@@ -13,4 +13,5 @@ unsafe_code = "forbid"
 [workspace.dependencies]
 indexmap = "2"
 reveal-foundation = { path = "crates/reveal-foundation" }
+reveal-geometry = { path = "crates/reveal-geometry" }
 slotmap = "1"

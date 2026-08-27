@@ -26,11 +26,13 @@ Run affected tests during ordinary work. Full workspace tests and clippy for a f
 - **Platform** — host-agnostic. Headless for tests, desktop (and later others) for real windows. The framework never depends on an embedder.
 - **Framework** — a verbatim Flutter port. Crate order follows Flutter: geometry / foundation → app → gestures / painting → rendering → widgets. Lower crates do not name higher crates.
 
+Current loose target: cupertino widgets, first `CupertinoButton` that presses and fades, sitting on that stack — not a shortcut past it.
+
 ## Ownership
 
 One `App`. Every framework callback gets `&mut App` plus a typed handle to itself.
 
-- **`Handle<T>`** — Copy generational id, point access (`app.get` / `app.get_mut`). Exclusivity lasts one field access, never a whole pass. Flutter objects live here: elements, render objects, `AnimationController`, `ScrollController`, `FocusNode`, and the rest. `ChangeNotifier` is a field on those objects (mixin-as-field), not an `Entity`. Port Flutter's listener family as Flutter.
+- **`Handle<T>`** — Copy generational id, point access (`app.get` / `app.get_mut`). Exclusivity lasts one field access, never a whole pass. Flutter objects live here: elements, render objects, `AnimationController`, `ScrollController`, `FocusNode`, and the rest. `ChangeNotifier` is mixed in as a `ChangeNotifierState` field (mixin-as-field).
 - **`Entity<T>`** — reserved for app-level stores the *user* writes, gpui-shaped. Not used to implement Flutter. Not built; how it is accessed is undecided.
 
 Do not lease a Handle out of the arena for a pass. shaft-rs-next did that; layout then could not re-enter the node it was laying out.
@@ -47,7 +49,7 @@ When something does not fit: stop and ask. If a divergence is needed, use a prov
 
 ## Docs
 
-`PORTING.md` in a source folder records functional divergences from Flutter, for a reader who knows Rust and only surface Flutter. Not naming, not mechanical Rust spelling. Straight transcriptions go under `## Identical`. Empty file: omit. Format is in the porting skill.
+`PORTING.md` in a source folder records functional divergences from Flutter, for a reader who knows Rust and only surface Flutter. Each entry is Change / Reason / Affect. No visible Affect means Identical — omit the entry. Straight transcriptions go under `## Identical`. Empty file: omit. Format is in the porting skill.
 
 Doc comments: the invariant a later editor will break. Inline comments: only what the next line does that the code cannot say. When copying from the experiment, strip its commentary.
 
@@ -63,5 +65,4 @@ A Flutter-shaped name on a different mechanism is a bug.
 
 - Do not commit unless asked.
 - Do not add a rule to this file or to the porting skill without asking.
-- A test that pins a behaviour is not done until you break that behaviour and watch it fail.
 - Ask rather than invent when a special case appears. The rules may be wrong too.

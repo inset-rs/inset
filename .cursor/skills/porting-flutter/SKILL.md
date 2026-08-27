@@ -21,14 +21,20 @@ A pattern earns a file under `patterns/` on its second instance. Until then, the
 - Dart `assert` → `debug_assert!`. Never put a side effect in one — it does not run in release. `assert(() { …; return true; }())` becomes `if cfg!(debug_assertions) { … }`. Keep protocol invariants; drop inspector-only asserts.
 - Do not `#[derive(PartialEq)]` unless Dart overrides `==`. Dart defaults to identity; a derive answers "unchanged" and skips work.
 - `try` / `finally` → a `Drop` guard. Cleanup at the end of the block is skipped on panic.
-- `mixin class` with state (`ChangeNotifier`) → a struct field on the host, named after the mixin. `mixin` that is never instantiated → a trait.
+- `mixin class` with state (`ChangeNotifier`) → a `ChangeNotifierState` field named after the mixin, plus `impl ChangeNotifier for Host`. `mixin` that is never instantiated → a trait.
 - `_foo` → private `foo`. `toString` / `debugFillProperties` → `Debug`.
 
 ## PORTING.md
 
-For a reader who knows Rust and only surface Flutter. Records **functional** divergences: a caller can do something Dart cannot, or cannot do something Dart can. Nothing to say: omit the file. Straight copy: one line under `## Identical`.
+For a reader who knows Rust and only surface Flutter. Records **functional** divergences. Nothing to say: omit the file. Straight copy: one line under `## Identical`.
 
-Do not record snake_case, SCREAMING_SNAKE consts, `iterator` → `iter()`, dropped `growable` flags, or other spelling/type noise that does not change behaviour.
+Each diverge is Change / Reason / Affect.
+
+- **Change:** what ours does
+- **Reason:** a specific Rust language or crate-layering issue. Not scope, not taste, not existing code. If you cannot name one, it is not a diverge — fix it or ask.
+- **Affect:** the direct effect on a user of the type — a different call, a different operator, a different observable.
+
+No visible Affect means Identical: do not record the entry. Naming, `iterator` → `iter()`, `~/` → `truncating_div`, dropped `growable` flags, and other spelling that does not change what a caller can do, stay out.
 
 ```
 # <crate>/src
@@ -41,9 +47,8 @@ Ported against: <commit>
 ## foo.rs → foo.dart
 - Change: Dart's `Key('x')` factory is `ValueKey::new("x")`.
   Reason: a Rust trait has no constructor that picks a concrete implementor.
+  Affect: write `ValueKey::new("x")` where Dart writes `Key('x')`.
 
 ## Deferred
 - `Listenable.merge`. Trigger: first widget that holds a `Listenable` as a value.
 ```
-
-`Reason:` is a specific Rust language or crate-layering issue. Not scope, not taste, not existing code. If you cannot name one, it is not a diverge — fix it or ask.
