@@ -26,7 +26,9 @@ A pattern earns a file under `patterns/` on its second instance. Until then, the
 
 ## PORTING.md
 
-For a reader who knows Rust and only surface Flutter. Nothing to say: omit the file. Straight copy: one line under `## Identical`.
+For a reader who knows Rust and only surface Flutter. Records **functional** divergences: a caller can do something Dart cannot, or cannot do something Dart can. Nothing to say: omit the file. Straight copy: one line under `## Identical`.
+
+Do not record snake_case, SCREAMING_SNAKE consts, `iterator` → `iter()`, dropped `growable` flags, or other spelling/type noise that does not change behaviour.
 
 ```
 # <crate>/src

@@ -47,7 +47,7 @@ When something does not fit: stop and ask. If a divergence is needed, use a prov
 
 ## Docs
 
-`PORTING.md` in a source folder records how that folder differs from Flutter, for a reader who knows Rust and only surface Flutter. Straight transcriptions go under `## Identical`. Empty file: omit. Format is in the porting skill.
+`PORTING.md` in a source folder records functional divergences from Flutter, for a reader who knows Rust and only surface Flutter. Not naming, not mechanical Rust spelling. Straight transcriptions go under `## Identical`. Empty file: omit. Format is in the porting skill.
 
 Doc comments: the invariant a later editor will break. Inline comments: only what the next line does that the code cannot say. When copying from the experiment, strip its commentary.
 

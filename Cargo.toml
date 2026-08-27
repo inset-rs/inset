@@ -11,5 +11,6 @@ publish = false
 unsafe_code = "forbid"
 
 [workspace.dependencies]
+indexmap = "2"
 reveal-foundation = { path = "crates/reveal-foundation" }
 slotmap = "1"
