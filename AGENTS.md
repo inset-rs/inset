@@ -41,6 +41,8 @@ Do not lease a Handle out of the arena for a pass. shaft-rs-next did that; layou
 
 Copy the Dart, then modify. Do not rewrite from understanding — models are bad at repeating a file they have only read.
 
+Port bottom-up so an upper layer never meets a missing dependency — that is when agents tend to invent ad-hoc solutions. While shaping a lower API, read how Flutter's next layer uses it so the interface matches; do not guess.
+
 When something does not fit: stop and ask. If a divergence is needed, use a proved pattern (`Handle`, a mixin-as-field, a `Drop` guard) — not a one-off workaround. A silent "seems compatible" change is a bug.
 
 ## Docs
