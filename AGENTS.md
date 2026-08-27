@@ -6,7 +6,7 @@ Flutter's source is the spec: `/Users/mac/code/flutter/packages/flutter/lib/src`
 
 Prior art, not specs:
 
-- `/Users/mac/code/reveal-rs-experiment` — ownership spike and handle-newtype experiment
+- `/Users/mac/code/reveal-rs-experiment` — ownership spike and handle-newtype experiment. Prior art, not a spec: take the code, not the commentary.
 - `/Users/mac/code/shaft-rs-next` — earlier port; its `PORTING.md` files record what divergence cost
 - `/Users/mac/code/ShaftUI` — `Backend` / `NativeView` split (vocabulary, not API)
 - `/Users/mac/code/zed/crates/gpui` — `Entity` as a user-facing store (later; not used to implement Flutter)
@@ -47,7 +47,7 @@ When something does not fit: stop and ask. If a divergence is needed, use a prov
 
 `PORTING.md` in a source folder records how that folder differs from Flutter, for a reader who knows Rust and only surface Flutter. Straight transcriptions go under `## Identical`. Empty file: omit. Format is in the porting skill.
 
-Doc comments: the invariant a later editor will break. Inline comments: only what the next line does that the code cannot say.
+Doc comments: the invariant a later editor will break. Inline comments: only what the next line does that the code cannot say. When copying from the experiment, strip its commentary.
 
 Do not hard-wrap Markdown at 80 columns.
 
