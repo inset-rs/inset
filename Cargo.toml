@@ -17,6 +17,7 @@ reveal-embedder-winit = { path = "crates/reveal-embedder-winit" }
 reveal-foundation = { path = "crates/reveal-foundation" }
 reveal-geometry = { path = "crates/reveal-geometry" }
 reveal-painting = { path = "crates/reveal-painting" }
+reveal-physics = { path = "crates/reveal-physics" }
 reveal-scheduler = { path = "crates/reveal-scheduler" }
 slotmap = "1"
 winit = "0.30"

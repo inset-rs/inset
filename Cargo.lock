@@ -979,6 +979,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "reveal-physics"
+version = "0.1.0"
+dependencies = [
+ "reveal-geometry",
+]
+
+[[package]]
 name = "reveal-scheduler"
 version = "0.1.0"
 dependencies = [
