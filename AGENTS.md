@@ -1,6 +1,6 @@
 # reveal-rs
 
-A Flutter port in Rust. The framework matches Flutter closely enough that upstream changes land without worry. Below it, a platform seam (views, frames, pointers, timers) so the same framework runs in tests and on real hosts.
+A Flutter port in Rust. The framework matches Flutter closely enough that upstream changes land without worry. Below it, dart:ui as an embedder interface (value types and host traits) so the same framework runs in tests and on real hosts.
 
 Flutter's source is the spec: `/Users/mac/code/flutter/packages/flutter/lib/src`. Read the Dart. Do not write Flutter from memory. If the checkout is missing, ask.
 
@@ -23,8 +23,8 @@ Run affected tests during ordinary work. Full workspace tests and clippy for a f
 
 ## Two layers
 
-- **Platform** — host-agnostic. Headless for tests, desktop (and later others) for real windows. The framework never depends on an embedder.
-- **Framework** — a verbatim Flutter port. Crate order follows Flutter: geometry / foundation → app → gestures / painting → rendering → widgets. Lower crates do not name higher crates.
+- **Embedder interface** — dart:ui as host traits and value types, so the same framework runs in tests and on real hosts. The framework depends on `reveal-embedder`, never on a host crate. Hosts implement the traits and drive the client; they do not name `App`.
+- **Framework** — a verbatim Flutter port. Crate order follows Flutter: dart:ui (`reveal-embedder`) → foundation → scheduler / painting → gestures → rendering → widgets. Lower crates do not name higher crates. `reveal-geometry` is the dart:ui value half until those types move into `reveal-embedder`.
 
 Current loose target: cupertino widgets, first `CupertinoButton` that presses and fades, sitting on that stack — not a shortcut past it.
 

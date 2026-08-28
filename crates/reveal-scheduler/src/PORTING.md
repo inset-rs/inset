@@ -1,0 +1,67 @@
+# reveal-scheduler/src
+Flutter home: packages/flutter/lib/src/scheduler
+Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
+
+## Identical
+
+- priority.rs → priority.dart
+
+## binding.rs → binding.dart
+
+- Change: `SchedulerBinding.instance` is `SchedulerBinding::instance(app)`, the App's singleton, and every member takes `&mut App`: `SchedulerBinding::schedule_frame(app)` for `SchedulerBinding.instance.scheduleFrame()`.
+  Reason: language — Dart's binding is a per-isolate global; the `&mut App` in hand is the ambient authority, and `App::singleton` is the per-App counterpart of the per-isolate instance.
+  Affect: when porting a `SchedulerBinding.instance.x()` call, write `SchedulerBinding::x(app)`.
+
+- Change: the host delivers one frame to `Shell`. `Shell` runs begin-frame, the mid-frame microtask flush, and draw-frame. Dart assigns those handlers onto `PlatformDispatcher` callback fields.
+  Reason: platform — there is no isolate-global callback table; `Shell` owns `App` so the host never names it.
+  Affect: a host calls `client.frame(...)`. Tests may still pump the handlers directly.
+
+- Change: `scheduleFrame` asks the host for one frame for the whole app (`app.platform().request_frame()`), not a redraw on every view.
+  Reason: platform — the scheduler has one frame; the host chooses the native vsync source.
+  Affect: a host implements `Platform::request_frame`.
+
+## shell.rs
+
+- Change: `Shell` owns `App` and is the `EmbedderClient`. Dart has no type (the engine owns the isolate). It lives here, not in foundation.
+  Reason: platform — the host talks to a client and must not name `App`; the type that owns `App` lives next to the scheduler.
+  Affect: the host's start closure returns `Shell::new(platform, setup)`.
+
+- Change: `FrameCallback` (and `TickerCallback`) receives `&mut App`.
+  Reason: language — a Rust closure cannot capture what it mutates; same as `Listener`.
+  Affect: register `FrameCallback::new(|app, time_stamp| …)`. Cancel a transient callback by the id `schedule_frame_callback` returned, not by the callback value.
+
+- Change: `timeDilation` is `SchedulerBinding::time_dilation(app)` / `set_time_dilation(app, v)`, not a global.
+  Reason: language — Dart keeps it as a mutable top-level; Rust has no mutable global without `unsafe` or a lock, and the binding is where every reader already looks.
+  Affect: write `SchedulerBinding::set_time_dilation(app, 2.0)` where Flutter assigns `timeDilation = 2.0`. The setter resets the epoch exactly as Dart's does.
+
+- Change: a panicking frame callback ends that phase; remaining callbacks in the phase are not called. The `finally` still advances `schedulerPhase` (Drop guard).
+  Reason: language — Rust has no catchable exception for ordinary control flow. Dart's `_invokeFrameCallback` catches and continues.
+  Affect: a panicking callback skips every callback after it in that phase. Flutter still calls them.
+
+## ticker.rs → ticker.dart
+
+- Change: `Ticker` and `TickerFuture` are `Handle`s. Methods that need the App live on [`TickerMethods`] / [`TickerFutureMethods`].
+  Reason: language — an inherent `impl Handle<Ticker>` is an orphan (`Handle` is foreign).
+  Affect: `ticker.start(app)`, `ticker.set_muted(app, true)`, `future.when_complete(app, listener)`. Import the methods trait.
+
+- Change: `TickerFuture` runs registered callbacks (`when_complete`, `when_complete_or_cancel`) through `App::schedule_microtask`; it is not a Rust `Future`.
+  Reason: language — Dart's `TickerFuture` implements `Future<void>`, whose listeners the isolate runs on the microtask queue. A Rust `Future` would need `&mut App` at poll time.
+  Affect: when porting `future.whenComplete(cb)` or `.then`, write `future.when_complete(app, Listener::new(...))`; the callback runs at the next drain, never during the `stop()` that resolved the future. Registering `when_complete` on an already-canceled future silently never fires, which is Dart's primary future hanging.
+
+- Change: `Ticker.muted` is the accessor `muted()` and the handle method `set_muted(app, value)`.
+  Reason: language — the setter schedules and unschedules ticks, so it needs the App.
+  Affect: write `ticker.set_muted(app, true)` where Flutter assigns `ticker.muted = true`.
+
+- Change: `TickerProvider::create_ticker` takes `&mut self` and `&mut App`.
+  Reason: language — the provider object is owned by the caller and may keep state; creating the ticker puts it in the App.
+  Affect: this receiver works only for providers living outside the App. `TickerProviderStateMixin` cannot: `app.get_mut(state)` and the `&mut App` argument cannot coexist. Reshaping to `(app, this)` is that mixin's trigger.
+
+## Deferred
+
+- `scheduleTask` and the priority task queue. Trigger: a `Timer` counterpart — `_ensureEventLoopCallback` needs `Timer.run`.
+- `_handleBeginFrame` / `_handleDrawFrame` warm-up-frame guards. Trigger: `scheduleWarmUpFrame`.
+- `endOfFrame`. Trigger: `RendererBinding.performReassemble` (`rendering/binding.dart`); it hands out a bare `Future`.
+- The app lifecycle (`lifecycleState`, `handleAppLifecycleStateChanged`, the `framesEnabled` setter — the field stays `true`). Trigger: the services layer, where lifecycle messages arrive.
+- `requestPerformanceMode` and `PerformanceModeRequestHandle`. Trigger: an engine to request modes from.
+- Platform dispatcher timings callbacks, timeline, service extensions, debug stack traces (`_FrameCallbackEntry.debugStack`, `debugPrintTransientCallbackRegistrationStack`, `debugLabel` / `toString` / `describeForError`). Trigger: diagnostics.
+- `TickerFuture.orCancel` and `TickerCanceled`. Trigger: the first ported `await …orCancel` — nothing under `packages/flutter/lib` uses it; material uses `whenCompleteOrCancel`.

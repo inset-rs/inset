@@ -1,11 +1,20 @@
 //! The one [`App`] and the arena of [`Handle`]s inside it. Not a Dart file.
 
 use std::any::{Any, type_name};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
+use std::rc::Rc;
 
+use reveal_embedder::{InertPlatform, PlatformRef};
 use slotmap::{SlotMap, new_key_type};
+
+use crate::change_notifier::Listener;
+
+/// Drain budget for one [`App::drain_microtasks`]: two callbacks scheduling
+/// each other forever must fail loud, not starve the event loop. Not a Dart
+/// or Flutter constant — the isolate drains until empty; a cycle there hangs.
+const MICROTASK_BUDGET: usize = 100_000;
 
 new_key_type! {
     /// Untyped [`Handle`]. For an edge that may point at more than one type; [`App::handle`] narrows it.
@@ -93,16 +102,42 @@ struct Slot {
 /// Owns every Flutter object. Callbacks receive `&mut App` plus a [`Handle`] to themselves.
 ///
 /// Private and `#[non_exhaustive]`: scheduler, timers, and further arenas are additive.
-#[derive(Default)]
 #[non_exhaustive]
 pub struct App {
     slots: SlotMap<HandleId, Slot>,
     singletons: HashMap<std::any::TypeId, HandleId>,
+    microtasks: VecDeque<Listener>,
+    platform: PlatformRef,
+}
+
+impl Default for App {
+    fn default() -> App {
+        App {
+            slots: SlotMap::with_key(),
+            singletons: HashMap::new(),
+            microtasks: VecDeque::new(),
+            platform: Rc::new(InertPlatform),
+        }
+    }
 }
 
 impl App {
     pub fn new() -> App {
         App::default()
+    }
+
+    /// The start closure (or tests that need a live engine) builds the
+    /// platform first, then this. [`App::new`] leaves an inert platform
+    /// and no views; tests that pump frames themselves use that.
+    pub fn with_platform(platform: PlatformRef) -> App {
+        App {
+            platform,
+            ..App::default()
+        }
+    }
+
+    pub fn platform(&self) -> PlatformRef {
+        Rc::clone(&self.platform)
     }
 
     /// One `T` per App (`SchedulerBinding.instance`, `kAlwaysCompleteAnimation`). Do not destroy it — the stored id goes stale and the next call panics.
@@ -114,6 +149,48 @@ impl App {
         self.singletons
             .insert(std::any::TypeId::of::<T>(), handle.id());
         handle
+    }
+
+    /// Dart's `scheduleMicrotask`: queues `callback` to run after the current
+    /// turn, before the next platform event — never inline.
+    ///
+    /// The host empties the queue with
+    /// [`drain_microtasks`](App::drain_microtasks) after every platform
+    /// event, and between `_beginFrame` and `_drawFrame` — where the engine,
+    /// which runs the two in one native task, puts an explicit flush.
+    pub fn schedule_microtask(&mut self, callback: Listener) {
+        self.microtasks.push_back(callback);
+    }
+
+    /// Runs queued microtasks until the queue is empty.
+    ///
+    /// A callback scheduled during the drain runs in the same drain, as
+    /// Dart's queue does. Call with no borrow of the App held.
+    ///
+    /// # Panics
+    ///
+    /// After [`MICROTASK_BUDGET`] callbacks in one drain, on the assumption
+    /// that two callbacks are scheduling each other in a cycle.
+    pub fn drain_microtasks(&mut self) {
+        let mut drained = 0usize;
+        while let Some(callback) = self.microtasks.pop_front() {
+            drained += 1;
+            assert!(
+                drained <= MICROTASK_BUDGET,
+                "microtasks did not converge after {MICROTASK_BUDGET} callbacks; \
+                 are two callbacks scheduling each other in a cycle?"
+            );
+            callback.call(self);
+        }
+    }
+
+    /// Whether any microtask is queued.
+    ///
+    /// The queue is empty when a new platform event begins, and the engine
+    /// explicitly flushes it between the two frame callbacks; the scheduler
+    /// asserts the latter.
+    pub fn has_pending_microtasks(&self) -> bool {
+        !self.microtasks.is_empty()
     }
 
     pub fn create<T: 'static>(&mut self, state: T) -> Handle<T> {
@@ -292,5 +369,33 @@ mod tests {
 
         assert_eq!(copied, counter);
         assert_eq!(app.get(edge.target).0, 1);
+    }
+
+    #[test]
+    fn a_microtask_runs_on_drain_not_inline() {
+        let mut app = App::new();
+        let counter = app.create(Counter(0));
+        app.schedule_microtask(crate::Listener::new(move |app| {
+            app.get_mut(counter).0 = 1;
+        }));
+        assert_eq!(app.get(counter).0, 0);
+        assert!(app.has_pending_microtasks());
+        app.drain_microtasks();
+        assert_eq!(app.get(counter).0, 1);
+        assert!(!app.has_pending_microtasks());
+    }
+
+    #[test]
+    fn a_microtask_scheduled_during_drain_runs_in_the_same_drain() {
+        let mut app = App::new();
+        let counter = app.create(Counter(0));
+        app.schedule_microtask(crate::Listener::new(move |app| {
+            app.get_mut(counter).0 = 1;
+            app.schedule_microtask(crate::Listener::new(move |app| {
+                app.get_mut(counter).0 = 2;
+            }));
+        }));
+        app.drain_microtasks();
+        assert_eq!(app.get(counter).0, 2);
     }
 }

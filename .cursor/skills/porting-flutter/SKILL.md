@@ -31,7 +31,10 @@ For a reader who knows Rust and only surface Flutter. Records **functional** div
 Each diverge is Change / Reason / Affect.
 
 - **Change:** what ours does
-- **Reason:** a specific Rust language or crate-layering issue. Not scope, not taste, not existing code. If you cannot name one, it is not a diverge — fix it or ask.
+- **Reason:** named kind, then the fact. Only two kinds:
+  - `language` — Rust cannot express Flutter's mechanism (no isolate GC, no trait state, no closure identity, orphan rule, …).
+  - `platform` — the host API is a small trait surface a real platform or a test can implement completely. Flutter's dart:ui is the engine talking to Dart; we do not copy that. Diverge when the host/test shape requires it (who owns the window, how a frame is requested, how the host talks to the framework).
+  Not scope, not taste, not existing code, not crate layering. If you cannot name one of the two kinds, it is not a diverge — fix it or ask.
 - **Affect:** the direct effect on a user of the type — a different call, a different operator, a different observable.
 
 No visible Affect means Identical: do not record the entry. Naming, `iterator` → `iter()`, `~/` → `truncating_div`, dropped `growable` flags, and other spelling that does not change what a caller can do, stay out.
@@ -46,7 +49,7 @@ Ported against: <commit>
 
 ## foo.rs → foo.dart
 - Change: Dart's `Key('x')` factory is `ValueKey::new("x")`.
-  Reason: a Rust trait has no constructor that picks a concrete implementor.
+  Reason: language — a Rust trait has no constructor that picks a concrete implementor.
   Affect: write `ValueKey::new("x")` where Dart writes `Key('x')`.
 
 ## Deferred

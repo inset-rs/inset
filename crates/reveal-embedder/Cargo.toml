@@ -1,14 +1,10 @@
 [package]
-name = "reveal-foundation"
+name = "reveal-embedder"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
-[dependencies]
-indexmap.workspace = true
-reveal-embedder.workspace = true
-slotmap.workspace = true
-
 [lints]
 workspace = true
+
