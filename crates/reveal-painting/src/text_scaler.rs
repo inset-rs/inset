@@ -2,7 +2,7 @@
 
 use std::fmt::{self, Debug};
 
-use reveal_geometry::clamp_double;
+use reveal_embedder::clamp_double;
 
 /// A class that describes how textual contents should be scaled for better
 /// readability.

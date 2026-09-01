@@ -3,7 +3,7 @@
 use std::fmt::{self, Debug};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
-use reveal_geometry::{Offset, RRect, Radius, Rect, Size, clamp_double, lerp_double};
+use reveal_embedder::{Offset, RRect, Radius, Rect, Size, clamp_double, lerp_double};
 
 use crate::basic_types::{Axis, TextDirection};
 

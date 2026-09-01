@@ -8,8 +8,8 @@ use crate::animation::{Animation, AnimationNode, AnimationStatus, AnimationStatu
 use crate::curves::Curve;
 use crate::listener_helpers::{
     AnimationEagerListenerMixin, AnimationLazyListenerData, AnimationLazyListenerMixin,
-    AnimationLocalListenersData, AnimationLocalListenersMixin,
-    AnimationLocalStatusListenersData, AnimationLocalStatusListenersMixin,
+    AnimationLocalListenersData, AnimationLocalListenersMixin, AnimationLocalStatusListenersData,
+    AnimationLocalStatusListenersMixin,
 };
 use crate::tween::Animatable;
 
@@ -337,10 +337,7 @@ impl AnimationLazyListenerMixin for ProxyAnimation {
             // Dart: `_parent!.addListener(notifyListeners)` — a tear-off.
             // `handle_method` gives the rebuilt listener the same identity, so
             // `did_stop_listening` removes without a stored handle.
-            parent.add_listener(
-                app,
-                Listener::handle_method(self.0, proxy_notify_listeners),
-            );
+            parent.add_listener(app, Listener::handle_method(self.0, proxy_notify_listeners));
             parent.add_status_listener(
                 app,
                 AnimationStatusListener::handle_method(self.0, proxy_notify_status_listeners),

@@ -4,8 +4,8 @@
 
 use std::fmt::{self, Debug};
 
-use crate::geometry::{Offset, Radius, Rect};
-use crate::lerp::lerp_double_non_null;
+use super::geometry::{Offset, Radius, Rect};
+use super::lerp::lerp_double_non_null;
 
 /// Dart's private `_RRectLike` fields. Shared by [`RRect`] and [`RSuperellipse`].
 #[derive(Clone, Copy, PartialEq)]
@@ -684,9 +684,6 @@ impl Debug for RRect {
 /// A rounded superellipse (not to be confused with a standard superellipse) is
 /// a shape formed by replacing the four curved corners of a superellipse with
 /// circular arcs.
-///
-/// [`contains`](RRect::contains) is RRect-only. Dart's `RSuperellipse.contains`
-/// is engine FFI (Impeller); it is not ported.
 #[derive(Clone, Copy, PartialEq)]
 pub struct RSuperellipse {
     /// The offset of the left edge of this rectangle from the x axis.
@@ -716,6 +713,21 @@ pub struct RSuperellipse {
 }
 
 rounded_type!(RSuperellipse);
+
+impl RSuperellipse {
+    /// Whether the point specified by the given offset (which is assumed to be
+    /// relative to the origin) lies inside the rounded superellipse.
+    ///
+    /// Dart's method is engine FFI (Impeller). Ours uses valo's Impeller-port
+    /// [`valo_geometry::RoundSuperellipse::contains`].
+    pub fn contains(self, point: Offset) -> bool {
+        valo_geometry::RoundSuperellipse::new(
+            self.outer_rect().into(),
+            super::rsuperellipse_radii_elliptical(self),
+        )
+        .contains(point.into())
+    }
+}
 
 impl Debug for RSuperellipse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -876,5 +888,15 @@ mod tests {
         assert_eq!(rrect.left, rse.left);
         assert!(format!("{rrect:?}").starts_with("RRect"));
         assert!(format!("{rse:?}").starts_with("RSuperellipse"));
+    }
+
+    #[test]
+    fn rsuperellipse_contains_the_center_and_rejects_the_outside() {
+        let rse = RSuperellipse::from_rect_and_radius(
+            Rect::from_ltrb(0.0, 0.0, 10.0, 10.0),
+            Radius::circular(2.0),
+        );
+        assert!(rse.contains(Offset::new(5.0, 5.0)));
+        assert!(!rse.contains(Offset::new(-1.0, 5.0)));
     }
 }

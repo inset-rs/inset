@@ -3,7 +3,7 @@
 use std::fmt::{self, Debug};
 
 use reveal_embedder::{BlurStyle, MaskBlur, Paint};
-use reveal_geometry::{Color, Offset, Shadow, lerp_double};
+use reveal_embedder::{Color, Offset, Shadow, lerp_double};
 
 use crate::debug::debug_disable_shadows;
 

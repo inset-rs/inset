@@ -5,7 +5,7 @@ use std::f64::consts::PI;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
-use reveal_geometry::{Offset, clamp_double, lerp_double};
+use reveal_embedder::{Offset, clamp_double, lerp_double};
 
 /// An parametric animation easing curve, i.e. a mapping of the unit interval to
 /// the unit interval.

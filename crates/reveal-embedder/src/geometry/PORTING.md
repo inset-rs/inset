@@ -1,4 +1,4 @@
-# reveal-geometry/src
+# reveal-embedder/src/geometry
 Flutter home: engine/src/flutter/lib/ui
 Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
@@ -7,9 +7,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - math.rs → math.dart
 - lerp.rs → lerp.dart
 - color.rs → painting.dart (Color, ColorSpace)
-- rrect.rs → geometry.dart (`RRect`, `RSuperellipse` except `contains`)
 - clip.rs → painting.dart (`Clip`)
-- shadow.rs → painting.dart (`Shadow`, except `toPaint`)
 
 ## geometry.rs → geometry.dart
 
@@ -17,7 +15,19 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — `PartialOrd` defines `<=` from one `partial_cmp`. Flutter's is component-wise and independent.
   Affect: write `a.le(&b)`, not `a <= b`. `Offset(1, 2) <= Offset(1, 3)` would be the wrong answer: Flutter's `<=` is true while `<` and `==` are both false.
 
-## lib.rs → dart:ui `Matrix4` / paint-boundary `From`
+## rrect.rs → geometry.dart (`RRect`, `RSuperellipse`)
+
+- Change: `RSuperellipse.contains` uses valo `RoundSuperellipse::contains` (Impeller param math).
+  Reason: platform — Dart's method is engine FFI; valo is the host geometry.
+  Affect: none for the inside/outside answer.
+
+## shadow.rs → painting.dart (`Shadow`)
+
+- Change: `to_paint` sets `mask_blur: Some(MaskBlur)` instead of Dart `MaskFilter.blur`.
+  Reason: platform — valo `Paint` has `mask_blur`, not `maskFilter`.
+  Affect: read `paint.mask_blur`.
+
+## mod.rs → dart:ui `Matrix4` / paint-boundary `From`
 
 - Change: `Matrix4` is valo `Matrix` (glam f32, column-major). Flutter `vector_math` `Matrix4` is f64.
   Reason: platform — valo paints in f32, matching what Flutter hands the engine.
@@ -29,10 +39,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## Deferred
 
-- `RSuperellipse.contains`. Trigger: Impeller hit-test / a Path. Dart's method is engine FFI, not the `RRect` ellipse test.
 - `RSTransform`. Trigger: `Canvas.drawAtlas`.
 - `Size.copy`. Trigger: `box.dart`'s `_DebugSize` hack.
 - `hashCode` / [`Hash`]. Trigger: the first map or set keyed by `Offset`, `Size`, `Rect`, `Radius`, or `Color`.
 - Subclassing `Color` / overriding `value`. Trigger: `CupertinoDynamicColor`.
 - `_lerpInt`. Trigger: `FontWeight.lerp`.
-- `Shadow.toPaint`. Trigger: `TextStyle` shadows. `Paint` is the valo type in `reveal-embedder`; geometry cannot name that crate. `BoxShadow::to_paint` is in painting.

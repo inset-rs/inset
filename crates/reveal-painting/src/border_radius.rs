@@ -3,7 +3,7 @@
 use std::fmt::{self, Debug};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
-use reveal_geometry::{RRect, RSuperellipse, Radius, Rect};
+use reveal_embedder::{RRect, RSuperellipse, Radius, Rect};
 
 use crate::basic_types::TextDirection;
 

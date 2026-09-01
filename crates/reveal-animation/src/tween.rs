@@ -4,8 +4,8 @@ use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::rc::Rc;
 
+use reveal_embedder::{Color, Rect, Size};
 use reveal_foundation::{App, Handle, Listener};
-use reveal_geometry::{Color, Rect, Size};
 
 use crate::animation::{Animation, AnimationNode, AnimationStatus, AnimationStatusListener};
 use crate::curves::Curve;
@@ -100,9 +100,7 @@ struct AnimatedEvaluation<T, A> {
     _value: PhantomData<fn() -> T>,
 }
 
-impl<T: 'static, A: Animatable<T> + Clone + 'static> AnimationNode<T>
-    for AnimatedEvaluation<T, A>
-{
+impl<T: 'static, A: Animatable<T> + Clone + 'static> AnimationNode<T> for AnimatedEvaluation<T, A> {
     fn add_listener(app: &mut App, this: Handle<Self>, listener: Listener) {
         app.get(this).parent.add_listener(app, listener);
     }
@@ -247,7 +245,10 @@ impl<T: TweenLerp + 'static> Tween<T> {
     /// Returns the value this variable has at the given animation clock value.
     pub fn lerp(self, app: &App, t: f64) -> T {
         let data = app.get(self.0);
-        let begin = data.begin.as_ref().expect("Tween.begin must be set before use");
+        let begin = data
+            .begin
+            .as_ref()
+            .expect("Tween.begin must be set before use");
         let end = data.end.as_ref().expect("Tween.end must be set before use");
         T::lerp(begin, end, t)
     }

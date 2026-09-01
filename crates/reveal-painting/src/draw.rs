@@ -6,7 +6,7 @@
 
 use reveal_embedder::valo::FillRule;
 use reveal_embedder::{Canvas, Paint, PathBuilder};
-use reveal_geometry::{RRect, rrect_radii_elliptical};
+use reveal_embedder::{RRect, rrect_radii_elliptical};
 
 /// Draws a rounded rect, falling back to the plain rect op when every corner
 /// is sharp (Flutter's `drawRect` vs `drawRRect` split).

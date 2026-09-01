@@ -2,9 +2,9 @@
 
 use std::fmt::{self, Debug};
 
-use crate::color::Color;
-use crate::geometry::Offset;
-use crate::lerp::lerp_double_non_null;
+use super::color::Color;
+use super::geometry::Offset;
+use super::lerp::lerp_double_non_null;
 
 /// A representation of a shadow.
 #[derive(Clone, Copy, PartialEq)]
@@ -67,6 +67,20 @@ impl Shadow {
     /// [`blur_radius`](Shadow::blur_radius) scaled by the given factor.
     pub fn scale(&self, factor: f64) -> Shadow {
         Shadow::new(self.color, self.offset * factor, self.blur_radius * factor)
+    }
+
+    /// Create the [`Paint`](crate::Paint) object that corresponds to this shadow
+    /// description.
+    ///
+    /// The [`offset`](Shadow::offset) is not represented in the [`Paint`](crate::Paint)
+    /// object. To honor this as well, the shape should be translated by
+    /// [`offset`](Shadow::offset) before being filled using this paint.
+    pub fn to_paint(&self) -> crate::Paint {
+        crate::Paint {
+            color: self.color.into(),
+            mask_blur: Some(crate::MaskBlur::new(self.blur_sigma() as f32)),
+            ..crate::Paint::default()
+        }
     }
 
     /// Linearly interpolate between two shadows.

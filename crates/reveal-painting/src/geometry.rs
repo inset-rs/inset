@@ -1,6 +1,6 @@
 //! Flutter counterpart: `painting/geometry.dart`.
 
-use reveal_geometry::{Offset, Size, clamp_double};
+use reveal_embedder::{Offset, Size, clamp_double};
 
 /// Position a child box within a container box, either above or below a target
 /// point.

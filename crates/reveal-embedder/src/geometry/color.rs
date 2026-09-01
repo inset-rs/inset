@@ -2,8 +2,8 @@
 
 use std::fmt::{self, Debug};
 
-use crate::lerp::lerp_double_non_null;
-use crate::math::clamp_double;
+use super::lerp::lerp_double_non_null;
+use super::math::clamp_double;
 
 fn scale_alpha(x: Color, factor: f64) -> Color {
     x.with_values(
@@ -36,7 +36,7 @@ fn wider_color_space(a: ColorSpace, b: ColorSpace) -> ColorSpace {
 /// Here are some ways it could be constructed:
 ///
 /// ```
-/// # use reveal_geometry::{Color, ColorSpace};
+/// # use reveal_embedder::{Color, ColorSpace};
 /// let c1 = Color::from(1.0, 0.2588, 0.6471, 0.9608, ColorSpace::Srgb);
 /// let c2 = Color::new(0xFF42A5F5);
 /// let c3 = Color::from_argb(0xFF, 0x42, 0xA5, 0xF5);
@@ -50,7 +50,7 @@ fn wider_color_space(a: ColorSpace, b: ColorSpace) -> ColorSpace {
 /// assumed to be zero, which means fully-transparent:
 ///
 /// ```
-/// # use reveal_geometry::{Color, ColorSpace};
+/// # use reveal_embedder::{Color, ColorSpace};
 /// let c1 = Color::new(0xFFFFFF); // fully transparent white (invisible)
 /// let c2 = Color::new(0xFFFFFFFF); // fully opaque white (visible)
 ///
@@ -125,7 +125,7 @@ impl Color {
     /// ## Example
     ///
     /// ```
-    /// # use reveal_geometry::{Color, ColorSpace};
+    /// # use reveal_embedder::{Color, ColorSpace};
     /// // Fully opaque maximum red color
     /// let c1 = Color::from(1.0, 1.0, 0.0, 0.0, ColorSpace::Srgb);
     ///
@@ -328,7 +328,7 @@ impl Color {
     ///
     /// Example:
     /// ```
-    /// # use reveal_geometry::Color;
+    /// # use reveal_embedder::Color;
     /// /// Create a color with 50% opacity.
     /// fn make_transparent(color: Color) -> Color {
     ///     color.with_values(Some(0.5), None, None, None, None)

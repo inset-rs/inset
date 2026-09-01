@@ -70,6 +70,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — valo `Path` has no `fillType`; `clip_path` takes the rule separately. Dart's default `PathFillType` is `nonZero`.
   Affect: pass `&path_builder.build()`. Even-odd clip paths need a fill-rule argument later.
 
+- Change: `clip_r_superellipse_and_paint` records `clip_path` of a valo `rsuperellipse_radii` path, not `Canvas.clipRSuperellipse`.
+  Reason: platform — valo 0.3.0 has no dedicated `clip_rsuperellipse` op. The path is the same Impeller geometry as `RSuperellipse.contains`.
+  Affect: a display-list dump shows a path clip. Callers still pass `RSuperellipse`.
+
 ## box_shadow.rs → box_shadow.dart
 
 - Change: `BoxShadow` (Dart: `extends ui.Shadow`) is a separate struct. Convert with [`From`].
@@ -92,7 +96,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## Deferred
 
-- `clipRSuperellipseAndPaint`. Trigger: first `RSuperellipse` clip. valo has no `clipRSuperellipse`; do not stand in a path or rrect clip without asking.
 - `ShapeBorder` / `OutlinedBorder` / `_CompoundBorder`. Trigger: `box_border.dart` (`Border` extends `BoxBorder` extends `ShapeBorder`). Open subclass set plus `operator +` returning a compound border.
 - `debug.dart` remainder (`debugNetworkImageHttpClientProvider`, …). Trigger: image loading / tests that are not `debugDisableShadows`.
 - `ColorSwatch` / `ColorProperty`. Trigger: Material colors / diagnostics. `Color` stays the dart:ui struct (stored by value on `Paint` / `BorderSide` / `TextStyle`); a `Color` trait cannot be that field type. `ColorSwatch` can wrap the primary `Color` plus a table, like `FractionalOffset` vs `Alignment`.

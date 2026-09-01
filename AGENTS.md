@@ -24,7 +24,7 @@ Run affected tests during ordinary work. Full workspace tests and clippy for a f
 ## Two layers
 
 - **Embedder interface** — dart:ui as host traits and value types, so the same framework runs in tests and on real hosts. The framework depends on `reveal-embedder`, never on a host crate. Hosts implement the traits and drive the client; they do not name `App`.
-- **Framework** — a verbatim Flutter port. Crate order follows Flutter: dart:ui (`reveal-embedder`) → foundation → scheduler / painting → gestures → rendering → widgets. Lower crates do not name higher crates. `reveal-geometry` is the dart:ui value half until those types move into `reveal-embedder`.
+- **Framework** — a verbatim Flutter port. Crate order follows Flutter: dart:ui (`reveal-embedder`) → foundation → scheduler / painting → gestures → rendering → widgets. Lower crates do not name higher crates. dart:ui value types (`Offset`, `Color`, `Shadow`, …) live in `reveal-embedder` with the host traits.
 
 Current loose target: cupertino widgets, first `CupertinoButton` that presses and fades, sitting on that stack — not a shortcut past it.
 

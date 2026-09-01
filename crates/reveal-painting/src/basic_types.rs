@@ -4,7 +4,7 @@ pub use reveal_embedder::{
     BlendMode, BlurStyle, Canvas, ClipOp, FillRule, Image, MaskBlur, Paint, PaintStyle, Paragraph,
     ParagraphBuilder, ParagraphStyle, Path, PathBuilder, Picture, Stroke,
 };
-pub use reveal_geometry::{Clip, Color, ColorSpace, Matrix4, Shadow};
+pub use reveal_embedder::{Clip, Color, ColorSpace, Matrix4, Shadow};
 
 /// A direction in which text flows.
 ///

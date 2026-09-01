@@ -197,8 +197,8 @@ mod tests {
             &mut app,
             Rc::new(CurveInterval::new(0.5, 1.0, Curves::linear())),
         ));
-        let middle = ConstantTween::new(&mut app, 10.0)
-            .chain(CurveTween::new(&mut app, Curves::linear()));
+        let middle =
+            ConstantTween::new(&mut app, 10.0).chain(CurveTween::new(&mut app, Curves::linear()));
         let last = Tween::new(&mut app, Some(10.0), Some(5.0)).chain(CurveTween::new(
             &mut app,
             Rc::new(CurveInterval::new(0.0, 0.5, Curves::linear())),

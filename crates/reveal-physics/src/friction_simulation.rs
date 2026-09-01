@@ -2,7 +2,7 @@
 
 use std::fmt::{self, Debug};
 
-use reveal_geometry::clamp_double;
+use reveal_embedder::clamp_double;
 
 use crate::{Simulation, Tolerance};
 

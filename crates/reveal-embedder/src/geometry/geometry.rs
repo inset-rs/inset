@@ -3,8 +3,8 @@
 use std::fmt::{self, Debug};
 use std::ops::{Add, BitAnd, Div, Mul, Neg, Rem, Sub};
 
-use crate::lerp::lerp_double_non_null;
-use crate::math::clamp_double;
+use super::lerp::lerp_double_non_null;
+use super::math::clamp_double;
 
 /// An immutable 2D floating-point offset.
 ///
@@ -209,7 +209,7 @@ impl Offset {
     /// instead:
     ///
     /// ```
-    /// # use reveal_geometry::Offset;
+    /// # use reveal_embedder::Offset;
     /// let a = Offset::new(10.0, 10.0);
     /// let b = a * 2.0; // same as: a.scale(2.0, 2.0)
     /// # assert_eq!(b, a.scale(2.0, 2.0));
@@ -219,7 +219,7 @@ impl Offset {
     /// instead:
     ///
     /// ```
-    /// # use reveal_geometry::Offset;
+    /// # use reveal_embedder::Offset;
     /// let a = Offset::new(10.0, 10.0);
     /// let b = -a; // same as: a.scale(-1.0, -1.0)
     /// # assert_eq!(b, a.scale(-1.0, -1.0));
@@ -235,7 +235,7 @@ impl Offset {
     /// `-` operators instead:
     ///
     /// ```
-    /// # use reveal_geometry::Offset;
+    /// # use reveal_embedder::Offset;
     /// let a = Offset::new(10.0, 10.0);
     /// let b = Offset::new(10.0, 10.0);
     /// let c = a + b; // same as: a.translate(b.dx(), b.dy())
@@ -813,7 +813,7 @@ impl Rem<f64> for Size {
 /// operand, to the origin, and whose size is the right-hand-side operand.
 ///
 /// ```
-/// # use reveal_geometry::{Offset, Rect, Size};
+/// # use reveal_embedder::{Offset, Rect, Size};
 /// let my_rect = Offset::ZERO & Size::new(100.0, 100.0);
 /// // same as: Rect::from_ltwh(0.0, 0.0, 100.0, 100.0)
 /// # assert_eq!(my_rect, Rect::from_ltwh(0.0, 0.0, 100.0, 100.0));
@@ -839,7 +839,7 @@ impl Debug for Size {
 /// a [`Size`] using the `&` operator:
 ///
 /// ```
-/// # use reveal_geometry::{Offset, Rect, Size};
+/// # use reveal_embedder::{Offset, Rect, Size};
 /// let my_rect = Offset::new(1.0, 2.0) & Size::new(3.0, 4.0);
 /// # assert_eq!(my_rect, Rect::from_ltwh(1.0, 2.0, 3.0, 4.0));
 /// ```

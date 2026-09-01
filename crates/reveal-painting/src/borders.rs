@@ -4,7 +4,7 @@
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 
 use reveal_embedder::{Canvas, FillRule, Paint, PaintStyle, PathBuilder, Stroke};
-use reveal_geometry::{Color, Offset, Rect, lerp_double};
+use reveal_embedder::{Color, Offset, Rect, lerp_double};
 
 /// The style of line to draw for a [`BorderSide`] in a `Border`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

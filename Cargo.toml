@@ -16,15 +16,12 @@ reveal-animation = { path = "crates/reveal-animation" }
 reveal-embedder = { path = "crates/reveal-embedder" }
 reveal-embedder-winit = { path = "crates/reveal-embedder-winit" }
 reveal-foundation = { path = "crates/reveal-foundation" }
-reveal-geometry = { path = "crates/reveal-geometry" }
 reveal-painting = { path = "crates/reveal-painting" }
 reveal-physics = { path = "crates/reveal-physics" }
 reveal-scheduler = { path = "crates/reveal-scheduler" }
 slotmap = "1"
 winit = "0.30"
-# Paint backend. Same versions as shaft-rs-next; a local valo checkout is a
-# `[patch.crates-io]` path override, not an edit to these lines.
-valo = "0.2.2"
-valo-geometry = "0.2.2"
+valo = "0.3.0"
+valo-geometry = "0.3.0"
 wgpu = "30"
 pollster = "0.4"

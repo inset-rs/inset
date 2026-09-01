@@ -2,7 +2,7 @@
 
 use std::fmt::{self, Debug};
 
-use reveal_geometry::{Color, clamp_double, lerp_double};
+use reveal_embedder::{Color, clamp_double, lerp_double};
 
 fn unit_channel(component: f64) -> f64 {
     (component * 255.0).round().clamp(0.0, 255.0) / 255.0

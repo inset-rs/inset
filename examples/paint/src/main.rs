@@ -4,8 +4,8 @@ use std::f32::consts::TAU;
 use std::time::Duration;
 
 use reveal_embedder::ViewMetrics;
+use reveal_embedder::{Color, ColorSpace, RRect, Radius, Rect};
 use reveal_embedder_winit::{ImplicitViewConfig, WinitEmbedder};
-use reveal_geometry::{Color, ColorSpace, RRect, Radius, Rect};
 use reveal_painting::{Canvas, Paint, Picture, draw_rrect};
 use reveal_scheduler::{FrameCallback, SchedulerBinding, Shell};
 

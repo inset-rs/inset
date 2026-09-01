@@ -209,7 +209,10 @@ pub trait AnimationLocalListenersMixin: Copy + 'static {
     ///
     /// [`add_listener`]: AnimationLocalListenersMixin::add_listener
     fn remove_listener(self, app: &mut App, listener: &Listener) {
-        let removed = self.local_listeners_data_mut(app).listeners.remove(listener);
+        let removed = self
+            .local_listeners_data_mut(app)
+            .listeners
+            .remove(listener);
         if removed {
             self.did_unregister_listener(app);
         }
@@ -299,8 +302,10 @@ pub trait AnimationLocalStatusListenersMixin: Copy + 'static {
     fn local_status_listeners_data(self, app: &App) -> &AnimationLocalStatusListenersData;
 
     /// The mixin's field on the host, mutably.
-    fn local_status_listeners_data_mut(self, app: &mut App)
-        -> &mut AnimationLocalStatusListenersData;
+    fn local_status_listeners_data_mut(
+        self,
+        app: &mut App,
+    ) -> &mut AnimationLocalStatusListenersData;
 
     /// Called immediately before a status listener is added via
     /// [`add_status_listener`].

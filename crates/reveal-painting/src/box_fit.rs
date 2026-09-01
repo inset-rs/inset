@@ -1,6 +1,6 @@
 //! Flutter counterpart: `painting/box_fit.dart`.
 
-use reveal_geometry::Size;
+use reveal_embedder::Size;
 
 /// How a box should be inscribed into another box.
 ///

@@ -4,8 +4,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
+use reveal_embedder::{clamp_double, lerp_double};
 use reveal_foundation::{App, Handle, Listenable, Listener};
-use reveal_geometry::{clamp_double, lerp_double};
 use reveal_physics::{Simulation, SpringDescription, SpringSimulation, SpringType, Tolerance};
 use reveal_scheduler::{FrameCallback, Ticker, TickerFuture, TickerProvider};
 

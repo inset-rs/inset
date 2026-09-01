@@ -1,6 +1,6 @@
 //! Flutter counterpart: `painting/matrix_utils.dart`.
 
-use reveal_geometry::{Matrix4, Offset, Rect};
+use reveal_embedder::{Matrix4, Offset, Rect};
 
 /// Returns the transform as an [`Offset`] if it is only a 2D translation.
 pub fn get_as_translation(transform: Matrix4) -> Option<Offset> {

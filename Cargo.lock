@@ -1254,7 +1254,6 @@ version = "0.1.0"
 dependencies = [
  "reveal-embedder",
  "reveal-embedder-winit",
- "reveal-geometry",
  "reveal-painting",
  "reveal-scheduler",
 ]
@@ -1514,8 +1513,8 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 name = "reveal-animation"
 version = "0.1.0"
 dependencies = [
+ "reveal-embedder",
  "reveal-foundation",
- "reveal-geometry",
  "reveal-physics",
  "reveal-scheduler",
 ]
@@ -1525,6 +1524,7 @@ name = "reveal-embedder"
 version = "0.1.0"
 dependencies = [
  "valo",
+ "valo-geometry",
 ]
 
 [[package]]
@@ -1548,26 +1548,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "reveal-geometry"
-version = "0.1.0"
-dependencies = [
- "valo-geometry",
-]
-
-[[package]]
 name = "reveal-painting"
 version = "0.1.0"
 dependencies = [
  "reveal-embedder",
  "reveal-foundation",
- "reveal-geometry",
 ]
 
 [[package]]
 name = "reveal-physics"
 version = "0.1.0"
 dependencies = [
- "reveal-geometry",
+ "reveal-embedder",
 ]
 
 [[package]]
@@ -2017,9 +2009,9 @@ checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
 
 [[package]]
 name = "valo"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32b4036e4d80eeaed9e1a12217d64cb623fb38a5f70c50f1d28ee064c5ea4280"
+checksum = "33529647fb891f48cdefc56d0f01e7e28849fa3dd2acadfc93d290e76dcf1cc0"
 dependencies = [
  "objc2 0.6.4",
  "objc2-metal 0.3.2",
@@ -2033,9 +2025,9 @@ dependencies = [
 
 [[package]]
 name = "valo-dl"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62e37eb8d99db4d7eb23c92b6fc159f2b6926a41d39dbfb24191750b2d8ac0c3"
+checksum = "32c61ff6b85cb734dc19c7d520fa400f7373fb22eb7bcd2eedfde3d5666063c6"
 dependencies = [
  "valo-geometry",
  "valo-text",
@@ -2044,18 +2036,18 @@ dependencies = [
 
 [[package]]
 name = "valo-geometry"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7657724a221dd0eac597ad8456ead2ed91c4f06a97239c5c0b8323d73f30cab"
+checksum = "e4320816cb7372404cd62f42749635e5950e6307ef52c9450aabc5d4b06cdf70"
 dependencies = [
  "glam",
 ]
 
 [[package]]
 name = "valo-renderer"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74807b38f03925cb5615f393c24330d729a9a28fab2efdfcd5114c9f68ad887a"
+checksum = "e73812c4a2f813d2c19837fe2a6f6935cab57bd8a7f4c9f825757dd7887d7265"
 dependencies = [
  "bytemuck",
  "etagere",
@@ -2070,9 +2062,9 @@ dependencies = [
 
 [[package]]
 name = "valo-text"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b74cfb2c76e6bd97a1fc9607dcdf571f23036ad463189700806f865586cf59b0"
+checksum = "e5a18b9300b63bc724dfc38523f1ed81deb78e50abff582b0aac0afbc5481159"
 dependencies = [
  "harfrust",
  "skrifa 0.35.0",
