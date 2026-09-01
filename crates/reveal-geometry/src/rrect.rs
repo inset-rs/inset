@@ -63,7 +63,14 @@ impl Rounded {
         }
     }
 
-    fn uniform(left: f64, top: f64, right: f64, bottom: f64, radius_x: f64, radius_y: f64) -> Rounded {
+    fn uniform(
+        left: f64,
+        top: f64,
+        right: f64,
+        bottom: f64,
+        radius_x: f64,
+        radius_y: f64,
+    ) -> Rounded {
         Rounded::raw(
             left, top, right, bottom, radius_x, radius_y, radius_x, radius_y, radius_x, radius_y,
             radius_x, radius_y,
@@ -284,7 +291,9 @@ macro_rules! rounded_type {
                 radius_x: f64,
                 radius_y: f64,
             ) -> $name {
-                $name::from_inner(Rounded::uniform(left, top, right, bottom, radius_x, radius_y))
+                $name::from_inner(Rounded::uniform(
+                    left, top, right, bottom, radius_x, radius_y,
+                ))
             }
 
             /// Construct from left, top, right, bottom, and the same radius in
@@ -301,7 +310,14 @@ macro_rules! rounded_type {
 
             /// Construct from a bounding box and the same radii along each axis.
             pub fn from_rect_xy(rect: Rect, radius_x: f64, radius_y: f64) -> $name {
-                $name::from_ltrbxy(rect.left, rect.top, rect.right, rect.bottom, radius_x, radius_y)
+                $name::from_ltrbxy(
+                    rect.left,
+                    rect.top,
+                    rect.right,
+                    rect.bottom,
+                    radius_x,
+                    radius_y,
+                )
             }
 
             /// Construct from a bounding box and a radius that is the same in
@@ -547,7 +563,10 @@ macro_rules! rounded_type {
             /// The offset halfway between the left and right and the top and
             /// bottom edges.
             pub fn center(self) -> Offset {
-                Offset::new(self.left + self.width() / 2.0, self.top + self.height() / 2.0)
+                Offset::new(
+                    self.left + self.width() / 2.0,
+                    self.top + self.height() / 2.0,
+                )
             }
 
             /// Scales all radii so that on each side their sum will not exceed
@@ -617,7 +636,8 @@ impl RRect {
         }
         let scaled = self.scale_radii();
         let (x, y, radius_x, radius_y);
-        if point.dx() < scaled.left + scaled.tl_radius_x && point.dy() < scaled.top + scaled.tl_radius_y
+        if point.dx() < scaled.left + scaled.tl_radius_x
+            && point.dy() < scaled.top + scaled.tl_radius_y
         {
             x = point.dx() - scaled.left - scaled.tl_radius_x;
             y = point.dy() - scaled.top - scaled.tl_radius_y;

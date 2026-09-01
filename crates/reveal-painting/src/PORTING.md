@@ -44,9 +44,21 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Rust has no inheritance for a stored abstract type.
   Affect: store `TextScaler::Linear` / `::Clamped`. `clamp` takes `min_scale_factor` and `max_scale_factor` (Dart defaults `0` and `infinity`).
 
+## matrix_utils.rs → matrix_utils.dart
+
+- Change: `transform_rect` is the four-corner accumulation only — Flutter's translation/scale/affine fast paths are skipped.
+  Reason: platform — `Matrix4` is valo's f32 matrix; the fast paths compute the same numbers.
+  Affect: none for the mapped rect. Corner math is f64 over f32 storage.
+
+## draw.rs
+
+- Change: `draw_rrect` / `draw_drrect` stand in for dart:ui `Canvas.drawRRect` / `Canvas.drawDRRect`. `drawDRRect` is one even-odd path.
+  Reason: platform — valo has no `drawDRRect` primitive.
+  Affect: call `draw_rrect(canvas, rrect, paint)` instead of `canvas.drawRRect`.
+
 ## Deferred
 
-- `ColorSwatch` / `ColorProperty`. Trigger: Material colors / diagnostics.
+- `ColorSwatch` / `ColorProperty`. Trigger: Material colors / diagnostics. `Color` stays the dart:ui struct (stored by value on `Paint` / `BorderSide` / `TextStyle`); a `Color` trait cannot be that field type. `ColorSwatch` can wrap the primary `Color` plus a table, like `FractionalOffset` vs `Alignment`.
 - Custom `TextScaler` / `SystemTextScaler`. Trigger: `MediaQuery`; `_ClampedTextScaler` is the `TextScaler::Clamped` arm, created by the default `clamp` on a non-linear scaler.
 - `EdgeInsets.fromViewPadding` / `fromWindowPadding` / `EdgeInsetsGeometry.fromViewPadding`. Trigger: embedder / `MediaQuery`.
 - `_MixedEdgeInsets` and cross-kind `add` / `subtract` / `flipped` / `infinity` / `clamp` / `EdgeInsetsGeometry.lerp`. Trigger: first consumer that adds an `EdgeInsets` to an `EdgeInsetsDirectional`.

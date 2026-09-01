@@ -22,3 +22,9 @@ reveal-physics = { path = "crates/reveal-physics" }
 reveal-scheduler = { path = "crates/reveal-scheduler" }
 slotmap = "1"
 winit = "0.30"
+# Paint backend. Same versions as shaft-rs-next; a local valo checkout is a
+# `[patch.crates-io]` path override, not an edit to these lines.
+valo = "0.2.2"
+valo-geometry = "0.2.2"
+wgpu = "30"
+pollster = "0.4"

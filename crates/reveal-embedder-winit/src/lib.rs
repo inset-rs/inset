@@ -1,6 +1,7 @@
 //! Desktop host: winit event loop and native windows. Frame pacing is
-//! `Window::request_redraw`. No present path yet (no `Canvas`).
+//! `Window::request_redraw`. Presents through valo.
 
+mod gpu;
 mod window;
 
 use reveal_embedder::{EmbedderClient, PlatformRef};

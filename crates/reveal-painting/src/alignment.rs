@@ -3,7 +3,7 @@
 use std::fmt::{self, Debug};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
-use reveal_geometry::{lerp_double, Offset, Rect, Size};
+use reveal_geometry::{Offset, Rect, Size, lerp_double};
 
 use crate::basic_types::TextDirection;
 

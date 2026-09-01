@@ -1,17 +1,19 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use reveal_embedder::{
-    EmbedderClient, Frame, Platform, PlatformRef, View, ViewConstraints, ViewId, ViewMetrics,
-    ViewPadding, ViewRef,
+    EmbedderClient, Frame, Picture, Platform, PlatformRef, View, ViewConstraints, ViewId,
+    ViewMetrics, ViewPadding, ViewRef,
 };
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
 
+use crate::gpu::Gpu;
 use crate::{ImplicitViewConfig, WinitEmbedder};
 
 const IMPLICIT_VIEW: ViewId = ViewId(0);
@@ -94,11 +96,16 @@ impl Platform for WinitPlatform {
     }
 }
 
-/// Stable view identity and current winit geometry. The native window remains
-/// owned by the event loop.
+/// Stable view identity, current winit geometry, and the valo present line.
 struct WinitView {
     id: ViewId,
     metrics: Cell<ViewMetrics>,
+    surface: Arc<Mutex<WinitSurface>>,
+}
+
+struct WinitSurface {
+    surface: valo::Surface,
+    context: valo::Context,
 }
 
 impl View for WinitView {
@@ -109,10 +116,21 @@ impl View for WinitView {
     fn metrics(&self) -> ViewMetrics {
         self.metrics.get()
     }
+
+    fn present(&self, picture: &Picture) {
+        let mut state = self.surface.lock().expect("surface lock");
+        let Some(surface_frame) = state.surface.acquire() else {
+            return;
+        };
+        state
+            .context
+            .render(picture, &surface_frame.target(Some(valo::Color::WHITE)));
+        state.context.present(surface_frame);
+    }
 }
 
 struct HostedView {
-    window: Window,
+    window: Arc<Window>,
     view: Rc<WinitView>,
 }
 
@@ -184,10 +202,23 @@ impl<C: EmbedderClient> WinitApp<C> {
                 config.logical_size[1],
             ));
         let window = event_loop.create_window(attributes).expect("create window");
+        let window = Arc::new(window);
         let window_id = window.id();
+        let gpu = Gpu::acquire();
+        let size = window.inner_size();
+        let surface = valo::Surface::new(
+            &gpu.instance,
+            &gpu.adapter,
+            &gpu.device,
+            window.clone(),
+            [size.width, size.height],
+        )
+        .expect("create valo surface");
+        let context = valo::Context::new(gpu.device, gpu.queue);
         let view = Rc::new(WinitView {
             id: IMPLICIT_VIEW,
             metrics: Cell::new(window_metrics(&window)),
+            surface: Arc::new(Mutex::new(WinitSurface { surface, context })),
         });
         self.platform.add_view(view.clone());
         self.views.insert(window_id, HostedView { window, view });
@@ -257,6 +288,14 @@ impl<C: EmbedderClient> ApplicationHandler for WinitApp<C> {
             }
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                 if let Some(hosted_view) = self.views.get(&id) {
+                    let size = hosted_view.window.inner_size();
+                    hosted_view
+                        .view
+                        .surface
+                        .lock()
+                        .expect("surface lock")
+                        .surface
+                        .resize([size.width, size.height]);
                     hosted_view
                         .view
                         .metrics

@@ -1,6 +1,9 @@
 //! Flutter counterpart: `painting/basic_types.dart`.
 
-pub use reveal_geometry::{Color, ColorSpace};
+pub use reveal_embedder::{
+    Canvas, Image, Paint, Paragraph, ParagraphBuilder, ParagraphStyle, Path, PathBuilder, Picture,
+};
+pub use reveal_geometry::{Clip, Color, ColorSpace, Matrix4};
 
 /// A direction in which text flows.
 ///

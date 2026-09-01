@@ -2,7 +2,7 @@
 
 use std::fmt::{self, Debug};
 
-use reveal_geometry::{clamp_double, lerp_double, Color};
+use reveal_geometry::{Color, clamp_double, lerp_double};
 
 fn unit_channel(component: f64) -> f64 {
     (component * 255.0).round().clamp(0.0, 255.0) / 255.0
@@ -18,11 +18,7 @@ fn get_hue(red: f64, green: f64, blue: f64, max: f64, delta: f64) -> f64 {
     } else {
         60.0 * (((red - green) / delta) + 4.0)
     };
-    if hue.is_nan() {
-        0.0
-    } else {
-        hue
-    }
+    if hue.is_nan() { 0.0 } else { hue }
 }
 
 fn color_from_hue(alpha: f64, hue: f64, chroma: f64, secondary: f64, match_: f64) -> Color {

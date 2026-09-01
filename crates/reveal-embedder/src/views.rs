@@ -96,9 +96,13 @@ impl Default for ViewMetrics {
 
 /// A stable handle to one host-provided view.
 ///
-/// Rendering joins this interface when the real display-list type and
-/// presenter exist. Until then this type reports view state only.
+/// [`present`](View::present) is Flutter `FlutterView.render`. The host owns
+/// the surface; the framework records a [`crate::Picture`] and hands it over.
 pub trait View: 'static {
     fn id(&self) -> ViewId;
     fn metrics(&self) -> ViewMetrics;
+
+    /// Renders and presents one picture. Physical pixels; the presenter
+    /// applies no extra scaling.
+    fn present(&self, picture: &crate::Picture);
 }

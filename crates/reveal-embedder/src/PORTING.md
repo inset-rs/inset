@@ -13,6 +13,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the native window is the source of truth; a framework-side copy would go stale.
   Affect: after a view-lifecycle notification, read `view.metrics()` from the host's current `View`.
 
+- Change: `View::present` takes a valo `Picture` (`DisplayList`). Flutter `FlutterView.render` takes a `Scene`. `Canvas` is `DisplayListBuilder`.
+  Reason: platform — the host paints a valo display list, not an engine `Scene`.
+  Affect: `view.present(&picture)` after recording into a `Canvas`.
+
 ## client.rs → dart:ui `hooks.dart`
 
 - Change: isolate-global engine hooks are methods on `EmbedderClient`. One `frame` is a complete engine frame; view lifecycle is typed notifications. The client owns begin/draw choreography.
@@ -21,7 +25,6 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 
 ## Deferred
 
-- `View::render` / `Scene` / the Valo-style concrete display-list seam. Trigger: the first presentable surface.
 - `onPointerDataPacket`. Trigger: gestures.
 - `onMetricsChanged` / `onPlatformBrightnessChanged`. Trigger: `MediaQuery` / `CupertinoTheme`.
 - `TargetPlatform` / `font_source`. Trigger: `defaultTargetPlatform` / text.
