@@ -52,9 +52,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## draw.rs
 
-- Change: `draw_rrect` / `draw_drrect` stand in for dart:ui `Canvas.drawRRect` / `Canvas.drawDRRect`. `drawDRRect` is one even-odd path.
-  Reason: platform — valo has no `drawDRRect` primitive.
-  Affect: call `draw_rrect(canvas, rrect, paint)` instead of `canvas.drawRRect`.
+- Change: `draw_rrect` / `draw_drrect` / `draw_oval` / `draw_rsuperellipse` stand in for dart:ui `Canvas.drawRRect` / `Canvas.drawDRRect` / `Canvas.drawOval` / `Canvas.drawRSuperellipse`. `drawDRRect` is one even-odd path. Oval is an elliptical rrect. Superellipse is a path.
+  Reason: platform — valo has no `drawDRRect`, `drawOval`, or `drawRSuperellipse` primitive.
+  Affect: call `draw_rrect(canvas, rrect, paint)` instead of `canvas.drawRRect`. Same for the others.
 
 ## clip.rs → clip.dart
 
@@ -106,6 +106,30 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — valo `Path` is already `Arc`; `contains` takes the fill rule separately.
   Affect: the path is `Arc`. Even-odd hit tests need a fill-rule argument later.
 
+## box_border.rs → box_border.dart
+
+- Change: `BoxBorder` is a trait. A stored box border is `Box<dyn BoxBorder>`. Factories live on `impl dyn BoxBorder`.
+  Reason: language — Flutter tests and apps subclass `BoxBorder`; a pairing enum cannot hold that set. `dyn Trait` is not `Copy`.
+  Affect: store `Box<dyn BoxBorder>`. `BoxBorder.lerp` is `<dyn BoxBorder>::lerp`. `BoxBorder.fromLTRB` is `<dyn BoxBorder>::from_ltrb` (all four sides required). `BoxBorder.all` takes `color`, `width`, `style`, `stroke_align` (Dart has defaults).
+
+- Change: `BoxBorder::paint` takes `shape` and `border_radius` as required arguments. [`ShapeBorder::paint`](ShapeBorder::paint) is the three-argument form and forwards with `BoxShape::Rectangle` and `None`.
+  Reason: language — Rust has no optional named parameters on a trait method that also overrides a shorter paint.
+  Affect: callers that pass a shape or radius use `BoxBorder::paint`. The three-argument call is `ShapeBorder::paint`.
+
+- Change: `Border::all` / inherent `scale` take every argument (no Dart named defaults). `scale` on the struct returns `Border` / `BorderDirectional`; [`ShapeBorder::scale`](ShapeBorder::scale) boxes that.
+  Reason: language — Rust has no named defaults and no covariant override return.
+  Affect: write `Border::all(color, width, style, stroke_align)` and `border.scale(t)` on the concrete type.
+
+## circle_border.rs / oval_border.rs / rounded_rectangle_border.rs / stadium_border.rs
+
+- Change: `OvalBorder` is a separate struct, not a subtype of `CircleBorder`. `CircleBorder::lerp_from` / `lerp_to` still run for a leftover `OvalBorder` via `OvalBorder`'s `super` forwarding.
+  Reason: language — Rust has no inheritance. Same pattern as `FractionalOffset` vs `Alignment`.
+  Affect: `OvalBorder` and `CircleBorder` with eccentricity 1.0 stay unequal (`runtimeType`). Lerp between them still returns a `CircleBorder`, as Dart's `OvalBorder is CircleBorder` does.
+
+- Change: `draw_oval` / `draw_rsuperellipse` stand in for dart:ui `Canvas.drawOval` / `Canvas.drawRSuperellipse`.
+  Reason: platform — valo has no those primitives. Oval is an elliptical `draw_rrect_radii_elliptical`; superellipse is a path.
+  Affect: call `draw_oval` / `draw_rsuperellipse`. A display-list dump shows an rrect or path.
+
 ## Deferred
 - `debug.dart` remainder (`debugNetworkImageHttpClientProvider`, …). Trigger: image loading / tests that are not `debugDisableShadows`.
 - `ColorSwatch` / `ColorProperty`. Trigger: Material colors / diagnostics. `Color` stays the dart:ui struct (stored by value on `Paint` / `BorderSide` / `TextStyle`); a `Color` trait cannot be that field type. `ColorSwatch` can wrap the primary `Color` plus a table, like `FractionalOffset` vs `Alignment`.
@@ -113,6 +137,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `EdgeInsets.fromViewPadding` / `fromWindowPadding` / `EdgeInsetsGeometry.fromViewPadding`. Trigger: embedder / `MediaQuery`.
 - `_MixedEdgeInsets` and cross-kind `add` / `subtract` / `flipped` / `infinity` / `clamp` / `EdgeInsetsGeometry.lerp`. Trigger: first consumer that adds an `EdgeInsets` to an `EdgeInsetsDirectional`.
 - `_MixedAlignment` and cross-kind `AlignmentGeometry.add` / `AlignmentGeometry.lerp`. Trigger: first consumer that adds an `Alignment` to an `AlignmentDirectional`.
-- `_MixedBorderRadius` and cross-kind `add` / `subtract` / `BorderRadiusGeometry.lerp`. Trigger: first consumer that adds a `BorderRadius` to a `BorderRadiusDirectional`.
+- `_MixedBorderRadius` and cross-kind `add` / `subtract` / `BorderRadiusGeometry.lerp`. Trigger: first consumer that adds a `BorderRadius` to a `BorderRadiusDirectional`. Same-kind `add` / `subtract` / `lerp` exist.
 - `hashCode` / [`Hash`]. Trigger: the first map or set keyed by insets, alignment, border radius, or `TextScaler`.
 - Diagnostics / `debugCheckCanResolveTextDirection`. Trigger: porting diagnostics; until then a missing `TextDirection` on resolve panics with the FlutterError summary string.

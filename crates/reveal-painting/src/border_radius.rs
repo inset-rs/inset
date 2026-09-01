@@ -198,6 +198,60 @@ impl BorderRadiusGeometry {
             BorderRadiusGeometry::Directional(radius) => radius.resolve(direction),
         }
     }
+
+    /// Returns the sum of two [`BorderRadiusGeometry`] objects.
+    ///
+    /// Same-kind add returns that kind. Cross-kind add (`_MixedBorderRadius`) is
+    /// deferred.
+    #[allow(clippy::should_implement_trait)]
+    pub fn add(self, other: BorderRadiusGeometry) -> BorderRadiusGeometry {
+        match (self, other) {
+            (BorderRadiusGeometry::BorderRadius(a), BorderRadiusGeometry::BorderRadius(b)) => {
+                BorderRadiusGeometry::BorderRadius(a + b)
+            }
+            (BorderRadiusGeometry::Directional(a), BorderRadiusGeometry::Directional(b)) => {
+                BorderRadiusGeometry::Directional(a + b)
+            }
+            _ => panic!("cross-kind BorderRadiusGeometry::add (_MixedBorderRadius) is deferred"),
+        }
+    }
+
+    /// Returns the difference between two [`BorderRadiusGeometry`] objects.
+    ///
+    /// Same-kind subtract returns that kind. Cross-kind subtract
+    /// (`_MixedBorderRadius`) is deferred.
+    pub fn subtract(self, other: BorderRadiusGeometry) -> BorderRadiusGeometry {
+        match (self, other) {
+            (BorderRadiusGeometry::BorderRadius(a), BorderRadiusGeometry::BorderRadius(b)) => {
+                BorderRadiusGeometry::BorderRadius(a - b)
+            }
+            (BorderRadiusGeometry::Directional(a), BorderRadiusGeometry::Directional(b)) => {
+                BorderRadiusGeometry::Directional(a - b)
+            }
+            _ => {
+                panic!("cross-kind BorderRadiusGeometry::subtract (_MixedBorderRadius) is deferred")
+            }
+        }
+    }
+
+    /// Linearly interpolate between two [`BorderRadiusGeometry`] objects.
+    ///
+    /// Same-kind lerp uses [`add`](Self::add) / [`subtract`](Self::subtract).
+    /// Cross-kind lerp (`_MixedBorderRadius`) is deferred.
+    pub fn lerp(
+        a: Option<BorderRadiusGeometry>,
+        b: Option<BorderRadiusGeometry>,
+        t: f64,
+    ) -> Option<BorderRadiusGeometry> {
+        match (a, b) {
+            (None, None) => return None,
+            (Some(a), Some(b)) if a == b => return Some(a),
+            _ => {}
+        }
+        let a = a.unwrap_or(BorderRadiusGeometry::ZERO);
+        let b = b.unwrap_or(BorderRadiusGeometry::ZERO);
+        Some(a.add(b.subtract(a) * t))
+    }
 }
 
 impl From<BorderRadius> for BorderRadiusGeometry {

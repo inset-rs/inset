@@ -389,6 +389,11 @@ pub trait ShapeBorder: Any + Debug {
         None
     }
 
+    /// [`BoxBorder`] downcast for [`dyn BoxBorder::lerp`].
+    fn as_box_border(&self) -> Option<&dyn crate::box_border::BoxBorder> {
+        None
+    }
+
     /// Field equality. Dart's default `==` is identity; subclasses that override
     /// `==` implement this.
     fn eq_shape(&self, other: &dyn ShapeBorder) -> bool {
@@ -1451,5 +1456,108 @@ mod tests {
         let rect = Rect::from_ltrb(0.0, 0.0, 10.0, 10.0);
         assert!(border.hit_test(rect, Offset::new(5.0, 5.0), None));
         assert!(!border.hit_test(rect, Offset::new(-1.0, 5.0), None));
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct ShapeWithInterior;
+
+    impl ShapeBorder for ShapeWithInterior {
+        fn dimensions(&self) -> EdgeInsetsGeometry {
+            EdgeInsetsGeometry::ZERO
+        }
+
+        fn scale(&self, _t: f64) -> Box<dyn ShapeBorder> {
+            Box::new(*self)
+        }
+
+        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+            rect_path(rect)
+        }
+
+        fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+            rect_path(rect)
+        }
+
+        fn paint_interior(
+            &self,
+            _canvas: &mut Canvas,
+            _rect: Rect,
+            _paint: &Paint,
+            _text_direction: Option<TextDirection>,
+        ) {
+        }
+
+        fn prefer_paint_interior(&self) -> bool {
+            true
+        }
+
+        fn paint(&self, _canvas: &mut Canvas, _rect: Rect, _text_direction: Option<TextDirection>) {
+        }
+
+        fn clone_box(&self) -> Box<dyn ShapeBorder> {
+            Box::new(*self)
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct ShapeWithoutInterior;
+
+    impl ShapeBorder for ShapeWithoutInterior {
+        fn dimensions(&self) -> EdgeInsetsGeometry {
+            EdgeInsetsGeometry::ZERO
+        }
+
+        fn scale(&self, _t: f64) -> Box<dyn ShapeBorder> {
+            Box::new(*self)
+        }
+
+        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+            rect_path(rect)
+        }
+
+        fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+            rect_path(rect)
+        }
+
+        fn paint(&self, _canvas: &mut Canvas, _rect: Rect, _text_direction: Option<TextDirection>) {
+        }
+
+        fn clone_box(&self) -> Box<dyn ShapeBorder> {
+            Box::new(*self)
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    #[test]
+    fn compound_borders_with_differing_prefer_paint_interiors() {
+        assert!(ShapeWithInterior.prefer_paint_interior());
+        assert!(!ShapeWithoutInterior.prefer_paint_interior());
+        assert!(
+            (&ShapeWithInterior as &dyn ShapeBorder)
+                .plus(&ShapeWithInterior)
+                .prefer_paint_interior()
+        );
+        assert!(
+            !(&ShapeWithInterior as &dyn ShapeBorder)
+                .plus(&ShapeWithoutInterior)
+                .prefer_paint_interior()
+        );
+        assert!(
+            !(&ShapeWithoutInterior as &dyn ShapeBorder)
+                .plus(&ShapeWithInterior)
+                .prefer_paint_interior()
+        );
+        assert!(
+            !(&ShapeWithoutInterior as &dyn ShapeBorder)
+                .plus(&ShapeWithoutInterior)
+                .prefer_paint_interior()
+        );
     }
 }

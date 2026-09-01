@@ -6,7 +6,9 @@
 
 use reveal_embedder::valo::FillRule;
 use reveal_embedder::{Canvas, Paint, PathBuilder};
-use reveal_embedder::{RRect, rrect_radii_elliptical};
+use reveal_embedder::{
+    RRect, RSuperellipse, Rect, rrect_radii_elliptical, rsuperellipse_radii_elliptical,
+};
 
 /// Draws a rounded rect, falling back to the plain rect op when every corner
 /// is sharp (Flutter's `drawRect` vs `drawRRect` split).
@@ -36,4 +38,30 @@ pub fn draw_drrect(canvas: &mut Canvas, outer: RRect, inner: RRect, paint: &Pain
     path.rrect_radii_elliptical(outer.outer_rect(), rrect_radii_elliptical(outer));
     path.rrect_radii_elliptical(inner.outer_rect(), rrect_radii_elliptical(inner));
     canvas.draw_path(&path.build(), FillRule::EvenOdd, paint);
+}
+
+/// Draws an oval inscribed in `rect` (Flutter `Canvas.drawOval`).
+pub fn draw_oval(canvas: &mut Canvas, rect: Rect, paint: &Paint) {
+    let rx = (rect.width() / 2.0) as f32;
+    let ry = (rect.height() / 2.0) as f32;
+    canvas.draw_rrect_radii_elliptical(rect, [[rx, ry]; 4], paint);
+}
+
+/// Draws a rounded superellipse (Flutter `Canvas.drawRSuperellipse`).
+pub fn draw_rsuperellipse(canvas: &mut Canvas, rse: RSuperellipse, paint: &Paint) {
+    if rse.tl_radius_x == 0.0
+        && rse.tl_radius_y == 0.0
+        && rse.tr_radius_x == 0.0
+        && rse.tr_radius_y == 0.0
+        && rse.br_radius_x == 0.0
+        && rse.br_radius_y == 0.0
+        && rse.bl_radius_x == 0.0
+        && rse.bl_radius_y == 0.0
+    {
+        canvas.draw_rect(rse.outer_rect(), paint);
+    } else {
+        let mut path = PathBuilder::new();
+        path.rsuperellipse_radii(rse.outer_rect().into(), rsuperellipse_radii_elliptical(rse));
+        canvas.draw_path(&path.build(), FillRule::NonZero, paint);
+    }
 }
