@@ -56,8 +56,45 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — valo has no `drawDRRect` primitive.
   Affect: call `draw_rrect(canvas, rrect, paint)` instead of `canvas.drawRRect`.
 
+## clip.rs → clip.dart
+
+- Change: `ClipContext` is a trait. `canvas()` is a short `&mut Canvas` borrow. The painter is `impl FnOnce(&mut Self)` instead of a `VoidCallback` that closes over the context.
+  Reason: language — Rust cannot hold `&mut Canvas` across a callback that also needs `&mut Self`.
+  Affect: write `|ctx| { ... }` and use `ctx.canvas()` inside; do not close over `self`.
+
+- Change: `doAntiAlias` is ignored. `clip_rect` / `clip_rrect_radii_elliptical` / `clip_path` take a `ClipOp`, not an AA flag.
+  Reason: platform — valo clips are anti-aliased.
+  Affect: `Clip::HardEdge` and `Clip::AntiAlias` record the same clip.
+
+- Change: `clip_path_and_paint` takes `&Arc<Path>` and clips with `FillRule::NonZero`.
+  Reason: platform — valo `Path` has no `fillType`; `clip_path` takes the rule separately. Dart's default `PathFillType` is `nonZero`.
+  Affect: pass `&path_builder.build()`. Even-odd clip paths need a fill-rule argument later.
+
+## box_shadow.rs → box_shadow.dart
+
+- Change: `BoxShadow` (Dart: `extends ui.Shadow`) is a separate struct. Convert with [`From`].
+  Reason: language — Rust has no inheritance.
+  Affect: store `Shadow::from(box_shadow)` where Dart stores a `BoxShadow` as a `Shadow` (drops `spreadRadius` / `blurStyle`).
+
+- Change: `to_paint` sets `mask_blur: Some(MaskBlur)` instead of Dart `MaskFilter.blur`.
+  Reason: platform — valo `Paint` has `mask_blur`, not `maskFilter`.
+  Affect: read `paint.mask_blur`.
+
+- Change: `debug_disable_shadows` / `set_debug_disable_shadows` instead of assigning a library `bool`.
+  Reason: language — Rust has no isolate-global assignable `bool` binding.
+  Affect: call the setter; the getter is the Dart read.
+
+## borders.rs → borders.dart (`BorderStyle`, `BorderSide`, `paintBorder`)
+
+- Change: `to_paint` uses `PaintStyle::Stroke(Stroke::new(width))` instead of Dart `style` + `strokeWidth` fields.
+  Reason: platform — valo stroke width lives on `PaintStyle::Stroke`.
+  Affect: inspect `paint.style`, not a separate `strokeWidth`.
+
 ## Deferred
 
+- `clipRSuperellipseAndPaint`. Trigger: first `RSuperellipse` clip. valo has no `clipRSuperellipse`; do not stand in a path or rrect clip without asking.
+- `ShapeBorder` / `OutlinedBorder` / `_CompoundBorder`. Trigger: `box_border.dart` (`Border` extends `BoxBorder` extends `ShapeBorder`). Open subclass set plus `operator +` returning a compound border.
+- `debug.dart` remainder (`debugNetworkImageHttpClientProvider`, …). Trigger: image loading / tests that are not `debugDisableShadows`.
 - `ColorSwatch` / `ColorProperty`. Trigger: Material colors / diagnostics. `Color` stays the dart:ui struct (stored by value on `Paint` / `BorderSide` / `TextStyle`); a `Color` trait cannot be that field type. `ColorSwatch` can wrap the primary `Color` plus a table, like `FractionalOffset` vs `Alignment`.
 - Custom `TextScaler` / `SystemTextScaler`. Trigger: `MediaQuery`; `_ClampedTextScaler` is the `TextScaler::Clamped` arm, created by the default `clamp` on a non-linear scaler.
 - `EdgeInsets.fromViewPadding` / `fromWindowPadding` / `EdgeInsetsGeometry.fromViewPadding`. Trigger: embedder / `MediaQuery`.

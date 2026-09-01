@@ -14,7 +14,10 @@ pub type Canvas = DisplayListBuilder;
 /// takes (Flutter `FlutterView.render` takes a `Scene`).
 pub type Picture = DisplayList;
 
-pub use valo::{Image, Paint, Paragraph, ParagraphBuilder, ParagraphStyle, Path, PathBuilder};
+pub use valo::{
+    BlendMode, BlurStyle, ClipOp, FillRule, Image, MaskBlur, Paint, PaintStyle, Paragraph,
+    ParagraphBuilder, ParagraphStyle, Path, PathBuilder, Stroke,
+};
 
 /// The full valo API for hosts and for recording that needs a type the
 /// aliases do not cover (`Op`, `Context`, `Surface`).

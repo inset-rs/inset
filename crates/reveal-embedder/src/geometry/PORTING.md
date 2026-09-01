@@ -9,6 +9,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - color.rs → painting.dart (Color, ColorSpace)
 - rrect.rs → geometry.dart (`RRect`, `RSuperellipse` except `contains`)
 - clip.rs → painting.dart (`Clip`)
+- shadow.rs → painting.dart (`Shadow`, except `toPaint`)
 
 ## geometry.rs → geometry.dart
 
@@ -34,3 +35,4 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `hashCode` / [`Hash`]. Trigger: the first map or set keyed by `Offset`, `Size`, `Rect`, `Radius`, or `Color`.
 - Subclassing `Color` / overriding `value`. Trigger: `CupertinoDynamicColor`.
 - `_lerpInt`. Trigger: `FontWeight.lerp`.
+- `Shadow.toPaint`. Trigger: `TextStyle` shadows. `Paint` is the valo type in `reveal-embedder`; geometry cannot name that crate. `BoxShadow::to_paint` is in painting.
