@@ -212,6 +212,23 @@ impl EdgeInsetsGeometry {
             EdgeInsetsGeometry::Directional(insets) => insets.resolve(direction),
         }
     }
+
+    /// Returns the sum of two [`EdgeInsetsGeometry`] objects.
+    ///
+    /// Same-kind add returns that kind. Cross-kind add (`_MixedEdgeInsets`) is
+    /// deferred.
+    #[allow(clippy::should_implement_trait)]
+    pub fn add(self, other: EdgeInsetsGeometry) -> EdgeInsetsGeometry {
+        match (self, other) {
+            (EdgeInsetsGeometry::Insets(a), EdgeInsetsGeometry::Insets(b)) => {
+                EdgeInsetsGeometry::Insets(a + b)
+            }
+            (EdgeInsetsGeometry::Directional(a), EdgeInsetsGeometry::Directional(b)) => {
+                EdgeInsetsGeometry::Directional(a + b)
+            }
+            _ => panic!("cross-kind EdgeInsetsGeometry::add (_MixedEdgeInsets) is deferred"),
+        }
+    }
 }
 
 impl PartialEq for EdgeInsetsGeometry {

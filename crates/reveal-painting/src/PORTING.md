@@ -88,15 +88,25 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Rust has no isolate-global assignable `bool` binding.
   Affect: call the setter; the getter is the Dart read.
 
-## borders.rs → borders.dart (`BorderStyle`, `BorderSide`, `paintBorder`)
+## borders.rs → borders.dart
 
 - Change: `to_paint` uses `PaintStyle::Stroke(Stroke::new(width))` instead of Dart `style` + `strokeWidth` fields.
   Reason: platform — valo stroke width lives on `PaintStyle::Stroke`.
   Affect: inspect `paint.style`, not a separate `strokeWidth`.
 
-## Deferred
+- Change: `ShapeBorder` / `OutlinedBorder` are traits. A stored border is `Box<dyn ShapeBorder>`. `clone_box` / `clone_outlined` stand in for Dart's shared immutable instances.
+  Reason: language — the subclass set is open (`InputBorder`, tests, apps); a pairing enum cannot hold it. `dyn Trait` is not `Copy`.
+  Affect: store `Box<dyn ShapeBorder>`. `a + b` is `a.plus(&b)`. `ShapeBorder.lerp` is `<dyn ShapeBorder>::lerp`. `is` / `as` is `as_any().downcast_ref`.
 
-- `ShapeBorder` / `OutlinedBorder` / `_CompoundBorder`. Trigger: `box_border.dart` (`Border` extends `BoxBorder` extends `ShapeBorder`). Open subclass set plus `operator +` returning a compound border.
+- Change: `OutlinedBorder.side` is a method; each concrete type holds `pub side: BorderSide`. `dimensions` is [`outlined_border_dimensions`].
+  Reason: language — a Rust trait cannot hold a field.
+  Affect: write `border.side()` (or the struct field). Outlined implementors call `outlined_border_dimensions(self.side)`.
+
+- Change: `get_outer_path` / `get_inner_path` return `Arc<Path>`. `hit_test` uses `FillRule::NonZero`.
+  Reason: platform — valo `Path` is already `Arc`; `contains` takes the fill rule separately.
+  Affect: the path is `Arc`. Even-odd hit tests need a fill-rule argument later.
+
+## Deferred
 - `debug.dart` remainder (`debugNetworkImageHttpClientProvider`, …). Trigger: image loading / tests that are not `debugDisableShadows`.
 - `ColorSwatch` / `ColorProperty`. Trigger: Material colors / diagnostics. `Color` stays the dart:ui struct (stored by value on `Paint` / `BorderSide` / `TextStyle`); a `Color` trait cannot be that field type. `ColorSwatch` can wrap the primary `Color` plus a table, like `FractionalOffset` vs `Alignment`.
 - Custom `TextScaler` / `SystemTextScaler`. Trigger: `MediaQuery`; `_ClampedTextScaler` is the `TextScaler::Clamped` arm, created by the default `clamp` on a non-linear scaler.
