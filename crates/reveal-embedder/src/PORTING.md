@@ -7,6 +7,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — there is no isolate-global dispatcher; the host supplies `Platform`.
   Affect: outgoing host requests go through `app.platform()`.
 
+- Change: [`TargetPlatform`](TargetPlatform) is a value type here; [`Platform::target_platform`](Platform::target_platform) reports the current one. There is no `defaultTargetPlatform` library global and no `debugDefaultTargetPlatformOverride`. `InertPlatform` answers Android, matching Flutter's test binding.
+  Reason: platform — there is no isolate-global `dart:io`; the host-supplied `Platform` is the source of truth, so two Apps can differ.
+  Affect: write `app.platform().target_platform()` where Dart writes `defaultTargetPlatform`. Tests that need iOS (etc.) install a `Platform` that returns that value.
+
 ## views.rs → dart:ui `FlutterView` / `ViewPadding` / `ViewConstraints`
 
 - Change: `View` is a handle to the native surface. The host owns the window and answers metrics from it; the framework does not keep a copy.
@@ -27,7 +31,8 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 
 - `onPointerDataPacket`. Trigger: gestures.
 - `onMetricsChanged` / `onPlatformBrightnessChanged`. Trigger: `MediaQuery` / `CupertinoTheme`.
-- `TargetPlatform` / `font_source`. Trigger: `defaultTargetPlatform` / text.
+- `font_source`. Trigger: text.
+- `debugDefaultTargetPlatformOverride`. Trigger: a debug switcher that must override a live host without swapping `Platform`.
 - Semantics callbacks. Trigger: semantics.
 - `PlatformDispatcher` callback setters and Zones. Trigger: a requirement to expose dart:ui callbacks independently of `Shell`.
 - `_updateFrameData` / the `frameNumber` argument to `_beginFrame`. Trigger: `FrameData`.

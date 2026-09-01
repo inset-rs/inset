@@ -12,7 +12,7 @@ Ground truth: `/Users/mac/code/flutter/packages/flutter/lib/src`. Read the Dart.
 
 Copy the file, then change only what Rust forces. Names, member order, defaults, branches, who decides, when hooks run — same as Flutter. A Flutter-shaped name on a different mechanism is a bug.
 
-When something does not fit: stop and ask. Use a proved pattern (`Handle` newtype, mixin Data+Mixin, `Drop` guard), not a one-off. Do not drop public members or invent a stand-in for a missing dependency without asking.
+When something does not fit: stop and ask. Use a proved pattern (`Handle` newtype, mixin Data+Mixin, fluent optional fields, `Drop` guard), not a one-off. Do not drop public members or invent a stand-in for a missing dependency without asking.
 
 A pattern earns a file under `patterns/` on its second instance. Until then, the note lives in that folder's `PORTING.md`.
 
@@ -20,6 +20,7 @@ A pattern earns a file under `patterns/` on its second instance. Until then, the
 
 - Mixin with fields: [patterns/mixin.md](patterns/mixin.md)
 - Handle newtype: [patterns/handle-newtype.md](patterns/handle-newtype.md)
+- Many optional fields: [patterns/many-optional-fields.md](patterns/many-optional-fields.md)
 
 ## Rust traps
 

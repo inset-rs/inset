@@ -15,5 +15,5 @@ mod views;
 pub use client::EmbedderClient;
 pub use geometry::*;
 pub use painting::*;
-pub use platform::{Frame, InertPlatform, Platform, PlatformRef, ViewRef};
+pub use platform::{Frame, InertPlatform, Platform, PlatformRef, TargetPlatform, ViewRef};
 pub use views::{View, ViewConstraints, ViewId, ViewMetrics, ViewPadding};

@@ -486,11 +486,15 @@ impl Drop for Notification {
 
 impl<T: ChangeNotifier> Listenable for Handle<T> {
     fn add_listener(&self, app: &mut App, listener: Listener) {
-        app.get_mut(*self).change_notifier_data_mut().add_listener(listener);
+        app.get_mut(*self)
+            .change_notifier_data_mut()
+            .add_listener(listener);
     }
 
     fn remove_listener(&self, app: &mut App, listener: &Listener) {
-        app.get_mut(*self).change_notifier_data_mut().remove_listener(listener);
+        app.get_mut(*self)
+            .change_notifier_data_mut()
+            .remove_listener(listener);
     }
 }
 
@@ -991,15 +995,12 @@ mod tests {
         let log = Log::default();
         let notifier = app.create(ValueNotifier::new(2.0));
 
-        notifier.add_listener(
-            &mut app,
-            {
-                let log = Rc::clone(&log);
-                Listener::new(move |app: &mut App| {
-                    log.borrow_mut().push(app.get(notifier).value().to_string());
-                })
-            },
-        );
+        notifier.add_listener(&mut app, {
+            let log = Rc::clone(&log);
+            Listener::new(move |app: &mut App| {
+                log.borrow_mut().push(app.get(notifier).value().to_string());
+            })
+        });
 
         notifier.set_value(&mut app, 3.0);
         assert_eq!(fired(&log), ["3"]);
@@ -1235,20 +1236,29 @@ mod tests {
         assert!(panicked);
         assert_eq!(fired(&log), ["l0", "l1"]);
         assert_eq!(
-            app.get(host).change_notifier.notification_call_stack_depth.get(),
+            app.get(host)
+                .change_notifier
+                .notification_call_stack_depth
+                .get(),
             0
         );
         assert_eq!(app.get(host).change_notifier.count, 4);
 
         app.get_mut(host).change_notifier.remove_listener(&l3);
         assert_eq!(app.get(host).change_notifier.count, 3);
-        assert_eq!(app.get(host).change_notifier.reentrantly_removed_listeners, 2);
+        assert_eq!(
+            app.get(host).change_notifier.reentrantly_removed_listeners,
+            2
+        );
 
         log.borrow_mut().clear();
         notify(&mut app, host);
         assert_eq!(fired(&log), ["l1"]);
         assert_eq!(app.get(host).change_notifier.count, 1);
-        assert_eq!(app.get(host).change_notifier.reentrantly_removed_listeners, 0);
+        assert_eq!(
+            app.get(host).change_notifier.reentrantly_removed_listeners,
+            0
+        );
 
         log.borrow_mut().clear();
         notify(&mut app, host);
@@ -1291,7 +1301,10 @@ mod tests {
 
         assert!(panicked);
         assert_eq!(
-            app.get(host).change_notifier.notification_call_stack_depth.get(),
+            app.get(host)
+                .change_notifier
+                .notification_call_stack_depth
+                .get(),
             0
         );
         assert_eq!(
@@ -1306,7 +1319,10 @@ mod tests {
         remove(&mut app, host, &survivor);
         log.borrow_mut().clear();
         notify(&mut app, host);
-        assert_eq!(app.get(host).change_notifier.reentrantly_removed_listeners, 0);
+        assert_eq!(
+            app.get(host).change_notifier.reentrantly_removed_listeners,
+            0
+        );
         assert!(!app.get(host).change_notifier.has_listeners());
     }
 
@@ -1333,10 +1349,16 @@ mod tests {
         }));
         std::panic::set_hook(hook);
 
-        assert_eq!(app.get(host).change_notifier.reentrantly_removed_listeners, 1);
+        assert_eq!(
+            app.get(host).change_notifier.reentrantly_removed_listeners,
+            1
+        );
 
         app.get_mut(host).change_notifier.dispose();
-        assert_eq!(app.get(host).change_notifier.reentrantly_removed_listeners, 0);
+        assert_eq!(
+            app.get(host).change_notifier.reentrantly_removed_listeners,
+            0
+        );
         assert_eq!(app.get(host).change_notifier.count, 0);
     }
 

@@ -62,6 +62,12 @@ pub trait BoxBorder: ShapeBorder {
     );
 }
 
+impl<T: BoxBorder + 'static> From<T> for Box<dyn BoxBorder> {
+    fn from(border: T) -> Box<dyn BoxBorder> {
+        Box::new(border)
+    }
+}
+
 impl dyn BoxBorder {
     /// Creates a [`Border`].
     pub fn from_ltrb(

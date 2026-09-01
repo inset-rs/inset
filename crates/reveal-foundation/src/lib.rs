@@ -9,3 +9,4 @@ pub use app::*;
 pub use change_notifier::*;
 pub use constants::*;
 pub use observer_list::*;
+pub use reveal_embedder::TargetPlatform;

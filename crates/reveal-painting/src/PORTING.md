@@ -130,6 +130,36 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — valo has no those primitives. Oval is an elliptical `draw_rrect_radii_elliptical`; superellipse is a path.
   Affect: call `draw_oval` / `draw_rsuperellipse`. A display-list dump shows an rrect or path.
 
+## image_provider.rs → image_provider.dart (`ImageConfiguration`) / services `asset_bundle.dart`
+
+- Change: [`AssetBundle`](AssetBundle) is `load` returning `Result<Vec<u8>, String>`. There is no `ImageProvider`, `ImageStream`, or `ImageCache`.
+  Reason: platform — a host or test can implement this completely; Flutter's Future plus codec/cache pipeline is the engine talking to Dart.
+  Affect: `bundle.load(key)` is synchronous. Store `Option<Rc<dyn AssetBundle>>`. Equality is pointer identity, as Dart's default `==`.
+
+- Change: [`ImageConfiguration`](ImageConfiguration) has no `locale` field.
+  Reason: platform — `dart:ui` `Locale` is not ported; the field exists so `AssetImage` can pick a locale-specific asset, which is deferred with image loading.
+  Affect: there is no `configuration.locale`. `copy_with` has no locale argument.
+
+## decoration.rs → decoration.dart
+
+- Change: [`Decoration`](Decoration) / [`BoxPainter`](BoxPainter) are traits. A stored decoration is `Box<dyn Decoration>`. `clone_box` stands in for Dart's shared immutable instances. `BoxPainter::paint` takes `&mut self`.
+  Reason: language — the subclass set is open; a pairing enum cannot hold it. The painter caches `Paint` objects.
+  Affect: store `Box<dyn Decoration>`. `Decoration.lerp` is `<dyn Decoration>::lerp`. `is` / `as` is `as_any().downcast_ref`. `create_box_painter` takes `Option<Box<dyn Fn()>>`.
+
+- Change: `get_clip_path` returns `Arc<Path>`.
+  Reason: platform — valo `Path` is already `Arc`.
+  Affect: the path is `Arc`.
+
+## box_decoration.rs → box_decoration.dart
+
+- Change: [`BoxDecoration`](BoxDecoration) has no `image` or `gradient` field. Background paint is solid `color` only.
+  Reason: platform — `DecorationImage` / `ImageProvider` and `Gradient.createShader` (valo shaders) are deferred; color, border, radius, and shadow do not need them.
+  Affect: there is no `decoration.image` or `decoration.gradient`. A `background_blend_mode` still requires a `color`.
+
+- Change: Dart's named constructor arguments are a fluent builder. `copyWith(color: c)` is `copy_with().color(c)`.
+  Reason: language — Rust has no optional named parameters.
+  Affect: write `BoxDecoration::new().color(c).border_radius(r)` where Dart writes `BoxDecoration(color: c, borderRadius: r)`. Set `color` before `background_blend_mode`.
+
 ## Deferred
 - `debug.dart` remainder (`debugNetworkImageHttpClientProvider`, …). Trigger: image loading / tests that are not `debugDisableShadows`.
 - `ColorSwatch` / `ColorProperty`. Trigger: Material colors / diagnostics. `Color` stays the dart:ui struct (stored by value on `Paint` / `BorderSide` / `TextStyle`); a `Color` trait cannot be that field type. `ColorSwatch` can wrap the primary `Color` plus a table, like `FractionalOffset` vs `Alignment`.
@@ -140,3 +170,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `_MixedBorderRadius` and cross-kind `add` / `subtract` / `BorderRadiusGeometry.lerp`. Trigger: first consumer that adds a `BorderRadius` to a `BorderRadiusDirectional`. Same-kind `add` / `subtract` / `lerp` exist.
 - `hashCode` / [`Hash`]. Trigger: the first map or set keyed by insets, alignment, border radius, or `TextScaler`.
 - Diagnostics / `debugCheckCanResolveTextDirection`. Trigger: porting diagnostics; until then a missing `TextDirection` on resolve panics with the FlutterError summary string.
+- `ImageProvider` / `ImageStream` / `ImageCache` / `DecorationImage` / `BoxDecoration.image`. Trigger: first decoration that paints an image.
+- `ui.Locale` / `ImageConfiguration.locale`. Trigger: locale-specific assets.
+- `Gradient` / `BoxDecoration.gradient` / `createShader`. Trigger: first decoration that paints a gradient. valo covers linear, radial (with optional focus), and a full-turn sweep; `TileMode.decal` and sweep `endAngle` have no valo counterpart.
+- `AssetBundle.loadString` / `loadStructuredData` / `loadBuffer` / caching / `NetworkAssetBundle` / `rootBundle`. Trigger: string or structured assets, or a default bundle on `App`.

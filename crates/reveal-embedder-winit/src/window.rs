@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use reveal_embedder::{
-    EmbedderClient, Frame, Picture, Platform, PlatformRef, View, ViewConstraints, ViewId,
-    ViewMetrics, ViewPadding, ViewRef,
+    EmbedderClient, Frame, Picture, Platform, PlatformRef, TargetPlatform, View, ViewConstraints,
+    ViewId, ViewMetrics, ViewPadding, ViewRef,
 };
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -68,6 +68,25 @@ impl WinitPlatform {
 }
 
 impl Platform for WinitPlatform {
+    /// The host this binary was built for — the platform adapter is where
+    /// host detection belongs, exactly as Flutter's `defaultTargetPlatform`
+    /// bottoms out in `dart:io`'s `Platform.isAndroid` chain.
+    fn target_platform(&self) -> TargetPlatform {
+        if cfg!(target_os = "android") {
+            TargetPlatform::Android
+        } else if cfg!(target_os = "ios") {
+            TargetPlatform::IOS
+        } else if cfg!(target_os = "macos") {
+            TargetPlatform::MacOS
+        } else if cfg!(target_os = "windows") {
+            TargetPlatform::Windows
+        } else if cfg!(target_os = "fuchsia") {
+            TargetPlatform::Fuchsia
+        } else {
+            TargetPlatform::Linux
+        }
+    }
+
     fn request_frame(&self) {
         if !self.frame_requested.replace(true) {
             self.poke();

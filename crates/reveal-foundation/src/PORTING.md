@@ -20,6 +20,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — dart:ui is host-bound; there is no isolate global to hang it on.
   Affect: host requests and view queries go through `app.platform()`.
 
+- Change: `TargetPlatform` is re-exported from `reveal-embedder`. Flutter defines the enum in this file; `defaultTargetPlatform` is not a getter here.
+  Reason: platform — the host `Platform` trait lives in the embedder crate, and that crate cannot depend on foundation.
+  Affect: `app.platform().target_platform()` where Dart writes `defaultTargetPlatform`. The enum is `reveal_foundation::TargetPlatform` or `reveal_embedder::TargetPlatform`.
+
 ## constants.rs → constants.dart
 
 - Change: `kProfileMode` is the constant `false`.

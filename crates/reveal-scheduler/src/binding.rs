@@ -698,6 +698,10 @@ mod tests {
     }
 
     impl reveal_embedder::Platform for RecordingPlatform {
+        fn target_platform(&self) -> reveal_embedder::TargetPlatform {
+            reveal_embedder::TargetPlatform::Android
+        }
+
         fn request_frame(&self) {
             self.frames
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
