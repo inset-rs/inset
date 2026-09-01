@@ -52,9 +52,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — the setter schedules and unschedules ticks, so it needs the App.
   Affect: write `ticker.set_muted(app, true)` where Flutter assigns `ticker.muted = true`.
 
-- Change: `TickerProvider::create_ticker` takes `&mut self` and `&mut App`.
-  Reason: language — the provider object is owned by the caller and may keep state; creating the ticker puts it in the App.
-  Affect: this receiver works only for providers living outside the App. `TickerProviderStateMixin` cannot: `app.get_mut(state)` and the `&mut App` argument cannot coexist. Reshaping to `(app, this)` is that mixin's trigger.
+- Change: [`TickerProvider::create_ticker`] takes `self` and `&mut App`.
+  Reason: language — a `&mut self` receiver cannot also produce the `&mut App` that creating a ticker needs, and a provider living in the App cannot be borrowed mutably while that App is borrowed.
+  Affect: `vsync.create_ticker(app, on_tick)` where Dart writes `vsync.createTicker(onTick)`. Pass a `Handle` (or a Copy test double) by value, not `&mut dyn TickerProvider`.
 
 ## Deferred
 

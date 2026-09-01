@@ -18,11 +18,14 @@ pub type TickerCallback = FrameCallback;
 /// frame triggers, but are most commonly used indirectly via an
 /// `AnimationController`. `AnimationController`s need a [`TickerProvider`] to
 /// obtain their [`Ticker`].
+///
+/// `create_ticker` takes `self` by value so a [`Handle`] in the App can
+/// implement this — Dart's `TickerProviderStateMixin` is `vsync: this`.
 pub trait TickerProvider {
     /// Creates a ticker with the given callback.
     ///
     /// The kind of ticker provided depends on the kind of ticker provider.
-    fn create_ticker(&mut self, app: &mut App, on_tick: TickerCallback) -> Ticker;
+    fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Ticker;
 }
 
 /// Calls its callback once per animation frame, when enabled.
@@ -649,7 +652,7 @@ mod tests {
     struct TestVSync;
 
     impl TickerProvider for TestVSync {
-        fn create_ticker(&mut self, app: &mut App, on_tick: TickerCallback) -> Ticker {
+        fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Ticker {
             Ticker::new(app, on_tick)
         }
     }
@@ -659,6 +662,31 @@ mod tests {
         let mut app = App::new();
         let log = Rc::new(RefCell::new(Vec::new()));
         let ticker = TestVSync.create_ticker(&mut app, elapsed_recorder(&log));
+        ticker.start(&mut app);
+        pump(&mut app, Duration::from_millis(10));
+        assert_eq!(*log.borrow(), vec![Duration::ZERO]);
+        ticker.stop(&mut app, false);
+    }
+
+    struct Host {
+        ticker: Option<Ticker>,
+    }
+
+    impl TickerProvider for Handle<Host> {
+        fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Ticker {
+            let ticker = Ticker::new(app, on_tick);
+            app.get_mut(self).ticker = Some(ticker);
+            ticker
+        }
+    }
+
+    #[test]
+    fn a_provider_in_the_app_can_vend_a_ticker() {
+        let mut app = App::new();
+        let host = app.create(Host { ticker: None });
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let ticker = host.create_ticker(&mut app, elapsed_recorder(&log));
+        assert!(app.get(host).ticker.is_some());
         ticker.start(&mut app);
         pump(&mut app, Duration::from_millis(10));
         assert_eq!(*log.borrow(), vec![Duration::ZERO]);

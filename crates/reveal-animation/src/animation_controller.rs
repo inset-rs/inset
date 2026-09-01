@@ -147,7 +147,7 @@ impl AnimationController {
         lower_bound: f64,
         upper_bound: f64,
         animation_behavior: AnimationBehavior,
-        vsync: &mut dyn TickerProvider,
+        vsync: impl TickerProvider,
     ) -> AnimationController {
         debug_assert!(upper_bound >= lower_bound);
         let this = AnimationController(app.create(AnimationControllerData {
@@ -186,7 +186,7 @@ impl AnimationController {
         duration: Option<Duration>,
         reverse_duration: Option<Duration>,
         animation_behavior: AnimationBehavior,
-        vsync: &mut dyn TickerProvider,
+        vsync: impl TickerProvider,
     ) -> AnimationController {
         let this = AnimationController(app.create(AnimationControllerData {
             lower_bound: f64::NEG_INFINITY,
@@ -684,7 +684,7 @@ impl AnimationController {
     }
 
     /// Recreates the [`Ticker`] with the new `TickerProvider`.
-    pub fn resync(self, app: &mut App, vsync: &mut dyn TickerProvider) {
+    pub fn resync(self, app: &mut App, vsync: impl TickerProvider) {
         let old_ticker = app.get(self.0).ticker.expect("resync after dispose");
         let ticker = vsync.create_ticker(
             app,
@@ -1032,7 +1032,7 @@ mod tests {
     struct TestVSync;
 
     impl TickerProvider for TestVSync {
-        fn create_ticker(&mut self, app: &mut App, on_tick: TickerCallback) -> Ticker {
+        fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Ticker {
             Ticker::new(app, on_tick)
         }
     }
@@ -1053,7 +1053,7 @@ mod tests {
             0.0,
             1.0,
             AnimationBehavior::Normal,
-            &mut TestVSync,
+            TestVSync,
         )
     }
 
