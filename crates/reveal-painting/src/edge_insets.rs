@@ -3,7 +3,7 @@
 use std::fmt::{self, Debug};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
-use reveal_geometry::{Offset, Rect, Size, clamp_double, lerp_double};
+use reveal_geometry::{clamp_double, lerp_double, Offset, RRect, Radius, Rect, Size};
 
 use crate::basic_types::{Axis, TextDirection};
 
@@ -488,6 +488,46 @@ impl EdgeInsets {
             rect.top - self.top,
             rect.right + self.right,
             rect.bottom + self.bottom,
+        )
+    }
+
+    /// Returns a new [`RRect`] expanded by this [`EdgeInsets`], increasing each
+    /// corner's radius by the corresponding per-axis inset amounts (clamped at
+    /// zero).
+    pub fn inflate_rrect(&self, rect: RRect) -> RRect {
+        RRect::from_ltrb_and_corners(
+            rect.left - self.left,
+            rect.top - self.top,
+            rect.right + self.right,
+            rect.bottom + self.bottom,
+            (rect.tl_radius() + Radius::elliptical(self.left, self.top))
+                .clamp(Some(Radius::ZERO), None),
+            (rect.tr_radius() + Radius::elliptical(self.right, self.top))
+                .clamp(Some(Radius::ZERO), None),
+            (rect.br_radius() + Radius::elliptical(self.right, self.bottom))
+                .clamp(Some(Radius::ZERO), None),
+            (rect.bl_radius() + Radius::elliptical(self.left, self.bottom))
+                .clamp(Some(Radius::ZERO), None),
+        )
+    }
+
+    /// Returns a new [`RRect`] shrunk by this [`EdgeInsets`], decreasing each
+    /// corner's radius by the corresponding per-axis inset amounts (clamped at
+    /// zero).
+    pub fn deflate_rrect(&self, rect: RRect) -> RRect {
+        RRect::from_ltrb_and_corners(
+            rect.left + self.left,
+            rect.top + self.top,
+            rect.right - self.right,
+            rect.bottom - self.bottom,
+            (rect.tl_radius() - Radius::elliptical(self.left, self.top))
+                .clamp(Some(Radius::ZERO), None),
+            (rect.tr_radius() - Radius::elliptical(self.right, self.top))
+                .clamp(Some(Radius::ZERO), None),
+            (rect.br_radius() - Radius::elliptical(self.right, self.bottom))
+                .clamp(Some(Radius::ZERO), None),
+            (rect.bl_radius() - Radius::elliptical(self.left, self.bottom))
+                .clamp(Some(Radius::ZERO), None),
         )
     }
 

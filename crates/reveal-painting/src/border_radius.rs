@@ -3,7 +3,7 @@
 use std::fmt::{self, Debug};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
-use reveal_geometry::Radius;
+use reveal_geometry::{RRect, RSuperellipse, Radius, Rect};
 
 use crate::basic_types::TextDirection;
 
@@ -456,6 +456,34 @@ impl BorderRadius {
             top_right.unwrap_or(self.top_right),
             bottom_left.unwrap_or(self.bottom_left),
             bottom_right.unwrap_or(self.bottom_right),
+        )
+    }
+
+    /// Creates an [`RRect`] from the current border radius and a [`Rect`].
+    ///
+    /// If any of the radii have negative values in x or y, those values will be
+    /// clamped to zero in order to produce a valid [`RRect`].
+    pub fn to_rrect(&self, rect: Rect) -> RRect {
+        RRect::from_rect_and_corners(
+            rect,
+            self.top_left.clamp(Some(Radius::ZERO), None),
+            self.top_right.clamp(Some(Radius::ZERO), None),
+            self.bottom_right.clamp(Some(Radius::ZERO), None),
+            self.bottom_left.clamp(Some(Radius::ZERO), None),
+        )
+    }
+
+    /// Creates an [`RSuperellipse`] from the current border radius and a [`Rect`].
+    ///
+    /// If any of the radii have negative values in x or y, those values will be
+    /// clamped to zero in order to produce a valid [`RRect`].
+    pub fn to_r_superellipse(&self, rect: Rect) -> RSuperellipse {
+        RSuperellipse::from_rect_and_corners(
+            rect,
+            self.top_left.clamp(Some(Radius::ZERO), None),
+            self.top_right.clamp(Some(Radius::ZERO), None),
+            self.bottom_right.clamp(Some(Radius::ZERO), None),
+            self.bottom_left.clamp(Some(Radius::ZERO), None),
         )
     }
 

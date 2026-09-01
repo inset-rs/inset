@@ -7,6 +7,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - math.rs → math.dart
 - lerp.rs → lerp.dart
 - color.rs → painting.dart (Color, ColorSpace)
+- rrect.rs → geometry.dart (`RRect`, `RSuperellipse` except `contains`)
 
 ## geometry.rs → geometry.dart
 
@@ -16,7 +17,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## Deferred
 
-- `RRect`, `RSuperellipse`, `RSTransform`. Trigger: painting borders/clips / transforms.
+- `RSuperellipse.contains`. Trigger: Impeller hit-test / a Path. Dart's method is engine FFI, not the `RRect` ellipse test.
+- `RSTransform`. Trigger: `Canvas.drawAtlas`.
 - `Size.copy`. Trigger: `box.dart`'s `_DebugSize` hack.
 - `hashCode` / [`Hash`]. Trigger: the first map or set keyed by `Offset`, `Size`, `Rect`, `Radius`, or `Color`.
 - Subclassing `Color` / overriding `value`. Trigger: `CupertinoDynamicColor`.

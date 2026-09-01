@@ -5,8 +5,10 @@ mod color;
 mod geometry;
 mod lerp;
 mod math;
+mod rrect;
 
 pub use color::*;
 pub use geometry::*;
 pub use lerp::*;
 pub use math::*;
+pub use rrect::*;
