@@ -40,9 +40,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## ticker.rs → ticker.dart
 
-- Change: `Ticker` and `TickerFuture` are `Handle`s. Methods that need the App live on [`TickerMethods`] / [`TickerFutureMethods`].
-  Reason: language — an inherent `impl Handle<Ticker>` is an orphan (`Handle` is foreign).
-  Affect: `ticker.start(app)`, `ticker.set_muted(app, true)`, `future.when_complete(app, listener)`. Import the methods trait.
+- Change: [`Ticker`] and [`TickerFuture`] are handle newtypes. Methods that need the App are inherent.
+  Reason: language — methods need `&mut App`, and an inherent `impl Handle<T>` is an orphan (`Handle` is foreign).
+  Affect: `Ticker::new(app, on_tick)`, then `ticker.start(app)`, `ticker.set_muted(app, true)`, `future.when_complete(app, listener)`.
 
 - Change: `TickerFuture` runs registered callbacks (`when_complete`, `when_complete_or_cancel`) through `App::schedule_microtask`; it is not a Rust `Future`.
   Reason: language — Dart's `TickerFuture` implements `Future<void>`, whose listeners the isolate runs on the microtask queue. A Rust `Future` would need `&mut App` at poll time.

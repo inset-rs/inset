@@ -40,17 +40,17 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Rust closures have no identity; Dart's `VoidCallback` compares by identity and tear-offs canonicalize.
   Affect: keep the `Listener` passed to `add_listener`, or rebuild a `handle_method` tear-off at the removal site.
 
-- Change: Dart's mixin class `ChangeNotifier` is the trait [`ChangeNotifier`] plus a [`ChangeNotifierState`] field named `notifier`.
+- Change: Dart's mixin class `ChangeNotifier` is the trait [`ChangeNotifier`] plus a [`ChangeNotifierData`] field named `change_notifier`.
   Reason: language — a Rust trait holds no state. Methods live on [`Handle`] so the call site needs no extra import.
-  Affect: `struct Foo { notifier: ChangeNotifierState, … }` and `impl ChangeNotifier for Foo { fn notifier_state(&mut self) -> &mut ChangeNotifierState { &mut self.notifier } }`, then `this.notify_listeners(app)` where Dart writes `notifyListeners()`. Standalone `ChangeNotifier()` is `ChangeNotifierState::new()`. `add_listener` is still `app.get_mut(this).notifier.add_listener(l)`.
+  Affect: `struct Foo { change_notifier: ChangeNotifierData, … }` and `impl ChangeNotifier for Foo { fn change_notifier_data(&self) -> &ChangeNotifierData { &self.change_notifier } fn change_notifier_data_mut(&mut self) -> &mut ChangeNotifierData { &mut self.change_notifier } }`, then `this.notify_listeners(app)` where Dart writes `notifyListeners()`. Standalone `ChangeNotifier()` is `ChangeNotifierData::new()`. `this.add_listener(app, l)` where Dart writes `addListener(l)` — the trait lives on the handle so an erased `Animation<T>` can implement it.
 
 - Change: a panicking listener ends the notification; remaining listeners are not called. `dispose` also clears `reentrantly_removed_listeners`.
   Reason: language — Rust has no catchable exception for ordinary control flow. A panic skips the compaction Dart's `catch` always reaches, and the next dispatch would underflow `count - reentrantly_removed_listeners`.
   Affect: a panicking listener skips every listener after it. Flutter still calls them.
 
-- Change: `ValueListenable::value` returns `&T`.
-  Reason: language — returning `T` would force `T: Clone` on every value type.
-  Affect: read with `.value()`; moving the value out needs `Clone`.
+- Change: [`Listenable`] lives on the handle (`Handle<T>` where `T: ChangeNotifier`). Methods take `&self` and `&mut App`. [`ValueListenable::value`] takes `&App` and returns `&T`.
+  Reason: language — a `&mut self` receiver on the slot cannot also produce the `&mut App` a registration must hand onward, and an erased `Animation<T>` is a handle, not a borrow of its slot. Returning `T` from `value` would force `T: Clone` on every value type.
+  Affect: `this.add_listener(app, l)` and `this.value(app)` where Dart writes `addListener(l)` and `.value`. The data's inherent `add_listener` remains for code that already holds the slot. Moving the value out needs `Clone`.
 
 ## Deferred
 

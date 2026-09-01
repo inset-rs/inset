@@ -12,6 +12,7 @@ unsafe_code = "forbid"
 
 [workspace.dependencies]
 indexmap = "2"
+reveal-animation = { path = "crates/reveal-animation" }
 reveal-embedder = { path = "crates/reveal-embedder" }
 reveal-embedder-winit = { path = "crates/reveal-embedder-winit" }
 reveal-foundation = { path = "crates/reveal-foundation" }

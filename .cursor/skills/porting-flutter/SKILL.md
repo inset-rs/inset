@@ -12,16 +12,20 @@ Ground truth: `/Users/mac/code/flutter/packages/flutter/lib/src`. Read the Dart.
 
 Copy the file, then change only what Rust forces. Names, member order, defaults, branches, who decides, when hooks run — same as Flutter. A Flutter-shaped name on a different mechanism is a bug.
 
-When something does not fit: stop and ask. Use a proved pattern (`Handle`, mixin-as-field, `Drop` guard), not a one-off. Do not drop public members or invent a stand-in for a missing dependency without asking.
+When something does not fit: stop and ask. Use a proved pattern (`Handle` newtype, mixin Data+Mixin, `Drop` guard), not a one-off. Do not drop public members or invent a stand-in for a missing dependency without asking.
 
 A pattern earns a file under `patterns/` on its second instance. Until then, the note lives in that folder's `PORTING.md`.
+
+## Verified
+
+- Mixin with fields: [patterns/mixin.md](patterns/mixin.md)
+- Handle newtype: [patterns/handle-newtype.md](patterns/handle-newtype.md)
 
 ## Rust traps
 
 - Dart `assert` → `debug_assert!`. Never put a side effect in one — it does not run in release. `assert(() { …; return true; }())` becomes `if cfg!(debug_assertions) { … }`. Keep protocol invariants; drop inspector-only asserts.
 - Do not `#[derive(PartialEq)]` unless Dart overrides `==`. Dart defaults to identity; a derive answers "unchanged" and skips work.
 - `try` / `finally` → a `Drop` guard. Cleanup at the end of the block is skipped on panic.
-- `mixin class` with state (`ChangeNotifier`) → a `ChangeNotifierState` field named after the mixin, plus `impl ChangeNotifier for Host`. `mixin` that is never instantiated → a trait.
 - `_foo` → private `foo`. `toString` / `debugFillProperties` → `Debug`.
 
 ## PORTING.md

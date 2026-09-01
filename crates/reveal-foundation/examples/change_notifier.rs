@@ -8,28 +8,32 @@
 //! `listenable_builder.2.dart`.
 
 use reveal_foundation::{
-    App, ChangeNotifier, ChangeNotifierState, Handle, Listenable, Listener, ValueListenable,
+    App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, Listener, ValueListenable,
     ValueNotifier,
 };
 
 /// Dart: `class Counter with ChangeNotifier`.
 struct Counter {
-    notifier: ChangeNotifierState,
+    change_notifier: ChangeNotifierData,
     count: i32,
 }
 
 impl Counter {
     fn new() -> Counter {
         Counter {
-            notifier: ChangeNotifierState::new(),
+            change_notifier: ChangeNotifierData::new(),
             count: 0,
         }
     }
 }
 
 impl ChangeNotifier for Counter {
-    fn notifier_state(&mut self) -> &mut ChangeNotifierState {
-        &mut self.notifier
+    fn change_notifier_data(&self) -> &ChangeNotifierData {
+        &self.change_notifier
+    }
+
+    fn change_notifier_data_mut(&mut self) -> &mut ChangeNotifierData {
+        &mut self.change_notifier
     }
 }
 
@@ -76,20 +80,16 @@ fn mixin_counter() {
     let on_print = Listener::new(move |app| {
         println!("  print       = {}", app.get(counter).count);
     });
-    app.get_mut(counter).notifier.add_listener(on_print.clone());
+    counter.add_listener(&mut app, on_print.clone());
 
     // Method tear-off: rebuild at the removal site with the same handle and function.
-    app.get_mut(counter)
-        .notifier
-        .add_listener(Listener::handle_method(label, rebuild));
+    counter.add_listener(&mut app, Listener::handle_method(label, rebuild));
 
     counter.increment(&mut app);
     counter.increment(&mut app);
 
-    app.get_mut(counter).notifier.remove_listener(&on_print);
-    app.get_mut(counter)
-        .notifier
-        .remove_listener(&Listener::handle_method(label, rebuild));
+    counter.remove_listener(&mut app, &on_print);
+    counter.remove_listener(&mut app, &Listener::handle_method(label, rebuild));
 
     println!("  (listeners removed)");
     counter.increment(&mut app);
@@ -102,9 +102,9 @@ fn value_notifier() {
     let count = app.create(ValueNotifier::new(0i32));
 
     let on_print = Listener::new(move |app| {
-        println!("  value       = {}", *app.get(count).value());
+        println!("  value       = {}", *count.value(app));
     });
-    app.get_mut(count).add_listener(on_print);
+    count.add_listener(&mut app, on_print);
 
     count.set_value(&mut app, 1);
     count.set_value(&mut app, 1); // equal: no notify

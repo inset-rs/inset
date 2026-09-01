@@ -28,11 +28,13 @@ Run affected tests during ordinary work. Full workspace tests and clippy for a f
 
 Current loose target: cupertino widgets, first `CupertinoButton` that presses and fades, sitting on that stack — not a shortcut past it.
 
+Accessibility is deferred. Do not stub `SemanticsBinding`, reduced-motion behavior, or host accessibility features; skip when a port reaches them.
+
 ## Ownership
 
 One `App`. Every framework callback gets `&mut App` plus a typed handle to itself.
 
-- **`Handle<T>`** — Copy generational id, point access (`app.get` / `app.get_mut`). Exclusivity lasts one field access, never a whole pass. Flutter objects live here: elements, render objects, `AnimationController`, `ScrollController`, `FocusNode`, and the rest. `ChangeNotifier` is mixed in as a `ChangeNotifierState` field (mixin-as-field).
+- **`Handle<T>`** — Copy generational id, point access (`app.get` / `app.get_mut`). Exclusivity lasts one field access, never a whole pass. Flutter objects live here: elements, render objects, `AnimationController`, `ScrollController`, `FocusNode`, and the rest. `ChangeNotifier` is mixed in as a `ChangeNotifierData` field (mixin-as-field).
 - **`Entity<T>`** — reserved for app-level stores the *user* writes, gpui-shaped. Not used to implement Flutter. Not built; how it is accessed is undecided.
 
 Do not lease a Handle out of the arena for a pass. shaft-rs-next did that; layout then could not re-enter the node it was laying out.

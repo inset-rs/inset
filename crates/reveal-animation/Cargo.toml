@@ -1,0 +1,15 @@
+[package]
+name = "reveal-animation"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+reveal-foundation.workspace = true
+reveal-geometry.workspace = true
+reveal-physics.workspace = true
+reveal-scheduler.workspace = true
+
+[lints]
+workspace = true

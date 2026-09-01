@@ -946,6 +946,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reveal-animation"
+version = "0.1.0"
+dependencies = [
+ "reveal-foundation",
+ "reveal-geometry",
+ "reveal-physics",
+ "reveal-scheduler",
+]
+
+[[package]]
 name = "reveal-embedder"
 version = "0.1.0"
 
