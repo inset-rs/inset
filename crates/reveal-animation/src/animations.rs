@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use reveal_foundation::{App, Handle, Listener};
+use reveal_foundation::{App, Handle, Listenable, Listener};
 
 use crate::animation::{Animation, AnimationNode, AnimationStatus, AnimationStatusListener};
 use crate::curves::Curve;
@@ -11,6 +11,7 @@ use crate::listener_helpers::{
     AnimationLocalListenersData, AnimationLocalListenersMixin,
     AnimationLocalStatusListenersData, AnimationLocalStatusListenersMixin,
 };
+use crate::tween::Animatable;
 
 /// Dart's `_AlwaysCompleteAnimation`. Private like the original; reach it
 /// through [`k_always_complete_animation`].
@@ -270,6 +271,18 @@ impl ProxyAnimation {
         Animation::from_handle(self.0)
     }
 
+    /// Chains a `Tween` (or any [`Animatable`]) to this proxy.
+    ///
+    /// Dart inherits `drive` from `Animation<double>`. The newtype is not a
+    /// subtype, so the method is inherent and forwards to [`as_animation`].
+    pub fn drive<U: 'static>(
+        self,
+        app: &mut App,
+        child: impl Animatable<U> + Clone + 'static,
+    ) -> Animation<U> {
+        self.as_animation().drive(app, child)
+    }
+
     /// The animation whose value this animation will proxy.
     pub fn parent(self, app: &App) -> Option<Animation<f64>> {
         app.get(self.0).parent
@@ -401,6 +414,16 @@ fn proxy_notify_status_listeners(
     status: AnimationStatus,
 ) {
     AnimationLocalStatusListenersMixin::notify_status_listeners(ProxyAnimation(this), app, status);
+}
+
+impl Listenable for ProxyAnimation {
+    fn add_listener(&self, app: &mut App, listener: Listener) {
+        self.as_animation().add_listener(app, listener);
+    }
+
+    fn remove_listener(&self, app: &mut App, listener: &Listener) {
+        self.as_animation().remove_listener(app, listener);
+    }
 }
 
 // Dart: `class ProxyAnimation extends Animation<double> with

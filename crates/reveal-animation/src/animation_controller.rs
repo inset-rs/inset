@@ -4,7 +4,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use reveal_foundation::{App, Handle, Listener};
+use reveal_foundation::{App, Handle, Listenable, Listener};
 use reveal_geometry::{clamp_double, lerp_double};
 use reveal_physics::{Simulation, SpringDescription, SpringSimulation, SpringType, Tolerance};
 use reveal_scheduler::{FrameCallback, Ticker, TickerFuture, TickerProvider};
@@ -15,6 +15,7 @@ use crate::listener_helpers::{
     AnimationEagerListenerMixin, AnimationLocalListenersData, AnimationLocalListenersMixin,
     AnimationLocalStatusListenersData, AnimationLocalStatusListenersMixin,
 };
+use crate::tween::Animatable;
 
 /// Dart's private `_AnimationDirection`: the direction in which an animation
 /// is running.
@@ -341,11 +342,7 @@ impl AnimationController {
         }
     }
 
-    fn start_simulation(
-        self,
-        app: &mut App,
-        simulation: Rc<dyn Simulation>,
-    ) -> TickerFuture {
+    fn start_simulation(self, app: &mut App, simulation: Rc<dyn Simulation>) -> TickerFuture {
         debug_assert!(!self.is_animating(app));
         let x = simulation.x(0.0);
         // The repeating simulation's direction setter fires during `x(0.0)`;
@@ -683,6 +680,18 @@ impl AnimationController {
         Animation::from_handle(self.0)
     }
 
+    /// Chains a `Tween` (or any [`Animatable`]) to this controller.
+    ///
+    /// Dart inherits `drive` from `Animation<double>`. The newtype is not a
+    /// subtype, so the method is inherent and forwards to [`view`].
+    pub fn drive<U: 'static>(
+        self,
+        app: &mut App,
+        child: impl Animatable<U> + Clone + 'static,
+    ) -> Animation<U> {
+        self.view().drive(app, child)
+    }
+
     /// Recreates the [`Ticker`] with the new `TickerProvider`.
     pub fn resync(self, app: &mut App, vsync: impl TickerProvider) {
         let old_ticker = app.get(self.0).ticker.expect("resync after dispose");
@@ -942,11 +951,7 @@ impl AnimationController {
     }
 
     /// Like [`animate_with`], but the status is reported as [`AnimationStatus::Reverse`].
-    pub fn animate_back_with(
-        self,
-        app: &mut App,
-        simulation: Box<dyn Simulation>,
-    ) -> TickerFuture {
+    pub fn animate_back_with(self, app: &mut App, simulation: Box<dyn Simulation>) -> TickerFuture {
         debug_assert!(
             app.get(self.0).ticker.is_some(),
             "AnimationController::animate_back_with() called after AnimationController::dispose()."
@@ -981,6 +986,16 @@ impl AnimationController {
         self.clear_status_listeners(app);
         self.clear_listeners(app);
         AnimationEagerListenerMixin::dispose(self, app);
+    }
+}
+
+impl Listenable for AnimationController {
+    fn add_listener(&self, app: &mut App, listener: Listener) {
+        self.view().add_listener(app, listener);
+    }
+
+    fn remove_listener(&self, app: &mut App, listener: &Listener) {
+        self.view().remove_listener(app, listener);
     }
 }
 
