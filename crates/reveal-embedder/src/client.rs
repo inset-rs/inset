@@ -3,7 +3,7 @@
 //! Dart's hooks are isolate-global functions the engine calls. Here they are
 //! methods on the embedder client so a host crate need not name `App`.
 
-use crate::{Frame, ViewId};
+use crate::{Frame, PointerDataPacket, ViewId};
 
 /// Complete frames and typed view lifecycle notifications.
 ///
@@ -14,4 +14,7 @@ pub trait EmbedderClient {
     fn view_added(&mut self, id: ViewId);
     fn view_metrics_changed(&mut self, id: ViewId);
     fn view_removed(&mut self, id: ViewId);
+
+    /// Flutter `PlatformDispatcher.onPointerDataPacket`.
+    fn pointer_data_packet(&mut self, packet: PointerDataPacket);
 }

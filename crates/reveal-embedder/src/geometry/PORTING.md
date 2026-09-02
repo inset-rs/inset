@@ -43,4 +43,3 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `Size.copy`. Trigger: `box.dart`'s `_DebugSize` hack.
 - `hashCode` / [`Hash`]. Trigger: the first map or set keyed by `Offset`, `Size`, `Rect`, `Radius`, or `Color`.
 - Subclassing `Color` / overriding `value`. Trigger: `CupertinoDynamicColor`.
-- `_lerpInt`. Trigger: `FontWeight.lerp`.

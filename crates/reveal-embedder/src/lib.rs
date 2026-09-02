@@ -10,10 +10,18 @@ mod client;
 mod geometry;
 mod painting;
 mod platform;
+mod pointer;
+mod text;
 mod views;
 
 pub use client::EmbedderClient;
 pub use geometry::*;
 pub use painting::*;
-pub use platform::{Frame, InertPlatform, Platform, PlatformRef, TargetPlatform, ViewRef};
-pub use views::{View, ViewConstraints, ViewId, ViewMetrics, ViewPadding};
+pub use platform::{
+    Brightness, Frame, InertPlatform, Platform, PlatformRef, TargetPlatform, ViewRef,
+};
+pub use pointer::{
+    PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
+};
+pub use text::*;
+pub use views::{GestureSettings, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding};

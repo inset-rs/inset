@@ -1,6 +1,10 @@
 # reveal-embedder/src
 No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` / `hooks.dart` / `FlutterView`.
 
+## Identical
+
+- text.rs → text.dart (`FontStyle`, `FontWeight`, `TextAlign`, `TextBaseline`, `TextDecoration`, `TextDecorationStyle`, `TextLeadingDistribution`, `TextHeightBehavior`, `TextDirection`, `kTextHeightNone`)
+
 ## platform.rs → dart:ui `platform_dispatcher.dart`
 
 - Change: Dart's isolate-global `PlatformDispatcher` is a host-supplied `Platform` that `App` holds. Frame, clock, and view lookup are requests on that object — not a callback table the framework assigns into.
@@ -10,6 +14,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - Change: [`TargetPlatform`](TargetPlatform) is a value type here; [`Platform::target_platform`](Platform::target_platform) reports the current one. There is no `defaultTargetPlatform` library global and no `debugDefaultTargetPlatformOverride`. `InertPlatform` answers Android, matching Flutter's test binding.
   Reason: platform — there is no isolate-global `dart:io`; the host-supplied `Platform` is the source of truth, so two Apps can differ.
   Affect: write `app.platform().target_platform()` where Dart writes `defaultTargetPlatform`. Tests that need iOS (etc.) install a `Platform` that returns that value.
+
+- Change: [`Brightness`](Brightness) is a value type here; [`Platform::platform_brightness`](Platform::platform_brightness) reports the current one. There is no `PlatformDispatcher.platformBrightness` library global. The trait default is light, matching Flutter's view configuration. `InertPlatform` uses that default.
+  Reason: platform — there is no isolate-global dispatcher; the host-supplied `Platform` is the source of truth.
+  Affect: write `app.platform().platform_brightness()` where Dart writes `PlatformDispatcher.instance.platformBrightness`.
 
 ## views.rs → dart:ui `FlutterView` / `ViewPadding` / `ViewConstraints`
 
@@ -27,10 +35,24 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — there is no isolate-global hooks table; the host drives a client without naming `App`.
   Affect: the host delivers frames and view events; it does not run scheduler phases itself.
 
+- Change: `PlatformDispatcher.onPointerDataPacket` is [`EmbedderClient::pointer_data_packet`](EmbedderClient::pointer_data_packet).
+  Reason: platform — same as the other hooks: the host calls the client instead of assigning into an isolate-global callback field.
+  Affect: the host delivers a [`PointerDataPacket`](PointerDataPacket); it does not convert to `PointerEvent`.
+
+## pointer.rs → dart:ui `pointer.dart`
+
+- Change: [`PointerData::view_id`](PointerData::view_id) is [`ViewId`](ViewId), not a bare `int`.
+  Reason: platform — views are already `ViewId` on this host surface.
+  Affect: fill `view_id: view.id()`, not a raw integer.
+
+- Change: `PointerData.respond` / `onRespond` are omitted.
+  Reason: platform — they exist to call `preventDefault` on the web DOM event that produced the sample.
+  Affect: there is no `pointer_data.respond(...)`.
+
 ## Deferred
 
-- `onPointerDataPacket`. Trigger: gestures.
 - `onMetricsChanged` / `onPlatformBrightnessChanged`. Trigger: `MediaQuery` / `CupertinoTheme`.
+- `ui.TextStyle` (the native-encoded class), `FontFeature`, `FontVariation`, `ParagraphStyle` encode. Trigger: painting `TextStyle` / valo `ParagraphBuilder`.
 - `font_source`. Trigger: text.
 - `debugDefaultTargetPlatformOverride`. Trigger: a debug switcher that must override a live host without swapping `Platform`.
 - Semantics callbacks. Trigger: semantics.

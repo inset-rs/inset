@@ -5,11 +5,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use reveal_embedder::{
-    EmbedderClient, Frame, Picture, Platform, PlatformRef, TargetPlatform, View, ViewConstraints,
+    Brightness, EmbedderClient, Frame, Picture, Platform, PlatformRef, PointerChange, PointerData,
+    PointerDataPacket, PointerDeviceKind, PointerSignalKind, TargetPlatform, View, ViewConstraints,
     ViewId, ViewMetrics, ViewPadding, ViewRef,
 };
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
 
@@ -29,6 +30,7 @@ struct WinitPlatform {
     implicit_view: Option<ViewId>,
     proxy: EventLoopProxy<()>,
     origin: Instant,
+    brightness: Cell<Brightness>,
 }
 
 impl WinitPlatform {
@@ -40,6 +42,7 @@ impl WinitPlatform {
             implicit_view,
             proxy,
             origin: Instant::now(),
+            brightness: Cell::new(Brightness::Light),
         }
     }
 
@@ -85,6 +88,10 @@ impl Platform for WinitPlatform {
         } else {
             TargetPlatform::Linux
         }
+    }
+
+    fn platform_brightness(&self) -> Brightness {
+        self.brightness.get()
     }
 
     fn request_frame(&self) {
@@ -161,6 +168,11 @@ struct WinitApp<C> {
     views: HashMap<WindowId, HostedView>,
     frame_source: Option<WindowId>,
     started: bool,
+    cursor: [f64; 2],
+    last_cursor: [f64; 2],
+    mouse_down: bool,
+    pointer_id: i64,
+    embedder_id: i64,
 }
 
 pub(crate) fn run<C: EmbedderClient + 'static>(
@@ -178,6 +190,11 @@ pub(crate) fn run<C: EmbedderClient + 'static>(
         views: HashMap::new(),
         frame_source: None,
         started: false,
+        cursor: [0.0, 0.0],
+        last_cursor: [0.0, 0.0],
+        mouse_down: false,
+        pointer_id: 0,
+        embedder_id: 0,
     };
     event_loop.run_app(&mut host).expect("run winit event loop");
 }
@@ -193,6 +210,32 @@ fn window_metrics(window: &Window) -> ViewMetrics {
         padding: ViewPadding::ZERO,
         view_padding: ViewPadding::ZERO,
         view_insets: ViewPadding::ZERO,
+    }
+}
+
+fn brightness_of(theme: winit::window::Theme) -> Brightness {
+    match theme {
+        winit::window::Theme::Light => Brightness::Light,
+        winit::window::Theme::Dark => Brightness::Dark,
+    }
+}
+
+/// Flutter `kPrimaryButton` / `kPrimaryMouseButton` (`gestures/events.dart`).
+const PRIMARY_MOUSE_BUTTON: i64 = 0x01;
+
+/// Line-based wheels are not pixels. 40 logical px/line is Chromium's
+/// convention (shaft-rs-next); convert to physical by the view scale so
+/// [`PointerData::scroll_delta_x`] / [`PointerData::scroll_delta_y`] stay
+/// physical, matching dart:ui. winit's up-positive deltas are sign-flipped
+/// to Flutter's content-forward sign.
+fn wheel_to_physical(delta: MouseScrollDelta, scale: f64) -> [f64; 2] {
+    const LOGICAL_PIXELS_PER_LINE: f64 = 40.0;
+    match delta {
+        MouseScrollDelta::LineDelta(dx, dy) => [
+            -f64::from(dx) * LOGICAL_PIXELS_PER_LINE * scale,
+            -f64::from(dy) * LOGICAL_PIXELS_PER_LINE * scale,
+        ],
+        MouseScrollDelta::PixelDelta(physical) => [-physical.x, -physical.y],
     }
 }
 
@@ -239,6 +282,9 @@ impl<C: EmbedderClient> WinitApp<C> {
             metrics: Cell::new(window_metrics(&window)),
             surface: Arc::new(Mutex::new(WinitSurface { surface, context })),
         });
+        if let Some(theme) = window.theme() {
+            self.platform.brightness.set(brightness_of(theme));
+        }
         self.platform.add_view(view.clone());
         self.views.insert(window_id, HostedView { window, view });
         self.frame_source = Some(window_id);
@@ -256,6 +302,86 @@ impl<C: EmbedderClient> WinitApp<C> {
         if self.frame_source == Some(window_id) {
             self.frame_source = self.views.keys().next().copied();
         }
+    }
+
+    fn send_pointer(&mut self, window_id: WindowId, change: PointerChange) {
+        let Some(packet) = self.pointer_packet(window_id, change, None) else {
+            return;
+        };
+        if let Some(client) = &mut self.client {
+            client.pointer_data_packet(packet);
+        }
+    }
+
+    fn send_scroll(&mut self, window_id: WindowId, delta: MouseScrollDelta) {
+        let scale = self
+            .views
+            .get(&window_id)
+            .map(|hosted| hosted.view.metrics().device_pixel_ratio)
+            .unwrap_or(1.0);
+        let [scroll_delta_x, scroll_delta_y] = wheel_to_physical(delta, scale);
+        let Some(packet) = self.pointer_packet(
+            window_id,
+            PointerChange::Hover,
+            Some((scroll_delta_x, scroll_delta_y)),
+        ) else {
+            return;
+        };
+        if let Some(client) = &mut self.client {
+            client.pointer_data_packet(packet);
+        }
+    }
+
+    fn pointer_packet(
+        &mut self,
+        window_id: WindowId,
+        change: PointerChange,
+        scroll: Option<(f64, f64)>,
+    ) -> Option<PointerDataPacket> {
+        let hosted = self.views.get(&window_id)?;
+        let view_id = hosted.view.id();
+        if change == PointerChange::Down {
+            self.pointer_id += 1;
+        }
+        self.embedder_id += 1;
+        let [x, y] = self.cursor;
+        let [last_x, last_y] = self.last_cursor;
+        let buttons = if self.mouse_down {
+            PRIMARY_MOUSE_BUTTON
+        } else {
+            0
+        };
+        let pointer_identifier = if change == PointerChange::Hover && buttons == 0 {
+            0
+        } else {
+            self.pointer_id
+        };
+        let (signal_kind, scroll_delta_x, scroll_delta_y) = match scroll {
+            Some((dx, dy)) => (Some(PointerSignalKind::Scroll), dx, dy),
+            None => (None, 0.0, 0.0),
+        };
+        let data = PointerData {
+            view_id,
+            embedder_id: self.embedder_id,
+            time_stamp: self.platform.elapsed(),
+            change,
+            kind: PointerDeviceKind::Mouse,
+            signal_kind,
+            pointer_identifier,
+            physical_x: x,
+            physical_y: y,
+            physical_delta_x: x - last_x,
+            physical_delta_y: y - last_y,
+            buttons,
+            pressure: 1.0,
+            pressure_min: 1.0,
+            pressure_max: 1.0,
+            scroll_delta_x,
+            scroll_delta_y,
+            ..PointerData::default()
+        };
+        self.last_cursor = self.cursor;
+        Some(PointerDataPacket::new(vec![data]))
     }
 }
 
@@ -332,7 +458,70 @@ impl<C: EmbedderClient> ApplicationHandler for WinitApp<C> {
                 }
                 self.flush_frame_request();
             }
+            WindowEvent::ThemeChanged(theme) => {
+                self.platform.brightness.set(brightness_of(theme));
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor = [position.x, position.y];
+                self.send_pointer(
+                    id,
+                    if self.mouse_down {
+                        PointerChange::Move
+                    } else {
+                        PointerChange::Hover
+                    },
+                );
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                self.send_scroll(id, delta);
+            }
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } => {
+                self.mouse_down = state == ElementState::Pressed;
+                self.send_pointer(
+                    id,
+                    if self.mouse_down {
+                        PointerChange::Down
+                    } else {
+                        PointerChange::Up
+                    },
+                );
+            }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use winit::dpi::PhysicalPosition;
+    use winit::event::MouseScrollDelta;
+
+    use super::wheel_to_physical;
+
+    #[test]
+    fn line_deltas_scale_to_physical_pixels_with_flutter_sign() {
+        assert_eq!(
+            wheel_to_physical(MouseScrollDelta::LineDelta(0.0, 1.0), 2.0),
+            [0.0, -80.0]
+        );
+        assert_eq!(
+            wheel_to_physical(MouseScrollDelta::LineDelta(0.0, -3.0), 1.0),
+            [0.0, 120.0]
+        );
+    }
+
+    #[test]
+    fn pixel_deltas_keep_physical_pixels_and_flip_sign() {
+        assert_eq!(
+            wheel_to_physical(
+                MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, -100.0)),
+                2.0
+            ),
+            [0.0, 100.0]
+        );
     }
 }

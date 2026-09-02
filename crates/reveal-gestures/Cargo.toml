@@ -1,0 +1,13 @@
+[package]
+name = "reveal-gestures"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+reveal-embedder.workspace = true
+reveal-foundation.workspace = true
+
+[lints]
+workspace = true

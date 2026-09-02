@@ -58,6 +58,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## Deferred
 
+- `Shell::pointer_data_packet` dispatch. Trigger: `GestureBinding`.
 - `scheduleTask` and the priority task queue. Trigger: a `Timer` counterpart — `_ensureEventLoopCallback` needs `Timer.run`.
 - `_handleBeginFrame` / `_handleDrawFrame` warm-up-frame guards. Trigger: `scheduleWarmUpFrame`.
 - `endOfFrame`. Trigger: `RendererBinding.performReassemble` (`rendering/binding.dart`); it hands out a bare `Future`.

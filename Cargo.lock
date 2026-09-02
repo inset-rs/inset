@@ -1548,6 +1548,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "reveal-gestures"
+version = "0.1.0"
+dependencies = [
+ "reveal-embedder",
+ "reveal-foundation",
+]
+
+[[package]]
 name = "reveal-painting"
 version = "0.1.0"
 dependencies = [

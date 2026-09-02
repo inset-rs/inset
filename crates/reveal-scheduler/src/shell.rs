@@ -5,7 +5,7 @@
 //! because it translates a host frame into scheduler phases; foundation
 //! cannot name this crate.
 
-use reveal_embedder::{EmbedderClient, Frame, PlatformRef, ViewId};
+use reveal_embedder::{EmbedderClient, Frame, PlatformRef, PointerDataPacket, ViewId};
 use reveal_foundation::App;
 
 use crate::SchedulerBinding;
@@ -44,6 +44,8 @@ impl EmbedderClient for Shell {
     fn view_metrics_changed(&mut self, _id: ViewId) {}
 
     fn view_removed(&mut self, _id: ViewId) {}
+
+    fn pointer_data_packet(&mut self, _packet: PointerDataPacket) {}
 }
 
 #[cfg(test)]

@@ -16,6 +16,7 @@ reveal-animation = { path = "crates/reveal-animation" }
 reveal-embedder = { path = "crates/reveal-embedder" }
 reveal-embedder-winit = { path = "crates/reveal-embedder-winit" }
 reveal-foundation = { path = "crates/reveal-foundation" }
+reveal-gestures = { path = "crates/reveal-gestures" }
 reveal-painting = { path = "crates/reveal-painting" }
 reveal-physics = { path = "crates/reveal-physics" }
 reveal-scheduler = { path = "crates/reveal-scheduler" }

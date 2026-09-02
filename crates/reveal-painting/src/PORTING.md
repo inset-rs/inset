@@ -10,12 +10,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - beveled_rectangle_border.rs → beveled_rectangle_border.dart
 - continuous_rectangle_border.rs → continuous_rectangle_border.dart
 - paint_utilities.rs → paint_utilities.dart (`paintZigZag`)
-
-## basic_types.rs → basic_types.dart
-
-- Change: `TextDirection` (`dart:ui`) is defined in this module until dart:ui value types move into `reveal-embedder`.
-  Reason: painting is where Flutter code imports it from (`basic_types.dart` re-exports it).
-  Affect: import `TextDirection` from `reveal-painting`, not `reveal-embedder`.
+- basic_types.rs dart:ui re-exports (`TextDirection`, `FontWeight`, `FontStyle`, `TextAlign`, `TextBaseline`, `TextDecoration`, `TextDecorationStyle`, `TextLeadingDistribution`, `TextHeightBehavior`)
 
 ## alignment.rs → alignment.dart
 

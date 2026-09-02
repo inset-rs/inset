@@ -36,6 +36,13 @@ pub(crate) fn lerp_double_non_null(a: f64, b: f64, t: f64) -> f64 {
     a * (1.0 - t) + b * t
 }
 
+/// Linearly interpolate between two integers.
+///
+/// Same as [`lerp_double`] but specialized for non-null `int`.
+pub fn lerp_int(a: i32, b: i32, t: f64) -> f64 {
+    f64::from(a) + f64::from(b - a) * t
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,5 +69,11 @@ mod tests {
     #[test]
     fn two_nans_return_the_first_where_equality_would_say_they_differ() {
         assert!(lerp_double(Some(f64::NAN), Some(f64::NAN), 0.25).is_some_and(f64::is_nan));
+    }
+
+    #[test]
+    fn lerp_int_walks_the_line() {
+        assert_eq!(lerp_int(100, 900, 0.5), 500.0);
+        assert_eq!(lerp_int(400, 400, 0.25), 400.0);
     }
 }

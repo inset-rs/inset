@@ -12,6 +12,24 @@ use crate::{View, ViewId};
 pub type PlatformRef = Rc<dyn Platform>;
 pub type ViewRef = Rc<dyn View>;
 
+/// Describes the contrast of a theme or color palette.
+///
+/// Flutter counterpart: `Brightness` (`dart:ui` `window.dart`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Brightness {
+    /// The color is dark and will require a light text color to achieve readable
+    /// contrast.
+    ///
+    /// For example, the color might be dark grey, requiring white text.
+    Dark,
+
+    /// The color is light and will require a dark text color to achieve readable
+    /// contrast.
+    ///
+    /// For example, the color might be bright white, requiring black text.
+    Light,
+}
+
 /// The platform that user interaction should adapt to target.
 ///
 /// Flutter counterpart: `TargetPlatform` (`foundation/platform.dart`). Flutter
@@ -45,6 +63,15 @@ pub trait Platform: 'static {
     /// Required rather than defaulted: an embedder must say what it is, and a
     /// default would let one silently claim the wrong conventions.
     fn target_platform(&self) -> TargetPlatform;
+
+    /// The platform's light/dark preference (Flutter
+    /// `PlatformDispatcher.platformBrightness`).
+    ///
+    /// Defaults to [`Brightness::Light`], matching Flutter's view configuration
+    /// default. A live host that can see the OS theme overrides this.
+    fn platform_brightness(&self) -> Brightness {
+        Brightness::Light
+    }
 
     /// Requests one isolate frame at the host's next appropriate opportunity.
     fn request_frame(&self);
@@ -105,10 +132,15 @@ pub struct Frame {
 
 #[cfg(test)]
 mod tests {
-    use super::{InertPlatform, Platform, TargetPlatform};
+    use super::{Brightness, InertPlatform, Platform, TargetPlatform};
 
     #[test]
     fn inert_platform_is_android() {
         assert_eq!(InertPlatform.target_platform(), TargetPlatform::Android);
+    }
+
+    #[test]
+    fn inert_platform_brightness_is_light() {
+        assert_eq!(InertPlatform.platform_brightness(), Brightness::Light);
     }
 }

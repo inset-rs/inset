@@ -24,6 +24,22 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the host `Platform` trait lives in the embedder crate, and that crate cannot depend on foundation.
   Affect: `app.platform().target_platform()` where Dart writes `defaultTargetPlatform`. The enum is `reveal_foundation::TargetPlatform` or `reveal_embedder::TargetPlatform`.
 
+## key.rs → key.dart
+
+- Change: Dart's `Key('x')` factory is `<dyn Key>::new("x")`.
+  Reason: language — a trait has no constructor; an inherent on `dyn Key` is the factory without colliding with [`UniqueKey::new`](UniqueKey::new).
+  Affect: write `<dyn Key>::new("x")` where Dart writes `Key('x')`. `ValueKey::new(3)` is unchanged.
+
+- Change: [`Key`](Key) equality and hashing go through [`eq_key`](Key::eq_key) / [`hash_key`](Key::hash_key) so `dyn Key` can implement [`PartialEq`] and [`Hash`]. [`UniqueKey`](UniqueKey) identity is a monotonic id, not object identity.
+  Reason: language — `PartialEq` and `Hash` are not object-safe; Rust has no implicit object identity for a value type.
+  Affect: store `Box<dyn Key>` / `Arc<dyn Key>`. Two [`UniqueKey::new`](UniqueKey::new) calls are never equal. Copying a `UniqueKey` keeps the same id.
+
+## basic_types.rs → basic_types.dart
+
+- Change: [`ValueChanged`](ValueChanged) / [`ValueSetter`](ValueSetter) / [`ValueGetter`](ValueGetter) receive [`App`](App), as [`Listener`](Listener) does for `VoidCallback`.
+  Reason: language — a Rust closure cannot capture what it mutates.
+  Affect: `Rc::new(|app, value| …)` where Dart writes a `ValueChanged<T>` tear-off, not `void Function(T)`.
+
 ## constants.rs → constants.dart
 
 - Change: `kProfileMode` is the constant `false`.
@@ -62,3 +78,5 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - The form a `Listenable` takes when held as a value (stored, re-pointed, compared). Trigger: `AnimatedBuilder` / `ValueListenableBuilder`.
 - `ChangeNotifier.maybeDispatchObjectCreation` / `memory_allocations`. Trigger: leak tracker / devtools.
 - Diagnostics / `FlutterError` structured trees. Trigger: porting diagnostics; until then messages are `debug_assert!` strings.
+- `GlobalKey` / `ObjectKey`. Trigger: `widgets/framework.dart`.
+- `AsyncCallback` / `AsyncValueSetter` / `AsyncValueGetter` / `IterableFilter`. Trigger: the first async or iterable-filter call site.

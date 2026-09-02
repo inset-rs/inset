@@ -94,6 +94,42 @@ impl Default for ViewMetrics {
     }
 }
 
+/// A `null` field indicates that the platform or view does not have a preference
+/// and the fallback constants should be used instead.
+///
+/// Flutter counterpart: `GestureSettings` (`dart:ui` `window.dart`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GestureSettings {
+    /// The number of physical pixels a pointer is allowed to drift before it is
+    /// considered an intentional movement.
+    ///
+    /// If `None`, the framework's default touch slop configuration should be used
+    /// instead.
+    pub physical_touch_slop: Option<f64>,
+
+    /// The number of physical pixels that the first and second tap of a double tap
+    /// can drift apart to still be recognized as a double tap.
+    ///
+    /// If `None`, the framework's default double tap slop configuration should be used
+    /// instead.
+    pub physical_double_tap_slop: Option<f64>,
+}
+
+impl GestureSettings {
+    /// Create a new [`GestureSettings`] object from an existing value, overwriting
+    /// all of the provided fields.
+    pub fn copy_with(
+        self,
+        physical_touch_slop: Option<f64>,
+        physical_double_tap_slop: Option<f64>,
+    ) -> GestureSettings {
+        GestureSettings {
+            physical_touch_slop: physical_touch_slop.or(self.physical_touch_slop),
+            physical_double_tap_slop: physical_double_tap_slop.or(self.physical_double_tap_slop),
+        }
+    }
+}
+
 /// A stable handle to one host-provided view.
 ///
 /// [`present`](View::present) is Flutter `FlutterView.render`. The host owns
@@ -101,6 +137,11 @@ impl Default for ViewMetrics {
 pub trait View: 'static {
     fn id(&self) -> ViewId;
     fn metrics(&self) -> ViewMetrics;
+
+    /// Flutter `FlutterView.gestureSettings`.
+    fn gesture_settings(&self) -> GestureSettings {
+        GestureSettings::default()
+    }
 
     /// Renders and presents one picture. Physical pixels; the presenter
     /// applies no extra scaling.
