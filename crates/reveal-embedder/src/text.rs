@@ -1,10 +1,10 @@
 //! Flutter counterpart: `engine/src/flutter/lib/ui/text.dart` value types
 //! used by painting (`FontWeight`, `TextDecoration`, `TextDirection`, …).
-//! The native-encoded `ui.TextStyle` / `ParagraphStyle` stay with valo.
+//! `ui.TextStyle` / `ParagraphStyle` are valo types; there is no engine encode.
 
 use std::fmt::{self, Debug, Display};
 
-use crate::lerp_int;
+use crate::{clamp_double, lerp_double, lerp_int};
 
 /// A [`TextStyle.height`](https://api.flutter.dev/flutter/dart-ui/TextStyle/height.html)
 /// value that indicates the text span should take the height defined by the
@@ -461,6 +461,152 @@ pub enum TextDirection {
     Ltr,
 }
 
+/// A feature tag and value that affect the selection of glyphs in a font.
+///
+/// Named constructors for individual OpenType tags (`alternative`, `fractions`,
+/// …) are deferred until a caller needs them. [`new`](FontFeature::new),
+/// [`enable`](FontFeature::enable), and [`disable`](FontFeature::disable) are
+/// the constructors Flutter's painting `TextStyle` uses.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FontFeature {
+    /// The tag that identifies the effect of this feature. Must consist of 4
+    /// ASCII characters.
+    pub feature: String,
+    /// The value assigned to this feature.
+    ///
+    /// Must be a positive integer. Many features are Boolean values using 1
+    /// (on) and 0 (off).
+    pub value: i32,
+}
+
+impl FontFeature {
+    /// Creates a [`FontFeature`] object, which can be added to a text style to
+    /// change how the engine selects glyphs when rendering text.
+    pub fn new(feature: impl Into<String>, value: i32) -> FontFeature {
+        let feature = feature.into();
+        debug_assert!(
+            feature.len() == 4,
+            "Feature tag must be exactly four characters long."
+        );
+        debug_assert!(
+            value >= 0,
+            "Feature value must be zero or a positive integer."
+        );
+        FontFeature { feature, value }
+    }
+
+    /// Create a [`FontFeature`] object that enables the feature with the given
+    /// tag.
+    pub fn enable(feature: impl Into<String>) -> FontFeature {
+        FontFeature::new(feature, 1)
+    }
+
+    /// Create a [`FontFeature`] object that disables the feature with the given
+    /// tag.
+    pub fn disable(feature: impl Into<String>) -> FontFeature {
+        FontFeature::new(feature, 0)
+    }
+}
+
+impl Display for FontFeature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "FontFeature('{}', {})", self.feature, self.value)
+    }
+}
+
+/// An axis tag and value that can be used to customize variable fonts.
+///
+/// Named constructors besides [`italic`](FontVariation::italic),
+/// [`optical_size`](FontVariation::optical_size), [`slant`](FontVariation::slant),
+/// [`width`](FontVariation::width), and [`weight`](FontVariation::weight) are
+/// not added until a caller needs them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FontVariation {
+    /// The tag that identifies the design axis.
+    ///
+    /// An axis tag must consist of 4 ASCII characters.
+    pub axis: String,
+    /// The value assigned to this design axis.
+    pub value: f64,
+}
+
+impl FontVariation {
+    /// Creates a [`FontVariation`] object, which can be added to a text style to
+    /// change the variable attributes of a font.
+    pub fn new(axis: impl Into<String>, value: f64) -> FontVariation {
+        let axis = axis.into();
+        debug_assert!(
+            axis.len() == 4,
+            "Axis tag must be exactly four characters long."
+        );
+        debug_assert!(
+            (-32768.0..32768.0).contains(&value),
+            "Value must be representable as a signed 16.16 fixed-point number, i.e. it must be in this range: -32768.0 ≤ value < 32768.0"
+        );
+        FontVariation { axis, value }
+    }
+
+    /// Variable font style. (`ital`)
+    pub fn italic(value: f64) -> FontVariation {
+        debug_assert!((0.0..=1.0).contains(&value));
+        FontVariation::new("ital", value)
+    }
+
+    /// Optical size optimization. (`opsz`)
+    pub fn optical_size(value: f64) -> FontVariation {
+        debug_assert!(value > 0.0);
+        FontVariation::new("opsz", value)
+    }
+
+    /// Variable font slant. (`slnt`)
+    pub fn slant(value: f64) -> FontVariation {
+        debug_assert!(value > -90.0 && value < 90.0);
+        FontVariation::new("slnt", value)
+    }
+
+    /// Variable font width. (`wdth`)
+    pub fn width(value: f64) -> FontVariation {
+        debug_assert!(value >= 0.0);
+        FontVariation::new("wdth", value)
+    }
+
+    /// Variable font weight. (`wght`)
+    pub fn weight(value: f64) -> FontVariation {
+        debug_assert!((1.0..=1000.0).contains(&value));
+        FontVariation::new("wght", value)
+    }
+
+    /// Linearly interpolates between two font variations.
+    ///
+    /// If the two variations have different axis tags, the interpolation
+    /// switches abruptly from one to the other at t=0.5. Otherwise, the value
+    /// is interpolated.
+    pub fn lerp(
+        a: Option<&FontVariation>,
+        b: Option<&FontVariation>,
+        t: f64,
+    ) -> Option<FontVariation> {
+        if a.map(|v| v.axis.as_str()) != b.map(|v| v.axis.as_str()) || (a.is_none() && b.is_none())
+        {
+            return if t < 0.5 { a.cloned() } else { b.cloned() };
+        }
+        Some(FontVariation::new(
+            a.unwrap().axis.clone(),
+            clamp_double(
+                lerp_double(Some(a.unwrap().value), Some(b.unwrap().value), t).unwrap(),
+                -32768.0,
+                32768.0 - 1.0 / 65536.0,
+            ),
+        ))
+    }
+}
+
+impl Display for FontVariation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "FontVariation('{}', {})", self.axis, self.value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -495,5 +641,28 @@ mod tests {
     fn text_direction_lists_rtl_first() {
         assert_eq!(TextDirection::Rtl as u8, 0);
         assert_eq!(TextDirection::Ltr as u8, 1);
+    }
+
+    #[test]
+    fn font_variation_lerp_switches_axis_at_half() {
+        let a = FontVariation::weight(400.0);
+        let b = FontVariation::width(100.0);
+        assert_eq!(
+            FontVariation::lerp(Some(&a), Some(&b), 0.4).unwrap().axis,
+            "wght"
+        );
+        assert_eq!(
+            FontVariation::lerp(Some(&a), Some(&b), 0.6).unwrap().axis,
+            "wdth"
+        );
+    }
+
+    #[test]
+    fn font_variation_lerp_interpolates_same_axis() {
+        let a = FontVariation::weight(100.0);
+        let b = FontVariation::weight(900.0);
+        let mid = FontVariation::lerp(Some(&a), Some(&b), 0.5).unwrap();
+        assert_eq!(mid.axis, "wght");
+        assert!((mid.value - 500.0).abs() < 1e-9);
     }
 }

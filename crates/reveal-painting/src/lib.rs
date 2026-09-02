@@ -27,7 +27,9 @@ mod paint_utilities;
 mod rounded_rectangle_border;
 mod shape_decoration;
 mod stadium_border;
+mod text_painter;
 mod text_scaler;
+mod text_style;
 
 pub use alignment::*;
 pub use basic_types::*;
@@ -56,4 +58,6 @@ pub use paint_utilities::*;
 pub use rounded_rectangle_border::*;
 pub use shape_decoration::*;
 pub use stadium_border::*;
+pub use text_painter::*;
 pub use text_scaler::*;
+pub use text_style::*;

@@ -16,7 +16,7 @@ pub type Picture = DisplayList;
 
 pub use valo::{
     BlendMode, BlurStyle, ClipOp, FillRule, Image, MaskBlur, Paint, PaintStyle, Paragraph,
-    ParagraphBuilder, ParagraphStyle, Path, PathBuilder, Stroke,
+    ParagraphBuilder, ParagraphStyle, Path, PathBuilder, Stroke, TextStyle,
 };
 
 /// The full valo API for hosts and for recording that needs a type the

@@ -5,9 +5,9 @@ pub use reveal_embedder::{
     ParagraphBuilder, ParagraphStyle, Path, PathBuilder, Picture, Stroke,
 };
 pub use reveal_embedder::{
-    Clip, Color, ColorSpace, FontStyle, FontWeight, Matrix4, Shadow, TextAlign, TextBaseline,
-    TextDecoration, TextDecorationStyle, TextDirection, TextHeightBehavior,
-    TextLeadingDistribution,
+    Clip, Color, ColorSpace, FontFeature, FontStyle, FontVariation, FontWeight, Matrix4, Shadow,
+    TextAlign, TextBaseline, TextDecoration, TextDecorationStyle, TextDirection,
+    TextHeightBehavior, TextLeadingDistribution,
 };
 
 /// The description of the difference between two objects, in the context of how

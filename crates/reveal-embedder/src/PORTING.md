@@ -3,7 +3,19 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 
 ## Identical
 
-- text.rs → text.dart (`FontStyle`, `FontWeight`, `TextAlign`, `TextBaseline`, `TextDecoration`, `TextDecorationStyle`, `TextLeadingDistribution`, `TextHeightBehavior`, `TextDirection`, `kTextHeightNone`)
+- text.rs → text.dart (`FontStyle`, `FontWeight`, `TextAlign`, `TextBaseline`, `TextDecoration`, `TextDecorationStyle`, `TextLeadingDistribution`, `TextHeightBehavior`, `TextDirection`, `kTextHeightNone`, `FontFeature` core, `FontVariation` core + named axes)
+
+## painting.rs → dart:ui `Canvas` / `Paint` / `Paragraph` / `TextStyle`
+
+- Change: [`TextStyle`](TextStyle) is valo `TextStyle`. There is no `Int32List` encode.
+  Reason: platform — there is no Dart/C++ language boundary; `ParagraphBuilder` takes valo styles.
+  Affect: pass a valo `TextStyle` into paragraph building. There is no encoded buffer.
+
+## text.rs → text.dart (`FontFeature` / `FontVariation`)
+
+- Change: `_encode` is omitted on [`FontFeature`](FontFeature) / [`FontVariation`](FontVariation).
+  Reason: platform — there is no engine FFI; the values are used as themselves.
+  Affect: there is no encode into a `ByteData` buffer.
 
 ## platform.rs → dart:ui `platform_dispatcher.dart`
 
@@ -52,7 +64,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 ## Deferred
 
 - `onMetricsChanged` / `onPlatformBrightnessChanged`. Trigger: `MediaQuery` / `CupertinoTheme`.
-- `ui.TextStyle` (the native-encoded class), `FontFeature`, `FontVariation`, `ParagraphStyle` encode. Trigger: painting `TextStyle` / valo `ParagraphBuilder`.
+- `FontFeature` named tag constructors (`alternative`, `fractions`, …). Trigger: a caller that uses those factories instead of `new` / `enable` / `disable`.
 - `font_source`. Trigger: text.
 - `debugDefaultTargetPlatformOverride`. Trigger: a debug switcher that must override a live host without swapping `Platform`.
 - Semantics callbacks. Trigger: semantics.

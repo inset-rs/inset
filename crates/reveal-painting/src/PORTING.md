@@ -10,7 +10,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - beveled_rectangle_border.rs → beveled_rectangle_border.dart
 - continuous_rectangle_border.rs → continuous_rectangle_border.dart
 - paint_utilities.rs → paint_utilities.dart (`paintZigZag`)
-- basic_types.rs dart:ui re-exports (`TextDirection`, `FontWeight`, `FontStyle`, `TextAlign`, `TextBaseline`, `TextDecoration`, `TextDecorationStyle`, `TextLeadingDistribution`, `TextHeightBehavior`)
+- basic_types.rs dart:ui re-exports (`TextDirection`, `FontWeight`, `FontStyle`, `TextAlign`, `TextBaseline`, `TextDecoration`, `TextDecorationStyle`, `TextLeadingDistribution`, `TextHeightBehavior`, `FontFeature`, `FontVariation`)
+- text_painter.rs → text_painter.dart (`kDefaultFontSize`, `TextOverflow`)
 
 ## alignment.rs → alignment.dart
 
@@ -170,6 +171,36 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — an associated function and a method cannot share a name.
   Affect: write `LinearBorder::start_side(side, alignment, size)` or `LinearBorder::new().start(edge)` where Dart writes `LinearBorder.start(side: side)`.
 
+## text_style.rs → text_style.dart
+
+- Change: Dart's named constructor arguments and `copyWith` are a fluent builder. `copyWith(color: c)` is `copy_with().color(c)`.
+  Reason: language — Rust has no optional named parameters.
+  Affect: write `TextStyle::new().color(c).font_size(14.0)` where Dart writes `TextStyle(color: c, fontSize: 14)`.
+
+- Change: `apply` is `style.apply().font_size_factor(2.0).into_style()`.
+  Reason: language — Rust has no optional named parameters, and `apply` cannot return both a builder and a `TextStyle`.
+  Affect: write `.into_style()` at the end of an `apply` chain. `style.apply().into_style()` is Dart `apply()` with defaults.
+
+- Change: the `fontFamilyFallback` getter is [`font_family_fallback_list`](TextStyle::font_family_fallback_list). The setter keeps [`font_family_fallback`](TextStyle::font_family_fallback).
+  Reason: language — a method and a setter cannot share a name.
+  Affect: read `style.font_family_fallback_list()`.
+
+- Change: [`TextStyle`](TextStyle) has no `locale` field.
+  Reason: platform — `dart:ui` `Locale` is not ported; same as [`ImageConfiguration`](ImageConfiguration).
+  Affect: there is no `style.locale`.
+
+- Change: [`get_text_style`](TextStyle::get_text_style) returns valo `TextStyle`. Combined decorations keep underline, else overline, else line-through. `decorationStyle`, background paint, `fontFeatures`, `fontVariations`, `textBaseline`, and `leadingDistribution` are not valo fields. Unspecified `fontSize` becomes valo's 14.
+  Reason: platform — valo `TextStyle` is the host span style; there is no engine encode.
+  Affect: `get_text_style()` is a valo `TextStyle`. Combined underline+lineThrough paints only underline. `get_text_style_with(&scaler)` is Dart `getTextStyle(textScaler: scaler)`.
+
+- Change: Dart's `getParagraphStyle` writes layout and a fallback font onto one `ui.ParagraphStyle`. Valo takes layout and font as two objects. [`get_paragraph_style`](TextStyle::get_paragraph_style) is the layout; the font is [`get_text_style`](TextStyle::get_text_style).
+  Reason: platform — valo requires both styles; Flutter combines them on `ui.ParagraphStyle`.
+  Affect: there is no `paragraph_style.font_size`. Pass both into the paragraph builder.
+
+- Change: valo `TextAlign` has no `Start` / `End`. [`get_paragraph_style`](TextStyle::get_paragraph_style) resolves them to `Left` / `Right` from `text_direction`. Omitted direction is treated as LTR.
+  Reason: platform — valo stores a physical alignment; it cannot keep Start/End until bidi direction is inferred.
+  Affect: pass `text_direction` when the align is Start or End.
+
 ## Deferred
 - `debug.dart` remainder (`debugNetworkImageHttpClientProvider`, …). Trigger: image loading / tests that are not `debugDisableShadows`.
 - `ColorSwatch` / `ColorProperty`. Trigger: Material colors / diagnostics. `Color` stays the dart:ui struct (stored by value on `Paint` / `BorderSide` / `TextStyle`); a `Color` trait cannot be that field type. `ColorSwatch` can wrap the primary `Color` plus a table, like `FractionalOffset` vs `Alignment`.
@@ -178,12 +209,14 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `_MixedEdgeInsets` and cross-kind `add` / `subtract` / `flipped` / `infinity` / `clamp` / `EdgeInsetsGeometry.lerp`. Trigger: first consumer that adds an `EdgeInsets` to an `EdgeInsetsDirectional`.
 - `_MixedAlignment` and cross-kind `AlignmentGeometry.add` / `AlignmentGeometry.lerp`. Trigger: first consumer that adds an `Alignment` to an `AlignmentDirectional`.
 - `_MixedBorderRadius` and cross-kind `add` / `subtract` / `BorderRadiusGeometry.lerp`. Trigger: first consumer that adds a `BorderRadius` to a `BorderRadiusDirectional`. Same-kind `add` / `subtract` / `lerp` exist.
-- `hashCode` / [`Hash`]. Trigger: the first map or set keyed by insets, alignment, border radius, or `TextScaler`.
+- `hashCode` / [`Hash`]. Trigger: the first map or set keyed by insets, alignment, border radius, `TextScaler`, or `TextStyle`.
 - Diagnostics / `debugCheckCanResolveTextDirection`. Trigger: porting diagnostics; until then a missing `TextDirection` on resolve panics with the FlutterError summary string.
 - `DecorationImage` / `BoxDecoration.image` / `ShapeDecoration.image`. Trigger: first decoration that paints an image.
-- `ui.Locale` / `ImageConfiguration.locale`. Trigger: locale-specific assets.
+- `ui.Locale` / `ImageConfiguration.locale` / `TextStyle.locale`. Trigger: locale-specific assets or region-specific glyphs.
 - `Gradient` / `BoxDecoration.gradient` / `ShapeDecoration.gradient` / `createShader`. Trigger: first decoration that paints a gradient. valo covers linear, radial (with optional focus), and a full-turn sweep; `TileMode.decal` and sweep `endAngle` have no valo counterpart.
 - `AssetBundle.loadString` / `loadStructuredData` / `loadBuffer` / caching / `NetworkAssetBundle` / `rootBundle`. Trigger: string or structured assets, or a default bundle on `App`.
 - `StarBorder`. Trigger: a star or polygon `ShapeBorder`. Path verbs are mechanical (`conicTo` exists on valo); lerp to `CircleBorder` / `StadiumBorder` / `RoundedRectangleBorder` is large.
 - `NotchedShape` / `CircularNotchedRectangle` / `AutomaticNotchedShape`. Trigger: `BottomAppBar`. valo has no `Path.arcToPoint` and no `Path.combine`.
 - `PaintingBinding`. Trigger: image cache / shader warm-up.
+- `text_painter.dart` remainder (`TextPainter`, `PlaceholderDimensions`, …). Trigger: painting glyphs / `Text`. `kDefaultFontSize` and `TextOverflow` live in `text_painter.rs`.
+- `strut_style.dart` / `getParagraphStyle(strutStyle:)`. Trigger: a paragraph that sets strut.
