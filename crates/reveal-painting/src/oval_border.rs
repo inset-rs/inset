@@ -50,8 +50,20 @@ impl OvalBorder {
         )
     }
 
-    fn as_circle(self) -> CircleBorder {
+    fn as_circle(&self) -> CircleBorder {
         CircleBorder::new(self.side, self.eccentricity)
+    }
+}
+
+/// Dart `border is CircleBorder`, including [`OvalBorder`] (`extends CircleBorder`).
+pub(crate) fn as_circle_border(border: &dyn ShapeBorder) -> Option<CircleBorder> {
+    if let Some(circle) = border.as_any().downcast_ref::<CircleBorder>() {
+        Some(*circle)
+    } else {
+        border
+            .as_any()
+            .downcast_ref::<OvalBorder>()
+            .map(|oval| oval.as_circle())
     }
 }
 

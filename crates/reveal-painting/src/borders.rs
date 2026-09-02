@@ -401,6 +401,12 @@ pub trait ShapeBorder: Any + Debug {
     }
 }
 
+impl<T: ShapeBorder + 'static> From<T> for Box<dyn ShapeBorder> {
+    fn from(border: T) -> Box<dyn ShapeBorder> {
+        Box::new(border)
+    }
+}
+
 impl dyn ShapeBorder {
     /// Creates a new border consisting of the two borders on either side of the
     /// operator.

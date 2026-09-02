@@ -7,6 +7,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - colors.rs → colors.dart (`HSVColor`, `HSLColor`)
 - box_fit.rs → box_fit.dart
 - geometry.rs → geometry.dart (`positionDependentBox`)
+- beveled_rectangle_border.rs → beveled_rectangle_border.dart
+- continuous_rectangle_border.rs → continuous_rectangle_border.dart
+- paint_utilities.rs → paint_utilities.dart (`paintZigZag`)
 
 ## basic_types.rs → basic_types.dart
 
@@ -160,6 +163,18 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Rust has no optional named parameters.
   Affect: write `BoxDecoration::new().color(c).border_radius(r)` where Dart writes `BoxDecoration(color: c, borderRadius: r)`. Set `color` before `background_blend_mode`.
 
+## shape_decoration.rs → shape_decoration.dart
+
+- Change: [`ShapeDecoration`](ShapeDecoration) has no `image` or `gradient` field. Interior paint is solid `color` only. `shape` is required on [`new`](ShapeDecoration::new); color and shadows are fluent.
+  Reason: platform — `DecorationImage` and `Gradient.createShader` are deferred, same as [`BoxDecoration`](BoxDecoration). Language — Rust has no optional named parameters; `shape` is the one required field.
+  Affect: write `ShapeDecoration::new(shape).color(c)` where Dart writes `ShapeDecoration(shape: shape, color: c)`. There is no `decoration.image` or `decoration.gradient`.
+
+## linear_border.rs → linear_border.dart
+
+- Change: Dart named constructors `LinearBorder.start` / `end` / `top` / `bottom` are `LinearBorder::start_side` / `end_side` / `top_side` / `bottom_side`. Fluent `.start(edge)` keeps the field name.
+  Reason: language — an associated function and a method cannot share a name.
+  Affect: write `LinearBorder::start_side(side, alignment, size)` or `LinearBorder::new().start(edge)` where Dart writes `LinearBorder.start(side: side)`.
+
 ## Deferred
 - `debug.dart` remainder (`debugNetworkImageHttpClientProvider`, …). Trigger: image loading / tests that are not `debugDisableShadows`.
 - `ColorSwatch` / `ColorProperty`. Trigger: Material colors / diagnostics. `Color` stays the dart:ui struct (stored by value on `Paint` / `BorderSide` / `TextStyle`); a `Color` trait cannot be that field type. `ColorSwatch` can wrap the primary `Color` plus a table, like `FractionalOffset` vs `Alignment`.
@@ -170,7 +185,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `_MixedBorderRadius` and cross-kind `add` / `subtract` / `BorderRadiusGeometry.lerp`. Trigger: first consumer that adds a `BorderRadius` to a `BorderRadiusDirectional`. Same-kind `add` / `subtract` / `lerp` exist.
 - `hashCode` / [`Hash`]. Trigger: the first map or set keyed by insets, alignment, border radius, or `TextScaler`.
 - Diagnostics / `debugCheckCanResolveTextDirection`. Trigger: porting diagnostics; until then a missing `TextDirection` on resolve panics with the FlutterError summary string.
-- `ImageProvider` / `ImageStream` / `ImageCache` / `DecorationImage` / `BoxDecoration.image`. Trigger: first decoration that paints an image.
+- `DecorationImage` / `BoxDecoration.image` / `ShapeDecoration.image`. Trigger: first decoration that paints an image.
 - `ui.Locale` / `ImageConfiguration.locale`. Trigger: locale-specific assets.
-- `Gradient` / `BoxDecoration.gradient` / `createShader`. Trigger: first decoration that paints a gradient. valo covers linear, radial (with optional focus), and a full-turn sweep; `TileMode.decal` and sweep `endAngle` have no valo counterpart.
+- `Gradient` / `BoxDecoration.gradient` / `ShapeDecoration.gradient` / `createShader`. Trigger: first decoration that paints a gradient. valo covers linear, radial (with optional focus), and a full-turn sweep; `TileMode.decal` and sweep `endAngle` have no valo counterpart.
 - `AssetBundle.loadString` / `loadStructuredData` / `loadBuffer` / caching / `NetworkAssetBundle` / `rootBundle`. Trigger: string or structured assets, or a default bundle on `App`.
+- `StarBorder`. Trigger: a star or polygon `ShapeBorder`. Path verbs are mechanical (`conicTo` exists on valo); lerp to `CircleBorder` / `StadiumBorder` / `RoundedRectangleBorder` is large.
+- `NotchedShape` / `CircularNotchedRectangle` / `AutomaticNotchedShape`. Trigger: `BottomAppBar`. valo has no `Path.arcToPoint` and no `Path.combine`.
+- `PaintingBinding`. Trigger: image cache / shader warm-up.

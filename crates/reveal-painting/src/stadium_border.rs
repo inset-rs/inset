@@ -11,9 +11,10 @@ use crate::border_radius::{BorderRadius, BorderRadiusGeometry};
 use crate::borders::{
     BorderSide, BorderStyle, OutlinedBorder, ShapeBorder, outlined_border_dimensions,
 };
-use crate::circle_border::{CircleBorder, rrect_path};
+use crate::circle_border::rrect_path;
 use crate::draw::draw_rrect;
 use crate::edge_insets::EdgeInsetsGeometry;
+use crate::oval_border::as_circle_border;
 use crate::rounded_rectangle_border::RoundedRectangleBorder;
 
 /// A border that fits a stadium-shaped border (a box with semicircles on the ends)
@@ -67,7 +68,7 @@ impl ShapeBorder for StadiumBorder {
             Some(Box::new(StadiumBorder::new(BorderSide::lerp(
                 a.side, self.side, t,
             ))))
-        } else if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<CircleBorder>()) {
+        } else if let Some(a) = a.and_then(as_circle_border) {
             Some(Box::new(StadiumToCircleBorder {
                 side: BorderSide::lerp(a.side, self.side, t),
                 circularity: 1.0 - t,
@@ -92,7 +93,7 @@ impl ShapeBorder for StadiumBorder {
             Some(Box::new(StadiumBorder::new(BorderSide::lerp(
                 self.side, b.side, t,
             ))))
-        } else if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<CircleBorder>()) {
+        } else if let Some(b) = b.and_then(as_circle_border) {
             Some(Box::new(StadiumToCircleBorder {
                 side: BorderSide::lerp(self.side, b.side, t),
                 circularity: t,
@@ -289,7 +290,7 @@ impl ShapeBorder for StadiumToCircleBorder {
                 circularity: self.circularity * t,
                 eccentricity: self.eccentricity,
             }))
-        } else if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<CircleBorder>()) {
+        } else if let Some(a) = a.and_then(as_circle_border) {
             Some(Box::new(StadiumToCircleBorder {
                 side: BorderSide::lerp(a.side, self.side, t),
                 circularity: self.circularity + (1.0 - self.circularity) * (1.0 - t),
@@ -316,7 +317,7 @@ impl ShapeBorder for StadiumToCircleBorder {
                 circularity: self.circularity * (1.0 - t),
                 eccentricity: self.eccentricity,
             }))
-        } else if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<CircleBorder>()) {
+        } else if let Some(b) = b.and_then(as_circle_border) {
             Some(Box::new(StadiumToCircleBorder {
                 side: BorderSide::lerp(self.side, b.side, t),
                 circularity: self.circularity + (1.0 - self.circularity) * t,

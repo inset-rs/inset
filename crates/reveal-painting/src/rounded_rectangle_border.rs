@@ -14,9 +14,10 @@ use crate::border_radius::{BorderRadius, BorderRadiusGeometry};
 use crate::borders::{
     BorderSide, BorderStyle, OutlinedBorder, ShapeBorder, outlined_border_dimensions,
 };
-use crate::circle_border::{CircleBorder, rrect_path};
+use crate::circle_border::rrect_path;
 use crate::draw::{draw_drrect, draw_rrect, draw_rsuperellipse};
 use crate::edge_insets::EdgeInsetsGeometry;
+use crate::oval_border::as_circle_border;
 
 /// A rectangular border with rounded corners.
 ///
@@ -82,7 +83,7 @@ impl ShapeBorder for RoundedRectangleBorder {
                 BorderRadiusGeometry::lerp(Some(a.border_radius), Some(self.border_radius), t)
                     .unwrap(),
             )))
-        } else if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<CircleBorder>()) {
+        } else if let Some(a) = a.and_then(as_circle_border) {
             Some(Box::new(RoundedRectangleToCircleBorder {
                 side: BorderSide::lerp(a.side, self.side, t),
                 border_radius: self.border_radius,
@@ -103,7 +104,7 @@ impl ShapeBorder for RoundedRectangleBorder {
                 BorderRadiusGeometry::lerp(Some(self.border_radius), Some(b.border_radius), t)
                     .unwrap(),
             )))
-        } else if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<CircleBorder>()) {
+        } else if let Some(b) = b.and_then(as_circle_border) {
             Some(Box::new(RoundedRectangleToCircleBorder {
                 side: BorderSide::lerp(self.side, b.side, t),
                 border_radius: self.border_radius,
@@ -293,7 +294,7 @@ impl ShapeBorder for RoundedSuperellipseBorder {
                 BorderSide::lerp(a.side, self.side, t),
                 BorderRadiusGeometry::lerp(Some(a.border_radius), Some(self.border_radius), t),
             )))
-        } else if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<CircleBorder>()) {
+        } else if let Some(a) = a.and_then(as_circle_border) {
             Some(Box::new(RoundedSuperellipseToCircleBorder {
                 side: BorderSide::lerp(a.side, self.side, t),
                 border_radius: self.border_radius,
@@ -313,7 +314,7 @@ impl ShapeBorder for RoundedSuperellipseBorder {
                 BorderSide::lerp(self.side, b.side, t),
                 BorderRadiusGeometry::lerp(Some(self.border_radius), Some(b.border_radius), t),
             )))
-        } else if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<CircleBorder>()) {
+        } else if let Some(b) = b.and_then(as_circle_border) {
             Some(Box::new(RoundedSuperellipseToCircleBorder {
                 side: BorderSide::lerp(self.side, b.side, t),
                 border_radius: self.border_radius,
@@ -593,7 +594,7 @@ impl ShapeBorder for RoundedRectangleToCircleBorder {
                 Some(self.circularity * t),
                 None,
             )))
-        } else if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<CircleBorder>()) {
+        } else if let Some(a) = a.and_then(as_circle_border) {
             Some(Box::new(self.copy_with(
                 Some(BorderSide::lerp(a.side, self.side, t)),
                 Some(self.border_radius),
@@ -624,7 +625,7 @@ impl ShapeBorder for RoundedRectangleToCircleBorder {
                 Some(self.circularity * (1.0 - t)),
                 None,
             )))
-        } else if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<CircleBorder>()) {
+        } else if let Some(b) = b.and_then(as_circle_border) {
             Some(Box::new(self.copy_with(
                 Some(BorderSide::lerp(self.side, b.side, t)),
                 Some(self.border_radius),
@@ -884,7 +885,7 @@ impl ShapeBorder for RoundedSuperellipseToCircleBorder {
                 Some(self.circularity * t),
                 None,
             )))
-        } else if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<CircleBorder>()) {
+        } else if let Some(a) = a.and_then(as_circle_border) {
             Some(Box::new(self.copy_with(
                 Some(BorderSide::lerp(a.side, self.side, t)),
                 Some(self.border_radius),
@@ -916,7 +917,7 @@ impl ShapeBorder for RoundedSuperellipseToCircleBorder {
                 Some(self.circularity * (1.0 - t)),
                 None,
             )))
-        } else if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<CircleBorder>()) {
+        } else if let Some(b) = b.and_then(as_circle_border) {
             Some(Box::new(self.copy_with(
                 Some(BorderSide::lerp(self.side, b.side, t)),
                 Some(self.border_radius),
@@ -1114,6 +1115,7 @@ mod tests {
     use reveal_embedder::{Color, FillRule, Radius};
 
     use crate::border_radius::BorderRadiusDirectional;
+    use crate::circle_border::CircleBorder;
 
     fn side_width(width: f64) -> BorderSide {
         BorderSide {
