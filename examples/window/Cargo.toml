@@ -7,7 +7,7 @@ publish.workspace = true
 
 [dependencies]
 reveal-embedder-winit.workspace = true
-reveal-scheduler.workspace = true
+reveal-shell.workspace = true
 
 [lints]
 workspace = true

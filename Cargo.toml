@@ -20,6 +20,7 @@ reveal-gestures = { path = "crates/reveal-gestures" }
 reveal-painting = { path = "crates/reveal-painting" }
 reveal-physics = { path = "crates/reveal-physics" }
 reveal-scheduler = { path = "crates/reveal-scheduler" }
+reveal-shell = { path = "crates/reveal-shell" }
 slotmap = "1"
 winit = "0.30"
 valo = "0.3.0"

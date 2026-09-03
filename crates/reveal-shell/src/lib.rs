@@ -1,14 +1,14 @@
 //! The one [`EmbedderClient`] the framework provides: owns [`App`] and
-//! translates host pushes into scheduler phases and retained views.
+//! translates host pushes into binding methods.
 //!
-//! Dart has no type for this — the engine owns the isolate. It lives here
-//! because it translates a host frame into scheduler phases; foundation
-//! cannot name this crate.
+//! Dart has no type for this — the engine owns the isolate. [`App`] stays in
+//! foundation. This crate sits above scheduler and gestures so the isolate
+//! can name both.
 
 use reveal_embedder::{EmbedderClient, Frame, PlatformRef, PointerDataPacket, ViewId};
 use reveal_foundation::App;
-
-use crate::SchedulerBinding;
+use reveal_gestures::GestureBinding;
+use reveal_scheduler::SchedulerBinding;
 
 /// Host-facing isolate: [`App`] plus the methods the embedder pushes.
 pub struct Shell {
@@ -45,23 +45,33 @@ impl EmbedderClient for Shell {
 
     fn view_removed(&mut self, _id: ViewId) {}
 
-    fn pointer_data_packet(&mut self, _packet: PointerDataPacket) {}
+    fn pointer_data_packet(&mut self, packet: PointerDataPacket) {
+        GestureBinding::handle_pointer_data_packet(&mut self.app, packet);
+        self.app.drain_microtasks();
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    use reveal_embedder::{EmbedderClient, Frame, Platform, ViewId, ViewRef};
+    use reveal_embedder::{
+        EmbedderClient, Frame, Picture, Platform, PointerChange, PointerData, PointerDataPacket,
+        PointerDeviceKind, View, ViewId, ViewMetrics, ViewRef,
+    };
     use reveal_foundation::App;
+    use reveal_gestures::{GestureBinding, PointerRoute};
+    use reveal_scheduler::SchedulerBinding;
 
     use super::Shell;
-    use crate::SchedulerBinding;
 
     struct RecordingPlatform {
         frames: Arc<AtomicUsize>,
+        view: Option<ViewRef>,
     }
 
     impl Platform for RecordingPlatform {
@@ -80,16 +90,30 @@ mod tests {
         fn wake_at(&self, _deadline: std::time::Instant) {}
 
         fn views(&self) -> Vec<ViewRef> {
-            Vec::new()
+            self.view.iter().cloned().collect()
         }
 
-        fn view(&self, _id: ViewId) -> Option<ViewRef> {
-            None
+        fn view(&self, id: ViewId) -> Option<ViewRef> {
+            self.view.as_ref().filter(|view| view.id() == id).cloned()
         }
 
         fn implicit_view(&self) -> Option<ViewRef> {
-            None
+            self.view.clone()
         }
+    }
+
+    struct TestView;
+
+    impl View for TestView {
+        fn id(&self) -> ViewId {
+            ViewId(0)
+        }
+
+        fn metrics(&self) -> ViewMetrics {
+            ViewMetrics::default()
+        }
+
+        fn present(&self, _picture: &Picture) {}
     }
 
     #[test]
@@ -97,6 +121,7 @@ mod tests {
         let frames = Arc::new(AtomicUsize::new(0));
         let platform = std::rc::Rc::new(RecordingPlatform {
             frames: Arc::clone(&frames),
+            view: None,
         });
         let mut setup_ran = false;
         let mut shell = Shell::new(platform, |_app: &mut App| {
@@ -110,5 +135,35 @@ mod tests {
         shell.frame(Frame {
             elapsed: Duration::from_millis(16),
         });
+    }
+
+    #[test]
+    fn pointer_data_packet_reaches_gesture_binding() {
+        let ran = Rc::new(Cell::new(false));
+        let ran_flag = Rc::clone(&ran);
+        let platform = std::rc::Rc::new(RecordingPlatform {
+            frames: Arc::new(AtomicUsize::new(0)),
+            view: Some(Rc::new(TestView)),
+        });
+        let mut shell = Shell::new(platform, |app| {
+            let binding = GestureBinding::instance(app);
+            binding.pointer_router(app).add_route(
+                app,
+                1,
+                PointerRoute::new(move |_app, _event| {
+                    ran_flag.set(true);
+                }),
+                None,
+            );
+        });
+
+        shell.pointer_data_packet(PointerDataPacket::new(vec![PointerData {
+            change: PointerChange::Down,
+            kind: PointerDeviceKind::Mouse,
+            buttons: 1,
+            pointer_identifier: 1,
+            ..PointerData::default()
+        }]));
+        assert!(ran.get());
     }
 }

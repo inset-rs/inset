@@ -1256,6 +1256,7 @@ dependencies = [
  "reveal-embedder-winit",
  "reveal-painting",
  "reveal-scheduler",
+ "reveal-shell",
 ]
 
 [[package]]
@@ -1551,6 +1552,7 @@ dependencies = [
 name = "reveal-gestures"
 version = "0.1.0"
 dependencies = [
+ "indexmap",
  "reveal-embedder",
  "reveal-foundation",
 ]
@@ -1577,6 +1579,16 @@ dependencies = [
  "indexmap",
  "reveal-embedder",
  "reveal-foundation",
+]
+
+[[package]]
+name = "reveal-shell"
+version = "0.1.0"
+dependencies = [
+ "reveal-embedder",
+ "reveal-foundation",
+ "reveal-gestures",
+ "reveal-scheduler",
 ]
 
 [[package]]
@@ -2480,7 +2492,7 @@ name = "window"
 version = "0.1.0"
 dependencies = [
  "reveal-embedder-winit",
- "reveal-scheduler",
+ "reveal-shell",
 ]
 
 [[package]]

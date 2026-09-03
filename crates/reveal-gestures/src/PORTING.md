@@ -6,6 +6,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 - constants.rs → constants.dart
 - gesture_settings.rs → gesture_settings.dart
+- gesture_details.rs → gesture_details.dart
 
 ## events.rs → events.dart
 
@@ -27,6 +28,77 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — same as [`PointerData::view_id`](reveal_embedder::PointerData::view_id).
   Affect: the getter is `Fn(ViewId) -> Option<f64>`.
 
+## debug.rs → debug.dart
+
+- Change: `debug_print_*` / `set_debug_print_*` instead of assigning a library `bool`.
+  Reason: language — Rust has no isolate-global assignable `bool` binding.
+  Affect: call the setter; the getter is the Dart read.
+
+## hit_test.rs → hit_test.dart
+
+- Change: [`HitTestable`](HitTestable) / [`HitTestDispatcher`](HitTestDispatcher) / [`HitTestTarget`](HitTestTarget) methods take [`App`](reveal_foundation::App).
+  Reason: language — a Rust callback cannot capture what it mutates.
+  Affect: `target.handle_event(app, event, entry)`.
+
+- Change: `viewId` is [`ViewId`](reveal_embedder::ViewId).
+  Reason: platform — same as [`PointerData::view_id`](reveal_embedder::PointerData::view_id).
+  Affect: `hit_test_in_view(..., view.id())`.
+
+- Change: there is no `HitTestResult.wrap`. Hit-test methods take `&mut HitTestResult`.
+  Reason: language — Dart's wrap is two objects over one list; a Rust `Vec` has one owner.
+  Affect: pass `&mut result` where Dart writes `HitTestResult.wrap(result)`.
+
+- Change: [`add`](HitTestResult::add) takes the entry by value and writes `transform` on the stored copy.
+  Reason: language — Dart mutates the same object the caller still holds.
+  Affect: after `result.add(entry)`, `entry` is gone. Read `result.path().last().transform()`.
+
+## arena.rs → arena.dart
+
+- Change: [`GestureArenaManager`](GestureArenaManager) is a Handle newtype. [`add`](GestureArenaManager::add) / [`close`](GestureArenaManager::close) / [`sweep`](GestureArenaManager::sweep) / [`hold`](GestureArenaManager::hold) / [`release`](GestureArenaManager::release) and [`GestureArenaEntry::resolve`](GestureArenaEntry::resolve) take [`App`](reveal_foundation::App).
+  Reason: language — callbacks must re-enter App; sole-member win uses [`App::schedule_microtask`](reveal_foundation::App::schedule_microtask). A `&mut` of the tables cannot be held across `accept_gesture`.
+  Affect: `GestureArenaManager::new(app)`. `arena.close(app, pointer)`. `entry.resolve(app, disposition)`.
+
+- Change: members compared by [`member_id`](GestureArenaMember::member_id) (`HandleId`).
+  Reason: language — Rust has no object identity for a trait object.
+  Affect: implementors are Handle newtypes; return `self.0.id()`.
+
+## pointer_router.rs → pointer_router.dart
+
+- Change: [`PointerRouter`](PointerRouter) is a Handle newtype. Route methods take [`App`](reveal_foundation::App).
+  Reason: language — `route` snapshots the tables, drops the slot, then calls; a route may `remove_route` the same router.
+  Affect: `PointerRouter::new(app)`. `router.add_route(app, pointer, route, transform)`. `router.route(app, event)`.
+
+- Change: [`PointerRoute`](PointerRoute) receives [`App`](reveal_foundation::App). Identity is [`Listener`](reveal_foundation::Listener)-shaped (`new` clones, or [`handle_method`](PointerRoute::handle_method)).
+  Reason: language — Rust closures have no identity; Dart's `PointerRoute` compares by identity and tear-offs canonicalize.
+  Affect: `PointerRoute::new(|app, event| …)` or `PointerRoute::handle_method(this, Self::handle_event)`. Keep the value, or rebuild the tear-off at `remove_route`.
+
+- Change: `_dispatch` does not catch panics or report `FlutterError`.
+  Reason: language — no catchable exception for ordinary control flow; diagnostics are deferred.
+  Affect: a panicking route skips every route after it. Flutter reports and continues.
+
+## binding.rs → binding.dart
+
+- Change: [`GestureBinding::instance`](GestureBinding::instance) is the App singleton. Members take `&mut App`.
+  Reason: language — same as [`SchedulerBinding::instance`](reveal_scheduler::SchedulerBinding::instance); Rust has no mixin-on-one-object.
+  Affect: `GestureBinding::instance(app)` where Dart writes `GestureBinding.instance`.
+
+- Change: [`pointer_router`](GestureBinding::pointer_router) / [`gesture_arena`](GestureBinding::gesture_arena) return Copy handles created on first [`instance`](GestureBinding::instance).
+  Reason: language — `App::singleton` `Default` cannot mint child Handles; the fields are filled on first access.
+  Affect: `let router = binding.pointer_router(app); router.add_route(app, ...)`.
+
+- Change: `hit_test_in_view` always adds this binding only. There is no override from `RendererBinding`.
+  Reason: language — Rust has no mixin override across crates.
+  Affect: a down event's path is `[GestureBinding]` until `RendererBinding` exists.
+
+- Change: `dispatch_event` / `_handlePointerDataPacket` do not catch panics or report `FlutterError`.
+  Reason: language — no catchable exception; diagnostics are deferred.
+  Affect: a panicking target skips the rest of the path.
+
 ## Deferred
 
 - `PointerEnterEvent` / `PointerExitEvent`. Trigger: `MouseTracker`.
+- `NativeHitTestTarget`. Trigger: platform views.
+- `recognizer.dart` / `team.dart` / `tap.dart`. Trigger: next; `GestureBinding.instance` is now an App singleton.
+- `_Resampler` / `SamplingClock` / `resamplingEnabled`. Trigger: a host that wants touch resampling.
+- `PointerSignalResolver`. Trigger: scroll/wheel.
+- Engine `onHitTest`. Trigger: platform views.

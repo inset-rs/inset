@@ -12,19 +12,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Dart's binding is a per-isolate global; the `&mut App` in hand is the ambient authority, and `App::singleton` is the per-App counterpart of the per-isolate instance.
   Affect: when porting a `SchedulerBinding.instance.x()` call, write `SchedulerBinding::x(app)`.
 
-- Change: the host delivers one frame to `Shell`. `Shell` runs begin-frame, the mid-frame microtask flush, and draw-frame. Dart assigns those handlers onto `PlatformDispatcher` callback fields.
-  Reason: platform — there is no isolate-global callback table; `Shell` owns `App` so the host never names it.
-  Affect: a host calls `client.frame(...)`. Tests may still pump the handlers directly.
-
 - Change: `scheduleFrame` asks the host for one frame for the whole app (`app.platform().request_frame()`), not a redraw on every view.
   Reason: platform — the scheduler has one frame; the host chooses the native vsync source.
   Affect: a host implements `Platform::request_frame`.
-
-## shell.rs
-
-- Change: `Shell` owns `App` and is the `EmbedderClient`. Dart has no type (the engine owns the isolate). It lives here, not in foundation.
-  Reason: platform — the host talks to a client and must not name `App`; the type that owns `App` lives next to the scheduler.
-  Affect: the host's start closure returns `Shell::new(platform, setup)`.
 
 - Change: `FrameCallback` (and `TickerCallback`) receives `&mut App`.
   Reason: language — a Rust closure cannot capture what it mutates; same as `Listener`.
@@ -58,7 +48,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## Deferred
 
-- `Shell::pointer_data_packet` dispatch. Trigger: `GestureBinding`.
 - `scheduleTask` and the priority task queue. Trigger: a `Timer` counterpart — `_ensureEventLoopCallback` needs `Timer.run`.
 - `_handleBeginFrame` / `_handleDrawFrame` warm-up-frame guards. Trigger: `scheduleWarmUpFrame`.
 - `endOfFrame`. Trigger: `RendererBinding.performReassemble` (`rendering/binding.dart`); it hands out a bare `Future`.
