@@ -5,11 +5,13 @@ use std::collections::{HashMap, VecDeque};
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::rc::Rc;
+use std::time::Duration;
 
 use reveal_embedder::{InertPlatform, PlatformRef};
 use slotmap::{SlotMap, new_key_type};
 
 use crate::change_notifier::Listener;
+use crate::timers::{Timer, Timers};
 
 /// Drain budget for one [`App::drain_microtasks`]: two callbacks scheduling
 /// each other forever must fail loud, not starve the event loop. Not a Dart
@@ -107,6 +109,7 @@ pub struct App {
     slots: SlotMap<HandleId, Slot>,
     singletons: HashMap<std::any::TypeId, HandleId>,
     microtasks: VecDeque<Listener>,
+    timers: Timers,
     platform: PlatformRef,
 }
 
@@ -116,6 +119,7 @@ impl Default for App {
             slots: SlotMap::with_key(),
             singletons: HashMap::new(),
             microtasks: VecDeque::new(),
+            timers: Timers::default(),
             platform: Rc::new(InertPlatform),
         }
     }
@@ -191,6 +195,47 @@ impl App {
     /// asserts the latter.
     pub fn has_pending_microtasks(&self) -> bool {
         !self.microtasks.is_empty()
+    }
+
+    /// Dart's `Timer(duration, callback)`. Fires when the clock reaches
+    /// `now + duration` via [`elapse`](Self::elapse).
+    pub fn schedule_timer(&mut self, duration: Duration, callback: Listener) -> Timer {
+        let (timer, wake) = self.timers.schedule(duration, callback);
+        if let Some(delay) = wake {
+            self.platform.wake_at(self.platform.now() + delay);
+        }
+        timer
+    }
+
+    /// Dart's `Timer.cancel()`. Idempotent.
+    pub fn cancel_timer(&mut self, timer: Timer) {
+        self.timers.cancel(timer);
+    }
+
+    /// Dart's `Timer.isActive`.
+    pub fn timer_is_active(&self, timer: Timer) -> bool {
+        self.timers.is_active(timer)
+    }
+
+    /// Advances the App clock by `duration` and fires due timers.
+    ///
+    /// Microtasks drain first, then each due timer in due order (ties by id),
+    /// then microtasks after each callback — Dart's event-loop position for
+    /// `Timer`. Tests call this (FakeAsync). A host calls it as time passes.
+    pub fn elapse(&mut self, duration: Duration) {
+        let target = self.timers.now() + duration;
+        self.drain_microtasks();
+        let mut fired = 0usize;
+        loop {
+            let Some(callback) = self.timers.pop_next_due(target) else {
+                break;
+            };
+            fired += 1;
+            Timers::assert_fire_budget(fired);
+            callback.call(self);
+            self.drain_microtasks();
+        }
+        self.timers.advance_to(target);
     }
 
     pub fn create<T: 'static>(&mut self, state: T) -> Handle<T> {
@@ -270,6 +315,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Timer;
 
     #[derive(Debug, Default, PartialEq)]
     struct Counter(i32);
@@ -397,5 +443,59 @@ mod tests {
         }));
         app.drain_microtasks();
         assert_eq!(app.get(counter).0, 2);
+    }
+
+    #[test]
+    fn timers_fire_in_due_order_after_microtasks() {
+        let mut app = App::new();
+        let log = app.create(Vec::<&'static str>::new());
+        app.schedule_microtask(crate::Listener::new(move |app| {
+            app.get_mut(log).push("micro");
+        }));
+        Timer::new(
+            &mut app,
+            Duration::from_millis(200),
+            crate::Listener::new(move |app| {
+                app.get_mut(log).push("late");
+            }),
+        );
+        Timer::new(
+            &mut app,
+            Duration::from_millis(100),
+            crate::Listener::new(move |app| {
+                app.get_mut(log).push("early");
+            }),
+        );
+        Timer::new(
+            &mut app,
+            Duration::from_millis(100),
+            crate::Listener::new(move |app| {
+                app.get_mut(log).push("early-second");
+            }),
+        );
+        assert!(app.get(log).is_empty());
+        app.elapse(Duration::from_millis(200));
+        assert_eq!(
+            app.get(log).as_slice(),
+            ["micro", "early", "early-second", "late"]
+        );
+    }
+
+    #[test]
+    fn cancel_prevents_a_timer_from_firing() {
+        let mut app = App::new();
+        let counter = app.create(Counter(0));
+        let timer = Timer::new(
+            &mut app,
+            Duration::from_millis(10),
+            crate::Listener::new(move |app| {
+                app.get_mut(counter).0 = 1;
+            }),
+        );
+        assert!(timer.is_active(&app));
+        timer.cancel(&mut app);
+        assert!(!timer.is_active(&app));
+        app.elapse(Duration::from_millis(10));
+        assert_eq!(app.get(counter).0, 0);
     }
 }

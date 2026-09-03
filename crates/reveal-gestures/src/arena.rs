@@ -37,22 +37,22 @@ pub trait GestureArenaMember: 'static {
 }
 
 #[derive(Clone)]
-struct MemberBox(Rc<dyn GestureArenaMember>);
+pub(crate) struct MemberBox(Rc<dyn GestureArenaMember>);
 
 impl MemberBox {
-    fn new(member: impl GestureArenaMember) -> MemberBox {
+    pub(crate) fn new(member: impl GestureArenaMember) -> MemberBox {
         MemberBox(Rc::new(member))
     }
 
-    fn member_id(&self) -> HandleId {
+    pub(crate) fn member_id(&self) -> HandleId {
         self.0.member_id()
     }
 
-    fn accept_gesture(&self, app: &mut App, pointer: i64) {
+    pub(crate) fn accept_gesture(&self, app: &mut App, pointer: i64) {
         self.0.accept_gesture(app, pointer);
     }
 
-    fn reject_gesture(&self, app: &mut App, pointer: i64) {
+    pub(crate) fn reject_gesture(&self, app: &mut App, pointer: i64) {
         self.0.reject_gesture(app, pointer);
     }
 }
@@ -67,20 +67,31 @@ impl PartialEq for MemberBox {
 ///
 /// A given [`GestureArenaMember`] can have multiple entries in multiple arenas
 /// with different pointer ids.
+///
+/// Dart's `_CombiningGestureArenaEntry implements GestureArenaEntry`. Both
+/// resolve through this type.
+type ResolveEntry = dyn Fn(&mut App, GestureDisposition);
+
+#[derive(Clone)]
 pub struct GestureArenaEntry {
-    arena: GestureArenaManager,
-    pointer: i64,
-    member: MemberBox,
+    resolve: Rc<ResolveEntry>,
 }
 
 impl GestureArenaEntry {
+    pub(crate) fn from_resolve(
+        resolve: impl Fn(&mut App, GestureDisposition) + 'static,
+    ) -> GestureArenaEntry {
+        GestureArenaEntry {
+            resolve: Rc::new(resolve),
+        }
+    }
+
     /// Call this member to claim victory (with accepted) or admit defeat (with rejected).
     ///
     /// It's fine to attempt to resolve a gesture recognizer for an arena that is
     /// already resolved.
     pub fn resolve(&self, app: &mut App, disposition: GestureDisposition) {
-        self.arena
-            .resolve(app, self.pointer, &self.member, disposition);
+        (self.resolve)(app, disposition);
     }
 }
 
@@ -190,11 +201,9 @@ impl GestureArenaManager {
             data.arenas.get_mut(&pointer).unwrap().add(member.clone());
         }
         debug_log_diagnostic(pointer, &format!("Adding: {:?}", member.member_id()), None);
-        GestureArenaEntry {
-            arena: self,
-            pointer,
-            member,
-        }
+        GestureArenaEntry::from_resolve(move |app, disposition| {
+            self.resolve(app, pointer, &member, disposition);
+        })
     }
 
     /// Prevents new members from entering the arena.

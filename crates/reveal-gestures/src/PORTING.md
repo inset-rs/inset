@@ -7,6 +7,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - constants.rs → constants.dart
 - gesture_settings.rs → gesture_settings.dart
 - gesture_details.rs → gesture_details.dart
+- recognizer.rs → OffsetPair, DragStartBehavior, MultitouchDragStrategy, GestureRecognizerState
+- tap.rs → TapDownDetails / TapUpDetails / TapMoveDetails
 
 ## events.rs → events.dart
 
@@ -62,6 +64,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Rust has no object identity for a trait object.
   Affect: implementors are Handle newtypes; return `self.0.id()`.
 
+## team.rs → team.dart
+
+- Change: [`GestureArenaTeam`](GestureArenaTeam) is a Handle newtype. [`add`](GestureArenaTeam::add) takes [`App`](reveal_foundation::App). [`captain`](GestureArenaTeam::captain) is `captain` / [`set_captain`](GestureArenaTeam::set_captain).
+  Reason: language — the team mutates App-owned combiner slots; `captain` is a `GestureArenaMember` field, not a typed Handle.
+  Affect: `GestureArenaTeam::new(app)`. `team.add(app, pointer, member)`. `team.set_captain(app, member)`.
+
 ## pointer_router.rs → pointer_router.dart
 
 - Change: [`PointerRouter`](PointerRouter) is a Handle newtype. Route methods take [`App`](reveal_foundation::App).
@@ -98,7 +106,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 - `PointerEnterEvent` / `PointerExitEvent`. Trigger: `MouseTracker`.
 - `NativeHitTestTarget`. Trigger: platform views.
-- `recognizer.dart` / `team.dart` / `tap.dart`. Trigger: next; `GestureBinding.instance` is now an App singleton.
+- `GestureRecognizer` / `OneSequenceGestureRecognizer` / `PrimaryPointerGestureRecognizer` / `BaseTapGestureRecognizer` / `TapGestureRecognizer`. Trigger: a proved inheritance encoding.
 - `_Resampler` / `SamplingClock` / `resamplingEnabled`. Trigger: a host that wants touch resampling.
 - `PointerSignalResolver`. Trigger: scroll/wheel.
 - Engine `onHitTest`. Trigger: platform views.

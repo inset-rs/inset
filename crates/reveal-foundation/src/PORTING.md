@@ -16,6 +16,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — there is no isolate event loop; a Rust `Future` would need `&mut App` in `poll`. The isolate has no drain budget — a cycle hangs.
   Affect: port `scheduleMicrotask(f)` as `app.schedule_microtask(...)`. Drain after platform events and between begin-frame and draw-frame.
 
+- Change: `dart:async` `Timer(duration, callback)` is [`Timer::new`](Timer::new). The queue lives in `timers.rs`; `App` forwards. The clock is logical: [`App::elapse`](App::elapse) fires due timers (microtasks first, then due order, microtasks after each). `Timer.periodic` is omitted.
+  Reason: language — there is no isolate event loop; tests play FakeAsync via `elapse`.
+  Affect: write `Timer::new(app, duration, Listener::new(...))`, `timer.cancel(app)`, `timer.is_active(app)`. Tests call `app.elapse(duration)`.
+
 - Change: `App` holds the host `Platform`. `App::new` uses an inert one; `with_platform` installs a live one before user code.
   Reason: platform — dart:ui is host-bound; there is no isolate global to hang it on.
   Affect: host requests and view queries go through `app.platform()`.

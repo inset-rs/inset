@@ -512,6 +512,26 @@ impl PointerEvent {
         }
     }
 
+    /// The [`delta`](Self::delta) transformed into the event receiver's local
+    /// coordinate system.
+    pub fn local_delta(&self) -> Offset {
+        match self {
+            PointerEvent::Added(e) => e.local_delta(),
+            PointerEvent::Removed(e) => e.local_delta(),
+            PointerEvent::Hover(e) => e.local_delta(),
+            PointerEvent::Down(e) => e.local_delta(),
+            PointerEvent::Move(e) => e.local_delta(),
+            PointerEvent::Up(e) => e.local_delta(),
+            PointerEvent::Cancel(e) => e.local_delta(),
+            PointerEvent::Scroll(e) => e.local_delta(),
+            PointerEvent::ScrollInertiaCancel(e) => e.local_delta(),
+            PointerEvent::Scale(e) => e.local_delta(),
+            PointerEvent::PanZoomStart(e) => e.local_delta(),
+            PointerEvent::PanZoomUpdate(e) => e.local_delta(),
+            PointerEvent::PanZoomEnd(e) => e.local_delta(),
+        }
+    }
+
     /// Distance in logical pixels that the pointer moved since the last move
     /// or hover.
     pub fn delta(&self) -> Offset {
