@@ -9,6 +9,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - gesture_details.rs → gesture_details.dart
 - recognizer.rs → OffsetPair, DragStartBehavior, MultitouchDragStrategy, GestureRecognizerState
 - tap.rs → TapDownDetails / TapUpDetails / TapMoveDetails
+- velocity.rs → Velocity / VelocityEstimate
+- lsq_solver.rs → lsq_solver.dart
+- long_press.rs → LongPressDownDetails / LongPressStartDetails / LongPressMoveUpdateDetails / LongPressEndDetails
 
 ## events.rs → events.dart
 
@@ -102,17 +105,23 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — no catchable exception; diagnostics are deferred.
   Affect: a panicking target skips the rest of the path.
 
-## recognizer.rs / tap.rs — GestureRecognizer hierarchy
+## recognizer.rs / tap.rs / long_press.rs — GestureRecognizer hierarchy
 
-One Handle on the leaf ([`TapGestureRecognizer`](TapGestureRecognizer)). Superclasses are field bags. `super` is an associated fn on a namespace, called inside the body at Dart's position. Virtuals from a superclass body call the leaf method. A second leaf must not hard-code `BaseTap` inside `PrimaryPointer`. Pattern file on the second leaf.
+Pattern: [leaf-inheritance](../../../.cursor/skills/porting-flutter/patterns/leaf-inheritance.md).
 
-- Change: [`TapGestureRecognizer`](TapGestureRecognizer) is a Handle newtype. Methods take [`App`](reveal_foundation::App). Callbacks receive [`App`].
+- Change: [`TapGestureRecognizer`](TapGestureRecognizer) / [`LongPressGestureRecognizer`](LongPressGestureRecognizer) are Handle newtypes. Methods take [`App`](reveal_foundation::App). Callbacks receive [`App`].
   Reason: language — same as other Handle newtypes; a Rust callback cannot capture what it mutates.
-  Affect: `TapGestureRecognizer::new(app)`. `tap.add_pointer(app, down)`. `tap.set_on_tap(app, |app| …)`.
+  Affect: `TapGestureRecognizer::new(app)`. `tap.add_pointer(app, down)`. `tap.set_on_tap(app, |app| …)`. Same shape on long press (`set_on_long_press`, …).
 
 - Change: `invokeCallback` does not catch panics or report `FlutterError`.
   Reason: language — no catchable exception; diagnostics are deferred.
-  Affect: a panicking `onTap` unwinds instead of logging and continuing.
+  Affect: a panicking `onTap` / `onLongPress` unwinds instead of logging and continuing.
+
+## velocity_tracker.rs → velocity_tracker.dart
+
+- Change: [`VelocityTracker`](VelocityTracker) `_sinceLastSample` is `Instant::now()`, not `GestureBinding.samplingClock.stopwatch()`.
+  Reason: language — `SamplingClock` is deferred with resampling; there is no isolate `Stopwatch` tied to FakeAsync.
+  Affect: the 40ms “pointer stopped” path follows wall time, not [`App::elapse`](reveal_foundation::App::elapse).
 
 ## Deferred
 

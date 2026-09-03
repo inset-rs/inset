@@ -609,6 +609,44 @@ impl PointerEvent {
         }
     }
 
+    /// Time of event dispatch, relative to an arbitrary timeline.
+    pub fn time_stamp(&self) -> Duration {
+        match self {
+            PointerEvent::Added(e) => e.time_stamp,
+            PointerEvent::Removed(e) => e.time_stamp,
+            PointerEvent::Hover(e) => e.time_stamp,
+            PointerEvent::Down(e) => e.time_stamp,
+            PointerEvent::Move(e) => e.time_stamp,
+            PointerEvent::Up(e) => e.time_stamp,
+            PointerEvent::Cancel(e) => e.time_stamp,
+            PointerEvent::Scroll(e) => e.time_stamp,
+            PointerEvent::ScrollInertiaCancel(e) => e.time_stamp,
+            PointerEvent::Scale(e) => e.time_stamp,
+            PointerEvent::PanZoomStart(e) => e.time_stamp,
+            PointerEvent::PanZoomUpdate(e) => e.time_stamp,
+            PointerEvent::PanZoomEnd(e) => e.time_stamp,
+        }
+    }
+
+    /// Set if the event was synthesized.
+    pub fn synthesized(&self) -> bool {
+        match self {
+            PointerEvent::Added(e) => e.synthesized,
+            PointerEvent::Removed(e) => e.synthesized,
+            PointerEvent::Hover(e) => e.synthesized,
+            PointerEvent::Down(e) => e.synthesized,
+            PointerEvent::Move(e) => e.synthesized,
+            PointerEvent::Up(e) => e.synthesized,
+            PointerEvent::Cancel(e) => e.synthesized,
+            PointerEvent::Scroll(e) => e.synthesized,
+            PointerEvent::ScrollInertiaCancel(e) => e.synthesized,
+            PointerEvent::Scale(e) => e.synthesized,
+            PointerEvent::PanZoomStart(e) => e.synthesized,
+            PointerEvent::PanZoomUpdate(e) => e.synthesized,
+            PointerEvent::PanZoomEnd(e) => e.synthesized,
+        }
+    }
+
     /// Set if the pointer is currently down.
     pub fn down(&self) -> bool {
         match self {

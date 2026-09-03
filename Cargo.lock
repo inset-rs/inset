@@ -1573,6 +1573,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reveal-rendering"
+version = "0.1.0"
+dependencies = [
+ "reveal-embedder",
+ "reveal-foundation",
+ "reveal-gestures",
+ "reveal-painting",
+]
+
+[[package]]
 name = "reveal-scheduler"
 version = "0.1.0"
 dependencies = [

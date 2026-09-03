@@ -21,6 +21,7 @@ A pattern earns a file under `patterns/` on its second instance. Until then, the
 - Mixin with fields: [patterns/mixin.md](patterns/mixin.md)
 - Handle newtype: [patterns/handle-newtype.md](patterns/handle-newtype.md)
 - Many optional fields: [patterns/many-optional-fields.md](patterns/many-optional-fields.md)
+- Leaf inheritance: [patterns/leaf-inheritance.md](patterns/leaf-inheritance.md)
 
 ## Rust traps
 
