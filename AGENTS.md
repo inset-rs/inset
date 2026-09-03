@@ -49,6 +49,8 @@ Port bottom-up so an upper layer never meets a missing dependency — that is wh
 
 When something does not fit: stop and ask. If a divergence is needed, use a proved pattern (`Handle`, a mixin-as-field, a `Drop` guard) — not a one-off workaround. A silent "seems compatible" change is a bug.
 
+When a port has tests, you can ref to cases from Flutter's matching file under `packages/flutter/test` as it's a good resource about expected behavior. While we don't aim at porting all tests if they buy us little value.
+
 ## Docs
 
 `PORTING.md` in a source folder records functional divergences from Flutter, for a reader who knows Rust and only surface Flutter. Each entry is Change / Reason / Affect. No visible Affect means Identical — omit the entry. Straight transcriptions go under `## Identical`. Empty file: omit. Format is in the porting skill.

@@ -102,11 +102,23 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — no catchable exception; diagnostics are deferred.
   Affect: a panicking target skips the rest of the path.
 
+## recognizer.rs / tap.rs — GestureRecognizer hierarchy
+
+One Handle on the leaf ([`TapGestureRecognizer`](TapGestureRecognizer)). Superclasses are field bags. `super` is an associated fn on a namespace, called inside the body at Dart's position. Virtuals from a superclass body call the leaf method. A second leaf must not hard-code `BaseTap` inside `PrimaryPointer`. Pattern file on the second leaf.
+
+- Change: [`TapGestureRecognizer`](TapGestureRecognizer) is a Handle newtype. Methods take [`App`](reveal_foundation::App). Callbacks receive [`App`].
+  Reason: language — same as other Handle newtypes; a Rust callback cannot capture what it mutates.
+  Affect: `TapGestureRecognizer::new(app)`. `tap.add_pointer(app, down)`. `tap.set_on_tap(app, |app| …)`.
+
+- Change: `invokeCallback` does not catch panics or report `FlutterError`.
+  Reason: language — no catchable exception; diagnostics are deferred.
+  Affect: a panicking `onTap` unwinds instead of logging and continuing.
+
 ## Deferred
 
 - `PointerEnterEvent` / `PointerExitEvent`. Trigger: `MouseTracker`.
 - `NativeHitTestTarget`. Trigger: platform views.
-- `GestureRecognizer` / `OneSequenceGestureRecognizer` / `PrimaryPointerGestureRecognizer` / `BaseTapGestureRecognizer` / `TapGestureRecognizer`. Trigger: a proved inheritance encoding.
+- `debugOwner` / `debugFillProperties` on recognizers. Trigger: diagnostics (F3).
 - `_Resampler` / `SamplingClock` / `resamplingEnabled`. Trigger: a host that wants touch resampling.
 - `PointerSignalResolver`. Trigger: scroll/wheel.
 - Engine `onHitTest`. Trigger: platform views.

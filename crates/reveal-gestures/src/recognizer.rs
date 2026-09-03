@@ -1,15 +1,35 @@
 //! Flutter counterpart: `gestures/recognizer.dart`.
 //!
-//! The `GestureRecognizer` class hierarchy is not here yet — Rust has no
-//! inheritance encoding proved for four abstract superclasses plus `Timer`
-//! for `deadline`. [`OffsetPair`] and the public enums are the mechanical
-//! slice.
+//! Superclass field bags live here. The leaf Handle and `super` namespaces
+//! are in [`tap`](crate::tap) until a second leaf needs the generic form.
 
+use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::rc::Rc;
+use std::time::Duration;
 
-use reveal_embedder::Offset;
+use reveal_embedder::{Offset, PointerDeviceKind};
+use reveal_foundation::Timer;
 
+use crate::arena::GestureArenaEntry;
 use crate::events::PointerEvent;
+use crate::gesture_settings::DeviceGestureSettings;
+use crate::team::GestureArenaTeam;
+
+/// Signature for [`GestureRecognizerData::allowed_buttons_filter`].
+///
+/// Used to filter the input buttons of incoming pointer events.
+/// The parameter `buttons` comes from `PointerEvent.buttons`.
+pub type AllowedButtonsFilter = Rc<dyn Fn(i64) -> bool>;
+
+/// `-1` is used as a sentinel value to indicate no touch slop was specified.
+pub(crate) const UNSET_TOUCH_SLOP: f64 = -1.0;
+
+/// The default value for `allowedButtonsFilter`.
+/// Accept any input.
+pub(crate) fn default_button_accept_behavior(_buttons: i64) -> bool {
+    true
+}
 
 /// Configuration of offset passed to `DragStartDetails`.
 ///
@@ -85,6 +105,96 @@ pub enum GestureRecognizerState {
     /// gesture until the recognizer returns to the [`Ready`](Self::Ready) state (typically when
     /// all the pointers the recognizer is tracking are removed from the screen).
     Defunct,
+}
+
+/// Data associated with a pointer event.
+///
+/// This is stored by `GestureRecognizer`s on a per-pointer basis.
+#[derive(Clone, Copy)]
+pub(crate) struct RecognizerEventData {
+    pub kind: PointerDeviceKind,
+    pub buttons: i64,
+}
+
+/// Field bag for Dart's `GestureRecognizer`.
+pub(crate) struct GestureRecognizerData {
+    pub gesture_settings: Option<DeviceGestureSettings>,
+    pub supported_devices: Option<HashSet<PointerDeviceKind>>,
+    pub allowed_buttons_filter: AllowedButtonsFilter,
+    pub pointer_to_event_data: HashMap<i64, RecognizerEventData>,
+}
+
+impl GestureRecognizerData {
+    pub(crate) fn new() -> GestureRecognizerData {
+        GestureRecognizerData {
+            gesture_settings: None,
+            supported_devices: None,
+            allowed_buttons_filter: Rc::new(default_button_accept_behavior),
+            pointer_to_event_data: HashMap::new(),
+        }
+    }
+}
+
+/// Field bag for Dart's `OneSequenceGestureRecognizer`.
+pub(crate) struct OneSequenceData {
+    pub entries: HashMap<i64, GestureArenaEntry>,
+    pub tracked_pointers: HashSet<i64>,
+    pub team: Option<GestureArenaTeam>,
+}
+
+impl OneSequenceData {
+    pub(crate) fn new() -> OneSequenceData {
+        OneSequenceData {
+            entries: HashMap::new(),
+            tracked_pointers: HashSet::new(),
+            team: None,
+        }
+    }
+}
+
+/// Field bag for Dart's `PrimaryPointerGestureRecognizer`.
+pub(crate) struct PrimaryPointerData {
+    pub deadline: Option<Duration>,
+    pub pre_accept_slop_tolerance: Option<f64>,
+    pub post_accept_slop_tolerance: Option<f64>,
+    pub state: GestureRecognizerState,
+    pub primary_pointer: Option<i64>,
+    pub initial_position: Option<OffsetPair>,
+    pub gesture_accepted: bool,
+    pub timer: Option<Timer>,
+    pub deadline_event: Option<crate::events::PointerDownEvent>,
+}
+
+impl PrimaryPointerData {
+    pub(crate) fn new(
+        deadline: Option<Duration>,
+        pre_accept_slop_tolerance: Option<f64>,
+        post_accept_slop_tolerance: Option<f64>,
+    ) -> PrimaryPointerData {
+        debug_assert!(
+            pre_accept_slop_tolerance == Some(UNSET_TOUCH_SLOP)
+                || pre_accept_slop_tolerance.is_none()
+                || pre_accept_slop_tolerance.is_some_and(|value| value >= 0.0),
+            "The preAcceptSlopTolerance must be unspecified, positive, or null"
+        );
+        debug_assert!(
+            post_accept_slop_tolerance == Some(UNSET_TOUCH_SLOP)
+                || post_accept_slop_tolerance.is_none()
+                || post_accept_slop_tolerance.is_some_and(|value| value >= 0.0),
+            "The postAcceptSlopTolerance must be unspecified, positive, or null"
+        );
+        PrimaryPointerData {
+            deadline,
+            pre_accept_slop_tolerance,
+            post_accept_slop_tolerance,
+            state: GestureRecognizerState::Ready,
+            primary_pointer: None,
+            initial_position: None,
+            gesture_accepted: false,
+            timer: None,
+            deadline_event: None,
+        }
+    }
 }
 
 /// A container for a [`local`](Self::local) and [`global`](Self::global) [`Offset`] pair.
