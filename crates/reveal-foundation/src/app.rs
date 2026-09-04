@@ -49,12 +49,20 @@ pub struct Handle<T> {
 }
 
 impl<T> Handle<T> {
-    /// Unchecked. Only [`App::create`] mints these; [`App::handle`] is the checked path.
+    /// Unchecked. [`App::create`] mints these; [`App::handle`] is the checked path and
+    /// [`from_id`](Self::from_id) the trusted one.
     fn new(id: HandleId) -> Handle<T> {
         Handle {
             id,
             state: PhantomData,
         }
+    }
+
+    /// Wraps an id that was minted for `T` without looking at the slot. The check is deferred to
+    /// [`App::get`], which panics on a stale or wrong-typed id. For an erased edge that
+    /// reconstructs the typed handle it was made from.
+    pub fn from_id(id: HandleId) -> Handle<T> {
+        Handle::new(id)
     }
 
     pub fn id(self) -> HandleId {
@@ -497,5 +505,24 @@ mod tests {
         assert!(!timer.is_active(&app));
         app.elapse(Duration::from_millis(10));
         assert_eq!(app.get(counter).0, 0);
+    }
+    #[test]
+    fn from_id_reads_like_the_minted_handle() {
+        let mut app = App::new();
+        let minted = app.create(Counter(7));
+        let rebuilt = Handle::<Counter>::from_id(minted.id());
+        assert_eq!(rebuilt, minted);
+        assert_eq!(app.get(rebuilt).0, 7);
+    }
+
+    #[test]
+    #[should_panic(expected = "stale handle")]
+    fn from_id_defers_the_stale_check_to_get() {
+        let mut app = App::new();
+        let minted = app.create(Counter(0));
+        let id = minted.id();
+        app.destroy(minted);
+        let rebuilt = Handle::<Counter>::from_id(id);
+        app.get(rebuilt);
     }
 }

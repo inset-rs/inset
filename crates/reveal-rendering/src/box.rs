@@ -1,14 +1,19 @@
-//! Flutter counterpart: `rendering/box.dart` (`BoxConstraints` only).
+//! Flutter counterpart: `rendering/box.dart` (`BoxConstraints`, `RenderBox`
+//! layout wrapper).
 //!
-//! `RenderBox` / `_DebugSize` / `BoxHitTestResult` wait on `RenderObject`.
+//! `_DebugSize` / `BoxHitTestResult` / `computeDryLayout` wait.
 
 use std::fmt::{self, Debug, Display};
 use std::hash::{Hash, Hasher};
 
-use reveal_embedder::{Size, ViewConstraints, clamp_double, lerp_double};
+use reveal_embedder::{Offset, Size, ViewConstraints, clamp_double, lerp_double};
+use reveal_foundation::{App, HandleId};
 use reveal_painting::EdgeInsetsGeometry;
 
-use crate::object::Constraints;
+use crate::object::{
+    AnyRenderObject, Constraints, RenderHandle, RenderObject, RenderObjectVTable, create, resolve,
+};
+use crate::pipeline_owner::PipelineOwner;
 
 /// Immutable layout constraints for `RenderBox` layout.
 ///
@@ -651,6 +656,339 @@ impl Display for BoxConstraints {
 impl Debug for BoxConstraints {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Display::fmt(self, f)
+    }
+}
+
+/// Parent data used by [`RenderBox`] and its subclasses.
+#[derive(Clone, Copy, Debug)]
+pub struct BoxParentData {
+    /// The offset at which to paint the child in the parent's coordinate system.
+    pub offset: Offset,
+}
+
+impl BoxParentData {
+    /// Creates box parent data with a zero offset.
+    pub const fn new() -> BoxParentData {
+        BoxParentData {
+            offset: Offset::ZERO,
+        }
+    }
+}
+
+impl Default for BoxParentData {
+    fn default() -> BoxParentData {
+        BoxParentData::new()
+    }
+}
+
+impl crate::object::ParentData for BoxParentData {}
+
+impl fmt::Display for BoxParentData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "offset={:?}", self.offset)
+    }
+}
+
+/// Flutter's `RenderBox` fields.
+pub struct RenderBoxData {
+    pub(crate) size: Option<Size>,
+    pub(crate) constraints: Option<BoxConstraints>,
+}
+
+impl RenderBoxData {
+    /// Unlaid-out box state.
+    pub fn new() -> RenderBoxData {
+        RenderBoxData {
+            size: None,
+            constraints: None,
+        }
+    }
+}
+
+impl Default for RenderBoxData {
+    fn default() -> RenderBoxData {
+        RenderBoxData::new()
+    }
+}
+
+/// Implements [`RenderBox`] field accessors for a `render_box` field.
+#[macro_export]
+macro_rules! render_box_accessors {
+    () => {
+        fn render_box_data(
+            self: $crate::RenderHandle<Self>,
+            app: &::reveal_foundation::App,
+        ) -> &$crate::RenderBoxData {
+            &self.get(app).render_box
+        }
+        fn render_box_data_mut(
+            self: $crate::RenderHandle<Self>,
+            app: &mut ::reveal_foundation::App,
+        ) -> &mut $crate::RenderBoxData {
+            &mut self.get_mut(app).render_box
+        }
+    };
+}
+
+/// Flutter's `RenderObjectWithChildMixin` when the child is a box.
+pub trait RenderObjectWithChildMixin: RenderBox {
+    /// Mixin field access.
+    fn child_data(
+        self: RenderHandle<Self>,
+        app: &App,
+    ) -> &crate::object::RenderObjectWithChildData<AnyRenderBox>;
+
+    /// See [`child_data`](Self::child_data).
+    fn child_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut crate::object::RenderObjectWithChildData<AnyRenderBox>;
+
+    /// The render object's unique child.
+    fn child(self: RenderHandle<Self>, app: &App) -> Option<AnyRenderBox> {
+        self.child_data(app).child
+    }
+
+    /// Sets the unique child, adopting or dropping as Flutter's setter does.
+    fn set_child(self: RenderHandle<Self>, app: &mut App, value: Option<AnyRenderBox>) {
+        if let Some(old) = self.child(app) {
+            self.drop_child(app, old.as_object());
+        }
+        self.child_data_mut(app).child = value;
+        if let Some(new) = value {
+            self.adopt_child(app, new.as_object());
+        }
+    }
+}
+
+/// A render object in a 2D Cartesian coordinate system.
+///
+/// Flutter's counterpart is `RenderBox`. [`RenderObject::perform_layout`] is the leaf override;
+/// [`AnyRenderBox::layout`] is the framework wrapper. `RenderObject`'s tree operations are
+/// provided here and forward to [`as_object`](Self::as_object).
+pub trait RenderBox: RenderObject {
+    /// Mixin field access.
+    fn render_box_data(self: RenderHandle<Self>, app: &App) -> &RenderBoxData;
+
+    /// See [`render_box_data`](Self::render_box_data).
+    fn render_box_data_mut(self: RenderHandle<Self>, app: &mut App) -> &mut RenderBoxData;
+
+    /// The box constraints most recently supplied by the parent.
+    ///
+    /// # Panics
+    ///
+    /// If layout has not yet happened.
+    fn constraints(self: RenderHandle<Self>, app: &App) -> BoxConstraints {
+        self.render_box_data(app).constraints.unwrap_or_else(|| {
+            panic!("A RenderObject does not have any constraints before it has been laid out.")
+        })
+    }
+
+    /// Installs [`BoxParentData`] unless the child already has it.
+    ///
+    /// The box default for [`RenderObject::setup_parent_data`]; override it here.
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        if !child.parent_data_is::<BoxParentData>(app) {
+            child.set_parent_data(app, BoxParentData::new());
+        }
+    }
+
+    /// The size of this box.
+    fn size(self: RenderHandle<Self>, app: &App) -> Size {
+        self.as_box().size(app)
+    }
+
+    /// Sets the size of this box. Call from [`RenderObject::perform_layout`] or
+    /// [`RenderObject::perform_resize`].
+    fn set_size(self: RenderHandle<Self>, app: &mut App, size: Size) {
+        self.as_box().set_size(app, size)
+    }
+
+    /// See [`AnyRenderBox::layout`].
+    fn layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        parent_uses_size: bool,
+    ) {
+        self.as_box().layout(app, constraints, parent_uses_size)
+    }
+
+    /// The erased `RenderBox` edge. Free: the vtable is a `const`, and the id is copied.
+    fn as_box(self: RenderHandle<Self>) -> AnyRenderBox {
+        AnyRenderBox {
+            id: self.id(),
+            vtable: const { &RenderBoxVTable::of::<Self>() },
+        }
+    }
+
+    /// The erased `RenderObject` edge, through [`as_box`](Self::as_box).
+    fn as_object(self: RenderHandle<Self>) -> AnyRenderObject {
+        self.as_box().as_object()
+    }
+
+    /// See [`AnyRenderObject::adopt_child`].
+    fn adopt_child(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        self.as_object().adopt_child(app, child)
+    }
+
+    /// See [`AnyRenderObject::drop_child`].
+    fn drop_child(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        self.as_object().drop_child(app, child)
+    }
+
+    /// See [`AnyRenderObject::mark_needs_layout`].
+    fn mark_needs_layout(self: RenderHandle<Self>, app: &mut App) {
+        self.as_object().mark_needs_layout(app)
+    }
+
+    /// See [`AnyRenderObject::schedule_initial_layout`].
+    fn schedule_initial_layout(self: RenderHandle<Self>, app: &mut App) {
+        self.as_object().schedule_initial_layout(app)
+    }
+
+    /// See [`AnyRenderObject::parent`].
+    fn parent(self: RenderHandle<Self>, app: &App) -> Option<AnyRenderObject> {
+        self.as_object().parent(app)
+    }
+
+    /// See [`AnyRenderObject::owner`].
+    fn owner(self: RenderHandle<Self>, app: &App) -> Option<PipelineOwner> {
+        self.as_object().owner(app)
+    }
+
+    /// See [`AnyRenderObject::attached`].
+    fn attached(self: RenderHandle<Self>, app: &App) -> bool {
+        self.as_object().attached(app)
+    }
+
+    /// See [`AnyRenderObject::debug_needs_layout`].
+    fn debug_needs_layout(self: RenderHandle<Self>, app: &App) -> bool {
+        self.as_object().debug_needs_layout(app)
+    }
+}
+
+/// The vtable of an [`AnyRenderBox`]: the object vtable plus the box accessors.
+pub(crate) struct RenderBoxVTable {
+    pub object: RenderObjectVTable,
+    pub box_data: fn(&App, HandleId) -> &RenderBoxData,
+    pub box_data_mut: fn(&mut App, HandleId) -> &mut RenderBoxData,
+}
+
+impl RenderBoxVTable {
+    const fn of<T: RenderBox>() -> RenderBoxVTable {
+        RenderBoxVTable {
+            object: RenderObjectVTable::of::<T>(
+                |app, id, child| <T as RenderBox>::setup_parent_data(resolve(id), app, child),
+                Some(|| const { &RenderBoxVTable::of::<T>() }),
+                None,
+            ),
+            box_data: |app, id| T::render_box_data(resolve(id), app),
+            box_data_mut: |app, id| T::render_box_data_mut(resolve(id), app),
+        }
+    }
+}
+
+impl<T: RenderBox> RenderHandle<T> {
+    /// Creates a box-protocol render object in `app`.
+    pub fn new_box(app: &mut App, object: T) -> RenderHandle<T> {
+        create(app, object)
+    }
+}
+
+/// Erased `RenderBox`.
+#[derive(Clone, Copy)]
+pub struct AnyRenderBox {
+    id: HandleId,
+    vtable: &'static RenderBoxVTable,
+}
+
+impl PartialEq for AnyRenderBox {
+    fn eq(&self, other: &AnyRenderBox) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for AnyRenderBox {}
+
+impl std::hash::Hash for AnyRenderBox {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl Debug for AnyRenderBox {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "AnyRenderBox({:?})", self.id)
+    }
+}
+
+impl AnyRenderBox {
+    pub(crate) fn from_vtable(id: HandleId, vtable: &'static RenderBoxVTable) -> AnyRenderBox {
+        AnyRenderBox { id, vtable }
+    }
+
+    /// The `RenderObject` view of this box. Free: points into the nested table.
+    pub fn as_object(self) -> AnyRenderObject {
+        AnyRenderObject::from_vtable(self.id, &self.vtable.object)
+    }
+
+    fn box_data(self, app: &App) -> &RenderBoxData {
+        (self.vtable.box_data)(app, self.id)
+    }
+
+    fn box_data_mut(self, app: &mut App) -> &mut RenderBoxData {
+        (self.vtable.box_data_mut)(app, self.id)
+    }
+
+    /// Compute the layout for this box.
+    pub fn layout(self, app: &mut App, constraints: BoxConstraints, parent_uses_size: bool) {
+        debug_assert!(constraints.debug_assert_is_valid(true));
+        let same = self.box_data(app).constraints == Some(constraints);
+        self.as_object()
+            .run_layout(app, parent_uses_size, constraints.is_tight(), same, |app| {
+                self.box_data_mut(app).constraints = Some(constraints)
+            });
+    }
+
+    /// The size of this box.
+    ///
+    /// # Panics
+    ///
+    /// If this box has not been laid out.
+    pub fn size(self, app: &App) -> Size {
+        self.box_data(app)
+            .size
+            .unwrap_or_else(|| panic!("RenderBox was not laid out: {self:?}"))
+    }
+
+    /// Sets the size of this box.
+    pub fn set_size(self, app: &mut App, size: Size) {
+        self.box_data_mut(app).size = Some(size);
+    }
+
+    /// [`BoxParentData`] stored on this child by its box parent.
+    pub fn box_parent_data(self, app: &App) -> &BoxParentData {
+        self.as_object().parent_data_of(app)
+    }
+
+    /// See [`AnyRenderObject::parent_data_of_mut`].
+    pub fn parent_data_of_mut<P: crate::object::ParentData + 'static>(
+        self,
+        app: &mut App,
+    ) -> &mut P {
+        self.as_object().parent_data_of_mut(app)
+    }
+
+    /// See [`AnyRenderObject::parent_data_is`].
+    pub fn parent_data_is<P: crate::object::ParentData + 'static>(self, app: &App) -> bool {
+        self.as_object().parent_data_is::<P>(app)
+    }
+}
+
+impl From<AnyRenderBox> for AnyRenderObject {
+    fn from(box_: AnyRenderBox) -> AnyRenderObject {
+        box_.as_object()
     }
 }
 
