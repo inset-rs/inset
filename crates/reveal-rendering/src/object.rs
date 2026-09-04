@@ -1,9 +1,10 @@
 //! Flutter counterpart: `rendering/object.dart` (`Constraints`, `ParentData`,
-//! `RenderObject` tree / layout marks).
+//! `RenderObject` tree / layout / paint marks). `PaintingContext` is in
+//! `painting_context.rs`, `PipelineOwner` in `pipeline_owner.rs`.
 //!
-//! [`PaintingContext`], layers, compositing, and semantics wait. A concrete
-//! node is [`RenderHandle<T>`] over the authored struct. Tree edges are
-//! [`AnyRenderObject`]. Authored methods take `self: RenderHandle<Self>`.
+//! Semantics wait. A concrete node is [`RenderHandle<T>`] over the authored
+//! struct. Tree edges are [`AnyRenderObject`]. Authored methods take
+//! `self: RenderHandle<Self>`.
 
 use std::any::Any;
 use std::cell::Cell;
@@ -11,12 +12,16 @@ use std::fmt::{self, Debug, Display};
 use std::hash::{Hash, Hasher};
 use std::ops::Receiver;
 
+use reveal_embedder::{Offset, Rect};
 use reveal_foundation::{App, Handle, HandleId};
 
+use crate::layer::{BoundaryLayer, CompositedLayer};
+use crate::painting_context::PaintingContext;
 use crate::pipeline_owner::PipelineOwner;
 
 thread_local! {
     static DEBUG_ACTIVE_LAYOUT: Cell<Option<AnyRenderObject>> = const { Cell::new(None) };
+    static DEBUG_ACTIVE_PAINT: Cell<Option<AnyRenderObject>> = const { Cell::new(None) };
 }
 
 /// Immutable layout constraints.
@@ -69,10 +74,15 @@ pub struct RenderObjectData {
     pub(crate) parent_data: Option<Box<dyn ParentData>>,
     pub(crate) needs_layout: bool,
     pub(crate) needs_paint: bool,
+    pub(crate) needs_composited_layer_update: bool,
+    pub(crate) was_repaint_boundary: bool,
+    /// Flutter's `_layerHandle`: the repaint boundary's layer, `None` until first painted.
+    pub(crate) layer: Option<BoundaryLayer>,
     pub(crate) is_relayout_boundary: Option<bool>,
     pub(crate) doing_this_layout_with_callback: bool,
     pub(crate) debug_doing_this_layout: bool,
     pub(crate) debug_doing_this_resize: bool,
+    pub(crate) debug_doing_this_paint: bool,
     pub(crate) debug_can_parent_use_size: Option<bool>,
     pub(crate) debug_mutations_locked: bool,
 }
@@ -87,10 +97,14 @@ impl RenderObjectData {
             parent_data: None,
             needs_layout: true,
             needs_paint: true,
+            needs_composited_layer_update: false,
+            was_repaint_boundary: false,
+            layer: None,
             is_relayout_boundary: None,
             doing_this_layout_with_callback: false,
             debug_doing_this_layout: false,
             debug_doing_this_resize: false,
+            debug_doing_this_paint: false,
             debug_can_parent_use_size: None,
             debug_mutations_locked: false,
         }
@@ -203,6 +217,46 @@ pub trait RenderObject: 'static + Sized {
         let _ = self;
         false
     }
+
+    /// Whether this render object repaints separately from its parent.
+    ///
+    /// A repaint boundary composites its own recording through
+    /// [`update_composited_layer`](Self::update_composited_layer): repainting it does not repaint
+    /// the parent, and repainting the parent reuses its recording. The value may change only when
+    /// the parent is also marked for paint (see `RenderOpacity`).
+    fn is_repaint_boundary(self: RenderHandle<Self>, _app: &App) -> bool {
+        let _ = self;
+        false
+    }
+
+    /// Update the composited layer owned by this render object.
+    ///
+    /// Called on repaint boundaries only: when the boundary repaints, and after
+    /// [`AnyRenderObject::mark_needs_composited_layer_update`] without a repaint. Return
+    /// `old_layer` with its properties updated, or a new layer when `old_layer` is `None`. The
+    /// offset belongs to the parent; do not change it.
+    fn update_composited_layer(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        old_layer: Option<CompositedLayer>,
+    ) -> CompositedLayer {
+        debug_assert!(self.is_repaint_boundary(app));
+        old_layer.unwrap_or_default()
+    }
+
+    /// Paint this render object into the given context at the given offset.
+    ///
+    /// Do not call this function directly: [`PaintingContext::paint_child`] does. Paint children
+    /// with `context.paint_child(app, child, offset + child_offset)`; do not use the canvas to
+    /// translate, and do not use it after painting a child.
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        let _ = (self, app, context, offset);
+    }
 }
 
 fn collect_children<T: RenderObject>(app: &App, this: RenderHandle<T>) -> Vec<AnyRenderObject> {
@@ -312,15 +366,21 @@ pub(crate) struct RenderObjectVTable {
     pub sized_by_parent: fn(&App, HandleId) -> bool,
     pub perform_layout: fn(&mut App, HandleId),
     pub perform_resize: fn(&mut App, HandleId),
+    pub paint_bounds: fn(&App, HandleId) -> Rect,
+    pub is_repaint_boundary: fn(&App, HandleId) -> bool,
+    pub update_composited_layer: fn(&mut App, HandleId, Option<CompositedLayer>) -> CompositedLayer,
+    pub paint: fn(&mut App, HandleId, &mut PaintingContext, Offset),
     /// The protocol table this object table is nested in. Exactly one is `Some`.
     pub as_box: Option<fn() -> &'static crate::box_::RenderBoxVTable>,
     pub as_sliver: Option<fn() -> &'static crate::sliver::RenderSliverVTable>,
 }
 
 impl RenderObjectVTable {
-    /// `setup_parent_data` is passed in because the box protocol has its own default.
+    /// `setup_parent_data` is passed in because the box protocol has its own default;
+    /// `paint_bounds` because each protocol defines it.
     pub(crate) const fn of<T: RenderObject>(
         setup_parent_data: fn(&mut App, HandleId, AnyRenderObject),
+        paint_bounds: fn(&App, HandleId) -> Rect,
         as_box: Option<fn() -> &'static crate::box_::RenderBoxVTable>,
         as_sliver: Option<fn() -> &'static crate::sliver::RenderSliverVTable>,
     ) -> RenderObjectVTable {
@@ -335,6 +395,12 @@ impl RenderObjectVTable {
             sized_by_parent: |app, id| T::sized_by_parent(resolve(id), app),
             perform_layout: |app, id| T::perform_layout(resolve(id), app),
             perform_resize: |app, id| T::perform_resize(resolve(id), app),
+            paint_bounds,
+            is_repaint_boundary: |app, id| T::is_repaint_boundary(resolve(id), app),
+            update_composited_layer: |app, id, old_layer| {
+                T::update_composited_layer(resolve(id), app, old_layer)
+            },
+            paint: |app, id, context, offset| T::paint(resolve(id), app, context, offset),
             as_box,
             as_sliver,
         }
@@ -402,6 +468,13 @@ impl AnyRenderObject {
 
     pub(crate) fn set_debug_active_layout(node: Option<AnyRenderObject>) {
         DEBUG_ACTIVE_LAYOUT.set(node);
+    }
+
+    /// The render object that is actively painting.
+    ///
+    /// Only meaningful when asserts are enabled.
+    pub fn debug_active_paint() -> Option<AnyRenderObject> {
+        DEBUG_ACTIVE_PAINT.get()
     }
 
     fn data(self, app: &App) -> &RenderObjectData {
@@ -614,6 +687,10 @@ impl AnyRenderObject {
             self.set_needs_layout(app, false);
             self.mark_needs_layout(app);
         }
+        if self.needs_paint(app) && self.layer(app).is_some() {
+            self.set_needs_paint(app, false);
+            self.mark_needs_paint(app);
+        }
         (self.vtable.did_attach)(app, self.id, owner)
     }
 
@@ -783,9 +860,234 @@ impl AnyRenderObject {
         self.mark_needs_paint(app);
     }
 
-    /// Marks this node as needing paint. Paint flushing is not in this slice.
+    // ---- paint ------------------------------------------------------------------------------
+
+    pub(crate) fn needs_paint(self, app: &App) -> bool {
+        self.data(app).needs_paint
+    }
+
+    fn set_needs_paint(self, app: &mut App, value: bool) {
+        self.data_mut(app).needs_paint = value;
+    }
+
+    /// Whether this render object's paint information is dirty.
+    ///
+    /// Always `false` when debug assertions are disabled.
+    pub fn debug_needs_paint(self, app: &App) -> bool {
+        if !cfg!(debug_assertions) {
+            return false;
+        }
+        self.needs_paint(app)
+    }
+
+    pub(crate) fn needs_composited_layer_update(self, app: &App) -> bool {
+        self.data(app).needs_composited_layer_update
+    }
+
+    pub(crate) fn set_needs_composited_layer_update(self, app: &mut App, value: bool) {
+        self.data_mut(app).needs_composited_layer_update = value;
+    }
+
+    /// Whether this render object's layer information is dirty.
+    ///
+    /// Always `false` when debug assertions are disabled.
+    pub fn debug_needs_composited_layer_update(self, app: &App) -> bool {
+        if !cfg!(debug_assertions) {
+            return false;
+        }
+        self.needs_composited_layer_update(app)
+    }
+
+    pub(crate) fn was_repaint_boundary(self, app: &App) -> bool {
+        self.data(app).was_repaint_boundary
+    }
+
+    /// Whether this render object repaints separately from its parent.
+    pub fn is_repaint_boundary(self, app: &App) -> bool {
+        (self.vtable.is_repaint_boundary)(app, self.id)
+    }
+
+    /// An estimate of the bounds within which this render object will paint.
+    pub fn paint_bounds(self, app: &App) -> Rect {
+        (self.vtable.paint_bounds)(app, self.id)
+    }
+
+    /// See [`RenderObject::update_composited_layer`].
+    pub fn update_composited_layer(
+        self,
+        app: &mut App,
+        old_layer: Option<CompositedLayer>,
+    ) -> CompositedLayer {
+        (self.vtable.update_composited_layer)(app, self.id, old_layer)
+    }
+
+    pub(crate) fn layer(self, app: &App) -> Option<&BoundaryLayer> {
+        self.data(app).layer.as_ref()
+    }
+
+    pub(crate) fn layer_mut(self, app: &mut App) -> Option<&mut BoundaryLayer> {
+        self.data_mut(app).layer.as_mut()
+    }
+
+    pub(crate) fn set_layer(self, app: &mut App, layer: Option<BoundaryLayer>) {
+        self.data_mut(app).layer = layer;
+    }
+
+    /// In debug mode, the layer of this repaint boundary. Always `None` when debug assertions
+    /// are disabled.
+    pub fn debug_layer(self, app: &App) -> Option<&BoundaryLayer> {
+        if !cfg!(debug_assertions) {
+            return None;
+        }
+        self.layer(app)
+    }
+
+    /// Mark this render object as having changed its visual appearance.
+    ///
+    /// Rather than eagerly updating this render object's display list in response to writes,
+    /// we instead mark the render object as needing to paint, which schedules a visual update.
+    /// As part of the visual update, the rendering pipeline will give this render object an
+    /// opportunity to update its display list.
     pub fn mark_needs_paint(self, app: &mut App) {
-        self.data_mut(app).needs_paint = true;
+        debug_assert!(
+            self.owner(app)
+                .is_none_or(|owner| !owner.debug_doing_paint(app))
+        );
+        if self.needs_paint(app) {
+            return;
+        }
+        self.set_needs_paint(app, true);
+        if self.is_repaint_boundary(app) && self.was_repaint_boundary(app) {
+            if crate::debug::debug_print_mark_needs_paint_stacks() {
+                eprintln!("markNeedsPaint() called for {self:?}");
+            }
+            debug_assert!(self.layer(app).is_some());
+            if let Some(owner) = self.owner(app) {
+                owner.add_node_needing_paint(app, self);
+                owner.request_visual_update(app);
+            }
+        } else if let Some(parent) = self.parent(app) {
+            parent.mark_needs_paint(app);
+        } else {
+            if crate::debug::debug_print_mark_needs_paint_stacks() {
+                eprintln!("markNeedsPaint() called for {self:?} (root of render tree)");
+            }
+            if let Some(owner) = self.owner(app) {
+                owner.request_visual_update(app);
+            }
+        }
+    }
+
+    /// Mark this render object as having changed a property on its composited layer.
+    ///
+    /// Render objects that have a composited layer have their [`layer`](Self::debug_layer)
+    /// updated through [`RenderObject::update_composited_layer`] without repainting their
+    /// children.
+    pub fn mark_needs_composited_layer_update(self, app: &mut App) {
+        debug_assert!(
+            self.owner(app)
+                .is_none_or(|owner| !owner.debug_doing_paint(app))
+        );
+        if self.needs_composited_layer_update(app) || self.needs_paint(app) {
+            return;
+        }
+        self.set_needs_composited_layer_update(app, true);
+        if self.is_repaint_boundary(app) && self.was_repaint_boundary(app) {
+            debug_assert!(self.layer(app).is_some());
+            if let Some(owner) = self.owner(app) {
+                owner.add_node_needing_paint(app, self);
+                owner.request_visual_update(app);
+            }
+        } else {
+            self.mark_needs_paint(app);
+        }
+    }
+
+    /// Flutter's `_skippedPaintingOnLayer`: this boundary's layer is detached, so the first
+    /// attached ancestor boundary will repaint it when it repaints.
+    pub(crate) fn skipped_painting_on_layer(self, app: &mut App) {
+        debug_assert!(self.attached(app));
+        debug_assert!(self.is_repaint_boundary(app));
+        debug_assert!(self.needs_paint(app) || self.needs_composited_layer_update(app));
+        debug_assert!(self.layer(app).is_some_and(|layer| !layer.attached));
+        let mut node = self.parent(app);
+        while let Some(current) = node {
+            if current.is_repaint_boundary(app) {
+                match current.layer(app) {
+                    None => break,
+                    Some(layer) if layer.attached => break,
+                    Some(_) => current.set_needs_paint(app, true),
+                }
+            }
+            node = current.parent(app);
+        }
+    }
+
+    /// Bootstrap the rendering pipeline by scheduling the very first paint.
+    ///
+    /// Requires that this render object is attached, is the root of the render tree, and has a
+    /// composited layer. `root_layer` is attached: it is the layer the host composes.
+    pub fn schedule_initial_paint(self, app: &mut App, root_layer: CompositedLayer) {
+        debug_assert!(self.attached(app));
+        debug_assert!(self.parent(app).is_none());
+        debug_assert!(!self.owner(app).expect("attached").debug_doing_paint(app));
+        debug_assert!(self.is_repaint_boundary(app));
+        debug_assert!(self.layer(app).is_none());
+        self.set_layer(app, Some(BoundaryLayer::new(root_layer, true)));
+        debug_assert!(self.needs_paint(app));
+        let owner = self.owner(app).expect("attached");
+        owner.add_node_needing_paint(app, self);
+    }
+
+    /// Replace the layer. This is only valid for the root of a render object subtree (whatever
+    /// object [`schedule_initial_paint`](Self::schedule_initial_paint) was called on).
+    pub fn replace_root_layer(self, app: &mut App, root_layer: CompositedLayer) {
+        debug_assert!(self.attached(app));
+        debug_assert!(self.parent(app).is_none());
+        debug_assert!(!self.owner(app).expect("attached").debug_doing_paint(app));
+        debug_assert!(self.is_repaint_boundary(app));
+        debug_assert!(
+            self.layer(app).is_some(),
+            "use schedule_initial_paint the first time"
+        );
+        self.detach_layer(app);
+        self.set_layer(app, Some(BoundaryLayer::new(root_layer, true)));
+        self.mark_needs_paint(app);
+    }
+
+    /// Flutter's `_paintWithContext`: the framework wrapper around the `paint` virtual.
+    pub(crate) fn paint_with_context(
+        self,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        debug_assert!(
+            !self.data(app).debug_doing_this_paint,
+            "Tried to paint a RenderObject reentrantly: {self:?}"
+        );
+        if self.needs_layout(app) {
+            return;
+        }
+        let debug_last_active_paint = if cfg!(debug_assertions) {
+            self.data_mut(app).debug_doing_this_paint = true;
+            let previous = DEBUG_ACTIVE_PAINT.replace(Some(self));
+            debug_assert!(!self.is_repaint_boundary(app) || self.layer(app).is_some());
+            previous
+        } else {
+            None
+        };
+        self.set_needs_paint(app, false);
+        self.set_needs_composited_layer_update(app, false);
+        let is_repaint_boundary = self.is_repaint_boundary(app);
+        self.data_mut(app).was_repaint_boundary = is_repaint_boundary;
+        (self.vtable.paint)(app, self.id, context, offset);
+        debug_assert!(!self.needs_layout(app));
+        debug_assert!(!self.needs_paint(app));
+        if cfg!(debug_assertions) {
+            DEBUG_ACTIVE_PAINT.set(debug_last_active_paint);
+            self.data_mut(app).debug_doing_this_paint = false;
+        }
     }
 }
 

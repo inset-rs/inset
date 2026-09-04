@@ -8,7 +8,9 @@
 #[path = "box.rs"]
 mod box_;
 mod debug;
+mod layer;
 mod object;
+mod painting_context;
 mod pipeline_owner;
 mod proxy_box;
 mod shifted_box;
@@ -17,7 +19,9 @@ mod viewport_offset;
 
 pub use box_::*;
 pub use debug::*;
+pub use layer::*;
 pub use object::*;
+pub use painting_context::*;
 pub use pipeline_owner::*;
 pub use proxy_box::*;
 pub use shifted_box::*;

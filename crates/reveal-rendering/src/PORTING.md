@@ -12,71 +12,71 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## debug.rs → debug.dart
 
-- Change: `debug_*` / `set_debug_*` instead of assigning a library `bool`.
-  Reason: language — Rust has no isolate-global assignable `bool` binding.
+- Change: `debug_*` / `set_debug_*` functions instead of assigning a library `bool`.
+  Reason: language — Rust has no isolate-global assignable `bool`.
   Affect: call the setter; the getter is the Dart read.
 
 ## object.rs → object.dart (RenderObject)
 
-- Change: a concrete node is `RenderHandle<T>` over the authored struct. Tree edges are `AnyRenderObject` / `AnyRenderBox` / `AnyRenderSliver` (`HandleId` + a `&'static` vtable built per type from the trait impl). Methods take `self: RenderHandle<Self>` ([`arbitrary_self_types`](https://github.com/rust-lang/rust/issues/44874)), not `&mut self`.
-  Reason: language — no inheritance or GC identity, and holding `&mut T` across a child `layout` would recreate shaft-rs-next's take/put lease. A downstream crate cannot inherent-impl `RenderHandle<MyBox>`.
-  Affect: write methods on `impl RenderFoo` / `impl RenderBox for RenderFoo` with `self: RenderHandle<Self>`. `RenderHandle::new_box(app, value)`; store `AnyRenderBox` on box parents and `AnyRenderObject` on `PipelineOwner`.
+- Change: a render object is a struct in the `App` arena, reached through a typed handle. Flutter's base-class fields are fields on the struct (`render_object`, `render_box`, a child slot), each with an accessor the trait asks for. Methods take `self: RenderHandle<Self>` and `&mut App`, not `&mut self`. A reference to "some render object" is an erased edge: `AnyRenderObject`, or `AnyRenderBox` / `AnyRenderSliver` when the protocol is known.
+  Reason: language — no inheritance and no GC identity; a `&mut self` receiver would hold the node borrowed while its child lays out, and the child must be able to reach back into it.
+  Affect: to write a render object, declare the struct with the mixin fields, `impl RenderObject` (accessors, `perform_layout`, `paint`, `visit_children`) and `impl RenderBox` (accessors), then `RenderHandle::new_box(app, value)`. Parents store the child's edge (`child.as_box()`); the pipeline stores `as_object()`. Tree methods (`mark_needs_layout`, `adopt_child`, `parent`, …) come from the protocol trait, so import `RenderBox` or `RenderSliver` to call them. An edge downcasts with `as_box()` / `as_sliver()`, Dart's `as RenderBox`.
 
-- Change: `RenderObject` / `RenderBox` fields are mixin data on the struct (`render_object`, `render_box`) with `xxx_data` accessors.
-  Reason: language — no inherited fields.
-  Affect: every leaf constructs `RenderObjectData::new()` / `RenderBoxData::new()` and implements the accessors (or `render_object_accessors!` / `render_box_accessors!`).
+- Change: Flutter's `attach(owner)` / `detach()` overrides are the hooks `did_attach` / `did_detach`, which run after the base body. The defaults walk `visit_children`, as do `redepth_children`'s.
+  Reason: language — a trait default cannot call `super`. Every Flutter override calls `super.attach` first, and no `detach` override reads its own owner before `super.detach`, so a post-hook is equivalent.
+  Affect: put what Dart writes after `super.attach(owner)` in `did_attach`; implement `visit_children` and the walks come for free.
 
-- Change: Flutter's `attach(owner)` / `detach()` overrides are the hooks `did_attach` / `did_detach`, called after the base body. Defaults walk `visit_children`; `redepth_children` likewise.
-  Reason: language — a trait default cannot call `super`, and the base body needs the erased edge, which a typed handle does not carry; `AnyRenderObject::attach` runs the base body, then the hook. Checked against Flutter: all 36 `attach` overrides call `super.attach(owner)` first, so the hook is exact; of 48 `detach` overrides, 9 call `super.detach()` first (child walks) and 36 last (listener cleanup), and none of the pre-`super` code reads this node's `owner` or `attached`, so running it after `_owner = null` is equivalent.
-  Affect: put what Dart writes after `super.attach(owner)` in `did_attach`; implement `visit_children` only for the child walk. Never call `attach` on a typed handle: use `as_object().attach(app, owner)`.
+- Change: a panic in `perform_layout`, `perform_resize`, or `paint` unwinds.
+  Reason: language — no `FlutterError.reportError` hook to catch and continue.
+  Affect: layout and paint do not survive a failing render object.
 
-- Change: a panic in `performLayout` / `performResize` unwinds.
-  Reason: language — no `FlutterError.reportError` isolate hook (same as gesture `invokeCallback`).
-  Affect: layout does not catch and continue.
-
-- Change: `ParentData` is a trait; storage is `Option<Box<dyn ParentData>>`. Typed access is `parent_data_of::<P>` / `parent_data_of_mut::<P>` / `parent_data_is::<P>`. Flutter's `ParentData()` is `EmptyParentData`.
-  Reason: language — Rust has no subclassed `ParentData` you can `as`.
+- Change: parent data is a trait object with typed access: `parent_data_of::<P>`, `parent_data_of_mut::<P>`, `parent_data_is::<P>`. Flutter's bare `ParentData()` is `EmptyParentData`.
+  Reason: language — no subclass cast.
   Affect: write `child.parent_data_of::<BoxParentData>(app)` where Dart writes `child.parentData! as BoxParentData`.
+
+- Change: `layout` is on the protocol edge and takes that protocol's constraints.
+  Reason: language — there is no abstract `Constraints` an erased node can hold.
+  Affect: `child.layout(app, box_constraints, parent_uses_size)` on an `AnyRenderBox`; there is no protocol-neutral `layout`.
+
+## painting_context.rs → object.dart (PaintingContext), layer.rs → layer.dart
+
+- Change: there is no `Layer` object tree. A repaint boundary keeps its recording as retained items (pictures, references to child boundaries, push/pop effects) plus one `CompositedLayer`, Flutter's `OffsetLayer` / `OpacityLayer` / `TransformLayer` as a value. The host recomposes the frame from those retained pieces every time; a boundary that did not change contributes the same pictures.
+  Reason: platform — valo composes a display list from retained pictures and has no engine layers to retain between frames; Flutter's layer tree exists for that engine boundary.
+  Affect: `update_composited_layer` returns a `CompositedLayer` and `mark_needs_composited_layer_update` replaces it without repainting the subtree; `push_clip_*` / `push_transform` / `push_opacity` take no `needsCompositing` or `oldLayer` and return nothing; `schedule_initial_paint` takes a `CompositedLayer`; `debug_layer()` reports `attached()` and the composited layer.
+
+- Change: no compositing bits (`needsCompositing`, `alwaysNeedsCompositing`, `flushCompositingBits`). Every pushed effect spans child boundaries.
+  Reason: platform — the layer-versus-canvas choice exists because a Skia clip cannot cross an engine layer; retained items have no such split.
+  Affect: `is_repaint_boundary` alone decides where recordings split; a frame is `flush_layout` then `flush_paint`.
 
 ## pipeline_owner.rs → object.dart (PipelineOwner)
 
-- Change: `PipelineOwner` is a Handle newtype; `onNeedVisualUpdate` is `Option<Listener>`.
-  Reason: language — no GC object, and `VoidCallback` must receive `App`.
-  Affect: `PipelineOwner::new(app, on_need_visual_update)`.
-
-## object.rs → object.dart (layout / child mixin)
-
-- Change: `AnyRenderBox::layout` takes `BoxConstraints`; `AnyRenderSliver::layout` takes `SliverConstraints`. Each protocol stores its own constraints on its mixin data.
-  Reason: language — Rust has no abstract `Constraints` object identity on an erased node.
-  Affect: call `layout` on the protocol handle; there is no unified constraints enum.
-
-- Change: `RenderObjectWithChildMixin` child access is `this.child(app)` / `this.set_child(app, child)` over a `RenderObjectWithChildData<AnyRenderBox>` field.
-  Reason: language — mixin fields are not inherited; the handle is the receiver.
-  Affect: write `this.child(app)` where Dart writes `child`. `BoxParentData` is installed by `RenderBox::setup_parent_data`.
+- Change: `onNeedVisualUpdate` is a `Listener`, which receives `&mut App`.
+  Reason: language — a Rust closure cannot capture what it mutates.
+  Affect: `PipelineOwner::new(app, Some(Listener::new(|app| …)))`.
 
 ## sliver.rs → sliver.dart
 
-- Change: `as_box_constraints` takes `(min_extent, max_extent, cross_axis_extent)` instead of Dart named optionals. Defaults are `0`, infinity, and this sliver's cross extent when the `Option` is `None`.
+- Change: `as_box_constraints` takes `(min_extent, max_extent, cross_axis_extent)` as `Option`s.
   Reason: language — no named optional parameters.
-  Affect: pass the three arguments; `None` for cross uses the constraint's cross extent.
+  Affect: pass `None` for Dart's defaults (`0`, infinity, this sliver's cross extent).
 
 ## proxy_box.rs → proxy_box.dart / shifted_box.rs → shifted_box.dart
 
-- Change: `RenderConstrainedBox` and `RenderPadding` are leaf structs; `RenderProxyBox` / `RenderShiftedBox` as types are not here.
-  Reason: language — no inheritance; the accepted authoring shape is the leaf struct plus traits.
-  Affect: construct with `RenderPadding::new(app, …)` / `RenderConstrainedBox::new(app, …)`.
+- Change: `RenderConstrainedBox` and `RenderPadding` are leaf structs; `RenderProxyBox` and `RenderShiftedBox` are not types.
+  Reason: language — no inheritance; a leaf struct plus traits is the authoring shape.
+  Affect: there is no base type to extend; write the leaf and its `paint`.
 
 ## Deferred
 
-- `PaintingContext` / layers / `flushPaint` / compositing bits. Trigger: paint.
-- `SemanticsBinding` / `markNeedsSemanticsUpdate` / semantics callbacks on `PipelineOwner`. Trigger: a11y; do not stub.
+- `PaintingContext.addLayer` / `addCompositionCallback` / `pushColorFilter`, `Layer.find` annotations, `LeaderLayer` / `FollowerLayer`, `toImage`. Trigger: `AnnotatedRegion`, `CompositedTransformFollower`, `RepaintBoundary.toImage`.
+- Debug paint overlays, `debugPaint`, `applyPaintTransform` / `getTransformTo`, `paintsChild`. Trigger: inspector; `RenderBox.localToGlobal`.
+- Semantics on `PipelineOwner` and `RenderObject`. Trigger: a11y; do not stub.
 - `PipelineManifold`. Trigger: `RendererBinding` attaching the root owner.
 - `computeDryLayout` / `_DebugSize` / `BoxHitTestResult` / `globalToLocal`. Trigger: `RenderBox` public extras.
-- `RenderProxyBox` / `RenderShiftedBox` paint, hit-test, and intrinsics. Trigger: `PaintingContext` / `BoxHitTestResult`.
-- `invokeLayoutCallback`. Trigger: `LayoutBuilder`. Also widen `_layoutWithoutResize` so a non-boundary `RenderObjectWithLayoutCallbackMixin` can flush (Flutter's `this is RenderObjectWithLayoutCallbackMixin` arm).
-- `layout` / `markNeedsLayout` / `constraints` as ops-table override points. Trigger: OverlayPortal (`layout` + `debugLayoutParent`), `RenderView` (constraints getter; not a box), first `markNeedsLayout` override (`RenderBox` intrinsics, `RenderParagraph`, OverlayPortal). Ask before adding; do not invent a parallel flag on `T`.
-- OverlayPortal / `_RenderDeferredLayoutBox`. Trigger: `layout` on the ops table.
-- `RenderView`. Trigger: `constraints` getter override + paint (`compositeFrame`). A box can stay `PipelineOwner.root_node` until then.
-- `RenderParagraph` / `RenderEditable`. Trigger: `TextPainter`, container `ParentData`, paint, hit-test — not a Handle failure.
-- Viewport / `ViewportOffset` / sliver-to-box adapters / sliver `ParentData`. Trigger: first viewport.
+- `RenderProxyBox` / `RenderShiftedBox` hit-test and intrinsics. Trigger: `BoxHitTestResult`.
+- `invokeLayoutCallback`. Trigger: `LayoutBuilder`; also widen `layout_without_resize` for a non-boundary layout-callback host.
+- `layout` / `markNeedsLayout` / `constraints` as override points. Trigger: OverlayPortal, `RenderView`, the first `markNeedsLayout` override. Ask before adding.
+- `RenderView` and `compositeFrame`. Trigger: R5; a box can stay `PipelineOwner.root_node` until then.
+- `RenderParagraph` / `RenderEditable`. Trigger: `TextPainter`, container parent data, hit-test.
+- Viewport / `ViewportOffset` / sliver-to-box adapters / sliver parent data. Trigger: first viewport. `RenderObjectWithChildMixin` is box-only until then.
 - `SliverConstraints.debugAssertIsValid` extra numeric checks. Trigger: a caller that relies on those messages.

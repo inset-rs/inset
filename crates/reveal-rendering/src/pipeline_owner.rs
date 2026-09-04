@@ -1,11 +1,12 @@
 //! Flutter counterpart: `rendering/object.dart` (`PipelineOwner`).
 //!
-//! Semantics callbacks, [`PipelineManifold`], and paint/compositing dirty
-//! lists wait.
+//! Semantics callbacks and [`PipelineManifold`] wait. Compositing bits are not
+//! a phase here (see `PORTING.md`).
 
 use reveal_foundation::{App, Handle, Listener};
 
 use crate::object::AnyRenderObject;
+use crate::painting_context::PaintingContext;
 
 /// The pipeline owner manages the rendering pipeline.
 ///
@@ -20,6 +21,8 @@ struct PipelineOwnerData {
     should_merge_dirty_nodes: bool,
     debug_doing_layout: bool,
     debug_doing_child_layout: bool,
+    nodes_needing_paint: Vec<AnyRenderObject>,
+    debug_doing_paint: bool,
     children: Vec<PipelineOwner>,
     debug_parent: Option<PipelineOwner>,
 }
@@ -37,6 +40,8 @@ impl PipelineOwner {
             should_merge_dirty_nodes: false,
             debug_doing_layout: false,
             debug_doing_child_layout: false,
+            nodes_needing_paint: Vec::new(),
+            debug_doing_paint: false,
             children: Vec::new(),
             debug_parent: None,
         }))
@@ -133,6 +138,64 @@ impl PipelineOwner {
         if cfg!(debug_assertions) {
             app.get_mut(self.0).debug_doing_layout = false;
             app.get_mut(self.0).debug_doing_child_layout = false;
+        }
+    }
+
+    /// Nodes with a dirty layer or paint state, to be updated in the next
+    /// [`flush_paint`](Self::flush_paint) pass.
+    pub fn nodes_needing_paint(self, app: &App) -> Vec<AnyRenderObject> {
+        app.get(self.0).nodes_needing_paint.clone()
+    }
+
+    pub(crate) fn add_node_needing_paint(self, app: &mut App, node: AnyRenderObject) {
+        app.get_mut(self.0).nodes_needing_paint.push(node);
+    }
+
+    /// Whether this pipeline is currently in the paint phase.
+    ///
+    /// Only meaningful when asserts are enabled.
+    pub fn debug_doing_paint(self, app: &App) -> bool {
+        app.get(self.0).debug_doing_paint
+    }
+
+    /// Update the display lists for all render objects.
+    ///
+    /// This function is one of the core stages of the rendering pipeline. Painting occurs after
+    /// layout and before the scene is recomposited so that scene is composited with up-to-date
+    /// display lists for every render object.
+    pub fn flush_paint(self, app: &mut App) {
+        if cfg!(debug_assertions) {
+            app.get_mut(self.0).debug_doing_paint = true;
+        }
+        let mut dirty_nodes = std::mem::take(&mut app.get_mut(self.0).nodes_needing_paint);
+        dirty_nodes.sort_by_key(|node| std::cmp::Reverse(node.depth(app)));
+        for node in dirty_nodes {
+            debug_assert!(node.debug_layer(app).is_some() || !cfg!(debug_assertions));
+            if (node.needs_paint(app) || node.needs_composited_layer_update(app))
+                && node.owner(app) == Some(self)
+            {
+                if node.layer(app).is_some_and(|layer| layer.attached()) {
+                    debug_assert!(node.is_repaint_boundary(app));
+                    if node.needs_paint(app) {
+                        PaintingContext::repaint_composited_child(app, node);
+                    } else {
+                        PaintingContext::update_layer_properties(app, node);
+                    }
+                } else {
+                    node.skipped_painting_on_layer(app);
+                }
+            }
+        }
+        let children = app.get(self.0).children.clone();
+        for child in children {
+            child.flush_paint(app);
+        }
+        debug_assert!(
+            app.get(self.0).nodes_needing_paint.is_empty(),
+            "Child PipelineOwners must not dirty nodes in their parent."
+        );
+        if cfg!(debug_assertions) {
+            app.get_mut(self.0).debug_doing_paint = false;
         }
     }
 

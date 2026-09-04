@@ -3,7 +3,7 @@
 //!
 //! `RenderProxyBox` paint / hit-test / intrinsics wait.
 
-use reveal_embedder::Size;
+use reveal_embedder::{Offset, Size};
 use reveal_foundation::App;
 
 use crate::box_::{
@@ -13,6 +13,7 @@ use crate::object::{
     AnyRenderObject, Constraints, RenderHandle, RenderObject, RenderObjectData,
     RenderObjectWithChildData,
 };
+use crate::painting_context::PaintingContext;
 
 /// How to behave during hit tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +108,19 @@ impl RenderObject for RenderConstrainedBox {
         } else {
             self.set_size(app, additional.enforce(constraints).constrain(Size::ZERO));
         }
+    }
+
+    /// Flutter's `RenderProxyBoxMixin.paint`.
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        let Some(child) = self.child(app) else {
+            return;
+        };
+        context.paint_child(app, child.as_object(), offset);
     }
 
     fn visit_children(

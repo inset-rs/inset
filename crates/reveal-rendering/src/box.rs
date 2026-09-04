@@ -6,7 +6,7 @@
 use std::fmt::{self, Debug, Display};
 use std::hash::{Hash, Hasher};
 
-use reveal_embedder::{Offset, Size, ViewConstraints, clamp_double, lerp_double};
+use reveal_embedder::{Offset, Rect, Size, ViewConstraints, clamp_double, lerp_double};
 use reveal_foundation::{App, HandleId};
 use reveal_painting::EdgeInsetsGeometry;
 
@@ -798,6 +798,11 @@ pub trait RenderBox: RenderObject {
         self.as_box().size(app)
     }
 
+    /// An estimate of the bounds within which this render object will paint: the box's own size.
+    fn paint_bounds(self: RenderHandle<Self>, app: &App) -> Rect {
+        Offset::ZERO & self.size(app)
+    }
+
     /// Sets the size of this box. Call from [`RenderObject::perform_layout`] or
     /// [`RenderObject::perform_resize`].
     fn set_size(self: RenderHandle<Self>, app: &mut App, size: Size) {
@@ -842,6 +847,16 @@ pub trait RenderBox: RenderObject {
         self.as_object().mark_needs_layout(app)
     }
 
+    /// See [`AnyRenderObject::mark_needs_paint`].
+    fn mark_needs_paint(self: RenderHandle<Self>, app: &mut App) {
+        self.as_object().mark_needs_paint(app)
+    }
+
+    /// See [`AnyRenderObject::mark_needs_composited_layer_update`].
+    fn mark_needs_composited_layer_update(self: RenderHandle<Self>, app: &mut App) {
+        self.as_object().mark_needs_composited_layer_update(app)
+    }
+
     /// See [`AnyRenderObject::schedule_initial_layout`].
     fn schedule_initial_layout(self: RenderHandle<Self>, app: &mut App) {
         self.as_object().schedule_initial_layout(app)
@@ -880,6 +895,7 @@ impl RenderBoxVTable {
         RenderBoxVTable {
             object: RenderObjectVTable::of::<T>(
                 |app, id, child| <T as RenderBox>::setup_parent_data(resolve(id), app, child),
+                |app, id| T::paint_bounds(resolve(id), app),
                 Some(|| const { &RenderBoxVTable::of::<T>() }),
                 None,
             ),
@@ -892,7 +908,11 @@ impl RenderBoxVTable {
 impl<T: RenderBox> RenderHandle<T> {
     /// Creates a box-protocol render object in `app`.
     pub fn new_box(app: &mut App, object: T) -> RenderHandle<T> {
-        create(app, object)
+        let this = create(app, object);
+        // Flutter's `RenderObject()` constructor: `_wasRepaintBoundary = isRepaintBoundary`.
+        let is_repaint_boundary = this.is_repaint_boundary(app);
+        this.render_object_data_mut(app).was_repaint_boundary = is_repaint_boundary;
+        this
     }
 }
 

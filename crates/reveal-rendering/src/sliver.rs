@@ -6,6 +6,7 @@
 use std::fmt::{self, Debug, Display};
 use std::hash::Hasher;
 
+use reveal_embedder::Rect;
 use reveal_foundation::{App, HandleId};
 use reveal_painting::{
     Axis, AxisDirection, axis_direction_is_reversed, axis_direction_to_axis, flip_axis_direction,
@@ -502,6 +503,27 @@ pub trait RenderSliver: RenderObject {
         self.as_sliver().set_geometry(app, geometry)
     }
 
+    /// An estimate of the bounds within which this render object will paint: the paint extent
+    /// along the main axis by the cross axis extent.
+    fn paint_bounds(self: RenderHandle<Self>, app: &App) -> Rect {
+        let constraints = self.constraints(app);
+        let geometry = self.geometry(app);
+        match constraints.axis() {
+            Axis::Horizontal => Rect::from_ltwh(
+                0.0,
+                0.0,
+                geometry.paint_extent,
+                constraints.cross_axis_extent,
+            ),
+            Axis::Vertical => Rect::from_ltwh(
+                0.0,
+                0.0,
+                constraints.cross_axis_extent,
+                geometry.paint_extent,
+            ),
+        }
+    }
+
     /// See [`AnyRenderSliver::layout`].
     fn layout(
         self: RenderHandle<Self>,
@@ -538,6 +560,16 @@ pub trait RenderSliver: RenderObject {
     /// See [`AnyRenderObject::mark_needs_layout`].
     fn mark_needs_layout(self: RenderHandle<Self>, app: &mut App) {
         self.as_object().mark_needs_layout(app)
+    }
+
+    /// See [`AnyRenderObject::mark_needs_paint`].
+    fn mark_needs_paint(self: RenderHandle<Self>, app: &mut App) {
+        self.as_object().mark_needs_paint(app)
+    }
+
+    /// See [`AnyRenderObject::mark_needs_composited_layer_update`].
+    fn mark_needs_composited_layer_update(self: RenderHandle<Self>, app: &mut App) {
+        self.as_object().mark_needs_composited_layer_update(app)
     }
 
     /// See [`AnyRenderObject::schedule_initial_layout`].
@@ -578,6 +610,7 @@ impl RenderSliverVTable {
         RenderSliverVTable {
             object: RenderObjectVTable::of::<T>(
                 |app, id, child| <T as RenderObject>::setup_parent_data(resolve(id), app, child),
+                |app, id| T::paint_bounds(resolve(id), app),
                 None,
                 Some(|| const { &RenderSliverVTable::of::<T>() }),
             ),
@@ -590,7 +623,11 @@ impl RenderSliverVTable {
 impl<T: RenderSliver> RenderHandle<T> {
     /// Creates a sliver-protocol render object in `app`.
     pub fn new_sliver(app: &mut App, object: T) -> RenderHandle<T> {
-        create(app, object)
+        let this = create(app, object);
+        // Flutter's `RenderObject()` constructor: `_wasRepaintBoundary = isRepaintBoundary`.
+        let is_repaint_boundary = this.is_repaint_boundary(app);
+        this.render_object_data_mut(app).was_repaint_boundary = is_repaint_boundary;
+        this
     }
 }
 

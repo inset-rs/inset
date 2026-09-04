@@ -12,6 +12,7 @@ use crate::box_::{
 use crate::object::{
     AnyRenderObject, RenderHandle, RenderObject, RenderObjectData, RenderObjectWithChildData,
 };
+use crate::painting_context::PaintingContext;
 
 /// Insets its child by the given padding.
 pub struct RenderPadding {
@@ -137,6 +138,22 @@ impl RenderObject for RenderPadding {
                 padding.vertical() + child.size(app).height(),
             )),
         );
+    }
+
+    /// Flutter's `RenderShiftedBox.paint`.
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        if let Some(child) = self.child(app) {
+            let child_offset = child
+                .as_object()
+                .parent_data_of::<BoxParentData>(app)
+                .offset;
+            context.paint_child(app, child.as_object(), child_offset + offset);
+        }
     }
 
     fn visit_children(
