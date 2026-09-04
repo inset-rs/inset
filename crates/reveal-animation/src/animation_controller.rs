@@ -5,12 +5,12 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use reveal_embedder::{clamp_double, lerp_double};
-use reveal_foundation::{App, Handle, Listenable, Listener};
+use reveal_foundation::{App, Handle, ListenableObject, Listener};
 use reveal_physics::{Simulation, SpringDescription, SpringSimulation, SpringType, Tolerance};
 use reveal_scheduler::{FrameCallback, Ticker, TickerFuture, TickerProvider};
 
-use crate::animation::{Animation, AnimationNode, AnimationStatus, AnimationStatusListener};
-use crate::curves::Curve;
+use crate::animation::{Animation, AnimationStatus, AnimationStatusListener, AnyAnimation};
+use crate::curves::{Curve, Curves};
 use crate::listener_helpers::{
     AnimationEagerListenerMixin, AnimationLocalListenersData, AnimationLocalListenersMixin,
     AnimationLocalStatusListenersData, AnimationLocalStatusListenersMixin,
@@ -81,10 +81,7 @@ impl AnimationBehavior {
 ///
 /// An [`AnimationController`] needs a `TickerProvider`, Dart's `vsync`
 /// constructor argument.
-#[derive(Clone, Copy)]
-pub struct AnimationController(Handle<AnimationControllerData>);
-
-struct AnimationControllerData {
+pub struct AnimationController {
     /// The value at which this animation is deemed to be dismissed.
     pub lower_bound: f64,
 
@@ -109,7 +106,7 @@ struct AnimationControllerData {
     /// this is `None`.
     pub reverse_duration: Option<Duration>,
 
-    ticker: Option<Ticker>,
+    ticker: Option<Handle<Ticker>>,
     simulation: Option<Rc<dyn Simulation>>,
     value: f64,
     last_elapsed_duration: Option<Duration>,
@@ -149,9 +146,9 @@ impl AnimationController {
         upper_bound: f64,
         animation_behavior: AnimationBehavior,
         vsync: impl TickerProvider,
-    ) -> AnimationController {
+    ) -> Handle<AnimationController> {
         debug_assert!(upper_bound >= lower_bound);
-        let this = AnimationController(app.create(AnimationControllerData {
+        let this = app.create(AnimationController {
             lower_bound,
             upper_bound,
             animation_behavior,
@@ -167,12 +164,12 @@ impl AnimationController {
             pending_direction: Rc::new(Cell::new(None)),
             local_listeners: AnimationLocalListenersData::new(),
             local_status_listeners: AnimationLocalStatusListenersData::new(),
-        }));
+        });
         let ticker = vsync.create_ticker(
             app,
-            FrameCallback::handle_method(this.0, animation_controller_tick),
+            FrameCallback::handle_method(this, AnimationController::tick),
         );
-        app.get_mut(this.0).ticker = Some(ticker);
+        app.get_mut(this).ticker = Some(ticker);
         this.internal_set_value(app, value.unwrap_or(lower_bound));
         this
     }
@@ -188,8 +185,8 @@ impl AnimationController {
         reverse_duration: Option<Duration>,
         animation_behavior: AnimationBehavior,
         vsync: impl TickerProvider,
-    ) -> AnimationController {
-        let this = AnimationController(app.create(AnimationControllerData {
+    ) -> Handle<AnimationController> {
+        let this = app.create(AnimationController {
             lower_bound: f64::NEG_INFINITY,
             upper_bound: f64::INFINITY,
             animation_behavior,
@@ -205,24 +202,24 @@ impl AnimationController {
             pending_direction: Rc::new(Cell::new(None)),
             local_listeners: AnimationLocalListenersData::new(),
             local_status_listeners: AnimationLocalStatusListenersData::new(),
-        }));
+        });
         let ticker = vsync.create_ticker(
             app,
-            FrameCallback::handle_method(this.0, animation_controller_tick),
+            FrameCallback::handle_method(this, AnimationController::tick),
         );
-        app.get_mut(this.0).ticker = Some(ticker);
+        app.get_mut(this).ticker = Some(ticker);
         this.internal_set_value(app, value);
         this
     }
 
     /// The current value of the animation.
-    pub fn value(self, app: &App) -> f64 {
-        app.get(self.0).value
+    pub fn value(self: Handle<Self>, app: &App) -> f64 {
+        app.get(self).value
     }
 
     /// The current status of this animation.
-    pub fn status(self, app: &App) -> AnimationStatus {
-        app.get(self.0).status
+    pub fn status(self: Handle<Self>, app: &App) -> AnimationStatus {
+        app.get(self).status
     }
 
     /// The amount of time that has passed between the time the animation
@@ -230,14 +227,14 @@ impl AnimationController {
     ///
     /// If the controller is not animating, the last elapsed duration is
     /// `None`.
-    pub fn last_elapsed_duration(self, app: &App) -> Option<Duration> {
-        app.get(self.0).last_elapsed_duration
+    pub fn last_elapsed_duration(self: Handle<Self>, app: &App) -> Option<Duration> {
+        app.get(self).last_elapsed_duration
     }
 }
 
 impl AnimationController {
-    fn internal_set_value(self, app: &mut App, new_value: f64) {
-        let controller = app.get_mut(self.0);
+    fn internal_set_value(self: Handle<Self>, app: &mut App, new_value: f64) {
+        let controller = app.get_mut(self);
         controller.value = clamp_double(new_value, controller.lower_bound, controller.upper_bound);
         if controller.value == controller.lower_bound {
             controller.status = AnimationStatus::Dismissed;
@@ -252,13 +249,13 @@ impl AnimationController {
     }
 
     fn animate_to_internal(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         target: f64,
         duration: Option<Duration>,
         curve: Rc<dyn Curve>,
-    ) -> TickerFuture {
-        let controller = app.get(self.0);
+    ) -> Handle<TickerFuture> {
+        let controller = app.get(self);
         let scale = if controller.animation_behavior.enable_animations() {
             1.0
         } else {
@@ -295,13 +292,13 @@ impl AnimationController {
 
         self.stop(app, true);
         if simulation_duration == Duration::ZERO {
-            let controller = app.get_mut(self.0);
+            let controller = app.get_mut(self);
             if controller.value != target {
                 controller.value =
                     clamp_double(target, controller.lower_bound, controller.upper_bound);
                 self.notify_listeners(app);
             }
-            let controller = app.get_mut(self.0);
+            let controller = app.get_mut(self);
             controller.status = if controller.direction == AnimationDirection::Forward {
                 AnimationStatus::Completed
             } else {
@@ -312,7 +309,7 @@ impl AnimationController {
         }
         debug_assert!(simulation_duration > Duration::ZERO);
         debug_assert!(!self.is_animating(app));
-        let value = app.get(self.0).value;
+        let value = app.get(self).value;
         self.start_simulation(
             app,
             Rc::new(InterpolationSimulation::new(
@@ -325,8 +322,8 @@ impl AnimationController {
         )
     }
 
-    fn direction_setter(self, app: &mut App, direction: AnimationDirection) {
-        let controller = app.get_mut(self.0);
+    fn direction_setter(self: Handle<Self>, app: &mut App, direction: AnimationDirection) {
+        let controller = app.get_mut(self);
         controller.direction = direction;
         controller.status = if direction == AnimationDirection::Forward {
             AnimationStatus::Forward
@@ -336,28 +333,32 @@ impl AnimationController {
         self.check_status_changed(app);
     }
 
-    fn drain_pending_direction(self, app: &mut App) {
-        if let Some(direction) = app.get(self.0).pending_direction.take() {
+    fn drain_pending_direction(self: Handle<Self>, app: &mut App) {
+        if let Some(direction) = app.get(self).pending_direction.take() {
             self.direction_setter(app, direction);
         }
     }
 
-    fn start_simulation(self, app: &mut App, simulation: Rc<dyn Simulation>) -> TickerFuture {
+    fn start_simulation(
+        self: Handle<Self>,
+        app: &mut App,
+        simulation: Rc<dyn Simulation>,
+    ) -> Handle<TickerFuture> {
         debug_assert!(!self.is_animating(app));
         let x = simulation.x(0.0);
         // The repeating simulation's direction setter fires during `x(0.0)`;
         // Dart runs it inside that call, before the value assignment.
         {
-            let controller = app.get_mut(self.0);
+            let controller = app.get_mut(self);
             controller.simulation = Some(simulation);
             controller.last_elapsed_duration = Some(Duration::ZERO);
         }
         self.drain_pending_direction(app);
-        let controller = app.get_mut(self.0);
+        let controller = app.get_mut(self);
         controller.value = clamp_double(x, controller.lower_bound, controller.upper_bound);
         let ticker = controller.ticker.expect("started after dispose");
         let result = ticker.start(app);
-        let controller = app.get_mut(self.0);
+        let controller = app.get_mut(self);
         controller.status = if controller.direction == AnimationDirection::Forward {
             AnimationStatus::Forward
         } else {
@@ -367,8 +368,8 @@ impl AnimationController {
         result
     }
 
-    fn check_status_changed(self, app: &mut App) {
-        let controller = app.get_mut(self.0);
+    fn check_status_changed(self: Handle<Self>, app: &mut App) {
+        let controller = app.get_mut(self);
         let new_status = controller.status;
         if controller.last_reported_status != new_status {
             controller.last_reported_status = new_status;
@@ -376,27 +377,27 @@ impl AnimationController {
         }
     }
 
-    fn tick(self, app: &mut App, elapsed: Duration) {
-        app.get_mut(self.0).last_elapsed_duration = Some(elapsed);
+    fn tick(self: Handle<Self>, app: &mut App, elapsed: Duration) {
+        app.get_mut(self).last_elapsed_duration = Some(elapsed);
         let elapsed_in_seconds = elapsed.as_micros() as f64 / 1_000_000.0;
         debug_assert!(elapsed_in_seconds >= 0.0);
-        let simulation = app.get(self.0).simulation.clone().unwrap();
+        let simulation = app.get(self).simulation.clone().unwrap();
         let x = simulation.x(elapsed_in_seconds);
         // The repeating simulation's direction setter fires during `x()`;
         // Dart runs it inside that call, before the value assignment.
         self.drain_pending_direction(app);
-        let controller = app.get_mut(self.0);
+        let controller = app.get_mut(self);
         controller.value = clamp_double(x, controller.lower_bound, controller.upper_bound);
         // Dart re-derefs `_simulation!` here, so a status listener that
         // replaced the simulation is consulted, and one that stopped the
         // controller crashes the tick — the panic is that crash.
         let simulation = app
-            .get(self.0)
+            .get(self)
             .simulation
             .clone()
             .expect("a listener stopped the controller during its own tick");
         if simulation.is_done(elapsed_in_seconds) {
-            let controller = app.get_mut(self.0);
+            let controller = app.get_mut(self);
             controller.status = if controller.direction == AnimationDirection::Forward {
                 AnimationStatus::Completed
             } else {
@@ -409,107 +410,105 @@ impl AnimationController {
     }
 }
 
-use crate::curves::Curves;
-
 impl AnimationEagerListenerMixin for AnimationController {}
 
 impl AnimationLocalListenersMixin for AnimationController {
-    fn local_listeners_data(self, app: &App) -> &AnimationLocalListenersData {
-        &app.get(self.0).local_listeners
+    fn local_listeners_data(self: Handle<Self>, app: &App) -> &AnimationLocalListenersData {
+        &app.get(self).local_listeners
     }
 
-    fn local_listeners_data_mut(self, app: &mut App) -> &mut AnimationLocalListenersData {
-        &mut app.get_mut(self.0).local_listeners
+    fn local_listeners_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut AnimationLocalListenersData {
+        &mut app.get_mut(self).local_listeners
     }
 
     // Dart resolves these by mixin order — `AnimationEagerListenerMixin`.
-    fn did_register_listener(self, app: &mut App) {
+    fn did_register_listener(self: Handle<Self>, app: &mut App) {
         AnimationEagerListenerMixin::did_register_listener(self, app)
     }
 
-    fn did_unregister_listener(self, app: &mut App) {
+    fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
         AnimationEagerListenerMixin::did_unregister_listener(self, app)
     }
 }
 
 impl AnimationLocalStatusListenersMixin for AnimationController {
-    fn local_status_listeners_data(self, app: &App) -> &AnimationLocalStatusListenersData {
-        &app.get(self.0).local_status_listeners
+    fn local_status_listeners_data(
+        self: Handle<Self>,
+        app: &App,
+    ) -> &AnimationLocalStatusListenersData {
+        &app.get(self).local_status_listeners
     }
 
     fn local_status_listeners_data_mut(
-        self,
+        self: Handle<Self>,
         app: &mut App,
     ) -> &mut AnimationLocalStatusListenersData {
-        &mut app.get_mut(self.0).local_status_listeners
+        &mut app.get_mut(self).local_status_listeners
     }
 
-    fn did_register_listener(self, app: &mut App) {
+    fn did_register_listener(self: Handle<Self>, app: &mut App) {
         AnimationEagerListenerMixin::did_register_listener(self, app)
     }
 
-    fn did_unregister_listener(self, app: &mut App) {
+    fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
         AnimationEagerListenerMixin::did_unregister_listener(self, app)
+    }
+}
+
+impl ListenableObject for AnimationController {
+    fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
+        AnimationLocalListenersMixin::add_listener(self, app, listener);
+    }
+
+    fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
+        AnimationLocalListenersMixin::remove_listener(self, app, listener);
     }
 }
 
 // Dart: `class AnimationController extends Animation<double> with
 // AnimationEagerListenerMixin, AnimationLocalListenersMixin,
 // AnimationLocalStatusListenersMixin`.
-impl AnimationNode<f64> for AnimationControllerData {
-    fn add_listener(app: &mut App, this: Handle<Self>, listener: Listener) {
-        AnimationLocalListenersMixin::add_listener(AnimationController(this), app, listener)
+impl Animation<f64> for AnimationController {
+    fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
+        AnimationLocalListenersMixin::add_listener(self, app, listener)
     }
 
-    fn remove_listener(app: &mut App, this: Handle<Self>, listener: &Listener) {
-        AnimationLocalListenersMixin::remove_listener(AnimationController(this), app, listener)
+    fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
+        AnimationLocalListenersMixin::remove_listener(self, app, listener)
     }
 
-    fn add_status_listener(app: &mut App, this: Handle<Self>, listener: AnimationStatusListener) {
-        AnimationLocalStatusListenersMixin::add_status_listener(
-            AnimationController(this),
-            app,
-            listener,
-        )
+    fn add_status_listener(self: Handle<Self>, app: &mut App, listener: AnimationStatusListener) {
+        AnimationLocalStatusListenersMixin::add_status_listener(self, app, listener)
     }
 
     fn remove_status_listener(
+        self: Handle<Self>,
         app: &mut App,
-        this: Handle<Self>,
         listener: &AnimationStatusListener,
     ) {
-        AnimationLocalStatusListenersMixin::remove_status_listener(
-            AnimationController(this),
-            app,
-            listener,
-        )
+        AnimationLocalStatusListenersMixin::remove_status_listener(self, app, listener)
     }
 
-    fn status(app: &App, this: Handle<Self>) -> AnimationStatus {
-        app.get(this).status
+    fn status(self: Handle<Self>, app: &App) -> AnimationStatus {
+        app.get(self).status
     }
 
-    fn value(app: &App, this: Handle<Self>) -> f64 {
-        app.get(this).value
+    fn value(self: Handle<Self>, app: &App) -> f64 {
+        app.get(self).value
     }
 
     // Dart overrides `isAnimating` away from the status-derived default
     // (`animation_controller.dart:449`): a muted or off-screen controller is
     // animating even while its status says otherwise.
-    fn is_animating(app: &App, this: Handle<Self>) -> bool {
-        match app.get(this).ticker {
+    fn is_animating(self: Handle<Self>, app: &App) -> bool {
+        match app.get(self).ticker {
             Some(ticker) => ticker.is_active(app),
             None => false,
         }
     }
-}
-
-fn animation_controller_tick(
-    this: Handle<AnimationControllerData>,
-    app: &mut App,
-    elapsed: Duration,
-) {
-    AnimationController(this).tick(app, elapsed);
 }
 
 /// Dart's private `_InterpolationSimulation`.
@@ -673,39 +672,40 @@ impl std::fmt::Debug for RepeatingSimulation {
 }
 
 impl AnimationController {
-    /// An [`Animation<f64>`] view of this controller — what to pass where a
+    /// An [`AnyAnimation<f64>`] view of this controller — what to pass where a
     /// Dart API wants an `Animation<double>`. Dart's `view` getter returns
     /// `this`; the erased handle is that upcast.
-    pub fn view(self) -> Animation<f64> {
-        Animation::from_handle(self.0)
+    pub fn view(self: Handle<Self>) -> AnyAnimation<f64> {
+        self.as_animation()
     }
 
     /// Chains a `Tween` (or any [`Animatable`]) to this controller.
     ///
-    /// Dart inherits `drive` from `Animation<double>`. The newtype is not a
-    /// subtype, so the method is inherent and forwards to [`view`].
+    /// Dart inherits `drive` from `Animation<double>`. A
+    /// `Handle<AnimationController>` is not a subtype, so the method is
+    /// inherent and forwards to [`view`](AnimationController::view).
     pub fn drive<U: 'static>(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         child: impl Animatable<U> + Clone + 'static,
-    ) -> Animation<U> {
+    ) -> AnyAnimation<U> {
         self.view().drive(app, child)
     }
 
     /// Recreates the [`Ticker`] with the new `TickerProvider`.
-    pub fn resync(self, app: &mut App, vsync: impl TickerProvider) {
-        let old_ticker = app.get(self.0).ticker.expect("resync after dispose");
+    pub fn resync(self: Handle<Self>, app: &mut App, vsync: impl TickerProvider) {
+        let old_ticker = app.get(self).ticker.expect("resync after dispose");
         let ticker = vsync.create_ticker(
             app,
-            FrameCallback::handle_method(self.0, animation_controller_tick),
+            FrameCallback::handle_method(self, AnimationController::tick),
         );
-        app.get_mut(self.0).ticker = Some(ticker);
+        app.get_mut(self).ticker = Some(ticker);
         ticker.absorb_ticker(app, old_ticker);
     }
 
     /// Stops the animation controller and sets the current value of the
     /// animation.
-    pub fn set_value(self, app: &mut App, new_value: f64) {
+    pub fn set_value(self: Handle<Self>, app: &mut App, new_value: f64) {
         self.stop(app, true);
         self.internal_set_value(app, new_value);
         self.notify_listeners(app);
@@ -713,17 +713,17 @@ impl AnimationController {
     }
 
     /// Sets the controller's value to the lower bound, stopping the animation.
-    pub fn reset(self, app: &mut App) {
-        let lower_bound = app.get(self.0).lower_bound;
+    pub fn reset(self: Handle<Self>, app: &mut App) {
+        let lower_bound = app.get(self).lower_bound;
         self.set_value(app, lower_bound);
     }
 
     /// The rate of change of [`AnimationController::value`] per second.
-    pub fn velocity(self, app: &mut App) -> f64 {
+    pub fn velocity(self: Handle<Self>, app: &mut App) -> f64 {
         if !self.is_animating(app) {
             return 0.0;
         }
-        let controller = app.get(self.0);
+        let controller = app.get(self);
         let elapsed = controller.last_elapsed_duration.unwrap();
         controller
             .simulation
@@ -735,54 +735,54 @@ impl AnimationController {
     /// Whether this animation is currently animating in either the forward or
     /// reverse direction.
     #[allow(clippy::wrong_self_convention)]
-    pub fn is_animating(self, app: &mut App) -> bool {
+    pub fn is_animating(self: Handle<Self>, app: &mut App) -> bool {
         // One body: Dart has a single isAnimating override, and it lives in
-        // the AnimationNode impl so the erased handle dispatches it too.
-        <AnimationControllerData as AnimationNode<f64>>::is_animating(app, self.0)
+        // the Animation impl so the erased handle dispatches it too.
+        <AnimationController as Animation<f64>>::is_animating(self, app)
     }
 
     /// Starts running this animation forwards (towards the end).
-    pub fn forward(self, app: &mut App, from: Option<f64>) -> TickerFuture {
+    pub fn forward(self: Handle<Self>, app: &mut App, from: Option<f64>) -> Handle<TickerFuture> {
         debug_assert!(
-            app.get(self.0).duration.is_some(),
+            app.get(self).duration.is_some(),
             "AnimationController::forward() called with no default duration. The \"duration\" \
              property should be set, either in the constructor or later, before calling forward()."
         );
         debug_assert!(
-            app.get(self.0).ticker.is_some(),
+            app.get(self).ticker.is_some(),
             "AnimationController::forward() called after AnimationController::dispose()."
         );
-        app.get_mut(self.0).direction = AnimationDirection::Forward;
+        app.get_mut(self).direction = AnimationDirection::Forward;
         if let Some(from) = from {
             self.set_value(app, from);
         }
-        let upper_bound = app.get(self.0).upper_bound;
+        let upper_bound = app.get(self).upper_bound;
         self.animate_to_internal(app, upper_bound, None, Curves::linear())
     }
 
     /// Starts running this animation in reverse (towards the beginning).
-    pub fn reverse(self, app: &mut App, from: Option<f64>) -> TickerFuture {
+    pub fn reverse(self: Handle<Self>, app: &mut App, from: Option<f64>) -> Handle<TickerFuture> {
         debug_assert!(
-            app.get(self.0).duration.is_some() || app.get(self.0).reverse_duration.is_some(),
+            app.get(self).duration.is_some() || app.get(self).reverse_duration.is_some(),
             "AnimationController::reverse() called with no default duration or reverseDuration."
         );
         debug_assert!(
-            app.get(self.0).ticker.is_some(),
+            app.get(self).ticker.is_some(),
             "AnimationController::reverse() called after AnimationController::dispose()."
         );
-        app.get_mut(self.0).direction = AnimationDirection::Reverse;
+        app.get_mut(self).direction = AnimationDirection::Reverse;
         if let Some(from) = from {
             self.set_value(app, from);
         }
-        let lower_bound = app.get(self.0).lower_bound;
+        let lower_bound = app.get(self).lower_bound;
         self.animate_to_internal(app, lower_bound, None, Curves::linear())
     }
 
     /// Toggles the direction of this animation.
-    pub fn toggle(self, app: &mut App, from: Option<f64>) -> TickerFuture {
+    pub fn toggle(self: Handle<Self>, app: &mut App, from: Option<f64>) -> Handle<TickerFuture> {
         debug_assert!(
             {
-                let controller = app.get(self.0);
+                let controller = app.get(self);
                 let mut duration = controller.duration;
                 if controller.status.is_forward_or_completed() {
                     duration = duration.or(controller.reverse_duration);
@@ -792,11 +792,11 @@ impl AnimationController {
             "AnimationController::toggle() called with no default duration."
         );
         debug_assert!(
-            app.get(self.0).ticker.is_some(),
+            app.get(self).ticker.is_some(),
             "AnimationController::toggle() called after AnimationController::dispose()."
         );
-        let forward_or_completed = app.get(self.0).status.is_forward_or_completed();
-        app.get_mut(self.0).direction = if forward_or_completed {
+        let forward_or_completed = app.get(self).status.is_forward_or_completed();
+        app.get_mut(self).direction = if forward_or_completed {
             AnimationDirection::Reverse
         } else {
             AnimationDirection::Forward
@@ -804,69 +804,69 @@ impl AnimationController {
         if let Some(from) = from {
             self.set_value(app, from);
         }
-        let target = match app.get(self.0).direction {
-            AnimationDirection::Forward => app.get(self.0).upper_bound,
-            AnimationDirection::Reverse => app.get(self.0).lower_bound,
+        let target = match app.get(self).direction {
+            AnimationDirection::Forward => app.get(self).upper_bound,
+            AnimationDirection::Reverse => app.get(self).lower_bound,
         };
         self.animate_to_internal(app, target, None, Curves::linear())
     }
 
     /// Drives the animation from its current value to `target`.
     pub fn animate_to(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         target: f64,
         duration: Option<Duration>,
         curve: Rc<dyn Curve>,
-    ) -> TickerFuture {
+    ) -> Handle<TickerFuture> {
         debug_assert!(
-            app.get(self.0).duration.is_some() || duration.is_some(),
+            app.get(self).duration.is_some() || duration.is_some(),
             "AnimationController::animate_to() called with no explicit duration and no default \
              duration."
         );
         debug_assert!(
-            app.get(self.0).ticker.is_some(),
+            app.get(self).ticker.is_some(),
             "AnimationController::animate_to() called after AnimationController::dispose()."
         );
-        app.get_mut(self.0).direction = AnimationDirection::Forward;
+        app.get_mut(self).direction = AnimationDirection::Forward;
         self.animate_to_internal(app, target, duration, curve)
     }
 
     /// Drives the animation from its current value to `target`, going in reverse.
     pub fn animate_back(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         target: f64,
         duration: Option<Duration>,
         curve: Rc<dyn Curve>,
-    ) -> TickerFuture {
+    ) -> Handle<TickerFuture> {
         debug_assert!(
-            app.get(self.0).duration.is_some()
-                || app.get(self.0).reverse_duration.is_some()
+            app.get(self).duration.is_some()
+                || app.get(self).reverse_duration.is_some()
                 || duration.is_some(),
             "AnimationController::animate_back() called with no explicit duration and no default \
              duration or reverseDuration."
         );
         debug_assert!(
-            app.get(self.0).ticker.is_some(),
+            app.get(self).ticker.is_some(),
             "AnimationController::animate_back() called after AnimationController::dispose()."
         );
-        app.get_mut(self.0).direction = AnimationDirection::Reverse;
+        app.get_mut(self).direction = AnimationDirection::Reverse;
         self.animate_to_internal(app, target, duration, curve)
     }
 
     /// Starts running this animation in the forward direction, and restarts
     /// the animation when it completes.
     pub fn repeat(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         min: Option<f64>,
         max: Option<f64>,
         reverse: bool,
         period: Option<Duration>,
         count: Option<u64>,
-    ) -> TickerFuture {
-        let controller = app.get(self.0);
+    ) -> Handle<TickerFuture> {
+        let controller = app.get(self);
         let min = min.unwrap_or(controller.lower_bound);
         let max = max.unwrap_or(controller.upper_bound);
         let period = period.or(controller.duration);
@@ -880,7 +880,7 @@ impl AnimationController {
         debug_assert!(count.is_none_or(|count| count > 0));
         self.stop(app, true);
         let (value, pending_direction) = {
-            let controller = app.get(self.0);
+            let controller = app.get(self);
             (controller.value, Rc::clone(&controller.pending_direction))
         };
         self.start_simulation(
@@ -899,14 +899,14 @@ impl AnimationController {
 
     /// Drives the animation with a spring and initial `velocity`.
     pub fn fling(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         velocity: f64,
         spring_description: Option<SpringDescription>,
         animation_behavior: Option<AnimationBehavior>,
-    ) -> TickerFuture {
+    ) -> Handle<TickerFuture> {
         let spring_description = spring_description.unwrap_or_else(k_fling_spring_description);
-        let controller = app.get_mut(self.0);
+        let controller = app.get_mut(self);
         controller.direction = if velocity < 0.0 {
             AnimationDirection::Reverse
         } else {
@@ -940,34 +940,43 @@ impl AnimationController {
     }
 
     /// Drives the animation according to the given simulation.
-    pub fn animate_with(self, app: &mut App, simulation: Box<dyn Simulation>) -> TickerFuture {
+    pub fn animate_with(
+        self: Handle<Self>,
+        app: &mut App,
+        simulation: Box<dyn Simulation>,
+    ) -> Handle<TickerFuture> {
         debug_assert!(
-            app.get(self.0).ticker.is_some(),
+            app.get(self).ticker.is_some(),
             "AnimationController::animate_with() called after AnimationController::dispose()."
         );
         self.stop(app, true);
-        app.get_mut(self.0).direction = AnimationDirection::Forward;
+        app.get_mut(self).direction = AnimationDirection::Forward;
         self.start_simulation(app, Rc::from(simulation))
     }
 
-    /// Like [`animate_with`], but the status is reported as [`AnimationStatus::Reverse`].
-    pub fn animate_back_with(self, app: &mut App, simulation: Box<dyn Simulation>) -> TickerFuture {
+    /// Like [`animate_with`](AnimationController::animate_with), but the status
+    /// is reported as [`AnimationStatus::Reverse`].
+    pub fn animate_back_with(
+        self: Handle<Self>,
+        app: &mut App,
+        simulation: Box<dyn Simulation>,
+    ) -> Handle<TickerFuture> {
         debug_assert!(
-            app.get(self.0).ticker.is_some(),
+            app.get(self).ticker.is_some(),
             "AnimationController::animate_back_with() called after AnimationController::dispose()."
         );
         self.stop(app, true);
-        app.get_mut(self.0).direction = AnimationDirection::Reverse;
+        app.get_mut(self).direction = AnimationDirection::Reverse;
         self.start_simulation(app, Rc::from(simulation))
     }
 
     /// Stops running this animation.
-    pub fn stop(self, app: &mut App, canceled: bool) {
+    pub fn stop(self: Handle<Self>, app: &mut App, canceled: bool) {
         debug_assert!(
-            app.get(self.0).ticker.is_some(),
+            app.get(self).ticker.is_some(),
             "AnimationController::stop() called after AnimationController::dispose()."
         );
-        let controller = app.get_mut(self.0);
+        let controller = app.get_mut(self);
         controller.simulation = None;
         controller.last_elapsed_duration = None;
         let ticker = controller.ticker.unwrap();
@@ -976,26 +985,16 @@ impl AnimationController {
 
     /// Release the resources used by this object. The object is no longer
     /// usable after this method is called.
-    pub fn dispose(self, app: &mut App) {
+    pub fn dispose(self: Handle<Self>, app: &mut App) {
         debug_assert!(
-            app.get(self.0).ticker.is_some(),
+            app.get(self).ticker.is_some(),
             "AnimationController::dispose() called more than once."
         );
-        let ticker = app.get_mut(self.0).ticker.take().unwrap();
+        let ticker = app.get_mut(self).ticker.take().unwrap();
         ticker.dispose(app);
         self.clear_status_listeners(app);
         self.clear_listeners(app);
         AnimationEagerListenerMixin::dispose(self, app);
-    }
-}
-
-impl Listenable for AnimationController {
-    fn add_listener(&self, app: &mut App, listener: Listener) {
-        self.view().add_listener(app, listener);
-    }
-
-    fn remove_listener(&self, app: &mut App, listener: &Listener) {
-        self.view().remove_listener(app, listener);
     }
 }
 
@@ -1008,7 +1007,7 @@ mod tests {
 
     use super::*;
 
-    fn assert_future_completed(app: &mut App, future: TickerFuture) {
+    fn assert_future_completed(app: &mut App, future: Handle<TickerFuture>) {
         let ran = Rc::new(Cell::new(false));
         future.when_complete(
             app,
@@ -1021,7 +1020,7 @@ mod tests {
         assert!(ran.get(), "TickerFuture should have completed");
     }
 
-    fn assert_future_canceled(app: &mut App, future: TickerFuture) {
+    fn assert_future_canceled(app: &mut App, future: Handle<TickerFuture>) {
         let completed = Rc::new(Cell::new(false));
         let either = Rc::new(Cell::new(false));
         future.when_complete(
@@ -1047,7 +1046,7 @@ mod tests {
     struct TestVSync;
 
     impl TickerProvider for TestVSync {
-        fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Ticker {
+        fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
             Ticker::new(app, on_tick)
         }
     }
@@ -1059,7 +1058,7 @@ mod tests {
         app.drain_microtasks();
     }
 
-    fn controller_with_duration(app: &mut App, ms: u64) -> AnimationController {
+    fn controller_with_duration(app: &mut App, ms: u64) -> Handle<AnimationController> {
         AnimationController::create(
             app,
             None,

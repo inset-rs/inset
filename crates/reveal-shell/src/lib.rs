@@ -4,6 +4,7 @@
 //! Dart has no type for this — the engine owns the isolate. [`App`] stays in
 //! foundation. This crate sits above scheduler and gestures so the isolate
 //! can name both.
+#![feature(arbitrary_self_types)]
 
 use reveal_embedder::{EmbedderClient, Frame, PlatformRef, PointerDataPacket, ViewId};
 use reveal_foundation::App;
@@ -49,7 +50,7 @@ impl EmbedderClient for Shell {
     fn view_removed(&mut self, _id: ViewId) {}
 
     fn pointer_data_packet(&mut self, packet: PointerDataPacket) {
-        GestureBinding::handle_pointer_data_packet(&mut self.app, packet);
+        GestureBinding::instance(&mut self.app).handle_pointer_data_packet(&mut self.app, packet);
         self.app.drain_microtasks();
     }
 }

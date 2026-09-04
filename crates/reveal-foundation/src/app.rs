@@ -4,6 +4,7 @@ use std::any::{Any, type_name};
 use std::collections::{HashMap, VecDeque};
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
+use std::ops::Receiver;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -77,6 +78,12 @@ impl<T> Clone for Handle<T> {
 }
 
 impl<T> Copy for Handle<T> {}
+
+/// An arena object's methods take `self: Handle<Self>`: the handle is the receiver, the
+/// object is `app.get(self)`.
+impl<T> Receiver for Handle<T> {
+    type Target = T;
+}
 
 impl<T> PartialEq for Handle<T> {
     fn eq(&self, other: &Handle<T>) -> bool {

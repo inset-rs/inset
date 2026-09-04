@@ -156,11 +156,6 @@ impl Debug for GestureArena {
     }
 }
 
-pub(crate) struct GestureArenaManagerData {
-    next_id: u64,
-    arenas: HashMap<i64, GestureArena>,
-}
-
 /// Used for disambiguating the meaning of sequences of pointer events.
 ///
 /// The first member to accept or the last member to not reject wins.
@@ -170,28 +165,30 @@ pub(crate) struct GestureArenaManagerData {
 ///
 /// To debug problems with gestures, consider using
 /// [`debug_print_gesture_arena_diagnostics`].
-#[derive(Clone, Copy)]
-pub struct GestureArenaManager(Handle<GestureArenaManagerData>);
+pub struct GestureArenaManager {
+    next_id: u64,
+    arenas: HashMap<i64, GestureArena>,
+}
 
 impl GestureArenaManager {
     /// Creates an empty manager.
-    pub fn new(app: &mut App) -> GestureArenaManager {
-        GestureArenaManager(app.create(GestureArenaManagerData {
+    pub fn new(app: &mut App) -> Handle<GestureArenaManager> {
+        app.create(GestureArenaManager {
             next_id: 0,
             arenas: HashMap::new(),
-        }))
+        })
     }
 
     /// Adds a new member (e.g., gesture recognizer) to the arena.
     pub fn add(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         pointer: i64,
         member: impl GestureArenaMember,
     ) -> GestureArenaEntry {
         let member = MemberBox::new(member);
         {
-            let data = app.get_mut(self.0);
+            let data = app.get_mut(self);
             if !data.arenas.contains_key(&pointer) {
                 debug_log_diagnostic(pointer, "★ Opening new gesture arena.", None);
                 let id = data.next_id;
@@ -209,16 +206,16 @@ impl GestureArenaManager {
     /// Prevents new members from entering the arena.
     ///
     /// Called after the framework has finished dispatching the pointer down event.
-    pub fn close(self, app: &mut App, pointer: i64) {
+    pub fn close(self: Handle<Self>, app: &mut App, pointer: i64) {
         let arena_id = {
-            let Some(state) = app.get_mut(self.0).arenas.get_mut(&pointer) else {
+            let Some(state) = app.get_mut(self).arenas.get_mut(&pointer) else {
                 return; // This arena either never existed or has been resolved.
             };
             state.is_open = false;
             state.id
         };
         let count = app
-            .get(self.0)
+            .get(self)
             .arenas
             .get(&pointer)
             .map(|state| state.members.len());
@@ -239,16 +236,16 @@ impl GestureArenaManager {
     ///
     ///  * [`hold`](Self::hold)
     ///  * [`release`](Self::release)
-    pub fn sweep(self, app: &mut App, pointer: i64) {
+    pub fn sweep(self: Handle<Self>, app: &mut App, pointer: i64) {
         let (is_held, member_count) = {
-            let Some(state) = app.get(self.0).arenas.get(&pointer) else {
+            let Some(state) = app.get(self).arenas.get(&pointer) else {
                 return; // This arena either never existed or has been resolved.
             };
             debug_assert!(!state.is_open);
             (state.is_held, state.members.len())
         };
         if is_held {
-            app.get_mut(self.0)
+            app.get_mut(self)
                 .arenas
                 .get_mut(&pointer)
                 .unwrap()
@@ -257,7 +254,7 @@ impl GestureArenaManager {
             return; // This arena is being held for a long-lived member.
         }
         debug_log_diagnostic(pointer, "Sweeping", Some(member_count));
-        let Some(state) = app.get_mut(self.0).arenas.remove(&pointer) else {
+        let Some(state) = app.get_mut(self).arenas.remove(&pointer) else {
             return;
         };
         if let Some(first) = state.members.first() {
@@ -281,8 +278,8 @@ impl GestureArenaManager {
     ///
     ///  * [`sweep`](Self::sweep)
     ///  * [`release`](Self::release)
-    pub fn hold(self, app: &mut App, pointer: i64) {
-        let Some(state) = app.get_mut(self.0).arenas.get_mut(&pointer) else {
+    pub fn hold(self: Handle<Self>, app: &mut App, pointer: i64) {
+        let Some(state) = app.get_mut(self).arenas.get_mut(&pointer) else {
             return; // This arena either never existed or has been resolved.
         };
         state.is_held = true;
@@ -299,9 +296,9 @@ impl GestureArenaManager {
     ///
     ///  * [`sweep`](Self::sweep)
     ///  * [`hold`](Self::hold)
-    pub fn release(self, app: &mut App, pointer: i64) {
+    pub fn release(self: Handle<Self>, app: &mut App, pointer: i64) {
         let has_pending_sweep = {
-            let Some(state) = app.get_mut(self.0).arenas.get_mut(&pointer) else {
+            let Some(state) = app.get_mut(self).arenas.get_mut(&pointer) else {
                 return; // This arena either never existed or has been resolved.
             };
             state.is_held = false;
@@ -315,13 +312,13 @@ impl GestureArenaManager {
     }
 
     fn resolve(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         pointer: i64,
         member: &MemberBox,
         disposition: GestureDisposition,
     ) {
-        let Some(arena_id) = app.get(self.0).arenas.get(&pointer).map(|state| {
+        let Some(arena_id) = app.get(self).arenas.get(&pointer).map(|state| {
             debug_assert!(state.members.contains(member));
             state.id
         }) else {
@@ -335,12 +332,12 @@ impl GestureArenaManager {
                     None,
                 );
                 let is_open = app
-                    .get(self.0)
+                    .get(self)
                     .arenas
                     .get(&pointer)
                     .is_some_and(|state| state.id == arena_id && state.is_open);
                 if is_open {
-                    let state = app.get_mut(self.0).arenas.get_mut(&pointer).unwrap();
+                    let state = app.get_mut(self).arenas.get_mut(&pointer).unwrap();
                     if state.eager_winner.is_none() {
                         state.eager_winner = Some(member.clone());
                     }
@@ -360,7 +357,7 @@ impl GestureArenaManager {
                     None,
                 );
                 let should_try = {
-                    let Some(state) = app.get_mut(self.0).arenas.get_mut(&pointer) else {
+                    let Some(state) = app.get_mut(self).arenas.get_mut(&pointer) else {
                         return;
                     };
                     if state.id != arena_id {
@@ -380,9 +377,9 @@ impl GestureArenaManager {
         }
     }
 
-    fn try_to_resolve_arena(self, app: &mut App, pointer: i64, arena_id: u64) {
+    fn try_to_resolve_arena(self: Handle<Self>, app: &mut App, pointer: i64, arena_id: u64) {
         let Some((member_count, eager_winner)) =
-            app.get(self.0).arenas.get(&pointer).and_then(|state| {
+            app.get(self).arenas.get(&pointer).and_then(|state| {
                 if state.id != arena_id {
                     return None;
                 }
@@ -397,7 +394,7 @@ impl GestureArenaManager {
                 self.resolve_by_default(app, pointer, arena_id);
             }));
         } else if member_count == 0 {
-            app.get_mut(self.0).arenas.remove(&pointer);
+            app.get_mut(self).arenas.remove(&pointer);
             debug_log_diagnostic(pointer, "Arena empty.", None);
         } else if let Some(winner) = eager_winner {
             debug_log_diagnostic(
@@ -409,8 +406,8 @@ impl GestureArenaManager {
         }
     }
 
-    fn resolve_by_default(self, app: &mut App, pointer: i64, arena_id: u64) {
-        let Some(winner) = app.get(self.0).arenas.get(&pointer).and_then(|state| {
+    fn resolve_by_default(self: Handle<Self>, app: &mut App, pointer: i64, arena_id: u64) {
+        let Some(winner) = app.get(self).arenas.get(&pointer).and_then(|state| {
             if state.id != arena_id {
                 return None;
             }
@@ -420,7 +417,7 @@ impl GestureArenaManager {
         }) else {
             return; // This arena has already resolved.
         };
-        app.get_mut(self.0).arenas.remove(&pointer);
+        app.get_mut(self).arenas.remove(&pointer);
         debug_log_diagnostic(
             pointer,
             &format!("Default winner: {:?}", winner.member_id()),
@@ -429,8 +426,14 @@ impl GestureArenaManager {
         winner.accept_gesture(app, pointer);
     }
 
-    fn resolve_in_favor_of(self, app: &mut App, pointer: i64, arena_id: u64, member: &MemberBox) {
-        let Some(members) = app.get(self.0).arenas.get(&pointer).and_then(|state| {
+    fn resolve_in_favor_of(
+        self: Handle<Self>,
+        app: &mut App,
+        pointer: i64,
+        arena_id: u64,
+        member: &MemberBox,
+    ) {
+        let Some(members) = app.get(self).arenas.get(&pointer).and_then(|state| {
             if state.id != arena_id {
                 return None;
             }
@@ -442,7 +445,7 @@ impl GestureArenaManager {
         }) else {
             return;
         };
-        app.get_mut(self.0).arenas.remove(&pointer);
+        app.get_mut(self).arenas.remove(&pointer);
         for rejected in &members {
             if rejected != member {
                 rejected.reject_gesture(app, pointer);
@@ -475,52 +478,49 @@ mod tests {
 
     const PRIMARY_KEY: i64 = 4;
 
-    struct TestMemberData {
+    struct TestMember {
         accept_ran: bool,
         reject_ran: bool,
     }
 
-    #[derive(Clone, Copy)]
-    struct TestMember(Handle<TestMemberData>);
-
     impl TestMember {
-        fn new(app: &mut App) -> TestMember {
-            TestMember(app.create(TestMemberData {
+        fn new(app: &mut App) -> Handle<TestMember> {
+            app.create(TestMember {
                 accept_ran: false,
                 reject_ran: false,
-            }))
+            })
         }
 
-        fn accept_ran(self, app: &App) -> bool {
-            app.get(self.0).accept_ran
+        fn accept_ran(self: Handle<Self>, app: &App) -> bool {
+            app.get(self).accept_ran
         }
 
-        fn reject_ran(self, app: &App) -> bool {
-            app.get(self.0).reject_ran
+        fn reject_ran(self: Handle<Self>, app: &App) -> bool {
+            app.get(self).reject_ran
         }
     }
 
-    impl GestureArenaMember for TestMember {
+    impl GestureArenaMember for Handle<TestMember> {
         fn accept_gesture(&self, app: &mut App, pointer: i64) {
             assert_eq!(pointer, PRIMARY_KEY);
-            app.get_mut(self.0).accept_ran = true;
+            app.get_mut(*self).accept_ran = true;
         }
 
         fn reject_gesture(&self, app: &mut App, pointer: i64) {
             assert_eq!(pointer, PRIMARY_KEY);
-            app.get_mut(self.0).reject_ran = true;
+            app.get_mut(*self).reject_ran = true;
         }
 
         fn member_id(&self) -> HandleId {
-            self.0.id()
+            self.id()
         }
     }
 
     struct GestureTester {
         app: App,
-        arena: GestureArenaManager,
-        first: TestMember,
-        second: TestMember,
+        arena: Handle<GestureArenaManager>,
+        first: Handle<TestMember>,
+        second: Handle<TestMember>,
         first_entry: Option<GestureArenaEntry>,
         second_entry: Option<GestureArenaEntry>,
     }

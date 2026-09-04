@@ -1,5 +1,6 @@
 //! Opens the implicit window and renders a small render tree in it: a padded, centered,
-//! decorated box, through `RendererBinding`'s frame pipeline.
+//! decorated box, through `RendererBinding`'s frame pipeline. The card is a mouse region
+//! that shows the pointing-hand cursor while hovered.
 //!
 //! ```text
 //! cargo run -p window
@@ -14,9 +15,10 @@ use reveal_embedder_winit::{ImplicitViewConfig, WinitEmbedder};
 use reveal_painting::{AlignmentGeometry, BoxDecoration, EdgeInsetsGeometry, ImageConfiguration};
 use reveal_rendering::{
     BoxConstraints, DecorationPosition, RenderBox, RenderConstrainedBox, RenderDecoratedBox,
-    RenderPadding, RenderPositionedBox, RendererBinding,
+    RenderMouseRegion, RenderPadding, RenderPositionedBox, RendererBinding,
 };
 use reveal_scheduler::SchedulerBinding;
+use reveal_services::SystemMouseCursors;
 use reveal_shell::Shell;
 
 fn main() {
@@ -42,13 +44,15 @@ fn main() {
                 BoxConstraints::tight(Size::new(200.0, 120.0)),
                 Some(card.as_box()),
             );
+            let hoverable = RenderMouseRegion::new(app, true, Some(sized.as_box()));
+            hoverable.set_cursor(app, SystemMouseCursors::CLICK.into());
             let centered = RenderPositionedBox::new(
                 app,
                 AlignmentGeometry::CENTER,
                 None,
                 None,
                 None,
-                Some(sized.as_box()),
+                Some(hoverable.as_box()),
             );
             let padded = RenderPadding::new(
                 app,

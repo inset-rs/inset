@@ -31,6 +31,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — there is no isolate-global dispatcher; the host-supplied `Platform` is the source of truth.
   Affect: write `app.platform().platform_brightness()` where Dart writes `PlatformDispatcher.instance.platformBrightness`.
 
+- Change: [`Platform::activate_system_cursor`](Platform::activate_system_cursor) is the `activateSystemCursor` message of Flutter's `SystemChannels.mouseCursor`; it takes a [`SystemMouseCursorKind`](SystemMouseCursorKind) and defaults to doing nothing.
+  Reason: platform — there are no method channels, so the kind needs no string encoding; a host capability is a method on `Platform`.
+  Affect: `reveal-services` calls it with the cursor's kind; a host that shows cursors overrides it.
+
 ## views.rs → dart:ui `FlutterView` / `ViewPadding` / `ViewConstraints`
 
 - Change: `View` is a handle to the native surface. The host owns the window and answers metrics from it; the framework does not keep a copy.

@@ -1,6 +1,6 @@
 //! Flutter counterpart: `animation/listener_helpers.dart`.
 
-use reveal_foundation::{App, HashedObserverList, Listener, ObserverList};
+use reveal_foundation::{App, Handle, HashedObserverList, Listener, ObserverList};
 
 use crate::animation::{AnimationStatus, AnimationStatusListener};
 
@@ -30,12 +30,12 @@ impl AnimationLazyListenerData {
 ///
 /// [`did_register_listener`]: AnimationLazyListenerMixin::did_register_listener
 /// [`did_unregister_listener`]: AnimationLazyListenerMixin::did_unregister_listener
-pub trait AnimationLazyListenerMixin: Copy + 'static {
+pub trait AnimationLazyListenerMixin: Sized + 'static {
     /// The mixin's field on the host.
-    fn lazy_listener_data(self, app: &App) -> &AnimationLazyListenerData;
+    fn lazy_listener_data(self: Handle<Self>, app: &App) -> &AnimationLazyListenerData;
 
     /// The mixin's field on the host, mutably.
-    fn lazy_listener_data_mut(self, app: &mut App) -> &mut AnimationLazyListenerData;
+    fn lazy_listener_data_mut(self: Handle<Self>, app: &mut App) -> &mut AnimationLazyListenerData;
 
     /// Called when the number of listeners changes from zero to one.
     ///
@@ -44,10 +44,10 @@ pub trait AnimationLazyListenerMixin: Copy + 'static {
     /// on its parent animation (`animation/animations.dart:227`), which needs
     /// the App to reach the parent and this handle to name the notifier the
     /// parent should call back.
-    fn did_start_listening(self, app: &mut App);
+    fn did_start_listening(self: Handle<Self>, app: &mut App);
 
     /// Called when the number of listeners changes from one to zero.
-    fn did_stop_listening(self, app: &mut App);
+    fn did_stop_listening(self: Handle<Self>, app: &mut App);
 
     /// Calls [`did_start_listening`] every time a registration of a listener
     /// causes an empty list of listeners to become non-empty.
@@ -60,7 +60,7 @@ pub trait AnimationLazyListenerMixin: Copy + 'static {
     ///
     /// [`did_start_listening`]: AnimationLazyListenerMixin::did_start_listening
     /// [`did_unregister_listener`]: AnimationLazyListenerMixin::did_unregister_listener
-    fn did_register_listener(self, app: &mut App) {
+    fn did_register_listener(self: Handle<Self>, app: &mut App) {
         if self.lazy_listener_data(app).listener_counter == 0 {
             self.did_start_listening(app);
         }
@@ -77,7 +77,7 @@ pub trait AnimationLazyListenerMixin: Copy + 'static {
     ///
     /// [`did_stop_listening`]: AnimationLazyListenerMixin::did_stop_listening
     /// [`did_register_listener`]: AnimationLazyListenerMixin::did_register_listener
-    fn did_unregister_listener(self, app: &mut App) {
+    fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
         debug_assert!(self.lazy_listener_data(app).listener_counter >= 1);
         self.lazy_listener_data_mut(app).listener_counter -= 1;
         if self.lazy_listener_data(app).listener_counter == 0 {
@@ -88,7 +88,7 @@ pub trait AnimationLazyListenerMixin: Copy + 'static {
     /// Whether there are any listeners.
     // `self` is a `Copy` handle and the name is Dart's spec.
     #[allow(clippy::wrong_self_convention)]
-    fn is_listening(self, app: &App) -> bool {
+    fn is_listening(self: Handle<Self>, app: &App) -> bool {
         self.lazy_listener_data(app).listener_counter > 0
     }
 }
@@ -106,20 +106,20 @@ pub trait AnimationLazyListenerMixin: Copy + 'static {
 ///
 /// [`did_register_listener`]: AnimationEagerListenerMixin::did_register_listener
 /// [`did_unregister_listener`]: AnimationEagerListenerMixin::did_unregister_listener
-pub trait AnimationEagerListenerMixin: Copy + 'static {
+pub trait AnimationEagerListenerMixin: Sized + 'static {
     /// This implementation ignores listener registrations.
-    fn did_register_listener(self, _app: &mut App) {}
+    fn did_register_listener(self: Handle<Self>, _app: &mut App) {}
 
     /// This implementation ignores listener registrations.
-    fn did_unregister_listener(self, _app: &mut App) {}
+    fn did_unregister_listener(self: Handle<Self>, _app: &mut App) {}
 
     /// Release the resources used by this object. The object is no longer usable
     /// after this method is called.
     ///
     /// An implementor that overrides this must end by calling
-    /// `AnimationEagerListenerMixin::dispose(self, app)`, as Dart's `@mustCallSuper`
+    /// `AnimationEagerListenerMixin::dispose(self: Handle<Self>, app)`, as Dart's `@mustCallSuper`
     /// requires.
-    fn dispose(self, _app: &mut App) {}
+    fn dispose(self: Handle<Self>, _app: &mut App) {}
 }
 
 /// Mixin state for [`AnimationLocalListenersMixin`].
@@ -168,12 +168,15 @@ impl AnimationLocalListenersData {
 /// [`notify_listeners`]: AnimationLocalListenersMixin::notify_listeners
 /// [`did_register_listener`]: AnimationLocalListenersMixin::did_register_listener
 /// [`did_unregister_listener`]: AnimationLocalListenersMixin::did_unregister_listener
-pub trait AnimationLocalListenersMixin: Copy + 'static {
+pub trait AnimationLocalListenersMixin: Sized + 'static {
     /// The mixin's field on the host.
-    fn local_listeners_data(self, app: &App) -> &AnimationLocalListenersData;
+    fn local_listeners_data(self: Handle<Self>, app: &App) -> &AnimationLocalListenersData;
 
     /// The mixin's field on the host, mutably.
-    fn local_listeners_data_mut(self, app: &mut App) -> &mut AnimationLocalListenersData;
+    fn local_listeners_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut AnimationLocalListenersData;
 
     /// Called immediately before a listener is added via [`add_listener`].
     ///
@@ -182,7 +185,7 @@ pub trait AnimationLocalListenersMixin: Copy + 'static {
     ///
     /// [`add_listener`]: AnimationLocalListenersMixin::add_listener
     /// [`notify_listeners`]: AnimationLocalListenersMixin::notify_listeners
-    fn did_register_listener(self, app: &mut App);
+    fn did_register_listener(self: Handle<Self>, app: &mut App);
 
     /// Called immediately after a listener is removed via [`remove_listener`].
     ///
@@ -191,14 +194,14 @@ pub trait AnimationLocalListenersMixin: Copy + 'static {
     ///
     /// [`remove_listener`]: AnimationLocalListenersMixin::remove_listener
     /// [`notify_listeners`]: AnimationLocalListenersMixin::notify_listeners
-    fn did_unregister_listener(self, app: &mut App);
+    fn did_unregister_listener(self: Handle<Self>, app: &mut App);
 
     /// Calls the listener every time the value of the animation changes.
     ///
     /// Listeners can be removed with [`remove_listener`].
     ///
     /// [`remove_listener`]: AnimationLocalListenersMixin::remove_listener
-    fn add_listener(self, app: &mut App, listener: Listener) {
+    fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
         self.did_register_listener(app);
         self.local_listeners_data_mut(app).listeners.add(listener);
     }
@@ -208,7 +211,7 @@ pub trait AnimationLocalListenersMixin: Copy + 'static {
     /// Listeners can be added with [`add_listener`].
     ///
     /// [`add_listener`]: AnimationLocalListenersMixin::add_listener
-    fn remove_listener(self, app: &mut App, listener: &Listener) {
+    fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
         let removed = self
             .local_listeners_data_mut(app)
             .listeners
@@ -227,7 +230,7 @@ pub trait AnimationLocalListenersMixin: Copy + 'static {
     /// [`did_unregister_listener`](AnimationLocalListenersMixin::did_unregister_listener).
     ///
     /// [`add_listener`]: AnimationLocalListenersMixin::add_listener
-    fn clear_listeners(self, app: &mut App) {
+    fn clear_listeners(self: Handle<Self>, app: &mut App) {
         self.local_listeners_data_mut(app).listeners.clear();
     }
 
@@ -235,7 +238,7 @@ pub trait AnimationLocalListenersMixin: Copy + 'static {
     ///
     /// If listeners are added or removed during this function, the modifications
     /// will not change which listeners are called during this iteration.
-    fn notify_listeners(self, app: &mut App) {
+    fn notify_listeners(self: Handle<Self>, app: &mut App) {
         let local_listeners = self.local_listeners_data(app).to_list();
         for listener in local_listeners {
             // Dart wraps this in a try/catch that reports the exception and
@@ -297,13 +300,16 @@ impl AnimationLocalStatusListenersData {
 /// [`notify_status_listeners`]: AnimationLocalStatusListenersMixin::notify_status_listeners
 /// [`did_register_listener`]: AnimationLocalStatusListenersMixin::did_register_listener
 /// [`did_unregister_listener`]: AnimationLocalStatusListenersMixin::did_unregister_listener
-pub trait AnimationLocalStatusListenersMixin: Copy + 'static {
+pub trait AnimationLocalStatusListenersMixin: Sized + 'static {
     /// The mixin's field on the host.
-    fn local_status_listeners_data(self, app: &App) -> &AnimationLocalStatusListenersData;
+    fn local_status_listeners_data(
+        self: Handle<Self>,
+        app: &App,
+    ) -> &AnimationLocalStatusListenersData;
 
     /// The mixin's field on the host, mutably.
     fn local_status_listeners_data_mut(
-        self,
+        self: Handle<Self>,
         app: &mut App,
     ) -> &mut AnimationLocalStatusListenersData;
 
@@ -315,7 +321,7 @@ pub trait AnimationLocalStatusListenersMixin: Copy + 'static {
     ///
     /// [`add_status_listener`]: AnimationLocalStatusListenersMixin::add_status_listener
     /// [`notify_status_listeners`]: AnimationLocalStatusListenersMixin::notify_status_listeners
-    fn did_register_listener(self, app: &mut App);
+    fn did_register_listener(self: Handle<Self>, app: &mut App);
 
     /// Called immediately after a status listener is removed via
     /// [`remove_status_listener`].
@@ -325,14 +331,14 @@ pub trait AnimationLocalStatusListenersMixin: Copy + 'static {
     ///
     /// [`remove_status_listener`]: AnimationLocalStatusListenersMixin::remove_status_listener
     /// [`notify_status_listeners`]: AnimationLocalStatusListenersMixin::notify_status_listeners
-    fn did_unregister_listener(self, app: &mut App);
+    fn did_unregister_listener(self: Handle<Self>, app: &mut App);
 
     /// Calls listener every time the status of the animation changes.
     ///
     /// Listeners can be removed with [`remove_status_listener`].
     ///
     /// [`remove_status_listener`]: AnimationLocalStatusListenersMixin::remove_status_listener
-    fn add_status_listener(self, app: &mut App, listener: AnimationStatusListener) {
+    fn add_status_listener(self: Handle<Self>, app: &mut App, listener: AnimationStatusListener) {
         self.did_register_listener(app);
         self.local_status_listeners_data_mut(app)
             .status_listeners
@@ -344,7 +350,11 @@ pub trait AnimationLocalStatusListenersMixin: Copy + 'static {
     /// Listeners can be added with [`add_status_listener`].
     ///
     /// [`add_status_listener`]: AnimationLocalStatusListenersMixin::add_status_listener
-    fn remove_status_listener(self, app: &mut App, listener: &AnimationStatusListener) {
+    fn remove_status_listener(
+        self: Handle<Self>,
+        app: &mut App,
+        listener: &AnimationStatusListener,
+    ) {
         let removed = self
             .local_status_listeners_data_mut(app)
             .status_listeners
@@ -363,7 +373,7 @@ pub trait AnimationLocalStatusListenersMixin: Copy + 'static {
     /// [`did_unregister_listener`](AnimationLocalStatusListenersMixin::did_unregister_listener).
     ///
     /// [`add_status_listener`]: AnimationLocalStatusListenersMixin::add_status_listener
-    fn clear_status_listeners(self, app: &mut App) {
+    fn clear_status_listeners(self: Handle<Self>, app: &mut App) {
         self.local_status_listeners_data_mut(app)
             .status_listeners
             .clear();
@@ -373,7 +383,7 @@ pub trait AnimationLocalStatusListenersMixin: Copy + 'static {
     ///
     /// If listeners are added or removed during this function, the modifications
     /// will not change which listeners are called during this iteration.
-    fn notify_status_listeners(self, app: &mut App, status: AnimationStatus) {
+    fn notify_status_listeners(self: Handle<Self>, app: &mut App, status: AnimationStatus) {
         let local_listeners = self.local_status_listeners_data(app).to_list();
         for listener in local_listeners {
             // Dart wraps this in a try/catch that reports the exception and
@@ -395,8 +405,6 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use reveal_foundation::Handle;
-
     use super::*;
 
     type Log = Rc<RefCell<Vec<String>>>;
@@ -410,40 +418,46 @@ mod tests {
         log: Log,
     }
 
-    impl AnimationLazyListenerMixin for Handle<LazyHost> {
-        fn lazy_listener_data(self, app: &App) -> &AnimationLazyListenerData {
+    impl AnimationLazyListenerMixin for LazyHost {
+        fn lazy_listener_data(self: Handle<Self>, app: &App) -> &AnimationLazyListenerData {
             &app.get(self).lazy_listener
         }
 
-        fn lazy_listener_data_mut(self, app: &mut App) -> &mut AnimationLazyListenerData {
+        fn lazy_listener_data_mut(
+            self: Handle<Self>,
+            app: &mut App,
+        ) -> &mut AnimationLazyListenerData {
             &mut app.get_mut(self).lazy_listener
         }
 
-        fn did_start_listening(self, app: &mut App) {
+        fn did_start_listening(self: Handle<Self>, app: &mut App) {
             app.get(self).log.borrow_mut().push("start".to_string());
         }
 
-        fn did_stop_listening(self, app: &mut App) {
+        fn did_stop_listening(self: Handle<Self>, app: &mut App) {
             app.get(self).log.borrow_mut().push("stop".to_string());
         }
     }
 
     // Dart resolves `didRegisterListener` for a class applying both mixins by
     // linearization; here the choice is written out.
-    impl AnimationLocalListenersMixin for Handle<LazyHost> {
-        fn local_listeners_data(self, app: &App) -> &AnimationLocalListenersData {
+    impl AnimationLocalListenersMixin for LazyHost {
+        fn local_listeners_data(self: Handle<Self>, app: &App) -> &AnimationLocalListenersData {
             &app.get(self).local_listeners
         }
 
-        fn local_listeners_data_mut(self, app: &mut App) -> &mut AnimationLocalListenersData {
+        fn local_listeners_data_mut(
+            self: Handle<Self>,
+            app: &mut App,
+        ) -> &mut AnimationLocalListenersData {
             &mut app.get_mut(self).local_listeners
         }
 
-        fn did_register_listener(self, app: &mut App) {
+        fn did_register_listener(self: Handle<Self>, app: &mut App) {
             AnimationLazyListenerMixin::did_register_listener(self, app);
         }
 
-        fn did_unregister_listener(self, app: &mut App) {
+        fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
             AnimationLazyListenerMixin::did_unregister_listener(self, app);
         }
     }
@@ -456,27 +470,30 @@ mod tests {
         disposed: bool,
     }
 
-    impl AnimationEagerListenerMixin for Handle<EagerHost> {
-        fn dispose(self, app: &mut App) {
+    impl AnimationEagerListenerMixin for EagerHost {
+        fn dispose(self: Handle<Self>, app: &mut App) {
             self.clear_listeners(app);
             app.get_mut(self).disposed = true;
         }
     }
 
-    impl AnimationLocalListenersMixin for Handle<EagerHost> {
-        fn local_listeners_data(self, app: &App) -> &AnimationLocalListenersData {
+    impl AnimationLocalListenersMixin for EagerHost {
+        fn local_listeners_data(self: Handle<Self>, app: &App) -> &AnimationLocalListenersData {
             &app.get(self).local_listeners
         }
 
-        fn local_listeners_data_mut(self, app: &mut App) -> &mut AnimationLocalListenersData {
+        fn local_listeners_data_mut(
+            self: Handle<Self>,
+            app: &mut App,
+        ) -> &mut AnimationLocalListenersData {
             &mut app.get_mut(self).local_listeners
         }
 
-        fn did_register_listener(self, app: &mut App) {
+        fn did_register_listener(self: Handle<Self>, app: &mut App) {
             AnimationEagerListenerMixin::did_register_listener(self, app);
         }
 
-        fn did_unregister_listener(self, app: &mut App) {
+        fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
             AnimationEagerListenerMixin::did_unregister_listener(self, app);
         }
     }
@@ -491,41 +508,47 @@ mod tests {
         log: Log,
     }
 
-    impl AnimationLazyListenerMixin for Handle<ReverseHost> {
-        fn lazy_listener_data(self, app: &App) -> &AnimationLazyListenerData {
+    impl AnimationLazyListenerMixin for ReverseHost {
+        fn lazy_listener_data(self: Handle<Self>, app: &App) -> &AnimationLazyListenerData {
             &app.get(self).lazy_listener
         }
 
-        fn lazy_listener_data_mut(self, app: &mut App) -> &mut AnimationLazyListenerData {
+        fn lazy_listener_data_mut(
+            self: Handle<Self>,
+            app: &mut App,
+        ) -> &mut AnimationLazyListenerData {
             &mut app.get_mut(self).lazy_listener
         }
 
-        fn did_start_listening(self, app: &mut App) {
+        fn did_start_listening(self: Handle<Self>, app: &mut App) {
             app.get(self).log.borrow_mut().push("start".to_string());
         }
 
-        fn did_stop_listening(self, app: &mut App) {
+        fn did_stop_listening(self: Handle<Self>, app: &mut App) {
             app.get(self).log.borrow_mut().push("stop".to_string());
         }
     }
 
-    impl AnimationLocalStatusListenersMixin for Handle<ReverseHost> {
-        fn local_status_listeners_data(self, app: &App) -> &AnimationLocalStatusListenersData {
+    impl AnimationLocalStatusListenersMixin for ReverseHost {
+        fn local_status_listeners_data(
+            self: Handle<Self>,
+            app: &App,
+        ) -> &AnimationLocalStatusListenersData {
             &app.get(self).local_status_listeners
         }
 
         fn local_status_listeners_data_mut(
-            self,
+            self: Handle<Self>,
             app: &mut App,
         ) -> &mut AnimationLocalStatusListenersData {
             &mut app.get_mut(self).local_status_listeners
         }
 
-        fn did_register_listener(self, app: &mut App) {
+        fn did_register_listener(self: Handle<Self>, app: &mut App) {
             AnimationLazyListenerMixin::did_register_listener(self, app);
         }
 
-        fn did_unregister_listener(self, app: &mut App) {
+        fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
             AnimationLazyListenerMixin::did_unregister_listener(self, app);
         }
     }
@@ -533,7 +556,7 @@ mod tests {
     /// A host whose start/stop hooks reach *another* host through the App,
     /// which is the shape `ProxyAnimation` uses to forward its parent's
     /// notifications (`animation/animations.dart:227`, `:235`). No
-    /// `Animation<T>` here — only the hook signature is being exercised.
+    /// `AnyAnimation<T>` here — only the hook signature is being exercised.
     #[derive(Default)]
     struct ProxyLikeHost {
         lazy_listener: AnimationLazyListenerData,
@@ -544,16 +567,19 @@ mod tests {
         log: Log,
     }
 
-    impl AnimationLazyListenerMixin for Handle<ProxyLikeHost> {
-        fn lazy_listener_data(self, app: &App) -> &AnimationLazyListenerData {
+    impl AnimationLazyListenerMixin for ProxyLikeHost {
+        fn lazy_listener_data(self: Handle<Self>, app: &App) -> &AnimationLazyListenerData {
             &app.get(self).lazy_listener
         }
 
-        fn lazy_listener_data_mut(self, app: &mut App) -> &mut AnimationLazyListenerData {
+        fn lazy_listener_data_mut(
+            self: Handle<Self>,
+            app: &mut App,
+        ) -> &mut AnimationLazyListenerData {
             &mut app.get_mut(self).lazy_listener
         }
 
-        fn did_start_listening(self, app: &mut App) {
+        fn did_start_listening(self: Handle<Self>, app: &mut App) {
             let Some(parent) = app.get(self).parent else {
                 return;
             };
@@ -566,7 +592,7 @@ mod tests {
             parent.add_listener(app, forward);
         }
 
-        fn did_stop_listening(self, app: &mut App) {
+        fn did_stop_listening(self: Handle<Self>, app: &mut App) {
             let Some(parent) = app.get(self).parent else {
                 return;
             };
@@ -577,20 +603,23 @@ mod tests {
         }
     }
 
-    impl AnimationLocalListenersMixin for Handle<ProxyLikeHost> {
-        fn local_listeners_data(self, app: &App) -> &AnimationLocalListenersData {
+    impl AnimationLocalListenersMixin for ProxyLikeHost {
+        fn local_listeners_data(self: Handle<Self>, app: &App) -> &AnimationLocalListenersData {
             &app.get(self).local_listeners
         }
 
-        fn local_listeners_data_mut(self, app: &mut App) -> &mut AnimationLocalListenersData {
+        fn local_listeners_data_mut(
+            self: Handle<Self>,
+            app: &mut App,
+        ) -> &mut AnimationLocalListenersData {
             &mut app.get_mut(self).local_listeners
         }
 
-        fn did_register_listener(self, app: &mut App) {
+        fn did_register_listener(self: Handle<Self>, app: &mut App) {
             AnimationLazyListenerMixin::did_register_listener(self, app);
         }
 
-        fn did_unregister_listener(self, app: &mut App) {
+        fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
             AnimationLazyListenerMixin::did_unregister_listener(self, app);
         }
     }
@@ -789,7 +818,7 @@ mod tests {
     /// reason the hooks take the App: `ProxyAnimation.didStartListening`
     /// registers its own `notifyListeners` on its parent
     /// (`animation/animations.dart:227`). This host does the same shape without
-    /// `Animation<T>` — it registers a listener on a *second* host when its own
+    /// `AnyAnimation<T>` — it registers a listener on a *second* host when its own
     /// first listener arrives, and removes it when its last one goes.
     #[test]
     fn a_start_hook_can_register_on_another_host_through_the_app() {

@@ -1,13 +1,12 @@
 //! Flutter counterpart: `gestures/long_press.dart`.
 
-use std::fmt::{self, Debug};
 use std::rc::Rc;
 use std::time::Duration;
 
 use reveal_embedder::{Offset, PointerDeviceKind};
-use reveal_foundation::{App, Handle, HandleId, Listener, ValueChanged};
+use reveal_foundation::{App, Handle, Listener, ValueChanged};
 
-use crate::arena::{GestureArenaMember, GestureDisposition};
+use crate::arena::GestureDisposition;
 use crate::constants::K_LONG_PRESS_TIMEOUT;
 use crate::events::{
     K_PRIMARY_BUTTON, K_SECONDARY_BUTTON, K_TERTIARY_BUTTON, PointerDownEvent, PointerEvent,
@@ -221,7 +220,20 @@ fn default_button_accept_behavior(buttons: i64) -> bool {
     buttons == K_PRIMARY_BUTTON || buttons == K_SECONDARY_BUTTON || buttons == K_TERTIARY_BUTTON
 }
 
-pub(crate) struct LongPressGestureData {
+/// Recognizes when the user has pressed down at the same location for a long
+/// period of time.
+///
+/// The gesture must not deviate in position from its touch down point for 500ms
+/// until it's recognized. Once the gesture is accepted, the finger can be
+/// moved, triggering `on_long_press_move_update` callbacks, unless the
+/// [`post_accept_slop_tolerance`](Self::post_accept_slop_tolerance) constructor
+/// argument is specified.
+///
+/// [`LongPressGestureRecognizer`] may compete on pointer events of
+/// [`K_PRIMARY_BUTTON`], [`K_SECONDARY_BUTTON`], and/or [`K_TERTIARY_BUTTON`] if
+/// at least one corresponding callback is non-null. If it has no callbacks, it
+/// is a no-op.
+pub struct LongPressGestureRecognizer {
     recognizer: GestureRecognizerData,
     one_sequence: OneSequenceData,
     primary: PrimaryPointerData,
@@ -252,14 +264,20 @@ pub(crate) struct LongPressGestureData {
     velocity_tracker: Option<VelocityTracker>,
 }
 
-impl LongPressGestureData {
-    fn empty_callbacks() -> LongPressGestureData {
-        LongPressGestureData {
-            recognizer: {
-                let mut recognizer = GestureRecognizerData::new();
-                recognizer.allowed_buttons_filter = Rc::new(default_button_accept_behavior);
-                recognizer
-            },
+impl LongPressGestureRecognizer {
+    /// Creates a long-press gesture recognizer.
+    ///
+    /// Consider assigning the [`set_on_long_press_start`](Self::set_on_long_press_start)
+    /// callback after creating this object.
+    ///
+    /// [`post_accept_slop_tolerance`](Self::post_accept_slop_tolerance) defaults
+    /// to none: the gesture can be moved without limit once the long press is
+    /// accepted.
+    pub fn new(app: &mut App) -> Handle<LongPressGestureRecognizer> {
+        let mut recognizer = GestureRecognizerData::new();
+        recognizer.allowed_buttons_filter = Rc::new(default_button_accept_behavior);
+        app.create(LongPressGestureRecognizer {
+            recognizer,
             one_sequence: OneSequenceData::new(),
             primary: PrimaryPointerData::new(
                 Some(K_LONG_PRESS_TIMEOUT),
@@ -291,43 +309,17 @@ impl LongPressGestureData {
             on_tertiary_long_press_up: None,
             on_tertiary_long_press_end: None,
             velocity_tracker: None,
-        }
-    }
-}
-
-/// Recognizes when the user has pressed down at the same location for a long
-/// period of time.
-///
-/// The gesture must not deviate in position from its touch down point for 500ms
-/// until it's recognized. Once the gesture is accepted, the finger can be
-/// moved, triggering `on_long_press_move_update` callbacks, unless the
-/// [`post_accept_slop_tolerance`](Self::post_accept_slop_tolerance) constructor
-/// argument is specified.
-///
-/// [`LongPressGestureRecognizer`] may compete on pointer events of
-/// [`K_PRIMARY_BUTTON`], [`K_SECONDARY_BUTTON`], and/or [`K_TERTIARY_BUTTON`] if
-/// at least one corresponding callback is non-null. If it has no callbacks, it
-/// is a no-op.
-#[derive(Clone, Copy)]
-pub struct LongPressGestureRecognizer(Handle<LongPressGestureData>);
-
-impl LongPressGestureRecognizer {
-    /// Creates a long-press gesture recognizer.
-    ///
-    /// Consider assigning the [`set_on_long_press_start`](Self::set_on_long_press_start)
-    /// callback after creating this object.
-    ///
-    /// [`post_accept_slop_tolerance`](Self::post_accept_slop_tolerance) defaults
-    /// to none: the gesture can be moved without limit once the long press is
-    /// accepted.
-    pub fn new(app: &mut App) -> LongPressGestureRecognizer {
-        LongPressGestureRecognizer(app.create(LongPressGestureData::empty_callbacks()))
+        })
     }
 
     /// Overwrites the default duration after which the long press will be
     /// recognized.
-    pub fn duration(self, app: &mut App, duration: Duration) -> LongPressGestureRecognizer {
-        app.get_mut(self.0).primary.deadline = Some(duration);
+    pub fn duration(
+        self: Handle<Self>,
+        app: &mut App,
+        duration: Duration,
+    ) -> Handle<LongPressGestureRecognizer> {
+        app.get_mut(self).primary.deadline = Some(duration);
         self
     }
 
@@ -335,260 +327,284 @@ impl LongPressGestureRecognizer {
     ///
     /// `None` means unlimited.
     pub fn post_accept_slop_tolerance(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         value: Option<f64>,
-    ) -> LongPressGestureRecognizer {
-        app.get_mut(self.0).primary.post_accept_slop_tolerance = value;
+    ) -> Handle<LongPressGestureRecognizer> {
+        app.get_mut(self).primary.post_accept_slop_tolerance = value;
         self
     }
 
     /// The kind of devices that are allowed to be recognized.
     pub fn supported_devices(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         devices: impl IntoIterator<Item = PointerDeviceKind>,
-    ) -> LongPressGestureRecognizer {
-        app.get_mut(self.0).recognizer.supported_devices = Some(devices.into_iter().collect());
+    ) -> Handle<LongPressGestureRecognizer> {
+        app.get_mut(self).recognizer.supported_devices = Some(devices.into_iter().collect());
         self
     }
 
     /// Called when interaction starts. Limits buttons this recognizer accepts.
     pub fn allowed_buttons_filter(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         filter: impl Fn(i64) -> bool + 'static,
-    ) -> LongPressGestureRecognizer {
-        app.get_mut(self.0).recognizer.allowed_buttons_filter = Rc::new(filter);
+    ) -> Handle<LongPressGestureRecognizer> {
+        app.get_mut(self).recognizer.allowed_buttons_filter = Rc::new(filter);
         self
     }
 
     /// Optional device specific configuration that takes precedence over
     /// framework defaults.
-    pub fn gesture_settings(self, app: &App) -> Option<DeviceGestureSettings> {
-        app.get(self.0).recognizer.gesture_settings
+    pub fn gesture_settings(self: Handle<Self>, app: &App) -> Option<DeviceGestureSettings> {
+        app.get(self).recognizer.gesture_settings
     }
 
     /// Sets [`gesture_settings`](Self::gesture_settings).
-    pub fn set_gesture_settings(self, app: &mut App, settings: Option<DeviceGestureSettings>) {
-        app.get_mut(self.0).recognizer.gesture_settings = settings;
+    pub fn set_gesture_settings(
+        self: Handle<Self>,
+        app: &mut App,
+        settings: Option<DeviceGestureSettings>,
+    ) {
+        app.get_mut(self).recognizer.gesture_settings = settings;
     }
 
     /// A pointer has contacted the screen at a particular location with a
     /// primary button, which might be the start of a long-press.
     pub fn set_on_long_press_down(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         callback: impl Fn(&mut App, LongPressDownDetails) + 'static,
     ) {
-        app.get_mut(self.0).on_long_press_down = Some(Rc::new(callback));
+        app.get_mut(self).on_long_press_down = Some(Rc::new(callback));
     }
 
     /// A pointer that previously triggered [`set_on_long_press_down`](Self::set_on_long_press_down)
     /// will not end up causing a long-press.
-    pub fn set_on_long_press_cancel(self, app: &mut App, callback: impl Fn(&mut App) + 'static) {
-        app.get_mut(self.0).on_long_press_cancel = Some(Listener::new(callback));
+    pub fn set_on_long_press_cancel(
+        self: Handle<Self>,
+        app: &mut App,
+        callback: impl Fn(&mut App) + 'static,
+    ) {
+        app.get_mut(self).on_long_press_cancel = Some(Listener::new(callback));
     }
 
     /// A long press gesture by a primary button has been recognized.
-    pub fn set_on_long_press(self, app: &mut App, callback: impl Fn(&mut App) + 'static) {
-        app.get_mut(self.0).on_long_press = Some(Listener::new(callback));
+    pub fn set_on_long_press(
+        self: Handle<Self>,
+        app: &mut App,
+        callback: impl Fn(&mut App) + 'static,
+    ) {
+        app.get_mut(self).on_long_press = Some(Listener::new(callback));
     }
 
     /// A long press gesture by a primary button has been recognized.
     pub fn set_on_long_press_start(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         callback: impl Fn(&mut App, LongPressStartDetails) + 'static,
     ) {
-        app.get_mut(self.0).on_long_press_start = Some(Rc::new(callback));
+        app.get_mut(self).on_long_press_start = Some(Rc::new(callback));
     }
 
     /// Moving after the long press by a primary button is recognized.
     pub fn set_on_long_press_move_update(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         callback: impl Fn(&mut App, LongPressMoveUpdateDetails) + 'static,
     ) {
-        app.get_mut(self.0).on_long_press_move_update = Some(Rc::new(callback));
+        app.get_mut(self).on_long_press_move_update = Some(Rc::new(callback));
     }
 
     /// The pointer stopped contacting the screen after a long-press by a
     /// primary button.
-    pub fn set_on_long_press_up(self, app: &mut App, callback: impl Fn(&mut App) + 'static) {
-        app.get_mut(self.0).on_long_press_up = Some(Listener::new(callback));
+    pub fn set_on_long_press_up(
+        self: Handle<Self>,
+        app: &mut App,
+        callback: impl Fn(&mut App) + 'static,
+    ) {
+        app.get_mut(self).on_long_press_up = Some(Listener::new(callback));
     }
 
     /// The pointer stopped contacting the screen after a long-press by a
     /// primary button.
     pub fn set_on_long_press_end(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         callback: impl Fn(&mut App, LongPressEndDetails) + 'static,
     ) {
-        app.get_mut(self.0).on_long_press_end = Some(Rc::new(callback));
+        app.get_mut(self).on_long_press_end = Some(Rc::new(callback));
     }
 
     /// A pointer has contacted the screen with a secondary button, which might
     /// be the start of a long-press.
     pub fn set_on_secondary_long_press_down(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         callback: impl Fn(&mut App, LongPressDownDetails) + 'static,
     ) {
-        app.get_mut(self.0).on_secondary_long_press_down = Some(Rc::new(callback));
+        app.get_mut(self).on_secondary_long_press_down = Some(Rc::new(callback));
     }
 
     /// A pointer that previously triggered
     /// [`set_on_secondary_long_press_down`](Self::set_on_secondary_long_press_down)
     /// will not end up causing a long-press.
     pub fn set_on_secondary_long_press_cancel(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         callback: impl Fn(&mut App) + 'static,
     ) {
-        app.get_mut(self.0).on_secondary_long_press_cancel = Some(Listener::new(callback));
+        app.get_mut(self).on_secondary_long_press_cancel = Some(Listener::new(callback));
     }
 
     /// A long press gesture by a secondary button has been recognized.
-    pub fn set_on_secondary_long_press(self, app: &mut App, callback: impl Fn(&mut App) + 'static) {
-        app.get_mut(self.0).on_secondary_long_press = Some(Listener::new(callback));
+    pub fn set_on_secondary_long_press(
+        self: Handle<Self>,
+        app: &mut App,
+        callback: impl Fn(&mut App) + 'static,
+    ) {
+        app.get_mut(self).on_secondary_long_press = Some(Listener::new(callback));
     }
 
     /// A long press gesture by a secondary button has been recognized.
     pub fn set_on_secondary_long_press_start(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         callback: impl Fn(&mut App, LongPressStartDetails) + 'static,
     ) {
-        app.get_mut(self.0).on_secondary_long_press_start = Some(Rc::new(callback));
+        app.get_mut(self).on_secondary_long_press_start = Some(Rc::new(callback));
     }
 
     /// Moving after the long press by a secondary button is recognized.
     pub fn set_on_secondary_long_press_move_update(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         callback: impl Fn(&mut App, LongPressMoveUpdateDetails) + 'static,
     ) {
-        app.get_mut(self.0).on_secondary_long_press_move_update = Some(Rc::new(callback));
+        app.get_mut(self).on_secondary_long_press_move_update = Some(Rc::new(callback));
     }
 
     /// The pointer stopped contacting the screen after a long-press by a
     /// secondary button.
     pub fn set_on_secondary_long_press_up(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         callback: impl Fn(&mut App) + 'static,
     ) {
-        app.get_mut(self.0).on_secondary_long_press_up = Some(Listener::new(callback));
+        app.get_mut(self).on_secondary_long_press_up = Some(Listener::new(callback));
     }
 
     /// The pointer stopped contacting the screen after a long-press by a
     /// secondary button.
     pub fn set_on_secondary_long_press_end(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         callback: impl Fn(&mut App, LongPressEndDetails) + 'static,
     ) {
-        app.get_mut(self.0).on_secondary_long_press_end = Some(Rc::new(callback));
+        app.get_mut(self).on_secondary_long_press_end = Some(Rc::new(callback));
     }
 
     /// A pointer has contacted the screen with a tertiary button, which might
     /// be the start of a long-press.
     pub fn set_on_tertiary_long_press_down(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         callback: impl Fn(&mut App, LongPressDownDetails) + 'static,
     ) {
-        app.get_mut(self.0).on_tertiary_long_press_down = Some(Rc::new(callback));
+        app.get_mut(self).on_tertiary_long_press_down = Some(Rc::new(callback));
     }
 
     /// A pointer that previously triggered
     /// [`set_on_tertiary_long_press_down`](Self::set_on_tertiary_long_press_down)
     /// will not end up causing a long-press.
     pub fn set_on_tertiary_long_press_cancel(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         callback: impl Fn(&mut App) + 'static,
     ) {
-        app.get_mut(self.0).on_tertiary_long_press_cancel = Some(Listener::new(callback));
+        app.get_mut(self).on_tertiary_long_press_cancel = Some(Listener::new(callback));
     }
 
     /// A long press gesture by a tertiary button has been recognized.
-    pub fn set_on_tertiary_long_press(self, app: &mut App, callback: impl Fn(&mut App) + 'static) {
-        app.get_mut(self.0).on_tertiary_long_press = Some(Listener::new(callback));
+    pub fn set_on_tertiary_long_press(
+        self: Handle<Self>,
+        app: &mut App,
+        callback: impl Fn(&mut App) + 'static,
+    ) {
+        app.get_mut(self).on_tertiary_long_press = Some(Listener::new(callback));
     }
 
     /// A long press gesture by a tertiary button has been recognized.
     pub fn set_on_tertiary_long_press_start(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         callback: impl Fn(&mut App, LongPressStartDetails) + 'static,
     ) {
-        app.get_mut(self.0).on_tertiary_long_press_start = Some(Rc::new(callback));
+        app.get_mut(self).on_tertiary_long_press_start = Some(Rc::new(callback));
     }
 
     /// Moving after the long press by a tertiary button is recognized.
     pub fn set_on_tertiary_long_press_move_update(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         callback: impl Fn(&mut App, LongPressMoveUpdateDetails) + 'static,
     ) {
-        app.get_mut(self.0).on_tertiary_long_press_move_update = Some(Rc::new(callback));
+        app.get_mut(self).on_tertiary_long_press_move_update = Some(Rc::new(callback));
     }
 
     /// The pointer stopped contacting the screen after a long-press by a
     /// tertiary button.
     pub fn set_on_tertiary_long_press_up(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         callback: impl Fn(&mut App) + 'static,
     ) {
-        app.get_mut(self.0).on_tertiary_long_press_up = Some(Listener::new(callback));
+        app.get_mut(self).on_tertiary_long_press_up = Some(Listener::new(callback));
     }
 
     /// The pointer stopped contacting the screen after a long-press by a
     /// tertiary button.
     pub fn set_on_tertiary_long_press_end(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         callback: impl Fn(&mut App, LongPressEndDetails) + 'static,
     ) {
-        app.get_mut(self.0).on_tertiary_long_press_end = Some(Rc::new(callback));
+        app.get_mut(self).on_tertiary_long_press_end = Some(Rc::new(callback));
     }
 
     /// The team that this recognizer belongs to, if any.
-    pub fn team(self, app: &App) -> Option<GestureArenaTeam> {
-        app.get(self.0).one_sequence.team
+    pub fn team(self: Handle<Self>, app: &App) -> Option<Handle<GestureArenaTeam>> {
+        app.get(self).one_sequence.team
     }
 
     /// The [`team`](Self::team) can only be set once.
-    pub fn set_team(self, app: &mut App, value: GestureArenaTeam) {
-        debug_assert!(app.get(self.0).one_sequence.entries.is_empty());
-        debug_assert!(app.get(self.0).one_sequence.tracked_pointers.is_empty());
-        debug_assert!(app.get(self.0).one_sequence.team.is_none());
-        app.get_mut(self.0).one_sequence.team = Some(value);
+    pub fn set_team(self: Handle<Self>, app: &mut App, value: Handle<GestureArenaTeam>) {
+        debug_assert!(app.get(self).one_sequence.entries.is_empty());
+        debug_assert!(app.get(self).one_sequence.tracked_pointers.is_empty());
+        debug_assert!(app.get(self).one_sequence.team.is_none());
+        app.get_mut(self).one_sequence.team = Some(value);
     }
 
     /// Registers a new pointer that might be relevant to this gesture detector.
-    pub fn add_pointer(self, app: &mut App, event: PointerDownEvent) {
+    pub fn add_pointer(self: Handle<Self>, app: &mut App, event: PointerDownEvent) {
         GestureRecognizer::add_pointer(self, app, event);
     }
 
     /// Releases any resources used by the object.
-    pub fn dispose(self, app: &mut App) {
+    pub fn dispose(self: Handle<Self>, app: &mut App) {
         <Self as RecognizerLeaf>::dispose(self, app);
     }
 
     /// Returns a very short pretty description of the gesture that the
     /// recognizer looks for.
-    pub fn debug_description(self) -> &'static str {
+    pub fn debug_description(self: Handle<Self>) -> &'static str {
         "long press"
     }
 
-    fn check_long_press_down(self, app: &mut App, event: &PointerDownEvent) {
-        debug_assert!(app.get(self.0).long_press_origin.is_some());
-        let origin = app.get(self.0).long_press_origin.unwrap();
+    fn check_long_press_down(self: Handle<Self>, app: &mut App, event: &PointerDownEvent) {
+        debug_assert!(app.get(self).long_press_origin.is_some());
+        let origin = app.get(self).long_press_origin.unwrap();
         let details = LongPressDownDetails::new(
             origin.global,
             Some(origin.local),
@@ -598,17 +614,17 @@ impl LongPressGestureRecognizer {
                 event.pointer,
             )),
         );
-        let initial_buttons = app.get(self.0).initial_buttons;
+        let initial_buttons = app.get(self).initial_buttons;
         match initial_buttons {
             Some(K_PRIMARY_BUTTON) => {
-                if let Some(callback) = app.get(self.0).on_long_press_down.clone() {
+                if let Some(callback) = app.get(self).on_long_press_down.clone() {
                     GestureRecognizer::invoke_callback(self, app, "onLongPressDown", |app| {
                         callback(app, details)
                     });
                 }
             }
             Some(K_SECONDARY_BUTTON) => {
-                if let Some(callback) = app.get(self.0).on_secondary_long_press_down.clone() {
+                if let Some(callback) = app.get(self).on_secondary_long_press_down.clone() {
                     GestureRecognizer::invoke_callback(
                         self,
                         app,
@@ -618,7 +634,7 @@ impl LongPressGestureRecognizer {
                 }
             }
             Some(K_TERTIARY_BUTTON) => {
-                if let Some(callback) = app.get(self.0).on_tertiary_long_press_down.clone() {
+                if let Some(callback) = app.get(self).on_tertiary_long_press_down.clone() {
                     GestureRecognizer::invoke_callback(
                         self,
                         app,
@@ -631,19 +647,19 @@ impl LongPressGestureRecognizer {
         }
     }
 
-    fn check_long_press_cancel(self, app: &mut App) {
-        if app.get(self.0).primary.state == GestureRecognizerState::Possible {
-            let initial_buttons = app.get(self.0).initial_buttons;
+    fn check_long_press_cancel(self: Handle<Self>, app: &mut App) {
+        if app.get(self).primary.state == GestureRecognizerState::Possible {
+            let initial_buttons = app.get(self).initial_buttons;
             match initial_buttons {
                 Some(K_PRIMARY_BUTTON) => {
-                    if let Some(callback) = app.get(self.0).on_long_press_cancel.clone() {
+                    if let Some(callback) = app.get(self).on_long_press_cancel.clone() {
                         GestureRecognizer::invoke_callback(self, app, "onLongPressCancel", |app| {
                             callback.call(app)
                         });
                     }
                 }
                 Some(K_SECONDARY_BUTTON) => {
-                    if let Some(callback) = app.get(self.0).on_secondary_long_press_cancel.clone() {
+                    if let Some(callback) = app.get(self).on_secondary_long_press_cancel.clone() {
                         GestureRecognizer::invoke_callback(
                             self,
                             app,
@@ -653,7 +669,7 @@ impl LongPressGestureRecognizer {
                     }
                 }
                 Some(K_TERTIARY_BUTTON) => {
-                    if let Some(callback) = app.get(self.0).on_tertiary_long_press_cancel.clone() {
+                    if let Some(callback) = app.get(self).on_tertiary_long_press_cancel.clone() {
                         GestureRecognizer::invoke_callback(
                             self,
                             app,
@@ -667,32 +683,28 @@ impl LongPressGestureRecognizer {
         }
     }
 
-    fn check_long_press_start(self, app: &mut App) {
-        let origin = app.get(self.0).long_press_origin.unwrap();
-        let initial_buttons = app.get(self.0).initial_buttons;
+    fn check_long_press_start(self: Handle<Self>, app: &mut App) {
+        let origin = app.get(self).long_press_origin.unwrap();
+        let initial_buttons = app.get(self).initial_buttons;
         match initial_buttons {
             Some(K_PRIMARY_BUTTON) => {
-                if app.get(self.0).on_long_press_start.is_some() {
+                if app.get(self).on_long_press_start.is_some() {
                     let details = LongPressStartDetails::new(origin.global, Some(origin.local));
-                    let callback = app.get(self.0).on_long_press_start.clone().unwrap();
+                    let callback = app.get(self).on_long_press_start.clone().unwrap();
                     GestureRecognizer::invoke_callback(self, app, "onLongPressStart", |app| {
                         callback(app, details)
                     });
                 }
-                if let Some(callback) = app.get(self.0).on_long_press.clone() {
+                if let Some(callback) = app.get(self).on_long_press.clone() {
                     GestureRecognizer::invoke_callback(self, app, "onLongPress", |app| {
                         callback.call(app)
                     });
                 }
             }
             Some(K_SECONDARY_BUTTON) => {
-                if app.get(self.0).on_secondary_long_press_start.is_some() {
+                if app.get(self).on_secondary_long_press_start.is_some() {
                     let details = LongPressStartDetails::new(origin.global, Some(origin.local));
-                    let callback = app
-                        .get(self.0)
-                        .on_secondary_long_press_start
-                        .clone()
-                        .unwrap();
+                    let callback = app.get(self).on_secondary_long_press_start.clone().unwrap();
                     GestureRecognizer::invoke_callback(
                         self,
                         app,
@@ -700,20 +712,16 @@ impl LongPressGestureRecognizer {
                         |app| callback(app, details),
                     );
                 }
-                if let Some(callback) = app.get(self.0).on_secondary_long_press.clone() {
+                if let Some(callback) = app.get(self).on_secondary_long_press.clone() {
                     GestureRecognizer::invoke_callback(self, app, "onSecondaryLongPress", |app| {
                         callback.call(app)
                     });
                 }
             }
             Some(K_TERTIARY_BUTTON) => {
-                if app.get(self.0).on_tertiary_long_press_start.is_some() {
+                if app.get(self).on_tertiary_long_press_start.is_some() {
                     let details = LongPressStartDetails::new(origin.global, Some(origin.local));
-                    let callback = app
-                        .get(self.0)
-                        .on_tertiary_long_press_start
-                        .clone()
-                        .unwrap();
+                    let callback = app.get(self).on_tertiary_long_press_start.clone().unwrap();
                     GestureRecognizer::invoke_callback(
                         self,
                         app,
@@ -721,7 +729,7 @@ impl LongPressGestureRecognizer {
                         |app| callback(app, details),
                     );
                 }
-                if let Some(callback) = app.get(self.0).on_tertiary_long_press.clone() {
+                if let Some(callback) = app.get(self).on_tertiary_long_press.clone() {
                     GestureRecognizer::invoke_callback(self, app, "onTertiaryLongPress", |app| {
                         callback.call(app)
                     });
@@ -731,26 +739,25 @@ impl LongPressGestureRecognizer {
         }
     }
 
-    fn check_long_press_move_update(self, app: &mut App, event: &PointerEvent) {
-        let origin = app.get(self.0).long_press_origin.unwrap();
+    fn check_long_press_move_update(self: Handle<Self>, app: &mut App, event: &PointerEvent) {
+        let origin = app.get(self).long_press_origin.unwrap();
         let details = LongPressMoveUpdateDetails::new(
             event.position(),
             Some(event.local_position()),
             event.position() - origin.global,
             Some(event.local_position() - origin.local),
         );
-        let initial_buttons = app.get(self.0).initial_buttons;
+        let initial_buttons = app.get(self).initial_buttons;
         match initial_buttons {
             Some(K_PRIMARY_BUTTON) => {
-                if let Some(callback) = app.get(self.0).on_long_press_move_update.clone() {
+                if let Some(callback) = app.get(self).on_long_press_move_update.clone() {
                     GestureRecognizer::invoke_callback(self, app, "onLongPressMoveUpdate", |app| {
                         callback(app, details)
                     });
                 }
             }
             Some(K_SECONDARY_BUTTON) => {
-                if let Some(callback) = app.get(self.0).on_secondary_long_press_move_update.clone()
-                {
+                if let Some(callback) = app.get(self).on_secondary_long_press_move_update.clone() {
                     GestureRecognizer::invoke_callback(
                         self,
                         app,
@@ -760,7 +767,7 @@ impl LongPressGestureRecognizer {
                 }
             }
             Some(K_TERTIARY_BUTTON) => {
-                if let Some(callback) = app.get(self.0).on_tertiary_long_press_move_update.clone() {
+                if let Some(callback) = app.get(self).on_tertiary_long_press_move_update.clone() {
                     GestureRecognizer::invoke_callback(
                         self,
                         app,
@@ -773,9 +780,9 @@ impl LongPressGestureRecognizer {
         }
     }
 
-    fn check_long_press_end(self, app: &mut App, event: &PointerEvent) {
+    fn check_long_press_end(self: Handle<Self>, app: &mut App, event: &PointerEvent) {
         let estimate = app
-            .get(self.0)
+            .get(self)
             .velocity_tracker
             .as_ref()
             .and_then(VelocityTracker::get_velocity_estimate);
@@ -785,23 +792,23 @@ impl LongPressGestureRecognizer {
         };
         let details =
             LongPressEndDetails::new(event.position(), Some(event.local_position()), velocity);
-        app.get_mut(self.0).velocity_tracker = None;
-        let initial_buttons = app.get(self.0).initial_buttons;
+        app.get_mut(self).velocity_tracker = None;
+        let initial_buttons = app.get(self).initial_buttons;
         match initial_buttons {
             Some(K_PRIMARY_BUTTON) => {
-                if let Some(callback) = app.get(self.0).on_long_press_end.clone() {
+                if let Some(callback) = app.get(self).on_long_press_end.clone() {
                     GestureRecognizer::invoke_callback(self, app, "onLongPressEnd", |app| {
                         callback(app, details)
                     });
                 }
-                if let Some(callback) = app.get(self.0).on_long_press_up.clone() {
+                if let Some(callback) = app.get(self).on_long_press_up.clone() {
                     GestureRecognizer::invoke_callback(self, app, "onLongPressUp", |app| {
                         callback.call(app)
                     });
                 }
             }
             Some(K_SECONDARY_BUTTON) => {
-                if let Some(callback) = app.get(self.0).on_secondary_long_press_end.clone() {
+                if let Some(callback) = app.get(self).on_secondary_long_press_end.clone() {
                     GestureRecognizer::invoke_callback(
                         self,
                         app,
@@ -809,7 +816,7 @@ impl LongPressGestureRecognizer {
                         |app| callback(app, details),
                     );
                 }
-                if let Some(callback) = app.get(self.0).on_secondary_long_press_up.clone() {
+                if let Some(callback) = app.get(self).on_secondary_long_press_up.clone() {
                     GestureRecognizer::invoke_callback(
                         self,
                         app,
@@ -819,7 +826,7 @@ impl LongPressGestureRecognizer {
                 }
             }
             Some(K_TERTIARY_BUTTON) => {
-                if let Some(callback) = app.get(self.0).on_tertiary_long_press_end.clone() {
+                if let Some(callback) = app.get(self).on_tertiary_long_press_end.clone() {
                     GestureRecognizer::invoke_callback(
                         self,
                         app,
@@ -827,7 +834,7 @@ impl LongPressGestureRecognizer {
                         |app| callback(app, details),
                     );
                 }
-                if let Some(callback) = app.get(self.0).on_tertiary_long_press_up.clone() {
+                if let Some(callback) = app.get(self).on_tertiary_long_press_up.clone() {
                     GestureRecognizer::invoke_callback(self, app, "onTertiaryLongPressUp", |app| {
                         callback.call(app)
                     });
@@ -837,36 +844,16 @@ impl LongPressGestureRecognizer {
         }
     }
 
-    fn reset(self, app: &mut App) {
-        let data = app.get_mut(self.0);
-        data.long_press_accepted = false;
-        data.long_press_origin = None;
-        data.initial_buttons = None;
-        data.velocity_tracker = None;
+    fn reset(self: Handle<Self>, app: &mut App) {
+        let recognizer = app.get_mut(self);
+        recognizer.long_press_accepted = false;
+        recognizer.long_press_origin = None;
+        recognizer.initial_buttons = None;
+        recognizer.velocity_tracker = None;
     }
 }
 
-impl Debug for LongPressGestureRecognizer {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("LongPressGestureRecognizer")
-            .field(&self.0.id())
-            .finish()
-    }
-}
-
-impl GestureArenaMember for LongPressGestureRecognizer {
-    fn accept_gesture(&self, _app: &mut App, _pointer: i64) {}
-
-    fn reject_gesture(&self, app: &mut App, pointer: i64) {
-        PrimaryPointerGestureRecognizer::reject_gesture(*self, app, pointer);
-    }
-
-    fn member_id(&self) -> HandleId {
-        self.0.id()
-    }
-}
-
-impl RecognizerLeafData for LongPressGestureData {
+impl RecognizerLeafData for LongPressGestureRecognizer {
     fn recognizer(&self) -> &GestureRecognizerData {
         &self.recognizer
     }
@@ -888,72 +875,62 @@ impl RecognizerLeafData for LongPressGestureData {
 }
 
 impl RecognizerLeaf for LongPressGestureRecognizer {
-    type Data = LongPressGestureData;
-
-    fn slot(self) -> Handle<LongPressGestureData> {
-        self.0
-    }
-
-    fn from_slot(slot: Handle<LongPressGestureData>) -> LongPressGestureRecognizer {
-        LongPressGestureRecognizer(slot)
-    }
-
-    fn is_pointer_allowed(self, app: &App, event: &PointerDownEvent) -> bool {
-        let data = app.get(self.0);
+    fn is_pointer_allowed(self: Handle<Self>, app: &App, event: &PointerDownEvent) -> bool {
+        let recognizer = app.get(self);
         let allowed = match event.buttons {
             K_PRIMARY_BUTTON => {
-                data.on_long_press_down.is_some()
-                    || data.on_long_press_cancel.is_some()
-                    || data.on_long_press_start.is_some()
-                    || data.on_long_press.is_some()
-                    || data.on_long_press_move_update.is_some()
-                    || data.on_long_press_end.is_some()
-                    || data.on_long_press_up.is_some()
+                recognizer.on_long_press_down.is_some()
+                    || recognizer.on_long_press_cancel.is_some()
+                    || recognizer.on_long_press_start.is_some()
+                    || recognizer.on_long_press.is_some()
+                    || recognizer.on_long_press_move_update.is_some()
+                    || recognizer.on_long_press_end.is_some()
+                    || recognizer.on_long_press_up.is_some()
             }
             K_SECONDARY_BUTTON => {
-                data.on_secondary_long_press_down.is_some()
-                    || data.on_secondary_long_press_cancel.is_some()
-                    || data.on_secondary_long_press_start.is_some()
-                    || data.on_secondary_long_press.is_some()
-                    || data.on_secondary_long_press_move_update.is_some()
-                    || data.on_secondary_long_press_end.is_some()
-                    || data.on_secondary_long_press_up.is_some()
+                recognizer.on_secondary_long_press_down.is_some()
+                    || recognizer.on_secondary_long_press_cancel.is_some()
+                    || recognizer.on_secondary_long_press_start.is_some()
+                    || recognizer.on_secondary_long_press.is_some()
+                    || recognizer.on_secondary_long_press_move_update.is_some()
+                    || recognizer.on_secondary_long_press_end.is_some()
+                    || recognizer.on_secondary_long_press_up.is_some()
             }
             K_TERTIARY_BUTTON => {
-                data.on_tertiary_long_press_down.is_some()
-                    || data.on_tertiary_long_press_cancel.is_some()
-                    || data.on_tertiary_long_press_start.is_some()
-                    || data.on_tertiary_long_press.is_some()
-                    || data.on_tertiary_long_press_move_update.is_some()
-                    || data.on_tertiary_long_press_end.is_some()
-                    || data.on_tertiary_long_press_up.is_some()
+                recognizer.on_tertiary_long_press_down.is_some()
+                    || recognizer.on_tertiary_long_press_cancel.is_some()
+                    || recognizer.on_tertiary_long_press_start.is_some()
+                    || recognizer.on_tertiary_long_press.is_some()
+                    || recognizer.on_tertiary_long_press_move_update.is_some()
+                    || recognizer.on_tertiary_long_press_end.is_some()
+                    || recognizer.on_tertiary_long_press_up.is_some()
             }
             _ => false,
         };
         allowed && GestureRecognizer::is_pointer_allowed(self, app, event)
     }
 
-    fn did_exceed_deadline(self, app: &mut App) {
+    fn did_exceed_deadline(self: Handle<Self>, app: &mut App) {
         self.resolve(app, GestureDisposition::Accepted);
-        app.get_mut(self.0).long_press_accepted = true;
-        let pointer = app.get(self.0).primary.primary_pointer.unwrap();
+        app.get_mut(self).long_press_accepted = true;
+        let pointer = app.get(self).primary.primary_pointer.unwrap();
         PrimaryPointerGestureRecognizer::accept_gesture(self, app, pointer);
         self.check_long_press_start(app);
     }
 
-    fn handle_primary_pointer(self, app: &mut App, event: PointerEvent) {
+    fn handle_primary_pointer(self: Handle<Self>, app: &mut App, event: PointerEvent) {
         if !event.synthesized() {
             if let PointerEvent::Down(down) = &event {
-                app.get_mut(self.0).velocity_tracker = Some(VelocityTracker::with_kind(down.kind));
-                app.get_mut(self.0)
+                app.get_mut(self).velocity_tracker = Some(VelocityTracker::with_kind(down.kind));
+                app.get_mut(self)
                     .velocity_tracker
                     .as_mut()
                     .unwrap()
                     .add_position(down.time_stamp, down.local_position());
             }
             if let PointerEvent::Move(moved) = &event {
-                debug_assert!(app.get(self.0).velocity_tracker.is_some());
-                app.get_mut(self.0)
+                debug_assert!(app.get(self).velocity_tracker.is_some());
+                app.get_mut(self)
                     .velocity_tracker
                     .as_mut()
                     .unwrap()
@@ -962,7 +939,7 @@ impl RecognizerLeaf for LongPressGestureRecognizer {
         }
 
         if matches!(event, PointerEvent::Up(_)) {
-            if app.get(self.0).long_press_accepted {
+            if app.get(self).long_press_accepted {
                 self.check_long_press_end(app, &event);
             } else {
                 self.resolve(app, GestureDisposition::Rejected);
@@ -972,15 +949,15 @@ impl RecognizerLeaf for LongPressGestureRecognizer {
             self.check_long_press_cancel(app);
             self.reset(app);
         } else if let PointerEvent::Down(down) = &event {
-            app.get_mut(self.0).long_press_origin = Some(OffsetPair::from_event_position(&event));
-            app.get_mut(self.0).initial_buttons = Some(down.buttons);
+            app.get_mut(self).long_press_origin = Some(OffsetPair::from_event_position(&event));
+            app.get_mut(self).initial_buttons = Some(down.buttons);
             self.check_long_press_down(app, down);
         } else if let PointerEvent::Move(moved) = &event {
-            let initial = app.get(self.0).initial_buttons;
-            let accepted = app.get(self.0).long_press_accepted;
+            let initial = app.get(self).initial_buttons;
+            let accepted = app.get(self).long_press_accepted;
             if Some(moved.buttons) != initial && !accepted {
                 self.resolve(app, GestureDisposition::Rejected);
-                let primary = app.get(self.0).primary.primary_pointer.unwrap();
+                let primary = app.get(self).primary.primary_pointer.unwrap();
                 OneSequenceGestureRecognizer::stop_tracking_pointer(self, app, primary);
             } else if accepted {
                 self.check_long_press_move_update(app, &event);
@@ -988,15 +965,20 @@ impl RecognizerLeaf for LongPressGestureRecognizer {
         }
     }
 
-    fn resolve(self, app: &mut App, disposition: GestureDisposition) {
+    fn resolve(self: Handle<Self>, app: &mut App, disposition: GestureDisposition) {
         if disposition == GestureDisposition::Rejected {
-            if app.get(self.0).long_press_accepted {
+            if app.get(self).long_press_accepted {
                 self.reset(app);
             } else {
                 self.check_long_press_cancel(app);
             }
         }
         OneSequenceGestureRecognizer::resolve(self, app, disposition);
+    }
+
+    fn accept_gesture(self: Handle<Self>, _app: &mut App, _pointer: i64) {
+        // Winning the arena isn't important here since it may happen from a sweep.
+        // Explicitly exceeding the deadline puts the gesture in accepted state.
     }
 }
 
@@ -1053,7 +1035,7 @@ mod tests {
     }
 
     fn set_handlers(
-        gesture: LongPressGestureRecognizer,
+        gesture: Handle<LongPressGestureRecognizer>,
         app: &mut App,
         log: &Rc<RefCell<Vec<&'static str>>>,
     ) {

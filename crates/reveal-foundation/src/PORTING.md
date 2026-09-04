@@ -12,6 +12,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Rust has no isolate-global GC, so a named owner has to hold the arena.
   Affect: Flutter objects are `Handle`s. Callbacks take `&mut App` plus a handle to themselves.
 
+- Change: `Handle<T>` is a method receiver. A Flutter object is one struct in the arena, and its methods take `self: Handle<Self>` plus `&App` / `&mut App`; the body reads `app.get(self)`.
+  Reason: language — `Handle` is foreign to every other crate, so `impl Handle<T>` there is an orphan; nightly `arbitrary_self_types` lets the methods live on `T` instead of a newtype around the handle.
+  Affect: `let controller = AnimationController::new(app, ..)` is a `Handle<AnimationController>`; call `controller.forward(app)`. A crate that calls an inherent `self: Handle<Self>` method needs `#![feature(arbitrary_self_types)]`; trait methods resolve without it.
+
 - Change: Dart's isolate microtask queue is on `App`. A drain has a budget and panics on a cycle.
   Reason: language — there is no isolate event loop; a Rust `Future` would need `&mut App` in `poll`. The isolate has no drain budget — a cycle hangs.
   Affect: port `scheduleMicrotask(f)` as `app.schedule_microtask(...)`. Drain after platform events and between begin-frame and draw-frame.
@@ -72,7 +76,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Rust has no catchable exception for ordinary control flow. A panic skips the compaction Dart's `catch` always reaches, and the next dispatch would underflow `count - reentrantly_removed_listeners`.
   Affect: a panicking listener skips every listener after it. Flutter still calls them.
 
-- Change: [`Listenable`] lives on the handle (`Handle<T>` where `T: ChangeNotifier`). Methods take `&self` and `&mut App`. [`ValueListenable::value`] takes `&App` and returns `&T`.
+- Change: [`Listenable`] lives on the handle: `Handle<T>` is `Listenable` when `T` implements [`ListenableObject`], which every [`ChangeNotifier`] does and an object with its own listener lists implements itself. Methods take `&self` and `&mut App`. [`ValueListenable::value`] takes `&App` and returns `&T`.
   Reason: language — a `&mut self` receiver on the slot cannot also produce the `&mut App` a registration must hand onward, and an erased `Animation<T>` is a handle, not a borrow of its slot. Returning `T` from `value` would force `T: Clone` on every value type.
   Affect: `this.add_listener(app, l)` and `this.value(app)` where Dart writes `addListener(l)` and `.value`. The data's inherent `add_listener` remains for code that already holds the slot. Moving the value out needs `Clone`.
 

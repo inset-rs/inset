@@ -484,17 +484,43 @@ impl Drop for Notification {
     }
 }
 
-impl<T: ChangeNotifier> Listenable for Handle<T> {
-    fn add_listener(&self, app: &mut App, listener: Listener) {
-        app.get_mut(*self)
+/// The object side of [`Listenable`]: an arena object that keeps listeners. Implementing it
+/// makes `Handle<Self>` a [`Listenable`]. Every [`ChangeNotifier`] is one; an object with its
+/// own listener bookkeeping (Flutter's `AnimationLocalListenersMixin`) implements it directly.
+///
+/// [`Listenable`] itself takes `&self` so that an erased handle type can implement it; a crate
+/// cannot implement that foreign trait for `Handle<ItsType>`, so it implements this one on
+/// the type instead.
+pub trait ListenableObject: Sized + 'static {
+    /// Register a closure to be called when the object notifies its listeners.
+    fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener);
+
+    /// Remove a previously registered closure from the list of closures that the
+    /// object notifies.
+    fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener);
+}
+
+impl<T: ChangeNotifier> ListenableObject for T {
+    fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
+        app.get_mut(self)
             .change_notifier_data_mut()
             .add_listener(listener);
     }
 
-    fn remove_listener(&self, app: &mut App, listener: &Listener) {
-        app.get_mut(*self)
+    fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
+        app.get_mut(self)
             .change_notifier_data_mut()
             .remove_listener(listener);
+    }
+}
+
+impl<T: ListenableObject> Listenable for Handle<T> {
+    fn add_listener(&self, app: &mut App, listener: Listener) {
+        T::add_listener(*self, app, listener);
+    }
+
+    fn remove_listener(&self, app: &mut App, listener: &Listener) {
+        T::remove_listener(*self, app, listener);
     }
 }
 

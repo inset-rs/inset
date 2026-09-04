@@ -7,7 +7,7 @@ use std::fmt::{self, Debug, Display};
 use std::hash::Hasher;
 
 use reveal_embedder::Rect;
-use reveal_foundation::{App, HandleId};
+use reveal_foundation::{App, Handle, HandleId};
 use reveal_painting::{
     Axis, AxisDirection, axis_direction_is_reversed, axis_direction_to_axis, flip_axis_direction,
 };
@@ -583,7 +583,7 @@ pub trait RenderSliver: RenderObject {
     }
 
     /// See [`AnyRenderObject::owner`].
-    fn owner(self: RenderHandle<Self>, app: &App) -> Option<PipelineOwner> {
+    fn owner(self: RenderHandle<Self>, app: &App) -> Option<Handle<PipelineOwner>> {
         self.as_object().owner(app)
     }
 

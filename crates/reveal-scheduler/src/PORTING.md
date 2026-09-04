@@ -28,17 +28,19 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Rust has no catchable exception for ordinary control flow. Dart's `_invokeFrameCallback` catches and continues.
   Affect: a panicking callback skips every callback after it in that phase. Flutter still calls them.
 
-## ticker.rs → ticker.dart
+## Handles
 
-- Change: [`Ticker`] and [`TickerFuture`] are handle newtypes. Methods that need the App are inherent.
-  Reason: language — methods need `&mut App`, and an inherent `impl Handle<T>` is an orphan (`Handle` is foreign).
-  Affect: `Ticker::new(app, on_tick)`, then `ticker.start(app)`, `ticker.set_muted(app, true)`, `future.when_complete(app, listener)`.
+- Change: [`Ticker`] and [`TickerFuture`] are arena objects whose methods take `self: Handle<Self>` — the receiver rule in `reveal-foundation/src/PORTING.md` (app.rs).
+  Reason: language — see the foundation entry.
+  Affect: `let ticker = Ticker::new(app, on_tick)` is a `Handle<Ticker>`; `ticker.start(app)` returns a `Handle<TickerFuture>`; `future.when_complete(app, listener)`. A crate that calls these inherent methods needs `#![feature(arbitrary_self_types)]`.
+
+## ticker.rs → ticker.dart
 
 - Change: `TickerFuture` runs registered callbacks (`when_complete`, `when_complete_or_cancel`) through `App::schedule_microtask`; it is not a Rust `Future`.
   Reason: language — Dart's `TickerFuture` implements `Future<void>`, whose listeners the isolate runs on the microtask queue. A Rust `Future` would need `&mut App` at poll time.
   Affect: when porting `future.whenComplete(cb)` or `.then`, write `future.when_complete(app, Listener::new(...))`; the callback runs at the next drain, never during the `stop()` that resolved the future. Registering `when_complete` on an already-canceled future silently never fires, which is Dart's primary future hanging.
 
-- Change: `Ticker.muted` is the accessor `muted()` and the handle method `set_muted(app, value)`.
+- Change: `Ticker.muted` is the accessor `muted(app)` and the setter `set_muted(app, value)`.
   Reason: language — the setter schedules and unschedules ticks, so it needs the App.
   Affect: write `ticker.set_muted(app, true)` where Flutter assigns `ticker.muted = true`.
 

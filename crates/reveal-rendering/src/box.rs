@@ -9,7 +9,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 
 use reveal_embedder::{Matrix4, Offset, Rect, Size, ViewConstraints, clamp_double, lerp_double};
-use reveal_foundation::{App, HandleId};
+use reveal_foundation::{App, Handle, HandleId};
 use reveal_gestures::{HitTestEntry, HitTestResult, HitTestTarget, PointerEvent};
 use reveal_painting::EdgeInsetsGeometry;
 use reveal_painting::transform_point;
@@ -1142,7 +1142,7 @@ pub trait RenderBox: RenderObject {
     }
 
     /// See [`AnyRenderObject::owner`].
-    fn owner(self: RenderHandle<Self>, app: &App) -> Option<PipelineOwner> {
+    fn owner(self: RenderHandle<Self>, app: &App) -> Option<Handle<PipelineOwner>> {
         self.as_object().owner(app)
     }
 

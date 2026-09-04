@@ -11,10 +11,7 @@ use crate::painting_context::PaintingContext;
 /// The pipeline owner manages the rendering pipeline.
 ///
 /// Flutter's counterpart is `PipelineOwner`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct PipelineOwner(Handle<PipelineOwnerData>);
-
-struct PipelineOwnerData {
+pub struct PipelineOwner {
     on_need_visual_update: Option<Listener>,
     root_node: Option<AnyRenderObject>,
     nodes_needing_layout: Vec<AnyRenderObject>,
@@ -23,8 +20,8 @@ struct PipelineOwnerData {
     debug_doing_child_layout: bool,
     nodes_needing_paint: Vec<AnyRenderObject>,
     debug_doing_paint: bool,
-    children: Vec<PipelineOwner>,
-    debug_parent: Option<PipelineOwner>,
+    children: Vec<Handle<PipelineOwner>>,
+    debug_parent: Option<Handle<PipelineOwner>>,
 }
 
 impl PipelineOwner {
@@ -32,8 +29,8 @@ impl PipelineOwner {
     ///
     /// Typically created by the binding, but can be created separately to drive
     /// off-screen render objects through the rendering pipeline.
-    pub fn new(app: &mut App, on_need_visual_update: Option<Listener>) -> PipelineOwner {
-        PipelineOwner(app.create(PipelineOwnerData {
+    pub fn new(app: &mut App, on_need_visual_update: Option<Listener>) -> Handle<PipelineOwner> {
+        app.create(PipelineOwner {
             on_need_visual_update,
             root_node: None,
             nodes_needing_layout: Vec::new(),
@@ -44,32 +41,32 @@ impl PipelineOwner {
             debug_doing_paint: false,
             children: Vec::new(),
             debug_parent: None,
-        }))
+        })
     }
 
     /// Calls [`on_need_visual_update`](Self::new) if one was provided.
-    pub fn request_visual_update(self, app: &mut App) {
-        let callback = app.get(self.0).on_need_visual_update.clone();
+    pub fn request_visual_update(self: Handle<Self>, app: &mut App) {
+        let callback = app.get(self).on_need_visual_update.clone();
         if let Some(callback) = callback {
             callback.call(app);
         }
     }
 
     /// The unique object managed by this pipeline that has no parent.
-    pub fn root_node(self, app: &App) -> Option<AnyRenderObject> {
-        app.get(self.0).root_node
+    pub fn root_node(self: Handle<Self>, app: &App) -> Option<AnyRenderObject> {
+        app.get(self).root_node
     }
 
     /// Sets the unique object managed by this pipeline that has no parent.
-    pub fn set_root_node(self, app: &mut App, value: Option<AnyRenderObject>) {
-        let current = app.get(self.0).root_node;
+    pub fn set_root_node(self: Handle<Self>, app: &mut App, value: Option<AnyRenderObject>) {
+        let current = app.get(self).root_node;
         if current == value {
             return;
         }
         if let Some(old) = current {
             old.detach(app);
         }
-        app.get_mut(self.0).root_node = value;
+        app.get_mut(self).root_node = value;
         if let Some(new) = value {
             new.attach(app, self);
         }
@@ -77,39 +74,43 @@ impl PipelineOwner {
 
     /// Relayout boundaries which need to be laid out in the next
     /// [`flush_layout`](Self::flush_layout) pass.
-    pub fn nodes_needing_layout(self, app: &App) -> Vec<AnyRenderObject> {
-        app.get(self.0).nodes_needing_layout.clone()
+    pub fn nodes_needing_layout(self: Handle<Self>, app: &App) -> Vec<AnyRenderObject> {
+        app.get(self).nodes_needing_layout.clone()
     }
 
-    pub(crate) fn add_node_needing_layout(self, app: &mut App, node: AnyRenderObject) {
-        app.get_mut(self.0).nodes_needing_layout.push(node);
+    pub(crate) fn add_node_needing_layout(
+        self: Handle<Self>,
+        app: &mut App,
+        node: AnyRenderObject,
+    ) {
+        app.get_mut(self).nodes_needing_layout.push(node);
     }
 
     /// Whether this pipeline is currently in the layout phase.
     ///
     /// Always `false` when debug assertions are disabled.
-    pub fn debug_doing_layout(self, app: &App) -> bool {
+    pub fn debug_doing_layout(self: Handle<Self>, app: &App) -> bool {
         if !cfg!(debug_assertions) {
             return false;
         }
-        app.get(self.0).debug_doing_layout
+        app.get(self).debug_doing_layout
     }
 
     /// Update the layout information for all dirty render objects.
-    pub fn flush_layout(self, app: &mut App) {
+    pub fn flush_layout(self: Handle<Self>, app: &mut App) {
         if cfg!(debug_assertions) {
-            app.get_mut(self.0).debug_doing_layout = true;
+            app.get_mut(self).debug_doing_layout = true;
         }
-        while !app.get(self.0).nodes_needing_layout.is_empty() {
-            debug_assert!(!app.get(self.0).should_merge_dirty_nodes);
-            let mut dirty_nodes = std::mem::take(&mut app.get_mut(self.0).nodes_needing_layout);
+        while !app.get(self).nodes_needing_layout.is_empty() {
+            debug_assert!(!app.get(self).should_merge_dirty_nodes);
+            let mut dirty_nodes = std::mem::take(&mut app.get_mut(self).nodes_needing_layout);
             dirty_nodes.sort_by_key(|node| node.depth(app));
             let mut i = 0;
             while i < dirty_nodes.len() {
-                if app.get(self.0).should_merge_dirty_nodes {
-                    app.get_mut(self.0).should_merge_dirty_nodes = false;
-                    if !app.get(self.0).nodes_needing_layout.is_empty() {
-                        app.get_mut(self.0)
+                if app.get(self).should_merge_dirty_nodes {
+                    app.get_mut(self).should_merge_dirty_nodes = false;
+                    if !app.get(self).nodes_needing_layout.is_empty() {
+                        app.get_mut(self)
                             .nodes_needing_layout
                             .extend(dirty_nodes.drain(i..));
                         break;
@@ -121,41 +122,41 @@ impl PipelineOwner {
                 }
                 i += 1;
             }
-            app.get_mut(self.0).should_merge_dirty_nodes = false;
+            app.get_mut(self).should_merge_dirty_nodes = false;
         }
         if cfg!(debug_assertions) {
-            app.get_mut(self.0).debug_doing_child_layout = true;
+            app.get_mut(self).debug_doing_child_layout = true;
         }
-        let children = app.get(self.0).children.clone();
+        let children = app.get(self).children.clone();
         for child in children {
             child.flush_layout(app);
         }
         debug_assert!(
-            app.get(self.0).nodes_needing_layout.is_empty(),
+            app.get(self).nodes_needing_layout.is_empty(),
             "Child PipelineOwners must not dirty nodes in their parent."
         );
-        app.get_mut(self.0).should_merge_dirty_nodes = false;
+        app.get_mut(self).should_merge_dirty_nodes = false;
         if cfg!(debug_assertions) {
-            app.get_mut(self.0).debug_doing_layout = false;
-            app.get_mut(self.0).debug_doing_child_layout = false;
+            app.get_mut(self).debug_doing_layout = false;
+            app.get_mut(self).debug_doing_child_layout = false;
         }
     }
 
     /// Nodes with a dirty layer or paint state, to be updated in the next
     /// [`flush_paint`](Self::flush_paint) pass.
-    pub fn nodes_needing_paint(self, app: &App) -> Vec<AnyRenderObject> {
-        app.get(self.0).nodes_needing_paint.clone()
+    pub fn nodes_needing_paint(self: Handle<Self>, app: &App) -> Vec<AnyRenderObject> {
+        app.get(self).nodes_needing_paint.clone()
     }
 
-    pub(crate) fn add_node_needing_paint(self, app: &mut App, node: AnyRenderObject) {
-        app.get_mut(self.0).nodes_needing_paint.push(node);
+    pub(crate) fn add_node_needing_paint(self: Handle<Self>, app: &mut App, node: AnyRenderObject) {
+        app.get_mut(self).nodes_needing_paint.push(node);
     }
 
     /// Whether this pipeline is currently in the paint phase.
     ///
     /// Only meaningful when asserts are enabled.
-    pub fn debug_doing_paint(self, app: &App) -> bool {
-        app.get(self.0).debug_doing_paint
+    pub fn debug_doing_paint(self: Handle<Self>, app: &App) -> bool {
+        app.get(self).debug_doing_paint
     }
 
     /// Update the display lists for all render objects.
@@ -163,11 +164,11 @@ impl PipelineOwner {
     /// This function is one of the core stages of the rendering pipeline. Painting occurs after
     /// layout and before the scene is recomposited so that scene is composited with up-to-date
     /// display lists for every render object.
-    pub fn flush_paint(self, app: &mut App) {
+    pub fn flush_paint(self: Handle<Self>, app: &mut App) {
         if cfg!(debug_assertions) {
-            app.get_mut(self.0).debug_doing_paint = true;
+            app.get_mut(self).debug_doing_paint = true;
         }
-        let mut dirty_nodes = std::mem::take(&mut app.get_mut(self.0).nodes_needing_paint);
+        let mut dirty_nodes = std::mem::take(&mut app.get_mut(self).nodes_needing_paint);
         dirty_nodes.sort_by_key(|node| std::cmp::Reverse(node.depth(app)));
         for node in dirty_nodes {
             debug_assert!(node.debug_layer(app).is_some() || !cfg!(debug_assertions));
@@ -186,56 +187,60 @@ impl PipelineOwner {
                 }
             }
         }
-        let children = app.get(self.0).children.clone();
+        let children = app.get(self).children.clone();
         for child in children {
             child.flush_paint(app);
         }
         debug_assert!(
-            app.get(self.0).nodes_needing_paint.is_empty(),
+            app.get(self).nodes_needing_paint.is_empty(),
             "Child PipelineOwners must not dirty nodes in their parent."
         );
         if cfg!(debug_assertions) {
-            app.get_mut(self.0).debug_doing_paint = false;
+            app.get_mut(self).debug_doing_paint = false;
         }
     }
 
     /// Adds `child` to this [`PipelineOwner`].
-    pub fn adopt_child(self, app: &mut App, child: PipelineOwner) {
-        debug_assert!(app.get(child.0).debug_parent.is_none());
-        debug_assert!(!app.get(self.0).children.contains(&child));
+    pub fn adopt_child(self: Handle<Self>, app: &mut App, child: Handle<PipelineOwner>) {
+        debug_assert!(app.get(child).debug_parent.is_none());
+        debug_assert!(!app.get(self).children.contains(&child));
         debug_assert!(
-            !app.get(self.0).debug_doing_child_layout,
+            !app.get(self).debug_doing_child_layout,
             "Cannot modify child list after layout."
         );
-        app.get_mut(self.0).children.push(child);
+        app.get_mut(self).children.push(child);
         if cfg!(debug_assertions) {
-            app.get_mut(child.0).debug_parent = Some(self);
+            app.get_mut(child).debug_parent = Some(self);
         }
     }
 
     /// Removes a child [`PipelineOwner`] previously added via
     /// [`adopt_child`](Self::adopt_child).
-    pub fn drop_child(self, app: &mut App, child: PipelineOwner) {
-        debug_assert_eq!(app.get(child.0).debug_parent, Some(self));
-        debug_assert!(app.get(self.0).children.contains(&child));
+    pub fn drop_child(self: Handle<Self>, app: &mut App, child: Handle<PipelineOwner>) {
+        debug_assert_eq!(app.get(child).debug_parent, Some(self));
+        debug_assert!(app.get(self).children.contains(&child));
         debug_assert!(
-            !app.get(self.0).debug_doing_child_layout,
+            !app.get(self).debug_doing_child_layout,
             "Cannot modify child list after layout."
         );
-        let children = &mut app.get_mut(self.0).children;
+        let children = &mut app.get_mut(self).children;
         let index = children
             .iter()
             .position(|&candidate| candidate == child)
             .expect("child was in the list");
         children.remove(index);
         if cfg!(debug_assertions) {
-            app.get_mut(child.0).debug_parent = None;
+            app.get_mut(child).debug_parent = None;
         }
     }
 
     /// Calls `visitor` for each immediate child of this [`PipelineOwner`].
-    pub fn visit_children(self, app: &App, visitor: &mut dyn FnMut(PipelineOwner)) {
-        for child in &app.get(self.0).children {
+    pub fn visit_children(
+        self: Handle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(Handle<PipelineOwner>),
+    ) {
+        for child in &app.get(self).children {
             visitor(*child);
         }
     }

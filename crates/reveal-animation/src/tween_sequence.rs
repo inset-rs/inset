@@ -117,10 +117,14 @@ pub struct TweenSequenceItem<T> {
     /// Defines the value of the [`TweenSequence`] for the interval within the
     /// animation's duration indicated by [`weight`] and this item's position
     /// in the list of items.
+    ///
+    /// [`weight`]: TweenSequenceItem::weight
     pub tween: Arc<dyn Animatable<T>>,
 
     /// An arbitrary value that indicates the relative percentage of a
     /// [`TweenSequence`] animation's duration when [`tween`] will be used.
+    ///
+    /// [`tween`]: TweenSequenceItem::tween
     pub weight: f64,
 }
 
@@ -156,7 +160,7 @@ mod tests {
     use std::rc::Rc;
     use std::sync::Arc;
 
-    use reveal_foundation::App;
+    use reveal_foundation::{App, Handle};
 
     use super::*;
     use crate::animation::Animation;
@@ -164,8 +168,10 @@ mod tests {
     use crate::curves::{Curves, Interval as CurveInterval};
     use crate::tween::{ConstantTween, CurveTween, Tween};
 
-    fn set_value(app: &mut App, driver: ProxyAnimation, value: f64) {
-        let stopped = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(value)));
+    fn set_value(app: &mut App, driver: Handle<ProxyAnimation>, value: f64) {
+        let stopped = app
+            .create(AlwaysStoppedAnimation::new(value))
+            .as_animation();
         driver.set_parent(app, Some(stopped));
     }
 

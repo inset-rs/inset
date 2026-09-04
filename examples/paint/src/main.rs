@@ -1,4 +1,5 @@
 //! Records a display list each frame and presents it on the implicit view.
+#![feature(arbitrary_self_types)]
 
 use std::f32::consts::TAU;
 use std::time::Duration;

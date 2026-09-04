@@ -68,9 +68,23 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the host presents a display list, and it owns the surface size.
   Affect: none beyond the host trait.
 
-- Change: `RendererBinding::init_render_view` puts the implicit view's `RenderView` at the root of `root_pipeline_owner`, as Flutter's test binding does.
-  Reason: platform — without the widget layer's `View` widget nothing else creates a child pipeline owner, and semantics (Flutter's reason for forbidding a root node there) are deferred.
-  Affect: call it once during setup, then set the view's child; every frame is `SchedulerBinding`'s persistent callback running `draw_frame`.
+## mouse_tracker.rs → mouse_tracker.dart
+
+- Change: Dart's `target is MouseTrackerAnnotation` is the virtual `RenderObject::mouse_tracker_annotation`, `None` by default; `RenderMouseRegion` answers with its current callbacks, cursor, and validity. The tracker keys its per-device annotation maps by the render object (an `AnyRenderObject`), and reads the annotation from it again each time it dispatches.
+  Reason: language — an erased render object cannot be asked whether it implements an interface; the object is the annotation's identity, as in Dart.
+  Affect: a render object that should receive enter/exit events overrides `mouse_tracker_annotation`. A render object that has left the arena reads as no annotation, where Dart would still hold the object with `validForMouseTracker == false`; both skip it.
+
+- Change: the hit-test callback given to `MouseTracker::new` is an `Rc<dyn Fn(&mut App, Offset, ViewId) -> HitTestResult>`; `mouse_is_connected` listeners are added through `Listenable`.
+  Reason: language — the callback runs against `App` and lives inside an arena object.
+  Affect: `RendererBinding::init_mouse_tracker` builds it; tests pass their own.
+
+- Change: `RendererBinding` feeds the tracker through `GestureBindingOverrides::will_dispatch_event` and schedules `update_all_devices` as a post-frame callback from its persistent frame callback, as Flutter does.
+  Reason: language — a crate above cannot override `GestureBinding.dispatchEvent`; see gestures `PORTING.md`.
+  Affect: none for callers.
+
+- Change: `RenderMouseRegion::new(app, valid_for_mouse_tracker, child)`; callbacks, `cursor`, `opaque`, and `hit_test_behavior` have setters.
+  Reason: language — no optional named constructor arguments; `validForMouseTracker` is the one argument without a setter.
+  Affect: pass `true` unless a test wants an invalid region.
 
 ## pipeline_owner.rs → object.dart (PipelineOwner)
 
@@ -99,12 +113,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `PaintingContext.addLayer` / `addCompositionCallback` / `pushColorFilter`, `Layer.find` annotations, `LeaderLayer` / `FollowerLayer`, `toImage`. Trigger: `AnnotatedRegion`, `CompositedTransformFollower`, `RepaintBoundary.toImage`.
 - Debug paint overlays, `debugPaint`, `applyPaintTransform` / `getTransformTo`, `paintsChild`. Trigger: inspector; `RenderBox.localToGlobal`.
 - Semantics on `PipelineOwner` and `RenderObject`. Trigger: a11y; do not stub.
-- `PipelineManifold`. Trigger: `RendererBinding` attaching the root owner.
+- `PipelineManifold`, and the widget layer's `View` creating a child `PipelineOwner` per `RenderView`. Until then `RendererBinding::init_render_view` roots the implicit view's `RenderView` in `root_pipeline_owner`, as Flutter's test binding does: call it once during setup, then set the view's child. Trigger: `RendererBinding` attaching the root owner; the `View` widget.
 - `computeDryLayout` / `_DebugSize` / `globalToLocal` / `localToGlobal`. Trigger: `RenderBox` public extras; `getTransformTo`.
 - `RenderProxyBox` / `RenderShiftedBox` intrinsics and dry layout. Trigger: the first intrinsic-sizing parent (`Row`, `IntrinsicWidth`).
 - `invokeLayoutCallback`. Trigger: `LayoutBuilder`; also widen `layout_without_resize` for a non-boundary layout-callback host.
 - `layout` / `markNeedsLayout` / `constraints` as override points. Trigger: OverlayPortal, `RenderView`, the first `markNeedsLayout` override. Ask before adding.
-- `RenderView.applyPaintTransform` / `updateSystemChrome`; the mouse tracker, `performReassemble`. Trigger: `getTransformTo`, R6.
+- `RenderView.applyPaintTransform` / `updateSystemChrome`; `performReassemble`. Trigger: `getTransformTo`, hot reload.
 - `RenderParagraph` / `RenderEditable`. Trigger: `TextPainter`, container parent data, hit-test.
 - Viewport / `ViewportOffset` / sliver-to-box adapters / sliver parent data. Trigger: first viewport. `RenderObjectWithChildMixin` is box-only until then.
 - `SliverConstraints.debugAssertIsValid` extra numeric checks. Trigger: a caller that relies on those messages.

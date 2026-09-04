@@ -5,6 +5,7 @@
 //! ```text
 //! cargo run -p layout
 //! ```
+#![feature(arbitrary_self_types)]
 
 use reveal_embedder::Size;
 use reveal_foundation::App;

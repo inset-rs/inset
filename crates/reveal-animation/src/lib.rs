@@ -1,4 +1,5 @@
 //! Flutter counterpart: `package:flutter/animation.dart`.
+#![feature(arbitrary_self_types)]
 
 mod animation;
 mod animation_controller;

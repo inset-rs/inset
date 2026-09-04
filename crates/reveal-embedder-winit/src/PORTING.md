@@ -12,6 +12,10 @@ No Flutter counterpart. Flutter's engine is C++ and is not in this checkout.
   Reason: platform — winit redraw is per window and the window must stay on the event-loop thread, while the scheduler requests one frame.
   Affect: closing the last window ends `run`. A frame runs the scheduler; `View::present` draws the valo picture.
 
+- Change: `Platform::activate_system_cursor` records the requested kind and pokes the loop; the loop sets the winit cursor icon on the window the pointer was last seen in. `None` hides the cursor; kinds winit lacks show the arrow.
+  Reason: platform — Flutter's engine maps cursor kinds per host; here winit is the host and it has one cursor per window.
+  Affect: a `MouseRegion` cursor shows up on hover. The device id is ignored: one mouse.
+
 ## Deferred
 
 - `ThemeChanged` → `onPlatformBrightnessChanged`. Trigger: `MediaQuery` / `CupertinoTheme`.

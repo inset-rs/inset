@@ -6,13 +6,13 @@ use std::time::{Duration, Instant};
 
 use reveal_embedder::{
     Brightness, EmbedderClient, Frame, Picture, Platform, PlatformRef, PointerChange, PointerData,
-    PointerDataPacket, PointerDeviceKind, PointerSignalKind, TargetPlatform, View, ViewConstraints,
-    ViewId, ViewMetrics, ViewPadding, ViewRef,
+    PointerDataPacket, PointerDeviceKind, PointerSignalKind, SystemMouseCursorKind, TargetPlatform,
+    View, ViewConstraints, ViewId, ViewMetrics, ViewPadding, ViewRef,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
-use winit::window::{Window, WindowId};
+use winit::window::{CursorIcon, Window, WindowId};
 
 use crate::gpu::Gpu;
 use crate::{ImplicitViewConfig, WinitEmbedder};
@@ -31,6 +31,8 @@ struct WinitPlatform {
     proxy: EventLoopProxy<()>,
     origin: Instant,
     brightness: Cell<Brightness>,
+    /// The latest system cursor request, applied by the event loop.
+    cursor_request: Cell<Option<SystemMouseCursorKind>>,
 }
 
 impl WinitPlatform {
@@ -43,6 +45,7 @@ impl WinitPlatform {
             proxy,
             origin: Instant::now(),
             brightness: Cell::new(Brightness::Light),
+            cursor_request: Cell::new(None),
         }
     }
 
@@ -120,6 +123,13 @@ impl Platform for WinitPlatform {
     fn implicit_view(&self) -> Option<ViewRef> {
         self.implicit_view.and_then(|id| self.view(id))
     }
+
+    /// One mouse: the device is not needed to pick the window; the window the pointer was
+    /// last seen in shows the cursor.
+    fn activate_system_cursor(&self, _device: i64, kind: SystemMouseCursorKind) {
+        self.cursor_request.set(Some(kind));
+        self.poke();
+    }
 }
 
 /// Stable view identity, current winit geometry, and the valo present line.
@@ -167,6 +177,8 @@ struct WinitApp<C> {
     platform: Rc<WinitPlatform>,
     views: HashMap<WindowId, HostedView>,
     frame_source: Option<WindowId>,
+    /// The window the mouse pointer was last seen in; system cursor requests go there.
+    pointer_window: Option<WindowId>,
     started: bool,
     cursor: [f64; 2],
     last_cursor: [f64; 2],
@@ -189,6 +201,7 @@ pub(crate) fn run<C: EmbedderClient + 'static>(
         platform,
         views: HashMap::new(),
         frame_source: None,
+        pointer_window: None,
         started: false,
         cursor: [0.0, 0.0],
         last_cursor: [0.0, 0.0],
@@ -223,6 +236,50 @@ fn brightness_of(theme: winit::window::Theme) -> Brightness {
 /// Flutter `kPrimaryButton` / `kPrimaryMouseButton` (`gestures/events.dart`).
 const PRIMARY_MOUSE_BUTTON: i64 = 0x01;
 
+/// The winit icon for a system cursor kind; `None` hides the cursor
+/// ([`SystemMouseCursorKind::None`]). Kinds winit lacks fall back to the default arrow, as
+/// the Flutter engine falls back to `basic`.
+fn cursor_icon_of(kind: SystemMouseCursorKind) -> Option<CursorIcon> {
+    let icon = match kind {
+        SystemMouseCursorKind::None => return None,
+        SystemMouseCursorKind::Basic | SystemMouseCursorKind::Disappearing => CursorIcon::Default,
+        SystemMouseCursorKind::Click => CursorIcon::Pointer,
+        SystemMouseCursorKind::Forbidden => CursorIcon::NotAllowed,
+        SystemMouseCursorKind::Wait => CursorIcon::Wait,
+        SystemMouseCursorKind::Progress => CursorIcon::Progress,
+        SystemMouseCursorKind::ContextMenu => CursorIcon::ContextMenu,
+        SystemMouseCursorKind::Help => CursorIcon::Help,
+        SystemMouseCursorKind::Text => CursorIcon::Text,
+        SystemMouseCursorKind::VerticalText => CursorIcon::VerticalText,
+        SystemMouseCursorKind::Cell => CursorIcon::Cell,
+        SystemMouseCursorKind::Precise => CursorIcon::Crosshair,
+        SystemMouseCursorKind::Move => CursorIcon::Move,
+        SystemMouseCursorKind::Grab => CursorIcon::Grab,
+        SystemMouseCursorKind::Grabbing => CursorIcon::Grabbing,
+        SystemMouseCursorKind::NoDrop => CursorIcon::NoDrop,
+        SystemMouseCursorKind::Alias => CursorIcon::Alias,
+        SystemMouseCursorKind::Copy => CursorIcon::Copy,
+        SystemMouseCursorKind::AllScroll => CursorIcon::AllScroll,
+        SystemMouseCursorKind::ResizeLeftRight => CursorIcon::EwResize,
+        SystemMouseCursorKind::ResizeUpDown => CursorIcon::NsResize,
+        SystemMouseCursorKind::ResizeUpLeftDownRight => CursorIcon::NwseResize,
+        SystemMouseCursorKind::ResizeUpRightDownLeft => CursorIcon::NeswResize,
+        SystemMouseCursorKind::ResizeUp => CursorIcon::NResize,
+        SystemMouseCursorKind::ResizeDown => CursorIcon::SResize,
+        SystemMouseCursorKind::ResizeLeft => CursorIcon::WResize,
+        SystemMouseCursorKind::ResizeRight => CursorIcon::EResize,
+        SystemMouseCursorKind::ResizeUpLeft => CursorIcon::NwResize,
+        SystemMouseCursorKind::ResizeUpRight => CursorIcon::NeResize,
+        SystemMouseCursorKind::ResizeDownLeft => CursorIcon::SwResize,
+        SystemMouseCursorKind::ResizeDownRight => CursorIcon::SeResize,
+        SystemMouseCursorKind::ResizeColumn => CursorIcon::ColResize,
+        SystemMouseCursorKind::ResizeRow => CursorIcon::RowResize,
+        SystemMouseCursorKind::ZoomIn => CursorIcon::ZoomIn,
+        SystemMouseCursorKind::ZoomOut => CursorIcon::ZoomOut,
+    };
+    Some(icon)
+}
+
 /// Line-based wheels are not pixels. 40 logical px/line is Chromium's
 /// convention (shaft-rs-next); convert to physical by the view scale so
 /// [`PointerData::scroll_delta_x`] / [`PointerData::scroll_delta_y`] stay
@@ -247,6 +304,25 @@ impl<C: EmbedderClient> WinitApp<C> {
             && self.platform.frame_requested.replace(false)
         {
             window.request_redraw();
+        }
+    }
+
+    fn apply_cursor_request(&mut self) {
+        let Some(kind) = self.platform.cursor_request.take() else {
+            return;
+        };
+        let Some(window) = self
+            .pointer_window
+            .and_then(|id| self.views.get(&id).map(|view| &view.window))
+        else {
+            return;
+        };
+        match cursor_icon_of(kind) {
+            Some(icon) => {
+                window.set_cursor(icon);
+                window.set_cursor_visible(true);
+            }
+            None => window.set_cursor_visible(false),
         }
     }
 
@@ -393,6 +469,7 @@ impl<C: EmbedderClient> ApplicationHandler for WinitApp<C> {
     }
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: ()) {
+        self.apply_cursor_request();
         if self.frame_source.is_some() {
             self.flush_frame_request();
         } else if self.platform.frame_requested.replace(false)
@@ -462,6 +539,7 @@ impl<C: EmbedderClient> ApplicationHandler for WinitApp<C> {
                 self.platform.brightness.set(brightness_of(theme));
             }
             WindowEvent::CursorMoved { position, .. } => {
+                self.pointer_window = Some(id);
                 self.cursor = [position.x, position.y];
                 self.send_pointer(
                     id,
@@ -500,7 +578,32 @@ mod tests {
     use winit::dpi::PhysicalPosition;
     use winit::event::MouseScrollDelta;
 
-    use super::wheel_to_physical;
+    use reveal_embedder::SystemMouseCursorKind;
+    use winit::window::CursorIcon;
+
+    use super::{cursor_icon_of, wheel_to_physical};
+
+    #[test]
+    fn cursor_kinds_map_to_winit_icons() {
+        assert_eq!(
+            cursor_icon_of(SystemMouseCursorKind::Click),
+            Some(CursorIcon::Pointer)
+        );
+        assert_eq!(
+            cursor_icon_of(SystemMouseCursorKind::Basic),
+            Some(CursorIcon::Default)
+        );
+        assert_eq!(
+            cursor_icon_of(SystemMouseCursorKind::None),
+            None,
+            "none hides the cursor"
+        );
+        assert_eq!(
+            cursor_icon_of(SystemMouseCursorKind::Disappearing),
+            Some(CursorIcon::Default),
+            "a kind winit lacks falls back to the arrow"
+        );
+    }
 
     #[test]
     fn line_deltas_scale_to_physical_pixels_with_flutter_sign() {

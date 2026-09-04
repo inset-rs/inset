@@ -2,9 +2,9 @@
 
 use std::rc::Rc;
 
-use reveal_foundation::{App, Handle, Listenable, Listener};
+use reveal_foundation::{App, Handle, ListenableObject, Listener};
 
-use crate::animation::{Animation, AnimationNode, AnimationStatus, AnimationStatusListener};
+use crate::animation::{Animation, AnimationStatus, AnimationStatusListener, AnyAnimation};
 use crate::curves::Curve;
 use crate::listener_helpers::{
     AnimationEagerListenerMixin, AnimationLazyListenerData, AnimationLazyListenerMixin,
@@ -18,30 +18,26 @@ use crate::tween::Animatable;
 #[derive(Default)]
 struct AlwaysCompleteAnimation;
 
-impl AnimationNode<f64> for AlwaysCompleteAnimation {
-    fn add_listener(_app: &mut App, _this: Handle<Self>, _listener: Listener) {}
+impl Animation<f64> for AlwaysCompleteAnimation {
+    fn add_listener(self: Handle<Self>, _app: &mut App, _listener: Listener) {}
 
-    fn remove_listener(_app: &mut App, _this: Handle<Self>, _listener: &Listener) {}
+    fn remove_listener(self: Handle<Self>, _app: &mut App, _listener: &Listener) {}
 
-    fn add_status_listener(
-        _app: &mut App,
-        _this: Handle<Self>,
-        _listener: AnimationStatusListener,
-    ) {
+    fn add_status_listener(self: Handle<Self>, _app: &mut App, _listener: AnimationStatusListener) {
     }
 
     fn remove_status_listener(
+        self: Handle<Self>,
         _app: &mut App,
-        _this: Handle<Self>,
         _listener: &AnimationStatusListener,
     ) {
     }
 
-    fn status(_app: &App, _this: Handle<Self>) -> AnimationStatus {
+    fn status(self: Handle<Self>, _app: &App) -> AnimationStatus {
         AnimationStatus::Completed
     }
 
-    fn value(_app: &App, _this: Handle<Self>) -> f64 {
+    fn value(self: Handle<Self>, _app: &App) -> f64 {
         1.0
     }
 }
@@ -55,8 +51,8 @@ impl AnimationNode<f64> for AlwaysCompleteAnimation {
 /// Dart's `kAlwaysCompleteAnimation` is a `const` — every mention is one
 /// canonical object — and ours is the App's singleton of the same type, so
 /// every call returns the same identity, as Dart's mentions do.
-pub fn k_always_complete_animation(app: &mut App) -> Animation<f64> {
-    Animation::from_handle(app.singleton::<AlwaysCompleteAnimation>())
+pub fn k_always_complete_animation(app: &mut App) -> AnyAnimation<f64> {
+    app.singleton::<AlwaysCompleteAnimation>().as_animation()
 }
 
 /// Dart's `_AlwaysDismissedAnimation`. Private like the original; reach it
@@ -64,30 +60,26 @@ pub fn k_always_complete_animation(app: &mut App) -> Animation<f64> {
 #[derive(Default)]
 struct AlwaysDismissedAnimation;
 
-impl AnimationNode<f64> for AlwaysDismissedAnimation {
-    fn add_listener(_app: &mut App, _this: Handle<Self>, _listener: Listener) {}
+impl Animation<f64> for AlwaysDismissedAnimation {
+    fn add_listener(self: Handle<Self>, _app: &mut App, _listener: Listener) {}
 
-    fn remove_listener(_app: &mut App, _this: Handle<Self>, _listener: &Listener) {}
+    fn remove_listener(self: Handle<Self>, _app: &mut App, _listener: &Listener) {}
 
-    fn add_status_listener(
-        _app: &mut App,
-        _this: Handle<Self>,
-        _listener: AnimationStatusListener,
-    ) {
+    fn add_status_listener(self: Handle<Self>, _app: &mut App, _listener: AnimationStatusListener) {
     }
 
     fn remove_status_listener(
+        self: Handle<Self>,
         _app: &mut App,
-        _this: Handle<Self>,
         _listener: &AnimationStatusListener,
     ) {
     }
 
-    fn status(_app: &App, _this: Handle<Self>) -> AnimationStatus {
+    fn status(self: Handle<Self>, _app: &App) -> AnimationStatus {
         AnimationStatus::Dismissed
     }
 
-    fn value(_app: &App, _this: Handle<Self>) -> f64 {
+    fn value(self: Handle<Self>, _app: &App) -> f64 {
         0.0
     }
 }
@@ -100,8 +92,8 @@ impl AnimationNode<f64> for AlwaysDismissedAnimation {
 ///
 /// See [`k_always_complete_animation`] for how the identity matches Dart's
 /// `const`.
-pub fn k_always_dismissed_animation(app: &mut App) -> Animation<f64> {
-    Animation::from_handle(app.singleton::<AlwaysDismissedAnimation>())
+pub fn k_always_dismissed_animation(app: &mut App) -> AnyAnimation<f64> {
+    app.singleton::<AlwaysDismissedAnimation>().as_animation()
 }
 
 /// An animation that is always stopped at a given value.
@@ -123,31 +115,27 @@ impl<T> AlwaysStoppedAnimation<T> {
     }
 }
 
-impl<T: Clone + 'static> AnimationNode<T> for AlwaysStoppedAnimation<T> {
-    fn add_listener(_app: &mut App, _this: Handle<Self>, _listener: Listener) {}
+impl<T: Clone + 'static> Animation<T> for AlwaysStoppedAnimation<T> {
+    fn add_listener(self: Handle<Self>, _app: &mut App, _listener: Listener) {}
 
-    fn remove_listener(_app: &mut App, _this: Handle<Self>, _listener: &Listener) {}
+    fn remove_listener(self: Handle<Self>, _app: &mut App, _listener: &Listener) {}
 
-    fn add_status_listener(
-        _app: &mut App,
-        _this: Handle<Self>,
-        _listener: AnimationStatusListener,
-    ) {
+    fn add_status_listener(self: Handle<Self>, _app: &mut App, _listener: AnimationStatusListener) {
     }
 
     fn remove_status_listener(
+        self: Handle<Self>,
         _app: &mut App,
-        _this: Handle<Self>,
         _listener: &AnimationStatusListener,
     ) {
     }
 
-    fn status(_app: &App, _this: Handle<Self>) -> AnimationStatus {
+    fn status(self: Handle<Self>, _app: &App) -> AnimationStatus {
         AnimationStatus::Forward
     }
 
-    fn value(app: &App, this: Handle<Self>) -> T {
-        app.get(this).value.clone()
+    fn value(self: Handle<Self>, app: &App) -> T {
+        app.get(self).value.clone()
     }
 }
 
@@ -156,26 +144,26 @@ impl<T: Clone + 'static> AnimationNode<T> for AlwaysStoppedAnimation<T> {
 ///
 /// To implement an animation that is driven by a parent, it is only necessary
 /// to implement this trait, supply [`parent`], and implement
-/// [`AnimationNode::value`].
+/// [`Animation::value`].
 ///
 /// To define a mapping from values in the range 0..1, consider subclassing
 /// `Tween` instead.
 ///
 /// [`parent`]: AnimationWithParent::parent
-pub trait AnimationWithParent<T: 'static>: Copy + 'static {
+pub trait AnimationWithParent<T: 'static>: Sized + 'static {
     /// The animation whose value this animation will proxy.
     ///
     /// This animation must remain the same for the lifetime of this object. If
     /// you wish to proxy a different animation at different times, consider
     /// using [`ProxyAnimation`].
-    fn parent(self, app: &App) -> Animation<T>;
+    fn parent(self: Handle<Self>, app: &App) -> AnyAnimation<T>;
 
     /// Calls the listener every time the value of the animation changes.
     ///
     /// Listeners can be removed with [`remove_listener`].
     ///
     /// [`remove_listener`]: AnimationWithParent::remove_listener
-    fn add_listener(self, app: &mut App, listener: Listener) {
+    fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
         let parent = self.parent(app);
         parent.add_listener(app, listener);
     }
@@ -186,7 +174,7 @@ pub trait AnimationWithParent<T: 'static>: Copy + 'static {
     /// Listeners can be added with [`add_listener`].
     ///
     /// [`add_listener`]: AnimationWithParent::add_listener
-    fn remove_listener(self, app: &mut App, listener: &Listener) {
+    fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
         let parent = self.parent(app);
         parent.remove_listener(app, listener);
     }
@@ -196,7 +184,7 @@ pub trait AnimationWithParent<T: 'static>: Copy + 'static {
     /// Listeners can be removed with [`remove_status_listener`].
     ///
     /// [`remove_status_listener`]: AnimationWithParent::remove_status_listener
-    fn add_status_listener(self, app: &mut App, listener: AnimationStatusListener) {
+    fn add_status_listener(self: Handle<Self>, app: &mut App, listener: AnimationStatusListener) {
         let parent = self.parent(app);
         parent.add_status_listener(app, listener);
     }
@@ -207,13 +195,17 @@ pub trait AnimationWithParent<T: 'static>: Copy + 'static {
     /// Listeners can be added with [`add_status_listener`].
     ///
     /// [`add_status_listener`]: AnimationWithParent::add_status_listener
-    fn remove_status_listener(self, app: &mut App, listener: &AnimationStatusListener) {
+    fn remove_status_listener(
+        self: Handle<Self>,
+        app: &mut App,
+        listener: &AnimationStatusListener,
+    ) {
         let parent = self.parent(app);
         parent.remove_status_listener(app, listener);
     }
 
     /// The current status of this animation.
-    fn status(self, app: &App) -> AnimationStatus {
+    fn status(self: Handle<Self>, app: &App) -> AnimationStatus {
         self.parent(app).status(app)
     }
 }
@@ -224,13 +216,10 @@ pub trait AnimationWithParent<T: 'static>: Copy + 'static {
 /// For example, one object can create a proxy animation, hand the proxy to
 /// another object, and then later change the animation from which the proxy
 /// receives its value.
-#[derive(Clone, Copy)]
-pub struct ProxyAnimation(Handle<ProxyAnimationData>);
-
-struct ProxyAnimationData {
+pub struct ProxyAnimation {
     status: Option<AnimationStatus>,
     value: Option<f64>,
-    parent: Option<Animation<f64>>,
+    parent: Option<AnyAnimation<f64>>,
 
     // Dart mixes in `AnimationLazyListenerMixin`,
     // `AnimationLocalListenersMixin` and `AnimationLocalStatusListenersMixin`;
@@ -245,8 +234,8 @@ impl ProxyAnimation {
     ///
     /// If the animation argument is `None`, the proxy animation has the status
     /// [`AnimationStatus::Dismissed`] and a value of 0.0.
-    pub fn new(app: &mut App, animation: Option<Animation<f64>>) -> ProxyAnimation {
-        let mut result = ProxyAnimationData {
+    pub fn new(app: &mut App, animation: Option<AnyAnimation<f64>>) -> Handle<ProxyAnimation> {
+        let mut result = ProxyAnimation {
             status: None,
             value: None,
             parent: animation,
@@ -258,65 +247,60 @@ impl ProxyAnimation {
             result.status = Some(AnimationStatus::Dismissed);
             result.value = Some(0.0);
         }
-        ProxyAnimation(app.create(result))
-    }
-
-    /// The animation whose value this animation will proxy.
-    ///
-    /// This value is mutable ([`set_parent`]). When mutated, the listeners on
-    /// the proxy animation will be transparently updated to be listening to
-    /// the new parent animation.
-    /// This proxy as an [`Animation<f64>`].
-    pub fn as_animation(self) -> Animation<f64> {
-        Animation::from_handle(self.0)
+        app.create(result)
     }
 
     /// Chains a `Tween` (or any [`Animatable`]) to this proxy.
     ///
-    /// Dart inherits `drive` from `Animation<double>`. The newtype is not a
-    /// subtype, so the method is inherent and forwards to [`as_animation`].
+    /// Dart inherits `drive` from `Animation<double>`. A `Handle<ProxyAnimation>`
+    /// is not a subtype, so the method is inherent and forwards to
+    /// [`as_animation`](Animation::as_animation).
     pub fn drive<U: 'static>(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         child: impl Animatable<U> + Clone + 'static,
-    ) -> Animation<U> {
+    ) -> AnyAnimation<U> {
         self.as_animation().drive(app, child)
     }
 
     /// The animation whose value this animation will proxy.
-    pub fn parent(self, app: &App) -> Option<Animation<f64>> {
-        app.get(self.0).parent
+    ///
+    /// This value is mutable ([`set_parent`](ProxyAnimation::set_parent)).
+    /// When mutated, the listeners on the proxy animation will be
+    /// transparently updated to be listening to the new parent animation.
+    pub fn parent(self: Handle<Self>, app: &App) -> Option<AnyAnimation<f64>> {
+        app.get(self).parent
     }
 
     /// Changes the animation whose value this animation proxies.
     ///
     /// Dart's `parent` setter, `animations.dart:200`.
-    pub fn set_parent(self, app: &mut App, value: Option<Animation<f64>>) {
-        if value == app.get(self.0).parent {
+    pub fn set_parent(self: Handle<Self>, app: &mut App, value: Option<AnyAnimation<f64>>) {
+        if value == app.get(self).parent {
             return;
         }
-        if let Some(parent) = app.get(self.0).parent {
+        if let Some(parent) = app.get(self).parent {
             let (status, current) = (parent.status(app), parent.value(app));
-            let proxy = app.get_mut(self.0);
+            let proxy = app.get_mut(self);
             proxy.status = Some(status);
             proxy.value = Some(current);
             if self.is_listening(app) {
                 self.did_stop_listening(app);
             }
         }
-        app.get_mut(self.0).parent = value;
-        if let Some(parent) = app.get(self.0).parent {
+        app.get_mut(self).parent = value;
+        if let Some(parent) = app.get(self).parent {
             if self.is_listening(app) {
                 self.did_start_listening(app);
             }
-            if app.get(self.0).value != Some(parent.value(app)) {
+            if app.get(self).value != Some(parent.value(app)) {
                 self.notify_listeners(app);
             }
             let status = parent.status(app);
-            if app.get(self.0).status != Some(status) {
+            if app.get(self).status != Some(status) {
                 self.notify_status_listeners(app, status);
             }
-            let proxy = app.get_mut(self.0);
+            let proxy = app.get_mut(self);
             proxy.status = None;
             proxy.value = None;
         }
@@ -324,102 +308,105 @@ impl ProxyAnimation {
 }
 
 impl AnimationLazyListenerMixin for ProxyAnimation {
-    fn lazy_listener_data(self, app: &App) -> &AnimationLazyListenerData {
-        &app.get(self.0).lazy_listener
+    fn lazy_listener_data(self: Handle<Self>, app: &App) -> &AnimationLazyListenerData {
+        &app.get(self).lazy_listener
     }
 
-    fn lazy_listener_data_mut(self, app: &mut App) -> &mut AnimationLazyListenerData {
-        &mut app.get_mut(self.0).lazy_listener
+    fn lazy_listener_data_mut(self: Handle<Self>, app: &mut App) -> &mut AnimationLazyListenerData {
+        &mut app.get_mut(self).lazy_listener
     }
 
-    fn did_start_listening(self, app: &mut App) {
-        if let Some(parent) = app.get(self.0).parent {
+    fn did_start_listening(self: Handle<Self>, app: &mut App) {
+        if let Some(parent) = app.get(self).parent {
             // Dart: `_parent!.addListener(notifyListeners)` — a tear-off.
             // `handle_method` gives the rebuilt listener the same identity, so
             // `did_stop_listening` removes without a stored handle.
-            parent.add_listener(app, Listener::handle_method(self.0, proxy_notify_listeners));
+            parent.add_listener(
+                app,
+                Listener::handle_method(self, ProxyAnimation::notify_listeners),
+            );
             parent.add_status_listener(
                 app,
-                AnimationStatusListener::handle_method(self.0, proxy_notify_status_listeners),
+                AnimationStatusListener::handle_method(
+                    self,
+                    ProxyAnimation::notify_status_listeners,
+                ),
             );
         }
     }
 
-    fn did_stop_listening(self, app: &mut App) {
-        if let Some(parent) = app.get(self.0).parent {
+    fn did_stop_listening(self: Handle<Self>, app: &mut App) {
+        if let Some(parent) = app.get(self).parent {
             parent.remove_listener(
                 app,
-                &Listener::handle_method(self.0, proxy_notify_listeners),
+                &Listener::handle_method(self, ProxyAnimation::notify_listeners),
             );
             parent.remove_status_listener(
                 app,
-                &AnimationStatusListener::handle_method(self.0, proxy_notify_status_listeners),
+                &AnimationStatusListener::handle_method(
+                    self,
+                    ProxyAnimation::notify_status_listeners,
+                ),
             );
         }
     }
 }
 
 impl AnimationLocalListenersMixin for ProxyAnimation {
-    fn local_listeners_data(self, app: &App) -> &AnimationLocalListenersData {
-        &app.get(self.0).local_listeners
+    fn local_listeners_data(self: Handle<Self>, app: &App) -> &AnimationLocalListenersData {
+        &app.get(self).local_listeners
     }
 
-    fn local_listeners_data_mut(self, app: &mut App) -> &mut AnimationLocalListenersData {
-        &mut app.get_mut(self.0).local_listeners
+    fn local_listeners_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut AnimationLocalListenersData {
+        &mut app.get_mut(self).local_listeners
     }
 
     // Dart resolves these two by mixin order — `AnimationLazyListenerMixin` is
     // the one that declares them in ProxyAnimation's `with` clause. Rust has
     // no such rule, so the choice is written out.
-    fn did_register_listener(self, app: &mut App) {
+    fn did_register_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_register_listener(self, app)
     }
 
-    fn did_unregister_listener(self, app: &mut App) {
+    fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_unregister_listener(self, app)
     }
 }
 
 impl AnimationLocalStatusListenersMixin for ProxyAnimation {
-    fn local_status_listeners_data(self, app: &App) -> &AnimationLocalStatusListenersData {
-        &app.get(self.0).local_status_listeners
+    fn local_status_listeners_data(
+        self: Handle<Self>,
+        app: &App,
+    ) -> &AnimationLocalStatusListenersData {
+        &app.get(self).local_status_listeners
     }
 
     fn local_status_listeners_data_mut(
-        self,
+        self: Handle<Self>,
         app: &mut App,
     ) -> &mut AnimationLocalStatusListenersData {
-        &mut app.get_mut(self.0).local_status_listeners
+        &mut app.get_mut(self).local_status_listeners
     }
 
-    fn did_register_listener(self, app: &mut App) {
+    fn did_register_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_register_listener(self, app)
     }
 
-    fn did_unregister_listener(self, app: &mut App) {
+    fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_unregister_listener(self, app)
     }
 }
 
-fn proxy_notify_listeners(this: Handle<ProxyAnimationData>, app: &mut App) {
-    AnimationLocalListenersMixin::notify_listeners(ProxyAnimation(this), app);
-}
-
-fn proxy_notify_status_listeners(
-    this: Handle<ProxyAnimationData>,
-    app: &mut App,
-    status: AnimationStatus,
-) {
-    AnimationLocalStatusListenersMixin::notify_status_listeners(ProxyAnimation(this), app, status);
-}
-
-impl Listenable for ProxyAnimation {
-    fn add_listener(&self, app: &mut App, listener: Listener) {
-        self.as_animation().add_listener(app, listener);
+impl ListenableObject for ProxyAnimation {
+    fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
+        AnimationLocalListenersMixin::add_listener(self, app, listener);
     }
 
-    fn remove_listener(&self, app: &mut App, listener: &Listener) {
-        self.as_animation().remove_listener(app, listener);
+    fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
+        AnimationLocalListenersMixin::remove_listener(self, app, listener);
     }
 }
 
@@ -427,46 +414,42 @@ impl Listenable for ProxyAnimation {
 // AnimationLazyListenerMixin, AnimationLocalListenersMixin,
 // AnimationLocalStatusListenersMixin`. The forwarding below is the `with`
 // clause: the mixins supply the listener protocol.
-impl AnimationNode<f64> for ProxyAnimationData {
-    fn add_listener(app: &mut App, this: Handle<Self>, listener: Listener) {
-        AnimationLocalListenersMixin::add_listener(ProxyAnimation(this), app, listener)
+impl Animation<f64> for ProxyAnimation {
+    fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
+        AnimationLocalListenersMixin::add_listener(self, app, listener)
     }
 
-    fn remove_listener(app: &mut App, this: Handle<Self>, listener: &Listener) {
-        AnimationLocalListenersMixin::remove_listener(ProxyAnimation(this), app, listener)
+    fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
+        AnimationLocalListenersMixin::remove_listener(self, app, listener)
     }
 
-    fn add_status_listener(app: &mut App, this: Handle<Self>, listener: AnimationStatusListener) {
-        AnimationLocalStatusListenersMixin::add_status_listener(ProxyAnimation(this), app, listener)
+    fn add_status_listener(self: Handle<Self>, app: &mut App, listener: AnimationStatusListener) {
+        AnimationLocalStatusListenersMixin::add_status_listener(self, app, listener)
     }
 
     fn remove_status_listener(
+        self: Handle<Self>,
         app: &mut App,
-        this: Handle<Self>,
         listener: &AnimationStatusListener,
     ) {
-        AnimationLocalStatusListenersMixin::remove_status_listener(
-            ProxyAnimation(this),
-            app,
-            listener,
-        )
+        AnimationLocalStatusListenersMixin::remove_status_listener(self, app, listener)
     }
 
-    fn status(app: &App, this: Handle<Self>) -> AnimationStatus {
-        match app.get(this).parent {
+    fn status(self: Handle<Self>, app: &App) -> AnimationStatus {
+        match app.get(self).parent {
             Some(parent) => parent.status(app),
             None => app
-                .get(this)
+                .get(self)
                 .status
                 .expect("a ProxyAnimation without a parent keeps its last status"),
         }
     }
 
-    fn value(app: &App, this: Handle<Self>) -> f64 {
-        match app.get(this).parent {
+    fn value(self: Handle<Self>, app: &App) -> f64 {
+        match app.get(self).parent {
             Some(parent) => parent.value(app),
             None => app
-                .get(this)
+                .get(self)
                 .value
                 .expect("a ProxyAnimation without a parent keeps its last value"),
         }
@@ -484,7 +467,7 @@ impl AnimationNode<f64> for ProxyAnimationData {
 pub struct ReverseAnimation {
     // Dart: `final Animation<double> parent` — private with a getter so it
     // cannot be rebound away from the animation the subscriptions target.
-    parent: Animation<f64>,
+    parent: AnyAnimation<f64>,
 
     // `AnimationLazyListenerMixin` and `AnimationLocalStatusListenersMixin`
     // state.
@@ -494,7 +477,7 @@ pub struct ReverseAnimation {
 
 impl ReverseAnimation {
     /// Creates a reverse animation.
-    pub fn new(parent: Animation<f64>) -> ReverseAnimation {
+    pub fn new(parent: AnyAnimation<f64>) -> ReverseAnimation {
         ReverseAnimation {
             parent,
             lazy_listener: AnimationLazyListenerData::new(),
@@ -503,12 +486,12 @@ impl ReverseAnimation {
     }
 
     /// The animation whose value and direction this animation is reversing.
-    pub fn parent(&self) -> Animation<f64> {
+    pub fn parent(&self) -> AnyAnimation<f64> {
         self.parent
     }
 
-    fn status_change_handler(this: Handle<Self>, app: &mut App, status: AnimationStatus) {
-        this.notify_status_listeners(app, Self::reverse_status(status));
+    fn status_change_handler(self: Handle<Self>, app: &mut App, status: AnimationStatus) {
+        self.notify_status_listeners(app, Self::reverse_status(status));
     }
 
     fn reverse_status(status: AnimationStatus) -> AnimationStatus {
@@ -521,16 +504,16 @@ impl ReverseAnimation {
     }
 }
 
-impl AnimationLazyListenerMixin for Handle<ReverseAnimation> {
-    fn lazy_listener_data(self, app: &App) -> &AnimationLazyListenerData {
+impl AnimationLazyListenerMixin for ReverseAnimation {
+    fn lazy_listener_data(self: Handle<Self>, app: &App) -> &AnimationLazyListenerData {
         &app.get(self).lazy_listener
     }
 
-    fn lazy_listener_data_mut(self, app: &mut App) -> &mut AnimationLazyListenerData {
+    fn lazy_listener_data_mut(self: Handle<Self>, app: &mut App) -> &mut AnimationLazyListenerData {
         &mut app.get_mut(self).lazy_listener
     }
 
-    fn did_start_listening(self, app: &mut App) {
+    fn did_start_listening(self: Handle<Self>, app: &mut App) {
         let parent = app.get(self).parent;
         parent.add_status_listener(
             app,
@@ -538,7 +521,7 @@ impl AnimationLazyListenerMixin for Handle<ReverseAnimation> {
         );
     }
 
-    fn did_stop_listening(self, app: &mut App) {
+    fn did_stop_listening(self: Handle<Self>, app: &mut App) {
         let parent = app.get(self).parent;
         parent.remove_status_listener(
             app,
@@ -547,23 +530,26 @@ impl AnimationLazyListenerMixin for Handle<ReverseAnimation> {
     }
 }
 
-impl AnimationLocalStatusListenersMixin for Handle<ReverseAnimation> {
-    fn local_status_listeners_data(self, app: &App) -> &AnimationLocalStatusListenersData {
+impl AnimationLocalStatusListenersMixin for ReverseAnimation {
+    fn local_status_listeners_data(
+        self: Handle<Self>,
+        app: &App,
+    ) -> &AnimationLocalStatusListenersData {
         &app.get(self).local_status_listeners
     }
 
     fn local_status_listeners_data_mut(
-        self,
+        self: Handle<Self>,
         app: &mut App,
     ) -> &mut AnimationLocalStatusListenersData {
         &mut app.get_mut(self).local_status_listeners
     }
 
-    fn did_register_listener(self, app: &mut App) {
+    fn did_register_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_register_listener(self, app)
     }
 
-    fn did_unregister_listener(self, app: &mut App) {
+    fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_unregister_listener(self, app)
     }
 }
@@ -572,37 +558,37 @@ impl AnimationLocalStatusListenersMixin for Handle<ReverseAnimation> {
 // AnimationLazyListenerMixin, AnimationLocalStatusListenersMixin`. The value
 // listeners are the class's own overrides: they forward to the parent, but
 // count through the lazy mixin so the status subscription follows them.
-impl AnimationNode<f64> for ReverseAnimation {
-    fn add_listener(app: &mut App, this: Handle<Self>, listener: Listener) {
-        AnimationLazyListenerMixin::did_register_listener(this, app);
-        let parent = app.get(this).parent;
+impl Animation<f64> for ReverseAnimation {
+    fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
+        AnimationLazyListenerMixin::did_register_listener(self, app);
+        let parent = app.get(self).parent;
         parent.add_listener(app, listener);
     }
 
-    fn remove_listener(app: &mut App, this: Handle<Self>, listener: &Listener) {
-        let parent = app.get(this).parent;
+    fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
+        let parent = app.get(self).parent;
         parent.remove_listener(app, listener);
-        AnimationLazyListenerMixin::did_unregister_listener(this, app);
+        AnimationLazyListenerMixin::did_unregister_listener(self, app);
     }
 
-    fn add_status_listener(app: &mut App, this: Handle<Self>, listener: AnimationStatusListener) {
-        AnimationLocalStatusListenersMixin::add_status_listener(this, app, listener)
+    fn add_status_listener(self: Handle<Self>, app: &mut App, listener: AnimationStatusListener) {
+        AnimationLocalStatusListenersMixin::add_status_listener(self, app, listener)
     }
 
     fn remove_status_listener(
+        self: Handle<Self>,
         app: &mut App,
-        this: Handle<Self>,
         listener: &AnimationStatusListener,
     ) {
-        AnimationLocalStatusListenersMixin::remove_status_listener(this, app, listener)
+        AnimationLocalStatusListenersMixin::remove_status_listener(self, app, listener)
     }
 
-    fn status(app: &App, this: Handle<Self>) -> AnimationStatus {
-        Self::reverse_status(app.get(this).parent.status(app))
+    fn status(self: Handle<Self>, app: &App) -> AnimationStatus {
+        Self::reverse_status(app.get(self).parent.status(app))
     }
 
-    fn value(app: &App, this: Handle<Self>) -> f64 {
-        1.0 - app.get(this).parent.value(app)
+    fn value(self: Handle<Self>, app: &App) -> f64 {
+        1.0 - app.get(self).parent.value(app)
     }
 }
 
@@ -623,7 +609,7 @@ pub struct CurvedAnimation {
     // Dart: `final Animation<double> parent` — private with the
     // `AnimationWithParent::parent` getter, so it cannot be rebound away from
     // the animation the constructor subscribed to.
-    parent: Animation<f64>,
+    parent: AnyAnimation<f64>,
 
     /// The curve to use in the forward direction.
     pub curve: Rc<dyn Curve>,
@@ -659,7 +645,7 @@ impl CurvedAnimation {
     /// Dart's statement order.
     pub fn create(
         app: &mut App,
-        parent: Animation<f64>,
+        parent: AnyAnimation<f64>,
         curve: Rc<dyn Curve>,
         reverse_curve: Option<Rc<dyn Curve>>,
     ) -> Handle<CurvedAnimation> {
@@ -671,16 +657,16 @@ impl CurvedAnimation {
             is_disposed: false,
         });
         let status = parent.status(app);
-        Self::update_curve_direction(this, app, status);
+        this.update_curve_direction(app, status);
         parent.add_status_listener(
             app,
-            AnimationStatusListener::handle_method(this, Self::update_curve_direction),
+            AnimationStatusListener::handle_method(this, CurvedAnimation::update_curve_direction),
         );
         this
     }
 
-    fn update_curve_direction(this: Handle<Self>, app: &mut App, status: AnimationStatus) {
-        let animation = app.get_mut(this);
+    fn update_curve_direction(self: Handle<Self>, app: &mut App, status: AnimationStatus) {
+        let animation = app.get_mut(self);
         animation.curve_direction = if status.is_animating() {
             animation.curve_direction.or(Some(status))
         } else {
@@ -688,8 +674,8 @@ impl CurvedAnimation {
         };
     }
 
-    fn use_forward_curve(app: &App, this: Handle<Self>) -> bool {
-        let animation = app.get(this);
+    fn use_forward_curve(self: Handle<Self>, app: &App) -> bool {
+        let animation = app.get(self);
         animation.reverse_curve.is_none()
             || animation
                 .curve_direction
@@ -698,52 +684,52 @@ impl CurvedAnimation {
     }
 
     /// Cleans up any listeners added by this CurvedAnimation.
-    pub fn dispose(app: &mut App, this: Handle<Self>) {
-        app.get_mut(this).is_disposed = true;
-        let parent = app.get(this).parent;
+    pub fn dispose(self: Handle<Self>, app: &mut App) {
+        app.get_mut(self).is_disposed = true;
+        let parent = app.get(self).parent;
         parent.remove_status_listener(
             app,
-            &AnimationStatusListener::handle_method(this, Self::update_curve_direction),
+            &AnimationStatusListener::handle_method(self, CurvedAnimation::update_curve_direction),
         );
     }
 }
 
-impl AnimationWithParent<f64> for Handle<CurvedAnimation> {
-    fn parent(self, app: &App) -> Animation<f64> {
+impl AnimationWithParent<f64> for CurvedAnimation {
+    fn parent(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
         app.get(self).parent
     }
 }
 
 // Dart: `class CurvedAnimation extends Animation<double> with
 // AnimationWithParentMixin<double>`.
-impl AnimationNode<f64> for CurvedAnimation {
-    fn add_listener(app: &mut App, this: Handle<Self>, listener: Listener) {
-        AnimationWithParent::add_listener(this, app, listener)
+impl Animation<f64> for CurvedAnimation {
+    fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
+        AnimationWithParent::add_listener(self, app, listener)
     }
 
-    fn remove_listener(app: &mut App, this: Handle<Self>, listener: &Listener) {
-        AnimationWithParent::remove_listener(this, app, listener)
+    fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
+        AnimationWithParent::remove_listener(self, app, listener)
     }
 
-    fn add_status_listener(app: &mut App, this: Handle<Self>, listener: AnimationStatusListener) {
-        AnimationWithParent::add_status_listener(this, app, listener)
+    fn add_status_listener(self: Handle<Self>, app: &mut App, listener: AnimationStatusListener) {
+        AnimationWithParent::add_status_listener(self, app, listener)
     }
 
     fn remove_status_listener(
+        self: Handle<Self>,
         app: &mut App,
-        this: Handle<Self>,
         listener: &AnimationStatusListener,
     ) {
-        AnimationWithParent::remove_status_listener(this, app, listener)
+        AnimationWithParent::remove_status_listener(self, app, listener)
     }
 
-    fn status(app: &App, this: Handle<Self>) -> AnimationStatus {
-        AnimationWithParent::status(this, app)
+    fn status(self: Handle<Self>, app: &App) -> AnimationStatus {
+        AnimationWithParent::status(self, app)
     }
 
-    fn value(app: &App, this: Handle<Self>) -> f64 {
-        let animation = app.get(this);
-        let active_curve = if Self::use_forward_curve(app, this) {
+    fn value(self: Handle<Self>, app: &App) -> f64 {
+        let animation = app.get(self);
+        let active_curve = if self.use_forward_curve(app) {
             Some(Rc::clone(&animation.curve))
         } else {
             animation.reverse_curve.clone()
@@ -800,8 +786,8 @@ enum TrainHoppingMode {
 /// [`on_switched_train`]: TrainHoppingAnimation::on_switched_train
 /// [`dispose`]: TrainHoppingAnimation::dispose
 pub struct TrainHoppingAnimation {
-    current_train: Option<Animation<f64>>,
-    next_train: Option<Animation<f64>>,
+    current_train: Option<AnyAnimation<f64>>,
+    next_train: Option<AnyAnimation<f64>>,
     mode: Option<TrainHoppingMode>,
 
     /// Called when this animation switches to be driven by the second
@@ -830,8 +816,8 @@ impl TrainHoppingAnimation {
     /// object under construction, so creation goes through the [`App`].
     pub fn create(
         app: &mut App,
-        current_train: Animation<f64>,
-        next_train: Option<Animation<f64>>,
+        current_train: AnyAnimation<f64>,
+        next_train: Option<AnyAnimation<f64>>,
         on_switched_train: Option<Listener>,
     ) -> Handle<TrainHoppingAnimation> {
         let mut current_train = current_train;
@@ -882,25 +868,25 @@ impl TrainHoppingAnimation {
     /// second animation when [`on_switched_train`] is called.
     ///
     /// [`on_switched_train`]: TrainHoppingAnimation::on_switched_train
-    pub fn current_train(&self) -> Option<Animation<f64>> {
+    pub fn current_train(&self) -> Option<AnyAnimation<f64>> {
         self.current_train
     }
 
-    fn status_change_handler(this: Handle<Self>, app: &mut App, status: AnimationStatus) {
-        debug_assert!(app.get(this).current_train.is_some());
-        if Some(status) != app.get(this).last_status {
-            this.notify_status_listeners(app, status);
-            app.get_mut(this).last_status = Some(status);
+    fn status_change_handler(self: Handle<Self>, app: &mut App, status: AnimationStatus) {
+        debug_assert!(app.get(self).current_train.is_some());
+        if Some(status) != app.get(self).last_status {
+            self.notify_status_listeners(app, status);
+            app.get_mut(self).last_status = Some(status);
         }
-        debug_assert!(app.get(this).last_status.is_some());
+        debug_assert!(app.get(self).last_status.is_some());
     }
 
-    fn value_change_handler(this: Handle<Self>, app: &mut App) {
-        debug_assert!(app.get(this).current_train.is_some());
+    fn value_change_handler(self: Handle<Self>, app: &mut App) {
+        debug_assert!(app.get(self).current_train.is_some());
         let mut hop = false;
-        if app.get(this).next_train.is_some() {
-            debug_assert!(app.get(this).mode.is_some());
-            let animation = app.get(this);
+        if app.get(self).next_train.is_some() {
+            debug_assert!(app.get(self).mode.is_some());
+            let animation = app.get(self);
             let current = animation.current_train.unwrap();
             let next = animation.next_train.unwrap();
             hop = match animation.mode.unwrap() {
@@ -910,103 +896,109 @@ impl TrainHoppingAnimation {
             if hop {
                 current.remove_status_listener(
                     app,
-                    &AnimationStatusListener::handle_method(this, Self::status_change_handler),
+                    &AnimationStatusListener::handle_method(self, Self::status_change_handler),
                 );
                 current.remove_listener(
                     app,
-                    &Listener::handle_method(this, Self::value_change_handler),
+                    &Listener::handle_method(self, Self::value_change_handler),
                 );
-                let animation = app.get_mut(this);
+                let animation = app.get_mut(self);
                 animation.current_train = animation.next_train.take();
-                let new_current = app.get(this).current_train.unwrap();
+                let new_current = app.get(self).current_train.unwrap();
                 new_current.add_status_listener(
                     app,
-                    AnimationStatusListener::handle_method(this, Self::status_change_handler),
+                    AnimationStatusListener::handle_method(self, Self::status_change_handler),
                 );
                 let status = new_current.status(app);
-                Self::status_change_handler(this, app, status);
+                self.status_change_handler(app, status);
             }
         }
-        let new_value = Self::value(app, this);
-        if Some(new_value) != app.get(this).last_value {
-            this.notify_listeners(app);
-            app.get_mut(this).last_value = Some(new_value);
+        let new_value = self.value(app);
+        if Some(new_value) != app.get(self).last_value {
+            self.notify_listeners(app);
+            app.get_mut(self).last_value = Some(new_value);
         }
-        debug_assert!(app.get(this).last_value.is_some());
-        if hop && let Some(on_switched_train) = app.get(this).on_switched_train.clone() {
+        debug_assert!(app.get(self).last_value.is_some());
+        if hop && let Some(on_switched_train) = app.get(self).on_switched_train.clone() {
             on_switched_train.call(app);
         }
     }
 
     /// Frees all the resources used by this performance.
     /// After this is called, this object is no longer usable.
-    pub fn dispose(app: &mut App, this: Handle<Self>) {
-        debug_assert!(app.get(this).current_train.is_some());
+    pub fn dispose(self: Handle<Self>, app: &mut App) {
+        debug_assert!(app.get(self).current_train.is_some());
         let current = app
-            .get(this)
+            .get(self)
             .current_train
             .expect("a disposed TrainHoppingAnimation has no current train");
         current.remove_status_listener(
             app,
-            &AnimationStatusListener::handle_method(this, Self::status_change_handler),
+            &AnimationStatusListener::handle_method(self, Self::status_change_handler),
         );
         current.remove_listener(
             app,
-            &Listener::handle_method(this, Self::value_change_handler),
+            &Listener::handle_method(self, Self::value_change_handler),
         );
-        app.get_mut(this).current_train = None;
-        if let Some(next) = app.get(this).next_train {
+        app.get_mut(self).current_train = None;
+        if let Some(next) = app.get(self).next_train {
             next.remove_listener(
                 app,
-                &Listener::handle_method(this, Self::value_change_handler),
+                &Listener::handle_method(self, Self::value_change_handler),
             );
         }
-        app.get_mut(this).next_train = None;
-        this.clear_listeners(app);
-        this.clear_status_listeners(app);
-        AnimationEagerListenerMixin::dispose(this, app);
+        app.get_mut(self).next_train = None;
+        self.clear_listeners(app);
+        self.clear_status_listeners(app);
+        AnimationEagerListenerMixin::dispose(self, app);
     }
 }
 
-impl AnimationEagerListenerMixin for Handle<TrainHoppingAnimation> {}
+impl AnimationEagerListenerMixin for TrainHoppingAnimation {}
 
-impl AnimationLocalListenersMixin for Handle<TrainHoppingAnimation> {
-    fn local_listeners_data(self, app: &App) -> &AnimationLocalListenersData {
+impl AnimationLocalListenersMixin for TrainHoppingAnimation {
+    fn local_listeners_data(self: Handle<Self>, app: &App) -> &AnimationLocalListenersData {
         &app.get(self).local_listeners
     }
 
-    fn local_listeners_data_mut(self, app: &mut App) -> &mut AnimationLocalListenersData {
+    fn local_listeners_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut AnimationLocalListenersData {
         &mut app.get_mut(self).local_listeners
     }
 
     // Dart resolves these by mixin order — `AnimationEagerListenerMixin` is
     // the one that declares them in this class's `with` clause.
-    fn did_register_listener(self, app: &mut App) {
+    fn did_register_listener(self: Handle<Self>, app: &mut App) {
         AnimationEagerListenerMixin::did_register_listener(self, app)
     }
 
-    fn did_unregister_listener(self, app: &mut App) {
+    fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
         AnimationEagerListenerMixin::did_unregister_listener(self, app)
     }
 }
 
-impl AnimationLocalStatusListenersMixin for Handle<TrainHoppingAnimation> {
-    fn local_status_listeners_data(self, app: &App) -> &AnimationLocalStatusListenersData {
+impl AnimationLocalStatusListenersMixin for TrainHoppingAnimation {
+    fn local_status_listeners_data(
+        self: Handle<Self>,
+        app: &App,
+    ) -> &AnimationLocalStatusListenersData {
         &app.get(self).local_status_listeners
     }
 
     fn local_status_listeners_data_mut(
-        self,
+        self: Handle<Self>,
         app: &mut App,
     ) -> &mut AnimationLocalStatusListenersData {
         &mut app.get_mut(self).local_status_listeners
     }
 
-    fn did_register_listener(self, app: &mut App) {
+    fn did_register_listener(self: Handle<Self>, app: &mut App) {
         AnimationEagerListenerMixin::did_register_listener(self, app)
     }
 
-    fn did_unregister_listener(self, app: &mut App) {
+    fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
         AnimationEagerListenerMixin::did_unregister_listener(self, app)
     }
 }
@@ -1014,36 +1006,36 @@ impl AnimationLocalStatusListenersMixin for Handle<TrainHoppingAnimation> {
 // Dart: `class TrainHoppingAnimation extends Animation<double> with
 // AnimationEagerListenerMixin, AnimationLocalListenersMixin,
 // AnimationLocalStatusListenersMixin`.
-impl AnimationNode<f64> for TrainHoppingAnimation {
-    fn add_listener(app: &mut App, this: Handle<Self>, listener: Listener) {
-        AnimationLocalListenersMixin::add_listener(this, app, listener)
+impl Animation<f64> for TrainHoppingAnimation {
+    fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
+        AnimationLocalListenersMixin::add_listener(self, app, listener)
     }
 
-    fn remove_listener(app: &mut App, this: Handle<Self>, listener: &Listener) {
-        AnimationLocalListenersMixin::remove_listener(this, app, listener)
+    fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
+        AnimationLocalListenersMixin::remove_listener(self, app, listener)
     }
 
-    fn add_status_listener(app: &mut App, this: Handle<Self>, listener: AnimationStatusListener) {
-        AnimationLocalStatusListenersMixin::add_status_listener(this, app, listener)
+    fn add_status_listener(self: Handle<Self>, app: &mut App, listener: AnimationStatusListener) {
+        AnimationLocalStatusListenersMixin::add_status_listener(self, app, listener)
     }
 
     fn remove_status_listener(
+        self: Handle<Self>,
         app: &mut App,
-        this: Handle<Self>,
         listener: &AnimationStatusListener,
     ) {
-        AnimationLocalStatusListenersMixin::remove_status_listener(this, app, listener)
+        AnimationLocalStatusListenersMixin::remove_status_listener(self, app, listener)
     }
 
-    fn status(app: &App, this: Handle<Self>) -> AnimationStatus {
-        app.get(this)
+    fn status(self: Handle<Self>, app: &App) -> AnimationStatus {
+        app.get(self)
             .current_train
             .expect("a disposed TrainHoppingAnimation has no current train")
             .status(app)
     }
 
-    fn value(app: &App, this: Handle<Self>) -> f64 {
-        app.get(this)
+    fn value(self: Handle<Self>, app: &App) -> f64 {
+        app.get(self)
             .current_train
             .expect("a disposed TrainHoppingAnimation has no current train")
             .value(app)
@@ -1051,7 +1043,7 @@ impl AnimationNode<f64> for TrainHoppingAnimation {
 }
 
 /// An interface for combining multiple Animations. Implementors need only
-/// implement [`AnimationNode::value`] to control how the child animations are
+/// implement [`Animation::value`] to control how the child animations are
 /// combined. Can be chained to combine more than 2 animations.
 ///
 /// For example, to create an animation that is the sum of two others,
@@ -1063,44 +1055,38 @@ impl AnimationNode<f64> for TrainHoppingAnimation {
 ///
 /// Dart's `CompoundAnimation<T>` is an abstract class whose handlers call the
 /// subclass's `value` override. The upward call is what makes it a trait here;
-/// it reaches the override through [`animation`], the erased handle, whose ops
-/// table is built from the subclass's [`AnimationNode`] impl. The fields Dart
-/// declares on the abstract class belong to the implementing state type and
-/// reach the trait through the app-mediated accessors.
+/// it reaches the override through [`as_animation`], the erased handle, whose
+/// vtable is built from the subclass's [`Animation`] impl. The fields Dart
+/// declares on the abstract class belong to the implementing type and reach
+/// the trait through the app-mediated accessors.
 ///
-/// [`animation`]: CompoundAnimation::animation
+/// [`as_animation`]: Animation::as_animation
 /// [`first`]: CompoundAnimation::first
 /// [`next`]: CompoundAnimation::next
 pub trait CompoundAnimation<T: Clone + PartialEq + 'static>:
-    AnimationLazyListenerMixin + AnimationLocalListenersMixin + AnimationLocalStatusListenersMixin
+    Animation<T>
+    + AnimationLazyListenerMixin
+    + AnimationLocalListenersMixin
+    + AnimationLocalStatusListenersMixin
 {
-    /// This animation as the erased [`Animation`] handle —
-    /// `Animation::from_handle(self)` in every implementor.
-    ///
-    /// [`AnimationNode`] stays on the state type, since that is what
-    /// `from_handle` erases, so this is how the handlers below reach a
-    /// subclass's `value` and `status` overrides: the same dispatch target the
-    /// virtual call had.
-    fn animation(self) -> Animation<T>;
-
     /// The first sub-animation. Its status takes precedence if neither are
     /// animating.
-    fn first(self, app: &App) -> Animation<T>;
+    fn first(self: Handle<Self>, app: &App) -> AnyAnimation<T>;
 
     /// The second sub-animation.
-    fn next(self, app: &App) -> Animation<T>;
+    fn next(self: Handle<Self>, app: &App) -> AnyAnimation<T>;
 
     /// Dart's `_lastStatus`, owned by the implementing type.
-    fn last_status(self, app: &App) -> Option<AnimationStatus>;
+    fn last_status(self: Handle<Self>, app: &App) -> Option<AnimationStatus>;
 
     /// Dart's `_lastStatus`, mutably.
-    fn last_status_mut(self, app: &mut App) -> &mut Option<AnimationStatus>;
+    fn last_status_mut(self: Handle<Self>, app: &mut App) -> &mut Option<AnimationStatus>;
 
     /// Dart's `_lastValue`, owned by the implementing type.
-    fn last_value(self, app: &App) -> &Option<T>;
+    fn last_value(self: Handle<Self>, app: &App) -> &Option<T>;
 
     /// Dart's `_lastValue`, mutably.
-    fn last_value_mut(self, app: &mut App) -> &mut Option<T>;
+    fn last_value_mut(self: Handle<Self>, app: &mut App) -> &mut Option<T>;
 
     /// Gets the status of this animation based on the [`first`] and [`next`]
     /// status.
@@ -1110,7 +1096,7 @@ pub trait CompoundAnimation<T: Clone + PartialEq + 'static>:
     ///
     /// [`first`]: CompoundAnimation::first
     /// [`next`]: CompoundAnimation::next
-    fn status(self, app: &App) -> AnimationStatus {
+    fn status(self: Handle<Self>, app: &App) -> AnimationStatus {
         let next_status = self.next(app).status(app);
         if next_status.is_animating() {
             next_status
@@ -1120,8 +1106,8 @@ pub trait CompoundAnimation<T: Clone + PartialEq + 'static>:
     }
 
     /// Dart's `_maybeNotifyStatusListeners`.
-    fn maybe_notify_status_listeners(self, app: &mut App, _status: AnimationStatus) {
-        let status = self.animation().status(app);
+    fn maybe_notify_status_listeners(self: Handle<Self>, app: &mut App, _status: AnimationStatus) {
+        let status = self.as_animation().status(app);
         if Some(status) != self.last_status(app) {
             *self.last_status_mut(app) = Some(status);
             self.notify_status_listeners(app, status);
@@ -1129,8 +1115,8 @@ pub trait CompoundAnimation<T: Clone + PartialEq + 'static>:
     }
 
     /// Dart's `_maybeNotifyListeners`.
-    fn maybe_notify_listeners(self, app: &mut App) {
-        let value = self.animation().value(app);
+    fn maybe_notify_listeners(self: Handle<Self>, app: &mut App) {
+        let value = self.as_animation().value(app);
         if self.last_value(app).as_ref() != Some(&value) {
             *self.last_value_mut(app) = Some(value);
             self.notify_listeners(app);
@@ -1142,43 +1128,37 @@ pub trait CompoundAnimation<T: Clone + PartialEq + 'static>:
 /// sub-animations.
 ///
 /// A free function rather than a provided method on [`CompoundAnimation`]
-/// because the tear-offs it registers name the entity, and inside the trait
-/// `Self` is only known to be *some* `Copy + 'static` handle — Rust cannot see
-/// that it is an `Handle<S>`, which is what `Listener::handle_method` takes.
-/// Each implementor's [`AnimationLazyListenerMixin::did_start_listening`] delegates
+/// because the method it implements belongs to the
+/// [`AnimationLazyListenerMixin`] supertrait: a provided method of the same
+/// name here would make every `did_start_listening` call ambiguous. Each
+/// implementor's [`AnimationLazyListenerMixin::did_start_listening`] delegates
 /// here, exactly as it would to a trait default.
-fn compound_did_start_listening<S: 'static, T>(this: Handle<S>, app: &mut App)
+fn compound_did_start_listening<S, T>(this: Handle<S>, app: &mut App)
 where
+    S: CompoundAnimation<T>,
     T: Clone + PartialEq + 'static,
-    Handle<S>: CompoundAnimation<T>,
 {
     let (first, next) = (this.first(app), this.next(app));
     first.add_listener(
         app,
-        Listener::handle_method(
-            this,
-            <Handle<S> as CompoundAnimation<T>>::maybe_notify_listeners,
-        ),
+        Listener::handle_method(this, <S as CompoundAnimation<T>>::maybe_notify_listeners),
     );
     first.add_status_listener(
         app,
         AnimationStatusListener::handle_method(
             this,
-            <Handle<S> as CompoundAnimation<T>>::maybe_notify_status_listeners,
+            <S as CompoundAnimation<T>>::maybe_notify_status_listeners,
         ),
     );
     next.add_listener(
         app,
-        Listener::handle_method(
-            this,
-            <Handle<S> as CompoundAnimation<T>>::maybe_notify_listeners,
-        ),
+        Listener::handle_method(this, <S as CompoundAnimation<T>>::maybe_notify_listeners),
     );
     next.add_status_listener(
         app,
         AnimationStatusListener::handle_method(
             this,
-            <Handle<S> as CompoundAnimation<T>>::maybe_notify_status_listeners,
+            <S as CompoundAnimation<T>>::maybe_notify_status_listeners,
         ),
     );
 }
@@ -1187,38 +1167,32 @@ where
 /// sub-animations. Free for the reason on
 /// [`compound_did_start_listening`]; the tear-offs it rebuilds are the same
 /// fn items registered there, so they match.
-fn compound_did_stop_listening<S: 'static, T>(this: Handle<S>, app: &mut App)
+fn compound_did_stop_listening<S, T>(this: Handle<S>, app: &mut App)
 where
+    S: CompoundAnimation<T>,
     T: Clone + PartialEq + 'static,
-    Handle<S>: CompoundAnimation<T>,
 {
     let (first, next) = (this.first(app), this.next(app));
     first.remove_listener(
         app,
-        &Listener::handle_method(
-            this,
-            <Handle<S> as CompoundAnimation<T>>::maybe_notify_listeners,
-        ),
+        &Listener::handle_method(this, <S as CompoundAnimation<T>>::maybe_notify_listeners),
     );
     first.remove_status_listener(
         app,
         &AnimationStatusListener::handle_method(
             this,
-            <Handle<S> as CompoundAnimation<T>>::maybe_notify_status_listeners,
+            <S as CompoundAnimation<T>>::maybe_notify_status_listeners,
         ),
     );
     next.remove_listener(
         app,
-        &Listener::handle_method(
-            this,
-            <Handle<S> as CompoundAnimation<T>>::maybe_notify_listeners,
-        ),
+        &Listener::handle_method(this, <S as CompoundAnimation<T>>::maybe_notify_listeners),
     );
     next.remove_status_listener(
         app,
         &AnimationStatusListener::handle_method(
             this,
-            <Handle<S> as CompoundAnimation<T>>::maybe_notify_status_listeners,
+            <S as CompoundAnimation<T>>::maybe_notify_status_listeners,
         ),
     );
 }
@@ -1231,8 +1205,8 @@ where
 /// The value of this animation is the [`f64`] that represents the mean value
 /// of the values of the `left` and `right` animations.
 pub struct AnimationMean {
-    first: Animation<f64>,
-    next: Animation<f64>,
+    first: AnyAnimation<f64>,
+    next: AnyAnimation<f64>,
     last_status: Option<AnimationStatus>,
     last_value: Option<f64>,
     lazy_listener: AnimationLazyListenerData,
@@ -1242,7 +1216,7 @@ pub struct AnimationMean {
 
 impl AnimationMean {
     /// Creates an animation that tracks the mean of two other animations.
-    pub fn new(left: Animation<f64>, right: Animation<f64>) -> AnimationMean {
+    pub fn new(left: AnyAnimation<f64>, right: AnyAnimation<f64>) -> AnimationMean {
         AnimationMean {
             first: left,
             next: right,
@@ -1255,121 +1229,123 @@ impl AnimationMean {
     }
 }
 
-impl AnimationLazyListenerMixin for Handle<AnimationMean> {
-    fn lazy_listener_data(self, app: &App) -> &AnimationLazyListenerData {
+impl AnimationLazyListenerMixin for AnimationMean {
+    fn lazy_listener_data(self: Handle<Self>, app: &App) -> &AnimationLazyListenerData {
         &app.get(self).lazy_listener
     }
 
-    fn lazy_listener_data_mut(self, app: &mut App) -> &mut AnimationLazyListenerData {
+    fn lazy_listener_data_mut(self: Handle<Self>, app: &mut App) -> &mut AnimationLazyListenerData {
         &mut app.get_mut(self).lazy_listener
     }
 
-    fn did_start_listening(self, app: &mut App) {
+    fn did_start_listening(self: Handle<Self>, app: &mut App) {
         compound_did_start_listening::<AnimationMean, f64>(self, app)
     }
 
-    fn did_stop_listening(self, app: &mut App) {
+    fn did_stop_listening(self: Handle<Self>, app: &mut App) {
         compound_did_stop_listening::<AnimationMean, f64>(self, app)
     }
 }
 
-impl AnimationLocalListenersMixin for Handle<AnimationMean> {
-    fn local_listeners_data(self, app: &App) -> &AnimationLocalListenersData {
+impl AnimationLocalListenersMixin for AnimationMean {
+    fn local_listeners_data(self: Handle<Self>, app: &App) -> &AnimationLocalListenersData {
         &app.get(self).local_listeners
     }
 
-    fn local_listeners_data_mut(self, app: &mut App) -> &mut AnimationLocalListenersData {
+    fn local_listeners_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut AnimationLocalListenersData {
         &mut app.get_mut(self).local_listeners
     }
 
-    fn did_register_listener(self, app: &mut App) {
+    fn did_register_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_register_listener(self, app)
     }
 
-    fn did_unregister_listener(self, app: &mut App) {
+    fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_unregister_listener(self, app)
     }
 }
 
-impl AnimationLocalStatusListenersMixin for Handle<AnimationMean> {
-    fn local_status_listeners_data(self, app: &App) -> &AnimationLocalStatusListenersData {
+impl AnimationLocalStatusListenersMixin for AnimationMean {
+    fn local_status_listeners_data(
+        self: Handle<Self>,
+        app: &App,
+    ) -> &AnimationLocalStatusListenersData {
         &app.get(self).local_status_listeners
     }
 
     fn local_status_listeners_data_mut(
-        self,
+        self: Handle<Self>,
         app: &mut App,
     ) -> &mut AnimationLocalStatusListenersData {
         &mut app.get_mut(self).local_status_listeners
     }
 
-    fn did_register_listener(self, app: &mut App) {
+    fn did_register_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_register_listener(self, app)
     }
 
-    fn did_unregister_listener(self, app: &mut App) {
+    fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_unregister_listener(self, app)
     }
 }
 
-impl CompoundAnimation<f64> for Handle<AnimationMean> {
-    fn animation(self) -> Animation<f64> {
-        Animation::from_handle(self)
-    }
-
-    fn first(self, app: &App) -> Animation<f64> {
+impl CompoundAnimation<f64> for AnimationMean {
+    fn first(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
         app.get(self).first
     }
 
-    fn next(self, app: &App) -> Animation<f64> {
+    fn next(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
         app.get(self).next
     }
 
-    fn last_status(self, app: &App) -> Option<AnimationStatus> {
+    fn last_status(self: Handle<Self>, app: &App) -> Option<AnimationStatus> {
         app.get(self).last_status
     }
 
-    fn last_status_mut(self, app: &mut App) -> &mut Option<AnimationStatus> {
+    fn last_status_mut(self: Handle<Self>, app: &mut App) -> &mut Option<AnimationStatus> {
         &mut app.get_mut(self).last_status
     }
 
-    fn last_value(self, app: &App) -> &Option<f64> {
+    fn last_value(self: Handle<Self>, app: &App) -> &Option<f64> {
         &app.get(self).last_value
     }
 
-    fn last_value_mut(self, app: &mut App) -> &mut Option<f64> {
+    fn last_value_mut(self: Handle<Self>, app: &mut App) -> &mut Option<f64> {
         &mut app.get_mut(self).last_value
     }
 }
 
 // Dart: `class AnimationMean extends CompoundAnimation<double>`.
-impl AnimationNode<f64> for AnimationMean {
-    fn add_listener(app: &mut App, this: Handle<Self>, listener: Listener) {
-        AnimationLocalListenersMixin::add_listener(this, app, listener)
+impl Animation<f64> for AnimationMean {
+    fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
+        AnimationLocalListenersMixin::add_listener(self, app, listener)
     }
 
-    fn remove_listener(app: &mut App, this: Handle<Self>, listener: &Listener) {
-        AnimationLocalListenersMixin::remove_listener(this, app, listener)
+    fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
+        AnimationLocalListenersMixin::remove_listener(self, app, listener)
     }
 
-    fn add_status_listener(app: &mut App, this: Handle<Self>, listener: AnimationStatusListener) {
-        AnimationLocalStatusListenersMixin::add_status_listener(this, app, listener)
+    fn add_status_listener(self: Handle<Self>, app: &mut App, listener: AnimationStatusListener) {
+        AnimationLocalStatusListenersMixin::add_status_listener(self, app, listener)
     }
 
     fn remove_status_listener(
+        self: Handle<Self>,
         app: &mut App,
-        this: Handle<Self>,
         listener: &AnimationStatusListener,
     ) {
-        AnimationLocalStatusListenersMixin::remove_status_listener(this, app, listener)
+        AnimationLocalStatusListenersMixin::remove_status_listener(self, app, listener)
     }
 
-    fn status(app: &App, this: Handle<Self>) -> AnimationStatus {
-        CompoundAnimation::status(this, app)
+    fn status(self: Handle<Self>, app: &App) -> AnimationStatus {
+        CompoundAnimation::status(self, app)
     }
 
-    fn value(app: &App, this: Handle<Self>) -> f64 {
-        let animation = app.get(this);
+    fn value(self: Handle<Self>, app: &App) -> f64 {
+        let animation = app.get(self);
         (animation.first.value(app) + animation.next.value(app)) / 2.0
     }
 }
@@ -1420,8 +1396,8 @@ fn dart_min(a: f64, b: f64) -> f64 {
 /// Rust has no `num` supertype, so this is `f64`-only until a non-double use
 /// appears.
 pub struct AnimationMax {
-    first: Animation<f64>,
-    next: Animation<f64>,
+    first: AnyAnimation<f64>,
+    next: AnyAnimation<f64>,
     last_status: Option<AnimationStatus>,
     last_value: Option<f64>,
     lazy_listener: AnimationLazyListenerData,
@@ -1434,7 +1410,7 @@ impl AnimationMax {
     ///
     /// Either argument can be an [`AnimationMax`] itself to combine multiple
     /// animations.
-    pub fn new(first: Animation<f64>, next: Animation<f64>) -> AnimationMax {
+    pub fn new(first: AnyAnimation<f64>, next: AnyAnimation<f64>) -> AnimationMax {
         AnimationMax {
             first,
             next,
@@ -1447,121 +1423,123 @@ impl AnimationMax {
     }
 }
 
-impl AnimationLazyListenerMixin for Handle<AnimationMax> {
-    fn lazy_listener_data(self, app: &App) -> &AnimationLazyListenerData {
+impl AnimationLazyListenerMixin for AnimationMax {
+    fn lazy_listener_data(self: Handle<Self>, app: &App) -> &AnimationLazyListenerData {
         &app.get(self).lazy_listener
     }
 
-    fn lazy_listener_data_mut(self, app: &mut App) -> &mut AnimationLazyListenerData {
+    fn lazy_listener_data_mut(self: Handle<Self>, app: &mut App) -> &mut AnimationLazyListenerData {
         &mut app.get_mut(self).lazy_listener
     }
 
-    fn did_start_listening(self, app: &mut App) {
+    fn did_start_listening(self: Handle<Self>, app: &mut App) {
         compound_did_start_listening::<AnimationMax, f64>(self, app)
     }
 
-    fn did_stop_listening(self, app: &mut App) {
+    fn did_stop_listening(self: Handle<Self>, app: &mut App) {
         compound_did_stop_listening::<AnimationMax, f64>(self, app)
     }
 }
 
-impl AnimationLocalListenersMixin for Handle<AnimationMax> {
-    fn local_listeners_data(self, app: &App) -> &AnimationLocalListenersData {
+impl AnimationLocalListenersMixin for AnimationMax {
+    fn local_listeners_data(self: Handle<Self>, app: &App) -> &AnimationLocalListenersData {
         &app.get(self).local_listeners
     }
 
-    fn local_listeners_data_mut(self, app: &mut App) -> &mut AnimationLocalListenersData {
+    fn local_listeners_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut AnimationLocalListenersData {
         &mut app.get_mut(self).local_listeners
     }
 
-    fn did_register_listener(self, app: &mut App) {
+    fn did_register_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_register_listener(self, app)
     }
 
-    fn did_unregister_listener(self, app: &mut App) {
+    fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_unregister_listener(self, app)
     }
 }
 
-impl AnimationLocalStatusListenersMixin for Handle<AnimationMax> {
-    fn local_status_listeners_data(self, app: &App) -> &AnimationLocalStatusListenersData {
+impl AnimationLocalStatusListenersMixin for AnimationMax {
+    fn local_status_listeners_data(
+        self: Handle<Self>,
+        app: &App,
+    ) -> &AnimationLocalStatusListenersData {
         &app.get(self).local_status_listeners
     }
 
     fn local_status_listeners_data_mut(
-        self,
+        self: Handle<Self>,
         app: &mut App,
     ) -> &mut AnimationLocalStatusListenersData {
         &mut app.get_mut(self).local_status_listeners
     }
 
-    fn did_register_listener(self, app: &mut App) {
+    fn did_register_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_register_listener(self, app)
     }
 
-    fn did_unregister_listener(self, app: &mut App) {
+    fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_unregister_listener(self, app)
     }
 }
 
-impl CompoundAnimation<f64> for Handle<AnimationMax> {
-    fn animation(self) -> Animation<f64> {
-        Animation::from_handle(self)
-    }
-
-    fn first(self, app: &App) -> Animation<f64> {
+impl CompoundAnimation<f64> for AnimationMax {
+    fn first(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
         app.get(self).first
     }
 
-    fn next(self, app: &App) -> Animation<f64> {
+    fn next(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
         app.get(self).next
     }
 
-    fn last_status(self, app: &App) -> Option<AnimationStatus> {
+    fn last_status(self: Handle<Self>, app: &App) -> Option<AnimationStatus> {
         app.get(self).last_status
     }
 
-    fn last_status_mut(self, app: &mut App) -> &mut Option<AnimationStatus> {
+    fn last_status_mut(self: Handle<Self>, app: &mut App) -> &mut Option<AnimationStatus> {
         &mut app.get_mut(self).last_status
     }
 
-    fn last_value(self, app: &App) -> &Option<f64> {
+    fn last_value(self: Handle<Self>, app: &App) -> &Option<f64> {
         &app.get(self).last_value
     }
 
-    fn last_value_mut(self, app: &mut App) -> &mut Option<f64> {
+    fn last_value_mut(self: Handle<Self>, app: &mut App) -> &mut Option<f64> {
         &mut app.get_mut(self).last_value
     }
 }
 
 // Dart: `class AnimationMax<T extends num> extends CompoundAnimation<T>`.
-impl AnimationNode<f64> for AnimationMax {
-    fn add_listener(app: &mut App, this: Handle<Self>, listener: Listener) {
-        AnimationLocalListenersMixin::add_listener(this, app, listener)
+impl Animation<f64> for AnimationMax {
+    fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
+        AnimationLocalListenersMixin::add_listener(self, app, listener)
     }
 
-    fn remove_listener(app: &mut App, this: Handle<Self>, listener: &Listener) {
-        AnimationLocalListenersMixin::remove_listener(this, app, listener)
+    fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
+        AnimationLocalListenersMixin::remove_listener(self, app, listener)
     }
 
-    fn add_status_listener(app: &mut App, this: Handle<Self>, listener: AnimationStatusListener) {
-        AnimationLocalStatusListenersMixin::add_status_listener(this, app, listener)
+    fn add_status_listener(self: Handle<Self>, app: &mut App, listener: AnimationStatusListener) {
+        AnimationLocalStatusListenersMixin::add_status_listener(self, app, listener)
     }
 
     fn remove_status_listener(
+        self: Handle<Self>,
         app: &mut App,
-        this: Handle<Self>,
         listener: &AnimationStatusListener,
     ) {
-        AnimationLocalStatusListenersMixin::remove_status_listener(this, app, listener)
+        AnimationLocalStatusListenersMixin::remove_status_listener(self, app, listener)
     }
 
-    fn status(app: &App, this: Handle<Self>) -> AnimationStatus {
-        CompoundAnimation::status(this, app)
+    fn status(self: Handle<Self>, app: &App) -> AnimationStatus {
+        CompoundAnimation::status(self, app)
     }
 
-    fn value(app: &App, this: Handle<Self>) -> f64 {
-        let animation = app.get(this);
+    fn value(self: Handle<Self>, app: &App) -> f64 {
+        let animation = app.get(self);
         dart_max(animation.first.value(app), animation.next.value(app))
     }
 }
@@ -1575,8 +1553,8 @@ impl AnimationNode<f64> for AnimationMax {
 /// Rust has no `num` supertype, so this is `f64`-only until a non-double use
 /// appears.
 pub struct AnimationMin {
-    first: Animation<f64>,
-    next: Animation<f64>,
+    first: AnyAnimation<f64>,
+    next: AnyAnimation<f64>,
     last_status: Option<AnimationStatus>,
     last_value: Option<f64>,
     lazy_listener: AnimationLazyListenerData,
@@ -1589,7 +1567,7 @@ impl AnimationMin {
     ///
     /// Either argument can be an [`AnimationMin`] itself to combine multiple
     /// animations.
-    pub fn new(first: Animation<f64>, next: Animation<f64>) -> AnimationMin {
+    pub fn new(first: AnyAnimation<f64>, next: AnyAnimation<f64>) -> AnimationMin {
         AnimationMin {
             first,
             next,
@@ -1602,121 +1580,123 @@ impl AnimationMin {
     }
 }
 
-impl AnimationLazyListenerMixin for Handle<AnimationMin> {
-    fn lazy_listener_data(self, app: &App) -> &AnimationLazyListenerData {
+impl AnimationLazyListenerMixin for AnimationMin {
+    fn lazy_listener_data(self: Handle<Self>, app: &App) -> &AnimationLazyListenerData {
         &app.get(self).lazy_listener
     }
 
-    fn lazy_listener_data_mut(self, app: &mut App) -> &mut AnimationLazyListenerData {
+    fn lazy_listener_data_mut(self: Handle<Self>, app: &mut App) -> &mut AnimationLazyListenerData {
         &mut app.get_mut(self).lazy_listener
     }
 
-    fn did_start_listening(self, app: &mut App) {
+    fn did_start_listening(self: Handle<Self>, app: &mut App) {
         compound_did_start_listening::<AnimationMin, f64>(self, app)
     }
 
-    fn did_stop_listening(self, app: &mut App) {
+    fn did_stop_listening(self: Handle<Self>, app: &mut App) {
         compound_did_stop_listening::<AnimationMin, f64>(self, app)
     }
 }
 
-impl AnimationLocalListenersMixin for Handle<AnimationMin> {
-    fn local_listeners_data(self, app: &App) -> &AnimationLocalListenersData {
+impl AnimationLocalListenersMixin for AnimationMin {
+    fn local_listeners_data(self: Handle<Self>, app: &App) -> &AnimationLocalListenersData {
         &app.get(self).local_listeners
     }
 
-    fn local_listeners_data_mut(self, app: &mut App) -> &mut AnimationLocalListenersData {
+    fn local_listeners_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut AnimationLocalListenersData {
         &mut app.get_mut(self).local_listeners
     }
 
-    fn did_register_listener(self, app: &mut App) {
+    fn did_register_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_register_listener(self, app)
     }
 
-    fn did_unregister_listener(self, app: &mut App) {
+    fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_unregister_listener(self, app)
     }
 }
 
-impl AnimationLocalStatusListenersMixin for Handle<AnimationMin> {
-    fn local_status_listeners_data(self, app: &App) -> &AnimationLocalStatusListenersData {
+impl AnimationLocalStatusListenersMixin for AnimationMin {
+    fn local_status_listeners_data(
+        self: Handle<Self>,
+        app: &App,
+    ) -> &AnimationLocalStatusListenersData {
         &app.get(self).local_status_listeners
     }
 
     fn local_status_listeners_data_mut(
-        self,
+        self: Handle<Self>,
         app: &mut App,
     ) -> &mut AnimationLocalStatusListenersData {
         &mut app.get_mut(self).local_status_listeners
     }
 
-    fn did_register_listener(self, app: &mut App) {
+    fn did_register_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_register_listener(self, app)
     }
 
-    fn did_unregister_listener(self, app: &mut App) {
+    fn did_unregister_listener(self: Handle<Self>, app: &mut App) {
         AnimationLazyListenerMixin::did_unregister_listener(self, app)
     }
 }
 
-impl CompoundAnimation<f64> for Handle<AnimationMin> {
-    fn animation(self) -> Animation<f64> {
-        Animation::from_handle(self)
-    }
-
-    fn first(self, app: &App) -> Animation<f64> {
+impl CompoundAnimation<f64> for AnimationMin {
+    fn first(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
         app.get(self).first
     }
 
-    fn next(self, app: &App) -> Animation<f64> {
+    fn next(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
         app.get(self).next
     }
 
-    fn last_status(self, app: &App) -> Option<AnimationStatus> {
+    fn last_status(self: Handle<Self>, app: &App) -> Option<AnimationStatus> {
         app.get(self).last_status
     }
 
-    fn last_status_mut(self, app: &mut App) -> &mut Option<AnimationStatus> {
+    fn last_status_mut(self: Handle<Self>, app: &mut App) -> &mut Option<AnimationStatus> {
         &mut app.get_mut(self).last_status
     }
 
-    fn last_value(self, app: &App) -> &Option<f64> {
+    fn last_value(self: Handle<Self>, app: &App) -> &Option<f64> {
         &app.get(self).last_value
     }
 
-    fn last_value_mut(self, app: &mut App) -> &mut Option<f64> {
+    fn last_value_mut(self: Handle<Self>, app: &mut App) -> &mut Option<f64> {
         &mut app.get_mut(self).last_value
     }
 }
 
 // Dart: `class AnimationMin<T extends num> extends CompoundAnimation<T>`.
-impl AnimationNode<f64> for AnimationMin {
-    fn add_listener(app: &mut App, this: Handle<Self>, listener: Listener) {
-        AnimationLocalListenersMixin::add_listener(this, app, listener)
+impl Animation<f64> for AnimationMin {
+    fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
+        AnimationLocalListenersMixin::add_listener(self, app, listener)
     }
 
-    fn remove_listener(app: &mut App, this: Handle<Self>, listener: &Listener) {
-        AnimationLocalListenersMixin::remove_listener(this, app, listener)
+    fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
+        AnimationLocalListenersMixin::remove_listener(self, app, listener)
     }
 
-    fn add_status_listener(app: &mut App, this: Handle<Self>, listener: AnimationStatusListener) {
-        AnimationLocalStatusListenersMixin::add_status_listener(this, app, listener)
+    fn add_status_listener(self: Handle<Self>, app: &mut App, listener: AnimationStatusListener) {
+        AnimationLocalStatusListenersMixin::add_status_listener(self, app, listener)
     }
 
     fn remove_status_listener(
+        self: Handle<Self>,
         app: &mut App,
-        this: Handle<Self>,
         listener: &AnimationStatusListener,
     ) {
-        AnimationLocalStatusListenersMixin::remove_status_listener(this, app, listener)
+        AnimationLocalStatusListenersMixin::remove_status_listener(self, app, listener)
     }
 
-    fn status(app: &App, this: Handle<Self>) -> AnimationStatus {
-        CompoundAnimation::status(this, app)
+    fn status(self: Handle<Self>, app: &App) -> AnimationStatus {
+        CompoundAnimation::status(self, app)
     }
 
-    fn value(app: &App, this: Handle<Self>) -> f64 {
-        let animation = app.get(this);
+    fn value(self: Handle<Self>, app: &App) -> f64 {
+        let animation = app.get(self);
         dart_min(animation.first.value(app), animation.next.value(app))
     }
 }
@@ -1764,7 +1744,7 @@ mod tests {
     #[test]
     fn an_always_stopped_animation_is_forward_at_its_value() {
         let mut app = App::new();
-        let half = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.5)));
+        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
 
         assert_eq!(half.value(&app), 0.5);
         assert_eq!(half.status(&app), AnimationStatus::Forward);
@@ -1775,7 +1755,7 @@ mod tests {
     #[test]
     fn a_parentless_proxy_is_dismissed_at_zero() {
         let mut app = App::new();
-        let animation = Animation::from_handle(ProxyAnimation::new(&mut app, None).0);
+        let animation = ProxyAnimation::new(&mut app, None).as_animation();
 
         assert_eq!(animation.value(&app), 0.0);
         assert_eq!(animation.status(&app), AnimationStatus::Dismissed);
@@ -1788,11 +1768,11 @@ mod tests {
     #[test]
     fn set_parent_generates_value_changed() {
         let mut app = App::new();
-        let half = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.5)));
+        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
         let did_receive_callback = Rc::new(Cell::new(false));
 
         let animation = ProxyAnimation::new(&mut app, None);
-        Animation::from_handle(animation.0).add_listener(
+        animation.as_animation().add_listener(
             &mut app,
             Listener::new({
                 let did_receive_callback = Rc::clone(&did_receive_callback);
@@ -1810,10 +1790,10 @@ mod tests {
     fn a_proxy_follows_its_parent_through_the_subscription() {
         let mut app = App::new();
         let inner = ProxyAnimation::new(&mut app, None);
-        let outer = ProxyAnimation::new(&mut app, Some(Animation::from_handle(inner.0)));
+        let outer = ProxyAnimation::new(&mut app, Some(inner.as_animation()));
 
         let notified = Rc::new(Cell::new(0));
-        Animation::from_handle(outer.0).add_listener(
+        outer.as_animation().add_listener(
             &mut app,
             Listener::new({
                 let notified = Rc::clone(&notified);
@@ -1823,28 +1803,30 @@ mod tests {
 
         // The inner proxy's own notification reaches the outer proxy's
         // listener through the tear-off the outer registered on it.
-        let target = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.6)));
+        let target = app.create(AlwaysStoppedAnimation::new(0.6)).as_animation();
         inner.set_parent(&mut app, Some(target));
 
         assert_eq!(notified.get(), 1);
-        assert_eq!(Animation::from_handle(outer.0).value(&app), 0.6);
+        assert_eq!(outer.as_animation().value(&app), 0.6);
     }
 
     #[test]
     fn removing_the_last_listener_unsubscribes_from_the_parent() {
         let mut app = App::new();
         let inner = ProxyAnimation::new(&mut app, None);
-        let outer = ProxyAnimation::new(&mut app, Some(Animation::from_handle(inner.0)));
+        let outer = ProxyAnimation::new(&mut app, Some(inner.as_animation()));
 
         let listener = Listener::new(|_app| {});
-        Animation::from_handle(outer.0).add_listener(&mut app, listener.clone());
+        outer
+            .as_animation()
+            .add_listener(&mut app, listener.clone());
         assert!(
             !inner.local_listeners_data(&app).is_empty(),
             "the outer proxy's tear-off is registered on the inner"
         );
         assert!(!inner.local_status_listeners_data(&app).is_empty());
 
-        Animation::from_handle(outer.0).remove_listener(&mut app, &listener);
+        outer.as_animation().remove_listener(&mut app, &listener);
         assert!(
             inner.local_listeners_data(&app).is_empty(),
             "the rebuilt tear-off matched, so the registration is gone"
@@ -1858,7 +1840,7 @@ mod tests {
         let statuses = Rc::new(RefCell::new(Vec::new()));
 
         let animation = ProxyAnimation::new(&mut app, None); // Dismissed
-        Animation::from_handle(animation.0).add_status_listener(
+        animation.as_animation().add_status_listener(
             &mut app,
             AnimationStatusListener::new({
                 let statuses = Rc::clone(&statuses);
@@ -1878,7 +1860,7 @@ mod tests {
         let animation = ProxyAnimation::new(&mut app, None);
 
         let observed = Rc::new(Cell::new(f64::NAN));
-        Animation::from_handle(animation.0).add_listener(
+        animation.as_animation().add_listener(
             &mut app,
             Listener::new({
                 let observed = Rc::clone(&observed);
@@ -1886,12 +1868,12 @@ mod tests {
                     // Mid-notification, from inside set_parent: the parent is
                     // already assigned, so the value reads through it — as in
                     // Dart, where the setter notifies after `_parent = value`.
-                    observed.set(Animation::from_handle(animation.0).value(app));
+                    observed.set(animation.as_animation().value(app));
                 }
             }),
         );
 
-        let half = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.5)));
+        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
         animation.set_parent(&mut app, Some(half));
         assert_eq!(observed.get(), 0.5);
     }
@@ -1899,11 +1881,11 @@ mod tests {
     #[test]
     fn setting_the_same_parent_is_a_no_op() {
         let mut app = App::new();
-        let half = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.5)));
+        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
         let animation = ProxyAnimation::new(&mut app, Some(half));
 
         let notified = Rc::new(Cell::new(0));
-        Animation::from_handle(animation.0).add_listener(
+        animation.as_animation().add_listener(
             &mut app,
             Listener::new({
                 let notified = Rc::clone(&notified);
@@ -1918,8 +1900,8 @@ mod tests {
     #[test]
     fn a_reverse_animation_flips_value_and_status() {
         let mut app = App::new();
-        let stopped = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.25)));
-        let reverse = Animation::from_handle(app.create(ReverseAnimation::new(stopped)));
+        let stopped = app.create(AlwaysStoppedAnimation::new(0.25)).as_animation();
+        let reverse = app.create(ReverseAnimation::new(stopped)).as_animation();
 
         assert_eq!(reverse.value(&app), 0.75);
         assert_eq!(reverse.status(&app), AnimationStatus::Reverse);
@@ -1932,24 +1914,28 @@ mod tests {
     fn reverse_animation_calls_listeners() {
         let mut app = App::new();
         let driver = ProxyAnimation::new(&mut app, None);
-        let animation = app.create(ReverseAnimation::new(Animation::from_handle(driver.0)));
+        let animation = app.create(ReverseAnimation::new(driver.as_animation()));
 
         let did_receive_callback = Rc::new(Cell::new(false));
         let listener = Listener::new({
             let did_receive_callback = Rc::clone(&did_receive_callback);
             move |_app| did_receive_callback.set(true)
         });
-        Animation::from_handle(animation).add_listener(&mut app, listener.clone());
+        animation
+            .as_animation()
+            .add_listener(&mut app, listener.clone());
 
         assert!(!did_receive_callback.get());
-        let target = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.6)));
+        let target = app.create(AlwaysStoppedAnimation::new(0.6)).as_animation();
         driver.set_parent(&mut app, Some(target));
         assert!(did_receive_callback.get());
         did_receive_callback.set(false);
 
-        Animation::from_handle(animation).remove_listener(&mut app, &listener);
+        animation
+            .as_animation()
+            .remove_listener(&mut app, &listener);
         assert!(!did_receive_callback.get());
-        let target = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.7)));
+        let target = app.create(AlwaysStoppedAnimation::new(0.7)).as_animation();
         driver.set_parent(&mut app, Some(target));
         assert!(!did_receive_callback.get());
     }
@@ -1959,14 +1945,16 @@ mod tests {
     fn a_reverse_animation_reverses_status_notifications() {
         let mut app = App::new();
         let driver = ProxyAnimation::new(&mut app, None); // Dismissed
-        let reverse = app.create(ReverseAnimation::new(Animation::from_handle(driver.0)));
+        let reverse = app.create(ReverseAnimation::new(driver.as_animation()));
 
         let statuses = Rc::new(RefCell::new(Vec::new()));
         let listener = AnimationStatusListener::new({
             let statuses = Rc::clone(&statuses);
             move |status, _app| statuses.borrow_mut().push(status)
         });
-        Animation::from_handle(reverse).add_status_listener(&mut app, listener.clone());
+        reverse
+            .as_animation()
+            .add_status_listener(&mut app, listener.clone());
         assert!(
             !driver.local_status_listeners_data(&app).is_empty(),
             "lazily subscribed to the driver"
@@ -1977,11 +1965,13 @@ mod tests {
 
         assert_eq!(*statuses.borrow(), vec![AnimationStatus::Dismissed]);
         assert_eq!(
-            Animation::from_handle(reverse).status(&app),
+            reverse.as_animation().status(&app),
             AnimationStatus::Dismissed
         );
 
-        Animation::from_handle(reverse).remove_status_listener(&mut app, &listener);
+        reverse
+            .as_animation()
+            .remove_status_listener(&mut app, &listener);
         assert!(
             driver.local_status_listeners_data(&app).is_empty(),
             "the rebuilt tear-off matched, so the subscription is gone"
@@ -1991,17 +1981,14 @@ mod tests {
     #[test]
     fn a_curved_animation_applies_the_curve() {
         let mut app = App::new();
-        let half = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.5)));
+        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
         let curved = CurvedAnimation::create(&mut app, half, Curves::ease(), None);
 
         assert_eq!(
-            Animation::from_handle(curved).value(&app),
+            curved.as_animation().value(&app),
             Curves::ease().transform(0.5)
         );
-        assert_eq!(
-            Animation::from_handle(curved).status(&app),
-            AnimationStatus::Forward
-        );
+        assert_eq!(curved.as_animation().status(&app), AnimationStatus::Forward);
     }
 
     #[test]
@@ -2009,15 +1996,15 @@ mod tests {
         let mut app = App::new();
         // A parent with status Reverse: a ReverseAnimation over an
         // always-Forward stopped animation at 0.25, so its value is 0.75.
-        let stopped = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.25)));
-        let parent = Animation::from_handle(app.create(ReverseAnimation::new(stopped)));
+        let stopped = app.create(AlwaysStoppedAnimation::new(0.25)).as_animation();
+        let parent = app.create(ReverseAnimation::new(stopped)).as_animation();
         let curved =
             CurvedAnimation::create(&mut app, parent, Curves::ease(), Some(Curves::ease_out()));
 
         // The constructor saw status Reverse while animating, so the curve
         // direction is pinned to Reverse and the reverse curve is active.
         assert_eq!(
-            Animation::from_handle(curved).value(&app),
+            curved.as_animation().value(&app),
             Curves::ease_out().transform(0.75)
         );
     }
@@ -2039,9 +2026,9 @@ mod tests {
         }
 
         let mut app = App::new();
-        let zero = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.0)));
+        let zero = app.create(AlwaysStoppedAnimation::new(0.0)).as_animation();
         let curved = CurvedAnimation::create(&mut app, zero, Rc::new(BogusCurve), None);
-        let _ = Animation::from_handle(curved).value(&app);
+        let _ = curved.as_animation().value(&app);
     }
 
     // animations_test.dart:326 — 'CurvedAnimation stops listening to parent
@@ -2050,15 +2037,10 @@ mod tests {
     fn a_disposed_curved_animation_unsubscribes_from_its_parent() {
         let mut app = App::new();
         let driver = ProxyAnimation::new(&mut app, None);
-        let curved = CurvedAnimation::create(
-            &mut app,
-            Animation::from_handle(driver.0),
-            Curves::ease(),
-            None,
-        );
+        let curved = CurvedAnimation::create(&mut app, driver.as_animation(), Curves::ease(), None);
         assert!(!driver.local_status_listeners_data(&app).is_empty());
 
-        CurvedAnimation::dispose(&mut app, curved);
+        curved.dispose(&mut app);
         assert!(driver.local_status_listeners_data(&app).is_empty());
         assert!(app.get(curved).is_disposed);
     }
@@ -2068,42 +2050,39 @@ mod tests {
     #[test]
     fn a_train_hopping_animation_hops_when_the_next_train_crosses() {
         let mut app = App::new();
-        let half = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.5)));
-        let low = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.3)));
+        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
+        let low = app.create(AlwaysStoppedAnimation::new(0.3)).as_animation();
         let train_a = ProxyAnimation::new(&mut app, Some(half));
         let train_b = ProxyAnimation::new(&mut app, Some(low));
 
         let switched = Rc::new(Cell::new(false));
         let train = TrainHoppingAnimation::create(
             &mut app,
-            Animation::from_handle(train_a.0),
-            Some(Animation::from_handle(train_b.0)),
+            train_a.as_animation(),
+            Some(train_b.as_animation()),
             Some(Listener::new({
                 let switched = Rc::clone(&switched);
                 move |_app| switched.set(true)
             })),
         );
 
-        assert_eq!(Animation::from_handle(train).value(&app), 0.5);
+        assert_eq!(train.as_animation().value(&app), 0.5);
         assert!(!switched.get());
 
         // Drive the next train past the current one: 0.3 → 0.75.
-        let high = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.75)));
+        let high = app.create(AlwaysStoppedAnimation::new(0.75)).as_animation();
         train_b.set_parent(&mut app, Some(high));
 
         assert!(switched.get(), "the hop fired the callback");
-        assert_eq!(
-            app.get(train).current_train(),
-            Some(Animation::from_handle(train_b.0))
-        );
-        assert_eq!(Animation::from_handle(train).value(&app), 0.75);
+        assert_eq!(app.get(train).current_train(), Some(train_b.as_animation()));
+        assert_eq!(train.as_animation().value(&app), 0.75);
     }
 
     #[test]
     fn trains_starting_at_the_same_value_hop_immediately_without_the_callback() {
         let mut app = App::new();
-        let a = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.5)));
-        let b = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.5)));
+        let a = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
+        let b = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
 
         let switched = Rc::new(Cell::new(false));
         let train = TrainHoppingAnimation::create(
@@ -2123,22 +2102,22 @@ mod tests {
     #[test]
     fn a_disposed_train_hopping_animation_releases_both_trains() {
         let mut app = App::new();
-        let half = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.5)));
-        let low = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.3)));
+        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
+        let low = app.create(AlwaysStoppedAnimation::new(0.3)).as_animation();
         let train_a = ProxyAnimation::new(&mut app, Some(half));
         let train_b = ProxyAnimation::new(&mut app, Some(low));
 
         let train = TrainHoppingAnimation::create(
             &mut app,
-            Animation::from_handle(train_a.0),
-            Some(Animation::from_handle(train_b.0)),
+            train_a.as_animation(),
+            Some(train_b.as_animation()),
             None,
         );
         assert!(!train_a.local_listeners_data(&app).is_empty());
         assert!(!train_a.local_status_listeners_data(&app).is_empty());
         assert!(!train_b.local_listeners_data(&app).is_empty());
 
-        TrainHoppingAnimation::dispose(&mut app, train);
+        train.dispose(&mut app);
         assert!(train_a.local_listeners_data(&app).is_empty());
         assert!(train_a.local_status_listeners_data(&app).is_empty());
         assert!(train_b.local_listeners_data(&app).is_empty());
@@ -2151,28 +2130,28 @@ mod tests {
     #[test]
     fn animation_mean_control_test() {
         let mut app = App::new();
-        let half = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.5)));
+        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
         let left = ProxyAnimation::new(&mut app, Some(half));
         let right = ProxyAnimation::new(&mut app, None); // 0.0
 
         let mean = app.create(AnimationMean::new(
-            Animation::from_handle(left.0),
-            Animation::from_handle(right.0),
+            left.as_animation(),
+            right.as_animation(),
         ));
-        let mean_handle = Animation::from_handle(mean);
+        let mean_handle = mean.as_animation();
         assert_eq!(mean_handle.value(&app), 0.25);
 
         let log = Rc::new(RefCell::new(Vec::new()));
         let log_value = Listener::new({
             let log = Rc::clone(&log);
             move |app: &mut App| {
-                let value = Animation::from_handle(mean).value(app);
+                let value = mean.as_animation().value(app);
                 log.borrow_mut().push(value);
             }
         });
         mean_handle.add_listener(&mut app, log_value.clone());
 
-        let one = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(1.0)));
+        let one = app.create(AlwaysStoppedAnimation::new(1.0)).as_animation();
         right.set_parent(&mut app, Some(one));
 
         assert_eq!(mean_handle.value(&app), 0.75);
@@ -2181,7 +2160,7 @@ mod tests {
 
         mean_handle.remove_listener(&mut app, &log_value);
 
-        let zero = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.0)));
+        let zero = app.create(AlwaysStoppedAnimation::new(0.0)).as_animation();
         left.set_parent(&mut app, Some(zero));
 
         assert_eq!(mean_handle.value(&app), 0.50);
@@ -2200,13 +2179,13 @@ mod tests {
         let driver = ProxyAnimation::new(&mut app, None); // Dismissed, 0.0
         let falling = Tween::new(&mut app, Some(1.0), Some(-1.0));
         let rising = Tween::new(&mut app, Some(-1.0), Some(1.0));
-        let current = falling.animate(&mut app, Animation::from_handle(driver.0));
-        let next = rising.animate(&mut app, Animation::from_handle(driver.0));
+        let current = falling.animate(&mut app, driver.as_animation());
+        let next = rising.animate(&mut app, driver.as_animation());
 
         let animation = TrainHoppingAnimation::create(&mut app, current, Some(next), None);
 
         let status_log = Rc::new(RefCell::new(Vec::new()));
-        Animation::from_handle(animation).add_status_listener(
+        animation.as_animation().add_status_listener(
             &mut app,
             AnimationStatusListener::new({
                 let status_log = Rc::clone(&status_log);
@@ -2217,7 +2196,7 @@ mod tests {
 
         // Dart: `controller.forward()` — status Forward; the trains cross at
         // t = 0.5, which hops to the rising train.
-        let half = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.5)));
+        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
         driver.set_parent(&mut app, Some(half));
         assert_eq!(*status_log.borrow(), vec![AnimationStatus::Forward]);
         status_log.borrow_mut().clear();
@@ -2243,20 +2222,20 @@ mod tests {
         let mut app = App::new();
         // Forward at 0.5, and Reverse at 0.5 (a ReverseAnimation over 0.5
         // keeps the value while flipping the direction).
-        let forward_half = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.5)));
+        let forward_half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
         let reverse_half = {
-            let stopped = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.5)));
-            Animation::from_handle(app.create(ReverseAnimation::new(stopped)))
+            let stopped = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
+            app.create(ReverseAnimation::new(stopped)).as_animation()
         };
 
         let parent = ProxyAnimation::new(&mut app, Some(forward_half));
         let curved = CurvedAnimation::create(
             &mut app,
-            Animation::from_handle(parent.0),
+            parent.as_animation(),
             forward_curve,
             Some(reverse_curve),
         );
-        let curved_handle = Animation::from_handle(curved);
+        let curved_handle = curved.as_animation();
 
         // Forward at 0.5: the forward interval maps it to 1.0.
         assert_eq!(curved_handle.value(&app), 1.0);
@@ -2269,7 +2248,7 @@ mod tests {
         assert_eq!(curved_handle.value(&app), 0.0);
 
         assert!(!app.get(curved).is_disposed);
-        CurvedAnimation::dispose(&mut app, curved);
+        curved.dispose(&mut app);
         assert!(app.get(curved).is_disposed);
 
         // Dismissed, then Forward at 0.5 again: were it still listening the
@@ -2284,11 +2263,11 @@ mod tests {
     #[test]
     fn animation_max_and_min_pick_their_extremes() {
         let mut app = App::new();
-        let low = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.25)));
-        let high = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(0.75)));
+        let low = app.create(AlwaysStoppedAnimation::new(0.25)).as_animation();
+        let high = app.create(AlwaysStoppedAnimation::new(0.75)).as_animation();
 
-        let max = Animation::from_handle(app.create(AnimationMax::new(low, high)));
-        let min = Animation::from_handle(app.create(AnimationMin::new(low, high)));
+        let max = app.create(AnimationMax::new(low, high)).as_animation();
+        let min = app.create(AnimationMin::new(low, high)).as_animation();
 
         assert_eq!(max.value(&app), 0.75);
         assert_eq!(min.value(&app), 0.25);

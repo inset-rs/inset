@@ -25,7 +25,7 @@ pub trait TickerProvider {
     /// Creates a ticker with the given callback.
     ///
     /// The kind of ticker provided depends on the kind of ticker provider.
-    fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Ticker;
+    fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker>;
 }
 
 /// Calls its callback once per animation frame, when enabled.
@@ -42,11 +42,8 @@ pub trait TickerProvider {
 /// [`stop`](Ticker::stop) methods are used by the ticker's consumer
 /// (for example, an `AnimationController`), and the muted property is
 /// controlled by the [`TickerProvider`] that created the ticker.
-#[derive(Clone, Copy)]
-pub struct Ticker(Handle<TickerData>);
-
-pub(crate) struct TickerData {
-    future: Option<TickerFuture>,
+pub struct Ticker {
+    future: Option<Handle<TickerFuture>>,
 
     /// If true, this ticker will request frames using
     /// [`SchedulerBinding::schedule_forced_frame`] instead of
@@ -66,23 +63,23 @@ pub(crate) struct TickerData {
 impl Ticker {
     /// Creates a ticker that will call the provided callback once per frame
     /// while running.
-    pub fn new(app: &mut App, on_tick: TickerCallback) -> Ticker {
-        Ticker(app.create(TickerData {
+    pub fn new(app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+        app.create(Ticker {
             future: None,
             force_frames: false,
             muted: false,
             start_time: None,
             on_tick,
             animation_id: None,
-        }))
+        })
     }
 
     /// Whether this ticker has been silenced.
     ///
     /// While silenced, a ticker's clock can still run, but the callback will
     /// not be called.
-    pub fn muted(self, app: &App) -> bool {
-        app.get(self.0).muted
+    pub fn muted(self: Handle<Self>, app: &App) -> bool {
+        app.get(self).muted
     }
 
     /// Whether time is elapsing for this [`Ticker`]. Becomes true when
@@ -92,13 +89,13 @@ impl Ticker {
     /// A ticker can be active yet not be actually ticking (i.e. not be
     /// calling the callback). To determine if a ticker is actually ticking,
     /// use [`is_ticking`](Ticker::is_ticking).
-    pub fn is_active(self, app: &App) -> bool {
-        app.get(self.0).future.is_some()
+    pub fn is_active(self: Handle<Self>, app: &App) -> bool {
+        app.get(self).future.is_some()
     }
 
     /// Whether this [`Ticker`] has already scheduled a frame callback.
-    fn scheduled(self, app: &App) -> bool {
-        app.get(self.0).animation_id.is_some()
+    fn scheduled(self: Handle<Self>, app: &App) -> bool {
+        app.get(self).animation_id.is_some()
     }
 
     /// Whether a tick should be scheduled.
@@ -113,17 +110,17 @@ impl Ticker {
     ///   been called).
     /// * The ticker is not ticking, e.g. because it is muted (see
     ///   [`is_ticking`](Ticker::is_ticking)).
-    fn should_schedule_tick(self, app: &mut App) -> bool {
-        !app.get(self.0).muted && self.is_active(app) && !self.scheduled(app)
+    fn should_schedule_tick(self: Handle<Self>, app: &mut App) -> bool {
+        !app.get(self).muted && self.is_active(app) && !self.scheduled(app)
     }
 
     /// Dart's `_tick`, the frame callback registered with the binding.
-    fn tick(self, app: &mut App, time_stamp: Duration) {
+    fn tick(self: Handle<Self>, app: &mut App, time_stamp: Duration) {
         debug_assert!(self.is_ticking(app));
         debug_assert!(self.scheduled(app));
-        app.get_mut(self.0).animation_id = None;
+        app.get_mut(self).animation_id = None;
 
-        let ticker = app.get_mut(self.0);
+        let ticker = app.get_mut(self);
         let start_time = *ticker.start_time.get_or_insert(time_stamp);
         let on_tick = ticker.on_tick.clone();
         on_tick.call(app, time_stamp - start_time);
@@ -139,29 +136,29 @@ impl Ticker {
     ///
     /// This should only be called if
     /// [`should_schedule_tick`](Ticker::should_schedule_tick) is true.
-    fn schedule_tick(self, app: &mut App, rescheduling: bool) {
+    fn schedule_tick(self: Handle<Self>, app: &mut App, rescheduling: bool) {
         debug_assert!(!self.scheduled(app));
         debug_assert!(self.should_schedule_tick(app));
-        if app.get(self.0).force_frames {
+        if app.get(self).force_frames {
             SchedulerBinding::schedule_forced_frame(app);
         } else {
             SchedulerBinding::schedule_frame(app);
         }
         let animation_id = SchedulerBinding::schedule_frame_callback(
             app,
-            FrameCallback::handle_method(self.0, ticker_tick),
+            FrameCallback::handle_method(self, Ticker::tick),
             rescheduling,
             false,
         );
-        app.get_mut(self.0).animation_id = Some(animation_id);
+        app.get_mut(self).animation_id = Some(animation_id);
     }
 
     /// Cancels the frame callback that was requested by
     /// [`schedule_tick`](Ticker::schedule_tick), if any.
     ///
     /// Calling this method when no tick is scheduled is harmless.
-    fn unschedule_tick(self, app: &mut App) {
-        if let Some(animation_id) = app.get_mut(self.0).animation_id.take() {
+    fn unschedule_tick(self: Handle<Self>, app: &mut App) {
+        if let Some(animation_id) = app.get_mut(self).animation_id.take() {
             SchedulerBinding::cancel_frame_callback_with_id(app, animation_id);
         }
         debug_assert!(!self.should_schedule_tick(app));
@@ -176,11 +173,11 @@ impl Ticker {
     /// By convention, muted is controlled by the object that created the
     /// [`Ticker`] (typically a [`TickerProvider`]), not the object that
     /// listens to the ticker's ticks.
-    pub fn set_muted(self, app: &mut App, value: bool) {
-        if value == app.get(self.0).muted {
+    pub fn set_muted(self: Handle<Self>, app: &mut App, value: bool) {
+        if value == app.get(self).muted {
             return;
         }
-        app.get_mut(self.0).muted = value;
+        app.get_mut(self).muted = value;
         if value {
             self.unschedule_tick(app);
         } else if self.should_schedule_tick(app) {
@@ -198,11 +195,11 @@ impl Ticker {
     /// This will return false if frames are not currently enabled. The
     /// lifecycle is not ported, so frames stay enabled.
     #[allow(clippy::wrong_self_convention)]
-    pub fn is_ticking(self, app: &mut App) -> bool {
-        if app.get(self.0).future.is_none() {
+    pub fn is_ticking(self: Handle<Self>, app: &mut App) -> bool {
+        if app.get(self).future.is_none() {
             return false;
         }
-        if app.get(self.0).muted {
+        if app.get(self).muted {
             return false;
         }
         if SchedulerBinding::frames_enabled(app) {
@@ -227,22 +224,22 @@ impl Ticker {
     ///
     /// In debug builds, if the ticker is already active — Dart throws a
     /// `FlutterError` from an assert block here.
-    pub fn start(self, app: &mut App) -> TickerFuture {
+    pub fn start(self: Handle<Self>, app: &mut App) -> Handle<TickerFuture> {
         debug_assert!(
             !self.is_active(app),
             "A ticker was started twice. A ticker that is already active cannot be started again without first stopping it."
         );
-        debug_assert!(app.get(self.0).start_time.is_none());
+        debug_assert!(app.get(self).start_time.is_none());
 
         let future = TickerFuture::new(app);
-        app.get_mut(self.0).future = Some(future);
+        app.get_mut(self).future = Some(future);
         if self.should_schedule_tick(app) {
             self.schedule_tick(app, false);
         }
         let phase = SchedulerBinding::scheduler_phase(app);
         if phase > SchedulerPhase::Idle && phase < SchedulerPhase::PostFrameCallbacks {
             let time_stamp = SchedulerBinding::current_frame_time_stamp(app);
-            app.get_mut(self.0).start_time = Some(time_stamp);
+            app.get_mut(self).start_time = Some(time_stamp);
         }
         future
     }
@@ -258,7 +255,7 @@ impl Ticker {
     /// Calling this sets [`Ticker::is_active`] to false.
     ///
     /// This method does nothing if called when the ticker is inactive.
-    pub fn stop(self, app: &mut App, canceled: bool) {
+    pub fn stop(self: Handle<Self>, app: &mut App, canceled: bool) {
         if !self.is_active(app) {
             return;
         }
@@ -266,7 +263,7 @@ impl Ticker {
         // We take the future into a local so that isTicking is false when we
         // actually complete the future (isTicking uses the future to
         // determine its state).
-        let ticker = app.get_mut(self.0);
+        let ticker = app.get_mut(self);
         let local_future = ticker.future.take().unwrap();
         ticker.start_time = None;
         debug_assert!(!self.is_active(app));
@@ -289,21 +286,21 @@ impl Ticker {
     /// if the original ticker is active.
     ///
     /// This ticker must not be active when this method is called.
-    pub fn absorb_ticker(self, app: &mut App, original_ticker: Ticker) {
+    pub fn absorb_ticker(self: Handle<Self>, app: &mut App, original_ticker: Handle<Ticker>) {
         debug_assert!(!self.is_active(app));
-        debug_assert!(app.get(self.0).future.is_none());
-        debug_assert!(app.get(self.0).start_time.is_none());
-        debug_assert!(app.get(self.0).animation_id.is_none());
+        debug_assert!(app.get(self).future.is_none());
+        debug_assert!(app.get(self).start_time.is_none());
+        debug_assert!(app.get(self).animation_id.is_none());
         debug_assert!(
-            app.get(original_ticker.0).future.is_some()
-                || app.get(original_ticker.0).start_time.is_none(),
+            app.get(original_ticker).future.is_some()
+                || app.get(original_ticker).start_time.is_none(),
             "Cannot absorb Ticker after it has been disposed."
         );
-        if app.get(original_ticker.0).future.is_some() {
-            let original = app.get_mut(original_ticker.0);
+        if app.get(original_ticker).future.is_some() {
+            let original = app.get_mut(original_ticker);
             let future = original.future.take(); // so the future is not
             let start_time = original.start_time; // canceled when we dispose
-            let ticker = app.get_mut(self.0); // the original ticker below
+            let ticker = app.get_mut(self); // the original ticker below
             ticker.future = future;
             ticker.start_time = start_time;
             if self.should_schedule_tick(app) {
@@ -320,16 +317,15 @@ impl Ticker {
     /// It is legal to call this method while [`Ticker::is_active`] is true, in
     /// which case:
     ///
-    /// * The frame callback that was requested by
-    ///   [`schedule_tick`](Ticker::schedule_tick), if any, is
+    /// * The frame callback that was requested by `schedule_tick`, if any, is
     ///   canceled.
     /// * The future that was returned by [`start`](Ticker::start)
     ///   does not resolve.
     /// * Callbacks registered with
     ///   [`TickerFuture::when_complete_or_cancel`] resolve as
     ///   canceled.
-    pub fn dispose(self, app: &mut App) {
-        if let Some(local_future) = app.get_mut(self.0).future.take() {
+    pub fn dispose(self: Handle<Self>, app: &mut App) {
+        if let Some(local_future) = app.get_mut(self).future.take() {
             debug_assert!(!self.is_active(app));
             self.unschedule_tick(app);
             local_future.mark_canceled(app);
@@ -339,13 +335,9 @@ impl Ticker {
             // We intentionally don't null out startTime. This means that if
             // start() was ever called, the object is now in a bogus state.
             // This weakly helps catch cases of use-after-dispose.
-            app.get_mut(self.0).start_time = Some(Duration::ZERO);
+            app.get_mut(self).start_time = Some(Duration::ZERO);
         }
     }
-}
-
-fn ticker_tick(this: Handle<TickerData>, app: &mut App, time_stamp: Duration) {
-    Ticker(this).tick(app, time_stamp);
 }
 
 /// An object representing an ongoing [`Ticker`] sequence.
@@ -360,10 +352,7 @@ fn ticker_tick(this: Handle<TickerData>, app: &mut App, time_stamp: Duration) {
 ///
 /// [`when_complete`]: TickerFuture::when_complete
 /// [`when_complete_or_cancel`]: TickerFuture::when_complete_or_cancel
-#[derive(Clone, Copy)]
-pub struct TickerFuture(Handle<TickerFutureData>);
-
-struct TickerFutureData {
+pub struct TickerFuture {
     // None means unresolved, true means complete, false means canceled.
     completed: Option<bool>,
     primary_callbacks: Vec<Listener>,
@@ -371,12 +360,12 @@ struct TickerFutureData {
 }
 
 impl TickerFuture {
-    fn new(app: &mut App) -> TickerFuture {
-        TickerFuture(app.create(TickerFutureData {
+    fn new(app: &mut App) -> Handle<TickerFuture> {
+        app.create(TickerFuture {
             completed: None,
             primary_callbacks: Vec::new(),
             or_cancel_callbacks: Vec::new(),
-        }))
+        })
     }
 
     /// Creates a [`TickerFuture`] instance that represents an
@@ -386,16 +375,16 @@ impl TickerFuture {
     /// [`Ticker`] but sometimes can skip the ticker because the animation is
     /// of zero duration, but which still need to represent the completed
     /// animation in the form of a [`TickerFuture`].
-    pub fn complete(app: &mut App) -> TickerFuture {
+    pub fn complete(app: &mut App) -> Handle<TickerFuture> {
         let this = TickerFuture::new(app);
         this.mark_complete(app);
         this
     }
 
     /// Dart's private `_complete`, called by [`Ticker::stop`].
-    fn mark_complete(self, app: &mut App) {
-        debug_assert!(app.get(self.0).completed.is_none());
-        let future = app.get_mut(self.0);
+    fn mark_complete(self: Handle<Self>, app: &mut App) {
+        debug_assert!(app.get(self).completed.is_none());
+        let future = app.get_mut(self);
         future.completed = Some(true);
         let callbacks: Vec<Listener> = future
             .primary_callbacks
@@ -409,14 +398,14 @@ impl TickerFuture {
 
     /// Dart's private `_cancel`, called by [`Ticker::stop`] with
     /// `canceled` and by [`Ticker::dispose`].
-    fn mark_canceled(self, app: &mut App) {
-        debug_assert!(app.get(self.0).completed.is_none());
-        let future = app.get_mut(self.0);
+    fn mark_canceled(self: Handle<Self>, app: &mut App) {
+        debug_assert!(app.get(self).completed.is_none());
+        let future = app.get_mut(self);
         future.completed = Some(false);
         // The primary future never resolves on cancellation: those callbacks
         // are dropped, as Dart's primary completer is left hanging.
         future.primary_callbacks.clear();
-        let callbacks: Vec<Listener> = future.or_cancel_callbacks.drain(..).collect();
+        let callbacks = std::mem::take(&mut future.or_cancel_callbacks);
         for callback in callbacks {
             app.schedule_microtask(callback);
         }
@@ -428,9 +417,9 @@ impl TickerFuture {
     /// On an already-complete future the callback still runs through the
     /// microtask queue, never inline, as a Dart `.then` on a resolved future
     /// does. On an already-canceled future it never runs.
-    pub fn when_complete(self, app: &mut App, callback: Listener) {
-        match app.get(self.0).completed {
-            None => app.get_mut(self.0).primary_callbacks.push(callback),
+    pub fn when_complete(self: Handle<Self>, app: &mut App, callback: Listener) {
+        match app.get(self).completed {
+            None => app.get_mut(self).primary_callbacks.push(callback),
             Some(true) => app.schedule_microtask(callback),
             Some(false) => {}
         }
@@ -438,9 +427,9 @@ impl TickerFuture {
 
     /// Calls `callback` either when this future resolves or when the ticker
     /// is canceled.
-    pub fn when_complete_or_cancel(self, app: &mut App, callback: Listener) {
-        match app.get(self.0).completed {
-            None => app.get_mut(self.0).or_cancel_callbacks.push(callback),
+    pub fn when_complete_or_cancel(self: Handle<Self>, app: &mut App, callback: Listener) {
+        match app.get(self).completed {
+            None => app.get_mut(self).or_cancel_callbacks.push(callback),
             Some(_) => app.schedule_microtask(callback),
         }
     }
@@ -652,7 +641,7 @@ mod tests {
     struct TestVSync;
 
     impl TickerProvider for TestVSync {
-        fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Ticker {
+        fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
             Ticker::new(app, on_tick)
         }
     }
@@ -669,11 +658,11 @@ mod tests {
     }
 
     struct Host {
-        ticker: Option<Ticker>,
+        ticker: Option<Handle<Ticker>>,
     }
 
     impl TickerProvider for Handle<Host> {
-        fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Ticker {
+        fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
             let ticker = Ticker::new(app, on_tick);
             app.get_mut(self).ticker = Some(ticker);
             ticker

@@ -14,6 +14,7 @@ use std::ops::Receiver;
 
 use reveal_embedder::{Offset, Rect};
 use reveal_foundation::{App, Handle, HandleId};
+use reveal_services::MouseTrackerAnnotation;
 
 use crate::layer::{BoundaryLayer, CompositedLayer};
 use crate::painting_context::PaintingContext;
@@ -69,7 +70,7 @@ impl Display for EmptyParentData {
 /// Flutter's `RenderObject` fields.
 pub struct RenderObjectData {
     pub(crate) parent: Option<AnyRenderObject>,
-    pub(crate) owner: Option<PipelineOwner>,
+    pub(crate) owner: Option<Handle<PipelineOwner>>,
     pub(crate) depth: i32,
     pub(crate) parent_data: Option<Box<dyn ParentData>>,
     pub(crate) needs_layout: bool,
@@ -188,7 +189,7 @@ pub trait RenderObject: 'static + Sized {
     /// The body of Flutter's `attach` override after `super.attach(owner)`; the base body has
     /// already run. The default attaches the children reported by
     /// [`visit_children`](Self::visit_children).
-    fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: PipelineOwner) {
+    fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: Handle<PipelineOwner>) {
         for child in collect_children(app, self) {
             child.attach(app, owner);
         }
@@ -227,6 +228,17 @@ pub trait RenderObject: 'static + Sized {
     fn is_repaint_boundary(self: RenderHandle<Self>, _app: &App) -> bool {
         let _ = self;
         false
+    }
+
+    /// Dart's `this is MouseTrackerAnnotation`: the annotation this render object implements,
+    /// read live each time the mouse tracker consults it. `None` for a render object that is
+    /// not an annotation, which is the default.
+    fn mouse_tracker_annotation(
+        self: RenderHandle<Self>,
+        _app: &App,
+    ) -> Option<MouseTrackerAnnotation> {
+        let _ = self;
+        None
     }
 
     /// Update the composited layer owned by this render object.
@@ -368,7 +380,7 @@ pub(crate) struct RenderObjectVTable {
     pub object_data: fn(&App, HandleId) -> &RenderObjectData,
     pub object_data_mut: fn(&mut App, HandleId) -> &mut RenderObjectData,
     pub visit_children: fn(&App, HandleId, &mut dyn FnMut(AnyRenderObject)),
-    pub did_attach: fn(&mut App, HandleId, PipelineOwner),
+    pub did_attach: fn(&mut App, HandleId, Handle<PipelineOwner>),
     pub did_detach: fn(&mut App, HandleId),
     pub redepth_children: fn(&mut App, HandleId),
     pub setup_parent_data: fn(&mut App, HandleId, AnyRenderObject),
@@ -377,6 +389,7 @@ pub(crate) struct RenderObjectVTable {
     pub perform_resize: fn(&mut App, HandleId),
     pub paint_bounds: fn(&App, HandleId) -> Rect,
     pub is_repaint_boundary: fn(&App, HandleId) -> bool,
+    pub mouse_tracker_annotation: fn(&App, HandleId) -> Option<MouseTrackerAnnotation>,
     pub update_composited_layer: fn(&mut App, HandleId, Option<CompositedLayer>) -> CompositedLayer,
     pub paint: fn(&mut App, HandleId, &mut PaintingContext, Offset),
     /// The protocol table this object table is nested in. Exactly one is `Some`.
@@ -406,6 +419,7 @@ impl RenderObjectVTable {
             perform_resize: |app, id| T::perform_resize(resolve(id), app),
             paint_bounds,
             is_repaint_boundary: |app, id| T::is_repaint_boundary(resolve(id), app),
+            mouse_tracker_annotation: |app, id| T::mouse_tracker_annotation(resolve(id), app),
             update_composited_layer: |app, id, old_layer| {
                 T::update_composited_layer(resolve(id), app, old_layer)
             },
@@ -547,7 +561,7 @@ impl AnyRenderObject {
     }
 
     /// The owner for this render object (`None` if unattached).
-    pub fn owner(self, app: &App) -> Option<PipelineOwner> {
+    pub fn owner(self, app: &App) -> Option<Handle<PipelineOwner>> {
         self.data(app).owner
     }
 
@@ -689,7 +703,7 @@ impl AnyRenderObject {
     ///
     /// Flutter's `RenderObject.attach` body, then the [`RenderObject::did_attach`] hook, which
     /// by default attaches the children.
-    pub fn attach(self, app: &mut App, owner: PipelineOwner) {
+    pub fn attach(self, app: &mut App, owner: Handle<PipelineOwner>) {
         debug_assert!(self.owner(app).is_none());
         self.data_mut(app).owner = Some(owner);
         if self.needs_layout(app) && self.is_relayout_boundary(app).is_some() {
@@ -919,6 +933,15 @@ impl AnyRenderObject {
     /// An estimate of the bounds within which this render object will paint.
     pub fn paint_bounds(self, app: &App) -> Rect {
         (self.vtable.paint_bounds)(app, self.id)
+    }
+
+    /// See [`RenderObject::mouse_tracker_annotation`]. Also `None` once the object has left
+    /// the arena: Dart's tracker keeps a stale annotation object alive, the arena does not.
+    pub fn mouse_tracker_annotation(self, app: &App) -> Option<MouseTrackerAnnotation> {
+        if !app.contains(self.id) {
+            return None;
+        }
+        (self.vtable.mouse_tracker_annotation)(app, self.id)
     }
 
     /// See [`RenderObject::update_composited_layer`].

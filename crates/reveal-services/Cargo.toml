@@ -1,19 +1,14 @@
 [package]
-name = "reveal-rendering"
+name = "reveal-services"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [dependencies]
-indexmap.workspace = true
-reveal-animation.workspace = true
 reveal-embedder.workspace = true
 reveal-foundation.workspace = true
 reveal-gestures.workspace = true
-reveal-painting.workspace = true
-reveal-scheduler.workspace = true
-reveal-services.workspace = true
 
 [lints]
 workspace = true

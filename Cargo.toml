@@ -21,6 +21,7 @@ reveal-painting = { path = "crates/reveal-painting" }
 reveal-physics = { path = "crates/reveal-physics" }
 reveal-rendering = { path = "crates/reveal-rendering" }
 reveal-scheduler = { path = "crates/reveal-scheduler" }
+reveal-services = { path = "crates/reveal-services" }
 reveal-shell = { path = "crates/reveal-shell" }
 slotmap = "1"
 winit = "0.30"

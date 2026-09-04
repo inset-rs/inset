@@ -1,5 +1,7 @@
 //! Flutter counterpart: `package:flutter/gestures.dart`.
 
+#![feature(arbitrary_self_types)]
+
 mod arena;
 mod binding;
 mod constants;

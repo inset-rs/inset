@@ -6,13 +6,19 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 - curves.rs → curves.dart (Curve2D family deferred)
 
+## Handles
+
+- Change: [`AnimationController`], [`ProxyAnimation`], the other concrete animations, [`Tween`] and the dedicated tweens are arena objects whose methods take `self: Handle<Self>` — the receiver rule in `reveal-foundation/src/PORTING.md` (app.rs). The listener mixin traits and [`Animation`] use the same receiver.
+  Reason: language — see the foundation entry.
+  Affect: `let controller = AnimationController::create(app, …, vsync)` is a `Handle<AnimationController>`; call `controller.forward(app, None)`. `Handle<AnimationController>` and `Handle<ProxyAnimation>` are `Listenable`. Implement the mixin traits and `Animation` for the object type, not for `Handle<…>`. A crate that calls the inherent methods needs `#![feature(arbitrary_self_types)]`.
+
 ## animation.rs → animation.dart
 
-- Change: Dart's `abstract class Animation<T>` is two types: a concrete animation implements [`AnimationNode<T>`], and a field typed `Animation<T>` holds the [`Animation<T>`] handle, built with [`Animation::from_handle`].
-  Reason: language — Rust has no subtyping, so a field cannot hold "any animation" by naming a base class. Dispatch stored in the arena would keep the arena borrowed across the listener call that needs `&mut App`.
-  Affect: implement [`AnimationNode<T>`] for the state type. Where Dart declares `Animation<double>`, declare `Animation<f64>`. Erasing does not consume the typed handle. `==` is slot identity.
+- Change: Dart's `abstract class Animation<T>` is the trait [`Animation<T>`], which each concrete animation implements; a field or parameter Dart types as `Animation<T>` holds the erased [`AnyAnimation<T>`], built with [`Animation::as_animation`].
+  Reason: language — same shape as rendering's erased edges (`AnyRenderObject`): Rust has no subtyping, so a field cannot hold "any animation" by naming a base class, and dispatch stored in the arena would keep the arena borrowed across the listener call that needs `&mut App`.
+  Affect: where Dart writes `Animation<double>` for a field or parameter, write `AnyAnimation<f64>` and pass `controller.as_animation()` or `controller.view()`. Erasing does not consume the typed handle; `==` is slot identity.
 
-- Change: [`Animation::value`] returns an owned `T`. The type does not implement foundation's [`ValueListenable`].
+- Change: [`AnyAnimation::value`] returns an owned `T`. The type does not implement foundation's [`ValueListenable`].
   Reason: language — an animation may compute its value on read (`CurvedAnimation`), so there is no stored field for a `&T` to point at.
   Affect: `animation.value(app)`. Handing an animation to a `ValueListenable` parameter waits for that site (`AnimatedBuilder`).
 
@@ -20,15 +26,15 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — a Rust closure has no identity; a named function has no stable address.
   Affect: method tear-offs use [`AnimationStatusListener::handle_method`] at both add and remove; store a [`AnimationStatusListener::new`] closure.
 
-- Change: [`Animation::drive`] is inherent on [`Animation<f64>`] and takes `&mut App`.
+- Change: [`AnyAnimation::drive`] is inherent on [`AnyAnimation<f64>`] and takes `&mut App`.
   Reason: language — Dart's `drive<U>` is a generic virtual method; no dispatch table can hold a generic. Creating the driven animation needs the App.
   Affect: `controller.drive(app, tween)` where Dart writes `controller.drive(tween)`. Flutter never overrides `drive`.
 
 ## listener_helpers.rs → listener_helpers.dart
 
-- Change: Dart's four mixins are traits on the handle. Mixin state is an opaque `XxxData` field named after the mixin; the trait is named Flutter's `XxxMixin`.
+- Change: Dart's four mixins are traits whose methods take `self: Handle<Self>`. Mixin state is an opaque `XxxData` field named after the mixin; the trait is named Flutter's `XxxMixin`.
   Reason: language — a Rust trait holds no state, and a `&mut self` receiver cannot also produce the `&mut App` the hooks hand onward.
-  Affect: hold `lazy_listener: AnimationLazyListenerData` (and the local-listener bags) on the host and implement `lazy_listener_data` / `lazy_listener_data_mut`. `AnimationEagerListenerMixin` has no data. When two mixins both declare `did_register_listener`, write which one applies. Call with UFCS when both traits are in scope.
+  Affect: hold `lazy_listener: AnimationLazyListenerData` (and the local-listener bags) on the host and implement `lazy_listener_data` / `lazy_listener_data_mut` for the host type. `AnimationEagerListenerMixin` has no data. When two mixins both declare `did_register_listener`, write which one applies. Call with UFCS when both traits are in scope.
 
 - Change: a panicking listener ends the notification.
   Reason: language — Rust has no catchable exception for ordinary control flow.
@@ -36,7 +42,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## tween.rs → tween.dart
 
-- Change: [`Tween`], [`CurveTween`], and the dedicated tween types are handle newtypes. [`Animatable::transform`] takes `&App`.
+- Change: [`Tween`], [`CurveTween`], and the dedicated tween types live in the arena; [`Animatable`] is implemented for their handles, and [`Animatable::transform`] takes `&App`.
   Reason: language — Flutter mutates `tween.end` after `drive` and the driven animation must see it; a value tween cloned into `drive` would go stale. `transform` reads those fields from the arena.
   Affect: `Tween::new(app, begin, end)`, then `tween.set_end(app, Some(0.4))` where Dart assigns `tween.end = 0.4`.
 
@@ -44,7 +50,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Rust cannot dispatch those operators on an open `T` at runtime.
   Affect: a missing `TweenLerp` impl is a compile error, not Dart's "Cannot lerp" throw. `f64` is implemented; `i64` uses [`IntTween`] / [`StepTween`].
 
-- Change: [`Animatable::animate`] and [`chain`] are default methods that require `Self: Clone`. They stay generic; [`Tween`] is `Copy`, so those call sites do not wrap in `Arc`.
+- Change: [`Animatable::animate`] and [`chain`] are default methods that require `Self: Clone`. They stay generic; a tween handle is `Copy`, so those call sites do not wrap in `Arc`.
   Reason: language — `drive` / `animate` are generic over one concrete animatable.
   Affect: `tween.animate(app, parent)` and `tween.chain(curve_tween)`.
 
@@ -62,19 +68,15 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — a Rust value has no handle until it is in the App, and those constructors pass `this` outward.
   Affect: `CurvedAnimation::create(app, parent, curve, reverse_curve)`.
 
-- Change: [`ProxyAnimation`] is a handle newtype. `new` takes `&mut App`. `parent =` is [`ProxyAnimation::set_parent`].
-  Reason: language — methods need `&mut App`, and an inherent `impl Handle<T>` is an orphan (`Handle` is foreign).
-  Affect: `ProxyAnimation::new(app, None)`, then `proxy.set_parent(app, Some(animation))`. Pass `proxy.as_animation()` where Dart passes the proxy as an `Animation<double>`.
+- Change: `ProxyAnimation.parent =` is [`ProxyAnimation::set_parent`].
+  Reason: language — the setter notifies, which needs `&mut App`.
+  Affect: `proxy.set_parent(app, Some(animation))` where Dart assigns `proxy.parent = animation`.
 
 - Change: [`AnimationMax`] and [`AnimationMin`] are `f64` only.
   Reason: language — Rust has no `num` spanning `i64` and `f64`.
   Affect: a non-double use is the trigger to generalize. Comparison is Dart's `max`/`min` (NaN propagates), not `f64::max`.
 
 ## animation_controller.rs → animation_controller.dart
-
-- Change: the public type is the newtype [`AnimationController`], wrapping the arena slot.
-  Reason: language — methods need `&mut App`, and an inherent `impl Handle<T>` is an orphan (`Handle` is foreign).
-  Affect: `AnimationController::create(app, …, vsync)`, then `controller.forward(app, None)`. `controller.view()` is the erased [`Animation<f64>`].
 
 - Change: Dart's `_directionSetter` tear-off is a cell the simulation writes and the controller drains after each `x()`.
   Reason: language — [`Simulation::x`] is `&self` with no App; the setter mutates the controller and notifies, which needs `&mut App`.

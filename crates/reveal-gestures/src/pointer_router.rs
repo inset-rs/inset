@@ -103,22 +103,19 @@ impl Debug for PointerRoute {
 
 type RouteTable = IndexMap<PointerRoute, Option<Matrix4>>;
 
-pub(crate) struct PointerRouterData {
+/// A routing table for [`PointerEvent`] events.
+pub struct PointerRouter {
     route_map: IndexMap<i64, RouteTable>,
     global_routes: RouteTable,
 }
 
-/// A routing table for [`PointerEvent`] events.
-#[derive(Clone, Copy)]
-pub struct PointerRouter(Handle<PointerRouterData>);
-
 impl PointerRouter {
     /// Creates an empty router.
-    pub fn new(app: &mut App) -> PointerRouter {
-        PointerRouter(app.create(PointerRouterData {
+    pub fn new(app: &mut App) -> Handle<PointerRouter> {
+        app.create(PointerRouter {
             route_map: IndexMap::new(),
             global_routes: IndexMap::new(),
-        }))
+        })
     }
 
     /// Adds a route to the routing table.
@@ -129,13 +126,13 @@ impl PointerRouter {
     /// Routes added reentrantly within [`route`](Self::route) will take effect when
     /// routing the next event.
     pub fn add_route(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         pointer: i64,
         route: PointerRoute,
         transform: Option<Matrix4>,
     ) {
-        let routes = app.get_mut(self.0).route_map.entry(pointer).or_default();
+        let routes = app.get_mut(self).route_map.entry(pointer).or_default();
         debug_assert!(!routes.contains_key(&route));
         routes.insert(route, transform);
     }
@@ -147,8 +144,8 @@ impl PointerRouter {
     ///
     /// Routes removed reentrantly within [`route`](Self::route) will take effect
     /// immediately.
-    pub fn remove_route(self, app: &mut App, pointer: i64, route: &PointerRoute) {
-        let data = app.get_mut(self.0);
+    pub fn remove_route(self: Handle<Self>, app: &mut App, pointer: i64, route: &PointerRoute) {
+        let data = app.get_mut(self);
         debug_assert!(data.route_map.contains_key(&pointer));
         let routes = data.route_map.get_mut(&pointer).unwrap();
         debug_assert!(routes.contains_key(route));
@@ -164,8 +161,13 @@ impl PointerRouter {
     ///
     /// Routes added reentrantly within [`route`](Self::route) will take effect when
     /// routing the next event.
-    pub fn add_global_route(self, app: &mut App, route: PointerRoute, transform: Option<Matrix4>) {
-        let data = app.get_mut(self.0);
+    pub fn add_global_route(
+        self: Handle<Self>,
+        app: &mut App,
+        route: PointerRoute,
+        transform: Option<Matrix4>,
+    ) {
+        let data = app.get_mut(self);
         debug_assert!(!data.global_routes.contains_key(&route));
         data.global_routes.insert(route, transform);
     }
@@ -176,8 +178,8 @@ impl PointerRouter {
     ///
     /// Routes removed reentrantly within [`route`](Self::route) will take effect
     /// immediately.
-    pub fn remove_global_route(self, app: &mut App, route: &PointerRoute) {
-        let data = app.get_mut(self.0);
+    pub fn remove_global_route(self: Handle<Self>, app: &mut App, route: &PointerRoute) {
+        let data = app.get_mut(self);
         debug_assert!(data.global_routes.contains_key(route));
         data.global_routes.shift_remove(route);
     }
@@ -185,9 +187,9 @@ impl PointerRouter {
     /// The number of global routes that have been registered.
     ///
     /// This is valid in debug builds only. In release builds, this will panic.
-    pub fn debug_global_route_count(self, app: &App) -> usize {
+    pub fn debug_global_route_count(self: Handle<Self>, app: &App) -> usize {
         if cfg!(debug_assertions) {
-            app.get(self.0).global_routes.len()
+            app.get(self).global_routes.len()
         } else {
             panic!("debugGlobalRouteCount is not supported in release builds");
         }
@@ -207,9 +209,9 @@ impl PointerRouter {
     ///
     /// Routes are called in the order in which they were added to the
     /// PointerRouter object.
-    pub fn route(self, app: &mut App, event: PointerEvent) {
+    pub fn route(self: Handle<Self>, app: &mut App, event: PointerEvent) {
         let (pointer_routes, copied_global_routes) = {
-            let data = app.get(self.0);
+            let data = app.get(self);
             (
                 data.route_map.get(&event.pointer()).cloned(),
                 data.global_routes.clone(),
@@ -222,7 +224,7 @@ impl PointerRouter {
     }
 
     fn dispatch_event_to_routes(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         event: &PointerEvent,
         copied_routes: RouteTable,
@@ -230,7 +232,7 @@ impl PointerRouter {
     ) {
         for (route, transform) in copied_routes {
             let still_registered = {
-                let data = app.get(self.0);
+                let data = app.get(self);
                 if pointer_routes {
                     data.route_map
                         .get(&event.pointer())

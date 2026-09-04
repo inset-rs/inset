@@ -7,7 +7,7 @@ use std::rc::Rc;
 use reveal_embedder::{Color, Rect, Size};
 use reveal_foundation::{App, Handle, Listener};
 
-use crate::animation::{Animation, AnimationNode, AnimationStatus, AnimationStatusListener};
+use crate::animation::{Animation, AnimationStatus, AnimationStatusListener, AnyAnimation};
 use crate::curves::Curve;
 
 /// An object that can produce a value of type `T` given an `Animation<double>`
@@ -29,25 +29,29 @@ pub trait Animatable<T> {
     /// This function is implemented by deferring to [`transform`]. Implementors
     /// that want to provide custom behavior should override [`transform`], not
     /// [`evaluate`].
-    fn evaluate(&self, app: &App, animation: Animation<f64>) -> T
+    ///
+    /// [`transform`]: Animatable::transform
+    /// [`evaluate`]: Animatable::evaluate
+    fn evaluate(&self, app: &App, animation: AnyAnimation<f64>) -> T
     where
         Self: Sized,
     {
         self.transform(app, animation.value(app))
     }
 
-    /// Returns a new [`Animation`] that is driven by the given animation but
+    /// Returns a new [`AnyAnimation`] that is driven by the given animation but
     /// that takes on values determined by this object.
-    fn animate(self, app: &mut App, parent: Animation<f64>) -> Animation<T>
+    fn animate(self, app: &mut App, parent: AnyAnimation<f64>) -> AnyAnimation<T>
     where
         Self: Sized + Clone + 'static,
         T: 'static,
     {
-        Animation::from_handle(app.create(AnimatedEvaluation {
+        app.create(AnimatedEvaluation {
             parent,
             evaluatable: self,
             _value: PhantomData,
-        }))
+        })
+        .as_animation()
     }
 
     /// Returns a new [`Animatable`] whose value is determined by first
@@ -95,39 +99,39 @@ impl<T> Debug for CallbackAnimatable<T> {
 /// Dart's `_AnimatedEvaluation<T>` — the animation returned by
 /// [`Animatable::animate`].
 struct AnimatedEvaluation<T, A> {
-    parent: Animation<f64>,
+    parent: AnyAnimation<f64>,
     evaluatable: A,
     _value: PhantomData<fn() -> T>,
 }
 
-impl<T: 'static, A: Animatable<T> + Clone + 'static> AnimationNode<T> for AnimatedEvaluation<T, A> {
-    fn add_listener(app: &mut App, this: Handle<Self>, listener: Listener) {
-        app.get(this).parent.add_listener(app, listener);
+impl<T: 'static, A: Animatable<T> + Clone + 'static> Animation<T> for AnimatedEvaluation<T, A> {
+    fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
+        app.get(self).parent.add_listener(app, listener);
     }
 
-    fn remove_listener(app: &mut App, this: Handle<Self>, listener: &Listener) {
-        app.get(this).parent.remove_listener(app, listener);
+    fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
+        app.get(self).parent.remove_listener(app, listener);
     }
 
-    fn add_status_listener(app: &mut App, this: Handle<Self>, listener: AnimationStatusListener) {
-        app.get(this).parent.add_status_listener(app, listener);
+    fn add_status_listener(self: Handle<Self>, app: &mut App, listener: AnimationStatusListener) {
+        app.get(self).parent.add_status_listener(app, listener);
     }
 
     fn remove_status_listener(
+        self: Handle<Self>,
         app: &mut App,
-        this: Handle<Self>,
         listener: &AnimationStatusListener,
     ) {
-        app.get(this).parent.remove_status_listener(app, listener);
+        app.get(self).parent.remove_status_listener(app, listener);
     }
 
-    fn status(app: &App, this: Handle<Self>) -> AnimationStatus {
-        app.get(this).parent.status(app)
+    fn status(self: Handle<Self>, app: &App) -> AnimationStatus {
+        app.get(self).parent.status(app)
     }
 
-    fn value(app: &App, this: Handle<Self>) -> T {
-        let parent = app.get(this).parent;
-        let evaluatable = app.get(this).evaluatable.clone();
+    fn value(self: Handle<Self>, app: &App) -> T {
+        let parent = app.get(self).parent;
+        let evaluatable = app.get(self).evaluatable.clone();
         evaluatable.evaluate(app, parent)
     }
 }
@@ -171,25 +175,13 @@ impl TweenLerp for f64 {
 ///
 /// [`set_begin`]: Tween::set_begin
 /// [`set_end`]: Tween::set_end
-pub struct Tween<T: 'static>(Handle<TweenData<T>>);
-
-pub(crate) struct TweenData<T> {
+#[derive(Debug)]
+pub struct Tween<T> {
+    /// The value this variable has at the beginning of the animation.
     pub begin: Option<T>,
+
+    /// The value this variable has at the end of the animation.
     pub end: Option<T>,
-}
-
-impl<T> Clone for Tween<T> {
-    fn clone(&self) -> Tween<T> {
-        *self
-    }
-}
-
-impl<T> Copy for Tween<T> {}
-
-impl<T: Debug> Debug for Tween<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Tween").field(&self.0).finish()
-    }
 }
 
 impl<T: 'static> Tween<T> {
@@ -201,28 +193,28 @@ impl<T: 'static> Tween<T> {
     ///
     /// [`begin`]: Tween::begin
     /// [`end`]: Tween::end
-    pub fn new(app: &mut App, begin: Option<T>, end: Option<T>) -> Tween<T> {
-        Tween(app.create(TweenData { begin, end }))
+    pub fn new(app: &mut App, begin: Option<T>, end: Option<T>) -> Handle<Tween<T>> {
+        app.create(Tween { begin, end })
     }
 
     /// The value this variable has at the beginning of the animation.
-    pub fn begin(self, app: &App) -> Option<&T> {
-        app.get(self.0).begin.as_ref()
+    pub fn begin(self: Handle<Self>, app: &App) -> Option<&T> {
+        app.get(self).begin.as_ref()
     }
 
     /// Dart's `begin` setter.
-    pub fn set_begin(self, app: &mut App, begin: Option<T>) {
-        app.get_mut(self.0).begin = begin;
+    pub fn set_begin(self: Handle<Self>, app: &mut App, begin: Option<T>) {
+        app.get_mut(self).begin = begin;
     }
 
     /// The value this variable has at the end of the animation.
-    pub fn end(self, app: &App) -> Option<&T> {
-        app.get(self.0).end.as_ref()
+    pub fn end(self: Handle<Self>, app: &App) -> Option<&T> {
+        app.get(self).end.as_ref()
     }
 
     /// Dart's `end` setter.
-    pub fn set_end(self, app: &mut App, end: Option<T>) {
-        app.get_mut(self.0).end = end;
+    pub fn set_end(self: Handle<Self>, app: &mut App, end: Option<T>) {
+        app.get_mut(self).end = end;
     }
 }
 
@@ -243,330 +235,309 @@ fn tween_transform<T: Clone>(
 
 impl<T: TweenLerp + 'static> Tween<T> {
     /// Returns the value this variable has at the given animation clock value.
-    pub fn lerp(self, app: &App, t: f64) -> T {
-        let data = app.get(self.0);
-        let begin = data
+    pub fn lerp(self: Handle<Self>, app: &App, t: f64) -> T {
+        let tween = app.get(self);
+        let begin = tween
             .begin
             .as_ref()
             .expect("Tween.begin must be set before use");
-        let end = data.end.as_ref().expect("Tween.end must be set before use");
+        let end = tween
+            .end
+            .as_ref()
+            .expect("Tween.end must be set before use");
         T::lerp(begin, end, t)
     }
 }
 
-impl<T: TweenLerp + 'static> Animatable<T> for Tween<T> {
+impl<T: TweenLerp + 'static> Animatable<T> for Handle<Tween<T>> {
     fn transform(&self, app: &App, t: f64) -> T {
-        let data = app.get(self.0);
-        tween_transform(&data.begin, &data.end, t, |t| self.lerp(app, t))
+        let this = *self;
+        let tween = app.get(this);
+        tween_transform(&tween.begin, &tween.end, t, |t| this.lerp(app, t))
     }
 }
 
 /// A [`Tween`] that evaluates its [`parent`] in reverse.
 ///
 /// [`parent`]: ReverseTween::parent
-pub struct ReverseTween<T: 'static>(Handle<ReverseTweenData<T>>);
-
-struct ReverseTweenData<T: 'static> {
-    parent: Tween<T>,
+pub struct ReverseTween<T: 'static> {
+    parent: Handle<Tween<T>>,
 }
-
-impl<T> Clone for ReverseTween<T> {
-    fn clone(&self) -> ReverseTween<T> {
-        *self
-    }
-}
-
-impl<T> Copy for ReverseTween<T> {}
 
 impl<T: TweenLerp + 'static> ReverseTween<T> {
     /// Construct a [`Tween`] that evaluates its parent in reverse.
-    pub fn new(app: &mut App, parent: Tween<T>) -> ReverseTween<T> {
-        ReverseTween(app.create(ReverseTweenData { parent }))
+    pub fn new(app: &mut App, parent: Handle<Tween<T>>) -> Handle<ReverseTween<T>> {
+        app.create(ReverseTween { parent })
     }
 
     /// This tween's value is the same as the parent's value evaluated in reverse.
-    pub fn parent(self, app: &App) -> Tween<T> {
-        app.get(self.0).parent
+    pub fn parent(self: Handle<Self>, app: &App) -> Handle<Tween<T>> {
+        app.get(self).parent
     }
 }
 
-impl<T: TweenLerp + 'static> Animatable<T> for ReverseTween<T> {
+impl<T: TweenLerp + 'static> Animatable<T> for Handle<ReverseTween<T>> {
     fn transform(&self, app: &App, t: f64) -> T {
-        self.parent(app).lerp(app, 1.0 - t)
+        let this = *self;
+        this.parent(app).lerp(app, 1.0 - t)
     }
 }
 
 /// An interpolation between two colors.
-pub struct ColorTween(Handle<TweenData<Color>>);
+pub struct ColorTween {
+    /// The value this variable has at the beginning of the animation.
+    pub begin: Option<Color>,
 
-impl Clone for ColorTween {
-    fn clone(&self) -> ColorTween {
-        *self
-    }
+    /// The value this variable has at the end of the animation.
+    pub end: Option<Color>,
 }
-
-impl Copy for ColorTween {}
 
 impl ColorTween {
     /// Creates a [`Color`] tween.
     ///
     /// The begin and end properties may be null; the null value is treated as
     /// transparent.
-    pub fn new(app: &mut App, begin: Option<Color>, end: Option<Color>) -> ColorTween {
-        ColorTween(app.create(TweenData { begin, end }))
+    pub fn new(app: &mut App, begin: Option<Color>, end: Option<Color>) -> Handle<ColorTween> {
+        app.create(ColorTween { begin, end })
     }
 
     /// The value this variable has at the beginning of the animation.
-    pub fn begin(self, app: &App) -> Option<Color> {
-        app.get(self.0).begin
+    pub fn begin(self: Handle<Self>, app: &App) -> Option<Color> {
+        app.get(self).begin
     }
 
     /// Dart's `begin` setter.
-    pub fn set_begin(self, app: &mut App, begin: Option<Color>) {
-        app.get_mut(self.0).begin = begin;
+    pub fn set_begin(self: Handle<Self>, app: &mut App, begin: Option<Color>) {
+        app.get_mut(self).begin = begin;
     }
 
     /// The value this variable has at the end of the animation.
-    pub fn end(self, app: &App) -> Option<Color> {
-        app.get(self.0).end
+    pub fn end(self: Handle<Self>, app: &App) -> Option<Color> {
+        app.get(self).end
     }
 
     /// Dart's `end` setter.
-    pub fn set_end(self, app: &mut App, end: Option<Color>) {
-        app.get_mut(self.0).end = end;
+    pub fn set_end(self: Handle<Self>, app: &mut App, end: Option<Color>) {
+        app.get_mut(self).end = end;
     }
 
     /// Returns the value this variable has at the given animation clock value.
-    pub fn lerp(self, app: &App, t: f64) -> Option<Color> {
-        let data = app.get(self.0);
-        Color::lerp(data.begin, data.end, t)
+    pub fn lerp(self: Handle<Self>, app: &App, t: f64) -> Option<Color> {
+        let tween = app.get(self);
+        Color::lerp(tween.begin, tween.end, t)
     }
 }
 
-impl Animatable<Option<Color>> for ColorTween {
+impl Animatable<Option<Color>> for Handle<ColorTween> {
     fn transform(&self, app: &App, t: f64) -> Option<Color> {
+        let this = *self;
         if t == 0.0 {
-            return self.begin(app);
+            return this.begin(app);
         }
         if t == 1.0 {
-            return self.end(app);
+            return this.end(app);
         }
-        self.lerp(app, t)
+        this.lerp(app, t)
     }
 }
 
 /// An interpolation between two sizes.
-pub struct SizeTween(Handle<TweenData<Size>>);
+pub struct SizeTween {
+    /// The value this variable has at the beginning of the animation.
+    pub begin: Option<Size>,
 
-impl Clone for SizeTween {
-    fn clone(&self) -> SizeTween {
-        *self
-    }
+    /// The value this variable has at the end of the animation.
+    pub end: Option<Size>,
 }
-
-impl Copy for SizeTween {}
 
 impl SizeTween {
     /// Creates a [`Size`] tween.
-    pub fn new(app: &mut App, begin: Option<Size>, end: Option<Size>) -> SizeTween {
-        SizeTween(app.create(TweenData { begin, end }))
+    pub fn new(app: &mut App, begin: Option<Size>, end: Option<Size>) -> Handle<SizeTween> {
+        app.create(SizeTween { begin, end })
     }
 
     /// Returns the value this variable has at the given animation clock value.
-    pub fn lerp(self, app: &App, t: f64) -> Option<Size> {
-        let data = app.get(self.0);
-        Size::lerp(data.begin, data.end, t)
+    pub fn lerp(self: Handle<Self>, app: &App, t: f64) -> Option<Size> {
+        let tween = app.get(self);
+        Size::lerp(tween.begin, tween.end, t)
     }
 }
 
-impl Animatable<Option<Size>> for SizeTween {
+impl Animatable<Option<Size>> for Handle<SizeTween> {
     fn transform(&self, app: &App, t: f64) -> Option<Size> {
-        let data = app.get(self.0);
+        let this = *self;
+        let tween = app.get(this);
         if t == 0.0 {
-            return data.begin;
+            return tween.begin;
         }
         if t == 1.0 {
-            return data.end;
+            return tween.end;
         }
-        self.lerp(app, t)
+        this.lerp(app, t)
     }
 }
 
 /// An interpolation between two rectangles.
-pub struct RectTween(Handle<TweenData<Rect>>);
+pub struct RectTween {
+    /// The value this variable has at the beginning of the animation.
+    pub begin: Option<Rect>,
 
-impl Clone for RectTween {
-    fn clone(&self) -> RectTween {
-        *self
-    }
+    /// The value this variable has at the end of the animation.
+    pub end: Option<Rect>,
 }
-
-impl Copy for RectTween {}
 
 impl RectTween {
     /// Creates a [`Rect`] tween.
-    pub fn new(app: &mut App, begin: Option<Rect>, end: Option<Rect>) -> RectTween {
-        RectTween(app.create(TweenData { begin, end }))
+    pub fn new(app: &mut App, begin: Option<Rect>, end: Option<Rect>) -> Handle<RectTween> {
+        app.create(RectTween { begin, end })
     }
 
     /// Returns the value this variable has at the given animation clock value.
-    pub fn lerp(self, app: &App, t: f64) -> Option<Rect> {
-        let data = app.get(self.0);
-        Rect::lerp(data.begin, data.end, t)
+    pub fn lerp(self: Handle<Self>, app: &App, t: f64) -> Option<Rect> {
+        let tween = app.get(self);
+        Rect::lerp(tween.begin, tween.end, t)
     }
 }
 
-impl Animatable<Option<Rect>> for RectTween {
+impl Animatable<Option<Rect>> for Handle<RectTween> {
     fn transform(&self, app: &App, t: f64) -> Option<Rect> {
-        let data = app.get(self.0);
+        let this = *self;
+        let tween = app.get(this);
         if t == 0.0 {
-            return data.begin;
+            return tween.begin;
         }
         if t == 1.0 {
-            return data.end;
+            return tween.end;
         }
-        self.lerp(app, t)
+        this.lerp(app, t)
     }
 }
 
 /// An interpolation between two integers that rounds.
-pub struct IntTween(Handle<TweenData<i64>>);
+pub struct IntTween {
+    /// The value this variable has at the beginning of the animation.
+    pub begin: Option<i64>,
 
-impl Clone for IntTween {
-    fn clone(&self) -> IntTween {
-        *self
-    }
+    /// The value this variable has at the end of the animation.
+    pub end: Option<i64>,
 }
-
-impl Copy for IntTween {}
 
 impl IntTween {
     /// Creates an int tween.
-    pub fn new(app: &mut App, begin: Option<i64>, end: Option<i64>) -> IntTween {
-        IntTween(app.create(TweenData { begin, end }))
+    pub fn new(app: &mut App, begin: Option<i64>, end: Option<i64>) -> Handle<IntTween> {
+        app.create(IntTween { begin, end })
     }
 
     /// Returns the interpolated integer, rounded.
-    pub fn lerp(self, app: &App, t: f64) -> i64 {
-        let data = app.get(self.0);
-        let begin = data.begin.expect("IntTween.begin must be set before use");
-        let end = data.end.expect("IntTween.end must be set before use");
+    pub fn lerp(self: Handle<Self>, app: &App, t: f64) -> i64 {
+        let tween = app.get(self);
+        let begin = tween.begin.expect("IntTween.begin must be set before use");
+        let end = tween.end.expect("IntTween.end must be set before use");
         (begin as f64 + (end - begin) as f64 * t).round() as i64
     }
 }
 
-impl Animatable<i64> for IntTween {
+impl Animatable<i64> for Handle<IntTween> {
     fn transform(&self, app: &App, t: f64) -> i64 {
-        let data = app.get(self.0);
-        tween_transform(&data.begin, &data.end, t, |t| self.lerp(app, t))
+        let this = *self;
+        let tween = app.get(this);
+        tween_transform(&tween.begin, &tween.end, t, |t| this.lerp(app, t))
     }
 }
 
 /// An interpolation between two integers that floors.
-pub struct StepTween(Handle<TweenData<i64>>);
+pub struct StepTween {
+    /// The value this variable has at the beginning of the animation.
+    pub begin: Option<i64>,
 
-impl Clone for StepTween {
-    fn clone(&self) -> StepTween {
-        *self
-    }
+    /// The value this variable has at the end of the animation.
+    pub end: Option<i64>,
 }
-
-impl Copy for StepTween {}
 
 impl StepTween {
     /// Creates an [`i64`] tween that floors.
-    pub fn new(app: &mut App, begin: Option<i64>, end: Option<i64>) -> StepTween {
-        StepTween(app.create(TweenData { begin, end }))
+    pub fn new(app: &mut App, begin: Option<i64>, end: Option<i64>) -> Handle<StepTween> {
+        app.create(StepTween { begin, end })
     }
 
     /// Returns the interpolated integer, floored.
-    pub fn lerp(self, app: &App, t: f64) -> i64 {
-        let data = app.get(self.0);
-        let begin = data.begin.expect("StepTween.begin must be set before use");
-        let end = data.end.expect("StepTween.end must be set before use");
+    pub fn lerp(self: Handle<Self>, app: &App, t: f64) -> i64 {
+        let tween = app.get(self);
+        let begin = tween.begin.expect("StepTween.begin must be set before use");
+        let end = tween.end.expect("StepTween.end must be set before use");
         (begin as f64 + (end - begin) as f64 * t).floor() as i64
     }
 }
 
-impl Animatable<i64> for StepTween {
+impl Animatable<i64> for Handle<StepTween> {
     fn transform(&self, app: &App, t: f64) -> i64 {
-        let data = app.get(self.0);
-        tween_transform(&data.begin, &data.end, t, |t| self.lerp(app, t))
+        let this = *self;
+        let tween = app.get(this);
+        tween_transform(&tween.begin, &tween.end, t, |t| this.lerp(app, t))
     }
 }
 
 /// A tween with a constant value.
-pub struct ConstantTween<T: 'static>(Tween<T>);
-
-impl<T> Clone for ConstantTween<T> {
-    fn clone(&self) -> ConstantTween<T> {
-        *self
-    }
+pub struct ConstantTween<T> {
+    // Dart: `class ConstantTween<T> extends Tween<T>` — the superclass's
+    // fields, with `begin` and `end` both set to the value.
+    tween: Tween<T>,
 }
-
-impl<T> Copy for ConstantTween<T> {}
 
 impl<T: Clone + 'static> ConstantTween<T> {
     /// Create a tween whose begin and end values equal `value`.
-    pub fn new(app: &mut App, value: T) -> ConstantTween<T> {
-        ConstantTween(Tween::new(app, Some(value.clone()), Some(value)))
+    pub fn new(app: &mut App, value: T) -> Handle<ConstantTween<T>> {
+        app.create(ConstantTween {
+            tween: Tween {
+                begin: Some(value.clone()),
+                end: Some(value),
+            },
+        })
     }
 }
 
-impl<T: Clone + 'static> Animatable<T> for ConstantTween<T> {
+impl<T: Clone + 'static> Animatable<T> for Handle<ConstantTween<T>> {
     fn transform(&self, app: &App, _t: f64) -> T {
-        self.0
-            .begin(app)
-            .cloned()
+        app.get(*self)
+            .tween
+            .begin
+            .clone()
             .expect("ConstantTween.begin must be set")
     }
 }
 
 /// Transforms the value of the given animation by the given curve.
-pub struct CurveTween(Handle<CurveTweenData>);
-
-struct CurveTweenData {
-    pub curve: std::rc::Rc<dyn Curve>,
-}
-
-impl Clone for CurveTween {
-    fn clone(&self) -> CurveTween {
-        *self
-    }
-}
-
-impl Copy for CurveTween {}
-
-impl Debug for CurveTween {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("CurveTween").field(&self.0).finish()
-    }
+#[derive(Debug)]
+pub struct CurveTween {
+    /// The curve to use when transforming the value of the animation.
+    pub curve: Rc<dyn Curve>,
 }
 
 impl CurveTween {
     /// Creates a curve tween.
-    pub fn new(app: &mut App, curve: std::rc::Rc<dyn Curve>) -> CurveTween {
-        CurveTween(app.create(CurveTweenData { curve }))
+    pub fn new(app: &mut App, curve: Rc<dyn Curve>) -> Handle<CurveTween> {
+        app.create(CurveTween { curve })
     }
 
     /// The curve to use when transforming the value of the animation.
-    pub fn curve(self, app: &App) -> std::rc::Rc<dyn Curve> {
-        std::rc::Rc::clone(&app.get(self.0).curve)
+    pub fn curve(self: Handle<Self>, app: &App) -> Rc<dyn Curve> {
+        Rc::clone(&app.get(self).curve)
     }
 
     /// Dart's `curve` setter.
-    pub fn set_curve(self, app: &mut App, curve: std::rc::Rc<dyn Curve>) {
-        app.get_mut(self.0).curve = curve;
+    pub fn set_curve(self: Handle<Self>, app: &mut App, curve: Rc<dyn Curve>) {
+        app.get_mut(self).curve = curve;
     }
 }
 
-impl Animatable<f64> for CurveTween {
+impl Animatable<f64> for Handle<CurveTween> {
     fn transform(&self, app: &App, t: f64) -> f64 {
+        let curve = &app.get(*self).curve;
         if t == 0.0 || t == 1.0 {
-            debug_assert_eq!(app.get(self.0).curve.transform(t).round(), t);
+            debug_assert_eq!(curve.transform(t).round(), t);
             return t;
         }
-        app.get(self.0).curve.transform(t)
+        curve.transform(t)
     }
 }
 
@@ -580,7 +551,7 @@ mod tests {
     fn a_driven_tween_sees_end_assigned_after_animate() {
         let mut app = App::new();
         let tween = Tween::new(&mut app, Some(0.0), Some(1.0));
-        let parent = Animation::from_handle(app.create(AlwaysStoppedAnimation::new(1.0)));
+        let parent = app.create(AlwaysStoppedAnimation::new(1.0)).as_animation();
         let driven = tween.animate(&mut app, parent);
 
         assert_eq!(driven.value(&app), 1.0);

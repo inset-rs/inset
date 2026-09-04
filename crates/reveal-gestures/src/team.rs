@@ -7,8 +7,8 @@ use reveal_foundation::{App, Handle, HandleId};
 use crate::arena::{GestureArenaEntry, GestureArenaMember, GestureDisposition, MemberBox};
 use crate::binding::GestureBinding;
 
-struct CombiningData {
-    owner: GestureArenaTeam,
+struct CombiningGestureArenaMember {
+    owner: Handle<GestureArenaTeam>,
     pointer: i64,
     members: Vec<MemberBox>,
     resolved: bool,
@@ -16,63 +16,85 @@ struct CombiningData {
     entry: Option<GestureArenaEntry>,
 }
 
-#[derive(Clone, Copy)]
-struct CombiningGestureArenaMember(Handle<CombiningData>);
-
 impl CombiningGestureArenaMember {
-    fn add_member(self, app: &mut App, pointer: i64, member: MemberBox) -> GestureArenaEntry {
-        debug_assert!(!app.get(self.0).resolved);
-        debug_assert_eq!(app.get(self.0).pointer, pointer);
-        app.get_mut(self.0).members.push(member.clone());
-        if app.get(self.0).entry.is_none() {
+    fn new(
+        app: &mut App,
+        owner: Handle<GestureArenaTeam>,
+        pointer: i64,
+    ) -> Handle<CombiningGestureArenaMember> {
+        app.create(CombiningGestureArenaMember {
+            owner,
+            pointer,
+            members: Vec::new(),
+            resolved: false,
+            winner: None,
+            entry: None,
+        })
+    }
+
+    fn add_member(
+        self: Handle<Self>,
+        app: &mut App,
+        pointer: i64,
+        member: MemberBox,
+    ) -> GestureArenaEntry {
+        debug_assert!(!app.get(self).resolved);
+        debug_assert_eq!(app.get(self).pointer, pointer);
+        app.get_mut(self).members.push(member.clone());
+        if app.get(self).entry.is_none() {
             let entry = GestureBinding::instance(app)
                 .gesture_arena(app)
                 .add(app, pointer, self);
-            app.get_mut(self.0).entry = Some(entry);
+            app.get_mut(self).entry = Some(entry);
         }
         GestureArenaEntry::from_resolve(move |app, disposition| {
             self.resolve_member(app, &member, disposition);
         })
     }
 
-    fn close(self, app: &mut App) {
-        debug_assert!(!app.get(self.0).resolved);
-        app.get_mut(self.0).resolved = true;
-        let owner = app.get(self.0).owner;
-        let pointer = app.get(self.0).pointer;
-        let removed = app.get_mut(owner.0).combiners.remove(&pointer);
-        debug_assert!(removed.is_some_and(|combiner| combiner.0 == self.0));
+    fn close(self: Handle<Self>, app: &mut App) {
+        debug_assert!(!app.get(self).resolved);
+        app.get_mut(self).resolved = true;
+        let owner = app.get(self).owner;
+        let pointer = app.get(self).pointer;
+        let removed = app.get_mut(owner).combiners.remove(&pointer);
+        debug_assert_eq!(removed, Some(self));
     }
 
-    fn resolve_member(self, app: &mut App, member: &MemberBox, disposition: GestureDisposition) {
-        if app.get(self.0).resolved {
+    fn resolve_member(
+        self: Handle<Self>,
+        app: &mut App,
+        member: &MemberBox,
+        disposition: GestureDisposition,
+    ) {
+        if app.get(self).resolved {
             return;
         }
         match disposition {
             GestureDisposition::Accepted => {
                 let captain = {
-                    let owner = app.get(self.0).owner;
-                    app.get(owner.0).captain.clone()
+                    let owner = app.get(self).owner;
+                    app.get(owner).captain.clone()
                 };
                 {
-                    let data = app.get_mut(self.0);
-                    if data.winner.is_none() {
-                        data.winner = captain.or_else(|| Some(member.clone()));
+                    let combiner = app.get_mut(self);
+                    if combiner.winner.is_none() {
+                        combiner.winner = captain.or_else(|| Some(member.clone()));
                     }
                 }
-                let entry = app.get(self.0).entry.clone().unwrap();
+                let entry = app.get(self).entry.clone().unwrap();
                 entry.resolve(app, disposition);
             }
             GestureDisposition::Rejected => {
-                let pointer = app.get(self.0).pointer;
+                let pointer = app.get(self).pointer;
                 let empty = {
-                    let data = app.get_mut(self.0);
-                    data.members.retain(|m| m != member);
-                    data.members.is_empty()
+                    let combiner = app.get_mut(self);
+                    combiner.members.retain(|m| m != member);
+                    combiner.members.is_empty()
                 };
                 member.reject_gesture(app, pointer);
                 if empty {
-                    let entry = app.get(self.0).entry.clone().unwrap();
+                    let entry = app.get(self).entry.clone().unwrap();
                     entry.resolve(app, disposition);
                 }
             }
@@ -80,23 +102,24 @@ impl CombiningGestureArenaMember {
     }
 }
 
-impl GestureArenaMember for CombiningGestureArenaMember {
+impl GestureArenaMember for Handle<CombiningGestureArenaMember> {
     fn accept_gesture(&self, app: &mut App, pointer: i64) {
-        debug_assert_eq!(app.get(self.0).pointer, pointer);
-        debug_assert!(app.get(self.0).winner.is_some() || !app.get(self.0).members.is_empty());
-        self.close(app);
+        let this = *self;
+        debug_assert_eq!(app.get(this).pointer, pointer);
+        debug_assert!(app.get(this).winner.is_some() || !app.get(this).members.is_empty());
+        this.close(app);
         let captain = {
-            let owner = app.get(self.0).owner;
-            app.get(owner.0).captain.clone()
+            let owner = app.get(this).owner;
+            app.get(owner).captain.clone()
         };
         let (winner, members) = {
-            let data = app.get_mut(self.0);
-            if data.winner.is_none() {
-                data.winner = captain.or_else(|| data.members.first().cloned());
+            let combiner = app.get_mut(this);
+            if combiner.winner.is_none() {
+                combiner.winner = captain.or_else(|| combiner.members.first().cloned());
             }
             (
-                data.winner.clone().expect("combiner has a winner"),
-                data.members.clone(),
+                combiner.winner.clone().expect("combiner has a winner"),
+                combiner.members.clone(),
             )
         };
         for member in &members {
@@ -108,22 +131,18 @@ impl GestureArenaMember for CombiningGestureArenaMember {
     }
 
     fn reject_gesture(&self, app: &mut App, pointer: i64) {
-        debug_assert_eq!(app.get(self.0).pointer, pointer);
-        self.close(app);
-        let members = app.get(self.0).members.clone();
+        let this = *self;
+        debug_assert_eq!(app.get(this).pointer, pointer);
+        this.close(app);
+        let members = app.get(this).members.clone();
         for member in &members {
             member.reject_gesture(app, pointer);
         }
     }
 
     fn member_id(&self) -> HandleId {
-        self.0.id()
+        self.id()
     }
-}
-
-pub(crate) struct GestureArenaTeamData {
-    combiners: HashMap<i64, CombiningGestureArenaMember>,
-    captain: Option<MemberBox>,
 }
 
 /// A group of [`GestureArenaMember`] objects that are competing as a unit in the
@@ -143,16 +162,18 @@ pub(crate) struct GestureArenaTeamData {
 /// When gesture recognizers are in a team with a captain, then once one of the
 /// team members claims victory or there are no other competing gestures in the
 /// arena, the captain wins the arena, and all other team members lose.
-#[derive(Clone, Copy)]
-pub struct GestureArenaTeam(Handle<GestureArenaTeamData>);
+pub struct GestureArenaTeam {
+    combiners: HashMap<i64, Handle<CombiningGestureArenaMember>>,
+    captain: Option<MemberBox>,
+}
 
 impl GestureArenaTeam {
     /// Creates an empty team.
-    pub fn new(app: &mut App) -> GestureArenaTeam {
-        GestureArenaTeam(app.create(GestureArenaTeamData {
+    pub fn new(app: &mut App) -> Handle<GestureArenaTeam> {
+        app.create(GestureArenaTeam {
             combiners: HashMap::new(),
             captain: None,
-        }))
+        })
     }
 
     /// A member that wins on behalf of the entire team.
@@ -160,13 +181,13 @@ impl GestureArenaTeam {
     /// If not none, when any one of the [`GestureArenaTeam`] members claims victory
     /// the captain accepts the gesture.
     /// If none, the member that claims a victory accepts the gesture.
-    pub fn captain(self, app: &App) -> Option<HandleId> {
-        app.get(self.0).captain.as_ref().map(MemberBox::member_id)
+    pub fn captain(self: Handle<Self>, app: &App) -> Option<HandleId> {
+        app.get(self).captain.as_ref().map(MemberBox::member_id)
     }
 
     /// Sets [`captain`](Self::captain).
-    pub fn set_captain(self, app: &mut App, captain: impl GestureArenaMember) {
-        app.get_mut(self.0).captain = Some(MemberBox::new(captain));
+    pub fn set_captain(self: Handle<Self>, app: &mut App, captain: impl GestureArenaMember) {
+        app.get_mut(self).captain = Some(MemberBox::new(captain));
     }
 
     /// Adds a new member to the arena on behalf of this team.
@@ -177,24 +198,17 @@ impl GestureArenaTeam {
     /// To assign a gesture recognizer to a team, see
     /// `OneSequenceGestureRecognizer.team`.
     pub fn add(
-        self,
+        self: Handle<Self>,
         app: &mut App,
         pointer: i64,
         member: impl GestureArenaMember,
     ) -> GestureArenaEntry {
         let member = MemberBox::new(member);
-        let combiner = match app.get(self.0).combiners.get(&pointer).copied() {
+        let combiner = match app.get(self).combiners.get(&pointer).copied() {
             Some(combiner) => combiner,
             None => {
-                let combiner = CombiningGestureArenaMember(app.create(CombiningData {
-                    owner: self,
-                    pointer,
-                    members: Vec::new(),
-                    resolved: false,
-                    winner: None,
-                    entry: None,
-                }));
-                app.get_mut(self.0).combiners.insert(pointer, combiner);
+                let combiner = CombiningGestureArenaMember::new(app, self, pointer);
+                app.get_mut(self).combiners.insert(pointer, combiner);
                 combiner
             }
         };
@@ -211,42 +225,39 @@ mod tests {
 
     const PRIMARY_KEY: i64 = 4;
 
-    struct TestMemberData {
+    struct TestMember {
         accept_ran: bool,
         reject_ran: bool,
     }
 
-    #[derive(Clone, Copy)]
-    struct TestMember(Handle<TestMemberData>);
-
     impl TestMember {
-        fn new(app: &mut App) -> TestMember {
-            TestMember(app.create(TestMemberData {
+        fn new(app: &mut App) -> Handle<TestMember> {
+            app.create(TestMember {
                 accept_ran: false,
                 reject_ran: false,
-            }))
+            })
         }
 
-        fn accept_ran(self, app: &App) -> bool {
-            app.get(self.0).accept_ran
+        fn accept_ran(self: Handle<Self>, app: &App) -> bool {
+            app.get(self).accept_ran
         }
 
-        fn reject_ran(self, app: &App) -> bool {
-            app.get(self.0).reject_ran
+        fn reject_ran(self: Handle<Self>, app: &App) -> bool {
+            app.get(self).reject_ran
         }
     }
 
-    impl GestureArenaMember for TestMember {
+    impl GestureArenaMember for Handle<TestMember> {
         fn accept_gesture(&self, app: &mut App, _pointer: i64) {
-            app.get_mut(self.0).accept_ran = true;
+            app.get_mut(*self).accept_ran = true;
         }
 
         fn reject_gesture(&self, app: &mut App, _pointer: i64) {
-            app.get_mut(self.0).reject_ran = true;
+            app.get_mut(*self).reject_ran = true;
         }
 
         fn member_id(&self) -> HandleId {
-            self.0.id()
+            self.id()
         }
     }
 

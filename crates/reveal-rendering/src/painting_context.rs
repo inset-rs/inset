@@ -355,6 +355,8 @@ mod tests {
     use crate::box_::{AnyRenderBox, BoxConstraints, RenderBox, RenderBoxData};
     use crate::layer::{CompositedLayer, CompositedLayerKind};
     use crate::object::{RenderHandle, RenderObject, RenderObjectData};
+    use reveal_foundation::Handle;
+
     use crate::pipeline_owner::PipelineOwner;
 
     /// Paints one rect and counts its paints. A repaint boundary when told to be, compositing
@@ -469,7 +471,7 @@ mod tests {
     }
 
     struct Tree {
-        owner: PipelineOwner,
+        owner: Handle<PipelineOwner>,
         parent: RenderHandle<Parent>,
         leaf: RenderHandle<Leaf>,
         parent_paints: Rc<Cell<u32>>,
@@ -515,7 +517,7 @@ mod tests {
         }
     }
 
-    fn frame(app: &mut App, owner: PipelineOwner) {
+    fn frame(app: &mut App, owner: Handle<PipelineOwner>) {
         owner.flush_layout(app);
         owner.flush_paint(app);
     }

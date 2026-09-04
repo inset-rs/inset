@@ -282,6 +282,34 @@ pointer_event_struct! {
 }
 
 pointer_event_struct! {
+    /// The pointer has moved with respect to the device while not in contact
+    /// with the device, and entered a target object.
+    ///
+    /// Only sent through `MouseTracker` annotation callbacks, never by pointer
+    /// routing or hit testing.
+    pub struct PointerEnterEvent {}
+    down = false,
+    pressure = 0.0,
+    distance = 0.0,
+    buttons = 0,
+    kind = PointerDeviceKind::Touch,
+}
+
+pointer_event_struct! {
+    /// The pointer has moved with respect to the device while not in contact
+    /// with the device, and exited a target object.
+    ///
+    /// Only sent through `MouseTracker` annotation callbacks, never by pointer
+    /// routing or hit testing.
+    pub struct PointerExitEvent {}
+    down = false,
+    pressure = 0.0,
+    distance = 0.0,
+    buttons = 0,
+    kind = PointerDeviceKind::Touch,
+}
+
+pointer_event_struct! {
     /// The pointer has made contact with the device.
     pub struct PointerDownEvent {}
     down = true,
@@ -419,6 +447,103 @@ impl PointerPanZoomUpdateEvent {
     }
 }
 
+/// Runs `$body` with `$e` bound to whichever event struct the enum holds.
+macro_rules! with_variant {
+    ($event:expr, $e:ident => $body:expr) => {
+        match $event {
+            PointerEvent::Added($e) => $body,
+            PointerEvent::Removed($e) => $body,
+            PointerEvent::Hover($e) => $body,
+            PointerEvent::Enter($e) => $body,
+            PointerEvent::Exit($e) => $body,
+            PointerEvent::Down($e) => $body,
+            PointerEvent::Move($e) => $body,
+            PointerEvent::Up($e) => $body,
+            PointerEvent::Cancel($e) => $body,
+            PointerEvent::Scroll($e) => $body,
+            PointerEvent::ScrollInertiaCancel($e) => $body,
+            PointerEvent::Scale($e) => $body,
+            PointerEvent::PanZoomStart($e) => $body,
+            PointerEvent::PanZoomUpdate($e) => $body,
+            PointerEvent::PanZoomEnd($e) => $body,
+        }
+    };
+}
+
+/// Like [`with_variant!`], re-wrapping the result in the same variant.
+macro_rules! map_variant {
+    ($event:expr, $e:ident => $body:expr) => {
+        match $event {
+            PointerEvent::Added($e) => PointerEvent::Added($body),
+            PointerEvent::Removed($e) => PointerEvent::Removed($body),
+            PointerEvent::Hover($e) => PointerEvent::Hover($body),
+            PointerEvent::Enter($e) => PointerEvent::Enter($body),
+            PointerEvent::Exit($e) => PointerEvent::Exit($body),
+            PointerEvent::Down($e) => PointerEvent::Down($body),
+            PointerEvent::Move($e) => PointerEvent::Move($body),
+            PointerEvent::Up($e) => PointerEvent::Up($body),
+            PointerEvent::Cancel($e) => PointerEvent::Cancel($body),
+            PointerEvent::Scroll($e) => PointerEvent::Scroll($body),
+            PointerEvent::ScrollInertiaCancel($e) => PointerEvent::ScrollInertiaCancel($body),
+            PointerEvent::Scale($e) => PointerEvent::Scale($body),
+            PointerEvent::PanZoomStart($e) => PointerEvent::PanZoomStart($body),
+            PointerEvent::PanZoomUpdate($e) => PointerEvent::PanZoomUpdate($body),
+            PointerEvent::PanZoomEnd($e) => PointerEvent::PanZoomEnd($body),
+        }
+    };
+}
+
+/// Flutter's `PointerEnterEvent.fromMouseEvent` / `PointerExitEvent.fromMouseEvent`: the
+/// fields every event carries, copied into a new event, then transformed like the source.
+macro_rules! from_mouse_event {
+    ($target:ident, $event:expr) => {
+        with_variant!($event, e => $target {
+            view_id: e.view_id,
+            time_stamp: e.time_stamp,
+            pointer: e.pointer,
+            kind: e.kind,
+            device: e.device,
+            position: e.position,
+            delta: e.delta,
+            buttons: e.buttons,
+            obscured: e.obscured,
+            pressure_min: e.pressure_min,
+            pressure_max: e.pressure_max,
+            distance: e.distance,
+            distance_max: e.distance_max,
+            size: e.size,
+            radius_major: e.radius_major,
+            radius_minor: e.radius_minor,
+            radius_min: e.radius_min,
+            radius_max: e.radius_max,
+            orientation: e.orientation,
+            tilt: e.tilt,
+            down: e.down,
+            synthesized: e.synthesized,
+            ..$target::default()
+        })
+        .transformed($event.transform())
+    };
+}
+
+impl PointerEnterEvent {
+    /// Creates an enter event from a [`PointerEvent`].
+    ///
+    /// This is used by the `MouseTracker` to synthesize enter events.
+    pub fn from_mouse_event(event: &PointerEvent) -> PointerEnterEvent {
+        from_mouse_event!(PointerEnterEvent, event)
+    }
+}
+
+impl PointerExitEvent {
+    /// Creates an exit event from a [`PointerEvent`].
+    ///
+    /// This is used by the `MouseTracker` to synthesize exit events.
+    pub fn from_mouse_event(event: &PointerEvent) -> PointerExitEvent {
+        from_mouse_event!(PointerExitEvent, event)
+    }
+}
+
 /// Base class for touch, stylus, or mouse events.
 ///
 /// Pairing enum over the public event classes. `_Transformed*` subclasses are
@@ -431,6 +556,10 @@ pub enum PointerEvent {
     Removed(PointerRemovedEvent),
     /// [`PointerHoverEvent`].
     Hover(PointerHoverEvent),
+    /// [`PointerEnterEvent`].
+    Enter(PointerEnterEvent),
+    /// [`PointerExitEvent`].
+    Exit(PointerExitEvent),
     /// [`PointerDownEvent`].
     Down(PointerDownEvent),
     /// [`PointerMoveEvent`].
@@ -456,237 +585,78 @@ pub enum PointerEvent {
 impl PointerEvent {
     /// The ID of the `FlutterView` which this event originated from.
     pub fn view_id(&self) -> ViewId {
-        match self {
-            PointerEvent::Added(e) => e.view_id,
-            PointerEvent::Removed(e) => e.view_id,
-            PointerEvent::Hover(e) => e.view_id,
-            PointerEvent::Down(e) => e.view_id,
-            PointerEvent::Move(e) => e.view_id,
-            PointerEvent::Up(e) => e.view_id,
-            PointerEvent::Cancel(e) => e.view_id,
-            PointerEvent::Scroll(e) => e.view_id,
-            PointerEvent::ScrollInertiaCancel(e) => e.view_id,
-            PointerEvent::Scale(e) => e.view_id,
-            PointerEvent::PanZoomStart(e) => e.view_id,
-            PointerEvent::PanZoomUpdate(e) => e.view_id,
-            PointerEvent::PanZoomEnd(e) => e.view_id,
-        }
+        with_variant!(self, e => e.view_id)
+    }
+
+    /// Unique identifier for the pointing device, reused across interactions.
+    pub fn device(&self) -> i64 {
+        with_variant!(self, e => e.device)
+    }
+
+    /// The transformation used to transform this event from the global
+    /// coordinate space into the coordinate space of the event receiver.
+    pub fn transform(&self) -> Option<Matrix4> {
+        with_variant!(self, e => e.transform)
     }
 
     /// Coordinate of the position of the pointer, in logical pixels in the
     /// global coordinate space.
     pub fn position(&self) -> Offset {
-        match self {
-            PointerEvent::Added(e) => e.position,
-            PointerEvent::Removed(e) => e.position,
-            PointerEvent::Hover(e) => e.position,
-            PointerEvent::Down(e) => e.position,
-            PointerEvent::Move(e) => e.position,
-            PointerEvent::Up(e) => e.position,
-            PointerEvent::Cancel(e) => e.position,
-            PointerEvent::Scroll(e) => e.position,
-            PointerEvent::ScrollInertiaCancel(e) => e.position,
-            PointerEvent::Scale(e) => e.position,
-            PointerEvent::PanZoomStart(e) => e.position,
-            PointerEvent::PanZoomUpdate(e) => e.position,
-            PointerEvent::PanZoomEnd(e) => e.position,
-        }
+        with_variant!(self, e => e.position)
     }
 
     /// The [`position`](Self::position) transformed into the event receiver's
     /// local coordinate system.
     pub fn local_position(&self) -> Offset {
-        match self {
-            PointerEvent::Added(e) => e.local_position(),
-            PointerEvent::Removed(e) => e.local_position(),
-            PointerEvent::Hover(e) => e.local_position(),
-            PointerEvent::Down(e) => e.local_position(),
-            PointerEvent::Move(e) => e.local_position(),
-            PointerEvent::Up(e) => e.local_position(),
-            PointerEvent::Cancel(e) => e.local_position(),
-            PointerEvent::Scroll(e) => e.local_position(),
-            PointerEvent::ScrollInertiaCancel(e) => e.local_position(),
-            PointerEvent::Scale(e) => e.local_position(),
-            PointerEvent::PanZoomStart(e) => e.local_position(),
-            PointerEvent::PanZoomUpdate(e) => e.local_position(),
-            PointerEvent::PanZoomEnd(e) => e.local_position(),
-        }
+        with_variant!(self, e => e.local_position())
     }
 
     /// The [`delta`](Self::delta) transformed into the event receiver's local
     /// coordinate system.
     pub fn local_delta(&self) -> Offset {
-        match self {
-            PointerEvent::Added(e) => e.local_delta(),
-            PointerEvent::Removed(e) => e.local_delta(),
-            PointerEvent::Hover(e) => e.local_delta(),
-            PointerEvent::Down(e) => e.local_delta(),
-            PointerEvent::Move(e) => e.local_delta(),
-            PointerEvent::Up(e) => e.local_delta(),
-            PointerEvent::Cancel(e) => e.local_delta(),
-            PointerEvent::Scroll(e) => e.local_delta(),
-            PointerEvent::ScrollInertiaCancel(e) => e.local_delta(),
-            PointerEvent::Scale(e) => e.local_delta(),
-            PointerEvent::PanZoomStart(e) => e.local_delta(),
-            PointerEvent::PanZoomUpdate(e) => e.local_delta(),
-            PointerEvent::PanZoomEnd(e) => e.local_delta(),
-        }
+        with_variant!(self, e => e.local_delta())
     }
 
     /// Distance in logical pixels that the pointer moved since the last move
     /// or hover.
     pub fn delta(&self) -> Offset {
-        match self {
-            PointerEvent::Added(e) => e.delta,
-            PointerEvent::Removed(e) => e.delta,
-            PointerEvent::Hover(e) => e.delta,
-            PointerEvent::Down(e) => e.delta,
-            PointerEvent::Move(e) => e.delta,
-            PointerEvent::Up(e) => e.delta,
-            PointerEvent::Cancel(e) => e.delta,
-            PointerEvent::Scroll(e) => e.delta,
-            PointerEvent::ScrollInertiaCancel(e) => e.delta,
-            PointerEvent::Scale(e) => e.delta,
-            PointerEvent::PanZoomStart(e) => e.delta,
-            PointerEvent::PanZoomUpdate(e) => e.delta,
-            PointerEvent::PanZoomEnd(e) => e.delta,
-        }
+        with_variant!(self, e => e.delta)
     }
 
     /// Unique identifier for the pointer, not reused.
     pub fn pointer(&self) -> i64 {
-        match self {
-            PointerEvent::Added(e) => e.pointer,
-            PointerEvent::Removed(e) => e.pointer,
-            PointerEvent::Hover(e) => e.pointer,
-            PointerEvent::Down(e) => e.pointer,
-            PointerEvent::Move(e) => e.pointer,
-            PointerEvent::Up(e) => e.pointer,
-            PointerEvent::Cancel(e) => e.pointer,
-            PointerEvent::Scroll(e) => e.pointer,
-            PointerEvent::ScrollInertiaCancel(e) => e.pointer,
-            PointerEvent::Scale(e) => e.pointer,
-            PointerEvent::PanZoomStart(e) => e.pointer,
-            PointerEvent::PanZoomUpdate(e) => e.pointer,
-            PointerEvent::PanZoomEnd(e) => e.pointer,
-        }
+        with_variant!(self, e => e.pointer)
     }
 
     /// The kind of input device for which the event was generated.
     pub fn kind(&self) -> PointerDeviceKind {
-        match self {
-            PointerEvent::Added(e) => e.kind,
-            PointerEvent::Removed(e) => e.kind,
-            PointerEvent::Hover(e) => e.kind,
-            PointerEvent::Down(e) => e.kind,
-            PointerEvent::Move(e) => e.kind,
-            PointerEvent::Up(e) => e.kind,
-            PointerEvent::Cancel(e) => e.kind,
-            PointerEvent::Scroll(e) => e.kind,
-            PointerEvent::ScrollInertiaCancel(e) => e.kind,
-            PointerEvent::Scale(e) => e.kind,
-            PointerEvent::PanZoomStart(e) => e.kind,
-            PointerEvent::PanZoomUpdate(e) => e.kind,
-            PointerEvent::PanZoomEnd(e) => e.kind,
-        }
+        with_variant!(self, e => e.kind)
     }
 
     /// Bit field using the `*_BUTTON` constants.
     pub fn buttons(&self) -> i64 {
-        match self {
-            PointerEvent::Added(e) => e.buttons,
-            PointerEvent::Removed(e) => e.buttons,
-            PointerEvent::Hover(e) => e.buttons,
-            PointerEvent::Down(e) => e.buttons,
-            PointerEvent::Move(e) => e.buttons,
-            PointerEvent::Up(e) => e.buttons,
-            PointerEvent::Cancel(e) => e.buttons,
-            PointerEvent::Scroll(e) => e.buttons,
-            PointerEvent::ScrollInertiaCancel(e) => e.buttons,
-            PointerEvent::Scale(e) => e.buttons,
-            PointerEvent::PanZoomStart(e) => e.buttons,
-            PointerEvent::PanZoomUpdate(e) => e.buttons,
-            PointerEvent::PanZoomEnd(e) => e.buttons,
-        }
+        with_variant!(self, e => e.buttons)
     }
 
     /// Time of event dispatch, relative to an arbitrary timeline.
     pub fn time_stamp(&self) -> Duration {
-        match self {
-            PointerEvent::Added(e) => e.time_stamp,
-            PointerEvent::Removed(e) => e.time_stamp,
-            PointerEvent::Hover(e) => e.time_stamp,
-            PointerEvent::Down(e) => e.time_stamp,
-            PointerEvent::Move(e) => e.time_stamp,
-            PointerEvent::Up(e) => e.time_stamp,
-            PointerEvent::Cancel(e) => e.time_stamp,
-            PointerEvent::Scroll(e) => e.time_stamp,
-            PointerEvent::ScrollInertiaCancel(e) => e.time_stamp,
-            PointerEvent::Scale(e) => e.time_stamp,
-            PointerEvent::PanZoomStart(e) => e.time_stamp,
-            PointerEvent::PanZoomUpdate(e) => e.time_stamp,
-            PointerEvent::PanZoomEnd(e) => e.time_stamp,
-        }
+        with_variant!(self, e => e.time_stamp)
     }
 
     /// Set if the event was synthesized.
     pub fn synthesized(&self) -> bool {
-        match self {
-            PointerEvent::Added(e) => e.synthesized,
-            PointerEvent::Removed(e) => e.synthesized,
-            PointerEvent::Hover(e) => e.synthesized,
-            PointerEvent::Down(e) => e.synthesized,
-            PointerEvent::Move(e) => e.synthesized,
-            PointerEvent::Up(e) => e.synthesized,
-            PointerEvent::Cancel(e) => e.synthesized,
-            PointerEvent::Scroll(e) => e.synthesized,
-            PointerEvent::ScrollInertiaCancel(e) => e.synthesized,
-            PointerEvent::Scale(e) => e.synthesized,
-            PointerEvent::PanZoomStart(e) => e.synthesized,
-            PointerEvent::PanZoomUpdate(e) => e.synthesized,
-            PointerEvent::PanZoomEnd(e) => e.synthesized,
-        }
+        with_variant!(self, e => e.synthesized)
     }
 
     /// Set if the pointer is currently down.
     pub fn down(&self) -> bool {
-        match self {
-            PointerEvent::Added(e) => e.down,
-            PointerEvent::Removed(e) => e.down,
-            PointerEvent::Hover(e) => e.down,
-            PointerEvent::Down(e) => e.down,
-            PointerEvent::Move(e) => e.down,
-            PointerEvent::Up(e) => e.down,
-            PointerEvent::Cancel(e) => e.down,
-            PointerEvent::Scroll(e) => e.down,
-            PointerEvent::ScrollInertiaCancel(e) => e.down,
-            PointerEvent::Scale(e) => e.down,
-            PointerEvent::PanZoomStart(e) => e.down,
-            PointerEvent::PanZoomUpdate(e) => e.down,
-            PointerEvent::PanZoomEnd(e) => e.down,
-        }
+        with_variant!(self, e => e.down)
     }
 
     /// Transforms the event from the global coordinate space into the
     /// coordinate space of an event receiver.
     pub fn transformed(&self, transform: Option<Matrix4>) -> PointerEvent {
-        match self {
-            PointerEvent::Added(e) => PointerEvent::Added(e.transformed(transform)),
-            PointerEvent::Removed(e) => PointerEvent::Removed(e.transformed(transform)),
-            PointerEvent::Hover(e) => PointerEvent::Hover(e.transformed(transform)),
-            PointerEvent::Down(e) => PointerEvent::Down(e.transformed(transform)),
-            PointerEvent::Move(e) => PointerEvent::Move(e.transformed(transform)),
-            PointerEvent::Up(e) => PointerEvent::Up(e.transformed(transform)),
-            PointerEvent::Cancel(e) => PointerEvent::Cancel(e.transformed(transform)),
-            PointerEvent::Scroll(e) => PointerEvent::Scroll(e.transformed(transform)),
-            PointerEvent::ScrollInertiaCancel(e) => {
-                PointerEvent::ScrollInertiaCancel(e.transformed(transform))
-            }
-            PointerEvent::Scale(e) => PointerEvent::Scale(e.transformed(transform)),
-            PointerEvent::PanZoomStart(e) => PointerEvent::PanZoomStart(e.transformed(transform)),
-            PointerEvent::PanZoomUpdate(e) => PointerEvent::PanZoomUpdate(e.transformed(transform)),
-            PointerEvent::PanZoomEnd(e) => PointerEvent::PanZoomEnd(e.transformed(transform)),
-        }
+        map_variant!(self, e => e.transformed(transform))
     }
 }
 
@@ -731,6 +701,12 @@ pub type PointerUpEventListener = ValueChanged<PointerUpEvent>;
 
 /// Signature for listening to [`PointerHoverEvent`] events.
 pub type PointerHoverEventListener = ValueChanged<PointerHoverEvent>;
+
+/// Signature for listening to [`PointerEnterEvent`] events.
+pub type PointerEnterEventListener = ValueChanged<PointerEnterEvent>;
+
+/// Signature for listening to [`PointerExitEvent`] events.
+pub type PointerExitEventListener = ValueChanged<PointerExitEvent>;
 
 /// Signature for listening to [`PointerCancelEvent`] events.
 pub type PointerCancelEventListener = ValueChanged<PointerCancelEvent>;

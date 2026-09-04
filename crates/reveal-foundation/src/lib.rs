@@ -1,4 +1,5 @@
 //! Flutter counterpart: `package:flutter/foundation.dart`.
+#![feature(arbitrary_self_types)]
 
 mod app;
 mod basic_types;

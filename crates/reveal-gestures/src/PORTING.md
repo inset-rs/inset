@@ -13,6 +13,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - lsq_solver.rs → lsq_solver.dart
 - long_press.rs → LongPressDownDetails / LongPressStartDetails / LongPressMoveUpdateDetails / LongPressEndDetails
 
+## Handle receivers
+
+- Change: [`GestureArenaManager`](GestureArenaManager), [`GestureArenaTeam`](GestureArenaTeam), [`PointerRouter`](PointerRouter), [`GestureBinding`](GestureBinding), [`TapGestureRecognizer`](TapGestureRecognizer) and [`LongPressGestureRecognizer`](LongPressGestureRecognizer) are arena objects: `new(app, ..)` returns `Handle<T>` and methods take `self: Handle<Self>` plus [`App`](reveal_foundation::App), per the `Handle<T>` receiver rule in `reveal-foundation/src/PORTING.md` (app.rs).
+  Reason: language — see that entry.
+  Affect: `let tap = TapGestureRecognizer::new(app)`, then `tap.add_pointer(app, down)`; `GestureBinding::instance(app).handle_pointer_event(app, event)`. Callbacks are [`Listener`](reveal_foundation::Listener) / [`ValueChanged`](reveal_foundation::ValueChanged) and receive `&mut App`: `tap.set_on_tap(app, |app| …)`.
+
 ## events.rs → events.dart
 
 - Change: [`PointerEvent`](PointerEvent) is a pairing enum over the public event classes. `_Transformed*` subclasses are the same struct with [`transform`](PointerDownEvent::transform) set.
@@ -33,9 +39,25 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## binding.rs → binding.dart
 
-- Change: `GestureBinding::hit_test_in_view` calls a registered `HitTestable` first, then adds itself. `RendererBinding` registers itself with `GestureBinding::set_hit_testable`.
-  Reason: language — Flutter's `RendererBinding` overrides the method through mixin order; a crate above cannot override a method below it.
-  Affect: none for callers; a test binding that hit-tests its own tree registers a `HitTestable`.
+- Change: [`GestureBinding::instance`](GestureBinding::instance) is the App singleton.
+  Reason: language — same as [`SchedulerBinding::instance`](reveal_scheduler::SchedulerBinding::instance); Rust has no mixin-on-one-object.
+  Affect: `GestureBinding::instance(app)` where Dart writes `GestureBinding.instance`.
+
+- Change: [`pointer_router`](GestureBinding::pointer_router) / [`gesture_arena`](GestureBinding::gesture_arena) return `Handle`s created on first [`instance`](GestureBinding::instance).
+  Reason: language — `App::singleton` `Default` cannot mint child Handles; the fields are filled on first access.
+  Affect: `let router = binding.pointer_router(app); router.add_route(app, ...)`.
+
+- Change: `GestureBinding::hit_test_in_view` and `dispatch_event` call a registered `GestureBindingOverrides` first (walk the render trees; feed the mouse tracker), then run their own body. `RendererBinding` registers itself with [`set_overrides`](GestureBinding::set_overrides).
+  Reason: language — Flutter's `RendererBinding` overrides those methods through mixin order; a crate above cannot override a method below it.
+  Affect: none for callers; a test binding that hit-tests its own tree registers a `GestureBindingOverrides` with `GestureBinding::instance(app).set_overrides(app, overrides)`.
+
+- Change: [`GestureBindingOverridesObject`](GestureBindingOverridesObject) is the object side of [`GestureBindingOverrides`](GestureBindingOverrides): implement it on the binding type, and `Handle<T>` is then [`HitTestable`](HitTestable) and `GestureBindingOverrides`.
+  Reason: language — orphan rule; a crate above cannot implement those foreign `&self` traits for `Handle<ItsType>`.
+  Affect: `impl GestureBindingOverridesObject for RendererBinding`, then register `Rc::new(handle)`.
+
+- Change: `dispatch_event` / `_handlePointerDataPacket` do not catch panics or report `FlutterError`.
+  Reason: language — no catchable exception; diagnostics are deferred.
+  Affect: a panicking target skips the rest of the path.
 
 ## converter.rs → converter.dart
 
@@ -69,25 +91,17 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## arena.rs → arena.dart
 
-- Change: [`GestureArenaManager`](GestureArenaManager) is a Handle newtype. [`add`](GestureArenaManager::add) / [`close`](GestureArenaManager::close) / [`sweep`](GestureArenaManager::sweep) / [`hold`](GestureArenaManager::hold) / [`release`](GestureArenaManager::release) and [`GestureArenaEntry::resolve`](GestureArenaEntry::resolve) take [`App`](reveal_foundation::App).
-  Reason: language — callbacks must re-enter App; sole-member win uses [`App::schedule_microtask`](reveal_foundation::App::schedule_microtask). A `&mut` of the tables cannot be held across `accept_gesture`.
-  Affect: `GestureArenaManager::new(app)`. `arena.close(app, pointer)`. `entry.resolve(app, disposition)`.
-
 - Change: members compared by [`member_id`](GestureArenaMember::member_id) (`HandleId`).
   Reason: language — Rust has no object identity for a trait object.
-  Affect: implementors are Handle newtypes; return `self.0.id()`.
+  Affect: implement [`GestureArenaMember`](GestureArenaMember) for `Handle<T>` and return `self.id()`.
 
 ## team.rs → team.dart
 
-- Change: [`GestureArenaTeam`](GestureArenaTeam) is a Handle newtype. [`add`](GestureArenaTeam::add) takes [`App`](reveal_foundation::App). [`captain`](GestureArenaTeam::captain) is `captain` / [`set_captain`](GestureArenaTeam::set_captain).
-  Reason: language — the team mutates App-owned combiner slots; `captain` is a `GestureArenaMember` field, not a typed Handle.
-  Affect: `GestureArenaTeam::new(app)`. `team.add(app, pointer, member)`. `team.set_captain(app, member)`.
+- Change: [`captain`](GestureArenaTeam::captain) returns the captain's `HandleId`; [`set_captain`](GestureArenaTeam::set_captain) takes the member.
+  Reason: language — `captain` is a `GestureArenaMember` field, not a typed Handle, and a trait object cannot be handed back by value.
+  Affect: `team.set_captain(app, member)`; `team.captain(app)` is an `Option<HandleId>`.
 
 ## pointer_router.rs → pointer_router.dart
-
-- Change: [`PointerRouter`](PointerRouter) is a Handle newtype. Route methods take [`App`](reveal_foundation::App).
-  Reason: language — `route` snapshots the tables, drops the slot, then calls; a route may `remove_route` the same router.
-  Affect: `PointerRouter::new(app)`. `router.add_route(app, pointer, route, transform)`. `router.route(app, event)`.
 
 - Change: [`PointerRoute`](PointerRoute) receives [`App`](reveal_foundation::App). Identity is [`Listener`](reveal_foundation::Listener)-shaped (`new` clones, or [`handle_method`](PointerRoute::handle_method)).
   Reason: language — Rust closures have no identity; Dart's `PointerRoute` compares by identity and tear-offs canonicalize.
@@ -97,31 +111,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — no catchable exception for ordinary control flow; diagnostics are deferred.
   Affect: a panicking route skips every route after it. Flutter reports and continues.
 
-## binding.rs → binding.dart
-
-- Change: [`GestureBinding::instance`](GestureBinding::instance) is the App singleton. Members take `&mut App`.
-  Reason: language — same as [`SchedulerBinding::instance`](reveal_scheduler::SchedulerBinding::instance); Rust has no mixin-on-one-object.
-  Affect: `GestureBinding::instance(app)` where Dart writes `GestureBinding.instance`.
-
-- Change: [`pointer_router`](GestureBinding::pointer_router) / [`gesture_arena`](GestureBinding::gesture_arena) return Copy handles created on first [`instance`](GestureBinding::instance).
-  Reason: language — `App::singleton` `Default` cannot mint child Handles; the fields are filled on first access.
-  Affect: `let router = binding.pointer_router(app); router.add_route(app, ...)`.
-
-- Change: `hit_test_in_view` always adds this binding only. There is no override from `RendererBinding`.
-  Reason: language — Rust has no mixin override across crates.
-  Affect: a down event's path is `[GestureBinding]` until `RendererBinding` exists.
-
-- Change: `dispatch_event` / `_handlePointerDataPacket` do not catch panics or report `FlutterError`.
-  Reason: language — no catchable exception; diagnostics are deferred.
-  Affect: a panicking target skips the rest of the path.
-
 ## recognizer.rs / tap.rs / long_press.rs — GestureRecognizer hierarchy
 
 Pattern: [leaf-inheritance](../../../.cursor/skills/porting-flutter/patterns/leaf-inheritance.md).
-
-- Change: [`TapGestureRecognizer`](TapGestureRecognizer) / [`LongPressGestureRecognizer`](LongPressGestureRecognizer) are Handle newtypes. Methods take [`App`](reveal_foundation::App). Callbacks receive [`App`].
-  Reason: language — same as other Handle newtypes; a Rust callback cannot capture what it mutates.
-  Affect: `TapGestureRecognizer::new(app)`. `tap.add_pointer(app, down)`. `tap.set_on_tap(app, |app| …)`. Same shape on long press (`set_on_long_press`, …).
 
 - Change: `invokeCallback` does not catch panics or report `FlutterError`.
   Reason: language — no catchable exception; diagnostics are deferred.

@@ -7,6 +7,7 @@
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use crate::mouse_cursor::SystemMouseCursorKind;
 use crate::{View, ViewId};
 
 pub type PlatformRef = Rc<dyn Platform>;
@@ -90,6 +91,14 @@ pub trait Platform: 'static {
 
     /// The stable implicit view, when this embedding provides one.
     fn implicit_view(&self) -> Option<ViewRef>;
+
+    /// Shows a system cursor for a pointing device (Flutter's `activateSystemCursor`
+    /// message on `SystemChannels.mouseCursor`).
+    ///
+    /// Defaults to nothing: a host without a system cursor ignores the request.
+    fn activate_system_cursor(&self, device: i64, kind: SystemMouseCursorKind) {
+        let _ = (device, kind);
+    }
 }
 
 /// Platform for hand-pumped tests.

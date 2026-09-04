@@ -8,6 +8,7 @@
 
 mod client;
 mod geometry;
+mod mouse_cursor;
 mod painting;
 mod platform;
 mod pointer;
@@ -16,6 +17,7 @@ mod views;
 
 pub use client::EmbedderClient;
 pub use geometry::*;
+pub use mouse_cursor::SystemMouseCursorKind;
 pub use painting::*;
 pub use platform::{
     Brightness, Frame, InertPlatform, Platform, PlatformRef, TargetPlatform, ViewRef,

@@ -1,19 +1,23 @@
 //! Flutter counterpart: `rendering/proxy_box.dart` (`RenderProxyBoxMixin`,
 //! `HitTestBehavior`, `RenderConstrainedBox`, `RenderOpacity`,
 //! `RenderAnimatedOpacityMixin`, `RenderAnimatedOpacity`, `RenderPointerListener`,
-//! `DecorationPosition`, `RenderDecoratedBox`, `RenderRepaintBoundary`).
+//! `DecorationPosition`, `RenderDecoratedBox`, `RenderRepaintBoundary`, `RenderMouseRegion`).
 //!
 //! Intrinsics wait.
 
-use reveal_animation::Animation;
+use std::rc::Rc;
+
+use reveal_animation::AnyAnimation;
 use reveal_embedder::{Color, Offset, Size};
 use reveal_foundation::{App, Handle, Listener};
 use reveal_gestures::{
-    PointerCancelEventListener, PointerDownEventListener, PointerEvent, PointerHoverEventListener,
-    PointerMoveEventListener, PointerPanZoomEndEventListener, PointerPanZoomStartEventListener,
+    PointerCancelEventListener, PointerDownEventListener, PointerEnterEventListener, PointerEvent,
+    PointerExitEventListener, PointerHoverEventListener, PointerMoveEventListener,
+    PointerPanZoomEndEventListener, PointerPanZoomStartEventListener,
     PointerPanZoomUpdateEventListener, PointerSignalEventListener, PointerUpEventListener,
 };
 use reveal_painting::{BoxPainter, ClipContext, Decoration, ImageConfiguration};
+use reveal_services::{MouseCursor, MouseCursorRef, MouseTrackerAnnotation};
 
 use crate::box_::{
     AnyRenderBox, BoxConstraints, BoxHitTestEntry, BoxHitTestResult, RenderBox, RenderBoxData,
@@ -25,6 +29,7 @@ use crate::object::{
     RenderObjectWithChildData,
 };
 use crate::painting_context::PaintingContext;
+use crate::pipeline_owner::PipelineOwner;
 
 /// A base class for render boxes that resemble their children.
 ///
@@ -402,7 +407,7 @@ impl RenderBox for RenderOpacity {
 pub struct RenderAnimatedOpacityData {
     alpha: Option<i32>,
     currently_is_repaint_boundary: Option<bool>,
-    opacity: Option<Animation<f64>>,
+    opacity: Option<AnyAnimation<f64>>,
 }
 
 impl RenderAnimatedOpacityData {
@@ -467,14 +472,14 @@ pub trait RenderAnimatedOpacityMixin: RenderObjectWithChildMixin {
     ///
     /// An opacity of 1.0 is fully opaque. An opacity of 0.0 is fully transparent
     /// (i.e., invisible).
-    fn opacity(self: RenderHandle<Self>, app: &App) -> Animation<f64> {
+    fn opacity(self: RenderHandle<Self>, app: &App) -> AnyAnimation<f64> {
         self.animated_opacity_data(app)
             .opacity
             .expect("set by the constructor")
     }
 
     /// Sets [`opacity`](Self::opacity).
-    fn set_opacity(self: RenderHandle<Self>, app: &mut App, value: Animation<f64>) {
+    fn set_opacity(self: RenderHandle<Self>, app: &mut App, value: AnyAnimation<f64>) {
         if self.animated_opacity_data(app).opacity == Some(value) {
             return;
         }
@@ -542,9 +547,9 @@ fn update_opacity<T: RenderAnimatedOpacityMixin>(this: Handle<T>, app: &mut App)
     RenderAnimatedOpacityMixin::update_opacity(RenderHandle::from_handle(this), app);
 }
 
-/// Makes its child partially transparent, driven from an [`Animation`].
+/// Makes its child partially transparent, driven from an [`AnyAnimation`].
 ///
-/// This is a variant of [`RenderOpacity`] that uses an [`Animation<f64>`]
+/// This is a variant of [`RenderOpacity`] that uses an [`AnyAnimation<f64>`]
 /// rather than a `f64` to control the opacity.
 pub struct RenderAnimatedOpacity {
     render_object: RenderObjectData,
@@ -557,7 +562,7 @@ impl RenderAnimatedOpacity {
     /// Creates a partially transparent render object.
     pub fn new(
         app: &mut App,
-        opacity: Animation<f64>,
+        opacity: AnyAnimation<f64>,
         child: Option<AnyRenderBox>,
     ) -> RenderHandle<Self> {
         let this = RenderHandle::new_box(
@@ -618,7 +623,7 @@ impl RenderObject for RenderAnimatedOpacity {
         RenderAnimatedOpacityMixin::update_composited_layer(self, app, old_layer)
     }
 
-    fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: crate::PipelineOwner) {
+    fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: Handle<crate::PipelineOwner>) {
         if let Some(child) = self.child(app) {
             child.as_object().attach(app, owner);
         }
@@ -924,7 +929,10 @@ impl RenderBox for RenderPointerListener {
                     callback(app, event.clone());
                 }
             }
-            PointerEvent::Added(_) | PointerEvent::Removed(_) => {}
+            PointerEvent::Added(_)
+            | PointerEvent::Removed(_)
+            | PointerEvent::Enter(_)
+            | PointerEvent::Exit(_) => {}
         }
     }
 
@@ -1249,6 +1257,294 @@ impl RenderBox for RenderRepaintBoundary {
     }
 }
 
+/// Calls callbacks in response to pointer events that are exclusive to mice.
+///
+/// It responds to events that are related to hovering, i.e. when the mouse
+/// enters, exits (with or without pressing buttons), or moves over a region
+/// without pressing buttons.
+///
+/// It does not respond to common events that construct gestures, such as when
+/// the pointer is pressed, moved, then released or canceled. For these events,
+/// use [`RenderPointerListener`].
+///
+/// If it has a child, it defers to the child for sizing behavior.
+///
+/// If it does not have a child, it grows to fit the parent-provided constraints.
+///
+/// Flutter's `RenderMouseRegion implements MouseTrackerAnnotation`: here it answers
+/// [`RenderObject::mouse_tracker_annotation`] with its current callbacks, cursor, and validity.
+///
+/// See also:
+///
+///  * `MouseRegion`, a widget that listens to hover events using
+///    [`RenderMouseRegion`].
+pub struct RenderMouseRegion {
+    render_object: RenderObjectData,
+    render_box: RenderBoxData,
+    child: RenderObjectWithChildData<AnyRenderBox>,
+    on_enter: Option<PointerEnterEventListener>,
+    on_hover: Option<PointerHoverEventListener>,
+    on_exit: Option<PointerExitEventListener>,
+    cursor: MouseCursorRef,
+    valid_for_mouse_tracker: bool,
+    opaque: bool,
+    behavior: HitTestBehavior,
+}
+
+impl RenderMouseRegion {
+    /// Creates a render object that forwards pointer events to callbacks.
+    ///
+    /// Dart's remaining constructor arguments have setters: the callbacks, `cursor`
+    /// (`MouseCursor.defer`), `opaque` (true), and `hit_test_behavior` (opaque).
+    /// `valid_for_mouse_tracker` has none, so it is a parameter (Dart's default is true).
+    pub fn new(
+        app: &mut App,
+        valid_for_mouse_tracker: bool,
+        child: Option<AnyRenderBox>,
+    ) -> RenderHandle<Self> {
+        let this = RenderHandle::new_box(
+            app,
+            RenderMouseRegion {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                child: RenderObjectWithChildData::new(),
+                on_enter: None,
+                on_hover: None,
+                on_exit: None,
+                cursor: <dyn MouseCursor>::defer(),
+                valid_for_mouse_tracker,
+                opaque: true,
+                behavior: HitTestBehavior::Opaque,
+            },
+        );
+        this.set_child(app, child);
+        this
+    }
+
+    /// Whether this object should prevent [`RenderMouseRegion`]s visually behind it
+    /// from detecting the pointer, thus affecting how their `on_hover`, `on_enter`,
+    /// and `on_exit` behave.
+    ///
+    /// If `opaque` is true, this object will absorb the mouse pointer and
+    /// prevent this object's siblings (or any other objects that are not
+    /// ancestors or descendants of this object) from detecting the mouse
+    /// pointer even when the pointer is within their areas.
+    ///
+    /// If `opaque` is false, this object will not affect how [`RenderMouseRegion`]s
+    /// behind it behave, which will detect the mouse pointer as long as the
+    /// pointer is within their areas.
+    ///
+    /// This defaults to true.
+    pub fn opaque(self: RenderHandle<Self>, app: &App) -> bool {
+        self.get(app).opaque
+    }
+
+    /// Sets [`opaque`](Self::opaque).
+    pub fn set_opaque(self: RenderHandle<Self>, app: &mut App, value: bool) {
+        if self.get(app).opaque != value {
+            self.get_mut(app).opaque = value;
+            // Trigger [MouseTracker]'s device update to recalculate mouse states.
+            self.mark_needs_paint(app);
+        }
+    }
+
+    /// How to behave during hit testing.
+    ///
+    /// This defaults to [`HitTestBehavior::Opaque`] if `None`.
+    pub fn hit_test_behavior(self: RenderHandle<Self>, app: &App) -> Option<HitTestBehavior> {
+        Some(self.get(app).behavior)
+    }
+
+    /// Sets [`hit_test_behavior`](Self::hit_test_behavior).
+    pub fn set_hit_test_behavior(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        value: Option<HitTestBehavior>,
+    ) {
+        let new_value = value.unwrap_or(HitTestBehavior::Opaque);
+        if self.get(app).behavior != new_value {
+            self.get_mut(app).behavior = new_value;
+            // Trigger [MouseTracker]'s device update to recalculate mouse states.
+            self.mark_needs_paint(app);
+        }
+    }
+
+    pointer_listener_field!(
+        on_enter,
+        set_on_enter,
+        PointerEnterEventListener,
+        "Triggered when a mouse pointer, with or without buttons pressed, has entered the region and `valid_for_mouse_tracker` is true."
+    );
+    pointer_listener_field!(
+        on_hover,
+        set_on_hover,
+        PointerHoverEventListener,
+        "Triggered when a pointer has moved onto or within the region without buttons pressed."
+    );
+    pointer_listener_field!(
+        on_exit,
+        set_on_exit,
+        PointerExitEventListener,
+        "Triggered when a mouse pointer, with or without buttons pressed, has exited the region and `valid_for_mouse_tracker` is true."
+    );
+
+    /// The mouse cursor for mouse pointers that are hovering over the region.
+    ///
+    /// When a mouse enters the region, its cursor will be changed to the `cursor`.
+    /// When the mouse leaves the region, the cursor will be set by the region
+    /// found at the new location.
+    ///
+    /// Defaults to `MouseCursor.defer`, deferring the choice of cursor to the next
+    /// region behind it in hit-test order.
+    pub fn cursor(self: RenderHandle<Self>, app: &App) -> MouseCursorRef {
+        Rc::clone(&self.get(app).cursor)
+    }
+
+    /// Sets [`cursor`](Self::cursor).
+    pub fn set_cursor(self: RenderHandle<Self>, app: &mut App, value: MouseCursorRef) {
+        if *self.get(app).cursor != *value {
+            self.get_mut(app).cursor = value;
+            // A repaint is needed in order to trigger a device update of
+            // [MouseTracker] so that this new value can be found.
+            self.mark_needs_paint(app);
+        }
+    }
+
+    /// Whether this is included when a `MouseTracker` collects the list of
+    /// annotations: true while attached to a pipeline owner.
+    pub fn valid_for_mouse_tracker(self: RenderHandle<Self>, app: &App) -> bool {
+        self.get(app).valid_for_mouse_tracker
+    }
+}
+
+impl RenderObjectWithChildMixin for RenderMouseRegion {
+    fn child_data(self: RenderHandle<Self>, app: &App) -> &RenderObjectWithChildData<AnyRenderBox> {
+        &self.get(app).child
+    }
+
+    fn child_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderObjectWithChildData<AnyRenderBox> {
+        &mut self.get_mut(app).child
+    }
+}
+
+impl RenderProxyBoxMixin for RenderMouseRegion {
+    fn compute_size_for_no_child(
+        self: RenderHandle<Self>,
+        _app: &App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        constraints.biggest()
+    }
+}
+
+impl RenderProxyBoxWithHitTestBehavior for RenderMouseRegion {
+    fn behavior(self: RenderHandle<Self>, app: &App) -> HitTestBehavior {
+        self.get(app).behavior
+    }
+}
+
+impl RenderObject for RenderMouseRegion {
+    crate::render_object_accessors!();
+
+    fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: Handle<PipelineOwner>) {
+        for child in [self.child(app)].into_iter().flatten() {
+            child.as_object().attach(app, owner);
+        }
+        self.get_mut(app).valid_for_mouse_tracker = true;
+    }
+
+    fn did_detach(self: RenderHandle<Self>, app: &mut App) {
+        // Dart clears the flag before `super.detach()`; nothing in the base body reads it.
+        self.get_mut(app).valid_for_mouse_tracker = false;
+        for child in [self.child(app)].into_iter().flatten() {
+            child.as_object().detach(app);
+        }
+    }
+
+    fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+        RenderProxyBoxMixin::perform_layout(self, app);
+    }
+
+    fn mouse_tracker_annotation(
+        self: RenderHandle<Self>,
+        app: &App,
+    ) -> Option<MouseTrackerAnnotation> {
+        let this = self.get(app);
+        Some(MouseTrackerAnnotation {
+            on_enter: this.on_enter.clone(),
+            on_exit: this.on_exit.clone(),
+            cursor: Rc::clone(&this.cursor),
+            valid_for_mouse_tracker: this.valid_for_mouse_tracker,
+        })
+    }
+
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        RenderProxyBoxMixin::paint(self, app, context, offset);
+    }
+
+    fn visit_children(
+        self: RenderHandle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyRenderObject),
+    ) {
+        if let Some(child) = self.child(app) {
+            visitor(child.as_object());
+        }
+    }
+}
+
+impl RenderBox for RenderMouseRegion {
+    crate::render_box_accessors!();
+
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        RenderProxyBoxMixin::setup_parent_data(self, app, child);
+    }
+
+    fn hit_test(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        RenderProxyBoxWithHitTestBehavior::hit_test(self, app, result, position)
+            && self.get(app).opaque
+    }
+
+    fn hit_test_self(self: RenderHandle<Self>, app: &App, position: Offset) -> bool {
+        RenderProxyBoxWithHitTestBehavior::hit_test_self(self, app, position)
+    }
+
+    fn hit_test_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        RenderProxyBoxMixin::hit_test_children(self, app, result, position)
+    }
+
+    fn handle_event(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        event: &PointerEvent,
+        _entry: &BoxHitTestEntry,
+    ) {
+        if let PointerEvent::Hover(event) = event
+            && let Some(on_hover) = self.get(app).on_hover.clone()
+        {
+            on_hover(app, event.clone());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use reveal_animation::{k_always_complete_animation, k_always_dismissed_animation};
@@ -1262,7 +1558,7 @@ mod tests {
     }
 
     /// The test binding's first frame: attach, lay the root out, schedule and flush paint.
-    fn first_frame(app: &mut App, root: AnyRenderBox) -> PipelineOwner {
+    fn first_frame(app: &mut App, root: AnyRenderBox) -> Handle<PipelineOwner> {
         let owner = PipelineOwner::new(app, None);
         owner.set_root_node(app, Some(root.as_object()));
         root.layout(app, BoxConstraints::tight(Size::new(100.0, 100.0)), false);
@@ -1272,7 +1568,7 @@ mod tests {
         owner
     }
 
-    fn pump_frame(app: &mut App, owner: PipelineOwner) {
+    fn pump_frame(app: &mut App, owner: Handle<PipelineOwner>) {
         owner.flush_layout(app);
         owner.flush_paint(app);
     }

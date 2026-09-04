@@ -158,109 +158,122 @@ impl Debug for AnimationStatusListener {
 ///
 /// This is what a concrete animation implements — Dart's
 /// `class X extends Animation<T>`. A field or parameter Dart types as
-/// `Animation<T>` holds an [`Animation`] handle instead; build one with
-/// [`Animation::from_handle`].
+/// `Animation<T>` holds the erased [`AnyAnimation<T>`] instead; get one from
+/// [`as_animation`](Animation::as_animation).
 ///
-/// The members are associated functions over `(app, this)` rather than methods
-/// on `&self`, for the reason recorded on the `listener_helpers` traits: a
-/// receiver borrows this animation's slot for the whole call, and the listener
-/// members hand `&mut App` onward to reach other entities and run listeners.
-pub trait AnimationNode<T>: Sized + 'static {
+/// The members take `self: Handle<Self>` rather than `&self`, for the reason
+/// recorded on the `listener_helpers` traits: a `&self` receiver would borrow
+/// this animation's slot for the whole call, and the listener members hand
+/// `&mut App` onward to reach other objects and run listeners.
+pub trait Animation<T: 'static>: Sized + 'static {
     /// Calls the listener every time the value of the animation changes.
     ///
     /// Listeners can be removed with [`remove_listener`].
     ///
-    /// [`remove_listener`]: AnimationNode::remove_listener
-    fn add_listener(app: &mut App, this: Handle<Self>, listener: Listener);
+    /// [`remove_listener`]: Animation::remove_listener
+    fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener);
 
     /// Stop calling the listener every time the value of the animation
     /// changes.
     ///
     /// Listeners can be added with [`add_listener`].
     ///
-    /// [`add_listener`]: AnimationNode::add_listener
-    fn remove_listener(app: &mut App, this: Handle<Self>, listener: &Listener);
+    /// [`add_listener`]: Animation::add_listener
+    fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener);
 
     /// Calls listener every time the status of the animation changes.
     ///
     /// Listeners can be removed with [`remove_status_listener`].
     ///
-    /// [`remove_status_listener`]: AnimationNode::remove_status_listener
-    fn add_status_listener(app: &mut App, this: Handle<Self>, listener: AnimationStatusListener);
+    /// [`remove_status_listener`]: Animation::remove_status_listener
+    fn add_status_listener(self: Handle<Self>, app: &mut App, listener: AnimationStatusListener);
 
     /// Stops calling the listener every time the status of the animation
     /// changes.
     ///
     /// Listeners can be added with [`add_status_listener`].
     ///
-    /// [`add_status_listener`]: AnimationNode::add_status_listener
+    /// [`add_status_listener`]: Animation::add_status_listener
     fn remove_status_listener(
+        self: Handle<Self>,
         app: &mut App,
-        this: Handle<Self>,
         listener: &AnimationStatusListener,
     );
 
     /// The current status of this animation.
-    fn status(app: &App, this: Handle<Self>) -> AnimationStatus;
+    fn status(self: Handle<Self>, app: &App) -> AnimationStatus;
 
     /// The current value of the animation.
     ///
     /// Returns an owned `T`, not a reference: an animation may compute its
     /// value from its parent's (Dart's `CurvedAnimation.value` does), so there
     /// is no stored field for a reference to point at.
-    fn value(app: &App, this: Handle<Self>) -> T;
+    fn value(self: Handle<Self>, app: &App) -> T;
 
     /// Whether this animation is stopped at the beginning.
-    fn is_dismissed(app: &App, this: Handle<Self>) -> bool {
-        Self::status(app, this).is_dismissed()
+    fn is_dismissed(self: Handle<Self>, app: &App) -> bool {
+        Self::status(self, app).is_dismissed()
     }
 
     /// Whether this animation is stopped at the end.
-    fn is_completed(app: &App, this: Handle<Self>) -> bool {
-        Self::status(app, this).is_completed()
+    fn is_completed(self: Handle<Self>, app: &App) -> bool {
+        Self::status(self, app).is_completed()
     }
 
     /// Whether this animation is running in either direction.
-    fn is_animating(app: &App, this: Handle<Self>) -> bool {
-        Self::status(app, this).is_animating()
+    fn is_animating(self: Handle<Self>, app: &App) -> bool {
+        Self::status(self, app).is_animating()
     }
 
     /// Whether the current aim of this animation is toward completion.
-    fn is_forward_or_completed(app: &App, this: Handle<Self>) -> bool {
-        Self::status(app, this).is_forward_or_completed()
+    fn is_forward_or_completed(self: Handle<Self>, app: &App) -> bool {
+        Self::status(self, app).is_forward_or_completed()
+    }
+
+    /// This animation as the erased [`AnyAnimation<T>`] — what to pass where
+    /// a Dart API takes an `Animation<T>`.
+    ///
+    /// The object is untouched; this mints an erased second handle to it, so
+    /// concrete members stay reachable through the typed one while the erased
+    /// handle sits in a field Dart types as `Animation<T>`.
+    fn as_animation(self: Handle<Self>) -> AnyAnimation<T> {
+        AnyAnimation {
+            id: self.id(),
+            vtable: const { &AnimationVTable::of::<Self>() },
+        }
     }
 }
 
-/// A handle to an animation whose concrete type is not known.
+/// Erased [`Animation`]: one identity and a static vtable, the fat pointer
+/// rustc cannot build for an arena id. No lease.
 ///
 /// This is what a field or parameter Dart types as `Animation<T>` becomes. The
 /// concrete animation stays in the [`App`] under its own type; the handle
-/// carries its address plus a static dispatch table, so holding or copying one
-/// borrows nothing, and the same entity stays reachable through its typed
-/// [`Handle`] handle for concrete-only members. Erasing does not consume
-/// anything — `from_handle` mints a second handle.
+/// carries its id plus a static dispatch table, so holding or copying one
+/// borrows nothing, and the same object stays reachable through its typed
+/// [`Handle`] for concrete-only members.
 ///
 /// Equality is Dart's `==` on an object reference: two handles are equal
-/// exactly when they address the same entity.
-pub struct Animation<T: 'static> {
-    entity: HandleId,
-    ops: &'static AnimationOps<T>,
+/// exactly when they address the same object.
+pub struct AnyAnimation<T: 'static> {
+    id: HandleId,
+    vtable: &'static AnimationVTable<T>,
 }
 
-/// The dispatch table behind [`Animation`]: one static instance per concrete
-/// [`AnimationNode`] type, built by [`Animation::from_handle`].
+/// The vtable of an erased [`AnyAnimation`]: one `&'static` table per
+/// concrete [`Animation`] type, built by [`AnimationVTable::of`].
 ///
 /// It lives outside the arena — `&'static` — because a listener member hands
 /// `&mut App` onward; dispatch read out of the arena would keep the arena
 /// borrowed across that call.
-struct AnimationOps<T> {
+struct AnimationVTable<T> {
     add_listener: fn(&mut App, HandleId, Listener),
     remove_listener: fn(&mut App, HandleId, &Listener),
     add_status_listener: fn(&mut App, HandleId, AnimationStatusListener),
     remove_status_listener: fn(&mut App, HandleId, &AnimationStatusListener),
     status: fn(&App, HandleId) -> AnimationStatus,
     value: fn(&App, HandleId) -> T,
-    // The four derived getters dispatch through the node rather than
+    // The four derived getters dispatch through the object rather than
     // recomputing from `status`, because they are virtual in Dart —
     // `AnimationController` overrides `isAnimating`
     // (`animation_controller.dart:449`).
@@ -270,173 +283,150 @@ struct AnimationOps<T> {
     is_forward_or_completed: fn(&App, HandleId) -> bool,
 }
 
-/// The typed handle behind an erased one.
-///
-/// # Panics
-///
-/// If the entity was destroyed. The slot cannot hold a different type: the id
-/// came from an `Handle<A>` in [`Animation::from_handle`], and a generation is
-/// never reused.
-fn resolve<A: 'static>(app: &App, id: HandleId) -> Handle<A> {
-    app.handle(id)
-        .unwrap_or_else(|| panic!("stale handle: animation entity {id:?} was destroyed"))
+/// The typed handle for an erased id. Free: nothing is looked up; `get` checks
+/// the slot.
+fn resolve<A: 'static>(id: HandleId) -> Handle<A> {
+    Handle::from_id(id)
 }
 
-impl<T: 'static> Animation<T> {
-    /// Erases the concrete type of `entity`.
-    ///
-    /// The entity is untouched; this mints an untyped second handle to it, so
-    /// concrete members stay reachable through the typed one while the erased
-    /// handle sits in a field Dart types as `Animation<T>`.
-    pub fn from_handle<A: AnimationNode<T>>(entity: Handle<A>) -> Animation<T> {
-        Animation {
-            entity: entity.id(),
-            ops: const {
-                &AnimationOps {
-                    add_listener: |app, id, listener| {
-                        let this = resolve::<A>(app, id);
-                        A::add_listener(app, this, listener)
-                    },
-                    remove_listener: |app, id, listener| {
-                        let this = resolve::<A>(app, id);
-                        A::remove_listener(app, this, listener)
-                    },
-                    add_status_listener: |app, id, listener| {
-                        let this = resolve::<A>(app, id);
-                        A::add_status_listener(app, this, listener)
-                    },
-                    remove_status_listener: |app, id, listener| {
-                        let this = resolve::<A>(app, id);
-                        A::remove_status_listener(app, this, listener)
-                    },
-                    status: |app, id| A::status(app, resolve(app, id)),
-                    value: |app, id| A::value(app, resolve(app, id)),
-                    is_dismissed: |app, id| A::is_dismissed(app, resolve(app, id)),
-                    is_completed: |app, id| A::is_completed(app, resolve(app, id)),
-                    is_animating: |app, id| A::is_animating(app, resolve(app, id)),
-                    is_forward_or_completed: |app, id| {
-                        A::is_forward_or_completed(app, resolve(app, id))
-                    },
-                }
+impl<T: 'static> AnimationVTable<T> {
+    /// The table for one concrete animation type.
+    const fn of<A: Animation<T>>() -> AnimationVTable<T> {
+        AnimationVTable {
+            add_listener: |app, id, listener| A::add_listener(resolve(id), app, listener),
+            remove_listener: |app, id, listener| A::remove_listener(resolve(id), app, listener),
+            add_status_listener: |app, id, listener| {
+                A::add_status_listener(resolve(id), app, listener)
             },
+            remove_status_listener: |app, id, listener| {
+                A::remove_status_listener(resolve(id), app, listener)
+            },
+            status: |app, id| A::status(resolve(id), app),
+            value: |app, id| A::value(resolve(id), app),
+            is_dismissed: |app, id| A::is_dismissed(resolve(id), app),
+            is_completed: |app, id| A::is_completed(resolve(id), app),
+            is_animating: |app, id| A::is_animating(resolve(id), app),
+            is_forward_or_completed: |app, id| A::is_forward_or_completed(resolve(id), app),
         }
     }
+}
 
+impl<T: 'static> AnyAnimation<T> {
     /// Calls the listener every time the value of the animation changes.
     ///
-    /// Listeners can be removed with [`remove_listener`](Animation::remove_listener).
+    /// Listeners can be removed with [`remove_listener`](AnyAnimation::remove_listener).
     pub fn add_listener(self, app: &mut App, listener: Listener) {
-        (self.ops.add_listener)(app, self.entity, listener)
+        (self.vtable.add_listener)(app, self.id, listener)
     }
 
     /// Stop calling the listener every time the value of the animation
     /// changes.
     ///
-    /// Listeners can be added with [`add_listener`](Animation::add_listener).
+    /// Listeners can be added with [`add_listener`](AnyAnimation::add_listener).
     pub fn remove_listener(self, app: &mut App, listener: &Listener) {
-        (self.ops.remove_listener)(app, self.entity, listener)
+        (self.vtable.remove_listener)(app, self.id, listener)
     }
 
     /// Calls listener every time the status of the animation changes.
     ///
     /// Listeners can be removed with
-    /// [`remove_status_listener`](Animation::remove_status_listener).
+    /// [`remove_status_listener`](AnyAnimation::remove_status_listener).
     pub fn add_status_listener(self, app: &mut App, listener: AnimationStatusListener) {
-        (self.ops.add_status_listener)(app, self.entity, listener)
+        (self.vtable.add_status_listener)(app, self.id, listener)
     }
 
     /// Stops calling the listener every time the status of the animation
     /// changes.
     ///
     /// Listeners can be added with
-    /// [`add_status_listener`](Animation::add_status_listener).
+    /// [`add_status_listener`](AnyAnimation::add_status_listener).
     pub fn remove_status_listener(self, app: &mut App, listener: &AnimationStatusListener) {
-        (self.ops.remove_status_listener)(app, self.entity, listener)
+        (self.vtable.remove_status_listener)(app, self.id, listener)
     }
 
     /// The current status of this animation.
     pub fn status(self, app: &App) -> AnimationStatus {
-        (self.ops.status)(app, self.entity)
+        (self.vtable.status)(app, self.id)
     }
 
     /// The current value of the animation.
     pub fn value(self, app: &App) -> T {
-        (self.ops.value)(app, self.entity)
+        (self.vtable.value)(app, self.id)
     }
 
     /// Whether this animation is stopped at the beginning.
     pub fn is_dismissed(self, app: &App) -> bool {
-        (self.ops.is_dismissed)(app, self.entity)
+        (self.vtable.is_dismissed)(app, self.id)
     }
 
     /// Whether this animation is stopped at the end.
     pub fn is_completed(self, app: &App) -> bool {
-        (self.ops.is_completed)(app, self.entity)
+        (self.vtable.is_completed)(app, self.id)
     }
 
     /// Whether this animation is running in either direction.
     pub fn is_animating(self, app: &App) -> bool {
-        (self.ops.is_animating)(app, self.entity)
+        (self.vtable.is_animating)(app, self.id)
     }
 
     /// Whether the current aim of this animation is toward completion.
     pub fn is_forward_or_completed(self, app: &App) -> bool {
-        (self.ops.is_forward_or_completed)(app, self.entity)
+        (self.vtable.is_forward_or_completed)(app, self.id)
     }
 }
 
-impl Animation<f64> {
+impl AnyAnimation<f64> {
     /// Chains a `Tween` (or any [`Animatable`]) to this animation.
     ///
     /// Dart's `Animation<U> drive<U>(Animatable<U> child)` is a generic
     /// virtual method; no dispatch table can hold a generic, so ours is
-    /// inherent on the handle and cannot be overridden. Flutter defines no
-    /// override either — `animation.dart:325` forwards to
+    /// inherent on the erased handle and cannot be overridden. Flutter defines
+    /// no override either — `animation.dart:325` forwards to
     /// `child.animate(this)`, as this does.
     pub fn drive<U: 'static>(
         self,
         app: &mut App,
         child: impl Animatable<U> + Clone + 'static,
-    ) -> Animation<U> {
+    ) -> AnyAnimation<U> {
         child.animate(app, self)
     }
 }
 
-impl<T: 'static> reveal_foundation::Listenable for Animation<T> {
+impl<T: 'static> reveal_foundation::Listenable for AnyAnimation<T> {
     fn add_listener(&self, app: &mut App, listener: Listener) {
-        Animation::add_listener(*self, app, listener);
+        AnyAnimation::add_listener(*self, app, listener);
     }
 
     fn remove_listener(&self, app: &mut App, listener: &Listener) {
-        Animation::remove_listener(*self, app, listener);
+        AnyAnimation::remove_listener(*self, app, listener);
     }
 }
 
-// Written by hand so that `Animation<T>: Copy` does not require `T: Copy`,
+// Written by hand so that `AnyAnimation<T>: Copy` does not require `T: Copy`,
 // like `Handle<T>`.
-impl<T> Clone for Animation<T> {
-    fn clone(&self) -> Animation<T> {
+impl<T> Clone for AnyAnimation<T> {
+    fn clone(&self) -> AnyAnimation<T> {
         *self
     }
 }
 
-impl<T> Copy for Animation<T> {}
+impl<T> Copy for AnyAnimation<T> {}
 
-impl<T> PartialEq for Animation<T> {
-    fn eq(&self, other: &Animation<T>) -> bool {
-        // The entity alone. Dart's `==` on an `Animation` is object identity,
-        // which the entity id carries; the ops address is excluded because
-        // Rust does not promise one address per instantiation across codegen
+impl<T> PartialEq for AnyAnimation<T> {
+    fn eq(&self, other: &AnyAnimation<T>) -> bool {
+        // The id alone. Dart's `==` on an `Animation` is object identity,
+        // which the id carries; the vtable address is excluded because Rust
+        // does not promise one address per instantiation across codegen
         // units.
-        self.entity == other.entity
+        self.id == other.id
     }
 }
 
-impl<T> Eq for Animation<T> {}
+impl<T> Eq for AnyAnimation<T> {}
 
-impl<T> Debug for Animation<T> {
+impl<T> Debug for AnyAnimation<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Animation<{}>({:?})", type_name::<T>(), self.entity)
+        write!(f, "AnyAnimation<{}>({:?})", type_name::<T>(), self.id)
     }
 }
 
@@ -524,28 +514,28 @@ mod tests {
     /// while stopped (`animation_controller.dart:449`).
     struct OverridingNode;
 
-    impl AnimationNode<f64> for OverridingNode {
-        fn add_listener(_app: &mut App, _this: Handle<Self>, _listener: Listener) {}
-        fn remove_listener(_app: &mut App, _this: Handle<Self>, _listener: &Listener) {}
+    impl Animation<f64> for OverridingNode {
+        fn add_listener(self: Handle<Self>, _app: &mut App, _listener: Listener) {}
+        fn remove_listener(self: Handle<Self>, _app: &mut App, _listener: &Listener) {}
         fn add_status_listener(
+            self: Handle<Self>,
             _app: &mut App,
-            _this: Handle<Self>,
             _listener: AnimationStatusListener,
         ) {
         }
         fn remove_status_listener(
+            self: Handle<Self>,
             _app: &mut App,
-            _this: Handle<Self>,
             _listener: &AnimationStatusListener,
         ) {
         }
-        fn status(_app: &App, _this: Handle<Self>) -> AnimationStatus {
+        fn status(self: Handle<Self>, _app: &App) -> AnimationStatus {
             AnimationStatus::Forward
         }
-        fn value(_app: &App, _this: Handle<Self>) -> f64 {
+        fn value(self: Handle<Self>, _app: &App) -> f64 {
             0.25
         }
-        fn is_animating(_app: &App, _this: Handle<Self>) -> bool {
+        fn is_animating(self: Handle<Self>, _app: &App) -> bool {
             // Forward would say true; the override says false.
             false
         }
@@ -555,7 +545,7 @@ mod tests {
     fn the_erased_handle_dispatches_overridden_getters() {
         let mut app = App::new();
         let node = app.create(OverridingNode);
-        let animation = Animation::from_handle(node);
+        let animation = node.as_animation();
 
         assert_eq!(animation.status(&app), AnimationStatus::Forward);
         assert_eq!(animation.value(&app), 0.25);
@@ -572,45 +562,41 @@ mod tests {
         let first = app.create(OverridingNode);
         let second = app.create(OverridingNode);
 
-        assert_eq!(
-            Animation::<f64>::from_handle(first),
-            Animation::from_handle(first)
-        );
-        assert_ne!(
-            Animation::<f64>::from_handle(first),
-            Animation::from_handle(second)
-        );
+        assert_eq!(first.as_animation(), first.as_animation());
+        assert_ne!(first.as_animation(), second.as_animation());
+    }
+
+    /// A node whose `value` reads its slot.
+    struct Counter(u32);
+
+    impl Animation<f64> for Counter {
+        fn add_listener(self: Handle<Self>, _app: &mut App, _listener: Listener) {}
+        fn remove_listener(self: Handle<Self>, _app: &mut App, _listener: &Listener) {}
+        fn add_status_listener(
+            self: Handle<Self>,
+            _app: &mut App,
+            _listener: AnimationStatusListener,
+        ) {
+        }
+        fn remove_status_listener(
+            self: Handle<Self>,
+            _app: &mut App,
+            _listener: &AnimationStatusListener,
+        ) {
+        }
+        fn status(self: Handle<Self>, _app: &App) -> AnimationStatus {
+            AnimationStatus::Forward
+        }
+        fn value(self: Handle<Self>, app: &App) -> f64 {
+            f64::from(app.get(self).0)
+        }
     }
 
     #[test]
     fn an_erased_handle_does_not_consume_the_typed_one() {
-        struct Counter(u32);
-        impl AnimationNode<f64> for Counter {
-            fn add_listener(_app: &mut App, _this: Handle<Self>, _listener: Listener) {}
-            fn remove_listener(_app: &mut App, _this: Handle<Self>, _listener: &Listener) {}
-            fn add_status_listener(
-                _app: &mut App,
-                _this: Handle<Self>,
-                _listener: AnimationStatusListener,
-            ) {
-            }
-            fn remove_status_listener(
-                _app: &mut App,
-                _this: Handle<Self>,
-                _listener: &AnimationStatusListener,
-            ) {
-            }
-            fn status(_app: &App, _this: Handle<Self>) -> AnimationStatus {
-                AnimationStatus::Forward
-            }
-            fn value(app: &App, this: Handle<Self>) -> f64 {
-                f64::from(app.get(this).0)
-            }
-        }
-
         let mut app = App::new();
         let counter = app.create(Counter(1));
-        let erased = Animation::from_handle(counter);
+        let erased = counter.as_animation();
 
         // The concrete member stays reachable after erasing — the failure that
         // killed the owned `Box<dyn>` shape.
@@ -618,14 +604,16 @@ mod tests {
         assert_eq!(erased.value(&app), 2.0);
     }
 
+    /// The erased handle looks nothing up; the stale check is `App::get`'s,
+    /// at the first member that reads the slot.
     #[test]
     #[should_panic(expected = "stale handle")]
-    fn an_erased_handle_to_a_destroyed_animation_panics() {
+    fn an_erased_handle_to_a_destroyed_animation_panics_on_slot_access() {
         let mut app = App::new();
-        let node = app.create(OverridingNode);
-        let animation = Animation::from_handle(node);
-        app.destroy(node);
-        animation.status(&app);
+        let counter = app.create(Counter(1));
+        let animation = counter.as_animation();
+        app.destroy(counter);
+        animation.value(&app);
     }
 
     #[test]

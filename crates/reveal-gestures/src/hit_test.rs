@@ -1,5 +1,6 @@
 //! Flutter counterpart: `gestures/hit_test.dart`.
 
+use std::any::Any;
 use std::fmt::{self, Debug};
 
 use reveal_embedder::{Matrix4, Offset, ViewId};
@@ -30,7 +31,7 @@ pub trait HitTestDispatcher {
 }
 
 /// An object that can handle events.
-pub trait HitTestTarget: Debug {
+pub trait HitTestTarget: Debug + Any {
     /// Override this method to receive events.
     fn handle_event(&self, app: &mut App, event: &PointerEvent, entry: &HitTestEntry);
 }
