@@ -23,3 +23,4 @@ pub use widgets::media_query::*;
 pub use widgets::text::*;
 pub use widgets::ticker_provider::*;
 pub use widgets::transitions::*;
+pub use widgets::widget_state::*;

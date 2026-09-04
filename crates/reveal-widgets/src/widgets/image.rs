@@ -55,13 +55,10 @@ mod tests {
     /// A leaf that records the configuration its context yields.
     fn probe(seen: &Seen, size: Option<Size>) -> WidgetRef {
         let seen = Rc::clone(seen);
-        Builder {
-            key: None,
-            builder: Rc::new(move |app, context| {
-                *seen.borrow_mut() = Some(create_local_image_configuration(app, context, size));
-                SizedBox::shrink(None).into_widget()
-            }),
-        }
+        Builder::new(move |app, context| {
+            *seen.borrow_mut() = Some(create_local_image_configuration(app, context, size));
+            SizedBox::shrink().into_widget()
+        })
         .into_widget()
     }
 
@@ -69,15 +66,14 @@ mod tests {
     fn the_configuration_reads_the_direction_pixel_ratio_size_and_platform() {
         let mut app = App::new();
         let seen: Seen = Rc::default();
-        let tree = Directionality {
-            key: None,
-            text_direction: TextDirection::Rtl,
-            child: MediaQuery::new(
+        let tree = Directionality::new(
+            TextDirection::Rtl,
+            MediaQuery::new(
                 MediaQueryData::new().device_pixel_ratio(3.0),
                 probe(&seen, Some(Size::new(1.0, 2.0))),
             )
             .into_widget(),
-        }
+        )
         .into_widget();
         let harness = Harness::mount(&mut app, tree);
         harness.pump(&mut app);

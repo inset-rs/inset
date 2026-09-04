@@ -9,3 +9,4 @@ pub mod media_query;
 pub mod text;
 pub mod ticker_provider;
 pub mod transitions;
+pub mod widget_state;

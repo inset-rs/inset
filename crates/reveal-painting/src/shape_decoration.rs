@@ -4,7 +4,7 @@ use std::any::Any;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::sync::Arc;
 
-use reveal_embedder::{BlurStyle, Canvas, ClipOp, Color, FillRule, Matrix4, Offset, Paint};
+use reveal_embedder::{BlurStyle, Canvas, ClipOp, FillRule, Matrix4, Offset, Paint};
 use reveal_embedder::{Path, PathBuilder, Rect, Size};
 
 use crate::basic_types::TextDirection;
@@ -13,6 +13,7 @@ use crate::box_border::{Border, BoxShape};
 use crate::box_decoration::BoxDecoration;
 use crate::box_shadow::BoxShadow;
 use crate::circle_border::CircleBorder;
+use crate::colors::AnyColor;
 use crate::debug::debug_disable_shadows;
 use crate::decoration::{BoxPainter, Decoration};
 use crate::edge_insets::EdgeInsetsGeometry;
@@ -31,7 +32,7 @@ pub struct ShapeDecoration {
     /// The color to fill in the background of the shape.
     ///
     /// The color is under the image (image paint is deferred).
-    pub color: Option<Color>,
+    pub color: Option<AnyColor>,
     /// A list of shadows cast by the [`shape`](Self::shape).
     pub shadows: Option<Vec<BoxShadow>>,
     /// The shape to fill the [`color`](Self::color) into and to cast as the
@@ -64,8 +65,8 @@ impl ShapeDecoration {
     }
 
     /// The color to fill in the background of the shape.
-    pub fn color(mut self, color: Color) -> ShapeDecoration {
-        self.color = Some(color);
+    pub fn color(mut self, color: impl Into<AnyColor>) -> ShapeDecoration {
+        self.color = Some(color.into());
         self
     }
 
@@ -120,14 +121,14 @@ impl ShapeDecoration {
             }
         };
         ShapeDecoration {
-            color: source.color,
+            color: source.color.clone(),
             shadows: source.box_shadow.clone(),
             shape,
         }
     }
 
     fn from_fields(
-        color: Option<Color>,
+        color: Option<AnyColor>,
         shadows: Option<Vec<BoxShadow>>,
         shape: Box<dyn ShapeBorder>,
     ) -> ShapeDecoration {
@@ -173,7 +174,12 @@ impl ShapeDecoration {
             }
         }
         Some(ShapeDecoration::from_fields(
-            Color::lerp(a.and_then(|a| a.color), b.and_then(|b| b.color), t),
+            AnyColor::lerp(
+                a.and_then(|a| a.color.as_ref()),
+                b.and_then(|b| b.color.as_ref()),
+                t,
+            )
+            .map(AnyColor::from),
             BoxShadow::lerp_list(
                 a.and_then(|a| a.shadows.as_deref()),
                 b.and_then(|b| b.shadows.as_deref()),
@@ -188,7 +194,7 @@ impl ShapeDecoration {
 impl Clone for ShapeDecoration {
     fn clone(&self) -> ShapeDecoration {
         ShapeDecoration {
-            color: self.color,
+            color: self.color.clone(),
             shadows: self.shadows.clone(),
             shape: self.shape.clone_box(),
         }
@@ -340,8 +346,8 @@ impl ShapeDecorationPainter {
 
         if self.interior_paint.is_none() && self.decoration.color.is_some() {
             let mut paint = Paint::default();
-            if let Some(color) = self.decoration.color {
-                paint.color = color.into();
+            if let Some(color) = &self.decoration.color {
+                paint.color = color.color().into();
             }
             self.interior_paint = Some(paint);
         }
@@ -517,6 +523,7 @@ impl Debug for ShapeDecorationPainter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reveal_embedder::Color;
 
     use reveal_embedder::{FillRule, Radius};
 

@@ -62,3 +62,4 @@ Ported against: <commit>
 ## Deferred
 - `Listenable.merge`. Trigger: first widget that holds a `Listenable` as a value.
 ```
+- Widget construction and what counts as a divergence: [patterns/widget-syntax.md](patterns/widget-syntax.md).

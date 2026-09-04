@@ -1098,11 +1098,11 @@ pub struct MediaQuery {
 
 impl MediaQuery {
     /// Creates a widget that provides [`MediaQueryData`] to its descendants.
-    pub fn new(data: MediaQueryData, child: WidgetRef) -> MediaQuery {
+    pub fn new<K>(data: MediaQueryData, child: impl IntoWidget<K>) -> MediaQuery {
         MediaQuery {
             key: None,
             data,
-            child,
+            child: child.into_widget(),
         }
     }
 
@@ -1142,14 +1142,14 @@ impl MediaQuery {
     ///    [`MediaQueryData::view_insets`].
     ///  * [`remove_view_padding`](Self::remove_view_padding), the same thing but for
     ///    [`MediaQueryData::view_padding`].
-    pub fn remove_padding(
+    pub fn remove_padding<K>(
         app: &mut App,
         context: BuildContext,
         remove_left: bool,
         remove_top: bool,
         remove_right: bool,
         remove_bottom: bool,
-        child: WidgetRef,
+        child: impl IntoWidget<K>,
     ) -> MediaQuery {
         MediaQuery::new(
             MediaQuery::of(app, context).remove_padding(
@@ -1182,14 +1182,14 @@ impl MediaQuery {
     ///    [`MediaQueryData::padding`].
     ///  * [`remove_view_padding`](Self::remove_view_padding), the same thing but for
     ///    [`MediaQueryData::view_padding`].
-    pub fn remove_view_insets(
+    pub fn remove_view_insets<K>(
         app: &mut App,
         context: BuildContext,
         remove_left: bool,
         remove_top: bool,
         remove_right: bool,
         remove_bottom: bool,
-        child: WidgetRef,
+        child: impl IntoWidget<K>,
     ) -> MediaQuery {
         MediaQuery::new(
             MediaQuery::of(app, context).remove_view_insets(
@@ -1223,14 +1223,14 @@ impl MediaQuery {
     ///    [`MediaQueryData::padding`].
     ///  * [`remove_view_insets`](Self::remove_view_insets), the same thing but for
     ///    [`MediaQueryData::view_insets`].
-    pub fn remove_view_padding(
+    pub fn remove_view_padding<K>(
         app: &mut App,
         context: BuildContext,
         remove_left: bool,
         remove_top: bool,
         remove_right: bool,
         remove_bottom: bool,
-        child: WidgetRef,
+        child: impl IntoWidget<K>,
     ) -> MediaQuery {
         MediaQuery::new(
             MediaQuery::of(app, context).remove_view_padding(
@@ -1262,30 +1262,28 @@ impl MediaQuery {
     ///    [`MediaQueryData::word_spacing_override`],
     ///    [`MediaQueryData::paragraph_spacing_override`], the affected properties of the
     ///    [`MediaQueryData`].
-    pub fn apply_text_style_overrides(
+    pub fn apply_text_style_overrides<K>(
         key: Option<KeyRef>,
         line_height_scale_factor_override: Option<f64>,
         letter_spacing_override: Option<f64>,
         word_spacing_override: Option<f64>,
         paragraph_spacing_override: Option<f64>,
-        child: WidgetRef,
+        child: impl IntoWidget<K>,
     ) -> WidgetRef {
-        Builder {
-            key,
-            builder: Rc::new(move |app, context| {
-                MediaQuery::new(
-                    MediaQuery::of(app, context).apply_text_style_overrides(
-                        line_height_scale_factor_override,
-                        letter_spacing_override,
-                        word_spacing_override,
-                        paragraph_spacing_override,
-                    ),
-                    child.clone(),
-                )
-                .into_widget()
-            }),
-        }
-        .into_widget()
+        let child = child.into_widget();
+        let builder = Builder::new(move |app, context| {
+            MediaQuery::new(
+                MediaQuery::of(app, context).apply_text_style_overrides(
+                    line_height_scale_factor_override,
+                    letter_spacing_override,
+                    word_spacing_override,
+                    paragraph_spacing_override,
+                ),
+                child.clone(),
+            )
+            .into_widget()
+        });
+        Self::keyed(builder, key).into_widget()
     }
 
     /// Wraps the `child` in a [`MediaQuery`] which is built using data from the provided
@@ -1301,12 +1299,15 @@ impl MediaQuery {
     /// The injected [`MediaQuery`] updates when the surrounding [`MediaQuery`] or the `view`
     /// changes; updates to the view's own metrics wait with the `WidgetsBindingObserver`
     /// (see `PORTING.md`).
-    pub fn from_view(key: Option<KeyRef>, view: ViewRef, child: WidgetRef) -> WidgetRef {
-        MediaQueryFromView {
-            key,
-            view,
-            ignore_parent_data: false,
-            child,
+    pub fn from_view<K>(
+        key: Option<KeyRef>,
+        view: ViewRef,
+        child: impl IntoWidget<K>,
+    ) -> WidgetRef {
+        let from_view = MediaQueryFromView::new(view, child);
+        match key {
+            Some(key) => from_view.key(key),
+            None => from_view,
         }
         .into_widget()
     }
@@ -1319,20 +1320,18 @@ impl MediaQuery {
     ///
     /// This can be used to prevent, for example, icon fonts from scaling as the user adjusts
     /// the platform's text scaling value.
-    pub fn with_no_text_scaling(key: Option<KeyRef>, child: WidgetRef) -> WidgetRef {
-        Builder {
-            key,
-            builder: Rc::new(move |app, context| {
-                MediaQuery::new(
-                    MediaQuery::of(app, context)
-                        .copy_with()
-                        .text_scaler(TextScaler::NO_SCALING),
-                    child.clone(),
-                )
-                .into_widget()
-            }),
-        }
-        .into_widget()
+    pub fn with_no_text_scaling<K>(key: Option<KeyRef>, child: impl IntoWidget<K>) -> WidgetRef {
+        let child = child.into_widget();
+        let builder = Builder::new(move |app, context| {
+            MediaQuery::new(
+                MediaQuery::of(app, context)
+                    .copy_with()
+                    .text_scaler(TextScaler::NO_SCALING),
+                child.clone(),
+            )
+            .into_widget()
+        });
+        Self::keyed(builder, key).into_widget()
     }
 
     /// Wraps the `child` in a [`MediaQuery`] and applies [`TextScaler::clamp`] on the current
@@ -1347,27 +1346,32 @@ impl MediaQuery {
     /// `max_scale_factor`, the scaler becomes `TextScaler::linear(min_scale_factor)`.
     ///
     /// Dart accepts a `key` here and does not pass it to its `Builder`; neither does this.
-    pub fn with_clamped_text_scaling(
+    pub fn with_clamped_text_scaling<K>(
         _key: Option<KeyRef>,
         min_scale_factor: f64,
         max_scale_factor: f64,
-        child: WidgetRef,
+        child: impl IntoWidget<K>,
     ) -> WidgetRef {
         debug_assert!(max_scale_factor >= min_scale_factor);
         debug_assert!(!max_scale_factor.is_nan());
         debug_assert!(min_scale_factor.is_finite());
         debug_assert!(min_scale_factor >= 0.0);
 
-        Builder {
-            key: None,
-            builder: Rc::new(move |app, context| {
-                let data = MediaQuery::of(app, context);
-                let text_scaler = data.text_scaler.clamp(min_scale_factor, max_scale_factor);
-                MediaQuery::new(data.copy_with().text_scaler(text_scaler), child.clone())
-                    .into_widget()
-            }),
-        }
+        let child = child.into_widget();
+        Builder::new(move |app, context| {
+            let data = MediaQuery::of(app, context);
+            let text_scaler = data.text_scaler.clamp(min_scale_factor, max_scale_factor);
+            MediaQuery::new(data.copy_with().text_scaler(text_scaler), child.clone()).into_widget()
+        })
         .into_widget()
+    }
+
+    /// The `Builder` behind a static `MediaQuery` wrapper, under Dart's `Key? key`.
+    fn keyed(builder: Builder, key: Option<KeyRef>) -> Builder {
+        match key {
+            Some(key) => builder.key(key),
+            None => builder,
+        }
     }
 
     /// The data from the closest instance of this class that encloses the given context.
@@ -2170,6 +2174,24 @@ struct MediaQueryFromView {
     child: WidgetRef,
 }
 
+impl MediaQueryFromView {
+    /// Creates a `MediaQueryFromView`; Dart's optional named arguments are the setters.
+    fn new<K>(view: ViewRef, child: impl IntoWidget<K>) -> MediaQueryFromView {
+        MediaQueryFromView {
+            key: None,
+            view,
+            ignore_parent_data: false,
+            child: child.into_widget(),
+        }
+    }
+
+    /// Dart `_MediaQueryFromView(key:)`.
+    fn key(mut self, key: KeyRef) -> MediaQueryFromView {
+        self.key = Some(key);
+        self
+    }
+}
+
 impl Debug for MediaQueryFromView {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MediaQueryFromView")
@@ -2390,7 +2412,7 @@ mod tests {
             (self.read)(app, context);
             self.child
                 .clone()
-                .unwrap_or_else(|| SizedBox::shrink(None).into_widget())
+                .unwrap_or_else(|| SizedBox::shrink().into_widget())
         }
     }
 
@@ -2678,14 +2700,10 @@ mod tests {
         });
         let mut app = App::with_platform(platform);
         let (reader, seen) = data_reader();
+        let from_view = MediaQuery::from_view(None, Rc::clone(&view), reader);
         run_widget(
             &mut app,
-            View {
-                key: None,
-                view: Rc::clone(&view),
-                child: MediaQuery::from_view(None, Rc::clone(&view), reader),
-            }
-            .into_widget(),
+            View::new(Rc::clone(&view), from_view).into_widget(),
         );
         app.elapse(Duration::ZERO);
         pump_frame(&mut app, Duration::ZERO);

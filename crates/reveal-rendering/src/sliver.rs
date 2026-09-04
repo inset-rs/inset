@@ -611,6 +611,9 @@ impl RenderSliverVTable {
             object: RenderObjectVTable::of::<T>(
                 |app, id, child| <T as RenderObject>::setup_parent_data(resolve(id), app, child),
                 |app, id| T::paint_bounds(resolve(id), app),
+                |app, id, child, transform| {
+                    <T as RenderObject>::apply_paint_transform(resolve(id), app, child, transform)
+                },
                 None,
                 Some(|| const { &RenderSliverVTable::of::<T>() }),
             ),

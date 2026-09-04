@@ -1,4 +1,5 @@
 # reveal-widgets/src
+Syntax (constructors, setters, `Option`, `into_widget`) follows `.cursor/skills/porting-flutter/patterns/widget-syntax.md` and is not a divergence.
 Flutter home: packages/flutter/lib/src/widgets
 Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
@@ -70,19 +71,11 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — the fallback has no tree slot to borrow from, and `Rc<dyn Widget>` is `!Sync`, so no static fallback can be handed out.
   Affect: `let default = DefaultTextStyle::of(app, context); default.style` is a value with no lifetime tied to `app`.
 
-- Change: a widget's fluent `key(..)` setter shares its name with the `Widget::key()` getter; the inherent by-value setter wins at call sites (`Text::new("..").key(k)`), the framework reaches the getter through the trait.
-  Reason: language — Dart's constructor parameter and getter share a name too.
-  Affect: none; siblings follow the same convention.
-
 ## widgets/basic.rs → basic.dart (+ `DecoratedBox` from container.dart, `WidgetBuilder` from framework.dart)
 
 - Change: `Directionality::of(app, context)` / `maybe_of(app, context)` take `App`; `Builder.builder` is `WidgetBuilder = Rc<dyn Fn(&mut App, BuildContext) -> WidgetRef>`, defined here.
   Reason: language — a Rust callback cannot capture what it mutates; every framework call takes `&mut App`.
   Affect: write `Directionality::of(app, context)` and `Builder { builder: Rc::new(|app, context| ..) }`.
-
-- Change: Dart's named constructors are associated functions with no key argument: `SizedBox::expand(child)`, `shrink(child)`, `from_size(size, child)`, `square(dimension, child)`.
-  Reason: language — no named optional arguments; the struct literal is the constructor.
-  Affect: give a key with struct update syntax: `SizedBox { key: Some(key), ..SizedBox::expand(child) }`.
 
 - Change: constructor asserts (`Opacity` 0..=1, `Align` factors >= 0, `ConstrainedBox.constraints` valid) run in the render object's constructor and setters, not at widget construction.
   Reason: language — a struct literal has no constructor body.
@@ -146,6 +139,14 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — the tree hands out no references that outlive an `App` call (as `DefaultTextStyle::of`).
   Affect: value semantics; `IconTheme::of(app, context).size`.
 
+- Change: `IconThemeData.color` is painting's `AnyColor` (a `CupertinoDynamicColor` may live there; `CupertinoIconThemeData.resolve` resolves it).
+  Reason: language — see painting's `colors.rs` entry.
+  Affect: `.color(Color::RED)` unchanged; compare with `.map(AnyColor::color)`.
+
+- Change: `IconThemeData.resolve` is overridable through a `resolver` closure set with `IconThemeData::resolver(..)`; Dart's `class CupertinoIconThemeData extends IconThemeData` is a constructor returning an `IconThemeData` with that override, `copy_with` / `merge` keep it, `lerp` drops it, and `==` treats the override's presence as Dart's `runtimeType` check.
+  Reason: language — `IconTheme.data` is a value, not a subclassable object.
+  Affect: `CupertinoIconThemeData::new().color(..)` where Dart writes `CupertinoIconThemeData(color: ..)`.
+
 - Identical: `IconThemeData` (`fallback`, `copy_with`, `merge`, `is_concrete`, `lerp`, the range asserts), `IconTheme` (`merge` over `Builder`, `of` with the concrete fallback fill-in, `update_should_notify`).
 
 ## widgets/media_query.rs → media_query.dart
@@ -169,6 +170,36 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: `create_local_image_configuration(app, context, size)` takes `App` and leaves `bundle` and `locale` unset.
   Reason: platform — `DefaultAssetBundle` and `Localizations` wait.
   Affect: an `ImageProvider` keyed by bundle or locale resolves against `None`.
+
+## widgets/widget_state.rs → widget_state.dart
+
+- Change: a constraint is erased into `WidgetStatesConstraintRef` (a newtype over `Rc<dyn WidgetStatesConstraint>`), which the mixin's operators produce and carry: `WidgetState::Hovered & WidgetState::Focused`, `~WidgetState::Disabled`, `WidgetState::any()` (a fn). `WidgetStateMap<T>` is `Vec<(WidgetStatesConstraintRef, T)>` in insertion order; a bare enum key is written `WidgetState::Error.into()`.
+  Reason: language — the orphan rule forbids `Not` / `BitAnd` impls on a plain `Rc<dyn Trait>` alias; constraints are not hashable (`hashCode` waits), so Dart's `Map` is an ordered entry list.
+  Affect: reuse a stored combination with `.clone()` (`active.clone() & WidgetState::Error`); `==` follows Dart's overrides on the combinators, `any` by class.
+
+- Change: `WidgetStateMapper<T>::resolve` panics with Dart's `ArgumentError` message when no key is satisfied, for every `T`; a map that should resolve to `None` ends with `(WidgetState::any(), None)`.
+  Reason: language — Dart's `null as T` is a runtime test of `T`'s nullability; a Rust generic cannot tell `Option<X>` from `X` without specialization.
+  Affect: `WidgetStateMapper<Option<X>>` (Dart's `<X?>`) panics on an unmatched set instead of resolving `null` unless it carries the `any` entry.
+
+- Change: Dart's static members of `WidgetStateProperty` are on `<dyn WidgetStateProperty<T>>`; `from_map`, `resolve_with`, `all`, `lerp` return `WidgetStatePropertyRef<T>` (`Rc<dyn WidgetStateProperty<T>>`); `lerp(a, b, t, f)` takes `Option<WidgetStatePropertyRef<T>>` sides and an `Fn(Option<T>, Option<T>, f64) -> Option<T>`, returning `Option<WidgetStatePropertyRef<Option<T>>>`.
+  Reason: language — a Rust trait has no static members; `T?` is `Option<T>`.
+  Affect: `<dyn WidgetStateProperty<MouseCursorRef>>::resolve_with(|states| ..)`; a `WidgetStateProperty<T>?` field is `Option<WidgetStatePropertyRef<T>>`.
+
+- Change: `WidgetStateProperty.resolveAs<T>(value, states)` is `<dyn WidgetStateProperty<T>>::resolve_as(&value, &states)` over `MaybeWidgetStateProperty<T>` (`as_widget_state_property` / `from_resolved`), implemented for `AnyColor` (its `WidgetStateColor` extension), `MouseCursorRef` (`as_any`), and `Option` of either; it returns the value's own type.
+  Reason: language — Dart's `value is WidgetStateProperty<T>` is a runtime interface query; the value types answer it here.
+  Affect: `<dyn WidgetStateProperty<MouseCursorRef>>::resolve_as(&widget.mouse_cursor, &states)` where Dart writes `WidgetStateProperty.resolveAs<MouseCursor?>(widget.mouseCursor, states)`; a plain `AnyColor` comes back unchanged, other extensions intact.
+
+- Change: `WidgetStateColor` is one struct over Dart's three private subclasses (`resolve_with`, `transparent()`, `from_map`) and becomes the `Color` it is in Dart with `into_any()` / `.into()`: an `AnyColor` whose value is the empty-state resolution (`super(defaultValue)`), read back with `color.extension::<WidgetStateColor>()`. `WidgetStateColor.transparent` is a fn.
+  Reason: language — painting's `Color` is a value (see its `colors.rs` entry); an `Rc` resolver cannot live in a `static`.
+  Affect: `TextStyle::new().color(WidgetStateColor::resolve_with(..))`; a `from_map` color read as a plain `Color` is its empty-state resolution (Dart throws via `noSuchMethod`), panicking with the mapper's message only when no key matches the empty set. `==` is Dart's `Color.==` (same subclass and value), map equality for `from_map`.
+
+- Change: `WidgetStateMouseCursor` is one struct over Dart's two private subclasses (`resolve_with(callback, debug_description: Option<&str>)`, `from_map`); `clickable()` / `adaptive_clickable()` / `textable()` are fns; `.into()` gives the `MouseCursorRef`, recovered with `as_any().downcast_ref::<WidgetStateMouseCursor>()`. A `from_map` cursor used as a plain cursor resolves the empty set like `resolve_with` does.
+  Reason: language — no `static const` object holding an `Rc`; no `noSuchMethod`.
+  Affect: two `clickable()` results are not `==` (identity; Dart's `const` is canonical), so a `MouseRegion` handed a fresh one each build re-annotates; map equality holds for `from_map`.
+
+- Change: `WidgetStatesController` holds `ChangeNotifierData` and the set directly and re-states `ValueNotifier`'s `value` / `set_value` / `dispose`; `Handle<WidgetStatesController>` is `Listenable`, not `ValueListenable<WidgetStates>`; `new(app, Option<WidgetStates>)` returns the handle.
+  Reason: language — foundation's `ValueNotifier` is a leaf arena object with no `&mut` access to its value and `set_value` on its own handle; there is no `ValueNotifierData` bag nor a `ValueListenableObject` twin (orphan rule).
+  Affect: `controller.update(app, state, add)`, `app.get(controller).value()`; passing it where a `ValueListenable` is wanted waits.
 
 ## Deferred
 
@@ -195,3 +226,4 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - gesture_detector.rs: `excludeFromSemantics`, `semantics`, `SemanticsGestureDelegate`, `_GestureSemantics`, `replaceSemanticsActions`, `RenderSemanticsGestureHandler` (a11y — do not stub); `onDoubleTap*`, `on*Drag*`, `onPan*`, `onScale*`, `onForcePress*`, `dragStartBehavior`, `trackpadScrollCausesScale`, `trackpadScrollToScaleFactor`, `ScrollConfiguration.of(context).getMultitouchDragStrategy` (their recognizers). Trigger: accessibility; the drag / scale / force-press recognizers. `onTapMove` is a field Flutter does not wire at this commit either.
 - icon_theme.rs: `InheritedTheme` (`wrap`, `captureAll`) on `IconTheme`; `CupertinoIconThemeData`. Trigger: `InheritedTheme`; cupertino.
 - media_query.rs: `WidgetsBindingObserver` registration and `didChangeMetrics` / `didChangeAccessibilityFeatures` / `didChangeTextScaleFactor` / `didChangePlatformBrightness` on the from-view state; `DisplayFeature` (`displayFeatures`, `removeDisplayFeatures`, `displayFeaturesOf`, its aspect); `SystemTextScaler`; platform sources for the accessibility flags, `alwaysUse24HourFormat`, `supportsShowingSystemContextMenu`, text style overrides, `displayCornerRadii`, `systemGestureInsets`; `debugCheckHasMediaQuery`, `debugBrightnessOverride`; `EdgeInsets.fromViewPadding` lives as a private fn here until painting takes it. Trigger: observers in binding.rs; `DisplayFeature` and those members on `Platform` / `ViewMetrics`; the debug files; painting.
+- widget_state.rs: `WidgetStateBorderSide` / `_LerpSides` (needs an extension slot on painting's Copy `BorderSide`), `WidgetStateOutlinedBorder` (needs a default-state stand-in over `Box<dyn OutlinedBorder>`), `WidgetStateTextStyle` (needs an extension slot on the value `TextStyle`), `WidgetStatesController` as `ValueListenable<WidgetStates>` (foundation `ValueListenableObject` twin or `ValueNotifierData` bag), `hashCode` / `Hash` on constraints, mappers, `WidgetStatePropertyAll`, `WidgetStateMapper.noSuchMethod`, `Diagnosticable`. Trigger: `ChipThemeData.side` / `.shape`, `InputDecoration.labelStyle`, the first consumer holding the controller as a `ValueListenable`, theme-data hashing, diagnostics.

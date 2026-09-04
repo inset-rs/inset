@@ -1,15 +1,20 @@
 //! Opens the implicit window and runs a small widget tree in it through `run_app`: a padded,
-//! centered, decorated card holding a line of text. The card is a mouse region that shows
-//! the pointing-hand cursor while hovered.
+//! centered, decorated card holding a `CupertinoButton` that fades while pressed and counts
+//! its presses on stdout. The card is a mouse region that shows the pointing-hand cursor
+//! while hovered.
 //!
 //! ```text
 //! cargo run -p window
 //! ```
 
-use reveal_embedder::{Color, TextDirection};
+use std::cell::Cell;
+use std::rc::Rc;
+
+use reveal_cupertino::{CupertinoButton, CupertinoTheme, CupertinoThemeData};
+use reveal_embedder::{Brightness, Color, TextDirection};
 use reveal_embedder_winit::{ImplicitViewConfig, WinitEmbedder};
+use reveal_foundation::Listener;
 use reveal_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
-use reveal_rendering::DecorationPosition;
 use reveal_services::SystemMouseCursors;
 use reveal_shell::Shell;
 use reveal_widgets::{
@@ -33,74 +38,43 @@ fn main() {
 
 /// What `WidgetsApp` would supply: the ambient reading direction the text needs.
 fn home() -> WidgetRef {
-    Directionality {
-        key: None,
-        text_direction: TextDirection::Ltr,
-        child: background(),
-    }
-    .into_widget()
+    Directionality::new(TextDirection::Ltr, background()).into_widget()
 }
 
 fn background() -> WidgetRef {
-    DecoratedBox {
-        key: None,
-        decoration: Box::new(BoxDecoration::new().color(BACKGROUND)),
-        position: DecorationPosition::Background,
-        child: Some(
-            Padding {
-                key: None,
-                padding: EdgeInsetsGeometry::all(24.0),
-                child: Some(
-                    Center {
-                        key: None,
-                        width_factor: None,
-                        height_factor: None,
-                        child: Some(card()),
-                    }
-                    .into_widget(),
-                ),
-            }
-            .into_widget(),
-        ),
-    }
-    .into_widget()
+    DecoratedBox::new(BoxDecoration::new().color(BACKGROUND))
+        .child(Padding::new(EdgeInsetsGeometry::all(24.0)).child(Center::new().child(card())))
+        .into_widget()
 }
 
 fn card() -> WidgetRef {
-    MouseRegion {
-        cursor: SystemMouseCursors::CLICK.into(),
-        child: Some(
-            SizedBox {
-                key: None,
-                width: Some(200.0),
-                height: Some(120.0),
-                child: Some(
-                    DecoratedBox {
-                        key: None,
-                        decoration: Box::new(BoxDecoration::new().color(CARD)),
-                        position: DecorationPosition::Background,
-                        child: Some(
-                            Center {
-                                key: None,
-                                width_factor: None,
-                                height_factor: None,
-                                child: Some(label()),
-                            }
-                            .into_widget(),
-                        ),
-                    }
-                    .into_widget(),
-                ),
-            }
-            .into_widget(),
-        ),
-        ..MouseRegion::default()
-    }
+    MouseRegion::new()
+        .cursor(SystemMouseCursors::CLICK.into())
+        .child(
+            SizedBox::new().width(240.0).height(140.0).child(
+                DecoratedBox::new(BoxDecoration::new().color(CARD))
+                    .child(Center::new().child(button())),
+            ),
+        )
+        .into_widget()
+}
+
+/// A filled iOS button under a dark Cupertino theme, counting its presses.
+fn button() -> WidgetRef {
+    let presses = Rc::new(Cell::new(0));
+    let on_pressed = Listener::new(move |_app| {
+        presses.set(presses.get() + 1);
+        println!("pressed {} time(s)", presses.get());
+    });
+    CupertinoTheme::new(
+        CupertinoThemeData::new().with_brightness(Brightness::Dark),
+        CupertinoButton::filled(label(), Some(on_pressed)),
+    )
     .into_widget()
 }
 
 fn label() -> WidgetRef {
-    Text::new("Hello, reveal")
-        .style(TextStyle::new().font_size(24.0).color(LABEL))
+    Text::new("Press me")
+        .style(TextStyle::new().font_size(20.0).color(LABEL))
         .into_widget()
 }

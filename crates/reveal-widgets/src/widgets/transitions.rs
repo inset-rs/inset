@@ -217,6 +217,29 @@ pub struct FadeTransition {
     pub child: Option<WidgetRef>,
 }
 
+impl FadeTransition {
+    /// Creates an opacity transition.
+    pub fn new(opacity: AnyAnimation<f64>) -> FadeTransition {
+        FadeTransition {
+            key: None,
+            opacity,
+            child: None,
+        }
+    }
+
+    /// Dart `FadeTransition(key:)`.
+    pub fn key(mut self, key: KeyRef) -> FadeTransition {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `FadeTransition(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> FadeTransition {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
 impl RenderObjectWidget for FadeTransition {
     type RenderObject = RenderAnimatedOpacity;
 
@@ -307,17 +330,11 @@ mod tests {
     }
 
     fn fade(opacity: AnyAnimation<f64>) -> WidgetRef {
-        FadeTransition {
-            key: None,
-            opacity,
-            child: Some(
-                Sized {
-                    size: Size::new(10.0, 10.0),
-                }
-                .into_widget(),
-            ),
-        }
-        .into_widget()
+        FadeTransition::new(opacity)
+            .child(Sized {
+                size: Size::new(10.0, 10.0),
+            })
+            .into_widget()
     }
 
     fn fade_under_root(harness: &Harness, app: &App) -> RenderHandle<RenderAnimatedOpacity> {

@@ -89,7 +89,7 @@ impl DefaultTextStyle {
     ///
     /// The `max_lines` property may be `None` (and indeed defaults to `None`), but if it is
     /// not `None`, it must be greater than zero.
-    pub fn new(style: TextStyle, child: WidgetRef) -> DefaultTextStyle {
+    pub fn new<K>(style: TextStyle, child: impl IntoWidget<K>) -> DefaultTextStyle {
         DefaultTextStyle {
             key: None,
             style,
@@ -99,7 +99,7 @@ impl DefaultTextStyle {
             max_lines: None,
             text_width_basis: TextWidthBasis::Parent,
             text_height_behavior: None,
-            child,
+            child: child.into_widget(),
         }
     }
 
@@ -111,7 +111,7 @@ impl DefaultTextStyle {
     /// This constructor creates a [`DefaultTextStyle`] with an invalid `child`, which means
     /// the constructed value cannot be incorporated into the tree.
     pub fn fallback() -> DefaultTextStyle {
-        DefaultTextStyle::new(TextStyle::new(), NullWidget.into_widget())
+        DefaultTextStyle::new(TextStyle::new(), NullWidget)
     }
 
     /// Dart `DefaultTextStyle(key:)`.
@@ -239,14 +239,14 @@ pub struct DefaultTextHeightBehavior {
 
 impl DefaultTextHeightBehavior {
     /// Creates a default text height behavior for the given subtree.
-    pub fn new(
+    pub fn new<K>(
         text_height_behavior: TextHeightBehavior,
-        child: WidgetRef,
+        child: impl IntoWidget<K>,
     ) -> DefaultTextHeightBehavior {
         DefaultTextHeightBehavior {
             key: None,
             text_height_behavior,
-            child,
+            child: child.into_widget(),
         }
     }
 
@@ -570,33 +570,40 @@ impl StatelessWidget for Text {
             .text_scaler
             .clone()
             .unwrap_or_else(|| MediaQuery::text_scaler_of(app, context));
-        RichText {
-            key: None,
-            text_align: self
-                .text_align
-                .or(default_text_style.text_align)
-                .unwrap_or(TextAlign::Start),
-            // RichText uses Directionality.of to obtain a default if this is None.
-            text_direction: self.text_direction,
-            soft_wrap: self.soft_wrap.unwrap_or(default_text_style.soft_wrap),
-            overflow: self
-                .overflow
-                .or(effective_text_style
-                    .as_ref()
-                    .and_then(|style| style.overflow))
-                .unwrap_or(default_text_style.overflow),
-            text_scaler,
-            max_lines: self.max_lines.or(default_text_style.max_lines),
-            text_width_basis: self
-                .text_width_basis
-                .unwrap_or(default_text_style.text_width_basis),
-            text_height_behavior: self
-                .text_height_behavior
-                .or(default_text_style.text_height_behavior)
-                .or_else(|| DefaultTextHeightBehavior::maybe_of(app, context)),
-            text: effective_text_span.into_span(),
+        let text_height_behavior = self
+            .text_height_behavior
+            .or(default_text_style.text_height_behavior)
+            .or_else(|| DefaultTextHeightBehavior::maybe_of(app, context));
+        let mut rich_text = RichText::new(effective_text_span.into_span())
+            .text_align(
+                self.text_align
+                    .or(default_text_style.text_align)
+                    .unwrap_or(TextAlign::Start),
+            )
+            .soft_wrap(self.soft_wrap.unwrap_or(default_text_style.soft_wrap))
+            .overflow(
+                self.overflow
+                    .or(effective_text_style
+                        .as_ref()
+                        .and_then(|style| style.overflow))
+                    .unwrap_or(default_text_style.overflow),
+            )
+            .text_scaler(text_scaler)
+            .text_width_basis(
+                self.text_width_basis
+                    .unwrap_or(default_text_style.text_width_basis),
+            );
+        // RichText uses Directionality.of to obtain a default if this is None.
+        if let Some(text_direction) = self.text_direction {
+            rich_text = rich_text.text_direction(text_direction);
         }
-        .into_widget()
+        if let Some(max_lines) = self.max_lines.or(default_text_style.max_lines) {
+            rich_text = rich_text.max_lines(max_lines);
+        }
+        if let Some(text_height_behavior) = text_height_behavior {
+            rich_text = rich_text.text_height_behavior(text_height_behavior);
+        }
+        rich_text.into_widget()
     }
 }
 
@@ -894,12 +901,7 @@ mod tests {
 
     /// Dart tests wrap text in a `Directionality`, which `RichText` requires.
     fn ltr(child: WidgetRef) -> WidgetRef {
-        Directionality {
-            key: None,
-            text_direction: TextDirection::Ltr,
-            child,
-        }
-        .into_widget()
+        Directionality::new(TextDirection::Ltr, child).into_widget()
     }
 
     /// Mounts `child` with fonts installed and pumps the first frame.
@@ -994,7 +996,7 @@ mod tests {
         let under_default = |style: TextStyle| {
             DefaultTextStyle::new(
                 TextStyle::new().font_size(12.0),
-                Text::new("Hello").style(style).into_widget(),
+                Text::new("Hello").style(style),
             )
             .into_widget()
         };
@@ -1002,7 +1004,7 @@ mod tests {
         let paragraph = paragraph_under_root(&harness, &app);
         let merged = style_of(paragraph, &app);
         assert_eq!(merged.font_size, Some(12.0));
-        assert_eq!(merged.color, Some(red));
+        assert_eq!(merged.color, Some(red.into()));
 
         harness.set_child(
             &mut app,
@@ -1058,7 +1060,7 @@ mod tests {
     fn a_default_text_style_supplies_what_the_text_leaves_unset() {
         let mut app = App::new();
         let under_default = |text: Text| {
-            DefaultTextStyle::new(TextStyle::new(), text.into_widget())
+            DefaultTextStyle::new(TextStyle::new(), text)
                 .max_lines(1)
                 .overflow(TextOverflow::Fade)
                 .text_align(TextAlign::Center)
@@ -1091,9 +1093,7 @@ mod tests {
             &mut app,
             DefaultTextStyle::new(
                 TextStyle::new(),
-                Text::new("Hello")
-                    .style(TextStyle::new().overflow(TextOverflow::Ellipsis))
-                    .into_widget(),
+                Text::new("Hello").style(TextStyle::new().overflow(TextOverflow::Ellipsis)),
             )
             .overflow(TextOverflow::Fade)
             .into_widget(),
@@ -1186,7 +1186,7 @@ mod tests {
             .word_spacing_override(4.0);
         let harness = mount(
             &mut app,
-            MediaQuery::new(data, Text::new("Hello").into_widget()).into_widget(),
+            MediaQuery::new(data, Text::new("Hello")).into_widget(),
         );
         let paragraph = paragraph_under_root(&harness, &app);
         let style = style_of(paragraph, &app);

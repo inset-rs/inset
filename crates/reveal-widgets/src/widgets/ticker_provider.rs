@@ -49,6 +49,28 @@ pub struct TickerMode {
 }
 
 impl TickerMode {
+    /// Creates a `TickerMode`; Dart's optional named arguments are the setters.
+    pub fn new<K>(enabled: bool, child: impl IntoWidget<K>) -> TickerMode {
+        TickerMode {
+            key: None,
+            enabled,
+            force_frames: false,
+            child: child.into_widget(),
+        }
+    }
+
+    /// Dart `TickerMode(key:)`.
+    pub fn key(mut self, key: KeyRef) -> TickerMode {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `TickerMode(force_frames:)`.
+    pub fn force_frames(mut self, force_frames: bool) -> TickerMode {
+        self.force_frames = force_frames;
+        self
+    }
+
     /// Whether tickers in the given subtree should be enabled or disabled.
     ///
     /// This is used automatically by [`TickerProviderStateMixin`] and
@@ -292,13 +314,13 @@ impl State for TickerModeState {
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         let effective_mode = self.effective_mode(app);
         let effective_values = self.effective_values(app);
-        EffectiveTickerMode {
-            enabled: *effective_mode.value(app),
-            force_frames: effective_values.value(app).force_frames,
-            notifier: effective_mode,
-            values_notifier: effective_values,
-            child: self.widget(app).child.clone(),
-        }
+        EffectiveTickerMode::new(
+            *effective_mode.value(app),
+            effective_values.value(app).force_frames,
+            effective_mode,
+            effective_values,
+            self.widget(app).child.clone(),
+        )
         .into_widget()
     }
 }
@@ -311,6 +333,25 @@ struct EffectiveTickerMode {
     notifier: Handle<ValueNotifier<bool>>,
     values_notifier: Handle<ValueNotifier<TickerModeData>>,
     child: WidgetRef,
+}
+
+impl EffectiveTickerMode {
+    /// Creates an `EffectiveTickerMode`; Dart's arguments are all required.
+    fn new<K>(
+        enabled: bool,
+        force_frames: bool,
+        notifier: Handle<ValueNotifier<bool>>,
+        values_notifier: Handle<ValueNotifier<TickerModeData>>,
+        child: impl IntoWidget<K>,
+    ) -> EffectiveTickerMode {
+        EffectiveTickerMode {
+            enabled,
+            force_frames,
+            notifier,
+            values_notifier,
+            child: child.into_widget(),
+        }
+    }
 }
 
 impl InheritedWidget for EffectiveTickerMode {
@@ -765,13 +806,7 @@ mod tests {
     impl LeafRenderObjectWidget for Sized {}
 
     fn ticker_mode(enabled: bool, child: WidgetRef) -> WidgetRef {
-        TickerMode {
-            key: None,
-            enabled,
-            force_frames: false,
-            child,
-        }
-        .into_widget()
+        TickerMode::new(enabled, child).into_widget()
     }
 
     fn new_controller(app: &mut App, vsync: impl TickerProvider) -> Handle<AnimationController> {
@@ -1098,13 +1133,9 @@ mod tests {
         harness.pump(&mut app);
         assert_eq!(seen.get(), Some(TickerModeData::FALLBACK));
 
-        let inner = TickerMode {
-            key: None,
-            enabled: true,
-            force_frames: true,
-            child: probe,
-        }
-        .into_widget();
+        let inner = TickerMode::new(true, probe)
+            .force_frames(true)
+            .into_widget();
         harness.set_child(&mut app, ticker_mode(false, inner));
         harness.pump(&mut app);
         assert_eq!(

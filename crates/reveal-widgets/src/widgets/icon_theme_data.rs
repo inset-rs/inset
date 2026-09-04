@@ -3,8 +3,12 @@
 //! [`IconThemeData::resolve`] is an inherent method here, not an override point: a
 //! `CupertinoIconThemeData` that resolves its color against the [`BuildContext`] waits.
 
+use std::fmt;
+use std::rc::Rc;
+
 use reveal_embedder::{Color, Shadow, clamp_double, lerp_double};
 use reveal_foundation::App;
+use reveal_painting::AnyColor;
 
 use crate::framework::BuildContext;
 
@@ -18,7 +22,7 @@ use crate::framework::BuildContext;
 ///
 /// Dart's named constructor arguments are the fluent setters
 /// (`IconThemeData::new().size(16.0).opacity(0.5)`).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct IconThemeData {
     /// The default for `Icon.size`.
     ///
@@ -47,7 +51,7 @@ pub struct IconThemeData {
     /// `ThemeData.brightness` is light.
     ///
     /// Otherwise, falls back to black.
-    pub color: Option<Color>,
+    pub color: Option<AnyColor>,
     /// An opacity to apply to both explicit and default icon colors.
     ///
     /// Falls back to 1.0. Dart clamps its private `_opacity` in this getter; here the value is
@@ -57,7 +61,15 @@ pub struct IconThemeData {
     pub shadows: Option<Vec<Shadow>>,
     /// The default for `Icon.applyTextScaling`.
     pub apply_text_scaling: Option<bool>,
+    /// A subclass's [`resolve`](Self::resolve) override (`CupertinoIconThemeData.resolve`);
+    /// `None` is the base class.
+    resolver: Option<IconThemeDataResolver>,
 }
+
+/// Dart's `IconThemeData.resolve(BuildContext)` override: given the data, returns the data
+/// that fits the context.
+pub type IconThemeDataResolver =
+    Rc<dyn Fn(&IconThemeData, &mut App, BuildContext) -> IconThemeData>;
 
 impl IconThemeData {
     /// Creates an icon theme data.
@@ -75,6 +87,7 @@ impl IconThemeData {
             opacity: None,
             shadows: None,
             apply_text_scaling: None,
+            resolver: None,
         }
     }
 
@@ -90,10 +103,11 @@ impl IconThemeData {
             weight: Some(400.0),
             grade: Some(0.0),
             optical_size: Some(48.0),
-            color: Some(Color::new(0xFF000000)),
+            color: Some(AnyColor::new(Color::new(0xFF000000))),
             opacity: Some(1.0),
             shadows: None,
             apply_text_scaling: Some(false),
+            resolver: None,
         }
     }
 
@@ -131,8 +145,8 @@ impl IconThemeData {
     }
 
     /// Dart `IconThemeData(color:)`.
-    pub fn color(mut self, color: Color) -> IconThemeData {
-        self.color = Some(color);
+    pub fn color(mut self, color: impl Into<AnyColor>) -> IconThemeData {
+        self.color = Some(color.into());
         self
     }
 
@@ -151,6 +165,15 @@ impl IconThemeData {
     /// Dart `IconThemeData(applyTextScaling:)`.
     pub fn apply_text_scaling(mut self, apply_text_scaling: bool) -> IconThemeData {
         self.apply_text_scaling = Some(apply_text_scaling);
+        self
+    }
+
+    /// Makes this data a subclass instance whose [`resolve`](Self::resolve) runs `resolver`:
+    /// Dart's `class CupertinoIconThemeData extends IconThemeData` overriding `resolve`.
+    /// `copy_with` and `merge` keep it, as the subclass's `copyWith` does; `lerp` drops it,
+    /// as Dart's `IconThemeData.lerp` returns the base class.
+    pub fn resolver(mut self, resolver: IconThemeDataResolver) -> IconThemeData {
+        self.resolver = Some(resolver);
         self
     }
 
@@ -186,7 +209,7 @@ impl IconThemeData {
         merged.weight = other.weight.or(self.weight);
         merged.grade = other.grade.or(self.grade);
         merged.optical_size = other.optical_size.or(self.optical_size);
-        merged.color = other.color.or(self.color);
+        merged.color = other.color.clone().or_else(|| self.color.clone());
         merged.opacity = other.opacity.or(self.opacity);
         merged.shadows = other.shadows.clone().or_else(|| self.shadows.clone());
         merged.apply_text_scaling = other.apply_text_scaling.or(self.apply_text_scaling);
@@ -209,8 +232,11 @@ impl IconThemeData {
     ///
     ///  * `CupertinoIconThemeData.resolve` an implementation that resolves the color of
     ///    `CupertinoIconThemeData` before returning.
-    pub fn resolve(&self, _app: &mut App, _context: BuildContext) -> IconThemeData {
-        self.clone()
+    pub fn resolve(&self, app: &mut App, context: BuildContext) -> IconThemeData {
+        match &self.resolver {
+            Some(resolver) => resolver(self, app, context),
+            None => self.clone(),
+        }
     }
 
     /// Whether all the properties (except shadows) of this object are non-null.
@@ -253,7 +279,12 @@ impl IconThemeData {
                 b.and_then(|b| b.optical_size),
                 t,
             ),
-            color: Color::lerp(a.and_then(|a| a.color), b.and_then(|b| b.color), t),
+            color: AnyColor::lerp(
+                a.and_then(|a| a.color.as_ref()),
+                b.and_then(|b| b.color.as_ref()),
+                t,
+            )
+            .map(AnyColor::from),
             opacity: lerp_double(a.and_then(|a| a.opacity), b.and_then(|b| b.opacity), t)
                 .map(clamp_opacity),
             shadows: Shadow::lerp_list(
@@ -266,6 +297,7 @@ impl IconThemeData {
             } else {
                 b.and_then(|b| b.apply_text_scaling)
             },
+            resolver: None,
         };
         lerped.debug_assert_ranges();
         lerped
@@ -281,6 +313,39 @@ impl Default for IconThemeData {
 /// Dart's `opacity` getter: `clampDouble(_opacity, 0.0, 1.0)`.
 fn clamp_opacity(opacity: f64) -> f64 {
     clamp_double(opacity, 0.0, 1.0)
+}
+
+/// Dart's `==` checks `runtimeType` first: a subclass instance never equals a base one.
+impl PartialEq for IconThemeData {
+    fn eq(&self, other: &IconThemeData) -> bool {
+        self.resolver.is_some() == other.resolver.is_some()
+            && self.size == other.size
+            && self.fill == other.fill
+            && self.weight == other.weight
+            && self.grade == other.grade
+            && self.optical_size == other.optical_size
+            && self.color == other.color
+            && self.opacity == other.opacity
+            && self.shadows == other.shadows
+            && self.apply_text_scaling == other.apply_text_scaling
+    }
+}
+
+impl fmt::Debug for IconThemeData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("IconThemeData")
+            .field("size", &self.size)
+            .field("fill", &self.fill)
+            .field("weight", &self.weight)
+            .field("grade", &self.grade)
+            .field("optical_size", &self.optical_size)
+            .field("color", &self.color)
+            .field("opacity", &self.opacity)
+            .field("shadows", &self.shadows)
+            .field("apply_text_scaling", &self.apply_text_scaling)
+            .field("resolver", &self.resolver.as_ref().map(|_| "override"))
+            .finish()
+    }
 }
 
 #[cfg(test)]
@@ -340,7 +405,7 @@ mod tests {
         assert_eq!(lerped.weight, Some(550.0));
         assert_eq!(lerped.grade, Some(18.75));
         assert_eq!(lerped.optical_size, Some(45.75));
-        assert_same_color(lerped.color, 0xBF7F7F7F);
+        assert_same_color(lerped.color.as_ref().map(AnyColor::color), 0xBF7F7F7F);
         assert_eq!(lerped.opacity, Some(0.625));
         assert_eq!(lerped.shadows, Some(vec![shadow(0xAAAAAAAA, 0.75, 0.75)]));
     }
@@ -353,7 +418,7 @@ mod tests {
         assert_eq!(lerped.weight, Some(150.0));
         assert_eq!(lerped.grade, Some(6.25));
         assert_eq!(lerped.optical_size, Some(11.25));
-        assert_same_color(lerped.color, 0x40FFFFFF);
+        assert_same_color(lerped.color.as_ref().map(AnyColor::color), 0x40FFFFFF);
         assert_eq!(lerped.opacity, Some(0.25));
         assert_eq!(lerped.shadows, Some(vec![shadow(0xFFFFFFFF, 0.25, 0.25)]));
     }
@@ -366,7 +431,7 @@ mod tests {
         assert_eq!(lerped.weight, Some(450.0));
         assert_eq!(lerped.grade, Some(18.75));
         assert_eq!(lerped.optical_size, Some(33.75));
-        assert_same_color(lerped.color, 0xBFFFFFFF);
+        assert_same_color(lerped.color.as_ref().map(AnyColor::color), 0xBFFFFFFF);
         assert_eq!(lerped.opacity, Some(0.75));
         assert_eq!(lerped.shadows, Some(vec![shadow(0xFFFFFFFF, 0.75, 0.75)]));
     }
@@ -386,7 +451,7 @@ mod tests {
         let merged = base.merge(Some(&other));
         assert_eq!(merged.size, Some(20.0));
         assert_eq!(merged.fill, Some(1.0));
-        assert_eq!(merged.color, Some(black));
+        assert_eq!(merged.color, Some(black.into()));
         assert_eq!(merged.opacity, Some(0.5));
         assert_eq!(merged.weight, None);
         assert_eq!(base.merge(None), base);

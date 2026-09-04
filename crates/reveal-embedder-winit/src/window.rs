@@ -142,6 +142,8 @@ struct WinitView {
     id: ViewId,
     metrics: Cell<ViewMetrics>,
     surface: Arc<Mutex<WinitSurface>>,
+    /// The window this view draws into, for retrying a present the surface refused.
+    window: Arc<Window>,
 }
 
 struct WinitSurface {
@@ -161,6 +163,10 @@ impl View for WinitView {
     fn present(&self, picture: &Picture) {
         let mut state = self.surface.lock().expect("surface lock");
         let Some(surface_frame) = state.surface.acquire() else {
+            // The swapchain has no texture yet (a window just shown, a surface being
+            // reconfigured): the scene stays retained, so a redraw presents it next vsync,
+            // as Flutter's rasterizer retries a frame it could not draw.
+            self.window.request_redraw();
             return;
         };
         state
@@ -362,6 +368,7 @@ impl<C: EmbedderClient> WinitApp<C> {
             id: IMPLICIT_VIEW,
             metrics: Cell::new(window_metrics(&window)),
             surface: Arc::new(Mutex::new(WinitSurface { surface, context })),
+            window: Arc::clone(&window),
         });
         if let Some(theme) = window.theme() {
             self.platform.brightness.set(brightness_of(theme));

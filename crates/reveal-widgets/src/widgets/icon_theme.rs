@@ -3,8 +3,6 @@
 //! [`IconTheme`] is a plain inherited widget: the `InheritedTheme` capture (`wrap`,
 //! `captureAll`) waits.
 
-use std::rc::Rc;
-
 use reveal_foundation::App;
 
 use crate::framework::{BuildContext, InheritedWidget, IntoWidget, KeyRef, WidgetRef};
@@ -26,11 +24,11 @@ pub struct IconTheme {
 
 impl IconTheme {
     /// Creates an icon theme that controls properties of descendant widgets.
-    pub fn new(data: IconThemeData, child: WidgetRef) -> IconTheme {
+    pub fn new<K>(data: IconThemeData, child: impl IntoWidget<K>) -> IconTheme {
         IconTheme {
             key: None,
             data,
-            child,
+            child: child.into_widget(),
         }
     }
 
@@ -42,18 +40,21 @@ impl IconTheme {
 
     /// Creates an icon theme that controls the properties of descendant widgets, and merges
     /// in the current icon theme, if any.
-    pub fn merge(key: Option<KeyRef>, data: IconThemeData, child: WidgetRef) -> WidgetRef {
-        Builder {
-            key: None,
-            builder: Rc::new(move |app, context| {
-                IconTheme {
-                    key: key.clone(),
-                    data: Self::get_inherited_icon_theme_data(app, context).merge(Some(&data)),
-                    child: child.clone(),
-                }
-                .into_widget()
-            }),
-        }
+    pub fn merge<K>(
+        key: Option<KeyRef>,
+        data: IconThemeData,
+        child: impl IntoWidget<K>,
+    ) -> WidgetRef {
+        let child = child.into_widget();
+        Builder::new(move |app, context| {
+            let merged = Self::get_inherited_icon_theme_data(app, context).merge(Some(&data));
+            let icon_theme = IconTheme::new(merged, child.clone());
+            match &key {
+                Some(key) => icon_theme.key(key.clone()),
+                None => icon_theme,
+            }
+            .into_widget()
+        })
         .into_widget()
     }
 
@@ -140,7 +141,7 @@ mod tests {
     impl StatelessWidget for IconThemeReader {
         fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
             self.seen.borrow_mut().push(IconTheme::of(app, context));
-            SizedBox::shrink(None).into_widget()
+            SizedBox::shrink().into_widget()
         }
     }
 

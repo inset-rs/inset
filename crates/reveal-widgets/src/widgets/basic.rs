@@ -25,8 +25,8 @@ use reveal_rendering::{
 use reveal_services::{MouseCursor, MouseCursorRef};
 
 use crate::framework::{
-    BuildContext, InheritedWidget, KeyRef, RenderObjectWidget, SingleChildRenderObjectWidget,
-    StatelessWidget, WidgetRef,
+    BuildContext, InheritedWidget, IntoWidget, KeyRef, RenderObjectWidget,
+    SingleChildRenderObjectWidget, StatelessWidget, WidgetRef,
 };
 use crate::widgets::image::create_local_image_configuration;
 
@@ -60,6 +60,21 @@ pub struct Directionality {
 }
 
 impl Directionality {
+    /// Creates a `Directionality`; Dart's optional named arguments are the setters.
+    pub fn new<K>(text_direction: TextDirection, child: impl IntoWidget<K>) -> Directionality {
+        Directionality {
+            key: None,
+            text_direction: text_direction,
+            child: child.into_widget(),
+        }
+    }
+
+    /// Dart `Directionality(key:)`.
+    pub fn key(mut self, key: KeyRef) -> Directionality {
+        self.key = Some(key);
+        self
+    }
+
     /// The text direction from the closest instance of this class that encloses
     /// the given context.
     ///
@@ -229,6 +244,29 @@ pub struct Opacity {
     pub child: Option<WidgetRef>,
 }
 
+impl Opacity {
+    /// Creates a `Opacity`; Dart's optional named arguments are the setters.
+    pub fn new(opacity: f64) -> Opacity {
+        Opacity {
+            key: None,
+            opacity: opacity,
+            child: None,
+        }
+    }
+
+    /// Dart `Opacity(key:)`.
+    pub fn key(mut self, key: KeyRef) -> Opacity {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `Opacity(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> Opacity {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
 impl RenderObjectWidget for Opacity {
     type RenderObject = RenderOpacity;
 
@@ -299,6 +337,36 @@ pub struct DecoratedBox {
     /// By default the decoration paints behind the child.
     pub position: DecorationPosition,
     pub child: Option<WidgetRef>,
+}
+
+impl DecoratedBox {
+    /// Creates a `DecoratedBox`; Dart's optional named arguments are the setters.
+    pub fn new(decoration: impl Decoration + 'static) -> DecoratedBox {
+        DecoratedBox {
+            key: None,
+            decoration: Box::new(decoration),
+            position: DecorationPosition::Background,
+            child: None,
+        }
+    }
+
+    /// Dart `DecoratedBox(key:)`.
+    pub fn key(mut self, key: KeyRef) -> DecoratedBox {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `DecoratedBox(position:)`.
+    pub fn position(mut self, position: DecorationPosition) -> DecoratedBox {
+        self.position = position;
+        self
+    }
+
+    /// Dart `DecoratedBox(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> DecoratedBox {
+        self.child = Some(child.into_widget());
+        self
+    }
 }
 
 impl RenderObjectWidget for DecoratedBox {
@@ -394,6 +462,29 @@ pub struct Padding {
     /// The amount of space by which to inset the child.
     pub padding: EdgeInsetsGeometry,
     pub child: Option<WidgetRef>,
+}
+
+impl Padding {
+    /// Creates a `Padding`; Dart's optional named arguments are the setters.
+    pub fn new(padding: EdgeInsetsGeometry) -> Padding {
+        Padding {
+            key: None,
+            padding: padding,
+            child: None,
+        }
+    }
+
+    /// Dart `Padding(key:)`.
+    pub fn key(mut self, key: KeyRef) -> Padding {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `Padding(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> Padding {
+        self.child = Some(child.into_widget());
+        self
+    }
 }
 
 impl RenderObjectWidget for Padding {
@@ -493,6 +584,41 @@ pub struct Align {
 }
 
 impl Align {
+    /// Creates a `Align`; Dart's named arguments are the setters.
+    pub fn new() -> Align {
+        Align::default()
+    }
+
+    /// Dart `Align(key:)`.
+    pub fn key(mut self, key: KeyRef) -> Align {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `Align(alignment:)`.
+    pub fn alignment(mut self, alignment: AlignmentGeometry) -> Align {
+        self.alignment = alignment;
+        self
+    }
+
+    /// Dart `Align(width_factor:)`.
+    pub fn width_factor(mut self, width_factor: f64) -> Align {
+        self.width_factor = Some(width_factor);
+        self
+    }
+
+    /// Dart `Align(height_factor:)`.
+    pub fn height_factor(mut self, height_factor: f64) -> Align {
+        self.height_factor = Some(height_factor);
+        self
+    }
+
+    /// Dart `Align(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> Align {
+        self.child = Some(child.into_widget());
+        self
+    }
+
     /// `Align.createRenderObject`'s body, shared with [`Center`].
     fn create_positioned_box(
         app: &mut App,
@@ -615,6 +741,35 @@ pub struct Center {
 }
 
 impl Center {
+    /// Creates a `Center`; Dart's named arguments are the setters.
+    pub fn new() -> Center {
+        Center::default()
+    }
+
+    /// Dart `Center(key:)`.
+    pub fn key(mut self, key: KeyRef) -> Center {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `Center(width_factor:)`.
+    pub fn width_factor(mut self, width_factor: f64) -> Center {
+        self.width_factor = Some(width_factor);
+        self
+    }
+
+    /// Dart `Center(height_factor:)`.
+    pub fn height_factor(mut self, height_factor: f64) -> Center {
+        self.height_factor = Some(height_factor);
+        self
+    }
+
+    /// Dart `Center(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> Center {
+        self.child = Some(child.into_widget());
+        self
+    }
+
     /// How to align the child: always `AlignmentGeometry::CENTER` (the inherited
     /// [`Align::alignment`]).
     pub fn alignment(&self) -> AlignmentGeometry {
@@ -724,43 +879,72 @@ pub struct SizedBox {
 }
 
 impl SizedBox {
+    /// Creates a `SizedBox`; Dart's named arguments are the setters.
+    pub fn new() -> SizedBox {
+        SizedBox::default()
+    }
+
+    /// Dart `SizedBox(key:)`.
+    pub fn key(mut self, key: KeyRef) -> SizedBox {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `SizedBox(width:)`.
+    pub fn width(mut self, width: f64) -> SizedBox {
+        self.width = Some(width);
+        self
+    }
+
+    /// Dart `SizedBox(height:)`.
+    pub fn height(mut self, height: f64) -> SizedBox {
+        self.height = Some(height);
+        self
+    }
+
+    /// Dart `SizedBox(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> SizedBox {
+        self.child = Some(child.into_widget());
+        self
+    }
+
     /// Creates a box that will become as large as its parent allows.
-    pub fn expand(child: Option<WidgetRef>) -> SizedBox {
+    pub fn expand() -> SizedBox {
         SizedBox {
             key: None,
             width: Some(f64::INFINITY),
             height: Some(f64::INFINITY),
-            child,
+            child: None,
         }
     }
 
     /// Creates a box that will become as small as its parent allows.
-    pub fn shrink(child: Option<WidgetRef>) -> SizedBox {
+    pub fn shrink() -> SizedBox {
         SizedBox {
             key: None,
             width: Some(0.0),
             height: Some(0.0),
-            child,
+            child: None,
         }
     }
 
     /// Creates a box with the specified size.
-    pub fn from_size(size: Option<Size>, child: Option<WidgetRef>) -> SizedBox {
+    pub fn from_size(size: Option<Size>) -> SizedBox {
         SizedBox {
             key: None,
             width: size.map(|size| size.width()),
             height: size.map(|size| size.height()),
-            child,
+            child: None,
         }
     }
 
     /// Creates a box whose [`width`](Self::width) and [`height`](Self::height) are equal.
-    pub fn square(dimension: Option<f64>, child: Option<WidgetRef>) -> SizedBox {
+    pub fn square(dimension: Option<f64>) -> SizedBox {
         SizedBox {
             key: None,
             width: dimension,
             height: dimension,
-            child,
+            child: None,
         }
     }
 
@@ -858,6 +1042,29 @@ pub struct ConstrainedBox {
     pub child: Option<WidgetRef>,
 }
 
+impl ConstrainedBox {
+    /// Creates a `ConstrainedBox`; Dart's optional named arguments are the setters.
+    pub fn new(constraints: BoxConstraints) -> ConstrainedBox {
+        ConstrainedBox {
+            key: None,
+            constraints: constraints,
+            child: None,
+        }
+    }
+
+    /// Dart `ConstrainedBox(key:)`.
+    pub fn key(mut self, key: KeyRef) -> ConstrainedBox {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `ConstrainedBox(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> ConstrainedBox {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
 impl RenderObjectWidget for ConstrainedBox {
     type RenderObject = RenderConstrainedBox;
 
@@ -947,6 +1154,92 @@ pub struct Listener {
 }
 
 impl Listener {
+    /// Creates a `Listener`; Dart's named arguments are the setters.
+    pub fn new() -> Listener {
+        Listener::default()
+    }
+
+    /// Dart `Listener(key:)`.
+    pub fn key(mut self, key: KeyRef) -> Listener {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `Listener(on_pointer_down:)`.
+    pub fn on_pointer_down(mut self, on_pointer_down: PointerDownEventListener) -> Listener {
+        self.on_pointer_down = Some(on_pointer_down);
+        self
+    }
+
+    /// Dart `Listener(on_pointer_move:)`.
+    pub fn on_pointer_move(mut self, on_pointer_move: PointerMoveEventListener) -> Listener {
+        self.on_pointer_move = Some(on_pointer_move);
+        self
+    }
+
+    /// Dart `Listener(on_pointer_up:)`.
+    pub fn on_pointer_up(mut self, on_pointer_up: PointerUpEventListener) -> Listener {
+        self.on_pointer_up = Some(on_pointer_up);
+        self
+    }
+
+    /// Dart `Listener(on_pointer_hover:)`.
+    pub fn on_pointer_hover(mut self, on_pointer_hover: PointerHoverEventListener) -> Listener {
+        self.on_pointer_hover = Some(on_pointer_hover);
+        self
+    }
+
+    /// Dart `Listener(on_pointer_cancel:)`.
+    pub fn on_pointer_cancel(mut self, on_pointer_cancel: PointerCancelEventListener) -> Listener {
+        self.on_pointer_cancel = Some(on_pointer_cancel);
+        self
+    }
+
+    /// Dart `Listener(on_pointer_pan_zoom_start:)`.
+    pub fn on_pointer_pan_zoom_start(
+        mut self,
+        on_pointer_pan_zoom_start: PointerPanZoomStartEventListener,
+    ) -> Listener {
+        self.on_pointer_pan_zoom_start = Some(on_pointer_pan_zoom_start);
+        self
+    }
+
+    /// Dart `Listener(on_pointer_pan_zoom_update:)`.
+    pub fn on_pointer_pan_zoom_update(
+        mut self,
+        on_pointer_pan_zoom_update: PointerPanZoomUpdateEventListener,
+    ) -> Listener {
+        self.on_pointer_pan_zoom_update = Some(on_pointer_pan_zoom_update);
+        self
+    }
+
+    /// Dart `Listener(on_pointer_pan_zoom_end:)`.
+    pub fn on_pointer_pan_zoom_end(
+        mut self,
+        on_pointer_pan_zoom_end: PointerPanZoomEndEventListener,
+    ) -> Listener {
+        self.on_pointer_pan_zoom_end = Some(on_pointer_pan_zoom_end);
+        self
+    }
+
+    /// Dart `Listener(on_pointer_signal:)`.
+    pub fn on_pointer_signal(mut self, on_pointer_signal: PointerSignalEventListener) -> Listener {
+        self.on_pointer_signal = Some(on_pointer_signal);
+        self
+    }
+
+    /// Dart `Listener(behavior:)`.
+    pub fn behavior(mut self, behavior: HitTestBehavior) -> Listener {
+        self.behavior = behavior;
+        self
+    }
+
+    /// Dart `Listener(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> Listener {
+        self.child = Some(child.into_widget());
+        self
+    }
+
     /// Copies the callbacks onto the render object; Dart's constructor and the setters
     /// share this list.
     fn apply_listeners(&self, app: &mut App, render_object: RenderHandle<RenderPointerListener>) {
@@ -1193,6 +1486,59 @@ pub struct MouseRegion {
 }
 
 impl MouseRegion {
+    /// Creates a `MouseRegion`; Dart's named arguments are the setters.
+    pub fn new() -> MouseRegion {
+        MouseRegion::default()
+    }
+
+    /// Dart `MouseRegion(key:)`.
+    pub fn key(mut self, key: KeyRef) -> MouseRegion {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `MouseRegion(on_enter:)`.
+    pub fn on_enter(mut self, on_enter: PointerEnterEventListener) -> MouseRegion {
+        self.on_enter = Some(on_enter);
+        self
+    }
+
+    /// Dart `MouseRegion(on_hover:)`.
+    pub fn on_hover(mut self, on_hover: PointerHoverEventListener) -> MouseRegion {
+        self.on_hover = Some(on_hover);
+        self
+    }
+
+    /// Dart `MouseRegion(on_exit:)`.
+    pub fn on_exit(mut self, on_exit: PointerExitEventListener) -> MouseRegion {
+        self.on_exit = Some(on_exit);
+        self
+    }
+
+    /// Dart `MouseRegion(cursor:)`.
+    pub fn cursor(mut self, cursor: MouseCursorRef) -> MouseRegion {
+        self.cursor = cursor;
+        self
+    }
+
+    /// Dart `MouseRegion(opaque:)`.
+    pub fn opaque(mut self, opaque: bool) -> MouseRegion {
+        self.opaque = opaque;
+        self
+    }
+
+    /// Dart `MouseRegion(hit_test_behavior:)`.
+    pub fn hit_test_behavior(mut self, hit_test_behavior: HitTestBehavior) -> MouseRegion {
+        self.hit_test_behavior = Some(hit_test_behavior);
+        self
+    }
+
+    /// Dart `MouseRegion(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> MouseRegion {
+        self.child = Some(child.into_widget());
+        self
+    }
+
     /// Copies the configuration onto the render object; Dart's constructor and the setters
     /// share this list.
     fn apply_configuration(&self, app: &mut App, render_object: RenderHandle<RenderMouseRegion>) {
@@ -1334,6 +1680,25 @@ pub struct RepaintBoundary {
     pub child: Option<WidgetRef>,
 }
 
+impl RepaintBoundary {
+    /// Creates a `RepaintBoundary`; Dart's named arguments are the setters.
+    pub fn new() -> RepaintBoundary {
+        RepaintBoundary::default()
+    }
+
+    /// Dart `RepaintBoundary(key:)`.
+    pub fn key(mut self, key: KeyRef) -> RepaintBoundary {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `RepaintBoundary(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> RepaintBoundary {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
 impl RenderObjectWidget for RepaintBoundary {
     type RenderObject = RenderRepaintBoundary;
 
@@ -1401,6 +1766,22 @@ pub struct Builder {
     /// a new tree of widgets and so a new Builder child will not be identical
     /// to the corresponding old one.
     pub builder: WidgetBuilder,
+}
+
+impl Builder {
+    /// Creates a `Builder`; Dart's optional named arguments are the setters.
+    pub fn new(builder: impl Fn(&mut App, BuildContext) -> WidgetRef + 'static) -> Builder {
+        Builder {
+            key: None,
+            builder: Rc::new(builder),
+        }
+    }
+
+    /// Dart `Builder(key:)`.
+    pub fn key(mut self, key: KeyRef) -> Builder {
+        self.key = Some(key);
+        self
+    }
 }
 
 impl StatelessWidget for Builder {
@@ -1618,7 +1999,7 @@ mod tests {
         );
         assert_eq!(constrained.size(&app), Size::new(50.0, 20.0));
 
-        harness.set_child(&mut app, SizedBox::expand(None).into_widget());
+        harness.set_child(&mut app, SizedBox::expand().into_widget());
         harness.pump(&mut app);
         assert_eq!(
             constrained.size(&app),
@@ -1626,21 +2007,21 @@ mod tests {
             "as large as the root allows"
         );
 
-        harness.set_child(&mut app, SizedBox::shrink(None).into_widget());
+        harness.set_child(&mut app, SizedBox::shrink().into_widget());
         harness.pump(&mut app);
         assert_eq!(constrained.size(&app), Size::new(0.0, 0.0));
     }
 
     #[test]
     fn sized_box_named_constructors_match_dart() {
-        let square = SizedBox::square(Some(7.0), None);
+        let square = SizedBox::square(Some(7.0));
         assert_eq!((square.width, square.height), (Some(7.0), Some(7.0)));
-        let from_size = SizedBox::from_size(Some(Size::new(3.0, 4.0)), None);
+        let from_size = SizedBox::from_size(Some(Size::new(3.0, 4.0)));
         assert_eq!((from_size.width, from_size.height), (Some(3.0), Some(4.0)));
-        let unspecified = SizedBox::from_size(None, None);
+        let unspecified = SizedBox::from_size(None);
         assert_eq!((unspecified.width, unspecified.height), (None, None));
-        assert!(format!("{:?}", SizedBox::expand(None)).starts_with("SizedBox.expand"));
-        assert!(format!("{:?}", SizedBox::shrink(None)).starts_with("SizedBox.shrink"));
+        assert!(format!("{:?}", SizedBox::expand()).starts_with("SizedBox.expand"));
+        assert!(format!("{:?}", SizedBox::shrink()).starts_with("SizedBox.shrink"));
         assert!(format!("{square:?}").starts_with("SizedBox {"));
     }
 
@@ -1705,7 +2086,7 @@ mod tests {
             .as_any()
             .downcast_ref::<BoxDecoration>()
             .expect("a BoxDecoration");
-        assert_eq!(decoration.color, Some(blue));
+        assert_eq!(decoration.color, Some(blue.into()));
     }
 
     #[test]

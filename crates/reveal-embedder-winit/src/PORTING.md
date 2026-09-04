@@ -20,6 +20,10 @@ No Flutter counterpart. Flutter's engine is C++ and is not in this checkout.
   Reason: platform — Flutter's engine finds platform fonts itself; valo needs a `FontSource`.
   Affect: text uses installed fonts; a family that is not installed falls back to the nearest face.
 
+- Change: `present` asks the window for another redraw when valo cannot acquire a surface texture (wgpu's `Timeout` on the first frame of a just-shown window), so the retained scene is presented next vsync.
+  Reason: platform — Flutter's Metal surface always has a drawable, so the engine treats a null `AcquireFrame` as `DrawSurfaceStatus::kFailed` and drops that frame (`rasterizer.cc`); its resubmit path (`kRetry`, for Android's first `FlutterImageView` frame) pushes the layer tree back to the front of the pipeline and draws again, which is what the redraw request does here.
+  Affect: the first frame appears without a resize; a frame is never dropped for a surface that was not ready.
+
 ## Deferred
 
 - `ThemeChanged` → `onPlatformBrightnessChanged`. Trigger: `MediaQuery` / `CupertinoTheme`.

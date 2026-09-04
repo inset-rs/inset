@@ -997,6 +997,28 @@ pub trait RenderBox: RenderObject {
         self.as_box().size(app)
     }
 
+    /// Multiply the transform from the parent's coordinate system to this box's coordinate
+    /// system into the given transform.
+    ///
+    /// This function is used to convert coordinate systems between boxes. Subclasses that
+    /// apply transforms during painting should override this function to factor those
+    /// transforms into the calculation.
+    ///
+    /// The [`RenderBox`] implementation takes care of adjusting the matrix for the position
+    /// of the given child as determined during layout and stored on the child's parent data.
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        debug_assert!(child.parent(app).map(AnyRenderObject::id) == Some(self.id()));
+        // Dart asserts the child's parent data is a `BoxParentData` with a message naming
+        // this type; `parent_data_of` panics the same way.
+        let offset = child.parent_data_of::<BoxParentData>(app).offset;
+        crate::object::translate(transform, offset.dx(), offset.dy());
+    }
+
     /// An estimate of the bounds within which this render object will paint: the box's own size.
     fn paint_bounds(self: RenderHandle<Self>, app: &App) -> Rect {
         Offset::ZERO & self.size(app)
@@ -1172,6 +1194,9 @@ impl RenderBoxVTable {
             object: RenderObjectVTable::of::<T>(
                 |app, id, child| <T as RenderBox>::setup_parent_data(resolve(id), app, child),
                 |app, id| T::paint_bounds(resolve(id), app),
+                |app, id, child, transform| {
+                    <T as RenderBox>::apply_paint_transform(resolve(id), app, child, transform)
+                },
                 Some(|| const { &RenderBoxVTable::of::<T>() }),
                 None,
             ),
@@ -1290,6 +1315,78 @@ impl AnyRenderBox {
         self.as_object().parent_data_of(app)
     }
 
+    /// Convert the given point from the global coordinate system in logical pixels to the
+    /// local coordinate system for this box.
+    ///
+    /// This method will un-project the point from the screen onto the widget, which makes it
+    /// different from `MatrixUtils.transformPoint`.
+    ///
+    /// If the transform from global coordinates to local coordinates is degenerate, this
+    /// function returns `Offset::ZERO`.
+    ///
+    /// If `ancestor` is non-null, this function converts the given point from the coordinate
+    /// system of `ancestor` (which must be an ancestor of this render object) instead of from
+    /// the global coordinate system.
+    ///
+    /// This method is implemented in terms of [`AnyRenderObject::get_transform_to`].
+    pub fn global_to_local(
+        self,
+        app: &App,
+        point: Offset,
+        ancestor: Option<AnyRenderObject>,
+    ) -> Offset {
+        // We want to find the local point that corresponds to the given point on
+        // the screen, but that also physically resides on this RenderBox's local
+        // render plane, so that it is useful for visually accurate gesture
+        // processing in the local space. For that, we cannot simply transform the
+        // 2D screen point to the 3D local space since the screen space lacks the
+        // depth component |z|, and so there are many 3D points that correspond to
+        // the screen point. We must first unproject the screen point onto the local
+        // render plane to find the true 3D point that corresponds to the screen
+        // point.
+        //
+        // We do orthogonal unprojection after undoing perspective, in local space.
+        // The local render plane is the XY plane with normal vector <0, 0, 1>.
+        // Unprojection is done by finding the intersection of the view vector with
+        // the local XY plane at z = 0.
+        let transform = self.as_object().get_transform_to(app, ancestor);
+        let Some(transform) = transform.invert() else {
+            return Offset::ZERO;
+        };
+
+        // Two points with the same screen x and y but different depths define the
+        // view direction in local coordinates.
+        let n = [0.0, 0.0, 1.0];
+        let i = crate::object::perspective_transform(&transform, [0.0, 0.0, 0.0]);
+        let d = subtract(
+            crate::object::perspective_transform(&transform, [0.0, 0.0, 1.0]),
+            i,
+        );
+        let s = crate::object::perspective_transform(&transform, [point.dx(), point.dy(), 0.0]);
+        // Project the screen point onto the local render plane.
+        let p = subtract(s, scale(d, dot(n, s) / dot(n, d)));
+        Offset::new(p[0], p[1])
+    }
+
+    /// Convert the given point from the local coordinate system for this box to the global
+    /// coordinate system in logical pixels.
+    ///
+    /// If `ancestor` is non-null, this function converts the given point to the coordinate
+    /// system of `ancestor` (which must be an ancestor of this render object) instead of to
+    /// the global coordinate system.
+    ///
+    /// This method is implemented in terms of [`AnyRenderObject::get_transform_to`]. If the
+    /// transform matrix puts the given `point` on the line at infinity (for instance, when
+    /// the transform matrix is the zero matrix), this method returns (NaN, NaN).
+    pub fn local_to_global(
+        self,
+        app: &App,
+        point: Offset,
+        ancestor: Option<AnyRenderObject>,
+    ) -> Offset {
+        reveal_painting::transform_point(&self.as_object().get_transform_to(app, ancestor), point)
+    }
+
     /// See [`AnyRenderObject::parent_data_of_mut`].
     pub fn parent_data_of_mut<P: crate::object::ParentData + 'static>(
         self,
@@ -1308,6 +1405,18 @@ impl From<AnyRenderBox> for AnyRenderObject {
     fn from(box_: AnyRenderBox) -> AnyRenderObject {
         box_.as_object()
     }
+}
+
+fn subtract(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn scale(a: [f64; 3], factor: f64) -> [f64; 3] {
+    [a[0] * factor, a[1] * factor, a[2] * factor]
+}
+
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
 #[cfg(test)]

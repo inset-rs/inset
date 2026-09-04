@@ -122,13 +122,19 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the fade is a gradient shader, and gradients are deferred.
   Affect: overflowing text is cut, not faded.
 
+## object.rs / box.rs → object.dart / box.dart (paint transforms)
+
+- Change: `apply_paint_transform` is a vtable slot with per-protocol defaults (box: the `BoxParentData` offset; proxy: none; view: the root transform); `get_transform_to`, `global_to_local`, `local_to_global` are Dart's over private matrix helpers (`multiply`, `translate`, `perspective_transform`), since valo's matrix has only `then` and `invert`.
+  Reason: language.
+  Affect: a transforming leaf overrides `apply_paint_transform` on its `impl RenderBox`.
+
 ## Deferred
 
 - `PaintingContext.addLayer` / `addCompositionCallback` / `pushColorFilter`, `Layer.find` annotations, `LeaderLayer` / `FollowerLayer`, `toImage`. Trigger: `AnnotatedRegion`, `CompositedTransformFollower`, `RepaintBoundary.toImage`.
-- Debug paint overlays, `debugPaint`, `applyPaintTransform` / `getTransformTo`, `paintsChild`. Trigger: inspector; `RenderBox.localToGlobal`.
+- Debug paint overlays, `debugPaint`, `paintsChild`, `describeApproximatePaintClip`. Trigger: inspector; semantics.
 - Semantics on `PipelineOwner` and `RenderObject`. Trigger: a11y; do not stub.
 - `PipelineManifold`. The widgets `View` creates a child `PipelineOwner` per `RenderView` (as Flutter); `RendererBinding::init_render_view` stays for render-tree-only hosts, rooting the implicit view's `RenderView` in `root_pipeline_owner` as Flutter's test binding does — never call it in an app that runs `run_app`. Trigger: semantics / the manifold's `onSemanticsEnabledChanged`.
-- `computeDryLayout` / `_DebugSize` / `globalToLocal` / `localToGlobal`. Trigger: `RenderBox` public extras; `getTransformTo`.
+- `computeDryLayout` / `_DebugSize`. Trigger: `RenderBox` public extras.
 - `RenderProxyBox` / `RenderShiftedBox` intrinsics and dry layout. Trigger: the first intrinsic-sizing parent (`Row`, `IntrinsicWidth`).
 - `invokeLayoutCallback`. Trigger: `LayoutBuilder`; also widen `layout_without_resize` for a non-boundary layout-callback host.
 - `layout` / `markNeedsLayout` / `constraints` as override points. Trigger: OverlayPortal, `RenderView`, the first `markNeedsLayout` override. Ask before adding.

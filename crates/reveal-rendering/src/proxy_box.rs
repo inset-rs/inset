@@ -8,7 +8,7 @@
 use std::rc::Rc;
 
 use reveal_animation::AnyAnimation;
-use reveal_embedder::{Color, Offset, Size};
+use reveal_embedder::{Color, Matrix4, Offset, Size};
 use reveal_foundation::{App, Handle, Listener};
 use reveal_gestures::{
     PointerCancelEventListener, PointerDownEventListener, PointerEnterEventListener, PointerEvent,
@@ -42,6 +42,16 @@ pub trait RenderProxyBoxMixin: RenderObjectWithChildMixin {
         if child.parent_data(app).is_none() {
             child.set_parent_data(app, EmptyParentData);
         }
+    }
+
+    /// A proxy paints its child at its own offset: no transform to apply.
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        let _ = (app, child, transform);
     }
 
     /// Lays the child out with this box's constraints and takes its size.
@@ -250,6 +260,15 @@ impl RenderBox for RenderConstrainedBox {
         RenderProxyBoxMixin::setup_parent_data(self, app, child);
     }
 
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
+    }
+
     fn hit_test_children(
         self: RenderHandle<Self>,
         app: &mut App,
@@ -391,6 +410,15 @@ impl RenderBox for RenderOpacity {
 
     fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
         RenderProxyBoxMixin::setup_parent_data(self, app, child);
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
     }
 
     fn hit_test_children(
@@ -668,6 +696,15 @@ impl RenderBox for RenderAnimatedOpacity {
         RenderProxyBoxMixin::setup_parent_data(self, app, child);
     }
 
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
+    }
+
     fn hit_test_children(
         self: RenderHandle<Self>,
         app: &mut App,
@@ -873,6 +910,15 @@ impl RenderBox for RenderPointerListener {
 
     fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
         RenderProxyBoxMixin::setup_parent_data(self, app, child);
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
     }
 
     fn handle_event(
@@ -1157,6 +1203,15 @@ impl RenderBox for RenderDecoratedBox {
         RenderProxyBoxMixin::setup_parent_data(self, app, child);
     }
 
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
+    }
+
     fn hit_test_children(
         self: RenderHandle<Self>,
         app: &mut App,
@@ -1245,6 +1300,15 @@ impl RenderBox for RenderRepaintBoundary {
 
     fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
         RenderProxyBoxMixin::setup_parent_data(self, app, child);
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
     }
 
     fn hit_test_children(
@@ -1506,6 +1570,15 @@ impl RenderBox for RenderMouseRegion {
 
     fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
         RenderProxyBoxMixin::setup_parent_data(self, app, child);
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
     }
 
     fn hit_test(

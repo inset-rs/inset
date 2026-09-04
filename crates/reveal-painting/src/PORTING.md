@@ -13,6 +13,20 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - basic_types.rs dart:ui re-exports (`TextDirection`, `FontWeight`, `FontStyle`, `TextAlign`, `TextBaseline`, `TextDecoration`, `TextDecorationStyle`, `TextLeadingDistribution`, `TextHeightBehavior`, `FontFeature`, `FontVariation`)
 - text_painter.rs → text_painter.dart (`kDefaultFontSize`, `TextOverflow`)
 
+## colors.rs → colors.dart (+ the `Color` subclass mechanism)
+
+- Change: Flutter's `Color` subclasses (`CupertinoDynamicColor`, `WidgetStateColor`, `ColorSwatch`) are extensions carried by `AnyColor { color: Color, extension }`: `color` is the value the subclass passed to `super`, `extension` the subclass (`ColorExtension`: `as_any` for Dart's `is`, `eq_extension` for its `==`). `AnyColor` derefs to `Color`, so inherited `Color` methods work and return a plain `Color`; `extension::<T>()` is Dart's `is T`. A `const` table entry holds `&'static dyn ColorExtension`; a run-time one an `Rc`.
+  Reason: language — dart:ui `Color` is a Copy value here and cannot be subclassed; the engine only ever reads the value, the framework does the `is` checks.
+  Affect: painting and framework fields that Flutter code may resolve or type-check hold `AnyColor`: `TextStyle.color` / `background_color` / `decoration_color`, `BoxDecoration.color`, `ShapeDecoration.color`, widgets' `IconThemeData.color`, theme data. Setters take `impl Into<AnyColor>`, so `.color(Color::RED)` is unchanged; reads compare with `.map(AnyColor::color)` or `Some(color.into())`. Paint-only fields (`BorderSide.color`, `BoxShadow.color`, gradient stops, `Paint`) stay `Color`: no Flutter code resolves a subclass there, and `BorderSide` / `BoxShadow` stay Copy values.
+
+- Change: `AnyColor::lerp` returns a plain `Option<Color>`; a subclass does not survive `lerp`, `copyWith`-style setters, or `merge` beyond being carried through untouched.
+  Reason: identical to Dart's `Color.lerp`, which constructs a new `Color`.
+  Affect: none.
+
+- Change: `ColorSwatch<T>` is an extension built with `ColorSwatch::new(primary, HashMap)` and turned into the color it is in Dart with `into_any()`; `get(&key)` is `operator []`.
+  Reason: language — see above.
+  Affect: `MaterialColor` / `MaterialAccentColor` wrap it; `any.extension::<ColorSwatch<i32>>()`.
+
 ## alignment.rs → alignment.dart
 
 - Change: `AlignmentGeometry` (abstract, two public subclasses) is a `#[non_exhaustive]` pairing enum over `Alignment` and `AlignmentDirectional`.
@@ -217,7 +231,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## Deferred
 - `debug.dart` remainder (`debugNetworkImageHttpClientProvider`, …). Trigger: image loading / tests that are not `debugDisableShadows`.
-- `ColorSwatch` / `ColorProperty`. Trigger: Material colors / diagnostics. `Color` stays the dart:ui struct (stored by value on `Paint` / `BorderSide` / `TextStyle`); a `Color` trait cannot be that field type. `ColorSwatch` can wrap the primary `Color` plus a table, like `FractionalOffset` vs `Alignment`.
+- `ColorProperty` (diagnostics); `ColorSwatch` as a `const` table (`HashMap` is not const; a static swatch table needs a slice-backed form). Trigger: diagnostics; Material's `Colors`.
 - Custom `TextScaler` / `SystemTextScaler`. Trigger: `MediaQuery`; `_ClampedTextScaler` is the `TextScaler::Clamped` arm, created by the default `clamp` on a non-linear scaler.
 - `EdgeInsets.fromViewPadding` / `fromWindowPadding` / `EdgeInsetsGeometry.fromViewPadding`. Trigger: embedder / `MediaQuery`.
 - `_MixedEdgeInsets` and cross-kind `add` / `subtract` / `flipped` / `infinity` / `clamp` / `EdgeInsetsGeometry.lerp`. Trigger: first consumer that adds an `EdgeInsets` to an `EdgeInsetsDirectional`.

@@ -12,6 +12,7 @@ use reveal_embedder::{
 use reveal_embedder::{ParagraphStyle, TextHeightBehavior, TextStyle as UiTextStyle};
 
 use crate::basic_types::RenderComparison;
+use crate::colors::AnyColor;
 use crate::text_painter::{K_DEFAULT_FONT_SIZE, TextOverflow};
 use crate::text_scaler::TextScaler;
 
@@ -35,9 +36,9 @@ pub struct TextStyle {
     ///
     /// If [`foreground`](Self::foreground) is specified, this value must be
     /// None. The color property is shorthand for `Paint()..color = color`.
-    pub color: Option<Color>,
+    pub color: Option<AnyColor>,
     /// The color to use as the background for the text.
-    pub background_color: Option<Color>,
+    pub background_color: Option<AnyColor>,
     /// The name of the font to use when painting the text (e.g., Roboto).
     ///
     /// If the font is defined in a package, this is prefixed with
@@ -71,7 +72,7 @@ pub struct TextStyle {
     /// The decorations to paint near the text (e.g., an underline).
     pub decoration: Option<TextDecoration>,
     /// The color in which to paint the text decorations.
-    pub decoration_color: Option<Color>,
+    pub decoration_color: Option<AnyColor>,
     /// The style in which to paint the text decorations (e.g., dashed).
     pub decoration_style: Option<TextDecorationStyle>,
     /// The thickness of the decoration stroke as a multiplier of the thickness
@@ -135,16 +136,16 @@ impl TextStyle {
     }
 
     /// The color to use when painting the text.
-    pub fn color(mut self, color: Color) -> TextStyle {
+    pub fn color(mut self, color: impl Into<AnyColor>) -> TextStyle {
         debug_assert!(self.foreground.is_none(), "{K_COLOR_FOREGROUND_WARNING}");
-        self.color = Some(color);
+        self.color = Some(color.into());
         self
     }
 
     /// The color to use as the background for the text.
-    pub fn background_color(mut self, background_color: Color) -> TextStyle {
+    pub fn background_color(mut self, background_color: impl Into<AnyColor>) -> TextStyle {
         debug_assert!(self.background.is_none(), "{K_COLOR_BACKGROUND_WARNING}");
-        self.background_color = Some(background_color);
+        self.background_color = Some(background_color.into());
         self
     }
 
@@ -256,8 +257,8 @@ impl TextStyle {
     }
 
     /// The color in which to paint the text decorations.
-    pub fn decoration_color(mut self, decoration_color: Color) -> TextStyle {
-        self.decoration_color = Some(decoration_color);
+    pub fn decoration_color(mut self, decoration_color: impl Into<AnyColor>) -> TextStyle {
+        self.decoration_color = Some(decoration_color.into());
         self
     }
 
@@ -377,12 +378,15 @@ impl TextStyle {
 
         let mut merged = self.copy_with();
         merged.color = if self.foreground.is_none() && other.foreground.is_none() {
-            other.color.or(self.color)
+            other.color.clone().or_else(|| self.color.clone())
         } else {
             None
         };
         merged.background_color = if self.background.is_none() && other.background.is_none() {
-            other.background_color.or(self.background_color)
+            other
+                .background_color
+                .clone()
+                .or_else(|| self.background_color.clone())
         } else {
             None
         };
@@ -406,7 +410,10 @@ impl TextStyle {
             .clone()
             .or_else(|| self.font_variations.clone());
         merged.decoration = other.decoration.or(self.decoration);
-        merged.decoration_color = other.decoration_color.or(self.decoration_color);
+        merged.decoration_color = other
+            .decoration_color
+            .clone()
+            .or_else(|| self.decoration_color.clone());
         merged.decoration_style = other.decoration_style.or(self.decoration_style);
         merged.decoration_thickness = other.decoration_thickness.or(self.decoration_thickness);
         merged.overflow = other.overflow.or(self.overflow);
@@ -456,8 +463,9 @@ impl TextStyle {
         if a.is_none() {
             let b = b.unwrap();
             let mut style = TextStyle::new().inherit(b.inherit);
-            style.color = Color::lerp(None, b.color, t);
-            style.background_color = Color::lerp(None, b.background_color, t);
+            style.color = AnyColor::lerp(None, b.color.as_ref(), t).map(AnyColor::from);
+            style.background_color =
+                AnyColor::lerp(None, b.background_color.as_ref(), t).map(AnyColor::from);
             style.font_size = if t < 0.5 { None } else { b.font_size };
             style.font_weight = FontWeight::lerp(None, b.font_weight, t);
             style.font_style = if t < 0.5 { None } else { b.font_style };
@@ -480,7 +488,8 @@ impl TextStyle {
             };
             style.font_variations = lerp_font_variations(None, b.font_variations.as_deref(), t);
             style.decoration = if t < 0.5 { None } else { b.decoration };
-            style.decoration_color = Color::lerp(None, b.decoration_color, t);
+            style.decoration_color =
+                AnyColor::lerp(None, b.decoration_color.as_ref(), t).map(AnyColor::from);
             style.decoration_style = if t < 0.5 { None } else { b.decoration_style };
             style.decoration_thickness = if t < 0.5 {
                 None
@@ -503,8 +512,9 @@ impl TextStyle {
         if b.is_none() {
             let a = a.unwrap();
             let mut style = TextStyle::new().inherit(a.inherit);
-            style.color = Color::lerp(a.color, None, t);
-            style.background_color = Color::lerp(None, a.background_color, t);
+            style.color = AnyColor::lerp(a.color.as_ref(), None, t).map(AnyColor::from);
+            style.background_color =
+                AnyColor::lerp(None, a.background_color.as_ref(), t).map(AnyColor::from);
             style.font_size = if t < 0.5 { a.font_size } else { None };
             style.font_weight = FontWeight::lerp(a.font_weight, None, t);
             style.font_style = if t < 0.5 { a.font_style } else { None };
@@ -527,7 +537,8 @@ impl TextStyle {
             };
             style.font_variations = lerp_font_variations(a.font_variations.as_deref(), None, t);
             style.decoration = if t < 0.5 { a.decoration } else { None };
-            style.decoration_color = Color::lerp(a.decoration_color, None, t);
+            style.decoration_color =
+                AnyColor::lerp(a.decoration_color.as_ref(), None, t).map(AnyColor::from);
             style.decoration_style = if t < 0.5 { a.decoration_style } else { None };
             style.decoration_thickness = if t < 0.5 {
                 a.decoration_thickness
@@ -599,12 +610,13 @@ impl TextStyle {
 
         let mut style = TextStyle::new().inherit(if t < 0.5 { a.inherit } else { b.inherit });
         style.color = if a.foreground.is_none() && b.foreground.is_none() {
-            Color::lerp(a.color, b.color, t)
+            AnyColor::lerp(a.color.as_ref(), b.color.as_ref(), t).map(AnyColor::from)
         } else {
             None
         };
         style.background_color = if a.background.is_none() && b.background.is_none() {
-            Color::lerp(a.background_color, b.background_color, t)
+            AnyColor::lerp(a.background_color.as_ref(), b.background_color.as_ref(), t)
+                .map(AnyColor::from)
         } else {
             None
         };
@@ -635,12 +647,12 @@ impl TextStyle {
         style.foreground = if a.foreground.is_some() || b.foreground.is_some() {
             if t < 0.5 {
                 Some(a.foreground.clone().unwrap_or_else(|| Paint {
-                    color: a.color.unwrap().into(),
+                    color: a.color.as_ref().unwrap().color().into(),
                     ..Paint::default()
                 }))
             } else {
                 Some(b.foreground.clone().unwrap_or_else(|| Paint {
-                    color: b.color.unwrap().into(),
+                    color: b.color.as_ref().unwrap().color().into(),
                     ..Paint::default()
                 }))
             }
@@ -650,12 +662,12 @@ impl TextStyle {
         style.background = if a.background.is_some() || b.background.is_some() {
             if t < 0.5 {
                 Some(a.background.clone().unwrap_or_else(|| Paint {
-                    color: a.background_color.unwrap().into(),
+                    color: a.background_color.as_ref().unwrap().color().into(),
                     ..Paint::default()
                 }))
             } else {
                 Some(b.background.clone().unwrap_or_else(|| Paint {
-                    color: b.background_color.unwrap().into(),
+                    color: b.background_color.as_ref().unwrap().color().into(),
                     ..Paint::default()
                 }))
             }
@@ -674,7 +686,9 @@ impl TextStyle {
             t,
         );
         style.decoration = if t < 0.5 { a.decoration } else { b.decoration };
-        style.decoration_color = Color::lerp(a.decoration_color, b.decoration_color, t);
+        style.decoration_color =
+            AnyColor::lerp(a.decoration_color.as_ref(), b.decoration_color.as_ref(), t)
+                .map(AnyColor::from);
         style.decoration_style = if t < 0.5 {
             a.decoration_style
         } else {
@@ -706,15 +720,15 @@ impl TextStyle {
     /// size scaled by `text_scaler` (Dart's `getTextStyle(textScaler: scaler)`).
     pub fn get_text_style_with(&self, text_scaler: &TextScaler) -> UiTextStyle {
         let background = self.background.clone().or_else(|| {
-            self.background_color.map(|color| Paint {
-                color: color.into(),
+            self.background_color.as_ref().map(|color| Paint {
+                color: color.color().into(),
                 ..Paint::default()
             })
         });
         UiTextStyle {
-            color: self.color,
+            color: self.color.as_ref().map(AnyColor::color),
             decoration: self.decoration,
-            decoration_color: self.decoration_color,
+            decoration_color: self.decoration_color.as_ref().map(AnyColor::color),
             decoration_style: self.decoration_style,
             decoration_thickness: self.decoration_thickness,
             font_weight: self.font_weight,
@@ -1112,12 +1126,14 @@ impl TextStyleApply {
 
         let mut result = TextStyle::new().inherit(style.inherit);
         result.color = if style.foreground.is_none() {
-            color.or(style.color)
+            color.map(AnyColor::from).or_else(|| style.color.clone())
         } else {
             None
         };
         result.background_color = if style.background.is_none() {
-            background_color.or(style.background_color)
+            background_color
+                .map(AnyColor::from)
+                .or_else(|| style.background_color.clone())
         } else {
             None
         };
@@ -1154,7 +1170,9 @@ impl TextStyleApply {
         result.font_features = font_features.or(style.font_features);
         result.font_variations = font_variations.or(style.font_variations);
         result.decoration = decoration.or(style.decoration);
-        result.decoration_color = decoration_color.or(style.decoration_color);
+        result.decoration_color = decoration_color
+            .map(AnyColor::from)
+            .or_else(|| style.decoration_color.clone());
         result.decoration_style = decoration_style.or(style.decoration_style);
         result.decoration_thickness = style.decoration_thickness.map(|decoration_thickness| {
             decoration_thickness * decoration_thickness_factor + decoration_thickness_delta
@@ -1351,8 +1369,8 @@ mod tests {
     fn copy_with_replaces_color() {
         let style = TextStyle::new().color(Color::from_argb(255, 0, 0, 0));
         let copied = style.copy_with().color(Color::from_argb(255, 255, 0, 0));
-        assert_eq!(copied.color, Some(Color::from_argb(255, 255, 0, 0)));
-        assert_eq!(style.color, Some(Color::from_argb(255, 0, 0, 0)));
+        assert_eq!(copied.color, Some(Color::from_argb(255, 255, 0, 0).into()));
+        assert_eq!(style.color, Some(Color::from_argb(255, 0, 0, 0).into()));
     }
 
     #[test]
@@ -1362,7 +1380,7 @@ mod tests {
             .font_size(14.0);
         let other = TextStyle::new().font_weight(FontWeight::BOLD);
         let merged = base.merge(Some(&other));
-        assert_eq!(merged.color, Some(Color::from_argb(255, 0, 0, 0)));
+        assert_eq!(merged.color, Some(Color::from_argb(255, 0, 0, 0).into()));
         assert_eq!(merged.font_size, Some(14.0));
         assert_eq!(merged.font_weight, Some(FontWeight::BOLD));
     }

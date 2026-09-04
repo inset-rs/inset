@@ -5,7 +5,7 @@ use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::sync::Arc;
 
 use reveal_embedder::{BlendMode, Canvas, ClipOp, Paint};
-use reveal_embedder::{Color, Offset, Path, PathBuilder, Rect, Size};
+use reveal_embedder::{Offset, Path, PathBuilder, Rect, Size};
 
 use crate::basic_types::TextDirection;
 use crate::border_radius::BorderRadiusGeometry;
@@ -13,6 +13,7 @@ use crate::borders::{BorderSide, BorderStyle};
 use crate::box_border::{Border, BorderDirectional, BoxBorder, BoxShape};
 use crate::box_shadow::BoxShadow;
 use crate::circle_border::{oval_path, rrect_path};
+use crate::colors::AnyColor;
 use crate::debug::debug_disable_shadows;
 use crate::decoration::{BoxPainter, Decoration};
 use crate::draw::draw_rrect;
@@ -31,7 +32,7 @@ pub struct BoxDecoration {
     /// The color to fill in the background of the box.
     ///
     /// This is ignored if a gradient is present (gradient paint is deferred).
-    pub color: Option<Color>,
+    pub color: Option<AnyColor>,
     /// A border to draw above the background [`color`](Self::color).
     pub border: Option<Box<dyn BoxBorder>>,
     /// If non-null, the corners of this box are rounded by this
@@ -79,8 +80,8 @@ impl BoxDecoration {
     }
 
     /// The color to fill in the background of the box.
-    pub fn color(mut self, color: Color) -> BoxDecoration {
-        self.color = Some(color);
+    pub fn color(mut self, color: impl Into<AnyColor>) -> BoxDecoration {
+        self.color = Some(color.into());
         self
     }
 
@@ -123,7 +124,7 @@ impl BoxDecoration {
     }
 
     fn from_fields(
-        color: Option<Color>,
+        color: Option<AnyColor>,
         border: Option<Box<dyn BoxBorder>>,
         border_radius: Option<BorderRadiusGeometry>,
         box_shadow: Option<Vec<BoxShadow>>,
@@ -159,7 +160,7 @@ impl BoxDecoration {
     /// Returns a new box decoration that is scaled by the given factor.
     pub fn scale(&self, factor: f64) -> BoxDecoration {
         BoxDecoration::from_fields(
-            Color::lerp(None, self.color, factor),
+            AnyColor::lerp(None, self.color.as_ref(), factor).map(AnyColor::from),
             <dyn BoxBorder>::lerp(None, self.border.as_deref(), factor),
             BorderRadiusGeometry::lerp(None, self.border_radius, factor),
             BoxShadow::lerp_list(None, self.box_shadow.as_deref(), factor),
@@ -198,7 +199,7 @@ impl BoxDecoration {
         let a = a.unwrap();
         let b = b.unwrap();
         Some(BoxDecoration::from_fields(
-            Color::lerp(a.color, b.color, t),
+            AnyColor::lerp(a.color.as_ref(), b.color.as_ref(), t).map(AnyColor::from),
             <dyn BoxBorder>::lerp(a.border.as_deref(), b.border.as_deref(), t),
             BorderRadiusGeometry::lerp(a.border_radius, b.border_radius, t),
             BoxShadow::lerp_list(a.box_shadow.as_deref(), b.box_shadow.as_deref(), t),
@@ -221,7 +222,7 @@ impl Default for BoxDecoration {
 impl Clone for BoxDecoration {
     fn clone(&self) -> BoxDecoration {
         BoxDecoration {
-            color: self.color,
+            color: self.color.clone(),
             border: self.border.as_ref().map(|b| b.clone_box_border()),
             border_radius: self.border_radius,
             box_shadow: self.box_shadow.clone(),
@@ -390,8 +391,8 @@ impl BoxDecorationPainter {
             if let Some(blend_mode) = self.decoration.background_blend_mode {
                 paint.blend_mode = blend_mode;
             }
-            if let Some(color) = self.decoration.color {
-                paint.color = color.into();
+            if let Some(color) = &self.decoration.color {
+                paint.color = color.color().into();
             }
             self.cached_background_paint = Some(paint);
         }
@@ -592,6 +593,7 @@ impl Debug for BoxDecorationPainter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reveal_embedder::Color;
     use reveal_embedder::{FillRule, Radius, lerp_double};
 
     use crate::border_radius::{BorderRadius, BorderRadiusDirectional};

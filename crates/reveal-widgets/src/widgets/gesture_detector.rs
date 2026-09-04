@@ -720,6 +720,314 @@ pub struct GestureDetector {
 }
 
 impl GestureDetector {
+    /// Creates a widget that detects gestures; Dart's named arguments are the setters.
+    pub fn new() -> GestureDetector {
+        GestureDetector::default()
+    }
+
+    /// Dart `GestureDetector(key:)`.
+    pub fn key(mut self, key: KeyRef) -> GestureDetector {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `GestureDetector(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> GestureDetector {
+        self.child = Some(child.into_widget());
+        self
+    }
+
+    /// Dart `GestureDetector(on_tap_down:)`.
+    pub fn on_tap_down(mut self, on_tap_down: GestureTapDownCallback) -> GestureDetector {
+        self.on_tap_down = Some(on_tap_down);
+        self
+    }
+
+    /// Dart `GestureDetector(on_tap_up:)`.
+    pub fn on_tap_up(mut self, on_tap_up: GestureTapUpCallback) -> GestureDetector {
+        self.on_tap_up = Some(on_tap_up);
+        self
+    }
+
+    /// Dart `GestureDetector(on_tap:)`.
+    pub fn on_tap(mut self, on_tap: GestureTapCallback) -> GestureDetector {
+        self.on_tap = Some(on_tap);
+        self
+    }
+
+    /// Dart `GestureDetector(on_tap_move:)`.
+    pub fn on_tap_move(mut self, on_tap_move: GestureTapMoveCallback) -> GestureDetector {
+        self.on_tap_move = Some(on_tap_move);
+        self
+    }
+
+    /// Dart `GestureDetector(on_tap_cancel:)`.
+    pub fn on_tap_cancel(mut self, on_tap_cancel: GestureTapCancelCallback) -> GestureDetector {
+        self.on_tap_cancel = Some(on_tap_cancel);
+        self
+    }
+
+    /// Dart `GestureDetector(on_secondary_tap:)`.
+    pub fn on_secondary_tap(mut self, on_secondary_tap: GestureTapCallback) -> GestureDetector {
+        self.on_secondary_tap = Some(on_secondary_tap);
+        self
+    }
+
+    /// Dart `GestureDetector(on_secondary_tap_down:)`.
+    pub fn on_secondary_tap_down(
+        mut self,
+        on_secondary_tap_down: GestureTapDownCallback,
+    ) -> GestureDetector {
+        self.on_secondary_tap_down = Some(on_secondary_tap_down);
+        self
+    }
+
+    /// Dart `GestureDetector(on_secondary_tap_up:)`.
+    pub fn on_secondary_tap_up(
+        mut self,
+        on_secondary_tap_up: GestureTapUpCallback,
+    ) -> GestureDetector {
+        self.on_secondary_tap_up = Some(on_secondary_tap_up);
+        self
+    }
+
+    /// Dart `GestureDetector(on_secondary_tap_cancel:)`.
+    pub fn on_secondary_tap_cancel(
+        mut self,
+        on_secondary_tap_cancel: GestureTapCancelCallback,
+    ) -> GestureDetector {
+        self.on_secondary_tap_cancel = Some(on_secondary_tap_cancel);
+        self
+    }
+
+    /// Dart `GestureDetector(on_tertiary_tap_down:)`.
+    pub fn on_tertiary_tap_down(
+        mut self,
+        on_tertiary_tap_down: GestureTapDownCallback,
+    ) -> GestureDetector {
+        self.on_tertiary_tap_down = Some(on_tertiary_tap_down);
+        self
+    }
+
+    /// Dart `GestureDetector(on_tertiary_tap_up:)`.
+    pub fn on_tertiary_tap_up(
+        mut self,
+        on_tertiary_tap_up: GestureTapUpCallback,
+    ) -> GestureDetector {
+        self.on_tertiary_tap_up = Some(on_tertiary_tap_up);
+        self
+    }
+
+    /// Dart `GestureDetector(on_tertiary_tap_cancel:)`.
+    pub fn on_tertiary_tap_cancel(
+        mut self,
+        on_tertiary_tap_cancel: GestureTapCancelCallback,
+    ) -> GestureDetector {
+        self.on_tertiary_tap_cancel = Some(on_tertiary_tap_cancel);
+        self
+    }
+
+    /// Dart `GestureDetector(on_long_press_down:)`.
+    pub fn on_long_press_down(
+        mut self,
+        on_long_press_down: GestureLongPressDownCallback,
+    ) -> GestureDetector {
+        self.on_long_press_down = Some(on_long_press_down);
+        self
+    }
+
+    /// Dart `GestureDetector(on_long_press_cancel:)`.
+    pub fn on_long_press_cancel(
+        mut self,
+        on_long_press_cancel: GestureLongPressCancelCallback,
+    ) -> GestureDetector {
+        self.on_long_press_cancel = Some(on_long_press_cancel);
+        self
+    }
+
+    /// Dart `GestureDetector(on_long_press:)`.
+    pub fn on_long_press(mut self, on_long_press: GestureLongPressCallback) -> GestureDetector {
+        self.on_long_press = Some(on_long_press);
+        self
+    }
+
+    /// Dart `GestureDetector(on_long_press_start:)`.
+    pub fn on_long_press_start(
+        mut self,
+        on_long_press_start: GestureLongPressStartCallback,
+    ) -> GestureDetector {
+        self.on_long_press_start = Some(on_long_press_start);
+        self
+    }
+
+    /// Dart `GestureDetector(on_long_press_move_update:)`.
+    pub fn on_long_press_move_update(
+        mut self,
+        on_long_press_move_update: GestureLongPressMoveUpdateCallback,
+    ) -> GestureDetector {
+        self.on_long_press_move_update = Some(on_long_press_move_update);
+        self
+    }
+
+    /// Dart `GestureDetector(on_long_press_up:)`.
+    pub fn on_long_press_up(
+        mut self,
+        on_long_press_up: GestureLongPressUpCallback,
+    ) -> GestureDetector {
+        self.on_long_press_up = Some(on_long_press_up);
+        self
+    }
+
+    /// Dart `GestureDetector(on_long_press_end:)`.
+    pub fn on_long_press_end(
+        mut self,
+        on_long_press_end: GestureLongPressEndCallback,
+    ) -> GestureDetector {
+        self.on_long_press_end = Some(on_long_press_end);
+        self
+    }
+
+    /// Dart `GestureDetector(on_secondary_long_press_down:)`.
+    pub fn on_secondary_long_press_down(
+        mut self,
+        on_secondary_long_press_down: GestureLongPressDownCallback,
+    ) -> GestureDetector {
+        self.on_secondary_long_press_down = Some(on_secondary_long_press_down);
+        self
+    }
+
+    /// Dart `GestureDetector(on_secondary_long_press_cancel:)`.
+    pub fn on_secondary_long_press_cancel(
+        mut self,
+        on_secondary_long_press_cancel: GestureLongPressCancelCallback,
+    ) -> GestureDetector {
+        self.on_secondary_long_press_cancel = Some(on_secondary_long_press_cancel);
+        self
+    }
+
+    /// Dart `GestureDetector(on_secondary_long_press:)`.
+    pub fn on_secondary_long_press(
+        mut self,
+        on_secondary_long_press: GestureLongPressCallback,
+    ) -> GestureDetector {
+        self.on_secondary_long_press = Some(on_secondary_long_press);
+        self
+    }
+
+    /// Dart `GestureDetector(on_secondary_long_press_start:)`.
+    pub fn on_secondary_long_press_start(
+        mut self,
+        on_secondary_long_press_start: GestureLongPressStartCallback,
+    ) -> GestureDetector {
+        self.on_secondary_long_press_start = Some(on_secondary_long_press_start);
+        self
+    }
+
+    /// Dart `GestureDetector(on_secondary_long_press_move_update:)`.
+    pub fn on_secondary_long_press_move_update(
+        mut self,
+        on_secondary_long_press_move_update: GestureLongPressMoveUpdateCallback,
+    ) -> GestureDetector {
+        self.on_secondary_long_press_move_update = Some(on_secondary_long_press_move_update);
+        self
+    }
+
+    /// Dart `GestureDetector(on_secondary_long_press_up:)`.
+    pub fn on_secondary_long_press_up(
+        mut self,
+        on_secondary_long_press_up: GestureLongPressUpCallback,
+    ) -> GestureDetector {
+        self.on_secondary_long_press_up = Some(on_secondary_long_press_up);
+        self
+    }
+
+    /// Dart `GestureDetector(on_secondary_long_press_end:)`.
+    pub fn on_secondary_long_press_end(
+        mut self,
+        on_secondary_long_press_end: GestureLongPressEndCallback,
+    ) -> GestureDetector {
+        self.on_secondary_long_press_end = Some(on_secondary_long_press_end);
+        self
+    }
+
+    /// Dart `GestureDetector(on_tertiary_long_press_down:)`.
+    pub fn on_tertiary_long_press_down(
+        mut self,
+        on_tertiary_long_press_down: GestureLongPressDownCallback,
+    ) -> GestureDetector {
+        self.on_tertiary_long_press_down = Some(on_tertiary_long_press_down);
+        self
+    }
+
+    /// Dart `GestureDetector(on_tertiary_long_press_cancel:)`.
+    pub fn on_tertiary_long_press_cancel(
+        mut self,
+        on_tertiary_long_press_cancel: GestureLongPressCancelCallback,
+    ) -> GestureDetector {
+        self.on_tertiary_long_press_cancel = Some(on_tertiary_long_press_cancel);
+        self
+    }
+
+    /// Dart `GestureDetector(on_tertiary_long_press:)`.
+    pub fn on_tertiary_long_press(
+        mut self,
+        on_tertiary_long_press: GestureLongPressCallback,
+    ) -> GestureDetector {
+        self.on_tertiary_long_press = Some(on_tertiary_long_press);
+        self
+    }
+
+    /// Dart `GestureDetector(on_tertiary_long_press_start:)`.
+    pub fn on_tertiary_long_press_start(
+        mut self,
+        on_tertiary_long_press_start: GestureLongPressStartCallback,
+    ) -> GestureDetector {
+        self.on_tertiary_long_press_start = Some(on_tertiary_long_press_start);
+        self
+    }
+
+    /// Dart `GestureDetector(on_tertiary_long_press_move_update:)`.
+    pub fn on_tertiary_long_press_move_update(
+        mut self,
+        on_tertiary_long_press_move_update: GestureLongPressMoveUpdateCallback,
+    ) -> GestureDetector {
+        self.on_tertiary_long_press_move_update = Some(on_tertiary_long_press_move_update);
+        self
+    }
+
+    /// Dart `GestureDetector(on_tertiary_long_press_up:)`.
+    pub fn on_tertiary_long_press_up(
+        mut self,
+        on_tertiary_long_press_up: GestureLongPressUpCallback,
+    ) -> GestureDetector {
+        self.on_tertiary_long_press_up = Some(on_tertiary_long_press_up);
+        self
+    }
+
+    /// Dart `GestureDetector(on_tertiary_long_press_end:)`.
+    pub fn on_tertiary_long_press_end(
+        mut self,
+        on_tertiary_long_press_end: GestureLongPressEndCallback,
+    ) -> GestureDetector {
+        self.on_tertiary_long_press_end = Some(on_tertiary_long_press_end);
+        self
+    }
+
+    /// Dart `GestureDetector(behavior:)`.
+    pub fn behavior(mut self, behavior: HitTestBehavior) -> GestureDetector {
+        self.behavior = Some(behavior);
+        self
+    }
+
+    /// Dart `GestureDetector(supported_devices:)`.
+    pub fn supported_devices(
+        mut self,
+        supported_devices: HashSet<PointerDeviceKind>,
+    ) -> GestureDetector {
+        self.supported_devices = Some(supported_devices);
+        self
+    }
+
     fn has_tap_callback(&self) -> bool {
         self.on_tap_down.is_some()
             || self.on_tap_up.is_some()
@@ -882,13 +1190,14 @@ impl StatelessWidget for GestureDetector {
             ));
         }
 
-        RawGestureDetector {
-            key: None,
-            child: self.child.clone(),
-            gestures,
-            behavior: self.behavior,
+        let mut detector = RawGestureDetector::new().gestures(gestures);
+        if let Some(child) = &self.child {
+            detector = detector.child(child.clone());
         }
-        .into_widget()
+        if let Some(behavior) = self.behavior {
+            detector = detector.behavior(behavior);
+        }
+        detector.into_widget()
     }
 }
 
@@ -939,6 +1248,37 @@ pub struct RawGestureDetector {
     /// This defaults to [`HitTestBehavior::DeferToChild`] if [`child`](Self::child) is not
     /// `None` and [`HitTestBehavior::Translucent`] if child is `None`.
     pub behavior: Option<HitTestBehavior>,
+}
+
+impl RawGestureDetector {
+    /// Creates a widget that detects gestures; Dart's named arguments are the setters.
+    pub fn new() -> RawGestureDetector {
+        RawGestureDetector::default()
+    }
+
+    /// Dart `RawGestureDetector(key:)`.
+    pub fn key(mut self, key: KeyRef) -> RawGestureDetector {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `RawGestureDetector(gestures:)`.
+    pub fn gestures(mut self, gestures: GestureRecognizerFactories) -> RawGestureDetector {
+        self.gestures = gestures;
+        self
+    }
+
+    /// Dart `RawGestureDetector(behavior:)`.
+    pub fn behavior(mut self, behavior: HitTestBehavior) -> RawGestureDetector {
+        self.behavior = Some(behavior);
+        self
+    }
+
+    /// Dart `RawGestureDetector(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> RawGestureDetector {
+        self.child = Some(child.into_widget());
+        self
+    }
 }
 
 impl StatefulWidget for RawGestureDetector {
@@ -1131,20 +1471,20 @@ impl State for RawGestureDetectorState {
             .behavior
             .unwrap_or_else(|| self.default_behavior(app));
         let child = widget.child.clone();
-        Listener {
-            on_pointer_down: Some(Rc::new(move |app: &mut App, event: PointerDownEvent| {
+        let mut listener = Listener::new()
+            .on_pointer_down(Rc::new(move |app: &mut App, event: PointerDownEvent| {
                 self.handle_pointer_down(app, event);
-            })),
-            on_pointer_pan_zoom_start: Some(Rc::new(
+            }))
+            .on_pointer_pan_zoom_start(Rc::new(
                 move |app: &mut App, event: PointerPanZoomStartEvent| {
                     self.handle_pointer_pan_zoom_start(app, event);
                 },
-            )),
-            behavior,
-            child,
-            ..Listener::default()
+            ))
+            .behavior(behavior);
+        if let Some(child) = child {
+            listener = listener.child(child);
         }
-        .into_widget()
+        listener.into_widget()
     }
 }
 
@@ -1375,13 +1715,12 @@ mod tests {
                     );
                 },
             );
-            RawGestureDetector {
-                key: None,
-                child: None,
-                gestures: vec![(TypeId::of::<TapGestureRecognizer>(), factory.into_factory())],
-                behavior: None,
-            }
-            .into_widget()
+            RawGestureDetector::new()
+                .gestures(vec![(
+                    TypeId::of::<TapGestureRecognizer>(),
+                    factory.into_factory(),
+                )])
+                .into_widget()
         }
     }
 
@@ -1396,30 +1735,25 @@ mod tests {
         let tap_log = Rc::clone(&log);
         mount(
             &mut app,
-            GestureDetector {
-                on_tap_down: Some(Rc::new(move |_app, details: TapDownDetails| {
+            GestureDetector::new()
+                .on_tap_down(Rc::new(move |_app, details: TapDownDetails| {
                     down_log
                         .borrow_mut()
                         .push(format!("down {:?}", details.local_position));
-                })),
-                on_tap_up: Some(Rc::new(move |_app, details: TapUpDetails| {
+                }))
+                .on_tap_up(Rc::new(move |_app, details: TapUpDetails| {
                     up_log
                         .borrow_mut()
                         .push(format!("up {:?}", details.global_position));
-                })),
-                on_tap: Some(Listener::new(move |_app| {
+                }))
+                .on_tap(Listener::new(move |_app| {
                     tap_log.borrow_mut().push("tap".into())
-                })),
-                behavior: Some(HitTestBehavior::Opaque),
-                child: Some(
-                    Sized {
-                        size: Size::new(100.0, 100.0),
-                    }
-                    .into_widget(),
-                ),
-                ..GestureDetector::default()
-            }
-            .into_widget(),
+                }))
+                .behavior(HitTestBehavior::Opaque)
+                .child(Sized {
+                    size: Size::new(100.0, 100.0),
+                })
+                .into_widget(),
         );
 
         tap_at(
@@ -1441,11 +1775,9 @@ mod tests {
         let count = Rc::clone(&taps);
         mount(
             &mut app,
-            GestureDetector {
-                on_tap: Some(Listener::new(move |_app| count.set(count.get() + 1))),
-                ..GestureDetector::default()
-            }
-            .into_widget(),
+            GestureDetector::new()
+                .on_tap(Listener::new(move |_app| count.set(count.get() + 1)))
+                .into_widget(),
         );
 
         tap_at(
@@ -1464,17 +1796,12 @@ mod tests {
         let count = Rc::clone(&taps);
         mount(
             &mut app,
-            GestureDetector {
-                on_tap: Some(Listener::new(move |_app| count.set(count.get() + 1))),
-                child: Some(
-                    Sized {
-                        size: Size::new(100.0, 100.0),
-                    }
-                    .into_widget(),
-                ),
-                ..GestureDetector::default()
-            }
-            .into_widget(),
+            GestureDetector::new()
+                .on_tap(Listener::new(move |_app| count.set(count.get() + 1)))
+                .child(Sized {
+                    size: Size::new(100.0, 100.0),
+                })
+                .into_widget(),
         );
 
         tap_at(
@@ -1496,20 +1823,18 @@ mod tests {
         let up_log = Rc::clone(&log);
         mount(
             &mut app,
-            GestureDetector {
-                on_tap: Some(Listener::new(move |_app| tap_log.borrow_mut().push("tap"))),
-                on_tap_cancel: Some(Listener::new(move |_app| {
+            GestureDetector::new()
+                .on_tap(Listener::new(move |_app| tap_log.borrow_mut().push("tap")))
+                .on_tap_cancel(Listener::new(move |_app| {
                     cancel_log.borrow_mut().push("tap_cancel")
-                })),
-                on_long_press: Some(Listener::new(move |_app| {
+                }))
+                .on_long_press(Listener::new(move |_app| {
                     long_press_log.borrow_mut().push("long_press")
-                })),
-                on_long_press_up: Some(Listener::new(move |_app| {
+                }))
+                .on_long_press_up(Listener::new(move |_app| {
                     up_log.borrow_mut().push("long_press_up")
-                })),
-                ..GestureDetector::default()
-            }
-            .into_widget(),
+                }))
+                .into_widget(),
         );
 
         press(
@@ -1537,12 +1862,10 @@ mod tests {
         let count = Rc::clone(&taps);
         mount(
             &mut app,
-            GestureDetector {
-                on_tap: Some(Listener::new(move |_app| count.set(count.get() + 1))),
-                supported_devices: Some(HashSet::from([PointerDeviceKind::Mouse])),
-                ..GestureDetector::default()
-            }
-            .into_widget(),
+            GestureDetector::new()
+                .on_tap(Listener::new(move |_app| count.set(count.get() + 1)))
+                .supported_devices(HashSet::from([PointerDeviceKind::Mouse]))
+                .into_widget(),
         );
 
         tap_at(
@@ -1596,7 +1919,7 @@ mod tests {
         );
         assert_eq!(factory.taps.get(), 1);
 
-        harness.set_child(&mut app, RawGestureDetector::default().into_widget());
+        harness.set_child(&mut app, RawGestureDetector::new().into_widget());
         harness.pump(&mut app);
         assert!(
             !app.contains(recognizer),
@@ -1676,16 +1999,14 @@ mod tests {
         );
         let harness = mount(
             &mut app,
-            RawGestureDetector {
-                key: None,
-                child: Some(LayoutProbe { on_layout }.into_widget()),
-                gestures: vec![(
+            RawGestureDetector::new()
+                .gestures(vec![(
                     TypeId::of::<TapGestureRecognizer>(),
                     tap_factory.into_factory(),
-                )],
-                behavior: Some(HitTestBehavior::Opaque),
-            }
-            .into_widget(),
+                )])
+                .behavior(HitTestBehavior::Opaque)
+                .child(LayoutProbe { on_layout })
+                .into_widget(),
         );
         let state = detector_state(&harness, &app);
         state_slot.set(Some(state));
@@ -1748,12 +2069,10 @@ mod tests {
         let mut app = App::new();
         let harness = mount(
             &mut app,
-            GestureDetector {
-                on_tap: Some(Listener::new(|_app| {})),
-                on_long_press: Some(Listener::new(|_app| {})),
-                ..GestureDetector::default()
-            }
-            .into_widget(),
+            GestureDetector::new()
+                .on_tap(Listener::new(|_app| {}))
+                .on_long_press(Listener::new(|_app| {}))
+                .into_widget(),
         );
         let state = detector_state(&harness, &app);
         let recognizers: Vec<HandleId> = state

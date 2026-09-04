@@ -97,12 +97,7 @@ impl WidgetsBinding {
              platform to provide a default view to render into (the \"implicit\" view). Try \
              using `run_widget` instead of `run_app` to start your app.",
         );
-        View {
-            key: None,
-            view,
-            child: root_widget,
-        }
-        .into_widget()
+        View::new(view, root_widget).into_widget()
     }
 
     /// Schedules a `Timer` for attaching the root widget.
@@ -129,11 +124,9 @@ impl WidgetsBinding {
     pub fn attach_root_widget(self: Handle<Self>, app: &mut App, root_widget: WidgetRef) {
         self.attach_to_build_owner(
             app,
-            RootWidget {
-                key: None,
-                child: Some(root_widget),
-                debug_short_description: Some("[root]".to_owned()),
-            },
+            RootWidget::new()
+                .child(root_widget)
+                .debug_short_description("[root]"),
         );
     }
 
@@ -228,7 +221,7 @@ fn run_widget_internal(app: &mut App, binding: Handle<WidgetsBinding>, widget: W
 ///
 /// It is used as the root of the widget tree, and provides a [`RootElement`] which does not
 /// have a render object itself and instead delegates rendering to its child.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct RootWidget {
     pub key: Option<KeyRef>,
     /// The widget below this widget in the tree.
@@ -238,6 +231,32 @@ pub struct RootWidget {
 }
 
 impl RootWidget {
+    /// Creates a `RootWidget`; Dart's named arguments are the setters.
+    pub fn new() -> RootWidget {
+        RootWidget::default()
+    }
+
+    /// Dart `RootWidget(key:)`.
+    pub fn key(mut self, key: KeyRef) -> RootWidget {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `RootWidget(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> RootWidget {
+        self.child = Some(child.into_widget());
+        self
+    }
+
+    /// Dart `RootWidget(debug_short_description:)`.
+    pub fn debug_short_description(
+        mut self,
+        debug_short_description: impl Into<String>,
+    ) -> RootWidget {
+        self.debug_short_description = Some(debug_short_description.into());
+        self
+    }
+
     /// Inflate this widget and attaches the resulting [`RootElement`] to the provided
     /// [`BuildOwner`].
     ///

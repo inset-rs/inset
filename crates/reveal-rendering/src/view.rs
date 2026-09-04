@@ -351,6 +351,21 @@ impl RenderObject for RenderView {
         }
     }
 
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        let root_transform = self
+            .get(app)
+            .root_transform
+            .as_ref()
+            .expect("the view has a configuration");
+        crate::object::multiply(transform, root_transform);
+        debug_assert!(child.parent(app).map(AnyRenderObject::id) == Some(self.id()));
+    }
+
     fn is_repaint_boundary(self: RenderHandle<Self>, _app: &App) -> bool {
         true
     }
@@ -376,6 +391,9 @@ impl HitTestTarget for RenderHandle<RenderView> {
 static VTABLE: RenderObjectVTable = RenderObjectVTable::of::<RenderView>(
     |app, id, child| <RenderView as RenderObject>::setup_parent_data(resolve(id), app, child),
     |app, id| RenderView::paint_bounds(resolve(id), app),
+    |app, id, child, transform| {
+        <RenderView as RenderObject>::apply_paint_transform(resolve(id), app, child, transform)
+    },
     None,
     None,
 );
@@ -392,6 +410,8 @@ mod tests {
     use crate::layer::CompositedLayerKind;
     use crate::pipeline_owner::PipelineOwner;
     use crate::proxy_box::RenderConstrainedBox;
+    use crate::shifted_box::RenderPadding;
+    use reveal_painting::EdgeInsetsGeometry;
 
     struct TestView {
         metrics: ViewMetrics,
@@ -550,5 +570,96 @@ mod tests {
             Offset::ZERO & Size::new(1600.0, 1200.0)
         );
         assert_eq!(presented.get(), 1);
+    }
+
+    #[test]
+    fn coordinates_convert_through_the_paint_transforms_below_the_view() {
+        let mut app = App::new();
+        let presented = Rc::new(Cell::new(0));
+        let child =
+            RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(30.0, 40.0)), None);
+        let padding = RenderPadding::new(
+            &mut app,
+            EdgeInsetsGeometry::from_ltrb(10.0, 20.0, 0.0, 0.0),
+            None,
+            Some(child.as_box()),
+        );
+        let view = RenderView::new(
+            &mut app,
+            Some(padding.as_box()),
+            Some(create_view_configuration(Size::new(800.0, 600.0), 2.0)),
+            test_view(&presented),
+        );
+        let owner = PipelineOwner::new(&mut app, None);
+        owner.set_root_node(&mut app, Some(view.as_object()));
+        view.prepare_initial_frame(&mut app);
+        owner.flush_layout(&mut app);
+
+        // The root view's own transform (logical to physical) is left out, as in Dart.
+        let child = child.as_box();
+        assert_eq!(
+            child.local_to_global(&app, Offset::ZERO, None),
+            Offset::new(10.0, 20.0)
+        );
+        assert_eq!(
+            child.global_to_local(&app, Offset::new(15.0, 25.0), None),
+            Offset::new(5.0, 5.0)
+        );
+        assert_eq!(
+            child.local_to_global(&app, Offset::new(1.0, 1.0), Some(padding.as_object())),
+            Offset::new(11.0, 21.0)
+        );
+        assert_eq!(
+            padding.as_box().global_to_local(
+                &app,
+                Offset::new(10.0, 20.0),
+                Some(child.as_object())
+            ),
+            Offset::new(20.0, 40.0)
+        );
+        assert!(
+            child
+                .as_object()
+                .paint_bounds(&app)
+                .inflate(70.0)
+                .contains(child.global_to_local(&app, Offset::new(100.0, 100.0), None))
+        );
+    }
+
+    #[test]
+    fn a_proxy_box_adds_no_paint_transform() {
+        let mut app = App::new();
+        let presented = Rc::new(Cell::new(0));
+        let child =
+            RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(30.0, 40.0)), None);
+        let proxy =
+            RenderConstrainedBox::new(&mut app, BoxConstraints::new(), Some(child.as_box()));
+        let padding = RenderPadding::new(
+            &mut app,
+            EdgeInsetsGeometry::from_ltrb(10.0, 20.0, 0.0, 0.0),
+            None,
+            Some(proxy.as_box()),
+        );
+        let view = RenderView::new(
+            &mut app,
+            Some(padding.as_box()),
+            Some(create_view_configuration(Size::new(800.0, 600.0), 2.0)),
+            test_view(&presented),
+        );
+        let owner = PipelineOwner::new(&mut app, None);
+        owner.set_root_node(&mut app, Some(view.as_object()));
+        view.prepare_initial_frame(&mut app);
+        owner.flush_layout(&mut app);
+
+        assert_eq!(
+            child.as_box().local_to_global(&app, Offset::ZERO, None),
+            Offset::new(10.0, 20.0)
+        );
+        assert_eq!(
+            child
+                .as_box()
+                .global_to_local(&app, Offset::new(15.0, 25.0), None),
+            Offset::new(5.0, 5.0)
+        );
     }
 }

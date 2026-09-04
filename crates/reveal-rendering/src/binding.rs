@@ -14,11 +14,6 @@ use crate::object::RenderHandle;
 use crate::pipeline_owner::PipelineOwner;
 use crate::view::{RenderView, ViewConfiguration};
 
-/// The glue between the render trees and the Flutter engine.
-///
-/// Flutter's `RendererBinding` mixin. Like Flutter's binding it is the App's singleton;
-/// members take `&mut App`.
-
 /// The object side of Flutter's `WidgetsBinding` overrides of `RendererBinding.drawFrame`:
 /// the widget layer builds before the renderer's frame and finalizes its tree after it.
 /// Implement it on the binding above and register `Rc::new(handle)` with

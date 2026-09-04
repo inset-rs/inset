@@ -12,7 +12,7 @@ use std::fmt::{self, Debug, Display};
 use std::hash::{Hash, Hasher};
 use std::ops::Receiver;
 
-use reveal_embedder::{Offset, Rect};
+use reveal_embedder::{Matrix4, Offset, Rect};
 use reveal_foundation::{App, Handle, HandleId};
 use reveal_services::MouseTrackerAnnotation;
 
@@ -219,6 +219,31 @@ pub trait RenderObject: 'static + Sized {
         false
     }
 
+    /// Applies the transform that would be applied when painting the given child to the
+    /// given matrix.
+    ///
+    /// Used by coordinate conversion functions ([`AnyRenderObject::get_transform_to`]) to
+    /// translate coordinates local to one render object into coordinates local to another
+    /// render object.
+    ///
+    /// Some RenderObjects will provide a zeroed out matrix in this method, indicating that
+    /// the child should not paint anything or respond to hit tests currently. A parent may
+    /// supply a non-zero matrix even if it does not paint its child currently, for example
+    /// if the parent is a `RenderOffstage` with `offstage` set to true. In both of these
+    /// cases, the parent must return `false` from `paintsChild`.
+    ///
+    /// The box protocol's default translates by the child's `BoxParentData` offset; this
+    /// object-level default only asserts, as Dart's `RenderObject.applyPaintTransform`.
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        let _ = transform;
+        debug_assert!(child.parent(app).map(AnyRenderObject::id) == Some(self.id()));
+    }
+
     /// Whether this render object repaints separately from its parent.
     ///
     /// A repaint boundary composites its own recording through
@@ -388,6 +413,7 @@ pub(crate) struct RenderObjectVTable {
     pub perform_layout: fn(&mut App, HandleId),
     pub perform_resize: fn(&mut App, HandleId),
     pub paint_bounds: fn(&App, HandleId) -> Rect,
+    pub apply_paint_transform: fn(&App, HandleId, AnyRenderObject, &mut Matrix4),
     pub is_repaint_boundary: fn(&App, HandleId) -> bool,
     pub mouse_tracker_annotation: fn(&App, HandleId) -> Option<MouseTrackerAnnotation>,
     pub update_composited_layer: fn(&mut App, HandleId, Option<CompositedLayer>) -> CompositedLayer,
@@ -398,11 +424,12 @@ pub(crate) struct RenderObjectVTable {
 }
 
 impl RenderObjectVTable {
-    /// `setup_parent_data` is passed in because the box protocol has its own default;
-    /// `paint_bounds` because each protocol defines it.
+    /// `setup_parent_data` and `apply_paint_transform` are passed in because the box
+    /// protocol has its own defaults; `paint_bounds` because each protocol defines it.
     pub(crate) const fn of<T: RenderObject>(
         setup_parent_data: fn(&mut App, HandleId, AnyRenderObject),
         paint_bounds: fn(&App, HandleId) -> Rect,
+        apply_paint_transform: fn(&App, HandleId, AnyRenderObject, &mut Matrix4),
         as_box: Option<fn() -> &'static crate::box_::RenderBoxVTable>,
         as_sliver: Option<fn() -> &'static crate::sliver::RenderSliverVTable>,
     ) -> RenderObjectVTable {
@@ -418,6 +445,7 @@ impl RenderObjectVTable {
             perform_layout: |app, id| T::perform_layout(resolve(id), app),
             perform_resize: |app, id| T::perform_resize(resolve(id), app),
             paint_bounds,
+            apply_paint_transform,
             is_repaint_boundary: |app, id| T::is_repaint_boundary(resolve(id), app),
             mouse_tracker_annotation: |app, id| T::mouse_tracker_annotation(resolve(id), app),
             update_composited_layer: |app, id, old_layer| {
@@ -957,6 +985,104 @@ impl AnyRenderObject {
         (self.vtable.paint_bounds)(app, self.id)
     }
 
+    /// See [`RenderObject::apply_paint_transform`].
+    pub fn apply_paint_transform(self, app: &App, child: AnyRenderObject, transform: &mut Matrix4) {
+        (self.vtable.apply_paint_transform)(app, self.id, child, transform)
+    }
+
+    /// Applies the paint transform from this [`AnyRenderObject`] to the `target`
+    /// [`AnyRenderObject`].
+    ///
+    /// Returns a matrix that maps the local paint coordinate system to the coordinate system
+    /// of `target`, or a `Matrix4::zero()` if the paint transform can not be computed.
+    ///
+    /// This method throws an exception when the `target` is not in the same render tree as
+    /// this render object.
+    ///
+    /// The `target` argument defaults to the root of the render tree (`None`).
+    pub fn get_transform_to(self, app: &App, target: Option<AnyRenderObject>) -> Matrix4 {
+        debug_assert!(self.attached(app));
+        // The paths from to fromRenderObject and toRenderObject's common ancestor.
+        // Each list's length is greater than 1 if not null.
+        //
+        // [this, ...., commonAncestorRenderObject], or null if `this` is the common
+        // ancestor.
+        let mut from_path: Option<Vec<AnyRenderObject>> = None;
+        // [target, ...., commonAncestorRenderObject], or null if `target` is the
+        // common ancestor.
+        let mut to_path: Option<Vec<AnyRenderObject>> = None;
+
+        let mut from = self;
+        let mut to = target.unwrap_or_else(|| {
+            self.owner(app)
+                .and_then(|owner| owner.root_node(app))
+                .expect("an attached render object has a root")
+        });
+
+        while from != to {
+            let from_depth = from.depth(app);
+            let to_depth = to.depth(app);
+
+            if from_depth >= to_depth {
+                let from_parent = from.parent(app).unwrap_or_else(|| {
+                    panic!("{target:?} and {self:?} are not in the same render tree.")
+                });
+                from_path
+                    .get_or_insert_with(|| vec![self])
+                    .push(from_parent);
+                from = from_parent;
+            }
+            if from_depth <= to_depth {
+                let to_parent = to.parent(app).unwrap_or_else(|| {
+                    panic!("{target:?} and {self:?} are not in the same render tree.")
+                });
+                debug_assert!(
+                    target.is_some(),
+                    "{self:?} has a depth that is less than or equal to the root node"
+                );
+                to_path
+                    .get_or_insert_with(|| vec![target.expect("checked above")])
+                    .push(to_parent);
+                to = to_parent;
+            }
+        }
+
+        let mut from_transform: Option<Matrix4> = None;
+        if let Some(from_path) = &from_path {
+            debug_assert!(from_path.len() > 1);
+            let mut transform = Matrix4::IDENTITY;
+            let last_index = if target.is_none() {
+                from_path.len() - 2
+            } else {
+                from_path.len() - 1
+            };
+            for index in (1..=last_index).rev() {
+                from_path[index].apply_paint_transform(app, from_path[index - 1], &mut transform);
+            }
+            from_transform = Some(transform);
+        }
+        let Some(to_path) = to_path else {
+            return from_transform.unwrap_or(Matrix4::IDENTITY);
+        };
+
+        debug_assert!(to_path.len() > 1);
+        let mut to_transform = Matrix4::IDENTITY;
+        for index in (1..to_path.len()).rev() {
+            to_path[index].apply_paint_transform(app, to_path[index - 1], &mut to_transform);
+        }
+        let Some(to_transform) = to_transform.invert() else {
+            // If the matrix is singular then `invert()` doesn't do anything.
+            return zero_matrix();
+        };
+        match from_transform {
+            Some(mut from_transform) => {
+                multiply(&mut from_transform, &to_transform);
+                from_transform
+            }
+            None => to_transform,
+        }
+    }
+
     /// See [`RenderObject::mouse_tracker_annotation`]. Also `None` once the object has left
     /// the arena: Dart's tracker keeps a stale annotation object alive, the arena does not.
     pub fn mouse_tracker_annotation(self, app: &App) -> Option<MouseTrackerAnnotation> {
@@ -1143,6 +1269,32 @@ impl AnyRenderObject {
             self.data_mut(app).debug_doing_this_paint = false;
         }
     }
+}
+
+/// vector_math's `Matrix4.zero()`.
+pub(crate) fn zero_matrix() -> Matrix4 {
+    Matrix4::from_flutter_array(&[0.0; 16])
+}
+
+/// vector_math's `transform.multiply(other)`: `transform = transform * other`, so `other`
+/// applies first to a point.
+pub(crate) fn multiply(transform: &mut Matrix4, other: &Matrix4) {
+    *transform = transform.then(other);
+}
+
+/// vector_math's `transform.translate(dx, dy)`.
+pub(crate) fn translate(transform: &mut Matrix4, dx: f64, dy: f64) {
+    multiply(transform, &Matrix4::translation(dx as f32, dy as f32));
+}
+
+/// vector_math's `Matrix4.perspectiveTransform(Vector3)`: transforms the point and divides by
+/// the resulting `w`.
+pub(crate) fn perspective_transform(transform: &Matrix4, point: [f64; 3]) -> [f64; 3] {
+    let m = transform.to_flutter_array().map(f64::from);
+    let [x, y, z] = point;
+    let out = |row: usize| m[row] * x + m[4 + row] * y + m[8 + row] * z + m[12 + row];
+    let w = out(3);
+    [out(0) / w, out(1) / w, out(2) / w]
 }
 
 #[cfg(test)]

@@ -1554,6 +1554,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "reveal-cupertino"
+version = "0.1.0"
+dependencies = [
+ "reveal-animation",
+ "reveal-embedder",
+ "reveal-foundation",
+ "reveal-gestures",
+ "reveal-painting",
+ "reveal-rendering",
+ "reveal-scheduler",
+ "reveal-services",
+ "reveal-widgets",
+ "valo-system-fonts",
+]
+
+[[package]]
 name = "reveal-embedder"
 version = "0.1.0"
 dependencies = [
@@ -2604,8 +2620,10 @@ dependencies = [
 name = "window"
 version = "0.1.0"
 dependencies = [
+ "reveal-cupertino",
  "reveal-embedder",
  "reveal-embedder-winit",
+ "reveal-foundation",
  "reveal-painting",
  "reveal-rendering",
  "reveal-services",

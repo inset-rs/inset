@@ -57,6 +57,22 @@ pub struct View {
 }
 
 impl View {
+    /// Create a [`View`] widget to bootstrap a render tree that is rendered into the provided
+    /// `FlutterView`.
+    pub fn new<K>(view: ViewRef, child: impl IntoWidget<K>) -> View {
+        View {
+            key: None,
+            view,
+            child: child.into_widget(),
+        }
+    }
+
+    /// Dart `View(key:)`.
+    pub fn key(mut self, key: KeyRef) -> View {
+        self.key = Some(key);
+        self
+    }
+
     /// Returns the `FlutterView` that the provided `context` will render into.
     ///
     /// Returns `None` if the `context` is not associated with a `FlutterView`.
@@ -139,12 +155,8 @@ impl State for ViewState {
             let widget = self.widget(app);
             (Rc::clone(&widget.view), widget.child.clone())
         };
-        RawView {
-            key: None,
-            view: Rc::clone(&view),
-            child: MediaQuery::from_view(None, view, child),
-        }
-        .into_widget()
+        let content = MediaQuery::from_view(None, Rc::clone(&view), child);
+        RawView::new(view, content).into_widget()
     }
 }
 
@@ -167,6 +179,24 @@ pub struct RawView {
     pub child: WidgetRef,
 }
 
+impl RawView {
+    /// Creates a [`RawView`] widget to bootstrap a render tree that is rendered into the
+    /// provided `FlutterView`.
+    pub fn new<K>(view: ViewRef, child: impl IntoWidget<K>) -> RawView {
+        RawView {
+            key: None,
+            view,
+            child: child.into_widget(),
+        }
+    }
+
+    /// Dart `RawView(key:)`.
+    pub fn key(mut self, key: KeyRef) -> RawView {
+        self.key = Some(key);
+        self
+    }
+}
+
 impl fmt::Debug for RawView {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RawView")
@@ -187,15 +217,8 @@ impl StatelessWidget for RawView {
             Rc::clone(&self.view),
             Rc::new(
                 move |_app: &mut App, _context: BuildContext, owner: Handle<PipelineOwner>| {
-                    ViewScope {
-                        view: Rc::clone(&view),
-                        child: PipelineOwnerScope {
-                            pipeline_owner: owner,
-                            child: child.clone(),
-                        }
-                        .into_widget(),
-                    }
-                    .into_widget()
+                    let scoped = PipelineOwnerScope::new(owner, child.clone());
+                    ViewScope::new(Rc::clone(&view), scoped).into_widget()
                 },
             ),
         )
@@ -513,6 +536,16 @@ pub struct ViewScope {
     pub child: WidgetRef,
 }
 
+impl ViewScope {
+    /// Creates a `ViewScope`; Dart's arguments are all required.
+    pub fn new<K>(view: ViewRef, child: impl IntoWidget<K>) -> ViewScope {
+        ViewScope {
+            view,
+            child: child.into_widget(),
+        }
+    }
+}
+
 impl fmt::Debug for ViewScope {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ViewScope")
@@ -536,6 +569,19 @@ impl InheritedWidget for ViewScope {
 pub struct PipelineOwnerScope {
     pub pipeline_owner: Handle<PipelineOwner>,
     pub child: WidgetRef,
+}
+
+impl PipelineOwnerScope {
+    /// Creates a `PipelineOwnerScope`; Dart's arguments are all required.
+    pub fn new<K>(
+        pipeline_owner: Handle<PipelineOwner>,
+        child: impl IntoWidget<K>,
+    ) -> PipelineOwnerScope {
+        PipelineOwnerScope {
+            pipeline_owner,
+            child: child.into_widget(),
+        }
+    }
 }
 
 impl InheritedWidget for PipelineOwnerScope {
