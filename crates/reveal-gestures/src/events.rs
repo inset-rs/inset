@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use reveal_embedder::{Matrix4, Offset, PointerDeviceKind, ViewId};
+use reveal_foundation::ValueChanged;
 
 /// The bit of [`PointerEvent`] `buttons` that corresponds to a cross-device
 /// behavior of "primary operation".
@@ -718,6 +719,34 @@ pub fn transform_delta_via_positions(
         transform_position(transform, untransformed_end_position - untransformed_delta);
     transformed_end_position - transformed_start_position
 }
+
+/// Signature for listening to [`PointerDownEvent`] events.
+pub type PointerDownEventListener = ValueChanged<PointerDownEvent>;
+
+/// Signature for listening to [`PointerMoveEvent`] events.
+pub type PointerMoveEventListener = ValueChanged<PointerMoveEvent>;
+
+/// Signature for listening to [`PointerUpEvent`] events.
+pub type PointerUpEventListener = ValueChanged<PointerUpEvent>;
+
+/// Signature for listening to [`PointerHoverEvent`] events.
+pub type PointerHoverEventListener = ValueChanged<PointerHoverEvent>;
+
+/// Signature for listening to [`PointerCancelEvent`] events.
+pub type PointerCancelEventListener = ValueChanged<PointerCancelEvent>;
+
+/// Signature for listening to [`PointerPanZoomStartEvent`] events.
+pub type PointerPanZoomStartEventListener = ValueChanged<PointerPanZoomStartEvent>;
+
+/// Signature for listening to [`PointerPanZoomUpdateEvent`] events.
+pub type PointerPanZoomUpdateEventListener = ValueChanged<PointerPanZoomUpdateEvent>;
+
+/// Signature for listening to [`PointerPanZoomEndEvent`] events.
+pub type PointerPanZoomEndEventListener = ValueChanged<PointerPanZoomEndEvent>;
+
+/// Signature for listening to pointer signal events: [`PointerEvent::Scroll`],
+/// [`PointerEvent::ScrollInertiaCancel`], and [`PointerEvent::Scale`].
+pub type PointerSignalEventListener = ValueChanged<PointerEvent>;
 
 #[cfg(test)]
 mod tests {

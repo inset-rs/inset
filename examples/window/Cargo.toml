@@ -6,7 +6,11 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+reveal-embedder.workspace = true
 reveal-embedder-winit.workspace = true
+reveal-painting.workspace = true
+reveal-rendering.workspace = true
+reveal-scheduler.workspace = true
 reveal-shell.workspace = true
 
 [lints]

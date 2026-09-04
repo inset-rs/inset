@@ -20,7 +20,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 - Change: a render object is a struct in the `App` arena, reached through a typed handle. Flutter's base-class fields are fields on the struct (`render_object`, `render_box`, a child slot), each with an accessor the trait asks for. Methods take `self: RenderHandle<Self>` and `&mut App`, not `&mut self`. A reference to "some render object" is an erased edge: `AnyRenderObject`, or `AnyRenderBox` / `AnyRenderSliver` when the protocol is known.
   Reason: language — no inheritance and no GC identity; a `&mut self` receiver would hold the node borrowed while its child lays out, and the child must be able to reach back into it.
-  Affect: to write a render object, declare the struct with the mixin fields, `impl RenderObject` (accessors, `perform_layout`, `paint`, `visit_children`) and `impl RenderBox` (accessors), then `RenderHandle::new_box(app, value)`. Parents store the child's edge (`child.as_box()`); the pipeline stores `as_object()`. Tree methods (`mark_needs_layout`, `adopt_child`, `parent`, …) come from the protocol trait, so import `RenderBox` or `RenderSliver` to call them. An edge downcasts with `as_box()` / `as_sliver()`, Dart's `as RenderBox`.
+  Affect: to write a render object, declare the struct with the mixin fields, `impl RenderObject` (accessors, `perform_layout`, `paint`, `visit_children`) and `impl RenderBox` (accessors), then `RenderHandle::new_box(app, value)`. Parents store the child's edge (`child.as_box()`); the pipeline stores `as_object()`. Tree methods (`mark_needs_layout`, `adopt_child`, `parent`, …) come from the protocol trait, so import `RenderBox` or `RenderSliver` to call them. An edge downcasts with `as_box()` / `as_sliver()`, Dart's `as RenderBox`. A crate that calls an inherent `self: RenderHandle<Self>` method (a setter on `RenderPadding`, `set_child` on `RenderView`) needs `#![feature(arbitrary_self_types)]` itself; trait methods resolve without it.
 
 - Change: Flutter's `attach(owner)` / `detach()` overrides are the hooks `did_attach` / `did_detach`, which run after the base body. The defaults walk `visit_children`, as do `redepth_children`'s.
   Reason: language — a trait default cannot call `super`. Every Flutter override calls `super.attach` first, and no `detach` override reads its own owner before `super.detach`, so a post-hook is equivalent.
@@ -38,6 +38,16 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — there is no abstract `Constraints` an erased node can hold.
   Affect: `child.layout(app, box_constraints, parent_uses_size)` on an `AnyRenderBox`; there is no protocol-neutral `layout`.
 
+## box.rs → box.dart (hit testing)
+
+- Change: `BoxHitTestResult` only wraps: `BoxHitTestResult::wrap(&mut result)` is a view over a `HitTestResult`, and there is no standalone constructor. `BoxHitTestEntry` is the entry's *target*, carrying the box and its local position; `result.add(BoxHitTestEntry::new(box, position).into())`.
+  Reason: language — no subclassing of the gesture crate's result and entry types.
+  Affect: a `hit_test` receives `&mut BoxHitTestResult<'_>`; `handle_event` receives the `BoxHitTestEntry` and reads `local_position()` from it.
+
+- Change: `RenderPointerListener`'s callbacks are set after construction (`set_on_pointer_down`, …), and `on_pointer_signal` receives the `PointerEvent` enum.
+  Reason: language — no optional named constructor arguments; signal events are three enum variants with no common type.
+  Affect: construct with `(app, behavior, child)` and set the callbacks you need; match the enum in a signal listener.
+
 ## painting_context.rs → object.dart (PaintingContext), layer.rs → layer.dart
 
 - Change: there is no `Layer` object tree. A repaint boundary keeps its recording as retained items (pictures, references to child boundaries, push/pop effects) plus one `CompositedLayer`, Flutter's `OffsetLayer` / `OpacityLayer` / `TransformLayer` as a value. The host recomposes the frame from those retained pieces every time; a boundary that did not change contributes the same pictures.
@@ -46,7 +56,21 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 - Change: no compositing bits (`needsCompositing`, `alwaysNeedsCompositing`, `flushCompositingBits`). Every pushed effect spans child boundaries.
   Reason: platform — the layer-versus-canvas choice exists because a Skia clip cannot cross an engine layer; retained items have no such split.
-  Affect: `is_repaint_boundary` alone decides where recordings split; a frame is `flush_layout` then `flush_paint`.
+  Affect: `is_repaint_boundary` alone decides where recordings split; where Flutter calls `markNeedsCompositingBitsUpdate` because that answer changed, call `mark_needs_paint`. A frame is `flush_layout` then `flush_paint`.
+
+## view.rs → view.dart, binding.rs → binding.dart
+
+- Change: `RenderView` is its own kind of render object, neither box nor sliver: its `constraints` and `size` are inherent methods, its child slot is written out, and it has no protocol edge; `RendererBinding` reaches it through the typed handle.
+  Reason: language — Flutter overrides the `constraints` getter on a `RenderObject`; here constraints belong to a protocol trait, and the view's come from its configuration.
+  Affect: `RenderView::new(app, child, configuration, view)` returns a typed handle; use `as_object()` for the tree.
+
+- Change: `composite_frame` composes the retained recording into a `Canvas` and hands the picture to `View::present`; there is no scene or physical size argument.
+  Reason: platform — the host presents a display list, and it owns the surface size.
+  Affect: none beyond the host trait.
+
+- Change: `RendererBinding::init_render_view` puts the implicit view's `RenderView` at the root of `root_pipeline_owner`, as Flutter's test binding does.
+  Reason: platform — without the widget layer's `View` widget nothing else creates a child pipeline owner, and semantics (Flutter's reason for forbidding a root node there) are deferred.
+  Affect: call it once during setup, then set the view's child; every frame is `SchedulerBinding`'s persistent callback running `draw_frame`.
 
 ## pipeline_owner.rs → object.dart (PipelineOwner)
 
@@ -62,9 +86,13 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## proxy_box.rs → proxy_box.dart / shifted_box.rs → shifted_box.dart
 
-- Change: `RenderConstrainedBox` and `RenderPadding` are leaf structs; `RenderProxyBox` and `RenderShiftedBox` are not types.
-  Reason: language — no inheritance; a leaf struct plus traits is the authoring shape.
-  Affect: there is no base type to extend; write the leaf and its `paint`.
+- Change: Flutter's base classes and mixins (`RenderProxyBox`, `RenderShiftedBox`, `RenderAligningShiftedBox`, `RenderAnimatedOpacityMixin`) are traits holding the shared bodies; a render object is always a leaf struct that implements them.
+  Reason: language — no inheritance.
+  Affect: implement the marker trait and, where Dart would run the inherited method, call it by name: `RenderProxyBoxMixin::paint(self, app, context, offset)`. Mixin state is a field (`RenderAnimatedOpacityData`, `RenderAligningShiftedBoxData`) with an accessor.
+
+- Change: `RenderOpacity` and `RenderAnimatedOpacity` have no `alwaysIncludeSemantics`; `RenderDecoratedBox` gives its painter no `onChanged`.
+  Reason: platform — accessibility is deferred; a `BoxPainter` callback cannot reach `App` yet, so an image decoration cannot request a repaint when its image loads.
+  Affect: pass no semantics flag; decorations that load images do not repaint on their own.
 
 ## Deferred
 
@@ -72,11 +100,11 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Debug paint overlays, `debugPaint`, `applyPaintTransform` / `getTransformTo`, `paintsChild`. Trigger: inspector; `RenderBox.localToGlobal`.
 - Semantics on `PipelineOwner` and `RenderObject`. Trigger: a11y; do not stub.
 - `PipelineManifold`. Trigger: `RendererBinding` attaching the root owner.
-- `computeDryLayout` / `_DebugSize` / `BoxHitTestResult` / `globalToLocal`. Trigger: `RenderBox` public extras.
-- `RenderProxyBox` / `RenderShiftedBox` hit-test and intrinsics. Trigger: `BoxHitTestResult`.
+- `computeDryLayout` / `_DebugSize` / `globalToLocal` / `localToGlobal`. Trigger: `RenderBox` public extras; `getTransformTo`.
+- `RenderProxyBox` / `RenderShiftedBox` intrinsics and dry layout. Trigger: the first intrinsic-sizing parent (`Row`, `IntrinsicWidth`).
 - `invokeLayoutCallback`. Trigger: `LayoutBuilder`; also widen `layout_without_resize` for a non-boundary layout-callback host.
 - `layout` / `markNeedsLayout` / `constraints` as override points. Trigger: OverlayPortal, `RenderView`, the first `markNeedsLayout` override. Ask before adding.
-- `RenderView` and `compositeFrame`. Trigger: R5; a box can stay `PipelineOwner.root_node` until then.
+- `RenderView.applyPaintTransform` / `updateSystemChrome`; the mouse tracker, `performReassemble`. Trigger: `getTransformTo`, R6.
 - `RenderParagraph` / `RenderEditable`. Trigger: `TextPainter`, container parent data, hit-test.
 - Viewport / `ViewportOffset` / sliver-to-box adapters / sliver parent data. Trigger: first viewport. `RenderObjectWithChildMixin` is box-only until then.
 - `SliverConstraints.debugAssertIsValid` extra numeric checks. Trigger: a caller that relies on those messages.

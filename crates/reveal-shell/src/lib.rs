@@ -8,6 +8,7 @@
 use reveal_embedder::{EmbedderClient, Frame, PlatformRef, PointerDataPacket, ViewId};
 use reveal_foundation::App;
 use reveal_gestures::GestureBinding;
+use reveal_rendering::RendererBinding;
 use reveal_scheduler::SchedulerBinding;
 
 /// Host-facing isolate: [`App`] plus the methods the embedder pushes.
@@ -41,7 +42,9 @@ impl EmbedderClient for Shell {
 
     fn view_added(&mut self, _id: ViewId) {}
 
-    fn view_metrics_changed(&mut self, _id: ViewId) {}
+    fn view_metrics_changed(&mut self, _id: ViewId) {
+        RendererBinding::instance(&mut self.app).handle_metrics_changed(&mut self.app);
+    }
 
     fn view_removed(&mut self, _id: ViewId) {}
 

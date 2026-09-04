@@ -1586,10 +1586,12 @@ dependencies = [
 name = "reveal-rendering"
 version = "0.1.0"
 dependencies = [
+ "reveal-animation",
  "reveal-embedder",
  "reveal-foundation",
  "reveal-gestures",
  "reveal-painting",
+ "reveal-scheduler",
 ]
 
 [[package]]
@@ -1608,6 +1610,7 @@ dependencies = [
  "reveal-embedder",
  "reveal-foundation",
  "reveal-gestures",
+ "reveal-rendering",
  "reveal-scheduler",
 ]
 
@@ -2511,7 +2514,11 @@ dependencies = [
 name = "window"
 version = "0.1.0"
 dependencies = [
+ "reveal-embedder",
  "reveal-embedder-winit",
+ "reveal-painting",
+ "reveal-rendering",
+ "reveal-scheduler",
  "reveal-shell",
 ]
 

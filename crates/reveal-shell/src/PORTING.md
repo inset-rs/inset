@@ -14,4 +14,4 @@ No Flutter counterpart. Dart has no type — the engine owns the isolate.
 
 ## Deferred
 
-- `view_added` / `view_metrics_changed` / `view_removed`. Trigger: `RendererBinding`.
+- `view_added` / `view_removed`. Trigger: the widget layer's `View`; `RendererBinding` does not create render views for new host views. `view_metrics_changed` reaches `RendererBinding::handle_metrics_changed`.

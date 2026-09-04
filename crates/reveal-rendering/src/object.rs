@@ -341,6 +341,15 @@ impl<T: 'static> RenderHandle<T> {
     pub(crate) fn id(self) -> HandleId {
         self.0.id()
     }
+
+    /// The foundation handle, for a [`reveal_foundation::Listener::handle_method`] tear-off.
+    pub(crate) fn handle(self) -> Handle<T> {
+        self.0
+    }
+
+    pub(crate) fn from_handle(handle: Handle<T>) -> RenderHandle<T> {
+        RenderHandle(handle)
+    }
 }
 
 /// The typed handle for an erased id. Free: nothing is looked up; `get` checks the slot.

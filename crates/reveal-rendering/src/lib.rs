@@ -5,6 +5,7 @@
 
 #![feature(arbitrary_self_types)]
 
+mod binding;
 #[path = "box.rs"]
 mod box_;
 mod debug;
@@ -15,8 +16,10 @@ mod pipeline_owner;
 mod proxy_box;
 mod shifted_box;
 mod sliver;
+mod view;
 mod viewport_offset;
 
+pub use binding::*;
 pub use box_::*;
 pub use debug::*;
 pub use layer::*;
@@ -26,4 +29,5 @@ pub use pipeline_owner::*;
 pub use proxy_box::*;
 pub use shifted_box::*;
 pub use sliver::*;
+pub use view::*;
 pub use viewport_offset::*;

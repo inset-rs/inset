@@ -6,9 +6,13 @@
 use std::fmt::{self, Debug, Display};
 use std::hash::{Hash, Hasher};
 
-use reveal_embedder::{Offset, Rect, Size, ViewConstraints, clamp_double, lerp_double};
+use std::ops::{Deref, DerefMut};
+
+use reveal_embedder::{Matrix4, Offset, Rect, Size, ViewConstraints, clamp_double, lerp_double};
 use reveal_foundation::{App, HandleId};
+use reveal_gestures::{HitTestEntry, HitTestResult, HitTestTarget, PointerEvent};
 use reveal_painting::EdgeInsetsGeometry;
+use reveal_painting::transform_point;
 
 use crate::object::{
     AnyRenderObject, Constraints, RenderHandle, RenderObject, RenderObjectVTable, create, resolve,
@@ -659,6 +663,201 @@ impl Debug for BoxConstraints {
     }
 }
 
+/// Method signature for hit testing a [`RenderBox`].
+///
+/// Used by [`BoxHitTestResult::add_with_paint_transform`] to hit test children of a
+/// [`RenderBox`].
+pub type BoxHitTest<'r> = dyn FnOnce(&mut BoxHitTestResult<'r>, Offset) -> bool;
+
+/// The result of performing a hit test on [`RenderBox`]es.
+///
+/// A view over a [`HitTestResult`]: Dart's `BoxHitTestResult.wrap`. Dart's bare
+/// `BoxHitTestResult()` constructor is `wrap` over a fresh `HitTestResult`.
+pub struct BoxHitTestResult<'a>(&'a mut HitTestResult);
+
+impl<'a> BoxHitTestResult<'a> {
+    /// Wraps `result` to create a [`BoxHitTestResult`] that shares its path.
+    pub fn wrap(result: &'a mut HitTestResult) -> BoxHitTestResult<'a> {
+        BoxHitTestResult(result)
+    }
+
+    /// Transforms `position` to the local coordinate system of a child for hit-testing the
+    /// child.
+    ///
+    /// The actual hit testing of the child needs to be implemented in the provided `hit_test`
+    /// callback, which is invoked with the transformed `position` as argument.
+    ///
+    /// The provided paint `transform` (which describes the transform from the child to the
+    /// parent in 3D) is processed by `PointerEvent.removePerspectiveTransform` to remove the
+    /// perspective component and inverted before it is used to transform `position` from the
+    /// coordinate system of the parent to the system of the child.
+    ///
+    /// If `transform` is `None` it will be treated as the identity transform and `position` is
+    /// provided to the `hit_test` callback as-is. If `transform` cannot be inverted, the
+    /// `hit_test` callback is not invoked and false is returned.
+    pub fn add_with_paint_transform(
+        &mut self,
+        transform: Option<Matrix4>,
+        position: Offset,
+        hit_test: impl FnOnce(&mut BoxHitTestResult<'_>, Offset) -> bool,
+    ) -> bool {
+        let transform = match transform {
+            Some(transform) => match transform.invert() {
+                Some(inverted) => Some(inverted),
+                None => return false,
+            },
+            None => None,
+        };
+        self.add_with_raw_transform(transform, position, hit_test)
+    }
+
+    /// Convenience method for hit testing children, that are translated by an [`Offset`].
+    ///
+    /// The actual hit testing of the child needs to be implemented in the provided `hit_test`
+    /// callback, which is invoked with the transformed `position` as argument.
+    pub fn add_with_paint_offset(
+        &mut self,
+        offset: Option<Offset>,
+        position: Offset,
+        hit_test: impl FnOnce(&mut BoxHitTestResult<'_>, Offset) -> bool,
+    ) -> bool {
+        let transformed_position = match offset {
+            Some(offset) => position - offset,
+            None => position,
+        };
+        if let Some(offset) = offset {
+            self.0.push_offset(Offset::ZERO - offset);
+        }
+        let is_hit = hit_test(self, transformed_position);
+        if offset.is_some() {
+            self.0.pop_transform();
+        }
+        is_hit
+    }
+
+    /// Transforms `position` to the local coordinate system of a child for hit-testing the
+    /// child.
+    ///
+    /// Unlike [`add_with_paint_transform`](Self::add_with_paint_transform), the provided
+    /// `transform` is used as-is to transform `position`: it must describe the transform from
+    /// the parent to the child.
+    pub fn add_with_raw_transform(
+        &mut self,
+        transform: Option<Matrix4>,
+        position: Offset,
+        hit_test: impl FnOnce(&mut BoxHitTestResult<'_>, Offset) -> bool,
+    ) -> bool {
+        let transformed_position = match transform {
+            Some(transform) => transform_point(&transform, position),
+            None => position,
+        };
+        if let Some(transform) = transform {
+            self.0.push_transform(transform);
+        }
+        let is_hit = hit_test(self, transformed_position);
+        if transform.is_some() {
+            self.0.pop_transform();
+        }
+        is_hit
+    }
+
+    /// Pass-through method for adding a hit test while manually managing the position
+    /// transformation logic.
+    ///
+    /// Exactly one of `paint_offset`, `paint_transform`, or `raw_transform` must be given.
+    pub fn add_with_out_of_band_position(
+        &mut self,
+        paint_offset: Option<Offset>,
+        paint_transform: Option<Matrix4>,
+        raw_transform: Option<Matrix4>,
+        hit_test: impl FnOnce(&mut BoxHitTestResult<'_>) -> bool,
+    ) -> bool {
+        debug_assert_eq!(
+            [
+                paint_offset.is_some(),
+                paint_transform.is_some(),
+                raw_transform.is_some()
+            ]
+            .iter()
+            .filter(|given| **given)
+            .count(),
+            1,
+            "Exactly one transform or offset argument must be provided."
+        );
+        if let Some(paint_offset) = paint_offset {
+            self.0.push_offset(Offset::ZERO - paint_offset);
+        } else if let Some(raw_transform) = raw_transform {
+            self.0.push_transform(raw_transform);
+        } else {
+            let paint_transform = paint_transform
+                .expect("checked")
+                .invert()
+                .expect("paint_transform must be invertible.");
+            self.0.push_transform(paint_transform);
+        }
+        let is_hit = hit_test(self);
+        self.0.pop_transform();
+        is_hit
+    }
+}
+
+impl Deref for BoxHitTestResult<'_> {
+    type Target = HitTestResult;
+
+    fn deref(&self) -> &HitTestResult {
+        self.0
+    }
+}
+
+impl DerefMut for BoxHitTestResult<'_> {
+    fn deref_mut(&mut self) -> &mut HitTestResult {
+        self.0
+    }
+}
+
+/// A hit test entry used by [`RenderBox`].
+///
+/// Dart's `BoxHitTestEntry` subclasses `HitTestEntry`; here it is the entry's target, carrying
+/// the box and the position of the hit test in the local coordinates of the box. It becomes a
+/// [`HitTestEntry`] with [`From`].
+#[derive(Clone, Copy, Debug)]
+pub struct BoxHitTestEntry {
+    target: AnyRenderBox,
+    local_position: Offset,
+}
+
+impl BoxHitTestEntry {
+    /// Creates a box hit test entry.
+    pub fn new(target: AnyRenderBox, local_position: Offset) -> BoxHitTestEntry {
+        BoxHitTestEntry {
+            target,
+            local_position,
+        }
+    }
+
+    /// The [`RenderBox`] that was hit.
+    pub fn target(&self) -> AnyRenderBox {
+        self.target
+    }
+
+    /// The position of the hit test in the local coordinates of [`target`](Self::target).
+    pub fn local_position(&self) -> Offset {
+        self.local_position
+    }
+}
+
+impl HitTestTarget for BoxHitTestEntry {
+    fn handle_event(&self, app: &mut App, event: &PointerEvent, _entry: &HitTestEntry) {
+        self.target.handle_event(app, event, self);
+    }
+}
+
+impl From<BoxHitTestEntry> for HitTestEntry {
+    fn from(entry: BoxHitTestEntry) -> HitTestEntry {
+        HitTestEntry::new(entry)
+    }
+}
+
 /// Parent data used by [`RenderBox`] and its subclasses.
 #[derive(Clone, Copy, Debug)]
 pub struct BoxParentData {
@@ -803,6 +1002,81 @@ pub trait RenderBox: RenderObject {
         Offset::ZERO & self.size(app)
     }
 
+    /// Whether this render object has undergone layout and has a [`size`](Self::size).
+    fn has_size(self: RenderHandle<Self>, app: &App) -> bool {
+        self.render_box_data(app).size.is_some()
+    }
+
+    /// Override this method to handle pointer events that hit this render object.
+    ///
+    /// For [`RenderBox`] objects, the `entry` argument is a [`BoxHitTestEntry`]. From this
+    /// object you can determine the position of the hit test in the local coordinates of the
+    /// render object (via `entry.local_position()`).
+    fn handle_event(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        event: &PointerEvent,
+        entry: &BoxHitTestEntry,
+    ) {
+        let _ = (self, app, event, entry);
+    }
+
+    /// Determines the set of render objects located at the given position.
+    ///
+    /// Returns true, and adds any render objects that contain the point to the given hit test
+    /// result, if this render object or one of its descendants absorbs the hit (preventing
+    /// objects below this one from being hit). Returns false if the hit can continue to other
+    /// objects below this one.
+    ///
+    /// The caller is responsible for transforming `position` from global coordinates to its
+    /// location relative to the origin of this [`RenderBox`]. This [`RenderBox`] is responsible
+    /// for checking whether the given position is within its bounds.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if this box has not been laid out.
+    fn hit_test(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        debug_assert!(
+            self.has_size(app),
+            "Cannot hit test a render box that has never been laid out: {self:?}"
+        );
+        if self.size(app).contains(position)
+            && (self.hit_test_children(app, result, position) || self.hit_test_self(app, position))
+        {
+            result.add(BoxHitTestEntry::new(self.as_box(), position).into());
+            return true;
+        }
+        false
+    }
+
+    /// Override this method if this render object can be hit even if its children were not hit.
+    ///
+    /// Returns true if the specified `position` should be considered a hit on this render
+    /// object.
+    fn hit_test_self(self: RenderHandle<Self>, _app: &App, _position: Offset) -> bool {
+        let _ = self;
+        false
+    }
+
+    /// Override this method to check whether any children are located at the given position.
+    ///
+    /// Subclasses should return true if at least one child reported a hit at the specified
+    /// position.
+    fn hit_test_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        let _ = (self, app, result, position);
+        false
+    }
+
     /// Sets the size of this box. Call from [`RenderObject::perform_layout`] or
     /// [`RenderObject::perform_resize`].
     fn set_size(self: RenderHandle<Self>, app: &mut App, size: Size) {
@@ -888,6 +1162,8 @@ pub(crate) struct RenderBoxVTable {
     pub object: RenderObjectVTable,
     pub box_data: fn(&App, HandleId) -> &RenderBoxData,
     pub box_data_mut: fn(&mut App, HandleId) -> &mut RenderBoxData,
+    pub hit_test: fn(&mut App, HandleId, &mut BoxHitTestResult<'_>, Offset) -> bool,
+    pub handle_event: fn(&mut App, HandleId, &PointerEvent, &BoxHitTestEntry),
 }
 
 impl RenderBoxVTable {
@@ -901,6 +1177,8 @@ impl RenderBoxVTable {
             ),
             box_data: |app, id| T::render_box_data(resolve(id), app),
             box_data_mut: |app, id| T::render_box_data_mut(resolve(id), app),
+            hit_test: |app, id, result, position| T::hit_test(resolve(id), app, result, position),
+            handle_event: |app, id, event, entry| T::handle_event(resolve(id), app, event, entry),
         }
     }
 }
@@ -951,6 +1229,21 @@ impl AnyRenderBox {
     /// The `RenderObject` view of this box. Free: points into the nested table.
     pub fn as_object(self) -> AnyRenderObject {
         AnyRenderObject::from_vtable(self.id, &self.vtable.object)
+    }
+
+    /// See [`RenderBox::hit_test`].
+    pub fn hit_test(
+        self,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        (self.vtable.hit_test)(app, self.id, result, position)
+    }
+
+    /// See [`RenderBox::handle_event`].
+    pub fn handle_event(self, app: &mut App, event: &PointerEvent, entry: &BoxHitTestEntry) {
+        (self.vtable.handle_event)(app, self.id, event, entry)
     }
 
     fn box_data(self, app: &App) -> &RenderBoxData {
@@ -1196,5 +1489,173 @@ mod tests {
         let constrained =
             constraints.constrain_size_and_attempt_to_preserve_aspect_ratio(Size::new(15.0, 0.0));
         assert_eq!(constrained, Size::new(15.0, 10.0));
+    }
+}
+
+#[cfg(test)]
+mod hit_test_tests {
+    use super::*;
+
+    #[derive(Debug)]
+    struct DummyHitTestTarget;
+
+    impl HitTestTarget for DummyHitTestTarget {
+        fn handle_event(&self, _app: &mut App, _event: &PointerEvent, _entry: &HitTestEntry) {}
+    }
+
+    /// `box_test.dart`: `BoxHitTestResult wrapping HitTestResult`.
+    #[test]
+    fn wrapping_shares_the_path() {
+        let transform = Matrix4::translation(40.0, 150.0);
+        let mut wrapped = HitTestResult::new();
+        wrapped.push_transform(transform);
+        wrapped.add(HitTestEntry::new(DummyHitTestTarget));
+        assert_eq!(wrapped.path().len(), 1);
+        assert_eq!(wrapped.path()[0].transform(), Some(transform));
+
+        let mut wrapping = BoxHitTestResult::wrap(&mut wrapped);
+        wrapping.add(HitTestEntry::new(DummyHitTestTarget));
+        assert_eq!(wrapping.path().len(), 2);
+        assert_eq!(wrapping.path()[1].transform(), Some(transform));
+
+        wrapped.add(HitTestEntry::new(DummyHitTestTarget));
+        assert_eq!(wrapped.path().len(), 3);
+        assert_eq!(wrapped.path()[2].transform(), Some(transform));
+    }
+
+    /// `box_test.dart`: `addWithPaintTransform`.
+    #[test]
+    fn add_with_paint_transform() {
+        let mut base = HitTestResult::new();
+        let mut result = BoxHitTestResult::wrap(&mut base);
+        let mut positions = Vec::new();
+
+        let is_hit = result.add_with_paint_transform(None, Offset::ZERO, |_, position| {
+            positions.push(position);
+            true
+        });
+        assert!(is_hit);
+        assert_eq!(positions, [Offset::ZERO]);
+        positions.clear();
+
+        let is_hit = result.add_with_paint_transform(
+            Some(Matrix4::translation(20.0, 30.0)),
+            Offset::ZERO,
+            |_, position| {
+                positions.push(position);
+                true
+            },
+        );
+        assert!(is_hit);
+        assert_eq!(positions, [Offset::new(-20.0, -30.0)]);
+        positions.clear();
+
+        let position = Offset::new(3.0, 4.0);
+        let is_hit = result.add_with_paint_transform(None, position, |_, position| {
+            positions.push(position);
+            false
+        });
+        assert!(!is_hit);
+        assert_eq!(positions, [position]);
+        positions.clear();
+
+        let is_hit = result.add_with_paint_transform(
+            Some(Matrix4::translation(20.0, 30.0)),
+            position,
+            |_, position| {
+                positions.push(position);
+                true
+            },
+        );
+        assert!(is_hit);
+        assert_eq!(positions, [position - Offset::new(20.0, 30.0)]);
+        positions.clear();
+
+        // A transform that cannot be inverted.
+        let is_hit = result.add_with_paint_transform(
+            Some(Matrix4::scale(0.0, 0.0)),
+            position,
+            |_, position| {
+                positions.push(position);
+                true
+            },
+        );
+        assert!(!is_hit);
+        assert!(positions.is_empty());
+    }
+
+    /// `box_test.dart`: `addWithPaintOffset`.
+    #[test]
+    fn add_with_paint_offset() {
+        let mut base = HitTestResult::new();
+        let mut result = BoxHitTestResult::wrap(&mut base);
+        let mut positions = Vec::new();
+
+        let is_hit = result.add_with_paint_offset(None, Offset::ZERO, |_, position| {
+            positions.push(position);
+            true
+        });
+        assert!(is_hit);
+        assert_eq!(positions, [Offset::ZERO]);
+        positions.clear();
+
+        let is_hit = result.add_with_paint_offset(
+            Some(Offset::new(55.0, 32.0)),
+            Offset::ZERO,
+            |_, position| {
+                positions.push(position);
+                true
+            },
+        );
+        assert!(is_hit);
+        assert_eq!(positions, [Offset::new(-55.0, -32.0)]);
+        positions.clear();
+
+        let position = Offset::new(3.0, 4.0);
+        let is_hit = result.add_with_paint_offset(
+            Some(Offset::new(55.0, 32.0)),
+            position,
+            |result, position| {
+                result.add(HitTestEntry::new(DummyHitTestTarget));
+                positions.push(position);
+                true
+            },
+        );
+        assert!(is_hit);
+        assert_eq!(positions, [position - Offset::new(55.0, 32.0)]);
+        assert_eq!(
+            result.path()[0].transform(),
+            Some(Matrix4::translation(-55.0, -32.0)),
+            "the entry records the transform to the child"
+        );
+    }
+
+    /// `box_test.dart`: `addWithRawTransform`.
+    #[test]
+    fn add_with_raw_transform() {
+        let mut base = HitTestResult::new();
+        let mut result = BoxHitTestResult::wrap(&mut base);
+        let mut positions = Vec::new();
+
+        let is_hit = result.add_with_raw_transform(
+            Some(Matrix4::translation(20.0, 30.0)),
+            Offset::ZERO,
+            |_, position| {
+                positions.push(position);
+                true
+            },
+        );
+        assert!(is_hit);
+        assert_eq!(positions, [Offset::new(20.0, 30.0)]);
+        positions.clear();
+
+        let position = Offset::new(3.0, 4.0);
+        let is_hit =
+            result.add_with_raw_transform(Some(Matrix4::IDENTITY), position, |_, position| {
+                positions.push(position);
+                true
+            });
+        assert!(is_hit);
+        assert_eq!(positions, [position]);
     }
 }

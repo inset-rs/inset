@@ -27,6 +27,16 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — they exist to call `preventDefault` on the web DOM event that produced the sample, same as `PointerData.respond`.
   Affect: there is no `event.respond(...)`.
 
+- Change: `PointerSignalEventListener` receives the `PointerEvent` enum.
+  Reason: language — `PointerScrollEvent`, `PointerScrollInertiaCancelEvent`, and `PointerScaleEvent` are enum variants with no shared `PointerSignalEvent` type.
+  Affect: match `PointerEvent::Scroll` / `ScrollInertiaCancel` / `Scale` in the listener.
+
+## binding.rs → binding.dart
+
+- Change: `GestureBinding::hit_test_in_view` calls a registered `HitTestable` first, then adds itself. `RendererBinding` registers itself with `GestureBinding::set_hit_testable`.
+  Reason: language — Flutter's `RendererBinding` overrides the method through mixin order; a crate above cannot override a method below it.
+  Affect: none for callers; a test binding that hit-tests its own tree registers a `HitTestable`.
+
 ## converter.rs → converter.dart
 
 - Change: `devicePixelRatioForView` takes [`ViewId`](reveal_embedder::ViewId).
