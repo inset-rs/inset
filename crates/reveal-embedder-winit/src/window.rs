@@ -470,6 +470,9 @@ impl<C: EmbedderClient> ApplicationHandler for WinitApp<C> {
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: winit::event::StartCause) {
         if matches!(cause, winit::event::StartCause::ResumeTimeReached { .. }) {
             self.platform.deadline.set(None);
+            if let Some(client) = &mut self.client {
+                client.wake(self.platform.elapsed());
+            }
         }
     }
 

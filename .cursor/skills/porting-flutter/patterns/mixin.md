@@ -39,6 +39,8 @@ impl RenderShiftedBox for RenderPadding {}
 
 Deep chains (`GestureRecognizer` → `OneSequence` → `PrimaryPointer` → `Tap`) are [leaf-inheritance.md](leaf-inheritance.md): the same bags, with `super` as a namespace fn.
 
+An intermediate base class (`ComponentElement`, `RenderObjectElement`) keeps Dart's method names on its trait; the leaf's `impl Element` forwards `fn update_slot(..) { RenderObjectElement::update_slot(self, app, new_slot) }`. Do not suffix the base's name (`update_slot_render_object`): a super call is always `Trait::method(self, ..)`. The root base class has no second trait to qualify with, so its bodies live on a sibling trait blanket-implemented for every leaf (`ElementBase`): `ElementBase::mount(self, app, parent, slot)`. Inside such a trait body a bare `self.mount(..)` is ambiguous; write `Element::mount(self, ..)` for the virtual call.
+
 ## Stateless mixin or interface
 
 Trait only, no bag: `RenderProxyBoxWithHitTestBehavior`, `Animatable`, `HitTestTarget`. A Dart `implements X` check on an erased object (`target is MouseTrackerAnnotation`) has to be answered by the object's vtable: a defaulted virtual, or a cast slot the type fills (`as_box` / `as_sliver`).

@@ -19,8 +19,40 @@ use crate::view::{RenderView, ViewConfiguration};
 /// Flutter's `RendererBinding` mixin. Like Flutter's binding it is the App's singleton;
 /// members take `&mut App`.
 
+/// The object side of Flutter's `WidgetsBinding` overrides of `RendererBinding.drawFrame`:
+/// the widget layer builds before the renderer's frame and finalizes its tree after it.
+/// Implement it on the binding above and register `Rc::new(handle)` with
+/// [`RendererBinding::set_overrides`]; `Handle<T>` is then [`RendererBindingOverrides`].
+pub trait RendererBindingOverridesObject: Sized + 'static {
+    /// Runs at the start of [`RendererBinding::draw_frame`], before layout.
+    fn will_draw_frame(self: Handle<Self>, app: &mut App);
+
+    /// Runs at the end of [`RendererBinding::draw_frame`], after compositing.
+    fn did_draw_frame(self: Handle<Self>, app: &mut App);
+}
+
+/// What the binding above this one adds around `drawFrame`; kept erased.
+pub trait RendererBindingOverrides {
+    /// See [`RendererBindingOverridesObject::will_draw_frame`].
+    fn will_draw_frame(&self, app: &mut App);
+
+    /// See [`RendererBindingOverridesObject::did_draw_frame`].
+    fn did_draw_frame(&self, app: &mut App);
+}
+
+impl<T: RendererBindingOverridesObject> RendererBindingOverrides for Handle<T> {
+    fn will_draw_frame(&self, app: &mut App) {
+        T::will_draw_frame(*self, app);
+    }
+
+    fn did_draw_frame(&self, app: &mut App) {
+        T::did_draw_frame(*self, app);
+    }
+}
+
 #[derive(Default)]
 pub struct RendererBinding {
+    overrides: Option<Rc<dyn RendererBindingOverrides>>,
     root_pipeline_owner: Option<Handle<PipelineOwner>>,
     /// Flutter's deprecated `pipelineOwner`, created on first use.
     pipeline_owner: Option<Handle<PipelineOwner>>,
@@ -261,7 +293,21 @@ impl RendererBinding {
     ///
     /// Each frame consists of the following phases: layout, paint, then compositing (for each
     /// registered [`RenderView`]).
+    /// Registers the binding layered above this one, as Flutter's `WidgetsBinding` does by
+    /// overriding `drawFrame`.
+    pub fn set_overrides(
+        self: Handle<Self>,
+        app: &mut App,
+        overrides: Rc<dyn RendererBindingOverrides>,
+    ) {
+        app.get_mut(self).overrides = Some(overrides);
+    }
+
     pub fn draw_frame(self: Handle<Self>, app: &mut App) {
+        let overrides = app.get(self).overrides.clone();
+        if let Some(overrides) = &overrides {
+            overrides.will_draw_frame(app);
+        }
         let root_pipeline_owner = self.root_pipeline_owner(app);
         root_pipeline_owner.flush_layout(app);
         root_pipeline_owner.flush_paint(app);
@@ -270,6 +316,9 @@ impl RendererBinding {
                 render_view.composite_frame(app); // this sends the bits to the GPU
             }
             app.get_mut(self).first_frame_sent = true;
+        }
+        if let Some(overrides) = &overrides {
+            overrides.did_draw_frame(app);
         }
     }
 

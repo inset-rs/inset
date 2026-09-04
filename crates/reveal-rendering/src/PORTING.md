@@ -68,6 +68,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the host presents a display list, and it owns the surface size.
   Affect: none beyond the host trait.
 
+- Change: `RendererBinding::draw_frame` calls a registered `RendererBindingOverrides` before layout and after compositing; the widgets binding registers itself with `set_overrides` and implements the object-side `RendererBindingOverridesObject`.
+  Reason: language — Flutter's `WidgetsBinding` overrides `drawFrame` through mixin order; a crate above cannot override a method below it (the same shape as the gesture binding's overrides).
+  Affect: none for callers.
+
 ## mouse_tracker.rs → mouse_tracker.dart
 
 - Change: Dart's `target is MouseTrackerAnnotation` is the virtual `RenderObject::mouse_tracker_annotation`, `None` by default; `RenderMouseRegion` answers with its current callbacks, cursor, and validity. The tracker keys its per-device annotation maps by the render object (an `AnyRenderObject`), and reads the annotation from it again each time it dispatches.
@@ -123,7 +127,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `PaintingContext.addLayer` / `addCompositionCallback` / `pushColorFilter`, `Layer.find` annotations, `LeaderLayer` / `FollowerLayer`, `toImage`. Trigger: `AnnotatedRegion`, `CompositedTransformFollower`, `RepaintBoundary.toImage`.
 - Debug paint overlays, `debugPaint`, `applyPaintTransform` / `getTransformTo`, `paintsChild`. Trigger: inspector; `RenderBox.localToGlobal`.
 - Semantics on `PipelineOwner` and `RenderObject`. Trigger: a11y; do not stub.
-- `PipelineManifold`, and the widget layer's `View` creating a child `PipelineOwner` per `RenderView`. Until then `RendererBinding::init_render_view` roots the implicit view's `RenderView` in `root_pipeline_owner`, as Flutter's test binding does: call it once during setup, then set the view's child. Trigger: `RendererBinding` attaching the root owner; the `View` widget.
+- `PipelineManifold`. The widgets `View` creates a child `PipelineOwner` per `RenderView` (as Flutter); `RendererBinding::init_render_view` stays for render-tree-only hosts, rooting the implicit view's `RenderView` in `root_pipeline_owner` as Flutter's test binding does — never call it in an app that runs `run_app`. Trigger: semantics / the manifold's `onSemanticsEnabledChanged`.
 - `computeDryLayout` / `_DebugSize` / `globalToLocal` / `localToGlobal`. Trigger: `RenderBox` public extras; `getTransformTo`.
 - `RenderProxyBox` / `RenderShiftedBox` intrinsics and dry layout. Trigger: the first intrinsic-sizing parent (`Row`, `IntrinsicWidth`).
 - `invokeLayoutCallback`. Trigger: `LayoutBuilder`; also widen `layout_without_resize` for a non-boundary layout-callback host.

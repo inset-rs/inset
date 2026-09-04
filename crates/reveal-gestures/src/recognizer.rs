@@ -3,9 +3,15 @@
 //! Superclass field bags and `super` namespaces. Leaves implement
 //! [`RecognizerLeaf`] so a superclass body calls the leaf, not a sibling. A
 //! `super` call is a namespace fn taking the leaf's `Handle` first.
+//!
+//! Dart's `GestureRecognizer` used as a type (a field, a `Map<Type,
+//! GestureRecognizer>` value) is the erased [`AnyGestureRecognizer`], minted by
+//! [`GestureRecognizerLeaf::as_recognizer`].
 
+use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -16,7 +22,7 @@ use crate::arena::{GestureArenaEntry, GestureArenaMember, GestureDisposition};
 use crate::binding::GestureBinding;
 use crate::constants::K_TOUCH_SLOP;
 use crate::debug::{debug_print_gesture_arena_diagnostics, debug_print_recognizer_callbacks_trace};
-use crate::events::{PointerDownEvent, PointerEvent};
+use crate::events::{PointerDownEvent, PointerEvent, PointerPanZoomStartEvent};
 use crate::gesture_settings::DeviceGestureSettings;
 use crate::pointer_router::PointerRoute;
 use crate::team::GestureArenaTeam;
@@ -386,6 +392,10 @@ pub(crate) trait RecognizerLeaf: RecognizerLeafData + Sized + 'static {
     fn dispose(self: Handle<Self>, app: &mut App) {
         PrimaryPointerGestureRecognizer::dispose(self, app);
     }
+
+    /// Returns a very short pretty description of the gesture that the
+    /// recognizer looks for.
+    fn debug_description(self: Handle<Self>) -> &'static str;
 }
 
 /// Dart's `GestureRecognizer extends GestureArenaMember`: every leaf competes in
@@ -401,6 +411,156 @@ impl<R: RecognizerLeaf> GestureArenaMember for Handle<R> {
 
     fn member_id(&self) -> HandleId {
         self.id()
+    }
+}
+
+/// A concrete recognizer: the bound Dart writes as `T extends GestureRecognizer`.
+///
+/// Every leaf ([`TapGestureRecognizer`](crate::TapGestureRecognizer),
+/// [`LongPressGestureRecognizer`](crate::LongPressGestureRecognizer)) implements it. It hands
+/// out the erased [`AnyGestureRecognizer`] that a field Dart types as `GestureRecognizer`
+/// holds.
+pub trait GestureRecognizerLeaf: Sized + 'static {
+    /// This recognizer as the erased [`AnyGestureRecognizer`] — what to pass where a Dart
+    /// API takes a `GestureRecognizer`.
+    ///
+    /// The object is untouched; this mints an erased second handle to it, so concrete
+    /// members stay reachable through the typed one.
+    fn as_recognizer(self: Handle<Self>) -> AnyGestureRecognizer;
+}
+
+impl<R: RecognizerLeaf> GestureRecognizerLeaf for R {
+    fn as_recognizer(self: Handle<Self>) -> AnyGestureRecognizer {
+        AnyGestureRecognizer {
+            id: self.id(),
+            vtable: const { &GestureRecognizerVTable::of::<R>() },
+        }
+    }
+}
+
+/// The vtable of an erased [`AnyGestureRecognizer`]: one `&'static` table per leaf type,
+/// built by [`GestureRecognizerVTable::of`]. Copied out of the edge before a virtual call,
+/// so the slot is not borrowed across it.
+pub(crate) struct GestureRecognizerVTable {
+    type_id: fn() -> TypeId,
+    type_name: fn() -> &'static str,
+    add_pointer: fn(&mut App, HandleId, PointerDownEvent),
+    add_pointer_pan_zoom: fn(&mut App, HandleId, PointerPanZoomStartEvent),
+    is_pointer_allowed: fn(&App, HandleId, &PointerDownEvent) -> bool,
+    is_pointer_pan_zoom_allowed: fn(&App, HandleId, &PointerPanZoomStartEvent) -> bool,
+    dispose: fn(&mut App, HandleId),
+    debug_description: fn(HandleId) -> &'static str,
+}
+
+/// The typed handle for an erased id. Free: nothing is looked up; `get` checks the slot.
+fn resolve<R: 'static>(id: HandleId) -> Handle<R> {
+    Handle::from_id(id)
+}
+
+impl GestureRecognizerVTable {
+    /// The table for one leaf type.
+    const fn of<R: RecognizerLeaf>() -> GestureRecognizerVTable {
+        GestureRecognizerVTable {
+            type_id: TypeId::of::<R>,
+            type_name: std::any::type_name::<R>,
+            add_pointer: |app, id, event| {
+                GestureRecognizer::add_pointer(resolve::<R>(id), app, event)
+            },
+            add_pointer_pan_zoom: |app, id, event| {
+                GestureRecognizer::add_pointer_pan_zoom(resolve::<R>(id), app, event)
+            },
+            is_pointer_allowed: |app, id, event| R::is_pointer_allowed(resolve(id), app, event),
+            is_pointer_pan_zoom_allowed: |app, id, event| {
+                R::is_pointer_pan_zoom_allowed(resolve(id), app, event)
+            },
+            dispose: |app, id| R::dispose(resolve(id), app),
+            debug_description: |id| R::debug_description(resolve(id)),
+        }
+    }
+}
+
+/// Erased `GestureRecognizer`: one identity and a static vtable, the fat pointer rustc
+/// cannot build for an arena id. No lease.
+///
+/// This is what a field Dart types as `GestureRecognizer` becomes. The leaf stays in the
+/// [`App`] under its own type; [`downcast`](Self::downcast) gets the typed handle back, and
+/// [`type_id`](Self::type_id) is Dart's `runtimeType`.
+///
+/// Equality is Dart's `==` on an object reference.
+#[derive(Clone, Copy)]
+pub struct AnyGestureRecognizer {
+    id: HandleId,
+    vtable: &'static GestureRecognizerVTable,
+}
+
+impl PartialEq for AnyGestureRecognizer {
+    fn eq(&self, other: &AnyGestureRecognizer) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for AnyGestureRecognizer {}
+
+impl Hash for AnyGestureRecognizer {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl fmt::Debug for AnyGestureRecognizer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}({:?})", (self.vtable.type_name)(), self.id)
+    }
+}
+
+impl AnyGestureRecognizer {
+    /// The arena id behind this edge.
+    pub fn id(self) -> HandleId {
+        self.id
+    }
+
+    /// Dart's `runtimeType`: the leaf type this edge was minted from.
+    pub fn type_id(self) -> TypeId {
+        (self.vtable.type_id)()
+    }
+
+    /// Dart's `recognizer as T`: the typed handle when this recognizer is a `T`, else `None`.
+    pub fn downcast<T: 'static>(self, app: &App) -> Option<Handle<T>> {
+        app.handle::<T>(self.id)
+    }
+
+    /// Registers a new pointer that might be relevant to this gesture detector.
+    ///
+    /// The owner of this gesture recognizer calls `add_pointer` with the
+    /// [`PointerDownEvent`] of each pointer that should be considered for this gesture.
+    pub fn add_pointer(self, app: &mut App, event: &PointerDownEvent) {
+        (self.vtable.add_pointer)(app, self.id, event.clone());
+    }
+
+    /// Registers a new pointer pan/zoom that might be relevant to this gesture detector.
+    pub fn add_pointer_pan_zoom(self, app: &mut App, event: &PointerPanZoomStartEvent) {
+        (self.vtable.add_pointer_pan_zoom)(app, self.id, event.clone());
+    }
+
+    /// Checks whether or not a pointer is allowed to be tracked by this recognizer.
+    pub fn is_pointer_allowed(self, app: &App, event: &PointerDownEvent) -> bool {
+        (self.vtable.is_pointer_allowed)(app, self.id, event)
+    }
+
+    /// Checks whether or not a pointer pan/zoom is allowed to be tracked by this recognizer.
+    pub fn is_pointer_pan_zoom_allowed(self, app: &App, event: &PointerPanZoomStartEvent) -> bool {
+        (self.vtable.is_pointer_pan_zoom_allowed)(app, self.id, event)
+    }
+
+    /// Releases any resources used by the object and frees its arena slot. Every edge to it
+    /// is stale afterwards.
+    pub fn dispose(self, app: &mut App) {
+        (self.vtable.dispose)(app, self.id);
+    }
+
+    /// Returns a very short pretty description of the gesture that the recognizer looks for.
+    pub fn debug_description(self) -> &'static str {
+        (self.vtable.debug_description)(self.id)
     }
 }
 
@@ -498,7 +658,11 @@ impl GestureRecognizer {
         data[&pointer].buttons
     }
 
-    pub(crate) fn dispose<R: RecognizerLeaf>(_this: Handle<R>, _app: &mut App) {}
+    /// Dart's body is a diagnostics assert and leaves the object to the collector; the arena
+    /// has no collector, so the slot goes too.
+    pub(crate) fn dispose<R: RecognizerLeaf>(this: Handle<R>, app: &mut App) {
+        app.destroy(this);
+    }
 
     pub(crate) fn invoke_callback<R: RecognizerLeaf, T>(
         this: Handle<R>,
@@ -830,10 +994,62 @@ impl PrimaryPointerGestureRecognizer {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
     use reveal_embedder::Offset;
 
     use crate::events::{PointerDownEvent, PointerEvent};
+    use crate::long_press::LongPressGestureRecognizer;
+    use crate::tap::TapGestureRecognizer;
+
+    #[test]
+    fn an_erased_recognizer_keeps_its_identity_and_type() {
+        let mut app = App::new();
+        let tap = TapGestureRecognizer::new(&mut app);
+        let long_press = LongPressGestureRecognizer::new(&mut app);
+        let erased = tap.as_recognizer();
+        assert_eq!(erased, tap.as_recognizer());
+        assert_ne!(erased, long_press.as_recognizer());
+        assert_eq!(erased.id(), tap.id());
+        assert_eq!(erased.type_id(), TypeId::of::<TapGestureRecognizer>());
+        assert_eq!(erased.downcast::<TapGestureRecognizer>(&app), Some(tap));
+        assert_eq!(erased.downcast::<LongPressGestureRecognizer>(&app), None);
+        assert_eq!(erased.debug_description(), "tap");
+        assert_eq!(long_press.as_recognizer().debug_description(), "long press");
+        assert!(format!("{erased:?}").contains("TapGestureRecognizer"));
+    }
+
+    #[test]
+    fn an_erased_recognizer_adds_pointers_and_dispose_frees_the_slot() {
+        let mut app = App::new();
+        let tap = TapGestureRecognizer::new(&mut app);
+        let recognized = Rc::new(Cell::new(false));
+        let flag = Rc::clone(&recognized);
+        tap.set_on_tap(&mut app, Some(Listener::new(move |_app| flag.set(true))));
+        let erased = tap.as_recognizer();
+        let down = PointerDownEvent {
+            pointer: 1,
+            ..PointerDownEvent::default()
+        };
+        assert!(erased.is_pointer_allowed(&app, &down));
+
+        erased.add_pointer(&mut app, &down);
+        let binding = GestureBinding::instance(&mut app);
+        binding.gesture_arena(&app).close(&mut app, 1);
+        app.drain_microtasks();
+        binding.pointer_router(&app).route(
+            &mut app,
+            PointerEvent::Up(crate::events::PointerUpEvent {
+                pointer: 1,
+                ..crate::events::PointerUpEvent::default()
+            }),
+        );
+        assert!(recognized.get());
+
+        erased.dispose(&mut app);
+        assert!(!app.contains(erased.id()));
+    }
 
     #[test]
     fn from_event_position_and_delta_and_arithmetic() {

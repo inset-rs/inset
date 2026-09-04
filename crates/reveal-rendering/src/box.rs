@@ -1227,6 +1227,11 @@ impl AnyRenderBox {
     }
 
     /// The `RenderObject` view of this box. Free: points into the nested table.
+    /// Whether this render object has undergone layout and has a size.
+    pub fn has_size(self, app: &App) -> bool {
+        self.box_data(app).size.is_some()
+    }
+
     pub fn as_object(self) -> AnyRenderObject {
         AnyRenderObject::from_vtable(self.id, &self.vtable.object)
     }

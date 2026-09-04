@@ -73,6 +73,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — same as the other hooks: the host calls the client instead of assigning into an isolate-global callback field.
   Affect: the host delivers a [`PointerDataPacket`](PointerDataPacket); it does not convert to `PointerEvent`.
 
+- Change: `EmbedderClient::wake(elapsed)` reports that a `Platform::wake_at` deadline passed, on the platform clock `Frame::elapsed` uses.
+  Reason: platform — Dart's event loop fires `Timer`s on its own; the `App` owns its timers and needs the host to say time passed.
+  Affect: a host calls `wake` when its wait ends; the shell turns it into `App::elapse`.
+
 ## pointer.rs → dart:ui `pointer.dart`
 
 - Change: [`PointerData::view_id`](PointerData::view_id) is [`ViewId`](ViewId), not a bare `int`.

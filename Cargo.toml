@@ -23,6 +23,7 @@ reveal-rendering = { path = "crates/reveal-rendering" }
 reveal-scheduler = { path = "crates/reveal-scheduler" }
 reveal-services = { path = "crates/reveal-services" }
 reveal-shell = { path = "crates/reveal-shell" }
+reveal-widgets = { path = "crates/reveal-widgets" }
 slotmap = "1"
 winit = "0.30"
 valo = "0.3.0"

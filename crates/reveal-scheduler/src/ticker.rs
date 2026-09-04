@@ -28,6 +28,19 @@ pub trait TickerProvider {
     fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker>;
 }
 
+/// [`TickerProvider`] for an object in the App: Dart's `implements TickerProvider` on a
+/// `State`, whose `vsync: this` is the object's [`Handle`].
+pub trait TickerProviderObject: Sized + 'static {
+    /// See [`TickerProvider::create_ticker`].
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker>;
+}
+
+impl<T: TickerProviderObject> TickerProvider for Handle<T> {
+    fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+        TickerProviderObject::create_ticker(self, app, on_tick)
+    }
+}
+
 /// Calls its callback once per animation frame, when enabled.
 ///
 /// When created, a ticker is initially disabled. Call

@@ -1655,6 +1655,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "reveal-widgets"
+version = "0.1.0"
+dependencies = [
+ "reveal-animation",
+ "reveal-embedder",
+ "reveal-foundation",
+ "reveal-gestures",
+ "reveal-painting",
+ "reveal-rendering",
+ "reveal-scheduler",
+ "reveal-services",
+ "valo-system-fonts",
+]
+
+[[package]]
 name = "roxmltree"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2593,9 +2608,9 @@ dependencies = [
  "reveal-embedder-winit",
  "reveal-painting",
  "reveal-rendering",
- "reveal-scheduler",
  "reveal-services",
  "reveal-shell",
+ "reveal-widgets",
 ]
 
 [[package]]

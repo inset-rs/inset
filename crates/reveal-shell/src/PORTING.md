@@ -16,6 +16,10 @@ No Flutter counterpart. Dart has no type — the engine owns the isolate.
   Reason: platform — Flutter's engine collects platform fonts on its own; here the shell asks `Platform::font_source` once.
   Affect: text shapes against the OS fonts without application code; a test shell with the inert platform has an empty collection until `PaintingBinding::install_fonts`.
 
+- Change: `Shell` keeps the app clock: `frame` and `wake` first `App::elapse` up to the platform's `elapsed`, so due `Timer`s fire before the frame's scheduler phases.
+  Reason: platform — Dart's event loop runs timers between engine events; the `App` clock only moves when the host says so.
+  Affect: a `Timer` (and so `run_app`'s root attach) fires at the next wake or frame, never during `setup`.
+
 ## Deferred
 
 - `view_added` / `view_removed`. Trigger: the widget layer's `View`; `RendererBinding` does not create render views for new host views. `view_metrics_changed` reaches `RendererBinding::handle_metrics_changed`.

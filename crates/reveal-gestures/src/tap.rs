@@ -2,6 +2,7 @@
 //!
 //! Leaf object. Superclass bags and `super` namespaces are in `recognizer.rs`.
 
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use reveal_embedder::{Matrix4, Offset, PointerDeviceKind};
@@ -260,6 +261,16 @@ impl TapGestureRecognizer {
         self
     }
 
+    /// Sets the kind of devices that are allowed to be recognized; `None` tracks and
+    /// recognizes events from all device kinds.
+    pub fn set_supported_devices(
+        self: Handle<Self>,
+        app: &mut App,
+        devices: Option<HashSet<PointerDeviceKind>>,
+    ) {
+        app.get_mut(self).recognizer.supported_devices = devices;
+    }
+
     /// Called when interaction starts. Limits buttons this recognizer accepts.
     pub fn allowed_buttons_filter(
         self: Handle<Self>,
@@ -314,9 +325,9 @@ impl TapGestureRecognizer {
     pub fn set_on_tap_down(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, TapDownDetails) + 'static,
+        callback: Option<GestureTapDownCallback>,
     ) {
-        app.get_mut(self).on_tap_down = Some(Rc::new(callback));
+        app.get_mut(self).on_tap_down = callback;
     }
 
     /// A pointer has stopped contacting the screen at a particular location,
@@ -324,24 +335,24 @@ impl TapGestureRecognizer {
     pub fn set_on_tap_up(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, TapUpDetails) + 'static,
+        callback: Option<GestureTapUpCallback>,
     ) {
-        app.get_mut(self).on_tap_up = Some(Rc::new(callback));
+        app.get_mut(self).on_tap_up = callback;
     }
 
     /// A pointer has stopped contacting the screen, which is recognized as a
     /// tap of a primary button.
-    pub fn set_on_tap(self: Handle<Self>, app: &mut App, callback: impl Fn(&mut App) + 'static) {
-        app.get_mut(self).on_tap = Some(Listener::new(callback));
+    pub fn set_on_tap(self: Handle<Self>, app: &mut App, callback: Option<GestureTapCallback>) {
+        app.get_mut(self).on_tap = callback;
     }
 
     /// A pointer that triggered a tap has moved.
     pub fn set_on_tap_move(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, TapMoveDetails) + 'static,
+        callback: Option<GestureTapMoveCallback>,
     ) {
-        app.get_mut(self).on_tap_move = Some(Rc::new(callback));
+        app.get_mut(self).on_tap_move = callback;
     }
 
     /// A pointer that previously triggered [`set_on_tap_down`](Self::set_on_tap_down)
@@ -349,9 +360,9 @@ impl TapGestureRecognizer {
     pub fn set_on_tap_cancel(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App) + 'static,
+        callback: Option<GestureTapCancelCallback>,
     ) {
-        app.get_mut(self).on_tap_cancel = Some(Listener::new(callback));
+        app.get_mut(self).on_tap_cancel = callback;
     }
 
     /// A pointer has stopped contacting the screen, which is recognized as a
@@ -359,9 +370,9 @@ impl TapGestureRecognizer {
     pub fn set_on_secondary_tap(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App) + 'static,
+        callback: Option<GestureTapCallback>,
     ) {
-        app.get_mut(self).on_secondary_tap = Some(Listener::new(callback));
+        app.get_mut(self).on_secondary_tap = callback;
     }
 
     /// A pointer has contacted the screen with a secondary button, which might
@@ -369,9 +380,9 @@ impl TapGestureRecognizer {
     pub fn set_on_secondary_tap_down(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, TapDownDetails) + 'static,
+        callback: Option<GestureTapDownCallback>,
     ) {
-        app.get_mut(self).on_secondary_tap_down = Some(Rc::new(callback));
+        app.get_mut(self).on_secondary_tap_down = callback;
     }
 
     /// A pointer has stopped contacting the screen, which is recognized as a
@@ -379,9 +390,9 @@ impl TapGestureRecognizer {
     pub fn set_on_secondary_tap_up(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, TapUpDetails) + 'static,
+        callback: Option<GestureTapUpCallback>,
     ) {
-        app.get_mut(self).on_secondary_tap_up = Some(Rc::new(callback));
+        app.get_mut(self).on_secondary_tap_up = callback;
     }
 
     /// A pointer that previously triggered [`set_on_secondary_tap_down`](Self::set_on_secondary_tap_down)
@@ -389,9 +400,9 @@ impl TapGestureRecognizer {
     pub fn set_on_secondary_tap_cancel(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App) + 'static,
+        callback: Option<GestureTapCancelCallback>,
     ) {
-        app.get_mut(self).on_secondary_tap_cancel = Some(Listener::new(callback));
+        app.get_mut(self).on_secondary_tap_cancel = callback;
     }
 
     /// A pointer has contacted the screen with a tertiary button, which might
@@ -399,9 +410,9 @@ impl TapGestureRecognizer {
     pub fn set_on_tertiary_tap_down(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, TapDownDetails) + 'static,
+        callback: Option<GestureTapDownCallback>,
     ) {
-        app.get_mut(self).on_tertiary_tap_down = Some(Rc::new(callback));
+        app.get_mut(self).on_tertiary_tap_down = callback;
     }
 
     /// A pointer has stopped contacting the screen, which is recognized as a
@@ -409,9 +420,9 @@ impl TapGestureRecognizer {
     pub fn set_on_tertiary_tap_up(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, TapUpDetails) + 'static,
+        callback: Option<GestureTapUpCallback>,
     ) {
-        app.get_mut(self).on_tertiary_tap_up = Some(Rc::new(callback));
+        app.get_mut(self).on_tertiary_tap_up = callback;
     }
 
     /// A pointer that previously triggered [`set_on_tertiary_tap_down`](Self::set_on_tertiary_tap_down)
@@ -419,9 +430,9 @@ impl TapGestureRecognizer {
     pub fn set_on_tertiary_tap_cancel(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App) + 'static,
+        callback: Option<GestureTapCancelCallback>,
     ) {
-        app.get_mut(self).on_tertiary_tap_cancel = Some(Listener::new(callback));
+        app.get_mut(self).on_tertiary_tap_cancel = callback;
     }
 
     /// The team that this recognizer belongs to, if any.
@@ -460,7 +471,7 @@ impl TapGestureRecognizer {
     /// Returns a very short pretty description of the gesture that the
     /// recognizer looks for.
     pub fn debug_description(self: Handle<Self>) -> &'static str {
-        "tap"
+        <Self as RecognizerLeaf>::debug_description(self)
     }
 
     fn handle_tap_down(self: Handle<Self>, app: &mut App, down: &PointerDownEvent) {
@@ -668,6 +679,10 @@ impl RecognizerLeaf for TapGestureRecognizer {
             }
         };
         allowed && GestureRecognizer::is_pointer_allowed(self, app, event)
+    }
+
+    fn debug_description(self: Handle<Self>) -> &'static str {
+        "tap"
     }
 }
 
@@ -901,7 +916,7 @@ mod tests {
         let tap = TapGestureRecognizer::new(&mut app);
         let recognized = Rc::new(Cell::new(false));
         let flag = Rc::clone(&recognized);
-        tap.set_on_tap(&mut app, move |_app| flag.set(true));
+        tap.set_on_tap(&mut app, Some(Listener::new(move |_app| flag.set(true))));
 
         let down1 = down(1, Offset::new(10.0, 10.0));
         let up1 = up(1, Offset::new(11.0, 9.0));
@@ -926,7 +941,7 @@ mod tests {
         );
         let recognized = Rc::new(Cell::new(false));
         let flag = Rc::clone(&recognized);
-        tap.set_on_tap(&mut app, move |_app| flag.set(true));
+        tap.set_on_tap(&mut app, Some(Listener::new(move |_app| flag.set(true))));
 
         let touch_down = down(1, Offset::new(10.0, 10.0));
         let touch_up = up(1, Offset::new(11.0, 9.0));
@@ -990,12 +1005,18 @@ mod tests {
         let last_up = Rc::new(RefCell::new(None));
         let down_slot = Rc::clone(&last_down);
         let up_slot = Rc::clone(&last_up);
-        tap.set_on_tap_down(&mut app, move |_app, details| {
-            *down_slot.borrow_mut() = Some(details.kind);
-        });
-        tap.set_on_tap_up(&mut app, move |_app, details| {
-            *up_slot.borrow_mut() = Some(details.kind);
-        });
+        tap.set_on_tap_down(
+            &mut app,
+            Some(Rc::new(move |_app, details| {
+                *down_slot.borrow_mut() = Some(details.kind);
+            })),
+        );
+        tap.set_on_tap_up(
+            &mut app,
+            Some(Rc::new(move |_app, details| {
+                *up_slot.borrow_mut() = Some(details.kind);
+            })),
+        );
 
         let mouse_down = PointerDownEvent {
             pointer: 1,
@@ -1024,7 +1045,10 @@ mod tests {
         let tap = TapGestureRecognizer::new(&mut app);
         let taps = Rc::new(Cell::new(0));
         let count = Rc::clone(&taps);
-        tap.set_on_tap(&mut app, move |_app| count.set(count.get() + 1));
+        tap.set_on_tap(
+            &mut app,
+            Some(Listener::new(move |_app| count.set(count.get() + 1))),
+        );
 
         let down1 = down(1, Offset::new(10.0, 10.0));
         let up1 = up(1, Offset::new(11.0, 9.0));
@@ -1050,7 +1074,10 @@ mod tests {
         let tap = TapGestureRecognizer::new(&mut app);
         let taps = Rc::new(Cell::new(0));
         let count = Rc::clone(&taps);
-        tap.set_on_tap(&mut app, move |_app| count.set(count.get() + 1));
+        tap.set_on_tap(
+            &mut app,
+            Some(Listener::new(move |_app| count.set(count.get() + 1))),
+        );
 
         let down1 = down(1, Offset::new(10.0, 10.0));
         let up1 = up(1, Offset::new(11.0, 9.0));
@@ -1079,8 +1106,8 @@ mod tests {
         let canceled = Rc::new(Cell::new(false));
         let rec = Rc::clone(&recognized);
         let can = Rc::clone(&canceled);
-        tap.set_on_tap(&mut app, move |_app| rec.set(true));
-        tap.set_on_tap_cancel(&mut app, move |_app| can.set(true));
+        tap.set_on_tap(&mut app, Some(Listener::new(move |_app| rec.set(true))));
+        tap.set_on_tap_cancel(&mut app, Some(Listener::new(move |_app| can.set(true))));
 
         let down3 = down(3, Offset::new(10.0, 10.0));
         tap.add_pointer(&mut app, down3.clone());
@@ -1107,8 +1134,8 @@ mod tests {
         let canceled = Rc::new(Cell::new(false));
         let rec = Rc::clone(&recognized);
         let can = Rc::clone(&canceled);
-        tap.set_on_tap(&mut app, move |_app| rec.set(true));
-        tap.set_on_tap_cancel(&mut app, move |_app| can.set(true));
+        tap.set_on_tap(&mut app, Some(Listener::new(move |_app| rec.set(true))));
+        tap.set_on_tap_cancel(&mut app, Some(Listener::new(move |_app| can.set(true))));
 
         let down4 = down(4, Offset::new(10.0, 10.0));
         tap.add_pointer(&mut app, down4.clone());
@@ -1131,7 +1158,7 @@ mod tests {
         let tap = TapGestureRecognizer::new(&mut app);
         let recognized = Rc::new(Cell::new(false));
         let flag = Rc::clone(&recognized);
-        tap.set_on_tap(&mut app, move |_app| flag.set(true));
+        tap.set_on_tap(&mut app, Some(Listener::new(move |_app| flag.set(true))));
 
         let down1 = down(1, Offset::new(10.0, 10.0));
         tap.add_pointer(&mut app, down1.clone());
@@ -1151,8 +1178,11 @@ mod tests {
         let tap = TapGestureRecognizer::new(&mut app);
         let down_fired = Rc::new(Cell::new(false));
         let flag = Rc::clone(&down_fired);
-        tap.set_on_tap_down(&mut app, move |_app, _details| flag.set(true));
-        tap.set_on_tap(&mut app, |_app| {});
+        tap.set_on_tap_down(
+            &mut app,
+            Some(Rc::new(move |_app, _details| flag.set(true))),
+        );
+        tap.set_on_tap(&mut app, Some(Listener::new(|_app| {})));
 
         let down1 = down(1, Offset::new(10.0, 10.0));
         tap.add_pointer(&mut app, down1.clone());
@@ -1175,13 +1205,19 @@ mod tests {
         let log = Rc::new(RefCell::new(Vec::new()));
         let down_log = Rc::clone(&log);
         let cancel_log = Rc::clone(&log);
-        tap.set_on_tap_down(&mut app, move |_app, _details| {
-            down_log.borrow_mut().push("down");
-        });
-        tap.set_on_tap(&mut app, |_app| {});
-        tap.set_on_tap_cancel(&mut app, move |_app| {
-            cancel_log.borrow_mut().push("cancel");
-        });
+        tap.set_on_tap_down(
+            &mut app,
+            Some(Rc::new(move |_app, _details| {
+                down_log.borrow_mut().push("down");
+            })),
+        );
+        tap.set_on_tap(&mut app, Some(Listener::new(|_app| {})));
+        tap.set_on_tap_cancel(
+            &mut app,
+            Some(Listener::new(move |_app| {
+                cancel_log.borrow_mut().push("cancel");
+            })),
+        );
 
         let down5 = down(5, Offset::new(10.0, 10.0));
         tap.add_pointer(&mut app, down5.clone());
@@ -1206,7 +1242,7 @@ mod tests {
         let tap = TapGestureRecognizer::new(&mut app);
         let recognized = Rc::new(Cell::new(false));
         let flag = Rc::clone(&recognized);
-        tap.set_on_tap(&mut app, move |_app| flag.set(true));
+        tap.set_on_tap(&mut app, Some(Listener::new(move |_app| flag.set(true))));
 
         let down1 = down(1, Offset::new(10.0, 10.0));
         tap.add_pointer(&mut app, down1.clone());
@@ -1233,7 +1269,7 @@ mod tests {
         let tap = TapGestureRecognizer::new(&mut app);
         let recognized = Rc::new(Cell::new(false));
         let flag = Rc::clone(&recognized);
-        tap.set_on_tap(&mut app, move |_app| flag.set(true));
+        tap.set_on_tap(&mut app, Some(Listener::new(move |_app| flag.set(true))));
 
         let down1 = down(1, Offset::new(10.0, 10.0));
         tap.add_pointer(&mut app, down1.clone());

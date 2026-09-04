@@ -1,0 +1,676 @@
+//! Flutter counterpart: `widgets/binding.dart` (`WidgetsBinding`, `RootWidget`,
+//! `RootElement`, `runApp`).
+//!
+//! `WidgetsBindingObserver` and the observer callbacks (locale, metrics, lifecycle, memory,
+//! back gestures, view focus), `performReassemble`, and the platform menu / windowing owners
+//! wait.
+
+use std::rc::Rc;
+use std::time::Duration;
+
+use reveal_foundation::{App, Handle, Listener, Timer};
+use reveal_rendering::{RendererBinding, RendererBindingOverridesObject};
+use reveal_scheduler::SchedulerBinding;
+
+use crate::framework::{
+    AnyElement, BuildOwner, Element, ElementBase, ElementData, IntoWidget, KeyRef, Slot, Widget,
+    WidgetKind, WidgetRef, downcast_widget,
+};
+use crate::view::View;
+
+/// The glue between the widgets layer and the Flutter engine.
+///
+/// The [`WidgetsBinding`] manages a single [`Element`] tree rooted at
+/// [`root_element`](Self::root_element). This element tree is created by
+/// [`attach_root_widget`](Self::attach_root_widget), and its build is scheduled onto the
+/// renderer's frame: the tree is built before the render tree is laid out and painted, and
+/// finalized after.
+#[derive(Default)]
+pub struct WidgetsBinding {
+    build_owner: Option<Handle<BuildOwner>>,
+    root_element: Option<AnyElement>,
+    ready_to_produce_frames: bool,
+}
+
+impl WidgetsBinding {
+    /// The current [`WidgetsBinding`], created on first use (Flutter's
+    /// `WidgetsFlutterBinding.ensureInitialized`).
+    ///
+    /// Creating it creates the renderer, gesture, and scheduler bindings below it.
+    pub fn instance(app: &mut App) -> Handle<WidgetsBinding> {
+        let this: Handle<WidgetsBinding> = app.singleton();
+        if app.get(this).build_owner.is_none() {
+            let build_owner = BuildOwner::new(
+                app,
+                Some(Listener::new(|app| {
+                    WidgetsBinding::instance(app).handle_build_scheduled(app)
+                })),
+            );
+            app.get_mut(this).build_owner = Some(build_owner);
+            // Flutter's `WidgetsBinding` overrides `RendererBinding.drawFrame`.
+            RendererBinding::instance(app).set_overrides(app, Rc::new(this));
+        }
+        this
+    }
+
+    /// The [`BuildOwner`] in charge of executing the build pipeline for the widget tree
+    /// rooted at this binding.
+    pub fn build_owner(self: Handle<Self>, app: &App) -> Handle<BuildOwner> {
+        app.get(self)
+            .build_owner
+            .expect("WidgetsBinding::instance must run first")
+    }
+
+    fn handle_build_scheduled(self: Handle<Self>, app: &mut App) {
+        // Flutter's debug checks against building during `drawFrame`'s locked phases wait
+        // with diagnostics.
+        SchedulerBinding::ensure_visual_update(app);
+    }
+
+    /// The [`Element`] that is at the root of the element tree hierarchy.
+    ///
+    /// This is initialized the first time [`run_app`] is called.
+    pub fn root_element(self: Handle<Self>, app: &App) -> Option<AnyElement> {
+        app.get(self).root_element
+    }
+
+    /// Whether the binding is ready to produce frames: Flutter's `framesEnabled` override
+    /// waits for the root widget.
+    pub fn ready_to_produce_frames(self: Handle<Self>, app: &App) -> bool {
+        app.get(self).ready_to_produce_frames
+    }
+
+    /// Wraps the `root_widget` in a [`View`] widget for the implicit view, the way [`run_app`]
+    /// does.
+    ///
+    /// # Panics
+    ///
+    /// If the platform has no implicit view.
+    pub fn wrap_with_default_view(
+        self: Handle<Self>,
+        app: &mut App,
+        root_widget: WidgetRef,
+    ) -> WidgetRef {
+        let view = app.platform().implicit_view().expect(
+            "The app requested a view, but the platform did not provide one. This is likely \
+             because the app called `run_app` to render its root widget, which expects the \
+             platform to provide a default view to render into (the \"implicit\" view). Try \
+             using `run_widget` instead of `run_app` to start your app.",
+        );
+        View {
+            key: None,
+            view,
+            child: root_widget,
+        }
+        .into_widget()
+    }
+
+    /// Schedules a `Timer` for attaching the root widget.
+    ///
+    /// This is called by [`run_app`] to configure the widget tree. Consider using
+    /// [`attach_root_widget`](Self::attach_root_widget) if you want to build the widget tree
+    /// synchronously.
+    pub fn schedule_attach_root_widget(self: Handle<Self>, app: &mut App, root_widget: WidgetRef) {
+        Timer::new(
+            app,
+            Duration::ZERO,
+            Listener::new(move |app| self.attach_root_widget(app, root_widget.clone())),
+        );
+    }
+
+    /// Takes a widget and attaches it to the [`root_element`](Self::root_element), creating
+    /// it if necessary.
+    ///
+    /// This is called by [`run_app`] to configure the widget tree.
+    ///
+    /// See also:
+    ///
+    ///  * [`run_app`], which bootstraps the widget tree.
+    pub fn attach_root_widget(self: Handle<Self>, app: &mut App, root_widget: WidgetRef) {
+        self.attach_to_build_owner(
+            app,
+            RootWidget {
+                key: None,
+                child: Some(root_widget),
+                debug_short_description: Some("[root]".to_owned()),
+            },
+        );
+    }
+
+    /// Called by [`attach_root_widget`](Self::attach_root_widget) to attach the provided
+    /// [`RootWidget`] to the [`build_owner`](Self::build_owner).
+    ///
+    /// This creates the [`root_element`](Self::root_element), if necessary, or re-uses an
+    /// existing one.
+    ///
+    /// This method is rarely called directly, but it can be useful in tests to restore the
+    /// element tree to a previous version by providing the [`RootWidget`] of that version.
+    pub fn attach_to_build_owner(self: Handle<Self>, app: &mut App, widget: RootWidget) {
+        let is_bootstrap_frame = app.get(self).root_element.is_none();
+        app.get_mut(self).ready_to_produce_frames = true;
+        let owner = self.build_owner(app);
+        let current = app.get(self).root_element.map(|element| {
+            element
+                .downcast::<RootElement>(app)
+                .expect("the root is a RootElement")
+        });
+        let root = widget.attach(app, owner, current);
+        app.get_mut(self).root_element = Some(root.as_element());
+        if is_bootstrap_frame {
+            SchedulerBinding::ensure_visual_update(app);
+        }
+    }
+
+    /// Whether the [`root_element`](Self::root_element) has been initialized.
+    ///
+    /// This will be false until [`run_app`] is called (or `WidgetTester.pumpWidget` is
+    /// called in the context of a `TestWidgetsFlutterBinding`).
+    pub fn is_root_widget_attached(self: Handle<Self>, app: &App) -> bool {
+        app.get(self).root_element.is_some()
+    }
+}
+
+/// Flutter's `WidgetsBinding.drawFrame`: build the dirty widgets, let the renderer draw,
+/// then unmount what fell out of the tree.
+impl RendererBindingOverridesObject for WidgetsBinding {
+    fn will_draw_frame(self: Handle<Self>, app: &mut App) {
+        if let Some(root_element) = app.get(self).root_element {
+            let owner = self.build_owner(app);
+            owner.build_scope(app, root_element, None);
+        }
+    }
+
+    fn did_draw_frame(self: Handle<Self>, app: &mut App) {
+        let owner = self.build_owner(app);
+        owner.finalize_tree(app);
+    }
+}
+
+/// Inflate the given widget and attach it to the view.
+///
+/// The widget is given constraints during layout that force it to fill the entire view. If
+/// you wish to align your widget to one side of the view (e.g., the top), consider using the
+/// `Align` widget. If you wish to center your widget, you can also use the `Center` widget.
+///
+/// Calling [`run_app`] again will detach the previous root widget from the view and attach
+/// the given widget in its place. The new widget tree is compared against the previous widget
+/// tree and any differences are applied to the underlying render tree, similar to what
+/// happens when a `StatefulWidget` rebuilds after calling `State::set_state`.
+///
+/// Initializes the binding using [`WidgetsBinding::instance`] if necessary.
+///
+/// The root widget is attached on the next timer turn, as Dart's `Timer.run` does, and the
+/// first frame is scheduled.
+pub fn run_app(app: &mut App, widget: WidgetRef) {
+    let binding = WidgetsBinding::instance(app);
+    let wrapped = binding.wrap_with_default_view(app, widget);
+    run_widget_internal(app, binding, wrapped);
+}
+
+/// Inflate the given widget and bootstrap the widget tree.
+///
+/// Unlike [`run_app`], this method does not define a `View` widget: the given `widget`
+/// must contain one (or the tree has no render tree to attach to).
+pub fn run_widget(app: &mut App, widget: WidgetRef) {
+    let binding = WidgetsBinding::instance(app);
+    run_widget_internal(app, binding, widget);
+}
+
+fn run_widget_internal(app: &mut App, binding: Handle<WidgetsBinding>, widget: WidgetRef) {
+    binding.schedule_attach_root_widget(app, widget);
+    // `scheduleWarmUpFrame` waits; a normal frame is scheduled instead.
+    SchedulerBinding::schedule_frame(app);
+}
+
+/// A wrapper widget that will be used as the root of the widget tree.
+///
+/// An instance of this widget is created by [`WidgetsBinding::attach_root_widget`].
+///
+/// It is used as the root of the widget tree, and provides a [`RootElement`] which does not
+/// have a render object itself and instead delegates rendering to its child.
+#[derive(Debug)]
+pub struct RootWidget {
+    pub key: Option<KeyRef>,
+    /// The widget below this widget in the tree.
+    pub child: Option<WidgetRef>,
+    /// A short description of this widget used by debugging aids.
+    pub debug_short_description: Option<String>,
+}
+
+impl RootWidget {
+    /// Inflate this widget and attaches the resulting [`RootElement`] to the provided
+    /// [`BuildOwner`].
+    ///
+    /// If `element` is `None`, this function will create a new element. Otherwise, the given
+    /// element will have an update scheduled to switch to this widget.
+    ///
+    /// Used by [`WidgetsBinding::attach_to_build_owner`] (which is indirectly called by
+    /// [`run_app`]) to bootstrap applications.
+    pub fn attach(
+        self,
+        app: &mut App,
+        owner: Handle<BuildOwner>,
+        element: Option<Handle<RootElement>>,
+    ) -> Handle<RootElement> {
+        let widget: WidgetRef = Rc::new(self);
+        match element {
+            None => {
+                let mut created = None;
+                owner.lock_state(app, |app| {
+                    let element = RootElement::create(app, widget.clone());
+                    element.as_element().assign_owner(app, owner);
+                    created = Some(element);
+                });
+                let element = created.expect("created while locked");
+                owner.build_scope(
+                    app,
+                    element.as_element(),
+                    Some(Box::new(move |app| {
+                        element.as_element().mount(app, None, None)
+                    })),
+                );
+                element
+            }
+            Some(element) => {
+                app.get_mut(element).new_widget = Some(widget);
+                element.as_element().mark_needs_build(app);
+                element
+            }
+        }
+    }
+}
+
+impl Widget for RootWidget {
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
+        RootElement::create(app, this).as_element()
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn widget_type(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<RootWidget>()
+    }
+
+    fn kind(&self) -> WidgetKind {
+        WidgetKind::Other
+    }
+}
+
+/// The root of the element tree.
+///
+/// This element class is the instantiation of a [`RootWidget`]. It can be used only as the
+/// root of an [`Element`] tree (it cannot be mounted into another [`Element`]; its parent
+/// must be `None`).
+///
+/// In typical usage, it will be instantiated for a [`RootWidget`] by calling
+/// [`RootWidget::attach`]. In this usage, it is normally instantiated by the bootstrapping
+/// logic in the `WidgetsFlutterBinding` singleton created by [`run_app`].
+pub struct RootElement {
+    element: ElementData,
+    child: Option<AnyElement>,
+    new_widget: Option<WidgetRef>,
+}
+
+impl RootElement {
+    fn create(app: &mut App, widget: WidgetRef) -> Handle<RootElement> {
+        debug_assert!(downcast_widget::<RootWidget>(&*widget).is_some());
+        app.create(RootElement {
+            element: ElementData::new(widget),
+            child: None,
+            new_widget: None,
+        })
+    }
+
+    /// The child element, if any.
+    pub fn child(self: Handle<Self>, app: &App) -> Option<AnyElement> {
+        app.get(self).child
+    }
+
+    fn rebuild_child(self: Handle<Self>, app: &mut App) {
+        let child_widget = downcast_widget::<RootWidget>(&**self.as_element().widget(app))
+            .expect("a RootElement holds a RootWidget")
+            .child
+            .clone();
+        let child = app.get(self).child;
+        let child = self
+            .as_element()
+            .update_child(app, child, child_widget, None);
+        app.get_mut(self).child = child;
+    }
+}
+
+impl Element for RootElement {
+    crate::element_accessors!();
+
+    fn visit_children(self: Handle<Self>, app: &App, visitor: &mut dyn FnMut(AnyElement)) {
+        if let Some(child) = app.get(self).child {
+            visitor(child);
+        }
+    }
+
+    fn forget_child(self: Handle<Self>, app: &mut App, child: AnyElement) {
+        debug_assert!(app.get(self).child == Some(child));
+        app.get_mut(self).child = None;
+    }
+
+    fn mount(
+        self: Handle<Self>,
+        app: &mut App,
+        parent: Option<AnyElement>,
+        new_slot: Option<Slot>,
+    ) {
+        debug_assert!(parent.is_none()); // We are the root!
+        debug_assert!(new_slot.is_none());
+        ElementBase::mount(self, app, parent, new_slot);
+        self.rebuild_child(app);
+        debug_assert!(app.get(self).child.is_some());
+        ElementBase::perform_rebuild(self, app); // clears the "dirty" flag
+    }
+
+    fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
+        ElementBase::update(self, app, new_widget);
+        self.rebuild_child(app);
+    }
+
+    fn perform_rebuild(self: Handle<Self>, app: &mut App) {
+        if let Some(new_widget) = app.get_mut(self).new_widget.take() {
+            Element::update(self, app, new_widget);
+        }
+        ElementBase::perform_rebuild(self, app);
+        debug_assert!(app.get(self).new_widget.is_none());
+    }
+
+    fn debug_doing_build(self: Handle<Self>, _app: &App) -> bool {
+        false // This element doesn't have a build phase.
+    }
+
+    fn debug_expects_render_object_for_slot(
+        self: Handle<Self>,
+        _app: &App,
+        _slot: Option<&Slot>,
+    ) -> bool {
+        false
+    }
+}
+
+/// The build owner a `GlobalKey` resolves against: the binding's.
+pub(crate) fn current_build_owner(app: &mut App) -> Option<Handle<BuildOwner>> {
+    let binding = WidgetsBinding::instance(app);
+    app.get(binding).build_owner
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::time::Duration;
+
+    use reveal_embedder::{
+        Picture, Platform, PlatformRef, Size, TargetPlatform, View as EmbedderView, ViewId,
+        ViewMetrics, ViewRef,
+    };
+    use reveal_foundation::{App, Handle};
+    use reveal_rendering::{
+        AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderHandle,
+        RendererBinding,
+    };
+    use reveal_scheduler::SchedulerBinding;
+
+    use super::*;
+    use crate::framework::{
+        BuildContext, LeafRenderObjectWidget, RenderObjectWidget, State, StateData, StatefulWidget,
+    };
+
+    struct TestView {
+        presented: Rc<Cell<u32>>,
+    }
+
+    impl EmbedderView for TestView {
+        fn id(&self) -> ViewId {
+            ViewId(0)
+        }
+
+        fn metrics(&self) -> ViewMetrics {
+            ViewMetrics {
+                physical_size: [800.0, 600.0],
+                physical_constraints: reveal_embedder::ViewConstraints::tight(800.0, 600.0),
+                device_pixel_ratio: 2.0,
+                ..ViewMetrics::default()
+            }
+        }
+
+        fn present(&self, _picture: &Picture) {
+            self.presented.set(self.presented.get() + 1);
+        }
+    }
+
+    struct TestPlatform {
+        view: ViewRef,
+        frames: Rc<Cell<u32>>,
+    }
+
+    impl Platform for TestPlatform {
+        fn target_platform(&self) -> TargetPlatform {
+            TargetPlatform::MacOS
+        }
+
+        fn request_frame(&self) {
+            self.frames.set(self.frames.get() + 1);
+        }
+
+        fn now(&self) -> std::time::Instant {
+            std::time::Instant::now()
+        }
+
+        fn wake_at(&self, _deadline: std::time::Instant) {}
+
+        fn views(&self) -> Vec<ViewRef> {
+            vec![Rc::clone(&self.view)]
+        }
+
+        fn view(&self, id: ViewId) -> Option<ViewRef> {
+            (self.view.id() == id).then(|| Rc::clone(&self.view))
+        }
+
+        fn implicit_view(&self) -> Option<ViewRef> {
+            Some(Rc::clone(&self.view))
+        }
+    }
+
+    fn app_with_view() -> (App, Rc<Cell<u32>>, Rc<Cell<u32>>) {
+        let presented = Rc::new(Cell::new(0));
+        let frames = Rc::new(Cell::new(0));
+        let platform: PlatformRef = Rc::new(TestPlatform {
+            view: Rc::new(TestView {
+                presented: Rc::clone(&presented),
+            }),
+            frames: Rc::clone(&frames),
+        });
+        (App::with_platform(platform), presented, frames)
+    }
+
+    fn pump_frame(app: &mut App, at: Duration) {
+        SchedulerBinding::handle_begin_frame(app, Some(at));
+        app.drain_microtasks();
+        SchedulerBinding::handle_draw_frame(app);
+        app.drain_microtasks();
+    }
+
+    #[derive(Debug)]
+    struct Sized {
+        size: Size,
+    }
+
+    impl RenderObjectWidget for Sized {
+        type RenderObject = RenderConstrainedBox;
+
+        fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+            RenderConstrainedBox::new(app, BoxConstraints::tight(self.size), None).as_object()
+        }
+
+        fn update_render_object(
+            &self,
+            app: &mut App,
+            _context: BuildContext,
+            render_object: RenderHandle<RenderConstrainedBox>,
+        ) {
+            render_object.set_additional_constraints(app, BoxConstraints::tight(self.size));
+        }
+    }
+
+    impl LeafRenderObjectWidget for Sized {}
+
+    #[derive(Debug)]
+    struct Resizable {
+        size: Rc<Cell<Size>>,
+        state: Rc<Cell<Option<Handle<ResizableState>>>>,
+    }
+
+    impl StatefulWidget for Resizable {
+        type State = ResizableState;
+
+        fn create_state(&self) -> ResizableState {
+            ResizableState {
+                state: StateData::new(),
+            }
+        }
+    }
+
+    struct ResizableState {
+        state: StateData<Resizable>,
+    }
+
+    impl State for ResizableState {
+        type Widget = Resizable;
+        crate::state_accessors!();
+
+        fn init_state(self: Handle<Self>, app: &mut App) {
+            self.widget(app).state.set(Some(self));
+        }
+
+        fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+            Sized {
+                size: self.widget(app).size.get(),
+            }
+            .into_widget()
+        }
+    }
+
+    fn root_child_size(app: &mut App) -> Size {
+        let render_view = RendererBinding::instance(app)
+            .render_views(app)
+            .into_iter()
+            .next()
+            .expect("run_app registered a render view");
+        let child = render_view.child(app).expect("the view has a child");
+        child.size(app)
+    }
+
+    #[test]
+    fn run_app_attaches_on_the_next_timer_turn_and_draws_the_first_frame() {
+        let (mut app, presented, frames) = app_with_view();
+        run_app(
+            &mut app,
+            Sized {
+                size: Size::new(30.0, 20.0),
+            }
+            .into_widget(),
+        );
+        let binding = WidgetsBinding::instance(&mut app);
+        assert!(!binding.is_root_widget_attached(&app));
+        assert_eq!(frames.get(), 1);
+
+        app.elapse(Duration::ZERO);
+        assert!(binding.is_root_widget_attached(&app));
+        let root = binding
+            .root_element(&app)
+            .and_then(|element| element.downcast::<RootElement>(&app))
+            .expect("the root element is a RootElement");
+        assert!(root.child(&app).is_some());
+
+        pump_frame(&mut app, Duration::ZERO);
+        assert_eq!(presented.get(), 1);
+        assert_eq!(root_child_size(&mut app), Size::new(400.0, 300.0));
+    }
+
+    #[test]
+    fn set_state_schedules_a_frame_that_rebuilds_before_layout() {
+        let (mut app, presented, frames) = app_with_view();
+        let size = Rc::new(Cell::new(Size::new(30.0, 20.0)));
+        let state = Rc::new(Cell::new(None));
+        run_app(
+            &mut app,
+            Resizable {
+                size: Rc::clone(&size),
+                state: Rc::clone(&state),
+            }
+            .into_widget(),
+        );
+        app.elapse(Duration::ZERO);
+        pump_frame(&mut app, Duration::ZERO);
+        let frames_before = frames.get();
+
+        size.set(Size::new(50.0, 60.0));
+        let state = state.get().expect("the state registered itself");
+        state.set_state(&mut app, |_| {});
+        assert_eq!(frames.get(), frames_before + 1);
+
+        pump_frame(&mut app, Duration::from_millis(16));
+        assert_eq!(presented.get(), 2);
+        assert_eq!(root_child_size(&mut app), Size::new(400.0, 300.0));
+        let root = WidgetsBinding::instance(&mut app)
+            .root_element(&app)
+            .expect("attached");
+        let mut leaves = Vec::new();
+        collect_leaves(&app, root, &mut leaves);
+        assert_eq!(leaves.len(), 1);
+    }
+
+    fn collect_leaves(app: &App, element: AnyElement, leaves: &mut Vec<AnyElement>) {
+        let mut children = Vec::new();
+        element.visit_children(app, &mut |child| children.push(child));
+        if children.is_empty() {
+            leaves.push(element);
+        }
+        for child in children {
+            collect_leaves(app, child, leaves);
+        }
+    }
+
+    #[test]
+    fn running_a_second_app_updates_the_root_in_place() {
+        let (mut app, _presented, _frames) = app_with_view();
+        run_app(
+            &mut app,
+            Sized {
+                size: Size::new(30.0, 20.0),
+            }
+            .into_widget(),
+        );
+        app.elapse(Duration::ZERO);
+        pump_frame(&mut app, Duration::ZERO);
+        let binding = WidgetsBinding::instance(&mut app);
+        let first_root = binding.root_element(&app);
+
+        run_app(
+            &mut app,
+            Sized {
+                size: Size::new(10.0, 10.0),
+            }
+            .into_widget(),
+        );
+        app.elapse(Duration::ZERO);
+        assert_eq!(binding.root_element(&app), first_root);
+        pump_frame(&mut app, Duration::from_millis(16));
+        assert_eq!(
+            RendererBinding::instance(&mut app).render_views(&app).len(),
+            1
+        );
+    }
+}

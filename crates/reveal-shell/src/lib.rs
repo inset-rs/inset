@@ -6,6 +6,8 @@
 //! can name both.
 #![feature(arbitrary_self_types)]
 
+use std::time::Duration;
+
 use reveal_embedder::{EmbedderClient, Frame, PlatformRef, PointerDataPacket, ViewId};
 use reveal_foundation::App;
 use reveal_gestures::GestureBinding;
@@ -16,6 +18,8 @@ use reveal_scheduler::SchedulerBinding;
 /// Host-facing isolate: [`App`] plus the methods the embedder pushes.
 pub struct Shell {
     app: App,
+    /// The platform time the app clock was last advanced to.
+    clock: Duration,
 }
 
 impl Shell {
@@ -28,16 +32,29 @@ impl Shell {
         // Flutter's engine collects the platform's fonts before the framework runs.
         PaintingBinding::instance(&mut app).install_platform_fonts(&mut app);
         setup(&mut app);
-        Shell { app }
+        Shell {
+            app,
+            clock: Duration::ZERO,
+        }
     }
 
     pub fn app(&mut self) -> &mut App {
         &mut self.app
     }
+
+    /// Moves the app clock up to the platform's `elapsed`, firing the timers that came due.
+    fn advance_clock(&mut self, elapsed: Duration) {
+        if elapsed <= self.clock {
+            return;
+        }
+        self.app.elapse(elapsed - self.clock);
+        self.clock = elapsed;
+    }
 }
 
 impl EmbedderClient for Shell {
     fn frame(&mut self, frame: Frame) {
+        self.advance_clock(frame.elapsed);
         SchedulerBinding::handle_begin_frame(&mut self.app, Some(frame.elapsed));
         self.app.drain_microtasks();
         SchedulerBinding::handle_draw_frame(&mut self.app);
@@ -55,6 +72,10 @@ impl EmbedderClient for Shell {
     fn pointer_data_packet(&mut self, packet: PointerDataPacket) {
         GestureBinding::instance(&mut self.app).handle_pointer_data_packet(&mut self.app, packet);
         self.app.drain_microtasks();
+    }
+
+    fn wake(&mut self, elapsed: Duration) {
+        self.advance_clock(elapsed);
     }
 }
 
@@ -172,5 +193,37 @@ mod tests {
             ..PointerData::default()
         }]));
         assert!(ran.get());
+    }
+
+    #[test]
+    fn wake_and_frame_advance_the_app_clock_and_fire_due_timers() {
+        let platform: reveal_embedder::PlatformRef = Rc::new(RecordingPlatform {
+            frames: Arc::new(AtomicUsize::new(0)),
+            view: None,
+        });
+        let fired = Rc::new(Cell::new(Vec::new()));
+        let mut shell = Shell::new(platform, |app| {
+            for (name, delay) in [("early", 10), ("late", 30)] {
+                let fired = Rc::clone(&fired);
+                reveal_foundation::Timer::new(
+                    app,
+                    Duration::from_millis(delay),
+                    reveal_foundation::Listener::new(move |_app| {
+                        let mut log = fired.take();
+                        log.push(name);
+                        fired.set(log);
+                    }),
+                );
+            }
+        });
+        assert!(fired.take().is_empty());
+
+        shell.wake(Duration::from_millis(15));
+        assert_eq!(fired.take(), vec!["early"]);
+
+        shell.frame(Frame {
+            elapsed: Duration::from_millis(32),
+        });
+        assert_eq!(fired.take(), vec!["late"]);
     }
 }

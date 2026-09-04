@@ -48,6 +48,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — a `&mut self` receiver cannot also produce the `&mut App` that creating a ticker needs, and a provider living in the App cannot be borrowed mutably while that App is borrowed.
   Affect: `vsync.create_ticker(app, on_tick)` where Dart writes `vsync.createTicker(onTick)`. Pass a `Handle` (or a Copy test double) by value, not `&mut dyn TickerProvider`.
 
+- Change: `TickerProviderObject` is `TickerProvider` for an object in the App (`create_ticker(self: Handle<Self>, ..)`), with the blanket `impl<T: TickerProviderObject> TickerProvider for Handle<T>`; Dart's `vsync: this` on a `State` is the state's handle.
+  Reason: language — a downstream crate cannot implement the foreign `TickerProvider` for `Handle<ItsState>` (orphan rule), so the twin lives here.
+  Affect: a state writes `impl TickerProviderObject for MyState { .. }` and passes `self` as `vsync`.
+
 ## Deferred
 
 - `scheduleTask` and the priority task queue. Trigger: a `Timer` counterpart — `_ensureEventLoopCallback` needs `Timer.run`.

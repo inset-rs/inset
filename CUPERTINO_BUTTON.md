@@ -2,11 +2,11 @@
 
 Goal: a CupertinoButton that presses (gesture) and fades (opacity animation).
 
-Spec: `/Users/mac/code/flutter/packages/flutter/lib/src/cupertino/button.dart`. Crate order: dart:ui (`reveal-embedder`) → foundation → scheduler / painting / physics → gestures → rendering → widgets → cupertino. Accessibility skipped (do not stub `SemanticsBinding`). No `reveal-widgets`, `reveal-cupertino`, or `reveal-services` crate exists.
+Spec: `/Users/mac/code/flutter/packages/flutter/lib/src/cupertino/button.dart`. Crate order: dart:ui (`reveal-embedder`) → foundation → scheduler / painting / physics → gestures → rendering → widgets → cupertino. Accessibility skipped (do not stub `SemanticsBinding`). No `reveal-widgets` or `reveal-cupertino` crate exists; `reveal-services` holds mouse cursors, the mouse tracking annotation, and `TextSelection`.
 
 ## Already in reveal-rs
 
-**reveal-embedder** (dart:ui subset) — `Offset`/`Size`/`Rect`/`RRect`/`RSuperellipse`/`Radius`, `Color`, `Clip`, `Shadow`, `Matrix4`, `Canvas`/`Paint`/`Path`/`Picture` (valo), `TargetPlatform`, `Brightness`, `Platform`/`View`/`EmbedderClient`, `ViewPadding`, `ViewConstraints`, `GestureSettings`, `PointerData`/`PointerDataPacket`. `ui.TextStyle` is valo `TextStyle` (no encode). `FontWeight` / `FontStyle` / `TextDecoration` / `TextAlign` / `TextBaseline` / `TextDirection` / `FontFeature` / `FontVariation` are in.
+**reveal-embedder** (dart:ui subset) — `Offset`/`Size`/`Rect`/`RRect`/`RSuperellipse`/`Radius`, `Color`, `Clip`, `Shadow`, `Matrix4`, `Canvas`/`Paint`/`Path`/`Picture` (valo), `TargetPlatform`, `Brightness`, `Platform`/`View`/`EmbedderClient`, `ViewPadding`, `ViewConstraints`, `GestureSettings`, `PointerData`/`PointerDataPacket`, `SystemMouseCursorKind`. dart:ui text: `TextStyle` / `ParagraphStyle` / `ParagraphBuilder` / `Paragraph` over valo (UTF-16 offsets), `TextPosition` / `TextRange` / `TextBox` / `LineMetrics` / `GlyphInfo`, `FontCollection` + `Platform::font_source`. `FontWeight` / `FontStyle` / `TextDecoration` / `TextAlign` / `TextBaseline` / `TextDirection` / `FontFeature` / `FontVariation` are in.
 
 **reveal-foundation** — `App`/`Handle`, `ChangeNotifier`/`Listenable`/`ValueNotifier`, `kDebugMode`/`kIsWeb`, `ObserverList`, `Key`/`LocalKey`/`UniqueKey`/`ValueKey`, `ValueChanged`, `Timer`. Re-exports `TargetPlatform`. No diagnostics, no `BindingBase`, no `GlobalKey`.
 
@@ -16,7 +16,7 @@ Spec: `/Users/mac/code/flutter/packages/flutter/lib/src/cupertino/button.dart`. 
 
 **reveal-animation** — `Animation`/`AnimationController`/`Tween`/`CurveTween`/`Curves`. `SingleTickerProviderStateMixin` is widgets, not here. `SemanticsBinding.disableAnimations` skipped.
 
-**reveal-painting** — alignment, edge insets, border radius, `BorderSide`/`ShapeBorder`, box/shape decorations (solid color only), `RoundedSuperellipseBorder`, `BoxShadow`, `HSLColor`/`HSVColor`, `ClipContext`, `TextScaler`, painting `TextStyle`. Re-exports dart:ui text enums.
+**reveal-painting** — alignment, edge insets, border radius, `BorderSide`/`ShapeBorder`, box/shape decorations (solid color only), `RoundedSuperellipseBorder`, `BoxShadow`, `HSLColor`/`HSVColor`, `ClipContext`, `TextScaler`, painting `TextStyle`, `InlineSpan`/`TextSpan`, `TextPainter`, `PaintingBinding` (fonts only). Re-exports dart:ui text enums.
 
 **reveal-physics** — simulations used by `AnimationController`; not required for tap.
 
@@ -24,7 +24,7 @@ Spec: `/Users/mac/code/flutter/packages/flutter/lib/src/cupertino/button.dart`. 
 
 **reveal-rendering** — `BoxConstraints`, `Constraints`, `HitTestBehavior`, rendering debug flags, `RenderObject` / `RenderBox` / `RenderSliver`, `RenderHandle<T>` + erased `AnyRenderObject` / `AnyRenderBox` / `AnyRenderSliver`, `PipelineOwner` dirty-layout flush, `RenderPadding`, `RenderConstrainedBox`. No `PaintingContext`, layers, or `flushPaint`.
 
-**reveal-embedder-winit** — host window + `View::present`. Mouse down/move/up/hover and wheel → `EmbedderClient::pointer_data_packet`.
+**reveal-embedder-winit** — host window + `View::present`. Mouse down/move/up/hover and wheel → `EmbedderClient::pointer_data_packet`. `Platform::activate_system_cursor` → winit cursor icons.
 
 ## Ordered work
 
@@ -43,12 +43,13 @@ Spec: `/Users/mac/code/flutter/packages/flutter/lib/src/cupertino/button.dart`. 
 
 | id | Flutter | status | depends | note |
 |---|---|---|---|---|
-| R1 | `object.dart` (`RenderObject`, `PaintingContext`, `PipelineOwner`) + `layer.dart` (`OpacityLayer`) | partial | G1, painting | **Layout/tree in** (`RenderHandle<T>` / `AnyRenderObject`, `PipelineOwner.flushLayout`). No `PaintingContext` / layers / paint flush. Skip semantics APIs. |
-| R2 | `box.dart` (`RenderBox`, `BoxConstraints`, `globalToLocal`, `paintBounds`) | partial | R1 | **`BoxConstraints` and the box `layout` wrapper are in.** `globalToLocal` / `BoxHitTestResult` / `_DebugSize` wait. |
-| R3 | `proxy_box.dart` slice | partial | R2 | `HitTestBehavior` and `RenderConstrainedBox` layout are in. Fade is `RenderAnimatedOpacity` + `OpacityLayer`. |
-| R4 | `shifted_box.dart` (`RenderPadding`, `RenderPositionedBox`) | partial | R2 | **`RenderPadding` layout is in.** `RenderPositionedBox` / paint wait. |
-| R5 | `view.dart` `RenderView` + `binding.dart` `RendererBinding` | blocked | R1, G6 | Skip `SemanticsBinding`. `RenderView` is not a box and overrides the `constraints` getter — ask before adding that ops slot. |
-| R6 | `mouse_tracker.dart` | next | R3 | |
+| R1 | `object.dart` (`RenderObject`, `PaintingContext`, `PipelineOwner`) + `layer.dart` (`OpacityLayer`) | partial | G1, painting | **Layout, paint, and layers in** (`RenderHandle<T>` / `AnyRenderObject`, `flushLayout` / `flushPaint`, retained paint items + `CompositedLayer`). `compositeFrame` waits on R5. Skip semantics APIs. |
+| R2 | `box.dart` (`RenderBox`, `BoxConstraints`, `globalToLocal`, `paintBounds`) | partial | R1 | **`BoxConstraints`, the box `layout` wrapper, `paintBounds`, `BoxHitTestResult` / `BoxHitTestEntry`, `hitTest` / `hitTestSelf` / `hitTestChildren` / `handleEvent` in.** `globalToLocal` / `_DebugSize` / dry layout wait. |
+| R3 | `proxy_box.dart` slice | partial | R2 | **`RenderConstrainedBox`, `RenderOpacity`, `RenderAnimatedOpacity`, `RenderRepaintBoundary`, `RenderDecoratedBox`, `RenderPointerListener` in** (layout, paint, hit-test). A pointer down reaches a listener through `GestureBinding` → `RendererBinding` → `RenderView`. Intrinsics wait. |
+| R4 | `shifted_box.dart` (`RenderPadding`, `RenderPositionedBox`) | partial | R2 | **`RenderPadding` and `RenderPositionedBox` in** (layout and paint). Hit-test waits. |
+| R5 | `view.dart` `RenderView` + `binding.dart` `RendererBinding` | partial | R1, G6 | **`RenderView`, `ViewConfiguration`, `compositeFrame`, `hitTest`, `RendererBinding` frame pipeline, `hitTestInView`, `dispatchEvent` and the mouse tracker in**; `examples/window` renders a tree. No ops slot was needed: constraints live on protocol traits, and the view is its own kind. `PipelineManifold` / semantics wait. |
+| R6 | `mouse_tracker.dart` + `proxy_box.dart` `RenderMouseRegion` + services `mouse_cursor.dart` / `mouse_tracking.dart` | done | R3, R5 | **`MouseTracker` (enter/exit/hover, cursors via `Platform::activate_system_cursor`), `RenderMouseRegion`, `MouseCursor` / `SystemMouseCursors` in**; `RendererBinding` updates the tracker on dispatch and after each frame. winit shows the system cursor. |
+| R7 | `paragraph.dart` `RenderParagraph` + painting `inline_span.dart` / `text_span.dart` / `text_painter.dart` + dart:ui paragraph types | partial | R2, painting | **`RenderParagraph` (layout, paint, clip overflow, hit-test self, caret / position / word queries), `TextSpan`, `TextPainter`, dart:ui `Paragraph` over valo in**; `examples/window` draws text. Inline children, selection, fade shader, intrinsics wait. |
 
 ### Widgets / Cupertino
 
@@ -60,6 +61,6 @@ Unchanged: W1–W10 and C1–C4 still wait on the tree. `CupertinoDynamicColor i
 2. **`RendererBinding` / `WidgetsBinding` mix in `SemanticsBinding`** — skip those members; do not stub the binding.
 3. **Diagnostics** — deferred as strings/`debug_assert!` until `diagnostics.dart`.
 4. **Layout re-entrancy** — `Handle` point access only. Leasing a render object for a pass is the shaft-rs-next bug.
-5. **`GestureRecognizer` inheritance (language)** — one Handle on the leaf; superclasses are field bags; `super` is a namespace fn. See `.cursor/skills/porting-flutter/patterns/leaf-inheritance.md`.
-6. **`RenderObject` (language)** — `RenderHandle<T>` + erased `AnyRenderObject` (id + `&'static` vtable, no lease); protocol traits own the edges and the tree methods. Ask before encoding `PaintingContext` / layers.
-7. **`layout` / `markNeedsLayout` / `constraints` as virtuals** — not on the ops table. OverlayPortal overrides `layout`; `RenderView` overrides `constraints`. Ask before adding those slots.
+5. **`GestureRecognizer` inheritance (language)** — one arena struct per leaf; superclasses are field bags; `super` is a namespace fn. See `.cursor/skills/porting-flutter/patterns/leaf-inheritance.md`.
+6. **`RenderObject` (language)** — `RenderHandle<T>` + erased `AnyRenderObject` (id + `&'static` vtable, no lease); protocol traits own the edges and the tree methods. Layers are data: a repaint boundary retains paint items plus one `CompositedLayer`; there is no `Layer` tree and no compositing bits (see rendering `PORTING.md`).
+7. **`layout` / `markNeedsLayout` as virtuals** — not on the vtable. OverlayPortal overrides `layout`; ask before adding that slot. `RenderView`'s `constraints` needed none: constraints live on the protocol traits and the view is its own kind of render object.

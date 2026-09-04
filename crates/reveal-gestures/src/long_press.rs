@@ -1,5 +1,6 @@
 //! Flutter counterpart: `gestures/long_press.dart`.
 
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -345,6 +346,16 @@ impl LongPressGestureRecognizer {
         self
     }
 
+    /// Sets the kind of devices that are allowed to be recognized; `None` tracks and
+    /// recognizes events from all device kinds.
+    pub fn set_supported_devices(
+        self: Handle<Self>,
+        app: &mut App,
+        devices: Option<HashSet<PointerDeviceKind>>,
+    ) {
+        app.get_mut(self).recognizer.supported_devices = devices;
+    }
+
     /// Called when interaction starts. Limits buttons this recognizer accepts.
     pub fn allowed_buttons_filter(
         self: Handle<Self>,
@@ -375,9 +386,9 @@ impl LongPressGestureRecognizer {
     pub fn set_on_long_press_down(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, LongPressDownDetails) + 'static,
+        callback: Option<GestureLongPressDownCallback>,
     ) {
-        app.get_mut(self).on_long_press_down = Some(Rc::new(callback));
+        app.get_mut(self).on_long_press_down = callback;
     }
 
     /// A pointer that previously triggered [`set_on_long_press_down`](Self::set_on_long_press_down)
@@ -385,36 +396,36 @@ impl LongPressGestureRecognizer {
     pub fn set_on_long_press_cancel(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App) + 'static,
+        callback: Option<GestureLongPressCancelCallback>,
     ) {
-        app.get_mut(self).on_long_press_cancel = Some(Listener::new(callback));
+        app.get_mut(self).on_long_press_cancel = callback;
     }
 
     /// A long press gesture by a primary button has been recognized.
     pub fn set_on_long_press(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App) + 'static,
+        callback: Option<GestureLongPressCallback>,
     ) {
-        app.get_mut(self).on_long_press = Some(Listener::new(callback));
+        app.get_mut(self).on_long_press = callback;
     }
 
     /// A long press gesture by a primary button has been recognized.
     pub fn set_on_long_press_start(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, LongPressStartDetails) + 'static,
+        callback: Option<GestureLongPressStartCallback>,
     ) {
-        app.get_mut(self).on_long_press_start = Some(Rc::new(callback));
+        app.get_mut(self).on_long_press_start = callback;
     }
 
     /// Moving after the long press by a primary button is recognized.
     pub fn set_on_long_press_move_update(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, LongPressMoveUpdateDetails) + 'static,
+        callback: Option<GestureLongPressMoveUpdateCallback>,
     ) {
-        app.get_mut(self).on_long_press_move_update = Some(Rc::new(callback));
+        app.get_mut(self).on_long_press_move_update = callback;
     }
 
     /// The pointer stopped contacting the screen after a long-press by a
@@ -422,9 +433,9 @@ impl LongPressGestureRecognizer {
     pub fn set_on_long_press_up(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App) + 'static,
+        callback: Option<GestureLongPressUpCallback>,
     ) {
-        app.get_mut(self).on_long_press_up = Some(Listener::new(callback));
+        app.get_mut(self).on_long_press_up = callback;
     }
 
     /// The pointer stopped contacting the screen after a long-press by a
@@ -432,9 +443,9 @@ impl LongPressGestureRecognizer {
     pub fn set_on_long_press_end(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, LongPressEndDetails) + 'static,
+        callback: Option<GestureLongPressEndCallback>,
     ) {
-        app.get_mut(self).on_long_press_end = Some(Rc::new(callback));
+        app.get_mut(self).on_long_press_end = callback;
     }
 
     /// A pointer has contacted the screen with a secondary button, which might
@@ -442,9 +453,9 @@ impl LongPressGestureRecognizer {
     pub fn set_on_secondary_long_press_down(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, LongPressDownDetails) + 'static,
+        callback: Option<GestureLongPressDownCallback>,
     ) {
-        app.get_mut(self).on_secondary_long_press_down = Some(Rc::new(callback));
+        app.get_mut(self).on_secondary_long_press_down = callback;
     }
 
     /// A pointer that previously triggered
@@ -453,36 +464,36 @@ impl LongPressGestureRecognizer {
     pub fn set_on_secondary_long_press_cancel(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App) + 'static,
+        callback: Option<GestureLongPressCancelCallback>,
     ) {
-        app.get_mut(self).on_secondary_long_press_cancel = Some(Listener::new(callback));
+        app.get_mut(self).on_secondary_long_press_cancel = callback;
     }
 
     /// A long press gesture by a secondary button has been recognized.
     pub fn set_on_secondary_long_press(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App) + 'static,
+        callback: Option<GestureLongPressCallback>,
     ) {
-        app.get_mut(self).on_secondary_long_press = Some(Listener::new(callback));
+        app.get_mut(self).on_secondary_long_press = callback;
     }
 
     /// A long press gesture by a secondary button has been recognized.
     pub fn set_on_secondary_long_press_start(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, LongPressStartDetails) + 'static,
+        callback: Option<GestureLongPressStartCallback>,
     ) {
-        app.get_mut(self).on_secondary_long_press_start = Some(Rc::new(callback));
+        app.get_mut(self).on_secondary_long_press_start = callback;
     }
 
     /// Moving after the long press by a secondary button is recognized.
     pub fn set_on_secondary_long_press_move_update(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, LongPressMoveUpdateDetails) + 'static,
+        callback: Option<GestureLongPressMoveUpdateCallback>,
     ) {
-        app.get_mut(self).on_secondary_long_press_move_update = Some(Rc::new(callback));
+        app.get_mut(self).on_secondary_long_press_move_update = callback;
     }
 
     /// The pointer stopped contacting the screen after a long-press by a
@@ -490,9 +501,9 @@ impl LongPressGestureRecognizer {
     pub fn set_on_secondary_long_press_up(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App) + 'static,
+        callback: Option<GestureLongPressUpCallback>,
     ) {
-        app.get_mut(self).on_secondary_long_press_up = Some(Listener::new(callback));
+        app.get_mut(self).on_secondary_long_press_up = callback;
     }
 
     /// The pointer stopped contacting the screen after a long-press by a
@@ -500,9 +511,9 @@ impl LongPressGestureRecognizer {
     pub fn set_on_secondary_long_press_end(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, LongPressEndDetails) + 'static,
+        callback: Option<GestureLongPressEndCallback>,
     ) {
-        app.get_mut(self).on_secondary_long_press_end = Some(Rc::new(callback));
+        app.get_mut(self).on_secondary_long_press_end = callback;
     }
 
     /// A pointer has contacted the screen with a tertiary button, which might
@@ -510,9 +521,9 @@ impl LongPressGestureRecognizer {
     pub fn set_on_tertiary_long_press_down(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, LongPressDownDetails) + 'static,
+        callback: Option<GestureLongPressDownCallback>,
     ) {
-        app.get_mut(self).on_tertiary_long_press_down = Some(Rc::new(callback));
+        app.get_mut(self).on_tertiary_long_press_down = callback;
     }
 
     /// A pointer that previously triggered
@@ -521,36 +532,36 @@ impl LongPressGestureRecognizer {
     pub fn set_on_tertiary_long_press_cancel(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App) + 'static,
+        callback: Option<GestureLongPressCancelCallback>,
     ) {
-        app.get_mut(self).on_tertiary_long_press_cancel = Some(Listener::new(callback));
+        app.get_mut(self).on_tertiary_long_press_cancel = callback;
     }
 
     /// A long press gesture by a tertiary button has been recognized.
     pub fn set_on_tertiary_long_press(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App) + 'static,
+        callback: Option<GestureLongPressCallback>,
     ) {
-        app.get_mut(self).on_tertiary_long_press = Some(Listener::new(callback));
+        app.get_mut(self).on_tertiary_long_press = callback;
     }
 
     /// A long press gesture by a tertiary button has been recognized.
     pub fn set_on_tertiary_long_press_start(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, LongPressStartDetails) + 'static,
+        callback: Option<GestureLongPressStartCallback>,
     ) {
-        app.get_mut(self).on_tertiary_long_press_start = Some(Rc::new(callback));
+        app.get_mut(self).on_tertiary_long_press_start = callback;
     }
 
     /// Moving after the long press by a tertiary button is recognized.
     pub fn set_on_tertiary_long_press_move_update(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, LongPressMoveUpdateDetails) + 'static,
+        callback: Option<GestureLongPressMoveUpdateCallback>,
     ) {
-        app.get_mut(self).on_tertiary_long_press_move_update = Some(Rc::new(callback));
+        app.get_mut(self).on_tertiary_long_press_move_update = callback;
     }
 
     /// The pointer stopped contacting the screen after a long-press by a
@@ -558,9 +569,9 @@ impl LongPressGestureRecognizer {
     pub fn set_on_tertiary_long_press_up(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App) + 'static,
+        callback: Option<GestureLongPressUpCallback>,
     ) {
-        app.get_mut(self).on_tertiary_long_press_up = Some(Listener::new(callback));
+        app.get_mut(self).on_tertiary_long_press_up = callback;
     }
 
     /// The pointer stopped contacting the screen after a long-press by a
@@ -568,9 +579,9 @@ impl LongPressGestureRecognizer {
     pub fn set_on_tertiary_long_press_end(
         self: Handle<Self>,
         app: &mut App,
-        callback: impl Fn(&mut App, LongPressEndDetails) + 'static,
+        callback: Option<GestureLongPressEndCallback>,
     ) {
-        app.get_mut(self).on_tertiary_long_press_end = Some(Rc::new(callback));
+        app.get_mut(self).on_tertiary_long_press_end = callback;
     }
 
     /// The team that this recognizer belongs to, if any.
@@ -591,6 +602,16 @@ impl LongPressGestureRecognizer {
         GestureRecognizer::add_pointer(self, app, event);
     }
 
+    /// Registers a new pointer pan/zoom that might be relevant to this gesture
+    /// detector.
+    pub fn add_pointer_pan_zoom(
+        self: Handle<Self>,
+        app: &mut App,
+        event: crate::events::PointerPanZoomStartEvent,
+    ) {
+        GestureRecognizer::add_pointer_pan_zoom(self, app, event);
+    }
+
     /// Releases any resources used by the object.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
         <Self as RecognizerLeaf>::dispose(self, app);
@@ -599,7 +620,7 @@ impl LongPressGestureRecognizer {
     /// Returns a very short pretty description of the gesture that the
     /// recognizer looks for.
     pub fn debug_description(self: Handle<Self>) -> &'static str {
-        "long press"
+        <Self as RecognizerLeaf>::debug_description(self)
     }
 
     fn check_long_press_down(self: Handle<Self>, app: &mut App, event: &PointerDownEvent) {
@@ -980,6 +1001,10 @@ impl RecognizerLeaf for LongPressGestureRecognizer {
         // Winning the arena isn't important here since it may happen from a sweep.
         // Explicitly exceeding the deadline puts the gesture in accepted state.
     }
+
+    fn debug_description(self: Handle<Self>) -> &'static str {
+        "long press"
+    }
 }
 
 #[cfg(test)]
@@ -1040,25 +1065,40 @@ mod tests {
         log: &Rc<RefCell<Vec<&'static str>>>,
     ) {
         let down_log = Rc::clone(log);
-        gesture.set_on_long_press_down(app, move |_app, _details| {
-            down_log.borrow_mut().push("down");
-        });
+        gesture.set_on_long_press_down(
+            app,
+            Some(Rc::new(move |_app, _details| {
+                down_log.borrow_mut().push("down");
+            })),
+        );
         let cancel_log = Rc::clone(log);
-        gesture.set_on_long_press_cancel(app, move |_app| {
-            cancel_log.borrow_mut().push("cancel");
-        });
+        gesture.set_on_long_press_cancel(
+            app,
+            Some(Listener::new(move |_app| {
+                cancel_log.borrow_mut().push("cancel");
+            })),
+        );
         let start_log = Rc::clone(log);
-        gesture.set_on_long_press(app, move |_app| {
-            start_log.borrow_mut().push("start");
-        });
+        gesture.set_on_long_press(
+            app,
+            Some(Listener::new(move |_app| {
+                start_log.borrow_mut().push("start");
+            })),
+        );
         let move_log = Rc::clone(log);
-        gesture.set_on_long_press_move_update(app, move |_app, _details| {
-            move_log.borrow_mut().push("move");
-        });
+        gesture.set_on_long_press_move_update(
+            app,
+            Some(Rc::new(move |_app, _details| {
+                move_log.borrow_mut().push("move");
+            })),
+        );
         let end_log = Rc::clone(log);
-        gesture.set_on_long_press_up(app, move |_app| {
-            end_log.borrow_mut().push("end");
-        });
+        gesture.set_on_long_press_up(
+            app,
+            Some(Listener::new(move |_app| {
+                end_log.borrow_mut().push("end");
+            })),
+        );
     }
 
     #[test]
@@ -1204,9 +1244,12 @@ mod tests {
         let log = Rc::new(RefCell::new(Vec::new()));
         set_handlers(gesture, &mut app, &log);
         let tap_log = Rc::clone(&log);
-        tap.set_on_tap_down(&mut app, move |_app, _details| {
-            tap_log.borrow_mut().push("tap_down");
-        });
+        tap.set_on_tap_down(
+            &mut app,
+            Some(Rc::new(move |_app, _details| {
+                tap_log.borrow_mut().push("tap_down");
+            })),
+        );
 
         let down1 = down(5, Offset::new(10.0, 10.0));
         tap.add_pointer(&mut app, down1.clone());

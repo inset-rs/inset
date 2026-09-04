@@ -925,6 +925,28 @@ impl AnyRenderObject {
         self.data(app).was_repaint_boundary
     }
 
+    /// The arena id behind this edge.
+    pub fn id(self) -> HandleId {
+        self.id
+    }
+
+    /// Dart's `renderObject as T`: the typed handle when this object is a `T`, else `None`.
+    pub fn downcast<T: RenderObject>(self, app: &App) -> Option<RenderHandle<T>> {
+        app.handle::<T>(self.id).map(RenderHandle::from_handle)
+    }
+
+    /// Release any resources held by this render object and free its arena slot. Dart's
+    /// `dispose` releases the layers and leaves the object to the collector; the arena has no
+    /// collector, so the slot goes too. Every edge to it is stale afterwards.
+    ///
+    /// The object must be detached. Its parent may still hold the edge: the widget layer
+    /// unmounts bottom-up and disposes the parent next, as Dart does.
+    pub fn dispose(self, app: &mut App) {
+        debug_assert!(!self.attached(app));
+        self.data_mut(app).layer = None;
+        app.destroy(self.id);
+    }
+
     /// Whether this render object repaints separately from its parent.
     pub fn is_repaint_boundary(self, app: &App) -> bool {
         (self.vtable.is_repaint_boundary)(app, self.id)
