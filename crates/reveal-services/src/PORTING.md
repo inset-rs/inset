@@ -2,7 +2,7 @@
 Flutter home: packages/flutter/lib/src/services
 Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
-Only mouse cursors and the mouse tracking annotation are here; the rest of the package waits.
+Only mouse cursors, the mouse tracking annotation, and `TextSelection` are here; the rest of the package waits.
 
 ## mouse_cursor.rs → mouse_cursor.dart
 
@@ -23,6 +23,12 @@ Only mouse cursors and the mouse tracking annotation are here; the rest of the p
 - Change: `MouseTrackerAnnotation` is a plain struct with `Default`; the listener typedefs (`PointerEnterEventListener`, `PointerExitEventListener`, `PointerHoverEventListener`) live in `reveal-gestures` next to the events.
   Reason: language — no named optional constructor arguments; gestures already defines the sibling listener typedefs.
   Affect: `MouseTrackerAnnotation { on_enter: Some(..), ..Default::default() }`. Who *is* an annotation (Dart's `implements MouseTrackerAnnotation`) is decided in rendering: see its `PORTING.md`.
+
+## text_editing.rs → text_editing.dart
+
+- Change: `TextSelection` does not extend `TextRange`: [`range()`](TextSelection::range) is the normalized range, and `start()` / `end()` / `is_valid()` / `is_collapsed()` are methods. `copyWith` is the fluent chain `copy_with().extent_offset(n)`.
+  Reason: language — no inheritance; no optional named parameters.
+  Affect: write `selection.start()` where Dart reads `selection.start`; pass `selection.range()` where a `TextRange` is wanted.
 
 ## Deferred
 

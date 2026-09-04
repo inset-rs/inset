@@ -455,6 +455,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "fontconfig-parser"
+version = "0.5.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbc773e24e02d4ddd8395fd30dc147524273a83e54e0f312d986ea30de5f5646"
+dependencies = [
+ "roxmltree",
+]
+
+[[package]]
+name = "fontdb"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "457e789b3d1202543297a350643cf459f836cade38934e7a4cf6a39e7cde2905"
+dependencies = [
+ "fontconfig-parser",
+ "log",
+ "memmap2",
+ "slotmap",
+ "tinyvec",
+ "ttf-parser",
+]
+
+[[package]]
 name = "foreign-types"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1536,6 +1559,7 @@ version = "0.1.0"
 dependencies = [
  "valo",
  "valo-geometry",
+ "valo-system-fonts",
 ]
 
 [[package]]
@@ -1545,6 +1569,7 @@ dependencies = [
  "pollster",
  "reveal-embedder",
  "valo",
+ "valo-system-fonts",
  "wgpu",
  "winit",
 ]
@@ -1573,6 +1598,8 @@ version = "0.1.0"
 dependencies = [
  "reveal-embedder",
  "reveal-foundation",
+ "reveal-services",
+ "valo-system-fonts",
 ]
 
 [[package]]
@@ -1594,6 +1621,7 @@ dependencies = [
  "reveal-painting",
  "reveal-scheduler",
  "reveal-services",
+ "valo-system-fonts",
 ]
 
 [[package]]
@@ -1621,9 +1649,16 @@ dependencies = [
  "reveal-embedder",
  "reveal-foundation",
  "reveal-gestures",
+ "reveal-painting",
  "reveal-rendering",
  "reveal-scheduler",
 ]
+
+[[package]]
+name = "roxmltree"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
 name = "rustc-hash"
@@ -1980,6 +2015,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "tinyvec"
+version = "1.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cf0ded5c4e56918d8f8a339e1bb67d038d3bc6d144ac407904015ba2e4cde9b"
+dependencies = [
+ "tinyvec_macros",
+]
+
+[[package]]
+name = "tinyvec_macros"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
+
+[[package]]
 name = "toml_datetime"
 version = "1.1.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2030,6 +2080,9 @@ name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
+dependencies = [
+ "core_maths",
+]
 
 [[package]]
 name = "unicode-bidi"
@@ -2112,6 +2165,17 @@ dependencies = [
  "valo-text",
  "web-time",
  "wgpu",
+]
+
+[[package]]
+name = "valo-system-fonts"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a772c7336b99f7edc20aa702a44acec4c9396bf5467b89b375dc175c2178fc31"
+dependencies = [
+ "fontdb",
+ "skrifa 0.35.0",
+ "valo-text",
 ]
 
 [[package]]

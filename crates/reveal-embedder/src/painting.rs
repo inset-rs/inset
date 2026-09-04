@@ -1,5 +1,6 @@
 //! Flutter counterpart: dart:ui `Canvas` / `Paint` / `Path` / `Picture` /
-//! `Image` / `Paragraph`. These are valo types under Flutter names.
+//! `Image`. These are valo types under Flutter names; the paragraph types live in
+//! `paragraph.rs`.
 //!
 //! Recording uses valo method signatures (`draw_rect`, f32 `Rect`). Convert
 //! framework geometry with [`From`] at the call (`rect.into()`).
@@ -15,8 +16,8 @@ pub type Canvas = DisplayListBuilder;
 pub type Picture = DisplayList;
 
 pub use valo::{
-    BlendMode, BlurStyle, ClipOp, FillRule, Image, MaskBlur, Paint, PaintStyle, Paragraph,
-    ParagraphBuilder, ParagraphStyle, Path, PathBuilder, Stroke, TextStyle,
+    BlendMode, BlurStyle, ClipOp, FillRule, Image, MaskBlur, Paint, PaintStyle, Path, PathBuilder,
+    Stroke,
 };
 
 /// The full valo API for hosts and for recording that needs a type the

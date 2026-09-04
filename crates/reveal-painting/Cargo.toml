@@ -6,8 +6,12 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-reveal-foundation.workspace = true
 reveal-embedder.workspace = true
+reveal-foundation.workspace = true
+reveal-services.workspace = true
+
+[dev-dependencies]
+valo-system-fonts.workspace = true
 
 [lints]
 workspace = true

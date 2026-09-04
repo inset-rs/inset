@@ -189,17 +189,31 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — `dart:ui` `Locale` is not ported; same as [`ImageConfiguration`](ImageConfiguration).
   Affect: there is no `style.locale`.
 
-- Change: [`get_text_style`](TextStyle::get_text_style) returns valo `TextStyle`. Combined decorations keep underline, else overline, else line-through. `decorationStyle`, background paint, `fontFeatures`, `fontVariations`, `textBaseline`, and `leadingDistribution` are not valo fields. Unspecified `fontSize` becomes valo's 14.
-  Reason: platform — valo `TextStyle` is the host span style; there is no engine encode.
-  Affect: `get_text_style()` is a valo `TextStyle`. Combined underline+lineThrough paints only underline. `get_text_style_with(&scaler)` is Dart `getTextStyle(textScaler: scaler)`.
+- Change: [`get_text_style`](TextStyle::get_text_style) takes no arguments; `get_text_style_with(&scaler)` is Dart `getTextStyle(textScaler: scaler)`. [`get_paragraph_style`](TextStyle::get_paragraph_style) is a fluent chain ending in `build()`.
+  Reason: language — no optional named parameters.
+  Affect: `style.get_paragraph_style().text_align(a).text_direction(d).build()` where Dart writes `style.getParagraphStyle(textAlign: a, textDirection: d)`. Neither takes `locale` or `strutStyle` (deferred).
 
-- Change: Dart's `getParagraphStyle` writes layout and a fallback font onto one `ui.ParagraphStyle`. Valo takes layout and font as two objects. [`get_paragraph_style`](TextStyle::get_paragraph_style) is the layout; the font is [`get_text_style`](TextStyle::get_text_style).
-  Reason: platform — valo requires both styles; Flutter combines them on `ui.ParagraphStyle`.
-  Affect: there is no `paragraph_style.font_size`. Pass both into the paragraph builder.
+## inline_span.rs → inline_span.dart, text_span.rs → text_span.dart
 
-- Change: valo `TextAlign` has no `Start` / `End`. [`get_paragraph_style`](TextStyle::get_paragraph_style) resolves them to `Left` / `Right` from `text_direction`. Omitted direction is treated as LTR.
-  Reason: platform — valo stores a physical alignment; it cannot keep Start/End until bidi direction is inferred.
-  Affect: pass `text_direction` when the align is Start or End.
+- Change: a span tree is shared: children are `InlineSpanRef` (`Rc<dyn InlineSpan>`), and a `TextSpan` becomes one with `into_span()`. Dart's named constructor arguments are the fluent setters `TextSpan::new().text("x").style(s)`. Equality is `*a == *b` on the trait object.
+  Reason: language — no inheritance, no structural `==` on a trait object, no optional named parameters.
+  Affect: build trees with `into_span()`; compare with `*a == *b` or `a.compare_to(&*b)`.
+
+## binding.rs → binding.dart
+
+- Change: `PaintingBinding` holds the app-wide `FontCollection`: `install_platform_fonts` (the shell, at start-up, from `Platform::font_source`) or `install_fonts` (tests, bundled fonts), then `fonts()`. `TextPainter`'s shaping methods (`layout`, `paint`, `preferred_line_height`, the caret queries, the two statics) take that collection as `&mut FontCollection`.
+  Reason: platform — Flutter's engine owns one font manager per process and every `ui.Paragraph` shapes against it implicitly; here the collection is a value the framework owns and passes.
+  Affect: `painter.layout(app.get_mut(fonts), min, max)` where Dart writes `painter.layout(minWidth:, maxWidth:)`; a paragraph built before fonts are installed panics with the message to install them.
+
+## text_painter.rs → text_painter.dart
+
+- Change: `TextPainter::new()` is the painter with every default; Dart's constructor arguments are the setters (`set_text`, `set_text_direction`, …). `compute_width` / `compute_max_intrinsic_width` take only `(text, text_direction, min_width, max_width)`.
+  Reason: language — no optional named parameters.
+  Affect: `let mut painter = TextPainter::new(); painter.set_text(Some(span)); painter.set_text_direction(Some(TextDirection::Ltr)); painter.layout(0.0, f64::INFINITY);`. To measure with other options than the two statics accept, build a painter the same way.
+
+- Change: the getters that fill a cache take `&mut self`: `plain_text`, `preferred_line_height`, `compute_line_metrics`, `inline_placeholder_boxes`, and the caret queries (`get_offset_for_caret`, `get_full_height_for_caret`). `layout` and `paint` do too.
+  Reason: language — Dart's getters write their cache through a `final` reference; Rust needs the borrow to say so.
+  Affect: hold a `TextPainter` as `mut`, or behind `&mut`, to read those.
 
 ## Deferred
 - `debug.dart` remainder (`debugNetworkImageHttpClientProvider`, …). Trigger: image loading / tests that are not `debugDisableShadows`.
@@ -218,5 +232,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `StarBorder`. Trigger: a star or polygon `ShapeBorder`. Path verbs are mechanical (`conicTo` exists on valo); lerp to `CircleBorder` / `StadiumBorder` / `RoundedRectangleBorder` is large.
 - `NotchedShape` / `CircularNotchedRectangle` / `AutomaticNotchedShape`. Trigger: `BottomAppBar`. valo has no `Path.arcToPoint` and no `Path.combine`.
 - `PaintingBinding`. Trigger: image cache / shader warm-up.
-- `text_painter.dart` remainder (`TextPainter`, `PlaceholderDimensions`, …). Trigger: painting glyphs / `Text`. `kDefaultFontSize` and `TextOverflow` live in `text_painter.rs`.
-- `strut_style.dart` / `getParagraphStyle(strutStyle:)`. Trigger: a paragraph that sets strut.
+- `strut_style.dart` / `getParagraphStyle(strutStyle:)` / `TextPainter.strutStyle`. Trigger: a paragraph that sets strut; the host has no strut, so `get_full_height_for_caret` uses the glyph's or the layout template's height.
+- `TextPainter.locale` / `TextSpan.locale` / `TextSpan.spellOut`. Trigger: `Locale`.
+- `PlaceholderSpan` / `WidgetSpan`. Trigger: `WidgetSpan`; the host has no placeholders.
+- `TextSpan.recognizer`, `TextSpan` as a `HitTestTarget`. Trigger: `RichText` with a tappable span; needs an erased `GestureRecognizer`.
+- `TextSpan.mouseCursor` / `onEnter` / `onExit` (the span as a `MouseTrackerAnnotation`). Trigger: a hoverable span; the mouse tracker keys annotations by render object.
+- `TextSpan.semanticsLabel` / `semanticsIdentifier`, `InlineSpanSemanticsInformation`, `computeSemanticsInformation`. Trigger: accessibility; do not stub.
+- `WordBoundary` / `TextPainter.wordBoundaries`. Trigger: text editing; needs services `TextBoundary`.

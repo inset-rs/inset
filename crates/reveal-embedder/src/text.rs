@@ -1,6 +1,6 @@
 //! Flutter counterpart: `engine/src/flutter/lib/ui/text.dart` value types
 //! used by painting (`FontWeight`, `TextDecoration`, `TextDirection`, …).
-//! `ui.TextStyle` / `ParagraphStyle` are valo types; there is no engine encode.
+//! `TextStyle` / `ParagraphStyle` / `Paragraph` are in `paragraph.rs`.
 
 use std::fmt::{self, Debug, Display};
 

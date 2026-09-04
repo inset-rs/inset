@@ -5,9 +5,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use reveal_embedder::{
-    Brightness, EmbedderClient, Frame, Picture, Platform, PlatformRef, PointerChange, PointerData,
-    PointerDataPacket, PointerDeviceKind, PointerSignalKind, SystemMouseCursorKind, TargetPlatform,
-    View, ViewConstraints, ViewId, ViewMetrics, ViewPadding, ViewRef,
+    Brightness, EmbedderClient, FontSource, Frame, Picture, Platform, PlatformRef, PointerChange,
+    PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind, SystemMouseCursorKind,
+    TargetPlatform, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding, ViewRef,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
@@ -122,6 +122,11 @@ impl Platform for WinitPlatform {
 
     fn implicit_view(&self) -> Option<ViewRef> {
         self.implicit_view.and_then(|id| self.view(id))
+    }
+
+    /// The OS font database, scanned on request; the shell asks once at start-up.
+    fn font_source(&self) -> Option<Box<dyn FontSource>> {
+        Some(Box::new(valo_system_fonts::SystemFonts::load()))
     }
 
     /// One mouse: the device is not needed to pick the window; the window the pointer was

@@ -9,5 +9,8 @@ publish.workspace = true
 valo.workspace = true
 valo-geometry.workspace = true
 
+[dev-dependencies]
+valo-system-fonts.workspace = true
+
 [lints]
 workspace = true

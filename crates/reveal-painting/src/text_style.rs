@@ -9,7 +9,7 @@ use reveal_embedder::{
     TextAlign, TextBaseline, TextDecoration, TextDecorationStyle, TextDirection,
     TextLeadingDistribution,
 };
-use reveal_embedder::{ParagraphStyle, TextStyle as UiTextStyle};
+use reveal_embedder::{ParagraphStyle, TextHeightBehavior, TextStyle as UiTextStyle};
 
 use crate::basic_types::RenderComparison;
 use crate::text_painter::{K_DEFAULT_FONT_SIZE, TextOverflow};
@@ -697,65 +697,48 @@ impl TextStyle {
         Some(style)
     }
 
-    /// The style information for text runs, as a valo [`TextStyle`](UiTextStyle).
+    /// The style information for text runs, encoded for use by `dart:ui`.
     pub fn get_text_style(&self) -> UiTextStyle {
         self.get_text_style_with(&TextScaler::NO_SCALING)
     }
 
-    /// The style information for text runs, scaled by `text_scaler`.
+    /// The style information for text runs, encoded for use by `dart:ui`, with the font
+    /// size scaled by `text_scaler` (Dart's `getTextStyle(textScaler: scaler)`).
     pub fn get_text_style_with(&self, text_scaler: &TextScaler) -> UiTextStyle {
-        let font_size = self.font_size.map(|size| text_scaler.scale(size));
-        let mut style = UiTextStyle::default();
-        let mut families = Vec::new();
-        if let Some(family) = &self.font_family {
-            families.push(family.clone());
+        let background = self.background.clone().or_else(|| {
+            self.background_color.map(|color| Paint {
+                color: color.into(),
+                ..Paint::default()
+            })
+        });
+        UiTextStyle {
+            color: self.color,
+            decoration: self.decoration,
+            decoration_color: self.decoration_color,
+            decoration_style: self.decoration_style,
+            decoration_thickness: self.decoration_thickness,
+            font_weight: self.font_weight,
+            font_style: self.font_style,
+            text_baseline: self.text_baseline,
+            font_family: self.font_family.clone(),
+            font_family_fallback: self.font_family_fallback_list(),
+            font_size: self.font_size.map(|size| text_scaler.scale(size)),
+            letter_spacing: self.letter_spacing,
+            word_spacing: self.word_spacing,
+            height: match self.height {
+                Some(height) if height == K_TEXT_HEIGHT_NONE => None,
+                height => height,
+            },
+            leading_distribution: self.leading_distribution,
+            foreground: self.foreground.clone(),
+            background,
+            shadows: self.shadows.clone(),
+            font_features: self.font_features.clone(),
+            font_variations: self.font_variations.clone(),
         }
-        if let Some(fallback) = self.font_family_fallback_list() {
-            families.extend(fallback);
-        }
-        style.families = families;
-        if let Some(weight) = self.font_weight {
-            style.weight = weight.value as u16;
-        }
-        style.italic = self.font_style == Some(FontStyle::Italic);
-        if let Some(size) = font_size {
-            style.size = size as f32;
-        }
-        if let Some(foreground) = &self.foreground {
-            style.color = foreground.color;
-        } else if let Some(color) = self.color {
-            style.color = color.into();
-        }
-        if let Some(letter_spacing) = self.letter_spacing {
-            style.letter_spacing = letter_spacing as f32;
-        }
-        if let Some(word_spacing) = self.word_spacing {
-            style.word_spacing = word_spacing as f32;
-        }
-        style.height = match self.height {
-            None => None,
-            Some(height) if height == K_TEXT_HEIGHT_NONE => None,
-            Some(height) => Some(height as f32),
-        };
-        style.decoration = valo_decoration(
-            self.decoration,
-            self.decoration_color,
-            self.decoration_thickness,
-        );
-        if let Some(shadows) = &self.shadows {
-            style.shadows = shadows
-                .iter()
-                .map(|shadow| reveal_embedder::valo::Shadow {
-                    color: shadow.color.into(),
-                    offset: shadow.offset.into(),
-                    blur: shadow.blur_sigma() as f32,
-                })
-                .collect();
-        }
-        style
     }
 
-    /// The style information for paragraphs, as a valo [`ParagraphStyle`].
+    /// The style information for paragraphs, encoded for use by `dart:ui`.
     ///
     /// Chain optional Dart named arguments, then [`GetParagraphStyle::build`].
     pub fn get_paragraph_style(&self) -> GetParagraphStyle<'_> {
@@ -766,6 +749,12 @@ impl TextStyle {
             text_scaler: TextScaler::NO_SCALING,
             ellipsis: None,
             max_lines: None,
+            text_height_behavior: None,
+            font_family: None,
+            font_size: None,
+            font_weight: None,
+            font_style: None,
+            height: None,
         }
     }
 
@@ -1194,6 +1183,12 @@ pub struct GetParagraphStyle<'a> {
     text_scaler: TextScaler,
     ellipsis: Option<String>,
     max_lines: Option<i32>,
+    text_height_behavior: Option<TextHeightBehavior>,
+    font_family: Option<String>,
+    font_size: Option<f64>,
+    font_weight: Option<FontWeight>,
+    font_style: Option<FontStyle>,
+    height: Option<f64>,
 }
 
 impl GetParagraphStyle<'_> {
@@ -1223,20 +1218,67 @@ impl GetParagraphStyle<'_> {
         self
     }
 
+    pub fn text_height_behavior(mut self, text_height_behavior: TextHeightBehavior) -> Self {
+        self.text_height_behavior = Some(text_height_behavior);
+        self
+    }
+
+    /// Overrides the style's `fontFamily`.
+    pub fn font_family(mut self, font_family: impl Into<String>) -> Self {
+        self.font_family = Some(font_family.into());
+        self
+    }
+
+    /// Overrides the style's `fontSize`.
+    pub fn font_size(mut self, font_size: f64) -> Self {
+        self.font_size = Some(font_size);
+        self
+    }
+
+    /// Overrides the style's `fontWeight`.
+    pub fn font_weight(mut self, font_weight: FontWeight) -> Self {
+        self.font_weight = Some(font_weight);
+        self
+    }
+
+    /// Overrides the style's `fontStyle`.
+    pub fn font_style(mut self, font_style: FontStyle) -> Self {
+        self.font_style = Some(font_style);
+        self
+    }
+
+    /// Overrides the style's `height`.
+    pub fn height(mut self, height: f64) -> Self {
+        self.height = Some(height);
+        self
+    }
+
     /// Dart `getParagraphStyle` returns a `ui.ParagraphStyle`.
     pub fn build(self) -> ParagraphStyle {
         debug_assert!(
             self.style.height.is_none_or(|height| !height.is_nan()),
             "{K_TEXT_STYLE_HEIGHT_NAN_WARNING}"
         );
-        let _ = self
-            .text_scaler
-            .scale(self.style.font_size.unwrap_or(K_DEFAULT_FONT_SIZE));
+        let height = self.height.or(self.style.height);
         ParagraphStyle {
-            align: valo_align(self.text_align, self.text_direction),
-            direction: self.text_direction.map(valo_direction),
-            preserve_trailing_whitespace: false,
-            max_lines: self.max_lines.map(|max_lines| max_lines as u32),
+            text_align: self.text_align,
+            text_direction: self.text_direction,
+            font_weight: self.font_weight.or(self.style.font_weight),
+            font_style: self.font_style.or(self.style.font_style),
+            font_family: self.font_family.or_else(|| self.style.font_family.clone()),
+            font_size: Some(
+                self.text_scaler.scale(
+                    self.font_size
+                        .or(self.style.font_size)
+                        .unwrap_or(K_DEFAULT_FONT_SIZE),
+                ),
+            ),
+            height: match height {
+                Some(height) if height == K_TEXT_HEIGHT_NONE => None,
+                height => height,
+            },
+            text_height_behavior: self.text_height_behavior,
+            max_lines: self.max_lines,
             ellipsis: self.ellipsis,
         }
     }
@@ -1301,58 +1343,6 @@ pub fn lerp_font_variations(
     Some(result)
 }
 
-fn valo_decoration(
-    decoration: Option<TextDecoration>,
-    color: Option<Color>,
-    thickness: Option<f64>,
-) -> Option<reveal_embedder::valo::Decoration> {
-    let decoration = decoration?;
-    if decoration == TextDecoration::NONE {
-        return None;
-    }
-    let kind = if decoration.contains(TextDecoration::UNDERLINE) {
-        reveal_embedder::valo::DecorationKind::Underline
-    } else if decoration.contains(TextDecoration::OVERLINE) {
-        reveal_embedder::valo::DecorationKind::Overline
-    } else if decoration.contains(TextDecoration::LINE_THROUGH) {
-        reveal_embedder::valo::DecorationKind::LineThrough
-    } else {
-        return None;
-    };
-    Some(reveal_embedder::valo::Decoration {
-        kind,
-        color: color.map(Into::into),
-        thickness: thickness.unwrap_or(1.0) as f32,
-    })
-}
-
-fn valo_align(
-    align: Option<TextAlign>,
-    direction: Option<TextDirection>,
-) -> reveal_embedder::valo::TextAlign {
-    match align {
-        None | Some(TextAlign::Left) => reveal_embedder::valo::TextAlign::Left,
-        Some(TextAlign::Right) => reveal_embedder::valo::TextAlign::Right,
-        Some(TextAlign::Center) => reveal_embedder::valo::TextAlign::Center,
-        Some(TextAlign::Justify) => reveal_embedder::valo::TextAlign::Justify,
-        Some(TextAlign::Start) => match direction {
-            Some(TextDirection::Rtl) => reveal_embedder::valo::TextAlign::Right,
-            _ => reveal_embedder::valo::TextAlign::Left,
-        },
-        Some(TextAlign::End) => match direction {
-            Some(TextDirection::Rtl) => reveal_embedder::valo::TextAlign::Left,
-            _ => reveal_embedder::valo::TextAlign::Right,
-        },
-    }
-}
-
-fn valo_direction(direction: TextDirection) -> reveal_embedder::valo::TextDirection {
-    match direction {
-        TextDirection::Ltr => reveal_embedder::valo::TextDirection::Ltr,
-        TextDirection::Rtl => reveal_embedder::valo::TextDirection::Rtl,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1395,9 +1385,10 @@ mod tests {
             .font_style(FontStyle::Italic)
             .color(Color::from_argb(255, 255, 0, 0));
         let ui = style.get_text_style();
-        assert_eq!(ui.size, 18.0);
-        assert_eq!(ui.weight, 700);
-        assert!(ui.italic);
+        assert_eq!(ui.font_size, Some(18.0));
+        assert_eq!(ui.font_weight, Some(FontWeight::W700));
+        assert_eq!(ui.font_style, Some(FontStyle::Italic));
+        assert_eq!(ui.color, Some(Color::from_argb(255, 255, 0, 0)));
     }
 
     #[test]

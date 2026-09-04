@@ -26,6 +26,7 @@ reveal-shell = { path = "crates/reveal-shell" }
 slotmap = "1"
 winit = "0.30"
 valo = "0.3.0"
+valo-system-fonts = "0.3.0"
 valo-geometry = "0.3.0"
 wgpu = "30"
 pollster = "0.4"

@@ -9,6 +9,7 @@
 use reveal_embedder::{EmbedderClient, Frame, PlatformRef, PointerDataPacket, ViewId};
 use reveal_foundation::App;
 use reveal_gestures::GestureBinding;
+use reveal_painting::PaintingBinding;
 use reveal_rendering::RendererBinding;
 use reveal_scheduler::SchedulerBinding;
 
@@ -24,6 +25,8 @@ impl Shell {
     /// installs work that needs one.
     pub fn new(platform: PlatformRef, setup: impl FnOnce(&mut App)) -> Shell {
         let mut app = App::with_platform(platform);
+        // Flutter's engine collects the platform's fonts before the framework runs.
+        PaintingBinding::instance(&mut app).install_platform_fonts(&mut app);
         setup(&mut app);
         Shell { app }
     }

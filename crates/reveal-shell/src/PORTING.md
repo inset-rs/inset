@@ -12,6 +12,10 @@ No Flutter counterpart. Dart has no type — the engine owns the isolate.
   Reason: platform — there is no isolate-global callback table.
   Affect: a host calls `client.frame(...)` / `client.pointer_data_packet(...)`. Tests may still pump the handlers directly.
 
+- Change: `Shell::new` installs the platform's fonts into `PaintingBinding` before `setup` runs.
+  Reason: platform — Flutter's engine collects platform fonts on its own; here the shell asks `Platform::font_source` once.
+  Affect: text shapes against the OS fonts without application code; a test shell with the inert platform has an empty collection until `PaintingBinding::install_fonts`.
+
 ## Deferred
 
 - `view_added` / `view_removed`. Trigger: the widget layer's `View`; `RendererBinding` does not create render views for new host views. `view_metrics_changed` reaches `RendererBinding::handle_metrics_changed`.

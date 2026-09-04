@@ -9,6 +9,7 @@ publish.workspace = true
 reveal-embedder.workspace = true
 reveal-foundation.workspace = true
 reveal-gestures.workspace = true
+reveal-painting.workspace = true
 reveal-rendering.workspace = true
 reveal-scheduler.workspace = true
 

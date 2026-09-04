@@ -17,6 +17,24 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — there is no engine FFI; the values are used as themselves.
   Affect: there is no encode into a `ByteData` buffer.
 
+## paragraph.rs → text.dart (`TextStyle`, `ParagraphStyle`, `ParagraphBuilder`, `Paragraph`), fonts.rs
+
+- Change: fonts are explicit. [`Platform::font_source`](Platform::font_source) is the host's font lookup (Flutter's engine asks the OS itself), and [`ParagraphBuilder::build`](ParagraphBuilder::build) takes the [`FontCollection`](FontCollection) to shape against; the framework keeps that collection (painting's `PaintingBinding`) and hands it down.
+  Reason: platform — Flutter's engine holds one font manager per process; valo shapes against a collection the caller owns, and a hidden global would tie every paragraph to one thread's state.
+  Affect: a host implements `font_source`; `builder.build(&mut fonts)` where Dart writes `builder.build()`.
+
+- Change: [`Paragraph`](Paragraph) and [`ParagraphBuilder`](ParagraphBuilder) wrap valo's. Offsets are UTF-16 code units as in Dart, mapped onto valo's UTF-8 bytes. `push_style` inherits the unset fields of the style below it, as the engine does. There are no placeholders: `add_placeholder` does not exist and placeholder boxes are empty. `get_boxes_for_range` returns tight boxes whatever `BoxHeightStyle` / `BoxWidthStyle` say, each with the paragraph's direction. `ideographic_baseline` is the first line's bottom.
+  Reason: platform — valo's paragraph has no placeholders, box styles, per-box direction, or ideographic metrics.
+  Affect: `TextBox.direction` is the paragraph's, not the run's; a `WidgetSpan` cannot be laid out; `BoxHeightStyle::Strut` and `Max` read as `Tight`.
+
+- Change: valo runs have no `decorationStyle`, background paint, `fontFeatures`, `fontVariations`, `textBaseline`, or `leadingDistribution`; a combined decoration paints underline, else overline, else line-through. Unset `fontSize` shapes at valo's 14.
+  Reason: platform — those are not valo span fields.
+  Affect: setting them on a `TextStyle` has no visible effect.
+
+- Change: `Canvas.drawParagraph` is [`CanvasText::draw_paragraph`](CanvasText::draw_paragraph), a trait on [`Canvas`](Canvas).
+  Reason: language — `Canvas` is valo's builder under a Flutter name; a method needs a trait.
+  Affect: `use reveal_embedder::CanvasText` at the call site.
+
 ## platform.rs → dart:ui `platform_dispatcher.dart`
 
 - Change: Dart's isolate-global `PlatformDispatcher` is a host-supplied `Platform` that `App` holds. Frame, clock, and view lookup are requests on that object — not a callback table the framework assigns into.
@@ -66,6 +84,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Affect: there is no `pointer_data.respond(...)`.
 
 ## Deferred
+- `StrutStyle` / `ParagraphStyle.strutStyle`, `Locale`, `ParagraphBuilder.addPlaceholder` / `placeholderScales`, `Paragraph.getBoxesForPlaceholders` contents. Trigger: strut, locale-specific glyphs, `WidgetSpan`. valo has none of them.
 
 - `onMetricsChanged` / `onPlatformBrightnessChanged`. Trigger: `MediaQuery` / `CupertinoTheme`.
 - `FontFeature` named tag constructors (`alternative`, `fractions`, …). Trigger: a caller that uses those factories instead of `new` / `enable` / `disable`.

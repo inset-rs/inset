@@ -1,8 +1,10 @@
 //! Flutter counterpart: `package:flutter/painting.dart`.
+#![feature(arbitrary_self_types)]
 
 mod alignment;
 mod basic_types;
 mod beveled_rectangle_border;
+mod binding;
 mod border_radius;
 mod borders;
 mod box_border;
@@ -20,6 +22,7 @@ mod edge_insets;
 mod fractional_offset;
 mod geometry;
 mod image_provider;
+mod inline_span;
 mod linear_border;
 mod matrix_utils;
 mod oval_border;
@@ -29,11 +32,13 @@ mod shape_decoration;
 mod stadium_border;
 mod text_painter;
 mod text_scaler;
+mod text_span;
 mod text_style;
 
 pub use alignment::*;
 pub use basic_types::*;
 pub use beveled_rectangle_border::*;
+pub use binding::*;
 pub use border_radius::*;
 pub use borders::*;
 pub use box_border::*;
@@ -51,6 +56,7 @@ pub use edge_insets::*;
 pub use fractional_offset::*;
 pub use geometry::*;
 pub use image_provider::*;
+pub use inline_span::*;
 pub use linear_border::*;
 pub use matrix_utils::*;
 pub use oval_border::*;
@@ -60,4 +66,5 @@ pub use shape_decoration::*;
 pub use stadium_border::*;
 pub use text_painter::*;
 pub use text_scaler::*;
+pub use text_span::*;
 pub use text_style::*;

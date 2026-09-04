@@ -7,18 +7,22 @@
 //! name `App`.
 
 mod client;
+mod fonts;
 mod geometry;
 mod mouse_cursor;
 mod painting;
+mod paragraph;
 mod platform;
 mod pointer;
 mod text;
 mod views;
 
 pub use client::EmbedderClient;
+pub use fonts::{FontCollection, FontDemand, FontId, FontSource};
 pub use geometry::*;
 pub use mouse_cursor::SystemMouseCursorKind;
 pub use painting::*;
+pub use paragraph::*;
 pub use platform::{
     Brightness, Frame, InertPlatform, Platform, PlatformRef, TargetPlatform, ViewRef,
 };

@@ -16,6 +16,10 @@ No Flutter counterpart. Flutter's engine is C++ and is not in this checkout.
   Reason: platform — Flutter's engine maps cursor kinds per host; here winit is the host and it has one cursor per window.
   Affect: a `MouseRegion` cursor shows up on hover. The device id is ignored: one mouse.
 
+- Change: `Platform::font_source` is `valo-system-fonts`' OS scanner.
+  Reason: platform — Flutter's engine finds platform fonts itself; valo needs a `FontSource`.
+  Affect: text uses installed fonts; a family that is not installed falls back to the nearest face.
+
 ## Deferred
 
 - `ThemeChanged` → `onPlatformBrightnessChanged`. Trigger: `MediaQuery` / `CupertinoTheme`.

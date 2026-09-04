@@ -15,5 +15,8 @@ reveal-painting.workspace = true
 reveal-scheduler.workspace = true
 reveal-services.workspace = true
 
+[dev-dependencies]
+valo-system-fonts.workspace = true
+
 [lints]
 workspace = true

@@ -305,13 +305,28 @@ impl App {
     pub fn get_mut<T: 'static>(&mut self, handle: Handle<T>) -> &mut T {
         let id = handle.id;
         let slot = self.resolve_mut(id);
-        let type_name_in_slot = slot.type_name;
-        slot.state.downcast_mut::<T>().unwrap_or_else(|| {
-            panic!(
-                "handle {id:?} holds `{type_name_in_slot}`, not `{}`",
-                type_name::<T>()
-            )
-        })
+        downcast_slot_mut(slot, id)
+    }
+
+    /// Two live slots at once, for an object that works on another (a render object shaping
+    /// its text against the font collection).
+    ///
+    /// # Panics
+    ///
+    /// If either handle is stale, or both name the same slot.
+    pub fn get_disjoint_mut<A: 'static, B: 'static>(
+        &mut self,
+        a: Handle<A>,
+        b: Handle<B>,
+    ) -> (&mut A, &mut B) {
+        let [slot_a, slot_b] = self
+            .slots
+            .get_disjoint_mut([a.id, b.id])
+            .unwrap_or_else(|| panic!("handles {:?} and {:?} are not two live slots", a.id, b.id));
+        (
+            downcast_slot_mut(slot_a, a.id),
+            downcast_slot_mut(slot_b, b.id),
+        )
     }
 
     fn resolve(&self, id: HandleId) -> &Slot {
@@ -325,6 +340,16 @@ impl App {
             .get_mut(id)
             .unwrap_or_else(|| panic!("stale handle: {id:?} was destroyed"))
     }
+}
+
+fn downcast_slot_mut<T: 'static>(slot: &mut Slot, id: HandleId) -> &mut T {
+    let type_name_in_slot = slot.type_name;
+    slot.state.downcast_mut::<T>().unwrap_or_else(|| {
+        panic!(
+            "handle {id:?} holds `{type_name_in_slot}`, not `{}`",
+            type_name::<T>()
+        )
+    })
 }
 
 #[cfg(test)]
@@ -513,6 +538,26 @@ mod tests {
         app.elapse(Duration::from_millis(10));
         assert_eq!(app.get(counter).0, 0);
     }
+    #[test]
+    fn get_disjoint_mut_borrows_two_slots_at_once() {
+        let mut app = App::new();
+        let a = app.create(1u32);
+        let b = app.create(String::from("x"));
+        let (a_value, b_value) = app.get_disjoint_mut(a, b);
+        *a_value += 1;
+        b_value.push('y');
+        assert_eq!(*app.get(a), 2);
+        assert_eq!(app.get(b), "xy");
+    }
+
+    #[test]
+    #[should_panic(expected = "not two live slots")]
+    fn get_disjoint_mut_rejects_the_same_slot_twice() {
+        let mut app = App::new();
+        let a = app.create(1u32);
+        let _ = app.get_disjoint_mut(a, a);
+    }
+
     #[test]
     fn from_id_reads_like_the_minted_handle() {
         let mut app = App::new();

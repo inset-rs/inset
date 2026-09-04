@@ -7,6 +7,7 @@
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use crate::fonts::FontSource;
 use crate::mouse_cursor::SystemMouseCursorKind;
 use crate::{View, ViewId};
 
@@ -91,6 +92,13 @@ pub trait Platform: 'static {
 
     /// The stable implicit view, when this embedding provides one.
     fn implicit_view(&self) -> Option<ViewRef>;
+
+    /// The platform's own font lookup: faces by family name and by codepoint, the way
+    /// Flutter's engine asks the OS. `None` for a host without one; text then shapes only
+    /// against fonts the application registers.
+    fn font_source(&self) -> Option<Box<dyn FontSource>> {
+        None
+    }
 
     /// Shows a system cursor for a pointing device (Flutter's `activateSystemCursor`
     /// message on `SystemChannels.mouseCursor`).

@@ -108,6 +108,16 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — accessibility is deferred; a `BoxPainter` callback cannot reach `App` yet, so an image decoration cannot request a repaint when its image loads.
   Affect: pass no semantics flag; decorations that load images do not repaint on their own.
 
+## paragraph.rs → paragraph.dart
+
+- Change: `RenderParagraph::new(app, text, text_direction, fonts)`; Dart's other constructor arguments are setters. `fonts` is an optional `FontCollection` handle; `None` shapes against `PaintingBinding`'s app-wide one. It is a leaf: no inline children, no selection registrar, no `selectionColor`.
+  Reason: language — no optional named parameters; platform — the font collection is explicit (see painting `binding.rs`), `WidgetSpan` needs placeholders the host lacks, and selection waits on `selection.dart`.
+  Affect: set `overflow`, `max_lines`, `soft_wrap`, … after construction. A hit test stops at the paragraph (spans are not targets), so `RichText` recognizers cannot fire.
+
+- Change: `TextOverflow::Fade` clips like `Clip`.
+  Reason: platform — the fade is a gradient shader, and gradients are deferred.
+  Affect: overflowing text is cut, not faded.
+
 ## Deferred
 
 - `PaintingContext.addLayer` / `addCompositionCallback` / `pushColorFilter`, `Layer.find` annotations, `LeaderLayer` / `FollowerLayer`, `toImage`. Trigger: `AnnotatedRegion`, `CompositedTransformFollower`, `RepaintBoundary.toImage`.
@@ -119,6 +129,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `invokeLayoutCallback`. Trigger: `LayoutBuilder`; also widen `layout_without_resize` for a non-boundary layout-callback host.
 - `layout` / `markNeedsLayout` / `constraints` as override points. Trigger: OverlayPortal, `RenderView`, the first `markNeedsLayout` override. Ask before adding.
 - `RenderView.applyPaintTransform` / `updateSystemChrome`; `performReassemble`. Trigger: `getTransformTo`, hot reload.
-- `RenderParagraph` / `RenderEditable`. Trigger: `TextPainter`, container parent data, hit-test.
+- `RenderParagraph` intrinsics, dry layout, baselines, `RelayoutWhenSystemFontsChangeMixin`, `applyPaintTransform`; `RenderEditable`. Trigger: `RenderBox` intrinsics and baselines; `PaintingBinding.systemFonts`; `EditableText`.
 - Viewport / `ViewportOffset` / sliver-to-box adapters / sliver parent data. Trigger: first viewport. `RenderObjectWithChildMixin` is box-only until then.
 - `SliverConstraints.debugAssertIsValid` extra numeric checks. Trigger: a caller that relies on those messages.

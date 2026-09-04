@@ -1,6 +1,6 @@
 //! Opens the implicit window and renders a small render tree in it: a padded, centered,
-//! decorated box, through `RendererBinding`'s frame pipeline. The card is a mouse region
-//! that shows the pointing-hand cursor while hovered.
+//! decorated box holding a line of text, through `RendererBinding`'s frame pipeline. The
+//! card is a mouse region that shows the pointing-hand cursor while hovered.
 //!
 //! ```text
 //! cargo run -p window
@@ -10,12 +10,15 @@
 //! feature in the calling crate too; trait methods do not.
 #![feature(arbitrary_self_types)]
 
+use reveal_embedder::TextDirection;
 use reveal_embedder::{Color, Size};
 use reveal_embedder_winit::{ImplicitViewConfig, WinitEmbedder};
-use reveal_painting::{AlignmentGeometry, BoxDecoration, EdgeInsetsGeometry, ImageConfiguration};
+use reveal_painting::{
+    AlignmentGeometry, BoxDecoration, EdgeInsetsGeometry, ImageConfiguration, TextSpan, TextStyle,
+};
 use reveal_rendering::{
     BoxConstraints, DecorationPosition, RenderBox, RenderConstrainedBox, RenderDecoratedBox,
-    RenderMouseRegion, RenderPadding, RenderPositionedBox, RendererBinding,
+    RenderMouseRegion, RenderPadding, RenderParagraph, RenderPositionedBox, RendererBinding,
 };
 use reveal_scheduler::SchedulerBinding;
 use reveal_services::SystemMouseCursors;
@@ -32,12 +35,33 @@ fn main() {
         Shell::new(platform, |app| {
             let render_view = RendererBinding::instance(app).init_render_view(app);
 
+            let label = RenderParagraph::new(
+                app,
+                TextSpan::new()
+                    .text("Hello, reveal")
+                    .style(
+                        TextStyle::new()
+                            .font_size(24.0)
+                            .color(Color::from_argb(255, 245, 245, 240)),
+                    )
+                    .into_span(),
+                TextDirection::Ltr,
+                None,
+            );
+            let centered_label = RenderPositionedBox::new(
+                app,
+                AlignmentGeometry::CENTER,
+                None,
+                None,
+                None,
+                Some(label.as_box()),
+            );
             let card = RenderDecoratedBox::new(
                 app,
                 Box::new(BoxDecoration::new().color(Color::from_argb(255, 51, 51, 64))),
                 DecorationPosition::Background,
                 ImageConfiguration::EMPTY,
-                None,
+                Some(centered_label.as_box()),
             );
             let sized = RenderConstrainedBox::new(
                 app,
