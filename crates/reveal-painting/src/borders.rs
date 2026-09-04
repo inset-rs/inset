@@ -49,9 +49,9 @@ pub struct BorderSide {
     /// The relative position of the stroke on a [`BorderSide`] in an
     /// `OutlinedBorder` or `Border`.
     ///
-    /// Values typically range from -1.0 ([`STROKE_ALIGN_INSIDE`], inside border,
-    /// default) to 1.0 ([`STROKE_ALIGN_OUTSIDE`], outside border), without any
-    /// bound constraints. A value of 0 ([`STROKE_ALIGN_CENTER`]) will center the
+    /// Values typically range from -1.0 ([`STROKE_ALIGN_INSIDE`](Self::STROKE_ALIGN_INSIDE), inside border,
+    /// default) to 1.0 ([`STROKE_ALIGN_OUTSIDE`](Self::STROKE_ALIGN_OUTSIDE), outside border), without any
+    /// bound constraints. A value of 0 ([`STROKE_ALIGN_CENTER`](Self::STROKE_ALIGN_CENTER)) will center the
     /// border on the edge of the widget.
     ///
     /// This property is not honored by [`to_paint`](Self::to_paint) (because the
@@ -295,7 +295,7 @@ pub trait ShapeBorder: Any + Debug {
     /// be reasonably added to this instance, then this should return None.
     ///
     /// The `reversed` argument is true if this object was the right operand of
-    /// [`plus`](dyn ShapeBorder::plus), and false if it was the left operand.
+    /// `plus`, and false if it was the left operand.
     fn add(&self, other: &dyn ShapeBorder, reversed: bool) -> Option<Box<dyn ShapeBorder>> {
         let _ = (other, reversed);
         None
@@ -378,7 +378,7 @@ pub trait ShapeBorder: Any + Debug {
     /// Paints the border within the given [`Rect`] on the given [`Canvas`].
     fn paint(&self, canvas: &mut Canvas, rect: Rect, text_direction: Option<TextDirection>);
 
-    /// A heap clone, so [`plus`](dyn ShapeBorder::plus) and lerp can duplicate like Dart.
+    /// A heap clone, so `plus` and lerp can duplicate like Dart.
     fn clone_box(&self) -> Box<dyn ShapeBorder>;
 
     /// Downcast support for `is` / `as` in Dart.
@@ -389,7 +389,7 @@ pub trait ShapeBorder: Any + Debug {
         None
     }
 
-    /// [`BoxBorder`] downcast for [`dyn BoxBorder::lerp`].
+    /// `BoxBorder` downcast for [`dyn BoxBorder::lerp`].
     fn as_box_border(&self) -> Option<&dyn crate::box_border::BoxBorder> {
         None
     }

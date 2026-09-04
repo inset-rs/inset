@@ -36,7 +36,7 @@ pub struct BoxDecoration {
     /// A border to draw above the background [`color`](Self::color).
     pub border: Option<Box<dyn BoxBorder>>,
     /// If non-null, the corners of this box are rounded by this
-    /// [`BorderRadius`].
+    /// `BorderRadius`.
     ///
     /// Applies only to boxes with rectangular shapes; ignored if
     /// [`shape`](Self::shape) is not [`BoxShape::Rectangle`].

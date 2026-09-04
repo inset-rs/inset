@@ -1,4 +1,5 @@
 # reveal-gestures/src
+Syntax (constructors, setters, `Option`, erasure calls) follows `.cursor/skills/porting-flutter/patterns/widget-syntax.md` and is not a divergence.
 Flutter home: packages/flutter/lib/src/gestures
 Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
@@ -17,7 +18,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 - Change: [`GestureArenaManager`](GestureArenaManager), [`GestureArenaTeam`](GestureArenaTeam), [`PointerRouter`](PointerRouter), [`GestureBinding`](GestureBinding), [`TapGestureRecognizer`](TapGestureRecognizer) and [`LongPressGestureRecognizer`](LongPressGestureRecognizer) are arena objects: `new(app, ..)` returns `Handle<T>` and methods take `self: Handle<Self>` plus [`App`](reveal_foundation::App), per the `Handle<T>` receiver rule in `reveal-foundation/src/PORTING.md` (app.rs).
   Reason: language — see that entry.
-  Affect: `let tap = TapGestureRecognizer::new(app)`, then `tap.add_pointer(app, down)`; `GestureBinding::instance(app).handle_pointer_event(app, event)`. Callbacks are [`Listener`](reveal_foundation::Listener) / [`ValueChanged`](reveal_foundation::ValueChanged) and receive `&mut App`; a setter takes the nullable field value, `tap.set_on_tap(app, Some(Listener::new(|app| …)))`, and `None` clears it as Dart's `onTap = null` does.
+  Affect: `let tap = TapGestureRecognizer::new(app)`, then `tap.add_pointer(app, down)`; `GestureBinding::instance(app).handle_pointer_event(app, event)`. Callbacks are [`Listener`](reveal_foundation::Listener) / [`ValueChanged`](reveal_foundation::ValueChanged) and receive `&mut App`.
 
 ## events.rs → events.dart
 
@@ -126,10 +127,6 @@ Pattern: [leaf-inheritance](../../../.cursor/skills/porting-flutter/patterns/lea
 - Change: `dispose` frees the arena slot after Dart's body, on the typed handle and the erased edge alike.
   Reason: language — Dart leaves the disposed object to the collector; the arena has none.
   Affect: every handle and edge to the recognizer is stale after `dispose`; calling it twice panics.
-
-- Change: `supportedDevices` is the builder `supported_devices(app, devices)` at construction and the setter `set_supported_devices(app, Option<HashSet<_>>)` afterwards; there is no getter.
-  Reason: language — no optional named constructor arguments, and one name cannot be both the builder and the getter.
-  Affect: `TapGestureRecognizer::new(app).supported_devices(app, [PointerDeviceKind::Mouse])`, or `set_supported_devices(app, None)` to accept every device again.
 
 ## velocity_tracker.rs → velocity_tracker.dart
 

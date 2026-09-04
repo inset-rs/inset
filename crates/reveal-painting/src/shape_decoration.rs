@@ -38,7 +38,7 @@ pub struct ShapeDecoration {
     /// The shape to fill the [`color`](Self::color) into and to cast as the
     /// [`shadows`](Self::shadows).
     ///
-    /// Shapes can be stacked (using [`plus`](dyn ShapeBorder::plus)). The color
+    /// Shapes can be stacked (using `plus`). The color
     /// is drawn into the inner-most shape specified.
     ///
     /// The [`shape`](Self::shape) property specifies the outline (border) of the

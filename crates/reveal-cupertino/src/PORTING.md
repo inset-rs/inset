@@ -5,7 +5,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## colors.rs → colors.dart
 
-- Change: `CupertinoDynamicColor` is a `ColorExtension` carried by `AnyColor`; every `CupertinoColors` entry is an `AnyColor`, and `CupertinoDynamicColor::resolve(&AnyColor, app, context)` returns an `AnyColor` (a resolved instance is `Rc`-shared; a table entry is `&'static`). Dart's optional `debugLabel:` is a fluent `const fn debug_label(..)`.
+- Change: `CupertinoDynamicColor` is a `ColorExtension` carried by `AnyColor`; every `CupertinoColors` entry is an `AnyColor`, and `CupertinoDynamicColor::resolve(&AnyColor, app, context)` returns an `AnyColor` (a resolved instance is `Rc`-shared; a table entry is `&'static`).
   Reason: language — see reveal-painting `## colors.rs`: dart:ui `Color` is a Copy value and cannot be subclassed.
   Affect: `CupertinoDynamicColor::resolve(&color, app, context)` where Dart writes `CupertinoDynamicColor.resolve(color, context)`; `color.extension::<CupertinoDynamicColor>()` is `color is CupertinoDynamicColor`; a `CupertinoDynamicColor` value becomes a color with `.into_any()` / `.to_any()` / `AnyColor::from`.
 
@@ -36,10 +36,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Identical: `CupertinoTheme` (`of`, `brightness_of`, `maybe_brightness_of`, the implied `IconTheme`), `resolve_from`, `no_default`, both `==` (including `NoDefaultCupertinoThemeData.==` leaving out `selectionHandleColor`).
 
 ## text_theme.rs → text_theme.dart
-
-- Change: Dart's `const TextStyle` defaults are private functions.
-  Reason: language — a `TextStyle` owns its font family string, so it is not `const`.
-  Affect: none.
 
 - Change: `_DefaultCupertinoTextThemeData` is `CupertinoTextThemeData::with_defaults(primary, label, inactive_gray)`, which stores the theme's label colors in the defaults builder instead of overriding the getters.
   Reason: language — no subclass to override getters in; the builder already applies those colors.

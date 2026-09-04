@@ -188,7 +188,7 @@ impl App {
     ///
     /// # Panics
     ///
-    /// After [`MICROTASK_BUDGET`] callbacks in one drain, on the assumption
+    /// After `MICROTASK_BUDGET` callbacks in one drain, on the assumption
     /// that two callbacks are scheduling each other in a cycle.
     pub fn drain_microtasks(&mut self) {
         let mut drained = 0usize;

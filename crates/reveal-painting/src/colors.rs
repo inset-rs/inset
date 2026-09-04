@@ -48,7 +48,7 @@ fn color_from_hue(alpha: f64, hue: f64, chroma: f64, secondary: f64, match_: f64
     )
 }
 
-/// A color represented using [`alpha`], [`hue`], [`saturation`], and [`value`].
+/// A color represented using `alpha`, `hue`, `saturation`, and `value`.
 #[derive(Clone, Copy, PartialEq)]
 pub struct HSVColor {
     /// Alpha, from 0.0 to 1.0.
@@ -90,22 +90,22 @@ impl HSVColor {
         HSVColor::from_ahsv(alpha, hue, saturation, max)
     }
 
-    /// Returns a copy of this color with the [`alpha`] parameter replaced.
+    /// Returns a copy of this color with the `alpha` parameter replaced.
     pub fn with_alpha(self, alpha: f64) -> HSVColor {
         HSVColor::from_ahsv(alpha, self.hue, self.saturation, self.value)
     }
 
-    /// Returns a copy of this color with the [`hue`] parameter replaced.
+    /// Returns a copy of this color with the `hue` parameter replaced.
     pub fn with_hue(self, hue: f64) -> HSVColor {
         HSVColor::from_ahsv(self.alpha, hue, self.saturation, self.value)
     }
 
-    /// Returns a copy of this color with the [`saturation`] parameter replaced.
+    /// Returns a copy of this color with the `saturation` parameter replaced.
     pub fn with_saturation(self, saturation: f64) -> HSVColor {
         HSVColor::from_ahsv(self.alpha, self.hue, saturation, self.value)
     }
 
-    /// Returns a copy of this color with the [`value`] parameter replaced.
+    /// Returns a copy of this color with the `value` parameter replaced.
     pub fn with_value(self, value: f64) -> HSVColor {
         HSVColor::from_ahsv(self.alpha, self.hue, self.saturation, value)
     }
@@ -163,7 +163,7 @@ impl Debug for HSVColor {
     }
 }
 
-/// A color represented using [`alpha`], [`hue`], [`saturation`], and [`lightness`].
+/// A color represented using `alpha`, `hue`, `saturation`, and `lightness`.
 #[derive(Clone, Copy, PartialEq)]
 pub struct HSLColor {
     /// Alpha, from 0.0 to 1.0.
@@ -215,17 +215,17 @@ impl HSLColor {
         HSLColor::from_ahsl(alpha, self.hue, self.saturation, self.lightness)
     }
 
-    /// Returns a copy of this color with the [`hue`] parameter replaced.
+    /// Returns a copy of this color with the `hue` parameter replaced.
     pub fn with_hue(self, hue: f64) -> HSLColor {
         HSLColor::from_ahsl(self.alpha, hue, self.saturation, self.lightness)
     }
 
-    /// Returns a copy of this color with the [`saturation`] parameter replaced.
+    /// Returns a copy of this color with the `saturation` parameter replaced.
     pub fn with_saturation(self, saturation: f64) -> HSLColor {
         HSLColor::from_ahsl(self.alpha, self.hue, saturation, self.lightness)
     }
 
-    /// Returns a copy of this color with the [`lightness`] parameter replaced.
+    /// Returns a copy of this color with the `lightness` parameter replaced.
     pub fn with_lightness(self, lightness: f64) -> HSLColor {
         HSLColor::from_ahsl(self.alpha, self.hue, self.saturation, lightness)
     }

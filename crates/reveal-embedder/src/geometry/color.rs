@@ -558,7 +558,7 @@ impl Debug for Color {
 ///
 /// This is also the result of `Image.colorSpace`.
 ///
-/// See also: https://en.wikipedia.org/wiki/Color_space
+/// See also: <https://en.wikipedia.org/wiki/Color_space>
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ColorSpace {
     /// The sRGB color space.
@@ -566,7 +566,7 @@ pub enum ColorSpace {
     /// You may know this as the standard color space for the web or the color
     /// space of non-wide-gamut Flutter apps.
     ///
-    /// See also: https://en.wikipedia.org/wiki/SRGB
+    /// See also: <https://en.wikipedia.org/wiki/SRGB>
     Srgb,
 
     /// A color space that is backwards compatible with sRGB but can represent
@@ -581,7 +581,7 @@ pub enum ColorSpace {
     /// supported in cases like using Impeller on iOS. When used on a platform
     /// that doesn't support Display P3, the colors will be clamped to sRGB.
     ///
-    /// See also: https://en.wikipedia.org/wiki/DCI-P3
+    /// See also: <https://en.wikipedia.org/wiki/DCI-P3>
     DisplayP3,
 }
 

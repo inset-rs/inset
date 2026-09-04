@@ -181,10 +181,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Dart's `null as T` is a runtime test of `T`'s nullability; a Rust generic cannot tell `Option<X>` from `X` without specialization.
   Affect: `WidgetStateMapper<Option<X>>` (Dart's `<X?>`) panics on an unmatched set instead of resolving `null` unless it carries the `any` entry.
 
-- Change: Dart's static members of `WidgetStateProperty` are on `<dyn WidgetStateProperty<T>>`; `from_map`, `resolve_with`, `all`, `lerp` return `WidgetStatePropertyRef<T>` (`Rc<dyn WidgetStateProperty<T>>`); `lerp(a, b, t, f)` takes `Option<WidgetStatePropertyRef<T>>` sides and an `Fn(Option<T>, Option<T>, f64) -> Option<T>`, returning `Option<WidgetStatePropertyRef<Option<T>>>`.
-  Reason: language — a Rust trait has no static members; `T?` is `Option<T>`.
-  Affect: `<dyn WidgetStateProperty<MouseCursorRef>>::resolve_with(|states| ..)`; a `WidgetStateProperty<T>?` field is `Option<WidgetStatePropertyRef<T>>`.
-
 - Change: `WidgetStateProperty.resolveAs<T>(value, states)` is `<dyn WidgetStateProperty<T>>::resolve_as(&value, &states)` over `MaybeWidgetStateProperty<T>` (`as_widget_state_property` / `from_resolved`), implemented for `AnyColor` (its `WidgetStateColor` extension), `MouseCursorRef` (`as_any`), and `Option` of either; it returns the value's own type.
   Reason: language — Dart's `value is WidgetStateProperty<T>` is a runtime interface query; the value types answer it here.
   Affect: `<dyn WidgetStateProperty<MouseCursorRef>>::resolve_as(&widget.mouse_cursor, &states)` where Dart writes `WidgetStateProperty.resolveAs<MouseCursor?>(widget.mouseCursor, states)`; a plain `AnyColor` comes back unchanged, other extensions intact.

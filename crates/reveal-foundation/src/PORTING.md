@@ -1,4 +1,5 @@
 # reveal-foundation/src
+Syntax (constructors, setters, `Option`, erasure calls) follows `.cursor/skills/porting-flutter/patterns/widget-syntax.md` and is not a divergence.
 Flutter home: packages/flutter/lib/src/foundation
 Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
@@ -33,10 +34,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: `app.platform().target_platform()` where Dart writes `defaultTargetPlatform`. The enum is `reveal_foundation::TargetPlatform` or `reveal_embedder::TargetPlatform`.
 
 ## key.rs → key.dart
-
-- Change: Dart's `Key('x')` factory is `<dyn Key>::new("x")`.
-  Reason: language — a trait has no constructor; an inherent on `dyn Key` is the factory without colliding with [`UniqueKey::new`](UniqueKey::new).
-  Affect: write `<dyn Key>::new("x")` where Dart writes `Key('x')`. `ValueKey::new(3)` is unchanged.
 
 - Change: [`Key`](Key) equality and hashing go through [`eq_key`](Key::eq_key) / [`hash_key`](Key::hash_key) so `dyn Key` can implement [`PartialEq`] and [`Hash`]. [`UniqueKey`](UniqueKey) identity is a monotonic id, not object identity.
   Reason: language — `PartialEq` and `Hash` are not object-safe; Rust has no implicit object identity for a value type.

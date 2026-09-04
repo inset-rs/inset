@@ -22,7 +22,7 @@ use crate::edge_insets::EdgeInsetsGeometry;
 /// used in a square space. When applied to a rectangular space, the border
 /// paints in the center of the rectangle.
 ///
-/// The [`eccentricity`] parameter describes how much a circle will deform to
+/// The `eccentricity` parameter describes how much a circle will deform to
 /// fit the rectangle it is a border for. A value of zero implies no
 /// deformation (a circle touching at least two sides of the rectangle), a
 /// value of one implies full deformation (an oval touching all sides of the

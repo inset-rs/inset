@@ -24,7 +24,7 @@ use crate::oval_border::as_circle_border;
 /// Typically used with `ShapeDecoration` to draw a box with a rounded
 /// rectangle.
 ///
-/// This shape can interpolate to and from [`CircleBorder`].
+/// This shape can interpolate to and from `CircleBorder`.
 #[derive(Clone, Copy, PartialEq)]
 pub struct RoundedRectangleBorder {
     /// The border outline's color and weight.

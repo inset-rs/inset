@@ -64,7 +64,7 @@ impl Directionality {
     pub fn new<K>(text_direction: TextDirection, child: impl IntoWidget<K>) -> Directionality {
         Directionality {
             key: None,
-            text_direction: text_direction,
+            text_direction,
             child: child.into_widget(),
         }
     }
@@ -249,7 +249,7 @@ impl Opacity {
     pub fn new(opacity: f64) -> Opacity {
         Opacity {
             key: None,
-            opacity: opacity,
+            opacity,
             child: None,
         }
     }
@@ -469,7 +469,7 @@ impl Padding {
     pub fn new(padding: EdgeInsetsGeometry) -> Padding {
         Padding {
             key: None,
-            padding: padding,
+            padding,
             child: None,
         }
     }
@@ -1047,7 +1047,7 @@ impl ConstrainedBox {
     pub fn new(constraints: BoxConstraints) -> ConstrainedBox {
         ConstrainedBox {
             key: None,
-            constraints: constraints,
+            constraints,
             child: None,
         }
     }

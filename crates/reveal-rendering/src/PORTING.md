@@ -1,4 +1,5 @@
 # reveal-rendering/src
+Syntax (constructors, setters, `Option`, erasure calls) follows `.cursor/skills/porting-flutter/patterns/widget-syntax.md` and is not a divergence.
 Flutter home: packages/flutter/lib/src/rendering
 Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
@@ -44,9 +45,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — no subclassing of the gesture crate's result and entry types.
   Affect: a `hit_test` receives `&mut BoxHitTestResult<'_>`; `handle_event` receives the `BoxHitTestEntry` and reads `local_position()` from it.
 
-- Change: `RenderPointerListener`'s callbacks are set after construction (`set_on_pointer_down`, …), and `on_pointer_signal` receives the `PointerEvent` enum.
-  Reason: language — no optional named constructor arguments; signal events are three enum variants with no common type.
-  Affect: construct with `(app, behavior, child)` and set the callbacks you need; match the enum in a signal listener.
+- Change: `RenderPointerListener`'s `on_pointer_signal` receives the `PointerEvent` enum.
+  Reason: language — signal events are three enum variants with no common `PointerSignalEvent` type.
+  Affect: match the enum in a signal listener.
 
 ## painting_context.rs → object.dart (PaintingContext), layer.rs → layer.dart
 
@@ -86,21 +87,11 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — a crate above cannot override `GestureBinding.dispatchEvent`; see gestures `PORTING.md`.
   Affect: none for callers.
 
-- Change: `RenderMouseRegion::new(app, valid_for_mouse_tracker, child)`; callbacks, `cursor`, `opaque`, and `hit_test_behavior` have setters.
-  Reason: language — no optional named constructor arguments; `validForMouseTracker` is the one argument without a setter.
-  Affect: pass `true` unless a test wants an invalid region.
-
 ## pipeline_owner.rs → object.dart (PipelineOwner)
 
 - Change: `onNeedVisualUpdate` is a `Listener`, which receives `&mut App`.
   Reason: language — a Rust closure cannot capture what it mutates.
   Affect: `PipelineOwner::new(app, Some(Listener::new(|app| …)))`.
-
-## sliver.rs → sliver.dart
-
-- Change: `as_box_constraints` takes `(min_extent, max_extent, cross_axis_extent)` as `Option`s.
-  Reason: language — no named optional parameters.
-  Affect: pass `None` for Dart's defaults (`0`, infinity, this sliver's cross extent).
 
 ## proxy_box.rs → proxy_box.dart / shifted_box.rs → shifted_box.dart
 
@@ -114,9 +105,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## paragraph.rs → paragraph.dart
 
-- Change: `RenderParagraph::new(app, text, text_direction, fonts)`; Dart's other constructor arguments are setters. `fonts` is an optional `FontCollection` handle; `None` shapes against `PaintingBinding`'s app-wide one. It is a leaf: no inline children, no selection registrar, no `selectionColor`.
-  Reason: language — no optional named parameters; platform — the font collection is explicit (see painting `binding.rs`), `WidgetSpan` needs placeholders the host lacks, and selection waits on `selection.dart`.
-  Affect: set `overflow`, `max_lines`, `soft_wrap`, … after construction. A hit test stops at the paragraph (spans are not targets), so `RichText` recognizers cannot fire.
+- Change: `RenderParagraph::new` takes a `fonts` argument: an optional `FontCollection` handle, `None` shaping against `PaintingBinding`'s app-wide one. It is a leaf: no inline children, no selection registrar, no `selectionColor`.
+  Reason: platform — the font collection is explicit (see painting `binding.rs`), `WidgetSpan` needs placeholders the host lacks, and selection waits on `selection.dart`.
+  Affect: a hit test stops at the paragraph (spans are not targets), so `RichText` recognizers cannot fire.
 
 - Change: `TextOverflow::Fade` clips like `Clip`.
   Reason: platform — the fade is a gradient shader, and gradients are deferred.

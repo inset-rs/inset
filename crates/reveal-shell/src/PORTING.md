@@ -1,4 +1,5 @@
 # reveal-shell/src
+Syntax (constructors, setters, `Option`, erasure calls) follows `.cursor/skills/porting-flutter/patterns/widget-syntax.md` and is not a divergence.
 
 No Flutter counterpart. Dart has no type — the engine owns the isolate.
 

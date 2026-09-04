@@ -1,4 +1,5 @@
 # reveal-animation/src
+Syntax (constructors, setters, `Option`, erasure calls) follows `.cursor/skills/porting-flutter/patterns/widget-syntax.md` and is not a divergence.
 Flutter home: packages/flutter/lib/src/animation
 Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
@@ -85,10 +86,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: the running simulation is `Rc<dyn Simulation>`.
   Reason: language — the tick hands `&mut App` to listeners while evaluating the simulation; a borrow of the slot cannot survive that.
   Affect: set tolerance on the simulation before passing it in.
-
-- Change: Dart-optional arguments are explicit.
-  Reason: language — Rust has no optional named arguments.
-  Affect: `controller.stop(app, true)` for Dart's `stop()`; `Curves::linear()` where Dart omits `curve`; `None` for omitted `from` / `duration` / `min` / `max` / `period` / `count`.
 
 ## animation_style.rs → animation_style.dart
 

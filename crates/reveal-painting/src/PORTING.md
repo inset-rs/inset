@@ -1,4 +1,5 @@
 # reveal-painting/src
+Syntax (constructors, setters, `Option`, erasure calls) follows `.cursor/skills/porting-flutter/patterns/widget-syntax.md` and is not a divergence.
 Flutter home: packages/flutter/lib/src/painting
 Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
@@ -23,7 +24,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: identical to Dart's `Color.lerp`, which constructs a new `Color`.
   Affect: none.
 
-- Change: `ColorSwatch<T>` is an extension built with `ColorSwatch::new(primary, HashMap)` and turned into the color it is in Dart with `into_any()`; `get(&key)` is `operator []`.
+- Change: `ColorSwatch<T>` is an extension, not a `Color` subclass.
   Reason: language — see above.
   Affect: `MaterialColor` / `MaterialAccentColor` wrap it; `any.extension::<ColorSwatch<i32>>()`.
 
@@ -111,9 +112,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — the subclass set is open (`InputBorder`, tests, apps); a pairing enum cannot hold it. `dyn Trait` is not `Copy`.
   Affect: store `Box<dyn ShapeBorder>`. `a + b` is `a.plus(&b)`. `ShapeBorder.lerp` is `<dyn ShapeBorder>::lerp`. `is` / `as` is `as_any().downcast_ref`.
 
-- Change: `OutlinedBorder.side` is a method; each concrete type holds `pub side: BorderSide`. `dimensions` is [`outlined_border_dimensions`].
-  Reason: language — a Rust trait cannot hold a field.
-  Affect: write `border.side()` (or the struct field). Outlined implementors call `outlined_border_dimensions(self.side)`.
+- Change: `OutlinedBorder` inherits no `side` field and no `dimensions` body; each concrete type holds `pub side: BorderSide` and calls [`outlined_border_dimensions`].
+  Reason: language — a Rust trait cannot hold a field, so it cannot default a body that reads one.
+  Affect: outlined implementors write `dimensions` as `outlined_border_dimensions(self.side)`.
 
 - Change: `get_outer_path` / `get_inner_path` return `Arc<Path>`. `hit_test` uses `FillRule::NonZero`.
   Reason: platform — valo `Path` is already `Arc`; `contains` takes the fill rule separately.
@@ -121,17 +122,17 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## box_border.rs → box_border.dart
 
-- Change: `BoxBorder` is a trait. A stored box border is `Box<dyn BoxBorder>`. Factories live on `impl dyn BoxBorder`.
+- Change: `BoxBorder` is a trait. A stored box border is `Box<dyn BoxBorder>`.
   Reason: language — Flutter tests and apps subclass `BoxBorder`; a pairing enum cannot hold that set. `dyn Trait` is not `Copy`.
-  Affect: store `Box<dyn BoxBorder>`. `BoxBorder.lerp` is `<dyn BoxBorder>::lerp`. `BoxBorder.fromLTRB` is `<dyn BoxBorder>::from_ltrb` (all four sides required). `BoxBorder.all` takes `color`, `width`, `style`, `stroke_align` (Dart has defaults).
+  Affect: store `Box<dyn BoxBorder>`; a border is cloned, never copied.
 
 - Change: `BoxBorder::paint` takes `shape` and `border_radius` as required arguments. [`ShapeBorder::paint`](ShapeBorder::paint) is the three-argument form and forwards with `BoxShape::Rectangle` and `None`.
   Reason: language — Rust has no optional named parameters on a trait method that also overrides a shorter paint.
   Affect: callers that pass a shape or radius use `BoxBorder::paint`. The three-argument call is `ShapeBorder::paint`.
 
-- Change: `Border::all` / inherent `scale` take every argument (no Dart named defaults). `scale` on the struct returns `Border` / `BorderDirectional`; [`ShapeBorder::scale`](ShapeBorder::scale) boxes that.
-  Reason: language — Rust has no named defaults and no covariant override return.
-  Affect: write `Border::all(color, width, style, stroke_align)` and `border.scale(t)` on the concrete type.
+- Change: inherent `scale` returns `Border` / `BorderDirectional`; [`ShapeBorder::scale`](ShapeBorder::scale) boxes that.
+  Reason: language — no covariant override return.
+  Affect: call `border.scale(t)` on the concrete type to keep the type; through the trait it is boxed.
 
 ## circle_border.rs / oval_border.rs / rounded_rectangle_border.rs / stadium_border.rs
 
@@ -169,49 +170,27 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — `DecorationImage` / `ImageProvider` and `Gradient.createShader` (valo shaders) are deferred; color, border, radius, and shadow do not need them.
   Affect: there is no `decoration.image` or `decoration.gradient`. A `background_blend_mode` still requires a `color`.
 
-- Change: Dart's named constructor arguments are a fluent builder. `copyWith(color: c)` is `copy_with().color(c)`.
-  Reason: language — Rust has no optional named parameters.
-  Affect: write `BoxDecoration::new().color(c).border_radius(r)` where Dart writes `BoxDecoration(color: c, borderRadius: r)`. Set `color` before `background_blend_mode`.
+- Change: Dart's `assert(backgroundBlendMode == null || color != null)` runs when `background_blend_mode` is set, not once at the end of a constructor.
+  Reason: language — a builder checks each field as it arrives.
+  Affect: set `color` before `background_blend_mode`; the other order trips the debug assert.
 
 ## shape_decoration.rs → shape_decoration.dart
 
-- Change: [`ShapeDecoration`](ShapeDecoration) has no `image` or `gradient` field. Interior paint is solid `color` only. `shape` is required on [`new`](ShapeDecoration::new); color and shadows are fluent.
-  Reason: platform — `DecorationImage` and `Gradient.createShader` are deferred, same as [`BoxDecoration`](BoxDecoration). Language — Rust has no optional named parameters; `shape` is the one required field.
-  Affect: write `ShapeDecoration::new(shape).color(c)` where Dart writes `ShapeDecoration(shape: shape, color: c)`. There is no `decoration.image` or `decoration.gradient`.
-
-## linear_border.rs → linear_border.dart
-
-- Change: Dart named constructors `LinearBorder.start` / `end` / `top` / `bottom` are `LinearBorder::start_side` / `end_side` / `top_side` / `bottom_side`. Fluent `.start(edge)` keeps the field name.
-  Reason: language — an associated function and a method cannot share a name.
-  Affect: write `LinearBorder::start_side(side, alignment, size)` or `LinearBorder::new().start(edge)` where Dart writes `LinearBorder.start(side: side)`.
+- Change: [`ShapeDecoration`](ShapeDecoration) has no `image` or `gradient` field. Interior paint is solid `color` only.
+  Reason: platform — `DecorationImage` and `Gradient.createShader` are deferred, same as [`BoxDecoration`](BoxDecoration).
+  Affect: there is no `decoration.image` or `decoration.gradient`.
 
 ## text_style.rs → text_style.dart
-
-- Change: Dart's named constructor arguments and `copyWith` are a fluent builder. `copyWith(color: c)` is `copy_with().color(c)`.
-  Reason: language — Rust has no optional named parameters.
-  Affect: write `TextStyle::new().color(c).font_size(14.0)` where Dart writes `TextStyle(color: c, fontSize: 14)`.
-
-- Change: `apply` is `style.apply().font_size_factor(2.0).into_style()`.
-  Reason: language — Rust has no optional named parameters, and `apply` cannot return both a builder and a `TextStyle`.
-  Affect: write `.into_style()` at the end of an `apply` chain. `style.apply().into_style()` is Dart `apply()` with defaults.
-
-- Change: the `fontFamilyFallback` getter is [`font_family_fallback_list`](TextStyle::font_family_fallback_list). The setter keeps [`font_family_fallback`](TextStyle::font_family_fallback).
-  Reason: language — a method and a setter cannot share a name.
-  Affect: read `style.font_family_fallback_list()`.
 
 - Change: [`TextStyle`](TextStyle) has no `locale` field.
   Reason: platform — `dart:ui` `Locale` is not ported; same as [`ImageConfiguration`](ImageConfiguration).
   Affect: there is no `style.locale`.
 
-- Change: [`get_text_style`](TextStyle::get_text_style) takes no arguments; `get_text_style_with(&scaler)` is Dart `getTextStyle(textScaler: scaler)`. [`get_paragraph_style`](TextStyle::get_paragraph_style) is a fluent chain ending in `build()`.
-  Reason: language — no optional named parameters.
-  Affect: `style.get_paragraph_style().text_align(a).text_direction(d).build()` where Dart writes `style.getParagraphStyle(textAlign: a, textDirection: d)`. Neither takes `locale` or `strutStyle` (deferred).
-
 ## inline_span.rs → inline_span.dart, text_span.rs → text_span.dart
 
-- Change: a span tree is shared: children are `InlineSpanRef` (`Rc<dyn InlineSpan>`), and a `TextSpan` becomes one with `into_span()`. Dart's named constructor arguments are the fluent setters `TextSpan::new().text("x").style(s)`. Equality is `*a == *b` on the trait object.
-  Reason: language — no inheritance, no structural `==` on a trait object, no optional named parameters.
-  Affect: build trees with `into_span()`; compare with `*a == *b` or `a.compare_to(&*b)`.
+- Change: a span tree is shared: children are `InlineSpanRef` (`Rc<dyn InlineSpan>`). Equality is `*a == *b` on the trait object.
+  Reason: language — no inheritance, no structural `==` on a trait object.
+  Affect: compare with `*a == *b` or `a.compare_to(&*b)`.
 
 ## binding.rs → binding.dart
 
@@ -221,9 +200,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## text_painter.rs → text_painter.dart
 
-- Change: `TextPainter::new()` is the painter with every default; Dart's constructor arguments are the setters (`set_text`, `set_text_direction`, …). `compute_width` / `compute_max_intrinsic_width` take only `(text, text_direction, min_width, max_width)`.
+- Change: the statics `compute_width` / `compute_max_intrinsic_width` take only `(text, text_direction, min_width, max_width)`; Dart's other measuring options are dropped.
   Reason: language — no optional named parameters.
-  Affect: `let mut painter = TextPainter::new(); painter.set_text(Some(span)); painter.set_text_direction(Some(TextDirection::Ltr)); painter.layout(0.0, f64::INFINITY);`. To measure with other options than the two statics accept, build a painter the same way.
+  Affect: to measure with a scaler, `max_lines`, or the other options, build a `TextPainter` and lay it out.
 
 - Change: the getters that fill a cache take `&mut self`: `plain_text`, `preferred_line_height`, `compute_line_metrics`, `inline_placeholder_boxes`, and the caret queries (`get_offset_for_caret`, `get_full_height_for_caret`). `layout` and `paint` do too.
   Reason: language — Dart's getters write their cache through a `final` reference; Rust needs the borrow to say so.
