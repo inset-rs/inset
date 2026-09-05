@@ -2326,6 +2326,7 @@ impl State for MediaQueryFromViewState {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
     use std::time::{Duration, Instant};
@@ -2482,7 +2483,8 @@ mod tests {
 
     #[test]
     fn from_view_computes_logical_size_and_padding() {
-        let app = App::new();
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let data = MediaQueryData::from_view(&app, &TestView, None);
         assert_eq!(data.size, Size::new(400.0, 300.0));
         assert_eq!(data.device_pixel_ratio, 2.0);
@@ -2500,7 +2502,8 @@ mod tests {
 
     #[test]
     fn from_view_takes_the_platform_specific_data_from_platform_data() {
-        let app = App::new();
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let platform_data = MediaQueryData::new()
             .platform_brightness(Brightness::Dark)
             .bold_text(true)
@@ -2519,7 +2522,8 @@ mod tests {
 
     #[test]
     fn size_of_depends_only_on_the_size_aspect() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (whole, whole_builds) = Reader::counting(
             |app, context| {
                 MediaQuery::of(app, context);
@@ -2617,14 +2621,16 @@ mod tests {
     #[test]
     #[should_panic(expected = "No MediaQuery widget ancestor found")]
     fn of_panics_with_darts_message_when_absent() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (reader, _) = data_reader();
         mount(&mut app, reader);
     }
 
     #[test]
     fn maybe_of_and_the_defaulted_accessors_tolerate_a_missing_media_query() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let seen = Rc::new(RefCell::new(Vec::new()));
         let (reader, _) = Reader::counting(
             {
@@ -2649,7 +2655,8 @@ mod tests {
 
     #[test]
     fn with_clamped_text_scaling_and_with_no_text_scaling_wrap_the_ambient_scaler() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let seen = Rc::new(RefCell::new(Vec::new()));
         let (reader, _) = Reader::counting(
             {
@@ -2690,7 +2697,8 @@ mod tests {
 
     #[test]
     fn from_view_yields_the_views_metrics_and_takes_platform_data_from_the_ambient_query() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let view: ViewRef = Rc::new(TestView);
         let (reader, seen) = data_reader();
         let from_view = MediaQuery::from_view(None, Rc::clone(&view), reader);
@@ -2736,14 +2744,17 @@ mod tests {
         let platform: PlatformRef = Rc::new(TestPlatform {
             view: Rc::clone(&view),
         });
-        let mut app = App::with_platform(platform);
+        let cell = AppCell::with_platform(platform);
+        let mut app = cell.borrow_mut();
         let (reader, seen) = data_reader();
         let from_view = MediaQuery::from_view(None, Rc::clone(&view), reader);
         run_widget(
             &mut app,
             View::new(Rc::clone(&view), from_view).into_widget(),
         );
-        app.elapse(Duration::ZERO);
+        drop(app);
+        cell.elapse(Duration::ZERO);
+        let mut app = cell.borrow_mut();
         pump_frame(&mut app, Duration::ZERO);
 
         assert_eq!(seen.borrow().len(), 1);

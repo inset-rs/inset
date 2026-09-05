@@ -612,7 +612,7 @@ mod tests {
         Picture, Platform, PlatformRef, Size, TargetPlatform, View as EmbedderView, ViewId,
         ViewMetrics, ViewRef,
     };
-    use reveal_foundation::{App, Handle};
+    use reveal_foundation::{App, AppCell, Handle};
     use reveal_rendering::{
         AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderHandle,
         RendererBinding,
@@ -682,12 +682,17 @@ mod tests {
         }
     }
 
-    fn app_with_view() -> (App, Rc<Cell<u32>>, Rc<Cell<u32>>) {
-        let (app, presented, frames, _size) = app_with_resizable_view();
-        (app, presented, frames)
+    fn app_with_view() -> (Rc<AppCell>, Rc<Cell<u32>>, Rc<Cell<u32>>) {
+        let (cell, presented, frames, _size) = app_with_resizable_view();
+        (cell, presented, frames)
     }
 
-    type ResizableApp = (App, Rc<Cell<u32>>, Rc<Cell<u32>>, Rc<Cell<[f64; 2]>>);
+    type ResizableApp = (
+        Rc<AppCell>,
+        Rc<Cell<u32>>,
+        Rc<Cell<u32>>,
+        Rc<Cell<[f64; 2]>>,
+    );
 
     fn app_with_resizable_view() -> ResizableApp {
         let presented = Rc::new(Cell::new(0));
@@ -701,7 +706,7 @@ mod tests {
             frames: Rc::clone(&frames),
         });
         (
-            App::with_platform(platform),
+            AppCell::with_platform(platform),
             presented,
             frames,
             physical_size,
@@ -787,7 +792,8 @@ mod tests {
 
     #[test]
     fn run_app_attaches_on_the_next_timer_turn_and_draws_the_first_frame() {
-        let (mut app, presented, frames) = app_with_view();
+        let (cell, presented, frames) = app_with_view();
+        let mut app = cell.borrow_mut();
         run_app(
             &mut app,
             Sized {
@@ -799,7 +805,9 @@ mod tests {
         assert!(!binding.is_root_widget_attached(&app));
         assert_eq!(frames.get(), 1);
 
-        app.elapse(Duration::ZERO);
+        drop(app);
+        cell.elapse(Duration::ZERO);
+        let mut app = cell.borrow_mut();
         assert!(binding.is_root_widget_attached(&app));
         let root = binding
             .root_element(&app)
@@ -814,7 +822,8 @@ mod tests {
 
     #[test]
     fn set_state_schedules_a_frame_that_rebuilds_before_layout() {
-        let (mut app, presented, frames) = app_with_view();
+        let (cell, presented, frames) = app_with_view();
+        let mut app = cell.borrow_mut();
         let size = Rc::new(Cell::new(Size::new(30.0, 20.0)));
         let state = Rc::new(Cell::new(None));
         run_app(
@@ -825,7 +834,9 @@ mod tests {
             }
             .into_widget(),
         );
-        app.elapse(Duration::ZERO);
+        drop(app);
+        cell.elapse(Duration::ZERO);
+        let mut app = cell.borrow_mut();
         pump_frame(&mut app, Duration::ZERO);
         let frames_before = frames.get();
 
@@ -858,7 +869,8 @@ mod tests {
 
     #[test]
     fn running_a_second_app_updates_the_root_in_place() {
-        let (mut app, _presented, _frames) = app_with_view();
+        let (cell, _presented, _frames) = app_with_view();
+        let mut app = cell.borrow_mut();
         run_app(
             &mut app,
             Sized {
@@ -866,7 +878,9 @@ mod tests {
             }
             .into_widget(),
         );
-        app.elapse(Duration::ZERO);
+        drop(app);
+        cell.elapse(Duration::ZERO);
+        let mut app = cell.borrow_mut();
         pump_frame(&mut app, Duration::ZERO);
         let binding = WidgetsBinding::instance(&mut app);
         let first_root = binding.root_element(&app);
@@ -878,7 +892,9 @@ mod tests {
             }
             .into_widget(),
         );
-        app.elapse(Duration::ZERO);
+        drop(app);
+        cell.elapse(Duration::ZERO);
+        let mut app = cell.borrow_mut();
         assert_eq!(binding.root_element(&app), first_root);
         pump_frame(&mut app, Duration::from_millis(16));
         assert_eq!(
@@ -889,7 +905,8 @@ mod tests {
 
     #[test]
     fn a_metrics_change_reaches_the_observers_and_the_media_query() {
-        let (mut app, _presented, _frames, physical_size) = app_with_resizable_view();
+        let (cell, _presented, _frames, physical_size) = app_with_resizable_view();
+        let mut app = cell.borrow_mut();
         let sizes = Rc::new(std::cell::RefCell::new(Vec::new()));
         let probe = crate::widgets::basic::Builder::new({
             let sizes = Rc::clone(&sizes);
@@ -904,7 +921,9 @@ mod tests {
             }
         });
         run_app(&mut app, probe.into_widget());
-        app.elapse(Duration::ZERO);
+        drop(app);
+        cell.elapse(Duration::ZERO);
+        let mut app = cell.borrow_mut();
         pump_frame(&mut app, Duration::ZERO);
         assert_eq!(*sizes.borrow(), vec![Size::new(400.0, 300.0)]);
 

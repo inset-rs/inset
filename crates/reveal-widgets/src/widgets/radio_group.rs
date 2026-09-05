@@ -828,6 +828,7 @@ impl<T: Copy + PartialEq + 'static> DirectionalFocusTraversalPolicyMixin
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::any::TypeId;
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -940,7 +941,7 @@ mod tests {
 
     /// The group's state, reached through a `GlobalKey`, plus what `on_changed` recorded.
     struct GroupHarness {
-        app: App,
+        cell: Rc<AppCell>,
         state: Handle<RadioGroupState<u32>>,
         changes: Rc<RefCell<Vec<Option<u32>>>>,
     }
@@ -956,7 +957,8 @@ mod tests {
 
     /// Three radios side by side in reading order, under a group with `group_value`.
     fn mount_group(group_value: Option<u32>, enabled: [bool; 3]) -> GroupHarness {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let changes: Rc<RefCell<Vec<Option<u32>>>> = Rc::default();
         let recorded = Rc::clone(&changes);
         let key = crate::framework::GlobalKey::new();
@@ -974,8 +976,9 @@ mod tests {
             group = group.group_value(value);
         }
         let void_callback_action = VoidCallbackAction::new(&mut app);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Directionality::new(
                 TextDirection::Ltr,
                 Actions::new(
@@ -988,11 +991,13 @@ mod tests {
             )
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let state = key
             .current_state::<RadioGroupState<u32>>(&mut app)
             .expect("the group is mounted");
+        drop(app);
         GroupHarness {
-            app,
+            cell,
             state,
             changes,
         }
@@ -1010,62 +1015,68 @@ mod tests {
 
     #[test]
     fn a_radio_group_registers_every_client_below_it() {
-        let mut harness = mount_group(None, [true, true, true]);
+        let harness = mount_group(None, [true, true, true]);
         let values: Vec<u32> = harness
             .state
-            .radios(&harness.app)
+            .radios(&harness.cell.borrow())
             .into_iter()
-            .map(|radio| radio.radio_value(&harness.app))
+            .map(|radio| radio.radio_value(&harness.cell.borrow()))
             .collect();
         assert_eq!(values, [0, 1, 2]);
-        assert_eq!(harness.state.group_value(&harness.app), None);
+        assert_eq!(harness.state.group_value(&harness.cell.borrow()), None);
 
         // A disabled radio does not register.
         let disabled = mount_group(Some(1), [true, false, true]);
         let values: Vec<u32> = disabled
             .state
-            .radios(&disabled.app)
+            .radios(&disabled.cell.borrow())
             .into_iter()
-            .map(|radio| radio.radio_value(&disabled.app))
+            .map(|radio| radio.radio_value(&disabled.cell.borrow()))
             .collect();
         assert_eq!(values, [0, 2]);
-        assert_eq!(disabled.state.group_value(&disabled.app), Some(1));
+        assert_eq!(disabled.state.group_value(&disabled.cell.borrow()), Some(1));
 
         // Reported selections reach the widget's callback.
         let registry = harness.state.as_radio_group_registry();
-        registry.on_changed(&mut harness.app, Some(2));
+        registry.on_changed(&mut harness.cell.borrow_mut(), Some(2));
         assert_eq!(*harness.changes.borrow(), [Some(2)]);
         drop(disabled);
     }
 
     #[test]
     fn an_arrow_key_moves_the_selection_to_the_next_radio() {
-        let mut harness = mount_group(Some(0), [true, true, true]);
-        let first = harness.state.radios(&harness.app)[0].focus_node(&harness.app);
-        first.request_focus(&mut harness.app, None);
-        harness.app.drain_microtasks();
-        assert_eq!(primary_focus(&mut harness.app), Some(first));
+        let harness = mount_group(Some(0), [true, true, true]);
+        let first =
+            harness.state.radios(&harness.cell.borrow())[0].focus_node(&harness.cell.borrow());
+        first.request_focus(&mut harness.cell.borrow_mut(), None);
+        harness.cell.borrow_mut().drain_microtasks();
+        assert_eq!(primary_focus(&mut harness.cell.borrow_mut()), Some(first));
 
-        assert!(arrow_down(&mut harness.app), "the group handled the key");
-        harness.app.drain_microtasks();
+        assert!(
+            arrow_down(&mut harness.cell.borrow_mut()),
+            "the group handled the key"
+        );
+        harness.cell.borrow_mut().drain_microtasks();
         assert_eq!(*harness.changes.borrow(), [Some(1)]);
-        let second = harness.state.radios(&harness.app)[1].focus_node(&harness.app);
-        assert_eq!(primary_focus(&mut harness.app), Some(second));
+        let second =
+            harness.state.radios(&harness.cell.borrow())[1].focus_node(&harness.cell.borrow());
+        assert_eq!(primary_focus(&mut harness.cell.borrow_mut()), Some(second));
 
         // The last radio wraps around to the first.
-        let third = harness.state.radios(&harness.app)[2].focus_node(&harness.app);
-        third.request_focus(&mut harness.app, None);
-        harness.app.drain_microtasks();
-        assert!(arrow_down(&mut harness.app));
-        harness.app.drain_microtasks();
+        let third =
+            harness.state.radios(&harness.cell.borrow())[2].focus_node(&harness.cell.borrow());
+        third.request_focus(&mut harness.cell.borrow_mut(), None);
+        harness.cell.borrow_mut().drain_microtasks();
+        assert!(arrow_down(&mut harness.cell.borrow_mut()));
+        harness.cell.borrow_mut().drain_microtasks();
         assert_eq!(*harness.changes.borrow(), [Some(1), Some(0)]);
     }
 
     #[test]
     fn an_arrow_key_is_ignored_while_no_radio_has_focus() {
-        let mut harness = mount_group(Some(0), [true, true, true]);
+        let harness = mount_group(Some(0), [true, true, true]);
         assert!(
-            !arrow_down(&mut harness.app),
+            !arrow_down(&mut harness.cell.borrow_mut()),
             "the manager ignores the event when the focus is elsewhere"
         );
         assert!(harness.changes.borrow().is_empty());
@@ -1073,19 +1084,21 @@ mod tests {
 
     #[test]
     fn the_traversal_policy_skips_the_unselected_radios() {
-        let mut harness = mount_group(Some(1), [true, true, true]);
+        let harness = mount_group(Some(1), [true, true, true]);
         let nodes: Vec<AnyFocusNode> = harness
             .state
-            .radios(&harness.app)
+            .radios(&harness.cell.borrow())
             .into_iter()
-            .map(|radio| radio.focus_node(&harness.app))
+            .map(|radio| radio.focus_node(&harness.cell.borrow()))
             .collect();
         let policy = harness
-            .app
+            .cell
+            .borrow()
             .get(harness.state)
             .policy
             .expect("created in init_state");
-        let sorted = policy.sort_descendants(&mut harness.app, nodes.clone(), nodes[0]);
+        let sorted =
+            policy.sort_descendants(&mut harness.cell.borrow_mut(), nodes.clone(), nodes[0]);
         assert_eq!(
             sorted,
             vec![nodes[0], nodes[1]],

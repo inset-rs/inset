@@ -201,7 +201,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::test_support::{app, build, pump};
+    use crate::test_support::{build, pump, test_cell};
 
     fn find<T: RenderObject>(app: &App, node: AnyRenderObject) -> Option<RenderHandle<T>> {
         if let Some(found) = node.downcast::<T>(app) {
@@ -237,11 +237,13 @@ mod tests {
 
     #[test]
     fn a_halo_outlines_its_shape_while_a_focus_node_inside_it_has_focus() {
-        let mut app = app();
+        let cell = test_cell();
+        let mut app = cell.borrow_mut();
         let key = Rc::new(GlobalKey::new());
         let node = FocusNode::new(&mut app).as_node();
+        drop(app);
         build(
-            &mut app,
+            &cell,
             Directionality::new(
                 TextDirection::Ltr,
                 CupertinoFocusHalo::with_rounded_superellipse(
@@ -252,6 +254,7 @@ mod tests {
             )
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         assert_eq!(halo_side(&mut app, &key), BorderSide::NONE);
 
         node.request_focus(&mut app, None);

@@ -578,7 +578,7 @@ mod tests {
     use reveal_widgets::{Builder, DefaultWidgetsLocalizations, IntoWidget, SizedBox};
 
     use super::*;
-    use crate::test_support::{app, build};
+    use crate::test_support::{build, test_cell};
 
     #[test]
     fn the_default_strings_format_dates_like_dart() {
@@ -619,7 +619,8 @@ mod tests {
 
     #[test]
     fn of_finds_the_strings_through_a_localizations_ancestor() {
-        let mut app = app();
+        let cell = test_cell();
+        let app = cell.borrow();
         let seen = Rc::new(RefCell::new(None));
         let probe = Builder::new({
             let seen = Rc::clone(&seen);
@@ -629,8 +630,9 @@ mod tests {
                 SizedBox::shrink().into_widget()
             }
         });
+        drop(app);
         build(
-            &mut app,
+            &cell,
             Localizations::new(
                 Locale::new("en").country_code("US"),
                 vec![

@@ -340,6 +340,7 @@ impl StatelessWidget for PageStorage {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
 
     use super::*;
@@ -364,7 +365,8 @@ mod tests {
 
     #[test]
     fn state_is_filed_under_the_page_storage_key_chain() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let bucket = PageStorageBucket::new(&mut app);
         let seen = Rc::new(RefCell::new(Vec::new()));
         let page = |seen: &Rc<RefCell<Vec<Option<i32>>>>, value: i32| {
@@ -390,7 +392,8 @@ mod tests {
 
     #[test]
     fn without_keys_nothing_is_saved_and_identifiers_are_direct() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let bucket = PageStorageBucket::new(&mut app);
         let seen = Rc::new(RefCell::new(Vec::new()));
         let harness = Harness::mount(

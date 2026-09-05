@@ -127,6 +127,7 @@ impl HapticFeedback {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
     use std::rc::Rc;
     use std::time::Instant;
@@ -173,7 +174,8 @@ mod tests {
     #[test]
     fn each_call_sends_its_own_feedback_kind_to_the_platform() {
         let platform = Rc::new(RecordingPlatform::default());
-        let app = App::with_platform(Rc::clone(&platform) as PlatformRef);
+        let cell = AppCell::with_platform(Rc::clone(&platform) as PlatformRef);
+        let app = cell.borrow();
 
         HapticFeedback::vibrate(&app);
         HapticFeedback::light_impact(&app);

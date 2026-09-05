@@ -458,6 +458,7 @@ impl TickerFuture {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
@@ -479,7 +480,8 @@ mod tests {
     // come from handle_begin_frame, as flutter_test's pump does).
     #[test]
     fn a_ticker_ticks_with_elapsed_time_until_stopped() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Rc::new(RefCell::new(Vec::new()));
         let ticker = Ticker::new(&mut app, elapsed_recorder(&log));
 
@@ -503,7 +505,8 @@ mod tests {
     // ticker_test.dart 'Ticker mute control test' (without lifecycle).
     #[test]
     fn a_muted_ticker_keeps_time_but_does_not_call_back() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Rc::new(RefCell::new(Vec::new()));
         let ticker = Ticker::new(&mut app, elapsed_recorder(&log));
 
@@ -539,7 +542,8 @@ mod tests {
     // ticker_test.dart 'Ticker can be slowed down with time dilation'
     #[test]
     fn a_ticker_is_slowed_by_time_dilation() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         SchedulerBinding::set_time_dilation(&mut app, 2.0);
         let last = Rc::new(Cell::new(None::<Duration>));
         let ticker = Ticker::new(
@@ -559,7 +563,8 @@ mod tests {
 
     #[test]
     fn the_ticker_future_completes_through_the_microtask_queue() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let ticker = Ticker::new(&mut app, FrameCallback::new(|_app, _t| {}));
         let future = ticker.start(&mut app);
 
@@ -583,7 +588,8 @@ mod tests {
 
     #[test]
     fn disposing_an_active_ticker_cancels_without_completing() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let ticker = Ticker::new(&mut app, FrameCallback::new(|_app, _t| {}));
         let future = ticker.start(&mut app);
 
@@ -618,7 +624,8 @@ mod tests {
     // survives under the absorbing ticker's identity.
     #[test]
     fn absorbing_a_ticker_keeps_the_original_future_alive() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Rc::new(RefCell::new(Vec::new()));
         let original = Ticker::new(&mut app, elapsed_recorder(&log));
         let future = original.start(&mut app);
@@ -643,7 +650,8 @@ mod tests {
 
     #[test]
     fn a_zero_duration_sequence_is_already_complete() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let future = TickerFuture::complete(&mut app);
 
         let ran = Rc::new(Cell::new(false));
@@ -669,7 +677,8 @@ mod tests {
 
     #[test]
     fn a_ticker_provider_vends_a_ticker_that_ticks() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Rc::new(RefCell::new(Vec::new()));
         let ticker = TestVSync.create_ticker(&mut app, elapsed_recorder(&log));
         ticker.start(&mut app);
@@ -692,7 +701,8 @@ mod tests {
 
     #[test]
     fn a_provider_in_the_app_can_vend_a_ticker() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let host = app.create(Host { ticker: None });
         let log = Rc::new(RefCell::new(Vec::new()));
         let ticker = host.create_ticker(&mut app, elapsed_recorder(&log));

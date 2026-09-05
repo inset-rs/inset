@@ -4,7 +4,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use reveal_embedder::Size;
-use reveal_foundation::{App, Handle};
+use reveal_foundation::{App, AppCell, Handle};
 use reveal_painting::EdgeInsetsGeometry;
 use reveal_rendering::{
     AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderHandle, RenderPadding,
@@ -210,7 +210,8 @@ impl StatelessWidget for Themed {
 
 #[test]
 fn mounting_builds_the_render_tree_and_lays_it_out() {
-    let mut app = App::new();
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
     let builds = Rc::new(Cell::new(0));
     let harness = Harness::mount(
         &mut app,
@@ -234,7 +235,8 @@ fn mounting_builds_the_render_tree_and_lays_it_out() {
 
 #[test]
 fn a_new_widget_of_the_same_type_updates_the_render_object_in_place() {
-    let mut app = App::new();
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
     let builds = Rc::new(Cell::new(0));
     let harness = Harness::mount(
         &mut app,
@@ -264,7 +266,8 @@ fn a_new_widget_of_the_same_type_updates_the_render_object_in_place() {
 
 #[test]
 fn set_state_rebuilds_only_after_the_owner_flushes() {
-    let mut app = App::new();
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
     let harness = Harness::mount(
         &mut app,
         Counter {
@@ -296,7 +299,8 @@ fn set_state_rebuilds_only_after_the_owner_flushes() {
 
 #[test]
 fn a_new_stateful_widget_keeps_its_state_and_reports_the_update() {
-    let mut app = App::new();
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
     let harness = Harness::mount(
         &mut app,
         Counter {
@@ -329,7 +333,8 @@ fn a_new_stateful_widget_keeps_its_state_and_reports_the_update() {
 
 #[test]
 fn a_different_widget_type_disposes_the_old_subtree_at_finalize() {
-    let mut app = App::new();
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
     let harness = Harness::mount(
         &mut app,
         Counter {
@@ -376,7 +381,8 @@ fn a_different_widget_type_disposes_the_old_subtree_at_finalize() {
 
 #[test]
 fn inherited_widgets_notify_their_dependents_only_when_they_should() {
-    let mut app = App::new();
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
     let builds = Rc::new(Cell::new(0));
     // One child instance, reused like a `const` widget, so only the theme decides rebuilds.
     let child: WidgetRef = Themed {
@@ -413,7 +419,8 @@ fn inherited_widgets_notify_their_dependents_only_when_they_should() {
 
 #[test]
 fn a_global_key_moves_an_element_with_its_state() {
-    let mut app = App::new();
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
     let key: KeyRef = Rc::new(GlobalKey::new());
     let global = downcast_key(&key);
     let counter = |key: &KeyRef| {

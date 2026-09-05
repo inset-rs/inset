@@ -2211,6 +2211,7 @@ impl State for CupertinoDraggableScrollableSheetState {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
 
     use reveal_embedder::{
@@ -2224,7 +2225,7 @@ mod tests {
     use super::*;
     use crate::localizations::DefaultCupertinoLocalizations;
     use crate::route::CupertinoPageRoute;
-    use crate::test_support::{app, build, pump};
+    use crate::test_support::{build, pump, test_cell};
 
     /// The test view is 800x600 physical at 2x.
     const VIEW_WIDTH: f64 = 400.0;
@@ -2317,12 +2318,12 @@ mod tests {
     }
 
     /// An app showing one settled `CupertinoPageRoute` whose content reports to `probe`.
-    fn app_with_page(probe: &Rc<Probe>, key: &GlobalKey) -> (App, Duration) {
-        let mut app = app();
+    fn app_with_page(probe: &Rc<Probe>, key: &GlobalKey) -> (Rc<AppCell>, Duration) {
+        let cell = test_cell();
         let navigator_key = GlobalKey::new();
         let builder = page(probe, key);
         build(
-            &mut app,
+            &cell,
             navigator(&navigator_key, move |navigator| {
                 navigator.on_generate_route(move |app, _settings| {
                     Some(Route::as_route(CupertinoPageRoute::new(
@@ -2332,8 +2333,8 @@ mod tests {
                 })
             }),
         );
-        let at = settle(&mut app, Duration::ZERO);
-        (app, at)
+        let at = settle(&mut cell.borrow_mut(), Duration::ZERO);
+        (cell, at)
     }
 
     fn navigator(key: &GlobalKey, configure: impl FnOnce(Navigator) -> Navigator) -> WidgetRef {
@@ -2351,7 +2352,7 @@ mod tests {
 
     /// The whole scenario: a page, a sheet shown over it, and both settled.
     struct Sheet {
-        app: App,
+        cell: Rc<AppCell>,
         page: Rc<Probe>,
         page_key: GlobalKey,
         sheet: Rc<Probe>,
@@ -2364,7 +2365,8 @@ mod tests {
     fn show_sheet(show_drag_handle: bool) -> Sheet {
         let page_probe: Rc<Probe> = Rc::default();
         let page_key = GlobalKey::new();
-        let (mut app, at) = app_with_page(&page_probe, &page_key);
+        let (cell, at) = app_with_page(&page_probe, &page_key);
+        let mut app = cell.borrow_mut();
 
         let sheet_probe: Rc<Probe> = Rc::default();
         let sheet_key = GlobalKey::new();
@@ -2392,8 +2394,9 @@ mod tests {
                 false,
             )
         };
+        drop(app);
         Sheet {
-            app,
+            cell,
             page: page_probe,
             page_key,
             sheet: sheet_probe,
@@ -2406,12 +2409,13 @@ mod tests {
     #[test]
     fn show_cupertino_sheet_slides_a_sheet_route_up_from_the_bottom() {
         let Sheet {
-            mut app,
+            cell,
             sheet_key,
             route,
             at,
             ..
         } = show_sheet(false);
+        let mut app = cell.borrow_mut();
         let sheet_route = route
             .downcast::<CupertinoSheetRoute>(&app)
             .expect("show_cupertino_sheet pushes a CupertinoSheetRoute");
@@ -2445,11 +2449,9 @@ mod tests {
     #[test]
     fn the_route_below_slides_down_and_scales_behind_the_sheet() {
         let Sheet {
-            mut app,
-            page_key,
-            at,
-            ..
+            cell, page_key, at, ..
         } = show_sheet(false);
+        let mut app = cell.borrow_mut();
         settle(&mut app, at);
 
         let offset = top_left(&page_key, &mut app);
@@ -2470,12 +2472,13 @@ mod tests {
     #[test]
     fn has_parent_sheet_is_true_inside_the_sheet_and_false_outside() {
         let Sheet {
-            mut app,
+            cell,
             page,
             sheet,
             at,
             ..
         } = show_sheet(false);
+        let mut app = cell.borrow_mut();
         settle(&mut app, at);
 
         assert_eq!(
@@ -2493,8 +2496,9 @@ mod tests {
     #[test]
     fn a_drag_handle_pads_the_sheet_content() {
         let Sheet {
-            mut app, sheet, at, ..
+            cell, sheet, at, ..
         } = show_sheet(true);
+        let mut app = cell.borrow_mut();
         settle(&mut app, at);
         assert_eq!(
             sheet.top_padding.get(),
@@ -2506,12 +2510,13 @@ mod tests {
     #[test]
     fn pop_sheet_pops_the_sheet() {
         let Sheet {
-            mut app,
+            cell,
             sheet,
             route,
             at,
             ..
         } = show_sheet(false);
+        let mut app = cell.borrow_mut();
         let at = settle(&mut app, at);
         assert!(route.is_active(&app));
 
@@ -2524,8 +2529,9 @@ mod tests {
     #[test]
     fn a_drag_past_the_dismiss_threshold_pops_the_sheet() {
         let Sheet {
-            mut app, route, at, ..
+            cell, route, at, ..
         } = show_sheet(false);
+        let mut app = cell.borrow_mut();
         let at = settle(&mut app, at);
 
         send(&mut app, PointerChange::Down, 200.0, 50.0, Duration::ZERO);
@@ -2555,12 +2561,13 @@ mod tests {
     #[test]
     fn a_short_drag_snaps_the_sheet_back() {
         let Sheet {
-            mut app,
+            cell,
             sheet_key,
             route,
             at,
             ..
         } = show_sheet(false);
+        let mut app = cell.borrow_mut();
         let at = settle(&mut app, at);
 
         send(&mut app, PointerChange::Down, 200.0, 50.0, Duration::ZERO);
@@ -2602,7 +2609,7 @@ mod tests {
     /// The whole scenario for a sheet whose content is a scroll view under the route's own
     /// controller: the view fills the sheet, the content is three views tall.
     struct ScrollableSheet {
-        app: App,
+        cell: Rc<AppCell>,
         /// The scroll view, which is the sheet's own top.
         view_key: GlobalKey,
         /// The scrolled content, which moves as the list scrolls.
@@ -2614,7 +2621,8 @@ mod tests {
     fn show_scrollable_sheet() -> ScrollableSheet {
         let page_probe: Rc<Probe> = Rc::default();
         let page_key = GlobalKey::new();
-        let (mut app, at) = app_with_page(&page_probe, &page_key);
+        let (cell, at) = app_with_page(&page_probe, &page_key);
+        let mut app = cell.borrow_mut();
 
         let view_key = GlobalKey::new();
         let content_key = GlobalKey::new();
@@ -2647,8 +2655,9 @@ mod tests {
             false,
         );
         let at = settle(&mut app, at);
+        drop(app);
         ScrollableSheet {
-            app,
+            cell,
             view_key,
             content_key,
             route,
@@ -2659,12 +2668,13 @@ mod tests {
     #[test]
     fn a_scrollable_built_through_the_scrollable_builder_scrolls() {
         let ScrollableSheet {
-            mut app,
+            cell,
             view_key,
             content_key,
             route,
             at,
         } = show_scrollable_sheet();
+        let mut app = cell.borrow_mut();
         assert_eq!(top_left(&view_key, &mut app).dy(), SHEET_TOP);
         assert_eq!(top_left(&content_key, &mut app).dy(), SHEET_TOP);
 
@@ -2709,12 +2719,13 @@ mod tests {
     #[test]
     fn a_downward_drag_at_the_top_of_the_scrollable_dismisses_the_sheet() {
         let ScrollableSheet {
-            mut app,
+            cell,
             view_key,
             route,
             at,
             ..
         } = show_scrollable_sheet();
+        let mut app = cell.borrow_mut();
 
         send(&mut app, PointerChange::Down, 200.0, 50.0, Duration::ZERO);
         for step in 1_u64..=5 {
@@ -2752,7 +2763,8 @@ mod tests {
     fn a_nested_navigation_sheets_inner_route_pops_back_to_the_root() {
         let page_probe: Rc<Probe> = Rc::default();
         let page_key = GlobalKey::new();
-        let (mut app, at) = app_with_page(&page_probe, &page_key);
+        let (cell, at) = app_with_page(&page_probe, &page_key);
+        let mut app = cell.borrow_mut();
 
         let sheet_probe: Rc<Probe> = Rc::default();
         let sheet_key = GlobalKey::new();

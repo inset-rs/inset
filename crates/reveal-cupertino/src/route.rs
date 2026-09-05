@@ -2787,7 +2787,7 @@ mod tests {
 
     use super::*;
     use crate::localizations::DefaultCupertinoLocalizations;
-    use crate::test_support::{app, build, pump};
+    use crate::test_support::{build, pump, test_cell};
 
     /// The test view is 800x600 physical at 2x.
     const VIEW_WIDTH: f64 = 400.0;
@@ -2899,16 +2899,19 @@ mod tests {
 
     #[test]
     fn a_pushed_cupertino_page_route_slides_in_from_the_right() {
-        let mut app = app();
+        let cell = test_cell();
+        let app = cell.borrow();
         let navigator_key = GlobalKey::new();
+        drop(app);
         build(
-            &mut app,
+            &cell,
             navigator(&navigator_key, |navigator| {
                 navigator.on_generate_route(|app, _settings| {
                     Some(Route::as_route(CupertinoPageRoute::new(app, plain_page())))
                 })
             }),
         );
+        let mut app = cell.borrow_mut();
         let state = navigator_state(&navigator_key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
@@ -2942,7 +2945,8 @@ mod tests {
 
     #[test]
     fn cupertino_pages_build_page_based_routes_that_carry_the_previous_title() {
-        let mut app = app();
+        let cell = test_cell();
+        let app = cell.borrow();
         let navigator_key = GlobalKey::new();
         let top_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
         let pages: Vec<PageRef> = vec![
@@ -2961,12 +2965,14 @@ mod tests {
                 .title("Details".to_string()),
             ),
         ];
+        drop(app);
         build(
-            &mut app,
+            &cell,
             navigator(&navigator_key, move |navigator| {
                 navigator.pages(pages).on_did_remove_page(|_app, _page| {})
             }),
         );
+        let mut app = cell.borrow_mut();
         settle(&mut app, Duration::ZERO);
 
         let context = top_context.get().expect("the top page built");
@@ -2991,16 +2997,19 @@ mod tests {
 
     #[test]
     fn a_flung_back_gesture_drag_moves_the_page_and_pops_the_route() {
-        let mut app = app();
+        let cell = test_cell();
+        let app = cell.borrow();
         let navigator_key = GlobalKey::new();
+        drop(app);
         build(
-            &mut app,
+            &cell,
             navigator(&navigator_key, |navigator| {
                 navigator.on_generate_route(|app, _settings| {
                     Some(Route::as_route(CupertinoPageRoute::new(app, plain_page())))
                 })
             }),
         );
+        let mut app = cell.borrow_mut();
         let state = navigator_state(&navigator_key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
@@ -3041,16 +3050,19 @@ mod tests {
 
     #[test]
     fn a_dropped_short_back_gesture_drag_snaps_the_page_back() {
-        let mut app = app();
+        let cell = test_cell();
+        let app = cell.borrow();
         let navigator_key = GlobalKey::new();
+        drop(app);
         build(
-            &mut app,
+            &cell,
             navigator(&navigator_key, |navigator| {
                 navigator.on_generate_route(|app, _settings| {
                     Some(Route::as_route(CupertinoPageRoute::new(app, plain_page())))
                 })
             }),
         );
+        let mut app = cell.borrow_mut();
         let state = navigator_state(&navigator_key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
@@ -3092,10 +3104,12 @@ mod tests {
 
     #[test]
     fn a_modal_popup_slides_up_from_the_bottom_and_dismisses_on_a_barrier_tap() {
-        let mut app = app();
+        let cell = test_cell();
+        let app = cell.borrow();
         let navigator_key = GlobalKey::new();
         let page_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        build(&mut app, {
+        drop(app);
+        build(&cell, {
             let page_context = Rc::clone(&page_context);
             navigator(&navigator_key, move |navigator| {
                 navigator.on_generate_route(move |app, _settings| {
@@ -3106,6 +3120,7 @@ mod tests {
                 })
             })
         });
+        let mut app = cell.borrow_mut();
         let at = settle(&mut app, Duration::ZERO);
 
         let popup_key = GlobalKey::new();
@@ -3154,10 +3169,12 @@ mod tests {
 
     #[test]
     fn a_cupertino_dialog_fades_in() {
-        let mut app = app();
+        let cell = test_cell();
+        let app = cell.borrow();
         let navigator_key = GlobalKey::new();
         let page_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        build(&mut app, {
+        drop(app);
+        build(&cell, {
             let page_context = Rc::clone(&page_context);
             navigator(&navigator_key, move |navigator| {
                 navigator.on_generate_route(move |app, _settings| {
@@ -3168,6 +3185,7 @@ mod tests {
                 })
             })
         });
+        let mut app = cell.borrow_mut();
         let at = settle(&mut app, Duration::ZERO);
 
         let dialog_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
@@ -3206,10 +3224,12 @@ mod tests {
 
     #[test]
     fn the_pop_gesture_is_disabled_for_the_first_route_and_for_a_fullscreen_dialog() {
-        let mut app = app();
+        let cell = test_cell();
+        let app = cell.borrow();
         let navigator_key = GlobalKey::new();
         let first = Rc::new(Cell::new(None));
-        build(&mut app, {
+        drop(app);
+        build(&cell, {
             let first = Rc::clone(&first);
             navigator(&navigator_key, move |navigator| {
                 navigator.on_generate_route(move |app, _settings| {
@@ -3219,6 +3239,7 @@ mod tests {
                 })
             })
         });
+        let mut app = cell.borrow_mut();
         let state = navigator_state(&navigator_key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
         let first = first.get().expect("the initial route was generated");

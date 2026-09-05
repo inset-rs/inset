@@ -474,7 +474,7 @@ fn debug_log_diagnostic(pointer: i64, message: &str, member_count: Option<usize>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reveal_foundation::{App, Handle};
+    use reveal_foundation::{App, AppCell, Handle};
 
     const PRIMARY_KEY: i64 = 4;
 
@@ -517,7 +517,7 @@ mod tests {
     }
 
     struct GestureTester {
-        app: App,
+        cell: Rc<AppCell>,
         arena: Handle<GestureArenaManager>,
         first: Handle<TestMember>,
         second: Handle<TestMember>,
@@ -527,12 +527,14 @@ mod tests {
 
     impl GestureTester {
         fn new() -> GestureTester {
-            let mut app = App::new();
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
             let first = TestMember::new(&mut app);
             let second = TestMember::new(&mut app);
             let arena = GestureArenaManager::new(&mut app);
+            drop(app);
             GestureTester {
-                app,
+                cell,
                 arena,
                 first,
                 second,
@@ -542,32 +544,40 @@ mod tests {
         }
 
         fn add_first(&mut self) {
-            self.first_entry = Some(self.arena.add(&mut self.app, PRIMARY_KEY, self.first));
+            self.first_entry = Some(self.arena.add(
+                &mut self.cell.borrow_mut(),
+                PRIMARY_KEY,
+                self.first,
+            ));
         }
 
         fn add_second(&mut self) {
-            self.second_entry = Some(self.arena.add(&mut self.app, PRIMARY_KEY, self.second));
+            self.second_entry = Some(self.arena.add(
+                &mut self.cell.borrow_mut(),
+                PRIMARY_KEY,
+                self.second,
+            ));
         }
 
         fn expect_nothing(&self) {
-            assert!(!self.first.accept_ran(&self.app));
-            assert!(!self.first.reject_ran(&self.app));
-            assert!(!self.second.accept_ran(&self.app));
-            assert!(!self.second.reject_ran(&self.app));
+            assert!(!self.first.accept_ran(&self.cell.borrow()));
+            assert!(!self.first.reject_ran(&self.cell.borrow()));
+            assert!(!self.second.accept_ran(&self.cell.borrow()));
+            assert!(!self.second.reject_ran(&self.cell.borrow()));
         }
 
         fn expect_first_win(&self) {
-            assert!(self.first.accept_ran(&self.app));
-            assert!(!self.first.reject_ran(&self.app));
-            assert!(!self.second.accept_ran(&self.app));
-            assert!(self.second.reject_ran(&self.app));
+            assert!(self.first.accept_ran(&self.cell.borrow()));
+            assert!(!self.first.reject_ran(&self.cell.borrow()));
+            assert!(!self.second.accept_ran(&self.cell.borrow()));
+            assert!(self.second.reject_ran(&self.cell.borrow()));
         }
 
         fn expect_second_win(&self) {
-            assert!(!self.first.accept_ran(&self.app));
-            assert!(self.first.reject_ran(&self.app));
-            assert!(self.second.accept_ran(&self.app));
-            assert!(!self.second.reject_ran(&self.app));
+            assert!(!self.first.accept_ran(&self.cell.borrow()));
+            assert!(self.first.reject_ran(&self.cell.borrow()));
+            assert!(self.second.accept_ran(&self.cell.borrow()));
+            assert!(!self.second.reject_ran(&self.cell.borrow()));
         }
     }
 
@@ -576,13 +586,15 @@ mod tests {
         let mut tester = GestureTester::new();
         tester.add_first();
         tester.add_second();
-        tester.arena.close(&mut tester.app, PRIMARY_KEY);
+        tester
+            .arena
+            .close(&mut tester.cell.borrow_mut(), PRIMARY_KEY);
         tester.expect_nothing();
         tester
             .first_entry
             .as_ref()
             .unwrap()
-            .resolve(&mut tester.app, GestureDisposition::Accepted);
+            .resolve(&mut tester.cell.borrow_mut(), GestureDisposition::Accepted);
         tester.expect_first_win();
     }
 
@@ -591,9 +603,13 @@ mod tests {
         let mut tester = GestureTester::new();
         tester.add_first();
         tester.add_second();
-        tester.arena.close(&mut tester.app, PRIMARY_KEY);
+        tester
+            .arena
+            .close(&mut tester.cell.borrow_mut(), PRIMARY_KEY);
         tester.expect_nothing();
-        tester.arena.sweep(&mut tester.app, PRIMARY_KEY);
+        tester
+            .arena
+            .sweep(&mut tester.cell.borrow_mut(), PRIMARY_KEY);
         tester.expect_first_win();
     }
 
@@ -602,13 +618,21 @@ mod tests {
         let mut tester = GestureTester::new();
         tester.add_first();
         tester.add_second();
-        tester.arena.close(&mut tester.app, PRIMARY_KEY);
+        tester
+            .arena
+            .close(&mut tester.cell.borrow_mut(), PRIMARY_KEY);
         tester.expect_nothing();
-        tester.arena.hold(&mut tester.app, PRIMARY_KEY);
+        tester
+            .arena
+            .hold(&mut tester.cell.borrow_mut(), PRIMARY_KEY);
         tester.expect_nothing();
-        tester.arena.sweep(&mut tester.app, PRIMARY_KEY);
+        tester
+            .arena
+            .sweep(&mut tester.cell.borrow_mut(), PRIMARY_KEY);
         tester.expect_nothing();
-        tester.arena.release(&mut tester.app, PRIMARY_KEY);
+        tester
+            .arena
+            .release(&mut tester.cell.borrow_mut(), PRIMARY_KEY);
         tester.expect_first_win();
     }
 
@@ -617,13 +641,21 @@ mod tests {
         let mut tester = GestureTester::new();
         tester.add_first();
         tester.add_second();
-        tester.arena.close(&mut tester.app, PRIMARY_KEY);
+        tester
+            .arena
+            .close(&mut tester.cell.borrow_mut(), PRIMARY_KEY);
         tester.expect_nothing();
-        tester.arena.hold(&mut tester.app, PRIMARY_KEY);
+        tester
+            .arena
+            .hold(&mut tester.cell.borrow_mut(), PRIMARY_KEY);
         tester.expect_nothing();
-        tester.arena.release(&mut tester.app, PRIMARY_KEY);
+        tester
+            .arena
+            .release(&mut tester.cell.borrow_mut(), PRIMARY_KEY);
         tester.expect_nothing();
-        tester.arena.sweep(&mut tester.app, PRIMARY_KEY);
+        tester
+            .arena
+            .sweep(&mut tester.cell.borrow_mut(), PRIMARY_KEY);
         tester.expect_first_win();
     }
 
@@ -632,18 +664,20 @@ mod tests {
         let mut tester = GestureTester::new();
         tester.add_first();
         tester.add_second();
-        tester.arena.close(&mut tester.app, PRIMARY_KEY);
+        tester
+            .arena
+            .close(&mut tester.cell.borrow_mut(), PRIMARY_KEY);
         tester.expect_nothing();
         tester
             .first_entry
             .as_ref()
             .unwrap()
-            .resolve(&mut tester.app, GestureDisposition::Accepted);
+            .resolve(&mut tester.cell.borrow_mut(), GestureDisposition::Accepted);
         tester
             .second_entry
             .as_ref()
             .unwrap()
-            .resolve(&mut tester.app, GestureDisposition::Accepted);
+            .resolve(&mut tester.cell.borrow_mut(), GestureDisposition::Accepted);
         tester.expect_first_win();
     }
 
@@ -652,18 +686,20 @@ mod tests {
         let mut tester = GestureTester::new();
         tester.add_first();
         tester.add_second();
-        tester.arena.close(&mut tester.app, PRIMARY_KEY);
+        tester
+            .arena
+            .close(&mut tester.cell.borrow_mut(), PRIMARY_KEY);
         tester.expect_nothing();
         tester
             .second_entry
             .as_ref()
             .unwrap()
-            .resolve(&mut tester.app, GestureDisposition::Accepted);
+            .resolve(&mut tester.cell.borrow_mut(), GestureDisposition::Accepted);
         tester
             .first_entry
             .as_ref()
             .unwrap()
-            .resolve(&mut tester.app, GestureDisposition::Accepted);
+            .resolve(&mut tester.cell.borrow_mut(), GestureDisposition::Accepted);
         tester.expect_second_win();
     }
 
@@ -677,9 +713,11 @@ mod tests {
             .first_entry
             .as_ref()
             .unwrap()
-            .resolve(&mut tester.app, GestureDisposition::Accepted);
+            .resolve(&mut tester.cell.borrow_mut(), GestureDisposition::Accepted);
         tester.expect_nothing();
-        tester.arena.close(&mut tester.app, PRIMARY_KEY);
+        tester
+            .arena
+            .close(&mut tester.cell.borrow_mut(), PRIMARY_KEY);
         tester.expect_first_win();
     }
 
@@ -693,14 +731,16 @@ mod tests {
             .first_entry
             .as_ref()
             .unwrap()
-            .resolve(&mut tester.app, GestureDisposition::Accepted);
+            .resolve(&mut tester.cell.borrow_mut(), GestureDisposition::Accepted);
         tester
             .second_entry
             .as_ref()
             .unwrap()
-            .resolve(&mut tester.app, GestureDisposition::Accepted);
+            .resolve(&mut tester.cell.borrow_mut(), GestureDisposition::Accepted);
         tester.expect_nothing();
-        tester.arena.close(&mut tester.app, PRIMARY_KEY);
+        tester
+            .arena
+            .close(&mut tester.cell.borrow_mut(), PRIMARY_KEY);
         tester.expect_first_win();
     }
 
@@ -714,20 +754,23 @@ mod tests {
             .second_entry
             .as_ref()
             .unwrap()
-            .resolve(&mut tester.app, GestureDisposition::Accepted);
+            .resolve(&mut tester.cell.borrow_mut(), GestureDisposition::Accepted);
         tester
             .first_entry
             .as_ref()
             .unwrap()
-            .resolve(&mut tester.app, GestureDisposition::Accepted);
+            .resolve(&mut tester.cell.borrow_mut(), GestureDisposition::Accepted);
         tester.expect_nothing();
-        tester.arena.close(&mut tester.app, PRIMARY_KEY);
+        tester
+            .arena
+            .close(&mut tester.cell.borrow_mut(), PRIMARY_KEY);
         tester.expect_second_win();
     }
 
     #[test]
     fn eager_winner_cleared_when_it_rejects_while_open() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let arena = GestureArenaManager::new(&mut app);
         let member_a = TestMember::new(&mut app);
         let member_b = TestMember::new(&mut app);
@@ -759,7 +802,8 @@ mod tests {
 
     #[test]
     fn sole_member_wins_on_close_after_microtask() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let arena = GestureArenaManager::new(&mut app);
         let member = TestMember::new(&mut app);
         arena.add(&mut app, PRIMARY_KEY, member);

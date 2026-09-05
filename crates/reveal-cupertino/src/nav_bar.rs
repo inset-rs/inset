@@ -4863,6 +4863,7 @@ fn widget_ref_eq(a: &Option<WidgetRef>, b: &Option<WidgetRef>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
 
     use reveal_embedder::{
@@ -4884,15 +4885,16 @@ mod tests {
     use crate::localizations::DefaultCupertinoLocalizations;
     use crate::page_scaffold::CupertinoPageScaffold;
     use crate::route::CupertinoPageRoute;
-    use crate::test_support::{app as test_app, build, pump};
+    use crate::test_support::{build, pump, test_cell};
 
     /// The test view is 800x600 physical at 2x.
     const VIEW_WIDTH: f64 = 400.0;
 
     /// What the shell does at start-up: the app-wide fonts, plus the icon font the chevron
     /// shapes from.
-    fn app_with_fonts() -> App {
-        let mut app = test_app();
+    fn app_with_fonts() -> Rc<AppCell> {
+        let cell = test_cell();
+        let mut app = cell.borrow_mut();
         let binding = reveal_painting::PaintingBinding::instance(&mut app);
         if !binding.has_fonts(&app) {
             binding.install_fonts(&mut app, |fonts| {
@@ -4900,7 +4902,8 @@ mod tests {
             });
         }
         install_cupertino_icon_font(&mut app);
-        app
+        drop(app);
+        cell
     }
 
     fn root_element(app: &mut App) -> AnyElement {
@@ -4990,7 +4993,7 @@ mod tests {
 
     /// Mounts a bare navigation bar under the chrome it reads: a media query with `padding`,
     /// the Cupertino localizations, and a text direction.
-    fn mount_bar(app: &mut App, padding: EdgeInsets, bar: CupertinoNavigationBar) -> GlobalKey {
+    fn mount_bar(cell: &AppCell, padding: EdgeInsets, bar: CupertinoNavigationBar) -> GlobalKey {
         let key = GlobalKey::new();
         let bar = bar.key(Rc::new(key.clone()));
         // A scaffold `Positioned`s the bar at the top, which leaves its height loose.
@@ -5002,7 +5005,7 @@ mod tests {
         )
         .into_widget();
         build(
-            app,
+            cell,
             Localizations::new(
                 Locale::new("en"),
                 vec![
@@ -5017,11 +5020,13 @@ mod tests {
     }
 
     /// An iOS app whose routes are built by `on_generate_route`, settled.
-    fn mount_app(configure: impl FnOnce(CupertinoApp) -> CupertinoApp) -> App {
-        let mut app = app_with_fonts();
-        build(&mut app, configure(CupertinoApp::new()).into_widget());
+    fn mount_app(configure: impl FnOnce(CupertinoApp) -> CupertinoApp) -> Rc<AppCell> {
+        let cell = app_with_fonts();
+        build(&cell, configure(CupertinoApp::new()).into_widget());
+        let mut app = cell.borrow_mut();
         settle(&mut app);
-        app
+        drop(app);
+        cell
     }
 
     /// Sends one pointer packet; the test view is 2x, so logical coordinates double.
@@ -5062,14 +5067,15 @@ mod tests {
 
     #[test]
     fn a_navigation_bar_centres_its_middle_and_reports_its_persistent_height() {
-        let mut app = app_with_fonts();
+        let cell = app_with_fonts();
         let bar = CupertinoNavigationBar::new().middle(Text::new("Title"));
         assert_eq!(
             bar.preferred_size(),
             Size::from_height(K_NAV_BAR_PERSISTENT_HEIGHT),
             "a bar without a bottom or a large title prefers the persistent height"
         );
-        let key = mount_bar(&mut app, EdgeInsets::from_ltrb(0.0, 20.0, 0.0, 0.0), bar);
+        let key = mount_bar(&cell, EdgeInsets::from_ltrb(0.0, 20.0, 0.0, 0.0), bar);
+        let mut app = cell.borrow_mut();
 
         let middle = paragraph_of(&mut app, "Title").expect("the middle is shown");
         let rect = global_rect(&mut app, middle.as_box());
@@ -5101,13 +5107,13 @@ mod tests {
 
     #[test]
     fn a_navigation_bar_fully_obstructs_only_when_its_background_is_opaque() {
-        let mut app = test_app();
+        let cell = test_cell();
         let seen = Rc::new(Cell::new(None));
         let probe = Rc::clone(&seen);
         let opaque = CupertinoNavigationBar::new().background_color(Color::new(0xFF00FF00));
         let translucent = CupertinoNavigationBar::new().background_color(Color::new(0x8000FF00));
         build(
-            &mut app,
+            &cell,
             Directionality::new(
                 TextDirection::Ltr,
                 Builder::new(move |app: &mut App, context: BuildContext| {
@@ -5129,7 +5135,7 @@ mod tests {
 
     #[test]
     fn an_implied_back_label_reads_the_previous_route_title() {
-        let mut app = mount_app(|cupertino_app| {
+        let cell = mount_app(|cupertino_app| {
             cupertino_app.on_generate_route(move |app, settings| {
                 let second = settings.name.as_deref() == Some("/second");
                 let route =
@@ -5138,6 +5144,7 @@ mod tests {
                 Some(Route::as_route(route))
             })
         });
+        let mut app = cell.borrow_mut();
         let count = |app: &mut App, text: &str| texts(app).iter().filter(|t| *t == text).count();
         assert_eq!(count(&mut app, "Start"), 1, "the first route's middle");
 
@@ -5159,7 +5166,7 @@ mod tests {
 
     #[test]
     fn a_second_route_implies_its_title_as_the_middle_and_a_back_chevron_that_pops() {
-        let mut app = mount_app(|cupertino_app| {
+        let cell = mount_app(|cupertino_app| {
             cupertino_app.on_generate_route(move |app, settings| {
                 let second = settings.name.as_deref() == Some("/second");
                 let route = CupertinoPageRoute::new(
@@ -5172,6 +5179,7 @@ mod tests {
                 Some(Route::as_route(route))
             })
         });
+        let mut app = cell.borrow_mut();
 
         assert!(
             texts(&mut app).contains(&"Home".to_string()),
@@ -5220,7 +5228,7 @@ mod tests {
 
     #[test]
     fn automatically_imply_leading_and_middle_can_be_turned_off() {
-        let mut app = mount_app(|cupertino_app| {
+        let cell = mount_app(|cupertino_app| {
             cupertino_app.on_generate_route(move |app, _settings| {
                 let route = CupertinoPageRoute::new(
                     app,
@@ -5233,6 +5241,7 @@ mod tests {
                 Some(Route::as_route(route.title(app, "Home".to_string())))
             })
         });
+        let mut app = cell.borrow_mut();
         assert!(
             !texts(&mut app).contains(&"Home".to_string()),
             "automaticallyImplyMiddle false leaves the middle empty"
@@ -5244,7 +5253,7 @@ mod tests {
         const SCAFFOLD: Color = Color::new(0xFF102030);
         const BAR: Color = Color::new(0xFF405060);
 
-        let mut app = app_with_fonts();
+        let cell = app_with_fonts();
         let key = GlobalKey::new();
         let bar_key = Rc::new(key.clone());
         let inner = Rc::new(Cell::new(None));
@@ -5268,7 +5277,7 @@ mod tests {
         )
         .into_widget();
         build(
-            &mut app,
+            &cell,
             Localizations::new(
                 Locale::new("en"),
                 vec![
@@ -5279,6 +5288,7 @@ mod tests {
             .child(Directionality::new(TextDirection::Ltr, tree))
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
 
         assert_eq!(
             bar_background(&mut app, &key),
@@ -5338,7 +5348,8 @@ mod tests {
 
     #[test]
     fn a_sliver_navigation_bar_shows_the_large_title_and_collapses_it_when_scrolled() {
-        let mut app = app_with_fonts();
+        let cell = app_with_fonts();
+        let mut app = cell.borrow_mut();
         let controller = ScrollController::default(&mut app);
         let scroll_view = CustomScrollView::new()
             .controller(controller.as_controller())
@@ -5353,8 +5364,9 @@ mod tests {
                     .into_widget(),
             ]);
         let tree = MediaQuery::new(MediaQueryData::new(), scroll_view).into_widget();
+        drop(app);
         build(
-            &mut app,
+            &cell,
             Localizations::new(
                 Locale::new("en"),
                 vec![
@@ -5365,6 +5377,7 @@ mod tests {
             .child(Directionality::new(TextDirection::Ltr, tree))
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
 
         let large = paragraph_of(&mut app, "Large").expect("the large title is built");
         let expanded = global_rect(&mut app, large.as_box());
@@ -5411,7 +5424,7 @@ mod tests {
 
     #[test]
     fn a_hero_flight_between_two_bars_builds_the_navigation_bar_transition() {
-        let mut app = mount_app(|cupertino_app| {
+        let cell = mount_app(|cupertino_app| {
             cupertino_app.on_generate_route(move |app, settings| {
                 let second = settings.name.as_deref() == Some("/second");
                 let route =
@@ -5420,6 +5433,7 @@ mod tests {
                 Some(Route::as_route(route))
             })
         });
+        let mut app = cell.borrow_mut();
 
         let root = root_element(&mut app);
         let navigator = elements(&app, root)
@@ -5454,8 +5468,9 @@ mod tests {
             Size::from_height(K_NAV_BAR_PERSISTENT_HEIGHT + 30.0)
         );
 
-        let mut app = test_app();
-        let key = mount_bar(&mut app, EdgeInsets::ZERO, bar);
+        let cell = test_cell();
+        let key = mount_bar(&cell, EdgeInsets::ZERO, bar);
+        let mut app = cell.borrow_mut();
         let bar_box = keyed_box(&mut app, &key);
         assert_eq!(
             bar_box.size(&app).height(),

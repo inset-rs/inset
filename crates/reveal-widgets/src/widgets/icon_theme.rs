@@ -121,6 +121,7 @@ impl InheritedWidget for IconTheme {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -163,7 +164,8 @@ mod tests {
 
     #[test]
     fn of_returns_the_fallback_outside_any_icon_theme() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (reader, seen) = reader();
         mount(&mut app, reader);
         assert_eq!(seen.borrow().as_slice(), [IconThemeData::fallback()]);
@@ -171,7 +173,8 @@ mod tests {
 
     #[test]
     fn of_fills_a_partial_theme_from_the_fallback() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (reader, seen) = reader();
         let partial = IconThemeData::new().size(16.0).opacity(0.5);
         mount(&mut app, IconTheme::new(partial, reader).into_widget());
@@ -182,7 +185,8 @@ mod tests {
 
     #[test]
     fn a_changed_data_notifies_the_dependent_and_an_equal_one_does_not() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (reader, seen) = reader();
         let themed = |size: f64| {
             IconTheme::new(IconThemeData::new().size(size), reader.clone()).into_widget()
@@ -207,7 +211,8 @@ mod tests {
 
     #[test]
     fn merge_layers_its_data_over_the_ambient_theme() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (reader, seen) = reader();
         let red = Color::new(0xFFFF0000);
         let key: KeyRef = Rc::new(ValueKey::new("merged"));

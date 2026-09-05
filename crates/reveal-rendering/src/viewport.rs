@@ -2392,6 +2392,7 @@ impl RenderBox for RenderShrinkWrappingViewport {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -2507,7 +2508,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "does not support returning intrinsic dimensions")]
     fn a_viewport_has_no_intrinsic_dimensions() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::zero(&mut app);
         let viewport = vertical_viewport(&mut app, offset, vec![]);
         viewport.as_box().get_min_intrinsic_width(&mut app, 0.0);
@@ -2516,7 +2518,8 @@ mod tests {
     /// While the framework is checking intrinsics, a viewport answers zero instead of panicking.
     #[test]
     fn a_viewport_reports_zero_intrinsics_while_checking_them() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::zero(&mut app);
         let viewport = vertical_viewport(&mut app, offset, vec![]);
         crate::object::set_debug_checking_intrinsics(true);
@@ -2530,7 +2533,8 @@ mod tests {
     /// allow, and that is the size it takes.
     #[test]
     fn a_viewport_dry_layout_is_the_biggest_size() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (sliver, _paints) = test_sliver(&mut app, 100.0);
         let offset = FixedViewportOffset::zero(&mut app);
         let viewport = vertical_viewport(&mut app, offset, vec![sliver]);
@@ -2545,7 +2549,8 @@ mod tests {
     /// and the viewport reports the total scroll extent to its offset.
     #[test]
     fn a_viewport_lays_its_slivers_out_in_order() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (first, first_paints) = test_sliver(&mut app, 100.0);
         let (second, second_paints) = test_sliver(&mut app, 300.0);
         let offset = FixedViewportOffset::zero(&mut app);
@@ -2574,7 +2579,8 @@ mod tests {
     /// second moves up by the same amount.
     #[test]
     fn a_scrolled_viewport_moves_its_slivers() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (first, _) = test_sliver(&mut app, 100.0);
         let (second, _) = test_sliver(&mut app, 300.0);
         let offset = FixedViewportOffset::new(&mut app, 60.0);
@@ -2599,7 +2605,8 @@ mod tests {
     /// A hit lands on the sliver that covers the position, in the viewport's coordinate system.
     #[test]
     fn a_viewport_hit_tests_the_sliver_under_the_position() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (first, _) = test_sliver(&mut app, 100.0);
         let (second, _) = test_sliver(&mut app, 300.0);
         let offset = FixedViewportOffset::zero(&mut app);
@@ -2629,7 +2636,8 @@ mod tests {
     /// The cache extent widens the region slivers are asked to lay out for.
     #[test]
     fn the_cache_extent_widens_the_laid_out_region() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (sliver, _) = test_sliver(&mut app, 1000.0);
         let offset = FixedViewportOffset::zero(&mut app);
         let viewport = vertical_viewport(&mut app, offset, vec![sliver]);
@@ -2658,7 +2666,8 @@ mod tests {
     /// incoming constraints.
     #[test]
     fn a_shrink_wrapping_viewport_sizes_itself_to_its_slivers() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (first, _) = test_sliver(&mut app, 60.0);
         let (second, _) = test_sliver(&mut app, 90.0);
         let offset = FixedViewportOffset::zero(&mut app);
@@ -2691,7 +2700,8 @@ mod tests {
     /// viewport's cross axis extent and painted at the sliver's paint offset.
     #[test]
     fn a_viewport_hosts_a_box_through_the_adapter() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight_for(None, Some(80.0)), None);
         let adapter = RenderSliverToBoxAdapter::new(&mut app, Some(child.as_box()));
@@ -2715,7 +2725,8 @@ mod tests {
     /// The viewport is the `RenderAbstractViewport` that `maybe_of` finds from a descendant.
     #[test]
     fn maybe_of_finds_the_enclosing_viewport() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight_for(None, Some(80.0)), None);
         let adapter = RenderSliverToBoxAdapter::new(&mut app, Some(child.as_box()));
@@ -2735,7 +2746,8 @@ mod tests {
     /// `get_offset_to_reveal` reports the offset that brings a descendant box to the leading edge.
     #[test]
     fn get_offset_to_reveal_reports_the_leading_edge_offset() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let leading =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight_for(None, Some(100.0)), None);
         let first = RenderSliverToBoxAdapter::new(&mut app, Some(leading.as_box()));
@@ -2787,7 +2799,8 @@ mod tests {
     /// The paint order decides which sliver paints last and which is hit-tested first.
     #[test]
     fn the_paint_order_reverses_the_hit_test_order() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (first, _) = test_sliver(&mut app, 100.0);
         let (second, _) = test_sliver(&mut app, 300.0);
         let offset = FixedViewportOffset::zero(&mut app);

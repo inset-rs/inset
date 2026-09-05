@@ -1168,6 +1168,7 @@ impl RenderBox for RenderIndexedStack {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -1247,7 +1248,8 @@ mod tests {
     /// and a positioned child does not count.
     #[test]
     fn stack_intrinsics_are_the_largest_non_positioned_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let first =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(30.0, 40.0)), None);
         let second =
@@ -1279,7 +1281,8 @@ mod tests {
     /// lays out to.
     #[test]
     fn dry_layout_matches_layout_for_a_padding_in_a_flex_in_a_stack() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let leaf =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(40.0, 20.0)), None);
         let padding = RenderPadding::new(
@@ -1306,7 +1309,8 @@ mod tests {
 
     #[test]
     fn positioned_child_is_laid_out_by_its_rect() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (child, _) = sized_box(&mut app, Size::new(10.0, 10.0));
         let stack = RenderStack::new(&mut app);
         stack.set_text_direction(&mut app, Some(TextDirection::Ltr));
@@ -1349,7 +1353,8 @@ mod tests {
             ),
         ];
         for (fit, child_size, stack_size) in cases {
-            let mut app = App::new();
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
             let (child, _) = sized_box(&mut app, Size::new(20.0, 20.0));
             let stack = RenderStack::new(&mut app);
             stack.set_text_direction(&mut app, Some(TextDirection::Ltr));
@@ -1376,7 +1381,8 @@ mod tests {
     /// [`RenderIndexedStack::index`].
     #[test]
     fn indexed_stack_paints_one_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (first, first_paints) = sized_box(&mut app, Size::new(20.0, 20.0));
         let (second, second_paints) = sized_box(&mut app, Size::new(30.0, 30.0));
         let stack = RenderIndexedStack::new(&mut app);
@@ -1408,7 +1414,8 @@ mod tests {
     #[test]
     fn overflowing_positioned_child_is_clipped() {
         for (clip_behavior, clips) in [(Clip::None, false), (Clip::HardEdge, true)] {
-            let mut app = App::new();
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
             let (child, _) = sized_box(&mut app, Size::new(10.0, 10.0));
             let stack = RenderStack::new(&mut app);
             stack.set_text_direction(&mut app, Some(TextDirection::Ltr));

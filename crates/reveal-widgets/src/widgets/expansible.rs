@@ -695,6 +695,7 @@ fn curves_identical(a: &Option<Rc<dyn Curve>>, b: &Option<Rc<dyn Curve>>) -> boo
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
 
     use reveal_embedder::{Size, TextDirection};
@@ -826,7 +827,8 @@ mod tests {
     // expansible_test.dart 'Expansible expands and collapses'
     #[test]
     fn an_expansible_expands_and_collapses_through_its_controller() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = ExpansibleController::new(&mut app);
         let builds = Rc::new(Cell::new(0));
         let harness = mount(&mut app, expansible(controller, &builds));
@@ -854,7 +856,8 @@ mod tests {
     // expansible_test.dart 'Expansible maintainState'
     #[test]
     fn a_collapsed_expansible_removes_its_body_when_maintain_state_is_false() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = ExpansibleController::new(&mut app);
         let builds = Rc::new(Cell::new(0));
         let harness = mount(
@@ -881,7 +884,8 @@ mod tests {
 
     #[test]
     fn a_collapsed_expansible_keeps_its_body_when_maintain_state_is_true() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = ExpansibleController::new(&mut app);
         let builds = Rc::new(Cell::new(0));
         let harness = mount(&mut app, expansible(controller, &builds));
@@ -895,7 +899,8 @@ mod tests {
     // expansible_test.dart 'Expansible restores state from PageStorage'
     #[test]
     fn an_expansible_restores_its_expanded_state_from_page_storage() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let bucket = PageStorageBucket::new(&mut app);
         let controller = ExpansibleController::new(&mut app);
         let builds = Rc::new(Cell::new(0));
@@ -935,7 +940,8 @@ mod tests {
     // expansible_test.dart 'ExpansibleController.of'
     #[test]
     fn expansible_controller_of_finds_the_enclosing_expansible() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = ExpansibleController::new(&mut app);
         let found: Rc<Cell<Option<Handle<ExpansibleController>>>> = Rc::new(Cell::new(None));
         let header: ExpansibleComponentBuilder = Rc::new({
@@ -958,7 +964,8 @@ mod tests {
 
     #[test]
     fn a_custom_expansible_builder_replaces_the_default_column() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = ExpansibleController::new(&mut app);
         let builds = Rc::new(Cell::new(0));
         let widget = expansible(controller, &builds).expansible_builder(Rc::new(

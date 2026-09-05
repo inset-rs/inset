@@ -122,6 +122,7 @@ impl<W: StatusTransitionWidget> StatusTransitionState<W> {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
     use std::time::Duration;
 
@@ -178,7 +179,8 @@ mod tests {
 
     #[test]
     fn a_status_transition_rebuilds_on_status_changes_only() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = AnimationController::create(
             &mut app,
             None,

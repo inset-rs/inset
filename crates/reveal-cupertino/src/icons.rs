@@ -7419,6 +7419,7 @@ impl CupertinoIcons {
 #[cfg(test)]
 mod tests {
     use reveal_embedder::{FontCollection, TextDirection};
+    use reveal_foundation::AppCell;
     use reveal_painting::{TextPainter, TextSpan, TextStyle};
 
     use super::*;
@@ -7482,7 +7483,8 @@ mod tests {
 
     #[test]
     fn installing_the_font_registers_a_family_covering_the_icon_glyphs() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let fonts = installed_fonts(&mut app);
         let collection = app.get(fonts);
         let id = collection
@@ -7496,7 +7498,8 @@ mod tests {
 
     #[test]
     fn installing_the_font_twice_registers_it_once() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let fonts = installed_fonts(&mut app);
         install_cupertino_icon_font(&mut app);
         assert_eq!(app.get(fonts).len(), 1);
@@ -7504,7 +7507,8 @@ mod tests {
 
     #[test]
     fn an_installed_icon_lays_out_as_one_glyph() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let fonts = installed_fonts(&mut app);
         let mut painter = TextPainter::new();
         painter.set_text(Some(

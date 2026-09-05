@@ -4195,6 +4195,7 @@ mod tests {
     use crate::test_harness::Harness;
     use crate::widgets::basic::SizedBox;
     use crate::widgets::media_query::MediaQueryData;
+    use reveal_foundation::AppCell;
 
     fn test_entry(app: &mut App) -> Handle<OverlayEntry> {
         OverlayEntry::new(
@@ -4250,7 +4251,8 @@ mod tests {
 
     #[test]
     fn overlay_entries_are_inserted_rearranged_and_removed_in_order() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (first, second) = (test_entry(&mut app), test_entry(&mut app));
         let harness = mount_overlay(&mut app, vec![first, second]);
         let theater = theater_of(&harness, &app);
@@ -4292,7 +4294,8 @@ mod tests {
 
     #[test]
     fn an_opaque_entry_takes_the_entries_below_it_offstage() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let bottom = OverlayEntry::new(
             &mut app,
             Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
@@ -4336,7 +4339,8 @@ mod tests {
 
     #[test]
     fn an_overlay_portal_shows_and_hides_its_overlay_child_in_the_overlay() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = OverlayPortalController::new(&mut app, None);
         let entry = OverlayEntry::new(
             &mut app,

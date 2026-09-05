@@ -1607,6 +1607,7 @@ impl AnyRestorationMixin {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
     use std::time::{Duration, Instant};
 
@@ -1662,14 +1663,14 @@ mod tests {
     }
 
     /// An [`App`] whose host restores the provided bucket hierarchy.
-    fn app_restoring(data: Option<RestorationMap>) -> (App, Rc<RecordingPlatform>) {
+    fn app_restoring(data: Option<RestorationMap>) -> (Rc<AppCell>, Rc<RecordingPlatform>) {
         let platform = Rc::new(RecordingPlatform::default());
         *platform.stored.borrow_mut() = Some(RestorationUpdate {
             enabled: true,
             data,
         });
-        let app = App::with_platform(Rc::clone(&platform) as PlatformRef);
-        (app, platform)
+        let cell = AppCell::with_platform(Rc::clone(&platform) as PlatformRef);
+        (cell, platform)
     }
 
     fn map<const N: usize>(entries: [(&str, RestorationData); N]) -> RestorationMap {
@@ -1835,9 +1836,10 @@ mod tests {
 
     #[test]
     fn the_root_scope_hands_the_hosts_root_bucket_down() {
-        let (mut app, _platform) =
+        let (cell, _platform) =
             app_restoring(Some(child("app", values([("count", 42i64.into())]))));
         let (probe, seen) = probe();
+        let mut app = cell.borrow_mut();
         mount(
             &mut app,
             RootRestorationScope::new(Some("app".to_string()), probe).into_widget(),
@@ -1850,7 +1852,8 @@ mod tests {
 
     #[test]
     fn the_root_scope_hands_nothing_down_without_a_restoration_id() {
-        let (mut app, _platform) = app_restoring(None);
+        let (cell, _platform) = app_restoring(None);
+        let mut app = cell.borrow_mut();
         let (probe, seen) = probe();
         mount(
             &mut app,
@@ -1862,10 +1865,11 @@ mod tests {
 
     #[test]
     fn a_restoration_scope_claims_the_child_bucket_named_by_its_id() {
-        let (mut app, _platform) = app_restoring(Some(child(
+        let (cell, _platform) = app_restoring(Some(child(
             "app",
             child("greeting", values([("hello", "world".into())])),
         )));
+        let mut app = cell.borrow_mut();
         let (probe, seen) = probe();
         mount(
             &mut app,
@@ -1883,7 +1887,8 @@ mod tests {
 
     #[test]
     fn a_restoration_scope_without_an_id_turns_restoration_off_for_its_subtree() {
-        let (mut app, _platform) = app_restoring(None);
+        let (cell, _platform) = app_restoring(None);
+        let mut app = cell.borrow_mut();
         let (probe, seen) = probe();
         mount(
             &mut app,
@@ -1896,10 +1901,11 @@ mod tests {
 
     #[test]
     fn a_registered_property_is_restored_from_the_hosts_data() {
-        let (mut app, _platform) = app_restoring(Some(child(
+        let (cell, _platform) = app_restoring(Some(child(
             "app",
             child("counter", values([("count", 7i64.into())])),
         )));
+        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
         let harness = mount(
             &mut app,
@@ -1921,7 +1927,8 @@ mod tests {
 
     #[test]
     fn a_property_with_no_stored_value_takes_its_default_and_writes_it_out() {
-        let (mut app, platform) = app_restoring(None);
+        let (cell, platform) = app_restoring(None);
+        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
         let harness = mount(
             &mut app,
@@ -1948,10 +1955,11 @@ mod tests {
 
     #[test]
     fn a_changed_property_reaches_the_host_at_the_end_of_the_frame() {
-        let (mut app, platform) = app_restoring(Some(child(
+        let (cell, platform) = app_restoring(Some(child(
             "app",
             child("counter", values([("count", 7i64.into())])),
         )));
+        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
         let harness = mount(
             &mut app,
@@ -1984,10 +1992,11 @@ mod tests {
 
     #[test]
     fn did_update_restoration_id_moves_the_bucket_and_its_data() {
-        let (mut app, platform) = app_restoring(Some(child(
+        let (cell, platform) = app_restoring(Some(child(
             "app",
             child("counter", values([("count", 7i64.into())])),
         )));
+        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
         let key_ref: KeyRef = Rc::new(key.clone());
         let tree = |restoration_id: &str, key: &KeyRef| {
@@ -2027,10 +2036,11 @@ mod tests {
 
     #[test]
     fn new_data_from_the_host_restores_the_registered_properties_again() {
-        let (mut app, _platform) = app_restoring(Some(child(
+        let (cell, _platform) = app_restoring(Some(child(
             "app",
             child("counter", values([("count", 7i64.into())])),
         )));
+        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
         let harness = mount(
             &mut app,
@@ -2063,7 +2073,8 @@ mod tests {
 
     #[test]
     fn a_state_without_a_surrounding_scope_gets_no_bucket() {
-        let (mut app, _platform) = app_restoring(None);
+        let (cell, _platform) = app_restoring(None);
+        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
         let harness = mount(
             &mut app,
@@ -2081,7 +2092,8 @@ mod tests {
 
     #[test]
     fn of_panics_outside_any_restoration_scope() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let context = Harness::mount(&mut app, SizedBox::shrink().into_widget())
             .root
             .as_element();

@@ -1828,7 +1828,7 @@ mod tests {
     use reveal_gestures::{DragEndDetails, DragUpdateDetails, Velocity};
 
     use super::*;
-    use crate::test_harness::{VIEW_HEIGHT, VIEW_WIDTH, binding_app, binding_mount, binding_pump};
+    use crate::test_harness::{VIEW_HEIGHT, VIEW_WIDTH, binding_cell, binding_mount, binding_pump};
     use crate::widgets::basic::{Builder, Directionality};
     use crate::widgets::media_query::{MediaQuery, MediaQueryData};
     use crate::widgets::single_child_scroll_view::SingleChildScrollView;
@@ -1874,16 +1874,19 @@ mod tests {
 
     #[test]
     fn the_sheet_starts_at_the_initial_child_size() {
-        let mut app = binding_app();
+        let cell = binding_cell();
+        let mut app = cell.borrow_mut();
         let controller = DraggableScrollableController::new(&mut app);
+        drop(app);
         binding_mount(
-            &mut app,
+            &cell,
             wrap(
                 DraggableScrollableSheet::new(scrollable_builder())
                     .initial_child_size(0.4)
                     .controller(controller),
             ),
         );
+        let app = cell.borrow();
 
         assert!(controller.is_attached(&app));
         assert_eq!(controller.size(&app), 0.4);
@@ -1893,16 +1896,19 @@ mod tests {
 
     #[test]
     fn a_drag_on_the_scrollable_grows_the_sheet_up_to_the_max_child_size() {
-        let mut app = binding_app();
+        let cell = binding_cell();
+        let mut app = cell.borrow_mut();
         let controller = DraggableScrollableController::new(&mut app);
+        drop(app);
         binding_mount(
-            &mut app,
+            &cell,
             wrap(
                 DraggableScrollableSheet::new(scrollable_builder())
                     .initial_child_size(0.5)
                     .controller(controller),
             ),
         );
+        let mut app = cell.borrow_mut();
 
         let position = position(&app, controller);
         let drag = ScrollPosition::drag(
@@ -1940,16 +1946,19 @@ mod tests {
 
     #[test]
     fn animate_to_reaches_the_size_and_notifies() {
-        let mut app = binding_app();
+        let cell = binding_cell();
+        let mut app = cell.borrow_mut();
         let controller = DraggableScrollableController::new(&mut app);
+        drop(app);
         binding_mount(
-            &mut app,
+            &cell,
             wrap(
                 DraggableScrollableSheet::new(scrollable_builder())
                     .initial_child_size(0.5)
                     .controller(controller),
             ),
         );
+        let mut app = cell.borrow_mut();
 
         let notified = Rc::new(Cell::new(0));
         let counter = Rc::clone(&notified);
@@ -1980,10 +1989,12 @@ mod tests {
 
     #[test]
     fn a_snapping_sheet_settles_on_the_nearest_snap_size() {
-        let mut app = binding_app();
+        let cell = binding_cell();
+        let mut app = cell.borrow_mut();
         let controller = DraggableScrollableController::new(&mut app);
+        drop(app);
         binding_mount(
-            &mut app,
+            &cell,
             wrap(
                 DraggableScrollableSheet::new(scrollable_builder())
                     .initial_child_size(0.5)
@@ -1992,6 +2003,7 @@ mod tests {
                     .controller(controller),
             ),
         );
+        let mut app = cell.borrow_mut();
 
         let position = position(&app, controller);
         let drag = ScrollPosition::drag(
@@ -2024,12 +2036,14 @@ mod tests {
 
     #[test]
     fn the_actuator_resets_the_sheet_to_its_initial_size() {
-        let mut app = binding_app();
+        let cell = binding_cell();
+        let mut app = cell.borrow_mut();
         let controller = DraggableScrollableController::new(&mut app);
         let inner_context: Rc<Cell<Option<BuildContext>>> = Rc::new(Cell::new(None));
         let reported = Rc::clone(&inner_context);
+        drop(app);
         binding_mount(
-            &mut app,
+            &cell,
             wrap(DraggableScrollableActuator::new(Builder::new(
                 move |_app, context| {
                     reported.set(Some(context));
@@ -2040,6 +2054,7 @@ mod tests {
                 },
             ))),
         );
+        let mut app = cell.borrow_mut();
 
         controller.jump_to(&mut app, 0.9);
         assert_eq!(controller.size(&app), 0.9);

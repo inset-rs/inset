@@ -730,6 +730,7 @@ pub fn intent_for_macos_selector(selector_name: &str) -> Option<IntentRef> {
 #[cfg(test)]
 mod tests {
     use reveal_embedder::{Platform, PlatformRef, ViewId, ViewRef};
+    use reveal_foundation::AppCell;
 
     use super::*;
     use crate::binding::WidgetsBinding;
@@ -766,8 +767,8 @@ mod tests {
         }
     }
 
-    fn app_of(platform: TargetPlatform) -> App {
-        App::with_platform(Rc::new(PlatformOf(platform)) as PlatformRef)
+    fn app_of(platform: TargetPlatform) -> Rc<AppCell> {
+        AppCell::with_platform(Rc::new(PlatformOf(platform)) as PlatformRef)
     }
 
     /// How the copy shortcut of a platform's table is described.
@@ -832,7 +833,8 @@ mod tests {
 
     #[test]
     fn an_apple_platform_hands_the_keys_it_handles_itself_back_to_the_ime() {
-        let mac = app_of(TargetPlatform::MacOS);
+        let mac_cell = app_of(TargetPlatform::MacOS);
+        let mac = mac_cell.borrow();
         let disabling = DefaultTextEditingShortcuts::get_disabling_shortcut(&mac)
             .expect("macOS disables the shortcuts the platform handles");
         assert!(disabling.iter().all(|(_, intent)| {
@@ -840,7 +842,8 @@ mod tests {
                 .as_any()
                 .is::<DoNothingAndStopPropagationTextIntent>()
         }));
-        let linux = app_of(TargetPlatform::Linux);
+        let linux_cell = app_of(TargetPlatform::Linux);
+        let linux = linux_cell.borrow();
         assert!(
             DefaultTextEditingShortcuts::get_disabling_shortcut(&linux).is_none(),
             "a non-Apple, non-web platform disables nothing"
@@ -849,11 +852,12 @@ mod tests {
 
     #[test]
     fn the_widget_wraps_its_child_in_the_platform_table_and_the_disabling_table() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
         mount(
-            &mut app,
+            &cell,
             DefaultTextEditingShortcuts::new(SizedBox::shrink()).into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let shortcuts = mounted_shortcuts(&mut app);
         let labels: Vec<&str> = shortcuts.iter().map(|(label, _)| label.as_str()).collect();
         assert_eq!(

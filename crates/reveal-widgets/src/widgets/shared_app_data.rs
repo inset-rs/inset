@@ -325,6 +325,7 @@ impl InheritedModel for SharedAppModel {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
 
     use super::*;
@@ -359,7 +360,8 @@ mod tests {
 
     #[test]
     fn set_value_rebuilds_only_the_dependents_of_that_key() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let counts: Rc<RefCell<Vec<i32>>> = Rc::default();
         let names: Rc<RefCell<Vec<String>>> = Rc::default();
         let count_context = Rc::new(Cell::new(None));
@@ -398,7 +400,8 @@ mod tests {
 
     #[test]
     fn get_value_initializes_once_and_shares_the_value_with_later_readers() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let inits = Rc::new(Cell::new(0));
         let seen: Rc<RefCell<Vec<i32>>> = Rc::default();
         let probe = |seen: &Rc<RefCell<Vec<i32>>>| {

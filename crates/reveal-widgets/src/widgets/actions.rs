@@ -2969,13 +2969,15 @@ mod tests {
 
     #[test]
     fn invoke_reaches_the_nearest_actions_widget_that_maps_the_intent() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let log: Rc<RefCell<Vec<String>>> = Rc::default();
         let outer = CountAction::new(&mut app, &log, "outer");
         let inner = CountAction::new(&mut app, &log, "inner");
         let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Actions::new(
                 map(TypeId::of::<CountIntent>(), Action::as_action(outer)),
                 Actions::new(
@@ -2985,6 +2987,7 @@ mod tests {
             )
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let context = captured.get().expect("the builder ran");
 
         let result = Actions::invoke(&mut app, context, &CountIntent { amount: 2 });
@@ -3001,13 +3004,15 @@ mod tests {
 
     #[test]
     fn invoke_walks_past_an_actions_widget_that_does_not_map_the_intent() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let log: Rc<RefCell<Vec<String>>> = Rc::default();
         let outer = CountAction::new(&mut app, &log, "outer");
         let unrelated = DoNothingAction::new(&mut app);
         let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Actions::new(
                 map(TypeId::of::<CountIntent>(), Action::as_action(outer)),
                 Actions::new(
@@ -3017,6 +3022,7 @@ mod tests {
             )
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let context = captured.get().expect("the builder ran");
 
         let result = Actions::invoke(&mut app, context, &CountIntent { amount: 5 });
@@ -3026,18 +3032,21 @@ mod tests {
 
     #[test]
     fn maybe_find_returns_the_bound_action_and_handler_only_when_it_is_enabled() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let log: Rc<RefCell<Vec<String>>> = Rc::default();
         let action = CountAction::new(&mut app, &log, "action");
         let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Actions::new(
                 map(TypeId::of::<CountIntent>(), Action::as_action(action)),
                 probe(&captured),
             )
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let context = captured.get().expect("the builder ran");
 
         assert_eq!(
@@ -3061,7 +3070,8 @@ mod tests {
 
     #[test]
     fn an_overridable_action_prefers_the_override_above_its_lookup_context() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let log: Rc<RefCell<Vec<String>>> = Rc::default();
         let override_action = CountAction::new(&mut app, &log, "override");
         let default_action = CountAction::new(&mut app, &log, "default");
@@ -3069,8 +3079,9 @@ mod tests {
         let inner_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
         let outer_sink = Rc::clone(&outer_context);
         let inner_sink = Rc::clone(&inner_context);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Actions::new(
                 map(
                     TypeId::of::<CountIntent>(),
@@ -3083,6 +3094,7 @@ mod tests {
             )
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let lookup_context = outer_context.get().expect("the builder ran");
 
         let overridable =
@@ -3092,11 +3104,14 @@ mod tests {
         assert_eq!(*log.borrow(), ["override:1"]);
 
         // With no override above the lookup context, the default action runs.
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let log: Rc<RefCell<Vec<String>>> = Rc::default();
         let default_action = CountAction::new(&mut app, &log, "default");
         let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        mount(&mut app, probe(&captured));
+        drop(app);
+        mount(&cell, probe(&captured));
+        let mut app = cell.borrow_mut();
         let lookup_context = captured.get().expect("the builder ran");
         let overridable =
             AnyAction::overridable(&mut app, Action::as_action(default_action), lookup_context);
@@ -3106,21 +3121,24 @@ mod tests {
 
     #[test]
     fn the_detector_reports_the_focus_highlight() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         FocusManager::instance(&mut app)
             .set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTraditional);
         let focus_highlights: Rc<RefCell<Vec<bool>>> = Rc::default();
         let focused: Rc<RefCell<Vec<bool>>> = Rc::default();
         let highlight_sink = Rc::clone(&focus_highlights);
         let focus_sink = Rc::clone(&focused);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             FocusableActionDetector::new(SizedBox::expand())
                 .autofocus(true)
                 .on_show_focus_highlight(move |_app, show| highlight_sink.borrow_mut().push(show))
                 .on_focus_change(move |_app, has_focus| focus_sink.borrow_mut().push(has_focus))
                 .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         // The post-frame callback `init_state` registered decides whether a highlight may show.
         pump_frame(&mut app);
 
@@ -3130,17 +3148,20 @@ mod tests {
 
     #[test]
     fn the_detector_reports_the_hover_highlight() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         FocusManager::instance(&mut app)
             .set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTraditional);
         let hover_highlights: Rc<RefCell<Vec<bool>>> = Rc::default();
         let sink = Rc::clone(&hover_highlights);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             FocusableActionDetector::new(SizedBox::expand())
                 .on_show_hover_highlight(move |_app, show| sink.borrow_mut().push(show))
                 .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         pump_frame(&mut app);
 
         let hover = |position: Offset| {
@@ -3160,7 +3181,8 @@ mod tests {
 
     #[test]
     fn a_disabled_detector_shows_no_highlight() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         FocusManager::instance(&mut app)
             .set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTraditional);
         let focus_highlights: Rc<RefCell<Vec<bool>>> = Rc::default();
@@ -3174,7 +3196,9 @@ mod tests {
                 .on_show_focus_highlight(move |_app, show| sink.borrow_mut().push(show))
                 .into_widget()
         };
-        mount(&mut app, detector(false, Rc::clone(&sink)));
+        drop(app);
+        mount(&cell, detector(false, Rc::clone(&sink)));
+        let mut app = cell.borrow_mut();
         pump_frame(&mut app);
         // A disabled detector sets `Focus.canRequestFocus` to false, so nothing is focused.
         node.request_focus(&mut app, None);
@@ -3182,7 +3206,9 @@ mod tests {
         assert!(!node.has_primary_focus(&app));
         assert!(focus_highlights.borrow().is_empty());
 
-        mount(&mut app, detector(true, Rc::clone(&sink)));
+        drop(app);
+        mount(&cell, detector(true, Rc::clone(&sink)));
+        let mut app = cell.borrow_mut();
         pump_frame(&mut app);
         node.request_focus(&mut app, None);
         app.drain_microtasks();

@@ -272,6 +272,7 @@ impl StatelessWidget for SliverSafeArea {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -305,7 +306,8 @@ mod tests {
 
     #[test]
     fn a_safe_area_pads_by_the_media_padding_it_avoids_and_removes_it_below() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let seen = Rc::new(RefCell::new(None));
         let probe = Builder::new({
             let seen = Rc::clone(&seen);
@@ -337,7 +339,8 @@ mod tests {
 
     #[test]
     fn maintaining_the_bottom_view_padding_uses_it_instead_of_the_consumed_padding() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             padded(
@@ -365,7 +368,8 @@ mod tests {
         use crate::widgets::basic::{Directionality, SliverToBoxAdapter};
         use crate::widgets::viewport::Viewport;
 
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::zero(&mut app);
         let area =
             SliverSafeArea::new(SliverToBoxAdapter::new().child(SizedBox::new().height(50.0)))

@@ -29,7 +29,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — a Rust future cannot hold `&mut App` across an `await`, so a continuation borrows the cell for each step instead (gpui's `AppCell` / `AsyncApp`), and it cannot start inline because the caller holds the `App`.
   Affect: a Dart `Future<T> m() async {..}` is `fn m(..) -> Task<T>` whose prefix runs where Dart's does; a method that only hands back a future returns that future's type (`CompleterFuture<T>` or `Task<T>`; edition 2024's `impl Future` would capture the `&mut App`). The shell runs the checkpoint at the end of every platform event and `AppCell::elapse` runs it around every timer, so `app.drain_microtasks()` is for a borrowed `App` only; nothing else may run the checkpoint, and `cx.update` while the `App` is borrowed panics.
 
-- Change: `App` holds the host `Platform`: `App::new` uses an inert one and `with_platform` installs a live one before user code.
+- Change: `App` holds the host `Platform`: `AppCell::new` uses an inert one and `AppCell::with_platform` installs a live one before user code.
   Reason: platform — dart:ui is host-bound; there is no isolate global to hang it on.
   Affect: host requests and view queries go through `app.platform()`.
 
@@ -91,5 +91,4 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Diagnostics / `FlutterError` structured trees. Trigger: porting diagnostics; until then messages are `debug_assert!` strings.
 - `GlobalKey` / `ObjectKey`. Trigger: `widgets/framework.dart`.
 - `AsyncCallback` / `AsyncValueSetter` / `AsyncValueGetter` / `IterableFilter`. Trigger: the first async or iterable-filter call site.
-- A bare `App::new` / `App::with_platform` and `App::elapse`: the tests written before `AppCell` build their `App` outside the cell, where `spawn` panics and `elapse` resumes no task. Trigger: the test pass after the cell's shape review, which builds every test `App` through `AppCell::new` and deletes the three.
 - Waking a task from another thread. Tasks are woken only from the main thread today, so a wake always lands before the next drain; a background task would need a `Send` poke into the host's event loop (winit's `EventLoopProxy`). Trigger: the first background executor or platform callback off the main thread.

@@ -1000,6 +1000,7 @@ impl AnimationController {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
@@ -1076,7 +1077,8 @@ mod tests {
     // ends Completed.
     #[test]
     fn forward_drives_the_value_to_the_upper_bound() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = controller_with_duration(&mut app, 100);
 
         controller.forward(&mut app, None);
@@ -1097,7 +1099,8 @@ mod tests {
 
     #[test]
     fn reverse_drives_the_value_to_the_lower_bound() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = controller_with_duration(&mut app, 100);
 
         controller.reverse(&mut app, Some(1.0));
@@ -1114,7 +1117,8 @@ mod tests {
 
     #[test]
     fn the_status_listener_sees_forward_then_completed() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = controller_with_duration(&mut app, 100);
 
         let log = Rc::new(RefCell::new(Vec::new()));
@@ -1139,7 +1143,8 @@ mod tests {
     // The value setter stops the animation and notifies even without change.
     #[test]
     fn set_value_stops_the_animation_and_notifies() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = controller_with_duration(&mut app, 100);
 
         let notified = Rc::new(RefCell::new(0));
@@ -1164,7 +1169,8 @@ mod tests {
     // The zero-duration path returns Dart's `TickerFuture.complete()`.
     #[test]
     fn a_zero_duration_animate_to_completes_synchronously() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = controller_with_duration(&mut app, 100);
 
         let future = controller.animate_to(&mut app, 1.0, Some(Duration::ZERO), Curves::linear());
@@ -1178,7 +1184,8 @@ mod tests {
     // (adapted): the direction setter flips the reported status mid-repeat.
     #[test]
     fn a_reversing_repeat_flips_the_status_each_period() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = controller_with_duration(&mut app, 100);
 
         let log = Rc::new(RefCell::new(Vec::new()));
@@ -1222,7 +1229,8 @@ mod tests {
     // Dart's in-`x()` setter call sits.
     #[test]
     fn the_direction_flip_notification_sees_the_pre_tick_value() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = controller_with_duration(&mut app, 100);
 
         let observed = Rc::new(RefCell::new(Vec::new()));
@@ -1255,7 +1263,8 @@ mod tests {
     // repeat with a count resolves the future once the periods are spent.
     #[test]
     fn a_counted_repeat_completes() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = controller_with_duration(&mut app, 100);
 
         let future = controller.repeat(&mut app, None, None, false, None, Some(1));
@@ -1276,7 +1285,8 @@ mod tests {
     // clamped away.
     #[test]
     fn fling_completes_at_the_upper_bound() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = controller_with_duration(&mut app, 100);
 
         controller.fling(&mut app, 1.0, None, None);
@@ -1296,7 +1306,8 @@ mod tests {
     // Disposing mid-flight cancels the ticker future without completing it.
     #[test]
     fn dispose_cancels_the_in_flight_future() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = controller_with_duration(&mut app, 100);
 
         let future = controller.forward(&mut app, None);
@@ -1318,7 +1329,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "dispose() called more than once")]
     fn a_second_dispose_panics_in_debug() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = controller_with_duration(&mut app, 100);
         controller.dispose(&mut app);
         controller.dispose(&mut app);
@@ -1327,7 +1339,8 @@ mod tests {
     // The velocity getter reads the simulation's dx at the last elapsed time.
     #[test]
     fn velocity_is_zero_when_not_animating() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = controller_with_duration(&mut app, 100);
         assert_eq!(controller.velocity(&mut app), 0.0);
 

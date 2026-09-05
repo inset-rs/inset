@@ -4090,6 +4090,7 @@ pub fn show_general_dialog(
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::{Cell, RefCell};
 
     use reveal_embedder::{
@@ -4160,11 +4161,11 @@ mod tests {
     }
 
     /// An [`App`] with a single view; the navigator needs a binding for its global keys.
-    fn app_with_view() -> App {
+    fn app_with_view() -> Rc<AppCell> {
         let platform: PlatformRef = Rc::new(TestPlatform {
             view: Rc::new(TestView),
         });
-        App::with_platform(platform)
+        AppCell::with_platform(platform)
     }
 
     fn pump_frame(app: &mut App, at: Duration) {
@@ -4174,10 +4175,10 @@ mod tests {
         app.drain_microtasks();
     }
 
-    fn mount(app: &mut App, child: WidgetRef) {
-        run_app(app, child);
-        app.elapse(Duration::ZERO);
-        pump_frame(app, Duration::ZERO);
+    fn mount(cell: &AppCell, child: WidgetRef) {
+        run_app(&mut cell.borrow_mut(), child);
+        cell.elapse(Duration::ZERO);
+        pump_frame(&mut cell.borrow_mut(), Duration::ZERO);
     }
 
     /// Runs frames until every route transition has settled.
@@ -4284,14 +4285,15 @@ mod tests {
 
     #[test]
     fn pushing_a_page_route_runs_its_transition_to_completion_and_popping_runs_it_back() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
         let key = GlobalKey::new();
         mount(
-            &mut app,
+            &cell,
             navigator(&key, |app, _settings| {
                 Some(page_route(app, None, "/").as_route())
             }),
         );
+        let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
@@ -4325,7 +4327,8 @@ mod tests {
 
     #[test]
     fn modal_route_of_reports_is_current_and_is_first() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let app = cell.borrow();
         let key = GlobalKey::new();
         let seen: Rc<RefCell<Vec<(bool, bool)>>> = Rc::new(RefCell::new(Vec::new()));
         let watcher = probe({
@@ -4337,12 +4340,14 @@ mod tests {
                 seen.borrow_mut().push((is_current, is_first));
             }
         });
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             navigator(&key, move |app, _settings| {
                 Some(page_route(app, Some(watcher.clone()), "/").as_route())
             }),
         );
+        let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
         assert_eq!(seen.borrow().last().copied(), Some((true, true)));
@@ -4359,7 +4364,7 @@ mod tests {
 
     #[test]
     fn a_pop_scope_with_can_pop_false_blocks_maybe_pop() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
         let key = GlobalKey::new();
         let blocked = Rc::new(Cell::new(false));
         let scope = PopScope::new(SizedBox::new())
@@ -4370,11 +4375,12 @@ mod tests {
             })
             .into_widget();
         mount(
-            &mut app,
+            &cell,
             navigator(&key, |app, _settings| {
                 Some(page_route(app, None, "/").as_route())
             }),
         );
+        let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
@@ -4394,14 +4400,15 @@ mod tests {
 
     #[test]
     fn tapping_the_barrier_dismisses_a_dismissible_popup_route() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
         let key = GlobalKey::new();
         mount(
-            &mut app,
+            &cell,
             navigator(&key, |app, _settings| {
                 Some(page_route(app, None, "/").as_route())
             }),
         );
+        let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
@@ -4423,14 +4430,15 @@ mod tests {
 
     #[test]
     fn a_non_dismissible_barrier_keeps_the_route() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
         let key = GlobalKey::new();
         mount(
-            &mut app,
+            &cell,
             navigator(&key, |app, _settings| {
                 Some(page_route(app, None, "/").as_route())
             }),
         );
+        let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
@@ -4448,14 +4456,15 @@ mod tests {
 
     #[test]
     fn local_history_entries_are_popped_before_the_route() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
         let key = GlobalKey::new();
         mount(
-            &mut app,
+            &cell,
             navigator(&key, |app, _settings| {
                 Some(page_route(app, None, "/").as_route())
             }),
         );
+        let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
@@ -4515,15 +4524,17 @@ mod tests {
             }
         }
 
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
         let observer = RouteObserver::new(
             &mut app,
             Rc::new(|app, route: AnyRoute| route.as_page_route(app).is_some()),
         );
         let initial: Rc<Cell<Option<AnyRoute>>> = Rc::new(Cell::new(None));
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Directionality::new(
                 TextDirection::Ltr,
                 Navigator::new()
@@ -4540,6 +4551,7 @@ mod tests {
             )
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 

@@ -41,6 +41,7 @@ pub fn create_local_image_configuration(
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -66,7 +67,8 @@ mod tests {
 
     #[test]
     fn the_configuration_reads_the_direction_pixel_ratio_size_and_platform() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let seen: Seen = Rc::default();
         let tree = Directionality::new(
             TextDirection::Rtl,
@@ -93,7 +95,8 @@ mod tests {
 
     #[test]
     fn without_ancestors_the_configuration_falls_back() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let seen: Seen = Rc::default();
         let harness = Harness::mount(&mut app, probe(&seen, None));
         harness.pump(&mut app);

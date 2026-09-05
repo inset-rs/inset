@@ -406,6 +406,7 @@ mod tests {
     use reveal_embedder::{
         PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, TextDirection,
     };
+    use reveal_foundation::AppCell;
     use reveal_gestures::GestureBinding;
     use reveal_painting::PaintingBinding;
     use reveal_rendering::{
@@ -455,7 +456,7 @@ mod tests {
     }
 
     struct Mounted {
-        app: App,
+        cell: Rc<AppCell>,
         state: Handle<CupertinoExpansionTileState>,
     }
 
@@ -470,7 +471,8 @@ mod tests {
     }
 
     fn mount(configure: impl FnOnce(CupertinoExpansionTile) -> CupertinoExpansionTile) -> Mounted {
-        let mut app = crate::test_support::app();
+        let cell = crate::test_support::test_cell();
+        let mut app = cell.borrow_mut();
         install_fonts(&mut app);
         let global_key = GlobalKey::new();
         let key: KeyRef = Rc::new(global_key.clone());
@@ -485,14 +487,17 @@ mod tests {
             .main_axis_size(MainAxisSize::Min)
             .cross_axis_alignment(CrossAxisAlignment::Start)
             .children([tile.into_widget()]);
+        drop(app);
         build(
-            &mut app,
+            &cell,
             Directionality::new(TextDirection::Ltr, Overlay::wrap(host)).into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let state = global_key
             .current_state::<CupertinoExpansionTileState>(&mut app)
             .expect("the tile mounted");
-        Mounted { app, state }
+        drop(app);
+        Mounted { cell, state }
     }
 
     /// The first `R` in the render subtree rooted at `render_object`, depth first.
@@ -513,11 +518,11 @@ mod tests {
     /// The tile's `Column`: the tile's own render object in a scrolling tile, and below the
     /// `LayoutBuilder` and the `OverlayPortal` in a fading one.
     fn column(mounted: &Mounted) -> AnyRenderObject {
-        let context = mounted.state.context(&mounted.app);
+        let context = mounted.state.context(&mounted.cell.borrow());
         let render_object = context
-            .find_render_object(&mounted.app)
+            .find_render_object(&mounted.cell.borrow())
             .expect("the tile is laid out");
-        find_in_subtree::<RenderFlex>(&mounted.app, render_object)
+        find_in_subtree::<RenderFlex>(&mounted.cell.borrow(), render_object)
             .expect("the tile's Column")
             .as_object()
     }
@@ -526,40 +531,45 @@ mod tests {
         body(mounted)
             .as_box()
             .expect("a box")
-            .size(&mounted.app)
+            .size(&mounted.cell.borrow())
             .height()
     }
 
     #[test]
     fn a_tap_on_the_header_expands_and_collapses_the_tile() {
-        let mut mounted = mount(|tile| tile);
-        let controller = mounted.state.tile_controller(&mounted.app);
-        assert!(!controller.is_expanded(&mounted.app));
+        let mounted = mount(|tile| tile);
+        let controller = mounted.state.tile_controller(&mounted.cell.borrow());
+        assert!(!controller.is_expanded(&mounted.cell.borrow()));
         assert_eq!(body_height(&mounted), 0.0);
 
-        tap(&mut mounted.app, 20.0, 20.0, Duration::ZERO);
-        assert!(controller.is_expanded(&mounted.app), "the tap expanded it");
-        let at = settle(&mut mounted.app, Duration::ZERO);
+        tap(&mut mounted.cell.borrow_mut(), 20.0, 20.0, Duration::ZERO);
+        assert!(
+            controller.is_expanded(&mounted.cell.borrow()),
+            "the tap expanded it"
+        );
+        let at = settle(&mut mounted.cell.borrow_mut(), Duration::ZERO);
         assert_eq!(body_height(&mounted), 50.0);
 
-        tap(&mut mounted.app, 20.0, 20.0, at);
+        tap(&mut mounted.cell.borrow_mut(), 20.0, 20.0, at);
         assert!(
-            !controller.is_expanded(&mounted.app),
+            !controller.is_expanded(&mounted.cell.borrow()),
             "the tap collapsed it"
         );
-        settle(&mut mounted.app, at);
+        settle(&mut mounted.cell.borrow_mut(), at);
         assert_eq!(body_height(&mounted), 0.0);
     }
 
     #[test]
     fn a_supplied_controller_drives_the_tile() {
-        let mut app = crate::test_support::app();
+        let cell = crate::test_support::test_cell();
+        let mut app = cell.borrow_mut();
         install_fonts(&mut app);
         let controller = ExpansibleController::new(&mut app);
         let global_key = GlobalKey::new();
         let key: KeyRef = Rc::new(global_key.clone());
+        drop(app);
         build(
-            &mut app,
+            &cell,
             Directionality::new(
                 TextDirection::Ltr,
                 Overlay::wrap(
@@ -574,57 +584,64 @@ mod tests {
             )
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let state = global_key
             .current_state::<CupertinoExpansionTileState>(&mut app)
             .expect("the tile mounted");
         assert_eq!(state.tile_controller(&app), controller);
 
         controller.expand(&mut app);
-        let mounted = Mounted { app, state };
-        assert!(controller.is_expanded(&mounted.app));
-        let mut mounted = mounted;
-        settle(&mut mounted.app, Duration::ZERO);
+        drop(app);
+        let mounted = Mounted { cell, state };
+        assert!(controller.is_expanded(&mounted.cell.borrow()));
+        let mounted = mounted;
+        settle(&mut mounted.cell.borrow_mut(), Duration::ZERO);
         assert_eq!(body_height(&mounted), 50.0);
     }
 
     #[test]
     fn the_chevron_turns_a_quarter_over_the_expansion() {
-        let mut mounted = mount(|tile| tile);
+        let mounted = mount(|tile| tile);
         let turns = mounted
-            .app
+            .cell
+            .borrow()
             .get(mounted.state)
             .icon_turns
             .expect("built with the header");
-        assert_eq!(turns.value(&mounted.app), 0.0);
+        assert_eq!(turns.value(&mounted.cell.borrow()), 0.0);
 
-        let controller = mounted.state.tile_controller(&mounted.app);
-        controller.expand(&mut mounted.app);
-        settle(&mut mounted.app, Duration::ZERO);
+        let controller = mounted.state.tile_controller(&mounted.cell.borrow());
+        controller.expand(&mut mounted.cell.borrow_mut());
+        settle(&mut mounted.cell.borrow_mut(), Duration::ZERO);
         let turns = mounted
-            .app
+            .cell
+            .borrow()
             .get(mounted.state)
             .icon_turns
             .expect("rebuilt with the header");
-        assert_eq!(turns.value(&mounted.app), 0.25);
+        assert_eq!(turns.value(&mounted.cell.borrow()), 0.25);
     }
 
     /// The `Column`'s second child: the body, wrapped in an `Opacity` while a fading tile
     /// animates.
     fn body(mounted: &Mounted) -> AnyRenderObject {
         let mut children = Vec::new();
-        column(mounted).visit_children(&mounted.app, &mut |child| children.push(child));
+        column(mounted).visit_children(&mounted.cell.borrow(), &mut |child| children.push(child));
         children[1]
     }
 
     /// The `FadeTransition` a fading tile paints over the content below the header, while its
     /// `Visibility` shows it.
     fn fading_copy(mounted: &mut Mounted) -> Option<RenderHandle<RenderAnimatedOpacity>> {
-        let context = mounted.state.context(&mounted.app);
-        let theater = Overlay::of(&mut mounted.app, context, false)
-            .context(&mounted.app)
-            .find_render_object(&mounted.app)
-            .expect("the overlay is laid out");
-        find_in_subtree::<RenderAnimatedOpacity>(&mounted.app, theater)
+        let context = mounted.state.context(&mounted.cell.borrow());
+        let theater = {
+            let mut app = mounted.cell.borrow_mut();
+            Overlay::of(&mut app, context, false)
+                .context(&app)
+                .find_render_object(&app)
+                .expect("the overlay is laid out")
+        };
+        find_in_subtree::<RenderAnimatedOpacity>(&mounted.cell.borrow(), theater)
     }
 
     fn one_frame(app: &mut App, at: Duration) {
@@ -636,29 +653,29 @@ mod tests {
 
     #[test]
     fn a_fading_tile_hides_its_in_place_body_while_it_animates() {
-        let mut mounted = mount(|tile| tile);
+        let mounted = mount(|tile| tile);
         assert!(
             body(&mounted)
-                .downcast::<RenderOpacity>(&mounted.app)
+                .downcast::<RenderOpacity>(&mounted.cell.borrow())
                 .is_none(),
             "no Opacity while the tile rests"
         );
 
-        mounted
-            .state
-            .tile_controller(&mounted.app)
-            .expand(&mut mounted.app);
-        one_frame(&mut mounted.app, Duration::from_millis(25));
-        one_frame(&mut mounted.app, Duration::from_millis(50));
+        {
+            let mut app = mounted.cell.borrow_mut();
+            mounted.state.tile_controller(&app).expand(&mut app);
+        }
+        one_frame(&mut mounted.cell.borrow_mut(), Duration::from_millis(25));
+        one_frame(&mut mounted.cell.borrow_mut(), Duration::from_millis(50));
         let hidden = body(&mounted)
-            .downcast::<RenderOpacity>(&mounted.app)
+            .downcast::<RenderOpacity>(&mounted.cell.borrow())
             .expect("an Opacity while a fading tile animates");
-        assert_eq!(hidden.opacity(&mounted.app), 0.0);
+        assert_eq!(hidden.opacity(&mounted.cell.borrow()), 0.0);
 
-        settle(&mut mounted.app, Duration::from_millis(50));
+        settle(&mut mounted.cell.borrow_mut(), Duration::from_millis(50));
         assert!(
             body(&mounted)
-                .downcast::<RenderOpacity>(&mounted.app)
+                .downcast::<RenderOpacity>(&mounted.cell.borrow())
                 .is_none(),
             "the Opacity goes once the animation settles"
         );
@@ -672,23 +689,25 @@ mod tests {
             "nothing is in the overlay before the first tap"
         );
 
-        tap(&mut mounted.app, 20.0, 20.0, Duration::ZERO);
-        one_frame(&mut mounted.app, Duration::from_millis(25));
-        one_frame(&mut mounted.app, Duration::from_millis(50));
+        tap(&mut mounted.cell.borrow_mut(), 20.0, 20.0, Duration::ZERO);
+        one_frame(&mut mounted.cell.borrow_mut(), Duration::from_millis(25));
+        one_frame(&mut mounted.cell.borrow_mut(), Duration::from_millis(50));
         let copy = fading_copy(&mut mounted).expect("the overlay child fades the copy in");
-        let opacity = copy.opacity(&mounted.app).value(&mounted.app);
+        let opacity = copy
+            .opacity(&mounted.cell.borrow())
+            .value(&mounted.cell.borrow());
         assert!(
             opacity > 0.0 && opacity < 1.0,
             "the copy fades in: {opacity}"
         );
         assert_eq!(
             copy.as_box()
-                .local_to_global(&mounted.app, Offset::ZERO, None),
+                .local_to_global(&mounted.cell.borrow(), Offset::ZERO, None),
             Offset::new(0.0, K_HEADER_HEIGHT),
             "the copy sits under the header"
         );
         assert_eq!(
-            copy.size(&mounted.app).height(),
+            copy.size(&mounted.cell.borrow()).height(),
             50.0,
             "the copy is fully extended while the body below is not"
         );
@@ -697,7 +716,7 @@ mod tests {
             "the in-place body is still expanding"
         );
 
-        settle(&mut mounted.app, Duration::from_millis(50));
+        settle(&mut mounted.cell.borrow_mut(), Duration::from_millis(50));
         assert!(
             fading_copy(&mut mounted).is_none(),
             "the Visibility hides the copy once the animation settles"
@@ -706,16 +725,16 @@ mod tests {
 
     #[test]
     fn a_scrolling_tile_never_hides_its_body() {
-        let mut mounted = mount(|tile| tile.transition_mode(ExpansionTileTransitionMode::Scroll));
-        mounted
-            .state
-            .tile_controller(&mounted.app)
-            .expand(&mut mounted.app);
-        one_frame(&mut mounted.app, Duration::from_millis(25));
-        one_frame(&mut mounted.app, Duration::from_millis(50));
+        let mounted = mount(|tile| tile.transition_mode(ExpansionTileTransitionMode::Scroll));
+        {
+            let mut app = mounted.cell.borrow_mut();
+            mounted.state.tile_controller(&app).expand(&mut app);
+        }
+        one_frame(&mut mounted.cell.borrow_mut(), Duration::from_millis(25));
+        one_frame(&mut mounted.cell.borrow_mut(), Duration::from_millis(50));
         assert!(
             body(&mounted)
-                .downcast::<RenderOpacity>(&mounted.app)
+                .downcast::<RenderOpacity>(&mounted.cell.borrow())
                 .is_none(),
             "a scrolling tile shows the body all the way"
         );

@@ -1499,6 +1499,7 @@ impl RenderBox for RenderFlex {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::any::Any;
 
     use reveal_foundation::Handle;
@@ -1592,7 +1593,8 @@ mod tests {
     /// `insert` / `move` / `remove` keep consistent from both ends.
     #[test]
     fn child_list_insert_move_and_remove() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let first = sized_box(&mut app, Size::new(10.0, 10.0));
         let middle = sized_box(&mut app, Size::new(10.0, 10.0));
         let last = sized_box(&mut app, Size::new(10.0, 10.0));
@@ -1715,7 +1717,8 @@ mod tests {
     /// intrinsic is the tallest child.
     #[test]
     fn row_intrinsics_add_the_inflexible_space_to_the_largest_flex_fraction() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let fixed = intrinsic_box(&mut app, Size::new(50.0, 20.0));
         let flexible = intrinsic_box(&mut app, Size::new(30.0, 10.0));
         let flex = row(&mut app, vec![fixed, flexible]);
@@ -1730,7 +1733,8 @@ mod tests {
     /// The spacing between the children counts towards the main axis intrinsic.
     #[test]
     fn row_intrinsics_include_the_spacing() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let first = intrinsic_box(&mut app, Size::new(50.0, 20.0));
         let second = intrinsic_box(&mut app, Size::new(30.0, 10.0));
         let flex = row(&mut app, vec![first, second]);
@@ -1750,7 +1754,8 @@ mod tests {
             (MainAxisSize::Max, Size::new(200.0, 20.0)),
             (MainAxisSize::Min, Size::new(80.0, 20.0)),
         ] {
-            let mut app = App::new();
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
             let fixed = intrinsic_box(&mut app, Size::new(50.0, 20.0));
             let flexible = intrinsic_box(&mut app, Size::new(30.0, 10.0));
             let flex = row(&mut app, vec![fixed, flexible]);
@@ -1771,7 +1776,8 @@ mod tests {
 
     #[test]
     fn row_lays_out_fixed_and_flexible_children_with_spacing() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let fixed = sized_box(&mut app, Size::new(50.0, 30.0));
         let flexible = sized_box(&mut app, Size::new(20.0, 10.0));
         let flex = row(&mut app, vec![fixed, flexible]);
@@ -1804,7 +1810,8 @@ mod tests {
             (MainAxisAlignment::SpaceEvenly, 20.0, 60.0),
         ];
         for (alignment, first_x, second_x) in cases {
-            let mut app = App::new();
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
             let first = sized_box(&mut app, Size::new(20.0, 20.0));
             let second = sized_box(&mut app, Size::new(20.0, 20.0));
             let flex = row(&mut app, vec![first, second]);
@@ -1836,7 +1843,8 @@ mod tests {
             (CrossAxisAlignment::Baseline, 0.0, 20.0),
         ];
         for (alignment, y, height) in cases {
-            let mut app = App::new();
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
             let child = sized_box(&mut app, Size::new(20.0, 20.0));
             let flex = row(&mut app, vec![child]);
             flex.set_cross_axis_alignment(&mut app, alignment);
@@ -1859,7 +1867,8 @@ mod tests {
     #[test]
     fn overflow_is_clipped() {
         for (clip_behavior, clips) in [(Clip::None, false), (Clip::HardEdge, true)] {
-            let mut app = App::new();
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
             let first = sized_box(&mut app, Size::new(80.0, 20.0));
             let second = sized_box(&mut app, Size::new(80.0, 20.0));
             let flex = row(&mut app, vec![first, second]);
@@ -1886,7 +1895,8 @@ mod tests {
     /// `flex_test.dart`: a hit lands on the child that covers the position.
     #[test]
     fn hit_test_reaches_the_child_under_the_position() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let first = sized_box(&mut app, Size::new(50.0, 50.0));
         let second = sized_box(&mut app, Size::new(50.0, 50.0));
         let flex = row(&mut app, vec![first, second]);

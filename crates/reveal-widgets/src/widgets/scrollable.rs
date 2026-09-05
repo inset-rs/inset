@@ -1275,6 +1275,7 @@ impl RestorableValue for RestorableScrollOffset {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::{Cell, RefCell};
     use std::time::Instant;
 
@@ -1333,14 +1334,14 @@ mod tests {
         }
     }
 
-    fn app_restoring(data: Option<RestorationMap>) -> (App, Rc<RecordingPlatform>) {
+    fn app_restoring(data: Option<RestorationMap>) -> (Rc<AppCell>, Rc<RecordingPlatform>) {
         let platform = Rc::new(RecordingPlatform::default());
         *platform.stored.borrow_mut() = Some(RestorationUpdate {
             enabled: true,
             data,
         });
-        let app = App::with_platform(Rc::clone(&platform) as PlatformRef);
-        (app, platform)
+        let cell = AppCell::with_platform(Rc::clone(&platform) as PlatformRef);
+        (cell, platform)
     }
 
     fn map<const N: usize>(entries: [(&str, RestorationData); N]) -> RestorationMap {
@@ -1448,7 +1449,8 @@ mod tests {
 
     #[test]
     fn a_laid_out_scrollable_takes_its_dimensions_from_its_viewport() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let viewport: ViewportBuilder =
             Rc::new(|_app, _context, offset| TestViewport { offset }.into_widget());
         let (_harness, state) = mount_scrollable(&mut app, Scrollable::new(viewport));
@@ -1471,7 +1473,8 @@ mod tests {
 
     #[test]
     fn a_scrollable_creates_a_position_on_its_effective_controller() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = ScrollController::new(&mut app, 17.0, true, None, None, None);
         let (_harness, state) = mount_scrollable(
             &mut app,
@@ -1487,7 +1490,8 @@ mod tests {
 
     #[test]
     fn a_scrollable_without_a_controller_uses_a_fallback_one() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (_harness, state) = mount_scrollable(&mut app, Scrollable::new(box_viewport()));
 
         assert_eq!(state.position(&app).pixels(&app), 0.0);
@@ -1496,7 +1500,8 @@ mod tests {
 
     #[test]
     fn of_finds_the_state_from_a_descendant_of_the_viewport() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let seen: Rc<Cell<Option<BuildContext>>> = Rc::new(Cell::new(None));
         let captured = seen.clone();
         let viewport: ViewportBuilder = Rc::new(move |_app, _context, _offset| {
@@ -1530,13 +1535,14 @@ mod tests {
 
     #[test]
     fn a_scrollable_restores_its_offset_through_the_restoration_mixin() {
-        let (mut app, _platform) = app_restoring(Some(child(
+        let (cell, _platform) = app_restoring(Some(child(
             "app",
             child(
                 "scroll",
                 values([("offset", RestorationData::Double(42.0))]),
             ),
         )));
+        let mut app = cell.borrow_mut();
         let scrollable = Scrollable::new(box_viewport()).restoration_id("scroll");
         let harness = Harness::mount(
             &mut app,
@@ -1560,7 +1566,8 @@ mod tests {
 
     #[test]
     fn saving_an_offset_writes_it_into_the_restoration_data() {
-        let (mut app, platform) = app_restoring(None);
+        let (cell, platform) = app_restoring(None);
+        let mut app = cell.borrow_mut();
         let scrollable = Scrollable::new(box_viewport()).restoration_id("scroll");
         let harness = Harness::mount(
             &mut app,
@@ -1592,7 +1599,8 @@ mod tests {
 
     #[test]
     fn the_scroll_context_reports_the_media_querys_device_pixel_ratio() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             MediaQuery::new(

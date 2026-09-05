@@ -1040,6 +1040,7 @@ impl PrimaryPointerLeaf for LongPressGestureRecognizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
     use std::rc::Rc;
     use std::time::Duration;
@@ -1151,7 +1152,8 @@ mod tests {
 
     #[test]
     fn should_recognize_long_press() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let gesture = LongPressGestureRecognizer::new(&mut app);
         let log = Rc::new(RefCell::new(Vec::new()));
         set_handlers(gesture, &mut app, &log);
@@ -1162,9 +1164,11 @@ mod tests {
         assert!(log.borrow().is_empty());
         route(&mut app, PointerEvent::Down(down1));
         assert_eq!(*log.borrow(), ["down"]);
-        app.elapse(Duration::from_millis(300));
+        drop(app);
+        cell.elapse(Duration::from_millis(300));
         assert_eq!(*log.borrow(), ["down"]);
-        app.elapse(Duration::from_millis(700));
+        cell.elapse(Duration::from_millis(700));
+        let mut app = cell.borrow_mut();
         assert_eq!(*log.borrow(), ["down", "start"]);
         gesture.dispose(&mut app);
         assert_eq!(*log.borrow(), ["down", "start"]);
@@ -1172,7 +1176,8 @@ mod tests {
 
     #[test]
     fn should_recognize_long_press_with_altered_duration() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let gesture = LongPressGestureRecognizer::new(&mut app)
             .duration(&mut app, Duration::from_millis(100));
         let log = Rc::new(RefCell::new(Vec::new()));
@@ -1183,9 +1188,11 @@ mod tests {
         close_arena(&mut app, 5);
         route(&mut app, PointerEvent::Down(down1));
         assert_eq!(*log.borrow(), ["down"]);
-        app.elapse(Duration::from_millis(50));
+        drop(app);
+        cell.elapse(Duration::from_millis(50));
         assert_eq!(*log.borrow(), ["down"]);
-        app.elapse(Duration::from_millis(50));
+        cell.elapse(Duration::from_millis(50));
+        let mut app = cell.borrow_mut();
         assert_eq!(*log.borrow(), ["down", "start"]);
         gesture.dispose(&mut app);
         assert_eq!(*log.borrow(), ["down", "start"]);
@@ -1193,7 +1200,8 @@ mod tests {
 
     #[test]
     fn up_cancels_long_press() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let gesture = LongPressGestureRecognizer::new(&mut app);
         let log = Rc::new(RefCell::new(Vec::new()));
         set_handlers(gesture, &mut app, &log);
@@ -1203,18 +1211,23 @@ mod tests {
         close_arena(&mut app, 5);
         route(&mut app, PointerEvent::Down(down1));
         assert_eq!(*log.borrow(), ["down"]);
-        app.elapse(Duration::from_millis(300));
+        drop(app);
+        cell.elapse(Duration::from_millis(300));
+        let mut app = cell.borrow_mut();
         assert_eq!(*log.borrow(), ["down"]);
         route(&mut app, PointerEvent::Up(up(5, Offset::new(11.0, 9.0))));
         assert_eq!(*log.borrow(), ["down", "cancel"]);
-        app.elapse(Duration::from_secs(1));
+        drop(app);
+        cell.elapse(Duration::from_secs(1));
+        let mut app = cell.borrow_mut();
         gesture.dispose(&mut app);
         assert_eq!(*log.borrow(), ["down", "cancel"]);
     }
 
     #[test]
     fn moving_before_accept_cancels() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let gesture = LongPressGestureRecognizer::new(&mut app);
         let log = Rc::new(RefCell::new(Vec::new()));
         set_handlers(gesture, &mut app, &log);
@@ -1224,16 +1237,22 @@ mod tests {
         close_arena(&mut app, 5);
         route(&mut app, PointerEvent::Down(down1));
         assert_eq!(*log.borrow(), ["down"]);
-        app.elapse(Duration::from_millis(300));
+        drop(app);
+        cell.elapse(Duration::from_millis(300));
+        let mut app = cell.borrow_mut();
         assert_eq!(*log.borrow(), ["down"]);
         route(
             &mut app,
             PointerEvent::Move(move_event(5, Offset::new(100.0, 200.0))),
         );
         assert_eq!(*log.borrow(), ["down", "cancel"]);
-        app.elapse(Duration::from_secs(1));
+        drop(app);
+        cell.elapse(Duration::from_secs(1));
+        let mut app = cell.borrow_mut();
         route(&mut app, PointerEvent::Up(up(5, Offset::new(100.0, 200.0))));
-        app.elapse(Duration::from_millis(300));
+        drop(app);
+        cell.elapse(Duration::from_millis(300));
+        let mut app = cell.borrow_mut();
         assert_eq!(*log.borrow(), ["down", "cancel"]);
         gesture.dispose(&mut app);
         assert_eq!(*log.borrow(), ["down", "cancel"]);
@@ -1241,7 +1260,8 @@ mod tests {
 
     #[test]
     fn moving_after_accept_is_ok() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let gesture = LongPressGestureRecognizer::new(&mut app);
         let log = Rc::new(RefCell::new(Vec::new()));
         set_handlers(gesture, &mut app, &log);
@@ -1251,7 +1271,9 @@ mod tests {
         close_arena(&mut app, 5);
         route(&mut app, PointerEvent::Down(down1));
         assert_eq!(*log.borrow(), ["down"]);
-        app.elapse(Duration::from_secs(1));
+        drop(app);
+        cell.elapse(Duration::from_secs(1));
+        let mut app = cell.borrow_mut();
         assert_eq!(*log.borrow(), ["down", "start"]);
         route(
             &mut app,
@@ -1260,7 +1282,9 @@ mod tests {
         assert_eq!(*log.borrow(), ["down", "start", "move"]);
         route(&mut app, PointerEvent::Up(up(5, Offset::new(11.0, 9.0))));
         assert_eq!(*log.borrow(), ["down", "start", "move", "end"]);
-        app.elapse(Duration::from_millis(300));
+        drop(app);
+        cell.elapse(Duration::from_millis(300));
+        let mut app = cell.borrow_mut();
         assert_eq!(*log.borrow(), ["down", "start", "move", "end"]);
         gesture.dispose(&mut app);
         assert_eq!(*log.borrow(), ["down", "start", "move", "end"]);
@@ -1268,7 +1292,8 @@ mod tests {
 
     #[test]
     fn should_recognize_both_tap_down_and_long_press() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let gesture = LongPressGestureRecognizer::new(&mut app);
         let tap = TapGestureRecognizer::new(&mut app);
         let log = Rc::new(RefCell::new(Vec::new()));
@@ -1288,9 +1313,11 @@ mod tests {
         assert!(log.borrow().is_empty());
         route(&mut app, PointerEvent::Down(down1));
         assert_eq!(*log.borrow(), ["down"]);
-        app.elapse(Duration::from_millis(300));
+        drop(app);
+        cell.elapse(Duration::from_millis(300));
         assert_eq!(*log.borrow(), ["down", "tap_down"]);
-        app.elapse(Duration::from_millis(700));
+        cell.elapse(Duration::from_millis(700));
+        let mut app = cell.borrow_mut();
         assert_eq!(*log.borrow(), ["down", "tap_down", "start"]);
         tap.dispose(&mut app);
         gesture.dispose(&mut app);
@@ -1299,7 +1326,8 @@ mod tests {
 
     #[test]
     fn should_recognize_long_press_up() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let gesture = LongPressGestureRecognizer::new(&mut app);
         let log = Rc::new(RefCell::new(Vec::new()));
         set_handlers(gesture, &mut app, &log);
@@ -1309,9 +1337,11 @@ mod tests {
         close_arena(&mut app, 5);
         route(&mut app, PointerEvent::Down(down1));
         assert_eq!(*log.borrow(), ["down"]);
-        app.elapse(Duration::from_millis(300));
+        drop(app);
+        cell.elapse(Duration::from_millis(300));
         assert_eq!(*log.borrow(), ["down"]);
-        app.elapse(Duration::from_millis(700));
+        cell.elapse(Duration::from_millis(700));
+        let mut app = cell.borrow_mut();
         assert_eq!(*log.borrow(), ["down", "start"]);
         route(&mut app, PointerEvent::Up(up(5, Offset::new(11.0, 9.0))));
         assert_eq!(*log.borrow(), ["down", "start", "end"]);

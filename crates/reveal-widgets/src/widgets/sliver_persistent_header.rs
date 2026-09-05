@@ -1365,6 +1365,7 @@ header_protocol!(
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
 
     use reveal_embedder::TextDirection;
@@ -1472,7 +1473,8 @@ mod tests {
     /// scrolled, and rebuilds its child at each shrink offset.
     #[test]
     fn a_pinned_header_shrinks_to_its_minimum_extent_and_stays() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::zero(&mut app);
         let shrink_offsets: ShrinkOffsets = Rc::default();
         let harness = Harness::mount(&mut app, header_tree(offset, &shrink_offsets, true, false));
@@ -1498,7 +1500,8 @@ mod tests {
     /// offset and it reports no scroll obstruction.
     #[test]
     fn a_floating_header_scrolls_off_as_it_shrinks() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::zero(&mut app);
         let shrink_offsets: ShrinkOffsets = Rc::default();
         let harness = Harness::mount(&mut app, header_tree(offset, &shrink_offsets, false, true));

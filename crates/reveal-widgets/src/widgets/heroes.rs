@@ -1759,6 +1759,7 @@ impl StatelessWidget for HeroMode {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::time::Duration;
 
     use reveal_embedder::{
@@ -1829,11 +1830,11 @@ mod tests {
     }
 
     /// An [`App`] with a single view; the navigator needs a binding for its global keys.
-    fn app_with_view() -> App {
+    fn app_with_view() -> Rc<AppCell> {
         let platform: PlatformRef = Rc::new(TestPlatform {
             view: Rc::new(TestView),
         });
-        App::with_platform(platform)
+        AppCell::with_platform(platform)
     }
 
     fn pump_frame(app: &mut App, at: Duration) {
@@ -1843,10 +1844,10 @@ mod tests {
         app.drain_microtasks();
     }
 
-    fn mount(app: &mut App, child: WidgetRef) {
-        run_app(app, child);
-        app.elapse(Duration::ZERO);
-        pump_frame(app, Duration::ZERO);
+    fn mount(cell: &AppCell, child: WidgetRef) {
+        run_app(&mut cell.borrow_mut(), child);
+        cell.elapse(Duration::ZERO);
+        pump_frame(&mut cell.borrow_mut(), Duration::ZERO);
     }
 
     /// Runs frames until every route transition has settled.
@@ -1949,13 +1950,16 @@ mod tests {
 
     #[test]
     fn a_hero_flies_between_two_page_routes() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
         let controller = HeroController::new(&mut app);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             hero_navigator(&key, controller, hero_page(10.0, 20.0, 40.0, 30.0, true)),
         );
+        let mut app = cell.borrow_mut();
         let navigator = navigator_state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
         let entries_before = overlay_children(&mut app, navigator).len();
@@ -2054,13 +2058,16 @@ mod tests {
 
     #[test]
     fn popping_back_flies_the_hero_home_and_clears_its_placeholder() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
         let controller = HeroController::new(&mut app);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             hero_navigator(&key, controller, hero_page(10.0, 20.0, 40.0, 30.0, true)),
         );
+        let mut app = cell.borrow_mut();
         let navigator = navigator_state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
@@ -2116,13 +2123,16 @@ mod tests {
 
     #[test]
     fn a_disabled_hero_mode_keeps_the_hero_out_of_the_flight() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
         let controller = HeroController::new(&mut app);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             hero_navigator(&key, controller, hero_page(10.0, 20.0, 40.0, 30.0, false)),
         );
+        let mut app = cell.borrow_mut();
         let navigator = navigator_state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
         let entries_before = overlay_children(&mut app, navigator).len();
@@ -2150,7 +2160,8 @@ mod tests {
 
     #[test]
     fn a_custom_flight_shuttle_builder_supplies_the_in_flight_widget() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
         let controller = HeroController::new(&mut app);
         let built = Rc::new(std::cell::Cell::new(0u32));
@@ -2162,10 +2173,12 @@ mod tests {
                 SizedBox::new().width(11.0).height(13.0).into_widget()
             })
         };
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             hero_navigator(&key, controller, hero_page(10.0, 20.0, 40.0, 30.0, true)),
         );
+        let mut app = cell.borrow_mut();
         let navigator = navigator_state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
@@ -2213,7 +2226,8 @@ mod tests {
 
     #[test]
     fn a_reverse_rect_tween_swaps_its_parent_ends() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let begin = Rect::from_ltrb(0.0, 0.0, 10.0, 10.0);
         let end = Rect::from_ltrb(20.0, 20.0, 40.0, 40.0);
         let parent: Rc<dyn RectTweenObject> =
@@ -2234,7 +2248,8 @@ mod tests {
 
     #[test]
     fn an_edge_insets_tween_interpolates_the_shuttle_padding() {
-        let app = App::new();
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let tween = EdgeInsetsTween::new(
             Some(EdgeInsets::from_ltrb(0.0, 0.0, 0.0, 0.0)),
             Some(EdgeInsets::from_ltrb(10.0, 20.0, 30.0, 40.0)),

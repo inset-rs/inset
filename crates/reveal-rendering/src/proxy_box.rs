@@ -6926,6 +6926,7 @@ mod tests {
     use reveal_animation::{k_always_complete_animation, k_always_dismissed_animation};
     use reveal_embedder::ColorFilter;
     use reveal_embedder::valo::{self, Op};
+    use reveal_foundation::AppCell;
     use reveal_foundation::ValueNotifier;
     use reveal_gestures::HitTestResult;
     use reveal_painting::BoxDecoration;
@@ -7031,7 +7032,8 @@ mod tests {
     /// additional constraints, and a tight axis reports that tight extent.
     #[test]
     fn constrained_box_intrinsics_enforce_the_additional_constraints() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = intrinsic_box(&mut app, Size::new(20.0, 30.0));
         let loose = RenderConstrainedBox::new(
             &mut app,
@@ -7056,7 +7058,8 @@ mod tests {
     /// `step_width` when there is one.
     #[test]
     fn intrinsic_width_sizes_the_child_to_its_max_intrinsic_width() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = intrinsic_box(&mut app, Size::new(100.0, 40.0));
         let intrinsic = RenderIntrinsicWidth::new(&mut app, None, None, Some(child.as_box()));
         intrinsic.layout(&mut app, BoxConstraints::new().max_width(500.0), false);
@@ -7071,7 +7074,8 @@ mod tests {
     /// The dry layout of a `RenderIntrinsicWidth` is the size it lays out to.
     #[test]
     fn intrinsic_width_dry_layout_matches_its_layout() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = intrinsic_box(&mut app, Size::new(100.0, 40.0));
         let intrinsic = RenderIntrinsicWidth::new(&mut app, None, None, Some(child.as_box()));
         let constraints = BoxConstraints::new().max_width(500.0);
@@ -7083,7 +7087,8 @@ mod tests {
     /// `intrinsic_height_test.dart`: the child is sized to its maximum intrinsic height.
     #[test]
     fn intrinsic_height_sizes_the_child_to_its_max_intrinsic_height() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = intrinsic_box(&mut app, Size::new(100.0, 40.0));
         let intrinsic = RenderIntrinsicHeight::new(&mut app, Some(child.as_box()));
         intrinsic.layout(&mut app, BoxConstraints::new().max_height(500.0), false);
@@ -7100,7 +7105,8 @@ mod tests {
     /// shows up in the paint transform.
     #[test]
     fn fitted_box_scales_its_child_into_itself() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = sized_box(&mut app, Size::new(100.0, 100.0));
         let fitted = RenderFittedBox::new(
             &mut app,
@@ -7129,7 +7135,8 @@ mod tests {
     /// ratio.
     #[test]
     fn aspect_ratio_sizes_itself_from_the_width() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = sized_box(&mut app, Size::new(10.0, 10.0));
         let aspect = RenderAspectRatio::new(&mut app, 2.0, Some(child.as_box()));
         aspect.layout(
@@ -7152,7 +7159,8 @@ mod tests {
     /// An aspect ratio box infers its width from the height when the width is unbounded.
     #[test]
     fn aspect_ratio_infers_the_width_from_an_unbounded_axis() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let aspect = RenderAspectRatio::new(&mut app, 0.5, None);
         aspect.layout(&mut app, BoxConstraints::new().max_height(100.0), false);
         assert_eq!(aspect.size(&app), Size::new(50.0, 100.0));
@@ -7160,7 +7168,8 @@ mod tests {
 
     #[test]
     fn constrained_box_without_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let box_ =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(80.0, 40.0)), None);
         box_.layout(&mut app, BoxConstraints::new(), false);
@@ -7169,7 +7178,8 @@ mod tests {
 
     #[test]
     fn additional_constraints_change_marks_layout() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let box_ =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(10.0, 10.0)), None);
         box_.layout(&mut app, BoxConstraints::new(), false);
@@ -7183,7 +7193,8 @@ mod tests {
     /// Flutter's `RenderProxyBoxMixin.setupParentData` gives the child plain `ParentData`.
     #[test]
     fn proxy_box_child_gets_empty_parent_data() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = sized_box(&mut app, Size::new(10.0, 10.0));
         let parent = RenderConstrainedBox::new(
             &mut app,
@@ -7198,7 +7209,8 @@ mod tests {
     /// opaque / partially opaque cases. Ours: whether it is a repaint boundary.
     #[test]
     fn render_opacity_composites_only_when_visible() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         for (opacity, composites) in [(0.0, false), (1.0, true), (0.1, true)] {
             let child = sized_box(&mut app, Size::new(1.0, 1.0));
             let opacity = RenderOpacity::new(&mut app, opacity, Some(child.as_box()));
@@ -7209,7 +7221,8 @@ mod tests {
     /// `layers_test.dart`: `non-painted layers are detached`.
     #[test]
     fn non_painted_layers_are_detached() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let inner = RenderDecoratedBox::new(
             &mut app,
             Box::new(BoxDecoration::new()),
@@ -7242,7 +7255,8 @@ mod tests {
 
     #[test]
     fn animated_opacity_follows_its_animation() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = sized_box(&mut app, Size::new(1.0, 1.0));
         let dismissed = k_always_dismissed_animation(&mut app);
         let complete = k_always_complete_animation(&mut app);
@@ -7264,7 +7278,8 @@ mod tests {
 
     #[test]
     fn decorated_box_paints_its_decoration() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let decorated = RenderDecoratedBox::new(
             &mut app,
             Box::new(BoxDecoration::new().color(Color::from_argb(255, 255, 0, 0))),
@@ -7340,7 +7355,8 @@ mod tests {
 
     #[test]
     fn limited_box_limits_only_unbounded_constraints() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = opaque_leaf(&mut app);
         let limited = RenderLimitedBox::new(&mut app, 100.0, 50.0, Some(child.as_box()));
 
@@ -7361,7 +7377,8 @@ mod tests {
 
     #[test]
     fn limited_box_without_child_is_empty() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let limited = RenderLimitedBox::new(&mut app, 100.0, 50.0, None);
         limited.layout(&mut app, BoxConstraints::new(), false);
         assert_eq!(limited.size(&app), Size::ZERO);
@@ -7427,7 +7444,8 @@ mod tests {
 
     #[test]
     fn clip_rect_pushes_its_clipper_and_clips_hit_tests() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = opaque_leaf(&mut app);
         let clipper: Rc<dyn CustomClipper<Rect>> = Rc::new(LeftHalfClipper);
         let clip = RenderClipRect::new(
@@ -7461,7 +7479,8 @@ mod tests {
 
     #[test]
     fn clip_rect_without_clipping_paints_its_child_directly() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = red_box(&mut app);
         let clip = RenderClipRect::new(&mut app, None, Clip::None, Some(child.as_box()));
         let root = RenderRepaintBoundary::new(&mut app, Some(clip.as_box()));
@@ -7479,7 +7498,8 @@ mod tests {
 
     #[test]
     fn clip_rrect_pushes_its_border_radius() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = opaque_leaf(&mut app);
         let clip = RenderClipRRect::new(
             &mut app,
@@ -7520,7 +7540,8 @@ mod tests {
 
     #[test]
     fn clip_rrect_clips_hit_tests_to_its_clipper() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = opaque_leaf(&mut app);
         let clipper: Rc<dyn CustomClipper<RRect>> = Rc::new(LeftHalfClipper);
         let clip = RenderClipRRect::new(
@@ -7544,7 +7565,8 @@ mod tests {
     /// The cached clip is dropped when the clipper notifies and when the box is resized.
     #[test]
     fn clip_rect_reclips_on_notification_and_on_resize() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let reclip = app.create(ValueNotifier::new(0));
         let clipper: Rc<dyn CustomClipper<Rect>> = Rc::new(NotifyingClipper {
             reclip: Rc::new(reclip),
@@ -7582,7 +7604,8 @@ mod tests {
 
     #[test]
     fn transform_paints_under_its_matrix() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = red_box(&mut app);
         let transform = RenderTransform::new(
             &mut app,
@@ -7607,7 +7630,8 @@ mod tests {
     /// A translation is folded into the child's paint offset instead of a pushed transform.
     #[test]
     fn transform_by_a_translation_paints_at_an_offset() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = red_box(&mut app);
         let transform = RenderTransform::new(
             &mut app,
@@ -7633,7 +7657,8 @@ mod tests {
 
     #[test]
     fn transform_hit_tests_through_its_matrix() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = opaque_leaf(&mut app);
         let transform = RenderTransform::new(
             &mut app,
@@ -7664,7 +7689,8 @@ mod tests {
     /// `Transform.scale(alignment: Alignment.center)`: the child grows around the box's centre.
     #[test]
     fn transform_scales_around_its_alignment_and_origin() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = opaque_leaf(&mut app);
         let transform = RenderTransform::new(
             &mut app,
@@ -7694,7 +7720,8 @@ mod tests {
 
     #[test]
     fn transform_applies_its_paint_transform_to_the_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = opaque_leaf(&mut app);
         let transform = RenderTransform::new(
             &mut app,
@@ -7712,7 +7739,8 @@ mod tests {
 
     #[test]
     fn fractional_translation_offsets_paint_and_hits() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = red_box(&mut app);
         let translated = RenderFractionalTranslation::new(
             &mut app,
@@ -7741,7 +7769,8 @@ mod tests {
 
     #[test]
     fn ignore_pointer_is_invisible_to_hit_testing() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = opaque_leaf(&mut app);
         let ignoring = RenderIgnorePointer::new(&mut app, true, Some(child.as_box()));
         ignoring.layout(
@@ -7765,7 +7794,8 @@ mod tests {
 
     #[test]
     fn absorb_pointer_takes_the_hit_from_its_subtree() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = opaque_leaf(&mut app);
         let absorbing = RenderAbsorbPointer::new(&mut app, true, Some(child.as_box()));
         absorbing.layout(
@@ -7793,7 +7823,8 @@ mod tests {
 
     #[test]
     fn offstage_lays_out_without_painting_or_hit_testing() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = red_box(&mut app);
         let offstage = RenderOffstage::new(&mut app, true, Some(child.as_box()));
         let root = RenderRepaintBoundary::new(&mut app, Some(offstage.as_box()));
@@ -7820,7 +7851,8 @@ mod tests {
 
     #[test]
     fn colored_box_fills_its_bounds() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let colored = red_box(&mut app);
         let root = RenderRepaintBoundary::new(&mut app, Some(colored.as_box()));
         first_frame(&mut app, root.as_box());
@@ -7838,7 +7870,8 @@ mod tests {
 
     #[test]
     fn colored_box_paints_its_child_over_the_color() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = red_box(&mut app);
         let colored = RenderColoredBox::new(&mut app, BLUE, true, Some(child.as_box()));
         let root = RenderRepaintBoundary::new(&mut app, Some(colored.as_box()));
@@ -7853,7 +7886,8 @@ mod tests {
 
     #[test]
     fn meta_data_carries_its_payload_and_hit_tests_by_behavior() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let payload: Rc<dyn Any> = Rc::new(42u32);
         let opaque = RenderMetaData::new(
             &mut app,
@@ -7924,7 +7958,8 @@ mod tests {
 
     #[test]
     fn a_backdrop_filter_blurs_under_its_bounds_before_its_child_paints() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = RenderColoredBox::new(&mut app, Color::new(0xFF00FF00), true, None);
         let filter = RenderBackdropFilter::new(
             &mut app,
@@ -7996,7 +8031,8 @@ mod tests {
 
     #[test]
     fn a_composed_backdrop_filter_replays_the_blur_it_composes() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = RenderColoredBox::new(&mut app, Color::new(0xFF00FF00), true, None);
         let saturation = ImageFilterConfig::new(ImageFilter::Color(ColorFilter::saturation(1.8)));
         let filter = RenderBackdropFilter::new(
@@ -8025,7 +8061,8 @@ mod tests {
 
     #[test]
     fn clip_oval_hit_tests_inside_the_inscribed_oval_and_clips_with_its_path() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = opaque_leaf(&mut app);
         let oval = RenderClipOval::new(&mut app, None, Clip::AntiAlias, Some(child.as_box()));
         let root = RenderRepaintBoundary::new(&mut app, Some(oval.as_box()));
@@ -8069,7 +8106,8 @@ mod tests {
                 self
             }
         }
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = opaque_leaf(&mut app);
         let clip = RenderClipPath::new(
             &mut app,
@@ -8106,7 +8144,8 @@ mod tests {
 
     #[test]
     fn clip_rsuperellipse_resolves_its_border_radius_and_clips_with_a_path() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = RenderConstrainedBox::new(&mut app, BoxConstraints::expand(None, None), None);
         let clip = RenderClipRSuperellipse::new(
             &mut app,

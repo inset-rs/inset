@@ -442,6 +442,7 @@ impl<T> Debug for AnyAnimation<T> {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
 
     use super::*;
@@ -501,7 +502,8 @@ mod tests {
         struct Host;
         fn hook(_this: Handle<Host>, _app: &mut App, _status: AnimationStatus) {}
 
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let a = app.create(Host);
         let b = app.create(Host);
 
@@ -553,7 +555,8 @@ mod tests {
 
     #[test]
     fn the_erased_handle_dispatches_overridden_getters() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let node = app.create(OverridingNode);
         let animation = node.as_animation();
 
@@ -568,7 +571,8 @@ mod tests {
 
     #[test]
     fn erased_handles_are_equal_exactly_when_their_entities_are() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let first = app.create(OverridingNode);
         let second = app.create(OverridingNode);
 
@@ -604,7 +608,8 @@ mod tests {
 
     #[test]
     fn an_erased_handle_does_not_consume_the_typed_one() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let counter = app.create(Counter(1));
         let erased = counter.as_animation();
 
@@ -619,7 +624,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "stale handle")]
     fn an_erased_handle_to_a_destroyed_animation_panics_on_slot_access() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let counter = app.create(Counter(1));
         let animation = counter.as_animation();
         app.destroy(counter);
@@ -634,7 +640,7 @@ mod tests {
         let listener = AnimationStatusListener::new(|status, _app| {
             RECEIVED.with(|received| received.set(Some(status)));
         });
-        listener.call(AnimationStatus::Reverse, &mut App::new());
+        listener.call(AnimationStatus::Reverse, &mut AppCell::new().borrow_mut());
         assert_eq!(RECEIVED.with(Cell::get), Some(AnimationStatus::Reverse));
     }
 }

@@ -254,7 +254,7 @@ mod tests {
     use std::cell::Cell;
 
     use reveal_embedder::Offset;
-    use reveal_foundation::App;
+    use reveal_foundation::{App, AppCell};
 
     use crate::events::PointerDownEvent;
 
@@ -268,7 +268,8 @@ mod tests {
 
     #[test]
     fn should_route_pointers() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let ran = Rc::new(Cell::new(false));
         let ran_flag = Rc::clone(&ran);
         let callback = PointerRoute::new(move |_app, _event| {
@@ -289,7 +290,8 @@ mod tests {
 
     #[test]
     fn supports_reentrant_cancellation() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let ran = Rc::new(Cell::new(false));
         let ran_flag = Rc::clone(&ran);
         let callback = PointerRoute::new(move |_app, _event| {
@@ -313,7 +315,8 @@ mod tests {
 
     #[test]
     fn supports_global_callbacks() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let first_ran = Rc::new(Cell::new(false));
         let second_ran = Rc::new(Cell::new(false));
         let first_flag = Rc::clone(&first_ran);
@@ -343,7 +346,8 @@ mod tests {
 
     #[test]
     fn supports_reentrant_global_cancellation() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let ran = Rc::new(Cell::new(false));
         let ran_flag = Rc::clone(&ran);
         let callback = PointerRoute::new(move |_app, _event| {
@@ -366,7 +370,8 @@ mod tests {
 
     #[test]
     fn handle_method_tear_off_matches_on_remove() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         struct Flag(Cell<bool>);
         fn mark(this: Handle<Flag>, app: &mut App, _event: PointerEvent) {
             app.get_mut(this).0.set(true);

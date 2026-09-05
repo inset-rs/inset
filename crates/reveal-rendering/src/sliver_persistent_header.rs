@@ -1321,6 +1321,7 @@ pub trait RenderSliverFloatingPinnedPersistentHeader: RenderSliverFloatingPersis
 #[cfg(test)]
 mod tests {
     use reveal_embedder::Size;
+    use reveal_foundation::AppCell;
 
     use super::*;
     use crate::object::{RenderObject, RenderObjectData, RenderObjectWithChildData};
@@ -1545,7 +1546,8 @@ mod tests {
     /// scrolls off, keeping its full scroll extent.
     #[test]
     fn a_scrolling_header_shrinks_as_it_scrolls_off() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let header = scrolling_header(&mut app, 40.0, 120.0);
         lay_out(&mut app, header.as_sliver(), 50.0);
 
@@ -1567,7 +1569,8 @@ mod tests {
     /// obstruction.
     #[test]
     fn a_pinned_header_stays_at_the_leading_edge() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let header = pinned_header(&mut app, 40.0, 120.0);
         lay_out(&mut app, header.as_sliver(), 100.0);
 
@@ -1588,7 +1591,8 @@ mod tests {
     /// An unscrolled pinned header is at its maximum extent.
     #[test]
     fn an_unscrolled_pinned_header_is_at_its_maximum_extent() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let header = pinned_header(&mut app, 40.0, 120.0);
         lay_out(&mut app, header.as_sliver(), 0.0);
 
@@ -1602,7 +1606,8 @@ mod tests {
     /// `layout_child` re-runs `update_child` only when the shrink offset or overlap changes.
     #[test]
     fn layout_child_reports_the_shrink_offset() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let header = scrolling_header(&mut app, 40.0, 120.0);
         lay_out(&mut app, header.as_sliver(), 80.0);
 

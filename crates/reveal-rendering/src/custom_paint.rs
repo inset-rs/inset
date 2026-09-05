@@ -575,6 +575,7 @@ impl RenderBox for RenderCustomPaint {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
 
     use reveal_embedder::{Color, Paint, valo};
@@ -685,7 +686,8 @@ mod tests {
 
     #[test]
     fn both_painters_paint_around_the_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let background = Rc::new(Recorder::new(RED));
         let foreground = Rc::new(Recorder::new(BLUE));
         let child = crate::proxy_box::RenderColoredBox::new(&mut app, GREEN, true, None);
@@ -711,7 +713,8 @@ mod tests {
 
     #[test]
     fn a_painter_repaints_when_its_repaint_listenable_notifies() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let notifier = app.create(ValueNotifier::new(0));
         let painter = Rc::new(Recorder {
             repaint: Some(Rc::new(notifier)),
@@ -740,7 +743,8 @@ mod tests {
     /// Dart's `_didUpdatePainter`: the new painter decides, and the listener moves with it.
     #[test]
     fn replacing_the_painter_asks_it_whether_to_repaint() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let notifier = app.create(ValueNotifier::new(0));
         let painter = Rc::new(Recorder {
             repaint: Some(Rc::new(notifier)),
@@ -788,7 +792,8 @@ mod tests {
 
     #[test]
     fn preferred_size_is_used_without_a_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let custom = RenderCustomPaint::new(
             &mut app,
             None,
@@ -815,7 +820,8 @@ mod tests {
 
     #[test]
     fn a_child_sizes_the_custom_paint() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = crate::proxy_box::RenderConstrainedBox::new(
             &mut app,
             BoxConstraints::tight(Size::new(40.0, 40.0)),
@@ -836,7 +842,8 @@ mod tests {
 
     #[test]
     fn the_painters_answer_hit_tests() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let background = Rc::new(Recorder::new(RED));
         let custom = RenderCustomPaint::new(
             &mut app,

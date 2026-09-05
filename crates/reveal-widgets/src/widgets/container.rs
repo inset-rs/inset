@@ -661,6 +661,7 @@ impl StatelessWidget for Container {
 #[cfg(test)]
 mod tests {
     use reveal_embedder::{Clip, Color, Offset, Size, TextDirection};
+    use reveal_foundation::AppCell;
     use reveal_painting::{Border, BorderSide, BorderStyle, BoxDecoration};
     use reveal_rendering::{
         AnyRenderBox, BoxParentData, RenderAligningShiftedBox, RenderBox, RenderColoredBox,
@@ -697,7 +698,8 @@ mod tests {
 
     #[test]
     fn decorated_box_paints_its_decoration_and_updates_in_place() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let red = Color::from_argb(255, 255, 0, 0);
         let blue = Color::from_argb(255, 0, 0, 255);
         let decorated = |color: Color| {
@@ -744,7 +746,8 @@ mod tests {
 
     #[test]
     fn a_container_builds_dart_s_chain_outside_in() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             Container::new()
@@ -789,7 +792,8 @@ mod tests {
 
     #[test]
     fn a_childless_container_expands_inside_a_limited_box() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(&mut app, Container::new().into_widget());
         harness.pump(&mut app);
         let limited = root_child::<RenderLimitedBox>(&harness, &app);
@@ -809,7 +813,8 @@ mod tests {
 
     #[test]
     fn a_decoration_adds_its_padding_and_paints_behind_the_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let decoration = BoxDecoration::new()
             .color(Color::from_argb(255, 0, 0, 255))
             .border(Border::all(
@@ -845,7 +850,8 @@ mod tests {
 
     #[test]
     fn an_aligned_container_positions_its_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             Container::new()
@@ -895,7 +901,8 @@ mod tests {
 
     #[test]
     fn a_clip_behavior_clips_the_decoration_through_its_clip_path() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             Directionality::new(

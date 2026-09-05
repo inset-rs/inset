@@ -1769,6 +1769,7 @@ impl ParentDataWidget for KeepAlive {
 #[cfg(test)]
 mod tests {
     use reveal_embedder::TextDirection;
+    use reveal_foundation::AppCell;
     use reveal_foundation::ValueKey;
     use reveal_rendering::{
         ContainerRenderObjectMixin, FixedViewportOffset, RenderSliverList, ScrollCacheExtent,
@@ -1833,7 +1834,8 @@ mod tests {
     /// them: `SliverChildListDelegate.findIndexByKey` finds each child's new index.
     #[test]
     fn a_keyed_reorder_keeps_the_child_render_objects() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::zero(&mut app);
         let ordered = |values: [u32; 3]| {
             SliverList::list(values.map(item).to_vec())
@@ -1858,7 +1860,8 @@ mod tests {
     /// instead of being destroyed.
     #[test]
     fn keep_alive_holds_a_scrolled_off_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::zero(&mut app);
         let mut children: Vec<WidgetRef> = vec![
             KeepAlive::new(true, SizedBox::new().key(key(0)).height(40.0))
@@ -1891,7 +1894,8 @@ mod tests {
     /// for.
     #[test]
     fn a_fixed_extent_list_forces_the_item_extent() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::zero(&mut app);
         let sliver = SliverFixedExtentList::builder(
             |_app, _context, _index| Some(SizedBox::new().height(10.0).into_widget()),

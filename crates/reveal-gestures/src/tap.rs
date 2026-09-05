@@ -972,6 +972,7 @@ impl BaseTapGestureRecognizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reveal_foundation::AppCell;
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
@@ -1045,7 +1046,8 @@ mod tests {
 
     #[test]
     fn should_recognize_tap() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tap = TapGestureRecognizer::new(&mut app);
         let recognized = Rc::new(Cell::new(false));
         let flag = Rc::clone(&recognized);
@@ -1067,7 +1069,8 @@ mod tests {
 
     #[test]
     fn should_recognize_tap_for_supported_devices_only() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tap = TapGestureRecognizer::new(&mut app).supported_devices(
             &mut app,
             [PointerDeviceKind::Mouse, PointerDeviceKind::Stylus],
@@ -1132,7 +1135,8 @@ mod tests {
 
     #[test]
     fn details_contain_the_correct_device_kind() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tap = TapGestureRecognizer::new(&mut app);
         let last_down = Rc::new(RefCell::new(None));
         let last_up = Rc::new(RefCell::new(None));
@@ -1174,7 +1178,8 @@ mod tests {
 
     #[test]
     fn no_duplicate_tap_events() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tap = TapGestureRecognizer::new(&mut app);
         let taps = Rc::new(Cell::new(0));
         let count = Rc::clone(&taps);
@@ -1203,7 +1208,8 @@ mod tests {
 
     #[test]
     fn should_not_recognize_two_overlapping_taps_fifo() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tap = TapGestureRecognizer::new(&mut app);
         let taps = Rc::new(Cell::new(0));
         let count = Rc::clone(&taps);
@@ -1233,7 +1239,8 @@ mod tests {
 
     #[test]
     fn distance_cancels_tap() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tap = TapGestureRecognizer::new(&mut app);
         let recognized = Rc::new(Cell::new(false));
         let canceled = Rc::new(Cell::new(false));
@@ -1261,7 +1268,8 @@ mod tests {
 
     #[test]
     fn short_distance_does_not_cancel_tap() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tap = TapGestureRecognizer::new(&mut app);
         let recognized = Rc::new(Cell::new(false));
         let canceled = Rc::new(Cell::new(false));
@@ -1287,7 +1295,8 @@ mod tests {
 
     #[test]
     fn timeout_does_not_cancel_tap() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tap = TapGestureRecognizer::new(&mut app);
         let recognized = Rc::new(Cell::new(false));
         let flag = Rc::clone(&recognized);
@@ -1297,7 +1306,9 @@ mod tests {
         tap.add_pointer(&mut app, down1.clone());
         close_arena(&mut app, 1);
         route(&mut app, PointerEvent::Down(down1));
-        app.elapse(std::time::Duration::from_millis(500));
+        drop(app);
+        cell.elapse(std::time::Duration::from_millis(500));
+        let mut app = cell.borrow_mut();
         assert!(!recognized.get());
         route(&mut app, PointerEvent::Up(up(1, Offset::new(11.0, 9.0))));
         sweep(&mut app, 1);
@@ -1307,7 +1318,8 @@ mod tests {
 
     #[test]
     fn press_timeout_fires_on_tap_down() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tap = TapGestureRecognizer::new(&mut app);
         let down_fired = Rc::new(Cell::new(false));
         let flag = Rc::clone(&down_fired);
@@ -1326,14 +1338,17 @@ mod tests {
         close_arena(&mut app, 1);
         route(&mut app, PointerEvent::Down(down1));
         assert!(!down_fired.get());
-        app.elapse(K_PRESS_TIMEOUT);
+        drop(app);
+        cell.elapse(K_PRESS_TIMEOUT);
+        let mut app = cell.borrow_mut();
         assert!(down_fired.get());
         tap.dispose(&mut app);
     }
 
     #[test]
     fn pointer_cancel_after_deadline_cancels_tap() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tap = TapGestureRecognizer::new(&mut app);
         let log = Rc::new(RefCell::new(Vec::new()));
         let down_log = Rc::clone(&log);
@@ -1355,7 +1370,9 @@ mod tests {
         let down5 = down(5, Offset::new(10.0, 10.0));
         tap.add_pointer(&mut app, down5.clone());
         close_arena(&mut app, 5);
-        app.elapse(std::time::Duration::from_millis(5000));
+        drop(app);
+        cell.elapse(std::time::Duration::from_millis(5000));
+        let mut app = cell.borrow_mut();
         assert_eq!(*log.borrow(), ["down"]);
         route(
             &mut app,
@@ -1371,7 +1388,8 @@ mod tests {
 
     #[test]
     fn should_yield_to_other_arena_members() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tap = TapGestureRecognizer::new(&mut app);
         let recognized = Rc::new(Cell::new(false));
         let flag = Rc::clone(&recognized);
@@ -1398,7 +1416,8 @@ mod tests {
 
     #[test]
     fn should_trigger_on_release_of_held_arena() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tap = TapGestureRecognizer::new(&mut app);
         let recognized = Rc::new(Cell::new(false));
         let flag = Rc::clone(&recognized);

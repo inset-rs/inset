@@ -527,6 +527,7 @@ impl SchedulerBinding {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::{Cell, RefCell};
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::rc::Rc;
@@ -552,7 +553,8 @@ mod tests {
 
     #[test]
     fn a_transient_callback_runs_once_per_registration() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
 
         SchedulerBinding::schedule_frame_callback(&mut app, logging(&log, "a"), false, true);
@@ -566,7 +568,8 @@ mod tests {
 
     #[test]
     fn canceling_by_id_prevents_the_call_even_mid_frame() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
 
         // The first callback cancels the second during the same frame — the
@@ -589,7 +592,8 @@ mod tests {
 
     #[test]
     fn the_frame_runs_phases_in_order_and_post_frame_runs_once() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
 
         SchedulerBinding::add_persistent_frame_callback(&mut app, logging(&log, "persistent"));
@@ -619,7 +623,8 @@ mod tests {
     // binding_test.dart 'Adding a persistent frame callback during a persistent frame callback'
     #[test]
     fn a_persistent_callback_added_during_a_frame_runs_on_the_next() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let called_back = Rc::new(Cell::new(false));
         SchedulerBinding::add_persistent_frame_callback(
             &mut app,
@@ -649,7 +654,8 @@ mod tests {
     // callback throws and the error is caught above the framework.
     #[test]
     fn a_panicking_transient_callback_still_advances_the_phase() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         SchedulerBinding::schedule_frame_callback(
             &mut app,
             FrameCallback::new(|_app, _t| panic!("a failing tick")),
@@ -670,7 +676,8 @@ mod tests {
 
     #[test]
     fn time_dilation_slows_the_adjusted_clock() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let seen = Rc::new(RefCell::new(Vec::new()));
 
         pump(&mut app, Duration::from_millis(0));
@@ -732,7 +739,8 @@ mod tests {
         let platform = std::rc::Rc::new(RecordingPlatform {
             frames: std::sync::Arc::clone(&frames),
         });
-        let mut app = App::with_platform(platform);
+        let cell = AppCell::with_platform(platform);
+        let mut app = cell.borrow_mut();
 
         SchedulerBinding::schedule_frame(&mut app);
         SchedulerBinding::schedule_frame(&mut app);
@@ -742,7 +750,8 @@ mod tests {
 
     #[test]
     fn the_host_can_pump_scheduler_handlers() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
         SchedulerBinding::schedule_frame_callback(&mut app, logging(&log, "a"), false, true);
 

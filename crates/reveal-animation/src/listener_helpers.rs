@@ -402,6 +402,7 @@ pub trait AnimationLocalStatusListenersMixin: Sized + 'static {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -642,7 +643,8 @@ mod tests {
 
     #[test]
     fn a_lazy_host_starts_listening_on_the_first_listener_and_stops_on_the_last() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let host = app.create(LazyHost::default());
         let log = Rc::clone(&app.get(host).log);
 
@@ -666,7 +668,8 @@ mod tests {
 
     #[test]
     fn removing_an_unregistered_listener_does_not_reach_did_unregister_listener() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let host = app.create(LazyHost::default());
         let log = Rc::clone(&app.get(host).log);
 
@@ -681,7 +684,8 @@ mod tests {
 
     #[test]
     fn a_lazy_host_starts_again_after_going_empty() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let host = app.create(LazyHost::default());
         let log = Rc::clone(&app.get(host).log);
 
@@ -695,7 +699,8 @@ mod tests {
 
     #[test]
     fn an_eager_host_never_starts_or_stops_but_disposes() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let host = app.create(EagerHost::default());
         let log: Log = Log::default();
 
@@ -712,7 +717,8 @@ mod tests {
 
     #[test]
     fn notify_listeners_calls_every_registered_listener() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let host = app.create(EagerHost::default());
         let log: Log = Log::default();
 
@@ -734,7 +740,8 @@ mod tests {
     /// scenario itself expressible. Deleting the guard makes this fail.
     #[test]
     fn a_listener_removed_mid_dispatch_is_not_called() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let host = app.create(EagerHost::default());
         let log: Log = Log::default();
 
@@ -762,7 +769,8 @@ mod tests {
 
     #[test]
     fn a_lazy_status_only_host_starts_and_stops_on_its_status_listeners() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let host = app.create(ReverseHost::default());
         let log = Rc::clone(&app.get(host).log);
 
@@ -787,7 +795,8 @@ mod tests {
     /// `iteration_patterns_test.dart:74`.
     #[test]
     fn a_status_listener_removed_mid_dispatch_is_not_called() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let host = app.create(ReverseHost::default());
         let log = Rc::clone(&app.get(host).log);
 
@@ -822,7 +831,8 @@ mod tests {
     /// first listener arrives, and removes it when its last one goes.
     #[test]
     fn a_start_hook_can_register_on_another_host_through_the_app() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let parent = app.create(EagerHost::default());
         let proxy = app.create(ProxyLikeHost::default());
         let log = Rc::clone(&app.get(proxy).log);
@@ -851,7 +861,8 @@ mod tests {
 
     #[test]
     fn clear_listeners_does_not_reach_did_unregister_listener() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let host = app.create(LazyHost::default());
         let log = Rc::clone(&app.get(host).log);
 

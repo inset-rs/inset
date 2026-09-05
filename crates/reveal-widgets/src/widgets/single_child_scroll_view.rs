@@ -1054,6 +1054,7 @@ impl RenderAbstractViewport for RenderSingleChildViewport {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::any::Any;
 
     use reveal_embedder::{Size, TextDirection, valo::Op};
@@ -1062,7 +1063,7 @@ mod tests {
     use reveal_rendering::{BoxHitTestEntry, RenderPadding};
 
     use super::*;
-    use crate::test_harness::{VIEW_HEIGHT, VIEW_WIDTH, binding_app, binding_mount, binding_pump};
+    use crate::test_harness::{VIEW_HEIGHT, VIEW_WIDTH, binding_cell, binding_mount, binding_pump};
     use crate::widgets::basic::{Directionality, Listener, SizedBox};
     use crate::widgets::media_query::{MediaQuery, MediaQueryData};
     use crate::widgets::scroll_controller::{ScrollController, ScrollControllerLeaf};
@@ -1118,16 +1119,17 @@ mod tests {
     }
 
     fn mount(
-        app: &mut App,
+        cell: &AppCell,
         view: SingleChildScrollView,
     ) -> RenderHandle<RenderSingleChildViewport> {
-        binding_mount(app, wrap(view));
-        let root = crate::binding::WidgetsBinding::instance(app)
-            .root_element(app)
+        binding_mount(cell, wrap(view));
+        let mut app = cell.borrow_mut();
+        let root = crate::binding::WidgetsBinding::instance(&mut app)
+            .root_element(&app)
             .expect("a mounted root element")
-            .find_render_object(app)
+            .find_render_object(&app)
             .expect("a mounted view has a render object");
-        find::<RenderSingleChildViewport>(app, root).expect("a RenderSingleChildViewport")
+        find::<RenderSingleChildViewport>(&app, root).expect("a RenderSingleChildViewport")
     }
 
     /// The offset the viewport paints its content at.
@@ -1175,14 +1177,17 @@ mod tests {
 
     #[test]
     fn a_vertical_view_gives_its_child_unbounded_height_and_keeps_the_viewport_height() {
-        let mut app = binding_app();
+        let cell = binding_cell();
+        let mut app = cell.borrow_mut();
         let controller = ScrollController::default(&mut app);
+        drop(app);
         let viewport = mount(
-            &mut app,
+            &cell,
             SingleChildScrollView::new()
                 .controller(controller.as_controller())
                 .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
         );
+        let app = cell.borrow();
 
         let child = viewport.child(&app).expect("the content");
         assert_eq!(child.size(&app), Size::new(CONTENT_WIDTH, CONTENT_HEIGHT));
@@ -1195,15 +1200,18 @@ mod tests {
 
     #[test]
     fn a_horizontal_view_gives_its_child_unbounded_width_and_keeps_the_viewport_width() {
-        let mut app = binding_app();
+        let cell = binding_cell();
+        let mut app = cell.borrow_mut();
         let controller = ScrollController::default(&mut app);
+        drop(app);
         let viewport = mount(
-            &mut app,
+            &cell,
             SingleChildScrollView::new()
                 .scroll_direction(Axis::Horizontal)
                 .controller(controller.as_controller())
                 .child(SizedBox::new().width(CONTENT_HEIGHT).height(CONTENT_WIDTH)),
         );
+        let app = cell.borrow();
 
         let child = viewport.child(&app).expect("the content");
         assert_eq!(child.size(&app), Size::new(CONTENT_HEIGHT, CONTENT_WIDTH));
@@ -1216,14 +1224,17 @@ mod tests {
 
     #[test]
     fn the_content_offset_follows_the_controller() {
-        let mut app = binding_app();
+        let cell = binding_cell();
+        let mut app = cell.borrow_mut();
         let controller = ScrollController::default(&mut app);
+        drop(app);
         let viewport = mount(
-            &mut app,
+            &cell,
             SingleChildScrollView::new()
                 .controller(controller.as_controller())
                 .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
         );
+        let mut app = cell.borrow_mut();
         assert_eq!(content_offset(&app, viewport), Offset::ZERO);
 
         controller.jump_to(&mut app, 120.0);
@@ -1233,15 +1244,18 @@ mod tests {
 
     #[test]
     fn a_reversed_view_starts_at_the_end_of_its_content() {
-        let mut app = binding_app();
+        let cell = binding_cell();
+        let mut app = cell.borrow_mut();
         let controller = ScrollController::default(&mut app);
+        drop(app);
         let viewport = mount(
-            &mut app,
+            &cell,
             SingleChildScrollView::new()
                 .reverse(true)
                 .controller(controller.as_controller())
                 .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
         );
+        let mut app = cell.borrow_mut();
 
         assert_eq!(viewport.axis_direction(&app), AxisDirection::Up);
         // At scroll offset zero the content's trailing edge sits on the viewport's.
@@ -1260,8 +1274,9 @@ mod tests {
 
     #[test]
     fn get_offset_to_reveal_answers_the_offset_that_brings_a_descendant_to_an_edge() {
-        let mut app = binding_app();
-        let viewport = mount(&mut app, SingleChildScrollView::new().child(tall_content()));
+        let cell = binding_cell();
+        let viewport = mount(&cell, SingleChildScrollView::new().child(tall_content()));
+        let app = cell.borrow();
         let padding = find::<RenderPadding>(&app, viewport.as_object()).expect("the padding");
         let target = padding.child(&app).expect("the target").as_object();
 
@@ -1290,14 +1305,17 @@ mod tests {
 
     #[test]
     fn a_hit_test_reaches_the_content_through_the_scroll_offset() {
-        let mut app = binding_app();
+        let cell = binding_cell();
+        let mut app = cell.borrow_mut();
         let controller = ScrollController::default(&mut app);
+        drop(app);
         let viewport = mount(
-            &mut app,
+            &cell,
             SingleChildScrollView::new()
                 .controller(controller.as_controller())
                 .child(tall_content()),
         );
+        let mut app = cell.borrow_mut();
         let padding = find::<RenderPadding>(&app, viewport.as_object()).expect("the padding");
         let target = padding.child(&app).expect("the target");
 
@@ -1317,12 +1335,13 @@ mod tests {
 
     #[test]
     fn overflowing_content_is_clipped_unless_the_clip_behavior_says_otherwise() {
-        let mut app = binding_app();
+        let cell = binding_cell();
         let viewport = mount(
-            &mut app,
+            &cell,
             SingleChildScrollView::new()
                 .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
         );
+        let app = cell.borrow();
         assert!(
             scene_ops(&app, viewport)
                 .iter()
@@ -1330,13 +1349,14 @@ mod tests {
             "content taller than the viewport is clipped"
         );
 
-        let mut app = binding_app();
+        let cell = binding_cell();
         let viewport = mount(
-            &mut app,
+            &cell,
             SingleChildScrollView::new()
                 .clip_behavior(Clip::None)
                 .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
         );
+        let app = cell.borrow();
         assert!(
             !scene_ops(&app, viewport)
                 .iter()
@@ -1344,12 +1364,13 @@ mod tests {
             "Clip::None paints the content unclipped"
         );
 
-        let mut app = binding_app();
+        let cell = binding_cell();
         let viewport = mount(
-            &mut app,
+            &cell,
             SingleChildScrollView::new()
                 .child(SizedBox::new().width(CONTENT_WIDTH).height(VIEW_HEIGHT)),
         );
+        let app = cell.borrow();
         assert!(
             !scene_ops(&app, viewport)
                 .iter()

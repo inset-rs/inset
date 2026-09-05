@@ -1487,6 +1487,7 @@ impl AnimatedWidget for ListenableBuilder {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
     use std::time::Duration;
 
@@ -1614,7 +1615,8 @@ mod tests {
     // transitions_test.dart 'SlideTransition transformHitTests'
     #[test]
     fn a_slide_transition_translates_by_the_animation_and_flips_in_rtl() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
         let position = controller.drive(
             &mut app,
@@ -1651,7 +1653,8 @@ mod tests {
     // transitions_test.dart 'MatrixTransition animates'
     #[test]
     fn a_matrix_transition_paints_the_matrix_its_callback_returns() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
         let widget = MatrixTransition::new(controller.view(), |value| {
             Matrix4::translation(value as f32 * 100.0, 0.0)
@@ -1681,7 +1684,8 @@ mod tests {
     // transitions_test.dart 'ScaleTransition animates'
     #[test]
     fn a_scale_transition_scales_about_its_alignment() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
         let widget = ScaleTransition::new(controller.view())
             .child(ten_by_ten())
@@ -1715,7 +1719,8 @@ mod tests {
     // transitions_test.dart 'RotationTransition animates'
     #[test]
     fn a_rotation_transition_turns_a_full_circle_per_unit() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
         let widget = RotationTransition::new(controller.view())
             .child(ten_by_ten())
@@ -1745,7 +1750,8 @@ mod tests {
     // transitions_test.dart 'SizeTransition clamps negative size factors'
     #[test]
     fn a_size_transition_clips_its_child_to_the_size_factor() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
         let widget = SizeTransition::new(controller.view())
             .child(ten_by_ten())
@@ -1773,7 +1779,8 @@ mod tests {
 
     #[test]
     fn a_horizontal_size_transition_fixes_its_cross_axis_factor() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
         let widget = SizeTransition::new(controller.view())
             .axis(Axis::Horizontal)
@@ -1792,7 +1799,8 @@ mod tests {
     // transitions_test.dart 'PositionedTransition animates'
     #[test]
     fn a_positioned_transition_places_its_child_by_the_relative_rect() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
         let tween = RelativeRectTween::new(
             Some(RelativeRect::from_ltrb(0.0, 0.0, 200.0, 100.0)),
@@ -1820,7 +1828,8 @@ mod tests {
     // transitions_test.dart 'RelativePositionedTransition animates'
     #[test]
     fn a_relative_positioned_transition_places_its_child_inside_the_given_size() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
         let rect = controller.drive(
             &mut app,
@@ -1877,7 +1886,8 @@ mod tests {
     // transitions_test.dart 'DecoratedBoxTransition test'
     #[test]
     fn a_decorated_box_transition_hands_the_animated_decoration_to_its_render_object() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
         let decoration = controller.drive(&mut app, FadingBlack);
         let widget = DecoratedBoxTransition::new(decoration, ten_by_ten())
@@ -1904,7 +1914,8 @@ mod tests {
     // transitions_test.dart 'AlignTransition animates'
     #[test]
     fn an_align_transition_hands_the_animated_alignment_to_its_render_object() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
         let alignment = controller.drive(
             &mut app,
@@ -1934,7 +1945,8 @@ mod tests {
     // transitions_test.dart 'DefaultTextStyleTransition test'
     #[test]
     fn a_default_text_style_transition_publishes_the_animated_style() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
         let style = controller.drive(
             &mut app,
@@ -1972,7 +1984,8 @@ mod tests {
     // transitions_test.dart 'FadeTransition animates'
     #[test]
     fn a_fade_transition_hands_its_animation_to_the_render_object() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
         let harness = Harness::mount(&mut app, fade(controller.view()));
         harness.pump(&mut app);
@@ -2036,7 +2049,8 @@ mod tests {
 
     #[test]
     fn an_animated_widget_rebuilds_when_its_listenable_notifies() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let notifier = app.create(ValueNotifier::new(10.0));
         let builds = Rc::new(Cell::new(0));
         let harness = Harness::mount(
@@ -2061,7 +2075,8 @@ mod tests {
 
     #[test]
     fn an_animated_widget_follows_a_new_listenable_and_unsubscribes_on_unmount() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let first = app.create(ValueNotifier::new(10.0));
         let second = app.create(ValueNotifier::new(30.0));
         let builds = Rc::new(Cell::new(0));
@@ -2105,7 +2120,8 @@ mod tests {
 
     #[test]
     fn a_listenable_builder_rebuilds_on_notify_and_hands_back_its_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let notifier = app.create(ValueNotifier::new(0i32));
         let builds = Rc::new(Cell::new(0));
         let child: WidgetRef = SizedBox::square(Some(4.0)).into_widget();

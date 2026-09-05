@@ -93,6 +93,7 @@ impl<T: PartialEq + Debug + 'static> SingleChildRenderObjectWidget for Annotated
 #[cfg(test)]
 mod tests {
     use reveal_embedder::Offset;
+    use reveal_foundation::AppCell;
     use reveal_rendering::{AnnotationResult, BoundaryLayer};
 
     use super::*;
@@ -143,7 +144,8 @@ mod tests {
 
     #[test]
     fn a_sized_region_answers_inside_its_bounds_and_nowhere_else() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(&mut app, centred_region(true));
         harness.pump(&mut app);
         let layer = root_layer(&harness, &app);
@@ -172,7 +174,8 @@ mod tests {
 
     #[test]
     fn an_unsized_region_answers_everywhere() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(&mut app, centred_region(false));
         harness.pump(&mut app);
         let layer = root_layer(&harness, &app);
@@ -192,7 +195,8 @@ mod tests {
 
     #[test]
     fn a_find_of_another_type_finds_nothing() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(&mut app, centred_region(true));
         harness.pump(&mut app);
         assert!(
@@ -205,7 +209,8 @@ mod tests {
 
     #[test]
     fn nested_regions_answer_innermost_first() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let inner = AnnotatedRegion::new(SizedBox::expand(), Marker(2));
         let tree = Center::new()
             .child(
@@ -278,7 +283,8 @@ mod tests {
 
     #[test]
     fn a_region_reconfigures_its_render_object_in_place() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let region = |value: u32, sized_region: bool| {
             AnnotatedRegion::new(sized(10.0, 10.0), Marker(value))
                 .sized(sized_region)

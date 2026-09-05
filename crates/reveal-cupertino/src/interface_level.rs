@@ -137,13 +137,14 @@ mod tests {
     use reveal_widgets::{Builder, SizedBox};
 
     use super::*;
-    use crate::test_support::{app, build};
+    use crate::test_support::{build, test_cell};
 
     fn read_under<T: 'static>(
         wrap: impl FnOnce(WidgetRef) -> WidgetRef,
         read: impl Fn(&mut App, BuildContext) -> T + 'static,
     ) -> T {
-        let mut app = app();
+        let cell = test_cell();
+        let app = cell.borrow();
         let seen = Rc::new(RefCell::new(None));
         let probe = Builder::new({
             let seen = Rc::clone(&seen);
@@ -153,7 +154,8 @@ mod tests {
             }
         })
         .into_widget();
-        build(&mut app, wrap(probe));
+        drop(app);
+        build(&cell, wrap(probe));
         let read = seen.borrow_mut().take();
         read.expect("the probe built")
     }

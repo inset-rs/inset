@@ -570,6 +570,7 @@ impl StatelessWidget for CupertinoListSection {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -581,7 +582,7 @@ mod tests {
     use reveal_widgets::{Builder, Directionality, GlobalKey};
 
     use super::*;
-    use crate::test_support::{app, build};
+    use crate::test_support::{build, test_cell};
 
     fn key_of(key: &GlobalKey) -> KeyRef {
         Rc::new(key.clone())
@@ -623,9 +624,9 @@ mod tests {
             .expect("the section has been laid out")
     }
 
-    fn mount<K>(app: &mut App, section: impl IntoWidget<K>) {
+    fn mount<K>(cell: &AppCell, section: impl IntoWidget<K>) {
         build(
-            app,
+            cell,
             Directionality::new(TextDirection::Ltr, section).into_widget(),
         );
     }
@@ -642,7 +643,7 @@ mod tests {
 
     #[test]
     fn a_base_section_stacks_its_top_margin_header_dividers_and_footer() {
-        let mut app = app();
+        let cell = test_cell();
         let (section_key, header, first, second, footer) = (
             GlobalKey::new(),
             GlobalKey::new(),
@@ -651,7 +652,7 @@ mod tests {
             GlobalKey::new(),
         );
         mount(
-            &mut app,
+            &cell,
             CupertinoListSection::new()
                 .key(key_of(&section_key))
                 .header(slot(&header, 50.0, 10.0))
@@ -661,6 +662,7 @@ mod tests {
                     slot(&second, 50.0, 40.0).into_widget(),
                 ]),
         );
+        let mut app = cell.borrow_mut();
 
         assert_eq!(
             offset_of(&mut app, &header),
@@ -692,10 +694,10 @@ mod tests {
 
     #[test]
     fn an_inset_grouped_section_clips_its_rows_and_drops_the_long_dividers() {
-        let mut app = app();
+        let cell = test_cell();
         let (section_key, first, second) = (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
         mount(
-            &mut app,
+            &cell,
             CupertinoListSection::inset_grouped()
                 .key(key_of(&section_key))
                 .children([
@@ -703,6 +705,7 @@ mod tests {
                     slot(&second, 50.0, 40.0).into_widget(),
                 ]),
         );
+        let mut app = cell.borrow_mut();
 
         assert_eq!(
             offset_of(&mut app, &first).dy(),
@@ -723,11 +726,11 @@ mod tests {
 
     #[test]
     fn a_base_section_styles_its_header_and_footer_in_the_header_footer_color() {
-        let mut app = app();
+        let cell = test_cell();
         let seen = Rc::new(RefCell::new(Vec::new()));
         let resolved = Rc::new(RefCell::new(None));
         mount(
-            &mut app,
+            &cell,
             CupertinoListSection::new()
                 .header(probe(&seen))
                 .footer(probe(&seen))
@@ -755,7 +758,7 @@ mod tests {
 
     #[test]
     fn an_inset_grouped_header_is_bold_and_re_picks_the_rows_margin() {
-        let mut app = app();
+        let cell = test_cell();
         let seen = Rc::new(RefCell::new(Vec::new()));
         let with_header = CupertinoListSection::inset_grouped().header(probe(&seen));
         assert_eq!(
@@ -769,7 +772,7 @@ mod tests {
         );
 
         mount(
-            &mut app,
+            &cell,
             with_header
                 .footer(probe(&seen))
                 .children([SizedBox::new().width(50.0).height(40.0).into_widget()]),

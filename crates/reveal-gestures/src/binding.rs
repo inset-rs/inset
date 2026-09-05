@@ -335,6 +335,7 @@ impl HitTestTarget for Handle<GestureBinding> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -343,7 +344,8 @@ mod tests {
 
     #[test]
     fn down_routes_through_the_binding_and_closes_the_arena() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let binding = GestureBinding::instance(&mut app);
         let ran = Rc::new(Cell::new(0));
         let ran_flag = Rc::clone(&ran);

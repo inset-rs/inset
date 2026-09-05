@@ -854,7 +854,7 @@ mod tests {
     use std::time::Duration;
 
     use reveal_embedder::{KeyData, KeyEventType};
-    use reveal_foundation::App;
+    use reveal_foundation::{App, AppCell};
 
     use super::{
         HardwareKeyboard, KeyDownEvent, KeyEvent, KeyEventCallback, KeyEventManager,
@@ -872,7 +872,8 @@ mod tests {
 
     #[test]
     fn a_down_up_pair_updates_the_pressed_key_sets() {
-        let mut app = App::default();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let keyboard = HardwareKeyboard::instance(&mut app);
 
         keyboard.handle_key_event(
@@ -904,7 +905,8 @@ mod tests {
 
     #[test]
     fn a_repeat_event_keeps_the_key_pressed_and_updates_the_logical_key() {
-        let mut app = App::default();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let keyboard = HardwareKeyboard::instance(&mut app);
 
         keyboard.handle_key_event(
@@ -934,7 +936,8 @@ mod tests {
 
     #[test]
     fn is_shift_pressed_answers_for_either_side() {
-        let mut app = App::default();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let keyboard = HardwareKeyboard::instance(&mut app);
         assert!(!keyboard.is_shift_pressed(&app));
 
@@ -967,7 +970,8 @@ mod tests {
 
     #[test]
     fn a_lock_key_toggles_its_mode_on_every_down() {
-        let mut app = App::default();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let keyboard = HardwareKeyboard::instance(&mut app);
         let caps_lock = down(
             PhysicalKeyboardKey::CAPS_LOCK,
@@ -996,7 +1000,8 @@ mod tests {
 
     #[test]
     fn handlers_receive_events_and_can_claim_them() {
-        let mut app = App::default();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let keyboard = HardwareKeyboard::instance(&mut app);
         let seen: Rc<RefCell<Vec<LogicalKeyboardKey>>> = Rc::new(RefCell::new(Vec::new()));
 
@@ -1038,7 +1043,8 @@ mod tests {
 
     #[test]
     fn a_handler_added_during_dispatch_takes_effect_after_it() {
-        let mut app = App::default();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let keyboard = HardwareKeyboard::instance(&mut app);
         let calls = Rc::new(RefCell::new(0));
 
@@ -1068,7 +1074,8 @@ mod tests {
 
     #[test]
     fn key_data_becomes_an_event_the_keyboard_records() {
-        let mut app = App::default();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let manager = KeyEventManager::instance(&mut app);
         let keyboard = manager.hardware_keyboard(&app);
 
@@ -1113,7 +1120,8 @@ mod tests {
 
     #[test]
     fn sync_keyboard_state_records_what_the_host_reports() {
-        let mut app = App::default();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let keyboard = HardwareKeyboard::instance(&mut app);
         keyboard.sync_keyboard_state(
             &mut app,

@@ -1851,15 +1851,17 @@ mod tests {
 
     #[test]
     fn a_shortcut_maps_a_key_event_to_an_intent_and_invokes_its_action() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let log: Rc<RefCell<Vec<&'static str>>> = Rc::default();
         let action = save_action(&mut app, &log);
         let shortcuts: ShortcutMap = vec![(
             Rc::new(SingleActivator::new(LogicalKeyboardKey::KEY_S).control(true)),
             Rc::new(SaveIntent),
         )];
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Shortcuts::new(
                 shortcuts,
                 Actions::new(
@@ -1869,6 +1871,7 @@ mod tests {
             )
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
 
         let keyboard = HardwareKeyboard::instance(&mut app);
         // Without the modifier the activator does not accept the event.
@@ -1898,7 +1901,8 @@ mod tests {
 
     #[test]
     fn a_logical_key_set_activates_on_the_whole_combination() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let log: Rc<RefCell<Vec<&'static str>>> = Rc::default();
         let action = save_action(&mut app, &log);
         let shortcuts: ShortcutMap = vec![(
@@ -1910,8 +1914,9 @@ mod tests {
             )),
             Rc::new(SaveIntent),
         )];
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Shortcuts::new(
                 shortcuts,
                 Actions::new(
@@ -1921,6 +1926,7 @@ mod tests {
             )
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
 
         let keyboard = HardwareKeyboard::instance(&mut app);
         keyboard.handle_key_event(
@@ -1939,7 +1945,8 @@ mod tests {
 
     #[test]
     fn callback_shortcuts_call_every_binding_that_accepts_the_event() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let app = cell.borrow();
         let log: Rc<RefCell<Vec<&'static str>>> = Rc::default();
         let first = Rc::clone(&log);
         let second = Rc::clone(&log);
@@ -1953,11 +1960,13 @@ mod tests {
                 Listener::new(move |_app| second.borrow_mut().push("second")),
             ),
         ];
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             CallbackShortcuts::new(bindings, Focus::new(SizedBox::shrink()).autofocus(true))
                 .into_widget(),
         );
+        let mut app = cell.borrow_mut();
 
         let keyboard = HardwareKeyboard::instance(&mut app);
         let event = KeyEvent::Down(
@@ -1974,8 +1983,9 @@ mod tests {
 
     #[test]
     fn the_manager_reindexes_and_notifies_when_its_shortcuts_change() {
-        let mut app = app_with_view();
-        mount(&mut app, SizedBox::shrink().into_widget());
+        let cell = app_with_view();
+        mount(&cell, SizedBox::shrink().into_widget());
+        let mut app = cell.borrow_mut();
         let manager = ShortcutManager::new(&mut app);
         let notifications: Rc<RefCell<u32>> = Rc::default();
         let sink = Rc::clone(&notifications);
@@ -2003,13 +2013,15 @@ mod tests {
 
     #[test]
     fn the_registry_merges_its_entries_into_the_registrars_manager() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let log: Rc<RefCell<Vec<&'static str>>> = Rc::default();
         let action = save_action(&mut app, &log);
         let captured: Rc<std::cell::Cell<Option<BuildContext>>> = Rc::default();
         let sink = Rc::clone(&captured);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             ShortcutRegistrar::new(Actions::new(
                 HashMap::from([(TypeId::of::<SaveIntent>(), action)]),
                 crate::widgets::basic::Builder::new(move |_app, context| {
@@ -2019,6 +2031,7 @@ mod tests {
             ))
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let context = captured.get().expect("the builder ran");
 
         let registry = ShortcutRegistry::of(&mut app, context);

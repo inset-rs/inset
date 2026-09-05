@@ -559,6 +559,7 @@ impl RenderSliver for RenderSliverList {
 #[cfg(test)]
 mod tests {
     use reveal_embedder::Size;
+    use reveal_foundation::AppCell;
     use reveal_gestures::HitTestResult;
 
     use super::*;
@@ -586,7 +587,8 @@ mod tests {
     /// each child's layout offset is the sum of the extents before it.
     #[test]
     fn a_sliver_list_stacks_children_of_differing_extents() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (list, _, _harness) = sliver_list(&mut app, vec![40.0, 60.0, 80.0, 100.0, 120.0]);
 
         let first = list.first_child(&app).expect("children were created");
@@ -611,7 +613,8 @@ mod tests {
     /// A list that fits inside the viewport reports its exact extent and no overflow.
     #[test]
     fn a_short_sliver_list_reports_its_exact_extent() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (list, manager, _harness) = sliver_list(&mut app, vec![40.0, 60.0]);
 
         let geometry = list.geometry(&app);
@@ -625,7 +628,8 @@ mod tests {
     /// Scrolling drops the children that left the cache area and creates the ones that entered.
     #[test]
     fn scrolling_a_sliver_list_replaces_its_children() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (list, _, harness) = sliver_list(&mut app, vec![100.0; 30]);
         assert_eq!(
             list.index_of(&app, list.first_child(&app).expect("built")),
@@ -643,7 +647,8 @@ mod tests {
     /// A hit inside a reified child lands on the child and the sliver.
     #[test]
     fn a_sliver_list_hit_tests_its_children() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (list, _, _harness) = sliver_list(&mut app, vec![50.0; 20]);
 
         let mut result = HitTestResult::new();
@@ -661,7 +666,8 @@ mod tests {
     /// A kept-alive child is moved to the bucket rather than destroyed when it scrolls away.
     #[test]
     fn a_sliver_list_keeps_a_child_alive() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (list, _, harness) = sliver_list(&mut app, vec![100.0; 30]);
         let first = list.first_child(&app).expect("children were created");
         first

@@ -478,10 +478,12 @@ impl ViewportOffset for FixedViewportOffset {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reveal_foundation::AppCell;
 
     #[test]
     fn a_fixed_offset_only_moves_by_correction() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::new(&mut app, 12.0);
         assert_eq!(offset.pixels(&app), 12.0);
         assert!(offset.has_pixels(&app));
@@ -495,7 +497,8 @@ mod tests {
 
     #[test]
     fn the_erased_edge_dispatches_to_the_concrete_offset() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::zero(&mut app).as_viewport_offset();
         assert_eq!(offset.pixels(&app), 0.0);
         assert!(offset.apply_viewport_dimension(&mut app, 100.0));

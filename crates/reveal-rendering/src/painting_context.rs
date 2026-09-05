@@ -400,6 +400,7 @@ impl ClipContext for PaintingContext {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -591,7 +592,8 @@ mod tests {
     /// `object_test.dart`: `nodesNeedingPaint updated with paint changes`.
     #[test]
     fn nodes_needing_paint_updated_with_paint_changes() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let owner = PipelineOwner::new(&mut app, None);
         let node = RenderHandle::new_box(
             &mut app,
@@ -617,7 +619,8 @@ mod tests {
 
     #[test]
     fn child_boundary_repaints_without_its_parent() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tree = tree(&mut app, true);
         frame(&mut app, tree.owner);
         assert_eq!(paints(&tree), (1, 1));
@@ -642,7 +645,8 @@ mod tests {
 
     #[test]
     fn composited_layer_update_does_not_repaint() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tree = tree(&mut app, true);
         frame(&mut app, tree.owner);
 
@@ -665,7 +669,8 @@ mod tests {
     /// `layers_test.dart`: `non-painted layers are detached`.
     #[test]
     fn unpainted_boundary_is_detached_and_skipped() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tree = tree(&mut app, true);
         frame(&mut app, tree.owner);
         assert!(leaf_layer_attached(&app, &tree));
@@ -694,7 +699,8 @@ mod tests {
 
     #[test]
     fn non_boundary_child_paints_into_the_parent_picture() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tree = tree(&mut app, false);
         frame(&mut app, tree.owner);
         assert_eq!(paints(&tree), (1, 1));
@@ -712,7 +718,8 @@ mod tests {
 
     #[test]
     fn composing_the_root_draws_the_child_boundary_through_its_layer() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tree = tree(&mut app, true);
         tree.leaf.get_mut(&mut app).alpha = 128;
         frame(&mut app, tree.owner);

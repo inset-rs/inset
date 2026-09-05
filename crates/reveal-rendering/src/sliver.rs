@@ -2061,6 +2061,7 @@ impl RenderSliver for RenderSliverToBoxAdapter {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use reveal_gestures::HitTestResult;
 
     use super::*;
@@ -2111,7 +2112,8 @@ mod tests {
 
     #[test]
     fn sliver_layout_sets_geometry() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let sliver = RenderHandle::new_sliver(
             &mut app,
             TestSliver {
@@ -2183,7 +2185,8 @@ mod tests {
     /// axis and reports the visible portion as its paint extent.
     #[test]
     fn a_box_adapter_reports_its_child_extent() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight_for(None, Some(60.0)), None);
         let adapter = RenderSliverToBoxAdapter::new(&mut app, Some(child.as_box()));
@@ -2210,7 +2213,8 @@ mod tests {
     /// A scrolled adapter moves its child up by the scroll offset and shrinks its paint extent.
     #[test]
     fn a_scrolled_box_adapter_offsets_its_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight_for(None, Some(60.0)), None);
         let adapter = RenderSliverToBoxAdapter::new(&mut app, Some(child.as_box()));
@@ -2238,7 +2242,8 @@ mod tests {
     /// An empty adapter reports zero geometry.
     #[test]
     fn a_childless_box_adapter_is_zero() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let adapter = RenderSliverToBoxAdapter::new(&mut app, None);
         adapter.layout(&mut app, adapter_constraints(0.0, 400.0), true);
         assert!(adapter.geometry(&app).is_zero());
@@ -2247,7 +2252,8 @@ mod tests {
     /// A hit inside the visible part of the child lands on both the child and the sliver.
     #[test]
     fn a_box_adapter_hit_tests_its_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = hit_testable_box(&mut app);
         let adapter = RenderSliverToBoxAdapter::new(&mut app, Some(child));
         adapter.layout(&mut app, adapter_constraints(0.0, 400.0), true);

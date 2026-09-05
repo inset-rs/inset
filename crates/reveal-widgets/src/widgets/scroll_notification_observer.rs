@@ -270,6 +270,7 @@ impl Debug for ScrollNotificationObserverState {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
 
     use reveal_painting::AxisDirection;
@@ -314,7 +315,8 @@ mod tests {
 
     #[test]
     fn every_listener_sees_a_descendants_scroll_notification() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (_harness, context) = mount(&mut app);
         let observer = ScrollNotificationObserver::of(&mut app, context);
 
@@ -337,7 +339,8 @@ mod tests {
 
     #[test]
     fn a_metrics_notification_arrives_as_a_scroll_update() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (_harness, context) = mount(&mut app);
         let observer = ScrollNotificationObserver::of(&mut app, context);
 
@@ -359,7 +362,8 @@ mod tests {
 
     #[test]
     fn a_removed_listener_stops_hearing_notifications() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (_harness, context) = mount(&mut app);
         let observer = ScrollNotificationObserver::of(&mut app, context);
 

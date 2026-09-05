@@ -598,6 +598,7 @@ impl RenderBox for RenderParagraph {
 #[cfg(test)]
 mod tests {
     use reveal_embedder::Color;
+    use reveal_foundation::AppCell;
     use reveal_gestures::HitTestResult;
     use reveal_painting::{TextSpan, TextStyle};
 
@@ -647,7 +648,8 @@ mod tests {
     /// whole text on one line, and the intrinsic height at a width is what the text takes there.
     #[test]
     fn paragraph_intrinsics_come_from_the_text() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         install_fonts(&mut app);
         let paragraph = RenderParagraph::new(
             &mut app,
@@ -674,7 +676,8 @@ mod tests {
     /// baseline that layout reports.
     #[test]
     fn paragraph_dry_layout_and_baseline_match_its_layout() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let constraints = BoxConstraints::new().max_width(200.0).max_height(1000.0);
         install_fonts(&mut app);
         let paragraph =
@@ -697,7 +700,8 @@ mod tests {
 
     #[test]
     fn a_paragraph_sizes_itself_to_its_text_within_loose_constraints() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let loose = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
         let (paragraph, _root) = laid_out(&mut app, "Hello", loose);
         let size = paragraph.size(&app);
@@ -708,7 +712,8 @@ mod tests {
 
     #[test]
     fn narrow_constraints_wrap_the_text() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let loose = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
         let (wide, _root) = laid_out(&mut app, "one two three four", loose);
         let natural = wide.size(&app);
@@ -722,7 +727,8 @@ mod tests {
 
     #[test]
     fn soft_wrap_off_lets_the_text_overflow_and_clips_it() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let loose = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
         let (wide, _root) = laid_out(&mut app, "one two three four", loose);
         let natural = wide.size(&app);
@@ -757,7 +763,8 @@ mod tests {
 
     #[test]
     fn ellipsis_overflow_reports_exceeded_lines() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let loose = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
         let (wide, _root) = laid_out(&mut app, "one two three four", loose);
         let natural = wide.size(&app);
@@ -787,7 +794,8 @@ mod tests {
 
     #[test]
     fn setting_text_marks_layout_or_paint_by_the_comparison() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let loose = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
         let (paragraph, root) = laid_out(&mut app, "Hello", loose);
         let owner = root.owner(&app).unwrap();
@@ -815,7 +823,8 @@ mod tests {
 
     #[test]
     fn painting_records_glyphs_and_hit_testing_lands_on_the_paragraph() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let loose = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
         let (paragraph, root) = laid_out(&mut app, "Hello", loose);
         let owner = root.owner(&app).unwrap();

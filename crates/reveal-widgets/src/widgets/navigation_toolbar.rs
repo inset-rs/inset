@@ -246,6 +246,7 @@ impl MultiChildLayoutDelegate for ToolbarLayout {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use reveal_rendering::{
         AnyRenderBox, ContainerBoxParentData, ContainerRenderObjectMixin,
         MultiChildLayoutParentData, RenderCustomMultiChildLayoutBox,
@@ -312,7 +313,8 @@ mod tests {
     /// The view is 300 x 200, so `size.height` is 200 and the leading widget is stretched to it.
     #[test]
     fn a_centered_middle_sits_in_the_middle_of_the_bar_in_both_directions() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = toolbar(
             &mut app,
             TextDirection::Ltr,
@@ -330,7 +332,8 @@ mod tests {
             ]
         );
 
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = toolbar(
             &mut app,
             TextDirection::Rtl,
@@ -351,7 +354,8 @@ mod tests {
 
     #[test]
     fn an_uncentered_middle_starts_next_to_the_leading_widget_in_both_directions() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = toolbar(
             &mut app,
             TextDirection::Ltr,
@@ -366,7 +370,8 @@ mod tests {
             "leading width plus the middle spacing"
         );
 
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = toolbar(
             &mut app,
             TextDirection::Rtl,
@@ -384,7 +389,8 @@ mod tests {
 
     #[test]
     fn a_centered_middle_that_would_overlap_the_leading_widget_is_pushed_off_it() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = toolbar(
             &mut app,
             TextDirection::Ltr,
@@ -402,7 +408,8 @@ mod tests {
 
     #[test]
     fn a_centered_middle_that_would_overlap_the_trailing_widget_is_pushed_off_it() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = toolbar(
             &mut app,
             TextDirection::Ltr,
@@ -423,7 +430,8 @@ mod tests {
 
     #[test]
     fn a_toolbar_lays_out_only_the_children_it_was_given() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = toolbar(
             &mut app,
             TextDirection::Ltr,

@@ -1703,6 +1703,7 @@ impl Animation<f64> for AnimationMin {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
@@ -1711,7 +1712,8 @@ mod tests {
 
     #[test]
     fn the_constant_animations_report_flutters_values() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
 
         let complete = k_always_complete_animation(&mut app);
         assert_eq!(complete.value(&app), 1.0);
@@ -1731,7 +1733,8 @@ mod tests {
 
     #[test]
     fn every_mention_of_a_constant_animation_is_one_identity() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let first = k_always_complete_animation(&mut app);
 
         // Dart's `const` canonicalization, reproduced per App by the
@@ -1743,7 +1746,8 @@ mod tests {
 
     #[test]
     fn an_always_stopped_animation_is_forward_at_its_value() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
 
         assert_eq!(half.value(&app), 0.5);
@@ -1754,7 +1758,8 @@ mod tests {
     // value/status half. `toString` is not ported.
     #[test]
     fn a_parentless_proxy_is_dismissed_at_zero() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let animation = ProxyAnimation::new(&mut app, None).as_animation();
 
         assert_eq!(animation.value(&app), 0.0);
@@ -1767,7 +1772,8 @@ mod tests {
     // takes that role, which also exercises the tear-off subscription.
     #[test]
     fn set_parent_generates_value_changed() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
         let did_receive_callback = Rc::new(Cell::new(false));
 
@@ -1788,7 +1794,8 @@ mod tests {
 
     #[test]
     fn a_proxy_follows_its_parent_through_the_subscription() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let inner = ProxyAnimation::new(&mut app, None);
         let outer = ProxyAnimation::new(&mut app, Some(inner.as_animation()));
 
@@ -1812,7 +1819,8 @@ mod tests {
 
     #[test]
     fn removing_the_last_listener_unsubscribes_from_the_parent() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let inner = ProxyAnimation::new(&mut app, None);
         let outer = ProxyAnimation::new(&mut app, Some(inner.as_animation()));
 
@@ -1836,7 +1844,8 @@ mod tests {
 
     #[test]
     fn set_parent_notifies_the_status_change() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let statuses = Rc::new(RefCell::new(Vec::new()));
 
         let animation = ProxyAnimation::new(&mut app, None); // Dismissed
@@ -1856,7 +1865,8 @@ mod tests {
 
     #[test]
     fn a_listener_can_reach_its_own_animation_while_it_notifies() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let animation = ProxyAnimation::new(&mut app, None);
 
         let observed = Rc::new(Cell::new(f64::NAN));
@@ -1880,7 +1890,8 @@ mod tests {
 
     #[test]
     fn setting_the_same_parent_is_a_no_op() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
         let animation = ProxyAnimation::new(&mut app, Some(half));
 
@@ -1899,7 +1910,8 @@ mod tests {
 
     #[test]
     fn a_reverse_animation_flips_value_and_status() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let stopped = app.create(AlwaysStoppedAnimation::new(0.25)).as_animation();
         let reverse = app.create(ReverseAnimation::new(stopped)).as_animation();
 
@@ -1912,7 +1924,8 @@ mod tests {
     // ProxyAnimation drives in place of the unported controller.
     #[test]
     fn reverse_animation_calls_listeners() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let driver = ProxyAnimation::new(&mut app, None);
         let animation = app.create(ReverseAnimation::new(driver.as_animation()));
 
@@ -1943,7 +1956,8 @@ mod tests {
     // The `_statusChangeHandler` half: status notifications arrive reversed.
     #[test]
     fn a_reverse_animation_reverses_status_notifications() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let driver = ProxyAnimation::new(&mut app, None); // Dismissed
         let reverse = app.create(ReverseAnimation::new(driver.as_animation()));
 
@@ -1980,7 +1994,8 @@ mod tests {
 
     #[test]
     fn a_curved_animation_applies_the_curve() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
         let curved = CurvedAnimation::create(&mut app, half, Curves::ease(), None);
 
@@ -1993,7 +2008,8 @@ mod tests {
 
     #[test]
     fn a_curved_animation_uses_the_reverse_curve_when_the_direction_is_reverse() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         // A parent with status Reverse: a ReverseAnimation over an
         // always-Forward stopped animation at 0.25, so its value is 0.75.
         let stopped = app.create(AlwaysStoppedAnimation::new(0.25)).as_animation();
@@ -2025,7 +2041,8 @@ mod tests {
             }
         }
 
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let zero = app.create(AlwaysStoppedAnimation::new(0.0)).as_animation();
         let curved = CurvedAnimation::create(&mut app, zero, Rc::new(BogusCurve), None);
         let _ = curved.as_animation().value(&app);
@@ -2035,7 +2052,8 @@ mod tests {
     // when disposed', the subscription half.
     #[test]
     fn a_disposed_curved_animation_unsubscribes_from_its_parent() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let driver = ProxyAnimation::new(&mut app, None);
         let curved = CurvedAnimation::create(&mut app, driver.as_animation(), Curves::ease(), None);
         assert!(!driver.local_status_listeners_data(&app).is_empty());
@@ -2049,7 +2067,8 @@ mod tests {
     // as the trains in place of the unported controllers.
     #[test]
     fn a_train_hopping_animation_hops_when_the_next_train_crosses() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
         let low = app.create(AlwaysStoppedAnimation::new(0.3)).as_animation();
         let train_a = ProxyAnimation::new(&mut app, Some(half));
@@ -2080,7 +2099,8 @@ mod tests {
 
     #[test]
     fn trains_starting_at_the_same_value_hop_immediately_without_the_callback() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let a = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
         let b = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
 
@@ -2101,7 +2121,8 @@ mod tests {
 
     #[test]
     fn a_disposed_train_hopping_animation_releases_both_trains() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
         let low = app.create(AlwaysStoppedAnimation::new(0.3)).as_animation();
         let train_a = ProxyAnimation::new(&mut app, Some(half));
@@ -2129,7 +2150,8 @@ mod tests {
     // removeListener half.
     #[test]
     fn animation_mean_control_test() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
         let left = ProxyAnimation::new(&mut app, Some(half));
         let right = ProxyAnimation::new(&mut app, None); // 0.0
@@ -2175,7 +2197,8 @@ mod tests {
     fn train_hopping_notifies_status_listeners() {
         use crate::tween::{Animatable, Tween};
 
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let driver = ProxyAnimation::new(&mut app, None); // Dismissed, 0.0
         let falling = Tween::new(&mut app, Some(1.0), Some(-1.0));
         let rising = Tween::new(&mut app, Some(-1.0), Some(1.0));
@@ -2219,7 +2242,8 @@ mod tests {
         assert_eq!(forward_curve.transform(0.5), 1.0);
         assert_eq!(reverse_curve.transform(0.5), 0.0);
 
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         // Forward at 0.5, and Reverse at 0.5 (a ReverseAnimation over 0.5
         // keeps the value while flipping the direction).
         let forward_half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
@@ -2262,7 +2286,8 @@ mod tests {
 
     #[test]
     fn animation_max_and_min_pick_their_extremes() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let low = app.create(AlwaysStoppedAnimation::new(0.25)).as_animation();
         let high = app.create(AlwaysStoppedAnimation::new(0.75)).as_animation();
 

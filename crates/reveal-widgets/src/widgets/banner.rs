@@ -477,6 +477,7 @@ impl StatelessWidget for CheckedModeBanner {
 #[cfg(test)]
 mod tests {
     use reveal_embedder::valo::Op;
+    use reveal_foundation::AppCell;
     use reveal_rendering::RenderCustomPaint;
 
     use super::*;
@@ -495,7 +496,8 @@ mod tests {
 
     #[test]
     fn a_banner_paints_a_rotated_shadowed_rect_with_its_message_in_the_corner() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         install_fonts(&mut app);
         let harness = Harness::mount(
             &mut app,

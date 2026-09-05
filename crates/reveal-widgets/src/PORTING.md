@@ -55,7 +55,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 - Change: `run_app` schedules the root attach with a zero-duration `Timer` (Dart's `Timer.run`) and then a normal frame; there is no warm-up frame.
   Reason: platform — `scheduleWarmUpFrame` waits in `reveal-scheduler`.
-  Affect: a host must `app.elapse(..)` (or run its event loop) before the first frame builds anything; the first frame is a regular frame.
+  Affect: a host must `cell.elapse(..)` (or run its event loop) before the first frame builds anything; the first frame is a regular frame.
 
 ## widgets/banner.rs → banner.dart
 

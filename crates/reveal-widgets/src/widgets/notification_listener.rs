@@ -217,6 +217,7 @@ impl Notification for LayoutChangedNotification {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
 
     use super::*;
@@ -266,7 +267,8 @@ mod tests {
 
     #[test]
     fn a_notification_bubbles_through_listeners_of_its_type_until_one_cancels() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log: Log = Rc::default();
         let tree = listener(
             &log,
@@ -286,7 +288,8 @@ mod tests {
 
     #[test]
     fn a_listener_of_another_type_is_skipped_and_dispatching_without_a_tree_is_a_no_op() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log: Log = Rc::default();
         let other_log: Log = Rc::default();
         let other = {
@@ -303,7 +306,8 @@ mod tests {
         assert_eq!(*log.borrow(), vec!["outer"]);
         assert_eq!(*other_log.borrow(), vec!["other"]);
 
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(&mut app, dispatcher());
         harness.pump(&mut app);
     }

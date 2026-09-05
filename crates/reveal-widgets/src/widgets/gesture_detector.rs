@@ -1510,7 +1510,7 @@ mod tests {
     use std::rc::Rc;
 
     use reveal_embedder::{Offset, Size, ViewId};
-    use reveal_foundation::{App, Handle, HandleId, Listener};
+    use reveal_foundation::{App, AppCell, Handle, HandleId, Listener};
     use reveal_gestures::{
         GestureBinding, GestureBindingOverridesObject, HitTestResult, K_LONG_PRESS_TIMEOUT,
         PointerDownEvent, PointerEvent, PointerUpEvent, TapDownDetails, TapUpDetails,
@@ -1728,7 +1728,8 @@ mod tests {
 
     #[test]
     fn a_gesture_detector_fires_its_tap_callbacks_end_to_end() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         let down_log = Rc::clone(&log);
         let up_log = Rc::clone(&log);
@@ -1770,7 +1771,8 @@ mod tests {
 
     #[test]
     fn a_childless_detector_defaults_to_translucent_and_receives_the_tap() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let taps = Rc::new(Cell::new(0));
         let count = Rc::clone(&taps);
         mount(
@@ -1791,7 +1793,8 @@ mod tests {
 
     #[test]
     fn a_detector_with_a_child_defers_to_it_and_misses_when_the_child_is_not_hit() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let taps = Rc::new(Cell::new(0));
         let count = Rc::clone(&taps);
         mount(
@@ -1815,7 +1818,8 @@ mod tests {
 
     #[test]
     fn a_long_press_is_recognized_after_the_timeout_and_the_tap_is_cancelled() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log: Rc<RefCell<Vec<&'static str>>> = Rc::new(RefCell::new(Vec::new()));
         let tap_log = Rc::clone(&log);
         let cancel_log = Rc::clone(&log);
@@ -1844,7 +1848,9 @@ mod tests {
             PointerDeviceKind::Touch,
         );
         assert!(log.borrow().is_empty());
-        app.elapse(K_LONG_PRESS_TIMEOUT);
+        drop(app);
+        cell.elapse(K_LONG_PRESS_TIMEOUT);
+        let mut app = cell.borrow_mut();
         assert_eq!(*log.borrow(), ["tap_cancel", "long_press"]);
         release(
             &mut app,
@@ -1857,7 +1863,8 @@ mod tests {
 
     #[test]
     fn supported_devices_is_respected() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let taps = Rc::new(Cell::new(0));
         let count = Rc::clone(&taps);
         mount(
@@ -1888,7 +1895,8 @@ mod tests {
 
     #[test]
     fn rebuilding_reuses_the_recognizer_reruns_the_initializer_and_drops_it_when_removed() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let factory = CountingTapFactory {
             constructions: Rc::new(Cell::new(0)),
             initializations: Rc::new(Cell::new(0)),
@@ -1936,7 +1944,8 @@ mod tests {
 
     #[test]
     fn replace_gesture_recognizers_swaps_the_recognizers_during_layout() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let armed = Rc::new(Cell::new(false));
         let state_slot: Rc<Cell<Option<Handle<RawGestureDetectorState>>>> =
             Rc::new(Cell::new(None));
@@ -2053,7 +2062,9 @@ mod tests {
             Offset::new(10.0, 10.0),
             PointerDeviceKind::Touch,
         );
-        app.elapse(K_LONG_PRESS_TIMEOUT);
+        drop(app);
+        cell.elapse(K_LONG_PRESS_TIMEOUT);
+        let mut app = cell.borrow_mut();
         release(
             &mut app,
             1,
@@ -2066,7 +2077,8 @@ mod tests {
 
     #[test]
     fn unmounting_disposes_the_recognizers() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount(
             &mut app,
             GestureDetector::new()

@@ -401,13 +401,14 @@ mod tests {
     };
 
     use super::*;
-    use crate::test_support::{app as test_app, build, pump};
+    use crate::test_support::{build, pump, test_cell};
 
     const ITEM_EXTENT: f64 = 50.0;
 
     #[test]
     fn a_cupertino_scrollbar_thickens_while_its_thumb_is_pressed() {
-        let mut app = test_app();
+        let cell = test_cell();
+        let mut app = cell.borrow_mut();
         let key = Rc::new(GlobalKey::new());
         let controller = ScrollController::default(&mut app);
         let list = ListView::new()
@@ -421,10 +422,12 @@ mod tests {
             scrollbar,
         )
         .into_widget();
+        drop(app);
         build(
-            &mut app,
+            &cell,
             Directionality::new(TextDirection::Ltr, tree).into_widget(),
         );
+        let mut app = cell.borrow_mut();
         // The metrics notification is dispatched from a microtask after layout, so the
         // painter only knows the axis from the second frame on.
         pump(&mut app, Duration::from_millis(16));

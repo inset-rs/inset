@@ -507,6 +507,7 @@ impl StatelessWidget for CupertinoListTileChevron {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
 
@@ -519,7 +520,7 @@ mod tests {
     use reveal_widgets::{Builder, Directionality, GlobalKey, downcast_widget};
 
     use super::*;
-    use crate::test_support::{app, build};
+    use crate::test_support::{build, test_cell};
     use crate::theme::CupertinoThemeData;
 
     fn key_of(key: &GlobalKey) -> KeyRef {
@@ -545,9 +546,9 @@ mod tests {
     }
 
     /// Mounts `tile` in a column, which hands it an unbounded height, as a list section does.
-    fn mount<K>(app: &mut App, tile: impl IntoWidget<K>) {
+    fn mount<K>(cell: &AppCell, tile: impl IntoWidget<K>) {
         build(
-            app,
+            cell,
             Directionality::new(
                 TextDirection::Ltr,
                 Column::new().children([tile.into_widget()]),
@@ -575,7 +576,7 @@ mod tests {
 
     #[test]
     fn a_notched_tile_lays_out_its_five_slots_with_the_notched_paddings() {
-        let mut app = app();
+        let cell = test_cell();
         let (tile_key, leading, title, subtitle, info, trailing) = (
             GlobalKey::new(),
             GlobalKey::new(),
@@ -585,7 +586,7 @@ mod tests {
             GlobalKey::new(),
         );
         mount(
-            &mut app,
+            &cell,
             CupertinoListTile::notched(slot(&title, 100.0, 20.0))
                 .key(key_of(&tile_key))
                 .leading(slot(&leading, 24.0, 24.0))
@@ -593,6 +594,7 @@ mod tests {
                 .additional_info(slot(&info, 40.0, 16.0))
                 .trailing(slot(&trailing, 12.0, 12.0)),
         );
+        let mut app = cell.borrow_mut();
 
         assert_eq!(
             box_of(&mut app, &tile_key).size(&app),
@@ -628,12 +630,13 @@ mod tests {
 
     #[test]
     fn a_base_tile_uses_the_edge_to_edge_padding_and_minimum_height() {
-        let mut app = app();
+        let cell = test_cell();
         let (tile_key, title) = (GlobalKey::new(), GlobalKey::new());
         mount(
-            &mut app,
+            &cell,
             CupertinoListTile::new(slot(&title, 100.0, 20.0)).key(key_of(&tile_key)),
         );
+        let mut app = cell.borrow_mut();
 
         assert_eq!(
             box_of(&mut app, &tile_key).size(&app),
@@ -648,12 +651,12 @@ mod tests {
 
     #[test]
     fn tapping_a_tile_activates_it_and_runs_on_tap() {
-        let mut app = app();
+        let cell = test_cell();
         let taps = Rc::new(Cell::new(0));
         let tile_key = GlobalKey::new();
         let title = GlobalKey::new();
         mount(
-            &mut app,
+            &cell,
             CupertinoListTile::new(slot(&title, 100.0, 20.0))
                 .key(key_of(&tile_key))
                 .on_tap(Listener::new({
@@ -661,6 +664,7 @@ mod tests {
                     move |_app| taps.set(taps.get() + 1)
                 })),
         );
+        let mut app = cell.borrow_mut();
         let state = tile_key
             .current_state::<CupertinoListTileState>(&mut app)
             .expect("the tile mounted");
@@ -684,10 +688,10 @@ mod tests {
 
     #[test]
     fn the_chevron_is_a_grey_right_chevron_sized_to_the_theme_text() {
-        let mut app = app();
+        let cell = test_cell();
         let seen: Rc<RefCell<Option<(WidgetRef, AnyColor)>>> = Rc::new(RefCell::new(None));
         build(
-            &mut app,
+            &cell,
             CupertinoTheme::new(
                 CupertinoThemeData::new(),
                 Builder::new({

@@ -1835,6 +1835,7 @@ impl DragLeaf for PanGestureRecognizer {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::{Cell, RefCell};
 
     use super::*;
@@ -1960,7 +1961,8 @@ mod tests {
 
     #[test]
     fn should_recognize_pan() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let pan = PanGestureRecognizer::new(&mut app);
         let tap = TapGestureRecognizer::new(&mut app);
 
@@ -2033,7 +2035,8 @@ mod tests {
 
     #[test]
     fn should_report_most_recent_point_to_on_start_by_default() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let drag = HorizontalDragGestureRecognizer::new(&mut app);
         let competing_drag = VerticalDragGestureRecognizer::new(&mut app);
         competing_drag.set_on_start(&mut app, Some(Rc::new(|_app, _details| {})));
@@ -2074,7 +2077,8 @@ mod tests {
 
     #[test]
     fn should_recognize_drag_with_the_down_start_behavior() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let drag = HorizontalDragGestureRecognizer::new(&mut app);
         drag.set_drag_start_behavior(&mut app, DragStartBehavior::Down);
 
@@ -2134,7 +2138,8 @@ mod tests {
 
     #[test]
     fn the_vertical_recognizer_wins_a_vertical_move_and_the_horizontal_one_cancels() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let vertical = VerticalDragGestureRecognizer::new(&mut app);
         let horizontal = HorizontalDragGestureRecognizer::new(&mut app);
 
@@ -2180,7 +2185,8 @@ mod tests {
 
     #[test]
     fn clamp_max_velocity() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let drag = HorizontalDragGestureRecognizer::new(&mut app);
         drag.set_drag_start_behavior(&mut app, DragStartBehavior::Down);
 
@@ -2225,7 +2231,8 @@ mod tests {
     fn drag_callbacks_on_a_drag_that_never_moves(
         only_accept_drag_on_threshold: bool,
     ) -> Vec<&'static str> {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let vertical_drag = VerticalDragGestureRecognizer::new(&mut app);
         vertical_drag.set_only_accept_drag_on_threshold(&mut app, only_accept_drag_on_threshold);
         let log = Rc::new(RefCell::new(Vec::<&'static str>::new()));
@@ -2277,7 +2284,8 @@ mod tests {
 
     #[test]
     fn should_recognize_pan_gestures_from_platform() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let pan = PanGestureRecognizer::new(&mut app);
         // A competing recognizer, so the gesture is not immediately claimed.
         let competing_pan = PanGestureRecognizer::new(&mut app);
@@ -2341,7 +2349,8 @@ mod tests {
 
     #[test]
     fn a_recognizer_with_no_callbacks_does_not_compete() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let drag = VerticalDragGestureRecognizer::new(&mut app);
         let down = PointerDownEvent {
             pointer: 5,
@@ -2358,7 +2367,8 @@ mod tests {
 
     #[test]
     fn debug_descriptions_name_the_axis() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let vertical = VerticalDragGestureRecognizer::new(&mut app);
         let horizontal = HorizontalDragGestureRecognizer::new(&mut app);
         let pan = PanGestureRecognizer::new(&mut app);

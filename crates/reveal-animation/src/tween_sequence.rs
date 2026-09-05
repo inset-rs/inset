@@ -160,7 +160,7 @@ mod tests {
     use std::rc::Rc;
     use std::sync::Arc;
 
-    use reveal_foundation::{App, Handle};
+    use reveal_foundation::{App, AppCell, Handle};
 
     use super::*;
     use crate::animation::Animation;
@@ -177,7 +177,8 @@ mod tests {
 
     #[test]
     fn tween_sequence() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let driver = ProxyAnimation::new(&mut app, None);
 
         let sequence = TweenSequence::new(vec![
@@ -196,7 +197,8 @@ mod tests {
 
     #[test]
     fn tween_sequence_with_curves() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let driver = ProxyAnimation::new(&mut app, None);
 
         let first = Tween::new(&mut app, Some(5.0), Some(10.0)).chain(CurveTween::new(
@@ -226,7 +228,8 @@ mod tests {
 
     #[test]
     fn tween_sequence_one_tween() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let driver = ProxyAnimation::new(&mut app, None);
 
         let sequence = TweenSequence::new(vec![TweenSequenceItem::new(
@@ -244,7 +247,8 @@ mod tests {
 
     #[test]
     fn a_flipped_tween_sequence_flips_both_axes() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let sequence = FlippedTweenSequence::new(vec![TweenSequenceItem::new(
             Arc::new(Tween::new(&mut app, Some(0.0), Some(0.5))),
             1.0,

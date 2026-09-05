@@ -8,7 +8,7 @@ use std::ops::Receiver;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
-use reveal_embedder::{InertPlatform, PlatformRef};
+use reveal_embedder::PlatformRef;
 use slotmap::{SlotMap, new_key_type};
 
 use crate::app_cell::{AppCell, AsyncApp};
@@ -126,7 +126,7 @@ struct Slot {
 /// arenas are additive.
 #[non_exhaustive]
 pub struct App {
-    /// The cell this App lives in — gpui's `App::this`. Dangling for a bare [`App::new`].
+    /// The cell this App lives in — gpui's `App::this`.
     this: Weak<AppCell>,
     slots: SlotMap<HandleId, Slot>,
     singletons: HashMap<std::any::TypeId, HandleId>,
@@ -136,34 +136,7 @@ pub struct App {
     platform: PlatformRef,
 }
 
-/// A bare `App` outside any cell: see [`App::new`].
-impl Default for App {
-    fn default() -> App {
-        App::build(
-            Weak::new(),
-            Rc::new(InertPlatform),
-            ForegroundExecutor::new(),
-        )
-    }
-}
-
 impl App {
-    /// A bare `App` outside any [`AppCell`]: it cannot [`spawn`](Self::spawn), and its
-    /// [`elapse`](Self::elapse) resumes no task. Kept for the tests written before the cell;
-    /// new code builds through [`AppCell::new`].
-    pub fn new() -> App {
-        App::default()
-    }
-
-    /// A bare `App` on a live platform; see [`new`](Self::new). New code builds through
-    /// [`AppCell::with_platform`].
-    pub fn with_platform(platform: PlatformRef) -> App {
-        App {
-            platform,
-            ..App::default()
-        }
-    }
-
     pub(crate) fn build(
         this: Weak<AppCell>,
         platform: PlatformRef,
@@ -194,15 +167,7 @@ impl App {
     /// completed; it cannot run inline, since the caller holds the App it would borrow.
     ///
     /// The returned [`Task`] is the continuation's future; dropping it does not cancel it.
-    ///
-    /// # Panics
-    ///
-    /// On a bare [`App::new`], which no cell can drain.
     pub fn spawn<R: 'static>(&self, f: impl AsyncFnOnce(&mut AsyncApp) -> R + 'static) -> Task<R> {
-        assert!(
-            self.this.strong_count() > 0,
-            "App::spawn on an App outside an AppCell: build it with AppCell::new"
-        );
         let mut cx = self.to_async();
         self.executor.spawn(async move { f(&mut cx).await })
     }
@@ -265,7 +230,7 @@ impl App {
     }
 
     /// Dart's `Timer(duration, callback)`. Fires when the clock reaches
-    /// `now + duration` via [`elapse`](Self::elapse).
+    /// `now + duration` via [`AppCell::elapse`].
     pub fn schedule_timer(&mut self, duration: Duration, callback: Listener) -> Timer {
         let (timer, wake) = self.timers.schedule(duration, callback);
         if let Some(delay) = wake {
@@ -284,24 +249,7 @@ impl App {
         self.timers.is_active(timer)
     }
 
-    /// Advances the App clock by `duration` and fires due timers, on a bare [`App::new`].
-    ///
-    /// [`AppCell::elapse`] is the one that lets a task resume between timers; this keeps the
-    /// same order (microtasks first, then each due timer, microtasks after each) for the tests
-    /// written before the cell.
-    pub fn elapse(&mut self, duration: Duration) {
-        let target = self.clock() + duration;
-        self.drain_microtasks();
-        let mut fired = 0usize;
-        while self.fire_next_due(target) {
-            fired += 1;
-            Timers::assert_fire_budget(fired);
-            self.drain_microtasks();
-        }
-        self.advance_clock_to(target);
-    }
-
-    /// The App clock: what [`elapse`](Self::elapse) has advanced it to.
+    /// The App clock: what [`AppCell::elapse`] has advanced it to.
     pub(crate) fn clock(&self) -> Duration {
         self.timers.now()
     }
@@ -431,7 +379,8 @@ mod tests {
 
     #[test]
     fn state_survives_a_round_trip_through_a_handle() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let counter = app.create(Counter(1));
 
         assert_eq!(app.get(counter), &Counter(1));
@@ -441,7 +390,8 @@ mod tests {
 
     #[test]
     fn handles_of_different_types_share_one_arena() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let counter = app.create(Counter(1));
         let label = app.create(Label("hello"));
 
@@ -451,7 +401,8 @@ mod tests {
 
     #[test]
     fn a_destroyed_slot_is_reused_but_its_handle_is_not() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let first = app.create(Counter(1));
         let first_id = first.id();
         app.destroy(first);
@@ -472,7 +423,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "stale handle")]
     fn reading_through_a_stale_handle_panics() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let counter = app.create(Counter(1));
         app.destroy(counter);
         app.get(counter);
@@ -480,7 +432,8 @@ mod tests {
 
     #[test]
     fn the_checked_path_from_an_untyped_id_answers_none_rather_than_panicking() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let counter = app.create(Counter(1));
         let id = counter.id();
 
@@ -493,7 +446,8 @@ mod tests {
 
     #[test]
     fn a_singleton_is_one_handle_per_type_per_app() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
 
         let first: Handle<Counter> = app.singleton();
         let second: Handle<Counter> = app.singleton();
@@ -502,7 +456,8 @@ mod tests {
         app.get_mut(first).0 = 9;
         assert_eq!(app.get(second).0, 9, "one slot behind both handles");
 
-        let mut other_app = App::new();
+        let other_cell = AppCell::new();
+        let mut other_app = other_cell.borrow_mut();
         let elsewhere: Handle<Counter> = other_app.singleton();
         assert_eq!(elsewhere.id(), first.id(), "ids may collide across Apps");
         assert_eq!(other_app.get(elsewhere).0, 0, "but the state is per App");
@@ -510,7 +465,8 @@ mod tests {
 
     #[test]
     fn a_handle_is_copy_so_an_edge_can_be_a_plain_field() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let counter = app.create(Counter(1));
 
         struct Edge {
@@ -525,7 +481,8 @@ mod tests {
 
     #[test]
     fn a_microtask_runs_on_drain_not_inline() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let counter = app.create(Counter(0));
         app.schedule_microtask(crate::Listener::new(move |app| {
             app.get_mut(counter).0 = 1;
@@ -539,7 +496,8 @@ mod tests {
 
     #[test]
     fn a_microtask_scheduled_during_drain_runs_in_the_same_drain() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let counter = app.create(Counter(0));
         app.schedule_microtask(crate::Listener::new(move |app| {
             app.get_mut(counter).0 = 1;
@@ -553,7 +511,8 @@ mod tests {
 
     #[test]
     fn timers_fire_in_due_order_after_microtasks() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = app.create(Vec::<&'static str>::new());
         app.schedule_microtask(crate::Listener::new(move |app| {
             app.get_mut(log).push("micro");
@@ -580,7 +539,9 @@ mod tests {
             }),
         );
         assert!(app.get(log).is_empty());
-        app.elapse(Duration::from_millis(200));
+        drop(app);
+        cell.elapse(Duration::from_millis(200));
+        let app = cell.borrow();
         assert_eq!(
             app.get(log).as_slice(),
             ["micro", "early", "early-second", "late"]
@@ -589,7 +550,8 @@ mod tests {
 
     #[test]
     fn cancel_prevents_a_timer_from_firing() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let counter = app.create(Counter(0));
         let timer = Timer::new(
             &mut app,
@@ -601,12 +563,15 @@ mod tests {
         assert!(timer.is_active(&app));
         timer.cancel(&mut app);
         assert!(!timer.is_active(&app));
-        app.elapse(Duration::from_millis(10));
+        drop(app);
+        cell.elapse(Duration::from_millis(10));
+        let app = cell.borrow();
         assert_eq!(app.get(counter).0, 0);
     }
     #[test]
     fn get_disjoint_mut_borrows_two_slots_at_once() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let a = app.create(1u32);
         let b = app.create(String::from("x"));
         let (a_value, b_value) = app.get_disjoint_mut(a, b);
@@ -619,14 +584,16 @@ mod tests {
     #[test]
     #[should_panic(expected = "not two live slots")]
     fn get_disjoint_mut_rejects_the_same_slot_twice() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let a = app.create(1u32);
         let _ = app.get_disjoint_mut(a, a);
     }
 
     #[test]
     fn from_id_reads_like_the_minted_handle() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let minted = app.create(Counter(7));
         let rebuilt = Handle::<Counter>::from_id(minted.id());
         assert_eq!(rebuilt, minted);
@@ -636,7 +603,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "stale handle")]
     fn from_id_defers_the_stale_check_to_get() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let minted = app.create(Counter(0));
         let id = minted.id();
         app.destroy(minted);

@@ -543,6 +543,7 @@ impl RenderSliver for RenderSliverPadding {
 #[cfg(test)]
 mod tests {
     use reveal_embedder::Size;
+    use reveal_foundation::AppCell;
     use reveal_foundation::Handle;
     use reveal_gestures::HitTestResult;
 
@@ -597,7 +598,8 @@ mod tests {
     /// is offset by the leading padding.
     #[test]
     fn padding_insets_the_child_and_grows_the_scroll_extent() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (padding, child_box) = padded_box(
             &mut app,
             EdgeInsetsGeometry::from_ltrb(10.0, 20.0, 30.0, 40.0),
@@ -631,7 +633,8 @@ mod tests {
     /// Scrolling past the leading padding consumes it before the child starts to scroll.
     #[test]
     fn scrolling_consumes_the_leading_padding_first() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (padding, _) = padded_box(
             &mut app,
             EdgeInsetsGeometry::from_ltrb(0.0, 20.0, 0.0, 0.0),
@@ -656,7 +659,8 @@ mod tests {
     /// A padding sliver with no child is just the padding.
     #[test]
     fn a_childless_padding_is_the_padding_alone() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let padding = RenderSliverPadding::new(
             &mut app,
             EdgeInsetsGeometry::all(15.0),
@@ -674,7 +678,8 @@ mod tests {
     /// A hit inside the child, past the leading padding, reaches it.
     #[test]
     fn padding_hit_tests_its_child_at_the_inset_position() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (padding, _) = padded_box(
             &mut app,
             EdgeInsetsGeometry::from_ltrb(10.0, 20.0, 30.0, 40.0),
@@ -712,7 +717,8 @@ mod tests {
     /// Changing the padding re-resolves it and marks the sliver for layout.
     #[test]
     fn setting_the_padding_re_resolves_it() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (padding, _) = padded_box(&mut app, EdgeInsetsGeometry::all(10.0), 100.0);
         lay_out(&mut app, padding.as_sliver(), Size::new(200.0, 400.0), 0.0);
         assert_eq!(padding.resolved_padding(&app), Some(EdgeInsets::all(10.0)));

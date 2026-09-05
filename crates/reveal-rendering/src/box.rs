@@ -2814,6 +2814,7 @@ mod hit_test_tests {
 
 #[cfg(test)]
 mod intrinsics_tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -2855,7 +2856,8 @@ mod intrinsics_tests {
     /// object is marked as needing layout`.
     #[test]
     fn the_intrinsic_cache_is_reused_and_cleared_by_mark_needs_layout() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let computations = Rc::new(Cell::new(0));
         let box_ = RenderHandle::new_box(
             &mut app,
@@ -2884,7 +2886,8 @@ mod intrinsics_tests {
     /// the parent, because the parent's layout depends on them.
     #[test]
     fn clearing_a_cached_intrinsic_marks_the_parent() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let computations = Rc::new(Cell::new(0));
         let child = RenderHandle::new_box(
             &mut app,

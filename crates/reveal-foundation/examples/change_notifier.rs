@@ -7,6 +7,7 @@
 //! Dart counterpart: `CounterModel with ChangeNotifier` in
 //! `listenable_builder.2.dart`.
 
+use reveal_foundation::AppCell;
 use reveal_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, Listener, ValueListenable,
     ValueNotifier,
@@ -72,7 +73,8 @@ fn main() {
 fn mixin_counter() {
     println!("Counter (mixin-as-field)");
 
-    let mut app = App::new();
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
     let counter = app.create(Counter::new());
     let label = app.create(Label { counter, shown: 0 });
 
@@ -98,7 +100,8 @@ fn mixin_counter() {
 fn value_notifier() {
     println!("ValueNotifier");
 
-    let mut app = App::new();
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
     let count = app.create(ValueNotifier::new(0i32));
 
     let on_print = Listener::new(move |app| {

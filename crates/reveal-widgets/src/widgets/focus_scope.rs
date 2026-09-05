@@ -1336,12 +1336,15 @@ mod tests {
 
     #[test]
     fn autofocus_gives_the_focus_widgets_node_the_primary_focus() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let app = cell.borrow();
         let captured: Captured = Rc::default();
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Focus::new(probe(&captured)).autofocus(true).into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let node = captured.get().expect("Focus.of found the node");
         assert!(node.has_primary_focus(&app));
         let manager = FocusManager::instance(&mut app);
@@ -1350,13 +1353,15 @@ mod tests {
 
     #[test]
     fn focus_of_reports_has_focus_on_the_ancestor_and_primary_focus_on_the_leaf() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let app = cell.borrow();
         let outer: Captured = Rc::default();
         let inner: Captured = Rc::default();
         let inner_sink = Rc::clone(&inner);
         let outer_sink = Rc::clone(&outer);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Focus::new(Builder::new(move |app, context| {
                 outer_sink.set(Focus::maybe_of(app, context, false, true));
                 Focus::new(probe(&inner_sink)).autofocus(true).into_widget()
@@ -1364,6 +1369,7 @@ mod tests {
             .debug_label("outer")
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
 
         let outer = outer.get().expect("the outer Focus.of found nothing");
         let inner = inner.get().expect("the inner Focus.of found nothing");
@@ -1380,17 +1386,20 @@ mod tests {
     fn focus_scope_of_returns_the_enclosing_scope() {
         // With no FocusScope of its own, the context reaches the one the `View` installs, which
         // hangs off the root scope through the view's `FocusTraversalGroup`.
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let app = cell.borrow();
         let scope_node = Rc::new(Cell::new(None));
         let sink = Rc::clone(&scope_node);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Builder::new(move |app, context| {
                 sink.set(Some(FocusScope::of(app, context, true)));
                 SizedBox::shrink().into_widget()
             })
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
         let view_scope = scope_node.get().expect("FocusScope.of ran");
         assert_ne!(view_scope, manager.root_scope(&app));
@@ -1401,11 +1410,13 @@ mod tests {
         );
 
         // A FocusScope widget below the view scopes its own subtree instead.
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let app = cell.borrow();
         let scope_node = Rc::new(Cell::new(None));
         let sink = Rc::clone(&scope_node);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             FocusScope::new(Builder::new(move |app, context| {
                 sink.set(Some(FocusScope::of(app, context, true)));
                 SizedBox::shrink().into_widget()
@@ -1413,6 +1424,7 @@ mod tests {
             .debug_label("scope")
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
         let scope = scope_node.get().expect("FocusScope.of ran");
         assert_ne!(scope, manager.root_scope(&app));
@@ -1433,12 +1445,14 @@ mod tests {
             HardwareKeyboard, KeyDownEvent, KeyEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
         };
 
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let app = cell.borrow();
         let seen: Rc<RefCell<Vec<&'static str>>> = Rc::default();
         let inner_seen = Rc::clone(&seen);
         let outer_seen = Rc::clone(&seen);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Focus::new(
                 Focus::new(SizedBox::shrink())
                     .autofocus(true)
@@ -1453,6 +1467,7 @@ mod tests {
             }))
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
 
         let event = KeyEvent::Down(KeyDownEvent::new(
             PhysicalKeyboardKey::KEY_A,
@@ -1466,11 +1481,13 @@ mod tests {
 
     #[test]
     fn moving_a_focus_widget_by_global_key_keeps_its_node_and_its_focus() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let app = cell.borrow();
         let captured: Captured = Rc::default();
         let key: KeyRef = Rc::new(GlobalKey::new());
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Padding::new(reveal_painting::EdgeInsetsGeometry::all(4.0))
                 .child(
                     Focus::new(probe(&captured))
@@ -1479,27 +1496,33 @@ mod tests {
                 )
                 .into_widget(),
         );
+        let app = cell.borrow();
         let node = captured.get().expect("Focus.of found the node");
         assert!(node.has_primary_focus(&app));
 
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Center::new()
                 .child(Focus::new(probe(&captured)).key(Rc::clone(&key)))
                 .into_widget(),
         );
+        let app = cell.borrow();
         assert_eq!(captured.get(), Some(node));
         assert!(node.has_primary_focus(&app));
     }
 
     #[test]
     fn exclude_focus_blocks_the_descendants() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let app = cell.borrow();
         let captured: Captured = Rc::default();
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             ExcludeFocus::new(Focus::new(probe(&captured))).into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let node = captured.get().expect("Focus.of found the node");
         assert!(!node.can_request_focus(&mut app));
 

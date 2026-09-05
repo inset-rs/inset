@@ -3797,12 +3797,13 @@ impl BaseTapLeaf for TrackTapGestureRecognizer {
 #[cfg(test)]
 mod tests {
     use reveal_embedder::{Size, TextDirection};
+    use reveal_foundation::AppCell;
     use reveal_gestures::HitTestResult;
     use reveal_painting::EdgeInsets;
     use reveal_rendering::{BoxHitTestEntry, RenderCustomPaint, RendererBinding};
 
     use super::*;
-    use crate::test_harness::{VIEW_HEIGHT, VIEW_WIDTH, binding_app, binding_mount, binding_pump};
+    use crate::test_harness::{VIEW_HEIGHT, VIEW_WIDTH, binding_cell, binding_mount, binding_pump};
     use crate::widgets::basic::{Directionality, SizedBox};
     use crate::widgets::media_query::MediaQueryData;
     use crate::widgets::scroll_controller::{ScrollController, ScrollControllerLeaf};
@@ -3813,9 +3814,9 @@ mod tests {
 
     /// A scrollbar with a global key around a `ListView` of 40 fixed-height boxes, both on the
     /// same controller: the shape every scrollbar test mounts.
-    fn mount(app: &mut App) -> (Rc<GlobalKey>, Handle<ScrollController>) {
+    fn mount(cell: &AppCell) -> (Rc<GlobalKey>, Handle<ScrollController>) {
         let key = Rc::new(GlobalKey::new());
-        let controller = ScrollController::default(app);
+        let controller = ScrollController::default(&mut cell.borrow_mut());
         let list = ListView::new()
             .controller(controller.as_controller())
             .children((0..ITEM_COUNT).map(|_| SizedBox::new().height(ITEM_EXTENT).into_widget()));
@@ -3830,12 +3831,12 @@ mod tests {
         )
         .into_widget();
         binding_mount(
-            app,
+            cell,
             Directionality::new(TextDirection::Ltr, tree).into_widget(),
         );
         // The metrics notification is dispatched from a microtask after layout, so the
         // painter only knows the metrics from the second frame on.
-        binding_pump(app, Duration::from_millis(16));
+        binding_pump(&mut cell.borrow_mut(), Duration::from_millis(16));
         (key, controller)
     }
 
@@ -3848,8 +3849,9 @@ mod tests {
 
     #[test]
     fn a_raw_scrollbar_paints_a_thumb_whose_extent_follows_the_metrics_and_fades_after_the_timer() {
-        let mut app = binding_app();
-        let (key, controller) = mount(&mut app);
+        let cell = binding_cell();
+        let (key, controller) = mount(&cell);
+        let mut app = cell.borrow_mut();
 
         controller.jump_to(&mut app, 10.0);
         for step in 1..4 {
@@ -3870,7 +3872,9 @@ mod tests {
 
         // The fade-out timer starts when the scroll ends, and the reverse animation runs for
         // the fade duration after it fires.
-        app.elapse(K_SCROLLBAR_TIME_TO_FADE + Duration::from_millis(1));
+        drop(app);
+        cell.elapse(K_SCROLLBAR_TIME_TO_FADE + Duration::from_millis(1));
+        let mut app = cell.borrow_mut();
         for step in 0..8 {
             binding_pump(&mut app, Duration::from_millis(700 + step * 60));
         }
@@ -3883,8 +3887,9 @@ mod tests {
 
     #[test]
     fn a_hit_on_the_painted_scrollbar_stops_at_the_custom_paint() {
-        let mut app = binding_app();
-        let (key, controller) = mount(&mut app);
+        let cell = binding_cell();
+        let (key, controller) = mount(&cell);
+        let mut app = cell.borrow_mut();
         controller.jump_to(&mut app, 10.0);
         for step in 1..4 {
             binding_pump(&mut app, Duration::from_millis(16 + step * 100));
@@ -3929,8 +3934,9 @@ mod tests {
 
     #[test]
     fn dragging_the_raw_scrollbar_thumb_moves_the_scroll_position() {
-        let mut app = binding_app();
-        let (key, controller) = mount(&mut app);
+        let cell = binding_cell();
+        let (key, controller) = mount(&cell);
+        let mut app = cell.borrow_mut();
         let state = key
             .current_state::<RawScrollbarState>(&mut app)
             .expect("the scrollbar is mounted");
@@ -3967,7 +3973,8 @@ mod tests {
 
     #[test]
     fn a_raw_scrollbar_hides_its_thumb_when_the_child_cannot_scroll() {
-        let mut app = binding_app();
+        let cell = binding_cell();
+        let mut app = cell.borrow_mut();
         let key = Rc::new(GlobalKey::new());
         let controller = ScrollController::default(&mut app);
         let list = ListView::new()
@@ -3981,10 +3988,12 @@ mod tests {
             scrollbar,
         )
         .into_widget();
+        drop(app);
         binding_mount(
-            &mut app,
+            &cell,
             Directionality::new(TextDirection::Ltr, tree).into_widget(),
         );
+        let mut app = cell.borrow_mut();
 
         let painter = painter(&mut app, &key);
         assert_eq!(

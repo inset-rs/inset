@@ -1106,6 +1106,7 @@ impl RestorationBucket {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::{Cell, RefCell};
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::time::{Duration, Instant};
@@ -1160,7 +1161,7 @@ mod tests {
     }
 
     struct Fixture {
-        app: App,
+        cell: Rc<AppCell>,
         platform: Rc<RecordingPlatform>,
         manager: Handle<RestorationManager>,
     }
@@ -1168,10 +1169,12 @@ mod tests {
     impl Fixture {
         fn new() -> Fixture {
             let platform = Rc::new(RecordingPlatform::default());
-            let mut app = App::with_platform(Rc::clone(&platform) as PlatformRef);
+            let cell = AppCell::with_platform(Rc::clone(&platform) as PlatformRef);
+            let mut app = cell.borrow_mut();
             let manager = RestorationManager::instance(&mut app);
+            drop(app);
             Fixture {
-                app,
+                cell,
                 platform,
                 manager,
             }
@@ -1183,20 +1186,23 @@ mod tests {
             fixture.push_from_host(true, Some(data));
             let root = fixture
                 .manager
-                .root_bucket(&mut fixture.app)
+                .root_bucket(&mut fixture.cell.borrow_mut())
                 .expect("restoration is enabled");
             (fixture, root)
         }
 
         /// Flutter's `_pushDataFromEngine`.
         fn push_from_host(&mut self, enabled: bool, data: Option<RestorationMap>) {
-            self.manager
-                .handle_restoration_update_from_engine(&mut self.app, enabled, data);
+            self.manager.handle_restoration_update_from_engine(
+                &mut self.cell.borrow_mut(),
+                enabled,
+                data,
+            );
         }
 
         /// Flutter's `MockRestorationManager.doSerialization`: what reached the host.
         fn serialize(&mut self) -> Vec<RestorationMap> {
-            self.manager.flush_data(&mut self.app);
+            self.manager.flush_data(&mut self.cell.borrow_mut());
             self.platform.puts.borrow_mut().drain(..).collect()
         }
 
@@ -1208,10 +1214,10 @@ mod tests {
         }
 
         fn pump(&mut self) {
-            SchedulerBinding::handle_begin_frame(&mut self.app, Some(Duration::ZERO));
-            self.app.drain_microtasks();
-            SchedulerBinding::handle_draw_frame(&mut self.app);
-            self.app.drain_microtasks();
+            SchedulerBinding::handle_begin_frame(&mut self.cell.borrow_mut(), Some(Duration::ZERO));
+            self.cell.borrow_mut().drain_microtasks();
+            SchedulerBinding::handle_draw_frame(&mut self.cell.borrow_mut());
+            self.cell.borrow_mut().drain_microtasks();
         }
     }
 
@@ -1279,7 +1285,7 @@ mod tests {
 
     #[test]
     fn the_root_bucket_comes_from_the_host_and_is_asked_for_once() {
-        let mut fixture = Fixture::new();
+        let fixture = Fixture::new();
         *fixture.platform.stored.borrow_mut() = Some(RestorationUpdate {
             enabled: true,
             data: Some(raw_data_set()),
@@ -1287,17 +1293,29 @@ mod tests {
 
         let root = fixture
             .manager
-            .root_bucket(&mut fixture.app)
+            .root_bucket(&mut fixture.cell.borrow_mut())
             .expect("the host enabled restoration");
         assert_eq!(fixture.platform.gets.get(), 1);
-        assert_eq!(root.restoration_id(&fixture.app), "root");
-        assert_eq!(root.read(&mut fixture.app, "value1"), Some(10i64.into()));
-        assert_eq!(root.read(&mut fixture.app, "value2"), Some("Hello".into()));
+        assert_eq!(root.restoration_id(&fixture.cell.borrow()), "root");
+        assert_eq!(
+            root.read(&mut fixture.cell.borrow_mut(), "value1"),
+            Some(10i64.into())
+        );
+        assert_eq!(
+            root.read(&mut fixture.cell.borrow_mut(), "value2"),
+            Some("Hello".into())
+        );
 
-        let child = root.claim_child(&mut fixture.app, "child1", None);
-        assert_eq!(child.read(&mut fixture.app, "foo"), Some(22i64.into()));
+        let child = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", None);
+        assert_eq!(
+            child.read(&mut fixture.cell.borrow_mut(), "foo"),
+            Some(22i64.into())
+        );
 
-        assert_eq!(fixture.manager.root_bucket(&mut fixture.app), Some(root));
+        assert_eq!(
+            fixture.manager.root_bucket(&mut fixture.cell.borrow_mut()),
+            Some(root)
+        );
         assert_eq!(
             fixture.platform.gets.get(),
             1,
@@ -1310,7 +1328,7 @@ mod tests {
         let mut fixture = Fixture::new();
         fixture.push_from_host(true, Some(raw_data_set()));
 
-        let root = fixture.manager.root_bucket(&mut fixture.app);
+        let root = fixture.manager.root_bucket(&mut fixture.cell.borrow_mut());
         assert!(root.is_some());
         assert_eq!(fixture.platform.gets.get(), 0);
     }
@@ -1318,13 +1336,16 @@ mod tests {
     #[test]
     fn new_data_replaces_the_root_bucket_and_notifies_listeners() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let child = root.claim_child(&mut fixture.app, "child1", None);
-        assert_eq!(child.read(&mut fixture.app, "foo"), Some(22i64.into()));
+        let child = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", None);
+        assert_eq!(
+            child.read(&mut fixture.cell.borrow_mut(), "foo"),
+            Some(22i64.into())
+        );
 
         let notifications = Rc::new(Cell::new(0));
         let counter = Rc::clone(&notifications);
         fixture.manager.add_listener(
-            &mut fixture.app,
+            &mut fixture.cell.borrow_mut(),
             Listener::new(move |_app| counter.set(counter.get() + 1)),
         );
 
@@ -1333,18 +1354,27 @@ mod tests {
 
         let new_root = fixture
             .manager
-            .root_bucket(&mut fixture.app)
+            .root_bucket(&mut fixture.cell.borrow_mut())
             .expect("restoration is still enabled");
         assert_ne!(new_root, root);
-        assert!(!fixture.app.contains(root), "the old root was disposed");
+        assert!(
+            !fixture.cell.borrow().contains(root),
+            "the old root was disposed"
+        );
 
-        child.dispose(&mut fixture.app);
+        child.dispose(&mut fixture.cell.borrow_mut());
 
-        assert_eq!(new_root.read(&mut fixture.app, "foo"), Some(33i64.into()));
-        assert_eq!(new_root.read(&mut fixture.app, "value1"), None);
-        let new_child = new_root.claim_child(&mut fixture.app, "childFoo", None);
         assert_eq!(
-            new_child.read(&mut fixture.app, "bar"),
+            new_root.read(&mut fixture.cell.borrow_mut(), "foo"),
+            Some(33i64.into())
+        );
+        assert_eq!(
+            new_root.read(&mut fixture.cell.borrow_mut(), "value1"),
+            None
+        );
+        let new_child = new_root.claim_child(&mut fixture.cell.borrow_mut(), "childFoo", None);
+        assert_eq!(
+            new_child.read(&mut fixture.cell.borrow_mut(), "bar"),
             Some("Hello".into())
         );
     }
@@ -1359,56 +1389,70 @@ mod tests {
         let notifications = Rc::new(Cell::new(0));
         let counter = Rc::clone(&notifications);
         fixture.manager.add_listener(
-            &mut fixture.app,
+            &mut fixture.cell.borrow_mut(),
             Listener::new(move |_app| counter.set(counter.get() + 1)),
         );
 
-        assert_eq!(fixture.manager.root_bucket(&mut fixture.app), None);
+        assert_eq!(
+            fixture.manager.root_bucket(&mut fixture.cell.borrow_mut()),
+            None
+        );
         assert_eq!(notifications.get(), 0);
 
         fixture.push_from_host(true, Some(raw_data_set()));
         assert_eq!(notifications.get(), 1);
-        assert!(fixture.manager.root_bucket(&mut fixture.app).is_some());
+        assert!(
+            fixture
+                .manager
+                .root_bucket(&mut fixture.cell.borrow_mut())
+                .is_some()
+        );
 
         fixture.push_from_host(false, None);
         assert_eq!(notifications.get(), 2);
-        assert_eq!(fixture.manager.root_bucket(&mut fixture.app), None);
+        assert_eq!(
+            fixture.manager.root_bucket(&mut fixture.cell.borrow_mut()),
+            None
+        );
     }
 
     #[test]
     fn a_host_that_stores_nothing_leaves_restoration_off() {
-        let mut fixture = Fixture::new();
-        assert_eq!(fixture.manager.root_bucket(&mut fixture.app), None);
+        let fixture = Fixture::new();
+        assert_eq!(
+            fixture.manager.root_bucket(&mut fixture.cell.borrow_mut()),
+            None
+        );
         assert_eq!(fixture.platform.gets.get(), 1);
     }
 
     #[test]
     fn is_replacing_is_true_until_the_end_of_the_next_frame() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        assert!(!fixture.manager.is_replacing(&fixture.app));
-        assert!(!root.is_replacing(&fixture.app));
+        assert!(!fixture.manager.is_replacing(&fixture.cell.borrow()));
+        assert!(!root.is_replacing(&fixture.cell.borrow()));
 
         fixture.push_from_host(true, None);
         let new_root = fixture
             .manager
-            .root_bucket(&mut fixture.app)
+            .root_bucket(&mut fixture.cell.borrow_mut())
             .expect("restoration is enabled");
         assert_ne!(new_root, root);
-        assert!(fixture.manager.is_replacing(&fixture.app));
-        assert!(new_root.is_replacing(&fixture.app));
+        assert!(fixture.manager.is_replacing(&fixture.cell.borrow()));
+        assert!(new_root.is_replacing(&fixture.cell.borrow()));
 
         fixture.pump();
-        assert!(!fixture.manager.is_replacing(&fixture.app));
-        assert!(!new_root.is_replacing(&fixture.app));
+        assert!(!fixture.manager.is_replacing(&fixture.cell.borrow()));
+        assert!(!new_root.is_replacing(&fixture.cell.borrow()));
 
         fixture.push_from_host(false, None);
-        assert!(!fixture.manager.is_replacing(&fixture.app));
+        assert!(!fixture.manager.is_replacing(&fixture.cell.borrow()));
     }
 
     #[test]
     fn scheduled_serialization_reaches_the_host_at_the_end_of_the_frame() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        root.write(&mut fixture.app, "value1", 22i64);
+        root.write(&mut fixture.cell.borrow_mut(), "value1", 22i64);
         assert!(fixture.platform.puts.borrow().is_empty());
 
         fixture.pump();
@@ -1426,10 +1470,10 @@ mod tests {
     #[test]
     fn flush_data_waits_for_a_scheduled_frame_and_otherwise_sends_at_once() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        SchedulerBinding::schedule_frame(&mut fixture.app);
-        root.write(&mut fixture.app, "foo", 1i64);
+        SchedulerBinding::schedule_frame(&mut fixture.cell.borrow_mut());
+        root.write(&mut fixture.cell.borrow_mut(), "foo", 1i64);
 
-        fixture.manager.flush_data(&mut fixture.app);
+        fixture.manager.flush_data(&mut fixture.cell.borrow_mut());
         assert!(
             fixture.platform.puts.borrow().is_empty(),
             "the scheduled frame will flush it"
@@ -1438,7 +1482,7 @@ mod tests {
         fixture.pump();
         assert_eq!(fixture.platform.puts.borrow_mut().drain(..).count(), 1);
 
-        root.write(&mut fixture.app, "foo", 2i64);
+        root.write(&mut fixture.cell.borrow_mut(), "foo", 2i64);
         let data = fixture
             .serialized()
             .expect("a write schedules serialization");
@@ -1455,47 +1499,62 @@ mod tests {
     fn root_bucket_values() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
         assert_eq!(
-            root.debug_owner(&fixture.app).is_some(),
+            root.debug_owner(&fixture.cell.borrow()).is_some(),
             cfg!(debug_assertions)
         );
-        assert_eq!(root.read(&mut fixture.app, "value1"), Some(10i64.into()));
-        assert_eq!(root.read(&mut fixture.app, "value2"), Some("Hello".into()));
-        assert_eq!(root.read(&mut fixture.app, "value3"), None);
+        assert_eq!(
+            root.read(&mut fixture.cell.borrow_mut(), "value1"),
+            Some(10i64.into())
+        );
+        assert_eq!(
+            root.read(&mut fixture.cell.borrow_mut(), "value2"),
+            Some("Hello".into())
+        );
+        assert_eq!(root.read(&mut fixture.cell.borrow_mut(), "value3"), None);
         assert!(fixture.serialized().is_none());
 
-        root.write(&mut fixture.app, "value1", 22i64);
-        assert_eq!(root.read(&mut fixture.app, "value1"), Some(22i64.into()));
+        root.write(&mut fixture.cell.borrow_mut(), "value1", 22i64);
+        assert_eq!(
+            root.read(&mut fixture.cell.borrow_mut(), "value1"),
+            Some(22i64.into())
+        );
         let data = fixture
             .serialized()
             .expect("a write schedules serialization");
         assert_eq!(at(&data, &["v", "value1"]), Some(&22i64.into()));
 
-        root.write(&mut fixture.app, "value3", true);
-        assert_eq!(root.read(&mut fixture.app, "value3"), Some(true.into()));
+        root.write(&mut fixture.cell.borrow_mut(), "value3", true);
+        assert_eq!(
+            root.read(&mut fixture.cell.borrow_mut(), "value3"),
+            Some(true.into())
+        );
         let data = fixture
             .serialized()
             .expect("a write schedules serialization");
         assert_eq!(at(&data, &["v", "value3"]), Some(&true.into()));
 
-        assert_eq!(root.remove(&mut fixture.app, "value1"), Some(22i64.into()));
-        assert_eq!(root.read(&mut fixture.app, "value1"), None);
+        assert_eq!(
+            root.remove(&mut fixture.cell.borrow_mut(), "value1"),
+            Some(22i64.into())
+        );
+        assert_eq!(root.read(&mut fixture.cell.borrow_mut(), "value1"), None);
         let data = fixture
             .serialized()
             .expect("a removal schedules serialization");
         assert_eq!(at(&data, &["v", "value1"]), None);
 
-        assert_eq!(root.remove(&mut fixture.app, "value4"), None);
+        assert_eq!(root.remove(&mut fixture.cell.borrow_mut(), "value4"), None);
         assert!(
             fixture.serialized().is_none(),
             "removing what is not there changes nothing"
         );
 
-        root.write(&mut fixture.app, "value4", None::<i64>);
+        root.write(&mut fixture.cell.borrow_mut(), "value4", None::<i64>);
         assert_eq!(
-            root.read(&mut fixture.app, "value4"),
+            root.read(&mut fixture.cell.borrow_mut(), "value4"),
             Some(RestorationData::Null)
         );
-        assert!(root.contains(&mut fixture.app, "value4"));
+        assert!(root.contains(&mut fixture.cell.borrow_mut(), "value4"));
         let data = fixture
             .serialized()
             .expect("a write schedules serialization");
@@ -1505,21 +1564,35 @@ mod tests {
     #[test]
     fn child_bucket_values() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let child = RestorationBucket::child(&mut fixture.app, "child1", root, owner("owner"));
+        let child = RestorationBucket::child(
+            &mut fixture.cell.borrow_mut(),
+            "child1",
+            root,
+            owner("owner"),
+        );
 
-        assert_eq!(child.restoration_id(&fixture.app), "child1");
-        assert_eq!(child.read(&mut fixture.app, "foo"), Some(22i64.into()));
-        assert_eq!(child.read(&mut fixture.app, "bar"), None);
+        assert_eq!(child.restoration_id(&fixture.cell.borrow()), "child1");
+        assert_eq!(
+            child.read(&mut fixture.cell.borrow_mut(), "foo"),
+            Some(22i64.into())
+        );
+        assert_eq!(child.read(&mut fixture.cell.borrow_mut(), "bar"), None);
         assert!(fixture.serialized().is_none());
 
-        child.write(&mut fixture.app, "foo", 44i64);
-        assert_eq!(child.read(&mut fixture.app, "foo"), Some(44i64.into()));
+        child.write(&mut fixture.cell.borrow_mut(), "foo", 44i64);
+        assert_eq!(
+            child.read(&mut fixture.cell.borrow_mut(), "foo"),
+            Some(44i64.into())
+        );
         let data = fixture
             .serialized()
             .expect("a write schedules serialization");
         assert_eq!(at(&data, &["c", "child1", "v", "foo"]), Some(&44i64.into()));
 
-        assert_eq!(child.remove(&mut fixture.app, "foo"), Some(44i64.into()));
+        assert_eq!(
+            child.remove(&mut fixture.cell.borrow_mut(), "foo"),
+            Some(44i64.into())
+        );
         let data = fixture
             .serialized()
             .expect("a removal schedules serialization");
@@ -1529,15 +1602,18 @@ mod tests {
     #[test]
     fn claiming_a_child_with_existing_data_keeps_that_data() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let child = root.claim_child(&mut fixture.app, "child1", owner("owner"));
+        let child = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner"));
         assert!(
             fixture.serialized().is_none(),
             "claiming stored data changes nothing"
         );
-        assert_eq!(child.restoration_id(&fixture.app), "child1");
-        assert_eq!(child.read(&mut fixture.app, "foo"), Some(22i64.into()));
+        assert_eq!(child.restoration_id(&fixture.cell.borrow()), "child1");
+        assert_eq!(
+            child.read(&mut fixture.cell.borrow_mut(), "foo"),
+            Some(22i64.into())
+        );
 
-        child.write(&mut fixture.app, "bar", 44i64);
+        child.write(&mut fixture.cell.borrow_mut(), "bar", 44i64);
         let data = fixture
             .serialized()
             .expect("a write schedules serialization");
@@ -1547,11 +1623,14 @@ mod tests {
     #[test]
     fn claiming_a_child_with_no_existing_data_gives_an_empty_bucket() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let child = root.claim_child(&mut fixture.app, "child2", owner("owner"));
-        assert_eq!(child.restoration_id(&fixture.app), "child2");
+        let child = root.claim_child(&mut fixture.cell.borrow_mut(), "child2", owner("owner"));
+        assert_eq!(child.restoration_id(&fixture.cell.borrow()), "child2");
 
-        child.write(&mut fixture.app, "foo", 55i64);
-        assert_eq!(child.read(&mut fixture.app, "foo"), Some(55i64.into()));
+        child.write(&mut fixture.cell.borrow_mut(), "foo", 55i64);
+        assert_eq!(
+            child.read(&mut fixture.cell.borrow_mut(), "foo"),
+            Some(55i64.into())
+        );
         let data = fixture
             .serialized()
             .expect("a new child schedules serialization");
@@ -1562,9 +1641,17 @@ mod tests {
     #[test]
     fn claiming_a_claimed_child_reports_the_duplicate_ids_at_finalization() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let _first = root.claim_child(&mut fixture.app, "child1", owner("FirstClaim"));
-        let second = root.claim_child(&mut fixture.app, "child1", owner("SecondClaim"));
-        assert_eq!(second.read(&mut fixture.app, "foo"), None);
+        let _first = root.claim_child(
+            &mut fixture.cell.borrow_mut(),
+            "child1",
+            owner("FirstClaim"),
+        );
+        let second = root.claim_child(
+            &mut fixture.cell.borrow_mut(),
+            "child1",
+            owner("SecondClaim"),
+        );
+        assert_eq!(second.read(&mut fixture.cell.borrow_mut(), "foo"), None);
 
         let error = catch_unwind(AssertUnwindSafe(|| fixture.serialized())).unwrap_err();
         let message = panic_message(&error);
@@ -1586,11 +1673,19 @@ mod tests {
     #[test]
     fn claiming_a_claimed_child_is_fine_once_the_first_owner_gives_it_up() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let first = root.claim_child(&mut fixture.app, "child1", owner("FirstClaim"));
-        let second = root.claim_child(&mut fixture.app, "child1", owner("SecondClaim"));
-        second.write(&mut fixture.app, "bar", 55i64);
+        let first = root.claim_child(
+            &mut fixture.cell.borrow_mut(),
+            "child1",
+            owner("FirstClaim"),
+        );
+        let second = root.claim_child(
+            &mut fixture.cell.borrow_mut(),
+            "child1",
+            owner("SecondClaim"),
+        );
+        second.write(&mut fixture.cell.borrow_mut(), "bar", 55i64);
 
-        first.dispose(&mut fixture.app);
+        first.dispose(&mut fixture.cell.borrow_mut());
 
         let data = fixture
             .serialized()
@@ -1601,28 +1696,42 @@ mod tests {
 
     #[test]
     fn unclaiming_and_claiming_the_same_id_gives_a_fresh_bucket() {
-        let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let first = root.claim_child(&mut fixture.app, "child1", owner("FirstClaim"));
-        assert_eq!(first.read(&mut fixture.app, "foo"), Some(22i64.into()));
-        first.dispose(&mut fixture.app);
+        let (fixture, root) = Fixture::restored(raw_data_set());
+        let first = root.claim_child(
+            &mut fixture.cell.borrow_mut(),
+            "child1",
+            owner("FirstClaim"),
+        );
+        assert_eq!(
+            first.read(&mut fixture.cell.borrow_mut(), "foo"),
+            Some(22i64.into())
+        );
+        first.dispose(&mut fixture.cell.borrow_mut());
 
-        let second = root.claim_child(&mut fixture.app, "child1", owner("SecondClaim"));
-        assert_eq!(second.read(&mut fixture.app, "foo"), None);
+        let second = root.claim_child(
+            &mut fixture.cell.borrow_mut(),
+            "child1",
+            owner("SecondClaim"),
+        );
+        assert_eq!(second.read(&mut fixture.cell.borrow_mut(), "foo"), None);
     }
 
     #[test]
     fn the_raw_data_drops_the_values_and_children_maps_when_they_empty_out() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let child = root.claim_child(&mut fixture.app, "child1", owner("owner"));
-        child.dispose(&mut fixture.app);
+        let child = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner"));
+        child.dispose(&mut fixture.cell.borrow_mut());
         let data = fixture
             .serialized()
             .expect("dropping a child schedules serialization");
         assert_eq!(at(&data, &["c"]), None);
 
-        assert_eq!(root.remove(&mut fixture.app, "value1"), Some(10i64.into()));
         assert_eq!(
-            root.remove(&mut fixture.app, "value2"),
+            root.remove(&mut fixture.cell.borrow_mut(), "value1"),
+            Some(10i64.into())
+        );
+        assert_eq!(
+            root.remove(&mut fixture.cell.borrow_mut(), "value2"),
             Some("Hello".into())
         );
         let data = fixture
@@ -1634,10 +1743,14 @@ mod tests {
     #[test]
     fn dispose_deletes_the_data_of_the_whole_subtree() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let child1 = root.claim_child(&mut fixture.app, "child1", owner("owner1"));
-        child1.claim_child(&mut fixture.app, "child1OfChild1", owner("owner1.1"));
-        let child2 = root.claim_child(&mut fixture.app, "child2", owner("owner2"));
-        child2.write(&mut fixture.app, "foo", 1i64);
+        let child1 = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner1"));
+        child1.claim_child(
+            &mut fixture.cell.borrow_mut(),
+            "child1OfChild1",
+            owner("owner1.1"),
+        );
+        let child2 = root.claim_child(&mut fixture.cell.borrow_mut(), "child2", owner("owner2"));
+        child2.write(&mut fixture.cell.borrow_mut(), "foo", 1i64);
 
         let data = fixture
             .serialized()
@@ -1645,13 +1758,13 @@ mod tests {
         assert!(at(&data, &["c", "child1"]).is_some());
         assert!(at(&data, &["c", "child2"]).is_some());
 
-        child1.dispose(&mut fixture.app);
+        child1.dispose(&mut fixture.cell.borrow_mut());
         let data = fixture
             .serialized()
             .expect("dropping a child schedules serialization");
         assert_eq!(at(&data, &["c", "child1"]), None);
 
-        child2.dispose(&mut fixture.app);
+        child2.dispose(&mut fixture.cell.borrow_mut());
         let data = fixture
             .serialized()
             .expect("dropping a child schedules serialization");
@@ -1661,20 +1774,20 @@ mod tests {
     #[test]
     fn rename_to_the_same_id_changes_nothing() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let child = root.claim_child(&mut fixture.app, "child1", owner("owner1"));
+        let child = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner1"));
 
-        child.rename(&mut fixture.app, "child1");
-        assert_eq!(child.restoration_id(&fixture.app), "child1");
+        child.rename(&mut fixture.cell.borrow_mut(), "child1");
+        assert_eq!(child.restoration_id(&fixture.cell.borrow()), "child1");
         assert!(fixture.serialized().is_none());
     }
 
     #[test]
     fn rename_to_an_unused_id_moves_the_data() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let child = root.claim_child(&mut fixture.app, "child1", owner("owner1"));
+        let child = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner1"));
 
-        child.rename(&mut fixture.app, "new-name");
-        assert_eq!(child.restoration_id(&fixture.app), "new-name");
+        child.rename(&mut fixture.cell.borrow_mut(), "new-name");
+        assert_eq!(child.restoration_id(&fixture.cell.borrow()), "new-name");
 
         let data = fixture
             .serialized()
@@ -1690,9 +1803,9 @@ mod tests {
     #[test]
     fn rename_onto_a_used_id_reports_the_duplicate_unless_it_is_given_up() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let _child1 = root.claim_child(&mut fixture.app, "child1", owner("owner1"));
-        let child2 = root.claim_child(&mut fixture.app, "child2", owner("owner2"));
-        child2.rename(&mut fixture.app, "child1");
+        let _child1 = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner1"));
+        let child2 = root.claim_child(&mut fixture.cell.borrow_mut(), "child2", owner("owner2"));
+        child2.rename(&mut fixture.cell.borrow_mut(), "child1");
 
         let error = catch_unwind(AssertUnwindSafe(|| fixture.serialized())).unwrap_err();
         assert!(
@@ -1704,13 +1817,13 @@ mod tests {
     #[test]
     fn rename_onto_a_given_up_id_takes_it_over() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let child1 = root.claim_child(&mut fixture.app, "child1", owner("owner1"));
-        let child2 = root.claim_child(&mut fixture.app, "child2", owner("owner2"));
-        child2.write(&mut fixture.app, "bar", 7i64);
+        let child1 = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner1"));
+        let child2 = root.claim_child(&mut fixture.cell.borrow_mut(), "child2", owner("owner2"));
+        child2.write(&mut fixture.cell.borrow_mut(), "bar", 7i64);
         fixture.serialize();
 
-        child2.rename(&mut fixture.app, "child1");
-        child1.dispose(&mut fixture.app);
+        child2.rename(&mut fixture.cell.borrow_mut(), "child1");
+        child1.dispose(&mut fixture.cell.borrow_mut());
 
         let data = fixture
             .serialized()
@@ -1722,16 +1835,16 @@ mod tests {
     #[test]
     fn renaming_a_child_that_is_still_waiting_for_its_id() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let child1 = root.claim_child(&mut fixture.app, "child1", owner("owner1"));
-        let child2 = root.claim_child(&mut fixture.app, "child1", owner("owner2"));
+        let child1 = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner1"));
+        let child2 = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner2"));
 
-        child2.rename(&mut fixture.app, "foo");
+        child2.rename(&mut fixture.cell.borrow_mut(), "foo");
 
         let data = fixture
             .serialized()
             .expect("the shuffle schedules serialization");
-        assert_eq!(child1.restoration_id(&fixture.app), "child1");
-        assert_eq!(child2.restoration_id(&fixture.app), "foo");
+        assert_eq!(child1.restoration_id(&fixture.cell.borrow()), "child1");
+        assert_eq!(child2.restoration_id(&fixture.cell.borrow()), "foo");
         assert_eq!(at(&data, &["c", "child1", "v", "foo"]), Some(&22i64.into()));
         assert_eq!(
             at(&data, &["c", "foo"]),
@@ -1742,20 +1855,24 @@ mod tests {
     #[test]
     fn adopting_a_child_of_this_bucket_changes_nothing() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let child = root.claim_child(&mut fixture.app, "child1", owner("owner1"));
+        let child = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner1"));
 
-        root.adopt_child(&mut fixture.app, child);
+        root.adopt_child(&mut fixture.cell.borrow_mut(), child);
         assert!(fixture.serialized().is_none());
     }
 
     #[test]
     fn adopting_a_fresh_child_puts_it_in_the_hierarchy() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let child = RestorationBucket::empty(&mut fixture.app, "fresh-child", owner("owner1"));
-        assert!(!child.is_replacing(&fixture.app));
+        let child = RestorationBucket::empty(
+            &mut fixture.cell.borrow_mut(),
+            "fresh-child",
+            owner("owner1"),
+        );
+        assert!(!child.is_replacing(&fixture.cell.borrow()));
 
-        root.adopt_child(&mut fixture.app, child);
-        child.write(&mut fixture.app, "value", 22i64);
+        root.adopt_child(&mut fixture.cell.borrow_mut(), child);
+        child.write(&mut fixture.cell.borrow_mut(), "value", 22i64);
 
         let data = fixture
             .serialized()
@@ -1769,9 +1886,13 @@ mod tests {
     #[test]
     fn adopting_a_child_that_already_had_a_parent_moves_its_data() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let child = root.claim_child(&mut fixture.app, "child1", owner("owner1"));
-        let child_of_child = child.claim_child(&mut fixture.app, "childOfChild", owner("owner2"));
-        child_of_child.write(&mut fixture.app, "foo", "bar");
+        let child = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner1"));
+        let child_of_child = child.claim_child(
+            &mut fixture.cell.borrow_mut(),
+            "childOfChild",
+            owner("owner2"),
+        );
+        child_of_child.write(&mut fixture.cell.borrow_mut(), "foo", "bar");
         let data = fixture
             .serialized()
             .expect("a write schedules serialization");
@@ -1780,7 +1901,7 @@ mod tests {
             Some(&"bar".into())
         );
 
-        root.adopt_child(&mut fixture.app, child_of_child);
+        root.adopt_child(&mut fixture.cell.borrow_mut(), child_of_child);
 
         let data = fixture
             .serialized()
@@ -1796,11 +1917,12 @@ mod tests {
     #[test]
     fn adopting_onto_a_used_id_reports_the_duplicate_unless_it_is_given_up() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let child = root.claim_child(&mut fixture.app, "child1", owner("owner1"));
-        let child_of_child = child.claim_child(&mut fixture.app, "child1", owner("owner2"));
-        child_of_child.write(&mut fixture.app, "foo", "bar");
+        let child = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner1"));
+        let child_of_child =
+            child.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner2"));
+        child_of_child.write(&mut fixture.cell.borrow_mut(), "foo", "bar");
 
-        root.adopt_child(&mut fixture.app, child_of_child);
+        root.adopt_child(&mut fixture.cell.borrow_mut(), child_of_child);
 
         let error = catch_unwind(AssertUnwindSafe(|| fixture.serialized())).unwrap_err();
         assert!(
@@ -1812,13 +1934,14 @@ mod tests {
     #[test]
     fn adopting_onto_a_given_up_id_takes_it_over() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let child = root.claim_child(&mut fixture.app, "child1", owner("owner1"));
-        let child_of_child = child.claim_child(&mut fixture.app, "child1", owner("owner2"));
-        child_of_child.write(&mut fixture.app, "foo", "bar");
+        let child = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner1"));
+        let child_of_child =
+            child.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner2"));
+        child_of_child.write(&mut fixture.cell.borrow_mut(), "foo", "bar");
         fixture.serialize();
 
-        root.adopt_child(&mut fixture.app, child_of_child);
-        child.dispose(&mut fixture.app);
+        root.adopt_child(&mut fixture.cell.borrow_mut(), child_of_child);
+        child.dispose(&mut fixture.cell.borrow_mut());
 
         let data = fixture
             .serialized()
@@ -1829,15 +1952,16 @@ mod tests {
     #[test]
     fn a_child_of_a_parentless_bucket_joins_the_manager_when_it_is_adopted() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let detached = RestorationBucket::empty(&mut fixture.app, "detached", owner("owner1"));
-        let child = detached.claim_child(&mut fixture.app, "leaf", owner("owner2"));
-        child.write(&mut fixture.app, "foo", 3i64);
+        let detached =
+            RestorationBucket::empty(&mut fixture.cell.borrow_mut(), "detached", owner("owner1"));
+        let child = detached.claim_child(&mut fixture.cell.borrow_mut(), "leaf", owner("owner2"));
+        child.write(&mut fixture.cell.borrow_mut(), "foo", 3i64);
         assert!(
             fixture.serialized().is_none(),
             "a bucket outside the hierarchy has no manager to schedule with"
         );
 
-        root.adopt_child(&mut fixture.app, detached);
+        root.adopt_child(&mut fixture.cell.borrow_mut(), detached);
 
         let data = fixture
             .serialized()
@@ -1851,7 +1975,8 @@ mod tests {
     #[cfg(debug_assertions)]
     #[test]
     fn a_bucket_cannot_be_used_after_it_is_disposed() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let bucket = RestorationBucket::empty(&mut app, "foo", None);
         bucket.dispose(&mut app);
 
@@ -1863,16 +1988,16 @@ mod tests {
 
     #[test]
     fn disposing_the_manager_disposes_the_root_bucket() {
-        let (mut fixture, root) = Fixture::restored(raw_data_set());
-        fixture.manager.dispose(&mut fixture.app);
-        assert!(!fixture.app.contains(root));
+        let (fixture, root) = Fixture::restored(raw_data_set());
+        fixture.manager.dispose(&mut fixture.cell.borrow_mut());
+        assert!(!fixture.cell.borrow().contains(root));
     }
 
     #[test]
     fn a_bucket_reports_the_owner_it_was_claimed_with() {
-        let (mut fixture, root) = Fixture::restored(raw_data_set());
-        let child = root.claim_child(&mut fixture.app, "child1", owner("owner1"));
-        let described = format!("{:?}", fixture.app.get(child));
+        let (fixture, root) = Fixture::restored(raw_data_set());
+        let child = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner1"));
+        let described = format!("{:?}", fixture.cell.borrow().get(child));
         if cfg!(debug_assertions) {
             assert_eq!(
                 described,

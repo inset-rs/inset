@@ -760,6 +760,7 @@ impl MultiChildRenderObjectWidget for ShrinkWrappingViewport {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -845,7 +846,8 @@ mod tests {
 
     #[test]
     fn a_viewport_builds_only_the_visible_children_and_more_when_the_offset_moves() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::zero(&mut app);
         let built: Built = Rc::default();
         let harness = Harness::mount(&mut app, viewport_tree(offset, &built));
@@ -870,7 +872,8 @@ mod tests {
 
     #[test]
     fn a_shrink_wrapping_viewport_sizes_itself_to_its_content() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::zero(&mut app);
         let built: Built = Rc::default();
         let tree = Directionality::new(

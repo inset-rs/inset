@@ -163,13 +163,15 @@ impl Animatable<Option<AlignmentGeometry>> for AlignmentGeometryTween {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use reveal_painting::{AlignmentDirectional, TextDirection};
 
     use super::*;
 
     #[test]
     fn an_alignment_tween_walks_between_the_corners() {
-        let app = App::new();
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let tween = AlignmentTween::new(Some(Alignment::TOP_LEFT), Some(Alignment::BOTTOM_LEFT));
         assert_eq!(tween.transform(&app, 0.0), Alignment::TOP_LEFT);
         assert_eq!(tween.transform(&app, 0.5), Alignment::CENTER_LEFT);
@@ -178,7 +180,8 @@ mod tests {
 
     #[test]
     fn an_alignment_geometry_tween_crosses_the_two_kinds() {
-        let app = App::new();
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let tween = AlignmentGeometryTween::new(
             Some(Alignment::CENTER_RIGHT.into()),
             Some(AlignmentDirectional::CENTER_END.into()),
@@ -193,7 +196,8 @@ mod tests {
 
     #[test]
     fn a_fractional_offset_tween_walks_between_the_corners() {
-        let app = App::new();
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let tween = FractionalOffsetTween::new(
             Some(FractionalOffset::new(0.0, 0.0)),
             Some(FractionalOffset::new(1.0, 1.0)),

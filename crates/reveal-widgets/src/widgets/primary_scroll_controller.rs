@@ -231,6 +231,7 @@ mod tests {
     use crate::test_harness::Harness;
     use crate::widgets::basic::SizedBox;
     use crate::widgets::scroll_controller::{ScrollController, ScrollControllerLeaf};
+    use reveal_foundation::AppCell;
 
     /// The element under the test root at `depth` levels down.
     fn descendant(harness: &Harness, app: &App, depth: usize) -> AnyElement {
@@ -249,7 +250,8 @@ mod tests {
 
     #[test]
     fn of_finds_the_controller_the_subtree_is_associated_with() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = ScrollController::default(&mut app);
         let harness = mount(
             &mut app,
@@ -270,7 +272,8 @@ mod tests {
 
     #[test]
     fn none_hides_the_controller_from_its_subtree() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = ScrollController::default(&mut app);
         let harness = mount(
             &mut app,
@@ -287,7 +290,8 @@ mod tests {
 
     #[test]
     fn should_inherit_follows_the_platform_and_the_axis() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let controller = ScrollController::default(&mut app);
         let harness = mount(
             &mut app,

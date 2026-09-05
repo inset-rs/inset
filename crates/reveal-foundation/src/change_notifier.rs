@@ -695,6 +695,7 @@ mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     use super::*;
+    use crate::app_cell::AppCell;
 
     type Log = Rc<RefCell<Vec<String>>>;
 
@@ -743,7 +744,8 @@ mod tests {
     /// `change_notifier_test.dart`: "ChangeNotifier" — order, duplicates, extra remove.
     #[test]
     fn listeners_are_called_in_the_order_they_were_added() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
         let host = app.create(TestNotifier::default());
 
@@ -799,7 +801,8 @@ mod tests {
     /// `change_notifier_test.dart`: "ChangeNotifier with mutating listener".
     #[test]
     fn a_listener_mutates_the_notifier_dispatching_to_it() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
         let host = app.create(TestNotifier::default());
 
@@ -837,7 +840,8 @@ mod tests {
     /// `change_notifier_test.dart`: "During notifyListeners, a listener was added and removed immediately".
     #[test]
     fn a_listener_added_and_removed_immediately_during_notify_is_not_called() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
         let host = app.create(TestNotifier::default());
 
@@ -864,7 +868,8 @@ mod tests {
     /// `change_notifier_test.dart`: self-removing listener in the middle still notifies all.
     #[test]
     fn a_self_removing_listener_in_the_middle_still_notifies_all() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
         let host = app.create(TestNotifier::default());
 
@@ -895,7 +900,8 @@ mod tests {
     /// `change_notifier_test.dart`: first listener removes itself, still notifies the rest.
     #[test]
     fn the_first_listener_removing_itself_still_notifies_the_rest() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
         let host = app.create(TestNotifier::default());
 
@@ -934,7 +940,8 @@ mod tests {
         fn hook(_this: Handle<Host>, _app: &mut App) {}
         fn other_hook(_this: Handle<Host>, _app: &mut App) {}
 
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let a = app.create(Host);
         let b = app.create(Host);
 
@@ -963,7 +970,8 @@ mod tests {
             CALLED_WITH.with(|called| called.set(Some(this.id())));
         }
 
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let host = app.create(Host);
         Listener::handle_method(host, hook).call(&mut app);
         assert_eq!(CALLED_WITH.with(Cell::get), Some(host.id()));
@@ -974,7 +982,8 @@ mod tests {
     #[test]
     fn removing_keeps_order_across_both_shrink_branches() {
         for first in 0..8 {
-            let mut app = App::new();
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
             let log = Log::default();
             let host = app.create(TestNotifier::default());
 
@@ -1006,7 +1015,8 @@ mod tests {
     /// `change_notifier_test.dart`: "Cannot use a disposed ChangeNotifier except for remove listener".
     #[test]
     fn dispose_drops_every_listener_but_leaves_removal_callable() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
         let host = app.create(TestNotifier::default());
 
@@ -1032,7 +1042,8 @@ mod tests {
     #[cfg(debug_assertions)]
     #[should_panic(expected = "was used after being disposed")]
     fn notifying_after_dispose_panics_in_debug() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let host = app.create(TestNotifier::default());
         app.get_mut(host).change_notifier.dispose();
         notify(&mut app, host);
@@ -1050,7 +1061,8 @@ mod tests {
     /// `change_notifier_test.dart`: "Can check hasListener on a disposed ChangeNotifier".
     #[test]
     fn has_listeners_is_false_after_dispose() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let counter = app.create(ValueNotifier::new(0i32));
         counter.add_listener(&mut app, recording(&Log::default(), "a"));
         assert!(app.get(counter).change_notifier.has_listeners());
@@ -1061,7 +1073,8 @@ mod tests {
     /// `change_notifier_test.dart`: "Value notifier".
     #[test]
     fn value_notifier_notifies_only_when_the_value_differs() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
         let notifier = app.create(ValueNotifier::new(2.0));
 
@@ -1083,7 +1096,8 @@ mod tests {
     /// `change_notifier_test.dart`: "hasListeners".
     #[test]
     fn has_listeners() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let notifier = app.create(ValueNotifier::new(true));
         assert!(!app.get(notifier).change_notifier.has_listeners());
 
@@ -1127,7 +1141,8 @@ mod tests {
     /// `change_notifier_test.dart`: "notifyListener can be called recursively".
     #[test]
     fn a_listener_assigns_through_its_owners_setter_and_the_dispatch_recurses() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
         let counter = app.create(ValueNotifier::new(0i32));
 
@@ -1158,7 +1173,8 @@ mod tests {
     /// `change_notifier_test.dart`: "Remove Listeners while notifying on a list which will not resize".
     #[test]
     fn removing_listeners_while_notifying_on_a_list_which_will_not_resize() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
         let host = app.create(TestNotifier::default());
 
@@ -1234,7 +1250,8 @@ mod tests {
     #[test]
     #[cfg(debug_assertions)]
     fn dispose_during_notify_panics_and_does_not_finish_the_callback() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let host = app.create(TestNotifier::default());
         let finished = Rc::new(Cell::new(false));
         let finished_flag = Rc::clone(&finished);
@@ -1261,7 +1278,8 @@ mod tests {
 
     #[test]
     fn a_bare_change_notifier_handle_can_notify() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
         let on_undo = app.create(ChangeNotifierData::new());
 
@@ -1273,7 +1291,8 @@ mod tests {
 
     #[test]
     fn a_panicking_listener_leaves_the_notifier_usable() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
         let host = app.create(TestNotifier::default());
 
@@ -1337,7 +1356,8 @@ mod tests {
 
     #[test]
     fn a_panic_inside_a_nested_dispatch_still_pairs_the_depth_guards() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
         let host = app.create(TestNotifier::default());
         let inner_host = app.create(TestNotifier::default());
@@ -1398,7 +1418,8 @@ mod tests {
 
     #[test]
     fn dispose_clears_the_compaction_owed_by_a_panicked_dispatch() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
         let host = app.create(TestNotifier::default());
 
@@ -1435,7 +1456,8 @@ mod tests {
     #[test]
     #[cfg(not(debug_assertions))]
     fn a_disposed_notifier_reused_in_release_does_not_underflow() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Log::default();
         let host = app.create(TestNotifier::default());
 

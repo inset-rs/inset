@@ -710,6 +710,7 @@ impl InheritedWidget for ScrollConfiguration {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::time::Instant;
 
     use reveal_embedder::{InertPlatform, Platform, PlatformRef, ViewId, ViewRef};
@@ -748,8 +749,8 @@ mod tests {
         }
     }
 
-    fn app_on(platform: TargetPlatform) -> App {
-        App::with_platform(Rc::new(FixedPlatform(platform)) as PlatformRef)
+    fn app_on(platform: TargetPlatform) -> Rc<AppCell> {
+        AppCell::with_platform(Rc::new(FixedPlatform(platform)) as PlatformRef)
     }
 
     fn descendant(harness: &Harness, app: &App, depth: usize) -> AnyElement {
@@ -776,7 +777,8 @@ mod tests {
             (TargetPlatform::Linux, "ClampingScrollPhysics"),
             (TargetPlatform::Windows, "ClampingScrollPhysics"),
         ] {
-            let mut app = app_on(platform);
+            let cell = app_on(platform);
+            let mut app = cell.borrow_mut();
             let harness = mount(&mut app, SizedBox::shrink().into_widget());
             let context = descendant(&harness, &app, 0);
 
@@ -794,7 +796,8 @@ mod tests {
 
     #[test]
     fn of_falls_back_to_a_plain_behavior_and_reads_the_ambient_one() {
-        let mut app = app_on(TargetPlatform::Android);
+        let cell = app_on(TargetPlatform::Android);
+        let mut app = cell.borrow_mut();
         let harness = mount(&mut app, SizedBox::shrink().into_widget());
         let context = descendant(&harness, &app, 0);
         assert_eq!(
@@ -850,7 +853,8 @@ mod tests {
 
     #[test]
     fn the_default_behavior_flips_the_axes_for_shift_and_takes_touch_like_devices() {
-        let mut app = app_on(TargetPlatform::Android);
+        let cell = app_on(TargetPlatform::Android);
+        let mut app = cell.borrow_mut();
         let harness = mount(&mut app, SizedBox::shrink().into_widget());
         let context = descendant(&harness, &app, 0);
         let behavior = ScrollConfiguration::of(&mut app, context);
@@ -877,7 +881,8 @@ mod tests {
             TargetPlatform::MacOS,
             TargetPlatform::Windows,
         ] {
-            let mut app = app_on(platform);
+            let cell = app_on(platform);
+            let mut app = cell.borrow_mut();
             let harness = mount(&mut app, SizedBox::shrink().into_widget());
             let context = descendant(&harness, &app, 0);
             let behavior = ScrollConfiguration::of(&mut app, context);
@@ -908,7 +913,8 @@ mod tests {
             TargetPlatform::Fuchsia,
             TargetPlatform::IOS,
         ] {
-            let mut app = app_on(platform);
+            let cell = app_on(platform);
+            let mut app = cell.borrow_mut();
             let harness = mount(&mut app, SizedBox::shrink().into_widget());
             let context = descendant(&harness, &app, 0);
             let behavior = ScrollConfiguration::of(&mut app, context);

@@ -629,6 +629,7 @@ pub fn default_scroll_notification_predicate(notification: &dyn ScrollNotificati
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
 
     use reveal_painting::AxisDirection;
@@ -774,7 +775,8 @@ mod tests {
 
     #[test]
     fn a_family_listener_receives_every_kind_of_scroll_notification() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let seen: Rc<RefCell<Vec<String>>> = Rc::default();
         let dispatcher = Builder::new(|app, context| {
             ScrollStartNotification::new(test_metrics(), Some(context))
@@ -813,7 +815,8 @@ mod tests {
 
     #[test]
     fn a_scroll_update_notification_bubbles_and_each_viewport_adds_to_its_depth() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log: Log = Rc::default();
         let dispatcher = Builder::new(|app, context| {
             ScrollUpdateNotification::new(test_metrics(), context)
@@ -845,7 +848,8 @@ mod tests {
             test_metrics(),
             // A `BuildContext` is required; the element tree is not walked by `Debug`.
             {
-                let mut app = App::new();
+                let cell = AppCell::new();
+                let mut app = cell.borrow_mut();
                 let harness = Harness::mount(&mut app, SizedBox::shrink().into_widget());
                 harness.root.as_element()
             },
@@ -870,7 +874,8 @@ mod tests {
 
     #[test]
     fn the_overscroll_notification_reports_its_overscroll_and_velocity() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(&mut app, SizedBox::shrink().into_widget());
         let context = harness.root.as_element();
         let notification =

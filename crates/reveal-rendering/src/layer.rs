@@ -845,6 +845,7 @@ impl AnyRenderObject {
 #[cfg(test)]
 mod tests {
     use reveal_embedder::valo::Op;
+    use reveal_foundation::AppCell;
 
     use super::*;
 
@@ -864,7 +865,8 @@ mod tests {
     }
 
     fn compose(layer: &BoundaryLayer) -> Vec<Op> {
-        let app = App::new();
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let mut canvas = Canvas::new();
         layer.add_to_scene(&app, &mut canvas);
         canvas.build().ops().to_vec()
@@ -901,7 +903,8 @@ mod tests {
 
     #[test]
     fn a_clip_gates_the_annotations_recorded_under_it() {
-        let app = App::new();
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let mut layer = BoundaryLayer::new(CompositedLayer::default(), true);
         layer.items.push(PaintItem::PushClipRect {
             clip_rect: Rect::from_ltwh(0.0, 0.0, 50.0, 50.0),
@@ -924,7 +927,8 @@ mod tests {
 
     #[test]
     fn a_transform_maps_the_search_point_into_what_it_records() {
-        let app = App::new();
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let mut layer = BoundaryLayer::new(CompositedLayer::default(), true);
         layer.items.push(PaintItem::PushTransform {
             transform: Matrix4::translation(10.0, 0.0),
@@ -943,7 +947,8 @@ mod tests {
 
     #[test]
     fn an_opaque_region_absorbs_the_search_for_what_is_recorded_behind_it() {
-        let app = App::new();
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let behind = AnnotatedRegionLayer::new(Rc::new(1u32));
         let front = AnnotatedRegionLayer::new(Rc::new(2u32)).opaque(true);
         let mut layer = BoundaryLayer::new(CompositedLayer::default(), true);

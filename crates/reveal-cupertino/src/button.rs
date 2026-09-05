@@ -896,6 +896,7 @@ impl State for CupertinoButtonState {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
     use std::rc::Rc;
     use std::time::Duration;
@@ -927,14 +928,14 @@ mod tests {
     }
 
     struct Mounted {
-        app: App,
+        cell: Rc<AppCell>,
         state: Handle<CupertinoButtonState>,
         presses: Rc<Cell<u32>>,
     }
 
     /// Mounts a 40x40 button filling the view, with `on_pressed` counting.
     fn mount(configure: impl FnOnce(CupertinoButton) -> CupertinoButton) -> Mounted {
-        let mut app = crate::test_support::app();
+        let cell = crate::test_support::test_cell();
         let presses = Rc::new(Cell::new(0));
         let on_pressed = Listener::new({
             let presses = Rc::clone(&presses);
@@ -947,12 +948,14 @@ mod tests {
             Some(on_pressed),
         ))
         .key(key);
-        build(&mut app, button.into_widget());
+        build(&cell, button.into_widget());
+        let mut app = cell.borrow_mut();
         let state = global_key
             .current_state::<CupertinoButtonState>(&mut app)
             .expect("the button mounted");
+        drop(app);
         Mounted {
-            app,
+            cell,
             state,
             presses,
         }
@@ -960,7 +963,8 @@ mod tests {
 
     #[test]
     fn an_activate_intent_presses_the_button_and_autofocus_takes_the_supplied_node() {
-        let mut app = crate::test_support::app();
+        let cell = crate::test_support::test_cell();
+        let mut app = cell.borrow_mut();
         let node = FocusNode::new(&mut app).as_node();
         let presses = Rc::new(Cell::new(0));
         let on_pressed = Listener::new({
@@ -975,13 +979,15 @@ mod tests {
                 SizedBox::square(Some(40.0)).into_widget()
             }
         });
+        drop(app);
         build(
-            &mut app,
+            &cell,
             CupertinoButton::new(child.into_widget(), Some(on_pressed))
                 .focus_node(node)
                 .autofocus(true)
                 .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         pump(&mut app, Duration::ZERO);
         assert!(
             node.has_primary_focus(&app),
@@ -995,89 +1001,91 @@ mod tests {
 
     fn opacity(mounted: &Mounted) -> f64 {
         mounted
-            .app
+            .cell
+            .borrow()
             .get(mounted.state)
             .opacity_animation
             .expect("created in init_state")
-            .value(&mounted.app)
+            .value(&mounted.cell.borrow())
     }
 
     #[test]
     fn a_press_fades_the_button_and_a_release_fires_on_pressed() {
-        let mut mounted = mount(|button| button);
+        let mounted = mount(|button| button);
         assert_eq!(opacity(&mounted), 1.0);
 
         send(
-            &mut mounted.app,
+            &mut mounted.cell.borrow_mut(),
             PointerChange::Down,
             20.0,
             20.0,
             Duration::ZERO,
         );
-        assert!(mounted.app.get(mounted.state).tap_in_progress);
-        assert!(mounted.app.get(mounted.state).button_held_down);
-        pump(&mut mounted.app, Duration::from_millis(16));
-        pump(&mut mounted.app, Duration::from_millis(200));
+        assert!(mounted.cell.borrow().get(mounted.state).tap_in_progress);
+        assert!(mounted.cell.borrow().get(mounted.state).button_held_down);
+        pump(&mut mounted.cell.borrow_mut(), Duration::from_millis(16));
+        pump(&mut mounted.cell.borrow_mut(), Duration::from_millis(200));
         assert!((opacity(&mounted) - 0.4).abs() < 1e-9);
         assert_eq!(mounted.presses.get(), 0);
 
         send(
-            &mut mounted.app,
+            &mut mounted.cell.borrow_mut(),
             PointerChange::Up,
             20.0,
             20.0,
             Duration::from_millis(210),
         );
         assert_eq!(mounted.presses.get(), 1);
-        assert!(!mounted.app.get(mounted.state).tap_in_progress);
-        assert!(!mounted.app.get(mounted.state).button_held_down);
-        pump(&mut mounted.app, Duration::from_millis(220));
-        pump(&mut mounted.app, Duration::from_millis(500));
+        assert!(!mounted.cell.borrow().get(mounted.state).tap_in_progress);
+        assert!(!mounted.cell.borrow().get(mounted.state).button_held_down);
+        pump(&mut mounted.cell.borrow_mut(), Duration::from_millis(220));
+        pump(&mut mounted.cell.borrow_mut(), Duration::from_millis(500));
         assert_eq!(opacity(&mounted), 1.0);
     }
 
     #[test]
     fn moving_past_the_slop_releases_the_button_without_a_press() {
-        let mut mounted = mount(|button| button);
+        let mounted = mount(|button| button);
         send(
-            &mut mounted.app,
+            &mut mounted.cell.borrow_mut(),
             PointerChange::Down,
             20.0,
             20.0,
             Duration::ZERO,
         );
-        assert!(mounted.app.get(mounted.state).button_held_down);
+        assert!(mounted.cell.borrow().get(mounted.state).button_held_down);
 
         send(
-            &mut mounted.app,
+            &mut mounted.cell.borrow_mut(),
             PointerChange::Move,
             2000.0,
             2000.0,
             Duration::from_millis(50),
         );
-        assert!(mounted.app.get(mounted.state).tap_in_progress);
-        assert!(!mounted.app.get(mounted.state).button_held_down);
+        assert!(mounted.cell.borrow().get(mounted.state).tap_in_progress);
+        assert!(!mounted.cell.borrow().get(mounted.state).button_held_down);
 
         send(
-            &mut mounted.app,
+            &mut mounted.cell.borrow_mut(),
             PointerChange::Up,
             2000.0,
             2000.0,
             Duration::from_millis(60),
         );
         assert_eq!(mounted.presses.get(), 0);
-        assert!(!mounted.app.get(mounted.state).tap_in_progress);
+        assert!(!mounted.cell.borrow().get(mounted.state).tap_in_progress);
     }
 
     #[test]
     fn a_disabled_button_ignores_the_pointer() {
-        let mut app = crate::test_support::app();
+        let cell = crate::test_support::test_cell();
         let global_key = GlobalKey::new();
         let key: KeyRef = Rc::new(global_key.clone());
         let button =
             CupertinoButton::new(SizedBox::square(Some(40.0)).into_widget(), None).key(key);
         assert!(!button.enabled());
-        build(&mut app, button.into_widget());
+        build(&cell, button.into_widget());
+        let mut app = cell.borrow_mut();
         let state = global_key
             .current_state::<CupertinoButtonState>(&mut app)
             .expect("the button mounted");
@@ -1096,7 +1104,8 @@ mod tests {
 
     #[test]
     fn a_long_press_alone_enables_the_button_and_the_slop_follows_the_platform() {
-        let app = crate::test_support::app();
+        let cell = crate::test_support::test_cell();
+        let app = cell.borrow();
         let long_pressed = Rc::new(Cell::new(0));
         let button = CupertinoButton::new(SizedBox::square(Some(40.0)).into_widget(), None)
             .on_long_press(Listener::new({
@@ -1141,20 +1150,21 @@ mod tests {
 
     #[test]
     fn a_mouse_click_presses_and_releases_the_button() {
-        let mut mounted = mount(|button| button);
-        click(&mut mounted.app, 20.0, 20.0);
+        let mounted = mount(|button| button);
+        click(&mut mounted.cell.borrow_mut(), 20.0, 20.0);
         assert_eq!(mounted.presses.get(), 1);
-        assert!(!mounted.app.get(mounted.state).tap_in_progress);
+        assert!(!mounted.cell.borrow().get(mounted.state).tap_in_progress);
         // The fade-out runs to its end, then the fade-in it owes runs.
         for at in [16, 150, 300, 600] {
-            pump(&mut mounted.app, Duration::from_millis(at));
+            pump(&mut mounted.cell.borrow_mut(), Duration::from_millis(at));
         }
         assert_eq!(opacity(&mounted), 1.0);
     }
 
     #[test]
     fn a_mouse_click_on_a_filled_text_button_in_a_dark_theme() {
-        let mut app = crate::test_support::app();
+        let cell = crate::test_support::test_cell();
+        let mut app = cell.borrow_mut();
         let binding = reveal_painting::PaintingBinding::instance(&mut app);
         if !binding.has_fonts(&app) {
             binding.install_fonts(&mut app, |fonts| {
@@ -1189,7 +1199,9 @@ mod tests {
                 ),
             ),
         );
-        build(&mut app, tree.into_widget());
+        drop(app);
+        build(&cell, tree.into_widget());
+        let mut app = cell.borrow_mut();
 
         click(&mut app, 200.0, 150.0);
         assert_eq!(presses.get(), 1);

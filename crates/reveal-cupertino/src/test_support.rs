@@ -8,7 +8,7 @@ use reveal_embedder::{
     Picture, Platform, PlatformRef, TargetPlatform, View as EmbedderView, ViewConstraints, ViewId,
     ViewMetrics, ViewRef,
 };
-use reveal_foundation::App;
+use reveal_foundation::{App, AppCell};
 use reveal_scheduler::SchedulerBinding;
 use reveal_widgets::{IntoWidget, View, WidgetRef, run_widget};
 
@@ -64,22 +64,26 @@ impl Platform for TestPlatform {
 }
 
 /// An app on a platform with one 2x view.
-pub(crate) fn app() -> App {
+pub(crate) fn test_cell() -> Rc<AppCell> {
     let platform: PlatformRef = Rc::new(TestPlatform {
         view: Rc::new(TestView),
     });
-    App::with_platform(platform)
+    AppCell::with_platform(platform)
 }
 
 /// Mounts `child` under the platform's view and runs the first frame.
-pub(crate) fn build(app: &mut App, child: WidgetRef) {
-    let view = app
-        .platform()
-        .implicit_view()
-        .expect("an app from test_support::app");
-    run_widget(app, View::new(view, child).into_widget());
-    app.elapse(Duration::ZERO);
-    pump(app, Duration::ZERO);
+pub(crate) fn build(cell: &AppCell, child: WidgetRef) {
+    {
+        let mut app = cell.borrow_mut();
+        let view = app
+            .platform()
+            .implicit_view()
+            .expect("an app from test_support::test_cell");
+        run_widget(&mut app, View::new(view, child).into_widget());
+    }
+    // `run_app` attaches the root widget on the next timer turn, as Dart's `Timer.run` does.
+    cell.elapse(Duration::ZERO);
+    pump(&mut cell.borrow_mut(), Duration::ZERO);
 }
 
 /// Runs one frame at `at`.

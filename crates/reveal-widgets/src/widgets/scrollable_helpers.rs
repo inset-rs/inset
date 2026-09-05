@@ -405,7 +405,7 @@ mod tests {
     use std::collections::HashMap;
 
     use reveal_embedder::Offset;
-    use reveal_foundation::App;
+    use reveal_foundation::{App, AppCell};
     use reveal_painting::Axis;
     use reveal_rendering::{
         AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderHandle,
@@ -509,7 +509,8 @@ mod tests {
 
     #[test]
     fn a_scroll_intent_reaches_the_ambient_scrollable_through_actions() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (_harness, state, context) = mount_scroll_action(&mut app, |scrollable| scrollable);
         assert!(
             ScrollContext::notification_context(&state, &mut app).is_some(),
@@ -552,7 +553,8 @@ mod tests {
 
     #[test]
     fn a_scroll_intent_across_the_axis_moves_nothing() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (_harness, state, context) = mount_scroll_action(&mut app, |scrollable| scrollable);
 
         assert_eq!(
@@ -572,7 +574,8 @@ mod tests {
 
     #[test]
     fn a_scroll_action_is_disabled_without_a_scrollable_and_refuses_physics_that_do_not_scroll() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let action = ScrollAction::new(&mut app);
         let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
         let sink = Rc::clone(&captured);

@@ -106,6 +106,7 @@ impl State for TitleState {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
     use std::rc::Rc;
     use std::time::Instant;
@@ -158,7 +159,8 @@ mod tests {
     fn a_title_describes_the_app_to_the_platform_and_again_when_it_changes() {
         let platform = Rc::new(RecordingPlatform::default());
         let platform_ref: PlatformRef = Rc::clone(&platform) as PlatformRef;
-        let mut app = App::with_platform(platform_ref);
+        let cell = AppCell::with_platform(platform_ref);
+        let mut app = cell.borrow_mut();
         let titled = |title: &str| {
             Title::new(Color::new(0xFF112233), SizedBox::shrink())
                 .title(title)

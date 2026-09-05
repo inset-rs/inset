@@ -878,6 +878,7 @@ impl LeafRenderObjectWidget for RichText {}
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::rc::Rc;
 
     use reveal_embedder::{Color, TextLeadingDistribution};
@@ -936,7 +937,8 @@ mod tests {
 
     #[test]
     fn a_text_lays_out_a_paragraph_with_the_fallback_style() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount(&mut app, Text::new("Hello").into_widget());
         let paragraph = paragraph_under_root(&harness, &app);
         let size = paragraph.size(&app);
@@ -955,7 +957,8 @@ mod tests {
 
     #[test]
     fn a_rich_text_span_becomes_the_child_of_the_styled_span() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let span = TextSpan::new().text("Hello").into_span();
         let harness = mount(&mut app, Text::rich(span).into_widget());
         let paragraph = paragraph_under_root(&harness, &app);
@@ -965,7 +968,8 @@ mod tests {
 
     #[test]
     fn a_default_text_style_styles_the_text_and_notifies_on_change() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         // One Text instance, reused like a `const` widget, so only the default style decides
         // rebuilds.
         let text: WidgetRef = Text::new("Hello").into_widget();
@@ -990,7 +994,8 @@ mod tests {
 
     #[test]
     fn an_explicit_style_merges_into_the_default_unless_it_does_not_inherit() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let red = Color::from_argb(255, 255, 0, 0);
         let under_default = |style: TextStyle| {
             DefaultTextStyle::new(
@@ -1022,7 +1027,8 @@ mod tests {
 
     #[test]
     fn a_new_string_updates_the_same_paragraph() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount(&mut app, Text::new("Hello").into_widget());
         let paragraph = paragraph_under_root(&harness, &app);
         let short = paragraph.size(&app);
@@ -1036,7 +1042,8 @@ mod tests {
 
     #[test]
     fn max_lines_and_overflow_reach_the_render_object() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount(
             &mut app,
             Text::new("Hello")
@@ -1057,7 +1064,8 @@ mod tests {
 
     #[test]
     fn a_default_text_style_supplies_what_the_text_leaves_unset() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let under_default = |text: Text| {
             DefaultTextStyle::new(TextStyle::new(), text)
                 .max_lines(1)
@@ -1087,7 +1095,8 @@ mod tests {
 
     #[test]
     fn the_style_overflow_beats_the_default_text_style_overflow() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount(
             &mut app,
             DefaultTextStyle::new(
@@ -1103,7 +1112,8 @@ mod tests {
 
     #[test]
     fn a_default_text_height_behavior_reaches_the_paragraph_and_notifies_on_change() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let text: WidgetRef = Text::new("Hello").into_widget();
         let under_behavior = |leading_distribution: TextLeadingDistribution| {
             DefaultTextHeightBehavior::new(
@@ -1134,7 +1144,8 @@ mod tests {
 
     #[test]
     fn a_rich_text_forwards_its_configuration_in_place() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let rich = |text: &str| {
             RichText::new(TextSpan::new().text(text).into_span())
                 .text_align(TextAlign::Center)
@@ -1156,7 +1167,8 @@ mod tests {
 
     #[test]
     fn a_changed_key_replaces_the_paragraph_where_the_same_key_keeps_it() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let keyed = |key: &str| {
             Text::new("Hello")
                 .key(Rc::new(ValueKey::new(key.to_owned())))
@@ -1176,7 +1188,8 @@ mod tests {
 
     #[test]
     fn a_media_query_bolds_scales_and_spaces_the_text() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let data = MediaQueryData::new()
             .bold_text(true)
             .text_scaler(TextScaler::linear(2.0))

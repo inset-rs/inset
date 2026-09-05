@@ -765,6 +765,7 @@ impl ValueListenable<TickerModeData> for ConstantTickerModeDataListenable {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
     use std::time::Duration;
 
@@ -924,7 +925,8 @@ mod tests {
     // ticker_provider_test.dart 'TickerMode'
     #[test]
     fn ticker_mode_mutes_the_ticker_a_single_provider_vends() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(&mut app, ticker_mode(false, SingleHost.into_widget()));
         harness.pump(&mut app);
         assert_eq!(SchedulerBinding::transient_callback_count(&mut app), 0);
@@ -950,7 +952,8 @@ mod tests {
 
     #[test]
     fn a_single_provider_disposes_its_ticker_with_the_state() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(&mut app, ticker_mode(true, SingleHost.into_widget()));
         harness.pump(&mut app);
         let mode_state = descendant(&harness, &app, 0)
@@ -1075,7 +1078,8 @@ mod tests {
 
     #[test]
     fn ticker_mode_mutes_every_ticker_a_provider_vends() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(&mut app, ticker_mode(false, MultiHost.into_widget()));
         harness.pump(&mut app);
         let state = descendant(&harness, &app, 2)
@@ -1123,7 +1127,8 @@ mod tests {
 
     #[test]
     fn a_disabled_ancestor_wins_and_forced_frames_accumulate() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let seen = Rc::new(Cell::new(None));
         let probe = ModeProbe {
             seen: Rc::clone(&seen),

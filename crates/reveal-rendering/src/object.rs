@@ -2204,7 +2204,7 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
-    use reveal_foundation::{App, Listener};
+    use reveal_foundation::{App, AppCell, Listener};
 
     use super::*;
     use crate::box_::{BoxConstraints, RenderBox, RenderBoxData};
@@ -2313,7 +2313,8 @@ mod tests {
     /// `object_test.dart`: `nodesNeedingLayout updated with layout changes`.
     #[test]
     fn nodes_needing_layout_updated_with_layout_changes() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let owner = PipelineOwner::new(&mut app, None);
         let node = RenderHandle::new_box(&mut app, leaf(Rc::new(Cell::new(0))));
         node.as_object().attach(&mut app, owner);
@@ -2329,7 +2330,8 @@ mod tests {
 
     #[test]
     fn clean_layout_skips_perform_layout() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let layouts = Rc::new(Cell::new(0));
         let node = RenderHandle::new_box(&mut app, leaf(Rc::clone(&layouts)));
         node.layout(&mut app, tight(), false);
@@ -2343,7 +2345,8 @@ mod tests {
 
     #[test]
     fn parent_uses_size_marks_parent() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let owner = PipelineOwner::new(&mut app, None);
         let child = RenderHandle::new_box(&mut app, leaf(Rc::new(Cell::new(0))));
         let parent = RenderHandle::new_box(
@@ -2367,7 +2370,8 @@ mod tests {
 
     #[test]
     fn adopt_drop_attach_detach() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let owner = PipelineOwner::new(&mut app, None);
         let child = RenderHandle::new_box(&mut app, leaf(Rc::new(Cell::new(0))));
         let parent = RenderHandle::new_box(
@@ -2395,7 +2399,8 @@ mod tests {
 
     #[test]
     fn parent_reenters_itself_after_child_layout() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let layouts = Rc::new(Cell::new(0));
         let child = RenderHandle::new_box(&mut app, leaf(Rc::new(Cell::new(0))));
         let parent = RenderHandle::new_box(
@@ -2410,7 +2415,8 @@ mod tests {
 
     #[test]
     fn flush_layout_orders_by_depth() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let owner = PipelineOwner::new(&mut app, None);
         let order = Rc::new(std::cell::RefCell::new(Vec::new()));
         let child_order = Rc::clone(&order);
@@ -2498,7 +2504,8 @@ mod tests {
 
     #[test]
     fn mark_needs_layout_requests_visual_update() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let updates = Rc::new(Cell::new(0));
         let updates_cb = Rc::clone(&updates);
         let owner = PipelineOwner::new(

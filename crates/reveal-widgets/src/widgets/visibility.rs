@@ -618,7 +618,7 @@ mod tests {
     use std::rc::Rc;
 
     use reveal_embedder::{Size, TextDirection};
-    use reveal_foundation::{App, Handle};
+    use reveal_foundation::{App, AppCell, Handle};
     use reveal_rendering::{RenderConstrainedBox, RenderIgnorePointer, RenderOffstage};
 
     use super::*;
@@ -714,7 +714,8 @@ mod tests {
 
     #[test]
     fn a_hidden_visibility_replaces_the_child_and_discards_its_state() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let report = Rc::new(Report::default());
         let harness = Harness::mount(&mut app, Visibility::new(Probe::new(&report)).into_widget());
         harness.pump(&mut app);
@@ -742,7 +743,8 @@ mod tests {
 
     #[test]
     fn a_hidden_visibility_takes_the_replacement_it_is_given() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             Visibility::new(SizedBox::new().width(10.0).height(10.0))
@@ -759,7 +761,8 @@ mod tests {
 
     #[test]
     fn maintain_state_hides_the_child_offstage_and_mutes_its_tickers() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let report = Rc::new(Report::default());
         let visibility = |visible: bool, report: &Rc<Report>| {
             Visibility::new(Probe::new(report))
@@ -788,7 +791,8 @@ mod tests {
 
     #[test]
     fn maintain_animation_leaves_out_the_ticker_mode() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let report = Rc::new(Report::default());
         let harness = Harness::mount(
             &mut app,
@@ -805,7 +809,8 @@ mod tests {
 
     #[test]
     fn maintain_focusability_keeps_the_hidden_child_focusable() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let report = Rc::new(Report::default());
         let harness = Harness::mount(
             &mut app,
@@ -821,7 +826,8 @@ mod tests {
 
     #[test]
     fn maintain_size_keeps_the_layout_and_stops_the_paint() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let report = Rc::new(Report::default());
         let harness = Harness::mount(
             &mut app,
@@ -867,7 +873,8 @@ mod tests {
     /// `non-painted layers are detached`).
     #[test]
     fn a_hidden_child_whose_size_is_maintained_is_not_painted() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tree = |visible: bool| {
             Visibility::maintain(
                 RepaintBoundary::new().child(SizedBox::new().width(10.0).height(10.0)),
@@ -901,7 +908,8 @@ mod tests {
 
     #[test]
     fn maintain_size_alone_hides_the_child_from_pointers() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             Visibility::new(SizedBox::new().width(10.0).height(10.0))
@@ -927,7 +935,8 @@ mod tests {
 
     #[test]
     fn maintain_interactivity_lets_pointers_through_a_hidden_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             Visibility::new(SizedBox::new().width(10.0).height(10.0))
@@ -950,7 +959,8 @@ mod tests {
 
     #[test]
     fn visibility_of_is_true_without_an_ancestor_visibility() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let report = Rc::new(Report::default());
         let harness = Harness::mount(&mut app, Probe::new(&report).into_widget());
         harness.pump(&mut app);
@@ -959,7 +969,8 @@ mod tests {
 
     #[test]
     fn visibility_of_reports_every_ancestor_scope() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let report = Rc::new(Report::default());
         let nested = |outer: bool, inner: bool, report: &Rc<Report>| {
             Visibility::new(
@@ -986,7 +997,8 @@ mod tests {
 
     #[test]
     fn visibility_of_rebuilds_its_dependents() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let report = Rc::new(Report::default());
         let visibility = |visible: bool, report: &Rc<Report>| {
             Visibility::new(Probe::new(report))
@@ -1007,7 +1019,8 @@ mod tests {
 
     #[test]
     fn visibility_of_reports_an_indexed_stack_scope() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let report = Rc::new(Report::default());
         let harness = Harness::mount(
             &mut app,

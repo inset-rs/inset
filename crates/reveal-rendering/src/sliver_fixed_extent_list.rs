@@ -772,6 +772,7 @@ fixed_extent_box_adaptor_leaf!(RenderSliverVariedExtentList);
 #[cfg(test)]
 mod tests {
     use reveal_embedder::Size;
+    use reveal_foundation::AppCell;
     use reveal_gestures::HitTestResult;
 
     use super::*;
@@ -800,7 +801,8 @@ mod tests {
     /// the cache area) are reified, and they are placed at multiples of the item extent.
     #[test]
     fn a_fixed_extent_list_reifies_only_the_visible_children() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (list, _, _harness) = fixed_list(&mut app, vec![50.0; 40], 50.0);
 
         assert_eq!(
@@ -819,7 +821,8 @@ mod tests {
     /// Scrolling collects the children that left the viewport and creates the ones that entered.
     #[test]
     fn scrolling_collects_and_creates_children() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (list, _, harness) = fixed_list(&mut app, vec![50.0; 40], 50.0);
         assert_eq!(
             list.index_of(&app, list.first_child(&app).expect("built")),
@@ -844,7 +847,8 @@ mod tests {
     /// A hit inside a reified child lands on the child and the sliver.
     #[test]
     fn a_fixed_extent_list_hit_tests_its_children() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (list, _, _harness) = fixed_list(&mut app, vec![50.0; 40], 50.0);
 
         let mut result = HitTestResult::new();
@@ -863,7 +867,8 @@ mod tests {
     /// being destroyed, and comes back out of it when it is needed again.
     #[test]
     fn a_kept_alive_child_survives_leaving_the_viewport() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (list, manager, harness) = fixed_list(&mut app, vec![50.0; 40], 50.0);
         let first = list.first_child(&app).expect("children were created");
         first
@@ -899,7 +904,8 @@ mod tests {
     /// A list shorter than the viewport reports underflow and its precise extent.
     #[test]
     fn a_short_list_reports_underflow() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (list, manager, _harness) = fixed_list(&mut app, vec![50.0; 2], 50.0);
 
         assert_eq!(list.geometry(&app).scroll_extent, 100.0);
@@ -910,7 +916,8 @@ mod tests {
     /// `RenderSliverVariedExtentList` asks its builder for each item's extent.
     #[test]
     fn a_varied_extent_list_uses_its_builder() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let manager = TestChildManager::<RenderSliverVariedExtentList>::new(vec![40.0; 10]);
         let builder: ItemExtentBuilder =
             Rc::new(|index, _| Some(if index % 2 == 0 { 40.0 } else { 20.0 }));
@@ -929,7 +936,8 @@ mod tests {
     /// The minimum and maximum child indices bracket the visible window.
     #[test]
     fn the_child_index_range_brackets_the_scroll_offset() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (list, _, _harness) = fixed_list(&mut app, vec![50.0; 40], 50.0);
         let constraints = list.constraints(&app);
 

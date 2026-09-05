@@ -1197,6 +1197,7 @@ impl ChangeNotifier for WidgetStatesController {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
 
     use reveal_foundation::{Listenable, Listener};
@@ -1567,7 +1568,8 @@ mod tests {
     // widget_states_controller_test.dart 'WidgetStatesController constructor'.
     #[test]
     fn controller_starts_with_the_given_states() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let empty = WidgetStatesController::new(&mut app, None);
         assert_eq!(*app.get(empty).value(), WidgetStates::new());
         let selected = WidgetStatesController::new(&mut app, Some(states([WidgetState::Selected])));
@@ -1577,7 +1579,8 @@ mod tests {
     // widget_states_controller_test.dart 'WidgetStatesController update, listener'.
     #[test]
     fn controller_update_notifies_only_on_change() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let count = Rc::new(Cell::new(0));
         let value_changed = Listener::new({
             let count = Rc::clone(&count);
@@ -1638,7 +1641,8 @@ mod tests {
     // widget_states_controller_test.dart 'WidgetStatesController const initial value'.
     #[test]
     fn controller_with_an_initial_value_notifies_only_on_change() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let count = Rc::new(Cell::new(0));
         let controller =
             WidgetStatesController::new(&mut app, Some(states([WidgetState::Selected])));

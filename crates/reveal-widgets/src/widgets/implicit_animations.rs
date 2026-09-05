@@ -3551,6 +3551,7 @@ fn offset_tween(app: &mut App, value: &Offset) -> Handle<Tween<Offset>> {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::{Cell, RefCell};
 
     use reveal_embedder::{Size, TextDirection};
@@ -3559,7 +3560,7 @@ mod tests {
     use super::*;
     use crate::binding::WidgetsBinding;
     use crate::framework::GlobalKey;
-    use crate::test_harness::{binding_app, binding_mount, binding_pump};
+    use crate::test_harness::{binding_cell, binding_mount, binding_pump};
     use crate::view::View;
     use crate::widgets::basic::{Align, Builder, Directionality, SizedBox, Stack};
 
@@ -3570,7 +3571,7 @@ mod tests {
         let view = app
             .platform()
             .implicit_view()
-            .expect("an app from binding_app");
+            .expect("an app from binding_cell");
         let root = View::new(view, child).into_widget();
         WidgetsBinding::instance(app).attach_root_widget(app, root);
         binding_pump(app, at);
@@ -3604,12 +3605,13 @@ mod tests {
 
     #[test]
     fn an_animated_positioned_animates_its_box_and_calls_on_end_once() {
-        let mut app = binding_app();
+        let cell = binding_cell();
         let key = Rc::new(GlobalKey::new());
         let ends = Rc::new(Cell::new(0));
         let counted = Rc::clone(&ends);
         let on_end = Listener::new(move |_app| counted.set(counted.get() + 1));
-        binding_mount(&mut app, positioned_tree(&key, 20.0, Some(on_end.clone())));
+        binding_mount(&cell, positioned_tree(&key, 20.0, Some(on_end.clone())));
+        let mut app = cell.borrow_mut();
         assert_eq!(
             render_box_of(&mut app, &key).size(&app),
             Size::new(20.0, 10.0),
@@ -3670,9 +3672,10 @@ mod tests {
 
     #[test]
     fn an_animated_opacity_reaches_its_target_after_the_duration() {
-        let mut app = binding_app();
+        let cell = binding_cell();
         let key = Rc::new(GlobalKey::new());
-        binding_mount(&mut app, opacity_tree(&key, 1.0));
+        binding_mount(&cell, opacity_tree(&key, 1.0));
+        let mut app = cell.borrow_mut();
         assert_eq!(opacity_of(&mut app, &key), 1.0);
 
         rebuild(&mut app, opacity_tree(&key, 0.0), Duration::ZERO);
@@ -3688,9 +3691,10 @@ mod tests {
 
     #[test]
     fn a_new_target_mid_flight_retargets_from_the_value_on_screen() {
-        let mut app = binding_app();
+        let cell = binding_cell();
         let key = Rc::new(GlobalKey::new());
-        binding_mount(&mut app, opacity_tree(&key, 0.0));
+        binding_mount(&cell, opacity_tree(&key, 0.0));
+        let mut app = cell.borrow_mut();
         rebuild(&mut app, opacity_tree(&key, 1.0), Duration::ZERO);
         binding_pump(&mut app, Duration::from_millis(50));
         let midpoint = opacity_of(&mut app, &key);
@@ -3728,7 +3732,7 @@ mod tests {
 
     #[test]
     fn an_animated_default_text_style_interpolates_the_style() {
-        let mut app = binding_app();
+        let cell = binding_cell();
         let seen: Rc<RefCell<Option<TextStyle>>> = Rc::new(RefCell::new(None));
         let font_size = || {
             seen.borrow()
@@ -3737,7 +3741,8 @@ mod tests {
                 .font_size
                 .expect("a font size")
         };
-        binding_mount(&mut app, text_style_tree(10.0, &seen));
+        binding_mount(&cell, text_style_tree(10.0, &seen));
+        let mut app = cell.borrow_mut();
         assert_eq!(font_size(), 10.0);
 
         rebuild(&mut app, text_style_tree(20.0, &seen), Duration::ZERO);
@@ -3753,9 +3758,10 @@ mod tests {
 
     #[test]
     fn a_target_that_did_not_change_leaves_the_controller_dismissed() {
-        let mut app = binding_app();
+        let cell = binding_cell();
         let key = Rc::new(GlobalKey::new());
-        binding_mount(&mut app, opacity_tree(&key, 0.5));
+        binding_mount(&cell, opacity_tree(&key, 0.5));
+        let mut app = cell.borrow_mut();
         rebuild(&mut app, opacity_tree(&key, 0.5), Duration::ZERO);
         binding_pump(&mut app, Duration::from_millis(50));
 
@@ -3786,8 +3792,9 @@ mod tests {
             )
             .into_widget()
         };
-        let mut app = binding_app();
-        binding_mount(&mut app, directional(TextDirection::Ltr));
+        let cell = binding_cell();
+        binding_mount(&cell, directional(TextDirection::Ltr));
+        let mut app = cell.borrow_mut();
         let positioned = |app: &mut App| {
             let widget = WidgetsBinding::instance(app)
                 .root_element(app)
@@ -3809,9 +3816,10 @@ mod tests {
 
     #[test]
     fn dispose_frees_the_arena_tweens_the_constructors_made() {
-        let mut app = binding_app();
+        let cell = binding_cell();
         let key = Rc::new(GlobalKey::new());
-        binding_mount(&mut app, opacity_tree(&key, 0.5));
+        binding_mount(&cell, opacity_tree(&key, 0.5));
+        let mut app = cell.borrow_mut();
         let state = key
             .current_state::<AnimatedOpacityState>(&mut app)
             .expect("the widget is mounted");
@@ -3836,7 +3844,8 @@ mod tests {
             Some(TextStyle::new().font_size(20.0)),
         );
         assert_eq!(tween.lerp(0.5).font_size, Some(15.0));
-        let app = App::new();
+        let cell = AppCell::new();
+        let app = cell.borrow();
         assert_eq!(tween.transform(&app, 0.0).font_size, Some(10.0));
         assert_eq!(tween.transform(&app, 1.0).font_size, Some(20.0));
     }
@@ -3847,7 +3856,8 @@ mod tests {
             Some(BoxConstraints::tight(Size::new(10.0, 10.0))),
             Some(BoxConstraints::tight(Size::new(20.0, 30.0))),
         );
-        let app = App::new();
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let halfway = tween.transform(&app, 0.5);
         assert_eq!(halfway.max_width, 15.0);
         assert_eq!(halfway.max_height, 20.0);
@@ -3866,12 +3876,13 @@ mod tests {
 
     #[test]
     fn an_animated_container_animates_its_width_and_calls_on_end_once() {
-        let mut app = binding_app();
+        let cell = binding_cell();
         let key = Rc::new(GlobalKey::new());
         let ends = Rc::new(Cell::new(0));
         let counted = Rc::clone(&ends);
         let on_end = Listener::new(move |_app| counted.set(counted.get() + 1));
-        binding_mount(&mut app, container_tree(&key, 20.0, Some(on_end.clone())));
+        binding_mount(&cell, container_tree(&key, 20.0, Some(on_end.clone())));
+        let mut app = cell.borrow_mut();
         assert_eq!(
             render_box_of(&mut app, &key).size(&app),
             Size::new(20.0, 10.0),
@@ -3926,9 +3937,10 @@ mod tests {
 
     #[test]
     fn an_animated_padding_interpolates_a_directional_inset() {
-        let mut app = binding_app();
+        let cell = binding_cell();
         let key = Rc::new(GlobalKey::new());
-        binding_mount(&mut app, padding_tree(&key, TextDirection::Ltr, 0.0));
+        binding_mount(&cell, padding_tree(&key, TextDirection::Ltr, 0.0));
+        let mut app = cell.borrow_mut();
         assert_eq!(offset_of(&mut app, &key), Offset::ZERO);
 
         rebuild(
@@ -3943,8 +3955,10 @@ mod tests {
         binding_pump(&mut app, Duration::from_millis(100));
         assert_eq!(offset_of(&mut app, &key).dx(), 40.0);
 
-        let mut app = binding_app();
-        binding_mount(&mut app, padding_tree(&key, TextDirection::Rtl, 40.0));
+        let cell = binding_cell();
+        drop(app);
+        binding_mount(&cell, padding_tree(&key, TextDirection::Rtl, 40.0));
+        let mut app = cell.borrow_mut();
         assert_eq!(
             offset_of(&mut app, &key),
             Offset::ZERO,
@@ -3960,9 +3974,10 @@ mod tests {
 
     #[test]
     fn an_animated_align_interpolates_the_alignment() {
-        let mut app = binding_app();
+        let cell = binding_cell();
         let key = Rc::new(GlobalKey::new());
-        binding_mount(&mut app, align_tree(&key, AlignmentGeometry::TOP_LEFT));
+        binding_mount(&cell, align_tree(&key, AlignmentGeometry::TOP_LEFT));
+        let mut app = cell.borrow_mut();
         assert_eq!(offset_of(&mut app, &key), Offset::ZERO);
 
         rebuild(
@@ -3989,9 +4004,10 @@ mod tests {
 
     #[test]
     fn an_animated_slide_moves_the_child_by_a_fraction_of_its_size() {
-        let mut app = binding_app();
+        let cell = binding_cell();
         let key = Rc::new(GlobalKey::new());
-        binding_mount(&mut app, slide_tree(&key, Offset::ZERO));
+        binding_mount(&cell, slide_tree(&key, Offset::ZERO));
+        let mut app = cell.borrow_mut();
         assert_eq!(offset_of(&mut app, &key), Offset::ZERO);
 
         rebuild(
@@ -4011,7 +4027,8 @@ mod tests {
         let begin = Matrix4::IDENTITY;
         let end = Matrix4::translation(10.0, 20.0).then(&Matrix4::scale(3.0, 3.0));
         let tween = Matrix4Tween::new(Some(begin), Some(end));
-        let app = App::new();
+        let cell = AppCell::new();
+        let app = cell.borrow();
         assert_eq!(tween.transform(&app, 0.0), begin);
         assert_eq!(tween.transform(&app, 1.0), end);
 
@@ -4028,7 +4045,8 @@ mod tests {
             Some(EdgeInsetsGeometry::from_ltrb(10.0, 0.0, 0.0, 0.0)),
             Some(EdgeInsetsGeometry::from_steb(20.0, 0.0, 0.0, 0.0)),
         );
-        let app = App::new();
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let halfway = tween.transform(&app, 0.5);
         assert_eq!(
             halfway.resolve(Some(TextDirection::Ltr)),
@@ -4047,7 +4065,8 @@ mod tests {
             Some(BorderRadius::all(Radius::circular(0.0))),
             Some(BorderRadius::all(Radius::circular(10.0))),
         );
-        let app = App::new();
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let halfway = tween.transform(&app, 0.5).expect("both ends are set");
         assert_eq!(halfway.top_left.x, 5.0);
     }

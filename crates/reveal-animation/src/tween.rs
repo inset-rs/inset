@@ -563,10 +563,12 @@ mod tests {
     use super::*;
     use crate::animation::Animation;
     use crate::animations::AlwaysStoppedAnimation;
+    use reveal_foundation::AppCell;
 
     #[test]
     fn a_driven_tween_sees_end_assigned_after_animate() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tween = Tween::new(&mut app, Some(0.0), Some(1.0));
         let parent = app.create(AlwaysStoppedAnimation::new(1.0)).as_animation();
         let driven = tween.animate(&mut app, parent);
@@ -578,7 +580,8 @@ mod tests {
 
     #[test]
     fn lerp_walks_the_line() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tween = Tween::new(&mut app, Some(0.0), Some(10.0));
         assert_eq!(tween.transform(&app, 0.0), 0.0);
         assert_eq!(tween.transform(&app, 0.25), 2.5);
@@ -587,7 +590,8 @@ mod tests {
 
     #[test]
     fn an_offset_tween_walks_both_axes() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tween = Tween::new(
             &mut app,
             Some(Offset::new(0.0, 10.0)),
@@ -600,7 +604,8 @@ mod tests {
 
     #[test]
     fn a_size_tween_walks_both_dimensions() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tween = Tween::new(
             &mut app,
             Some(Size::new(10.0, 20.0)),

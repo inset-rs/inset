@@ -2031,6 +2031,7 @@ impl RenderBox for RenderBaseline {
 mod tests {
     use super::*;
     use reveal_embedder::Size;
+    use reveal_foundation::AppCell;
 
     use crate::box_::BoxConstraints;
     use crate::layer::{CompositedLayer, PaintItem};
@@ -2041,7 +2042,8 @@ mod tests {
     /// extent handed to the child.
     #[test]
     fn padding_intrinsics_add_the_insets() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(80.0, 40.0)), None);
         let padding = RenderPadding::new(
@@ -2060,7 +2062,8 @@ mod tests {
     /// Without a child, the padding is all there is.
     #[test]
     fn padding_intrinsics_without_a_child_are_the_insets() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let padding = RenderPadding::new(&mut app, EdgeInsetsGeometry::all(10.0), None, None);
         assert_eq!(
             padding.as_box().get_min_intrinsic_width(&mut app, 0.0),
@@ -2075,7 +2078,8 @@ mod tests {
     /// The dry layout of a padding is the size it lays out to.
     #[test]
     fn padding_dry_layout_matches_its_layout() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(80.0, 40.0)), None);
         let padding = RenderPadding::new(
@@ -2095,7 +2099,8 @@ mod tests {
     /// its natural size and is aligned within what the parent allows.
     #[test]
     fn constraints_transform_box_leaves_the_child_unconstrained_and_aligns_it() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(50.0, 20.0)), None);
         let unconstrained = RenderConstraintsTransformBox::new(
@@ -2121,7 +2126,8 @@ mod tests {
     /// A child that does not fit is clipped when the clip behavior asks for it.
     #[test]
     fn constraints_transform_box_clips_an_overflowing_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = RenderConstrainedBox::new(
             &mut app,
             BoxConstraints::tight(Size::new(200.0, 200.0)),
@@ -2159,7 +2165,8 @@ mod tests {
     /// A `RenderConstrainedOverflowBox` lets its child overflow and keeps the parent's size.
     #[test]
     fn constrained_overflow_box_sizes_itself_to_the_parent() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = RenderConstrainedBox::new(&mut app, BoxConstraints::new(), None);
         let overflow = RenderConstrainedOverflowBox::new(
             &mut app,
@@ -2187,7 +2194,8 @@ mod tests {
     /// through, and reports the requested size as its intrinsics.
     #[test]
     fn sized_overflow_box_takes_its_requested_size() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(30.0, 30.0)), None);
         let sized = RenderSizedOverflowBox::new(
@@ -2207,7 +2215,8 @@ mod tests {
     /// maximum, and divides its intrinsics by the factor.
     #[test]
     fn fractionally_sized_box_tightens_the_child_to_a_fraction() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child = RenderConstrainedBox::new(&mut app, BoxConstraints::new(), None);
         let fraction = RenderFractionallySizedOverflowBox::new(
             &mut app,
@@ -2229,7 +2238,8 @@ mod tests {
     /// distance from the top.
     #[test]
     fn baseline_shifts_the_child_down_to_its_baseline() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(20.0, 20.0)), None);
         let baseline = RenderBaseline::new(
@@ -2249,7 +2259,8 @@ mod tests {
 
     #[test]
     fn padding_around_tight_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(80.0, 40.0)), None);
         let padding = RenderPadding::new(
@@ -2269,7 +2280,8 @@ mod tests {
 
     #[test]
     fn positioned_box_centers_its_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(20.0, 20.0)), None);
         let positioned = RenderPositionedBox::new(
@@ -2294,7 +2306,8 @@ mod tests {
 
     #[test]
     fn positioned_box_shrink_wraps_with_a_factor() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(20.0, 20.0)), None);
         let positioned = RenderPositionedBox::new(
@@ -2319,7 +2332,8 @@ mod tests {
 
     #[test]
     fn padding_without_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let padding = RenderPadding::new(&mut app, EdgeInsetsGeometry::all(10.0), None, None);
         padding.layout(
             &mut app,

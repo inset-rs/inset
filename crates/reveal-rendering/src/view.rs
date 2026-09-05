@@ -404,6 +404,7 @@ static VTABLE: RenderObjectVTable = RenderObjectVTable::of::<RenderView>(
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -466,7 +467,8 @@ mod tests {
     /// `view_test.dart`: `Constraints are derived from configuration`.
     #[test]
     fn constraints_are_derived_from_configuration() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let presented = Rc::new(Cell::new(0));
         let view = RenderView::new(&mut app, None, None, test_view(&presented));
         assert!(!view.has_configuration(&app));
@@ -486,7 +488,8 @@ mod tests {
     /// prepareInitialFrame first`.
     #[test]
     fn configuration_can_change_before_prepare_initial_frame() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let presented = Rc::new(Cell::new(0));
         let view = RenderView::new(&mut app, None, None, test_view(&presented));
         view.set_configuration(
@@ -506,7 +509,8 @@ mod tests {
     /// resizes). Ours observes the replacement through the paint mark.
     #[test]
     fn does_not_replace_the_root_layer_unnecessarily() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let presented = Rc::new(Cell::new(0));
         let view = RenderView::new(
             &mut app,
@@ -551,7 +555,8 @@ mod tests {
     /// composited to the host.
     #[test]
     fn accounts_for_device_pixel_ratio_in_paint_bounds_and_presents() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let presented = Rc::new(Cell::new(0));
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(10.0, 10.0)), None);
@@ -578,7 +583,8 @@ mod tests {
 
     #[test]
     fn coordinates_convert_through_the_paint_transforms_below_the_view() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let presented = Rc::new(Cell::new(0));
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(30.0, 40.0)), None);
@@ -632,7 +638,8 @@ mod tests {
 
     #[test]
     fn a_proxy_box_adds_no_paint_transform() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let presented = Rc::new(Cell::new(0));
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(30.0, 40.0)), None);

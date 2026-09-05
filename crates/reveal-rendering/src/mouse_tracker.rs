@@ -539,6 +539,7 @@ fn annotation_target(app: &App, entry: &HitTestEntry) -> Option<AnyRenderObject>
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::{Cell, RefCell};
 
     use reveal_embedder::{
@@ -593,12 +594,12 @@ mod tests {
         }
     }
 
-    fn app_with_cursor_host() -> (App, Rc<CursorRecordingPlatform>) {
+    fn app_with_cursor_host() -> (Rc<AppCell>, Rc<CursorRecordingPlatform>) {
         let platform = Rc::new(CursorRecordingPlatform {
             activated: RefCell::new(Vec::new()),
         });
         let platform_ref: PlatformRef = Rc::clone(&platform) as PlatformRef;
-        (App::with_platform(platform_ref), platform)
+        (AppCell::with_platform(platform_ref), platform)
     }
 
     /// A laid-out tree: a 200×200 root holding a mouse region padded 50 on each side, so the
@@ -707,7 +708,8 @@ mod tests {
 
     #[test]
     fn entering_and_leaving_a_region_sends_enter_then_exit_in_local_coordinates() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let RegionTree { root, region, .. } = tree_with_region(&mut app);
         let tracker = tracker_for(&mut app, root);
         let log = record_events(&mut app, region);
@@ -727,7 +729,8 @@ mod tests {
 
     #[test]
     fn a_still_mouse_notices_the_tree_moving_under_it_after_a_frame() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let RegionTree {
             owner,
             root,
@@ -755,7 +758,8 @@ mod tests {
 
     #[test]
     fn a_region_removed_from_the_tree_sends_no_exit() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let RegionTree {
             owner,
             root,
@@ -779,7 +783,8 @@ mod tests {
 
     #[test]
     fn a_detached_region_is_invalid_for_the_tracker() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let region = RenderMouseRegion::new(&mut app, true, None);
         assert!(region.valid_for_mouse_tracker(&app));
         let owner = PipelineOwner::new(&mut app, None);
@@ -797,7 +802,8 @@ mod tests {
 
     #[test]
     fn a_removed_mouse_exits_and_disconnects() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let RegionTree { root, region, .. } = tree_with_region(&mut app);
         let tracker = tracker_for(&mut app, root);
         let log = record_events(&mut app, region);
@@ -824,7 +830,8 @@ mod tests {
 
     #[test]
     fn touch_and_signal_events_are_ignored() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let RegionTree { root, region, .. } = tree_with_region(&mut app);
         let tracker = tracker_for(&mut app, root);
         let log = record_events(&mut app, region);
@@ -854,7 +861,8 @@ mod tests {
 
     #[test]
     fn the_front_regions_cursor_wins_and_deferring_regions_let_the_one_behind_decide() {
-        let (mut app, platform) = app_with_cursor_host();
+        let (cell, platform) = app_with_cursor_host();
+        let mut app = cell.borrow_mut();
         let RegionTree {
             owner,
             root,
@@ -896,7 +904,8 @@ mod tests {
 
     #[test]
     fn an_opaque_region_hides_the_region_behind_it_and_a_transparent_one_does_not() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let back = RenderMouseRegion::new(&mut app, true, None);
         let front = RenderMouseRegion::new(&mut app, true, Some(back.as_box()));
         let root = RenderRepaintBoundary::new(&mut app, Some(front.as_box()));
@@ -923,7 +932,8 @@ mod tests {
 
     #[test]
     fn hover_reaches_the_region_through_handle_event() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let region = RenderMouseRegion::new(&mut app, true, None);
         let log = record_events(&mut app, region);
         let event = mouse_hover(Offset::new(3.0, 4.0));
@@ -934,7 +944,8 @@ mod tests {
 
     #[test]
     fn an_opaque_region_absorbs_the_hit_test_for_what_is_behind_it() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let region = RenderMouseRegion::new(&mut app, true, None);
         let root = RenderRepaintBoundary::new(&mut app, Some(region.as_box()));
         let owner = PipelineOwner::new(&mut app, None);
@@ -968,7 +979,8 @@ mod tests {
 
     #[test]
     fn a_region_with_no_annotation_neighbours_still_uses_the_fallback_cursor() {
-        let (mut app, platform) = app_with_cursor_host();
+        let (cell, platform) = app_with_cursor_host();
+        let mut app = cell.borrow_mut();
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(10.0, 10.0)), None);
         let root = RenderRepaintBoundary::new(&mut app, Some(child.as_box()));

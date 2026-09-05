@@ -869,6 +869,7 @@ impl ScrollPositionWithSingleContextLeaf for ScrollPositionWithSingleContext {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
 
     use reveal_animation::Curves;
@@ -928,7 +929,8 @@ mod tests {
 
     #[test]
     fn applying_dimensions_makes_the_metrics_available_and_move_to_clamps() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
         assert!(!position.have_dimensions(&app));
@@ -953,7 +955,8 @@ mod tests {
 
     #[test]
     fn jump_to_notifies_listeners_and_dispatches_start_update_end() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
         lay_out(&mut app, position);
@@ -981,7 +984,8 @@ mod tests {
 
     #[test]
     fn animate_to_drives_the_position_through_the_ticker() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
         lay_out(&mut app, position);
@@ -1007,7 +1011,8 @@ mod tests {
 
     #[test]
     fn animate_to_within_the_tolerance_jumps_instead() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
         lay_out(&mut app, position);
@@ -1027,7 +1032,8 @@ mod tests {
 
     #[test]
     fn a_clamping_drag_scrolls_the_position_and_settles_at_once() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
         lay_out(&mut app, position);
@@ -1069,7 +1075,8 @@ mod tests {
 
     #[test]
     fn a_bouncing_drag_overscrolls_and_springs_back_over_frames() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let position = position(&mut app, &harness, Rc::new(BouncingScrollPhysics::new()));
         lay_out(&mut app, position);
@@ -1105,7 +1112,8 @@ mod tests {
 
     #[test]
     fn a_new_position_absorbs_the_old_one() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let old = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
         lay_out(&mut app, old);
@@ -1129,7 +1137,8 @@ mod tests {
 
     #[test]
     fn a_pointer_scroll_moves_the_position_within_the_extents() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
         lay_out(&mut app, position);
@@ -1149,7 +1158,8 @@ mod tests {
 
     #[test]
     fn the_description_names_the_context_the_physics_and_the_activity() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
         lay_out(&mut app, position);

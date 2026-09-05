@@ -8,14 +8,15 @@
 #![feature(arbitrary_self_types)]
 
 use reveal_embedder::Size;
-use reveal_foundation::App;
+use reveal_foundation::AppCell;
 use reveal_painting::EdgeInsetsGeometry;
 use reveal_rendering::{
     BoxConstraints, PipelineOwner, RenderBox, RenderConstrainedBox, RenderPadding,
 };
 
 fn main() {
-    let mut app = App::new();
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
     let owner = PipelineOwner::new(&mut app, None);
 
     let child =

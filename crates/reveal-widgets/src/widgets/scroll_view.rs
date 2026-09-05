@@ -1305,6 +1305,7 @@ impl Debug for ListView {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
 
     use reveal_embedder::{Size, TextDirection};
@@ -1312,7 +1313,7 @@ mod tests {
     use reveal_rendering::{AnyRenderObject, RenderSliverPadding};
 
     use super::*;
-    use crate::test_harness::{Harness, VIEW_HEIGHT, binding_app, binding_mount, binding_pump};
+    use crate::test_harness::{Harness, VIEW_HEIGHT, binding_cell, binding_mount, binding_pump};
     use crate::widgets::basic::{Directionality, SizedBox};
     use crate::widgets::media_query::MediaQueryData;
     use crate::widgets::scroll_controller::{ScrollController, ScrollControllerLeaf};
@@ -1363,12 +1364,15 @@ mod tests {
 
     #[test]
     fn a_list_view_lays_out_only_the_visible_children_and_scrolls_through_its_controller() {
-        let mut app = binding_app();
+        let cell = binding_cell();
+        let mut app = cell.borrow_mut();
         let controller = ScrollController::default(&mut app);
         let list = ListView::new()
             .controller(controller.as_controller())
             .children(boxes(ITEM_COUNT));
-        binding_mount(&mut app, wrap(list));
+        drop(app);
+        binding_mount(&cell, wrap(list));
+        let mut app = cell.borrow_mut();
 
         let visible = (VIEW_HEIGHT / ITEM_EXTENT) as usize;
         let laid_out = item_count_under_view(&mut app);
@@ -1411,7 +1415,8 @@ mod tests {
         .item_count(1000)
         .build();
 
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(&mut app, wrap(list));
         harness.pump(&mut app);
 
@@ -1447,7 +1452,8 @@ mod tests {
         .build();
         assert_eq!(list.scroll_view.semantic_child_count, Some(10));
 
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(&mut app, wrap(list));
         harness.pump(&mut app);
 
@@ -1462,7 +1468,8 @@ mod tests {
     fn a_custom_scroll_view_lays_out_a_box_adapter_above_a_sliver_list() {
         use crate::widgets::basic::SliverToBoxAdapter;
 
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let view = CustomScrollView::new().slivers([
             SliverToBoxAdapter::new()
                 .child(SizedBox::new().height(120.0))
@@ -1490,7 +1497,8 @@ mod tests {
 
     #[test]
     fn a_box_scroll_view_consumes_the_media_query_padding_along_the_scroll_axis() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let padding = EdgeInsets::from_ltrb(8.0, 16.0, 24.0, 32.0);
         let list = ListView::new().children(boxes(10));
         let harness = Harness::mount(

@@ -1219,7 +1219,8 @@ mod tests {
 
     /// `CupertinoDynamicColor::resolve(color)` against a context built under `wrap`.
     fn resolve_under(wrap: impl FnOnce(WidgetRef) -> WidgetRef, color: AnyColor) -> AnyColor {
-        let mut app = crate::test_support::app();
+        let cell = crate::test_support::test_cell();
+        let app = cell.borrow();
         let seen = Rc::new(RefCell::new(None));
         let probe = Builder::new({
             let seen = Rc::clone(&seen);
@@ -1229,7 +1230,8 @@ mod tests {
             }
         })
         .into_widget();
-        build(&mut app, wrap(probe));
+        drop(app);
+        build(&cell, wrap(probe));
         let resolved = seen.borrow_mut().take();
         resolved.expect("the probe built")
     }
@@ -1414,7 +1416,8 @@ mod tests {
 
     #[test]
     fn maybe_resolve_passes_none_through() {
-        let mut app = crate::test_support::app();
+        let cell = crate::test_support::test_cell();
+        let app = cell.borrow();
         let seen = Rc::new(RefCell::new(None));
         let probe = Builder::new({
             let seen = Rc::clone(&seen);
@@ -1431,7 +1434,8 @@ mod tests {
             }
         })
         .into_widget();
-        build(&mut app, probe);
+        drop(app);
+        build(&cell, probe);
         let (none, red) = seen.borrow_mut().take().expect("the probe built");
         assert_eq!(none, None);
         assert_eq!(red, Some(CupertinoColors::SYSTEM_RED));

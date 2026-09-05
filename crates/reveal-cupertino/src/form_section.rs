@@ -229,6 +229,7 @@ impl StatelessWidget for CupertinoFormSection {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -237,7 +238,7 @@ mod tests {
     use reveal_widgets::{Builder, Directionality, GlobalKey, SizedBox};
 
     use super::*;
-    use crate::test_support::{app, build};
+    use crate::test_support::{build, test_cell};
 
     fn key_of(key: &GlobalKey) -> KeyRef {
         Rc::new(key.clone())
@@ -279,9 +280,9 @@ mod tests {
             .expect("the section has been laid out")
     }
 
-    fn mount<K>(app: &mut App, section: impl IntoWidget<K>) {
+    fn mount<K>(cell: &AppCell, section: impl IntoWidget<K>) {
         build(
-            app,
+            cell,
             Directionality::new(TextDirection::Ltr, section).into_widget(),
         );
     }
@@ -298,12 +299,12 @@ mod tests {
 
     #[test]
     fn a_base_form_section_styles_its_header_and_lays_out_as_a_base_list_section() {
-        let mut app = app();
+        let cell = test_cell();
         let seen = Rc::new(RefCell::new(Vec::new()));
         let secondary = Rc::new(RefCell::new(None));
         let (first, second) = (GlobalKey::new(), GlobalKey::new());
         mount(
-            &mut app,
+            &cell,
             CupertinoFormSection::new([
                 Builder::new({
                     let (secondary, first) = (Rc::clone(&secondary), first.clone());
@@ -322,6 +323,7 @@ mod tests {
             .header(probe(&seen))
             .footer(probe(&seen)),
         );
+        let mut app = cell.borrow_mut();
 
         let styles = seen.borrow();
         assert_eq!(styles.len(), 2, "header and footer");
@@ -344,12 +346,13 @@ mod tests {
 
     #[test]
     fn an_inset_grouped_form_section_keeps_the_form_margin_and_does_not_clip() {
-        let mut app = app();
+        let cell = test_cell();
         let (section_key, first) = (GlobalKey::new(), GlobalKey::new());
         let section = CupertinoFormSection::inset_grouped([slot(&first, 50.0, 40.0).into_widget()]);
         assert_eq!(section.margin, K_FORM_DEFAULT_INSET_GROUPED_ROWS_MARGIN);
         assert_eq!(section.clip_behavior, Clip::None);
-        mount(&mut app, section.key(key_of(&section_key)));
+        mount(&cell, section.key(key_of(&section_key)));
+        let mut app = cell.borrow_mut();
 
         assert_eq!(
             offset_of(&mut app, &first).dy(),

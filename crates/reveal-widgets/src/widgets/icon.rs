@@ -461,6 +461,7 @@ impl StatelessWidget for Icon {
 mod tests {
     use reveal_embedder::Color;
     use reveal_embedder::Size;
+    use reveal_foundation::AppCell;
     use reveal_painting::{PaintingBinding, TextScaler};
     use reveal_rendering::{
         AnyRenderBox, BoxConstraints, RenderBox, RenderConstrainedBox, RenderHandle, RenderObject,
@@ -528,7 +529,8 @@ mod tests {
 
     #[test]
     fn an_icon_builds_a_centred_glyph_in_a_square_of_its_size() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let theme = IconThemeData::fallback().color(Color::from_argb(255, 255, 0, 0));
         let harness = mount(
             &mut app,
@@ -575,7 +577,8 @@ mod tests {
 
     #[test]
     fn an_icon_defaults_its_size_and_axes_to_the_ambient_theme() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let theme = IconThemeData::fallback().size(18.0).weight(700.0);
         let harness = mount(
             &mut app,
@@ -606,7 +609,8 @@ mod tests {
 
     #[test]
     fn an_icon_without_an_icon_data_is_an_empty_square() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount(
             &mut app,
             TextDirection::Ltr,
@@ -620,9 +624,11 @@ mod tests {
 
     #[test]
     fn a_direction_matching_icon_is_mirrored_in_rtl() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let mirrored = glyph().match_text_direction(true);
-        let mut app_ltr = App::new();
+        let cell_ltr = AppCell::new();
+        let mut app_ltr = cell_ltr.borrow_mut();
         let ltr = mount(
             &mut app_ltr,
             TextDirection::Ltr,
@@ -657,7 +663,8 @@ mod tests {
 
     #[test]
     fn apply_text_scaling_scales_the_square_with_the_media_query() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         install_fonts(&mut app);
         let media = MediaQueryData::new().text_scaler(TextScaler::linear(2.0));
         let harness = Harness::mount(
@@ -686,7 +693,8 @@ mod tests {
 
     #[test]
     fn a_blend_mode_moves_the_color_into_a_foreground_paint() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let theme = IconThemeData::fallback().color(Color::from_argb(255, 0, 0, 255));
         let harness = mount(
             &mut app,
@@ -713,7 +721,8 @@ mod tests {
 
     #[test]
     fn the_theme_s_opacity_fades_the_glyph_color() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let theme = IconThemeData::fallback()
             .color(Color::from_argb(255, 0, 0, 255))
             .opacity(0.5);

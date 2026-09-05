@@ -219,7 +219,7 @@ impl GestureArenaTeam {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reveal_foundation::App;
+    use reveal_foundation::{App, AppCell};
 
     use crate::binding::GestureBinding;
 
@@ -263,7 +263,8 @@ mod tests {
 
     #[test]
     fn first_team_member_wins_when_the_outsider_rejects() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let binding = GestureBinding::instance(&mut app);
         let team = GestureArenaTeam::new(&mut app);
         let first = TestMember::new(&mut app);
@@ -289,7 +290,8 @@ mod tests {
 
     #[test]
     fn first_eager_team_member_wins_without_a_captain() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let binding = GestureBinding::instance(&mut app);
         let team = GestureArenaTeam::new(&mut app);
         let first = TestMember::new(&mut app);
@@ -305,7 +307,8 @@ mod tests {
 
     #[test]
     fn captain_wins_when_a_team_member_accepts() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let binding = GestureBinding::instance(&mut app);
         let team = GestureArenaTeam::new(&mut app);
         let captain = TestMember::new(&mut app);

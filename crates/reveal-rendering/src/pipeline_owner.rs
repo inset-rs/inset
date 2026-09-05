@@ -356,7 +356,7 @@ mod tests {
     use std::rc::Rc;
 
     use reveal_embedder::Size;
-    use reveal_foundation::App;
+    use reveal_foundation::{App, AppCell};
 
     use super::*;
     use crate::box_::{RenderBox, RenderBoxData};
@@ -400,7 +400,8 @@ mod tests {
     /// before child's render objects.
     #[test]
     fn parent_pipeline_lays_out_before_child_pipeline() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let log = Rc::new(RefCell::new(Vec::new()));
 
         let root_log = Rc::clone(&log);
@@ -432,7 +433,8 @@ mod tests {
 
     #[test]
     fn set_root_node_attaches_and_replacing_detaches() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let owner = PipelineOwner::new(&mut app, None);
         let first = RenderHandle::new_box(&mut app, leaf(None));
         let second = RenderHandle::new_box(&mut app, leaf(None));
@@ -447,7 +449,8 @@ mod tests {
 
     #[test]
     fn schedule_initial_layout_then_flush() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let owner = PipelineOwner::new(&mut app, None);
         let node = RenderHandle::new_box(&mut app, leaf(None));
         owner.set_root_node(&mut app, Some(node.as_object()));
@@ -471,7 +474,8 @@ mod tests {
 
     #[test]
     fn an_owner_without_a_callback_requests_visual_updates_through_its_manifold() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let manifold = Rc::new(CountingManifold {
             requests: Cell::new(0),
         });
@@ -511,7 +515,8 @@ mod tests {
 
     #[test]
     fn a_callback_takes_precedence_over_the_manifold() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let manifold = Rc::new(CountingManifold {
             requests: Cell::new(0),
         });

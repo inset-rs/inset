@@ -2556,6 +2556,7 @@ pub enum TraversalEdgeBehavior {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
 
@@ -2621,11 +2622,11 @@ pub(crate) mod tests {
     }
 
     /// An [`App`] with a single view, ready for [`run_app`].
-    pub(crate) fn app_with_view() -> App {
+    pub(crate) fn app_with_view() -> Rc<AppCell> {
         let platform: PlatformRef = Rc::new(TestPlatform {
             view: Rc::new(TestView),
         });
-        App::with_platform(platform)
+        AppCell::with_platform(platform)
     }
 
     /// A frame: begin, draw, and the microtasks in between.
@@ -2637,19 +2638,19 @@ pub(crate) mod tests {
     }
 
     /// Mounts `widget` through [`run_app`] and draws the first frame.
-    pub(crate) fn mount(app: &mut App, widget: WidgetRef) {
-        run_app(app, widget);
-        app.elapse(Duration::ZERO);
-        pump_frame(app);
+    pub(crate) fn mount(cell: &AppCell, widget: WidgetRef) {
+        run_app(&mut cell.borrow_mut(), widget);
+        cell.elapse(Duration::ZERO);
+        pump_frame(&mut cell.borrow_mut());
     }
 
     /// A mounted app whose tree is one `Builder`, plus that builder's context.
-    fn mounted_context() -> (App, BuildContext) {
-        let mut app = app_with_view();
+    fn mounted_context() -> (Rc<AppCell>, BuildContext) {
+        let cell = app_with_view();
         let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
         let sink = Rc::clone(&captured);
         mount(
-            &mut app,
+            &cell,
             Builder::new(move |_app, context| {
                 sink.set(Some(context));
                 SizedBox::shrink().into_widget()
@@ -2657,7 +2658,7 @@ pub(crate) mod tests {
             .into_widget(),
         );
         let context = captured.get().expect("the builder ran");
-        (app, context)
+        (cell, context)
     }
 
     fn key_a_down() -> KeyEvent {
@@ -2682,7 +2683,8 @@ pub(crate) mod tests {
 
     #[test]
     fn a_node_attached_under_a_scope_gains_primary_focus_on_request_focus() {
-        let (mut app, context) = mounted_context();
+        let (cell, context) = mounted_context();
+        let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
         let root = manager.root_scope(&app);
         let scope = FocusScopeNode::new(&mut app);
@@ -2705,7 +2707,8 @@ pub(crate) mod tests {
 
     #[test]
     fn unfocus_moves_the_focus_according_to_its_disposition() {
-        let (mut app, context) = mounted_context();
+        let (cell, context) = mounted_context();
+        let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
         let root = manager.root_scope(&app);
         let scope = FocusScopeNode::new(&mut app);
@@ -2735,7 +2738,8 @@ pub(crate) mod tests {
 
     #[test]
     fn set_first_focus_adopts_the_scope_and_focuses_it_with_its_parent() {
-        let (mut app, context) = mounted_context();
+        let (cell, context) = mounted_context();
+        let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
         let root = manager.root_scope(&app);
         let scope1 = FocusScopeNode::new(&mut app);
@@ -2754,7 +2758,8 @@ pub(crate) mod tests {
 
     #[test]
     fn a_node_that_cannot_request_focus_refuses_the_request() {
-        let (mut app, context) = mounted_context();
+        let (cell, context) = mounted_context();
+        let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
         let root = manager.root_scope(&app);
         let scope = FocusScopeNode::new(&mut app);
@@ -2772,7 +2777,8 @@ pub(crate) mod tests {
 
     #[test]
     fn descendants_are_focusable_false_unfocuses_and_blocks_the_descendants() {
-        let (mut app, context) = mounted_context();
+        let (cell, context) = mounted_context();
+        let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
         let root = manager.root_scope(&app);
         let scope = FocusScopeNode::new(&mut app);
@@ -2799,7 +2805,8 @@ pub(crate) mod tests {
 
     #[test]
     fn a_key_event_walks_from_the_primary_focus_to_the_root_until_one_handles_it() {
-        let (mut app, context) = mounted_context();
+        let (cell, context) = mounted_context();
+        let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
         let root = manager.root_scope(&app);
         let scope = FocusScopeNode::new(&mut app);
@@ -2855,7 +2862,8 @@ pub(crate) mod tests {
 
     #[test]
     fn disposing_a_focused_node_moves_the_focus_to_its_scope() {
-        let (mut app, context) = mounted_context();
+        let (cell, context) = mounted_context();
+        let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
         let root = manager.root_scope(&app);
         let scope = FocusScopeNode::new(&mut app);
@@ -2876,8 +2884,9 @@ pub(crate) mod tests {
 
     #[test]
     fn the_highlight_mode_follows_the_last_interaction() {
-        let mut app = app_with_view();
-        mount(&mut app, SizedBox::shrink().into_widget());
+        let cell = app_with_view();
+        mount(&cell, SizedBox::shrink().into_widget());
+        let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
         let seen: Rc<RefCell<Vec<FocusHighlightMode>>> = Rc::default();
         {
@@ -2916,8 +2925,9 @@ pub(crate) mod tests {
 
     #[test]
     fn the_highlight_strategy_pins_the_mode() {
-        let mut app = app_with_view();
-        mount(&mut app, SizedBox::shrink().into_widget());
+        let cell = app_with_view();
+        mount(&cell, SizedBox::shrink().into_widget());
+        let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
         manager.set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTouch);
         assert_eq!(

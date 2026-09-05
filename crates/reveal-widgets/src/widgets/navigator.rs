@@ -6038,6 +6038,7 @@ impl Notification for NavigationNotification {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
 
@@ -6120,7 +6121,7 @@ mod tests {
         }
     }
 
-    fn app_with_view(restoration_data: Option<RestorationMap>) -> (App, Rc<TestPlatform>) {
+    fn app_with_view(restoration_data: Option<RestorationMap>) -> (Rc<AppCell>, Rc<TestPlatform>) {
         let platform = Rc::new(TestPlatform {
             view: Rc::new(TestView),
             stored: RefCell::new(Some(RestorationUpdate {
@@ -6130,7 +6131,7 @@ mod tests {
             puts: RefCell::new(Vec::new()),
         });
         let erased: PlatformRef = Rc::clone(&platform) as PlatformRef;
-        (App::with_platform(erased), platform)
+        (AppCell::with_platform(erased), platform)
     }
 
     fn pump_frame(app: &mut App, at: Duration) {
@@ -6140,10 +6141,10 @@ mod tests {
         app.drain_microtasks();
     }
 
-    fn mount(app: &mut App, child: WidgetRef) {
-        run_app(app, child);
-        app.elapse(Duration::ZERO);
-        pump_frame(app, Duration::ZERO);
+    fn mount(cell: &AppCell, child: WidgetRef) {
+        run_app(&mut cell.borrow_mut(), child);
+        cell.elapse(Duration::ZERO);
+        pump_frame(&mut cell.borrow_mut(), Duration::ZERO);
     }
 
     /// Rebuilds the root with a new widget, the way `run_app` first attached it.
@@ -6257,13 +6258,16 @@ mod tests {
 
     #[test]
     fn the_pages_api_inserts_removes_and_reorders_routes_through_the_transition_delegate() {
-        let (mut app, _platform) = app_with_view(None);
+        let (cell, _platform) = app_with_view(None);
+        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
         let binding = crate::binding::WidgetsBinding::instance(&mut app);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             pages_navigator(&key, vec![TestPage::page("a"), TestPage::page("b")]),
         );
+        let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
         assert_eq!(history_names(navigator_state, &app), vec!["a", "b"]);
@@ -6385,11 +6389,13 @@ mod tests {
             }
         }
 
-        let (mut app, _platform) = app_with_view(None);
+        let (cell, _platform) = app_with_view(None);
+        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
         let observer = app.create(Recorder::default());
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Directionality::new(
                 TextDirection::Ltr,
                 Navigator::new()
@@ -6406,6 +6412,7 @@ mod tests {
             )
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
         assert_eq!(
@@ -6434,10 +6441,10 @@ mod tests {
     #[test]
     fn the_history_is_restored_from_the_restoration_data_of_a_previous_run() {
         // Run once, pushing a restorable named route on top of a restorable page.
-        let (mut app, platform) = app_with_view(None);
+        let (cell, platform) = app_with_view(None);
         let key = GlobalKey::new();
         mount(
-            &mut app,
+            &cell,
             Directionality::new(
                 TextDirection::Ltr,
                 RootRestorationScope::new(
@@ -6459,6 +6466,7 @@ mod tests {
             )
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
         navigator_state.restorable_push_named(&mut app, "second", None);
@@ -6474,10 +6482,10 @@ mod tests {
             .expect("the manager wrote the restoration data");
 
         // Run again from the saved data: the pageless route comes back.
-        let (mut app, _platform) = app_with_view(Some(saved));
+        let (cell, _platform) = app_with_view(Some(saved));
         let key = GlobalKey::new();
         mount(
-            &mut app,
+            &cell,
             Directionality::new(
                 TextDirection::Ltr,
                 RootRestorationScope::new(
@@ -6499,6 +6507,7 @@ mod tests {
             )
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let restored = state(&key, &mut app);
         settle(&mut app, Duration::ZERO);
         assert_eq!(history_names(restored, &app), vec!["a", "second"]);
@@ -6506,11 +6515,11 @@ mod tests {
 
     #[test]
     fn a_route_reports_its_position_in_the_history() {
-        let (mut app, _platform) = app_with_view(None);
+        let (cell, _platform) = app_with_view(None);
         let key = GlobalKey::new();
         let pushed: Rc<Cell<Option<AnyRoute>>> = Rc::new(Cell::new(None));
         mount(
-            &mut app,
+            &cell,
             Directionality::new(
                 TextDirection::Ltr,
                 Navigator::new()
@@ -6526,6 +6535,7 @@ mod tests {
             )
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
         let first = pushed.get().expect("the initial route");

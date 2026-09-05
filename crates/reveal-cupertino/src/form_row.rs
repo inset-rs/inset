@@ -194,7 +194,7 @@ mod tests {
     use reveal_widgets::{Builder, Directionality, SizedBox};
 
     use super::*;
-    use crate::test_support::{app, build};
+    use crate::test_support::{build, test_cell};
     use crate::theme::CupertinoThemeData;
 
     /// Records the text style in force where a row places a slot, next to the theme's label
@@ -211,10 +211,12 @@ mod tests {
 
     #[test]
     fn a_form_row_styles_its_prefix_and_helper_with_the_theme_and_its_error_in_red() {
-        let mut app = app();
+        let cell = test_cell();
+        let app = cell.borrow();
         let seen = Rc::new(RefCell::new(Vec::new()));
+        drop(app);
         build(
-            &mut app,
+            &cell,
             Directionality::new(
                 TextDirection::Ltr,
                 CupertinoTheme::new(

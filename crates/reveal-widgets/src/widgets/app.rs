@@ -1702,6 +1702,7 @@ impl State for WidgetsAppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reveal_foundation::AppCell;
 
     fn locale(language: &str, country: Option<&str>) -> Locale {
         let locale = Locale::new(language);
@@ -1846,8 +1847,8 @@ mod tests {
         }
     }
 
-    fn app_of(platform: TargetPlatform) -> App {
-        App::with_platform(Rc::new(PlatformOf(platform)) as PlatformRef)
+    fn app_of(platform: TargetPlatform) -> Rc<AppCell> {
+        AppCell::with_platform(Rc::new(PlatformOf(platform)) as PlatformRef)
     }
 
     /// A view whose host answers a deep link as its default route.
@@ -1987,9 +1988,12 @@ mod tests {
 
     #[test]
     fn home_is_shown_by_the_first_route_of_the_navigator_the_app_builds() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         install_fonts(&mut app);
-        mount(&mut app, widgets_app().home(Marker).into_widget());
+        drop(app);
+        mount(&cell, widgets_app().home(Marker).into_widget());
+        let mut app = cell.borrow_mut();
         settle(&mut app);
         let root = root_element(&mut app);
         assert!(has_widget::<Navigator>(&app, root), "the app builds one");
@@ -2001,15 +2005,18 @@ mod tests {
 
     #[test]
     fn a_routes_table_entry_for_the_default_route_is_the_first_route() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         install_fonts(&mut app);
         let builder: WidgetBuilder = Rc::new(|_app, _context| Marker.into_widget());
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             widgets_app()
                 .routes([(String::from("/"), builder)])
                 .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         settle(&mut app);
         let root = root_element(&mut app);
         assert!(has_widget::<Marker>(&app, root));
@@ -2017,12 +2024,14 @@ mod tests {
 
     #[test]
     fn a_builder_replaces_the_navigator_and_is_handed_no_child() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         install_fonts(&mut app);
         let had_child = Rc::new(Cell::new(true));
         let sink = Rc::clone(&had_child);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             WidgetsApp::new(COLOR)
                 .builder(move |_app, _context, child| {
                     sink.set(child.is_some());
@@ -2030,6 +2039,7 @@ mod tests {
                 })
                 .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let root = root_element(&mut app);
         assert!(!had_child.get(), "no routes, so the builder gets no child");
         assert!(has_widget::<Marker>(&app, root));
@@ -2038,12 +2048,14 @@ mod tests {
 
     #[test]
     fn a_builder_wraps_the_navigator_when_the_app_has_routes() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         install_fonts(&mut app);
         let had_child = Rc::new(Cell::new(false));
         let sink = Rc::clone(&had_child);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             widgets_app()
                 .home(SizedBox::shrink())
                 .builder(move |_app, _context, child| {
@@ -2052,6 +2064,7 @@ mod tests {
                 })
                 .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         settle(&mut app);
         let root = root_element(&mut app);
         assert!(had_child.get());
@@ -2060,12 +2073,14 @@ mod tests {
 
     #[test]
     fn the_locale_argument_overrides_the_resolver_and_the_widgets_delegate_is_supplied() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         install_fonts(&mut app);
         let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
         let sink = Rc::clone(&captured);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             WidgetsApp::new(COLOR)
                 .locale(Locale::new("fr"))
                 .supported_locales([Locale::new("en").country_code("US"), Locale::new("fr")])
@@ -2075,6 +2090,7 @@ mod tests {
                 })
                 .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let context = captured.get().expect("the builder ran");
         assert_eq!(
             Localizations::locale_of(&mut app, context),
@@ -2096,7 +2112,8 @@ mod tests {
             TargetPlatform::IOS,
             TargetPlatform::MacOS,
         ] {
-            let app = app_of(platform);
+            let cell = app_of(platform);
+            let app = cell.borrow();
             let shortcuts = WidgetsApp::default_shortcuts(&app);
             let tab = intents_for(&shortcuts, LogicalKeyboardKey::TAB);
             assert_eq!(tab.len(), 2, "{platform:?} binds tab and shift-tab");
@@ -2113,7 +2130,8 @@ mod tests {
 
     #[test]
     fn the_apple_default_shortcuts_scroll_with_the_meta_key() {
-        let app = app_of(TargetPlatform::MacOS);
+        let cell = app_of(TargetPlatform::MacOS);
+        let app = cell.borrow();
         let shortcuts = WidgetsApp::default_shortcuts(&app);
         let arrow_up = intents_for(&shortcuts, LogicalKeyboardKey::ARROW_UP);
         assert!(arrow_up[0].as_any().is::<DirectionalFocusIntent>());
@@ -2130,14 +2148,17 @@ mod tests {
 
     #[test]
     fn the_default_actions_request_focus_for_a_request_focus_intent() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         install_fonts(&mut app);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Focus::new(SizedBox::shrink())
                 .debug_label("target")
                 .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         let root_scope = FocusManager::instance(&mut app).root_scope(&app);
         let node: AnyFocusNode = FocusNodeLeaf::as_node(root_scope)
             .descendants(&mut app)
@@ -2153,9 +2174,12 @@ mod tests {
 
     #[test]
     fn the_debug_banner_is_built_unless_it_is_turned_off() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         install_fonts(&mut app);
-        mount(&mut app, widgets_app().home(Marker).into_widget());
+        drop(app);
+        mount(&cell, widgets_app().home(Marker).into_widget());
+        let mut app = cell.borrow_mut();
         settle(&mut app);
         let root = root_element(&mut app);
         assert_eq!(
@@ -2164,15 +2188,18 @@ mod tests {
             "the banner is a debug-mode widget"
         );
 
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         install_fonts(&mut app);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             widgets_app()
                 .home(Marker)
                 .debug_show_checked_mode_banner(false)
                 .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         settle(&mut app);
         let root = root_element(&mut app);
         assert!(!has_widget::<CheckedModeBanner>(&app, root));
@@ -2180,24 +2207,30 @@ mod tests {
 
     #[test]
     fn a_restoration_scope_id_names_the_root_restoration_scope() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         install_fonts(&mut app);
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             widgets_app()
                 .home(Marker)
                 .restoration_scope_id("app")
                 .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         settle(&mut app);
         let root = root_element(&mut app);
         let scope =
             find_widget::<RootRestorationScope>(&app, root).expect("the app always builds one");
         assert_eq!(scope.restoration_id.as_deref(), Some("app"));
 
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         install_fonts(&mut app);
-        mount(&mut app, widgets_app().home(Marker).into_widget());
+        drop(app);
+        mount(&cell, widgets_app().home(Marker).into_widget());
+        let mut app = cell.borrow_mut();
         settle(&mut app);
         let root = root_element(&mut app);
         let scope =
@@ -2207,14 +2240,16 @@ mod tests {
 
     #[test]
     fn the_platforms_default_route_name_overrides_the_initial_route() {
-        let mut app = App::with_platform(Rc::new(DeepLinkPlatform {
+        let cell = AppCell::with_platform(Rc::new(DeepLinkPlatform {
             view: Rc::new(DeepLinkView),
             default_route_name: String::from("/deep"),
         }) as PlatformRef);
+        let mut app = cell.borrow_mut();
         install_fonts(&mut app);
         let deep: WidgetBuilder = Rc::new(|_app, _context| Marker.into_widget());
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             widgets_app()
                 .initial_route("/ignored")
                 .routes([
@@ -2228,6 +2263,7 @@ mod tests {
                 ])
                 .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         settle(&mut app);
         let root = root_element(&mut app);
         assert!(has_widget::<Marker>(&app, root));

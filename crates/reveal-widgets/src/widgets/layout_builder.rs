@@ -639,6 +639,7 @@ impl RenderBox for RenderLayoutBuilder {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
 
     use reveal_embedder::{Size, TextDirection};
@@ -669,7 +670,8 @@ mod tests {
 
     #[test]
     fn the_builder_runs_at_layout_with_the_constraints_and_only_when_they_change() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let seen: Seen = Rc::default();
         let harness = Harness::mount(&mut app, sized(100.0, builder(&seen)));
         harness.pump(&mut app);
@@ -692,7 +694,8 @@ mod tests {
 
     #[test]
     fn an_inherited_dependency_change_rebuilds_the_builder_during_layout() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let seen = Rc::new(RefCell::new(Vec::new()));
         let dependent = {
             let seen = Rc::clone(&seen);

@@ -520,12 +520,13 @@ impl StatelessWidget for HitTestableAtOrigin {
 #[cfg(test)]
 mod tests {
     use reveal_embedder::TextDirection;
+    use reveal_foundation::AppCell;
     use reveal_painting::EdgeInsets;
     use reveal_rendering::{AnyRenderObject, RenderPadding};
     use reveal_widgets::{Directionality, MediaQueryData};
 
     use super::*;
-    use crate::test_support::{app as test_app, build};
+    use crate::test_support::{build, test_cell};
 
     const BAR_HEIGHT: f64 = 44.0;
 
@@ -565,31 +566,32 @@ mod tests {
     }
 
     fn mount(
-        app: &mut App,
+        cell: &AppCell,
         data: MediaQueryData,
         scaffold: CupertinoPageScaffold,
     ) -> Vec<EdgeInsets> {
         let tree: WidgetRef = MediaQuery::new(data, scaffold).into_widget();
         build(
-            app,
+            cell,
             Directionality::new(TextDirection::Ltr, tree).into_widget(),
         );
-        let root = reveal_widgets::WidgetsBinding::instance(app)
-            .root_element(app)
+        let mut app = cell.borrow_mut();
+        let root = reveal_widgets::WidgetsBinding::instance(&mut app)
+            .root_element(&app)
             .expect("a mounted root element")
-            .find_render_object(app)
+            .find_render_object(&app)
             .expect("a mounted view has a render object");
-        paddings(app, root)
+        paddings(&app, root)
     }
 
     #[test]
     fn an_opaque_navigation_bar_shifts_the_content_down_by_its_preferred_height() {
-        let mut app = test_app();
+        let cell = test_cell();
         let scaffold = CupertinoPageScaffold::new(SizedBox::expand()).navigation_bar(
             ObstructingPreferredSizeWidgetRef::new(TestNavigationBar { opaque: true }),
         );
         let paddings = mount(
-            &mut app,
+            &cell,
             MediaQueryData::new().padding(EdgeInsets::from_ltrb(0.0, 20.0, 0.0, 0.0)),
             scaffold,
         );
@@ -601,12 +603,12 @@ mod tests {
 
     #[test]
     fn a_translucent_navigation_bar_leaves_the_content_in_place_and_hints_the_padding() {
-        let mut app = test_app();
+        let cell = test_cell();
         let scaffold = CupertinoPageScaffold::new(SizedBox::expand()).navigation_bar(
             ObstructingPreferredSizeWidgetRef::new(TestNavigationBar { opaque: false }),
         );
         let paddings = mount(
-            &mut app,
+            &cell,
             MediaQueryData::new().padding(EdgeInsets::from_ltrb(0.0, 20.0, 0.0, 0.0)),
             scaffold,
         );
@@ -618,10 +620,10 @@ mod tests {
 
     #[test]
     fn resize_to_avoid_bottom_inset_pads_the_content_by_the_bottom_view_inset() {
-        let mut app = test_app();
+        let cell = test_cell();
         let scaffold = CupertinoPageScaffold::new(SizedBox::expand());
         let paddings = mount(
-            &mut app,
+            &cell,
             MediaQueryData::new().view_insets(EdgeInsets::from_ltrb(0.0, 0.0, 0.0, 120.0)),
             scaffold,
         );
@@ -630,11 +632,14 @@ mod tests {
             "the keyboard inset becomes bottom padding: {paddings:?}"
         );
 
-        let mut without = test_app();
+        let without_cell = test_cell();
+
+        let without = without_cell.borrow();
         let scaffold =
             CupertinoPageScaffold::new(SizedBox::expand()).resize_to_avoid_bottom_inset(false);
+        drop(without);
         let paddings = mount(
-            &mut without,
+            &without_cell,
             MediaQueryData::new().view_insets(EdgeInsets::from_ltrb(0.0, 0.0, 0.0, 120.0)),
             scaffold,
         );

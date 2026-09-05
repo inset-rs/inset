@@ -15,7 +15,7 @@ use reveal_embedder::{
     PointerDeviceKind, TargetPlatform, View as EmbedderView, ViewConstraints, ViewId, ViewMetrics,
     ViewRef,
 };
-use reveal_foundation::App;
+use reveal_foundation::AppCell;
 use reveal_gestures::GestureBinding;
 use reveal_painting::PaintingBinding;
 use reveal_rendering::{AnyRenderObject, RenderParagraph};
@@ -90,7 +90,7 @@ enum Search {
 
 /// The mounted gallery, plus the key its navigator is reached through.
 struct Fixture {
-    app: App,
+    cell: Rc<AppCell>,
     navigator: GlobalKey,
     at: Duration,
 }
@@ -100,7 +100,8 @@ impl Fixture {
         let platform: PlatformRef = Rc::new(TestPlatform {
             view: Rc::new(TestView),
         });
-        let mut app = App::with_platform(platform);
+        let cell = AppCell::with_platform(platform);
+        let mut app = cell.borrow_mut();
         // What the shell does at start-up: the app-wide fonts every paragraph shapes against.
         PaintingBinding::instance(&mut app).install_fonts(&mut app, |fonts| {
             fonts.add_source(valo_system_fonts::SystemFonts::load());
@@ -115,10 +116,11 @@ impl Fixture {
         // icon glyphs are shaped in.
         install_cupertino_icon_font(&mut app);
         // `run_app` attaches the root widget on the next timer turn, as Dart's `Timer.run` does.
-        app.elapse(Duration::ZERO);
+        drop(app);
+        cell.elapse(Duration::ZERO);
 
         let mut fixture = Fixture {
-            app,
+            cell,
             navigator,
             at: Duration::ZERO,
         };
@@ -132,59 +134,62 @@ impl Fixture {
     fn settle(&mut self) {
         for _ in 0..40 {
             self.at += Duration::from_millis(20);
-            SchedulerBinding::handle_begin_frame(&mut self.app, Some(self.at));
-            self.app.drain_microtasks();
-            SchedulerBinding::handle_draw_frame(&mut self.app);
-            self.app.drain_microtasks();
+            SchedulerBinding::handle_begin_frame(&mut self.cell.borrow_mut(), Some(self.at));
+            self.cell.borrow_mut().drain_microtasks();
+            SchedulerBinding::handle_draw_frame(&mut self.cell.borrow_mut());
+            self.cell.borrow_mut().drain_microtasks();
         }
     }
 
     fn navigator(&mut self) -> reveal_foundation::Handle<NavigatorState> {
         self.navigator
-            .current_state::<NavigatorState>(&mut self.app)
+            .current_state::<NavigatorState>(&mut self.cell.borrow_mut())
             .expect("the CupertinoApp's navigator is mounted")
     }
 
     fn push(&mut self, route: AnyRoute) {
         let navigator = self.navigator();
-        navigator.push(&mut self.app, route);
+        navigator.push(&mut self.cell.borrow_mut(), route);
         self.settle();
     }
 
     /// The same call the row's chevron makes.
     fn push_entry(&mut self, entry: Entry) {
-        let route = entry_route(&mut self.app, entry);
+        let route = entry_route(&mut self.cell.borrow_mut(), entry);
         self.push(route);
     }
 
     fn push_sub_page(&mut self, entry: Entry, index: usize) {
-        let route = sub_route(&mut self.app, entry, index);
+        let route = sub_route(&mut self.cell.borrow_mut(), entry, index);
         self.push(route);
     }
 
     fn pop(&mut self) {
         let navigator = self.navigator();
-        navigator.pop(&mut self.app, None);
+        navigator.pop(&mut self.cell.borrow_mut(), None);
         self.settle();
     }
 
     fn can_pop(&mut self) -> bool {
         let navigator = self.navigator();
-        navigator.can_pop(&self.app)
+        navigator.can_pop(&self.cell.borrow())
     }
 
     /// Every render object of the mounted tree, parents before children.
     fn render_objects(&mut self) -> Vec<AnyRenderObject> {
-        let root = WidgetsBinding::instance(&mut self.app)
-            .root_element(&self.app)
-            .expect("a mounted app")
-            .find_render_object(&self.app)
-            .expect("a mounted view has a render object");
+        let root = {
+            let mut app = self.cell.borrow_mut();
+            WidgetsBinding::instance(&mut app)
+                .root_element(&app)
+                .expect("a mounted app")
+                .find_render_object(&app)
+                .expect("a mounted view has a render object")
+        };
         let mut all = vec![root];
         let mut visited = 0;
         while visited < all.len() {
             let object = all[visited];
-            object.visit_children(&self.app, &mut |child| all.push(child));
+            object.visit_children(&self.cell.borrow(), &mut |child| all.push(child));
             visited += 1;
         }
         all
@@ -193,14 +198,17 @@ impl Fixture {
     /// The mounted elements in tree order: a subtree is visited before its next sibling, so the
     /// overlay's topmost route comes last.
     fn elements(&mut self) -> Vec<AnyElement> {
-        let root = WidgetsBinding::instance(&mut self.app)
-            .root_element(&self.app)
-            .expect("a mounted app");
+        let root = {
+            let mut app = self.cell.borrow_mut();
+            WidgetsBinding::instance(&mut app)
+                .root_element(&app)
+                .expect("a mounted app")
+        };
         let mut all = Vec::new();
         let mut stack = vec![root];
         while let Some(element) = stack.pop() {
             all.push(element);
-            let mut children = element.children(&self.app);
+            let mut children = element.children(&self.cell.borrow());
             children.reverse();
             stack.extend(children);
         }
@@ -217,8 +225,10 @@ impl Fixture {
             .iter()
             .rev()
             .find(|element| {
-                downcast_widget::<CupertinoNavigationBarBackButton>(&**element.widget(&self.app))
-                    .is_some()
+                downcast_widget::<CupertinoNavigationBarBackButton>(
+                    &**element.widget(&self.cell.borrow()),
+                )
+                .is_some()
             })
             .copied()
             .expect("the top screen has an automatic back button");
@@ -226,12 +236,12 @@ impl Fixture {
         let mut labels = Vec::new();
         let mut stack = vec![button];
         while let Some(element) = stack.pop() {
-            if let Some(text) = downcast_widget::<Text>(&**element.widget(&self.app))
+            if let Some(text) = downcast_widget::<Text>(&**element.widget(&self.cell.borrow()))
                 && let Some(data) = &text.data
             {
                 labels.push(data.clone());
             }
-            stack.extend(element.children(&self.app));
+            stack.extend(element.children(&self.cell.borrow()));
         }
         labels.join(" ")
     }
@@ -248,22 +258,22 @@ impl Fixture {
             elements.reverse();
         }
         for element in elements {
-            let Some(object) = element.render_object(&self.app) else {
+            let Some(object) = element.render_object(&self.cell.borrow()) else {
                 continue;
             };
-            let Some(paragraph) = object.downcast::<RenderParagraph>(&self.app) else {
+            let Some(paragraph) = object.downcast::<RenderParagraph>(&self.cell.borrow()) else {
                 continue;
             };
             if !paragraph
-                .text(&self.app)
+                .text(&self.cell.borrow())
                 .to_plain_text(true, true)
                 .contains(text)
             {
                 continue;
             }
             let object = object.as_box().expect("a paragraph is a box");
-            let size = object.size(&self.app);
-            let origin = object.local_to_global(&self.app, Offset::ZERO, None);
+            let size = object.size(&self.cell.borrow());
+            let origin = object.local_to_global(&self.cell.borrow(), Offset::ZERO, None);
             return origin + Offset::new(size.width() / 2.0, size.height() / 2.0);
         }
         panic!("nothing on screen reads {text:?}; saw {:?}", self.texts())
@@ -289,27 +299,34 @@ impl Fixture {
     }
 
     fn send(&mut self, change: PointerChange, at_point: Offset) {
-        GestureBinding::instance(&mut self.app).handle_pointer_data_packet(
-            &mut self.app,
-            PointerDataPacket::new(vec![PointerData {
-                change,
-                kind: PointerDeviceKind::Touch,
-                time_stamp: self.at,
-                pointer_identifier: 1,
-                physical_x: at_point.dx(),
-                physical_y: at_point.dy(),
-                ..PointerData::default()
-            }]),
-        );
-        self.app.drain_microtasks();
+        {
+            let mut app = self.cell.borrow_mut();
+            GestureBinding::instance(&mut app).handle_pointer_data_packet(
+                &mut app,
+                PointerDataPacket::new(vec![PointerData {
+                    change,
+                    kind: PointerDeviceKind::Touch,
+                    time_stamp: self.at,
+                    pointer_identifier: 1,
+                    physical_x: at_point.dx(),
+                    physical_y: at_point.dy(),
+                    ..PointerData::default()
+                }]),
+            );
+        }
+        self.cell.borrow_mut().drain_microtasks();
     }
 
     /// The plain text of every paragraph on screen.
     fn texts(&mut self) -> Vec<String> {
         self.render_objects()
             .into_iter()
-            .filter_map(|object| object.downcast::<RenderParagraph>(&self.app))
-            .map(|paragraph| paragraph.text(&self.app).to_plain_text(true, true))
+            .filter_map(|object| object.downcast::<RenderParagraph>(&self.cell.borrow()))
+            .map(|paragraph| {
+                paragraph
+                    .text(&self.cell.borrow())
+                    .to_plain_text(true, true)
+            })
             .collect()
     }
 

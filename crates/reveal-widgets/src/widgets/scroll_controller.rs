@@ -851,6 +851,7 @@ impl Listenable for AnyScrollController {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
 
     use reveal_foundation::ListenableObject;
@@ -879,7 +880,8 @@ mod tests {
 
     #[test]
     fn a_controller_creates_its_position_at_the_initial_scroll_offset() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let controller =
             ScrollController::new(&mut app, 25.0, true, Some("list".to_string()), None, None);
@@ -904,7 +906,8 @@ mod tests {
 
     #[test]
     fn a_controller_forwards_its_positions_notifications() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let controller = ScrollController::default(&mut app);
         let position = attached(&mut app, &harness, controller.as_controller());
@@ -928,7 +931,8 @@ mod tests {
 
     #[test]
     fn on_attach_and_on_detach_see_the_position() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let attaches = Rc::new(Cell::new(0));
         let detaches = Rc::new(Cell::new(0));
@@ -957,7 +961,8 @@ mod tests {
 
     #[test]
     fn a_tracking_controller_reports_the_most_recently_updated_offset() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let controller = TrackingScrollController::new(&mut app, 10.0, true, None, None, None);
         assert_eq!(controller.initial_scroll_offset(&app), 10.0);

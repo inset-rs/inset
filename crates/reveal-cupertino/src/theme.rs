@@ -670,7 +670,8 @@ mod tests {
         wrap: impl FnOnce(WidgetRef) -> WidgetRef,
         read: impl Fn(&mut App, BuildContext) -> T + 'static,
     ) -> T {
-        let mut app = crate::test_support::app();
+        let cell = crate::test_support::test_cell();
+        let app = cell.borrow();
         let seen = Rc::new(RefCell::new(None));
         let probe = Builder::new({
             let seen = Rc::clone(&seen);
@@ -680,7 +681,8 @@ mod tests {
             }
         })
         .into_widget();
-        build(&mut app, wrap(probe));
+        drop(app);
+        build(&cell, wrap(probe));
         let value = seen.borrow_mut().take();
         value.expect("the probe built")
     }

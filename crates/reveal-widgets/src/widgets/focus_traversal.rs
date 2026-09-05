@@ -3273,6 +3273,7 @@ impl StatelessWidget for ExcludeFocusTraversal {
 #[cfg(test)]
 mod tests {
     use reveal_embedder::{Rect, TextDirection};
+    use reveal_foundation::AppCell;
 
     use super::*;
     use crate::widgets::basic::{Directionality, Positioned, SizedBox, Stack};
@@ -3284,9 +3285,9 @@ mod tests {
     }
 
     /// Mounts the given children in a `Stack` under a [`FocusTraversalGroup`] with `policy`.
-    fn mount_group(app: &mut App, policy: AnyFocusTraversalPolicy, children: Vec<WidgetRef>) {
+    fn mount_group(cell: &AppCell, policy: AnyFocusTraversalPolicy, children: Vec<WidgetRef>) {
         mount(
-            app,
+            cell,
             Directionality::new(
                 TextDirection::Ltr,
                 FocusTraversalGroup::new(Stack::new().children(children)).policy(policy),
@@ -3341,9 +3342,12 @@ mod tests {
 
     #[test]
     fn widget_order_traverses_in_widget_creation_order() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let policy = WidgetOrderTraversalPolicy::new(&mut app).as_policy();
-        mount_group(&mut app, policy, scattered());
+        drop(app);
+        mount_group(&cell, policy, scattered());
+        let mut app = cell.borrow_mut();
 
         assert_eq!(order(&mut app, "x", 3, true), ["y", "z", "x"]);
         assert_eq!(order(&mut app, "x", 3, false), ["z", "y", "x"]);
@@ -3351,9 +3355,12 @@ mod tests {
 
     #[test]
     fn reading_order_traverses_top_to_bottom_in_the_reading_direction() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let policy = ReadingOrderTraversalPolicy::new(&mut app).as_policy();
-        mount_group(&mut app, policy, scattered());
+        drop(app);
+        mount_group(&cell, policy, scattered());
+        let mut app = cell.borrow_mut();
 
         // "y" and "x" share the topmost band, left to right; "z" is below them.
         assert_eq!(order(&mut app, "y", 3, true), ["x", "z", "y"]);
@@ -3362,16 +3369,19 @@ mod tests {
 
     #[test]
     fn reading_order_follows_the_directionality_in_force() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let policy = ReadingOrderTraversalPolicy::new(&mut app).as_policy();
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Directionality::new(
                 TextDirection::Rtl,
                 FocusTraversalGroup::new(Stack::new().children(scattered())).policy(policy),
             )
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
 
         // Right to left: "x" comes before "y" in the topmost band.
         assert_eq!(order(&mut app, "x", 3, true), ["y", "z", "x"]);
@@ -3379,7 +3389,8 @@ mod tests {
 
     #[test]
     fn ordered_traversal_follows_the_numeric_order() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let policy = OrderedTraversalPolicy::new(&mut app).as_policy();
         let ordered = |label: &'static str, rect: Rect, order: f64| -> WidgetRef {
             FocusTraversalOrder::new(
@@ -3388,8 +3399,9 @@ mod tests {
             )
             .into_widget()
         };
+        drop(app);
         mount_group(
-            &mut app,
+            &cell,
             policy,
             vec![
                 ordered("x", Rect::from_ltwh(100.0, 0.0, 50.0, 20.0), 3.0),
@@ -3397,13 +3409,15 @@ mod tests {
                 ordered("z", Rect::from_ltwh(0.0, 100.0, 50.0, 20.0), 2.0),
             ],
         );
+        let mut app = cell.borrow_mut();
 
         assert_eq!(order(&mut app, "y", 3, true), ["z", "x", "y"]);
     }
 
     #[test]
     fn ordered_traversal_follows_the_lexical_order() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let policy = OrderedTraversalPolicy::new(&mut app).as_policy();
         let ordered = |label: &'static str, rect: Rect, order: &'static str| -> WidgetRef {
             FocusTraversalOrder::new(
@@ -3412,8 +3426,9 @@ mod tests {
             )
             .into_widget()
         };
+        drop(app);
         mount_group(
-            &mut app,
+            &cell,
             policy,
             vec![
                 ordered("x", Rect::from_ltwh(100.0, 0.0, 50.0, 20.0), "c"),
@@ -3421,15 +3436,19 @@ mod tests {
                 ordered("z", Rect::from_ltwh(0.0, 100.0, 50.0, 20.0), "b"),
             ],
         );
+        let mut app = cell.borrow_mut();
 
         assert_eq!(order(&mut app, "y", 3, true), ["z", "x", "y"]);
     }
 
     #[test]
     fn the_traversal_edge_behavior_decides_what_happens_at_the_last_node() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let policy = WidgetOrderTraversalPolicy::new(&mut app).as_policy();
-        mount_group(&mut app, policy, scattered());
+        drop(app);
+        mount_group(&cell, policy, scattered());
+        let mut app = cell.borrow_mut();
 
         // The default is a closed loop: the last node wraps around to the first.
         assert_eq!(order(&mut app, "z", 1, true), ["x"]);
@@ -3452,9 +3471,12 @@ mod tests {
 
     #[test]
     fn directional_focus_moves_to_the_neighbour_in_that_direction() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let policy = ReadingOrderTraversalPolicy::new(&mut app).as_policy();
-        mount_group(&mut app, policy, scattered());
+        drop(app);
+        mount_group(&cell, policy, scattered());
+        let mut app = cell.borrow_mut();
 
         let y = node(&mut app, "y");
         y.request_focus(&mut app, None);
@@ -3491,15 +3513,17 @@ mod tests {
         use crate::widgets::actions::Actions;
         use crate::widgets::shortcuts::{ShortcutMap, Shortcuts, SingleActivator};
 
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let policy = WidgetOrderTraversalPolicy::new(&mut app).as_policy();
         let action = Action::as_action(NextFocusAction::new(&mut app));
         let shortcuts: ShortcutMap = vec![(
             Rc::new(SingleActivator::new(LogicalKeyboardKey::TAB)),
             Rc::new(NextFocusIntent::new()),
         )];
+        drop(app);
         mount(
-            &mut app,
+            &cell,
             Directionality::new(
                 TextDirection::Ltr,
                 Shortcuts::new(
@@ -3512,6 +3536,7 @@ mod tests {
             )
             .into_widget(),
         );
+        let mut app = cell.borrow_mut();
 
         node(&mut app, "x").request_focus(&mut app, None);
         app.drain_microtasks();
@@ -3530,10 +3555,12 @@ mod tests {
 
     #[test]
     fn exclude_focus_traversal_keeps_its_descendants_out_of_the_order() {
-        let mut app = app_with_view();
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
         let policy = WidgetOrderTraversalPolicy::new(&mut app).as_policy();
+        drop(app);
         mount_group(
-            &mut app,
+            &cell,
             policy,
             vec![
                 placed("x", Rect::from_ltwh(100.0, 0.0, 50.0, 20.0)),
@@ -3545,6 +3572,7 @@ mod tests {
                 placed("z", Rect::from_ltwh(0.0, 100.0, 50.0, 20.0)),
             ],
         );
+        let mut app = cell.borrow_mut();
 
         assert_eq!(order(&mut app, "x", 2, true), ["z", "x"]);
     }

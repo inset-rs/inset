@@ -411,6 +411,7 @@ impl GestureBindingOverridesObject for RendererBinding {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
     use std::time::Duration;
 
@@ -478,7 +479,7 @@ mod tests {
         }
     }
 
-    fn app_with_view() -> (App, Rc<Cell<u32>>, Rc<Cell<u32>>) {
+    fn app_with_view() -> (Rc<AppCell>, Rc<Cell<u32>>, Rc<Cell<u32>>) {
         let presented = Rc::new(Cell::new(0));
         let frames = Rc::new(Cell::new(0));
         let platform: PlatformRef = Rc::new(TestPlatform {
@@ -487,12 +488,13 @@ mod tests {
             }),
             frames: Rc::clone(&frames),
         });
-        (App::with_platform(platform), presented, frames)
+        (AppCell::with_platform(platform), presented, frames)
     }
 
     #[test]
     fn a_frame_lays_out_paints_and_presents_the_implicit_view() {
-        let (mut app, presented, _frames) = app_with_view();
+        let (cell, presented, _frames) = app_with_view();
+        let mut app = cell.borrow_mut();
         let binding = RendererBinding::instance(&mut app);
         let render_view = binding.init_render_view(&mut app);
         assert_eq!(
@@ -515,7 +517,8 @@ mod tests {
 
     #[test]
     fn a_dirty_node_requests_a_visual_update() {
-        let (mut app, _presented, frames) = app_with_view();
+        let (cell, _presented, frames) = app_with_view();
+        let mut app = cell.borrow_mut();
         let binding = RendererBinding::instance(&mut app);
         let render_view = binding.init_render_view(&mut app);
         let child =
@@ -538,7 +541,8 @@ mod tests {
 
         use crate::proxy_box::{HitTestBehavior, RenderPointerListener};
 
-        let (mut app, _presented, _frames) = app_with_view();
+        let (cell, _presented, _frames) = app_with_view();
+        let mut app = cell.borrow_mut();
         let binding = RendererBinding::instance(&mut app);
         let render_view = binding.init_render_view(&mut app);
         let listener = RenderPointerListener::new(&mut app, HitTestBehavior::Opaque, None);
@@ -575,7 +579,8 @@ mod tests {
         use crate::proxy_box::RenderMouseRegion;
         use crate::shifted_box::RenderPadding;
 
-        let (mut app, _presented, _frames) = app_with_view();
+        let (cell, _presented, _frames) = app_with_view();
+        let mut app = cell.borrow_mut();
         let binding = RendererBinding::instance(&mut app);
         let render_view = binding.init_render_view(&mut app);
         let region = RenderMouseRegion::new(&mut app, true, None);
@@ -632,7 +637,8 @@ mod tests {
 
     #[test]
     fn deferred_first_frame_is_not_presented() {
-        let (mut app, presented, _frames) = app_with_view();
+        let (cell, presented, _frames) = app_with_view();
+        let mut app = cell.borrow_mut();
         let binding = RendererBinding::instance(&mut app);
         binding.init_render_view(&mut app);
         binding.defer_first_frame(&mut app);

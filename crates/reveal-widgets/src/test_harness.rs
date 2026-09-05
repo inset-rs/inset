@@ -6,7 +6,7 @@
 use std::rc::Rc;
 
 use reveal_embedder::{Picture, View as EmbedderView, ViewConstraints, ViewId, ViewMetrics};
-use reveal_foundation::{App, Handle};
+use reveal_foundation::{App, AppCell, Handle};
 use reveal_rendering::{
     AnyRenderObject, PipelineOwner, RenderHandle, RenderView, ViewConfiguration,
 };
@@ -465,22 +465,26 @@ impl reveal_embedder::Platform for BindingPlatform {
 
 /// An [`App`] whose platform has one [`VIEW_WIDTH`] x [`VIEW_HEIGHT`] view, for a tree that
 /// needs the `WidgetsBinding` (a `GlobalKey` lookup, a post-frame callback, a timer).
-pub(crate) fn binding_app() -> App {
+pub(crate) fn binding_cell() -> Rc<AppCell> {
     let platform: reveal_embedder::PlatformRef = Rc::new(BindingPlatform {
         view: Rc::new(TestView),
     });
-    App::with_platform(platform)
+    AppCell::with_platform(platform)
 }
 
 /// Mounts `child` under the platform's view and runs the first frame.
-pub(crate) fn binding_mount(app: &mut App, child: WidgetRef) {
-    let view = app
-        .platform()
-        .implicit_view()
-        .expect("an app from binding_app");
-    crate::binding::run_widget(app, View::new(view, child).into_widget());
-    app.elapse(std::time::Duration::ZERO);
-    binding_pump(app, std::time::Duration::ZERO);
+pub(crate) fn binding_mount(cell: &AppCell, child: WidgetRef) {
+    {
+        let mut app = cell.borrow_mut();
+        let view = app
+            .platform()
+            .implicit_view()
+            .expect("an app from binding_cell");
+        crate::binding::run_widget(&mut app, View::new(view, child).into_widget());
+    }
+    // `run_app` attaches the root widget on the next timer turn, as Dart's `Timer.run` does.
+    cell.elapse(std::time::Duration::ZERO);
+    binding_pump(&mut cell.borrow_mut(), std::time::Duration::ZERO);
 }
 
 /// Runs one frame at `at`, then drains the microtasks it queued.

@@ -1206,6 +1206,7 @@ impl PrimaryPointerGestureRecognizer {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::Cell;
 
     use super::*;
@@ -1217,7 +1218,8 @@ mod tests {
 
     #[test]
     fn an_erased_recognizer_keeps_its_identity_and_type() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tap = TapGestureRecognizer::new(&mut app);
         let long_press = LongPressGestureRecognizer::new(&mut app);
         let erased = tap.as_recognizer();
@@ -1234,7 +1236,8 @@ mod tests {
 
     #[test]
     fn an_erased_recognizer_adds_pointers_and_dispose_frees_the_slot() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tap = TapGestureRecognizer::new(&mut app);
         let recognized = Rc::new(Cell::new(false));
         let flag = Rc::clone(&recognized);

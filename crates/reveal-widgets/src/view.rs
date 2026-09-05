@@ -643,23 +643,26 @@ mod tests {
     use reveal_scheduler::SchedulerBinding;
 
     use crate::framework::{GlobalKey, IntoWidget};
-    use crate::test_harness::{binding_app, binding_mount, binding_pump};
+    use crate::test_harness::{binding_cell, binding_mount, binding_pump};
     use crate::widgets::basic::SizedBox;
 
     /// A view's render tree lives under the view's own `PipelineOwner`, which has no visual
     /// update callback: its requests must reach the binding through the manifold.
     #[test]
     fn a_dirty_render_object_under_a_view_schedules_a_frame() {
-        let mut app = binding_app();
+        let cell = binding_cell();
+        let app = cell.borrow();
         let key = Rc::new(GlobalKey::new());
+        drop(app);
         binding_mount(
-            &mut app,
+            &cell,
             SizedBox::new()
                 .key(key.clone())
                 .width(10.0)
                 .height(10.0)
                 .into_widget(),
         );
+        let mut app = cell.borrow_mut();
         for _ in 0..5 {
             binding_pump(&mut app, std::time::Duration::from_millis(16));
         }

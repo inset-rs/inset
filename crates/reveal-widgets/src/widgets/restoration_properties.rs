@@ -1449,6 +1449,7 @@ pub trait RestorableChangeNotifier: RestorableListenable {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::rc::Rc;
 
     use reveal_foundation::Handle;
@@ -1614,14 +1615,15 @@ mod tests {
 
     /// A mounted [`Bag`] under a root scope holding `data`.
     struct Fixture {
-        app: App,
+        cell: Rc<AppCell>,
         properties: Properties,
         bucket: Handle<RestorationBucket>,
     }
 
     impl Fixture {
         fn mount(data: Option<RestorationMap>) -> Fixture {
-            let mut app = App::new();
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
             let manager = RestorationManager::instance(&mut app);
             manager.handle_restoration_update_from_engine(&mut app, true, data);
             let key = GlobalKey::new();
@@ -1644,15 +1646,17 @@ mod tests {
                 .expect("a BagState");
             let properties = app.get(state).properties.expect("restore_state ran");
             let bucket = state.bucket(&app).expect("the bag claimed a bucket");
+            drop(app);
             Fixture {
-                app,
+                cell,
                 properties,
                 bucket,
             }
         }
 
         fn stored(&mut self, restoration_id: &str) -> Option<RestorationData> {
-            self.bucket.read(&mut self.app, restoration_id)
+            self.bucket
+                .read(&mut self.cell.borrow_mut(), restoration_id)
         }
     }
 
@@ -1682,9 +1686,9 @@ mod tests {
 
     #[test]
     fn a_property_with_no_stored_value_takes_the_default_it_was_created_with() {
-        let mut fixture = Fixture::mount(None);
+        let fixture = Fixture::mount(None);
         let properties = fixture.properties;
-        let app = &mut fixture.app;
+        let app = &mut fixture.cell.borrow_mut();
 
         assert_eq!(*properties.int.value(app), 1);
         assert_eq!(*properties.double.value(app), 1.5);
@@ -1723,9 +1727,9 @@ mod tests {
 
     #[test]
     fn every_property_restores_the_value_the_data_describes() {
-        let mut fixture = Fixture::mount(filled());
+        let fixture = Fixture::mount(filled());
         let properties = fixture.properties;
-        let app = &mut fixture.app;
+        let app = &mut fixture.cell.borrow_mut();
 
         assert_eq!(*properties.int.value(app), 7);
         assert_eq!(*properties.double.value(app), 2.5);
@@ -1751,22 +1755,23 @@ mod tests {
     fn a_new_value_is_written_back_as_the_data_it_was_restored_from() {
         let mut fixture = Fixture::mount(filled());
         let properties = fixture.properties;
-        let app = &mut fixture.app;
-
-        properties.int.set_value(app, 8);
-        properties.double.set_value(app, 3.5);
-        properties.string.set_value(app, "eight".to_string());
-        properties.boolean.set_value(app, true);
-        properties.int_n.set_value(app, Some(9));
-        properties.double_n.set_value(app, None);
-        properties.string_n.set_value(app, Some("nine".to_string()));
-        properties.bool_n.set_value(app, Some(true));
-        properties
-            .date_time
-            .set_value(app, DateTime::from_milliseconds_since_epoch(4000));
-        properties.date_time_n.set_value(app, None);
-        properties.direction.set_value(app, Direction::Up);
-        properties.direction_n.set_value(app, Some(Direction::Down));
+        {
+            let app = &mut fixture.cell.borrow_mut();
+            properties.int.set_value(app, 8);
+            properties.double.set_value(app, 3.5);
+            properties.string.set_value(app, "eight".to_string());
+            properties.boolean.set_value(app, true);
+            properties.int_n.set_value(app, Some(9));
+            properties.double_n.set_value(app, None);
+            properties.string_n.set_value(app, Some("nine".to_string()));
+            properties.bool_n.set_value(app, Some(true));
+            properties
+                .date_time
+                .set_value(app, DateTime::from_milliseconds_since_epoch(4000));
+            properties.date_time_n.set_value(app, None);
+            properties.direction.set_value(app, Direction::Up);
+            properties.direction_n.set_value(app, Some(Direction::Down));
+        }
 
         assert_eq!(fixture.stored("int"), Some(8i64.into()));
         assert_eq!(fixture.stored("double"), Some(3.5f64.into()));
@@ -1784,19 +1789,19 @@ mod tests {
 
     #[test]
     fn setting_the_value_it_already_has_writes_nothing() {
-        let mut fixture = Fixture::mount(filled());
+        let fixture = Fixture::mount(filled());
         let int = fixture.properties.int;
         let notified = Rc::new(std::cell::Cell::new(0usize));
         let seen = Rc::clone(&notified);
         int.add_listener(
-            &mut fixture.app,
+            &mut fixture.cell.borrow_mut(),
             Listener::new(move |_app| seen.set(seen.get() + 1)),
         );
 
-        int.set_value(&mut fixture.app, 7);
+        int.set_value(&mut fixture.cell.borrow_mut(), 7);
         assert_eq!(notified.get(), 0, "the value did not change");
 
-        int.set_value(&mut fixture.app, 8);
+        int.set_value(&mut fixture.cell.borrow_mut(), 8);
         assert_eq!(notified.get(), 1);
     }
 
@@ -1804,13 +1809,13 @@ mod tests {
     fn an_unregistered_property_is_removed_from_the_data() {
         let mut fixture = Fixture::mount(filled());
         let int = fixture.properties.int;
-        let state = int.state(&fixture.app);
+        let state = int.state(&fixture.cell.borrow());
         let bag = state
-            .downcast::<BagState>(&fixture.app)
+            .downcast::<BagState>(&fixture.cell.borrow())
             .expect("the owner is the bag");
-        bag.unregister_from_restoration(&mut fixture.app, int.as_property());
+        bag.unregister_from_restoration(&mut fixture.cell.borrow_mut(), int.as_property());
 
         assert_eq!(fixture.stored("int"), None);
-        assert!(!int.as_property().is_registered(&fixture.app));
+        assert!(!int.as_property().is_registered(&fixture.cell.borrow()));
     }
 }

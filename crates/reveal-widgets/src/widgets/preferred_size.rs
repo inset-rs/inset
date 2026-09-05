@@ -144,6 +144,7 @@ impl StatelessWidget for PreferredSize {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use reveal_rendering::RenderConstrainedBox;
 
     use super::*;
@@ -158,7 +159,8 @@ mod tests {
         ));
         assert_eq!(bar.preferred_size(), Size::from_height(80.0));
 
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(&mut app, bar.into_widget());
         harness.pump(&mut app);
         assert!(

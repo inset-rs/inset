@@ -495,6 +495,7 @@ impl CustomPainter for CupertinoLinearActivityIndicatorPainter {
 #[cfg(test)]
 mod tests {
     use reveal_embedder::valo::Op;
+    use reveal_foundation::AppCell;
     use reveal_painting::AlignmentGeometry;
     use reveal_rendering::{
         AnyRenderObject, RenderBox, RenderCustomPaint, RenderHandle, RenderObject,
@@ -502,7 +503,7 @@ mod tests {
     use reveal_widgets::{Align, GlobalKey};
 
     use super::*;
-    use crate::test_support::{app, build, pump};
+    use crate::test_support::{build, pump, test_cell};
 
     /// The first descendant render object of type `T`, from `node` down.
     fn find<T: RenderObject>(app: &App, node: AnyRenderObject) -> Option<RenderHandle<T>> {
@@ -560,9 +561,9 @@ mod tests {
     }
 
     /// Mounts `child` where it may take its own size; the view's root is tight.
-    fn loosely<K>(app: &mut App, child: impl IntoWidget<K>) {
+    fn loosely<K>(cell: &AppCell, child: impl IntoWidget<K>) {
         build(
-            app,
+            cell,
             Align::new()
                 .alignment(AlignmentGeometry::TOP_LEFT)
                 .child(child)
@@ -572,12 +573,13 @@ mod tests {
 
     #[test]
     fn a_spinning_indicator_paints_its_eight_ticks_and_rotates_the_alpha_table() {
-        let mut app = app();
+        let cell = test_cell();
         let global_key = GlobalKey::new();
         loosely(
-            &mut app,
+            &cell,
             CupertinoActivityIndicator::new().key(key_of(&global_key)),
         );
+        let mut app = cell.borrow_mut();
 
         let (painter, size) = painter_of(&mut app, &global_key);
         assert_eq!(size, Size::new(20.0, 20.0), "the radius doubled");
@@ -604,14 +606,15 @@ mod tests {
 
     #[test]
     fn an_indicator_that_is_not_animating_never_advances() {
-        let mut app = app();
+        let cell = test_cell();
         let global_key = GlobalKey::new();
         loosely(
-            &mut app,
+            &cell,
             CupertinoActivityIndicator::new()
                 .animating(false)
                 .key(key_of(&global_key)),
         );
+        let mut app = cell.borrow_mut();
         let state = global_key
             .current_state::<CupertinoActivityIndicatorState>(&mut app)
             .expect("the indicator mounted");
@@ -629,11 +632,12 @@ mod tests {
 
     #[test]
     fn a_partially_revealed_indicator_draws_a_fraction_of_its_ticks() {
-        let mut app = app();
+        let cell = test_cell();
         let global_key = GlobalKey::new();
         let indicator = CupertinoActivityIndicator::partially_revealed().progress(0.5);
         assert!(!indicator.animating);
-        loosely(&mut app, indicator.key(key_of(&global_key)));
+        loosely(&cell, indicator.key(key_of(&global_key)));
+        let mut app = cell.borrow_mut();
 
         let (painter, size) = painter_of(&mut app, &global_key);
         assert_eq!(
@@ -644,15 +648,16 @@ mod tests {
 
     #[test]
     fn the_linear_indicator_fills_its_track_up_to_the_progress() {
-        let mut app = app();
+        let cell = test_cell();
         let global_key = GlobalKey::new();
         loosely(
-            &mut app,
+            &cell,
             SizedBox::new()
                 .width(200.0)
                 .height(10.0)
                 .child(CupertinoLinearActivityIndicator::new(0.25).key(key_of(&global_key))),
         );
+        let mut app = cell.borrow_mut();
 
         let (painter, size) = painter_of(&mut app, &global_key);
         assert_eq!(size, Size::new(200.0, 10.0));

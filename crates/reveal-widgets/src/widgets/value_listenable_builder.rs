@@ -173,6 +173,7 @@ impl<T: Clone + 'static> State for ValueListenableBuilderState<T> {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
 
     use reveal_foundation::ValueNotifier;
@@ -183,7 +184,8 @@ mod tests {
 
     #[test]
     fn the_builder_sees_each_value_and_the_child_passes_through() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let notifier = app.create(ValueNotifier::new(1));
         let seen = Rc::new(RefCell::new(Vec::new()));
         let child: WidgetRef = SizedBox::shrink().into_widget();

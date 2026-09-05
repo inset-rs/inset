@@ -90,10 +90,12 @@ impl PaintingBinding {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reveal_foundation::AppCell;
 
     #[test]
     fn fonts_are_installed_once_and_read_back() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let binding = PaintingBinding::instance(&mut app);
         assert!(!binding.has_fonts(&app));
         let fonts = binding.install_platform_fonts(&mut app);
@@ -107,7 +109,8 @@ mod tests {
 
     #[test]
     fn registering_a_font_before_any_install_creates_the_collection() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let binding = PaintingBinding::instance(&mut app);
         assert_eq!(
             binding.register_font(&mut app, "Nonesuch", b"not a font".to_vec()),
@@ -122,7 +125,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "text needs fonts")]
     fn reading_fonts_before_install_panics() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let binding = PaintingBinding::instance(&mut app);
         binding.fonts(&app);
     }

@@ -59,8 +59,10 @@ impl AppCell {
         self.app.borrow_mut()
     }
 
-    /// Dart's microtask checkpoint: runs every queued microtask and polls every ready task,
-    /// including the ones they queue, until nothing is left. Returns the number of rounds.
+    /// The microtask checkpoint — the HTML event loop's "perform a microtask checkpoint",
+    /// V8's `PerformMicrotaskCheckpoint`, the point where Dart drains its microtask queue:
+    /// runs every queued microtask and polls every ready task, including the ones they
+    /// queue, until nothing is left. Returns the number of rounds.
     /// The shell runs it at the end of every platform event and [`elapse`](Self::elapse)
     /// around every timer; a test runs it where it would pump.
     ///
@@ -341,12 +343,5 @@ mod tests {
         let cell = AppCell::new();
         let _app = cell.borrow_mut();
         cell.checkpoint();
-    }
-
-    #[test]
-    #[should_panic(expected = "outside an AppCell")]
-    fn a_bare_app_cannot_spawn() {
-        let app = App::new();
-        app.spawn(async move |_cx| {});
     }
 }

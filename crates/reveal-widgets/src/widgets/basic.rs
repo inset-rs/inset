@@ -7164,7 +7164,7 @@ mod tests {
     use std::rc::Rc;
 
     use reveal_embedder::{Color, Offset, Radius, Size};
-    use reveal_foundation::{App, Handle};
+    use reveal_foundation::{App, AppCell, Handle};
     use reveal_gestures::{HitTestEntry, HitTestResult, PointerDownEvent, PointerEvent};
     use reveal_rendering::{
         AnyRenderBox, BoxHitTestEntry, BoxHitTestResult, BoxParentData, ContainerBoxParentData,
@@ -7229,7 +7229,8 @@ mod tests {
 
     #[test]
     fn padding_insets_its_child_and_updates_in_place() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let padded = |inset: f64| {
             Padding {
                 key: None,
@@ -7258,7 +7259,8 @@ mod tests {
 
     #[test]
     fn padding_resolves_directional_insets_through_directionality() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let directional = |text_direction: TextDirection| {
             Directionality {
                 key: None,
@@ -7294,7 +7296,8 @@ mod tests {
 
     #[test]
     fn center_positions_its_child_in_the_middle() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             Center {
@@ -7316,7 +7319,8 @@ mod tests {
 
     #[test]
     fn align_positions_its_child_and_updates_in_place() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let aligned = |alignment: AlignmentGeometry, width_factor: Option<f64>| {
             Align {
                 alignment,
@@ -7348,7 +7352,8 @@ mod tests {
 
     #[test]
     fn sized_box_constrains_its_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(&mut app, sized(50.0, 20.0));
         harness.pump(&mut app);
         let constrained = render_object_under_root::<RenderConstrainedBox>(&harness, &app);
@@ -7386,7 +7391,8 @@ mod tests {
 
     #[test]
     fn constrained_box_imposes_its_constraints() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             ConstrainedBox {
@@ -7403,7 +7409,8 @@ mod tests {
 
     #[test]
     fn listener_receives_a_pointer_down_through_its_render_object() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let downs = Rc::new(Cell::new(0));
         let seen_at = Rc::new(Cell::new(Offset::ZERO));
         let harness = Harness::mount(
@@ -7456,7 +7463,8 @@ mod tests {
 
     #[test]
     fn mouse_region_forwards_its_configuration() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             MouseRegion {
@@ -7500,7 +7508,8 @@ mod tests {
 
     #[test]
     fn opacity_forwards_its_value() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let faded = |opacity: f64| {
             Opacity {
                 key: None,
@@ -7521,7 +7530,8 @@ mod tests {
 
     #[test]
     fn repaint_boundary_isolates_repaints() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             RepaintBoundary {
@@ -7538,7 +7548,8 @@ mod tests {
 
     #[test]
     fn directionality_of_resolves_through_the_tree_and_notifies_on_change() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let builds = Rc::new(Cell::new(0));
         let seen = Rc::new(Cell::new(None));
         // One reader instance, reused like a `const` widget, so only the Directionality
@@ -7577,7 +7588,8 @@ mod tests {
 
     #[test]
     fn builder_builds_with_its_context() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             Builder {
@@ -7721,7 +7733,8 @@ mod tests {
 
     #[test]
     fn row_lays_out_fixed_and_expanded_children() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             ltr(Row::new()
@@ -7752,7 +7765,8 @@ mod tests {
 
     #[test]
     fn a_loose_flexible_child_keeps_its_own_size() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             ltr(Row::new()
@@ -7797,7 +7811,8 @@ mod tests {
 
     #[test]
     fn a_column_space_between_spreads_its_children() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             Column::new()
@@ -7821,7 +7836,8 @@ mod tests {
 
     #[test]
     fn reordering_keyed_children_moves_elements_and_render_children() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (first, second, third) = (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
         let row = |order: [&GlobalKey; 3]| {
             let widths = [10.0, 20.0, 30.0];
@@ -7875,7 +7891,8 @@ mod tests {
 
     #[test]
     fn a_child_can_be_added_and_removed_in_the_middle() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let (first, middle, last) = (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
         let ends = || {
             ltr(Row::new()
@@ -7935,7 +7952,8 @@ mod tests {
                 Size::new(20.0, 10.0),
             ),
         ] {
-            let mut app = App::new();
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
             let harness = Harness::mount(
                 &mut app,
                 ltr(ConstrainedBox::new(
@@ -7975,7 +7993,8 @@ mod tests {
 
     #[test]
     fn an_indexed_stack_lays_out_every_child_but_shows_one() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let stack = |index: i32| {
             ltr(IndexedStack::new()
                 .index(Some(index))
@@ -8027,7 +8046,8 @@ mod tests {
 
     #[test]
     fn clip_rect_and_clip_rrect_configure_their_render_objects() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let clipped = |behavior: Clip| {
             ClipRect::new()
                 .clip_behavior(behavior)
@@ -8053,7 +8073,8 @@ mod tests {
 
     #[test]
     fn clip_rrect_resolves_its_radius_through_directionality() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let corner = Radius::circular(4.0);
         let radius = BorderRadiusGeometry::directional(corner, corner, corner, corner);
         let rounded = |text_direction: TextDirection| {
@@ -8118,7 +8139,8 @@ mod tests {
 
     #[test]
     fn transform_moves_hit_tests_with_its_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let translated = |transform_hit_tests: bool| {
             Transform::translate(Offset::new(20.0, 0.0))
                 .transform_hit_tests(transform_hit_tests)
@@ -8162,7 +8184,8 @@ mod tests {
 
     #[test]
     fn fractional_translation_forwards_its_configuration() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             FractionalTranslation::new(Offset::new(0.25, 0.0))
@@ -8191,7 +8214,8 @@ mod tests {
 
     #[test]
     fn ignore_pointer_and_absorb_pointer_stop_hit_tests_differently() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             IgnorePointer::new().child(opaque(10.0, 10.0)).into_widget(),
@@ -8224,7 +8248,8 @@ mod tests {
         ));
         assert!(!hit_boxes(&result).is_empty(), "the child answers again");
 
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             AbsorbPointer::new().child(opaque(10.0, 10.0)).into_widget(),
@@ -8249,7 +8274,8 @@ mod tests {
 
     #[test]
     fn limited_box_caps_an_unbounded_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let limited = |max_width: f64| {
             ltr(Row::new()
                 .children([LimitedBox::new()
@@ -8281,7 +8307,8 @@ mod tests {
 
     #[test]
     fn colored_box_forwards_its_color_and_anti_aliasing() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let red = Color::from_argb(255, 255, 0, 0);
         let blue = Color::from_argb(255, 0, 0, 255);
         let harness = Harness::mount(
@@ -8307,7 +8334,8 @@ mod tests {
 
     #[test]
     fn offstage_takes_no_room_and_hides_its_child() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let staged = |offstage: bool| {
             Offstage::new()
                 .offstage(offstage)
@@ -8353,7 +8381,8 @@ mod tests {
 
     #[test]
     fn custom_paint_sizes_itself_and_runs_its_painter() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let paints = Rc::new(Cell::new(0));
         let painted = Rc::new(Cell::new(Size::ZERO));
         let painter = || RecordingPainter {
@@ -8401,7 +8430,8 @@ mod tests {
     #[cfg(debug_assertions)]
     #[should_panic(expected = "Incorrect use of ParentDataWidget")]
     fn a_flexible_under_a_non_flex_parent_asserts() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             Padding::new(EdgeInsetsGeometry::all(1.0))
@@ -8413,7 +8443,8 @@ mod tests {
 
     #[test]
     fn meta_data_reaches_its_render_object_and_updates() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             MetaData::new()
@@ -8441,7 +8472,8 @@ mod tests {
 
     #[test]
     fn a_backdrop_filter_reaches_its_render_object_and_a_grouped_one_shares_the_group_key() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             BackdropFilter::filter(ImageFilter::blur(3.0, 3.0))
@@ -8485,7 +8517,8 @@ mod tests {
 
         use crate::widgets::viewport::Viewport;
 
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::zero(&mut app);
         let tree = Directionality::new(
             TextDirection::Ltr,
@@ -8524,7 +8557,8 @@ mod tests {
 
     #[test]
     fn fitted_box_scales_its_child_to_the_space_it_is_given() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             FittedBox::new().child(sized(600.0, 400.0)).into_widget(),
@@ -8591,7 +8625,8 @@ mod tests {
 
     #[test]
     fn unconstrained_box_lets_its_child_size_itself_under_a_tight_parent() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let tight = |child: WidgetRef| {
             SizedBox::new()
                 .width(50.0)
@@ -8663,7 +8698,8 @@ mod tests {
 
     #[test]
     fn fractionally_sized_box_tightens_its_child_to_a_fraction() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             FractionallySizedBox::new()
@@ -8685,7 +8721,8 @@ mod tests {
 
     #[test]
     fn overflow_box_gives_its_child_its_own_constraints() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             OverflowBox::new()
@@ -8729,7 +8766,8 @@ mod tests {
 
     #[test]
     fn sized_overflow_box_takes_its_requested_size() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             Directionality::new(
@@ -8750,7 +8788,8 @@ mod tests {
 
     #[test]
     fn aspect_ratio_picks_the_widest_size_that_keeps_the_ratio() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(&mut app, AspectRatio::new(2.0).into_widget());
         harness.pump(&mut app);
         assert_eq!(
@@ -8769,7 +8808,8 @@ mod tests {
 
     #[test]
     fn intrinsic_width_sizes_to_the_child_s_max_intrinsic_width() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             IntrinsicWidth::new().child(sized(40.0, 10.0)).into_widget(),
@@ -8811,7 +8851,8 @@ mod tests {
 
     #[test]
     fn intrinsic_height_sizes_to_the_child_s_max_intrinsic_height() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             IntrinsicHeight::new()
@@ -8827,7 +8868,8 @@ mod tests {
 
     #[test]
     fn baseline_shifts_its_child_down_to_the_requested_baseline() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             Baseline::new(30.0, TextBaseline::Alphabetic)
@@ -8846,7 +8888,8 @@ mod tests {
 
     #[test]
     fn the_clip_widgets_reach_their_render_objects_and_a_shape_clip_resolves_its_direction() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let harness = Harness::mount(
             &mut app,
             ClipOval::new().child(SizedBox::shrink()).into_widget(),

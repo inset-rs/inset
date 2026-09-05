@@ -96,6 +96,7 @@ impl PointerSignalResolver {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::RefCell;
 
     use crate::events::PointerScrollEvent;
@@ -104,7 +105,8 @@ mod tests {
 
     #[test]
     fn only_the_first_registered_callback_runs() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let resolver = PointerSignalResolver::new(&mut app);
         let event = PointerEvent::Scroll(PointerScrollEvent::default());
         let called = Rc::new(RefCell::new(Vec::<&'static str>::new()));
@@ -138,7 +140,8 @@ mod tests {
 
     #[test]
     fn resolving_without_a_registration_does_nothing() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let resolver = PointerSignalResolver::new(&mut app);
         resolver.resolve(&mut app);
     }

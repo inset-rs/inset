@@ -988,6 +988,7 @@ impl WidgetsBindingObserverObject for LocalizationsResolver {
 
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
     use std::cell::{Cell, RefCell};
 
     use super::*;
@@ -1056,7 +1057,8 @@ mod tests {
 
     #[test]
     fn localizations_provides_the_locale_the_resources_and_the_directionality() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let seen = Rc::new(RefCell::new(Vec::new()));
         let harness = Harness::mount(
             &mut app,
@@ -1078,7 +1080,8 @@ mod tests {
 
     #[test]
     fn a_delegate_loads_once_per_locale_and_again_when_it_asks_to_reload() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let seen = Rc::new(RefCell::new(Vec::new()));
         let loads = Rc::new(Cell::new(0));
         // One probe widget: an identical child is not rebuilt, so only the scope's
@@ -1121,7 +1124,8 @@ mod tests {
 
     #[test]
     fn an_unsupported_locale_skips_the_delegate() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let seen = Rc::new(RefCell::new(Vec::new()));
         let harness = Harness::mount(
             &mut app,
@@ -1144,7 +1148,8 @@ mod tests {
 
     #[test]
     fn override_keeps_the_inherited_locale_and_puts_its_delegates_first() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let seen = Rc::new(RefCell::new(Vec::new()));
         let inner = {
             let seen = Rc::clone(&seen);
@@ -1173,7 +1178,8 @@ mod tests {
 
     #[test]
     fn the_resolver_follows_the_platform_locales_and_notifies_on_a_change() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let resolver = LocalizationsResolver::new(
             &mut app,
             None,
@@ -1226,7 +1232,8 @@ mod tests {
 
     #[test]
     fn the_resolver_prefers_its_callbacks_over_the_basic_algorithm() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let list_callback: LocaleListResolutionCallback =
             Rc::new(|_locales, _supported| Some(Locale::new("de")));
         let resolver = LocalizationsResolver::new(
@@ -1269,7 +1276,8 @@ mod tests {
 
     #[test]
     fn maybe_locale_of_is_none_without_an_ancestor() {
-        let mut app = App::new();
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
         let seen = Rc::new(Cell::new(Some(en_us())));
         let harness = Harness::mount(
             &mut app,
