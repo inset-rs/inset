@@ -63,10 +63,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## list_tile.rs → list_tile.dart
 
-- Change: the state clears its pressed look as soon as `onTap` returns; Dart's callback returns a `FutureOr` the state awaits first.
-  Reason: language — the framework has no `Future`, so a callback cannot be awaited.
-  Affect: the tile stays activated only for the duration of the call, so a caller cannot hold it activated across asynchronous work; a callback that unmounts the tile is still safe.
-
 ## list_section.rs → list_section.dart
 
 - Change: the constructor assert that a section has children or a header runs at the start of `build`.
@@ -113,19 +109,11 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the sub-screen widget needs `MediaQuery.displayFeatures` (Deferred; reveal-widgets records the same for `RawDialogRoute`).
   Affect: a popup or dialog is not confined to the display-feature sub-screen closest to an anchor point.
 
-- Change: `show_cupertino_modal_popup` and `show_cupertino_dialog` return the pushed `AnyRoute` rather than a future of its result.
-  Reason: platform — there is no future to await (navigator.rs records the completion shape).
-  Affect: `let route = show_cupertino_dialog(app, context, builder, ..); route.when_popped(app, Rc::new(|app, result| ..));` where Dart writes `final T? result = await showCupertinoDialog<T>(context: context, builder: builder);`.
-
 - Change: `CupertinoModalPopupRoute.barrierColor` is stored as an `AnyColor`, and the `ModalRoute` getter hands back its plain `Color`.
   Reason: language — `kCupertinoModalBarrierColor` is a `CupertinoDynamicColor` (colors.rs), and widgets' `ModalRoute::barrier_color` is a plain `Color`.
   Affect: `route.barrier_color(app, Some(color))` takes an `AnyColor`; an unresolved dynamic colour paints its own light value, as Dart's does when the route is pushed directly.
 
 ## sheet.rs → sheet.dart
-
-- Change: `show_cupertino_sheet` returns the pushed `AnyRoute` rather than a future of its result.
-  Reason: platform — there is no future to await (route.rs's show functions).
-  Affect: `let route = show_cupertino_sheet(app, context, Some(builder), ..); route.when_popped(app, Rc::new(|app, result| ..));` where Dart writes `final T? result = await showCupertinoSheet<T>(context: context, builder: builder);`.
 
 - Change: Dart's "either scrollableBuilder or builder" assert on `CupertinoSheetRoute` runs on the first build.
   Reason: language — neither builder is a required argument, so both arrive through fluent setters (the list_section.rs shape).

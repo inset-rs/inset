@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use reveal_animation::{Animatable, AnyAnimation, Curve, CurveTween, Curves, Tween};
 use reveal_embedder::{FontWeight, Offset};
-use reveal_foundation::{App, Handle, Listener};
+use reveal_foundation::{App, Handle, Task};
 use reveal_rendering::{BoxConstraints, MainAxisSize};
 use reveal_widgets::{
     BuildContext, Center, Column, ConstrainedBox, Expansible, ExpansibleController, FadeTransition,
@@ -241,7 +241,10 @@ impl CupertinoExpansionTileState {
         let header_key: KeyRef = Rc::new(app.get(self).header_key.clone());
         CupertinoListTile::new(title)
             .key(header_key)
-            .on_tap(Listener::handle_method(self, Self::on_header_tap))
+            .on_tap(Rc::new(move |app: &mut App| {
+                self.on_header_tap(app);
+                Task::ready(())
+            }))
             .trailing(trailing)
             .background_color_activated(CupertinoColors::TRANSPARENT)
             .into_widget()

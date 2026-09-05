@@ -13,7 +13,7 @@ use reveal_animation::{
     AnyAnimation, CurvedAnimation, Curves, Tween,
 };
 use reveal_embedder::{Canvas, Color, ImageFilter, Offset, Paint, Rect, TextDirection};
-use reveal_foundation::{App, Handle, Listener, ValueNotifier};
+use reveal_foundation::{App, CompleterFuture, Handle, Listener, ValueNotifier};
 use reveal_gestures::{
     DragEndDetails, DragGestureRecognizer, DragStartDetails, DragUpdateDetails,
     HorizontalDragGestureRecognizer, PointerDownEvent, RecognizerLeaf,
@@ -463,7 +463,7 @@ macro_rules! cupertino_route_transition_mixin_route_overrides {
         fn did_push(
             self: ::reveal_foundation::Handle<Self>,
             app: &mut ::reveal_foundation::App,
-        ) -> ::reveal_foundation::Handle<::reveal_scheduler::TickerFuture> {
+        ) -> ::reveal_scheduler::TickerFuture {
             ::reveal_widgets::ModalRoute::did_push(self, app)
         }
 
@@ -2445,9 +2445,8 @@ impl PopupRoute for CupertinoModalPopupRoute {}
 /// The `builder` argument typically builds a `CupertinoActionSheet` widget. Content below the
 /// widget is dimmed with a `ModalBarrier`.
 ///
-/// The returned route is the pushed [`CupertinoModalPopupRoute`]; register a callback on
-/// `AnyRoute::when_popped` for the value (if any) that was passed to `NavigatorState::pop` when
-/// the popup was closed.
+/// Returns a future that resolves to the value that was passed to [`Navigator::pop`] when the
+/// popup was closed.
 ///
 /// See also:
 ///
@@ -2468,7 +2467,7 @@ pub fn show_cupertino_modal_popup(
     semantics_dismissible: bool,
     route_settings: Option<RouteSettingsRef>,
     request_focus: Option<bool>,
-) -> AnyRoute {
+) -> CompleterFuture<RouteResult> {
     let resolved_barrier_color = CupertinoDynamicColor::resolve(&barrier_color, app, context);
     let route = CupertinoModalPopupRoute::new(app, builder)
         .barrier_color(app, Some(resolved_barrier_color))
@@ -2522,9 +2521,8 @@ fn build_cupertino_dialog_transitions(
 /// The `use_root_navigator` argument is used to determine whether to push the dialog to the
 /// [`Navigator`] furthest from or nearest to the given `context`.
 ///
-/// The returned route is the pushed [`CupertinoDialogRoute`]; register a callback on
-/// `AnyRoute::when_popped` for the value (if any) that was passed to `NavigatorState::pop` when
-/// the dialog was closed.
+/// Returns a future that resolves to the value (if any) that was passed to [`Navigator::pop`]
+/// when the dialog was closed.
 ///
 /// See also:
 ///
@@ -2545,7 +2543,7 @@ pub fn show_cupertino_dialog(
     barrier_dismissible: bool,
     route_settings: Option<RouteSettingsRef>,
     request_focus: Option<bool>,
-) -> AnyRoute {
+) -> CompleterFuture<RouteResult> {
     let route = CupertinoDialogRoute::new(app, builder, context)
         .barrier_dismissible(app, barrier_dismissible);
     if let Some(barrier_label) = barrier_label {
@@ -3126,7 +3124,7 @@ mod tests {
         let popup_key = GlobalKey::new();
         let key: KeyRef = Rc::new(popup_key.clone());
         let context = page_context.get().expect("the page built");
-        let route = show_cupertino_modal_popup(
+        let popped = show_cupertino_modal_popup(
             &mut app,
             context,
             Rc::new(move |_app, _context| {
@@ -3162,8 +3160,8 @@ mod tests {
         tap_at(&mut app, 200.0, 20.0);
         settle(&mut app, at);
         assert!(
-            !route.is_active(&app),
-            "the barrier tap dismissed the popup"
+            matches!(popped.peek(), Some(None)),
+            "the barrier tap dismissed the popup with no result"
         );
     }
 
@@ -3190,7 +3188,7 @@ mod tests {
 
         let dialog_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
         let context = page_context.get().expect("the page built");
-        let route = show_cupertino_dialog(
+        let popped = show_cupertino_dialog(
             &mut app,
             context,
             context_page(Rc::clone(&dialog_context)),
@@ -3219,7 +3217,7 @@ mod tests {
 
         settle(&mut app, at);
         assert_eq!(opacity.value(&app), 1.0, "the fade completes");
-        assert!(route.is_active(&app));
+        assert!(!popped.is_completed(), "the dialog is still up");
     }
 
     #[test]

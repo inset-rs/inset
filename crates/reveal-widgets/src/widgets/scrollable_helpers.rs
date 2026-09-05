@@ -6,9 +6,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use reveal_animation::Curves;
-use reveal_embedder::Clip;
-use reveal_foundation::{App, Handle};
-use reveal_painting::{AxisDirection, axis_direction_to_axis};
+use reveal_embedder::{Clip, Offset, Rect, Size};
+use reveal_foundation::{App, Handle, Listener, PRECISION_ERROR_TOLERANCE, Task};
+use reveal_painting::{Axis, AxisDirection, axis_direction_to_axis, transform_rect};
 
 use crate::framework::{BuildContext, State};
 use crate::widgets::actions::{Action, ActionData, ContextAction, Intent};
@@ -136,6 +136,220 @@ impl Debug for ScrollableDetails {
             description.push(format!("decorationClipBehavior: {clip:?}"));
         }
         write!(f, "ScrollableDetails({})", description.join(", "))
+    }
+}
+
+/// An auto scroller that scrolls the [`scrollable`](Self::scrollable) if a drag gesture drags
+/// close to its edge.
+///
+/// The scroll velocity is controlled by the [`velocity_scalar`](Self::velocity_scalar):
+///
+/// velocity = (distance of overscroll) * [`velocity_scalar`](Self::velocity_scalar).
+pub struct EdgeDraggingAutoScroller {
+    /// The `Scrollable` this auto scroller is scrolling.
+    pub scrollable: Handle<ScrollableState>,
+
+    /// Called when a scroll view is scrolled.
+    ///
+    /// The scroll view may be scrolled multiple times in a row until the drag
+    /// target no longer triggers the auto scroll. This callback will be called
+    /// in between each scroll.
+    pub on_scroll_view_scrolled: Option<Listener>,
+
+    /// The velocity scalar per pixel over scroll.
+    ///
+    /// It represents how the velocity scale with the over scroll distance. The
+    /// auto-scroll velocity = (distance of overscroll) * velocity_scalar.
+    pub velocity_scalar: f64,
+
+    /// Dart's `late` field: set by
+    /// [`start_auto_scroll_if_necessary`](Self::start_auto_scroll_if_necessary) before the
+    /// first scroll reads it.
+    drag_target_related_to_scroll_origin: Option<Rect>,
+
+    scrolling: bool,
+}
+
+impl EdgeDraggingAutoScroller {
+    /// Creates a auto scroller that scrolls the `scrollable`.
+    pub fn new(
+        app: &mut App,
+        scrollable: Handle<ScrollableState>,
+        on_scroll_view_scrolled: Option<Listener>,
+        velocity_scalar: f64,
+    ) -> Handle<EdgeDraggingAutoScroller> {
+        app.create(EdgeDraggingAutoScroller {
+            scrollable,
+            on_scroll_view_scrolled,
+            velocity_scalar,
+            drag_target_related_to_scroll_origin: None,
+            scrolling: false,
+        })
+    }
+
+    /// Whether the auto scroll is in progress.
+    pub fn scrolling(self: Handle<Self>, app: &App) -> bool {
+        app.get(self).scrolling
+    }
+
+    fn offset_extent(offset: Offset, scroll_direction: Axis) -> f64 {
+        match scroll_direction {
+            Axis::Horizontal => offset.dx(),
+            Axis::Vertical => offset.dy(),
+        }
+    }
+
+    fn size_extent(size: Size, scroll_direction: Axis) -> f64 {
+        match scroll_direction {
+            Axis::Horizontal => size.width(),
+            Axis::Vertical => size.height(),
+        }
+    }
+
+    fn axis_direction(self: Handle<Self>, app: &App) -> AxisDirection {
+        app.get(self).scrollable.axis_direction(app)
+    }
+
+    fn scroll_direction(self: Handle<Self>, app: &App) -> Axis {
+        axis_direction_to_axis(self.axis_direction(app))
+    }
+
+    /// Starts the auto scroll if the `drag_target` is close to the edge.
+    ///
+    /// The scroll starts to scroll the [`scrollable`](Self::scrollable) if the target rect is
+    /// close to the edge of the [`scrollable`](Self::scrollable); otherwise, it remains
+    /// stationary.
+    ///
+    /// If the scrollable is already scrolling, calling this method updates the
+    /// previous drag target to the new value and continues scrolling if necessary.
+    ///
+    /// If the [`scrollable`](Self::scrollable)'s [`ScrollableState::resolved_physics`] refuses
+    /// user-driven scrolling (for example `NeverScrollableScrollPhysics`), no
+    /// auto scroll is started and any in-flight auto scroll is stopped.
+    pub fn start_auto_scroll_if_necessary(self: Handle<Self>, app: &mut App, drag_target: Rect) {
+        let scrollable = app.get(self).scrollable;
+        let physics = scrollable.resolved_physics(app);
+        if let Some(physics) = physics
+            && !physics.should_accept_user_offset(&scrollable.position(app).copy_with(app))
+        {
+            self.stop_auto_scroll(app);
+            return;
+        }
+        let delta_to_origin = scrollable.delta_to_scroll_origin(app);
+        app.get_mut(self).drag_target_related_to_scroll_origin =
+            Some(drag_target.translate(delta_to_origin.dx(), delta_to_origin.dy()));
+        if app.get(self).scrolling {
+            // The change will be picked up in the next scroll.
+            return;
+        }
+        debug_assert!(!app.get(self).scrolling);
+        // Not awaited, as Dart's is not: the scroll continues on its own.
+        drop(self.scroll(app));
+    }
+
+    /// Stop any ongoing auto scrolling.
+    pub fn stop_auto_scroll(self: Handle<Self>, app: &mut App) {
+        app.get_mut(self).scrolling = false;
+    }
+
+    /// Dart's `async _scroll`: one scroll step now, and the decision about the next one once
+    /// its animation has ended.
+    fn scroll(self: Handle<Self>, app: &mut App) -> Task<()> {
+        let scrollable = app.get(self).scrollable;
+        let scroll_render_box = scrollable
+            .context(app)
+            .find_render_object(app)
+            .and_then(|object| object.as_box())
+            .expect("a Scrollable's render object is a RenderBox");
+        let transform = scroll_render_box.as_object().get_transform_to(app, None);
+        let size = scroll_render_box.size(app);
+        let global_rect = transform_rect(
+            &transform,
+            Rect::from_ltwh(0.0, 0.0, size.width(), size.height()),
+        );
+        let drag_target_related_to_scroll_origin = app
+            .get(self)
+            .drag_target_related_to_scroll_origin
+            .expect("startAutoScrollIfNecessary sets the drag target before a scroll");
+        let transformed_drag_target =
+            transform_rect(&transform, drag_target_related_to_scroll_origin);
+
+        debug_assert!(
+            (global_rect.size().width() + PRECISION_ERROR_TOLERANCE)
+                >= transformed_drag_target.size().width()
+                && (global_rect.size().height() + PRECISION_ERROR_TOLERANCE)
+                    >= transformed_drag_target.size().height(),
+            "Drag target size is larger than scrollable size, which may cause bouncing"
+        );
+        app.get_mut(self).scrolling = true;
+        let mut new_offset: Option<f64> = None;
+        const OVER_DRAG_MAX: f64 = 20.0;
+
+        let delta_to_origin = scrollable.delta_to_scroll_origin(app);
+        let viewport_origin = global_rect
+            .top_left()
+            .translate(delta_to_origin.dx(), delta_to_origin.dy());
+        let scroll_direction = self.scroll_direction(app);
+        let viewport_start = Self::offset_extent(viewport_origin, scroll_direction);
+        let viewport_end = viewport_start + Self::size_extent(global_rect.size(), scroll_direction);
+
+        let proxy_start = Self::offset_extent(
+            drag_target_related_to_scroll_origin.top_left(),
+            scroll_direction,
+        );
+        let proxy_end = Self::offset_extent(
+            drag_target_related_to_scroll_origin.bottom_right(),
+            scroll_direction,
+        );
+        let position = scrollable.position(app);
+        let pixels = position.pixels(app);
+        let (min_scroll_extent, max_scroll_extent) = (
+            position.min_scroll_extent(app),
+            position.max_scroll_extent(app),
+        );
+        match self.axis_direction(app) {
+            AxisDirection::Up | AxisDirection::Left => {
+                if proxy_end > viewport_end && pixels > min_scroll_extent {
+                    let over_drag = (proxy_end - viewport_end).min(OVER_DRAG_MAX);
+                    new_offset = Some(min_scroll_extent.max(pixels - over_drag));
+                } else if proxy_start < viewport_start && pixels < max_scroll_extent {
+                    let over_drag = (viewport_start - proxy_start).min(OVER_DRAG_MAX);
+                    new_offset = Some(max_scroll_extent.min(pixels + over_drag));
+                }
+            }
+            AxisDirection::Right | AxisDirection::Down => {
+                if proxy_start < viewport_start && pixels > min_scroll_extent {
+                    let over_drag = (viewport_start - proxy_start).min(OVER_DRAG_MAX);
+                    new_offset = Some(min_scroll_extent.max(pixels - over_drag));
+                } else if proxy_end > viewport_end && pixels < max_scroll_extent {
+                    let over_drag = (proxy_end - viewport_end).min(OVER_DRAG_MAX);
+                    new_offset = Some(max_scroll_extent.min(pixels + over_drag));
+                }
+            }
+        }
+
+        let Some(new_offset) = new_offset.filter(|new_offset| (new_offset - pixels).abs() >= 1.0)
+        else {
+            // Drag should not trigger scroll.
+            app.get_mut(self).scrolling = false;
+            return Task::ready(());
+        };
+        let velocity_scalar = app.get(self).velocity_scalar;
+        let duration = Duration::from_millis((1000.0 / velocity_scalar).round() as u64);
+        let animated = position.animate_to(app, new_offset, duration, Curves::linear());
+        app.spawn(async move |cx| {
+            animated.await;
+            let scrolling = cx.update(|app| {
+                if let Some(on_scroll_view_scrolled) = app.get(self).on_scroll_view_scrolled.clone()
+                {
+                    on_scroll_view_scrolled.call(app);
+                }
+                app.get(self).scrolling
+            });
+            if scrolling {
+                cx.update(|app| self.scroll(app)).await;
+            }
+        })
     }
 }
 
@@ -505,6 +719,162 @@ mod tests {
         app.drain_microtasks();
         SchedulerBinding::handle_draw_frame(app);
         app.drain_microtasks();
+    }
+
+    /// A frame at `at`, then the checkpoint where an auto scroller's continuation runs.
+    fn pump_frame_and_checkpoint(cell: &AppCell, at: Duration) {
+        pump_frame(&mut cell.borrow_mut(), at);
+        cell.checkpoint();
+    }
+
+    /// A drag over the mounted scrollable, the way `ReorderableList` drives an auto scroller.
+    struct AutoScrollDrag {
+        scroller: Handle<EdgeDraggingAutoScroller>,
+        /// How many scrolls `on_scroll_view_scrolled` reported.
+        scrolls: Rc<Cell<usize>>,
+        /// Cleared when the drag ends; the callback re-submits the target only while set.
+        dragging: Rc<Cell<bool>>,
+    }
+
+    /// An auto scroller whose `on_scroll_view_scrolled` counts the scrolls and, like a drag
+    /// whose pointer stays put, re-submits the same on-screen drag target after each one
+    /// while the drag lasts.
+    fn auto_scroll_drag(
+        app: &mut App,
+        state: Handle<ScrollableState>,
+        drag_target: Rect,
+    ) -> AutoScrollDrag {
+        let scrolls = Rc::new(Cell::new(0));
+        let dragging = Rc::new(Cell::new(true));
+        let scroller_slot: Rc<Cell<Option<Handle<EdgeDraggingAutoScroller>>>> = Rc::default();
+        let counter = Rc::clone(&scrolls);
+        let in_progress = Rc::clone(&dragging);
+        let slot = Rc::clone(&scroller_slot);
+        let on_scrolled = Listener::new(move |app| {
+            counter.set(counter.get() + 1);
+            if !in_progress.get() {
+                return;
+            }
+            if let Some(scroller) = slot.get() {
+                scroller.start_auto_scroll_if_necessary(app, drag_target);
+            }
+        });
+        // 50 pixels per second: a 10 pixel overdrag scrolls 10 pixels in 20 milliseconds.
+        let scroller = EdgeDraggingAutoScroller::new(app, state, Some(on_scrolled), 50.0);
+        scroller_slot.set(Some(scroller));
+        AutoScrollDrag {
+            scroller,
+            scrolls,
+            dragging,
+        }
+    }
+
+    /// A drag target hanging 10 pixels over the trailing edge scrolls the view 10 pixels at a
+    /// time, each step after the previous one's animation, until told to stop.
+    #[test]
+    fn an_auto_scroller_keeps_scrolling_while_the_drag_target_hangs_over_the_edge() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let (_harness, state, _context) = mount_scroll_action(&mut app, |scrollable| scrollable);
+        let drag_target = Rect::from_ltwh(0.0, VIEW_HEIGHT - 10.0, 50.0, 20.0);
+        let AutoScrollDrag {
+            scroller,
+            scrolls,
+            dragging,
+        } = auto_scroll_drag(&mut app, state, drag_target);
+        assert!(!scroller.scrolling(&app));
+
+        scroller.start_auto_scroll_if_necessary(&mut app, drag_target);
+        assert!(scroller.scrolling(&app));
+        assert_eq!(
+            state.position(&app).pixels(&app),
+            0.0,
+            "the animation has not ticked"
+        );
+        drop(app);
+
+        // A scroll takes three frames: one to start its ticker, one to reach the target and
+        // one past the duration to end; the next starts at the checkpoint after that.
+        for frame in 0..=8 {
+            pump_frame_and_checkpoint(&cell, Duration::from_millis(20 * frame));
+            let app = cell.borrow();
+            assert!(
+                state.position(&app).pixels(&app) >= 10.0 * scrolls.get() as f64,
+                "every reported scroll moved 10 pixels"
+            );
+        }
+        let app = cell.borrow();
+        assert_eq!(scrolls.get(), 3);
+        assert!(scroller.scrolling(&app));
+        drop(app);
+
+        // The drag ends: the scroll in flight still ends and reports; no further one starts.
+        dragging.set(false);
+        scroller.stop_auto_scroll(&mut cell.borrow_mut());
+        assert!(!scroller.scrolling(&cell.borrow()));
+        for frame in 9..=16 {
+            pump_frame_and_checkpoint(&cell, Duration::from_millis(20 * frame));
+        }
+        let app = cell.borrow();
+        assert_eq!(scrolls.get(), 4);
+        assert_eq!(state.position(&app).pixels(&app), 40.0);
+        assert!(!scroller.scrolling(&app));
+    }
+
+    /// A reversed scrollable scrolls when the target hangs over its leading (top) edge, since
+    /// that is where its content continues.
+    #[test]
+    fn an_auto_scroller_follows_the_axis_direction() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let (_harness, state, _context) = mount_scroll_action(&mut app, |scrollable| {
+            scrollable.axis_direction(AxisDirection::Up)
+        });
+        let over_the_top = Rect::from_ltwh(0.0, -10.0, 50.0, 20.0);
+        let AutoScrollDrag {
+            scroller, scrolls, ..
+        } = auto_scroll_drag(&mut app, state, over_the_top);
+
+        scroller.start_auto_scroll_if_necessary(&mut app, over_the_top);
+        assert!(scroller.scrolling(&app));
+        drop(app);
+        for frame in 0..=2 {
+            pump_frame_and_checkpoint(&cell, Duration::from_millis(20 * frame));
+        }
+        let app = cell.borrow();
+        assert_eq!(scrolls.get(), 1);
+        assert_eq!(state.position(&app).pixels(&app), 10.0);
+    }
+
+    /// A target inside the viewport starts nothing, and physics that refuse user scrolling
+    /// stop an auto scroll before it begins.
+    #[test]
+    fn an_auto_scroller_stays_idle_for_a_target_inside_the_viewport_or_refusing_physics() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let (_harness, state, _context) = mount_scroll_action(&mut app, |scrollable| scrollable);
+        let inside = Rect::from_ltwh(0.0, 50.0, 50.0, 20.0);
+        let AutoScrollDrag {
+            scroller, scrolls, ..
+        } = auto_scroll_drag(&mut app, state, inside);
+        scroller.start_auto_scroll_if_necessary(&mut app, inside);
+        assert!(
+            !scroller.scrolling(&app),
+            "the drag should not trigger a scroll"
+        );
+        drop(app);
+        pump_frame_and_checkpoint(&cell, Duration::ZERO);
+        assert_eq!(scrolls.get(), 0);
+
+        let mut app = cell.borrow_mut();
+        let (_harness, state, _context) = mount_scroll_action(&mut app, |scrollable| {
+            scrollable.physics(Rc::new(NeverScrollableScrollPhysics::new()))
+        });
+        let over_the_edge = Rect::from_ltwh(0.0, VIEW_HEIGHT - 10.0, 50.0, 20.0);
+        let AutoScrollDrag { scroller, .. } = auto_scroll_drag(&mut app, state, over_the_edge);
+        scroller.start_auto_scroll_if_necessary(&mut app, over_the_edge);
+        assert!(!scroller.scrolling(&app));
+        assert_eq!(state.position(&app).pixels(&app), 0.0);
     }
 
     #[test]

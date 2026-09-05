@@ -6,7 +6,8 @@ use std::time::Duration;
 use reveal_animation::{AnimationBehavior, AnimationController, Curve};
 use reveal_embedder::PointerDeviceKind;
 use reveal_foundation::{
-    App, Handle, HandleId, ListenableObject, Listener, PRECISION_ERROR_TOLERANCE,
+    App, Completer, CompleterFuture, Handle, HandleId, ListenableObject, Listener,
+    PRECISION_ERROR_TOLERANCE,
 };
 use reveal_gestures::{DragEndDetails, DragObject, DragStartDetails, DragUpdateDetails};
 use reveal_painting::{AxisDirection, axis_direction_is_reversed};
@@ -1264,6 +1265,7 @@ impl ScrollActivity for BallisticScrollActivity {
 ///  * [`BallisticScrollActivity`], which sets into motion a scroll view.
 pub struct DrivenScrollActivity {
     scroll_activity: ScrollActivityData,
+    completer: Completer<()>,
     controller: Handle<AnimationController>,
 }
 
@@ -1280,6 +1282,7 @@ impl DrivenScrollActivity {
         vsync: impl TickerProvider,
     ) -> Handle<DrivenScrollActivity> {
         debug_assert!(duration > Duration::ZERO);
+        let completer = Completer::new();
         let controller = AnimationController::create_unbounded(
             app,
             from,
@@ -1290,6 +1293,7 @@ impl DrivenScrollActivity {
         );
         let this = app.create(DrivenScrollActivity {
             scroll_activity: ScrollActivityData::new(delegate),
+            completer,
             controller,
         });
         controller.add_listener(app, Listener::handle_method(this, Self::tick));
@@ -1307,6 +1311,7 @@ impl DrivenScrollActivity {
         simulation: Box<dyn Simulation>,
         vsync: impl TickerProvider,
     ) -> Handle<DrivenScrollActivity> {
+        let completer = Completer::new();
         let controller = AnimationController::create_unbounded(
             app,
             0.0,
@@ -1317,6 +1322,7 @@ impl DrivenScrollActivity {
         );
         let this = app.create(DrivenScrollActivity {
             scroll_activity: ScrollActivityData::new(delegate),
+            completer,
             controller,
         });
         controller.add_listener(app, Listener::handle_method(this, Self::tick));
@@ -1324,6 +1330,15 @@ impl DrivenScrollActivity {
         // Won't trigger if we dispose the controller before it completes.
         done.when_complete(app, Listener::handle_method(this, Self::end));
         this
+    }
+
+    /// A future that completes when the activity stops.
+    ///
+    /// For example, this future will complete if the animation reaches the end
+    /// or if the user interacts with the scroll view in way that causes the
+    /// animation to stop before it reaches the end.
+    pub fn done(self: Handle<Self>, app: &App) -> CompleterFuture<()> {
+        app.get(self).completer.future()
     }
 
     fn tick(self: Handle<Self>, app: &mut App) {
@@ -1383,6 +1398,8 @@ impl ScrollActivity for DrivenScrollActivity {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
+        let completer = app.get(self).completer.clone();
+        completer.complete(app, ());
         app.get(self).controller.dispose(app);
         ScrollActivityBase::dispose(self, app);
     }

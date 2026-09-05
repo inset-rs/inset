@@ -1,9 +1,14 @@
 //! Flutter counterpart: `scheduler/ticker.dart`.
 
+use std::cell::{Cell, OnceCell};
+use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::rc::Rc;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
-use reveal_foundation::{App, Handle, Listener};
+use reveal_foundation::{App, Completer, CompleterFuture, Handle, Listener};
 
 use crate::binding::{FrameCallback, SchedulerBinding, SchedulerPhase};
 
@@ -64,7 +69,7 @@ impl<T: TickerProvider + ?Sized> TickerProvider for Rc<T> {
 /// (for example, an `AnimationController`), and the muted property is
 /// controlled by the [`TickerProvider`] that created the ticker.
 pub struct Ticker {
-    future: Option<Handle<TickerFuture>>,
+    future: Option<TickerFuture>,
 
     /// If true, this ticker will request frames using
     /// [`SchedulerBinding::schedule_forced_frame`] instead of
@@ -245,15 +250,15 @@ impl Ticker {
     ///
     /// In debug builds, if the ticker is already active — Dart throws a
     /// `FlutterError` from an assert block here.
-    pub fn start(self: Handle<Self>, app: &mut App) -> Handle<TickerFuture> {
+    pub fn start(self: Handle<Self>, app: &mut App) -> TickerFuture {
         debug_assert!(
             !self.is_active(app),
             "A ticker was started twice. A ticker that is already active cannot be started again without first stopping it."
         );
         debug_assert!(app.get(self).start_time.is_none());
 
-        let future = TickerFuture::new(app);
-        app.get_mut(self).future = Some(future);
+        let future = TickerFuture::new();
+        app.get_mut(self).future = Some(future.clone());
         if self.should_schedule_tick(app) {
             self.schedule_tick(app, false);
         }
@@ -291,7 +296,7 @@ impl Ticker {
 
         self.unschedule_tick(app);
         if canceled {
-            local_future.mark_canceled(app);
+            local_future.mark_canceled(app, Some(self));
         } else {
             local_future.mark_complete(app);
         }
@@ -349,7 +354,7 @@ impl Ticker {
         if let Some(local_future) = app.get_mut(self).future.take() {
             debug_assert!(!self.is_active(app));
             self.unschedule_tick(app);
-            local_future.mark_canceled(app);
+            local_future.mark_canceled(app, Some(self));
         }
         #[cfg(debug_assertions)]
         {
@@ -363,98 +368,158 @@ impl Ticker {
 
 /// An object representing an ongoing [`Ticker`] sequence.
 ///
-/// The [`Ticker::start`] method returns a [`TickerFuture`]. The
-/// [`TickerFuture`] will complete successfully if the [`Ticker`] is stopped
-/// using [`Ticker::stop`] with `canceled` false.
+/// The [`Ticker::start`] method returns a [`TickerFuture`]. The [`TickerFuture`] will
+/// complete successfully if the [`Ticker`] is stopped using [`Ticker::stop`] with `canceled`
+/// false. If the [`Ticker`] is disposed without being stopped, or if it is stopped with
+/// `canceled` true, then this future will never complete.
 ///
-/// If the [`Ticker`] is disposed without being stopped, or if it is stopped
-/// with `canceled` true, then the [`when_complete`] callbacks never run —
-/// register with [`when_complete_or_cancel`] to observe both outcomes.
+/// A `Future<Output = ()>`, as Dart's implements `Future<void>`: `await` it in a task, or
+/// register a callback with [`when_complete`](Self::when_complete). Clones share the one
+/// sequence, as Dart's references to the one object do.
 ///
-/// [`when_complete`]: TickerFuture::when_complete
-/// [`when_complete_or_cancel`]: TickerFuture::when_complete_or_cancel
+/// To be notified when the sequence is canceled, use [`or_cancel`](Self::or_cancel) or
+/// [`when_complete_or_cancel`](Self::when_complete_or_cancel).
+#[derive(Clone)]
 pub struct TickerFuture {
-    // None means unresolved, true means complete, false means canceled.
-    completed: Option<bool>,
-    primary_callbacks: Vec<Listener>,
-    or_cancel_callbacks: Vec<Listener>,
+    shared: Rc<TickerFutureState>,
+}
+
+/// Written once each: the outcome, and the secondary completer `or_cancel` creates on first
+/// use. No runtime borrow can conflict here.
+struct TickerFutureState {
+    primary: Completer<()>,
+    secondary: OnceCell<Completer<Result<(), TickerCanceled>>>,
+    /// `None` means unresolved, `Some(true)` complete, `Some(false)` canceled.
+    completed: Cell<Option<bool>>,
 }
 
 impl TickerFuture {
-    fn new(app: &mut App) -> Handle<TickerFuture> {
-        app.create(TickerFuture {
-            completed: None,
-            primary_callbacks: Vec::new(),
-            or_cancel_callbacks: Vec::new(),
-        })
+    fn new() -> TickerFuture {
+        TickerFuture {
+            shared: Rc::new(TickerFutureState {
+                primary: Completer::new(),
+                secondary: OnceCell::new(),
+                completed: Cell::new(None),
+            }),
+        }
     }
 
-    /// Creates a [`TickerFuture`] instance that represents an
-    /// already-complete [`Ticker`] sequence.
+    /// Creates a [`TickerFuture`] instance that represents an already-complete [`Ticker`]
+    /// sequence.
     ///
-    /// This is useful for implementing objects that normally defer to a
-    /// [`Ticker`] but sometimes can skip the ticker because the animation is
-    /// of zero duration, but which still need to represent the completed
-    /// animation in the form of a [`TickerFuture`].
-    pub fn complete(app: &mut App) -> Handle<TickerFuture> {
-        let this = TickerFuture::new(app);
-        this.mark_complete(app);
-        this
+    /// This is useful for implementing objects that normally defer to a [`Ticker`] but
+    /// sometimes can skip the ticker because the animation is of zero duration, but which
+    /// still need to represent the completed animation in the form of a [`TickerFuture`].
+    pub fn complete() -> TickerFuture {
+        TickerFuture {
+            shared: Rc::new(TickerFutureState {
+                primary: Completer::completed(()),
+                secondary: OnceCell::new(),
+                completed: Cell::new(Some(true)),
+            }),
+        }
     }
 
     /// Dart's private `_complete`, called by [`Ticker::stop`].
-    fn mark_complete(self: Handle<Self>, app: &mut App) {
-        debug_assert!(app.get(self).completed.is_none());
-        let future = app.get_mut(self);
-        future.completed = Some(true);
-        let callbacks: Vec<Listener> = future
-            .primary_callbacks
-            .drain(..)
-            .chain(future.or_cancel_callbacks.drain(..))
-            .collect();
-        for callback in callbacks {
-            app.schedule_microtask(callback);
+    fn mark_complete(&self, app: &mut App) {
+        debug_assert!(self.shared.completed.get().is_none());
+        self.shared.completed.set(Some(true));
+        self.shared.primary.complete(app, ());
+        if let Some(secondary) = self.shared.secondary.get() {
+            secondary.complete(app, Ok(()));
         }
     }
 
-    /// Dart's private `_cancel`, called by [`Ticker::stop`] with
-    /// `canceled` and by [`Ticker::dispose`].
-    fn mark_canceled(self: Handle<Self>, app: &mut App) {
-        debug_assert!(app.get(self).completed.is_none());
-        let future = app.get_mut(self);
-        future.completed = Some(false);
-        // The primary future never resolves on cancellation: those callbacks
-        // are dropped, as Dart's primary completer is left hanging.
-        future.primary_callbacks.clear();
-        let callbacks = std::mem::take(&mut future.or_cancel_callbacks);
-        for callback in callbacks {
-            app.schedule_microtask(callback);
+    /// Dart's private `_cancel`, called by [`Ticker::stop`] with `canceled` and by
+    /// [`Ticker::dispose`].
+    fn mark_canceled(&self, app: &mut App, ticker: Option<Handle<Ticker>>) {
+        debug_assert!(self.shared.completed.get().is_none());
+        self.shared.completed.set(Some(false));
+        if let Some(secondary) = self.shared.secondary.get() {
+            secondary.complete(app, Err(TickerCanceled { ticker }));
         }
     }
 
-    /// Runs `callback` when the ticker stops without being canceled — the
-    /// counterpart of `.then`/`.whenComplete` on the primary future.
+    /// A future that resolves when this future resolves or with a [`TickerCanceled`] when
+    /// the ticker is canceled.
     ///
-    /// On an already-complete future the callback still runs through the
-    /// microtask queue, never inline, as a Dart `.then` on a resolved future
-    /// does. On an already-canceled future it never runs.
-    pub fn when_complete(self: Handle<Self>, app: &mut App, callback: Listener) {
-        match app.get(self).completed {
-            None => app.get_mut(self).primary_callbacks.push(callback),
-            Some(true) => app.schedule_microtask(callback),
-            Some(false) => {}
-        }
+    /// Until this is first called, canceling the ticker records no error anywhere; from
+    /// then on a cancellation resolves the returned future with `Err`, which the awaiting
+    /// task is expected to handle.
+    pub fn or_cancel(&self) -> CompleterFuture<Result<(), TickerCanceled>> {
+        self.shared
+            .secondary
+            .get_or_init(|| match self.shared.completed.get() {
+                None => Completer::new(),
+                Some(true) => Completer::completed(Ok(())),
+                Some(false) => Completer::completed(Err(TickerCanceled { ticker: None })),
+            })
+            .future()
     }
 
-    /// Calls `callback` either when this future resolves or when the ticker
-    /// is canceled.
-    pub fn when_complete_or_cancel(self: Handle<Self>, app: &mut App, callback: Listener) {
-        match app.get(self).completed {
-            None => app.get_mut(self).or_cancel_callbacks.push(callback),
-            Some(_) => app.schedule_microtask(callback),
+    /// Dart's `then` / `whenComplete`: runs `callback` on the microtask queue after the
+    /// ticker stops without being canceled, never inline — a `.then` on an already resolved
+    /// future still runs asynchronously. On a canceled ticker it never runs.
+    pub fn when_complete(&self, app: &mut App, callback: Listener) {
+        self.shared
+            .primary
+            .future()
+            .then(app, move |app, ()| callback.call(app));
+    }
+
+    /// Calls `callback` either when this future resolves or when the ticker is canceled.
+    ///
+    /// Calling this method registers a handler for the [`or_cancel`](Self::or_cancel) error,
+    /// so canceling the ticker afterwards leaves no unobserved cancellation.
+    pub fn when_complete_or_cancel(&self, app: &mut App, callback: Listener) {
+        self.or_cancel().then(app, move |app, _| callback.call(app));
+    }
+}
+
+impl Future for TickerFuture {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let mut primary = self.shared.primary.future();
+        Pin::new(&mut primary).poll(cx)
+    }
+}
+
+impl fmt::Debug for TickerFuture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let state = match self.shared.completed.get() {
+            None => "active",
+            Some(true) => "complete",
+            Some(false) => "canceled",
+        };
+        write!(f, "TickerFuture({state})")
+    }
+}
+
+/// Exception thrown by [`Ticker`] objects on the [`TickerFuture::or_cancel`] future when
+/// the ticker is canceled.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TickerCanceled {
+    /// Reference to the [`Ticker`] object that was canceled.
+    ///
+    /// This may be `None` in the case that the future created for
+    /// [`TickerFuture::or_cancel`] was created after the ticker was canceled.
+    pub ticker: Option<Handle<Ticker>>,
+}
+
+impl fmt::Display for TickerCanceled {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.ticker {
+            Some(ticker) => write!(f, "This ticker was canceled: {ticker:?}"),
+            None => write!(
+                f,
+                "The ticker was canceled before the \"orCancel\" property was first used."
+            ),
         }
     }
 }
+
+impl std::error::Error for TickerCanceled {}
 
 #[cfg(test)]
 mod tests {
@@ -652,7 +717,7 @@ mod tests {
     fn a_zero_duration_sequence_is_already_complete() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let future = TickerFuture::complete(&mut app);
+        let future = TickerFuture::complete();
 
         let ran = Rc::new(Cell::new(false));
         future.when_complete(

@@ -15,6 +15,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - widgets/scroll_simulation.rs → scroll_simulation.dart
 - widgets/scroll_metrics.rs → scroll_metrics.dart
 - widgets/primary_scroll_controller.rs → primary_scroll_controller.dart
+- widgets/scroll_controller.rs → scroll_controller.dart
 - widgets/single_child_scroll_view.rs → single_child_scroll_view.dart
 - widgets/pages.rs → pages.dart
 - widgets/pop_scope.rs → pop_scope.dart
@@ -218,10 +219,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## widgets/localizations.rs → localizations.dart
 
-- Change: `LocalizationsDelegate::load` returns its `Rc<T>` at once and the state's load finishes synchronously; the branch that defers the first frame for a pending future is gone.
-  Reason: platform — no futures; every delegate answers synchronously, as Dart's `SynchronousFuture` ones do.
-  Affect: a delegate that must read files loads them before it is handed to `Localizations`.
-
 ## widgets/default_text_editing_shortcuts.rs → default_text_editing_shortcuts.dart
 
 - Change: Dart's `static final` shortcut tables are functions that build a fresh `ShortcutMap` per call (the two that read the target platform take `App`), and `intent_for_macos_selector` builds its intent per call.
@@ -284,10 +281,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — no inheritance, and an erased reference to an arena object is an id plus a static table, or an `Rc` over the handle.
   Affect: an activity that overrides `dispose` ends with `ScrollActivityBase::dispose(self, app)`; `ScrollPosition::hold` hands back `Rc::new(activity)`.
 
-- Change: nothing in this crate returns a `Future`: `DrivenScrollActivity` has no `done`, and the `animate_to` / `ensure_visible` family (scroll_position.rs, scroll_controller.rs, scrollable.rs, draggable_scrollable_sheet.rs) returns nothing.
-  Reason: language — there is no `Future<void>`; rendering's `viewport_offset.rs` records the same for `animate_to`.
-  Affect: a caller cannot await a scroll; listen to `ScrollPosition::is_scrolling_notifier` or a `ScrollEndNotification`. navigator.rs records the callback form routes use instead.
-
 ## widgets/scroll_position.rs → scroll_position.dart
 
 - Change: `ScrollPosition` is a trait over `ViewportOffset` with a `ScrollPositionData` bag, its shared bodies on the `ScrollPositionBase` namespace and the type-erased handle `AnyScrollPosition`; Dart's constructor body is `ScrollPositionBase::init`, called right after `App::create`, and a leaf's `impl ViewportOffset` forwards the members `ScrollPosition` overrides to the base.
@@ -311,10 +304,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: `absorb`'s `other is! ScrollPositionWithSingleContext` is a downcast to the leaf's own type rather than a test for the base class.
   Reason: language — the arena answers only the type a handle was created with, and the type-erased handle's vtable carries no "is a single-context position" slot.
   Affect: a position that absorbs one of a different leaf type goes idle and keeps its own scroll direction and drag, where Dart hands both over; every position a `Scrollable` replaces is made by the same controller, so the leaf types match in practice.
-
-## widgets/scroll_controller.rs → scroll_controller.dart
-
-- `animate_to` returns nothing; see scroll_activity.rs's future entry.
 
 ## widgets/scroll_configuration.rs → scroll_configuration.dart
 
@@ -345,8 +334,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: a pointer scroll signal is resolved through gestures' `PointerSignalResolver`, but the host is not told the event was handled.
   Reason: platform — `PointerEvent.respond` is omitted on signal events (reveal-gestures records it).
   Affect: an embedder that would scroll the page itself is not told the scrollable took the event.
-
-- `Scrollable::ensure_visible` returns nothing; see scroll_activity.rs's future entry.
 
 ## widgets/scroll_view.rs → scroll_view.dart
 
@@ -494,9 +481,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## widgets/navigator.rs → navigator.dart
 
-- Change: Dart's `Future<T?>` results are completion callbacks: `Route.popped` is `AnyRoute::when_popped(app, callback)`, the dispose completer `when_disposed`, and `TransitionRoute.completed` `when_completed`; the callback runs through a microtask, never inline, as a Dart `.then` on a resolved future does. `NavigatorState::push` and every `push*` / `pop_and_push*` / `replace*` return the route they installed instead of a future, the `restorable_*` forms the restoration ID Dart returns, and `Route.willPop` and `maybe_pop` answer within the call.
-  Reason: platform — there is no event loop, so nothing can await; the host drives the frame and the microtask queue lives on `App` (scroll_activity.rs's future entry; scheduler's `TickerFuture` has the same shape).
-  Affect: `let route = navigator.push(app, MyRoute::new(app).as_route()); route.when_popped(app, Rc::new(|app, result| ..));` where Dart writes `final T? result = await Navigator.push(context, route);`.
+- Change: `Route::will_pop` and `NavigatorState::maybe_pop` answer within the call, where Dart returns a future.
+  Reason: language — the only asynchrony in Dart's deprecated `willPop` is the `_willPopCallbacks` loop it awaits, which is deferred with `WillPopScope` (see `## Deferred`), so nothing remains for a future to wait on.
+  Affect: `if navigator.maybe_pop(app, result) { .. }` where Dart writes `if (await navigator.maybePop(result))`; when the callback loop is ported, both become `CompleterFuture`s.
 
 - Change: Dart's type argument `T` on `Route<T>` / `Page<T>` / `TransitionDelegate<T>` is erased: a route result is `RouteResult = Option<Rc<dyn Any>>`.
   Reason: language — the navigator holds routes of mixed result types in one history, and a type-erased handle cannot carry a per-route type parameter.
@@ -531,8 +518,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: `PopEntry` takes `&self` and the `App`, implemented for a handle through `PopEntryObject`, and a `ModalRoute` holds each registered entry as an `Rc<dyn PopEntry>` compared by identity.
   Reason: language — every pop entry lives in the arena, a Rust callback cannot capture what it mutates, and an `Rc` has no `==` by object identity.
   Affect: a state that registers itself mints `Rc::new(self)` once and unregisters with that same `Rc`, as `PopScopeState` does.
-
-- `show_general_dialog` returns the pushed `AnyRoute` where Dart returns a future; see navigator.rs's future entry.
 
 - Change: `RawDialogRoute.buildPage` returns the page builder's widget directly, and there is no `anchorPoint`.
   Reason: platform — the `Semantics` and `DisplayFeatureSubScreen` wrappers Dart adds are deferred, and `anchorPoint` exists only to feed the latter.
@@ -591,8 +576,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: language — Dart's `List` `==` is identity, and a `Vec` has none.
   Affect: rebuilding a snapping sheet with a fresh list of the same sizes does not schedule the post-frame snap Dart schedules; the snap targets are the same either way, so the snap it skips would move the sheet nowhere new.
 
-- `DraggableScrollableController::animate_to` returns nothing; see scroll_activity.rs's future entry.
-
 ## Deferred
 
 - focus_manager.rs: `FocusManager.listenToApplicationLifecycleChangesIfSupported`, `_AppLifecycleListener`, `_appLifecycleChange`, `_respondToLifecycleChange`, `_suspendedNode`. Trigger: `WidgetsBindingObserver.didChangeAppLifecycleState`.
@@ -646,7 +629,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - viewport.rs: `_ViewportElement.debugVisitOnstageChildren` and both viewports' `debugFillProperties`. Trigger: diagnostics.
 - `ScrollContext.setSemanticsActions`; scrollable.rs: `_ScrollSemantics` / `_RenderScrollSemantics`, `Scrollable.excludeFromSemantics` and `semanticChildCount`, `ScrollableState.setSemanticsActions`, `_scrollSemanticsKey` and `_handleScrollMetricsNotification`, the `Semantics` wrapper `build` puts around the `IgnorePointer`; scroll_position.rs: `_updateSemanticActions` and `_semanticActions`. Trigger: accessibility (do not stub).
 - scrollable.rs: `_ScrollableSelectionHandler`, `_ScrollableSelectionHandlerState`, `_ScrollableSelectionContainerDelegate`, `_getDeltaToScrollOrigin`. Trigger: `SelectionContainer` / `SelectionRegistrar`.
-- scrollable_helpers.rs: `EdgeDraggingAutoScroller`. Trigger: a completion signal for `ScrollPosition::animate_to` — Dart's `_scroll` awaits the animation before deciding whether to scroll again, and `animate_to` returns nothing here.
 - scroll_configuration.rs: the `GlowingOverscrollIndicator` `buildOverscrollIndicator` would build, with `OverscrollIndicatorNotification`; `PageScrollPhysics`. Trigger: `overscroll_indicator.dart`; `page_view.dart`.
 - scrollable.rs / scroll_configuration.rs / primary_scroll_controller.rs: `debugFillProperties` on `Scrollable`, `ScrollableState`, `ScrollConfiguration` and `PrimaryScrollController`; `ScrollableDetails.hashCode` (no `Hash` over `Rc<dyn ScrollPhysics>`). Trigger: diagnostics; a map keyed by scrollable details.
 - scroll_view.rs: `GridView` and its four constructors. Trigger: `RenderSliverGrid`.

@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use reveal_animation::{Curve, Curves};
 use reveal_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, Listenable, ListenableObject,
-    Listener,
+    App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, HandleId, Listenable,
+    ListenableObject, Listener,
 };
 
 /// The direction of a scroll, relative to the positive scroll offset.
@@ -133,6 +133,9 @@ pub trait ViewportOffset: ChangeNotifier + Sized {
 
     /// Animates [`pixels`](Self::pixels) from its current value to the given value.
     ///
+    /// The returned future will complete when the animation ends, whether it completed
+    /// successfully or whether it was interrupted prematurely.
+    ///
     /// The duration must not be zero. To jump to a particular value without an animation, use
     /// [`jump_to`](Self::jump_to).
     fn animate_to(
@@ -141,7 +144,7 @@ pub trait ViewportOffset: ChangeNotifier + Sized {
         to: f64,
         duration: Duration,
         curve: Rc<dyn Curve>,
-    );
+    ) -> CompleterFuture<()>;
 
     /// Calls [`jump_to`](Self::jump_to) if duration is `None` or zero, otherwise
     /// [`animate_to`](Self::animate_to) is called.
@@ -157,8 +160,8 @@ pub trait ViewportOffset: ChangeNotifier + Sized {
         duration: Option<Duration>,
         curve: Option<Rc<dyn Curve>>,
         clamp: Option<bool>,
-    ) {
-        ViewportOffsetBase::move_to(self, app, to, duration, curve, clamp);
+    ) -> CompleterFuture<()> {
+        ViewportOffsetBase::move_to(self, app, to, duration, curve, clamp)
     }
 
     /// The direction in which the user is trying to change [`pixels`](Self::pixels), relative
@@ -214,18 +217,28 @@ impl ViewportOffsetBase {
         duration: Option<Duration>,
         curve: Option<Rc<dyn Curve>>,
         clamp: Option<bool>,
-    ) {
+    ) -> CompleterFuture<()> {
         let _ = clamp;
-        match duration {
-            None => this.jump_to(app, to),
-            Some(duration) if duration.is_zero() => this.jump_to(app, to),
-            Some(duration) => this.animate_to(app, to, duration, curve.unwrap_or(Curves::ease())),
-        }
+        let Some(duration) = duration.filter(|duration| !duration.is_zero()) else {
+            this.jump_to(app, to);
+            return CompleterFuture::ready(());
+        };
+        this.animate_to(app, to, duration, curve.unwrap_or(Curves::ease()))
     }
 }
 
+/// The dispatch signature of [`ViewportOffset::animate_to`].
+type AnimateToFn = fn(&mut App, HandleId, f64, Duration, Rc<dyn Curve>) -> CompleterFuture<()>;
+
 /// The dispatch signature of [`ViewportOffset::move_to`].
-type MoveToFn = fn(&mut App, HandleId, f64, Option<Duration>, Option<Rc<dyn Curve>>, Option<bool>);
+type MoveToFn = fn(
+    &mut App,
+    HandleId,
+    f64,
+    Option<Duration>,
+    Option<Rc<dyn Curve>>,
+    Option<bool>,
+) -> CompleterFuture<()>;
 
 /// The vtable of an erased [`AnyViewportOffset`]: one `&'static` table per concrete
 /// [`ViewportOffset`] type.
@@ -238,7 +251,7 @@ struct ViewportOffsetVTable {
     apply_content_dimensions: fn(&mut App, HandleId, f64, f64) -> bool,
     correct_by: fn(&mut App, HandleId, f64),
     jump_to: fn(&mut App, HandleId, f64),
-    animate_to: fn(&mut App, HandleId, f64, Duration, Rc<dyn Curve>),
+    animate_to: AnimateToFn,
     move_to: MoveToFn,
     user_scroll_direction: fn(&App, HandleId) -> ScrollDirection,
     allow_implicit_scrolling: fn(&App, HandleId) -> bool,
@@ -326,7 +339,13 @@ impl AnyViewportOffset {
     }
 
     /// See [`ViewportOffset::animate_to`].
-    pub fn animate_to(self, app: &mut App, to: f64, duration: Duration, curve: Rc<dyn Curve>) {
+    pub fn animate_to(
+        self,
+        app: &mut App,
+        to: f64,
+        duration: Duration,
+        curve: Rc<dyn Curve>,
+    ) -> CompleterFuture<()> {
         (self.vtable.animate_to)(app, self.id, to, duration, curve)
     }
 
@@ -338,7 +357,7 @@ impl AnyViewportOffset {
         duration: Option<Duration>,
         curve: Option<Rc<dyn Curve>>,
         clamp: Option<bool>,
-    ) {
+    ) -> CompleterFuture<()> {
         (self.vtable.move_to)(app, self.id, to, duration, curve, clamp)
     }
 
@@ -463,7 +482,8 @@ impl ViewportOffset for FixedViewportOffset {
         _to: f64,
         _duration: Duration,
         _curve: Rc<dyn Curve>,
-    ) {
+    ) -> CompleterFuture<()> {
+        CompleterFuture::ready(())
     }
 
     fn user_scroll_direction(self: Handle<Self>, _app: &App) -> ScrollDirection {
@@ -503,7 +523,16 @@ mod tests {
         assert_eq!(offset.pixels(&app), 0.0);
         assert!(offset.apply_viewport_dimension(&mut app, 100.0));
         assert!(offset.apply_content_dimensions(&mut app, 0.0, 200.0));
-        offset.move_to(&mut app, 30.0, None, None, None);
+        let moved = offset.move_to(&mut app, 30.0, None, None, None);
         assert_eq!(offset.pixels(&app), 0.0);
+        assert!(
+            moved.is_completed(),
+            "a jump hands back an already completed future"
+        );
+        let animated = offset.animate_to(&mut app, 30.0, Duration::from_millis(10), Curves::ease());
+        assert!(
+            animated.is_completed(),
+            "a fixed offset's animation is over before it starts"
+        );
     }
 }

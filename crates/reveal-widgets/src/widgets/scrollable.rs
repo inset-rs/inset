@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use reveal_animation::Curve;
 use reveal_embedder::{Clip, Offset};
-use reveal_foundation::{App, Handle, Listener};
+use reveal_foundation::{App, CompleterFuture, Handle, Listener, wait_all};
 use reveal_gestures::{
     DeviceGestureSettings, Drag, DragDownDetails, DragEndDetails, DragGestureRecognizer,
     DragStartBehavior, DragStartDetails, DragUpdateDetails, GestureBinding,
@@ -49,6 +49,13 @@ use crate::widgets::ticker_provider::{TickerProviderStateMixin, TickerProviderSt
 /// Signature used by [`Scrollable`] to build the viewport through which the
 /// scrollable content is displayed.
 pub type ViewportBuilder = Rc<dyn Fn(&mut App, BuildContext, AnyViewportOffset) -> WidgetRef>;
+
+// The return type of `perform_ensure_visible`.
+//
+// The list of futures represents each pending ScrollPosition call to
+// ensure_visible. The returned ScrollableState's context is used to find the
+// next potential ancestor Scrollable.
+type EnsureVisibleResults = (Vec<CompleterFuture<()>>, Handle<ScrollableState>);
 
 /// A widget that manages scrolling in one dimension and informs the `Viewport`
 /// through which the content is viewed.
@@ -370,6 +377,8 @@ impl Scrollable {
 
     /// Scrolls all scrollables that enclose the given context so as to make the
     /// given context visible.
+    ///
+    /// The returned future completes once every enclosing scrollable's animation has ended.
     pub fn ensure_visible(
         app: &mut App,
         context: BuildContext,
@@ -377,7 +386,9 @@ impl Scrollable {
         duration: Duration,
         curve: Rc<dyn Curve>,
         alignment_policy: ScrollPositionAlignmentPolicy,
-    ) {
+    ) -> CompleterFuture<()> {
+        let mut futures: Vec<CompleterFuture<()>> = Vec::new();
+
         // The `target_render_object` is used to record the first target render object.
         // If there are multiple scrollable widgets nested, it is made to be as visible as
         // possible to improve the user experience. If it is already visible, then let the
@@ -386,7 +397,7 @@ impl Scrollable {
         let mut context = context;
         let mut scrollable = Scrollable::maybe_of(app, context, None);
         while let Some(current) = scrollable {
-            current.perform_ensure_visible(
+            let (new_futures, current) = current.perform_ensure_visible(
                 app,
                 context.find_render_object(app).expect("a render object"),
                 alignment,
@@ -395,6 +406,7 @@ impl Scrollable {
                 alignment_policy,
                 target_render_object,
             );
+            futures.extend(new_futures);
 
             if target_render_object.is_none() {
                 target_render_object = context.find_render_object(app);
@@ -402,6 +414,16 @@ impl Scrollable {
             context = current.context(app);
             scrollable = Scrollable::maybe_of(app, context, None);
         }
+
+        if futures.is_empty() || duration.is_zero() {
+            return CompleterFuture::ready(());
+        }
+        if futures.len() == 1 {
+            return futures.pop().expect("the single future");
+        }
+        CompleterFuture::spawn(app, async move {
+            wait_all(futures).await;
+        })
     }
 }
 
@@ -849,8 +871,8 @@ impl ScrollableState {
         curve: Rc<dyn Curve>,
         alignment_policy: ScrollPositionAlignmentPolicy,
         target_render_object: Option<AnyRenderObject>,
-    ) {
-        self.position(app).ensure_visible(
+    ) -> EnsureVisibleResults {
+        let ensure_visible_future = self.position(app).ensure_visible(
             app,
             object,
             alignment,
@@ -859,6 +881,7 @@ impl ScrollableState {
             alignment_policy,
             target_render_object,
         );
+        (vec![ensure_visible_future], self)
     }
 }
 

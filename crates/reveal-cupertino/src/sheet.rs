@@ -9,7 +9,9 @@ use reveal_animation::{
     AnimationStatusListener, AnyAnimation, CurvedAnimation, Curves,
 };
 use reveal_embedder::{Brightness, Color, Offset, Radius, SystemUiOverlayStyle};
-use reveal_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Listener};
+use reveal_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, Listener,
+};
 use reveal_gestures::{
     Drag, DragEndDetails, DragGestureRecognizer, DragStartDetails, DragUpdateDetails,
     IOSScrollViewFlingVelocityTracker, PointerDownEvent, PointerEvent, RecognizerLeaf,
@@ -258,9 +260,8 @@ type GetSheetDragged = Rc<dyn Fn(&App) -> bool>;
 /// [`show_cupertino_sheet`] always pushes the [`CupertinoSheetRoute`] to the root
 /// [`Navigator`]. This is to ensure the previous route animates correctly.
 ///
-/// The returned route is the pushed [`CupertinoSheetRoute`]; register a callback on
-/// `AnyRoute::when_popped` for the value (if any) that was passed to `NavigatorState::pop` when
-/// the sheet was closed.
+/// Returns a future that resolves to the value (if any) that was passed to [`Navigator::pop`]
+/// when the sheet was closed.
 ///
 /// See also:
 ///
@@ -282,7 +283,7 @@ pub fn show_cupertino_sheet(
     settings: Option<RouteSettingsRef>,
     top_gap: Option<f64>,
     show_drag_handle: bool,
-) -> AnyRoute {
+) -> CompleterFuture<RouteResult> {
     debug_assert!(
         top_gap.is_none_or(|top_gap| (0.0..=0.9).contains(&top_gap)),
         "topGap must be between 0.0 and 0.9"
@@ -2357,7 +2358,7 @@ mod tests {
         page_key: GlobalKey,
         sheet: Rc<Probe>,
         sheet_key: GlobalKey,
-        route: AnyRoute,
+        popped: CompleterFuture<RouteResult>,
         at: Duration,
     }
 
@@ -2372,7 +2373,7 @@ mod tests {
         let sheet_key = GlobalKey::new();
         let context = page_probe.context.get().expect("the page built");
         let builder = page(&sheet_probe, &sheet_key);
-        let route = if show_drag_handle {
+        let popped = if show_drag_handle {
             // `show_cupertino_sheet` never forwards its `show_drag_handle`, as Dart's
             // `showCupertinoSheet` does not either, so a sheet with a handle is pushed as
             // its own route.
@@ -2401,24 +2402,29 @@ mod tests {
             page_key,
             sheet: sheet_probe,
             sheet_key,
-            route,
+            popped,
             at,
         }
+    }
+
+    /// The route of the sheet whose content reported to `sheet`: Dart's `ModalRoute.of`.
+    fn route_of_sheet(app: &mut App, sheet: &Probe) -> AnyRoute {
+        let context = sheet.context.get().expect("the sheet built");
+        reveal_widgets::AnyModalRoute::of(app, context)
+            .expect("the sheet content is under its route")
+            .as_route()
     }
 
     #[test]
     fn show_cupertino_sheet_slides_a_sheet_route_up_from_the_bottom() {
         let Sheet {
             cell,
+            sheet,
             sheet_key,
-            route,
             at,
             ..
         } = show_sheet(false);
         let mut app = cell.borrow_mut();
-        let sheet_route = route
-            .downcast::<CupertinoSheetRoute>(&app)
-            .expect("show_cupertino_sheet pushes a CupertinoSheetRoute");
 
         let mut at = at;
         for _ in 0..4 {
@@ -2437,6 +2443,9 @@ mod tests {
             SHEET_TOP,
             "the sheet stops below the top of the screen"
         );
+        let sheet_route = route_of_sheet(&mut app, &sheet)
+            .downcast::<CupertinoSheetRoute>(&app)
+            .expect("show_cupertino_sheet pushes a CupertinoSheetRoute");
         let animation = TransitionRoute::animation(sheet_route, &app).expect("an installed route");
         assert_eq!(animation.value(&app), 1.0);
         assert!(!TransitionRoute::opaque(sheet_route, &app));
@@ -2512,24 +2521,24 @@ mod tests {
         let Sheet {
             cell,
             sheet,
-            route,
+            popped,
             at,
             ..
         } = show_sheet(false);
         let mut app = cell.borrow_mut();
         let at = settle(&mut app, at);
-        assert!(route.is_active(&app));
+        assert!(!popped.is_completed());
 
         let context = sheet.context.get().expect("the sheet built");
         CupertinoSheetRoute::pop_sheet(&mut app, context);
         settle(&mut app, at);
-        assert!(!route.is_active(&app), "pop_sheet popped the sheet");
+        assert!(popped.is_completed(), "pop_sheet popped the sheet");
     }
 
     #[test]
     fn a_drag_past_the_dismiss_threshold_pops_the_sheet() {
         let Sheet {
-            cell, route, at, ..
+            cell, popped, at, ..
         } = show_sheet(false);
         let mut app = cell.borrow_mut();
         let at = settle(&mut app, at);
@@ -2555,7 +2564,7 @@ mod tests {
         );
         settle(&mut app, at + Duration::from_millis(300));
 
-        assert!(!route.is_active(&app), "the drag dismissed the sheet");
+        assert!(popped.is_completed(), "the drag dismissed the sheet");
     }
 
     #[test]
@@ -2563,7 +2572,7 @@ mod tests {
         let Sheet {
             cell,
             sheet_key,
-            route,
+            popped,
             at,
             ..
         } = show_sheet(false);
@@ -2597,7 +2606,7 @@ mod tests {
         settle(&mut app, at + Duration::from_millis(240));
 
         assert!(
-            route.is_active(&app),
+            !popped.is_completed(),
             "the short drag did not pop the sheet"
         );
         assert_eq!(
@@ -2614,7 +2623,7 @@ mod tests {
         view_key: GlobalKey,
         /// The scrolled content, which moves as the list scrolls.
         content_key: GlobalKey,
-        route: AnyRoute,
+        popped: CompleterFuture<RouteResult>,
         at: Duration,
     }
 
@@ -2643,7 +2652,7 @@ mod tests {
                     .into_widget()
             })
         };
-        let route = show_cupertino_sheet(
+        let popped = show_cupertino_sheet(
             &mut app,
             context,
             None,
@@ -2660,7 +2669,7 @@ mod tests {
             cell,
             view_key,
             content_key,
-            route,
+            popped,
             at,
         }
     }
@@ -2671,7 +2680,7 @@ mod tests {
             cell,
             view_key,
             content_key,
-            route,
+            popped,
             at,
         } = show_scrollable_sheet();
         let mut app = cell.borrow_mut();
@@ -2701,7 +2710,7 @@ mod tests {
         settle(&mut app, at + Duration::from_millis(240));
 
         assert!(
-            route.is_active(&app),
+            !popped.is_completed(),
             "the scroll did not dismiss the sheet"
         );
         assert_eq!(
@@ -2721,7 +2730,7 @@ mod tests {
         let ScrollableSheet {
             cell,
             view_key,
-            route,
+            popped,
             at,
             ..
         } = show_scrollable_sheet();
@@ -2754,7 +2763,7 @@ mod tests {
         settle(&mut app, at + Duration::from_millis(300));
 
         assert!(
-            !route.is_active(&app),
+            popped.is_completed(),
             "the drag handed over to the sheet's dismiss gesture"
         );
     }
@@ -2771,7 +2780,7 @@ mod tests {
         let inner_probe: Rc<Probe> = Rc::default();
         let inner_key = GlobalKey::new();
         let context = page_probe.context.get().expect("the page built");
-        let sheet_route = show_cupertino_sheet(
+        let sheet_popped = show_cupertino_sheet(
             &mut app,
             context,
             Some(page(&sheet_probe, &sheet_key)),
@@ -2795,10 +2804,10 @@ mod tests {
         let inner_builder = page(&inner_probe, &inner_key);
         let inner_route = CupertinoPageRoute::new(&mut app, inner_builder);
         let nested = Navigator::of(&mut app, sheet_context, false);
-        let inner_route = nested.push(&mut app, Route::as_route(inner_route));
+        nested.push(&mut app, Route::as_route(inner_route));
         let at = settle(&mut app, at);
         assert!(inner_route.is_active(&app), "the inner route was pushed");
-        assert!(sheet_route.is_active(&app), "the sheet is still up");
+        assert!(!sheet_popped.is_completed(), "the sheet is still up");
 
         let inner_context = inner_probe.context.get().expect("the inner route built");
         let nested = Navigator::of(&mut app, inner_context, false);
@@ -2807,7 +2816,7 @@ mod tests {
 
         assert!(!inner_route.is_active(&app), "the inner route popped");
         assert!(
-            sheet_route.is_active(&app),
+            !sheet_popped.is_completed(),
             "popping the inner route left the sheet up"
         );
     }

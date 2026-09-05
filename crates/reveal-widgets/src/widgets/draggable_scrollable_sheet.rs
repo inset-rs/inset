@@ -8,8 +8,8 @@ use std::time::Duration;
 use reveal_animation::{Animation, AnimationBehavior, AnimationController, Curve};
 use reveal_embedder::clamp_double;
 use reveal_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Handle, ListenableObject, Listener, ValueListenable,
-    ValueNotifier,
+    App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, ListenableObject, Listener,
+    ValueListenable, ValueNotifier,
 };
 use reveal_gestures::{Drag, DragStartDetails};
 use reveal_painting::AlignmentGeometry;
@@ -146,13 +146,16 @@ impl DraggableScrollableController {
     ///
     /// The sheet will not snap after calling [`animate_to`](Self::animate_to) even if
     /// [`DraggableScrollableSheet::snap`] is true. Snapping only occurs after user drags.
+    ///
+    /// The returned future completes when the animation ends. An interrupted animation is
+    /// stopped as canceled, so its future never completes — as Dart's does not.
     pub fn animate_to(
         self: Handle<Self>,
         app: &mut App,
         size: f64,
         duration: Duration,
         curve: Rc<dyn Curve>,
-    ) {
+    ) -> CompleterFuture<()> {
         self.assert_attached(app);
         debug_assert!((0.0..=1.0).contains(&size));
         debug_assert!(!duration.is_zero());
@@ -195,7 +198,8 @@ impl DraggableScrollableController {
             }),
         );
         let target = clamp_double(size, extent.min_size(app), extent.max_size(app));
-        animation_controller.animate_to(app, target, Some(duration), curve);
+        let animated = animation_controller.animate_to(app, target, Some(duration), curve);
+        CompleterFuture::spawn(app, animated)
     }
 
     /// Jumps the attached sheet from its current size to the given `size`, a
@@ -1968,7 +1972,8 @@ mod tests {
             Listener::new(move |_app| counter.set(counter.get() + 1)),
         );
 
-        controller.animate_to(&mut app, 0.8, Duration::from_millis(100), Curves::linear());
+        let done =
+            controller.animate_to(&mut app, 0.8, Duration::from_millis(100), Curves::linear());
 
         binding_pump(&mut app, Duration::ZERO);
         binding_pump(&mut app, Duration::from_millis(50));
@@ -1977,6 +1982,7 @@ mod tests {
             "{}",
             controller.size(&app)
         );
+        assert!(!done.is_completed());
 
         binding_pump(&mut app, Duration::from_millis(100));
         assert!(
@@ -1985,6 +1991,15 @@ mod tests {
             controller.size(&app)
         );
         assert!(notified.get() > 0);
+        // The frame past the duration ends the animation.
+        binding_pump(&mut app, Duration::from_millis(150));
+        assert!(
+            !done.is_completed(),
+            "the continuation after the animation runs at the checkpoint"
+        );
+        drop(app);
+        cell.checkpoint();
+        assert!(done.is_completed());
     }
 
     #[test]

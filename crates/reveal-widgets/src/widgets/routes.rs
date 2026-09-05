@@ -11,7 +11,9 @@ use reveal_animation::{
     AnimationStatusListener, AnyAnimation, ColorTween, Curve, CurveTween, Curves, ProxyAnimation,
     TrainHoppingAnimation, k_always_complete_animation, k_always_dismissed_animation,
 };
-use reveal_foundation::{App, Handle, HandleId, Listener, MergingListenable, ValueListenable};
+use reveal_foundation::{
+    App, Completer, CompleterFuture, Handle, HandleId, Listener, MergingListenable, ValueListenable,
+};
 use reveal_painting::Color;
 use reveal_physics::Simulation;
 use reveal_scheduler::{FrameCallback, SchedulerBinding, SchedulerPhase, TickerFuture};
@@ -27,8 +29,7 @@ use crate::widgets::focus_scope::FocusScope;
 use crate::widgets::modal_barrier::{AnimatedModalBarrier, ModalBarrier};
 use crate::widgets::navigator::{
     AnyRoute, NavigationNotification, Navigator, NavigatorObserver, NavigatorObserverData, Route,
-    RouteBase, RouteCompleter, RoutePopDisposition, RoutePredicate, RouteResult,
-    RouteResultCallback, RouteSettingsRef,
+    RouteBase, RoutePopDisposition, RoutePredicate, RouteResult, RouteSettingsRef,
 };
 use crate::widgets::overlay::OverlayEntry;
 use crate::widgets::page_storage::{PageStorage, PageStorageBucket};
@@ -158,7 +159,7 @@ pub trait OverlayRoute: Route {
 /// The fields Dart's `TransitionRoute` declares; every transition route carries this bag under
 /// the field `transition_route`.
 pub struct TransitionRouteData {
-    transition_completer: RouteCompleter,
+    transition_completer: Completer<RouteResult>,
     pop_finalized: bool,
     animation: Option<AnyAnimation<f64>>,
     controller: Option<Handle<AnimationController>>,
@@ -184,7 +185,7 @@ impl TransitionRouteData {
     pub fn new(app: &mut App) -> TransitionRouteData {
         let dismissed = k_always_dismissed_animation(app);
         TransitionRouteData {
-            transition_completer: RouteCompleter::new(),
+            transition_completer: Completer::new(),
             pop_finalized: false,
             animation: None,
             controller: None,
@@ -260,27 +261,16 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
         }
     }
 
-    /// Registers a callback that runs once the transition itself has finished, after the
-    /// overlay entries have been removed from the navigator's overlay.
+    /// This future completes only once the transition itself has finished, after the overlay
+    /// entries have been removed from the navigator's overlay.
     ///
-    /// It runs once the animation has been dismissed. That is after `popped`, because `popped`
-    /// typically resolves before the animation even starts, as soon as the route is popped.
-    ///
-    /// Dart's `completed` future.
-    fn when_completed(self: Handle<Self>, app: &mut App, callback: RouteResultCallback) {
-        match self
-            .transition_route_data(app)
+    /// This future completes once the animation has been dismissed. That will be after
+    /// [`popped`](Route::popped), because `popped` typically completes before the animation
+    /// even starts, as soon as the route is popped.
+    fn completed(self: Handle<Self>, app: &App) -> CompleterFuture<RouteResult> {
+        self.transition_route_data(app)
             .transition_completer
-            .result()
-        {
-            None => self
-                .transition_route_data_mut(app)
-                .transition_completer
-                .push(callback),
-            Some(result) => {
-                app.schedule_microtask(Listener::new(move |app| callback(app, result.clone())));
-            }
-        }
+            .future()
     }
 
     /// The duration the transition going forwards.
@@ -351,8 +341,8 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
 
     /// Returns true if the transition has completed.
     ///
-    /// It is equivalent to whether the completion registered with
-    /// [`when_completed`](Self::when_completed) has run.
+    /// It is equivalent to whether the future returned by [`completed`](Self::completed) has
+    /// completed.
     ///
     /// This method only works when debug assertions are enabled. Otherwise it always returns
     /// false.
@@ -517,7 +507,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
     }
 
     /// Dart's `TransitionRoute.didPush`.
-    fn did_push(self: Handle<Self>, app: &mut App) -> Handle<TickerFuture> {
+    fn did_push(self: Handle<Self>, app: &mut App) -> TickerFuture {
         debug_assert!(
             self.transition_route_data(app).controller.is_some(),
             "didPush called before install or after dispose"
@@ -670,7 +660,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
                             self,
                             app,
                             Some(next_train),
-                            Some(next),
+                            Some(next.completed(app)),
                         );
                     } else {
                         // Two trains animate at different values. We have to do train hopping.
@@ -695,7 +685,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
                                         self,
                                         app,
                                         Some(next_train),
-                                        Some(next),
+                                        Some(next.completed(app)),
                                     );
                                     if let Some(remover) = self
                                         .transition_route_data_mut(app)
@@ -737,7 +727,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
                                     self,
                                     app,
                                     current,
-                                    Some(next),
+                                    Some(next.completed(app)),
                                 );
                                 if let Some(remover) = self
                                     .transition_route_data_mut(app)
@@ -758,13 +748,18 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
                         self.set_secondary_animation(
                             app,
                             Some(new_animation.as_animation()),
-                            Some(next),
+                            Some(next.completed(app)),
                         );
                     }
                 }
                 None => {
                     let animation = next.animation(app);
-                    TransitionRoute::set_secondary_animation(self, app, animation, Some(next));
+                    TransitionRoute::set_secondary_animation(
+                        self,
+                        app,
+                        animation,
+                        Some(next.completed(app)),
+                    );
                 }
             }
         } else {
@@ -778,32 +773,28 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
         }
     }
 
-    /// Dart's `_setSecondaryAnimation`; `disposed` is the route whose `completed` releases the
-    /// reference to `animation`.
+    /// Dart's `_setSecondaryAnimation`.
     fn set_secondary_animation(
         self: Handle<Self>,
         app: &mut App,
         animation: Option<AnyAnimation<f64>>,
-        disposed: Option<AnyTransitionRoute>,
+        disposed: Option<CompleterFuture<RouteResult>>,
     ) {
         let secondary = self.transition_route_data(app).secondary_animation;
         secondary.set_parent(app, animation);
         // Releases the reference to the next route's animation when that route is disposed.
         if let Some(disposed) = disposed {
-            disposed.when_completed(
-                app,
-                Rc::new(move |app, _result| {
-                    if secondary.parent(app) == animation {
-                        let dismissed = k_always_dismissed_animation(app);
-                        secondary.set_parent(app, Some(dismissed));
-                        if let Some(animation) = animation
-                            && let Some(hopping) = animation.downcast::<TrainHoppingAnimation>(app)
-                        {
-                            hopping.dispose(app);
-                        }
+            disposed.then(app, move |app, _| {
+                if secondary.parent(app) == animation {
+                    let dismissed = k_always_dismissed_animation(app);
+                    secondary.set_parent(app, Some(dismissed));
+                    if let Some(animation) = animation
+                        && let Some(hopping) = animation.downcast::<TrainHoppingAnimation>(app)
+                    {
+                        hopping.dispose(app);
                     }
-                }),
-            );
+                }
+            });
         }
     }
 
@@ -951,14 +942,8 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
             controller.dispose(app);
         }
         let result = self.transition_route_data(app).result.clone();
-        let callbacks = self
-            .transition_route_data_mut(app)
-            .transition_completer
-            .complete(result.clone());
-        for callback in callbacks {
-            let result = result.clone();
-            app.schedule_microtask(Listener::new(move |app| callback(app, result.clone())));
-        }
+        let transition_completer = self.transition_route_data(app).transition_completer.clone();
+        transition_completer.complete(app, result);
         OverlayRoute::dispose(self, app);
     }
 
@@ -981,7 +966,7 @@ struct TransitionRouteVTable {
     reverse_transition_duration: fn(&App, HandleId) -> Duration,
     can_transition_to: fn(&App, HandleId, AnyTransitionRoute) -> bool,
     can_transition_from: fn(&App, HandleId, AnyTransitionRoute) -> bool,
-    when_completed: fn(&mut App, HandleId, RouteResultCallback),
+    completed: fn(&App, HandleId) -> CompleterFuture<RouteResult>,
     pop_gesture_enabled: fn(&mut App, HandleId) -> bool,
     handle_start_back_gesture: fn(&mut App, HandleId, f64),
     handle_update_back_gesture_progress: fn(&mut App, HandleId, f64),
@@ -1008,7 +993,7 @@ impl TransitionRouteVTable {
             reverse_transition_duration: |app, id| R::reverse_transition_duration(resolve(id), app),
             can_transition_to: |app, id, next| R::can_transition_to(resolve(id), app, next),
             can_transition_from: |app, id, prev| R::can_transition_from(resolve(id), app, prev),
-            when_completed: |app, id, callback| R::when_completed(resolve(id), app, callback),
+            completed: |app, id| R::completed(resolve(id), app),
             pop_gesture_enabled: |app, id| {
                 PredictiveBackRoute::pop_gesture_enabled(resolve::<R>(id), app)
             },
@@ -1099,9 +1084,9 @@ impl AnyTransitionRoute {
         (self.vtable.can_transition_from)(app, self.id, previous_route)
     }
 
-    /// See [`TransitionRoute::when_completed`].
-    pub fn when_completed(self, app: &mut App, callback: RouteResultCallback) {
-        (self.vtable.when_completed)(app, self.id, callback)
+    /// See [`TransitionRoute::completed`].
+    pub fn completed(self, app: &App) -> CompleterFuture<RouteResult> {
+        (self.vtable.completed)(app, self.id)
     }
 
     /// See [`PredictiveBackRoute::pop_gesture_enabled`].
@@ -2049,7 +2034,7 @@ pub trait ModalRoute: LocalHistoryRoute {
     }
 
     /// Dart's `ModalRoute.didPush`.
-    fn did_push(self: Handle<Self>, app: &mut App) -> Handle<TickerFuture> {
+    fn did_push(self: Handle<Self>, app: &mut App) -> TickerFuture {
         let key = self.modal_route_data(app).scope_key.clone();
         if let Some(state) = key.current_state::<ModalScopeState>(app) {
             let navigator = self.as_route().navigator(app).expect("an installed route");
@@ -2987,7 +2972,7 @@ macro_rules! modal_route_overrides {
         fn did_push(
             self: ::reveal_foundation::Handle<Self>,
             app: &mut ::reveal_foundation::App,
-        ) -> ::reveal_foundation::Handle<::reveal_scheduler::TickerFuture> {
+        ) -> ::reveal_scheduler::TickerFuture {
             $crate::ModalRoute::did_push(self, app)
         }
 
@@ -4037,8 +4022,7 @@ impl RawDialogRouteLeaf for RawDialogRoute {
 /// The `use_root_navigator` argument is used to determine whether to push the dialog to the
 /// [`Navigator`] furthest from or nearest to the given `context`.
 ///
-/// The returned route is the pushed [`RawDialogRoute`]; register a callback on
-/// [`AnyRoute::when_popped`] for the value (if any) that was passed to [`NavigatorState::pop`](crate::NavigatorState::pop)
+/// Returns a future that resolves to the value (if any) that was passed to [`Navigator::pop`]
 /// when the dialog was closed.
 ///
 /// See also:
@@ -4062,7 +4046,7 @@ pub fn show_general_dialog(
     fullscreen_dialog: bool,
     route_settings: Option<RouteSettingsRef>,
     request_focus: Option<bool>,
-) -> AnyRoute {
+) -> CompleterFuture<RouteResult> {
     debug_assert!(!barrier_dismissible || barrier_label.is_some());
     let route = RawDialogRoute::new(app, page_builder)
         .barrier_dismissible(app, barrier_dismissible)
@@ -4313,13 +4297,13 @@ mod tests {
         assert!(!pushed.is_first(&app));
 
         let popped = Rc::new(Cell::new(false));
-        pushed.when_popped(&mut app, {
+        pushed.popped(&app).then(&mut app, {
             let popped = Rc::clone(&popped);
-            Rc::new(move |_app, _result| popped.set(true))
+            move |_app, _result| popped.set(true)
         });
         navigator_state.pop(&mut app, None);
         app.drain_microtasks();
-        assert!(popped.get(), "the popped completion resolves at once");
+        assert!(popped.get(), "the popped future resolves at once");
 
         settle(&mut app, at);
         assert_eq!(animation.value(&app), 0.0);

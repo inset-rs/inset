@@ -131,13 +131,16 @@ impl Fixture {
     /// Pumps a fixed span of frames rather than waiting for quiescence: the Activity entry's
     /// spinner never stops asking for the next frame, so "settled" is not a state this app
     /// reaches. Forty frames is 800 ms — comfortably past the route transition.
+    ///
+    /// Each frame phase ends with the checkpoint the shell runs after every platform event, so
+    /// a continuation awaiting a route's result resumes as it would in the app.
     fn settle(&mut self) {
         for _ in 0..40 {
             self.at += Duration::from_millis(20);
             SchedulerBinding::handle_begin_frame(&mut self.cell.borrow_mut(), Some(self.at));
-            self.cell.borrow_mut().drain_microtasks();
+            self.cell.checkpoint();
             SchedulerBinding::handle_draw_frame(&mut self.cell.borrow_mut());
-            self.cell.borrow_mut().drain_microtasks();
+            self.cell.checkpoint();
         }
     }
 
@@ -314,7 +317,7 @@ impl Fixture {
                 }]),
             );
         }
-        self.cell.borrow_mut().drain_microtasks();
+        self.cell.checkpoint();
     }
 
     /// The plain text of every paragraph on screen.

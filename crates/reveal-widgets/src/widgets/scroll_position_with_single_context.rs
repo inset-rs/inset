@@ -4,7 +4,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use reveal_animation::Curve;
-use reveal_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Listener};
+use reveal_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, Listener,
+};
 use reveal_gestures::{Drag, DragStartDetails};
 use reveal_painting::AxisDirection;
 use reveal_physics::near_equal;
@@ -160,8 +162,8 @@ pub trait ScrollPositionWithSingleContextLeaf: ScrollPosition + ScrollActivityDe
         to: f64,
         duration: Duration,
         curve: Rc<dyn Curve>,
-    ) {
-        ScrollPositionWithSingleContext::animate_to(self, app, to, duration, curve);
+    ) -> CompleterFuture<()> {
+        ScrollPositionWithSingleContext::animate_to(self, app, to, duration, curve)
     }
 
     /// Dart's `ScrollPositionWithSingleContext.jumpTo`.
@@ -269,8 +271,8 @@ macro_rules! scroll_position_with_single_context_viewport_offset_overrides {
             to: f64,
             duration: ::std::time::Duration,
             curve: ::std::rc::Rc<dyn ::reveal_animation::Curve>,
-        ) {
-            $crate::ScrollPositionWithSingleContextLeaf::animate_to(self, app, to, duration, curve);
+        ) -> ::reveal_foundation::CompleterFuture<()> {
+            $crate::ScrollPositionWithSingleContextLeaf::animate_to(self, app, to, duration, curve)
         }
 
         fn move_to(
@@ -280,8 +282,8 @@ macro_rules! scroll_position_with_single_context_viewport_offset_overrides {
             duration: ::std::option::Option<::std::time::Duration>,
             curve: ::std::option::Option<::std::rc::Rc<dyn ::reveal_animation::Curve>>,
             clamp: ::std::option::Option<bool>,
-        ) {
-            $crate::ScrollPositionBase::move_to(self, app, to, duration, curve, clamp);
+        ) -> ::reveal_foundation::CompleterFuture<()> {
+            $crate::ScrollPositionBase::move_to(self, app, to, duration, curve, clamp)
         }
 
         fn user_scroll_direction(
@@ -671,7 +673,7 @@ impl ScrollPositionWithSingleContext {
         to: f64,
         duration: Duration,
         curve: Rc<dyn Curve>,
-    ) {
+    ) -> CompleterFuture<()> {
         let physics = this.physics(app);
         let metrics = this.copy_with(app);
         if near_equal(
@@ -681,7 +683,7 @@ impl ScrollPositionWithSingleContext {
         ) {
             // Skip the animation, go straight to the position as we are already close.
             ViewportOffset::jump_to(this, app, to);
-            return;
+            return CompleterFuture::ready(());
         }
 
         let from = ViewportOffset::pixels(this, app);
@@ -696,6 +698,7 @@ impl ScrollPositionWithSingleContext {
             vsync,
         );
         ScrollPosition::begin_activity(this, app, Some(activity.as_activity()));
+        activity.done(app)
     }
 
     /// See [`ScrollPositionWithSingleContextLeaf::jump_to`].
@@ -1009,6 +1012,116 @@ mod tests {
         assert_eq!(ViewportOffset::pixels(position, &app), 200.0);
     }
 
+    /// `animate_to`'s future resolves when the activity ends, which happens on the microtask
+    /// queue after the frame that finishes the animation; its listeners never run inline.
+    #[test]
+    fn animate_to_resolves_its_future_when_the_activity_ends() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = mount_scroll_harness(&mut app);
+        let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        lay_out(&mut app, position);
+
+        let done = ViewportOffset::animate_to(
+            position,
+            &mut app,
+            200.0,
+            Duration::from_millis(100),
+            Curves::linear(),
+        );
+        assert!(!done.is_completed());
+        let heard = Rc::new(Cell::new(false));
+        let flag = Rc::clone(&heard);
+        done.clone().then(&mut app, move |_app, ()| flag.set(true));
+
+        pump(&mut app, Duration::ZERO);
+        pump(&mut app, Duration::from_millis(50));
+        assert!(!done.is_completed(), "still animating");
+        pump(&mut app, Duration::from_millis(100));
+        assert_eq!(ViewportOffset::pixels(position, &app), 200.0);
+        assert!(
+            !done.is_completed(),
+            "at the target, but the simulation ends after it"
+        );
+
+        // The frame past the duration stops the ticker, whose completion queues the end.
+        SchedulerBinding::handle_begin_frame(&mut app, Some(Duration::from_millis(150)));
+        assert!(
+            !done.is_completed(),
+            "the activity ends on the microtask queue, after the frame"
+        );
+        app.drain_microtasks();
+        assert!(done.is_completed());
+        assert!(heard.get(), "the listener ran in the same drain");
+        assert!(!is_scrolling(&app, position));
+    }
+
+    /// A task awaiting `animate_to` resumes at the checkpoint after the activity ends.
+    #[test]
+    fn a_task_awaiting_animate_to_resumes_at_the_checkpoint() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = mount_scroll_harness(&mut app);
+        let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        lay_out(&mut app, position);
+
+        let done = ViewportOffset::animate_to(
+            position,
+            &mut app,
+            200.0,
+            Duration::from_millis(100),
+            Curves::linear(),
+        );
+        let resumed = Rc::new(Cell::new(false));
+        let flag = Rc::clone(&resumed);
+        app.spawn(async move |_cx| {
+            done.await;
+            flag.set(true);
+        });
+        pump(&mut app, Duration::ZERO);
+        drop(app);
+        cell.checkpoint();
+        assert!(!resumed.get(), "pending: the animation is still running");
+
+        pump(&mut cell.borrow_mut(), Duration::from_millis(100));
+        pump(&mut cell.borrow_mut(), Duration::from_millis(150));
+        assert!(!resumed.get(), "a task resumes only at the checkpoint");
+        cell.checkpoint();
+        assert!(resumed.get());
+    }
+
+    /// An animation another activity interrupts resolves `animate_to`'s future too, as Dart's
+    /// does when the user grabs the view.
+    #[test]
+    fn an_interrupted_animation_resolves_animate_to_as_well() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = mount_scroll_harness(&mut app);
+        let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        lay_out(&mut app, position);
+
+        let done = ViewportOffset::animate_to(
+            position,
+            &mut app,
+            200.0,
+            Duration::from_millis(100),
+            Curves::linear(),
+        );
+        pump(&mut app, Duration::ZERO);
+        pump(&mut app, Duration::from_millis(50));
+        assert!(!done.is_completed());
+
+        ViewportOffset::jump_to(position, &mut app, 0.0);
+        assert!(done.is_completed(), "the driven activity was disposed");
+        assert_eq!(ViewportOffset::pixels(position, &app), 0.0);
+        pump(&mut app, Duration::from_millis(100));
+        assert_eq!(
+            ViewportOffset::pixels(position, &app),
+            0.0,
+            "the animation is gone"
+        );
+    }
+
     #[test]
     fn animate_to_within_the_tolerance_jumps_instead() {
         let cell = AppCell::new();
@@ -1018,7 +1131,7 @@ mod tests {
         lay_out(&mut app, position);
         harness.notifications.borrow_mut().clear();
 
-        ViewportOffset::animate_to(
+        let done = ViewportOffset::animate_to(
             position,
             &mut app,
             0.000_001,
@@ -1028,6 +1141,7 @@ mod tests {
 
         assert_eq!(ViewportOffset::pixels(position, &app), 0.000_001);
         assert!(!is_scrolling(&app, position));
+        assert!(done.is_completed(), "a jump hands back a resolved future");
     }
 
     #[test]

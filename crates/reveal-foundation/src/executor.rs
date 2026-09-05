@@ -43,7 +43,7 @@ impl ForegroundExecutor {
         let schedule = move |runnable| lock(&ready).push_back(runnable);
         let (runnable, task) = async_task::spawn_local(future, schedule);
         runnable.schedule();
-        Task { inner: Some(task) }
+        Task::spawned(task)
     }
 
     pub(crate) fn handle(&self) -> ExecutorHandle {
@@ -111,25 +111,60 @@ fn lock(ready: &ReadyQueue) -> MutexGuard<'_, VecDeque<Runnable>> {
 /// Dart's futures always run to completion; dropping this handle likewise lets the task
 /// finish unobserved, where gpui's `Task` would cancel it.
 pub struct Task<T> {
-    inner: Option<async_task::Task<T>>,
+    inner: TaskInner<T>,
 }
+
+enum TaskInner<T> {
+    /// A value known now: what an `async` body that never awaits hands back.
+    Ready(Option<T>),
+    Spawned(Option<async_task::Task<T>>),
+}
+
+impl<T> Task<T> {
+    /// A task that resolves with `value` at once: Dart's `Future.value`, for an async callback
+    /// whose body had nothing to await.
+    pub fn ready(value: T) -> Task<T> {
+        Task {
+            inner: TaskInner::Ready(Some(value)),
+        }
+    }
+
+    pub(crate) fn spawned(task: async_task::Task<T>) -> Task<T> {
+        Task {
+            inner: TaskInner::Spawned(Some(task)),
+        }
+    }
+}
+
+// Sound: `poll` never projects a pin into the payload — `Ready` is taken by value and
+// `async_task::Task` is itself `Unpin`.
+impl<T> Unpin for Task<T> {}
 
 impl<T> Future for Task<T> {
     type Output = T;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T> {
-        let task = self
-            .get_mut()
-            .inner
-            .as_mut()
-            .expect("a Task is polled until it completes, then never again");
-        Pin::new(task).poll(cx)
+        match &mut self.get_mut().inner {
+            TaskInner::Ready(value) => Poll::Ready(
+                value
+                    .take()
+                    .expect("a Task is polled until it completes, then never again"),
+            ),
+            TaskInner::Spawned(task) => {
+                let task = task
+                    .as_mut()
+                    .expect("a Task is polled until it completes, then never again");
+                Pin::new(task).poll(cx)
+            }
+        }
     }
 }
 
 impl<T> Drop for Task<T> {
     fn drop(&mut self) {
-        if let Some(task) = self.inner.take() {
+        if let TaskInner::Spawned(task) = &mut self.inner
+            && let Some(task) = task.take()
+        {
             task.detach();
         }
     }

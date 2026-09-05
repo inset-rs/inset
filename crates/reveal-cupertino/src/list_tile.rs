@@ -4,7 +4,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use reveal_embedder::FontWeight;
-use reveal_foundation::{App, Handle, Listener};
+use reveal_foundation::{App, AsyncCallback, Handle, Listener, Task};
 use reveal_painting::{AnyColor, EdgeInsetsGeometry, TextOverflow};
 use reveal_rendering::{BoxConstraints, CrossAxisAlignment, HitTestBehavior, MainAxisAlignment};
 use reveal_widgets::{
@@ -102,8 +102,11 @@ pub struct CupertinoListTile {
     pub trailing: Option<WidgetRef>,
     /// The [`on_tap`](Self::on_tap) function is called when a user taps on
     /// [`CupertinoListTile`]. If left `None`, the [`CupertinoListTile`] will not react on
-    /// taps. The tile is active only for the duration of the invocation.
-    pub on_tap: Option<Listener>,
+    /// taps. If the returned [`Task`] completes later, then the [`CupertinoListTile`] remains
+    /// activated until it has completed. This is according to iOS behavior. However, if the
+    /// function has nothing to await and returns [`Task::ready`], then the tile is active
+    /// only for the duration of invocation.
+    pub on_tap: Option<AsyncCallback>,
     /// The [`background_color`](Self::background_color) of the tile in normal state. Once the
     /// tile is tapped, the background color switches to
     /// [`background_color_activated`](Self::background_color_activated). It is set to match
@@ -205,7 +208,7 @@ impl CupertinoListTile {
     }
 
     /// Dart `CupertinoListTile(onTap:)`.
-    pub fn on_tap(mut self, on_tap: Listener) -> CupertinoListTile {
+    pub fn on_tap(mut self, on_tap: AsyncCallback) -> CupertinoListTile {
         self.on_tap = Some(on_tap);
         self
     }
@@ -278,15 +281,25 @@ pub struct CupertinoListTileState {
 }
 
 impl CupertinoListTileState {
-    fn handle_tap(self: Handle<Self>, app: &mut App) {
-        if let Some(on_tap) = self.widget(app).on_tap.clone() {
-            on_tap.call(app);
-        }
-        if self.mounted(app) {
-            self.set_state(app, |state| {
-                state.tapped = false;
+    /// Dart's `onTap: () async { .. }`: runs the widget's callback and, once its task has
+    /// completed, clears the pressed look.
+    fn on_tap(self: Handle<Self>, app: &mut App) -> Task<()> {
+        let on_tap = self
+            .widget(app)
+            .on_tap
+            .clone()
+            .expect("the detector is built only with an on_tap");
+        let task = on_tap(app);
+        app.spawn(async move |cx| {
+            task.await;
+            cx.update(|app| {
+                if self.mounted(app) {
+                    self.set_state(app, |state| {
+                        state.tapped = false;
+                    });
+                }
             });
-        }
+        })
     }
 }
 
@@ -445,7 +458,8 @@ impl State for CupertinoListTileState {
                     state.tapped = false;
                 });
             }))
-            .on_tap(Listener::new(move |app| self.handle_tap(app)))
+            // The task is dropped, as Dart's `onTap: () async { .. }` drops its future.
+            .on_tap(Listener::new(move |app| drop(self.on_tap(app))))
             .behavior(HitTestBehavior::Opaque)
             .child(child)
             .into_widget()
@@ -507,7 +521,7 @@ impl StatelessWidget for CupertinoListTileChevron {
 
 #[cfg(test)]
 mod tests {
-    use reveal_foundation::AppCell;
+    use reveal_foundation::{AppCell, Completer};
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
 
@@ -649,6 +663,18 @@ mod tests {
         );
     }
 
+    /// A tap on the tile: down, then up ten milliseconds later.
+    fn tap(app: &mut App) {
+        send(app, PointerChange::Down, 200.0, 20.0, Duration::ZERO);
+        send(
+            app,
+            PointerChange::Up,
+            200.0,
+            20.0,
+            Duration::from_millis(10),
+        );
+    }
+
     #[test]
     fn tapping_a_tile_activates_it_and_runs_on_tap() {
         let cell = test_cell();
@@ -659,9 +685,12 @@ mod tests {
             &cell,
             CupertinoListTile::new(slot(&title, 100.0, 20.0))
                 .key(key_of(&tile_key))
-                .on_tap(Listener::new({
+                .on_tap(Rc::new({
                     let taps = Rc::clone(&taps);
-                    move |_app| taps.set(taps.get() + 1)
+                    move |_app: &mut App| {
+                        taps.set(taps.get() + 1);
+                        Task::ready(())
+                    }
                 })),
         );
         let mut app = cell.borrow_mut();
@@ -681,9 +710,57 @@ mod tests {
         );
         assert_eq!(taps.get(), 1);
         assert!(
-            !app.get(state).tapped,
-            "the listener runs to completion, so the tile deactivates at once"
+            app.get(state).tapped,
+            "the continuation runs at the checkpoint, not inline"
         );
+        drop(app);
+        cell.checkpoint();
+        let app = cell.borrow();
+        assert!(
+            !app.get(state).tapped,
+            "a callback with nothing to await deactivates the tile at the next checkpoint"
+        );
+    }
+
+    #[test]
+    fn a_tile_stays_activated_until_its_callback_task_completes() {
+        let cell = test_cell();
+        let completer: Completer<()> = Completer::new();
+        let tile_key = GlobalKey::new();
+        let title = GlobalKey::new();
+        mount(
+            &cell,
+            CupertinoListTile::new(slot(&title, 100.0, 20.0))
+                .key(key_of(&tile_key))
+                .on_tap(Rc::new({
+                    let completer = completer.clone();
+                    move |app: &mut App| {
+                        let future = completer.future();
+                        app.spawn(async move |_cx| future.await)
+                    }
+                })),
+        );
+        let mut app = cell.borrow_mut();
+        let state = tile_key
+            .current_state::<CupertinoListTileState>(&mut app)
+            .expect("the tile mounted");
+
+        tap(&mut app);
+        assert!(app.get(state).tapped);
+        drop(app);
+        cell.checkpoint();
+        assert!(
+            cell.borrow().get(state).tapped,
+            "the callback's task is still pending"
+        );
+
+        completer.complete(&mut cell.borrow_mut(), ());
+        assert!(
+            cell.borrow().get(state).tapped,
+            "completion wakes the continuation; it does not run inline"
+        );
+        cell.checkpoint();
+        assert!(!cell.borrow().get(state).tapped);
     }
 
     #[test]

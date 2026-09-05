@@ -254,7 +254,7 @@ impl AnimationController {
         target: f64,
         duration: Option<Duration>,
         curve: Rc<dyn Curve>,
-    ) -> Handle<TickerFuture> {
+    ) -> TickerFuture {
         let controller = app.get(self);
         let scale = if controller.animation_behavior.enable_animations() {
             1.0
@@ -305,7 +305,7 @@ impl AnimationController {
                 AnimationStatus::Dismissed
             };
             self.check_status_changed(app);
-            return TickerFuture::complete(app);
+            return TickerFuture::complete();
         }
         debug_assert!(simulation_duration > Duration::ZERO);
         debug_assert!(!self.is_animating(app));
@@ -343,7 +343,7 @@ impl AnimationController {
         self: Handle<Self>,
         app: &mut App,
         simulation: Rc<dyn Simulation>,
-    ) -> Handle<TickerFuture> {
+    ) -> TickerFuture {
         debug_assert!(!self.is_animating(app));
         let x = simulation.x(0.0);
         // The repeating simulation's direction setter fires during `x(0.0)`;
@@ -742,7 +742,7 @@ impl AnimationController {
     }
 
     /// Starts running this animation forwards (towards the end).
-    pub fn forward(self: Handle<Self>, app: &mut App, from: Option<f64>) -> Handle<TickerFuture> {
+    pub fn forward(self: Handle<Self>, app: &mut App, from: Option<f64>) -> TickerFuture {
         debug_assert!(
             app.get(self).duration.is_some(),
             "AnimationController::forward() called with no default duration. The \"duration\" \
@@ -761,7 +761,7 @@ impl AnimationController {
     }
 
     /// Starts running this animation in reverse (towards the beginning).
-    pub fn reverse(self: Handle<Self>, app: &mut App, from: Option<f64>) -> Handle<TickerFuture> {
+    pub fn reverse(self: Handle<Self>, app: &mut App, from: Option<f64>) -> TickerFuture {
         debug_assert!(
             app.get(self).duration.is_some() || app.get(self).reverse_duration.is_some(),
             "AnimationController::reverse() called with no default duration or reverseDuration."
@@ -779,7 +779,7 @@ impl AnimationController {
     }
 
     /// Toggles the direction of this animation.
-    pub fn toggle(self: Handle<Self>, app: &mut App, from: Option<f64>) -> Handle<TickerFuture> {
+    pub fn toggle(self: Handle<Self>, app: &mut App, from: Option<f64>) -> TickerFuture {
         debug_assert!(
             {
                 let controller = app.get(self);
@@ -818,7 +818,7 @@ impl AnimationController {
         target: f64,
         duration: Option<Duration>,
         curve: Rc<dyn Curve>,
-    ) -> Handle<TickerFuture> {
+    ) -> TickerFuture {
         debug_assert!(
             app.get(self).duration.is_some() || duration.is_some(),
             "AnimationController::animate_to() called with no explicit duration and no default \
@@ -839,7 +839,7 @@ impl AnimationController {
         target: f64,
         duration: Option<Duration>,
         curve: Rc<dyn Curve>,
-    ) -> Handle<TickerFuture> {
+    ) -> TickerFuture {
         debug_assert!(
             app.get(self).duration.is_some()
                 || app.get(self).reverse_duration.is_some()
@@ -865,7 +865,7 @@ impl AnimationController {
         reverse: bool,
         period: Option<Duration>,
         count: Option<u64>,
-    ) -> Handle<TickerFuture> {
+    ) -> TickerFuture {
         let controller = app.get(self);
         let min = min.unwrap_or(controller.lower_bound);
         let max = max.unwrap_or(controller.upper_bound);
@@ -904,7 +904,7 @@ impl AnimationController {
         velocity: f64,
         spring_description: Option<SpringDescription>,
         animation_behavior: Option<AnimationBehavior>,
-    ) -> Handle<TickerFuture> {
+    ) -> TickerFuture {
         let spring_description = spring_description.unwrap_or_else(k_fling_spring_description);
         let controller = app.get_mut(self);
         controller.direction = if velocity < 0.0 {
@@ -944,7 +944,7 @@ impl AnimationController {
         self: Handle<Self>,
         app: &mut App,
         simulation: Box<dyn Simulation>,
-    ) -> Handle<TickerFuture> {
+    ) -> TickerFuture {
         debug_assert!(
             app.get(self).ticker.is_some(),
             "AnimationController::animate_with() called after AnimationController::dispose()."
@@ -960,7 +960,7 @@ impl AnimationController {
         self: Handle<Self>,
         app: &mut App,
         simulation: Box<dyn Simulation>,
-    ) -> Handle<TickerFuture> {
+    ) -> TickerFuture {
         debug_assert!(
             app.get(self).ticker.is_some(),
             "AnimationController::animate_back_with() called after AnimationController::dispose()."
@@ -1008,7 +1008,7 @@ mod tests {
 
     use super::*;
 
-    fn assert_future_completed(app: &mut App, future: Handle<TickerFuture>) {
+    fn assert_future_completed(app: &mut App, future: TickerFuture) {
         let ran = Rc::new(Cell::new(false));
         future.when_complete(
             app,
@@ -1021,7 +1021,7 @@ mod tests {
         assert!(ran.get(), "TickerFuture should have completed");
     }
 
-    fn assert_future_canceled(app: &mut App, future: Handle<TickerFuture>) {
+    fn assert_future_canceled(app: &mut App, future: TickerFuture) {
         let completed = Rc::new(Cell::new(false));
         let either = Rc::new(Cell::new(false));
         future.when_complete(

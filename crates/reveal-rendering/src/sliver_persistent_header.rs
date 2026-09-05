@@ -10,7 +10,7 @@ use reveal_animation::{
     Tween,
 };
 use reveal_embedder::{Matrix4, Offset, Rect, clamp_double};
-use reveal_foundation::{App, Handle, HandleId, ListenableObject, Listener};
+use reveal_foundation::{App, AsyncCallback, Handle, HandleId, ListenableObject, Listener};
 use reveal_painting::{Axis, AxisDirection, transform_rect};
 use reveal_scheduler::{Ticker, TickerCallback, TickerProvider, TickerProviderObject};
 
@@ -70,16 +70,14 @@ pub struct OverScrollHeaderStretchConfiguration {
     /// [`on_stretch_trigger`](Self::on_stretch_trigger).
     pub stretch_trigger_offset: f64,
 
-    /// The callback to be executed when a user over-scrolls to the offset specified by
-    /// [`stretch_trigger_offset`](Self::stretch_trigger_offset).
-    ///
-    /// Dart's `AsyncCallback?`: there is no isolate event loop here, so the callback runs to
-    /// completion synchronously.
-    pub on_stretch_trigger: Option<Listener>,
+    /// The callback function to be executed when a user over-scrolls to the offset specified
+    /// by [`stretch_trigger_offset`](Self::stretch_trigger_offset).
+    pub on_stretch_trigger: Option<AsyncCallback>,
 }
 
 impl OverScrollHeaderStretchConfiguration {
-    /// Creates an object that specifies how a stretched header may activate a callback.
+    /// Creates an object that specifies how a stretched header may activate an
+    /// [`AsyncCallback`].
     ///
     /// Dart's default `stretch_trigger_offset` is 100.0.
     pub fn new() -> OverScrollHeaderStretchConfiguration {
@@ -96,7 +94,10 @@ impl OverScrollHeaderStretchConfiguration {
     }
 
     /// Sets [`on_stretch_trigger`](Self::on_stretch_trigger).
-    pub fn on_stretch_trigger(mut self, value: Listener) -> OverScrollHeaderStretchConfiguration {
+    pub fn on_stretch_trigger(
+        mut self,
+        value: AsyncCallback,
+    ) -> OverScrollHeaderStretchConfiguration {
         self.on_stretch_trigger = Some(value);
         self
     }
@@ -419,7 +420,8 @@ pub trait RenderSliverPersistentHeader:
             && stretch_offset >= configuration.stretch_trigger_offset
             && self.header_data(app).last_stretch_offset <= configuration.stretch_trigger_offset
         {
-            on_stretch_trigger.call(app);
+            // The future the trigger hands back is not awaited, as Dart's is not.
+            drop(on_stretch_trigger(app));
         }
         self.header_data_mut(app).last_stretch_offset = stretch_offset;
     }
@@ -1320,8 +1322,10 @@ pub trait RenderSliverFloatingPinnedPersistentHeader: RenderSliverFloatingPersis
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use reveal_embedder::Size;
-    use reveal_foundation::AppCell;
+    use reveal_foundation::{AppCell, Task};
 
     use super::*;
     use crate::object::{RenderObject, RenderObjectData, RenderObjectWithChildData};
@@ -1614,6 +1618,34 @@ mod tests {
         assert_eq!(header.last_shrink_offset(&app), 80.0);
         // The child is laid out with the remaining extent, floored at the minimum extent.
         assert_eq!(header.child_extent(&app), 40.0);
+    }
+
+    /// The stretch trigger fires once as the overscroll crosses the trigger offset, and again
+    /// only after the header has come back under it.
+    #[test]
+    fn the_stretch_trigger_fires_once_per_crossing() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let triggered = Rc::new(Cell::new(0));
+        let counter = Rc::clone(&triggered);
+        let configuration =
+            OverScrollHeaderStretchConfiguration::new().on_stretch_trigger(Rc::new(move |_app| {
+                counter.set(counter.get() + 1);
+                Task::ready(())
+            }));
+        let header = scrolling_header(&mut app, 40.0, 120.0);
+        header.set_stretch_configuration(&mut app, Some(configuration));
+        let harness = lay_out(&mut app, header.as_sliver(), 0.0);
+        assert_eq!(triggered.get(), 0);
+
+        harness.scroll_to(&mut app, -120.0);
+        assert_eq!(triggered.get(), 1);
+        harness.scroll_to(&mut app, -130.0);
+        assert_eq!(triggered.get(), 1, "already past the trigger offset");
+
+        harness.scroll_to(&mut app, 0.0);
+        harness.scroll_to(&mut app, -100.0);
+        assert_eq!(triggered.get(), 2);
     }
 
     /// The show-on-screen configuration defaults to the full unbounded range.

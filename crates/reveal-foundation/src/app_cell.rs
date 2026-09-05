@@ -210,7 +210,7 @@ mod tests {
         cell.checkpoint();
         assert_eq!(seen.get(), 0, "pending: the waker is parked");
 
-        completer.complete(7);
+        completer.complete(&mut cell.borrow_mut(), 7);
         assert_eq!(seen.get(), 0, "completion wakes; it does not poll inline");
         cell.checkpoint();
         assert_eq!(seen.get(), 7);
@@ -230,7 +230,7 @@ mod tests {
             });
         }
         cell.checkpoint();
-        completer.complete(5);
+        completer.complete(&mut cell.borrow_mut(), 5);
         cell.checkpoint();
         assert_eq!(seen.get(), 15);
     }
@@ -268,7 +268,7 @@ mod tests {
         });
         cell.checkpoint();
 
-        completer.complete(());
+        completer.complete(&mut cell.borrow_mut(), ());
         cell.checkpoint();
         assert_eq!(*events.borrow(), ["task", "microtask from the task"]);
         assert!(!cell.borrow().has_pending_microtasks());
@@ -281,7 +281,7 @@ mod tests {
         Timer::new(
             app,
             duration,
-            Listener::new(move |_app| completer.complete(())),
+            Listener::new(move |app| completer.complete(app, ())),
         );
         future
     }
@@ -343,5 +343,34 @@ mod tests {
         let cell = AppCell::new();
         let _app = cell.borrow_mut();
         cell.checkpoint();
+    }
+
+    #[test]
+    fn then_runs_on_the_microtask_queue_after_completion() {
+        let cell = AppCell::new();
+        let completer: Completer<u32> = Completer::new();
+        let seen = counter();
+        {
+            let mut app = cell.borrow_mut();
+            let out = seen.clone();
+            completer
+                .future()
+                .then(&mut app, move |_app, value| out.set(value));
+            completer.complete(&mut app, 9);
+            assert_eq!(seen.get(), 0, "a listener never runs inline");
+            app.drain_microtasks();
+            assert_eq!(seen.get(), 9, "a listener is a microtask");
+        }
+        let later = counter();
+        {
+            let mut app = cell.borrow_mut();
+            let out = later.clone();
+            completer
+                .future()
+                .then(&mut app, move |_app, value| out.set(value));
+            assert_eq!(later.get(), 0, "even on a resolved future");
+        }
+        cell.checkpoint();
+        assert_eq!(later.get(), 9);
     }
 }

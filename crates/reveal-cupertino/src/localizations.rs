@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use reveal_embedder::Locale;
-use reveal_foundation::{App, DateTime};
+use reveal_foundation::{App, CompleterFuture, DateTime};
 use reveal_widgets::{
     BuildContext, Localizations, LocalizationsDelegate, LocalizationsDelegateRef,
 };
@@ -330,7 +330,11 @@ impl LocalizationsDelegate<dyn CupertinoLocalizations> for CupertinoLocalization
         locale.language_code == "en"
     }
 
-    fn load(&self, locale: &Locale) -> Rc<dyn CupertinoLocalizations> {
+    fn load(
+        &self,
+        _app: &mut App,
+        locale: &Locale,
+    ) -> CompleterFuture<Rc<dyn CupertinoLocalizations>> {
         DefaultCupertinoLocalizations::load(locale)
     }
 
@@ -379,8 +383,8 @@ impl DefaultCupertinoLocalizations {
     /// The `locale` parameter is ignored.
     ///
     /// This method is typically used to create a [`LocalizationsDelegate`].
-    pub fn load(_locale: &Locale) -> Rc<dyn CupertinoLocalizations> {
-        Rc::new(DefaultCupertinoLocalizations::new())
+    pub fn load(_locale: &Locale) -> CompleterFuture<Rc<dyn CupertinoLocalizations>> {
+        CompleterFuture::ready(Rc::new(DefaultCupertinoLocalizations::new()))
     }
 
     /// A [`LocalizationsDelegate`] that uses [`DefaultCupertinoLocalizations::load`]
@@ -615,6 +619,16 @@ mod tests {
         let delegate = DefaultCupertinoLocalizations::delegate();
         assert!(delegate.is_supported(&Locale::new("en").country_code("GB")));
         assert!(!delegate.is_supported(&Locale::new("fr")));
+    }
+
+    #[test]
+    fn load_completes_synchronously() {
+        let strings = DefaultCupertinoLocalizations::load(&Locale::new("en"));
+        assert!(strings.is_completed(), "Dart's SynchronousFuture");
+        assert_eq!(
+            strings.peek().expect("complete").back_button_label(),
+            "Back"
+        );
     }
 
     #[test]

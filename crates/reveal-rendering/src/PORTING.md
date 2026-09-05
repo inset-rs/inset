@@ -186,10 +186,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## viewport_offset.rs → viewport_offset.dart
 
-- Change: `animate_to` and `move_to` return nothing.
-  Reason: language — there is no isolate event loop, so there is no `Future<void>` to hand back (foundation's `PORTING.md` records the same).
-  Affect: a caller cannot await a scroll animation finishing.
-
 - Change: `super.moveTo` is `ViewportOffsetBase::move_to`, the sibling-base shape, and `debug_fill_description` is the `@protected` hook Dart's `toString` fills; `toString` itself is not ported.
   Reason: language — a trait default cannot call `super`, and widgets' `ScrollPosition` overrides both and calls the `super` bodies.
   Affect: an implementor that overrides either calls `ViewportOffsetBase::move_to(self, ..)` or `ViewportOffset::debug_fill_description(self, ..)` where Dart writes `super.…`.
@@ -234,10 +230,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Dart compares the provider by object identity, which `Option<Rc<dyn TickerProvider>>` has no `==` for.
   Affect: `header.set_vsync(app, Some(TickerProviderRef::new(state_handle)))`.
 
-- Change: `OverScrollHeaderStretchConfiguration::on_stretch_trigger` runs to completion synchronously.
-  Reason: language — Dart's `AsyncCallback` returns a `Future` the isolate drains.
-  Affect: nothing awaits the trigger.
-
 - Change: `RenderSliverFloatingPinnedPersistentHeader` carries only its `update_geometry` body; a leaf that is one overrides `RenderSliverFloatingPersistentHeader::update_geometry` and forwards to it.
   Reason: language — no inheritance, so the pinned variant's override has to be installed on the trait the base body dispatches through.
   Affect: a floating pinned header's `impl RenderSliverFloatingPersistentHeader` forwards `update_geometry` to `RenderSliverFloatingPinnedPersistentHeader::update_geometry(self, app)` by name.
@@ -267,4 +259,3 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `RenderCustomSingleChildLayoutBox` and `SingleChildLayoutDelegate` (`shifted_box.dart`; `custom_layout.rs` holds only the multi-child pair, as Dart does). Trigger: `CustomSingleChildLayout`.
 - `RenderBoxBase`, Flutter's `RenderBox.hitTest` body reachable from an override, sits in `proxy_box.rs` next to its callers and repeats `RenderBox::hit_test`'s default. Trigger: the next edit of `box.rs` — move it beside `RenderBox` and have the default forward to it.
 - `RenderTransform.filterQuality` and Dart's `ImageFilterLayer` path. Trigger: the first `Transform(filterQuality:)`, with `PaintingContext.pushColorFilter`.
-- `ViewportOffset.animateTo`'s `Future<void>`. Trigger: `ScrollPosition`, or the first caller that awaits a scroll settling.

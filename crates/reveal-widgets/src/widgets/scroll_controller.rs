@@ -9,8 +9,8 @@ use std::time::Duration;
 use indexmap::IndexMap;
 use reveal_animation::Curve;
 use reveal_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, Listenable, ListenableObject,
-    Listener,
+    App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, HandleId, Listenable,
+    ListenableObject, Listener, wait_all,
 };
 
 use crate::widgets::scroll_context::ScrollContext;
@@ -241,9 +241,9 @@ pub trait ScrollControllerLeaf: ChangeNotifier + Sized + 'static {
         offset: f64,
         duration: Duration,
         curve: Rc<dyn Curve>,
-    ) {
+    ) -> CompleterFuture<()> {
         self.as_controller()
-            .animate_to(app, offset, duration, curve);
+            .animate_to(app, offset, duration, curve)
     }
 
     /// See [`AnyScrollController::jump_to`].
@@ -746,14 +746,27 @@ impl AnyScrollController {
     ///
     /// The duration must not be zero. To jump to a particular value without an
     /// animation, use [`jump_to`](Self::jump_to).
-    pub fn animate_to(self, app: &mut App, offset: f64, duration: Duration, curve: Rc<dyn Curve>) {
+    ///
+    /// The returned future completes once every attached position's animation has ended.
+    pub fn animate_to(
+        self,
+        app: &mut App,
+        offset: f64,
+        duration: Duration,
+        curve: Rc<dyn Curve>,
+    ) -> CompleterFuture<()> {
         assert!(
             self.has_clients(app),
             "ScrollController not attached to any scroll views."
         );
-        for position in self.positions(app) {
-            position.animate_to(app, offset, duration, curve.clone());
-        }
+        let futures: Vec<CompleterFuture<()>> = self
+            .positions(app)
+            .into_iter()
+            .map(|position| position.animate_to(app, offset, duration, curve.clone()))
+            .collect();
+        CompleterFuture::spawn(app, async move {
+            wait_all(futures).await;
+        })
     }
 
     /// Jumps the scroll position from its current value to the given value,
@@ -854,11 +867,20 @@ mod tests {
     use reveal_foundation::AppCell;
     use std::cell::Cell;
 
+    use reveal_animation::Curves;
     use reveal_foundation::ListenableObject;
+    use reveal_scheduler::SchedulerBinding;
 
     use super::*;
     use crate::test_harness::{ScrollHarness, mount_scroll_harness};
     use crate::widgets::scroll_physics::ClampingScrollPhysics;
+
+    fn pump(app: &mut App, at: Duration) {
+        SchedulerBinding::handle_begin_frame(app, Some(at));
+        app.drain_microtasks();
+        SchedulerBinding::handle_draw_frame(app);
+        app.drain_microtasks();
+    }
 
     fn attached(
         app: &mut App,
@@ -927,6 +949,43 @@ mod tests {
         controller.detach(&mut app, position);
         position.jump_to(&mut app, 90.0);
         assert_eq!(notified.get(), 1);
+    }
+
+    /// `animate_to` drives every attached position, and its future resolves only once the last
+    /// of them has settled, at the checkpoint that runs the continuation.
+    #[test]
+    fn animate_to_resolves_after_every_position_has_settled() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = mount_scroll_harness(&mut app);
+        let controller = ScrollController::default(&mut app);
+        let first = attached(&mut app, &harness, controller.as_controller());
+        let second = attached(&mut app, &harness, controller.as_controller());
+
+        let done = controller.animate_to(
+            &mut app,
+            200.0,
+            Duration::from_millis(100),
+            Curves::linear(),
+        );
+        pump(&mut app, Duration::ZERO);
+        pump(&mut app, Duration::from_millis(50));
+        assert!((first.pixels(&app) - 100.0).abs() < 0.001);
+        assert!((second.pixels(&app) - 100.0).abs() < 0.001);
+        assert!(!done.is_completed());
+
+        pump(&mut app, Duration::from_millis(100));
+        assert_eq!(first.pixels(&app), 200.0);
+        assert_eq!(second.pixels(&app), 200.0);
+        // The frame past the duration ends both activities.
+        pump(&mut app, Duration::from_millis(150));
+        assert!(
+            !done.is_completed(),
+            "the wait over the positions resolves at the checkpoint"
+        );
+        drop(app);
+        cell.checkpoint();
+        assert!(done.is_completed());
     }
 
     #[test]

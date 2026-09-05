@@ -19,7 +19,7 @@ use reveal_animation::{AnyAnimation, Tween};
 use reveal_cupertino::{
     CupertinoColors, CupertinoDynamicColor, CupertinoListTile, CupertinoListTileChevron,
 };
-use reveal_foundation::{App, Listener};
+use reveal_foundation::{App, Task};
 use reveal_painting::{AnyColor, BorderRadiusGeometry, BoxDecoration};
 use reveal_widgets::{
     AnimatedBuilder, BuildContext, Container, Hero, HeroTagRef, IntoWidget, Text, WidgetRef,
@@ -91,8 +91,9 @@ fn row(index: usize, subject: &Subject, app: &mut App, context: BuildContext) ->
         .leading(swatch(subject, SMALL, app, context))
         .leading_size(SMALL)
         .trailing(CupertinoListTileChevron::new())
-        .on_tap(Listener::new(move |app: &mut App| {
+        .on_tap(Rc::new(move |app: &mut App| {
             open_sub_page(app, context, Entry::Heroes, index);
+            Task::ready(())
         }))
         .into_widget()
 }

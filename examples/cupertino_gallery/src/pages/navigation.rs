@@ -5,8 +5,10 @@
 //! screen's back button shows something different, which is the only way that rule is visible
 //! at all.
 
+use std::rc::Rc;
+
 use reveal_cupertino::{CupertinoListTile, CupertinoListTileChevron, CupertinoNavigationBar};
-use reveal_foundation::{App, Listener};
+use reveal_foundation::{App, Task};
 use reveal_widgets::{BuildContext, IntoWidget, Text, WidgetRef};
 
 use crate::app::open_sub_page;
@@ -71,8 +73,9 @@ fn push_row(index: usize, caption: &str, app: &mut App, context: BuildContext) -
     CupertinoListTile::notched(Text::new(SUB_TITLES[index]))
         .subtitle(secondary(app, context, caption))
         .trailing(CupertinoListTileChevron::new())
-        .on_tap(Listener::new(move |app: &mut App| {
+        .on_tap(Rc::new(move |app: &mut App| {
             open_sub_page(app, context, Entry::Navigation, index);
+            Task::ready(())
         }))
         .into_widget()
 }

@@ -855,7 +855,7 @@ mod tests {
         state: StateData<SingleHost>,
         single_ticker_provider: SingleTickerProviderStateMixinData,
         controller: Option<Handle<AnimationController>>,
-        future: Option<Handle<TickerFuture>>,
+        future: Option<TickerFuture>,
     }
 
     /// Dart's `vsync: this`.
@@ -971,7 +971,7 @@ mod tests {
             .single_ticker_provider
             .ticker
             .expect("vended");
-        let future = app.get(state).future.expect("started");
+        let future = app.get(state).future.clone().expect("started");
         let canceled = Rc::new(Cell::new(false));
         future.when_complete_or_cancel(
             &mut app,

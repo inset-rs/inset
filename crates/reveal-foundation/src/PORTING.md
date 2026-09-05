@@ -25,7 +25,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — there is no isolate event loop; tests play FakeAsync via `elapse`.
   Affect: write `Timer::new(app, duration, Listener::new(..))`, `timer.cancel(app)`, `timer.is_active(app)`; tests call `cell.elapse(duration)`.
 
-- Change: the `App` lives in an `AppCell`, which the shell and the tests hold. A Dart `async` body is ported with everything up to its first `await` inline — including the call whose future is awaited — and the rest as `app.spawn(async move |cx| ..)`, a continuation that reaches the `App` through `cx.update(|app| ..)` one closure at a time. Microtasks and continuations run only through `AppCell::checkpoint`, which repeats until neither queue has work, with nothing borrowed. `Completer` and its future are `dart:async`'s; a `Task` is a continuation's future, and dropping it does not cancel it.
+- Change: the `App` lives in an `AppCell`, which the shell and the tests hold. A Dart `async` body is ported with everything up to its first `await` inline — including the call whose future is awaited — and the rest as `app.spawn(async move |cx| ..)`, a continuation that reaches the `App` through `cx.update(|app| ..)` one closure at a time. Microtasks and continuations run only through `AppCell::checkpoint`, which repeats until neither queue has work, with nothing borrowed. `Completer` and its future are `dart:async`'s (`CompleterFuture::ready` is `Future.value`, `peek` tells a `SynchronousFuture` apart, `then(app, ..)` runs a callback at the checkpoint after completion, `wait_all` is `Future.wait`); a `Task` is a continuation's future, and dropping it does not cancel it.
   Reason: language — a Rust future cannot hold `&mut App` across an `await`, so a continuation borrows the cell for each step instead (gpui's `AppCell` / `AsyncApp`), and it cannot start inline because the caller holds the `App`.
   Affect: a Dart `Future<T> m() async {..}` is `fn m(..) -> Task<T>` whose prefix runs where Dart's does; a method that only hands back a future returns that future's type (`CompleterFuture<T>` or `Task<T>`; edition 2024's `impl Future` would capture the `&mut App`). The shell runs the checkpoint at the end of every platform event and `AppCell::elapse` runs it around every timer, so `app.drain_microtasks()` is for a borrowed `App` only; nothing else may run the checkpoint, and `cx.update` while the `App` is borrowed panics.
 
@@ -44,6 +44,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: `ValueChanged` / `ValueSetter` / `ValueGetter` receive the `App`, as `Listener` does for `VoidCallback`.
   Reason: language — a Rust closure cannot capture what it mutates.
   Affect: `Rc::new(|app, value| …)` where Dart writes a `ValueChanged<T>` tear-off.
+
+- Change: `AsyncCallback` / `AsyncValueSetter` / `AsyncValueGetter` return a `Task`, and a body with nothing to await returns `Task::ready`.
+  Reason: language — a Rust future that nobody polls never runs, where a Dart `async` body runs whether or not its future is awaited; a `Task` is already queued when it is handed back, so a caller that ignores it (Dart's unawaited call) still lets it run.
+  Affect: an implementor runs its prefix and returns `app.spawn(async move |cx| ..)`; a caller that awaits it does so in its own continuation.
 
 ## constants.rs → constants.dart
 
@@ -90,5 +94,5 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `ChangeNotifier.maybeDispatchObjectCreation` / `memory_allocations`. Trigger: leak tracker / devtools.
 - Diagnostics / `FlutterError` structured trees. Trigger: porting diagnostics; until then messages are `debug_assert!` strings.
 - `GlobalKey` / `ObjectKey`. Trigger: `widgets/framework.dart`.
-- `AsyncCallback` / `AsyncValueSetter` / `AsyncValueGetter` / `IterableFilter`. Trigger: the first async or iterable-filter call site.
+- `IterableFilter`. Trigger: the first iterable-filter call site.
 - Waking a task from another thread. Tasks are woken only from the main thread today, so a wake always lands before the next drain; a background task would need a `Send` poke into the host's event loop (winit's `EventLoopProxy`). Trigger: the first background executor or platform callback off the main thread.

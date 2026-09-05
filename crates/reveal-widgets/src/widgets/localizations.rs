@@ -7,7 +7,10 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use reveal_embedder::{Locale, TextDirection};
-use reveal_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle};
+use reveal_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, Completer, CompleterFuture, Handle, wait_all,
+};
+use reveal_rendering::RendererBinding;
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 use crate::framework::{
@@ -21,11 +24,40 @@ use crate::widgets::basic::{Directionality, SizedBox};
 
 /// The resources every delegate loaded, keyed by the delegate's [`type`](AnyLocalizationsDelegate::type).
 ///
-/// Each value is the `Rc<T>` a [`LocalizationsDelegate<T>`] produced.
-type TypeToResources = HashMap<TypeId, Box<dyn Any>>;
+/// Each value holds the `Rc<T>` a [`LocalizationsDelegate<T>`] produced.
+type TypeToResources = HashMap<TypeId, Rc<dyn Any>>;
 
-fn load_all(locale: &Locale, all_delegates: &[LocalizationsDelegateRef]) -> TypeToResources {
+// Used by load_all() to record LocalizationsDelegate.load() futures we're
+// waiting for.
+struct Pending {
+    delegate: LocalizationsDelegateRef,
+    future_value: CompleterFuture<Rc<dyn Any>>,
+}
+
+// A utility function used by Localizations to generate one future
+// that completes when all of the LocalizationsDelegate.load() futures
+// complete. The returned map is indexed by each delegate's type.
+//
+// The input future values must have distinct types.
+//
+// The returned future will resolve when all of the input map's
+// future values have resolved. If all of the input map's values are
+// already complete (Dart's SynchronousFutures) then a complete future
+// is returned immediately.
+//
+// This is more complicated than just applying wait_all to input
+// because some of the input.values may be already complete. We don't want
+// to wait_all for those.
+fn load_all(
+    app: &mut App,
+    locale: &Locale,
+    all_delegates: &[LocalizationsDelegateRef],
+) -> CompleterFuture<Rc<TypeToResources>> {
     let mut output = TypeToResources::new();
+    let mut pending_list: Option<Vec<Pending>> = None;
+
+    // Only load the first delegate for each delegate type that supports
+    // locale.languageCode.
     let mut types = HashSet::new();
     let mut delegates = Vec::new();
     for delegate in all_delegates {
@@ -34,12 +66,42 @@ fn load_all(locale: &Locale, all_delegates: &[LocalizationsDelegateRef]) -> Type
             delegates.push(delegate);
         }
     }
+
     for delegate in delegates {
-        let completed_value = delegate.load(locale);
-        let previous = output.insert(delegate.r#type(), completed_value);
-        debug_assert!(previous.is_none());
+        let input_value = delegate.load(app, locale);
+        if let Some(completed_value) = input_value.peek() {
+            // inputValue was a SynchronousFuture
+            let r#type = delegate.r#type();
+            debug_assert!(!output.contains_key(&r#type));
+            output.insert(r#type, completed_value);
+        } else {
+            pending_list.get_or_insert_default().push(Pending {
+                delegate: delegate.clone(),
+                future_value: input_value,
+            });
+        }
     }
-    output
+
+    // All of the delegate.load() values were synchronous futures, we're done.
+    let Some(pending_list) = pending_list else {
+        return CompleterFuture::ready(Rc::new(output));
+    };
+
+    // Some of delegate.load() values were asynchronous futures. Wait for them.
+    let future_values: Vec<_> = pending_list
+        .iter()
+        .map(|pending| pending.future_value.clone())
+        .collect();
+    CompleterFuture::spawn(app, async move {
+        let values = wait_all(future_values).await;
+        debug_assert_eq!(values.len(), pending_list.len());
+        for (pending, value) in pending_list.iter().zip(values) {
+            let r#type = pending.delegate.r#type();
+            debug_assert!(!output.contains_key(&r#type));
+            output.insert(r#type, value);
+        }
+        Rc::new(output)
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -67,7 +129,11 @@ pub trait LocalizationsDelegate<T: ?Sized + 'static>: Debug + 'static {
     /// It's assumed that this method will return an object that contains a
     /// collection of related resources (typically defined with one method per
     /// resource). The object will be retrieved with [`Localizations::of`].
-    fn load(&self, locale: &Locale) -> Rc<T>;
+    ///
+    /// A delegate whose resources are at hand returns [`CompleterFuture::ready`], Dart's
+    /// `SynchronousFuture`: the [`Localizations`] widget then builds at once instead of
+    /// deferring the first frame until the future completes.
+    fn load(&self, app: &mut App, locale: &Locale) -> CompleterFuture<Rc<T>>;
 
     /// Returns true if the resources for this delegate should be loaded
     /// again by calling the [`load`](Self::load) method.
@@ -84,8 +150,8 @@ pub trait AnyLocalizationsDelegate: Debug {
     /// See [`LocalizationsDelegate::is_supported`].
     fn is_supported(&self, locale: &Locale) -> bool;
 
-    /// See [`LocalizationsDelegate::load`]; the box holds the `Rc<T>`.
-    fn load(&self, locale: &Locale) -> Box<dyn Any>;
+    /// See [`LocalizationsDelegate::load`]; the value holds the `Rc<T>`.
+    fn load(&self, app: &mut App, locale: &Locale) -> CompleterFuture<Rc<dyn Any>>;
 
     /// See [`LocalizationsDelegate::should_reload`]; false when `old` is a delegate of
     /// another type.
@@ -158,8 +224,17 @@ impl<T: ?Sized + 'static, D: LocalizationsDelegate<T>> AnyLocalizationsDelegate
         self.delegate.is_supported(locale)
     }
 
-    fn load(&self, locale: &Locale) -> Box<dyn Any> {
-        Box::new(self.delegate.load(locale))
+    fn load(&self, app: &mut App, locale: &Locale) -> CompleterFuture<Rc<dyn Any>> {
+        let resources = self.delegate.load(app, locale);
+        // A complete future stays complete, so `load_all` still tells a synchronous delegate
+        // apart; a pending one is forwarded when it completes.
+        if let Some(value) = resources.peek() {
+            return CompleterFuture::ready(erase(value));
+        }
+        let completer = Completer::new();
+        let future = completer.future();
+        resources.then(app, move |app, value| completer.complete(app, erase(value)));
+        future
     }
 
     fn should_reload(&self, old: &dyn AnyLocalizationsDelegate) -> bool {
@@ -179,6 +254,11 @@ impl<T: ?Sized + 'static, D: LocalizationsDelegate<T>> AnyLocalizationsDelegate
     fn as_any(&self) -> &dyn Any {
         self
     }
+}
+
+/// The `Rc<T>` as [`TypeToResources`] stores it.
+fn erase<T: ?Sized + 'static>(resources: Rc<T>) -> Rc<dyn Any> {
+    Rc::new(resources)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -287,7 +367,11 @@ impl LocalizationsDelegate<dyn WidgetsLocalizations> for WidgetsLocalizationsDel
         true
     }
 
-    fn load(&self, locale: &Locale) -> Rc<dyn WidgetsLocalizations> {
+    fn load(
+        &self,
+        _app: &mut App,
+        locale: &Locale,
+    ) -> CompleterFuture<Rc<dyn WidgetsLocalizations>> {
         DefaultWidgetsLocalizations::load(locale)
     }
 
@@ -323,8 +407,8 @@ impl DefaultWidgetsLocalizations {
     ///
     /// This method is typically used to create a [`LocalizationsDelegate`].
     /// The `WidgetsApp` does so by default.
-    pub fn load(_locale: &Locale) -> Rc<dyn WidgetsLocalizations> {
-        Rc::new(DefaultWidgetsLocalizations::new())
+    pub fn load(_locale: &Locale) -> CompleterFuture<Rc<dyn WidgetsLocalizations>> {
+        CompleterFuture::ready(Rc::new(DefaultWidgetsLocalizations::new()))
     }
 
     /// A [`LocalizationsDelegate`] that uses [`DefaultWidgetsLocalizations::load`]
@@ -465,8 +549,9 @@ impl InheritedWidget for LocalizationsScope {
 /// of localized resources. There are multiple delegates because there are
 /// multiple sources for localizations within an app.
 ///
-/// Delegates are loaded synchronously: [`LocalizationsDelegate::load`] returns the
-/// resources, so a [`Localizations`] widget always builds its child.
+/// If [`Localizations`] were to be rebuilt with a new `locale` then
+/// the widget subtree that corresponds to [`BuildContext`] `context` would
+/// be rebuilt after the corresponding resources had been loaded.
 ///
 /// ## Localizations widgets
 ///
@@ -728,9 +813,27 @@ impl LocalizationsState {
             self.set_locale(app, locale);
             return;
         }
-        let type_to_resources = load_all(&locale, &delegates);
-        app.get_mut(self).type_to_resources = Rc::new(type_to_resources);
-        self.set_locale(app, locale);
+
+        let type_to_resources_future = load_all(app, &locale, &delegates);
+
+        if let Some(type_to_resources) = type_to_resources_future.peek() {
+            // All of the delegates' resources loaded synchronously.
+            app.get_mut(self).type_to_resources = type_to_resources;
+            self.set_locale(app, locale);
+        } else {
+            // - Don't rebuild the dependent widgets until the resources for the new locale
+            // have finished loading. Until then the old locale will continue to be used.
+            // - If we're running at app startup time then defer reporting the first
+            // "useful" frame until after the async load has completed.
+            RendererBinding::instance(app).defer_first_frame(app);
+            type_to_resources_future.then(app, move |app, value| {
+                if self.mounted(app) {
+                    self.set_state(app, |state| state.type_to_resources = value);
+                    self.set_locale(app, locale);
+                }
+                RendererBinding::instance(app).allow_first_frame(app);
+            });
+        }
     }
 
     /// The resources a [`LocalizationsDelegate<T>`] loaded, if one did.
@@ -1023,13 +1126,38 @@ mod tests {
             locale.language_code != "xx"
         }
 
-        fn load(&self, locale: &Locale) -> Rc<dyn Greetings> {
+        fn load(&self, _app: &mut App, locale: &Locale) -> CompleterFuture<Rc<dyn Greetings>> {
             self.loads.set(self.loads.get() + 1);
-            Rc::new(LocaleGreetings(locale.clone()))
+            CompleterFuture::ready(Rc::new(LocaleGreetings(locale.clone())))
         }
 
         fn should_reload(&self, _old: &Self) -> bool {
             self.reload
+        }
+    }
+
+    /// Dart's `FakeLocalizationsDelegate`: loads whenever the test completes its completer.
+    struct FakeLocalizationsDelegate {
+        completer: Completer<Rc<dyn Greetings>>,
+    }
+
+    impl Debug for FakeLocalizationsDelegate {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("FakeLocalizationsDelegate")
+        }
+    }
+
+    impl LocalizationsDelegate<dyn Greetings> for FakeLocalizationsDelegate {
+        fn is_supported(&self, _locale: &Locale) -> bool {
+            true
+        }
+
+        fn load(&self, _app: &mut App, _locale: &Locale) -> CompleterFuture<Rc<dyn Greetings>> {
+            self.completer.future()
+        }
+
+        fn should_reload(&self, _old: &Self) -> bool {
+            false
         }
     }
 
@@ -1076,6 +1204,127 @@ mod tests {
                 text_direction: TextDirection::Ltr,
             }]
         );
+        assert!(
+            RendererBinding::instance(&mut app).send_frames_to_engine(&app),
+            "a delegate that loads synchronously defers no frame"
+        );
+    }
+
+    #[test]
+    fn locale_is_available_when_localizations_widget_stops_deferring_frames() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let delegate = FakeLocalizationsDelegate {
+            completer: Completer::new(),
+        };
+        let completer = delegate.completer.clone();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let key = GlobalKey::new();
+        let harness = Harness::mount(
+            &mut app,
+            Localizations::new(
+                Locale::new("fo"),
+                vec![
+                    DefaultWidgetsLocalizations::delegate(),
+                    LocalizationsDelegateRef::new(delegate),
+                ],
+            )
+            .key(Rc::new(key.clone()))
+            .child(probe(&seen))
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let state = key
+            .current_state::<LocalizationsState>(&mut app)
+            .expect("the Localizations widget mounted");
+        assert_eq!(state.locale(&app), None);
+        assert!(seen.borrow().is_empty(), "the child is not built yet");
+        let binding = RendererBinding::instance(&mut app);
+        assert!(
+            !binding.send_frames_to_engine(&app),
+            "the first frame is deferred until the load completes"
+        );
+
+        completer.complete(&mut app, Rc::new(LocaleGreetings(Locale::new("fo"))));
+        assert_eq!(
+            state.locale(&app),
+            None,
+            "the load completes on the microtask queue"
+        );
+        drop(app);
+        cell.checkpoint();
+        let mut app = cell.borrow_mut();
+        assert_eq!(state.locale(&app), Some(&Locale::new("fo")));
+        assert!(binding.send_frames_to_engine(&app));
+        harness.pump(&mut app);
+        assert_eq!(seen.borrow()[0].locale, Locale::new("fo"));
+        assert_eq!(seen.borrow()[0].greeting.as_deref(), Some("hello in fo"));
+    }
+
+    #[test]
+    fn a_pending_load_keeps_the_old_locale_until_it_completes() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        // One probe widget: an identical child is not rebuilt, so only the scope's
+        // notification can rebuild it.
+        let probe = probe(&seen).into_widget();
+        let harness = Harness::mount(
+            &mut app,
+            Localizations::new(
+                en_us(),
+                vec![
+                    LocalizationsDelegateRef::new(GreetingsDelegate {
+                        loads: Rc::new(Cell::new(0)),
+                        reload: false,
+                    }),
+                    DefaultWidgetsLocalizations::delegate(),
+                ],
+            )
+            .child(Rc::clone(&probe))
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert_eq!(seen.borrow()[0].greeting.as_deref(), Some("hello in en_US"));
+
+        let delegate = FakeLocalizationsDelegate {
+            completer: Completer::new(),
+        };
+        let completer = delegate.completer.clone();
+        harness.set_child(
+            &mut app,
+            Localizations::new(
+                Locale::new("fr"),
+                vec![
+                    LocalizationsDelegateRef::new(delegate),
+                    DefaultWidgetsLocalizations::delegate(),
+                ],
+            )
+            .child(Rc::clone(&probe))
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert_eq!(
+            seen.borrow().len(),
+            1,
+            "the dependents keep the old resources"
+        );
+        let binding = RendererBinding::instance(&mut app);
+        assert!(!binding.send_frames_to_engine(&app));
+
+        completer.complete(&mut app, Rc::new(LocaleGreetings(Locale::new("fr"))));
+        drop(app);
+        cell.checkpoint();
+        let mut app = cell.borrow_mut();
+        harness.pump(&mut app);
+        assert!(binding.send_frames_to_engine(&app));
+        assert_eq!(
+            seen.borrow().len(),
+            2,
+            "the new resources rebuild the dependents"
+        );
+        assert_eq!(seen.borrow()[1].locale, Locale::new("fr"));
+        assert_eq!(seen.borrow()[1].greeting.as_deref(), Some("hello in fr"));
     }
 
     #[test]

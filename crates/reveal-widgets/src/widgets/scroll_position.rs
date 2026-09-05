@@ -10,8 +10,8 @@ use std::time::Duration;
 use reveal_animation::Curve;
 use reveal_embedder::{Rect, clamp_double};
 use reveal_foundation::{
-    App, Handle, HandleId, Listenable, ListenableObject, Listener, PRECISION_ERROR_TOLERANCE,
-    ValueNotifier,
+    App, CompleterFuture, Handle, HandleId, Listenable, ListenableObject, Listener,
+    PRECISION_ERROR_TOLERANCE, ValueNotifier,
 };
 use reveal_gestures::{Drag, DragStartDetails};
 use reveal_painting::{Axis, AxisDirection, axis_direction_to_axis, transform_rect};
@@ -569,7 +569,7 @@ pub trait ScrollPosition: ViewportOffset {
         curve: Rc<dyn Curve>,
         alignment_policy: ScrollPositionAlignmentPolicy,
         target_render_object: Option<AnyRenderObject>,
-    ) {
+    ) -> CompleterFuture<()> {
         ScrollPositionBase::ensure_visible(
             self,
             app,
@@ -579,7 +579,7 @@ pub trait ScrollPosition: ViewportOffset {
             curve,
             alignment_policy,
             target_render_object,
-        );
+        )
     }
 
     /// This notifier's value is true if a scroll is underway and false if the scroll
@@ -1123,11 +1123,11 @@ impl ScrollPositionBase {
         curve: Rc<dyn Curve>,
         alignment_policy: ScrollPositionAlignmentPolicy,
         target_render_object: Option<AnyRenderObject>,
-    ) {
+    ) -> CompleterFuture<()> {
         debug_assert!(object.attached(app));
         // If no viewport is found, return.
         let Some(viewport) = AnyRenderAbstractViewport::maybe_of(app, Some(object)) else {
-            return;
+            return CompleterFuture::ready(());
         };
 
         let mut target_rect: Option<Rect> = None;
@@ -1176,15 +1176,15 @@ impl ScrollPositionBase {
             };
 
         if target == this.pixels(app) {
-            return;
+            return CompleterFuture::ready(());
         }
 
         if duration.is_zero() {
             P::jump_to(this, app, target);
-            return;
+            return CompleterFuture::ready(());
         }
 
-        P::animate_to(this, app, target, duration, curve);
+        P::animate_to(this, app, target, duration, curve)
     }
 
     /// See [`ViewportOffset::move_to`], which a [`ScrollPosition`] overrides.
@@ -1195,14 +1195,14 @@ impl ScrollPositionBase {
         duration: Option<Duration>,
         curve: Option<Rc<dyn Curve>>,
         clamp: Option<bool>,
-    ) {
+    ) -> CompleterFuture<()> {
         let clamp = clamp.unwrap_or(true);
         let to = if clamp {
             clamp_double(to, this.min_scroll_extent(app), this.max_scroll_extent(app))
         } else {
             to
         };
-        reveal_rendering::ViewportOffsetBase::move_to(this, app, to, duration, curve, Some(clamp));
+        reveal_rendering::ViewportOffsetBase::move_to(this, app, to, duration, curve, Some(clamp))
     }
 
     /// See [`ViewportOffset::allow_implicit_scrolling`], which a [`ScrollPosition`] overrides.
@@ -1391,8 +1391,18 @@ fn reset_implied_velocity<P: ScrollPosition>(
     this.scroll_position_data_mut(app).implied_velocity = 0.0;
 }
 
+/// The dispatch signature of [`ViewportOffset::animate_to`].
+type AnimateToFn = fn(&mut App, HandleId, f64, Duration, Rc<dyn Curve>) -> CompleterFuture<()>;
+
 /// The dispatch signature of [`ViewportOffset::move_to`].
-type MoveToFn = fn(&mut App, HandleId, f64, Option<Duration>, Option<Rc<dyn Curve>>, Option<bool>);
+type MoveToFn = fn(
+    &mut App,
+    HandleId,
+    f64,
+    Option<Duration>,
+    Option<Rc<dyn Curve>>,
+    Option<bool>,
+) -> CompleterFuture<()>;
 
 /// The dispatch signature of [`ScrollPosition::ensure_visible`].
 type EnsureVisibleFn = fn(
@@ -1404,7 +1414,7 @@ type EnsureVisibleFn = fn(
     Rc<dyn Curve>,
     ScrollPositionAlignmentPolicy,
     Option<AnyRenderObject>,
-);
+) -> CompleterFuture<()>;
 
 /// The vtable of an erased [`AnyScrollPosition`]: one `&'static` table per concrete
 /// [`ScrollPosition`] type.
@@ -1438,7 +1448,7 @@ struct ScrollPositionVTable {
     apply_content_dimensions: fn(&mut App, HandleId, f64, f64) -> bool,
     ensure_visible: EnsureVisibleFn,
     is_scrolling_notifier: fn(&App, HandleId) -> Handle<ValueNotifier<bool>>,
-    animate_to: fn(&mut App, HandleId, f64, Duration, Rc<dyn Curve>),
+    animate_to: AnimateToFn,
     jump_to: fn(&mut App, HandleId, f64),
     pointer_scroll: fn(&mut App, HandleId, f64),
     move_to: MoveToFn,
@@ -1513,16 +1523,16 @@ impl ScrollPositionVTable {
                     curve,
                     policy,
                     target,
-                );
+                )
             },
             is_scrolling_notifier: |app, id| P::is_scrolling_notifier(resolve(id), app),
             animate_to: |app, id, to, duration, curve| {
-                P::animate_to(resolve(id), app, to, duration, curve);
+                P::animate_to(resolve(id), app, to, duration, curve)
             },
             jump_to: |app, id, value| P::jump_to(resolve(id), app, value),
             pointer_scroll: |app, id, delta| P::pointer_scroll(resolve(id), app, delta),
             move_to: |app, id, to, duration, curve, clamp| {
-                P::move_to(resolve(id), app, to, duration, curve, clamp);
+                P::move_to(resolve(id), app, to, duration, curve, clamp)
             },
             user_scroll_direction: |app, id| P::user_scroll_direction(resolve(id), app),
             allow_implicit_scrolling: |app, id| P::allow_implicit_scrolling(resolve(id), app),
@@ -1747,7 +1757,7 @@ impl AnyScrollPosition {
         curve: Rc<dyn Curve>,
         alignment_policy: ScrollPositionAlignmentPolicy,
         target_render_object: Option<AnyRenderObject>,
-    ) {
+    ) -> CompleterFuture<()> {
         (self.vtable.ensure_visible)(
             app,
             self.id,
@@ -1757,7 +1767,7 @@ impl AnyScrollPosition {
             curve,
             alignment_policy,
             target_render_object,
-        );
+        )
     }
 
     /// See [`ScrollPosition::is_scrolling_notifier`].
@@ -1766,8 +1776,14 @@ impl AnyScrollPosition {
     }
 
     /// See [`ViewportOffset::animate_to`].
-    pub fn animate_to(self, app: &mut App, to: f64, duration: Duration, curve: Rc<dyn Curve>) {
-        (self.vtable.animate_to)(app, self.id, to, duration, curve);
+    pub fn animate_to(
+        self,
+        app: &mut App,
+        to: f64,
+        duration: Duration,
+        curve: Rc<dyn Curve>,
+    ) -> CompleterFuture<()> {
+        (self.vtable.animate_to)(app, self.id, to, duration, curve)
     }
 
     /// See [`ViewportOffset::jump_to`].
@@ -1788,8 +1804,8 @@ impl AnyScrollPosition {
         duration: Option<Duration>,
         curve: Option<Rc<dyn Curve>>,
         clamp: Option<bool>,
-    ) {
-        (self.vtable.move_to)(app, self.id, to, duration, curve, clamp);
+    ) -> CompleterFuture<()> {
+        (self.vtable.move_to)(app, self.id, to, duration, curve, clamp)
     }
 
     /// See [`ViewportOffset::user_scroll_direction`].

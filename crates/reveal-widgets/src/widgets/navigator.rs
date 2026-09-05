@@ -11,7 +11,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use reveal_embedder::{Clip, RestorationData, RestorationMap};
-use reveal_foundation::{App, Handle, HandleId, ListenableObject, Listener, ValueNotifier};
+use reveal_foundation::{
+    App, Completer, CompleterFuture, Handle, HandleId, ListenableObject, Listener, ValueNotifier,
+};
 use reveal_gestures::GestureBinding;
 use reveal_rendering::RenderAbsorbPointer;
 use reveal_scheduler::{
@@ -46,13 +48,6 @@ const K_ANDROID_REFOCUSING_DELAY_DURATION: Duration = Duration::from_millis(300)
 ///
 /// Dart's `T?` on `Route<T>`; erased here because a `Route` is reached through [`AnyRoute`].
 pub type RouteResult = Option<Rc<dyn Any>>;
-
-/// A callback that is run when a route's [`popped`](AnyRoute::when_popped) or
-/// [`disposed`](AnyRoute::when_disposed) completion is reached.
-///
-/// Dart's `route.popped.then(..)`; there is no event loop, so the completion is a callback the
-/// caller registers, resolved through a microtask exactly as `TickerFuture` resolves.
-pub type RouteResultCallback = Rc<dyn Fn(&mut App, RouteResult)>;
 
 /// Creates a route for the given route settings.
 ///
@@ -318,52 +313,14 @@ impl From<PageRef> for RouteSettingsRef {
 // ---------------------------------------------------------------------------------------------
 // Route
 
-/// Dart's `Completer<T?>`: the completion a caller registers a callback on.
-///
-/// Resolved callbacks run through a microtask, as `TickerFuture`'s do.
-#[derive(Default)]
-pub(crate) struct RouteCompleter {
-    result: Option<RouteResult>,
-    callbacks: Vec<RouteResultCallback>,
-}
-
-impl RouteCompleter {
-    /// A completion nothing has resolved yet.
-    pub(crate) fn new() -> RouteCompleter {
-        RouteCompleter::default()
-    }
-
-    pub(crate) fn is_completed(&self) -> bool {
-        self.result.is_some()
-    }
-
-    /// The result the completion resolved with, if it has.
-    pub(crate) fn result(&self) -> Option<RouteResult> {
-        self.result.clone()
-    }
-
-    /// Registers a callback on a completion that has not resolved yet.
-    pub(crate) fn push(&mut self, callback: RouteResultCallback) {
-        debug_assert!(!self.is_completed());
-        self.callbacks.push(callback);
-    }
-
-    /// Resolves the completion, returning the callbacks the caller schedules as microtasks.
-    pub(crate) fn complete(&mut self, result: RouteResult) -> Vec<RouteResultCallback> {
-        debug_assert!(!self.is_completed());
-        self.result = Some(result);
-        std::mem::take(&mut self.callbacks)
-    }
-}
-
 /// The fields Dart's `Route` declares; every route carries this bag under the field `route`.
 pub struct RouteData {
     request_focus: Option<bool>,
     navigator: Option<Handle<NavigatorState>>,
     settings: RouteSettingsRef,
     restoration_scope_id: Handle<ValueNotifier<Option<String>>>,
-    pop_completer: RouteCompleter,
-    dispose_completer: RouteCompleter,
+    pop_completer: Completer<RouteResult>,
+    dispose_completer: Completer<RouteResult>,
 }
 
 impl RouteData {
@@ -382,8 +339,8 @@ impl RouteData {
             settings: settings
                 .unwrap_or_else(|| RouteSettingsRef::Settings(RouteSettings::default())),
             restoration_scope_id: app.create(ValueNotifier::new(None)),
-            pop_completer: RouteCompleter::default(),
-            dispose_completer: RouteCompleter::default(),
+            pop_completer: Completer::new(),
+            dispose_completer: Completer::new(),
         }
     }
 }
@@ -519,7 +476,7 @@ pub trait Route: Sized + 'static {
     ///
     /// [`did_add`](Self::did_add) will be called instead of this when the route immediately
     /// appears on screen without any push transition.
-    fn did_push(self: Handle<Self>, app: &mut App) -> Handle<TickerFuture> {
+    fn did_push(self: Handle<Self>, app: &mut App) -> TickerFuture {
         RouteBase::did_push(self, app)
     }
 
@@ -699,14 +656,9 @@ pub trait Route: Sized + 'static {
         self.as_route().has_active_route_below(app)
     }
 
-    /// See [`AnyRoute::when_popped`].
-    fn when_popped(self: Handle<Self>, app: &mut App, callback: RouteResultCallback) {
-        self.as_route().when_popped(app, callback);
-    }
-
-    /// See [`AnyRoute::when_disposed`].
-    fn when_disposed(self: Handle<Self>, app: &mut App, callback: RouteResultCallback) {
-        self.as_route().when_disposed(app, callback);
+    /// See [`AnyRoute::popped`].
+    fn popped(self: Handle<Self>, app: &App) -> CompleterFuture<RouteResult> {
+        self.as_route().popped(app)
     }
 }
 
@@ -728,8 +680,8 @@ pub trait RouteBase: Route {
     }
 
     /// Dart's `Route.didPush`.
-    fn did_push(self: Handle<Self>, app: &mut App) -> Handle<TickerFuture> {
-        let future = TickerFuture::complete(app);
+    fn did_push(self: Handle<Self>, app: &mut App) -> TickerFuture {
+        let future = TickerFuture::complete();
         let route = self.as_route();
         future.when_complete(
             app,
@@ -757,7 +709,7 @@ pub trait RouteBase: Route {
         // `navigator.focus_node` might acquire more focused children in `install`
         // asynchronously.
         let route = self.as_route();
-        let future = TickerFuture::complete(app);
+        let future = TickerFuture::complete();
         future.when_complete(
             app,
             Listener::new(move |app| {
@@ -833,7 +785,8 @@ pub trait RouteBase: Route {
     /// Dart's `Route.didComplete`.
     fn did_complete(self: Handle<Self>, app: &mut App, result: RouteResult) {
         let result = result.or_else(|| Route::current_result(self, app));
-        self.as_route().complete_popped(app, result);
+        let pop_completer = self.route_data(app).pop_completer.clone();
+        pop_completer.complete(app, result);
     }
 
     /// Dart's `Route.didPopNext`.
@@ -866,7 +819,8 @@ pub trait RouteBase: Route {
         self.route_data_mut(app).navigator = None;
         let notifier = self.route_data(app).restoration_scope_id;
         app.get_mut(notifier).dispose();
-        self.as_route().complete_disposed(app);
+        let dispose_completer = self.route_data(app).dispose_completer.clone();
+        dispose_completer.complete(app, None);
     }
 }
 
@@ -885,7 +839,7 @@ struct RouteVTable {
     data_mut: fn(&mut App, HandleId) -> &mut RouteData,
     overlay_entries: fn(&App, HandleId) -> Vec<Handle<OverlayEntry>>,
     install: fn(&mut App, HandleId),
-    did_push: fn(&mut App, HandleId) -> Handle<TickerFuture>,
+    did_push: fn(&mut App, HandleId) -> TickerFuture,
     did_add: fn(&mut App, HandleId),
     did_replace: fn(&mut App, HandleId, Option<AnyRoute>),
     will_pop: fn(&mut App, HandleId) -> RoutePopDisposition,
@@ -1093,66 +1047,13 @@ impl AnyRoute {
         notifier.set_value(app, restoration_id);
     }
 
-    // ---- the completions Dart writes as `popped` and `_disposeCompleter` ----
-
-    /// Registers a callback that runs when this route is popped off the navigator.
+    /// A future that completes when this route is popped off the navigator.
     ///
-    /// The callback receives the value given to [`NavigatorState::pop`], if any, or else the
-    /// value of [`current_result`](Self::current_result). It runs through a microtask, never
-    /// inline, as a Dart `.then` on a resolved future does.
-    pub fn when_popped(self, app: &mut App, callback: RouteResultCallback) {
-        match self.data(app).pop_completer.result.clone() {
-            None => self.data_mut(app).pop_completer.callbacks.push(callback),
-            Some(result) => {
-                app.schedule_microtask(Listener::new(move |app| {
-                    callback(app, result.clone());
-                }));
-            }
-        }
-    }
-
-    /// Whether the `popped` completion has been resolved (Dart's `_popCompleter.isCompleted`).
-    pub fn popped_is_completed(self, app: &App) -> bool {
-        self.data(app).pop_completer.is_completed()
-    }
-
-    /// Registers a callback that runs when this route is disposed.
-    pub fn when_disposed(self, app: &mut App, callback: RouteResultCallback) {
-        match self.data(app).dispose_completer.result.clone() {
-            None => self
-                .data_mut(app)
-                .dispose_completer
-                .callbacks
-                .push(callback),
-            Some(result) => {
-                app.schedule_microtask(Listener::new(move |app| {
-                    callback(app, result.clone());
-                }));
-            }
-        }
-    }
-
-    fn complete_popped(self, app: &mut App, result: RouteResult) {
-        debug_assert!(!self.data(app).pop_completer.is_completed());
-        let completer = &mut self.data_mut(app).pop_completer;
-        completer.result = Some(result.clone());
-        let callbacks = std::mem::take(&mut completer.callbacks);
-        for callback in callbacks {
-            let result = result.clone();
-            app.schedule_microtask(Listener::new(move |app| callback(app, result.clone())));
-        }
-    }
-
-    fn complete_disposed(self, app: &mut App) {
-        if self.data(app).dispose_completer.is_completed() {
-            return;
-        }
-        let completer = &mut self.data_mut(app).dispose_completer;
-        completer.result = Some(None);
-        let callbacks = std::mem::take(&mut completer.callbacks);
-        for callback in callbacks {
-            app.schedule_microtask(Listener::new(move |app| callback(app, None)));
-        }
+    /// The future completes with the value given to [`NavigatorState::pop`], if any, or else
+    /// the value of [`current_result`](Self::current_result). See
+    /// [`did_complete`](Self::did_complete) for more discussion on this topic.
+    pub fn popped(self, app: &App) -> CompleterFuture<RouteResult> {
+        self.data(app).pop_completer.future()
     }
 
     // ---- the virtuals ----
@@ -1168,7 +1069,7 @@ impl AnyRoute {
     }
 
     /// See [`Route::did_push`].
-    pub fn did_push(self, app: &mut App) -> Handle<TickerFuture> {
+    pub fn did_push(self, app: &mut App) -> TickerFuture {
         (self.vtable.did_push)(app, self.id)
     }
 
@@ -2265,14 +2166,14 @@ impl Navigator {
 
     /// Push a named route onto the navigator that most tightly encloses the given context.
     ///
-    /// Returns the pushed [`Route`]; register [`AnyRoute::when_popped`] on it for what Dart's
-    /// returned future resolves with.
+    /// Returns a future that completes to the `result` value passed to [`pop`](Self::pop) when
+    /// the pushed route is popped off the navigator.
     pub fn push_named(
         app: &mut App,
         context: BuildContext,
         route_name: &str,
         arguments: Option<Rc<dyn Any>>,
-    ) -> AnyRoute {
+    ) -> CompleterFuture<RouteResult> {
         Navigator::of(app, context, false).push_named(app, route_name, arguments)
     }
 
@@ -2296,7 +2197,7 @@ impl Navigator {
         route_name: &str,
         result: RouteResult,
         arguments: Option<Rc<dyn Any>>,
-    ) -> AnyRoute {
+    ) -> CompleterFuture<RouteResult> {
         Navigator::of(app, context, false)
             .push_replacement_named(app, route_name, result, arguments)
     }
@@ -2321,7 +2222,7 @@ impl Navigator {
         route_name: &str,
         result: RouteResult,
         arguments: Option<Rc<dyn Any>>,
-    ) -> AnyRoute {
+    ) -> CompleterFuture<RouteResult> {
         Navigator::of(app, context, false).pop_and_push_named(app, route_name, result, arguments)
     }
 
@@ -2345,7 +2246,7 @@ impl Navigator {
         new_route_name: &str,
         predicate: RoutePredicate,
         arguments: Option<Rc<dyn Any>>,
-    ) -> AnyRoute {
+    ) -> CompleterFuture<RouteResult> {
         Navigator::of(app, context, false).push_named_and_remove_until(
             app,
             new_route_name,
@@ -2372,7 +2273,14 @@ impl Navigator {
     }
 
     /// Push the given route onto the navigator that most tightly encloses the given context.
-    pub fn push(app: &mut App, context: BuildContext, route: AnyRoute) -> AnyRoute {
+    ///
+    /// Returns a future that completes to the `result` value passed to [`pop`](Self::pop) when
+    /// the pushed route is popped off the navigator.
+    pub fn push(
+        app: &mut App,
+        context: BuildContext,
+        route: AnyRoute,
+    ) -> CompleterFuture<RouteResult> {
         Navigator::of(app, context, false).push(app, route)
     }
 
@@ -2394,7 +2302,7 @@ impl Navigator {
         context: BuildContext,
         new_route: AnyRoute,
         result: RouteResult,
-    ) -> AnyRoute {
+    ) -> CompleterFuture<RouteResult> {
         Navigator::of(app, context, false).push_replacement(app, new_route, result)
     }
 
@@ -2421,7 +2329,7 @@ impl Navigator {
         context: BuildContext,
         new_route: AnyRoute,
         predicate: RoutePredicate,
-    ) -> AnyRoute {
+    ) -> CompleterFuture<RouteResult> {
         Navigator::of(app, context, false).push_and_remove_until(app, new_route, predicate)
     }
 
@@ -2891,7 +2799,7 @@ impl RouteEntry {
         let route = app.get(self).route;
         debug_assert!(route.is_installed_in(app, navigator));
         app.get_mut(self).current_state = RouteLifecycle::Popping;
-        if route.popped_is_completed(app) {
+        if route.data(app).pop_completer.is_completed() {
             // This is a page-based route popped through the Navigator.pop. The didPop should
             // have been called. No further action is needed.
             debug_assert!(app.get(self).page_based);
@@ -2921,7 +2829,7 @@ impl RouteEntry {
         route.did_complete(app, pending_result);
         app.get_mut(self).pending_result = None;
         // did_complete implies the popped completion resolved.
-        debug_assert!(route.popped_is_completed(app));
+        debug_assert!(route.data(app).pop_completer.is_completed());
         app.get_mut(self).current_state = RouteLifecycle::Remove;
     }
 
@@ -4264,15 +4172,16 @@ impl NavigatorState {
 impl NavigatorState {
     /// Push a named route onto the navigator.
     ///
-    /// The route name will be passed to [`Navigator::on_generate_route`]. The returned route is
-    /// the one that was pushed; register [`AnyRoute::when_popped`] on it for what Dart's
-    /// returned future resolves with.
+    /// The route name will be passed to [`Navigator::on_generate_route`].
+    ///
+    /// Returns a future that completes to the `result` value passed to [`pop`](Self::pop) when
+    /// the pushed route is popped off the navigator.
     pub fn push_named(
         self: Handle<Self>,
         app: &mut App,
         route_name: &str,
         arguments: Option<Rc<dyn Any>>,
-    ) -> AnyRoute {
+    ) -> CompleterFuture<RouteResult> {
         let route = self
             .route_named(app, route_name, arguments, false)
             .expect("a route for the given name");
@@ -4307,7 +4216,7 @@ impl NavigatorState {
         route_name: &str,
         result: RouteResult,
         arguments: Option<Rc<dyn Any>>,
-    ) -> AnyRoute {
+    ) -> CompleterFuture<RouteResult> {
         let route = self
             .route_named(app, route_name, arguments, false)
             .expect("a route for the given name");
@@ -4340,7 +4249,7 @@ impl NavigatorState {
         route_name: &str,
         result: RouteResult,
         arguments: Option<Rc<dyn Any>>,
-    ) -> AnyRoute {
+    ) -> CompleterFuture<RouteResult> {
         self.pop(app, result);
         self.push_named(app, route_name, arguments)
     }
@@ -4365,7 +4274,7 @@ impl NavigatorState {
         new_route_name: &str,
         predicate: RoutePredicate,
         arguments: Option<Rc<dyn Any>>,
-    ) -> AnyRoute {
+    ) -> CompleterFuture<RouteResult> {
         let route = self
             .route_named(app, new_route_name, arguments, false)
             .expect("a route for the given name");
@@ -4394,12 +4303,16 @@ impl NavigatorState {
 
     /// Push the given route onto the navigator.
     ///
-    /// Returns the route that was pushed; register [`AnyRoute::when_popped`] on it for what
-    /// Dart's returned future resolves with.
-    pub fn push(self: Handle<Self>, app: &mut App, route: AnyRoute) -> AnyRoute {
+    /// Returns a future that completes to the `result` value passed to [`pop`](Self::pop) when
+    /// the pushed route is popped off the navigator.
+    pub fn push(
+        self: Handle<Self>,
+        app: &mut App,
+        route: AnyRoute,
+    ) -> CompleterFuture<RouteResult> {
         let entry = RouteEntry::new(app, route, RouteLifecycle::Push, false, None);
         self.push_entry(app, entry);
-        route
+        route.popped(app)
     }
 
     /// Push a new route onto the navigator and return its restoration ID.
@@ -4447,11 +4360,11 @@ impl NavigatorState {
         app: &mut App,
         new_route: AnyRoute,
         result: RouteResult,
-    ) -> AnyRoute {
+    ) -> CompleterFuture<RouteResult> {
         debug_assert!(!new_route.installed(app));
         let entry = RouteEntry::new(app, new_route, RouteLifecycle::PushReplace, false, None);
         self.push_replacement_entry(app, entry, result);
-        new_route
+        new_route.popped(app)
     }
 
     /// The restorable version of [`push_replacement`](Self::push_replacement).
@@ -4507,12 +4420,12 @@ impl NavigatorState {
         app: &mut App,
         new_route: AnyRoute,
         predicate: RoutePredicate,
-    ) -> AnyRoute {
+    ) -> CompleterFuture<RouteResult> {
         debug_assert!(!new_route.installed(app));
         debug_assert!(new_route.overlay_entries(app).is_empty());
         let entry = RouteEntry::new(app, new_route, RouteLifecycle::Push, false, None);
         self.push_entry_and_remove_until(app, entry, predicate);
-        new_route
+        new_route.popped(app)
     }
 
     /// The restorable version of [`push_and_remove_until`](Self::push_and_remove_until).
@@ -4767,7 +4680,7 @@ impl NavigatorState {
             let route = app.get(entry).route;
             if on_pop_page(app, route, result.clone()) {
                 if app.get(entry).current_state <= RouteLifecycle::Idle {
-                    debug_assert!(route.popped_is_completed(app));
+                    debug_assert!(route.data(app).pop_completer.is_completed());
                     app.get_mut(entry).current_state = RouteLifecycle::Pop;
                 }
                 route.on_pop_invoked_with_result(app, true, result);
@@ -5914,26 +5827,23 @@ impl RestorableRouteFuture {
             app,
             Listener::handle_method(self, RestorableRouteFuture::notify),
         );
-        route.when_popped(
-            app,
-            Rc::new(move |app, result| {
-                if app.get(self).disposed {
-                    return;
-                }
-                if let Some(route) = app.get(self).route {
-                    let notifier = route.restoration_scope_id(app);
-                    notifier.remove_listener(
-                        app,
-                        &Listener::handle_method(self, RestorableRouteFuture::notify),
-                    );
-                }
-                app.get_mut(self).route = None;
-                self.notify_listeners(app);
-                if let Some(on_complete) = app.get(self).on_complete.clone() {
-                    on_complete(app, result);
-                }
-            }),
-        );
+        route.popped(app).then(app, move |app, result| {
+            if app.get(self).disposed {
+                return;
+            }
+            if let Some(route) = app.get(self).route {
+                let notifier = route.restoration_scope_id(app);
+                notifier.remove_listener(
+                    app,
+                    &Listener::handle_method(self, RestorableRouteFuture::notify),
+                );
+            }
+            app.get_mut(self).route = None;
+            self.notify_listeners(app);
+            if let Some(on_complete) = app.get(self).on_complete.clone() {
+                on_complete(app, result);
+            }
+        });
     }
 
     fn notify(self: Handle<Self>, app: &mut App) {
@@ -6552,5 +6462,95 @@ mod tests {
         assert!(second.is_current(&app));
         assert!(!second.is_first(&app));
         assert!(second.has_active_route_below(&app));
+    }
+
+    /// A navigator whose every route is a plain [`PageRouteBuilder`] showing the corner page.
+    fn pageless_navigator(key: &GlobalKey) -> WidgetRef {
+        Directionality::new(
+            TextDirection::Ltr,
+            Navigator::new()
+                .key(Rc::new(key.clone()))
+                .on_generate_route(|app, _settings| {
+                    Some(PageRouteBuilder::new(app, corner_page()).as_route())
+                }),
+        )
+        .into_widget()
+    }
+
+    /// Dart's `push` returns `route.popped`: the future completes within the pop, with the
+    /// pop's result, and a `.then` on it runs at the microtask drain — never inline.
+    #[test]
+    fn push_returns_a_future_that_completes_with_the_pop_result() {
+        let (cell, _platform) = app_with_view(None);
+        let key = GlobalKey::new();
+        mount(&cell, pageless_navigator(&key));
+        let mut app = cell.borrow_mut();
+        let navigator_state = state(&key, &mut app);
+        let at = settle(&mut app, Duration::ZERO);
+
+        let second = PageRouteBuilder::new(&mut app, corner_page()).as_route();
+        let popped = navigator_state.push(&mut app, second);
+        let at = settle(&mut app, at);
+        assert!(!popped.is_completed(), "the route is still up");
+
+        let seen: Rc<Cell<Option<i32>>> = Rc::default();
+        popped.clone().then(&mut app, {
+            let seen = Rc::clone(&seen);
+            move |_app, result| {
+                seen.set(result.and_then(|value| value.downcast_ref::<i32>().copied()));
+            }
+        });
+        navigator_state.pop(&mut app, Some(Rc::new(42)));
+        assert!(
+            popped.is_completed(),
+            "did_complete resolves the future within the pop"
+        );
+        assert_eq!(seen.get(), None, "a listener never runs inline");
+        app.drain_microtasks();
+        assert_eq!(seen.get(), Some(42));
+        settle(&mut app, at);
+    }
+
+    /// Dart's "remove a route whose value is awaited": `removeRoute(route, 'B')` completes the
+    /// future the push returned, and the continuation awaiting it resumes at the checkpoint.
+    #[test]
+    fn remove_route_completes_the_awaited_value() {
+        let (cell, _platform) = app_with_view(None);
+        let key = GlobalKey::new();
+        mount(&cell, pageless_navigator(&key));
+        let mut app = cell.borrow_mut();
+        let navigator_state = state(&key, &mut app);
+        let at = settle(&mut app, Duration::ZERO);
+
+        let route_a = PageRouteBuilder::new(&mut app, corner_page()).as_route();
+        let page_value = navigator_state.push(&mut app, route_a);
+        let at = settle(&mut app, at);
+        let awaited: Rc<Cell<Option<&'static str>>> = Rc::default();
+        app.spawn({
+            let awaited = Rc::clone(&awaited);
+            async move |_cx| {
+                let value = page_value.await;
+                awaited.set(value.and_then(|value| value.downcast_ref::<&str>().copied()));
+            }
+        });
+        drop(app);
+        cell.checkpoint();
+        assert_eq!(
+            awaited.get(),
+            None,
+            "the continuation is parked on the future"
+        );
+
+        let mut app = cell.borrow_mut();
+        navigator_state.remove_route(&mut app, route_a, Some(Rc::new("B")));
+        settle(&mut app, at);
+        assert_eq!(
+            awaited.get(),
+            None,
+            "the continuation resumes only at the checkpoint"
+        );
+        drop(app);
+        cell.checkpoint();
+        assert_eq!(awaited.get(), Some("B"));
     }
 }

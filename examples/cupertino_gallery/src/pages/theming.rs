@@ -4,13 +4,15 @@
 //! app — it resolves itself against the ambient theme. The two cards below hold the SAME
 //! constants; only the theme wrapped around each differs.
 
+use std::rc::Rc;
+
 use reveal_cupertino::CupertinoDynamicColor;
 use reveal_cupertino::{
     CupertinoColors, CupertinoListTile, CupertinoListTileChevron, CupertinoNavigationBar,
     CupertinoTheme, CupertinoThemeData,
 };
 use reveal_embedder::Brightness;
-use reveal_foundation::{App, Listener};
+use reveal_foundation::{App, Task};
 use reveal_painting::{AnyColor, BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry};
 use reveal_rendering::{CrossAxisAlignment, MainAxisAlignment};
 use reveal_widgets::{
@@ -150,8 +152,9 @@ fn push_row(app: &mut App, context: BuildContext) -> WidgetRef {
     CupertinoListTile::notched(Text::new(SUB_TITLE))
         .subtitle(secondary(app, context, "A whole screen, dark"))
         .trailing(CupertinoListTileChevron::new())
-        .on_tap(Listener::new(move |app: &mut App| {
+        .on_tap(Rc::new(move |app: &mut App| {
             open_sub_page(app, context, Entry::Theming, 0);
+            Task::ready(())
         }))
         .into_widget()
 }

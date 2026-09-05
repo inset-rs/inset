@@ -4,11 +4,13 @@
 //! Forms" entry demonstrates. The index is not a mock-up of iOS Settings; it is the
 //! framework's own list section, rendering itself.
 
+use std::rc::Rc;
+
 use reveal_cupertino::{
     CupertinoDynamicColor, CupertinoListTile, CupertinoListTileChevron, CupertinoNavigationBar,
     CupertinoTheme,
 };
-use reveal_foundation::{App, Listener};
+use reveal_foundation::{App, Task};
 use reveal_painting::EdgeInsetsGeometry;
 use reveal_rendering::MainAxisSize;
 use reveal_widgets::{BuildContext, IntoWidget, Padding, Row, StatelessWidget, Text, WidgetRef};
@@ -59,8 +61,9 @@ fn row(entry: Entry, app: &mut App, context: BuildContext) -> WidgetRef {
                     .into_widget(),
             ]),
         )
-        .on_tap(Listener::new(move |app: &mut App| {
+        .on_tap(Rc::new(move |app: &mut App| {
             open_entry(app, context, entry);
+            Task::ready(())
         }))
         .into_widget()
 }

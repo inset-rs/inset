@@ -11,11 +11,13 @@
 //! Scrolling entry is where that happens, and the footer below points at it rather than
 //! rebuilding it here.
 
+use std::rc::Rc;
+
 use reveal_cupertino::{
     CupertinoColors, CupertinoDynamicColor, CupertinoListTile, CupertinoListTileChevron,
     CupertinoNavigationBar,
 };
-use reveal_foundation::{App, Listener};
+use reveal_foundation::{App, Task};
 use reveal_painting::{AlignmentGeometry, BoxDecoration, EdgeInsetsGeometry};
 use reveal_rendering::CrossAxisAlignment;
 use reveal_widgets::{BuildContext, Column, Container, IntoWidget, SafeArea, Text, WidgetRef};
@@ -88,8 +90,9 @@ fn push_row(app: &mut App, context: BuildContext) -> WidgetRef {
             "Same band, opaque bar, no SafeArea",
         ))
         .trailing(CupertinoListTileChevron::new())
-        .on_tap(Listener::new(move |app: &mut App| {
+        .on_tap(Rc::new(move |app: &mut App| {
             open_sub_page(app, context, Entry::PageScaffold, 0);
+            Task::ready(())
         }))
         .into_widget()
 }

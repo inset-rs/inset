@@ -1,8 +1,7 @@
 //! Dialogs, action sheets, modal popups and sheets — and the result each one hands back.
 //!
-//! Dart writes `if (await showCupertinoDialog<bool>(...))`. There is no `await` here: the
-//! pushed route is returned, and `when_popped` is where the answer arrives — which is the same
-//! moment, the route popping, with nothing hidden.
+//! Dart writes `if (await showCupertinoDialog<bool>(...))`. Here the call runs inline and hands
+//! back the future; what follows Dart's `await` is the spawned continuation.
 
 use std::any::Any;
 use std::rc::Rc;
@@ -138,24 +137,22 @@ fn ask(
 ) -> Listener {
     Listener::new(move |app: &mut App| {
         let builder: WidgetBuilder = Rc::new(dialog);
-        let route =
+        let answer =
             show_cupertino_dialog(app, context, builder, None, None, true, false, None, None);
-        route.when_popped(
-            app,
-            Rc::new(move |app: &mut App, result| {
-                let answer = result
-                    .and_then(|value| value.downcast_ref::<bool>().copied())
-                    .map(|yes| describe(yes).to_owned());
-                record(this, app, answer);
-            }),
-        );
+        app.spawn(async move |cx| {
+            let answer = answer
+                .await
+                .and_then(|value| value.downcast_ref::<bool>().copied())
+                .map(|yes| describe(yes).to_owned());
+            cx.update(|app| record(this, app, answer));
+        });
     })
 }
 
 fn action_sheet(this: Handle<LastAnswer>, context: BuildContext) -> Listener {
     Listener::new(move |app: &mut App| {
         let builder: WidgetBuilder = Rc::new(sheet_actions);
-        let route = show_cupertino_modal_popup(
+        let chosen = show_cupertino_modal_popup(
             app,
             context,
             builder,
@@ -167,17 +164,15 @@ fn action_sheet(this: Handle<LastAnswer>, context: BuildContext) -> Listener {
             None,
             None,
         );
-        route.when_popped(
-            app,
-            Rc::new(move |app: &mut App, result| {
-                // `None` here is the dismissible barrier: tapped outside, the route popped with
-                // no result at all.
-                let chosen = result
-                    .and_then(|value| value.downcast_ref::<String>().cloned())
-                    .unwrap_or_else(|| "Dismissed".to_owned());
-                record(this, app, Some(chosen));
-            }),
-        );
+        app.spawn(async move |cx| {
+            // `None` here is the dismissible barrier: tapped outside, the route popped with no
+            // result at all.
+            let chosen = chosen
+                .await
+                .and_then(|value| value.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "Dismissed".to_owned());
+            cx.update(|app| record(this, app, Some(chosen)));
+        });
     })
 }
 
@@ -202,7 +197,7 @@ fn bare_popup(context: BuildContext) -> Listener {
 fn sheet(this: Handle<LastAnswer>, context: BuildContext) -> Listener {
     Listener::new(move |app: &mut App| {
         let builder: WidgetBuilder = Rc::new(sheet_page);
-        let route = show_cupertino_sheet(
+        let closed = show_cupertino_sheet(
             app,
             context,
             Some(builder),
@@ -213,15 +208,13 @@ fn sheet(this: Handle<LastAnswer>, context: BuildContext) -> Listener {
             None,
             false,
         );
-        route.when_popped(
-            app,
-            Rc::new(move |app: &mut App, result| {
-                let closed = result
-                    .and_then(|value| value.downcast_ref::<String>().cloned())
-                    .unwrap_or_else(|| "Dragged down".to_owned());
-                record(this, app, Some(closed));
-            }),
-        );
+        app.spawn(async move |cx| {
+            let closed = closed
+                .await
+                .and_then(|value| value.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "Dragged down".to_owned());
+            cx.update(|app| record(this, app, Some(closed)));
+        });
     })
 }
 
