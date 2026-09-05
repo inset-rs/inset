@@ -5,13 +5,15 @@ use std::collections::{HashMap, VecDeque};
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::ops::Receiver;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use reveal_embedder::{InertPlatform, PlatformRef};
 use slotmap::{SlotMap, new_key_type};
 
+use crate::app_cell::{AppCell, AsyncApp};
 use crate::change_notifier::Listener;
+use crate::executor::{ForegroundExecutor, Task};
 use crate::timers::{Timer, Timers};
 
 /// Drain budget for one [`App::drain_microtasks`]: two callbacks scheduling
@@ -119,41 +121,90 @@ struct Slot {
 
 /// Owns every Flutter object. Callbacks receive `&mut App` plus a [`Handle`] to themselves.
 ///
-/// Private and `#[non_exhaustive]`: scheduler, timers, and further arenas are additive.
+/// Lives in an [`AppCell`], which is what the shell and the tests hold; a task reaches it
+/// through [`AsyncApp`]. Private and `#[non_exhaustive]`: scheduler, timers, and further
+/// arenas are additive.
 #[non_exhaustive]
 pub struct App {
+    /// The cell this App lives in — gpui's `App::this`. Dangling for a bare [`App::new`].
+    this: Weak<AppCell>,
     slots: SlotMap<HandleId, Slot>,
     singletons: HashMap<std::any::TypeId, HandleId>,
     microtasks: VecDeque<Listener>,
     timers: Timers,
+    executor: ForegroundExecutor,
     platform: PlatformRef,
 }
 
+/// A bare `App` outside any cell: see [`App::new`].
 impl Default for App {
     fn default() -> App {
-        App {
-            slots: SlotMap::with_key(),
-            singletons: HashMap::new(),
-            microtasks: VecDeque::new(),
-            timers: Timers::default(),
-            platform: Rc::new(InertPlatform),
-        }
+        App::build(
+            Weak::new(),
+            Rc::new(InertPlatform),
+            ForegroundExecutor::new(),
+        )
     }
 }
 
 impl App {
+    /// A bare `App` outside any [`AppCell`]: it cannot [`spawn`](Self::spawn), and its
+    /// [`elapse`](Self::elapse) resumes no task. Kept for the tests written before the cell;
+    /// new code builds through [`AppCell::new`].
     pub fn new() -> App {
         App::default()
     }
 
-    /// The start closure (or tests that need a live engine) builds the
-    /// platform first, then this. [`App::new`] leaves an inert platform
-    /// and no views; tests that pump frames themselves use that.
+    /// A bare `App` on a live platform; see [`new`](Self::new). New code builds through
+    /// [`AppCell::with_platform`].
     pub fn with_platform(platform: PlatformRef) -> App {
         App {
             platform,
             ..App::default()
         }
+    }
+
+    pub(crate) fn build(
+        this: Weak<AppCell>,
+        platform: PlatformRef,
+        executor: ForegroundExecutor,
+    ) -> App {
+        App {
+            this,
+            slots: SlotMap::with_key(),
+            singletons: HashMap::new(),
+            microtasks: VecDeque::new(),
+            timers: Timers::default(),
+            executor,
+            platform,
+        }
+    }
+
+    /// This App as a task sees it: the handle an `async` body captures across its `await`s.
+    pub fn to_async(&self) -> AsyncApp {
+        AsyncApp::new(self.this.clone())
+    }
+
+    /// Queues `f` as a task on this App: the continuation of a Dart `async` body.
+    ///
+    /// Dart runs an `async` body synchronously up to its first `await`; port that prefix
+    /// inline — including the call whose future is awaited — and spawn only what follows the
+    /// `await`. The continuation first runs at the next [`AppCell::checkpoint`], the end of
+    /// the current platform event, and thereafter at the checkpoint after whatever it awaited
+    /// completed; it cannot run inline, since the caller holds the App it would borrow.
+    ///
+    /// The returned [`Task`] is the continuation's future; dropping it does not cancel it.
+    ///
+    /// # Panics
+    ///
+    /// On a bare [`App::new`], which no cell can drain.
+    pub fn spawn<R: 'static>(&self, f: impl AsyncFnOnce(&mut AsyncApp) -> R + 'static) -> Task<R> {
+        assert!(
+            self.this.strong_count() > 0,
+            "App::spawn on an App outside an AppCell: build it with AppCell::new"
+        );
+        let mut cx = self.to_async();
+        self.executor.spawn(async move { f(&mut cx).await })
     }
 
     pub fn platform(&self) -> PlatformRef {
@@ -233,24 +284,38 @@ impl App {
         self.timers.is_active(timer)
     }
 
-    /// Advances the App clock by `duration` and fires due timers.
+    /// Advances the App clock by `duration` and fires due timers, on a bare [`App::new`].
     ///
-    /// Microtasks drain first, then each due timer in due order (ties by id),
-    /// then microtasks after each callback — Dart's event-loop position for
-    /// `Timer`. Tests call this (FakeAsync). A host calls it as time passes.
+    /// [`AppCell::elapse`] is the one that lets a task resume between timers; this keeps the
+    /// same order (microtasks first, then each due timer, microtasks after each) for the tests
+    /// written before the cell.
     pub fn elapse(&mut self, duration: Duration) {
-        let target = self.timers.now() + duration;
+        let target = self.clock() + duration;
         self.drain_microtasks();
         let mut fired = 0usize;
-        loop {
-            let Some(callback) = self.timers.pop_next_due(target) else {
-                break;
-            };
+        while self.fire_next_due(target) {
             fired += 1;
             Timers::assert_fire_budget(fired);
-            callback.call(self);
             self.drain_microtasks();
         }
+        self.advance_clock_to(target);
+    }
+
+    /// The App clock: what [`elapse`](Self::elapse) has advanced it to.
+    pub(crate) fn clock(&self) -> Duration {
+        self.timers.now()
+    }
+
+    /// Fires the next timer due by `target`, if any.
+    pub(crate) fn fire_next_due(&mut self, target: Duration) -> bool {
+        let Some(callback) = self.timers.pop_next_due(target) else {
+            return false;
+        };
+        callback.call(self);
+        true
+    }
+
+    pub(crate) fn advance_clock_to(&mut self, target: Duration) {
         self.timers.advance_to(target);
     }
 

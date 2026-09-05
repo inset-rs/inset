@@ -18,12 +18,16 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: `let controller = AnimationController::new(app, ..)` is a `Handle<AnimationController>`; call `controller.forward(app)`. A crate that calls an inherent `self: Handle<Self>` method needs `#![feature(arbitrary_self_types)]`; trait methods resolve without it.
 
 - Change: Dart's isolate microtask queue is on `App`; a drain has a budget and panics on a cycle.
-  Reason: language — there is no isolate event loop, and a Rust `Future` would need `&mut App` in `poll`.
+  Reason: language — there is no isolate event loop.
   Affect: port `scheduleMicrotask(f)` as `app.schedule_microtask(..)`. Drain after platform events and between begin-frame and draw-frame; a cycle panics where the isolate hangs.
 
-- Change: `dart:async`'s `Timer` is `Timer::new` on a logical clock: `App::elapse` fires due timers (microtasks first, then due order, microtasks after each). `Timer.periodic` is omitted.
+- Change: `dart:async`'s `Timer` is `Timer::new` on a logical clock: `AppCell::elapse` fires due timers (microtasks first, then due order, microtasks after each, tasks polled after each). `Timer.periodic` is omitted.
   Reason: language — there is no isolate event loop; tests play FakeAsync via `elapse`.
-  Affect: write `Timer::new(app, duration, Listener::new(..))`, `timer.cancel(app)`, `timer.is_active(app)`; tests call `app.elapse(duration)`.
+  Affect: write `Timer::new(app, duration, Listener::new(..))`, `timer.cancel(app)`, `timer.is_active(app)`; tests call `cell.elapse(duration)`.
+
+- Change: the `App` lives in an `AppCell`, which the shell and the tests hold. A Dart `async` body is ported with everything up to its first `await` inline — including the call whose future is awaited — and the rest as `app.spawn(async move |cx| ..)`, a continuation that reaches the `App` through `cx.update(|app| ..)` one closure at a time. Microtasks and continuations run only through `AppCell::checkpoint`, which repeats until neither queue has work, with nothing borrowed. `Completer` and its future are `dart:async`'s; a `Task` is a continuation's future, and dropping it does not cancel it.
+  Reason: language — a Rust future cannot hold `&mut App` across an `await`, so a continuation borrows the cell for each step instead (gpui's `AppCell` / `AsyncApp`), and it cannot start inline because the caller holds the `App`.
+  Affect: a Dart `Future<T> m() async {..}` is `fn m(..) -> Task<T>` whose prefix runs where Dart's does; a method that only hands back a future returns that future's type (`CompleterFuture<T>` or `Task<T>`; edition 2024's `impl Future` would capture the `&mut App`). The shell runs the checkpoint at the end of every platform event and `AppCell::elapse` runs it around every timer, so `app.drain_microtasks()` is for a borrowed `App` only; nothing else may run the checkpoint, and `cx.update` while the `App` is borrowed panics.
 
 - Change: `App` holds the host `Platform`: `App::new` uses an inert one and `with_platform` installs a live one before user code.
   Reason: platform — dart:ui is host-bound; there is no isolate global to hang it on.
@@ -87,3 +91,5 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Diagnostics / `FlutterError` structured trees. Trigger: porting diagnostics; until then messages are `debug_assert!` strings.
 - `GlobalKey` / `ObjectKey`. Trigger: `widgets/framework.dart`.
 - `AsyncCallback` / `AsyncValueSetter` / `AsyncValueGetter` / `IterableFilter`. Trigger: the first async or iterable-filter call site.
+- A bare `App::new` / `App::with_platform` and `App::elapse`: the tests written before `AppCell` build their `App` outside the cell, where `spawn` panics and `elapse` resumes no task. Trigger: the test pass after the cell's shape review, which builds every test `App` through `AppCell::new` and deletes the three.
+- Waking a task from another thread. Tasks are woken only from the main thread today, so a wake always lands before the next drain; a background task would need a `Send` poke into the host's event loop (winit's `EventLoopProxy`). Trigger: the first background executor or platform callback off the main thread.

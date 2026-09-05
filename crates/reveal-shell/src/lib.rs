@@ -1,4 +1,4 @@
-//! The one [`EmbedderClient`] the framework provides: owns [`App`] and
+//! The one [`EmbedderClient`] the framework provides: owns the [`AppCell`] and
 //! translates host pushes into binding methods.
 //!
 //! Dart has no type for this — the engine owns the isolate. [`App`] stays in
@@ -6,19 +6,24 @@
 //! can name both.
 #![feature(arbitrary_self_types)]
 
+use std::cell::RefMut;
+use std::rc::Rc;
 use std::time::Duration;
 
 use reveal_embedder::{EmbedderClient, Frame, KeyData, PlatformRef, PointerDataPacket, ViewId};
-use reveal_foundation::App;
+use reveal_foundation::{App, AppCell};
 use reveal_gestures::GestureBinding;
 use reveal_painting::PaintingBinding;
 use reveal_rendering::RendererBinding;
 use reveal_scheduler::SchedulerBinding;
 use reveal_services::KeyEventManager;
 
-/// Host-facing isolate: [`App`] plus the methods the embedder pushes.
+/// Host-facing isolate: the [`AppCell`] plus the methods the embedder pushes.
+///
+/// Every push is one turn: the `App` is borrowed for the binding call and released before the
+/// cell's checkpoint, where the microtasks and futures the event queued run.
 pub struct Shell {
-    app: App,
+    app: Rc<AppCell>,
     /// The platform time the app clock was last advanced to.
     clock: Duration,
 }
@@ -29,18 +34,33 @@ impl Shell {
     /// Setup (later widgets `run_app`) requests the first frame when it
     /// installs work that needs one.
     pub fn new(platform: PlatformRef, setup: impl FnOnce(&mut App)) -> Shell {
-        let mut app = App::with_platform(platform);
-        // Flutter's engine collects the platform's fonts before the framework runs.
-        PaintingBinding::instance(&mut app).install_platform_fonts(&mut app);
-        setup(&mut app);
-        Shell {
-            app,
+        let shell = Shell {
+            app: AppCell::with_platform(platform),
             clock: Duration::ZERO,
-        }
+        };
+        shell.turn(|app| {
+            // Flutter's engine collects the platform's fonts before the framework runs.
+            PaintingBinding::instance(app).install_platform_fonts(app);
+            setup(app);
+        });
+        shell
     }
 
-    pub fn app(&mut self) -> &mut App {
-        &mut self.app
+    /// The `App`, borrowed until the guard drops. A host that needs a full turn — a borrow, then
+    /// the checkpoint — takes [`cell`](Self::cell).
+    pub fn app(&self) -> RefMut<'_, App> {
+        self.app.borrow_mut()
+    }
+
+    pub fn cell(&self) -> &Rc<AppCell> {
+        &self.app
+    }
+
+    /// One platform event: `f` on the borrowed `App`, then the checkpoint.
+    fn turn<R>(&self, f: impl FnOnce(&mut App) -> R) -> R {
+        let result = f(&mut self.app.borrow_mut());
+        self.app.checkpoint();
+        result
     }
 
     /// Moves the app clock up to the platform's `elapsed`, firing the timers that came due.
@@ -56,29 +76,25 @@ impl Shell {
 impl EmbedderClient for Shell {
     fn frame(&mut self, frame: Frame) {
         self.advance_clock(frame.elapsed);
-        SchedulerBinding::handle_begin_frame(&mut self.app, Some(frame.elapsed));
-        self.app.drain_microtasks();
-        SchedulerBinding::handle_draw_frame(&mut self.app);
-        self.app.drain_microtasks();
+        // The engine runs `_beginFrame` and `_drawFrame` as two native tasks: two turns.
+        self.turn(|app| SchedulerBinding::handle_begin_frame(app, Some(frame.elapsed)));
+        self.turn(SchedulerBinding::handle_draw_frame);
     }
 
     fn view_added(&mut self, _id: ViewId) {}
 
     fn view_metrics_changed(&mut self, _id: ViewId) {
-        RendererBinding::instance(&mut self.app).handle_metrics_changed(&mut self.app);
+        self.turn(|app| RendererBinding::instance(app).handle_metrics_changed(app));
     }
 
     fn view_removed(&mut self, _id: ViewId) {}
 
     fn pointer_data_packet(&mut self, packet: PointerDataPacket) {
-        GestureBinding::instance(&mut self.app).handle_pointer_data_packet(&mut self.app, packet);
-        self.app.drain_microtasks();
+        self.turn(|app| GestureBinding::instance(app).handle_pointer_data_packet(app, packet));
     }
 
     fn key_data(&mut self, data: KeyData) -> bool {
-        let handled = KeyEventManager::instance(&mut self.app).handle_key_data(&mut self.app, data);
-        self.app.drain_microtasks();
-        handled
+        self.turn(|app| KeyEventManager::instance(app).handle_key_data(app, data))
     }
 
     fn wake(&mut self, elapsed: Duration) {
@@ -166,7 +182,7 @@ mod tests {
         assert!(setup_ran);
         assert_eq!(frames.load(Ordering::SeqCst), 0);
 
-        SchedulerBinding::schedule_frame(shell.app());
+        SchedulerBinding::schedule_frame(&mut shell.app());
         assert_eq!(frames.load(Ordering::SeqCst), 1);
         shell.frame(Frame {
             elapsed: Duration::from_millis(16),
@@ -231,8 +247,8 @@ mod tests {
         assert!(shell.key_data(key_a), "the handler claimed the event");
         assert_eq!(seen.get(), 1);
 
-        let keyboard = HardwareKeyboard::instance(shell.app());
-        assert!(keyboard.is_logical_key_pressed(shell.app(), LogicalKeyboardKey::KEY_A));
+        let keyboard = HardwareKeyboard::instance(&mut shell.app());
+        assert!(keyboard.is_logical_key_pressed(&shell.app(), LogicalKeyboardKey::KEY_A));
     }
 
     #[test]

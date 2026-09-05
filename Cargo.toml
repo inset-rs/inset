@@ -11,6 +11,7 @@ publish = false
 unsafe_code = "forbid"
 
 [workspace.dependencies]
+async-task = "4"
 indexmap = "2"
 reveal-animation = { path = "crates/reveal-animation" }
 reveal-cupertino = { path = "crates/reveal-cupertino" }
