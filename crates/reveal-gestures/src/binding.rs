@@ -12,6 +12,7 @@ use crate::debug::{debug_print_hit_test_results, debug_print_mouse_hover_events}
 use crate::events::{PointerCancelEvent, PointerEvent};
 use crate::hit_test::{HitTestEntry, HitTestResult, HitTestTarget, HitTestable};
 use crate::pointer_router::PointerRouter;
+use crate::pointer_signal_resolver::PointerSignalResolver;
 
 /// What Flutter's `RendererBinding` mixin adds on top of `GestureBinding`: it overrides
 /// `hitTestInView` to walk the render trees before this binding adds itself, and the start of
@@ -93,6 +94,7 @@ pub struct GestureBinding {
     /// Filled on first [`GestureBinding::instance`]. `Default` cannot mint Handles.
     pointer_router: Option<Handle<PointerRouter>>,
     gesture_arena: Option<Handle<GestureArenaManager>>,
+    pointer_signal_resolver: Option<Handle<PointerSignalResolver>>,
     hit_tests: HashMap<i64, HitTestResult>,
     /// Flutter's `hitTestInView` override point: the renderer binding registers itself here.
     overrides: Option<Rc<dyn GestureBindingOverrides>>,
@@ -107,9 +109,11 @@ impl GestureBinding {
         if app.get(this).pointer_router.is_none() {
             let router = PointerRouter::new(app);
             let arena = GestureArenaManager::new(app);
+            let resolver = PointerSignalResolver::new(app);
             let binding = app.get_mut(this);
             binding.pointer_router = Some(router);
             binding.gesture_arena = Some(arena);
+            binding.pointer_signal_resolver = Some(resolver);
         }
         this
     }
@@ -126,6 +130,15 @@ impl GestureBinding {
     pub fn gesture_arena(self: Handle<Self>, app: &App) -> Handle<GestureArenaManager> {
         app.get(self)
             .gesture_arena
+            .expect("GestureBinding::instance must run first")
+    }
+
+    /// The resolver used for determining which widget handles a
+    /// [`PointerEvent::Scroll`], [`PointerEvent::ScrollInertiaCancel`], or
+    /// [`PointerEvent::Scale`] event.
+    pub fn pointer_signal_resolver(self: Handle<Self>, app: &App) -> Handle<PointerSignalResolver> {
+        app.get(self)
+            .pointer_signal_resolver
             .expect("GestureBinding::instance must run first")
     }
 
@@ -310,6 +323,11 @@ impl HitTestTarget for Handle<GestureBinding> {
             arena.close(app, event.pointer());
         } else if matches!(event, PointerEvent::Up(_) | PointerEvent::PanZoomEnd(_)) {
             arena.sweep(app, event.pointer());
+        } else if matches!(
+            event,
+            PointerEvent::Scroll(_) | PointerEvent::ScrollInertiaCancel(_) | PointerEvent::Scale(_)
+        ) {
+            this.pointer_signal_resolver(app).resolve(app);
         }
     }
 }

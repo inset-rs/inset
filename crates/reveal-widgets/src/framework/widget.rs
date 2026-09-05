@@ -9,13 +9,14 @@ use std::rc::Rc;
 
 use reveal_foundation::{App, Key};
 use reveal_rendering::{
-    AnyRenderObject, ParentData, RenderHandle, RenderObject, RenderObjectWithChildMixin,
+    AnyRenderObject, ContainerRenderObjectMixin, ParentData, RenderHandle, RenderObject,
+    RenderObjectWithChildMixin,
 };
 
 use super::element::{AnyElement, BuildContext};
 use super::elements::{
-    InheritedElement, LeafRenderObjectElement, ParentDataElement, SingleChildRenderObjectElement,
-    StatefulElement, StatelessElement,
+    InheritedElement, LeafRenderObjectElement, MultiChildRenderObjectElement, ParentDataElement,
+    SingleChildRenderObjectElement, StatefulElement, StatelessElement,
 };
 use super::state::State;
 
@@ -355,6 +356,20 @@ pub trait ParentDataWidget: Debug + 'static {
     /// appropriate.
     fn apply_parent_data(&self, app: &mut App, render_object: AnyRenderObject);
 
+    /// Dart's `debugIsValidRenderObject`: whether `render_object`'s parent data is the one
+    /// this widget writes.
+    ///
+    /// The default answers `render_object.parent_data_is::<Self::ParentData>(app)`. A widget
+    /// whose Dart counterpart also accepts a subclass of its `ParentData` — `Positioned` on a
+    /// `_TheaterParentData` — overrides this to accept that type too.
+    fn debug_is_valid_render_object(
+        &self,
+        app: &App,
+        render_object: ::reveal_rendering::AnyRenderObject,
+    ) -> bool {
+        render_object.parent_data_is::<Self::ParentData>(app)
+    }
+
     /// Whether the `ParentDataElement::apply_widget_out_of_turn` method will be allowed
     /// with this widget.
     ///
@@ -427,7 +442,7 @@ pub trait RenderObjectWidget: Debug + 'static {
     /// should instead be handled by the method that overrides `RenderObjectElement.mount`
     /// in the object rendered by this object's `create_element` method.
     ///
-    /// Returns the erased edge (`handle.as_object()`), which is what the element tree holds;
+    /// Returns the type-erased handle (`handle.as_object()`), which is what the element tree holds;
     /// [`update_render_object`](Self::update_render_object) gets the typed handle back.
     fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject;
 
@@ -514,6 +529,18 @@ where
 {
     /// The widget below this widget in the tree.
     fn child(&self) -> Option<&WidgetRef>;
+
+    /// Creates the element that manages this widget's child.
+    ///
+    /// Dart's `createElement`; a widget whose element has bodies of its own
+    /// (`SingleChildScrollView`'s viewport) overrides it with an element that implements
+    /// `SingleChildRenderObjectElementBase`.
+    fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement
+    where
+        Self: Sized,
+    {
+        SingleChildRenderObjectElement::<Self>::create(app, this)
+    }
 }
 
 /// The kind tag of [`IntoWidget`] for a [`SingleChildRenderObjectWidget`].
@@ -542,7 +569,7 @@ where
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        SingleChildRenderObjectElement::<W>::create(app, this)
+        SingleChildRenderObjectWidget::create_element(&self.0, app, this)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -561,6 +588,96 @@ where
 impl<W: SingleChildRenderObjectWidget> Debug for SingleChildRenderObject<W>
 where
     W::RenderObject: RenderObjectWithChildMixin,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// A superclass for `RenderObjectWidget`s that configure `RenderObject` subclasses that have a
+/// single list of children. (This superclass only provides the storage for that child list, it
+/// doesn't actually provide the updating logic.)
+///
+/// The render object assigned to this widget must use `ContainerRenderObjectMixin`, which
+/// provides the necessary functionality to visit the children of the container render object
+/// (the render object belonging to the [`children`](Self::children) widgets).
+///
+/// See also:
+///
+///  * `Stack`, which uses [`MultiChildRenderObjectWidget`].
+///  * `RenderStack`, for an example implementation of the associated render object.
+pub trait MultiChildRenderObjectWidget: RenderObjectWidget
+where
+    Self::RenderObject: ContainerRenderObjectMixin,
+{
+    /// The widgets below this widget in the tree.
+    ///
+    /// If this list is going to be mutated, it is usually wise to put a [`Key`] on each of the
+    /// child widgets, so that the framework can match old configurations to new configurations
+    /// and maintain the underlying render objects.
+    ///
+    /// Also, a widget is immutable, so directly modifying the [`children`](Self::children) of a
+    /// widget already in the tree results in incorrect behaviour. Whenever the children list is
+    /// modified, a new list should be provided.
+    fn children(&self) -> &[WidgetRef];
+
+    /// Creates the element that manages this widget's children.
+    ///
+    /// Dart's `createElement`; a widget whose element has bodies of its own (`Viewport`)
+    /// overrides it with an element that implements `MultiChildRenderObjectElementBase`.
+    fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement
+    where
+        Self: Sized,
+    {
+        MultiChildRenderObjectElement::<Self>::create(app, this)
+    }
+}
+
+/// The kind tag of [`IntoWidget`] for a [`MultiChildRenderObjectWidget`].
+pub struct MultiChildRenderObjectKind;
+
+/// The erased form of a [`MultiChildRenderObjectWidget`].
+pub struct MultiChildRenderObject<W: MultiChildRenderObjectWidget>(pub W)
+where
+    W::RenderObject: ContainerRenderObjectMixin;
+
+impl<W: MultiChildRenderObjectWidget> IntoWidget<MultiChildRenderObjectKind> for W
+where
+    W::RenderObject: ContainerRenderObjectMixin,
+{
+    fn into_widget(self) -> WidgetRef {
+        Rc::new(MultiChildRenderObject(self))
+    }
+}
+
+impl<W: MultiChildRenderObjectWidget> Widget for MultiChildRenderObject<W>
+where
+    W::RenderObject: ContainerRenderObjectMixin,
+{
+    fn key(&self) -> Option<&KeyRef> {
+        self.0.key()
+    }
+
+    fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
+        MultiChildRenderObjectWidget::create_element(&self.0, app, this)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        &self.0
+    }
+
+    fn widget_type(&self) -> TypeId {
+        TypeId::of::<W>()
+    }
+
+    fn kind(&self) -> WidgetKind {
+        WidgetKind::Other
+    }
+}
+
+impl<W: MultiChildRenderObjectWidget> Debug for MultiChildRenderObject<W>
+where
+    W::RenderObject: ContainerRenderObjectMixin,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)

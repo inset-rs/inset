@@ -138,6 +138,46 @@ pub trait Listenable {
     fn remove_listener(&self, app: &mut App, listener: &Listener);
 }
 
+/// A [`Listenable`] that triggers when any of the given [`Listenable`]s
+/// themselves trigger.
+///
+/// Once it is created, items must not be added to or removed from the list.
+/// Doing so will lead to memory leaks or exceptions.
+///
+/// The list may contain `None`s; they are ignored.
+///
+/// Dart's `Listenable.merge` factory.
+pub struct MergingListenable {
+    children: Vec<Option<Rc<dyn Listenable>>>,
+}
+
+impl MergingListenable {
+    /// Dart `Listenable.merge(listenables)`.
+    pub fn new(children: Vec<Option<Rc<dyn Listenable>>>) -> MergingListenable {
+        MergingListenable { children }
+    }
+}
+
+impl Listenable for MergingListenable {
+    fn add_listener(&self, app: &mut App, listener: Listener) {
+        for child in self.children.iter().flatten() {
+            child.add_listener(app, listener.clone());
+        }
+    }
+
+    fn remove_listener(&self, app: &mut App, listener: &Listener) {
+        for child in self.children.iter().flatten() {
+            child.remove_listener(app, listener);
+        }
+    }
+}
+
+impl Debug for MergingListenable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Listenable::merge([{} children])", self.children.len())
+    }
+}
+
 /// An interface for implementors of [`Listenable`] that expose a [`value`].
 ///
 /// This interface is implemented by [`ValueNotifier<T>`] and `Animation<T>`, and
@@ -437,10 +477,9 @@ impl ChangeNotifierData {
             let mut new_listeners = vec![None; new_length];
 
             let mut new_index = 0;
-            for i in 0..self.count {
-                let listener = self.listeners[i].clone();
+            for listener in &self.listeners[..self.count] {
                 if listener.is_some() {
-                    new_listeners[new_index] = listener;
+                    new_listeners[new_index] = listener.clone();
                     new_index += 1;
                 }
             }
@@ -508,6 +547,11 @@ impl<T: ChangeNotifier> ListenableObject for T {
     }
 
     fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
+        // Allowed on a disposed instance (see `ChangeNotifierData::remove_listener`); here a
+        // disposed notifier may already have left the arena, so a stale handle is a no-op.
+        if !app.contains(self) {
+            return;
+        }
         app.get_mut(self)
             .change_notifier_data_mut()
             .remove_listener(listener);

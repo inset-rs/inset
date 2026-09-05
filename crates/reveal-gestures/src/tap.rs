@@ -12,14 +12,15 @@ use crate::arena::GestureDisposition;
 use crate::constants::K_PRESS_TIMEOUT;
 use crate::events::{
     K_PRIMARY_BUTTON, K_SECONDARY_BUTTON, K_TERTIARY_BUTTON, PointerCancelEvent, PointerDownEvent,
-    PointerEvent, PointerUpEvent,
+    PointerEvent, PointerMoveEvent, PointerUpEvent,
 };
 use crate::gesture_details::PositionedGestureDetails;
 use crate::gesture_settings::DeviceGestureSettings;
 use crate::recognizer::{
     GestureRecognizer, GestureRecognizerData, GestureRecognizerState, OneSequenceData,
     OneSequenceGestureRecognizer, PrimaryPointerData, PrimaryPointerGestureRecognizer,
-    RecognizerLeaf, RecognizerLeafData, UNSET_TOUCH_SLOP,
+    PrimaryPointerLeaf, PrimaryPointerLeafData, RecognizerLeaf, RecognizerLeafData,
+    UNSET_TOUCH_SLOP,
 };
 use crate::team::GestureArenaTeam;
 
@@ -172,7 +173,9 @@ pub type GestureTapMoveCallback = ValueChanged<TapMoveDetails>;
 pub type GestureTapCancelCallback = Listener;
 
 /// Field bag for Dart's `BaseTapGestureRecognizer`.
-pub(crate) struct BaseTapData {
+///
+/// A leaf holds one and hands it out through [`BaseTapLeafData::base_tap`].
+pub struct BaseTapData {
     sent_tap_down: bool,
     won_arena_for_primary_pointer: bool,
     down: Option<PointerDownEvent>,
@@ -180,7 +183,8 @@ pub(crate) struct BaseTapData {
 }
 
 impl BaseTapData {
-    fn new() -> BaseTapData {
+    /// Initializes the tap recognizer: no down event seen, no arena won.
+    pub fn new() -> BaseTapData {
         BaseTapData {
             sent_tap_down: false,
             won_arena_for_primary_pointer: false,
@@ -188,6 +192,83 @@ impl BaseTapData {
             up: None,
         }
     }
+}
+
+impl Default for BaseTapData {
+    fn default() -> BaseTapData {
+        BaseTapData::new()
+    }
+}
+
+/// The extra field bag a [`BaseTapGestureRecognizer`] leaf carries.
+pub trait BaseTapLeafData: PrimaryPointerLeafData {
+    /// The leaf's [`BaseTapGestureRecognizer`] bag.
+    fn base_tap(&self) -> &BaseTapData;
+
+    /// The leaf's [`BaseTapGestureRecognizer`] bag, mutably.
+    fn base_tap_mut(&mut self) -> &mut BaseTapData;
+}
+
+/// Virtuals [`BaseTapGestureRecognizer`]'s bodies call on its leaves.
+pub trait BaseTapLeaf: PrimaryPointerLeaf + BaseTapLeafData {
+    /// A pointer has contacted the screen, which might be the start of a tap.
+    ///
+    /// This triggers after the down event, once a short timeout (the deadline)
+    /// has elapsed, or once the gesture has won the arena, whichever comes first.
+    ///
+    /// The parameter `down` is the down event of the primary pointer that started
+    /// the tap sequence.
+    ///
+    /// If this recognizer doesn't win the arena,
+    /// [`handle_tap_cancel`](Self::handle_tap_cancel) is called next. Otherwise,
+    /// [`handle_tap_up`](Self::handle_tap_up) is called next.
+    fn handle_tap_down(self: Handle<Self>, app: &mut App, down: &PointerDownEvent);
+
+    /// A pointer has stopped contacting the screen, which is recognized as a tap.
+    ///
+    /// This triggers on the up event if the recognizer wins the arena with it or
+    /// has previously won.
+    ///
+    /// The parameter `down` is the down event of the primary pointer that started
+    /// the tap sequence, and `up` is the up event that ended it.
+    ///
+    /// If this recognizer doesn't win the arena,
+    /// [`handle_tap_cancel`](Self::handle_tap_cancel) is called instead.
+    fn handle_tap_up(
+        self: Handle<Self>,
+        app: &mut App,
+        down: &PointerDownEvent,
+        up: &PointerUpEvent,
+    );
+
+    /// A pointer that triggered a tap has moved.
+    ///
+    /// This triggers on the move event if the recognizer has recognized the tap
+    /// gesture. The parameter `move_event` is the move event of the primary
+    /// pointer that started the tap sequence.
+    fn handle_tap_move(self: Handle<Self>, _app: &mut App, _move_event: &PointerMoveEvent) {}
+
+    /// A pointer that previously triggered [`handle_tap_down`](Self::handle_tap_down)
+    /// will not end up causing a tap.
+    ///
+    /// This triggers once the gesture loses the arena if
+    /// [`handle_tap_down`](Self::handle_tap_down) has been previously triggered.
+    ///
+    /// The parameter `down` is the down event of the primary pointer that started
+    /// the tap sequence; `cancel` is the cancel event, which might be `None`;
+    /// `reason` is a short description of the cause if `cancel` is `None`, which
+    /// can be "forced" if other gestures won the arena, or "spontaneous"
+    /// otherwise.
+    ///
+    /// If this recognizer wins the arena, [`handle_tap_up`](Self::handle_tap_up)
+    /// is called instead.
+    fn handle_tap_cancel(
+        self: Handle<Self>,
+        app: &mut App,
+        down: &PointerDownEvent,
+        cancel: Option<&PointerCancelEvent>,
+        reason: &str,
+    );
 }
 
 /// Recognizes taps.
@@ -474,6 +555,135 @@ impl TapGestureRecognizer {
         <Self as RecognizerLeaf>::debug_description(self)
     }
 
+    fn invoke_callback<T>(
+        self: Handle<Self>,
+        app: &mut App,
+        name: &str,
+        callback: impl FnOnce(&mut App) -> T,
+    ) -> Option<T> {
+        GestureRecognizer::invoke_callback(self, app, name, callback)
+    }
+}
+
+impl RecognizerLeafData for TapGestureRecognizer {
+    fn recognizer(&self) -> &GestureRecognizerData {
+        &self.recognizer
+    }
+    fn recognizer_mut(&mut self) -> &mut GestureRecognizerData {
+        &mut self.recognizer
+    }
+    fn one_sequence(&self) -> &OneSequenceData {
+        &self.one_sequence
+    }
+    fn one_sequence_mut(&mut self) -> &mut OneSequenceData {
+        &mut self.one_sequence
+    }
+}
+
+impl PrimaryPointerLeafData for TapGestureRecognizer {
+    fn primary(&self) -> &PrimaryPointerData {
+        &self.primary
+    }
+    fn primary_mut(&mut self) -> &mut PrimaryPointerData {
+        &mut self.primary
+    }
+}
+
+impl BaseTapLeafData for TapGestureRecognizer {
+    fn base_tap(&self) -> &BaseTapData {
+        &self.base_tap
+    }
+    fn base_tap_mut(&mut self) -> &mut BaseTapData {
+        &mut self.base_tap
+    }
+}
+
+impl RecognizerLeaf for TapGestureRecognizer {
+    fn add_allowed_pointer(self: Handle<Self>, app: &mut App, event: PointerDownEvent) {
+        BaseTapGestureRecognizer::add_allowed_pointer(self, app, event);
+    }
+
+    fn handle_non_allowed_pointer(self: Handle<Self>, app: &mut App, event: &PointerDownEvent) {
+        PrimaryPointerGestureRecognizer::handle_non_allowed_pointer(self, app, event);
+    }
+
+    fn start_tracking_pointer(
+        self: Handle<Self>,
+        app: &mut App,
+        pointer: i64,
+        transform: Option<Matrix4>,
+    ) {
+        BaseTapGestureRecognizer::start_tracking_pointer(self, app, pointer, transform);
+    }
+
+    fn handle_event(self: Handle<Self>, app: &mut App, event: PointerEvent) {
+        PrimaryPointerGestureRecognizer::handle_event(self, app, event);
+    }
+
+    fn did_stop_tracking_last_pointer(self: Handle<Self>, app: &mut App, pointer: i64) {
+        PrimaryPointerGestureRecognizer::did_stop_tracking_last_pointer(self, app, pointer);
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        PrimaryPointerGestureRecognizer::dispose(self, app);
+    }
+
+    fn resolve(self: Handle<Self>, app: &mut App, disposition: GestureDisposition) {
+        BaseTapGestureRecognizer::resolve(self, app, disposition);
+    }
+
+    fn accept_gesture(self: Handle<Self>, app: &mut App, pointer: i64) {
+        BaseTapGestureRecognizer::accept_gesture(self, app, pointer);
+    }
+
+    fn reject_gesture(self: Handle<Self>, app: &mut App, pointer: i64) {
+        BaseTapGestureRecognizer::reject_gesture(self, app, pointer);
+    }
+
+    fn is_pointer_allowed(self: Handle<Self>, app: &App, event: &PointerDownEvent) -> bool {
+        let allowed = {
+            let recognizer = app.get(self);
+            match event.buttons {
+                K_PRIMARY_BUTTON => {
+                    recognizer.on_tap_down.is_some()
+                        || recognizer.on_tap.is_some()
+                        || recognizer.on_tap_up.is_some()
+                        || recognizer.on_tap_cancel.is_some()
+                        || recognizer.on_tap_move.is_some()
+                }
+                K_SECONDARY_BUTTON => {
+                    recognizer.on_secondary_tap.is_some()
+                        || recognizer.on_secondary_tap_down.is_some()
+                        || recognizer.on_secondary_tap_up.is_some()
+                        || recognizer.on_secondary_tap_cancel.is_some()
+                }
+                K_TERTIARY_BUTTON => {
+                    recognizer.on_tertiary_tap_down.is_some()
+                        || recognizer.on_tertiary_tap_up.is_some()
+                        || recognizer.on_tertiary_tap_cancel.is_some()
+                }
+                _ => false,
+            }
+        };
+        allowed && GestureRecognizer::is_pointer_allowed(self, app, event)
+    }
+
+    fn debug_description(self: Handle<Self>) -> &'static str {
+        "tap"
+    }
+}
+
+impl PrimaryPointerLeaf for TapGestureRecognizer {
+    fn handle_primary_pointer(self: Handle<Self>, app: &mut App, event: PointerEvent) {
+        BaseTapGestureRecognizer::handle_primary_pointer(self, app, event);
+    }
+
+    fn did_exceed_deadline(self: Handle<Self>, app: &mut App) {
+        BaseTapGestureRecognizer::did_exceed_deadline(self, app);
+    }
+}
+
+impl BaseTapLeaf for TapGestureRecognizer {
     fn handle_tap_down(self: Handle<Self>, app: &mut App, down: &PointerDownEvent) {
         let details = TapDownDetails::new(
             down.position,
@@ -533,11 +743,7 @@ impl TapGestureRecognizer {
         }
     }
 
-    fn handle_tap_move(
-        self: Handle<Self>,
-        app: &mut App,
-        move_event: &crate::events::PointerMoveEvent,
-    ) {
+    fn handle_tap_move(self: Handle<Self>, app: &mut App, move_event: &PointerMoveEvent) {
         if app.get(self).on_tap_move.is_some() && move_event.buttons == K_PRIMARY_BUTTON {
             let details = TapMoveDetails::new(
                 GestureRecognizer::kind_for_pointer(self, app, move_event.pointer),
@@ -587,248 +793,175 @@ impl TapGestureRecognizer {
             _ => {}
         }
     }
-
-    fn invoke_callback<T>(
-        self: Handle<Self>,
-        app: &mut App,
-        name: &str,
-        callback: impl FnOnce(&mut App) -> T,
-    ) -> Option<T> {
-        GestureRecognizer::invoke_callback(self, app, name, callback)
-    }
 }
 
-impl RecognizerLeafData for TapGestureRecognizer {
-    fn recognizer(&self) -> &GestureRecognizerData {
-        &self.recognizer
-    }
-    fn recognizer_mut(&mut self) -> &mut GestureRecognizerData {
-        &mut self.recognizer
-    }
-    fn one_sequence(&self) -> &OneSequenceData {
-        &self.one_sequence
-    }
-    fn one_sequence_mut(&mut self) -> &mut OneSequenceData {
-        &mut self.one_sequence
-    }
-    fn primary(&self) -> &PrimaryPointerData {
-        &self.primary
-    }
-    fn primary_mut(&mut self) -> &mut PrimaryPointerData {
-        &mut self.primary
-    }
-}
-
-impl RecognizerLeaf for TapGestureRecognizer {
-    fn add_allowed_pointer(self: Handle<Self>, app: &mut App, event: PointerDownEvent) {
-        BaseTapGestureRecognizer::add_allowed_pointer(self, app, event);
-    }
-
-    fn start_tracking_pointer(
-        self: Handle<Self>,
-        app: &mut App,
-        pointer: i64,
-        transform: Option<Matrix4>,
-    ) {
-        BaseTapGestureRecognizer::start_tracking_pointer(self, app, pointer, transform);
-    }
-
-    fn handle_primary_pointer(self: Handle<Self>, app: &mut App, event: PointerEvent) {
-        BaseTapGestureRecognizer::handle_primary_pointer(self, app, event);
-    }
-
-    fn did_exceed_deadline(self: Handle<Self>, app: &mut App) {
-        BaseTapGestureRecognizer::did_exceed_deadline(self, app);
-    }
-
-    fn resolve(self: Handle<Self>, app: &mut App, disposition: GestureDisposition) {
-        BaseTapGestureRecognizer::resolve(self, app, disposition);
-    }
-
-    fn accept_gesture(self: Handle<Self>, app: &mut App, pointer: i64) {
-        BaseTapGestureRecognizer::accept_gesture(self, app, pointer);
-    }
-
-    fn reject_gesture(self: Handle<Self>, app: &mut App, pointer: i64) {
-        BaseTapGestureRecognizer::reject_gesture(self, app, pointer);
-    }
-
-    fn is_pointer_allowed(self: Handle<Self>, app: &App, event: &PointerDownEvent) -> bool {
-        let allowed = {
-            let recognizer = app.get(self);
-            match event.buttons {
-                K_PRIMARY_BUTTON => {
-                    recognizer.on_tap_down.is_some()
-                        || recognizer.on_tap.is_some()
-                        || recognizer.on_tap_up.is_some()
-                        || recognizer.on_tap_cancel.is_some()
-                        || recognizer.on_tap_move.is_some()
-                }
-                K_SECONDARY_BUTTON => {
-                    recognizer.on_secondary_tap.is_some()
-                        || recognizer.on_secondary_tap_down.is_some()
-                        || recognizer.on_secondary_tap_up.is_some()
-                        || recognizer.on_secondary_tap_cancel.is_some()
-                }
-                K_TERTIARY_BUTTON => {
-                    recognizer.on_tertiary_tap_down.is_some()
-                        || recognizer.on_tertiary_tap_up.is_some()
-                        || recognizer.on_tertiary_tap_cancel.is_some()
-                }
-                _ => false,
-            }
-        };
-        allowed && GestureRecognizer::is_pointer_allowed(self, app, event)
-    }
-
-    fn debug_description(self: Handle<Self>) -> &'static str {
-        "tap"
-    }
-}
-
-struct BaseTapGestureRecognizer;
+/// Dart's `BaseTapGestureRecognizer`: the base class for gesture recognizers
+/// that track a single tap.
+///
+/// Its bodies are associated fns taking the leaf's `Handle`; a leaf's override
+/// calls one where Dart writes `super`. Its fields are [`BaseTapData`], and the
+/// virtuals it calls back into are [`BaseTapLeaf`].
+pub struct BaseTapGestureRecognizer;
 
 impl BaseTapGestureRecognizer {
-    fn add_allowed_pointer(
-        this: Handle<TapGestureRecognizer>,
+    /// Records the down event of the primary pointer, then starts tracking it.
+    ///
+    /// A pointer added while no down event is recorded is ignored: the tap has
+    /// already been rejected with the pointer still down.
+    pub fn add_allowed_pointer<R: BaseTapLeaf>(
+        this: Handle<R>,
         app: &mut App,
         event: PointerDownEvent,
     ) {
-        if app.get(this).primary.state == GestureRecognizerState::Ready {
-            if app.get(this).base_tap.down.is_some() && app.get(this).base_tap.up.is_some() {
+        if app.get(this).primary().state == GestureRecognizerState::Ready {
+            if app.get(this).base_tap().down.is_some() && app.get(this).base_tap().up.is_some() {
                 debug_assert_eq!(
-                    app.get(this).base_tap.down.as_ref().unwrap().pointer,
-                    app.get(this).base_tap.up.as_ref().unwrap().pointer
+                    app.get(this).base_tap().down.as_ref().unwrap().pointer,
+                    app.get(this).base_tap().up.as_ref().unwrap().pointer
                 );
                 Self::reset(this, app);
             }
             debug_assert!(
-                app.get(this).base_tap.down.is_none() && app.get(this).base_tap.up.is_none()
+                app.get(this).base_tap().down.is_none() && app.get(this).base_tap().up.is_none()
             );
-            app.get_mut(this).base_tap.down = Some(event.clone());
+            app.get_mut(this).base_tap_mut().down = Some(event.clone());
         }
-        if app.get(this).base_tap.down.is_some() {
+        if app.get(this).base_tap().down.is_some() {
             PrimaryPointerGestureRecognizer::add_allowed_pointer(this, app, event);
         }
     }
 
-    fn start_tracking_pointer(
-        this: Handle<TapGestureRecognizer>,
+    /// Causes events related to the given pointer ID to be routed to this
+    /// recognizer.
+    ///
+    /// The recognizer never tracks a pointer while no down event is recorded,
+    /// because checking the tap down in that state would panic.
+    pub fn start_tracking_pointer<R: BaseTapLeaf>(
+        this: Handle<R>,
         app: &mut App,
         pointer: i64,
         transform: Option<Matrix4>,
     ) {
-        debug_assert!(app.get(this).base_tap.down.is_some());
+        debug_assert!(app.get(this).base_tap().down.is_some());
         OneSequenceGestureRecognizer::start_tracking_pointer(this, app, pointer, transform);
     }
 
-    fn handle_primary_pointer(
-        this: Handle<TapGestureRecognizer>,
+    /// Ends the tap on an up event, cancels it on a cancel event or a change of
+    /// buttons, and reports movement otherwise.
+    pub fn handle_primary_pointer<R: BaseTapLeaf>(
+        this: Handle<R>,
         app: &mut App,
         event: PointerEvent,
     ) {
         if let PointerEvent::Up(up) = &event {
-            app.get_mut(this).base_tap.up = Some(up.clone());
+            app.get_mut(this).base_tap_mut().up = Some(up.clone());
             Self::check_up(this, app);
         } else if let PointerEvent::Cancel(cancel) = &event {
             this.resolve(app, GestureDisposition::Rejected);
-            if app.get(this).base_tap.sent_tap_down {
+            if app.get(this).base_tap().sent_tap_down {
                 Self::check_cancel(this, app, Some(cancel), "");
             }
             Self::reset(this, app);
-        } else if event.buttons() != app.get(this).base_tap.down.as_ref().unwrap().buttons {
+        } else if event.buttons() != app.get(this).base_tap().down.as_ref().unwrap().buttons {
             this.resolve(app, GestureDisposition::Rejected);
-            let primary = app.get(this).primary.primary_pointer.unwrap();
+            let primary = app.get(this).primary().primary_pointer.unwrap();
             OneSequenceGestureRecognizer::stop_tracking_pointer(this, app, primary);
         } else if let PointerEvent::Move(move_event) = &event {
             Self::check_move(this, app, move_event);
         }
     }
 
-    fn resolve(this: Handle<TapGestureRecognizer>, app: &mut App, disposition: GestureDisposition) {
-        if app.get(this).base_tap.won_arena_for_primary_pointer
+    /// Resolves this recognizer's participation in each gesture arena, cancelling
+    /// a tap this recognizer had already won.
+    pub fn resolve<R: BaseTapLeaf>(
+        this: Handle<R>,
+        app: &mut App,
+        disposition: GestureDisposition,
+    ) {
+        if app.get(this).base_tap().won_arena_for_primary_pointer
             && disposition == GestureDisposition::Rejected
         {
-            debug_assert!(app.get(this).base_tap.sent_tap_down);
+            debug_assert!(app.get(this).base_tap().sent_tap_down);
             Self::check_cancel(this, app, None, "spontaneous");
             Self::reset(this, app);
         }
         OneSequenceGestureRecognizer::resolve(this, app, disposition);
     }
 
-    fn did_exceed_deadline(this: Handle<TapGestureRecognizer>, app: &mut App) {
+    /// Reports the tap down once the deadline has elapsed.
+    pub fn did_exceed_deadline<R: BaseTapLeaf>(this: Handle<R>, app: &mut App) {
         Self::check_down(this, app);
     }
 
-    fn accept_gesture(this: Handle<TapGestureRecognizer>, app: &mut App, pointer: i64) {
+    /// Reports the tap down, then the tap up if the pointer is already up.
+    pub fn accept_gesture<R: BaseTapLeaf>(this: Handle<R>, app: &mut App, pointer: i64) {
         PrimaryPointerGestureRecognizer::accept_gesture(this, app, pointer);
-        if Some(pointer) == app.get(this).primary.primary_pointer {
+        if Some(pointer) == app.get(this).primary().primary_pointer {
             Self::check_down(this, app);
-            app.get_mut(this).base_tap.won_arena_for_primary_pointer = true;
+            app.get_mut(this)
+                .base_tap_mut()
+                .won_arena_for_primary_pointer = true;
             Self::check_up(this, app);
         }
     }
 
-    fn reject_gesture(this: Handle<TapGestureRecognizer>, app: &mut App, pointer: i64) {
+    /// Cancels a reported tap down, because another gesture won the arena.
+    pub fn reject_gesture<R: BaseTapLeaf>(this: Handle<R>, app: &mut App, pointer: i64) {
         PrimaryPointerGestureRecognizer::reject_gesture(this, app, pointer);
-        if Some(pointer) == app.get(this).primary.primary_pointer {
-            debug_assert!(app.get(this).primary.state != GestureRecognizerState::Possible);
-            if app.get(this).base_tap.sent_tap_down {
+        if Some(pointer) == app.get(this).primary().primary_pointer {
+            debug_assert!(app.get(this).primary().state != GestureRecognizerState::Possible);
+            if app.get(this).base_tap().sent_tap_down {
                 Self::check_cancel(this, app, None, "forced");
             }
             Self::reset(this, app);
         }
     }
 
-    fn check_down(this: Handle<TapGestureRecognizer>, app: &mut App) {
-        if app.get(this).base_tap.sent_tap_down {
+    fn check_down<R: BaseTapLeaf>(this: Handle<R>, app: &mut App) {
+        if app.get(this).base_tap().sent_tap_down {
             return;
         }
-        let down = app.get(this).base_tap.down.clone().unwrap();
+        let down = app.get(this).base_tap().down.clone().unwrap();
         this.handle_tap_down(app, &down);
-        app.get_mut(this).base_tap.sent_tap_down = true;
+        app.get_mut(this).base_tap_mut().sent_tap_down = true;
     }
 
-    fn check_up(this: Handle<TapGestureRecognizer>, app: &mut App) {
-        if !app.get(this).base_tap.won_arena_for_primary_pointer
-            || app.get(this).base_tap.up.is_none()
+    fn check_up<R: BaseTapLeaf>(this: Handle<R>, app: &mut App) {
+        if !app.get(this).base_tap().won_arena_for_primary_pointer
+            || app.get(this).base_tap().up.is_none()
         {
             return;
         }
         debug_assert_eq!(
-            app.get(this).base_tap.up.as_ref().unwrap().pointer,
-            app.get(this).base_tap.down.as_ref().unwrap().pointer
+            app.get(this).base_tap().up.as_ref().unwrap().pointer,
+            app.get(this).base_tap().down.as_ref().unwrap().pointer
         );
-        let down = app.get(this).base_tap.down.clone().unwrap();
-        let up = app.get(this).base_tap.up.clone().unwrap();
+        let down = app.get(this).base_tap().down.clone().unwrap();
+        let up = app.get(this).base_tap().up.clone().unwrap();
         this.handle_tap_up(app, &down, &up);
         Self::reset(this, app);
     }
 
-    fn check_cancel(
-        this: Handle<TapGestureRecognizer>,
+    fn check_cancel<R: BaseTapLeaf>(
+        this: Handle<R>,
         app: &mut App,
         event: Option<&PointerCancelEvent>,
         note: &str,
     ) {
-        let down = app.get(this).base_tap.down.clone().unwrap();
+        let down = app.get(this).base_tap().down.clone().unwrap();
         this.handle_tap_cancel(app, &down, event, note);
     }
 
-    fn check_move(
-        this: Handle<TapGestureRecognizer>,
-        app: &mut App,
-        event: &crate::events::PointerMoveEvent,
-    ) {
+    fn check_move<R: BaseTapLeaf>(this: Handle<R>, app: &mut App, event: &PointerMoveEvent) {
         debug_assert_eq!(
             event.pointer,
-            app.get(this).base_tap.down.as_ref().unwrap().pointer
+            app.get(this).base_tap().down.as_ref().unwrap().pointer
         );
         this.handle_tap_move(app, event);
     }
 
-    fn reset(this: Handle<TapGestureRecognizer>, app: &mut App) {
-        let base_tap = &mut app.get_mut(this).base_tap;
+    fn reset<R: BaseTapLeaf>(this: Handle<R>, app: &mut App) {
+        let base_tap = app.get_mut(this).base_tap_mut();
         base_tap.sent_tap_down = false;
         base_tap.won_arena_for_primary_pointer = false;
         base_tap.up = None;

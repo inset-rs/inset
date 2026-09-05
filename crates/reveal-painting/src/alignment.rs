@@ -17,7 +17,7 @@ use crate::basic_types::TextDirection;
 /// [`Alignment`] object, call the [`resolve`](AlignmentGeometry::resolve)
 /// method.
 ///
-/// Non-exhaustive: `_MixedAlignment` (cross-kind `add`) is a later arm.
+/// Non-exhaustive: Flutter may add a subclass.
 #[non_exhaustive]
 #[derive(Clone, Copy)]
 pub enum AlignmentGeometry {
@@ -25,6 +25,16 @@ pub enum AlignmentGeometry {
     Alignment(Alignment),
     /// Directional alignment — Dart's `AlignmentDirectional`.
     Directional(AlignmentDirectional),
+    /// A visual and a directional horizontal coordinate at once — Dart's private
+    /// `_MixedAlignment`, what combining the two kinds produces.
+    Mixed {
+        /// The distance fraction in the horizontal direction.
+        x: f64,
+        /// The distance fraction in the horizontal direction from the start side.
+        start: f64,
+        /// The distance fraction in the vertical direction.
+        y: f64,
+    },
 }
 
 impl AlignmentGeometry {
@@ -82,6 +92,7 @@ impl AlignmentGeometry {
         match self {
             AlignmentGeometry::Alignment(alignment) => alignment.x,
             AlignmentGeometry::Directional(_) => 0.0,
+            AlignmentGeometry::Mixed { x, .. } => *x,
         }
     }
 
@@ -89,6 +100,7 @@ impl AlignmentGeometry {
         match self {
             AlignmentGeometry::Alignment(_) => 0.0,
             AlignmentGeometry::Directional(alignment) => alignment.start,
+            AlignmentGeometry::Mixed { start, .. } => *start,
         }
     }
 
@@ -96,6 +108,39 @@ impl AlignmentGeometry {
         match self {
             AlignmentGeometry::Alignment(alignment) => alignment.y,
             AlignmentGeometry::Directional(alignment) => alignment.y,
+            AlignmentGeometry::Mixed { y, .. } => *y,
+        }
+    }
+
+    /// Dart's private `_MixedAlignment`.
+    const fn mixed(x: f64, start: f64, y: f64) -> AlignmentGeometry {
+        AlignmentGeometry::Mixed { x, start, y }
+    }
+
+    /// Returns the sum of two [`AlignmentGeometry`] objects.
+    ///
+    /// If you know you are adding two [`Alignment`] or two
+    /// [`AlignmentDirectional`] objects, consider using the `+` operator
+    /// instead, which always returns an object of the same type as the operands,
+    /// and is typed accordingly.
+    ///
+    /// Applied to two objects of the same kind, the result is of that kind;
+    /// otherwise it is the mixed arm, which [`resolve`](Self::resolve) turns
+    /// into a concrete [`Alignment`].
+    #[allow(clippy::should_implement_trait)]
+    pub fn add(self, other: AlignmentGeometry) -> AlignmentGeometry {
+        match (self, other) {
+            (AlignmentGeometry::Alignment(a), AlignmentGeometry::Alignment(b)) => {
+                AlignmentGeometry::Alignment(a + b)
+            }
+            (AlignmentGeometry::Directional(a), AlignmentGeometry::Directional(b)) => {
+                AlignmentGeometry::Directional(a + b)
+            }
+            _ => AlignmentGeometry::mixed(
+                self.x() + other.x(),
+                self.start() + other.start(),
+                self.y() + other.y(),
+            ),
         }
     }
 
@@ -109,6 +154,46 @@ impl AlignmentGeometry {
             AlignmentGeometry::Directional(alignment) => {
                 AlignmentGeometry::Directional(alignment.truncating_div(other))
             }
+            AlignmentGeometry::Mixed { .. } => AlignmentGeometry::mixed(
+                (self.x() / other).trunc(),
+                (self.start() / other).trunc(),
+                (self.y() / other).trunc(),
+            ),
+        }
+    }
+
+    /// Linearly interpolate between two [`AlignmentGeometry`] objects.
+    ///
+    /// If either is `None`, this function interpolates from
+    /// [`Alignment::CENTER`], and the result is of the same kind as the
+    /// non-`None` argument.
+    ///
+    /// Applied to two objects of the same kind, the result is of that kind;
+    /// otherwise it is the mixed arm, which [`resolve`](Self::resolve) turns
+    /// into a concrete [`Alignment`].
+    pub fn lerp(
+        a: Option<AlignmentGeometry>,
+        b: Option<AlignmentGeometry>,
+        t: f64,
+    ) -> Option<AlignmentGeometry> {
+        if a == b {
+            return a;
+        }
+        match (a, b) {
+            (None, None) => None,
+            (None, Some(b)) => Some(b * t),
+            (Some(a), None) => Some(a * (1.0 - t)),
+            (Some(AlignmentGeometry::Alignment(a)), Some(AlignmentGeometry::Alignment(b))) => {
+                Alignment::lerp(Some(a), Some(b), t).map(AlignmentGeometry::Alignment)
+            }
+            (Some(AlignmentGeometry::Directional(a)), Some(AlignmentGeometry::Directional(b))) => {
+                AlignmentDirectional::lerp(Some(a), Some(b), t).map(AlignmentGeometry::Directional)
+            }
+            (Some(a), Some(b)) => Some(AlignmentGeometry::mixed(
+                lerp_double(Some(a.x()), Some(b.x()), t).unwrap(),
+                lerp_double(Some(a.start()), Some(b.start()), t).unwrap(),
+                lerp_double(Some(a.y()), Some(b.y()), t).unwrap(),
+            )),
         }
     }
 
@@ -125,6 +210,12 @@ impl AlignmentGeometry {
         match self {
             AlignmentGeometry::Alignment(alignment) => alignment.resolve(direction),
             AlignmentGeometry::Directional(alignment) => alignment.resolve(direction),
+            AlignmentGeometry::Mixed { .. } => {
+                match direction.expect("AlignmentGeometry.resolve needs a TextDirection") {
+                    TextDirection::Rtl => Alignment::new(self.x() - self.start(), self.y()),
+                    TextDirection::Ltr => Alignment::new(self.x() + self.start(), self.y()),
+                }
+            }
         }
     }
 }
@@ -154,6 +245,9 @@ impl Neg for AlignmentGeometry {
         match self {
             AlignmentGeometry::Alignment(alignment) => AlignmentGeometry::Alignment(-alignment),
             AlignmentGeometry::Directional(alignment) => AlignmentGeometry::Directional(-alignment),
+            AlignmentGeometry::Mixed { .. } => {
+                AlignmentGeometry::mixed(-self.x(), -self.start(), -self.y())
+            }
         }
     }
 }
@@ -168,6 +262,9 @@ impl Mul<f64> for AlignmentGeometry {
             }
             AlignmentGeometry::Directional(alignment) => {
                 AlignmentGeometry::Directional(alignment * other)
+            }
+            AlignmentGeometry::Mixed { .. } => {
+                AlignmentGeometry::mixed(self.x() * other, self.start() * other, self.y() * other)
             }
         }
     }
@@ -184,6 +281,9 @@ impl Div<f64> for AlignmentGeometry {
             AlignmentGeometry::Directional(alignment) => {
                 AlignmentGeometry::Directional(alignment / other)
             }
+            AlignmentGeometry::Mixed { .. } => {
+                AlignmentGeometry::mixed(self.x() / other, self.start() / other, self.y() / other)
+            }
         }
     }
 }
@@ -198,6 +298,9 @@ impl Rem<f64> for AlignmentGeometry {
             }
             AlignmentGeometry::Directional(alignment) => {
                 AlignmentGeometry::Directional(alignment % other)
+            }
+            AlignmentGeometry::Mixed { .. } => {
+                AlignmentGeometry::mixed(self.x() % other, self.start() % other, self.y() % other)
             }
         }
     }
@@ -838,6 +941,65 @@ mod tests {
         assert_eq!(
             AlignmentGeometry::BOTTOM_END,
             AlignmentGeometry::from(AlignmentDirectional::BOTTOM_END)
+        );
+    }
+
+    #[test]
+    fn a_cross_kind_lerp_resolves_per_direction() {
+        let a = AlignmentGeometry::xy(1.0, 0.0);
+        let b = AlignmentGeometry::directional(1.0, 0.0);
+        let halfway = AlignmentGeometry::lerp(Some(a), Some(b), 0.5).expect("both ends are set");
+        assert!(matches!(halfway, AlignmentGeometry::Mixed { .. }));
+        assert_eq!(
+            halfway.resolve(Some(TextDirection::Ltr)),
+            Alignment::new(1.0, 0.0)
+        );
+        assert_eq!(
+            halfway.resolve(Some(TextDirection::Rtl)),
+            Alignment::new(0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn a_same_kind_lerp_keeps_the_kind() {
+        let lerp = |a, b, t| AlignmentGeometry::lerp(Some(a), Some(b), t).expect("both ends");
+        assert_eq!(
+            lerp(
+                AlignmentGeometry::TOP_LEFT,
+                AlignmentGeometry::BOTTOM_LEFT,
+                0.5
+            ),
+            AlignmentGeometry::Alignment(Alignment::CENTER_LEFT)
+        );
+        assert_eq!(
+            lerp(
+                AlignmentGeometry::TOP_START,
+                AlignmentGeometry::BOTTOM_START,
+                0.5
+            ),
+            AlignmentGeometry::Directional(AlignmentDirectional::CENTER_START)
+        );
+    }
+
+    #[test]
+    fn a_lerp_from_none_starts_at_the_center() {
+        let end = AlignmentGeometry::directional(1.0, 1.0);
+        assert_eq!(
+            AlignmentGeometry::lerp(None, Some(end), 0.5),
+            Some(AlignmentGeometry::directional(0.5, 0.5))
+        );
+    }
+
+    #[test]
+    fn a_cross_kind_add_is_the_mixed_arm() {
+        let sum = AlignmentGeometry::xy(1.0, 2.0).add(AlignmentGeometry::directional(3.0, 4.0));
+        assert_eq!(
+            sum.resolve(Some(TextDirection::Ltr)),
+            Alignment::new(4.0, 6.0)
+        );
+        assert_eq!(
+            sum.resolve(Some(TextDirection::Rtl)),
+            Alignment::new(-2.0, 6.0)
         );
     }
 

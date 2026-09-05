@@ -6,7 +6,7 @@
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
-use reveal_embedder::{Size, TargetPlatform};
+use reveal_embedder::{Locale, Size, TargetPlatform};
 
 use crate::basic_types::TextDirection;
 
@@ -32,6 +32,8 @@ pub struct ImageConfiguration {
     pub bundle: Option<Rc<dyn AssetBundle>>,
     /// The device pixel ratio where the image will be shown.
     pub device_pixel_ratio: Option<f64>,
+    /// The language and region for which to select the image.
+    pub locale: Option<Locale>,
     /// The reading direction of the language for which to select the image.
     pub text_direction: Option<TextDirection>,
     /// The size at which the image will be rendered.
@@ -47,6 +49,7 @@ impl ImageConfiguration {
     pub const EMPTY: ImageConfiguration = ImageConfiguration {
         bundle: None,
         device_pixel_ratio: None,
+        locale: None,
         text_direction: None,
         size: None,
         platform: None,
@@ -57,6 +60,7 @@ impl ImageConfiguration {
     pub fn new(
         bundle: Option<Rc<dyn AssetBundle>>,
         device_pixel_ratio: Option<f64>,
+        locale: Option<Locale>,
         text_direction: Option<TextDirection>,
         size: Option<Size>,
         platform: Option<TargetPlatform>,
@@ -64,6 +68,7 @@ impl ImageConfiguration {
         ImageConfiguration {
             bundle,
             device_pixel_ratio,
+            locale,
             text_direction,
             size,
             platform,
@@ -79,6 +84,7 @@ impl ImageConfiguration {
         &self,
         bundle: Option<Rc<dyn AssetBundle>>,
         device_pixel_ratio: Option<f64>,
+        locale: Option<Locale>,
         text_direction: Option<TextDirection>,
         size: Option<Size>,
         platform: Option<TargetPlatform>,
@@ -86,6 +92,7 @@ impl ImageConfiguration {
         ImageConfiguration {
             bundle: bundle.or_else(|| self.bundle.clone()),
             device_pixel_ratio: device_pixel_ratio.or(self.device_pixel_ratio),
+            locale: locale.or_else(|| self.locale.clone()),
             text_direction: text_direction.or(self.text_direction),
             size: size.or(self.size),
             platform: platform.or(self.platform),
@@ -104,6 +111,7 @@ impl Clone for ImageConfiguration {
         ImageConfiguration {
             bundle: self.bundle.clone(),
             device_pixel_ratio: self.device_pixel_ratio,
+            locale: self.locale.clone(),
             text_direction: self.text_direction,
             size: self.size,
             platform: self.platform,
@@ -115,6 +123,7 @@ impl PartialEq for ImageConfiguration {
     fn eq(&self, other: &ImageConfiguration) -> bool {
         bundles_eq(self.bundle.as_ref(), other.bundle.as_ref())
             && self.device_pixel_ratio == other.device_pixel_ratio
+            && self.locale == other.locale
             && self.text_direction == other.text_direction
             && self.size == other.size
             && self.platform == other.platform
@@ -137,6 +146,9 @@ impl Debug for ImageConfiguration {
         }
         if let Some(dpr) = self.device_pixel_ratio {
             fields.push(format!("devicePixelRatio: {dpr:.1}"));
+        }
+        if let Some(locale) = &self.locale {
+            fields.push(format!("locale: {locale}"));
         }
         if let Some(text_direction) = self.text_direction {
             fields.push(format!("textDirection: {text_direction:?}"));
@@ -176,11 +188,13 @@ mod tests {
         let sized = empty.copy_with(
             None,
             Some(2.0),
+            Some(Locale::new("ar")),
             Some(TextDirection::Rtl),
             Some(Size::new(10.0, 20.0)),
             Some(TargetPlatform::IOS),
         );
         assert_eq!(sized.device_pixel_ratio, Some(2.0));
+        assert_eq!(sized.locale, Some(Locale::new("ar")));
         assert_eq!(sized.text_direction, Some(TextDirection::Rtl));
         assert_eq!(sized.size, Some(Size::new(10.0, 20.0)));
         assert_eq!(sized.platform, Some(TargetPlatform::IOS));
@@ -195,9 +209,9 @@ mod tests {
         let b: Rc<dyn AssetBundle> = Rc::new(MemoryBundle {
             bytes: b"one".to_vec(),
         });
-        let left = ImageConfiguration::new(Some(a.clone()), None, None, None, None);
-        let same = ImageConfiguration::new(Some(a), None, None, None, None);
-        let other = ImageConfiguration::new(Some(b), None, None, None, None);
+        let left = ImageConfiguration::new(Some(a.clone()), None, None, None, None, None);
+        let same = ImageConfiguration::new(Some(a), None, None, None, None, None);
+        let other = ImageConfiguration::new(Some(b), None, None, None, None, None);
         assert_eq!(left, same);
         assert_ne!(left, other);
         assert_eq!(left.bundle.as_ref().unwrap().load("k").unwrap(), b"one");

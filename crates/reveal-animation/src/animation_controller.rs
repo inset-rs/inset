@@ -1046,7 +1046,7 @@ mod tests {
     struct TestVSync;
 
     impl TickerProvider for TestVSync {
-        fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
             Ticker::new(app, on_tick)
         }
     }

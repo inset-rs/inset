@@ -20,7 +20,8 @@ use crate::timers::{Timer, Timers};
 const MICROTASK_BUDGET: usize = 100_000;
 
 new_key_type! {
-    /// Untyped [`Handle`]. For an edge that may point at more than one type; [`App::handle`] narrows it.
+    /// Untyped [`Handle`]. For a reference that may point at more than one type;
+    /// [`App::handle`] narrows it.
     ///
     /// Destroy bumps the generation, so a leftover id does not silently name the next occupant.
     pub struct HandleId;
@@ -60,7 +61,7 @@ impl<T> Handle<T> {
     }
 
     /// Wraps an id that was minted for `T` without looking at the slot. The check is deferred to
-    /// [`App::get`], which panics on a stale or wrong-typed id. For an erased edge that
+    /// [`App::get`], which panics on a stale or wrong-typed id. For a type-erased handle that
     /// reconstructs the typed handle it was made from.
     pub fn from_id(id: HandleId) -> Handle<T> {
         Handle::new(id)

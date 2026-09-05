@@ -21,7 +21,7 @@ pub use valo::Matrix as Matrix4;
 pub use valo_geometry::MatrixKind;
 
 mod matrix;
-pub use matrix::transform3;
+pub use matrix::*;
 
 impl From<Color> for valo::Color {
     fn from(color: Color) -> valo::Color {

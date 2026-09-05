@@ -7,20 +7,24 @@
 //! struct generic over its widget type, so the widget is reached without a cast.
 
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use reveal_foundation::{App, Handle, HandleId};
-use reveal_rendering::{AnyRenderObject, RenderHandle, RenderObjectWithChildMixin};
+use reveal_rendering::{
+    AnyRenderObject, ContainerRenderObjectMixin, ErasedRenderObject, RenderHandle,
+    RenderObjectWithChildMixin,
+};
 
 use super::element::{
-    AnyElement, Element, ElementBase, ElementData, ElementLifecycle, Slot,
+    AnyElement, Element, ElementBase, ElementData, ElementLifecycle, IndexedSlot, Slot,
     debug_check_owner_build_target_exists,
 };
 use super::state::{State, StateLifecycle};
 use super::widget::{
-    InheritedWidget, LeafRenderObjectWidget, ParentDataWidget, RenderObjectWidget,
-    SingleChildRenderObjectWidget, StatefulWidget, StatelessWidget, WidgetRef, downcast_widget,
+    InheritedWidget, LeafRenderObjectWidget, MultiChildRenderObjectWidget, ParentDataWidget,
+    RenderObjectWidget, SingleChildRenderObjectWidget, StatefulWidget, StatelessWidget, WidgetRef,
+    downcast_widget,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -29,8 +33,8 @@ use super::widget::{
 /// The fields of Dart's `ComponentElement`.
 #[derive(Default)]
 pub struct ComponentElementData {
-    child: Option<AnyElement>,
-    debug_doing_build: bool,
+    pub(crate) child: Option<AnyElement>,
+    pub(crate) debug_doing_build: bool,
 }
 
 /// An [`Element`] that composes other [`Element`]s.
@@ -135,6 +139,7 @@ macro_rules! component_element_overrides {
         }
     };
 }
+pub(crate) use component_element_overrides;
 
 // ---------------------------------------------------------------------------------------------
 // StatelessElement
@@ -725,7 +730,10 @@ impl<W: ParentDataWidget> Element for ParentDataElement<W> {
         render_object: AnyRenderObject,
     ) -> bool {
         // `debugIsValidRenderObject`: the render object must carry this widget's parent data.
-        let valid = render_object.parent_data_is::<W::ParentData>(app);
+        let widget_value = self.as_element().widget(app).clone();
+        let typed_widget = downcast_widget::<W>(&*widget_value)
+            .expect("a ParentDataElement holds its ParentDataWidget");
+        let valid = typed_widget.debug_is_valid_render_object(app, render_object);
         debug_assert!(
             valid,
             "Incorrect use of ParentDataWidget. The ParentDataWidget {:?} wants to apply \
@@ -760,6 +768,11 @@ impl RenderObjectElementData {
     /// The render object this element created, once mounted.
     pub fn render_object(&self) -> Option<AnyRenderObject> {
         self.render_object
+    }
+
+    /// Whether this element is currently creating or updating its render object.
+    pub fn debug_doing_build(&self) -> bool {
+        self.debug_doing_build
     }
 }
 
@@ -1157,20 +1170,134 @@ impl<W: LeafRenderObjectWidget> Element for LeafRenderObjectElement<W> {
 // ---------------------------------------------------------------------------------------------
 // SingleChildRenderObjectElement
 
-/// An [`Element`] that uses a [`SingleChildRenderObjectWidget`] as its configuration.
+/// The fields of Dart's `SingleChildRenderObjectElement`.
+#[derive(Default)]
+pub struct SingleChildRenderObjectElementData {
+    child: Option<AnyElement>,
+}
+
+/// The bodies of Dart's `SingleChildRenderObjectElement`: an [`Element`] that uses a
+/// [`SingleChildRenderObjectWidget`] as its configuration.
 ///
 /// The child is optional.
 ///
-/// This element subclass can be used for `RenderObjectWidget`s whose `RenderObject`s use the
+/// This element subclass can be used for [`RenderObjectWidget`]s whose `RenderObject`s use the
 /// `RenderObjectWithChildMixin` mixin. Such widgets are expected to inherit from
 /// [`SingleChildRenderObjectWidget`].
+///
+/// Flutter's class is instantiable and also subclassed (`SingleChildScrollView`'s viewport
+/// element), so the bodies live on this trait and [`SingleChildRenderObjectElement`] is the
+/// plain leaf that implements it; a subclass calls the body it overrides by name where Dart
+/// writes `super`.
+pub trait SingleChildRenderObjectElementBase:
+    RenderObjectElement + RenderObjectElementWidget
+where
+    Self::Widget: SingleChildRenderObjectWidget,
+    <Self::Widget as RenderObjectWidget>::RenderObject: RenderObjectWithChildMixin,
+{
+    /// The child slot, held under the field `single_child`.
+    fn single_child_data(self: Handle<Self>, app: &App) -> &SingleChildRenderObjectElementData;
+
+    /// See [`single_child_data`](Self::single_child_data).
+    fn single_child_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut SingleChildRenderObjectElementData;
+
+    /// The child element, if any.
+    fn child(self: Handle<Self>, app: &App) -> Option<AnyElement> {
+        self.single_child_data(app).child
+    }
+
+    /// Dart's `updateChild(_child, (widget as SingleChildRenderObjectWidget).child, null)`,
+    /// which both `mount` and `update` run.
+    fn update_child_from_widget(self: Handle<Self>, app: &mut App) {
+        let child_widget = Self::widget_of(self.as_element().widget(app))
+            .child()
+            .cloned();
+        let child = self.single_child_data(app).child;
+        let child = self
+            .as_element()
+            .update_child(app, child, child_widget, None);
+        self.single_child_data_mut(app).child = child;
+    }
+
+    /// `SingleChildRenderObjectElement.visitChildren`.
+    fn visit_children(self: Handle<Self>, app: &App, visitor: &mut dyn FnMut(AnyElement)) {
+        if let Some(child) = self.single_child_data(app).child {
+            visitor(child);
+        }
+    }
+
+    /// `SingleChildRenderObjectElement.forgetChild`.
+    fn forget_child(self: Handle<Self>, app: &mut App, child: AnyElement) {
+        debug_assert!(self.single_child_data(app).child == Some(child));
+        self.single_child_data_mut(app).child = None;
+    }
+
+    /// `SingleChildRenderObjectElement.mount`.
+    fn mount(
+        self: Handle<Self>,
+        app: &mut App,
+        parent: Option<AnyElement>,
+        new_slot: Option<Slot>,
+    ) {
+        RenderObjectElement::mount(self, app, parent, new_slot);
+        self.update_child_from_widget(app);
+    }
+
+    /// `SingleChildRenderObjectElement.update`.
+    fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
+        RenderObjectElement::update(self, app, new_widget);
+        self.update_child_from_widget(app);
+    }
+
+    /// `SingleChildRenderObjectElement.insertRenderObjectChild`.
+    fn insert_render_object_child(
+        self: Handle<Self>,
+        app: &mut App,
+        child: AnyRenderObject,
+        slot: Option<Slot>,
+    ) {
+        debug_assert!(slot.is_none());
+        let render_object = self.typed_render_object(app);
+        render_object.set_child(app, Some(ErasedRenderObject::from_object(child)));
+    }
+
+    /// `SingleChildRenderObjectElement.moveRenderObjectChild`.
+    fn move_render_object_child(
+        self: Handle<Self>,
+        _app: &mut App,
+        _child: AnyRenderObject,
+        _old_slot: Option<Slot>,
+        _new_slot: Option<Slot>,
+    ) {
+        unreachable!("a single child never moves slots");
+    }
+
+    /// `SingleChildRenderObjectElement.removeRenderObjectChild`.
+    fn remove_render_object_child(
+        self: Handle<Self>,
+        app: &mut App,
+        child: AnyRenderObject,
+        slot: Option<Slot>,
+    ) {
+        debug_assert!(slot.is_none());
+        let render_object = self.typed_render_object(app);
+        debug_assert!(render_object.child(app).map(|current| current.as_object()) == Some(child));
+        render_object.set_child(app, None);
+    }
+}
+
+/// An [`Element`] that uses a [`SingleChildRenderObjectWidget`] as its configuration: the leaf
+/// that has no bodies of its own beyond [`SingleChildRenderObjectElementBase`]'s.
 pub struct SingleChildRenderObjectElement<W: SingleChildRenderObjectWidget>
 where
     W::RenderObject: RenderObjectWithChildMixin,
 {
     element: ElementData,
     render_object_element: RenderObjectElementData,
-    child: Option<AnyElement>,
+    single_child: SingleChildRenderObjectElementData,
     marker: std::marker::PhantomData<fn() -> W>,
 }
 
@@ -1184,26 +1311,10 @@ where
         app.create(SingleChildRenderObjectElement::<W> {
             element: ElementData::new(widget),
             render_object_element: RenderObjectElementData::default(),
-            child: None,
+            single_child: SingleChildRenderObjectElementData::default(),
             marker: std::marker::PhantomData,
         })
         .as_element()
-    }
-
-    /// The child element, if any.
-    pub fn child(self: Handle<Self>, app: &App) -> Option<AnyElement> {
-        app.get(self).child
-    }
-
-    fn update_child_from_widget(self: Handle<Self>, app: &mut App) {
-        let child_widget = Self::widget_of(self.as_element().widget(app))
-            .child()
-            .cloned();
-        let child = app.get(self).child;
-        let child = self
-            .as_element()
-            .update_child(app, child, child_widget, None);
-        app.get_mut(self).child = child;
     }
 }
 
@@ -1236,6 +1347,23 @@ where
     }
 }
 
+impl<W: SingleChildRenderObjectWidget> SingleChildRenderObjectElementBase
+    for SingleChildRenderObjectElement<W>
+where
+    W::RenderObject: RenderObjectWithChildMixin,
+{
+    fn single_child_data(self: Handle<Self>, app: &App) -> &SingleChildRenderObjectElementData {
+        &app.get(self).single_child
+    }
+
+    fn single_child_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut SingleChildRenderObjectElementData {
+        &mut app.get_mut(self).single_child
+    }
+}
+
 impl<W: SingleChildRenderObjectWidget> Element for SingleChildRenderObjectElement<W>
 where
     W::RenderObject: RenderObjectWithChildMixin,
@@ -1257,14 +1385,11 @@ where
     const IS_RENDER_OBJECT_ELEMENT: bool = true;
 
     fn visit_children(self: Handle<Self>, app: &App, visitor: &mut dyn FnMut(AnyElement)) {
-        if let Some(child) = app.get(self).child {
-            visitor(child);
-        }
+        SingleChildRenderObjectElementBase::visit_children(self, app, visitor);
     }
 
     fn forget_child(self: Handle<Self>, app: &mut App, child: AnyElement) {
-        debug_assert!(app.get(self).child == Some(child));
-        app.get_mut(self).child = None;
+        SingleChildRenderObjectElementBase::forget_child(self, app, child);
     }
 
     fn mount(
@@ -1273,13 +1398,11 @@ where
         parent: Option<AnyElement>,
         new_slot: Option<Slot>,
     ) {
-        RenderObjectElement::mount(self, app, parent, new_slot);
-        self.update_child_from_widget(app);
+        SingleChildRenderObjectElementBase::mount(self, app, parent, new_slot);
     }
 
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
-        RenderObjectElement::update(self, app, new_widget);
-        self.update_child_from_widget(app);
+        SingleChildRenderObjectElementBase::update(self, app, new_widget);
     }
 
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
@@ -1316,22 +1439,19 @@ where
         child: AnyRenderObject,
         slot: Option<Slot>,
     ) {
-        debug_assert!(slot.is_none());
-        let render_object = self.typed_render_object(app);
-        let child = child
-            .as_box()
-            .expect("a single-child render object holds a box");
-        render_object.set_child(app, Some(child));
+        SingleChildRenderObjectElementBase::insert_render_object_child(self, app, child, slot);
     }
 
     fn move_render_object_child(
         self: Handle<Self>,
-        _app: &mut App,
-        _child: AnyRenderObject,
-        _old_slot: Option<Slot>,
-        _new_slot: Option<Slot>,
+        app: &mut App,
+        child: AnyRenderObject,
+        old_slot: Option<Slot>,
+        new_slot: Option<Slot>,
     ) {
-        unreachable!("a single child never moves slots");
+        SingleChildRenderObjectElementBase::move_render_object_child(
+            self, app, child, old_slot, new_slot,
+        );
     }
 
     fn remove_render_object_child(
@@ -1340,10 +1460,377 @@ where
         child: AnyRenderObject,
         slot: Option<Slot>,
     ) {
-        debug_assert!(slot.is_none());
+        SingleChildRenderObjectElementBase::remove_render_object_child(self, app, child, slot);
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// MultiChildRenderObjectElement
+
+/// The fields of Dart's `MultiChildRenderObjectElement`.
+#[derive(Default)]
+pub struct MultiChildRenderObjectElementData {
+    children: Vec<AnyElement>,
+    // We keep a set of forgotten children to avoid O(n^2) work walking children repeatedly to
+    // remove children.
+    forgotten_children: HashSet<AnyElement>,
+}
+
+/// The bodies of Dart's `MultiChildRenderObjectElement`: an [`Element`] that uses a
+/// [`MultiChildRenderObjectWidget`] as its configuration.
+///
+/// This element subclass can be used for [`RenderObjectWidget`]s whose `RenderObject`s use the
+/// `ContainerRenderObjectMixin` mixin with a parent data type that implements
+/// `ContainerParentDataMixin`. Such widgets are expected to inherit from
+/// [`MultiChildRenderObjectWidget`].
+///
+/// Flutter's class is instantiable and also subclassed (`Viewport`'s element), so the bodies
+/// live on this trait and [`MultiChildRenderObjectElement`] is the plain leaf that implements
+/// it; a subclass calls the body it overrides by name where Dart writes `super`.
+///
+/// See also:
+///
+/// * [`IndexedSlot`], which is used as the [`Element`] slots for the children of a
+///   [`MultiChildRenderObjectElement`].
+/// * [`AnyElement::update_children`], which discusses why [`IndexedSlot`] is used for the slots
+///   of the children.
+pub trait MultiChildRenderObjectElementBase:
+    RenderObjectElement + RenderObjectElementWidget
+where
+    Self::Widget: MultiChildRenderObjectWidget,
+    <Self::Widget as RenderObjectWidget>::RenderObject: ContainerRenderObjectMixin,
+{
+    /// The child list, held under the field `multi_child`.
+    fn multi_child_data(self: Handle<Self>, app: &App) -> &MultiChildRenderObjectElementData;
+
+    /// See [`multi_child_data`](Self::multi_child_data).
+    fn multi_child_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut MultiChildRenderObjectElementData;
+
+    /// The current list of children of this element.
+    ///
+    /// This list is filtered to hide elements that have been forgotten (using
+    /// [`Element::forget_child`]).
+    fn children(self: Handle<Self>, app: &App) -> Vec<AnyElement> {
+        let this = self.multi_child_data(app);
+        this.children
+            .iter()
+            .copied()
+            .filter(|child| !this.forgotten_children.contains(child))
+            .collect()
+    }
+
+    /// Dart's `slot.value?.renderObject`: the child this child is inserted after, as the
+    /// container's `ChildType`.
+    fn after_render_object(
+        app: &App,
+        slot: Option<&Slot>,
+    ) -> Option<
+        <<Self::Widget as RenderObjectWidget>::RenderObject as ContainerRenderObjectMixin>::ChildType,
+    >{
+        let render_object = Self::indexed_slot(slot)
+            .value?
+            .render_object(app)
+            .expect("the element before this slot has a render object");
+        Some(ErasedRenderObject::from_object(render_object))
+    }
+
+    /// Dart's `IndexedSlot<Element?> slot` parameter type.
+    fn indexed_slot(slot: Option<&Slot>) -> &IndexedSlot {
+        match slot {
+            Some(Slot::Indexed(slot)) => slot,
+            _ => unreachable!("a multi-child element gives its children indexed slots"),
+        }
+    }
+
+    /// `MultiChildRenderObjectElement.visitChildren`.
+    fn visit_children(self: Handle<Self>, app: &App, visitor: &mut dyn FnMut(AnyElement)) {
+        let this = self.multi_child_data(app);
+        for child in &this.children {
+            if !this.forgotten_children.contains(child) {
+                visitor(*child);
+            }
+        }
+    }
+
+    /// `MultiChildRenderObjectElement.forgetChild`.
+    fn forget_child(self: Handle<Self>, app: &mut App, child: AnyElement) {
+        debug_assert!(self.multi_child_data(app).children.contains(&child));
+        debug_assert!(
+            !self
+                .multi_child_data(app)
+                .forgotten_children
+                .contains(&child)
+        );
+        self.multi_child_data_mut(app)
+            .forgotten_children
+            .insert(child);
+    }
+
+    /// `MultiChildRenderObjectElement.mount`.
+    fn mount(
+        self: Handle<Self>,
+        app: &mut App,
+        parent: Option<AnyElement>,
+        new_slot: Option<Slot>,
+    ) {
+        RenderObjectElement::mount(self, app, parent, new_slot);
+        let child_widgets = Self::widget_of(self.as_element().widget(app))
+            .children()
+            .to_vec();
+        let mut children = Vec::with_capacity(child_widgets.len());
+        let mut previous_child: Option<AnyElement> = None;
+        for (index, child_widget) in child_widgets.into_iter().enumerate() {
+            let new_child = self.as_element().inflate_widget(
+                app,
+                child_widget,
+                Some(Slot::Indexed(IndexedSlot {
+                    index,
+                    value: previous_child,
+                })),
+            );
+            children.push(new_child);
+            previous_child = Some(new_child);
+        }
+        self.multi_child_data_mut(app).children = children;
+    }
+
+    /// `MultiChildRenderObjectElement.update`.
+    fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
+        RenderObjectElement::update(self, app, new_widget);
+        let child_widgets = Self::widget_of(self.as_element().widget(app))
+            .children()
+            .to_vec();
+        let old_children = self.multi_child_data(app).children.clone();
+        let is_forgotten = |app: &App, child: AnyElement| {
+            self.multi_child_data(app)
+                .forgotten_children
+                .contains(&child)
+        };
+        let children = self.as_element().update_children(
+            app,
+            &old_children,
+            &child_widgets,
+            Some(&is_forgotten),
+            None,
+        );
+        let this = self.multi_child_data_mut(app);
+        this.children = children;
+        this.forgotten_children.clear();
+    }
+
+    /// `MultiChildRenderObjectElement.insertRenderObjectChild`.
+    fn insert_render_object_child(
+        self: Handle<Self>,
+        app: &mut App,
+        child: AnyRenderObject,
+        slot: Option<Slot>,
+    ) {
         let render_object = self.typed_render_object(app);
-        debug_assert!(render_object.child(app).map(|current| current.as_object()) == Some(child));
-        render_object.set_child(app, None);
+        let after = Self::after_render_object(app, slot.as_ref());
+        render_object.insert(app, ErasedRenderObject::from_object(child), after);
+    }
+
+    /// `MultiChildRenderObjectElement.moveRenderObjectChild`.
+    fn move_render_object_child(
+        self: Handle<Self>,
+        app: &mut App,
+        child: AnyRenderObject,
+        _old_slot: Option<Slot>,
+        new_slot: Option<Slot>,
+    ) {
+        let render_object = self.typed_render_object(app);
+        debug_assert!(child.parent(app) == Some(RenderObjectElement::render_object(self, app)));
+        let after = Self::after_render_object(app, new_slot.as_ref());
+        render_object.move_child(app, ErasedRenderObject::from_object(child), after);
+    }
+
+    /// `MultiChildRenderObjectElement.removeRenderObjectChild`.
+    fn remove_render_object_child(
+        self: Handle<Self>,
+        app: &mut App,
+        child: AnyRenderObject,
+        _slot: Option<Slot>,
+    ) {
+        let render_object = self.typed_render_object(app);
+        debug_assert!(child.parent(app) == Some(RenderObjectElement::render_object(self, app)));
+        render_object.remove(app, ErasedRenderObject::from_object(child));
+    }
+}
+
+/// An [`Element`] that uses a [`MultiChildRenderObjectWidget`] as its configuration: the leaf
+/// that has no bodies of its own beyond [`MultiChildRenderObjectElementBase`]'s.
+pub struct MultiChildRenderObjectElement<W: MultiChildRenderObjectWidget>
+where
+    W::RenderObject: ContainerRenderObjectMixin,
+{
+    element: ElementData,
+    render_object_element: RenderObjectElementData,
+    multi_child: MultiChildRenderObjectElementData,
+    marker: std::marker::PhantomData<fn() -> W>,
+}
+
+impl<W: MultiChildRenderObjectWidget> MultiChildRenderObjectElement<W>
+where
+    W::RenderObject: ContainerRenderObjectMixin,
+{
+    /// Creates an element that uses the given widget as its configuration.
+    pub fn create(app: &mut App, widget: WidgetRef) -> AnyElement {
+        debug_assert!(downcast_widget::<W>(&*widget).is_some());
+        app.create(MultiChildRenderObjectElement::<W> {
+            element: ElementData::new(widget),
+            render_object_element: RenderObjectElementData::default(),
+            multi_child: MultiChildRenderObjectElementData::default(),
+            marker: std::marker::PhantomData,
+        })
+        .as_element()
+    }
+}
+
+impl<W: MultiChildRenderObjectWidget> RenderObjectElementWidget for MultiChildRenderObjectElement<W>
+where
+    W::RenderObject: ContainerRenderObjectMixin,
+{
+    type Widget = W;
+
+    fn widget_of(widget: &WidgetRef) -> &W {
+        downcast_widget::<W>(&**widget)
+            .expect("a MultiChildRenderObjectElement holds its MultiChildRenderObjectWidget")
+    }
+}
+
+impl<W: MultiChildRenderObjectWidget> RenderObjectElement for MultiChildRenderObjectElement<W>
+where
+    W::RenderObject: ContainerRenderObjectMixin,
+{
+    fn render_object_element_data(self: Handle<Self>, app: &App) -> &RenderObjectElementData {
+        &app.get(self).render_object_element
+    }
+
+    fn render_object_element_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut RenderObjectElementData {
+        &mut app.get_mut(self).render_object_element
+    }
+}
+
+impl<W: MultiChildRenderObjectWidget> MultiChildRenderObjectElementBase
+    for MultiChildRenderObjectElement<W>
+where
+    W::RenderObject: ContainerRenderObjectMixin,
+{
+    fn multi_child_data(self: Handle<Self>, app: &App) -> &MultiChildRenderObjectElementData {
+        &app.get(self).multi_child
+    }
+
+    fn multi_child_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut MultiChildRenderObjectElementData {
+        &mut app.get_mut(self).multi_child
+    }
+}
+
+impl<W: MultiChildRenderObjectWidget> Element for MultiChildRenderObjectElement<W>
+where
+    W::RenderObject: ContainerRenderObjectMixin,
+{
+    crate::element_accessors!();
+
+    fn render_object(self: Handle<Self>, app: &App) -> Option<AnyRenderObject> {
+        self.render_object_element_data(app).render_object
+    }
+
+    fn render_object_attaching_child(self: Handle<Self>, _app: &App) -> Option<AnyElement> {
+        None
+    }
+
+    fn debug_doing_build(self: Handle<Self>, app: &App) -> bool {
+        self.render_object_element_data(app).debug_doing_build
+    }
+
+    const IS_RENDER_OBJECT_ELEMENT: bool = true;
+
+    fn perform_rebuild(self: Handle<Self>, app: &mut App) {
+        RenderObjectElement::perform_rebuild(self, app);
+    }
+
+    fn deactivate(self: Handle<Self>, app: &mut App) {
+        RenderObjectElement::deactivate(self, app);
+    }
+
+    fn unmount(self: Handle<Self>, app: &mut App) {
+        RenderObjectElement::unmount(self, app);
+    }
+
+    fn update_parent_data(self: Handle<Self>, app: &mut App, parent_data_element: AnyElement) {
+        RenderObjectElement::update_parent_data(self, app, parent_data_element);
+    }
+
+    fn update_slot(self: Handle<Self>, app: &mut App, new_slot: Option<Slot>) {
+        RenderObjectElement::update_slot(self, app, new_slot);
+    }
+
+    fn attach_render_object(self: Handle<Self>, app: &mut App, new_slot: Option<Slot>) {
+        RenderObjectElement::attach_render_object(self, app, new_slot);
+    }
+
+    fn detach_render_object(self: Handle<Self>, app: &mut App) {
+        RenderObjectElement::detach_render_object(self, app);
+    }
+
+    fn visit_children(self: Handle<Self>, app: &App, visitor: &mut dyn FnMut(AnyElement)) {
+        MultiChildRenderObjectElementBase::visit_children(self, app, visitor);
+    }
+
+    fn forget_child(self: Handle<Self>, app: &mut App, child: AnyElement) {
+        MultiChildRenderObjectElementBase::forget_child(self, app, child);
+    }
+
+    fn mount(
+        self: Handle<Self>,
+        app: &mut App,
+        parent: Option<AnyElement>,
+        new_slot: Option<Slot>,
+    ) {
+        MultiChildRenderObjectElementBase::mount(self, app, parent, new_slot);
+    }
+
+    fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
+        MultiChildRenderObjectElementBase::update(self, app, new_widget);
+    }
+
+    fn insert_render_object_child(
+        self: Handle<Self>,
+        app: &mut App,
+        child: AnyRenderObject,
+        slot: Option<Slot>,
+    ) {
+        MultiChildRenderObjectElementBase::insert_render_object_child(self, app, child, slot);
+    }
+
+    fn move_render_object_child(
+        self: Handle<Self>,
+        app: &mut App,
+        child: AnyRenderObject,
+        old_slot: Option<Slot>,
+        new_slot: Option<Slot>,
+    ) {
+        MultiChildRenderObjectElementBase::move_render_object_child(
+            self, app, child, old_slot, new_slot,
+        );
+    }
+
+    fn remove_render_object_child(
+        self: Handle<Self>,
+        app: &mut App,
+        child: AnyRenderObject,
+        slot: Option<Slot>,
+    ) {
+        MultiChildRenderObjectElementBase::remove_render_object_child(self, app, child, slot);
     }
 }
 

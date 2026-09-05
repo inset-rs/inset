@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use crate::{Frame, PointerDataPacket, ViewId};
+use crate::{Frame, KeyData, PointerDataPacket, ViewId};
 
 /// Complete frames and typed view lifecycle notifications.
 ///
@@ -19,6 +19,12 @@ pub trait EmbedderClient {
 
     /// Flutter `PlatformDispatcher.onPointerDataPacket`.
     fn pointer_data_packet(&mut self, packet: PointerDataPacket);
+
+    /// Flutter `PlatformDispatcher.onKeyData`.
+    ///
+    /// Returns whether the framework handled the event; a host that shares the
+    /// keyboard with other native components should not propagate a handled one.
+    fn key_data(&mut self, data: KeyData) -> bool;
 
     /// A deadline requested through `Platform::wake_at` has passed.
     ///

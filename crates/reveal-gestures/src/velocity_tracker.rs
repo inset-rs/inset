@@ -21,6 +21,84 @@ struct PointAtTime {
     time: Duration,
 }
 
+/// Dart's `VelocityTracker` used as a type: what a
+/// [`GestureVelocityTrackerBuilder`](crate::GestureVelocityTrackerBuilder)
+/// returns, and what a `Map<int, VelocityTracker>` holds.
+///
+/// [`IOSScrollViewFlingVelocityTracker`] and
+/// [`MacOSScrollViewFlingVelocityTracker`] are Dart subclasses of
+/// [`VelocityTracker`]; a caller that stores any of the three stores a
+/// `Box<dyn AnyVelocityTracker>`.
+pub trait AnyVelocityTracker {
+    /// The kind of pointer this tracker is for.
+    fn kind(&self) -> PointerDeviceKind;
+
+    /// Adds a position as the given time to the tracker.
+    fn add_position(&mut self, time: Duration, position: Offset);
+
+    /// Returns an estimate of the velocity of the object being tracked by the
+    /// tracker given the current information available to the tracker.
+    fn get_velocity_estimate(&self) -> Option<VelocityEstimate>;
+
+    /// Computes the velocity of the pointer at the time of the last provided
+    /// data point.
+    fn get_velocity(&self) -> Velocity;
+}
+
+impl AnyVelocityTracker for VelocityTracker {
+    fn kind(&self) -> PointerDeviceKind {
+        self.kind
+    }
+
+    fn add_position(&mut self, time: Duration, position: Offset) {
+        VelocityTracker::add_position(self, time, position);
+    }
+
+    fn get_velocity_estimate(&self) -> Option<VelocityEstimate> {
+        VelocityTracker::get_velocity_estimate(self)
+    }
+
+    fn get_velocity(&self) -> Velocity {
+        VelocityTracker::get_velocity(self)
+    }
+}
+
+impl AnyVelocityTracker for IOSScrollViewFlingVelocityTracker {
+    fn kind(&self) -> PointerDeviceKind {
+        self.kind
+    }
+
+    fn add_position(&mut self, time: Duration, position: Offset) {
+        IOSScrollViewFlingVelocityTracker::add_position(self, time, position);
+    }
+
+    fn get_velocity_estimate(&self) -> Option<VelocityEstimate> {
+        IOSScrollViewFlingVelocityTracker::get_velocity_estimate(self)
+    }
+
+    fn get_velocity(&self) -> Velocity {
+        IOSScrollViewFlingVelocityTracker::get_velocity(self)
+    }
+}
+
+impl AnyVelocityTracker for MacOSScrollViewFlingVelocityTracker {
+    fn kind(&self) -> PointerDeviceKind {
+        MacOSScrollViewFlingVelocityTracker::kind(self)
+    }
+
+    fn add_position(&mut self, time: Duration, position: Offset) {
+        MacOSScrollViewFlingVelocityTracker::add_position(self, time, position);
+    }
+
+    fn get_velocity_estimate(&self) -> Option<VelocityEstimate> {
+        MacOSScrollViewFlingVelocityTracker::get_velocity_estimate(self)
+    }
+
+    fn get_velocity(&self) -> Velocity {
+        MacOSScrollViewFlingVelocityTracker::get_velocity(self)
+    }
+}
+
 /// Computes a pointer's velocity based on data from `PointerMoveEvent`s.
 ///
 /// The input data is provided by calling [`add_position`](Self::add_position).

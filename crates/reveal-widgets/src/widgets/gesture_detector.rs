@@ -1516,9 +1516,9 @@ mod tests {
         PointerDownEvent, PointerEvent, PointerUpEvent, TapDownDetails, TapUpDetails,
     };
     use reveal_rendering::{
-        AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, RenderBox, RenderBoxData,
-        RenderConstrainedBox, RenderHandle, RenderObject, RenderObjectData,
-        RenderObjectWithChildMixin, RenderPointerListener,
+        AnyRenderObject, BoxConstraints, RenderBox, RenderBoxData, RenderConstrainedBox,
+        RenderHandle, RenderObject, RenderObjectData, RenderObjectWithChildMixin,
+        RenderPointerListener, RenderView,
     };
 
     use super::*;
@@ -1530,7 +1530,7 @@ mod tests {
     /// Plays `RendererBinding`'s part: hit-tests the harness's render root before the
     /// gesture binding adds itself to the path.
     struct RootHitTester {
-        root: AnyRenderBox,
+        root: RenderHandle<RenderView>,
     }
 
     impl GestureBindingOverridesObject for RootHitTester {
@@ -1541,7 +1541,7 @@ mod tests {
             position: Offset,
         ) {
             let root = app.get(self).root;
-            root.hit_test(app, &mut BoxHitTestResult::wrap(result), position);
+            root.hit_test(app, result, position);
         }
 
         fn hit_test_in_view(
@@ -1568,7 +1568,7 @@ mod tests {
         let harness = Harness::mount(app, child);
         harness.pump(app);
         let hit_tester = app.create(RootHitTester {
-            root: harness.render_root(app).as_box(),
+            root: harness.render_root(app),
         });
         GestureBinding::instance(app).set_overrides(app, Rc::new(hit_tester));
         harness

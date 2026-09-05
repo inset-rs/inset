@@ -3,7 +3,7 @@
 //! Only the font collection is here; `imageCache`, `shaderWarmUp`, and the `systemFonts`
 //! listenable wait.
 
-use reveal_embedder::FontCollection;
+use reveal_embedder::{FontCollection, FontId};
 use reveal_foundation::{App, Handle};
 
 /// Binding for the painting library: the fonts every paragraph shapes against.
@@ -50,6 +50,25 @@ impl PaintingBinding {
         })
     }
 
+    /// Registers `bytes` as a face of `family` in the app-wide font collection, installing
+    /// an empty collection first when the shell has not installed one.
+    ///
+    /// Flutter's engine loads the font assets a `pubspec.yaml` declares into the same font
+    /// manager the platform's faces live in; a crate that bundles a font does this. Returns
+    /// `None` when the bytes are not a font.
+    pub fn register_font(
+        self: Handle<Self>,
+        app: &mut App,
+        family: &str,
+        bytes: Vec<u8>,
+    ) -> Option<FontId> {
+        let fonts = match app.get(self).fonts {
+            Some(fonts) => fonts,
+            None => self.install_fonts(app, |_| {}),
+        };
+        app.get_mut(fonts).register(family, bytes)
+    }
+
     /// Whether a font collection has been installed.
     pub fn has_fonts(self: Handle<Self>, app: &App) -> bool {
         app.get(self).fonts.is_some()
@@ -83,6 +102,20 @@ mod tests {
         assert!(
             app.get(fonts).is_empty(),
             "the inert platform has no font source"
+        );
+    }
+
+    #[test]
+    fn registering_a_font_before_any_install_creates_the_collection() {
+        let mut app = App::new();
+        let binding = PaintingBinding::instance(&mut app);
+        assert_eq!(
+            binding.register_font(&mut app, "Nonesuch", b"not a font".to_vec()),
+            None
+        );
+        assert!(
+            binding.has_fonts(&app),
+            "the collection the face would have joined"
         );
     }
 

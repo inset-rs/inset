@@ -1,7 +1,11 @@
 //! Desktop host: winit event loop and native windows. Frame pacing is
 //! `Window::request_redraw`. Presents through valo.
 
+// wgpu's handle registry nests auto-trait obligations past the default depth.
+#![recursion_limit = "256"]
+
 mod gpu;
+mod keys;
 mod window;
 
 use reveal_embedder::{EmbedderClient, PlatformRef};

@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
-use reveal_embedder::{Canvas, Clip, Matrix4, Offset, Path, RRect, Rect};
+use reveal_embedder::{BlendMode, Canvas, Clip, ImageFilter, Matrix4, Offset, Path, RRect, Rect};
 use reveal_foundation::App;
 use reveal_painting::ClipContext;
 
-use crate::layer::{BoundaryLayer, PaintItem};
+use crate::layer::{AnnotatedRegionLayer, BackdropKey, BoundaryLayer, PaintItem};
 use crate::object::AnyRenderObject;
 
 /// A place to paint.
@@ -317,6 +317,27 @@ impl PaintingContext {
         );
     }
 
+    /// Annotate further painting with a value [`BoundaryLayer::find`] can answer.
+    ///
+    /// Flutter's `pushLayer(AnnotatedRegionLayer(...), painter, offset)`. The layer paints
+    /// nothing of its own, so `painter` records at `offset` unchanged; the layer's own
+    /// `offset` only shifts the rectangle its `size` clips the search to.
+    pub fn push_annotated_region(
+        &mut self,
+        app: &mut App,
+        layer: AnnotatedRegionLayer,
+        painter: impl FnOnce(&mut App, &mut PaintingContext, Offset),
+        offset: Offset,
+    ) {
+        self.push_layer(
+            app,
+            PaintItem::PushAnnotatedRegion(layer),
+            painter,
+            offset,
+            None,
+        );
+    }
+
     /// Blend further painting with an alpha value.
     ///
     /// `alpha` is 0 to 255. `painter` paints at `Offset::ZERO`; the layer applies `offset`.
@@ -330,6 +351,39 @@ impl PaintingContext {
         self.push_layer(
             app,
             PaintItem::PushOpacity { alpha, offset },
+            painter,
+            Offset::ZERO,
+            None,
+        );
+    }
+}
+
+impl PaintingContext {
+    /// Blur what is already painted under `bounds` and paint `painter` on top: Flutter's
+    /// `pushLayer(BackdropFilterLayer(filter, blendMode, backdropKey), painter, offset)`.
+    ///
+    /// `bounds` is the filtered render object's paint bounds in the caller's coordinate
+    /// system; a filter carrying its own bounds wins.
+    #[allow(clippy::too_many_arguments)]
+    pub fn push_backdrop_filter(
+        &mut self,
+        app: &mut App,
+        offset: Offset,
+        bounds: Rect,
+        filter: ImageFilter,
+        blend_mode: BlendMode,
+        backdrop_key: Option<BackdropKey>,
+        painter: impl FnOnce(&mut App, &mut PaintingContext, Offset),
+    ) {
+        self.push_layer(
+            app,
+            PaintItem::PushBackdropFilter {
+                filter,
+                blend_mode,
+                backdrop_key,
+                bounds,
+                offset,
+            },
             painter,
             Offset::ZERO,
             None,

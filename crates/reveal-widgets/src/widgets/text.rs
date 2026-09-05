@@ -883,7 +883,6 @@ mod tests {
     use reveal_embedder::{Color, TextLeadingDistribution};
     use reveal_foundation::ValueKey;
     use reveal_painting::PaintingBinding;
-    use reveal_rendering::RenderObjectWithChildMixin;
 
     use super::*;
     use crate::test_harness::Harness;

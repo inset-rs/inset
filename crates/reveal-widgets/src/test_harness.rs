@@ -1,18 +1,43 @@
 //! A small render tree root for widget tests (the shape of `RawView`): a
-//! `RenderTreeRootElement` whose render object is a repaint boundary with its own pipeline
-//! owner, plus the frame pump. Tests across the crate mount widgets under it.
+//! `RenderTreeRootElement` whose render object is a `RenderView` over a fixed-size test view
+//! with its own pipeline owner, plus the frame pump. Tests across the crate mount widgets
+//! under it.
 
 use std::rc::Rc;
 
+use reveal_embedder::{Picture, View as EmbedderView, ViewConstraints, ViewId, ViewMetrics};
 use reveal_foundation::{App, Handle};
 use reveal_rendering::{
-    AnyRenderObject, BoxConstraints, CompositedLayer, PipelineOwner, RenderBox, RenderHandle,
-    RenderObjectWithChildMixin, RenderRepaintBoundary,
+    AnyRenderObject, PipelineOwner, RenderHandle, RenderView, ViewConfiguration,
 };
 
 use crate::*;
 
 // ---- the test root: `RawView` in miniature ----
+
+/// The logical size every test tree is laid out in.
+pub(crate) const VIEW_WIDTH: f64 = 300.0;
+pub(crate) const VIEW_HEIGHT: f64 = 200.0;
+
+/// A fixed-size view at pixel ratio 1 that drops what it is given to present.
+struct TestView;
+
+impl EmbedderView for TestView {
+    fn id(&self) -> ViewId {
+        ViewId(0)
+    }
+
+    fn metrics(&self) -> ViewMetrics {
+        ViewMetrics {
+            physical_size: [VIEW_WIDTH, VIEW_HEIGHT],
+            physical_constraints: ViewConstraints::new(0.0, VIEW_WIDTH, 0.0, VIEW_HEIGHT),
+            device_pixel_ratio: 1.0,
+            ..ViewMetrics::default()
+        }
+    }
+
+    fn present(&self, _picture: &Picture) {}
+}
 
 #[derive(Debug)]
 pub(crate) struct TestRoot {
@@ -20,10 +45,12 @@ pub(crate) struct TestRoot {
 }
 
 impl RenderObjectWidget for TestRoot {
-    type RenderObject = RenderRepaintBoundary;
+    type RenderObject = RenderView;
 
     fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
-        RenderRepaintBoundary::new(app, None).as_object()
+        let view = Rc::new(TestView);
+        let configuration = ViewConfiguration::from_view(&*view);
+        RenderView::new(app, None, Some(configuration), view).as_object()
     }
 }
 
@@ -110,10 +137,9 @@ impl Element for TestRootElement {
         debug_assert!(parent.is_none());
         RenderObjectElement::mount(self, app, parent, new_slot);
         let owner = PipelineOwner::new(app, None);
-        let render_object = RenderObjectElement::render_object(self, app);
-        owner.set_root_node(app, Some(render_object));
-        render_object.schedule_initial_layout(app);
-        render_object.schedule_initial_paint(app, CompositedLayer::default());
+        let render_view: RenderHandle<RenderView> = self.typed_render_object(app);
+        owner.set_root_node(app, Some(render_view.as_object()));
+        render_view.prepare_initial_frame(app);
         app.get_mut(self).pipeline_owner = Some(owner);
         self.update_child_from_widget(app);
     }
@@ -157,7 +183,7 @@ impl Element for TestRootElement {
         child: AnyRenderObject,
         _slot: Option<Slot>,
     ) {
-        let root: RenderHandle<RenderRepaintBoundary> = self.typed_render_object(app);
+        let root: RenderHandle<RenderView> = self.typed_render_object(app);
         root.set_child(app, Some(child.as_box().expect("a box child")));
     }
 
@@ -177,7 +203,7 @@ impl Element for TestRootElement {
         _child: AnyRenderObject,
         _slot: Option<Slot>,
     ) {
-        let root: RenderHandle<RenderRepaintBoundary> = self.typed_render_object(app);
+        let root: RenderHandle<RenderView> = self.typed_render_object(app);
         root.set_child(app, None);
     }
 }
@@ -190,7 +216,9 @@ pub(crate) struct Harness {
 
 impl Harness {
     pub(crate) fn mount(app: &mut App, child: WidgetRef) -> Harness {
-        let owner = BuildOwner::new(app, None);
+        // Flutter's test binding attaches test trees to the binding's own build owner, which is
+        // the one `GlobalKey` lookups consult.
+        let owner = WidgetsBinding::instance(app).build_owner(app);
         let widget: WidgetRef = Rc::new(TestRootErased(TestRoot { child }));
         let root = TestRootElement::create(app, widget);
         root.as_element().assign_owner(app, owner);
@@ -215,22 +243,16 @@ impl Harness {
         );
     }
 
-    /// A frame: build, layout, finalize.
+    /// A frame: build, layout, paint, finalize.
     pub(crate) fn pump(&self, app: &mut App) {
         self.owner.build_scope(app, self.root.as_element(), None);
         let pipeline = app.get(self.root).pipeline_owner.expect("mounted");
-        let render_root: RenderHandle<RenderRepaintBoundary> = self.root.typed_render_object(app);
-        render_root.layout(
-            app,
-            BoxConstraints::new().max_width(300.0).max_height(200.0),
-            false,
-        );
         pipeline.flush_layout(app);
         pipeline.flush_paint(app);
         self.owner.finalize_tree(app);
     }
 
-    pub(crate) fn render_root(&self, app: &App) -> RenderHandle<RenderRepaintBoundary> {
+    pub(crate) fn render_root(&self, app: &App) -> RenderHandle<RenderView> {
         self.root.typed_render_object(app)
     }
 }
@@ -273,4 +295,198 @@ pub(crate) fn padding_under_root(
         .as_object()
         .downcast::<reveal_rendering::RenderPadding>(app)
         .expect("a RenderPadding")
+}
+
+// ---- scroll test support ----
+
+/// A [`ScrollContext`] for tests: its notification and storage contexts are the element it
+/// was given, and its tickers come straight from the scheduler.
+pub(crate) struct TestScrollContext {
+    context: BuildContext,
+    pub(crate) axis_direction: reveal_painting::AxisDirection,
+    pub(crate) device_pixel_ratio: f64,
+    pub(crate) ignore_pointer: bool,
+    pub(crate) can_drag: Vec<bool>,
+    pub(crate) saved_offsets: Vec<f64>,
+}
+
+impl TestScrollContext {
+    pub(crate) fn new(app: &mut App, context: BuildContext) -> Handle<TestScrollContext> {
+        app.create(TestScrollContext {
+            context,
+            axis_direction: reveal_painting::AxisDirection::Down,
+            device_pixel_ratio: 1.0,
+            ignore_pointer: false,
+            can_drag: Vec::new(),
+            saved_offsets: Vec::new(),
+        })
+    }
+}
+
+impl reveal_scheduler::TickerProviderObject for TestScrollContext {
+    fn create_ticker(
+        self: Handle<Self>,
+        app: &mut App,
+        on_tick: reveal_scheduler::TickerCallback,
+    ) -> Handle<reveal_scheduler::Ticker> {
+        reveal_scheduler::Ticker::new(app, on_tick)
+    }
+}
+
+impl ScrollContext for Handle<TestScrollContext> {
+    fn type_name(&self) -> &'static str {
+        "TestScrollContext"
+    }
+
+    fn vsync(&self) -> Rc<dyn TickerProvider> {
+        Rc::new(*self)
+    }
+
+    fn notification_context(&self, app: &mut App) -> Option<BuildContext> {
+        let this = *self;
+        Some(app.get(this).context)
+    }
+
+    fn storage_context(&self, app: &App) -> BuildContext {
+        let this = *self;
+        app.get(this).context
+    }
+
+    fn axis_direction(&self, app: &App) -> reveal_painting::AxisDirection {
+        let this = *self;
+        app.get(this).axis_direction
+    }
+
+    fn device_pixel_ratio(&self, app: &App) -> f64 {
+        let this = *self;
+        app.get(this).device_pixel_ratio
+    }
+
+    fn set_ignore_pointer(&self, app: &mut App, value: bool) {
+        let this = *self;
+        app.get_mut(this).ignore_pointer = value;
+    }
+
+    fn set_can_drag(&self, app: &mut App, value: bool) {
+        let this = *self;
+        app.get_mut(this).can_drag.push(value);
+    }
+
+    fn save_offset(&self, app: &mut App, offset: f64) {
+        let this = *self;
+        app.get_mut(this).saved_offsets.push(offset);
+    }
+}
+
+/// A mounted tree that records every `ScrollNotification` a descendant dispatches, plus the
+/// [`TestScrollContext`] a scroll position under test can use.
+pub(crate) struct ScrollHarness {
+    #[allow(dead_code)]
+    pub(crate) harness: Harness,
+    pub(crate) context: Handle<TestScrollContext>,
+    /// [`context`](Self::context) as the one `ScrollContext` every position under test shares.
+    pub(crate) scroll_context: Rc<dyn ScrollContext>,
+    pub(crate) notifications: Rc<std::cell::RefCell<Vec<String>>>,
+}
+
+/// The label a recorded notification is stored under.
+fn notification_label(notification: &dyn ScrollNotification) -> String {
+    let any = notification.as_any();
+    if any.downcast_ref::<ScrollStartNotification>().is_some() {
+        "start".to_string()
+    } else if let Some(update) = any.downcast_ref::<ScrollUpdateNotification>() {
+        format!("update {:?}", update.scroll_delta.unwrap_or_default())
+    } else if let Some(overscroll) = any.downcast_ref::<OverscrollNotification>() {
+        format!("overscroll {:?}", overscroll.overscroll)
+    } else if any.downcast_ref::<ScrollEndNotification>().is_some() {
+        "end".to_string()
+    } else if let Some(user) = any.downcast_ref::<UserScrollNotification>() {
+        format!("user {:?}", user.direction)
+    } else {
+        "unknown".to_string()
+    }
+}
+
+/// Mounts the recorder tree and returns the scroll context under it.
+pub(crate) fn mount_scroll_harness(app: &mut App) -> ScrollHarness {
+    let notifications = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let recorded = notifications.clone();
+    let tree = NotificationListener::<dyn ScrollNotification>::new(SizedBox::shrink())
+        .on_notification(move |_app, notification: &dyn ScrollNotification| {
+            recorded.borrow_mut().push(notification_label(notification));
+            false
+        })
+        .into_widget();
+    let harness = Harness::mount(app, tree);
+    harness.pump(app);
+    let listener = harness.root.as_element().children(app)[0];
+    let inner = listener.children(app)[0];
+    let context = TestScrollContext::new(app, inner);
+    ScrollHarness {
+        harness,
+        context,
+        scroll_context: Rc::new(context),
+        notifications,
+    }
+}
+
+// ---- the binding harness: a real `WidgetsBinding`, for trees that use a `GlobalKey` ----
+
+/// A [`TestView`] behind a `PlatformRef`, so `run_widget` finds an implicit view.
+struct BindingPlatform {
+    view: reveal_embedder::ViewRef,
+}
+
+impl reveal_embedder::Platform for BindingPlatform {
+    fn target_platform(&self) -> reveal_embedder::TargetPlatform {
+        reveal_embedder::TargetPlatform::MacOS
+    }
+
+    fn request_frame(&self) {}
+
+    fn now(&self) -> std::time::Instant {
+        std::time::Instant::now()
+    }
+
+    fn wake_at(&self, _deadline: std::time::Instant) {}
+
+    fn views(&self) -> Vec<reveal_embedder::ViewRef> {
+        vec![Rc::clone(&self.view)]
+    }
+
+    fn view(&self, id: ViewId) -> Option<reveal_embedder::ViewRef> {
+        (self.view.id() == id).then(|| Rc::clone(&self.view))
+    }
+
+    fn implicit_view(&self) -> Option<reveal_embedder::ViewRef> {
+        Some(Rc::clone(&self.view))
+    }
+}
+
+/// An [`App`] whose platform has one [`VIEW_WIDTH`] x [`VIEW_HEIGHT`] view, for a tree that
+/// needs the `WidgetsBinding` (a `GlobalKey` lookup, a post-frame callback, a timer).
+pub(crate) fn binding_app() -> App {
+    let platform: reveal_embedder::PlatformRef = Rc::new(BindingPlatform {
+        view: Rc::new(TestView),
+    });
+    App::with_platform(platform)
+}
+
+/// Mounts `child` under the platform's view and runs the first frame.
+pub(crate) fn binding_mount(app: &mut App, child: WidgetRef) {
+    let view = app
+        .platform()
+        .implicit_view()
+        .expect("an app from binding_app");
+    crate::binding::run_widget(app, View::new(view, child).into_widget());
+    app.elapse(std::time::Duration::ZERO);
+    binding_pump(app, std::time::Duration::ZERO);
+}
+
+/// Runs one frame at `at`, then drains the microtasks it queued.
+pub(crate) fn binding_pump(app: &mut App, at: std::time::Duration) {
+    reveal_scheduler::SchedulerBinding::handle_begin_frame(app, Some(at));
+    app.drain_microtasks();
+    reveal_scheduler::SchedulerBinding::handle_draw_frame(app);
+    app.drain_microtasks();
 }

@@ -5,6 +5,11 @@ use std::time::Duration;
 use reveal_embedder::{Matrix4, Offset, PointerDeviceKind, ViewId};
 use reveal_foundation::ValueChanged;
 
+use crate::constants::{
+    K_PAN_SLOP, K_PRECISE_POINTER_HIT_SLOP, K_PRECISE_POINTER_PAN_SLOP, K_TOUCH_SLOP,
+};
+use crate::gesture_settings::DeviceGestureSettings;
+
 /// The bit of [`PointerEvent`] `buttons` that corresponds to a cross-device
 /// behavior of "primary operation".
 pub const K_PRIMARY_BUTTON: i64 = 0x01;
@@ -72,7 +77,7 @@ pub fn nth_stylus_button(number: i64) -> i64 {
 ///
 /// It returns zero when `buttons` is zero.
 pub fn smallest_button(buttons: i64) -> i64 {
-    buttons & buttons.wrapping_neg()
+    buttons.isolate_lowest_one()
 }
 
 /// Returns whether `buttons` contains one and only one button.
@@ -688,6 +693,34 @@ pub fn transform_delta_via_positions(
     let transformed_start_position =
         transform_position(transform, untransformed_end_position - untransformed_delta);
     transformed_end_position - transformed_start_position
+}
+
+/// Determine the appropriate hit slop pixels based on the `kind` of pointer.
+pub fn compute_hit_slop(kind: PointerDeviceKind, settings: Option<DeviceGestureSettings>) -> f64 {
+    match kind {
+        PointerDeviceKind::Mouse => K_PRECISE_POINTER_HIT_SLOP,
+        PointerDeviceKind::Stylus
+        | PointerDeviceKind::InvertedStylus
+        | PointerDeviceKind::Unknown
+        | PointerDeviceKind::Touch
+        | PointerDeviceKind::Trackpad => settings
+            .and_then(|settings| settings.touch_slop)
+            .unwrap_or(K_TOUCH_SLOP),
+    }
+}
+
+/// Determine the appropriate pan slop pixels based on the `kind` of pointer.
+pub fn compute_pan_slop(kind: PointerDeviceKind, settings: Option<DeviceGestureSettings>) -> f64 {
+    match kind {
+        PointerDeviceKind::Mouse => K_PRECISE_POINTER_PAN_SLOP,
+        PointerDeviceKind::Stylus
+        | PointerDeviceKind::InvertedStylus
+        | PointerDeviceKind::Unknown
+        | PointerDeviceKind::Touch
+        | PointerDeviceKind::Trackpad => settings
+            .and_then(|settings| settings.pan_slop())
+            .unwrap_or(K_PAN_SLOP),
+    }
 }
 
 /// Signature for listening to [`PointerDownEvent`] events.

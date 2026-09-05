@@ -9,25 +9,32 @@
 mod client;
 mod fonts;
 mod geometry;
+mod key;
+mod locale;
 mod mouse_cursor;
 mod painting;
 mod paragraph;
 mod platform;
 mod pointer;
+mod restoration;
 mod text;
 mod views;
 
 pub use client::EmbedderClient;
 pub use fonts::{FontCollection, FontDemand, FontId, FontSource};
 pub use geometry::*;
+pub use key::{KeyData, KeyEventDeviceType, KeyEventType};
+pub use locale::Locale;
 pub use mouse_cursor::SystemMouseCursorKind;
 pub use painting::*;
 pub use paragraph::*;
 pub use platform::{
-    Brightness, Frame, InertPlatform, Platform, PlatformRef, TargetPlatform, ViewRef,
+    ApplicationSwitcherDescription, Brightness, Frame, HapticFeedbackType, InertPlatform, Platform,
+    PlatformRef, SystemUiOverlayStyle, TargetPlatform, ViewRef,
 };
 pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
 };
+pub use restoration::{RestorationData, RestorationMap, RestorationUpdate};
 pub use text::*;
 pub use views::{GestureSettings, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding};

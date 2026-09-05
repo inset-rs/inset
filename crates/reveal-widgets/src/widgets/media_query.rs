@@ -16,6 +16,7 @@ use reveal_foundation::{App, Handle};
 use reveal_gestures::{DeviceGestureSettings, K_TOUCH_SLOP};
 use reveal_painting::{BorderRadius, EdgeInsets, TextScaler};
 
+use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 use crate::framework::{
     BuildContext, InheritedModel, InheritedModelKind, InheritedWidget, IntoWidget, KeyRef, State,
     StateData, StatefulWidget, WidgetRef,
@@ -2213,6 +2214,7 @@ impl StatefulWidget for MediaQueryFromView {
             state: StateData::new(),
             parent_data: None,
             data: None,
+            observer: None,
         }
     }
 }
@@ -2223,6 +2225,8 @@ struct MediaQueryFromViewState {
     state: StateData<MediaQueryFromView>,
     parent_data: Option<MediaQueryData>,
     data: Option<MediaQueryData>,
+    /// The `Rc` registered with the binding, kept to remove it by identity.
+    observer: Option<WidgetsBindingObserverRef>,
 }
 
 impl MediaQueryFromViewState {
@@ -2247,9 +2251,43 @@ impl MediaQueryFromViewState {
     }
 }
 
+/// Dart's `_MediaQueryFromViewState with WidgetsBindingObserver`: every platform change
+/// re-derives the data from the view.
+impl WidgetsBindingObserverObject for MediaQueryFromViewState {
+    fn did_change_accessibility_features(self: Handle<Self>, app: &mut App) {
+        // If this is a MediaQueryFromView that was created by an app, the MediaQueryData
+        // is derived from the parent's data (if any) and the view: recompute.
+        self.update_data(app);
+    }
+
+    fn did_change_metrics(self: Handle<Self>, app: &mut App) {
+        self.update_data(app);
+    }
+
+    fn did_change_text_scale_factor(self: Handle<Self>, app: &mut App) {
+        self.update_data(app);
+    }
+
+    fn did_change_platform_brightness(self: Handle<Self>, app: &mut App) {
+        self.update_data(app);
+    }
+}
+
 impl State for MediaQueryFromViewState {
     type Widget = MediaQueryFromView;
     crate::state_accessors!();
+
+    fn init_state(self: Handle<Self>, app: &mut App) {
+        let observer: WidgetsBindingObserverRef = Rc::new(self);
+        WidgetsBinding::instance(app).add_observer(app, Rc::clone(&observer));
+        app.get_mut(self).observer = Some(observer);
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        if let Some(observer) = app.get_mut(self).observer.take() {
+            WidgetsBinding::instance(app).remove_observer(app, &observer);
+        }
+    }
 
     fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
         self.update_parent_data(app);

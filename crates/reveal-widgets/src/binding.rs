@@ -8,6 +8,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
+use reveal_embedder::Locale;
 use reveal_foundation::{App, Handle, Listener, Timer};
 use reveal_rendering::{RendererBinding, RendererBindingOverridesObject};
 use reveal_scheduler::SchedulerBinding;
@@ -30,7 +31,103 @@ pub struct WidgetsBinding {
     build_owner: Option<Handle<BuildOwner>>,
     root_element: Option<AnyElement>,
     ready_to_produce_frames: bool,
+    observers: Vec<WidgetsBindingObserverRef>,
 }
+
+/// Interface for classes that register with the Widgets layer binding.
+///
+/// This can be used by any class, not just widgets. It provides an interface which is used
+/// by [`WidgetsBinding::add_observer`] and [`WidgetsBinding::remove_observer`] to notify
+/// objects of changes in the environment, such as changes to the device metrics or
+/// accessibility settings. It is used to implement features such as `MediaQuery`.
+///
+/// A `State` registers itself through the object twin
+/// [`WidgetsBindingObserverObject`], whose handle is the observer. The route, lifecycle,
+/// memory-pressure, back-gesture, and view-focus callbacks wait with their platform
+/// events; only the ones the renderer raises, and the locale list, are here.
+pub trait WidgetsBindingObserver {
+    /// Called when the application's dimensions change. For example, when a phone is rotated.
+    fn did_change_metrics(&self, app: &mut App) {
+        let _ = app;
+    }
+
+    /// Called when the system tells the app that the user's locale has changed. For example,
+    /// if the user changes the system language settings.
+    ///
+    /// This method exposes notifications from `PlatformDispatcher.onLocaleChanged`.
+    fn did_change_locales(&self, app: &mut App, locales: Option<&[Locale]>) {
+        let _ = (app, locales);
+    }
+
+    /// Called when the platform's text scale factor changes.
+    fn did_change_text_scale_factor(&self, app: &mut App) {
+        let _ = app;
+    }
+
+    /// Called when the platform brightness changes.
+    fn did_change_platform_brightness(&self, app: &mut App) {
+        let _ = app;
+    }
+
+    /// Called when the system changes the set of currently active accessibility features.
+    fn did_change_accessibility_features(&self, app: &mut App) {
+        let _ = app;
+    }
+}
+
+/// The object side of [`WidgetsBindingObserver`]: implement it on an arena object (a
+/// `State`) and register `Rc::new(handle)`.
+pub trait WidgetsBindingObserverObject: Sized + 'static {
+    /// See [`WidgetsBindingObserver::did_change_metrics`].
+    fn did_change_metrics(self: Handle<Self>, app: &mut App) {
+        let _ = app;
+    }
+
+    /// See [`WidgetsBindingObserver::did_change_locales`].
+    fn did_change_locales(self: Handle<Self>, app: &mut App, locales: Option<&[Locale]>) {
+        let _ = (app, locales);
+    }
+
+    /// See [`WidgetsBindingObserver::did_change_text_scale_factor`].
+    fn did_change_text_scale_factor(self: Handle<Self>, app: &mut App) {
+        let _ = app;
+    }
+
+    /// See [`WidgetsBindingObserver::did_change_platform_brightness`].
+    fn did_change_platform_brightness(self: Handle<Self>, app: &mut App) {
+        let _ = app;
+    }
+
+    /// See [`WidgetsBindingObserver::did_change_accessibility_features`].
+    fn did_change_accessibility_features(self: Handle<Self>, app: &mut App) {
+        let _ = app;
+    }
+}
+
+impl<T: WidgetsBindingObserverObject> WidgetsBindingObserver for Handle<T> {
+    fn did_change_metrics(&self, app: &mut App) {
+        T::did_change_metrics(*self, app);
+    }
+
+    fn did_change_locales(&self, app: &mut App, locales: Option<&[Locale]>) {
+        T::did_change_locales(*self, app, locales);
+    }
+
+    fn did_change_text_scale_factor(&self, app: &mut App) {
+        T::did_change_text_scale_factor(*self, app);
+    }
+
+    fn did_change_platform_brightness(&self, app: &mut App) {
+        T::did_change_platform_brightness(*self, app);
+    }
+
+    fn did_change_accessibility_features(&self, app: &mut App) {
+        T::did_change_accessibility_features(*self, app);
+    }
+}
+
+/// A registered observer; removed again by identity of the `Rc`.
+pub type WidgetsBindingObserverRef = Rc<dyn WidgetsBindingObserver>;
 
 impl WidgetsBinding {
     /// The current [`WidgetsBinding`], created on first use (Flutter's
@@ -51,6 +148,14 @@ impl WidgetsBinding {
             RendererBinding::instance(app).set_overrides(app, Rc::new(this));
         }
         this
+    }
+
+    /// The object in charge of the focus tree.
+    ///
+    /// Rarely used directly. Instead, consider using `FocusScope::of` to obtain the
+    /// `FocusScopeNode` for a given `BuildContext`.
+    pub fn focus_manager(self: Handle<Self>, app: &App) -> Handle<crate::FocusManager> {
+        self.build_owner(app).focus_manager(app)
     }
 
     /// The [`BuildOwner`] in charge of executing the build pipeline for the widget tree
@@ -154,6 +259,72 @@ impl WidgetsBinding {
         }
     }
 
+    /// Registers the given object as a binding observer. Binding observers are notified when
+    /// various application events occur, for example when the system locale changes.
+    /// Generally, one widget in the widget tree registers itself as a binding observer, and
+    /// converts the system state into inherited widgets.
+    ///
+    /// The observer is removed again with the same `Rc` (Dart's `Set.remove` by identity).
+    pub fn add_observer(self: Handle<Self>, app: &mut App, observer: WidgetsBindingObserverRef) {
+        app.get_mut(self).observers.push(observer);
+    }
+
+    /// Unregisters the given observer. This should be used sparingly as it is relatively
+    /// expensive (O(N) in the number of registered observers).
+    pub fn remove_observer(
+        self: Handle<Self>,
+        app: &mut App,
+        observer: &WidgetsBindingObserverRef,
+    ) -> bool {
+        let observers = &mut app.get_mut(self).observers;
+        let before = observers.len();
+        observers.retain(|registered| !Rc::ptr_eq(registered, observer));
+        observers.len() < before
+    }
+
+    /// Called when the platform's text scale factor changes: tells the observers.
+    pub fn handle_text_scale_factor_changed(self: Handle<Self>, app: &mut App) {
+        for observer in app.get(self).observers.clone() {
+            observer.did_change_text_scale_factor(app);
+        }
+    }
+
+    /// Called when the platform brightness changes: tells the observers.
+    pub fn handle_platform_brightness_changed(self: Handle<Self>, app: &mut App) {
+        for observer in app.get(self).observers.clone() {
+            observer.did_change_platform_brightness(app);
+        }
+    }
+
+    /// Called when the system locale changes.
+    ///
+    /// Calls [`dispatch_locales_changed`](Self::dispatch_locales_changed) to notify the
+    /// binding observers.
+    ///
+    /// This method exposes notifications from `PlatformDispatcher.onLocaleChanged`.
+    pub fn handle_locale_changed(self: Handle<Self>, app: &mut App) {
+        let locales = app.platform().locales();
+        self.dispatch_locales_changed(app, Some(&locales));
+    }
+
+    /// Notify all the observers that the locale has changed (using
+    /// [`WidgetsBindingObserver::did_change_locales`]), giving them the `locales` argument.
+    ///
+    /// This is called by [`handle_locale_changed`](Self::handle_locale_changed) when the
+    /// `PlatformDispatcher.onLocaleChanged` notification is received.
+    pub fn dispatch_locales_changed(self: Handle<Self>, app: &mut App, locales: Option<&[Locale]>) {
+        for observer in app.get(self).observers.clone() {
+            observer.did_change_locales(app, locales);
+        }
+    }
+
+    /// Called when the set of active accessibility features changes: tells the observers.
+    pub fn handle_accessibility_features_changed(self: Handle<Self>, app: &mut App) {
+        for observer in app.get(self).observers.clone() {
+            observer.did_change_accessibility_features(app);
+        }
+    }
+
     /// Whether the [`root_element`](Self::root_element) has been initialized.
     ///
     /// This will be false until [`run_app`] is called (or `WidgetTester.pumpWidget` is
@@ -176,6 +347,13 @@ impl RendererBindingOverridesObject for WidgetsBinding {
     fn did_draw_frame(self: Handle<Self>, app: &mut App) {
         let owner = self.build_owner(app);
         owner.finalize_tree(app);
+    }
+
+    /// `WidgetsBinding.handleMetricsChanged` after `super`: tells the observers.
+    fn did_handle_metrics_changed(self: Handle<Self>, app: &mut App) {
+        for observer in app.get(self).observers.clone() {
+            observer.did_change_metrics(app);
+        }
     }
 }
 
@@ -448,6 +626,7 @@ mod tests {
 
     struct TestView {
         presented: Rc<Cell<u32>>,
+        physical_size: Rc<Cell<[f64; 2]>>,
     }
 
     impl EmbedderView for TestView {
@@ -456,9 +635,10 @@ mod tests {
         }
 
         fn metrics(&self) -> ViewMetrics {
+            let [width, height] = self.physical_size.get();
             ViewMetrics {
-                physical_size: [800.0, 600.0],
-                physical_constraints: reveal_embedder::ViewConstraints::tight(800.0, 600.0),
+                physical_size: [width, height],
+                physical_constraints: reveal_embedder::ViewConstraints::tight(width, height),
                 device_pixel_ratio: 2.0,
                 ..ViewMetrics::default()
             }
@@ -503,15 +683,29 @@ mod tests {
     }
 
     fn app_with_view() -> (App, Rc<Cell<u32>>, Rc<Cell<u32>>) {
+        let (app, presented, frames, _size) = app_with_resizable_view();
+        (app, presented, frames)
+    }
+
+    type ResizableApp = (App, Rc<Cell<u32>>, Rc<Cell<u32>>, Rc<Cell<[f64; 2]>>);
+
+    fn app_with_resizable_view() -> ResizableApp {
         let presented = Rc::new(Cell::new(0));
         let frames = Rc::new(Cell::new(0));
+        let physical_size = Rc::new(Cell::new([800.0, 600.0]));
         let platform: PlatformRef = Rc::new(TestPlatform {
             view: Rc::new(TestView {
                 presented: Rc::clone(&presented),
+                physical_size: Rc::clone(&physical_size),
             }),
             frames: Rc::clone(&frames),
         });
-        (App::with_platform(platform), presented, frames)
+        (
+            App::with_platform(platform),
+            presented,
+            frames,
+            physical_size,
+        )
     }
 
     fn pump_frame(app: &mut App, at: Duration) {
@@ -690,6 +884,36 @@ mod tests {
         assert_eq!(
             RendererBinding::instance(&mut app).render_views(&app).len(),
             1
+        );
+    }
+
+    #[test]
+    fn a_metrics_change_reaches_the_observers_and_the_media_query() {
+        let (mut app, _presented, _frames, physical_size) = app_with_resizable_view();
+        let sizes = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let probe = crate::widgets::basic::Builder::new({
+            let sizes = Rc::clone(&sizes);
+            move |app, context| {
+                sizes
+                    .borrow_mut()
+                    .push(crate::MediaQuery::size_of(app, context));
+                Sized {
+                    size: Size::new(1.0, 1.0),
+                }
+                .into_widget()
+            }
+        });
+        run_app(&mut app, probe.into_widget());
+        app.elapse(Duration::ZERO);
+        pump_frame(&mut app, Duration::ZERO);
+        assert_eq!(*sizes.borrow(), vec![Size::new(400.0, 300.0)]);
+
+        physical_size.set([1000.0, 400.0]);
+        RendererBinding::instance(&mut app).handle_metrics_changed(&mut app);
+        pump_frame(&mut app, Duration::from_millis(16));
+        assert_eq!(
+            *sizes.borrow(),
+            vec![Size::new(400.0, 300.0), Size::new(500.0, 200.0)]
         );
     }
 }

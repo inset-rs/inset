@@ -329,6 +329,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
+name = "cupertino-gallery"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "reveal-animation",
+ "reveal-cupertino",
+ "reveal-embedder",
+ "reveal-embedder-winit",
+ "reveal-foundation",
+ "reveal-gestures",
+ "reveal-painting",
+ "reveal-rendering",
+ "reveal-scheduler",
+ "reveal-shell",
+ "reveal-widgets",
+ "valo-system-fonts",
+]
+
+[[package]]
 name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1557,11 +1576,13 @@ dependencies = [
 name = "reveal-cupertino"
 version = "0.1.0"
 dependencies = [
+ "indexmap",
  "reveal-animation",
  "reveal-embedder",
  "reveal-foundation",
  "reveal-gestures",
  "reveal-painting",
+ "reveal-physics",
  "reveal-rendering",
  "reveal-scheduler",
  "reveal-services",
@@ -1573,6 +1594,7 @@ dependencies = [
 name = "reveal-embedder"
 version = "0.1.0"
 dependencies = [
+ "indexmap",
  "valo",
  "valo-geometry",
  "valo-system-fonts",
@@ -1606,6 +1628,7 @@ dependencies = [
  "indexmap",
  "reveal-embedder",
  "reveal-foundation",
+ "reveal-scheduler",
 ]
 
 [[package]]
@@ -1653,9 +1676,11 @@ dependencies = [
 name = "reveal-services"
 version = "0.1.0"
 dependencies = [
+ "indexmap",
  "reveal-embedder",
  "reveal-foundation",
  "reveal-gestures",
+ "reveal-scheduler",
 ]
 
 [[package]]
@@ -1668,17 +1693,20 @@ dependencies = [
  "reveal-painting",
  "reveal-rendering",
  "reveal-scheduler",
+ "reveal-services",
 ]
 
 [[package]]
 name = "reveal-widgets"
 version = "0.1.0"
 dependencies = [
+ "indexmap",
  "reveal-animation",
  "reveal-embedder",
  "reveal-foundation",
  "reveal-gestures",
  "reveal-painting",
+ "reveal-physics",
  "reveal-rendering",
  "reveal-scheduler",
  "reveal-services",

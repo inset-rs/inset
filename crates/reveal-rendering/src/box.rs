@@ -1,23 +1,34 @@
 //! Flutter counterpart: `rendering/box.dart` (`BoxConstraints`, `RenderBox`
-//! layout wrapper).
+//! layout wrapper, intrinsics, dry layout and baselines).
 //!
-//! `_DebugSize` / `BoxHitTestResult` / `computeDryLayout` wait.
+//! `_DebugSize` and `debugAssertDoesMeetConstraints` wait.
 
+use std::any::{Any, TypeId};
+use std::collections::HashMap;
 use std::fmt::{self, Debug, Display};
 use std::hash::{Hash, Hasher};
 
-use std::ops::{Deref, DerefMut};
+use std::cell::Cell;
+use std::ops::{Add, Deref, DerefMut};
 
-use reveal_embedder::{Matrix4, Offset, Rect, Size, ViewConstraints, clamp_double, lerp_double};
+use reveal_embedder::{
+    Matrix4, Offset, Rect, Size, TextBaseline, ViewConstraints, clamp_double, lerp_double,
+};
 use reveal_foundation::{App, Handle, HandleId};
 use reveal_gestures::{HitTestEntry, HitTestResult, HitTestTarget, PointerEvent};
 use reveal_painting::EdgeInsetsGeometry;
 use reveal_painting::transform_point;
 
 use crate::object::{
-    AnyRenderObject, Constraints, RenderHandle, RenderObject, RenderObjectVTable, create, resolve,
+    AnyRenderObject, Constraints, ContainerParentDataMixin, ContainerRenderObjectMixin, ParentData,
+    RenderHandle, RenderObject, RenderObjectVTable, create, debug_checking_intrinsics, resolve,
 };
+use crate::painting_context::PaintingContext;
 use crate::pipeline_owner::PipelineOwner;
+
+thread_local! {
+    static DEBUG_DOING_BASELINE: Cell<bool> = const { Cell::new(false) };
+}
 
 /// Immutable layout constraints for `RenderBox` layout.
 ///
@@ -880,7 +891,15 @@ impl Default for BoxParentData {
     }
 }
 
-impl crate::object::ParentData for BoxParentData {}
+impl ParentData for BoxParentData {
+    fn provide(&self, id: TypeId) -> Option<&dyn Any> {
+        (id == TypeId::of::<BoxParentData>()).then_some(self)
+    }
+
+    fn provide_mut(&mut self, id: TypeId) -> Option<&mut dyn Any> {
+        (id == TypeId::of::<BoxParentData>()).then_some(self)
+    }
+}
 
 impl fmt::Display for BoxParentData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -888,10 +907,161 @@ impl fmt::Display for BoxParentData {
     }
 }
 
+/// Parent data for a [`RenderBox`] subclass that uses [`ContainerRenderObjectMixin`].
+///
+/// Flutter's `ContainerBoxParentData`: a convenience class that mixes
+/// [`ContainerParentDataMixin`] into a [`BoxParentData`]. Here it is the pair of accessors a
+/// container's parent data provides, one for each half.
+pub trait ContainerBoxParentData: ContainerParentDataMixin<ChildType = AnyRenderBox> {
+    /// Mixin field access: the [`BoxParentData`] half.
+    ///
+    /// [`ParentData::provide`](crate::ParentData::provide) must answer [`BoxParentData`] with
+    /// the same value, or the box protocol cannot position this child.
+    fn box_parent_data(&self) -> &BoxParentData;
+
+    /// See [`box_parent_data`](Self::box_parent_data).
+    fn box_parent_data_mut(&mut self) -> &mut BoxParentData;
+
+    /// The offset at which to paint the child in the parent's coordinate system.
+    fn offset(&self) -> Offset {
+        self.box_parent_data().offset
+    }
+
+    /// Sets [`offset`](Self::offset).
+    fn set_offset(&mut self, value: Offset) {
+        self.box_parent_data_mut().offset = value;
+    }
+}
+
+/// A wrapper that represents the baseline location of a [`RenderBox`].
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct BaselineOffset(pub Option<f64>);
+
+impl BaselineOffset {
+    /// A value that indicates that the associated [`RenderBox`] does not have any baselines.
+    ///
+    /// [`BaselineOffset::NO_BASELINE`] is an identity element in most binary operations
+    /// involving two [`BaselineOffset`]s (such as [`min_of`](Self::min_of)), for render objects
+    /// with no baselines typically do not contribute to the baseline offset of their parents.
+    pub const NO_BASELINE: BaselineOffset = BaselineOffset(None);
+
+    /// The distance from the top of the box, or `None` for no baseline.
+    pub fn offset(self) -> Option<f64> {
+        self.0
+    }
+
+    /// Compares this [`BaselineOffset`] and `other`, and returns whichever is closer to the
+    /// origin.
+    ///
+    /// When both `self` and `other` are [`NO_BASELINE`](Self::NO_BASELINE), this method returns
+    /// [`NO_BASELINE`](Self::NO_BASELINE). When one of them is
+    /// [`NO_BASELINE`](Self::NO_BASELINE), this method returns the other operand.
+    pub fn min_of(self, other: BaselineOffset) -> BaselineOffset {
+        match (self.0, other.0) {
+            (Some(lhs), Some(rhs)) => {
+                if lhs >= rhs {
+                    other
+                } else {
+                    self
+                }
+            }
+            (Some(_), None) => self,
+            (None, _) => other,
+        }
+    }
+}
+
+impl Add<f64> for BaselineOffset {
+    type Output = BaselineOffset;
+
+    /// Returns a new baseline location that is `offset` pixels further away from the origin than
+    /// `self`, or unchanged if `self` is [`NO_BASELINE`](Self::NO_BASELINE).
+    fn add(self, offset: f64) -> BaselineOffset {
+        BaselineOffset(self.0.map(|value| value + offset))
+    }
+}
+
+/// Why a box cannot compute a dry layout, for
+/// [`RenderBox::debug_cannot_compute_dry_layout`].
+///
+/// Flutter's `debugCannotComputeDryLayout` takes a `reason` or an `error`, exactly one of them.
+#[derive(Clone, Copy, Debug)]
+pub enum DryLayoutFailure<'a> {
+    /// The box does not implement dry layout; the panic names the box and adds this reason.
+    Reason(&'a str),
+
+    /// The box cannot lay out with the given constraints; the panic is this error.
+    Error(&'a str),
+}
+
+/// Intrinsic dimension calculation that computes the intrinsic width given the max height, or
+/// the intrinsic height given the max width.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum IntrinsicDimension {
+    MinWidth,
+    MaxWidth,
+    MinHeight,
+    MaxHeight,
+}
+
+/// An `f64` used as a map key, as Dart uses a `double`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct DoubleKey(u64);
+
+impl DoubleKey {
+    fn new(value: f64) -> DoubleKey {
+        DoubleKey(value.to_bits())
+    }
+}
+
+/// Flutter's `_LayoutCacheStorage`: what one [`RenderBox`] has memoized.
+///
+/// The layout cache storage is typically cleared in
+/// [`RenderBox::mark_needs_layout`], but is usually kept across
+/// [`AnyRenderBox::layout`] calls because the incoming [`BoxConstraints`] is always an input of
+/// every layout computation.
+#[derive(Default)]
+struct LayoutCacheStorage {
+    cached_intrinsic_dimensions: HashMap<(IntrinsicDimension, DoubleKey), f64>,
+    cached_dry_layout_sizes: HashMap<BoxConstraints, Size>,
+    cached_alphabetic_baseline: HashMap<BoxConstraints, BaselineOffset>,
+    cached_ideo_baseline: HashMap<BoxConstraints, BaselineOffset>,
+}
+
+impl LayoutCacheStorage {
+    /// Empties the storage, and returns whether it had anything cached.
+    fn clear(&mut self) -> bool {
+        let has_cache = !self.cached_dry_layout_sizes.is_empty()
+            || !self.cached_intrinsic_dimensions.is_empty()
+            || !self.cached_alphabetic_baseline.is_empty()
+            || !self.cached_ideo_baseline.is_empty();
+        if has_cache {
+            self.cached_dry_layout_sizes.clear();
+            self.cached_intrinsic_dimensions.clear();
+            self.cached_alphabetic_baseline.clear();
+            self.cached_ideo_baseline.clear();
+        }
+        has_cache
+    }
+
+    fn baselines(
+        &mut self,
+        baseline: TextBaseline,
+    ) -> &mut HashMap<BoxConstraints, BaselineOffset> {
+        match baseline {
+            TextBaseline::Alphabetic => &mut self.cached_alphabetic_baseline,
+            TextBaseline::Ideographic => &mut self.cached_ideo_baseline,
+        }
+    }
+}
+
 /// Flutter's `RenderBox` fields.
 pub struct RenderBoxData {
     pub(crate) size: Option<Size>,
     pub(crate) constraints: Option<BoxConstraints>,
+    layout_cache: LayoutCacheStorage,
+    debug_computing_this_dry_layout: bool,
+    debug_computing_this_dry_baseline: bool,
 }
 
 impl RenderBoxData {
@@ -900,6 +1070,9 @@ impl RenderBoxData {
         RenderBoxData {
             size: None,
             constraints: None,
+            layout_cache: LayoutCacheStorage::default(),
+            debug_computing_this_dry_layout: false,
+            debug_computing_this_dry_baseline: false,
         }
     }
 }
@@ -929,33 +1102,139 @@ macro_rules! render_box_accessors {
     };
 }
 
-/// Flutter's `RenderObjectWithChildMixin` when the child is a box.
-pub trait RenderObjectWithChildMixin: RenderBox {
-    /// Mixin field access.
-    fn child_data(
-        self: RenderHandle<Self>,
-        app: &App,
-    ) -> &crate::object::RenderObjectWithChildData<AnyRenderBox>;
+/// Dart's `child.parentData! as BoxParentData`.
+///
+/// # Panics
+///
+/// If the child has no parent data, or its parent data is not a box's.
+fn box_parent_data_of(app: &App, child: AnyRenderObject) -> &BoxParentData {
+    child
+        .parent_data(app)
+        .and_then(|parent_data| parent_data.part::<BoxParentData>())
+        .expect("parent data is not a BoxParentData")
+}
 
-    /// See [`child_data`](Self::child_data).
-    fn child_data_mut(
+/// A mixin that provides useful default behaviors for boxes with children managed by the
+/// [`ContainerRenderObjectMixin`] mixin.
+///
+/// By convention, this trait doesn't override any members of the supertrait. Instead, it
+/// provides helpful functions that render objects can call as appropriate.
+///
+/// Flutter's `RenderBoxContainerDefaultsMixin`.
+pub trait RenderBoxContainerDefaultsMixin:
+    ContainerRenderObjectMixin<ChildType = AnyRenderBox, ParentDataType: ContainerBoxParentData>
+    + RenderBox
+{
+    /// Returns the baseline of the first child with a baseline.
+    ///
+    /// Useful when the children are displayed vertically in the same order they appear in the
+    /// child list.
+    fn default_compute_distance_to_first_actual_baseline(
         self: RenderHandle<Self>,
         app: &mut App,
-    ) -> &mut crate::object::RenderObjectWithChildData<AnyRenderBox>;
-
-    /// The render object's unique child.
-    fn child(self: RenderHandle<Self>, app: &App) -> Option<AnyRenderBox> {
-        self.child_data(app).child
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        debug_assert!(!self.as_object().debug_needs_layout(app));
+        let mut child = self.first_child(app);
+        while let Some(current) = child {
+            let child_parent_data = current
+                .as_object()
+                .parent_data_of::<Self::ParentDataType>(app);
+            let (offset, next_sibling) =
+                (child_parent_data.offset(), child_parent_data.next_sibling());
+            if let Some(result) = current.get_distance_to_actual_baseline(app, baseline) {
+                return Some(result + offset.dy());
+            }
+            child = next_sibling;
+        }
+        None
     }
 
-    /// Sets the unique child, adopting or dropping as Flutter's setter does.
-    fn set_child(self: RenderHandle<Self>, app: &mut App, value: Option<AnyRenderBox>) {
-        if let Some(old) = self.child(app) {
-            self.drop_child(app, old.as_object());
+    /// Returns the minimum baseline value among every child.
+    ///
+    /// Useful when the vertical position of the children isn't determined by the order in the
+    /// child list.
+    fn default_compute_distance_to_highest_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        debug_assert!(!self.as_object().debug_needs_layout(app));
+        let mut min_baseline = BaselineOffset::NO_BASELINE;
+        let mut child = self.first_child(app);
+        while let Some(current) = child {
+            let child_parent_data = current
+                .as_object()
+                .parent_data_of::<Self::ParentDataType>(app);
+            let (offset, next_sibling) =
+                (child_parent_data.offset(), child_parent_data.next_sibling());
+            let candidate = BaselineOffset(current.get_distance_to_actual_baseline(app, baseline))
+                + offset.dy();
+            min_baseline = min_baseline.min_of(candidate);
+            child = next_sibling;
         }
-        self.child_data_mut(app).child = value;
-        if let Some(new) = value {
-            self.adopt_child(app, new.as_object());
+        min_baseline.offset()
+    }
+
+    /// Performs a hit test on each child by walking the child list backwards.
+    ///
+    /// Stops walking once after the first child reports that it contains the given point.
+    /// Returns whether any children contain the given point.
+    ///
+    /// See also:
+    ///
+    ///  * [`default_paint`](Self::default_paint), which paints the children appropriate for
+    ///    this hit-testing strategy.
+    fn default_hit_test_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        let mut child = self.last_child(app);
+        while let Some(current) = child {
+            // The x, y parameters have the top left of the node's box as the origin.
+            let child_parent_data = current
+                .as_object()
+                .parent_data_of::<Self::ParentDataType>(app);
+            let (offset, previous_sibling) = (
+                child_parent_data.offset(),
+                child_parent_data.previous_sibling(),
+            );
+            let is_hit =
+                result.add_with_paint_offset(Some(offset), position, |result, transformed| {
+                    debug_assert_eq!(transformed, position - offset);
+                    current.hit_test(app, result, transformed)
+                });
+            if is_hit {
+                return true;
+            }
+            child = previous_sibling;
+        }
+        false
+    }
+
+    /// Paints each child by walking the child list forwards.
+    ///
+    /// See also:
+    ///
+    ///  * [`default_hit_test_children`](Self::default_hit_test_children), which implements
+    ///    hit-testing of the children in a manner appropriate for this painting strategy.
+    fn default_paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        let mut child = self.first_child(app);
+        while let Some(current) = child {
+            let child_parent_data = current
+                .as_object()
+                .parent_data_of::<Self::ParentDataType>(app);
+            let (child_offset, next_sibling) =
+                (child_parent_data.offset(), child_parent_data.next_sibling());
+            context.paint_child(app, current.as_object(), child_offset + offset);
+            child = next_sibling;
         }
     }
 }
@@ -992,6 +1271,341 @@ pub trait RenderBox: RenderObject {
         }
     }
 
+    /// See [`AnyRenderBox::get_min_intrinsic_width`].
+    fn get_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        self.as_box().get_min_intrinsic_width(app, height)
+    }
+
+    /// Computes the value returned by [`get_min_intrinsic_width`](Self::get_min_intrinsic_width).
+    /// Do not call this function directly, instead, call
+    /// [`get_min_intrinsic_width`](Self::get_min_intrinsic_width).
+    ///
+    /// Override in subclasses that implement [`RenderObject::perform_layout`]. This method
+    /// should return the minimum width that this box could be without failing to correctly
+    /// paint its contents within itself, without clipping.
+    ///
+    /// If the layout algorithm is independent of the context (e.g. it always tries to be a
+    /// particular size), or if the layout algorithm is width-in-height-out, or if the layout
+    /// algorithm uses both the incoming width and height constraints (e.g. it always sizes
+    /// itself to [`BoxConstraints::biggest`]), then the `height` argument should be ignored.
+    ///
+    /// If the layout algorithm is strictly height-in-width-out, or is height-in-width-out when
+    /// the width is unconstrained, then the height argument is the height to use.
+    ///
+    /// The `height` argument will never be negative. It may be infinite.
+    ///
+    /// If this algorithm depends on the intrinsic dimensions of a child, the intrinsic
+    /// dimensions of that child should be obtained using the functions whose names start with
+    /// `get_`, not `compute_`.
+    ///
+    /// This function should never return a negative or infinite value.
+    ///
+    /// # When the intrinsic dimensions cannot be known
+    ///
+    /// There are cases where render objects do not have an efficient way to compute their
+    /// intrinsic dimensions. For example, it may be prohibitively expensive to reify and
+    /// measure every child of a lazy viewport, or the dimensions may be computed by a callback
+    /// about which the render object cannot reason.
+    ///
+    /// In such cases the intrinsic functions should panic when
+    /// [`debug_checking_intrinsics`](crate::debug_checking_intrinsics) is false and debug
+    /// assertions are enabled, and return 0.0 otherwise. See
+    /// [`RenderViewportBase::debug_throw_if_not_checking_intrinsics`](crate::RenderViewportBase::debug_throw_if_not_checking_intrinsics).
+    ///
+    /// # Aspect-ratio-driven boxes
+    ///
+    /// Some boxes always return a fixed size based on the constraints. For these boxes, the
+    /// intrinsic functions should return the appropriate size when the incoming `height` or
+    /// `width` argument is finite, treating that as a tight constraint in the respective
+    /// direction and treating the other direction's constraints as unbounded. When the incoming
+    /// argument is not finite, then they should return the actual intrinsic dimensions based on
+    /// the contents, as any other box would.
+    fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        let _ = (self, app, height);
+        0.0
+    }
+
+    /// See [`AnyRenderBox::get_max_intrinsic_width`].
+    fn get_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        self.as_box().get_max_intrinsic_width(app, height)
+    }
+
+    /// Computes the value returned by [`get_max_intrinsic_width`](Self::get_max_intrinsic_width).
+    /// Do not call this function directly, instead, call
+    /// [`get_max_intrinsic_width`](Self::get_max_intrinsic_width).
+    ///
+    /// Override in subclasses that implement [`RenderObject::perform_layout`]. This should
+    /// return the smallest width beyond which increasing the width never decreases the preferred
+    /// height. The preferred height is the value that would be returned by
+    /// [`compute_min_intrinsic_height`](Self::compute_min_intrinsic_height) for that width.
+    ///
+    /// If the layout algorithm is strictly height-in-width-out, or is height-in-width-out when
+    /// the width is unconstrained, then this should return the same value as
+    /// [`compute_min_intrinsic_width`](Self::compute_min_intrinsic_width) for the same height.
+    ///
+    /// Otherwise, the height argument should be ignored, and the returned value should be equal
+    /// to or bigger than the value returned by
+    /// [`compute_min_intrinsic_width`](Self::compute_min_intrinsic_width).
+    ///
+    /// The value returned by this method might not match the size that the object would actually
+    /// take. For example, a box that always exactly sizes itself using
+    /// [`BoxConstraints::biggest`] might well size itself bigger than its max intrinsic size.
+    fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        let _ = (self, app, height);
+        0.0
+    }
+
+    /// See [`AnyRenderBox::get_min_intrinsic_height`].
+    fn get_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        self.as_box().get_min_intrinsic_height(app, width)
+    }
+
+    /// Computes the value returned by
+    /// [`get_min_intrinsic_height`](Self::get_min_intrinsic_height). Do not call this function
+    /// directly, instead, call [`get_min_intrinsic_height`](Self::get_min_intrinsic_height).
+    ///
+    /// Override in subclasses that implement [`RenderObject::perform_layout`]. Should return the
+    /// minimum height that this box could be without failing to correctly paint its contents
+    /// within itself, without clipping.
+    ///
+    /// If the layout algorithm is independent of the context, or if the layout algorithm is
+    /// height-in-width-out, or if the layout algorithm uses both the incoming height and width
+    /// constraints, then the `width` argument should be ignored.
+    ///
+    /// If the layout algorithm is strictly width-in-height-out, or is width-in-height-out when
+    /// the height is unconstrained, then the width argument is the width to use.
+    ///
+    /// The `width` argument will never be negative. It may be infinite.
+    fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        let _ = (self, app, width);
+        0.0
+    }
+
+    /// See [`AnyRenderBox::get_max_intrinsic_height`].
+    fn get_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        self.as_box().get_max_intrinsic_height(app, width)
+    }
+
+    /// Computes the value returned by
+    /// [`get_max_intrinsic_height`](Self::get_max_intrinsic_height). Do not call this function
+    /// directly, instead, call [`get_max_intrinsic_height`](Self::get_max_intrinsic_height).
+    ///
+    /// Override in subclasses that implement [`RenderObject::perform_layout`]. Should return the
+    /// smallest height beyond which increasing the height never decreases the preferred width.
+    /// The preferred width is the value that would be returned by
+    /// [`compute_min_intrinsic_width`](Self::compute_min_intrinsic_width) for that height.
+    ///
+    /// If the layout algorithm is strictly width-in-height-out, or is width-in-height-out when
+    /// the height is unconstrained, then this should return the same value as
+    /// [`compute_min_intrinsic_height`](Self::compute_min_intrinsic_height) for the same width.
+    ///
+    /// Otherwise, the width argument should be ignored, and the returned value should be equal
+    /// to or bigger than the value returned by
+    /// [`compute_min_intrinsic_height`](Self::compute_min_intrinsic_height).
+    fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        let _ = (self, app, width);
+        0.0
+    }
+
+    /// See [`AnyRenderBox::get_dry_layout`].
+    fn get_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        self.as_box().get_dry_layout(app, constraints)
+    }
+
+    /// Computes the value returned by [`get_dry_layout`](Self::get_dry_layout). Do not call this
+    /// function directly, instead, call [`get_dry_layout`](Self::get_dry_layout).
+    ///
+    /// Override in subclasses that implement [`RenderObject::perform_layout`] or
+    /// [`perform_resize`](Self::perform_resize), or when setting
+    /// [`RenderObject::sized_by_parent`] to true without overriding
+    /// [`perform_resize`](Self::perform_resize). This method should return the [`Size`] that
+    /// this box would like to be given the provided [`BoxConstraints`].
+    ///
+    /// The size returned by this method must match the [`size`](Self::size) that the box will
+    /// compute for itself in [`RenderObject::perform_layout`] (or
+    /// [`perform_resize`](Self::perform_resize), if
+    /// [`RenderObject::sized_by_parent`] is true).
+    ///
+    /// If this algorithm depends on the size of a child, the size of that child should be
+    /// obtained using its [`get_dry_layout`](Self::get_dry_layout) method.
+    ///
+    /// # When the size cannot be known
+    ///
+    /// There are cases where render objects do not have an efficient way to compute their size.
+    /// For example, the size may be computed by a callback about which the render object cannot
+    /// reason. In such cases, the function should call
+    /// [`debug_cannot_compute_dry_layout`](Self::debug_cannot_compute_dry_layout) and return
+    /// [`Size::ZERO`].
+    fn compute_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        let _ = (app, constraints);
+        self.debug_cannot_compute_dry_layout(DryLayoutFailure::Reason(
+            "It does not implement RenderBox::compute_dry_layout.",
+        ));
+        Size::ZERO
+    }
+
+    /// See [`AnyRenderBox::get_dry_baseline`].
+    fn get_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        self.as_box().get_dry_baseline(app, constraints, baseline)
+    }
+
+    /// Computes the value returned by [`get_dry_baseline`](Self::get_dry_baseline).
+    ///
+    /// This method is for overriding only and shouldn't be called directly. To get this box's
+    /// speculative baseline location for the given `constraints`, call
+    /// [`get_dry_baseline`](Self::get_dry_baseline) instead.
+    ///
+    /// The "dry" in the method name means the implementation must not produce observable side
+    /// effects when called. For example, it must not change the [`size`](Self::size) of the box,
+    /// or its children's paint offsets. Moreover, accessing the current layout of this box or a
+    /// child box usually indicates a bug in the implementation, as the current layout is
+    /// typically calculated using a set of [`BoxConstraints`] that's different from the
+    /// `constraints` given as the first parameter. To get the size of this box or a child box in
+    /// this method's implementation, use [`get_dry_layout`](Self::get_dry_layout) instead.
+    ///
+    /// The implementation must return a value that represents the distance from the top of the
+    /// box to the first baseline of the box's contents, for the given `constraints`, or `None`
+    /// if the box has no baselines. It's the same exact value
+    /// [`compute_distance_to_actual_baseline`](Self::compute_distance_to_actual_baseline) would
+    /// return, when this box was laid out at `constraints` in the same exact state.
+    ///
+    /// Not all boxes support dry baseline computation. In such cases the box must call
+    /// [`debug_cannot_compute_dry_layout`](Self::debug_cannot_compute_dry_layout) and return a
+    /// dummy baseline offset value (such as `None`).
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        let _ = (app, constraints, baseline);
+        self.debug_cannot_compute_dry_layout(DryLayoutFailure::Reason(
+            "It does not implement RenderBox::compute_dry_baseline.",
+        ));
+        None
+    }
+
+    /// Called from [`compute_dry_layout`](Self::compute_dry_layout) or
+    /// [`compute_dry_baseline`](Self::compute_dry_baseline) if this box does not support
+    /// calculating a dry layout.
+    ///
+    /// When debug assertions are enabled and
+    /// [`debug_checking_intrinsics`](crate::debug_checking_intrinsics) is not true, this method
+    /// panics with the given [`DryLayoutFailure`].
+    fn debug_cannot_compute_dry_layout(self: RenderHandle<Self>, failure: DryLayoutFailure<'_>) {
+        let _ = self;
+        if !cfg!(debug_assertions) || debug_checking_intrinsics() {
+            return;
+        }
+        match failure {
+            DryLayoutFailure::Reason(reason) => panic!(
+                "The {} class does not support dry layout. {reason}",
+                std::any::type_name::<Self>()
+            ),
+            DryLayoutFailure::Error(error) => panic!("{error}"),
+        }
+    }
+
+    /// See [`AnyRenderBox::get_distance_to_baseline`].
+    fn get_distance_to_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+        only_real: bool,
+    ) -> Option<f64> {
+        self.as_box()
+            .get_distance_to_baseline(app, baseline, only_real)
+    }
+
+    /// See [`AnyRenderBox::get_distance_to_actual_baseline`].
+    fn get_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        self.as_box().get_distance_to_actual_baseline(app, baseline)
+    }
+
+    /// Returns the distance from the y-coordinate of the position of the box to the y-coordinate
+    /// of the first given baseline in the box's contents, if any, or `None` otherwise.
+    ///
+    /// Do not call this function directly. If you need to know the baseline of a child from an
+    /// invocation of [`RenderObject::perform_layout`] or [`RenderObject::paint`], call
+    /// [`get_distance_to_baseline`](Self::get_distance_to_baseline).
+    ///
+    /// Subclasses should override this method to supply the distances to their baselines. When
+    /// implementing this method, there are generally three strategies:
+    ///
+    ///  * For classes that use the [`ContainerRenderObjectMixin`] child model, consider
+    ///    implementing [`RenderBoxContainerDefaultsMixin`] and using
+    ///    [`RenderBoxContainerDefaultsMixin::default_compute_distance_to_first_actual_baseline`].
+    ///
+    ///  * For classes that define a particular baseline themselves, return that value directly.
+    ///
+    ///  * For classes that have a child to which they wish to defer the computation, call
+    ///    [`get_distance_to_actual_baseline`](Self::get_distance_to_actual_baseline) on the
+    ///    child.
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        let _ = (self, app, baseline);
+        debug_assert!(
+            DEBUG_DOING_BASELINE.get(),
+            "Please see the documentation for compute_distance_to_actual_baseline for the \
+             required calling conventions of this method."
+        );
+        None
+    }
+
+    /// Mark this render object's layout information as dirty.
+    ///
+    /// Flutter's `RenderBox.markNeedsLayout`: it also clears the intrinsics, dry layout and
+    /// baseline caches, and defers to the parent when they held anything.
+    fn mark_needs_layout(self: RenderHandle<Self>, app: &mut App) {
+        // If the cache was not empty, then this box's layout is used by the parent's layout
+        // algorithm (it's possible that the parent only used the intrinsics for paint, but
+        // there's no good way to detect that so we conservatively assume it's a layout
+        // dependency).
+        //
+        // A render object's perform_layout implementation may depend on the baseline location or
+        // the intrinsic dimensions of a descendant, even when there are relayout boundaries
+        // between them.
+        //
+        // Some calculations may fail (dry baseline, for example). The layout dependency is still
+        // established, but only from the box that failed to compute the dry baseline to the
+        // ancestor that queried the dry baseline.
+        if self.render_box_data_mut(app).layout_cache.clear() && self.parent(app).is_some() {
+            self.as_object().mark_parent_needs_layout(app);
+            return;
+        }
+        crate::object::RenderObjectBase::mark_needs_layout(self, app);
+    }
+
+    /// Updates the box's size using only the constraints.
+    ///
+    /// By default this method sets [`size`](Self::size) to the result of
+    /// [`compute_dry_layout`](Self::compute_dry_layout) called with the current
+    /// [`constraints`](Self::constraints). Instead of overriding this method, consider
+    /// overriding [`compute_dry_layout`](Self::compute_dry_layout).
+    fn perform_resize(self: RenderHandle<Self>, app: &mut App) {
+        RenderBoxBase::perform_resize(self, app);
+    }
+
     /// The size of this box.
     fn size(self: RenderHandle<Self>, app: &App) -> Size {
         self.as_box().size(app)
@@ -1014,8 +1628,8 @@ pub trait RenderBox: RenderObject {
     ) {
         debug_assert!(child.parent(app).map(AnyRenderObject::id) == Some(self.id()));
         // Dart asserts the child's parent data is a `BoxParentData` with a message naming
-        // this type; `parent_data_of` panics the same way.
-        let offset = child.parent_data_of::<BoxParentData>(app).offset;
+        // this type; `box_parent_data` panics the same way.
+        let offset = box_parent_data_of(app, child).offset;
         crate::object::translate(transform, offset.dx(), offset.dy());
     }
 
@@ -1063,17 +1677,7 @@ pub trait RenderBox: RenderObject {
         result: &mut BoxHitTestResult<'_>,
         position: Offset,
     ) -> bool {
-        debug_assert!(
-            self.has_size(app),
-            "Cannot hit test a render box that has never been laid out: {self:?}"
-        );
-        if self.size(app).contains(position)
-            && (self.hit_test_children(app, result, position) || self.hit_test_self(app, position))
-        {
-            result.add(BoxHitTestEntry::new(self.as_box(), position).into());
-            return true;
-        }
-        false
+        RenderBoxBase::hit_test(self, app, result, position)
     }
 
     /// Override this method if this render object can be hit even if its children were not hit.
@@ -1115,7 +1719,7 @@ pub trait RenderBox: RenderObject {
         self.as_box().layout(app, constraints, parent_uses_size)
     }
 
-    /// The erased `RenderBox` edge. Free: the vtable is a `const`, and the id is copied.
+    /// The type-erased `RenderBox` handle. Free: the vtable is a `const`, and the id is copied.
     fn as_box(self: RenderHandle<Self>) -> AnyRenderBox {
         AnyRenderBox {
             id: self.id(),
@@ -1123,7 +1727,7 @@ pub trait RenderBox: RenderObject {
         }
     }
 
-    /// The erased `RenderObject` edge, through [`as_box`](Self::as_box).
+    /// The type-erased `RenderObject` handle, through [`as_box`](Self::as_box).
     fn as_object(self: RenderHandle<Self>) -> AnyRenderObject {
         self.as_box().as_object()
     }
@@ -1136,11 +1740,6 @@ pub trait RenderBox: RenderObject {
     /// See [`AnyRenderObject::drop_child`].
     fn drop_child(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
         self.as_object().drop_child(app, child)
-    }
-
-    /// See [`AnyRenderObject::mark_needs_layout`].
-    fn mark_needs_layout(self: RenderHandle<Self>, app: &mut App) {
-        self.as_object().mark_needs_layout(app)
     }
 
     /// See [`AnyRenderObject::mark_needs_paint`].
@@ -1179,6 +1778,45 @@ pub trait RenderBox: RenderObject {
     }
 }
 
+/// Flutter's `RenderBox` bodies that an override calls through `super`.
+///
+/// A trait default cannot call `super`, and a leaf's [`RenderBox::hit_test`] shadows the default
+/// it would call; this sibling trait, blanket-implemented for every box, carries that body (the
+/// shape `ElementBase` has for `Element`).
+pub(crate) trait RenderBoxBase: RenderBox {
+    /// Flutter's `RenderBox.performResize`.
+    fn perform_resize(self: RenderHandle<Self>, app: &mut App) {
+        // Default behavior for subclasses that have sized_by_parent = true.
+        let constraints = RenderBox::constraints(self, app);
+        let size = RenderBox::compute_dry_layout(self, app, constraints);
+        debug_assert!(size.width().is_finite() && size.height().is_finite());
+        self.set_size(app, size);
+    }
+
+    /// Flutter's `RenderBox.hitTest`.
+    fn hit_test(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        debug_assert!(
+            self.has_size(app),
+            "Cannot hit test a render box that has never been laid out: {self:?}"
+        );
+        if self.size(app).contains(position)
+            && (RenderBox::hit_test_children(self, app, result, position)
+                || RenderBox::hit_test_self(self, app, position))
+        {
+            result.add(BoxHitTestEntry::new(self.as_box(), position).into());
+            return true;
+        }
+        false
+    }
+}
+
+impl<T: RenderBox> RenderBoxBase for T {}
+
 /// The vtable of an [`AnyRenderBox`]: the object vtable plus the box accessors.
 pub(crate) struct RenderBoxVTable {
     pub object: RenderObjectVTable,
@@ -1186,6 +1824,13 @@ pub(crate) struct RenderBoxVTable {
     pub box_data_mut: fn(&mut App, HandleId) -> &mut RenderBoxData,
     pub hit_test: fn(&mut App, HandleId, &mut BoxHitTestResult<'_>, Offset) -> bool,
     pub handle_event: fn(&mut App, HandleId, &PointerEvent, &BoxHitTestEntry),
+    pub compute_min_intrinsic_width: fn(&mut App, HandleId, f64) -> f64,
+    pub compute_max_intrinsic_width: fn(&mut App, HandleId, f64) -> f64,
+    pub compute_min_intrinsic_height: fn(&mut App, HandleId, f64) -> f64,
+    pub compute_max_intrinsic_height: fn(&mut App, HandleId, f64) -> f64,
+    pub compute_dry_layout: fn(&mut App, HandleId, BoxConstraints) -> Size,
+    pub compute_dry_baseline: fn(&mut App, HandleId, BoxConstraints, TextBaseline) -> Option<f64>,
+    pub compute_distance_to_actual_baseline: fn(&mut App, HandleId, TextBaseline) -> Option<f64>,
 }
 
 impl RenderBoxVTable {
@@ -1197,6 +1842,8 @@ impl RenderBoxVTable {
                 |app, id, child, transform| {
                     <T as RenderBox>::apply_paint_transform(resolve(id), app, child, transform)
                 },
+                |app, id| <T as RenderBox>::perform_resize(resolve(id), app),
+                |app, id| <T as RenderBox>::mark_needs_layout(resolve(id), app),
                 Some(|| const { &RenderBoxVTable::of::<T>() }),
                 None,
             ),
@@ -1204,6 +1851,27 @@ impl RenderBoxVTable {
             box_data_mut: |app, id| T::render_box_data_mut(resolve(id), app),
             hit_test: |app, id, result, position| T::hit_test(resolve(id), app, result, position),
             handle_event: |app, id, event, entry| T::handle_event(resolve(id), app, event, entry),
+            compute_min_intrinsic_width: |app, id, height| {
+                T::compute_min_intrinsic_width(resolve(id), app, height)
+            },
+            compute_max_intrinsic_width: |app, id, height| {
+                T::compute_max_intrinsic_width(resolve(id), app, height)
+            },
+            compute_min_intrinsic_height: |app, id, width| {
+                T::compute_min_intrinsic_height(resolve(id), app, width)
+            },
+            compute_max_intrinsic_height: |app, id, width| {
+                T::compute_max_intrinsic_height(resolve(id), app, width)
+            },
+            compute_dry_layout: |app, id, constraints| {
+                T::compute_dry_layout(resolve(id), app, constraints)
+            },
+            compute_dry_baseline: |app, id, constraints, baseline| {
+                T::compute_dry_baseline(resolve(id), app, constraints, baseline)
+            },
+            compute_distance_to_actual_baseline: |app, id, baseline| {
+                T::compute_distance_to_actual_baseline(resolve(id), app, baseline)
+            },
         }
     }
 }
@@ -1212,11 +1880,84 @@ impl<T: RenderBox> RenderHandle<T> {
     /// Creates a box-protocol render object in `app`.
     pub fn new_box(app: &mut App, object: T) -> RenderHandle<T> {
         let this = create(app, object);
+        let data = this.render_object_data_mut(app);
+        data.object_vtable = Some(&const { RenderBoxVTable::of::<T>() }.object);
         // Flutter's `RenderObject()` constructor: `_wasRepaintBoundary = isRepaintBoundary`.
         let is_repaint_boundary = this.is_repaint_boundary(app);
         this.render_object_data_mut(app).was_repaint_boundary = is_repaint_boundary;
         this
     }
+}
+
+/// Flutter's `RenderBox._debugSetDoingBaseline(true)` and the `finally` that clears it.
+struct DebugDoingBaseline;
+
+impl DebugDoingBaseline {
+    fn enter() -> DebugDoingBaseline {
+        DEBUG_DOING_BASELINE.set(cfg!(debug_assertions));
+        DebugDoingBaseline
+    }
+}
+
+impl Drop for DebugDoingBaseline {
+    fn drop(&mut self) {
+        DEBUG_DOING_BASELINE.set(false);
+    }
+}
+
+/// Flutter's `RenderBox._computeIntrinsics` preamble: whether the result may be memoized.
+fn should_cache_intrinsics(this: AnyRenderBox, app: &App) -> bool {
+    // perform_resize should not depend on anything except the incoming constraints.
+    debug_assert!(debug_checking_intrinsics() || !this.as_object().debug_doing_this_resize(app));
+    // We don't want the debug-mode intrinsic tests to affect who gets marked dirty, etc.
+    !cfg!(debug_assertions) || !debug_checking_intrinsics()
+}
+
+/// Flutter's `_IntrinsicDimension.memoize`.
+fn memoize_intrinsic(
+    this: AnyRenderBox,
+    app: &mut App,
+    dimension: IntrinsicDimension,
+    input: f64,
+    computer: fn(&mut App, HandleId, f64) -> f64,
+) -> f64 {
+    if !should_cache_intrinsics(this, app) {
+        return computer(app, this.id, input);
+    }
+    let key = (dimension, DoubleKey::new(input));
+    if let Some(cached) = this.layout_cache(app).cached_intrinsic_dimensions.get(&key) {
+        return *cached;
+    }
+    let result = computer(app, this.id, input);
+    this.layout_cache_mut(app)
+        .cached_intrinsic_dimensions
+        .insert(key, result);
+    result
+}
+
+/// Flutter's `_Baseline.memoize`.
+fn memoize_baseline(
+    this: AnyRenderBox,
+    app: &mut App,
+    constraints: BoxConstraints,
+    baseline: TextBaseline,
+    computer: impl FnOnce(AnyRenderBox, &mut App) -> BaselineOffset,
+) -> BaselineOffset {
+    if !should_cache_intrinsics(this, app) {
+        return computer(this, app);
+    }
+    if let Some(cached) = this
+        .layout_cache_mut(app)
+        .baselines(baseline)
+        .get(&constraints)
+    {
+        return *cached;
+    }
+    let result = computer(this, app);
+    this.layout_cache_mut(app)
+        .baselines(baseline)
+        .insert(constraints, result);
+    result
 }
 
 /// Erased `RenderBox`.
@@ -1310,9 +2051,294 @@ impl AnyRenderBox {
         self.box_data_mut(app).size = Some(size);
     }
 
+    /// The box constraints most recently supplied by the parent.
+    ///
+    /// # Panics
+    ///
+    /// If layout has not yet happened.
+    pub fn constraints(self, app: &App) -> BoxConstraints {
+        self.box_data(app).constraints.unwrap_or_else(|| {
+            panic!("A RenderObject does not have any constraints before it has been laid out.")
+        })
+    }
+
+    /// Returns the minimum width that this box could be without failing to correctly paint its
+    /// contents within itself, without clipping.
+    ///
+    /// The height argument may give a specific height to assume. The given height can be
+    /// infinite, meaning that the intrinsic width in an unconstrained environment is being
+    /// requested. The given height should never be negative.
+    ///
+    /// This function should only be called on one's children. Calling this function couples the
+    /// child with the parent so that when the child's layout changes, the parent is notified
+    /// (via [`RenderBox::mark_needs_layout`]).
+    ///
+    /// Calling this function is expensive as it can result in O(N^2) behavior.
+    ///
+    /// Do not override this method. Instead, implement
+    /// [`RenderBox::compute_min_intrinsic_width`].
+    pub fn get_min_intrinsic_width(self, app: &mut App, height: f64) -> f64 {
+        debug_assert!(
+            height >= 0.0,
+            "The height argument to get_min_intrinsic_width was negative. If you perform \
+             computations on another height before passing it to get_min_intrinsic_width, \
+             consider using f64::max or clamp_double to force the value into the valid range."
+        );
+        memoize_intrinsic(
+            self,
+            app,
+            IntrinsicDimension::MinWidth,
+            height,
+            self.vtable.compute_min_intrinsic_width,
+        )
+    }
+
+    /// Returns the smallest width beyond which increasing the width never decreases the
+    /// preferred height. The preferred height is the value that would be returned by
+    /// [`get_min_intrinsic_height`](Self::get_min_intrinsic_height) for that width.
+    ///
+    /// Do not override this method. Instead, implement
+    /// [`RenderBox::compute_max_intrinsic_width`].
+    pub fn get_max_intrinsic_width(self, app: &mut App, height: f64) -> f64 {
+        debug_assert!(
+            height >= 0.0,
+            "The height argument to get_max_intrinsic_width was negative."
+        );
+        memoize_intrinsic(
+            self,
+            app,
+            IntrinsicDimension::MaxWidth,
+            height,
+            self.vtable.compute_max_intrinsic_width,
+        )
+    }
+
+    /// Returns the minimum height that this box could be without failing to correctly paint its
+    /// contents within itself, without clipping.
+    ///
+    /// Do not override this method. Instead, implement
+    /// [`RenderBox::compute_min_intrinsic_height`].
+    pub fn get_min_intrinsic_height(self, app: &mut App, width: f64) -> f64 {
+        debug_assert!(
+            width >= 0.0,
+            "The width argument to get_min_intrinsic_height was negative."
+        );
+        memoize_intrinsic(
+            self,
+            app,
+            IntrinsicDimension::MinHeight,
+            width,
+            self.vtable.compute_min_intrinsic_height,
+        )
+    }
+
+    /// Returns the smallest height beyond which increasing the height never decreases the
+    /// preferred width. The preferred width is the value that would be returned by
+    /// [`get_min_intrinsic_width`](Self::get_min_intrinsic_width) for that height.
+    ///
+    /// Do not override this method. Instead, implement
+    /// [`RenderBox::compute_max_intrinsic_height`].
+    pub fn get_max_intrinsic_height(self, app: &mut App, width: f64) -> f64 {
+        debug_assert!(
+            width >= 0.0,
+            "The width argument to get_max_intrinsic_height was negative."
+        );
+        memoize_intrinsic(
+            self,
+            app,
+            IntrinsicDimension::MaxHeight,
+            width,
+            self.vtable.compute_max_intrinsic_height,
+        )
+    }
+
+    /// Returns the [`Size`] that this box would like to be given the provided
+    /// [`BoxConstraints`].
+    ///
+    /// The size returned by this method is guaranteed to be the same size that this box computes
+    /// for itself during layout given the same constraints.
+    ///
+    /// This function should only be called on one's children. Calling this function couples the
+    /// child with the parent so that when the child's layout changes, the parent is notified
+    /// (via [`RenderBox::mark_needs_layout`]).
+    ///
+    /// This layout is called "dry" layout as opposed to the regular "wet" layout run performed
+    /// by [`RenderObject::perform_layout`] because it computes the desired size for the given
+    /// constraints without changing any internal state.
+    ///
+    /// Calling this function is expensive as it can result in O(N^2) behavior.
+    ///
+    /// Do not override this method. Instead, implement [`RenderBox::compute_dry_layout`].
+    pub fn get_dry_layout(self, app: &mut App, constraints: BoxConstraints) -> Size {
+        if !should_cache_intrinsics(self, app) {
+            return self.compute_dry_layout(app, constraints);
+        }
+        if let Some(cached) = self
+            .layout_cache(app)
+            .cached_dry_layout_sizes
+            .get(&constraints)
+        {
+            return *cached;
+        }
+        let result = self.compute_dry_layout(app, constraints);
+        self.layout_cache_mut(app)
+            .cached_dry_layout_sizes
+            .insert(constraints, result);
+        result
+    }
+
+    /// Flutter's `RenderBox._computeDryLayout`: the re-entrancy guard around the virtual.
+    fn compute_dry_layout(self, app: &mut App, constraints: BoxConstraints) -> Size {
+        if cfg!(debug_assertions) {
+            assert!(!self.box_data(app).debug_computing_this_dry_layout);
+            self.box_data_mut(app).debug_computing_this_dry_layout = true;
+        }
+        let result = (self.vtable.compute_dry_layout)(app, self.id, constraints);
+        if cfg!(debug_assertions) {
+            self.box_data_mut(app).debug_computing_this_dry_layout = false;
+        }
+        result
+    }
+
+    /// Returns the distance from the top of the box to the first baseline of the box's contents
+    /// for the given `constraints`, or `None` if this box does not have any baselines.
+    ///
+    /// This method calls [`RenderBox::compute_dry_baseline`] under the hood and caches the
+    /// result. Boxes typically don't override
+    /// [`get_dry_baseline`](Self::get_dry_baseline). Instead, consider overriding
+    /// [`RenderBox::compute_dry_baseline`] such that it returns a baseline location that is
+    /// consistent with [`get_distance_to_actual_baseline`](Self::get_distance_to_actual_baseline).
+    ///
+    /// This method is usually called by the [`RenderBox::compute_dry_baseline`] or the
+    /// [`RenderBox::compute_dry_layout`] implementation of a parent box to get the baseline
+    /// location of a box child. Unlike
+    /// [`get_distance_to_baseline`](Self::get_distance_to_baseline), this method takes a
+    /// [`BoxConstraints`] as an argument and computes the baseline location as if the box was
+    /// laid out by the parent using that [`BoxConstraints`].
+    pub fn get_dry_baseline(
+        self,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        let baseline_offset = memoize_baseline(self, app, constraints, baseline, |this, app| {
+            this.compute_dry_baseline(app, constraints, baseline)
+        })
+        .offset();
+        // This assert makes sure compute_dry_baseline always gets called in debug mode, in case
+        // the compute_dry_baseline implementation invokes debug_cannot_compute_dry_layout. The
+        // check is skipped when debug_checking_intrinsics is true to avoid slowing down the app
+        // significantly.
+        if cfg!(debug_assertions) && !debug_checking_intrinsics() {
+            assert_eq!(
+                baseline_offset,
+                (self.vtable.compute_dry_baseline)(app, self.id, constraints, baseline)
+            );
+        }
+        baseline_offset
+    }
+
+    /// Flutter's `RenderBox._computeDryBaseline`: the re-entrancy guard around the virtual.
+    fn compute_dry_baseline(
+        self,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> BaselineOffset {
+        if cfg!(debug_assertions) {
+            assert!(!self.box_data(app).debug_computing_this_dry_baseline);
+            self.box_data_mut(app).debug_computing_this_dry_baseline = true;
+        }
+        let result = BaselineOffset((self.vtable.compute_dry_baseline)(
+            app,
+            self.id,
+            constraints,
+            baseline,
+        ));
+        if cfg!(debug_assertions) {
+            self.box_data_mut(app).debug_computing_this_dry_baseline = false;
+        }
+        result
+    }
+
+    /// Returns the distance from the y-coordinate of the position of the box to the y-coordinate
+    /// of the first given baseline in the box's contents.
+    ///
+    /// Used by certain layout models to align adjacent boxes on a common baseline, regardless of
+    /// padding, font size differences, etc. If there is no baseline, this function returns the
+    /// distance from the y-coordinate of the position of the box to the y-coordinate of the
+    /// bottom of the box (i.e., the height of the box) unless the caller passes true for
+    /// `only_real`, in which case the function returns `None`.
+    ///
+    /// Only call this function after calling [`layout`](Self::layout) on this box. You are only
+    /// allowed to call this from the parent of this box during that parent's
+    /// [`RenderObject::perform_layout`] or [`RenderObject::paint`] functions.
+    ///
+    /// To override the baseline computation, override
+    /// [`RenderBox::compute_distance_to_actual_baseline`].
+    pub fn get_distance_to_baseline(
+        self,
+        app: &mut App,
+        baseline: TextBaseline,
+        only_real: bool,
+    ) -> Option<f64> {
+        debug_assert!(
+            !DEBUG_DOING_BASELINE.get(),
+            "Please see the documentation for compute_distance_to_actual_baseline for the \
+             required calling conventions of this method."
+        );
+        debug_assert!(!self.as_object().debug_needs_layout(app) || debug_checking_intrinsics());
+        let result = {
+            let _doing_baseline = DebugDoingBaseline::enter();
+            self.get_distance_to_actual_baseline(app, baseline)
+        };
+        match result {
+            None if !only_real => Some(self.size(app).height()),
+            result => result,
+        }
+    }
+
+    /// Calls [`RenderBox::compute_distance_to_actual_baseline`] and caches the result.
+    ///
+    /// This function must only be called from
+    /// [`get_distance_to_baseline`](Self::get_distance_to_baseline) and
+    /// [`RenderBox::compute_distance_to_actual_baseline`].
+    pub fn get_distance_to_actual_baseline(
+        self,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        debug_assert!(
+            DEBUG_DOING_BASELINE.get() || !cfg!(debug_assertions),
+            "Please see the documentation for compute_distance_to_actual_baseline for the \
+             required calling conventions of this method."
+        );
+        let constraints = self
+            .box_data(app)
+            .constraints
+            .expect("a RenderBox has constraints once it has been laid out");
+        memoize_baseline(self, app, constraints, baseline, |this, app| {
+            BaselineOffset((this.vtable.compute_distance_to_actual_baseline)(
+                app, this.id, baseline,
+            ))
+        })
+        .offset()
+    }
+
+    fn layout_cache(self, app: &App) -> &LayoutCacheStorage {
+        &self.box_data(app).layout_cache
+    }
+
+    fn layout_cache_mut(self, app: &mut App) -> &mut LayoutCacheStorage {
+        &mut self.box_data_mut(app).layout_cache
+    }
+
     /// [`BoxParentData`] stored on this child by its box parent.
+    ///
+    /// Dart's `child.parentData! as BoxParentData`: a subclass answers with its own
+    /// [`BoxParentData`] half through [`ParentData::provide`].
     pub fn box_parent_data(self, app: &App) -> &BoxParentData {
-        self.as_object().parent_data_of(app)
+        box_parent_data_of(app, self.as_object())
     }
 
     /// Convert the given point from the global coordinate system in logical pixels to the
@@ -1398,6 +2424,18 @@ impl AnyRenderBox {
     /// See [`AnyRenderObject::parent_data_is`].
     pub fn parent_data_is<P: crate::object::ParentData + 'static>(self, app: &App) -> bool {
         self.as_object().parent_data_is::<P>(app)
+    }
+}
+
+impl crate::object::ErasedRenderObject for AnyRenderBox {
+    fn as_object(self) -> AnyRenderObject {
+        AnyRenderBox::as_object(self)
+    }
+
+    fn from_object(object: AnyRenderObject) -> AnyRenderBox {
+        object
+            .as_box()
+            .expect("the render object is not a RenderBox")
     }
 }
 
@@ -1771,5 +2809,104 @@ mod hit_test_tests {
             });
         assert!(is_hit);
         assert_eq!(positions, [position]);
+    }
+}
+
+#[cfg(test)]
+mod intrinsics_tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use super::*;
+    use crate::object::RenderObjectData;
+
+    /// A leaf whose minimum intrinsic width is `100.0 + height`, counting how often it is
+    /// actually computed.
+    struct CountingBox {
+        render_object: RenderObjectData,
+        render_box: RenderBoxData,
+        computations: Rc<Cell<u32>>,
+    }
+
+    impl RenderObject for CountingBox {
+        crate::render_object_accessors!();
+
+        fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+            let size = self.constraints(app).smallest();
+            self.set_size(app, size);
+        }
+    }
+
+    impl RenderBox for CountingBox {
+        crate::render_box_accessors!();
+
+        fn compute_min_intrinsic_width(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            height: f64,
+        ) -> f64 {
+            let computations = self.get(app).computations.clone();
+            computations.set(computations.get() + 1);
+            100.0 + height
+        }
+    }
+
+    /// `box_test.dart`: `Intrinsics cache' and `Intrinsics cache is cleared when the render
+    /// object is marked as needing layout`.
+    #[test]
+    fn the_intrinsic_cache_is_reused_and_cleared_by_mark_needs_layout() {
+        let mut app = App::new();
+        let computations = Rc::new(Cell::new(0));
+        let box_ = RenderHandle::new_box(
+            &mut app,
+            CountingBox {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                computations: computations.clone(),
+            },
+        );
+
+        assert_eq!(box_.as_box().get_min_intrinsic_width(&mut app, 0.0), 100.0);
+        assert_eq!(computations.get(), 1);
+
+        assert_eq!(box_.as_box().get_min_intrinsic_width(&mut app, 0.0), 100.0);
+        assert_eq!(computations.get(), 1, "the memoized value is reused");
+
+        assert_eq!(box_.as_box().get_min_intrinsic_width(&mut app, 10.0), 110.0);
+        assert_eq!(computations.get(), 2, "another height is another entry");
+
+        box_.mark_needs_layout(&mut app);
+        assert_eq!(box_.as_box().get_min_intrinsic_width(&mut app, 0.0), 100.0);
+        assert_eq!(computations.get(), 3, "mark_needs_layout cleared the cache");
+    }
+
+    /// Flutter's `RenderBox.markNeedsLayout`: a box whose intrinsics the parent read defers to
+    /// the parent, because the parent's layout depends on them.
+    #[test]
+    fn clearing_a_cached_intrinsic_marks_the_parent() {
+        let mut app = App::new();
+        let computations = Rc::new(Cell::new(0));
+        let child = RenderHandle::new_box(
+            &mut app,
+            CountingBox {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                computations,
+            },
+        );
+        let parent = crate::proxy_box::RenderConstrainedBox::new(
+            &mut app,
+            BoxConstraints::new(),
+            Some(child.as_box()),
+        );
+        parent.layout(&mut app, BoxConstraints::new().max_width(50.0), false);
+        assert!(!parent.debug_needs_layout(&app));
+
+        child.as_box().get_min_intrinsic_width(&mut app, 0.0);
+        child.mark_needs_layout(&mut app);
+        assert!(
+            parent.debug_needs_layout(&app),
+            "the parent read an intrinsic, so it has to lay out again"
+        );
     }
 }

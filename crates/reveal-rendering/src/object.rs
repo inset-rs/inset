@@ -3,15 +3,18 @@
 //! `painting_context.rs`, `PipelineOwner` in `pipeline_owner.rs`.
 //!
 //! Semantics wait. A concrete node is [`RenderHandle<T>`] over the authored
-//! struct. Tree edges are [`AnyRenderObject`]. Authored methods take
-//! `self: RenderHandle<Self>`.
+//! struct. A link to another node is the type-erased handle [`AnyRenderObject`].
+//! Authored methods take `self: RenderHandle<Self>`.
 
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::cell::Cell;
 use std::fmt::{self, Debug, Display};
 use std::hash::{Hash, Hasher};
 use std::ops::Receiver;
+use std::rc::Rc;
+use std::time::Duration;
 
+use reveal_animation::Curve;
 use reveal_embedder::{Matrix4, Offset, Rect};
 use reveal_foundation::{App, Handle, HandleId};
 use reveal_services::MouseTrackerAnnotation;
@@ -23,6 +26,21 @@ use crate::pipeline_owner::PipelineOwner;
 thread_local! {
     static DEBUG_ACTIVE_LAYOUT: Cell<Option<AnyRenderObject>> = const { Cell::new(None) };
     static DEBUG_ACTIVE_PAINT: Cell<Option<AnyRenderObject>> = const { Cell::new(None) };
+    static DEBUG_CHECKING_INTRINSICS: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether the framework is currently checking a render object's intrinsic sizes, dry layout, or
+/// dry baseline against its real layout.
+///
+/// Flutter's `RenderObject.debugCheckingIntrinsics`. While this is true, an intrinsic
+/// computation neither caches its result nor throws where it cannot answer.
+pub fn debug_checking_intrinsics() -> bool {
+    DEBUG_CHECKING_INTRINSICS.get()
+}
+
+/// Sets [`debug_checking_intrinsics`].
+pub fn set_debug_checking_intrinsics(value: bool) {
+    DEBUG_CHECKING_INTRINSICS.set(value);
 }
 
 /// Immutable layout constraints.
@@ -53,6 +71,35 @@ pub trait Constraints {
 pub trait ParentData: Any + Debug + Display {
     /// Called when the render object is removed from the tree.
     fn detach(&mut self) {}
+
+    /// The half of this parent data whose type is `id`, if it embeds one.
+    ///
+    /// Dart's `parentData as BoxParentData` and `parentData is KeepAliveParentDataMixin`: a
+    /// half answers for its own type, and a type that embeds one answers for its own type first
+    /// and then asks the half, so a chain of halves composes. Every box parent must answer
+    /// [`crate::BoxParentData`], or a child of it cannot be positioned by the box protocol.
+    fn provide(&self, id: TypeId) -> Option<&dyn Any> {
+        let _ = id;
+        None
+    }
+
+    /// See [`provide`](Self::provide); mirrors it exactly.
+    fn provide_mut(&mut self, id: TypeId) -> Option<&mut dyn Any> {
+        let _ = id;
+        None
+    }
+}
+
+impl dyn ParentData {
+    /// The `P` half of this parent data: [`provide`](ParentData::provide), typed.
+    pub fn part<P: 'static>(&self) -> Option<&P> {
+        self.provide(TypeId::of::<P>())?.downcast_ref()
+    }
+
+    /// The `P` half of this parent data, mutably: [`provide_mut`](ParentData::provide_mut), typed.
+    pub fn part_mut<P: 'static>(&mut self) -> Option<&mut P> {
+        self.provide_mut(TypeId::of::<P>())?.downcast_mut()
+    }
 }
 
 /// Flutter's `ParentData()` — no subclass fields.
@@ -69,6 +116,10 @@ impl Display for EmptyParentData {
 
 /// Flutter's `RenderObject` fields.
 pub struct RenderObjectData {
+    /// The erased vtable, recorded by the protocol constructor (`RenderHandle::new_box`,
+    /// `RenderHandle::new_sliver`). Dart upcasts a subclass reference to `RenderObject` for
+    /// free; here the fat pointer has to be built, and only the protocol knows the table.
+    pub(crate) object_vtable: Option<&'static RenderObjectVTable>,
     pub(crate) parent: Option<AnyRenderObject>,
     pub(crate) owner: Option<Handle<PipelineOwner>>,
     pub(crate) depth: i32,
@@ -92,6 +143,7 @@ impl RenderObjectData {
     /// Empty tree state for a newly constructed render object.
     pub fn new() -> RenderObjectData {
         RenderObjectData {
+            object_vtable: None,
             parent: None,
             owner: None,
             depth: 0,
@@ -136,6 +188,636 @@ impl<C> Default for RenderObjectWithChildData<C> {
     }
 }
 
+/// Flutter's `ContainerParentDataMixin` fields: the links of a doubly-linked child list.
+#[derive(Debug)]
+pub struct ContainerParentData<ChildType> {
+    pub(crate) previous_sibling: Option<ChildType>,
+    pub(crate) next_sibling: Option<ChildType>,
+}
+
+impl<ChildType> ContainerParentData<ChildType> {
+    /// No siblings.
+    pub const fn new() -> ContainerParentData<ChildType> {
+        ContainerParentData {
+            previous_sibling: None,
+            next_sibling: None,
+        }
+    }
+}
+
+impl<ChildType> Default for ContainerParentData<ChildType> {
+    fn default() -> ContainerParentData<ChildType> {
+        ContainerParentData::new()
+    }
+}
+
+/// Parent data to support a doubly-linked list of children.
+///
+/// The children can be traversed using [`next_sibling`](Self::next_sibling) or
+/// [`previous_sibling`](Self::previous_sibling), which can be called on the parent data of the
+/// render objects obtained via [`crate::ContainerRenderObjectMixin::first_child`] or
+/// [`crate::ContainerRenderObjectMixin::last_child`].
+///
+/// Flutter's `ContainerParentDataMixin`. The links live in a [`ContainerParentData`] field.
+pub trait ContainerParentDataMixin: ParentData {
+    /// The type-erased handle of a child in the list. `AnyRenderBox` for a box container.
+    type ChildType: Copy + PartialEq;
+
+    /// Mixin field access.
+    fn container_parent_data(&self) -> &ContainerParentData<Self::ChildType>;
+
+    /// See [`container_parent_data`](Self::container_parent_data).
+    fn container_parent_data_mut(&mut self) -> &mut ContainerParentData<Self::ChildType>;
+
+    /// The previous sibling in the parent's child list.
+    fn previous_sibling(&self) -> Option<Self::ChildType> {
+        self.container_parent_data().previous_sibling
+    }
+
+    /// Sets [`previous_sibling`](Self::previous_sibling).
+    fn set_previous_sibling(&mut self, value: Option<Self::ChildType>) {
+        self.container_parent_data_mut().previous_sibling = value;
+    }
+
+    /// The next sibling in the parent's child list.
+    fn next_sibling(&self) -> Option<Self::ChildType> {
+        self.container_parent_data().next_sibling
+    }
+
+    /// Sets [`next_sibling`](Self::next_sibling).
+    fn set_next_sibling(&mut self, value: Option<Self::ChildType>) {
+        self.container_parent_data_mut().next_sibling = value;
+    }
+
+    /// Clear the sibling pointers.
+    ///
+    /// The body of Flutter's `detach` override; call it from [`ParentData::detach`].
+    fn detach(&mut self) {
+        debug_assert!(
+            self.previous_sibling().is_none(),
+            "Pointers to siblings must be nulled before detaching ParentData."
+        );
+        debug_assert!(
+            self.next_sibling().is_none(),
+            "Pointers to siblings must be nulled before detaching ParentData."
+        );
+    }
+}
+
+/// Flutter's `ContainerRenderObjectMixin` fields: the head and tail of the child list, and its
+/// length.
+pub struct ContainerRenderObjectData<ChildType> {
+    pub(crate) child_count: usize,
+    pub(crate) first_child: Option<ChildType>,
+    pub(crate) last_child: Option<ChildType>,
+}
+
+impl<ChildType> ContainerRenderObjectData<ChildType> {
+    /// No children.
+    pub const fn new() -> ContainerRenderObjectData<ChildType> {
+        ContainerRenderObjectData {
+            child_count: 0,
+            first_child: None,
+            last_child: None,
+        }
+    }
+}
+
+impl<ChildType> Default for ContainerRenderObjectData<ChildType> {
+    fn default() -> ContainerRenderObjectData<ChildType> {
+        ContainerRenderObjectData::new()
+    }
+}
+
+/// An erased render object a parent can hold as a child: Dart's `ChildType extends RenderObject`
+/// type argument of `RenderObjectWithChildMixin` and `ContainerRenderObjectMixin`.
+///
+/// Implemented by [`crate::AnyRenderBox`] and [`crate::AnyRenderSliver`].
+pub trait ErasedRenderObject: Copy + PartialEq + Debug + 'static {
+    /// The `RenderObject` view of this handle.
+    fn as_object(self) -> AnyRenderObject;
+
+    /// Dart's implicit downcast of a `RenderObject` to `ChildType`.
+    ///
+    /// # Panics
+    ///
+    /// If `object` does not use this protocol.
+    fn from_object(object: AnyRenderObject) -> Self;
+}
+
+/// A render object with a single child.
+///
+/// Flutter's `RenderObjectWithChildMixin`. The child slot lives in a
+/// [`RenderObjectWithChildData`] field.
+pub trait RenderObjectWithChildMixin: RenderObject {
+    /// Flutter's `ChildType`: the protocol of this render object's child.
+    type ChildType: ErasedRenderObject;
+
+    /// Mixin field access.
+    fn child_data(
+        self: RenderHandle<Self>,
+        app: &App,
+    ) -> &RenderObjectWithChildData<Self::ChildType>;
+
+    /// See [`child_data`](Self::child_data).
+    fn child_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderObjectWithChildData<Self::ChildType>;
+
+    /// The render object's unique child.
+    fn child(self: RenderHandle<Self>, app: &App) -> Option<Self::ChildType> {
+        self.child_data(app).child
+    }
+
+    /// Sets the unique child, adopting or dropping as Flutter's setter does.
+    fn set_child(self: RenderHandle<Self>, app: &mut App, value: Option<Self::ChildType>) {
+        if let Some(old) = self.child(app) {
+            self.as_render_object(app).drop_child(app, old.as_object());
+        }
+        self.child_data_mut(app).child = value;
+        if let Some(new) = value {
+            self.as_render_object(app).adopt_child(app, new.as_object());
+        }
+    }
+}
+
+/// Generic mixin for render objects with a list of children.
+///
+/// Provides a child model for a render object that has a doubly-linked list of children.
+///
+/// [`ParentDataType`](ContainerRenderObjectMixin::ParentDataType) stores parent container data
+/// on its child render objects. It must be a [`ContainerParentDataMixin`], which provides the
+/// interface for visiting children. This data is populated by the `setup_parent_data`
+/// implemented by the render object using this mixin.
+///
+/// Flutter's `ContainerRenderObjectMixin`. Its two type arguments are the associated types
+/// [`ChildType`](ContainerRenderObjectMixin::ChildType) and
+/// [`ParentDataType`](ContainerRenderObjectMixin::ParentDataType).
+pub trait ContainerRenderObjectMixin: RenderObject {
+    /// Flutter's `ChildType`: the protocol of this render object's children.
+    type ChildType: ErasedRenderObject;
+
+    /// Flutter's `ParentDataType`: the parent data this render object installs on its children.
+    type ParentDataType: ContainerParentDataMixin<ChildType = Self::ChildType> + 'static;
+
+    /// Mixin field access.
+    fn container_data(
+        self: RenderHandle<Self>,
+        app: &App,
+    ) -> &ContainerRenderObjectData<Self::ChildType>;
+
+    /// See [`container_data`](Self::container_data).
+    fn container_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut ContainerRenderObjectData<Self::ChildType>;
+
+    /// The number of children.
+    fn child_count(self: RenderHandle<Self>, app: &App) -> usize {
+        self.container_data(app).child_count
+    }
+
+    /// Insert child into this render object's child list after the given child.
+    ///
+    /// If `after` is `None`, then this inserts the child at the start of the list, and the child
+    /// becomes the new [`first_child`](Self::first_child).
+    fn insert(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        child: Self::ChildType,
+        after: Option<Self::ChildType>,
+    ) {
+        ContainerRenderObjectBase::insert(self, app, child, after)
+    }
+
+    /// Append child to the end of this render object's child list.
+    fn add(self: RenderHandle<Self>, app: &mut App, child: Self::ChildType) {
+        let last_child = self.last_child(app);
+        self.insert(app, child, last_child);
+    }
+
+    /// Add all the children to the end of this render object's child list.
+    fn add_all(self: RenderHandle<Self>, app: &mut App, children: Option<Vec<Self::ChildType>>) {
+        for child in children.into_iter().flatten() {
+            self.add(app, child);
+        }
+    }
+
+    /// Remove this child from the child list.
+    ///
+    /// Requires the child to be present in the child list.
+    fn remove(self: RenderHandle<Self>, app: &mut App, child: Self::ChildType) {
+        ContainerRenderObjectBase::remove(self, app, child)
+    }
+
+    /// Remove all their children from this render object's child list.
+    ///
+    /// More efficient than removing them individually.
+    fn remove_all(self: RenderHandle<Self>, app: &mut App) {
+        ContainerRenderObjectBase::remove_all(self, app)
+    }
+
+    /// Move the given `child` in the child list to be after another child.
+    ///
+    /// Dart's `move`. More efficient than removing and re-adding the child. Requires the child
+    /// to already be in the child list at some position. Pass `None` for `after` to move the
+    /// child to the start of the child list.
+    fn move_child(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        child: Self::ChildType,
+        after: Option<Self::ChildType>,
+    ) {
+        ContainerRenderObjectBase::move_child(self, app, child, after)
+    }
+
+    /// The body of Flutter's `attach` override: attaches every child in the list.
+    fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: Handle<PipelineOwner>) {
+        let mut child = self.first_child(app);
+        while let Some(current) = child {
+            current.as_object().attach(app, owner);
+            child = current
+                .as_object()
+                .parent_data_of::<Self::ParentDataType>(app)
+                .next_sibling();
+        }
+    }
+
+    /// The body of Flutter's `detach` override: detaches every child in the list.
+    fn did_detach(self: RenderHandle<Self>, app: &mut App) {
+        let mut child = self.first_child(app);
+        while let Some(current) = child {
+            current.as_object().detach(app);
+            child = current
+                .as_object()
+                .parent_data_of::<Self::ParentDataType>(app)
+                .next_sibling();
+        }
+    }
+
+    /// Flutter's `redepthChildren`: walks the child list.
+    fn redepth_children(self: RenderHandle<Self>, app: &mut App) {
+        let mut child = self.first_child(app);
+        while let Some(current) = child {
+            self.as_render_object(app)
+                .redepth_child(app, current.as_object());
+            child = current
+                .as_object()
+                .parent_data_of::<Self::ParentDataType>(app)
+                .next_sibling();
+        }
+    }
+
+    /// Flutter's `visitChildren`: walks the child list.
+    fn visit_children(
+        self: RenderHandle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyRenderObject),
+    ) {
+        let mut child = self.first_child(app);
+        while let Some(current) = child {
+            visitor(current.as_object());
+            child = current
+                .as_object()
+                .parent_data_of::<Self::ParentDataType>(app)
+                .next_sibling();
+        }
+    }
+
+    /// The first child in the child list.
+    fn first_child(self: RenderHandle<Self>, app: &App) -> Option<Self::ChildType> {
+        self.container_data(app).first_child
+    }
+
+    /// The last child in the child list.
+    fn last_child(self: RenderHandle<Self>, app: &App) -> Option<Self::ChildType> {
+        self.container_data(app).last_child
+    }
+
+    /// The previous child before the given child in the child list.
+    fn child_before(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: Self::ChildType,
+    ) -> Option<Self::ChildType> {
+        debug_assert_eq!(
+            child.as_object().parent(app),
+            Some(self.as_render_object(app))
+        );
+        child
+            .as_object()
+            .parent_data_of::<Self::ParentDataType>(app)
+            .previous_sibling()
+    }
+
+    /// The next child after the given child in the child list.
+    fn child_after(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: Self::ChildType,
+    ) -> Option<Self::ChildType> {
+        debug_assert_eq!(
+            child.as_object().parent(app),
+            Some(self.as_render_object(app))
+        );
+        child
+            .as_object()
+            .parent_data_of::<Self::ParentDataType>(app)
+            .next_sibling()
+    }
+
+    /// Returns a list containing the children of this render object.
+    ///
+    /// Dart's `RenderBoxContainerDefaultsMixin.getChildrenAsList`, useful for any container.
+    fn children_as_list(self: RenderHandle<Self>, app: &App) -> Vec<Self::ChildType> {
+        let mut result = Vec::new();
+        let mut child = self.first_child(app);
+        while let Some(current) = child {
+            result.push(current);
+            child = current
+                .as_object()
+                .parent_data_of::<Self::ParentDataType>(app)
+                .next_sibling();
+        }
+        result
+    }
+}
+
+/// Flutter's `ContainerRenderObjectMixin` bodies that an override calls through `super`.
+///
+/// Blanket-implemented for every container, and repeats the default bodies of the four child-list
+/// mutators: a leaf's own override shadows the default it would otherwise call.
+pub trait ContainerRenderObjectBase: ContainerRenderObjectMixin {
+    /// Flutter's `ContainerRenderObjectMixin.insert`.
+    fn insert(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        child: Self::ChildType,
+        after: Option<Self::ChildType>,
+    ) {
+        debug_assert!(
+            child.as_object() != self.as_render_object(app),
+            "A RenderObject cannot be inserted into itself."
+        );
+        debug_assert!(
+            after.is_none_or(|after| after.as_object() != self.as_render_object(app)),
+            "A RenderObject cannot simultaneously be both the parent and the sibling of another \
+             RenderObject."
+        );
+        debug_assert!(
+            after != Some(child),
+            "A RenderObject cannot be inserted after itself."
+        );
+        debug_assert!(Some(child) != self.first_child(app));
+        debug_assert!(Some(child) != self.last_child(app));
+        self.as_render_object(app)
+            .adopt_child(app, child.as_object());
+        debug_assert!(
+            child
+                .as_object()
+                .parent_data_is::<Self::ParentDataType>(app),
+            "A child has parent data that does not conform to this render object's \
+             ParentDataType. Override setup_parent_data to install it."
+        );
+        insert_into_child_list(self, app, child, after);
+    }
+
+    /// Flutter's `ContainerRenderObjectMixin.remove`.
+    fn remove(self: RenderHandle<Self>, app: &mut App, child: Self::ChildType) {
+        remove_from_child_list(self, app, child);
+        self.as_render_object(app)
+            .drop_child(app, child.as_object());
+    }
+
+    /// Flutter's `ContainerRenderObjectMixin.removeAll`.
+    fn remove_all(self: RenderHandle<Self>, app: &mut App) {
+        let mut child = self.first_child(app);
+        while let Some(current) = child {
+            let child_parent_data = current
+                .as_object()
+                .parent_data_of_mut::<Self::ParentDataType>(app);
+            let next = child_parent_data.next_sibling();
+            child_parent_data.set_previous_sibling(None);
+            child_parent_data.set_next_sibling(None);
+            self.as_render_object(app)
+                .drop_child(app, current.as_object());
+            child = next;
+        }
+        let container = self.container_data_mut(app);
+        container.first_child = None;
+        container.last_child = None;
+        container.child_count = 0;
+    }
+
+    /// Flutter's `ContainerRenderObjectMixin.move`.
+    fn move_child(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        child: Self::ChildType,
+        after: Option<Self::ChildType>,
+    ) {
+        debug_assert!(child.as_object() != self.as_render_object(app));
+        debug_assert!(after.is_none_or(|after| after.as_object() != self.as_render_object(app)));
+        debug_assert!(after != Some(child));
+        debug_assert_eq!(
+            child.as_object().parent(app),
+            Some(self.as_render_object(app)),
+            "the child must already be a child of this render object"
+        );
+        if child
+            .as_object()
+            .parent_data_of::<Self::ParentDataType>(app)
+            .previous_sibling()
+            == after
+        {
+            return;
+        }
+        remove_from_child_list(self, app, child);
+        insert_into_child_list(self, app, child, after);
+        self.as_render_object(app).mark_needs_layout(app);
+    }
+}
+
+impl<T: ContainerRenderObjectMixin> ContainerRenderObjectBase for T {}
+
+/// Flutter's `_debugUltimatePreviousSiblingOf`.
+fn debug_ultimate_previous_sibling_of<P>(
+    app: &App,
+    child: P::ChildType,
+    equals: Option<P::ChildType>,
+) -> bool
+where
+    P: ContainerParentDataMixin + 'static,
+    P::ChildType: ErasedRenderObject,
+{
+    let mut child = child;
+    while let Some(previous) = child
+        .as_object()
+        .parent_data_of::<P>(app)
+        .previous_sibling()
+    {
+        debug_assert!(previous != child);
+        child = previous;
+    }
+    Some(child) == equals
+}
+
+/// Flutter's `_debugUltimateNextSiblingOf`.
+fn debug_ultimate_next_sibling_of<P>(
+    app: &App,
+    child: P::ChildType,
+    equals: Option<P::ChildType>,
+) -> bool
+where
+    P: ContainerParentDataMixin + 'static,
+    P::ChildType: ErasedRenderObject,
+{
+    let mut child = child;
+    while let Some(next) = child.as_object().parent_data_of::<P>(app).next_sibling() {
+        debug_assert!(next != child);
+        child = next;
+    }
+    Some(child) == equals
+}
+
+/// Flutter's `_insertIntoChildList`.
+fn insert_into_child_list<T: ContainerRenderObjectMixin>(
+    this: RenderHandle<T>,
+    app: &mut App,
+    child: T::ChildType,
+    after: Option<T::ChildType>,
+) {
+    type ParentDataOf<T> = <T as ContainerRenderObjectMixin>::ParentDataType;
+
+    debug_assert!(
+        child
+            .as_object()
+            .parent_data_of::<ParentDataOf<T>>(app)
+            .next_sibling()
+            .is_none()
+    );
+    debug_assert!(
+        child
+            .as_object()
+            .parent_data_of::<ParentDataOf<T>>(app)
+            .previous_sibling()
+            .is_none()
+    );
+    this.container_data_mut(app).child_count += 1;
+    let Some(after) = after else {
+        // insert at the start (first_child)
+        let first_child = this.first_child(app);
+        child
+            .as_object()
+            .parent_data_of_mut::<ParentDataOf<T>>(app)
+            .set_next_sibling(first_child);
+        if let Some(first_child) = first_child {
+            first_child
+                .as_object()
+                .parent_data_of_mut::<ParentDataOf<T>>(app)
+                .set_previous_sibling(Some(child));
+        }
+        let container = this.container_data_mut(app);
+        container.first_child = Some(child);
+        container.last_child.get_or_insert(child);
+        return;
+    };
+    debug_assert!(this.first_child(app).is_some());
+    debug_assert!(this.last_child(app).is_some());
+    debug_assert!(debug_ultimate_previous_sibling_of::<ParentDataOf<T>>(
+        app,
+        after,
+        this.first_child(app)
+    ));
+    debug_assert!(debug_ultimate_next_sibling_of::<ParentDataOf<T>>(
+        app,
+        after,
+        this.last_child(app)
+    ));
+    let after_next_sibling = after
+        .as_object()
+        .parent_data_of::<ParentDataOf<T>>(app)
+        .next_sibling();
+    let Some(after_next_sibling) = after_next_sibling else {
+        // insert at the end (last_child); we'll end up with two or more children
+        debug_assert_eq!(Some(after), this.last_child(app));
+        child
+            .as_object()
+            .parent_data_of_mut::<ParentDataOf<T>>(app)
+            .set_previous_sibling(Some(after));
+        after
+            .as_object()
+            .parent_data_of_mut::<ParentDataOf<T>>(app)
+            .set_next_sibling(Some(child));
+        this.container_data_mut(app).last_child = Some(child);
+        return;
+    };
+    // insert in the middle; we'll end up with three or more children
+    // set up links from child to siblings
+    let child_parent_data = child.as_object().parent_data_of_mut::<ParentDataOf<T>>(app);
+    child_parent_data.set_next_sibling(Some(after_next_sibling));
+    child_parent_data.set_previous_sibling(Some(after));
+    // set up links from siblings to child
+    after
+        .as_object()
+        .parent_data_of_mut::<ParentDataOf<T>>(app)
+        .set_next_sibling(Some(child));
+    after_next_sibling
+        .as_object()
+        .parent_data_of_mut::<ParentDataOf<T>>(app)
+        .set_previous_sibling(Some(child));
+}
+
+/// Flutter's `_removeFromChildList`.
+fn remove_from_child_list<T: ContainerRenderObjectMixin>(
+    this: RenderHandle<T>,
+    app: &mut App,
+    child: T::ChildType,
+) {
+    type ParentDataOf<T> = <T as ContainerRenderObjectMixin>::ParentDataType;
+
+    debug_assert!(debug_ultimate_previous_sibling_of::<ParentDataOf<T>>(
+        app,
+        child,
+        this.first_child(app)
+    ));
+    debug_assert!(debug_ultimate_next_sibling_of::<ParentDataOf<T>>(
+        app,
+        child,
+        this.last_child(app)
+    ));
+    let child_parent_data = child.as_object().parent_data_of::<ParentDataOf<T>>(app);
+    let (previous_sibling, next_sibling) = (
+        child_parent_data.previous_sibling(),
+        child_parent_data.next_sibling(),
+    );
+    match previous_sibling {
+        None => {
+            debug_assert_eq!(this.first_child(app), Some(child));
+            this.container_data_mut(app).first_child = next_sibling;
+        }
+        Some(previous_sibling) => previous_sibling
+            .as_object()
+            .parent_data_of_mut::<ParentDataOf<T>>(app)
+            .set_next_sibling(next_sibling),
+    }
+    match next_sibling {
+        None => {
+            debug_assert_eq!(this.last_child(app), Some(child));
+            this.container_data_mut(app).last_child = previous_sibling;
+        }
+        Some(next_sibling) => next_sibling
+            .as_object()
+            .parent_data_of_mut::<ParentDataOf<T>>(app)
+            .set_previous_sibling(previous_sibling),
+    }
+    let child_parent_data = child.as_object().parent_data_of_mut::<ParentDataOf<T>>(app);
+    child_parent_data.set_previous_sibling(None);
+    child_parent_data.set_next_sibling(None);
+    this.container_data_mut(app).child_count -= 1;
+}
+
 /// Class-specific render object: the data accessors and the virtuals, nothing else. Methods
 /// take [`RenderHandle<Self>`] so they can re-enter the same slot through [`App`].
 ///
@@ -149,6 +831,16 @@ pub trait RenderObject: 'static + Sized {
     /// See [`render_object_data`](Self::render_object_data).
     fn render_object_data_mut(self: RenderHandle<Self>, app: &mut App) -> &mut RenderObjectData;
 
+    /// Dart's implicit upcast of a concrete render object to `RenderObject`: this object's
+    /// type-erased handle, through the vtable the protocol recorded when it created it.
+    fn as_render_object(self: RenderHandle<Self>, app: &App) -> AnyRenderObject {
+        let vtable = self
+            .render_object_data(app)
+            .object_vtable
+            .expect("a render object records its vtable when the protocol creates it");
+        AnyRenderObject::from_vtable(self.id(), vtable)
+    }
+
     /// Do the work of computing the layout for this render object.
     ///
     /// Do not call this function directly: call `layout` on the protocol handle instead.
@@ -158,13 +850,12 @@ pub trait RenderObject: 'static + Sized {
     /// Updates the render object's size using only the constraints.
     ///
     /// Called by `layout` only when [`sized_by_parent`](Self::sized_by_parent) is true.
-    /// Override this instead of relying on `computeDryLayout`, which is not in this slice.
+    ///
+    /// A box overrides [`crate::RenderBox::compute_dry_layout`] instead: the box protocol's
+    /// [`crate::RenderBox::perform_resize`] sizes itself from it.
     fn perform_resize(self: RenderHandle<Self>, _app: &mut App) {
         let _ = self;
-        panic!(
-            "RenderObject::perform_resize was called; override it when sized_by_parent is true \
-             (computeDryLayout is not in this slice)"
-        )
+        panic!("RenderObject::perform_resize was called; override it when sized_by_parent is true")
     }
 
     /// Calls `visitor` for each immediate child.
@@ -281,6 +972,45 @@ pub trait RenderObject: 'static + Sized {
         old_layer.unwrap_or_default()
     }
 
+    /// Attempt to make (a portion of) this or a descendant [`RenderObject`] visible on screen.
+    ///
+    /// If `descendant` is provided, that render object is made visible. If `descendant` is
+    /// omitted, this render object is made visible.
+    ///
+    /// The optional `rect` parameter describes which area of that render object should be
+    /// shown on screen. If `rect` is `None`, the entire render object (as defined by its
+    /// paint bounds) will be revealed. The `rect` parameter is interpreted relative to the
+    /// coordinate system of `descendant` if that argument is provided and relative to this
+    /// render object otherwise.
+    ///
+    /// The `duration` parameter can be set to a non-zero value to bring the target object on
+    /// screen in an animation defined by `curve`.
+    ///
+    /// See also:
+    ///
+    /// * [`crate::show_in_viewport`], which `RenderViewportBase` delegates
+    ///   this method to.
+    fn show_on_screen(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        descendant: Option<AnyRenderObject>,
+        rect: Option<Rect>,
+        duration: Duration,
+        curve: Rc<dyn Curve>,
+    ) {
+        RenderObjectBase::show_on_screen(self, app, descendant, rect, duration, curve)
+    }
+
+    /// Dart's `object is RenderAbstractViewport` for any interface: the erased handle of the
+    /// interface `id` names, if this type implements it.
+    ///
+    /// An implementor answers each interface it implements with that interface's type-erased
+    /// handle, boxed; [`AnyRenderObject::interface`] unboxes it. The default implements none.
+    fn interface(self: RenderHandle<Self>, id: TypeId) -> Option<Box<dyn Any>> {
+        let _ = (self, id);
+        None
+    }
+
     /// Paint this render object into the given context at the given offset.
     ///
     /// Do not call this function directly: [`PaintingContext::paint_child`] does. Paint children
@@ -380,11 +1110,12 @@ impl<T: 'static> RenderHandle<T> {
     }
 
     /// The foundation handle, for a [`reveal_foundation::Listener::handle_method`] tear-off.
-    pub(crate) fn handle(self) -> Handle<T> {
+    pub fn handle(self) -> Handle<T> {
         self.0
     }
 
-    pub(crate) fn from_handle(handle: Handle<T>) -> RenderHandle<T> {
+    /// The render handle for a foundation handle, which is what such a tear-off is called with.
+    pub fn from_handle(handle: Handle<T>) -> RenderHandle<T> {
         RenderHandle(handle)
     }
 }
@@ -398,8 +1129,12 @@ pub(crate) fn create<T: 'static>(app: &mut App, object: T) -> RenderHandle<T> {
     RenderHandle(app.create(object))
 }
 
+/// The dispatch signature of [`RenderObject::show_on_screen`].
+pub(crate) type ShowOnScreenFn =
+    fn(&mut App, HandleId, Option<AnyRenderObject>, Option<Rect>, Duration, Rc<dyn Curve>);
+
 /// The vtable of an erased [`AnyRenderObject`]: one `&'static` table per type, built from the
-/// trait impl by the protocol. Copied out of the edge before a virtual call, so the slot is not
+/// trait impl by the protocol. Copied out of the handle before a virtual call, so the slot is not
 /// borrowed across it.
 pub(crate) struct RenderObjectVTable {
     pub object_data: fn(&App, HandleId) -> &RenderObjectData,
@@ -412,11 +1147,14 @@ pub(crate) struct RenderObjectVTable {
     pub sized_by_parent: fn(&App, HandleId) -> bool,
     pub perform_layout: fn(&mut App, HandleId),
     pub perform_resize: fn(&mut App, HandleId),
+    pub mark_needs_layout: fn(&mut App, HandleId),
     pub paint_bounds: fn(&App, HandleId) -> Rect,
     pub apply_paint_transform: fn(&App, HandleId, AnyRenderObject, &mut Matrix4),
     pub is_repaint_boundary: fn(&App, HandleId) -> bool,
     pub mouse_tracker_annotation: fn(&App, HandleId) -> Option<MouseTrackerAnnotation>,
     pub update_composited_layer: fn(&mut App, HandleId, Option<CompositedLayer>) -> CompositedLayer,
+    pub show_on_screen: ShowOnScreenFn,
+    pub interface: fn(HandleId, TypeId) -> Option<Box<dyn Any>>,
     pub paint: fn(&mut App, HandleId, &mut PaintingContext, Offset),
     /// The protocol table this object table is nested in. Exactly one is `Some`.
     pub as_box: Option<fn() -> &'static crate::box_::RenderBoxVTable>,
@@ -424,12 +1162,15 @@ pub(crate) struct RenderObjectVTable {
 }
 
 impl RenderObjectVTable {
-    /// `setup_parent_data` and `apply_paint_transform` are passed in because the box
-    /// protocol has its own defaults; `paint_bounds` because each protocol defines it.
+    /// `setup_parent_data`, `apply_paint_transform`, `perform_resize` and `mark_needs_layout`
+    /// are passed in because the box protocol has its own defaults; `paint_bounds` because each
+    /// protocol defines it.
     pub(crate) const fn of<T: RenderObject>(
         setup_parent_data: fn(&mut App, HandleId, AnyRenderObject),
         paint_bounds: fn(&App, HandleId) -> Rect,
         apply_paint_transform: fn(&App, HandleId, AnyRenderObject, &mut Matrix4),
+        perform_resize: fn(&mut App, HandleId),
+        mark_needs_layout: fn(&mut App, HandleId),
         as_box: Option<fn() -> &'static crate::box_::RenderBoxVTable>,
         as_sliver: Option<fn() -> &'static crate::sliver::RenderSliverVTable>,
     ) -> RenderObjectVTable {
@@ -443,7 +1184,8 @@ impl RenderObjectVTable {
             setup_parent_data,
             sized_by_parent: |app, id| T::sized_by_parent(resolve(id), app),
             perform_layout: |app, id| T::perform_layout(resolve(id), app),
-            perform_resize: |app, id| T::perform_resize(resolve(id), app),
+            perform_resize,
+            mark_needs_layout,
             paint_bounds,
             apply_paint_transform,
             is_repaint_boundary: |app, id| T::is_repaint_boundary(resolve(id), app),
@@ -451,6 +1193,10 @@ impl RenderObjectVTable {
             update_composited_layer: |app, id, old_layer| {
                 T::update_composited_layer(resolve(id), app, old_layer)
             },
+            show_on_screen: |app, id, descendant, rect, duration, curve| {
+                T::show_on_screen(resolve(id), app, descendant, rect, duration, curve)
+            },
+            interface: |id, interface| T::interface(resolve(id), interface),
             paint: |app, id, context, offset| T::paint(resolve(id), app, context, offset),
             as_box,
             as_sliver,
@@ -637,7 +1383,7 @@ impl AnyRenderObject {
         self.data(app).doing_this_layout_with_callback
     }
 
-    fn debug_doing_this_layout(self, app: &App) -> bool {
+    pub(crate) fn debug_doing_this_layout(self, app: &App) -> bool {
         self.data(app).debug_doing_this_layout
     }
 
@@ -645,7 +1391,7 @@ impl AnyRenderObject {
         self.data_mut(app).debug_doing_this_layout = value;
     }
 
-    fn debug_doing_this_resize(self, app: &App) -> bool {
+    pub(crate) fn debug_doing_this_resize(self, app: &App) -> bool {
         self.data(app).debug_doing_this_resize
     }
 
@@ -655,6 +1401,10 @@ impl AnyRenderObject {
 
     fn set_debug_can_parent_use_size(self, app: &mut App, value: Option<bool>) {
         self.data_mut(app).debug_can_parent_use_size = value;
+    }
+
+    fn debug_mutations_locked(self, app: &App) -> bool {
+        self.data(app).debug_mutations_locked
     }
 
     fn set_debug_mutations_locked(self, app: &mut App, value: bool) {
@@ -761,22 +1511,11 @@ impl AnyRenderObject {
     }
 
     /// Mark this render object's layout information as dirty.
+    ///
+    /// The box protocol overrides this with [`crate::RenderBox::mark_needs_layout`], which
+    /// clears the intrinsics and dry-layout caches first.
     pub fn mark_needs_layout(self, app: &mut App) {
-        if self.needs_layout(app) {
-            return;
-        }
-        self.set_needs_layout(app, true);
-        if let Some(owner) = self.owner(app)
-            && self.is_relayout_boundary(app).unwrap_or(false)
-        {
-            if crate::debug::debug_print_mark_needs_layout_stacks() {
-                eprintln!("markNeedsLayout() called for {self:?}");
-            }
-            owner.add_node_needing_layout(app, self);
-            owner.request_visual_update(app);
-        } else if self.parent(app).is_some() {
-            self.mark_parent_needs_layout(app);
-        }
+        (self.vtable.mark_needs_layout)(app, self.id)
     }
 
     /// Mark this render object's layout information as dirty, and then defer to
@@ -795,6 +1534,30 @@ impl AnyRenderObject {
     }
 
     /// Mark layout dirty and also mark the parent, for a `sized_by_parent` change.
+    /// Allows mutations to be made to this object's child list (and any descendants) as
+    /// well as to any other dirty nodes in the render tree owned by the same `PipelineOwner`
+    /// as this object. The `callback` argument is invoked synchronously, and the mutations
+    /// are allowed only during that callback's execution.
+    ///
+    /// This exists to allow child lists to be built on-demand during layout (e.g. based on
+    /// the object's size), and to enable nodes to be moved around the tree as this happens
+    /// (e.g. to handle `GlobalKey` reparenting), while still ensuring that any particular
+    /// node is only laid out once per frame.
+    ///
+    /// Calling this function disables a number of asserts that are intended to catch likely
+    /// bugs. As such, using this function is generally discouraged.
+    ///
+    /// This function can only be called during layout.
+    pub fn invoke_layout_callback(self, app: &mut App, callback: impl FnOnce(&mut App)) {
+        debug_assert!(self.debug_mutations_locked(app));
+        debug_assert!(self.debug_doing_this_layout(app));
+        debug_assert!(!self.doing_this_layout_with_callback(app));
+        self.data_mut(app).doing_this_layout_with_callback = true;
+        let owner = self.owner(app).expect("a laying-out object is attached");
+        owner.enable_mutations_to_dirty_subtrees(app, callback);
+        self.data_mut(app).doing_this_layout_with_callback = false;
+    }
+
     pub fn mark_needs_layout_for_sized_by_parent_change(self, app: &mut App) {
         self.mark_needs_layout(app);
         self.mark_parent_needs_layout(app);
@@ -953,7 +1716,7 @@ impl AnyRenderObject {
         self.data(app).was_repaint_boundary
     }
 
-    /// The arena id behind this edge.
+    /// The arena id behind this handle.
     pub fn id(self) -> HandleId {
         self.id
     }
@@ -965,9 +1728,9 @@ impl AnyRenderObject {
 
     /// Release any resources held by this render object and free its arena slot. Dart's
     /// `dispose` releases the layers and leaves the object to the collector; the arena has no
-    /// collector, so the slot goes too. Every edge to it is stale afterwards.
+    /// collector, so the slot goes too. Every handle to it is stale afterwards.
     ///
-    /// The object must be detached. Its parent may still hold the edge: the widget layer
+    /// The object must be detached. Its parent may still hold a handle to it: the widget layer
     /// unmounts bottom-up and disposes the parent next, as Dart does.
     pub fn dispose(self, app: &mut App) {
         debug_assert!(!self.attached(app));
@@ -1090,6 +1853,27 @@ impl AnyRenderObject {
             return None;
         }
         (self.vtable.mouse_tracker_annotation)(app, self.id)
+    }
+
+    /// See [`RenderObject::interface`]: Dart's `object is RenderAbstractViewport`, as
+    /// `interface::<AnyRenderAbstractViewport>()`.
+    pub fn interface<I: 'static>(self) -> Option<I> {
+        (self.vtable.interface)(self.id, TypeId::of::<I>())?
+            .downcast()
+            .ok()
+            .map(|handle| *handle)
+    }
+
+    /// See [`RenderObject::show_on_screen`].
+    pub fn show_on_screen(
+        self,
+        app: &mut App,
+        descendant: Option<AnyRenderObject>,
+        rect: Option<Rect>,
+        duration: Duration,
+        curve: Rc<dyn Curve>,
+    ) {
+        (self.vtable.show_on_screen)(app, self.id, descendant, rect, duration, curve)
     }
 
     /// See [`RenderObject::update_composited_layer`].
@@ -1271,6 +2055,50 @@ impl AnyRenderObject {
     }
 }
 
+/// Flutter's `RenderObject` bodies that an override calls through `super`.
+///
+/// Blanket-implemented for every [`RenderObject`], and repeats the default bodies of the
+/// virtuals above: a leaf's own override shadows the default it would otherwise call.
+pub trait RenderObjectBase: RenderObject {
+    /// Flutter's `RenderObject.markNeedsLayout` body; an override calls it where Dart writes
+    /// `super.markNeedsLayout()`.
+    fn mark_needs_layout(self: RenderHandle<Self>, app: &mut App) {
+        let this = self.as_render_object(app);
+        if this.needs_layout(app) {
+            return;
+        }
+        this.set_needs_layout(app, true);
+        if let Some(owner) = this.owner(app)
+            && this.is_relayout_boundary(app).unwrap_or(false)
+        {
+            if crate::debug::debug_print_mark_needs_layout_stacks() {
+                eprintln!("markNeedsLayout() called for {this:?}");
+            }
+            owner.add_node_needing_layout(app, this);
+            owner.request_visual_update(app);
+        } else if this.parent(app).is_some() {
+            this.mark_parent_needs_layout(app);
+        }
+    }
+
+    /// Flutter's `RenderObject.showOnScreen`.
+    fn show_on_screen(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        descendant: Option<AnyRenderObject>,
+        rect: Option<Rect>,
+        duration: Duration,
+        curve: Rc<dyn Curve>,
+    ) {
+        let this = self.as_render_object(app);
+        if let Some(parent) = this.parent(app) {
+            parent.show_on_screen(app, Some(descendant.unwrap_or(this)), rect, duration, curve);
+        }
+    }
+}
+
+impl<T: RenderObject> RenderObjectBase for T {}
+
 /// vector_math's `Matrix4.zero()`.
 pub(crate) fn zero_matrix() -> Matrix4 {
     Matrix4::from_flutter_array(&[0.0; 16])
@@ -1295,6 +2123,80 @@ pub(crate) fn perspective_transform(transform: &Matrix4, point: [f64; 3]) -> [f6
     let out = |row: usize| m[row] * x + m[4 + row] * y + m[8 + row] * z + m[12 + row];
     let w = out(3);
     [out(0) / w, out(1) / w, out(2) / w]
+}
+
+/// The bag of [`RenderObjectWithLayoutCallbackMixin`].
+#[derive(Debug)]
+pub struct RenderObjectWithLayoutCallbackData {
+    // The initial value of this flag must be set to true to prevent the layout
+    // callback from being scheduled when the subtree has never been laid out (in
+    // which case the `constraints` or any other layout information is unknown).
+    needs_rebuild: bool,
+}
+
+impl Default for RenderObjectWithLayoutCallbackData {
+    fn default() -> RenderObjectWithLayoutCallbackData {
+        RenderObjectWithLayoutCallbackData {
+            needs_rebuild: true,
+        }
+    }
+}
+
+/// A mixin for `RenderObject`s that run a layout callback (typically one that builds a
+/// widget subtree) during `perform_layout`, as `LayoutBuilder`'s render object does.
+///
+/// Implementers keep the bag under a field named `layout_callback`, implement
+/// [`layout_callback`](Self::layout_callback), and call
+/// [`run_layout_callback`](Self::run_layout_callback) in their `perform_layout`. The mixin
+/// is on the box protocol here because scheduling needs the tree methods.
+pub trait RenderObjectWithLayoutCallbackMixin: crate::box_::RenderBox {
+    /// The mixin's bag.
+    fn layout_callback_data(
+        self: RenderHandle<Self>,
+        app: &App,
+    ) -> &RenderObjectWithLayoutCallbackData;
+
+    /// See [`layout_callback_data`](Self::layout_callback_data).
+    fn layout_callback_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderObjectWithLayoutCallbackData;
+
+    /// The layout callback to run in `perform_layout`, through
+    /// [`run_layout_callback`](Self::run_layout_callback), which invokes it with
+    /// [`AnyRenderObject::invoke_layout_callback`].
+    fn layout_callback(self: RenderHandle<Self>, app: &mut App);
+
+    /// Invokes [`layout_callback`](Self::layout_callback) with
+    /// [`AnyRenderObject::invoke_layout_callback`].
+    ///
+    /// Must be called in `perform_layout`, and only after the callback was scheduled.
+    fn run_layout_callback(self: RenderHandle<Self>, app: &mut App) {
+        debug_assert!(self.as_object().debug_doing_this_layout(app));
+        self.as_object()
+            .invoke_layout_callback(app, |app| Self::layout_callback(self, app));
+        self.layout_callback_data_mut(app).needs_rebuild = false;
+    }
+
+    /// Schedules the layout callback to be run in the next layout pass, marking this object
+    /// for layout.
+    fn schedule_layout_callback(self: RenderHandle<Self>, app: &mut App) {
+        if self.layout_callback_data(app).needs_rebuild {
+            debug_assert!(self.as_object().needs_layout(app));
+            return;
+        }
+        self.layout_callback_data_mut(app).needs_rebuild = true;
+        // This ensures that the layout callback will be run even if an ancestor
+        // chooses to not lay out this subtree (for example, obstructed OverlayEntries
+        // with `maintainState` set to true), to maintain the widget tree integrity
+        // (making sure global keys are unique, for example).
+        if let Some(owner) = self.as_object().owner(app) {
+            owner.add_node_needing_layout(app, self.as_object());
+        }
+        // In an active tree, markNeedsLayout is needed to inform the layout boundary
+        // that its child size may change.
+        self.as_object().mark_needs_layout(app);
+    }
 }
 
 #[cfg(test)]
@@ -1418,7 +2320,7 @@ mod tests {
         assert!(owner.nodes_needing_layout(&app).is_empty());
 
         node.layout(&mut app, tight(), false);
-        node.mark_needs_layout(&mut app);
+        node.as_object().mark_needs_layout(&mut app);
         assert!(owner.nodes_needing_layout(&app).contains(&node.as_object()));
 
         owner.flush_layout(&mut app);
@@ -1434,7 +2336,7 @@ mod tests {
         assert_eq!(layouts.get(), 1);
         node.layout(&mut app, tight(), false);
         assert_eq!(layouts.get(), 1);
-        node.mark_needs_layout(&mut app);
+        node.as_object().mark_needs_layout(&mut app);
         node.layout(&mut app, tight(), false);
         assert_eq!(layouts.get(), 2);
     }
@@ -1454,7 +2356,7 @@ mod tests {
         assert!(!parent.debug_needs_layout(&app));
         assert!(!child.debug_needs_layout(&app));
 
-        child.mark_needs_layout(&mut app);
+        child.as_object().mark_needs_layout(&mut app);
         assert!(parent.debug_needs_layout(&app));
         assert!(
             owner
@@ -1587,8 +2489,8 @@ mod tests {
         parent.as_object().attach(&mut app, owner);
         parent.layout(&mut app, tight(), false);
         child.layout(&mut app, tight(), false);
-        parent.mark_needs_layout(&mut app);
-        child.mark_needs_layout(&mut app);
+        parent.as_object().mark_needs_layout(&mut app);
+        child.as_object().mark_needs_layout(&mut app);
         order.borrow_mut().clear();
         owner.flush_layout(&mut app);
         assert_eq!(*order.borrow(), ["parent", "child"]);
@@ -1609,7 +2511,7 @@ mod tests {
         owner.set_root_node(&mut app, Some(node.as_object()));
         node.layout(&mut app, tight(), false);
         assert_eq!(updates.get(), 0);
-        node.mark_needs_layout(&mut app);
+        node.as_object().mark_needs_layout(&mut app);
         assert_eq!(updates.get(), 1);
     }
 }

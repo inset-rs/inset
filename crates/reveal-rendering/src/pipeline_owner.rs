@@ -1,21 +1,64 @@
 //! Flutter counterpart: `rendering/object.dart` (`PipelineOwner`).
 //!
-//! Semantics callbacks and [`PipelineManifold`] wait. Compositing bits are not
-//! a phase here (see `PORTING.md`).
+//! Semantics callbacks and the semantics half of [`PipelineManifold`] wait.
+//! Compositing bits are not a phase here (see `PORTING.md`).
+
+use std::rc::Rc;
 
 use reveal_foundation::{App, Handle, Listener};
 
 use crate::object::AnyRenderObject;
 use crate::painting_context::PaintingContext;
 
+/// Manages a tree of [`PipelineOwner`]s.
+///
+/// All [`PipelineOwner`]s within a tree are attached to the same
+/// [`PipelineManifold`], which gives them access to shared functionality such
+/// as requesting a visual update (by calling
+/// [`request_visual_update`](Self::request_visual_update)). As such, the
+/// [`PipelineManifold`] gives the [`PipelineOwner`]s access to functionality
+/// usually provided by the bindings without tying the [`PipelineOwner`]s to a
+/// particular binding implementation.
+///
+/// The root of the [`PipelineOwner`] tree is attached to a [`PipelineManifold`] by
+/// passing the manifold to [`PipelineOwner::attach`]. Children are attached to the
+/// same [`PipelineManifold`] as their parent when they are adopted via
+/// [`PipelineOwner::adopt_child`].
+///
+/// Dart's `semanticsEnabled` and the listeners that report its changes wait with
+/// semantics.
+pub trait PipelineManifold {
+    /// Called by a [`PipelineOwner`] connected to this [`PipelineManifold`] when a
+    /// `RenderObject` associated with that pipeline owner wishes to update its
+    /// visual appearance.
+    ///
+    /// Typical implementations of this function will schedule a task to flush the
+    /// various stages of the pipeline. This function might be called multiple
+    /// times in quick succession. Implementations should take care to discard
+    /// duplicate calls quickly.
+    ///
+    /// A [`PipelineOwner`] connected to this [`PipelineManifold`] will call its
+    /// `on_need_visual_update` callback instead of this method if it has been
+    /// configured with one ([`PipelineOwner::new`]).
+    ///
+    /// See also:
+    ///
+    ///  * `SchedulerBinding::ensure_visual_update`, which [`PipelineManifold`]
+    ///    implementations typically call to implement this method.
+    fn request_visual_update(&self, app: &mut App);
+}
+
 /// The pipeline owner manages the rendering pipeline.
 ///
 /// Flutter's counterpart is `PipelineOwner`.
 pub struct PipelineOwner {
     on_need_visual_update: Option<Listener>,
+    manifold: Option<Rc<dyn PipelineManifold>>,
     root_node: Option<AnyRenderObject>,
     nodes_needing_layout: Vec<AnyRenderObject>,
     should_merge_dirty_nodes: bool,
+    /// Dart's `_debugAllowMutationsToDirtySubtrees`.
+    debug_allow_mutations_to_dirty_subtrees: bool,
     debug_doing_layout: bool,
     debug_doing_child_layout: bool,
     nodes_needing_paint: Vec<AnyRenderObject>,
@@ -32,9 +75,11 @@ impl PipelineOwner {
     pub fn new(app: &mut App, on_need_visual_update: Option<Listener>) -> Handle<PipelineOwner> {
         app.create(PipelineOwner {
             on_need_visual_update,
+            manifold: None,
             root_node: None,
             nodes_needing_layout: Vec::new(),
             should_merge_dirty_nodes: false,
+            debug_allow_mutations_to_dirty_subtrees: false,
             debug_doing_layout: false,
             debug_doing_child_layout: false,
             nodes_needing_paint: Vec::new(),
@@ -44,11 +89,16 @@ impl PipelineOwner {
         })
     }
 
-    /// Calls [`on_need_visual_update`](Self::new) if one was provided.
+    /// Calls the `on_need_visual_update` callback given to [`new`](Self::new) if there is
+    /// one, otherwise asks the [`PipelineManifold`] this owner is attached to.
+    ///
+    /// Used to notify the pipeline owner that an associated render object wishes
+    /// to update its visual appearance.
     pub fn request_visual_update(self: Handle<Self>, app: &mut App) {
-        let callback = app.get(self).on_need_visual_update.clone();
-        if let Some(callback) = callback {
+        if let Some(callback) = app.get(self).on_need_visual_update.clone() {
             callback.call(app);
+        } else if let Some(manifold) = app.get(self).manifold.clone() {
+            manifold.request_visual_update(app);
         }
     }
 
@@ -94,6 +144,26 @@ impl PipelineOwner {
             return false;
         }
         app.get(self).debug_doing_layout
+    }
+
+    /// See [`AnyRenderObject::invoke_layout_callback`]: runs `callback` with mutations to
+    /// dirty subtrees allowed, then asks [`flush_layout`](Self::flush_layout) to merge the
+    /// nodes it dirtied before continuing.
+    pub(crate) fn enable_mutations_to_dirty_subtrees(
+        self: Handle<Self>,
+        app: &mut App,
+        callback: impl FnOnce(&mut App),
+    ) {
+        debug_assert!(app.get(self).debug_doing_layout);
+        let old_state = app.get(self).debug_allow_mutations_to_dirty_subtrees;
+        if cfg!(debug_assertions) {
+            app.get_mut(self).debug_allow_mutations_to_dirty_subtrees = true;
+        }
+        callback(app);
+        app.get_mut(self).should_merge_dirty_nodes = true;
+        if cfg!(debug_assertions) {
+            app.get_mut(self).debug_allow_mutations_to_dirty_subtrees = old_state;
+        }
     }
 
     /// Update the layout information for all dirty render objects.
@@ -200,6 +270,34 @@ impl PipelineOwner {
         }
     }
 
+    /// Mark this [`PipelineOwner`] as attached to the given [`PipelineManifold`].
+    ///
+    /// Typically, this is only called directly on the root [`PipelineOwner`].
+    /// Children are automatically attached to their parent's [`PipelineManifold`]
+    /// when [`adopt_child`](Self::adopt_child) is called.
+    pub fn attach(self: Handle<Self>, app: &mut App, manifold: Rc<dyn PipelineManifold>) {
+        debug_assert!(app.get(self).manifold.is_none());
+        app.get_mut(self).manifold = Some(Rc::clone(&manifold));
+        let children = app.get(self).children.clone();
+        for child in children {
+            child.attach(app, Rc::clone(&manifold));
+        }
+    }
+
+    /// Mark this [`PipelineOwner`] as detached.
+    ///
+    /// Typically, this is only called directly on the root [`PipelineOwner`].
+    /// Children are automatically detached from their parent's [`PipelineManifold`]
+    /// when [`drop_child`](Self::drop_child) is called.
+    pub fn detach(self: Handle<Self>, app: &mut App) {
+        debug_assert!(app.get(self).manifold.is_some());
+        app.get_mut(self).manifold = None;
+        let children = app.get(self).children.clone();
+        for child in children {
+            child.detach(app);
+        }
+    }
+
     /// Adds `child` to this [`PipelineOwner`].
     pub fn adopt_child(self: Handle<Self>, app: &mut App, child: Handle<PipelineOwner>) {
         debug_assert!(app.get(child).debug_parent.is_none());
@@ -211,6 +309,9 @@ impl PipelineOwner {
         app.get_mut(self).children.push(child);
         if cfg!(debug_assertions) {
             app.get_mut(child).debug_parent = Some(self);
+        }
+        if let Some(manifold) = app.get(self).manifold.clone() {
+            child.attach(app, manifold);
         }
     }
 
@@ -232,6 +333,9 @@ impl PipelineOwner {
         if cfg!(debug_assertions) {
             app.get_mut(child).debug_parent = None;
         }
+        if app.get(self).manifold.is_some() {
+            child.detach(app);
+        }
     }
 
     /// Calls `visitor` for each immediate child of this [`PipelineOwner`].
@@ -248,7 +352,7 @@ impl PipelineOwner {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
     use reveal_embedder::Size;
@@ -352,5 +456,75 @@ mod tests {
         owner.flush_layout(&mut app);
         assert!(!node.debug_needs_layout(&app));
         assert_eq!(node.size(&app), Size::ZERO);
+    }
+
+    /// Counts the visual updates requested through it.
+    struct CountingManifold {
+        requests: Cell<u32>,
+    }
+
+    impl PipelineManifold for CountingManifold {
+        fn request_visual_update(&self, _app: &mut App) {
+            self.requests.set(self.requests.get() + 1);
+        }
+    }
+
+    #[test]
+    fn an_owner_without_a_callback_requests_visual_updates_through_its_manifold() {
+        let mut app = App::new();
+        let manifold = Rc::new(CountingManifold {
+            requests: Cell::new(0),
+        });
+        let root = PipelineOwner::new(&mut app, None);
+        let adopted_before = PipelineOwner::new(&mut app, None);
+        root.adopt_child(&mut app, adopted_before);
+
+        adopted_before.request_visual_update(&mut app);
+        assert_eq!(
+            manifold.requests.get(),
+            0,
+            "unattached owners request nothing"
+        );
+
+        root.attach(&mut app, manifold.clone());
+        root.request_visual_update(&mut app);
+        adopted_before.request_visual_update(&mut app);
+        assert_eq!(
+            manifold.requests.get(),
+            2,
+            "attach reaches existing children"
+        );
+
+        let adopted_after = PipelineOwner::new(&mut app, None);
+        root.adopt_child(&mut app, adopted_after);
+        adopted_after.request_visual_update(&mut app);
+        assert_eq!(manifold.requests.get(), 3, "adopt_child attaches the child");
+
+        root.drop_child(&mut app, adopted_after);
+        adopted_after.request_visual_update(&mut app);
+        assert_eq!(manifold.requests.get(), 3, "drop_child detaches the child");
+
+        root.detach(&mut app);
+        adopted_before.request_visual_update(&mut app);
+        assert_eq!(manifold.requests.get(), 3, "detach reaches the children");
+    }
+
+    #[test]
+    fn a_callback_takes_precedence_over_the_manifold() {
+        let mut app = App::new();
+        let manifold = Rc::new(CountingManifold {
+            requests: Cell::new(0),
+        });
+        let callbacks = Rc::new(Cell::new(0));
+        let owner = PipelineOwner::new(
+            &mut app,
+            Some(Listener::new({
+                let callbacks = callbacks.clone();
+                move |_app| callbacks.set(callbacks.get() + 1)
+            })),
+        );
+        owner.attach(&mut app, manifold.clone());
+        owner.request_visual_update(&mut app);
+        assert_eq!((callbacks.get(), manifold.requests.get()), (1, 0));
     }
 }

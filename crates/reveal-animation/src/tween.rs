@@ -4,7 +4,7 @@ use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::rc::Rc;
 
-use reveal_embedder::{Color, Rect, Size};
+use reveal_embedder::{Color, Offset, Rect, Size};
 use reveal_foundation::{App, Handle, Listener};
 
 use crate::animation::{Animation, AnimationStatus, AnimationStatusListener, AnyAnimation};
@@ -157,6 +157,10 @@ impl<P: Debug, C: Debug> Debug for ChainedEvaluation<P, C> {
 }
 
 /// Types that [`Tween<T>`] can interpolate with `+`, `-`, and `*`.
+///
+/// Dart's `Tween.lerp` is `begin + (end - begin) * t` on `dynamic`, and its assert rejects a
+/// type that does not carry the three operators (`Rect` is the type it names: use
+/// [`RectTween`]). This trait is the set of types that do.
 pub trait TweenLerp: Clone {
     /// Dart's `Tween.lerp`.
     fn lerp(begin: &Self, end: &Self, t: f64) -> Self;
@@ -165,6 +169,19 @@ pub trait TweenLerp: Clone {
 impl TweenLerp for f64 {
     fn lerp(begin: &f64, end: &f64, t: f64) -> f64 {
         begin + (end - begin) * t
+    }
+}
+
+impl TweenLerp for Offset {
+    fn lerp(begin: &Offset, end: &Offset, t: f64) -> Offset {
+        *begin + (*end - *begin) * t
+    }
+}
+
+impl TweenLerp for Size {
+    fn lerp(begin: &Size, end: &Size, t: f64) -> Size {
+        // Dart: `Size - Size` is an `Offset`, and `Size + Offset` is a `Size`.
+        *begin + (*end - *begin) * t
     }
 }
 
@@ -566,5 +583,29 @@ mod tests {
         assert_eq!(tween.transform(&app, 0.0), 0.0);
         assert_eq!(tween.transform(&app, 0.25), 2.5);
         assert_eq!(tween.transform(&app, 1.0), 10.0);
+    }
+
+    #[test]
+    fn an_offset_tween_walks_both_axes() {
+        let mut app = App::new();
+        let tween = Tween::new(
+            &mut app,
+            Some(Offset::new(0.0, 10.0)),
+            Some(Offset::new(4.0, -10.0)),
+        );
+        assert_eq!(tween.transform(&app, 0.0), Offset::new(0.0, 10.0));
+        assert_eq!(tween.transform(&app, 0.25), Offset::new(1.0, 5.0));
+        assert_eq!(tween.transform(&app, 1.0), Offset::new(4.0, -10.0));
+    }
+
+    #[test]
+    fn a_size_tween_walks_both_dimensions() {
+        let mut app = App::new();
+        let tween = Tween::new(
+            &mut app,
+            Some(Size::new(10.0, 20.0)),
+            Some(Size::new(20.0, 0.0)),
+        );
+        assert_eq!(tween.transform(&app, 0.5), Size::new(15.0, 10.0));
     }
 }

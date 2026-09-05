@@ -2,13 +2,14 @@
 //!
 //! An element is one struct in the arena, reached through `Handle<Self>`; Dart's base-class
 //! fields are the [`ElementData`] bag the struct holds under the field `element`. A reference
-//! to "some element" is the erased edge [`AnyElement`], which is also the [`BuildContext`]
+//! to "some element" is the type-erased handle [`AnyElement`], which is also the [`BuildContext`]
 //! (Dart's `Element implements BuildContext`).
 //!
 //! Dart's base bodies are the free functions `base_*`; an override calls the one it would
 //! call as `super`.
 
 use std::any::{Any, TypeId};
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
@@ -24,11 +25,12 @@ use super::widget::{
     InheritedWidget, Widget, WidgetKind, WidgetRef, can_update, downcast_widget, global_key_id,
     same_widget,
 };
+use crate::widgets::scroll_notification::ScrollNotification;
 
 /// A handle to the location of a widget in the widget tree.
 ///
-/// This is Dart's `BuildContext` interface, which `Element` implements: here the erased
-/// element edge plays both parts.
+/// This is Dart's `BuildContext` interface, which `Element` implements: here the type-erased
+/// element handle plays both parts.
 pub type BuildContext = AnyElement;
 
 /// Dart's `_ElementLifecycle`.
@@ -61,6 +63,8 @@ pub struct IndexedSlot {
 pub enum Slot {
     /// A child of a multi-child render object element.
     Indexed(IndexedSlot),
+    /// The index of a child of a lazily built sliver (`SliverMultiBoxAdaptorElement`).
+    Index(i32),
     /// A parent-defined value, compared by identity as an arbitrary Dart object would be.
     Custom(Rc<dyn Any>),
 }
@@ -69,8 +73,103 @@ impl PartialEq for Slot {
     fn eq(&self, other: &Slot) -> bool {
         match (self, other) {
             (Slot::Indexed(a), Slot::Indexed(b)) => a == b,
+            (Slot::Index(a), Slot::Index(b)) => a == b,
             (Slot::Custom(a), Slot::Custom(b)) => Rc::ptr_eq(a, b),
             _ => false,
+        }
+    }
+}
+
+/// The live "is this child forgotten?" check [`AnyElement::update_children`] takes (Dart's
+/// `Set<Element> forgottenChildren`).
+pub type ForgottenChildren<'a> = &'a dyn Fn(&App, AnyElement) -> bool;
+
+/// A type a `NotificationListener<T>` can listen for: a concrete [`Notification`], or a
+/// family of them named by a trait object (`dyn ScrollNotification`).
+///
+/// Dart's `notification is T`; a family answers it through a vtable slot on
+/// [`Notification`], a concrete type through [`Notification::as_any`].
+pub trait NotificationTarget: 'static {
+    /// The notification as a `T`, when it is one.
+    fn cast(notification: &dyn Notification) -> Option<&Self>;
+}
+
+impl<T: Notification> NotificationTarget for T {
+    fn cast(notification: &dyn Notification) -> Option<&T> {
+        notification.as_any().downcast_ref::<T>()
+    }
+}
+
+/// To send a notification, call [`dispatch`](Self::dispatch) on the notification you wish to
+/// send. The notification will be delivered to any `NotificationListener` widgets with the
+/// appropriate type parameters that are ancestors of the given [`BuildContext`].
+/// A notification that can bubble up the widget tree.
+///
+/// You can determine the type of a notification using the `is` operator to check the
+/// `runtimeType` of the notification; here [`as_any`](Self::as_any) and a downcast.
+///
+/// To listen for notifications in a subtree, use a `NotificationListener`.
+///
+pub trait Notification: Any + Debug {
+    /// The notification as `Any`, for Dart's `notification is T` check.
+    fn as_any(&self) -> &dyn Any;
+
+    /// The depth counter of a notification that mixes in `ViewportNotificationMixin`
+    /// (`widgets/scroll_notification.rs`), for the viewport elements that increment it as
+    /// the notification bubbles past them; `None` — the default — for every other
+    /// notification.
+    ///
+    /// This is Dart's `notification is ViewportNotificationMixin`: a mixin is an interface,
+    /// not a type, so an erased notification answers the check from its own vtable rather
+    /// than through [`as_any`](Self::as_any). The counter is a [`Cell`] because a
+    /// notification bubbles as `&dyn Notification`.
+    fn viewport_depth(&self) -> Option<&Cell<u32>> {
+        None
+    }
+
+    /// The notification as a `ScrollNotification` (`widgets/scroll_notification.rs`), for a
+    /// `NotificationListener<dyn ScrollNotification>`; `None` — the default — for every
+    /// other notification.
+    ///
+    /// This is Dart's `notification is ScrollNotification`, answered from the vtable as
+    /// [`viewport_depth`](Self::viewport_depth) is, because the family is a trait.
+    fn as_scroll_notification(&self) -> Option<&dyn ScrollNotification> {
+        None
+    }
+
+    /// Start bubbling this notification at the given build context.
+    ///
+    /// The notification will be delivered to any `NotificationListener` widgets with the
+    /// appropriate type parameters that are ancestors of the given [`BuildContext`]. If the
+    /// [`BuildContext`] is null, the notification is not dispatched.
+    fn dispatch(&self, app: &mut App, target: Option<BuildContext>)
+    where
+        Self: Sized,
+    {
+        if let Some(target) = target {
+            target.dispatch_notification(app, self);
+        }
+    }
+}
+
+/// Dart's `_NotificationNode`: one notifiable element and the chain above it.
+pub struct NotificationNode {
+    parent: Option<Rc<NotificationNode>>,
+    current: AnyElement,
+}
+
+impl NotificationNode {
+    /// A node for `current`, chained under its nearest notifiable ancestor.
+    pub fn new(parent: Option<Rc<NotificationNode>>, current: AnyElement) -> NotificationNode {
+        NotificationNode { parent, current }
+    }
+
+    fn dispatch_notification(&self, app: &mut App, notification: &dyn Notification) {
+        if self.current.on_notification(app, notification) {
+            return;
+        }
+        if let Some(parent) = &self.parent {
+            parent.dispatch_notification(app, notification);
         }
     }
 }
@@ -87,6 +186,8 @@ pub struct ElementData {
     dirty: bool,
     pub(crate) in_dirty_list: bool,
     inherited_elements: Option<Rc<HashMap<TypeId, AnyElement>>>,
+    /// Dart's `_notificationTree`: the nearest notifiable ancestor chain.
+    notification_tree: Option<Rc<NotificationNode>>,
     dependencies: Option<HashSet<AnyElement>>,
     had_unsatisfied_dependencies: bool,
     debug_built_once: bool,
@@ -106,6 +207,7 @@ impl ElementData {
             dirty: true,
             in_dirty_list: false,
             inherited_elements: None,
+            notification_tree: None,
             dependencies: None,
             had_unsatisfied_dependencies: false,
             debug_built_once: false,
@@ -157,7 +259,7 @@ pub trait Element: Sized + 'static {
     /// See [`element_data`](Self::element_data).
     fn element_data_mut(self: Handle<Self>, app: &mut App) -> &mut ElementData;
 
-    /// The erased edge to this element.
+    /// The type-erased handle to this element.
     fn as_element(self: Handle<Self>) -> AnyElement {
         AnyElement {
             id: self.id(),
@@ -276,6 +378,50 @@ pub trait Element: Sized + 'static {
     /// Dart's `_updateInheritance`: inherit the parent's inherited-element map.
     fn update_inheritance(self: Handle<Self>, app: &mut App) {
         ElementBase::update_inheritance(self, app);
+    }
+
+    /// Called in [`mount`](Self::mount) and [`activate`](Self::activate) to register this
+    /// element in the notification tree.
+    ///
+    /// This method is only exposed so that notifiable elements can be implemented (Dart's
+    /// `NotifiableElementMixin`): an element that wishes to respond to notifications
+    /// overrides it to insert a node for itself, and [`on_notification`](Self::on_notification)
+    /// to handle them.
+    ///
+    /// See also:
+    ///   * `NotificationListener`, a widget that allows listening to notifications.
+    fn attach_notification_tree(self: Handle<Self>, app: &mut App) {
+        ElementBase::attach_notification_tree(self, app);
+    }
+
+    /// The [`BuildScope`] whose dirty list this element is in.
+    ///
+    /// The [`BuildOwner`] builds the dirty elements of one scope per `build_scope` call;
+    /// an element that wants its own (a `LayoutBuilder`, whose subtree is built during
+    /// layout) overrides this.
+    fn build_scope(self: Handle<Self>, app: &App) -> Handle<BuildScope> {
+        ElementBase::build_scope(self, app)
+    }
+
+    /// Marks the element as dirty and adds it to the global list of widgets to rebuild in
+    /// the next frame.
+    ///
+    /// Since it is inefficient to build an element twice in one frame, applications and
+    /// widgets should be structured so as to only mark widgets dirty during event handlers
+    /// before the frame begins, not during the build itself.
+    fn mark_needs_build(self: Handle<Self>, app: &mut App) {
+        ElementBase::mark_needs_build(self, app);
+    }
+
+    /// Called when a notification of the appropriate type arrives at this location in the
+    /// tree (Dart's `NotifiableElementMixin.onNotification`).
+    ///
+    /// Return true to cancel the notification bubbling. Return false to allow the
+    /// notification to continue to be dispatched to further ancestors. Only elements that
+    /// override [`attach_notification_tree`](Self::attach_notification_tree) are asked.
+    fn on_notification(self: Handle<Self>, app: &mut App, notification: &dyn Notification) -> bool {
+        let _ = (app, notification);
+        false
     }
 
     /// Whether the child in the provided `slot` (or one of its descendants) must insert a
@@ -417,6 +563,10 @@ pub(crate) struct ElementVTable {
     pub perform_rebuild: fn(&mut App, HandleId),
     pub did_change_dependencies: fn(&mut App, HandleId),
     pub update_inheritance: fn(&mut App, HandleId),
+    pub attach_notification_tree: fn(&mut App, HandleId),
+    pub build_scope: fn(&App, HandleId) -> Handle<BuildScope>,
+    pub mark_needs_build: fn(&mut App, HandleId),
+    pub on_notification: fn(&mut App, HandleId, &dyn Notification) -> bool,
     pub debug_expects_render_object_for_slot: fn(&App, HandleId, Option<&Slot>) -> bool,
     pub render_object: fn(&App, HandleId) -> Option<AnyRenderObject>,
     pub inflate_widget: fn(&mut App, HandleId, WidgetRef, Option<Slot>) -> AnyElement,
@@ -462,6 +612,12 @@ impl ElementVTable {
             perform_rebuild: |app, id| T::perform_rebuild(resolve(id), app),
             did_change_dependencies: |app, id| T::did_change_dependencies(resolve(id), app),
             update_inheritance: |app, id| T::update_inheritance(resolve(id), app),
+            attach_notification_tree: |app, id| T::attach_notification_tree(resolve(id), app),
+            build_scope: |app, id| T::build_scope(resolve(id), app),
+            mark_needs_build: |app, id| T::mark_needs_build(resolve(id), app),
+            on_notification: |app, id, notification| {
+                T::on_notification(resolve(id), app, notification)
+            },
             debug_expects_render_object_for_slot: |app, id, slot| {
                 T::debug_expects_render_object_for_slot(resolve(id), app, slot)
             },
@@ -525,7 +681,7 @@ impl Debug for AnyElement {
 }
 
 impl AnyElement {
-    /// The arena id behind this edge.
+    /// The arena id behind this handle.
     pub fn id(self) -> HandleId {
         self.id
     }
@@ -584,9 +740,7 @@ impl AnyElement {
 
     /// The [`BuildScope`] whose dirty list this element is in.
     pub fn build_scope(self, app: &App) -> Handle<BuildScope> {
-        self.data(app)
-            .parent_build_scope
-            .expect("an element in a tree has a build scope")
+        (self.vtable.build_scope)(app, self.id)
     }
 
     /// Where this element is in its lifecycle.
@@ -704,6 +858,27 @@ impl AnyElement {
     /// See [`Element::update_inheritance`].
     pub fn update_inheritance(self, app: &mut App) {
         (self.vtable.update_inheritance)(app, self.id);
+    }
+
+    /// See [`Element::attach_notification_tree`].
+    pub fn attach_notification_tree(self, app: &mut App) {
+        (self.vtable.attach_notification_tree)(app, self.id);
+    }
+
+    /// See [`Element::on_notification`].
+    pub fn on_notification(self, app: &mut App, notification: &dyn Notification) -> bool {
+        (self.vtable.on_notification)(app, self.id, notification)
+    }
+
+    /// Start bubbling this notification at the given build context.
+    ///
+    /// The notification will be delivered to any `NotificationListener` widgets with the
+    /// appropriate type parameters that are ancestors of the given [`BuildContext`].
+    pub fn dispatch_notification(self, app: &mut App, notification: &dyn Notification) {
+        let tree = self.data(app).notification_tree.clone();
+        if let Some(tree) = tree {
+            tree.dispatch_notification(app, notification);
+        }
     }
 
     /// See [`Element::debug_expects_render_object_for_slot`].
@@ -890,6 +1065,9 @@ impl AnyElement {
     /// `forgotten_children`. If it is, the function acts as if the child was not in
     /// `old_children`.
     ///
+    /// `forgotten_children` is a predicate so that it reads the caller's set live (in the
+    /// arena, where a reentrant `forget_child` writes it) rather than a snapshot.
+    ///
     /// This function is a convenience wrapper around [`update_child`](Self::update_child),
     /// which updates each individual child. If `slots` is non-`None`, the value for the
     /// `new_slot` argument of [`update_child`](Self::update_child) is retrieved from that
@@ -905,12 +1083,12 @@ impl AnyElement {
         app: &mut App,
         old_children: &[AnyElement],
         new_widgets: &[WidgetRef],
-        forgotten_children: Option<&HashSet<AnyElement>>,
+        forgotten_children: Option<ForgottenChildren<'_>>,
         slots: Option<&[Option<Slot>]>,
     ) -> Vec<AnyElement> {
         debug_assert!(slots.is_none_or(|slots| slots.len() == new_widgets.len()));
-        let replace_with_null_if_forgotten = |child: AnyElement| -> Option<AnyElement> {
-            let forgotten = forgotten_children.is_some_and(|forgotten| forgotten.contains(&child));
+        let replace_with_null_if_forgotten = |app: &App, child: AnyElement| -> Option<AnyElement> {
+            let forgotten = forgotten_children.is_some_and(|forgotten| forgotten(app, child));
             (!forgotten).then_some(child)
         };
         let slot_for =
@@ -958,7 +1136,7 @@ impl AnyElement {
         while (old_children_top as isize <= old_children_bottom)
             && (new_children_top as isize <= new_children_bottom)
         {
-            let old_child = replace_with_null_if_forgotten(old_children[old_children_top]);
+            let old_child = replace_with_null_if_forgotten(app, old_children[old_children_top]);
             let new_widget = &new_widgets[new_children_top];
             debug_assert!(
                 old_child.is_none_or(|old| old.lifecycle(app) == ElementLifecycle::Active)
@@ -989,7 +1167,7 @@ impl AnyElement {
             && (new_children_top as isize <= new_children_bottom)
         {
             let old_child =
-                replace_with_null_if_forgotten(old_children[old_children_bottom as usize]);
+                replace_with_null_if_forgotten(app, old_children[old_children_bottom as usize]);
             let new_widget = &new_widgets[new_children_bottom as usize];
             debug_assert!(
                 old_child.is_none_or(|old| old.lifecycle(app) == ElementLifecycle::Active)
@@ -1009,7 +1187,7 @@ impl AnyElement {
         let mut old_keyed_children: HashMap<KeyIdentity, AnyElement> = HashMap::new();
         if have_old_children {
             while old_children_top as isize <= old_children_bottom {
-                let old_child = replace_with_null_if_forgotten(old_children[old_children_top]);
+                let old_child = replace_with_null_if_forgotten(app, old_children[old_children_top]);
                 debug_assert!(
                     old_child.is_none_or(|old| old.lifecycle(app) == ElementLifecycle::Active)
                 );
@@ -1074,7 +1252,7 @@ impl AnyElement {
             && (new_children_top as isize <= new_children_bottom)
         {
             let old_child = old_children[old_children_top];
-            debug_assert!(replace_with_null_if_forgotten(old_child).is_some());
+            debug_assert!(replace_with_null_if_forgotten(app, old_child).is_some());
             debug_assert!(old_child.lifecycle(app) == ElementLifecycle::Active);
             let new_widget = &new_widgets[new_children_top];
             debug_assert!(can_update(&**old_child.widget(app), &**new_widget));
@@ -1099,7 +1277,7 @@ impl AnyElement {
         // Clean up any of the remaining middle nodes from the old list.
         if have_old_children {
             for old_child in old_keyed_children.into_values() {
-                if forgotten_children.is_none_or(|forgotten| !forgotten.contains(&old_child)) {
+                if replace_with_null_if_forgotten(app, old_child).is_some() {
                     self.deactivate_child(app, old_child);
                 }
             }
@@ -1136,9 +1314,7 @@ impl AnyElement {
     }
 
     fn update_build_scope_recursively(self, app: &mut App) {
-        let parent_scope = self
-            .parent(app)
-            .and_then(|parent| parent.data(app).parent_build_scope);
+        let parent_scope = self.parent(app).map(|parent| parent.build_scope(app));
         if self.data(app).parent_build_scope == parent_scope {
             return;
         }
@@ -1577,37 +1753,7 @@ impl AnyElement {
     /// widgets should be structured so as to only mark widgets dirty during event handlers
     /// before the frame begins, not during the build itself.
     pub fn mark_needs_build(self, app: &mut App) {
-        debug_assert!(self.lifecycle(app) != ElementLifecycle::Defunct);
-        if self.lifecycle(app) != ElementLifecycle::Active {
-            return;
-        }
-        let owner = self.owner(app).expect("an active element has an owner");
-        if cfg!(debug_assertions) {
-            if owner.debug_building(app) {
-                let target = owner
-                    .debug_current_build_target(app)
-                    .expect("building has a target");
-                debug_assert!(owner.debug_state_locked(app));
-                assert!(
-                    self.debug_is_descendant_of(app, target),
-                    "setState() or markNeedsBuild() called during build. This widget cannot \
-                     be marked as needing to build because the framework is already in the \
-                     process of building widgets. A widget can be marked as needing to be \
-                     built during the build phase only if one of its ancestors is currently \
-                     building."
-                );
-            } else {
-                assert!(
-                    !owner.debug_state_locked(app),
-                    "setState() or markNeedsBuild() called when widget tree was locked."
-                );
-            }
-        }
-        if self.dirty(app) {
-            return;
-        }
-        self.data_mut(app).dirty = true;
-        owner.schedule_build_for(app, self);
+        (self.vtable.mark_needs_build)(app, self.id);
     }
 
     /// Cause the widget to update itself. In debug builds, also verify various invariants.
@@ -1646,6 +1792,16 @@ impl AnyElement {
             .as_ref()
             .is_some_and(|dependencies| !dependencies.is_empty())
             || data.had_unsatisfied_dependencies
+    }
+
+    /// The notification chain this element dispatches into.
+    pub fn notification_tree(self, app: &App) -> Option<Rc<NotificationNode>> {
+        self.data(app).notification_tree.clone()
+    }
+
+    /// Sets the notification chain: a notifiable element chains a node for itself here.
+    pub fn set_notification_tree(self, app: &mut App, tree: Option<Rc<NotificationNode>>) {
+        self.data_mut(app).notification_tree = tree;
     }
 
     pub(crate) fn inherited_elements(self, app: &App) -> Option<Rc<HashMap<TypeId, AnyElement>>> {
@@ -1753,7 +1909,7 @@ pub trait ElementBase: Element {
         );
         let parent_depth = parent.map_or(0, |parent| parent.depth(app));
         let parent_owner = parent.and_then(|parent| parent.owner(app));
-        let parent_scope = parent.and_then(|parent| parent.data(app).parent_build_scope);
+        let parent_scope = parent.map(|parent| parent.build_scope(app));
         let data = this.data_mut(app);
         data.parent = parent;
         data.slot = new_slot;
@@ -1771,6 +1927,7 @@ pub trait ElementBase: Element {
             owner.register_global_key(app, key, this);
         }
         this.update_inheritance(app);
+        this.attach_notification_tree(app);
     }
 
     /// `Element.update`.
@@ -1834,6 +1991,7 @@ pub trait ElementBase: Element {
         }
         data.had_unsatisfied_dependencies = false;
         this.update_inheritance(app);
+        this.attach_notification_tree(app);
         if this.dirty(app) {
             owner.schedule_build_for(app, this);
         }
@@ -1885,6 +2043,59 @@ pub trait ElementBase: Element {
             "didChangeDependencies"
         ));
         this.mark_needs_build(app);
+    }
+
+    /// `Element.attachNotificationTree`: inherit the parent's notification chain.
+    fn attach_notification_tree(self: Handle<Self>, app: &mut App) {
+        let this = self.as_element();
+        let tree = this
+            .parent(app)
+            .and_then(|parent| parent.data(app).notification_tree.clone());
+        this.data_mut(app).notification_tree = tree;
+    }
+
+    /// `Element.buildScope`: the scope inherited from the parent at mount.
+    fn build_scope(self: Handle<Self>, app: &App) -> Handle<BuildScope> {
+        self.as_element()
+            .data(app)
+            .parent_build_scope
+            .expect("an element in a tree has a build scope")
+    }
+
+    /// `Element.markNeedsBuild`.
+    fn mark_needs_build(self: Handle<Self>, app: &mut App) {
+        let this = self.as_element();
+        debug_assert!(this.lifecycle(app) != ElementLifecycle::Defunct);
+        if this.lifecycle(app) != ElementLifecycle::Active {
+            return;
+        }
+        let owner = this.owner(app).expect("an active element has an owner");
+        if cfg!(debug_assertions) {
+            if owner.debug_building(app) {
+                let target = owner
+                    .debug_current_build_target(app)
+                    .expect("building has a target");
+                debug_assert!(owner.debug_state_locked(app));
+                assert!(
+                    this.debug_is_descendant_of(app, target),
+                    "setState() or markNeedsBuild() called during build. This widget cannot \
+                     be marked as needing to build because the framework is already in the \
+                     process of building widgets. A widget can be marked as needing to be \
+                     built during the build phase only if one of its ancestors is currently \
+                     building."
+                );
+            } else {
+                assert!(
+                    !owner.debug_state_locked(app),
+                    "setState() or markNeedsBuild() called when widget tree was locked."
+                );
+            }
+        }
+        if this.dirty(app) {
+            return;
+        }
+        this.data_mut(app).dirty = true;
+        owner.schedule_build_for(app, this);
     }
 
     /// `Element._updateInheritance`.

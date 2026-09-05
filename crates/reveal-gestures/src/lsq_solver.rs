@@ -207,20 +207,16 @@ impl LeastSquaresSolver {
             result.coefficients[i] /= r.get(i, i);
         }
 
-        let mut y_mean = 0.0;
-        for h in 0..m {
-            y_mean += self.y[h];
-        }
-        y_mean /= m as f64;
+        let y_mean = self.y[..m].iter().sum::<f64>() / m as f64;
 
         let mut sum_squared_error = 0.0;
         let mut sum_squared_total = 0.0;
         for h in 0..m {
             let mut term = 1.0;
             let mut err = self.y[h] - result.coefficients[0];
-            for i in 1..n {
+            for coefficient in &result.coefficients[1..n] {
                 term *= self.x[h];
-                err -= term * result.coefficients[i];
+                err -= term * coefficient;
             }
             sum_squared_error += self.w[h] * self.w[h] * err * err;
             let v = self.y[h] - y_mean;

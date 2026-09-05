@@ -6,6 +6,7 @@ use reveal_foundation::{App, Handle, Listener};
 
 use super::element::{AnyElement, ElementLifecycle};
 use super::widget::GlobalKeyId;
+use crate::widgets::focus_manager::FocusManager;
 
 /// A class that determines the scope of a `BuildOwner::build_scope` operation.
 ///
@@ -217,6 +218,7 @@ pub type BuildScopeCallback = Box<dyn FnOnce(&mut App)>;
 pub struct BuildOwner {
     /// Called on each build pass when the first buildable element is marked dirty.
     on_build_scheduled: Option<Listener>,
+    focus_manager: Handle<FocusManager>,
     inactive_elements: InactiveElements,
     scheduled_flush_dirty_elements: bool,
     global_key_registry: HashMap<GlobalKeyId, AnyElement>,
@@ -228,10 +230,26 @@ pub struct BuildOwner {
 impl BuildOwner {
     /// Creates an object that manages widgets.
     ///
-    /// Flutter's `focusManager` argument waits with the focus system.
+    /// This constructs a new [`FocusManager`] and registers its global input handlers via
+    /// [`FocusManager::register_global_handlers`], which will modify static state. Callers
+    /// wishing to avoid altering this state can explicitly pass a focus manager to
+    /// [`with_focus_manager`](Self::with_focus_manager), Dart's `focusManager` argument.
     pub fn new(app: &mut App, on_build_scheduled: Option<Listener>) -> Handle<BuildOwner> {
+        let focus_manager = FocusManager::new(app);
+        focus_manager.register_global_handlers(app);
+        BuildOwner::with_focus_manager(app, on_build_scheduled, focus_manager)
+    }
+
+    /// Creates an object that manages widgets, with the [`FocusManager`] Dart's `focusManager`
+    /// argument supplies; its global input handlers are not registered.
+    pub fn with_focus_manager(
+        app: &mut App,
+        on_build_scheduled: Option<Listener>,
+        focus_manager: Handle<FocusManager>,
+    ) -> Handle<BuildOwner> {
         app.create(BuildOwner {
             on_build_scheduled,
+            focus_manager,
             inactive_elements: InactiveElements::default(),
             scheduled_flush_dirty_elements: false,
             global_key_registry: HashMap::new(),
@@ -239,6 +257,23 @@ impl BuildOwner {
             debug_building: false,
             debug_current_build_target: None,
         })
+    }
+
+    /// The object in charge of the focus tree.
+    ///
+    /// Rarely used directly. Instead, consider using `FocusScope::of` to obtain the
+    /// `FocusScopeNode` for a given `BuildContext`.
+    pub fn focus_manager(self: Handle<Self>, app: &App) -> Handle<FocusManager> {
+        app.get(self).focus_manager
+    }
+
+    /// Replaces the object in charge of the focus tree (Dart's mutable `focusManager` field).
+    pub fn set_focus_manager(
+        self: Handle<Self>,
+        app: &mut App,
+        focus_manager: Handle<FocusManager>,
+    ) {
+        app.get_mut(self).focus_manager = focus_manager;
     }
 
     /// Replaces the `on_build_scheduled` callback.

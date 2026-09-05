@@ -17,7 +17,8 @@ use crate::gesture_settings::DeviceGestureSettings;
 use crate::recognizer::{
     GestureRecognizer, GestureRecognizerData, GestureRecognizerState, OffsetPair, OneSequenceData,
     OneSequenceGestureRecognizer, PrimaryPointerData, PrimaryPointerGestureRecognizer,
-    RecognizerLeaf, RecognizerLeafData, UNSET_TOUCH_SLOP,
+    PrimaryPointerLeaf, PrimaryPointerLeafData, RecognizerLeaf, RecognizerLeafData,
+    UNSET_TOUCH_SLOP,
 };
 use crate::team::GestureArenaTeam;
 use crate::velocity::Velocity;
@@ -887,6 +888,9 @@ impl RecognizerLeafData for LongPressGestureRecognizer {
     fn one_sequence_mut(&mut self) -> &mut OneSequenceData {
         &mut self.one_sequence
     }
+}
+
+impl PrimaryPointerLeafData for LongPressGestureRecognizer {
     fn primary(&self) -> &PrimaryPointerData {
         &self.primary
     }
@@ -896,6 +900,30 @@ impl RecognizerLeafData for LongPressGestureRecognizer {
 }
 
 impl RecognizerLeaf for LongPressGestureRecognizer {
+    fn add_allowed_pointer(self: Handle<Self>, app: &mut App, event: PointerDownEvent) {
+        PrimaryPointerGestureRecognizer::add_allowed_pointer(self, app, event);
+    }
+
+    fn handle_non_allowed_pointer(self: Handle<Self>, app: &mut App, event: &PointerDownEvent) {
+        PrimaryPointerGestureRecognizer::handle_non_allowed_pointer(self, app, event);
+    }
+
+    fn handle_event(self: Handle<Self>, app: &mut App, event: PointerEvent) {
+        PrimaryPointerGestureRecognizer::handle_event(self, app, event);
+    }
+
+    fn did_stop_tracking_last_pointer(self: Handle<Self>, app: &mut App, pointer: i64) {
+        PrimaryPointerGestureRecognizer::did_stop_tracking_last_pointer(self, app, pointer);
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        PrimaryPointerGestureRecognizer::dispose(self, app);
+    }
+
+    fn reject_gesture(self: Handle<Self>, app: &mut App, pointer: i64) {
+        PrimaryPointerGestureRecognizer::reject_gesture(self, app, pointer);
+    }
+
     fn is_pointer_allowed(self: Handle<Self>, app: &App, event: &PointerDownEvent) -> bool {
         let recognizer = app.get(self);
         let allowed = match event.buttons {
@@ -931,6 +959,28 @@ impl RecognizerLeaf for LongPressGestureRecognizer {
         allowed && GestureRecognizer::is_pointer_allowed(self, app, event)
     }
 
+    fn resolve(self: Handle<Self>, app: &mut App, disposition: GestureDisposition) {
+        if disposition == GestureDisposition::Rejected {
+            if app.get(self).long_press_accepted {
+                self.reset(app);
+            } else {
+                self.check_long_press_cancel(app);
+            }
+        }
+        OneSequenceGestureRecognizer::resolve(self, app, disposition);
+    }
+
+    fn accept_gesture(self: Handle<Self>, _app: &mut App, _pointer: i64) {
+        // Winning the arena isn't important here since it may happen from a sweep.
+        // Explicitly exceeding the deadline puts the gesture in accepted state.
+    }
+
+    fn debug_description(self: Handle<Self>) -> &'static str {
+        "long press"
+    }
+}
+
+impl PrimaryPointerLeaf for LongPressGestureRecognizer {
     fn did_exceed_deadline(self: Handle<Self>, app: &mut App) {
         self.resolve(app, GestureDisposition::Accepted);
         app.get_mut(self).long_press_accepted = true;
@@ -984,26 +1034,6 @@ impl RecognizerLeaf for LongPressGestureRecognizer {
                 self.check_long_press_move_update(app, &event);
             }
         }
-    }
-
-    fn resolve(self: Handle<Self>, app: &mut App, disposition: GestureDisposition) {
-        if disposition == GestureDisposition::Rejected {
-            if app.get(self).long_press_accepted {
-                self.reset(app);
-            } else {
-                self.check_long_press_cancel(app);
-            }
-        }
-        OneSequenceGestureRecognizer::resolve(self, app, disposition);
-    }
-
-    fn accept_gesture(self: Handle<Self>, _app: &mut App, _pointer: i64) {
-        // Winning the arena isn't important here since it may happen from a sweep.
-        // Explicitly exceeding the deadline puts the gesture in accepted state.
-    }
-
-    fn debug_description(self: Handle<Self>) -> &'static str {
-        "long press"
     }
 }
 

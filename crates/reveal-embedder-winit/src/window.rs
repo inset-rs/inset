@@ -5,9 +5,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use reveal_embedder::{
-    Brightness, EmbedderClient, FontSource, Frame, Picture, Platform, PlatformRef, PointerChange,
-    PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind, SystemMouseCursorKind,
-    TargetPlatform, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding, ViewRef,
+    Brightness, EmbedderClient, FontSource, Frame, KeyData, KeyEventDeviceType, KeyEventType,
+    Picture, Platform, PlatformRef, PointerChange, PointerData, PointerDataPacket,
+    PointerDeviceKind, PointerSignalKind, SystemMouseCursorKind, TargetPlatform, View,
+    ViewConstraints, ViewId, ViewMetrics, ViewPadding, ViewRef,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
@@ -15,6 +16,7 @@ use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::window::{CursorIcon, Window, WindowId};
 
 use crate::gpu::Gpu;
+use crate::keys;
 use crate::{ImplicitViewConfig, WinitEmbedder};
 
 const IMPLICIT_VIEW: ViewId = ViewId(0);
@@ -196,6 +198,8 @@ struct WinitApp<C> {
     mouse_down: bool,
     pointer_id: i64,
     embedder_id: i64,
+    /// The logical key each held physical key went down with, keyed by USB HID usage.
+    pressing_records: HashMap<u64, u64>,
 }
 
 pub(crate) fn run<C: EmbedderClient + 'static>(
@@ -219,6 +223,7 @@ pub(crate) fn run<C: EmbedderClient + 'static>(
         mouse_down: false,
         pointer_id: 0,
         embedder_id: 0,
+        pressing_records: HashMap::new(),
     };
     event_loop.run_app(&mut host).expect("run winit event loop");
 }
@@ -420,6 +425,54 @@ impl<C: EmbedderClient> WinitApp<C> {
         }
     }
 
+    fn send_key(&mut self, event: winit::event::KeyEvent, is_synthetic: bool) {
+        let Some(data) = self.key_data(event, is_synthetic) else {
+            return;
+        };
+        if let Some(client) = &mut self.client {
+            // The window is the last stop for the event: there is no native component
+            // below it to keep an unhandled key from.
+            let _handled = client.key_data(data);
+        }
+    }
+
+    /// A winit key event as dart:ui [`KeyData`], or `None` for a key this host
+    /// cannot name in Flutter's tables.
+    fn key_data(&mut self, event: winit::event::KeyEvent, is_synthetic: bool) -> Option<KeyData> {
+        let physical = keys::physical_key_usage(event.physical_key)?;
+        let event_type = match (event.state, event.repeat) {
+            (ElementState::Pressed, false) => KeyEventType::Down,
+            (ElementState::Pressed, true) => KeyEventType::Repeat,
+            (ElementState::Released, _) => KeyEventType::Up,
+        };
+        let logical = keys::logical_key_id(&event.logical_key, event.location);
+        // Flutter's embedders remember which logical key a physical key went down
+        // with, so its repeats and its up report that one even when the modifiers
+        // changed in between (`_pressingRecords` in the engine's `KeyboardConverter`).
+        let logical = match event_type {
+            KeyEventType::Down => {
+                let logical = logical?;
+                self.pressing_records.insert(physical, logical);
+                logical
+            }
+            KeyEventType::Repeat => self.pressing_records.get(&physical).copied().or(logical)?,
+            KeyEventType::Up => self.pressing_records.remove(&physical).or(logical)?,
+        };
+        let character = match event_type {
+            KeyEventType::Up => None,
+            KeyEventType::Down | KeyEventType::Repeat => keys::character_of(event.text.as_deref()),
+        };
+        Some(KeyData {
+            time_stamp: self.platform.elapsed(),
+            event_type,
+            device_type: KeyEventDeviceType::Keyboard,
+            physical,
+            logical,
+            character,
+            synthesized: is_synthetic,
+        })
+    }
+
     fn pointer_packet(
         &mut self,
         window_id: WindowId,
@@ -564,6 +617,13 @@ impl<C: EmbedderClient> ApplicationHandler for WinitApp<C> {
                         PointerChange::Hover
                     },
                 );
+            }
+            WindowEvent::KeyboardInput {
+                event,
+                is_synthetic,
+                ..
+            } => {
+                self.send_key(event, is_synthetic);
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 self.send_scroll(id, delta);

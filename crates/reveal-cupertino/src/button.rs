@@ -1,10 +1,9 @@
 //! Flutter counterpart: `cupertino/button.dart`.
 //!
-//! `FocusableActionDetector` (focus, keyboard activation, the focus highlight) and
-//! `Semantics` wait with the focus system and accessibility: the button wraps its gesture
-//! detector directly, so `focus_color` is never shown and `is_focused` stays false.
+//! `Semantics(button: true)` waits with accessibility.
 
 use std::any::TypeId;
+use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 use std::time::Duration;
@@ -13,7 +12,7 @@ use reveal_animation::{
     AnimationBehavior, AnimationController, AnyAnimation, CurveTween, Curves, Tween,
 };
 use reveal_embedder::{Brightness, Size, TargetPlatform};
-use reveal_foundation::{App, Handle, K_IS_WEB, Listener};
+use reveal_foundation::{App, Handle, K_IS_WEB, Listener, ValueChanged};
 use reveal_gestures::{
     LongPressGestureRecognizer, TapDownDetails, TapGestureRecognizer, TapMoveDetails, TapUpDetails,
 };
@@ -25,7 +24,8 @@ use reveal_rendering::{BoxConstraints, HitTestBehavior};
 use reveal_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use reveal_services::{MouseCursor, MouseCursorRef, SystemMouseCursors};
 use reveal_widgets::{
-    Align, BuildContext, ConstrainedBox, DecoratedBox, DefaultTextStyle, FadeTransition,
+    Action, ActivateIntent, Align, AnyAction, AnyFocusNode, BuildContext, CallbackAction,
+    ConstrainedBox, DecoratedBox, DefaultTextStyle, FadeTransition, FocusableActionDetector,
     GestureRecognizerFactories, GestureRecognizerFactory, GestureRecognizerFactoryWithHandlers,
     IconTheme, IntoWidget, KeyRef, MediaQuery, MouseRegion, Padding, RawGestureDetector,
     SingleTickerProviderStateMixin, SingleTickerProviderStateMixinData, State, StateData,
@@ -171,6 +171,26 @@ pub struct CupertinoButton {
     /// is enabled, `SystemMouseCursors.click` is used on Web and `MouseCursor.defer` is used
     /// on other platforms.
     pub mouse_cursor: Option<MouseCursorRef>,
+    /// An optional focus node to use as the focus node for this widget.
+    ///
+    /// If one is not supplied, then one will be automatically allocated, owned, and managed
+    /// by this widget. The widget will be focusable even if a `focus_node` is not supplied.
+    /// If supplied, the given `focus_node` will be _hosted_ by this widget, but not owned.
+    /// See `FocusNode` for more information on what being hosted and/or owned implies.
+    pub focus_node: Option<AnyFocusNode>,
+    /// Handler called when the focus changes.
+    ///
+    /// Called with true if this widget's node gains focus, and false if it loses focus.
+    pub on_focus_change: Option<ValueChanged<bool>>,
+    /// True if this widget will be selected as the initial focus when no other node in its
+    /// scope is currently focused.
+    ///
+    /// Ideally, there is only one widget with autofocus set in each `FocusScope`. If there is
+    /// more than one widget with autofocus set, then the first one added to the tree will get
+    /// focus.
+    ///
+    /// Defaults to false.
+    pub autofocus: bool,
     /// The callback that is called when the button is long-pressed.
     ///
     /// If [`on_pressed`](Self::on_pressed) and [`on_long_press`](Self::on_long_press)
@@ -246,6 +266,9 @@ impl CupertinoButton {
             border_radius: None,
             alignment: AlignmentGeometry::CENTER,
             focus_color: None,
+            focus_node: None,
+            on_focus_change: None,
+            autofocus: false,
             mouse_cursor: None,
             on_long_press: None,
             on_pressed,
@@ -320,6 +343,27 @@ impl CupertinoButton {
         self
     }
 
+    /// Dart `CupertinoButton(focusNode:)`.
+    pub fn focus_node(mut self, focus_node: AnyFocusNode) -> CupertinoButton {
+        self.focus_node = Some(focus_node);
+        self
+    }
+
+    /// Dart `CupertinoButton(onFocusChange:)`.
+    pub fn on_focus_change(
+        mut self,
+        on_focus_change: impl Fn(&mut App, bool) + 'static,
+    ) -> CupertinoButton {
+        self.on_focus_change = Some(Rc::new(on_focus_change));
+        self
+    }
+
+    /// Dart `CupertinoButton(autofocus:)`.
+    pub fn autofocus(mut self, autofocus: bool) -> CupertinoButton {
+        self.autofocus = autofocus;
+        self
+    }
+
     /// Dart `CupertinoButton(mouseCursor:)`.
     pub fn mouse_cursor(mut self, mouse_cursor: MouseCursorRef) -> CupertinoButton {
         self.mouse_cursor = Some(mouse_cursor);
@@ -378,6 +422,7 @@ impl StatefulWidget for CupertinoButton {
             animation_controller: None,
             opacity_animation: None,
             is_focused: false,
+            action_map: HashMap::new(),
             button_held_down: false,
             tap_in_progress: false,
         }
@@ -399,6 +444,8 @@ pub struct CupertinoButtonState {
     animation_controller: Option<Handle<AnimationController>>,
     opacity_animation: Option<AnyAnimation<f64>>,
     is_focused: bool,
+    /// Dart's `late final _actionMap`, filled in `init_state` (an action is an arena object).
+    action_map: HashMap<TypeId, AnyAction>,
     button_held_down: bool,
     tap_in_progress: bool,
 }
@@ -490,6 +537,10 @@ impl CupertinoButtonState {
             .expect("the button has been laid out")
     }
 
+    fn on_show_focus_highlight(self: Handle<Self>, app: &mut App, show_highlight: bool) {
+        self.set_state(app, |state| state.is_focused = show_highlight);
+    }
+
     fn handle_tap(self: Handle<Self>, app: &mut App) {
         if let Some(on_pressed) = self.widget(app).on_pressed.clone() {
             on_pressed.call(app);
@@ -558,6 +609,16 @@ impl State for CupertinoButtonState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         app.get_mut(self).is_focused = false;
+        let activate = CallbackAction::<ActivateIntent>::new(
+            app,
+            Rc::new(move |app: &mut App, _intent: &ActivateIntent| {
+                self.handle_tap(app);
+                None
+            }),
+        );
+        app.get_mut(self)
+            .action_map
+            .insert(TypeId::of::<ActivateIntent>(), activate.as_action());
         let animation_controller = AnimationController::create(
             app,
             Some(0.0),
@@ -590,6 +651,9 @@ impl State for CupertinoButtonState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
+        for action in std::mem::take(&mut app.get_mut(self).action_map).into_values() {
+            app.destroy(action.id());
+        }
         let animation_controller = self.animation_controller(app);
         animation_controller.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
@@ -786,34 +850,46 @@ impl State for CupertinoButtonState {
             .get(self)
             .opacity_animation
             .expect("created in init_state");
-        // `FocusableActionDetector` waits with the focus system; `Semantics(button: true)`
-        // with accessibility.
-        MouseRegion::new()
-            .cursor(effective_mouse_cursor)
-            .child(
-                RawGestureDetector::new()
-                    .behavior(HitTestBehavior::Opaque)
-                    .gestures(gestures)
-                    .child(
-                        ConstrainedBox::new(constraints).child(
-                            FadeTransition::new(opacity).child(
-                                DecoratedBox::new(shape_decoration).child(
-                                    Padding::new(padding).child(
-                                        Align::new()
-                                            .alignment(widget.alignment)
-                                            .width_factor(1.0)
-                                            .height_factor(1.0)
-                                            .child(DefaultTextStyle::new(
-                                                text_style,
-                                                IconTheme::new(icon_theme, widget.child.clone())
-                                                    .into_widget(),
-                                            )),
-                                    ),
+        let mut detector = FocusableActionDetector::new(
+            RawGestureDetector::new()
+                .behavior(HitTestBehavior::Opaque)
+                .gestures(gestures)
+                .child(
+                    ConstrainedBox::new(constraints).child(
+                        FadeTransition::new(opacity).child(
+                            DecoratedBox::new(shape_decoration).child(
+                                Padding::new(padding).child(
+                                    Align::new()
+                                        .alignment(widget.alignment)
+                                        .width_factor(1.0)
+                                        .height_factor(1.0)
+                                        .child(DefaultTextStyle::new(
+                                            text_style,
+                                            IconTheme::new(icon_theme, widget.child.clone())
+                                                .into_widget(),
+                                        )),
                                 ),
                             ),
                         ),
                     ),
-            )
+                ),
+        )
+        .actions(app.get(self).action_map.clone())
+        .autofocus(widget.autofocus)
+        .on_show_focus_highlight(move |app, show_highlight| {
+            self.on_show_focus_highlight(app, show_highlight)
+        })
+        .enabled(enabled);
+        if let Some(focus_node) = widget.focus_node {
+            detector = detector.focus_node(focus_node);
+        }
+        if let Some(on_focus_change) = widget.on_focus_change.clone() {
+            detector = detector.on_focus_change(move |app, focused| on_focus_change(app, focused));
+        }
+        // `Semantics(button: true)` waits with accessibility.
+        MouseRegion::new()
+            .cursor(effective_mouse_cursor)
+            .child(detector)
             .into_widget()
     }
 }
@@ -826,7 +902,9 @@ mod tests {
 
     use reveal_embedder::{PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
     use reveal_gestures::GestureBinding;
-    use reveal_widgets::{Directionality, GlobalKey, SizedBox};
+    use reveal_widgets::{
+        Actions, Builder, Directionality, FocusNode, FocusNodeLeaf, GlobalKey, SizedBox,
+    };
 
     use super::*;
     use crate::test_support::{build, pump};
@@ -878,6 +956,41 @@ mod tests {
             state,
             presses,
         }
+    }
+
+    #[test]
+    fn an_activate_intent_presses_the_button_and_autofocus_takes_the_supplied_node() {
+        let mut app = crate::test_support::app();
+        let node = FocusNode::new(&mut app).as_node();
+        let presses = Rc::new(Cell::new(0));
+        let on_pressed = Listener::new({
+            let presses = Rc::clone(&presses);
+            move |_app| presses.set(presses.get() + 1)
+        });
+        let inner_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
+        let child = Builder::new({
+            let inner_context = Rc::clone(&inner_context);
+            move |_app, context| {
+                inner_context.set(Some(context));
+                SizedBox::square(Some(40.0)).into_widget()
+            }
+        });
+        build(
+            &mut app,
+            CupertinoButton::new(child.into_widget(), Some(on_pressed))
+                .focus_node(node)
+                .autofocus(true)
+                .into_widget(),
+        );
+        pump(&mut app, Duration::ZERO);
+        assert!(
+            node.has_primary_focus(&app),
+            "autofocus focused the supplied node"
+        );
+
+        let context = inner_context.get().expect("the child built");
+        Actions::invoke(&mut app, context, &ActivateIntent);
+        assert_eq!(presses.get(), 1, "ActivateIntent runs onPressed");
     }
 
     fn opacity(mounted: &Mounted) -> f64 {

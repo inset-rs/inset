@@ -312,6 +312,16 @@ impl<T: 'static> AnimationVTable<T> {
 }
 
 impl<T: 'static> AnyAnimation<T> {
+    /// The arena id behind this handle.
+    pub fn id(self) -> HandleId {
+        self.id
+    }
+
+    /// Dart's `animation as A`: the typed handle when this animation is an `A`, else `None`.
+    pub fn downcast<A: 'static>(self, app: &App) -> Option<Handle<A>> {
+        app.handle::<A>(self.id)
+    }
+
     /// Calls the listener every time the value of the animation changes.
     ///
     /// Listeners can be removed with [`remove_listener`](AnyAnimation::remove_listener).

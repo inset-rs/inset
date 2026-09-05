@@ -8,12 +8,13 @@
 
 use std::time::Duration;
 
-use reveal_embedder::{EmbedderClient, Frame, PlatformRef, PointerDataPacket, ViewId};
+use reveal_embedder::{EmbedderClient, Frame, KeyData, PlatformRef, PointerDataPacket, ViewId};
 use reveal_foundation::App;
 use reveal_gestures::GestureBinding;
 use reveal_painting::PaintingBinding;
 use reveal_rendering::RendererBinding;
 use reveal_scheduler::SchedulerBinding;
+use reveal_services::KeyEventManager;
 
 /// Host-facing isolate: [`App`] plus the methods the embedder pushes.
 pub struct Shell {
@@ -74,6 +75,12 @@ impl EmbedderClient for Shell {
         self.app.drain_microtasks();
     }
 
+    fn key_data(&mut self, data: KeyData) -> bool {
+        let handled = KeyEventManager::instance(&mut self.app).handle_key_data(&mut self.app, data);
+        self.app.drain_microtasks();
+        handled
+    }
+
     fn wake(&mut self, elapsed: Duration) {
         self.advance_clock(elapsed);
     }
@@ -88,12 +95,13 @@ mod tests {
     use std::time::Duration;
 
     use reveal_embedder::{
-        EmbedderClient, Frame, Picture, Platform, PointerChange, PointerData, PointerDataPacket,
-        PointerDeviceKind, View, ViewId, ViewMetrics, ViewRef,
+        EmbedderClient, Frame, KeyData, KeyEventType, Picture, Platform, PointerChange,
+        PointerData, PointerDataPacket, PointerDeviceKind, View, ViewId, ViewMetrics, ViewRef,
     };
     use reveal_foundation::App;
     use reveal_gestures::{GestureBinding, PointerRoute};
     use reveal_scheduler::SchedulerBinding;
+    use reveal_services::{HardwareKeyboard, KeyEvent, LogicalKeyboardKey, PhysicalKeyboardKey};
 
     use super::Shell;
 
@@ -193,6 +201,38 @@ mod tests {
             ..PointerData::default()
         }]));
         assert!(ran.get());
+    }
+
+    #[test]
+    fn key_data_reaches_the_hardware_keyboard() {
+        let seen = Rc::new(Cell::new(0));
+        let seen_flag = Rc::clone(&seen);
+        let platform = std::rc::Rc::new(RecordingPlatform {
+            frames: Arc::new(AtomicUsize::new(0)),
+            view: None,
+        });
+        let mut shell = Shell::new(platform, |app| {
+            HardwareKeyboard::instance(app).add_handler(
+                app,
+                Rc::new(move |_app: &mut App, _event: &KeyEvent| {
+                    seen_flag.set(seen_flag.get() + 1);
+                    true
+                }),
+            );
+        });
+
+        let key_a = KeyData {
+            event_type: KeyEventType::Down,
+            physical: PhysicalKeyboardKey::KEY_A.usb_hid_usage,
+            logical: LogicalKeyboardKey::KEY_A.key_id,
+            character: Some("a".to_owned()),
+            ..KeyData::default()
+        };
+        assert!(shell.key_data(key_a), "the handler claimed the event");
+        assert_eq!(seen.get(), 1);
+
+        let keyboard = HardwareKeyboard::instance(shell.app());
+        assert!(keyboard.is_logical_key_pressed(shell.app(), LogicalKeyboardKey::KEY_A));
     }
 
     #[test]

@@ -1,12 +1,12 @@
 //! Flutter counterpart: `rendering/paragraph.dart` (`RenderParagraph`).
 //!
 //! The paragraph is a leaf here: inline children (`WidgetSpan` placeholders), selection
-//! (`SelectionRegistrar` / `_SelectableFragment`), the fade overflow shader, intrinsics and
-//! dry layout, semantics, and `RelayoutWhenSystemFontsChangeMixin` wait; see `PORTING.md`.
+//! (`SelectionRegistrar` / `_SelectableFragment`), the fade overflow shader, semantics, and
+//! `RelayoutWhenSystemFontsChangeMixin` wait; see `PORTING.md`.
 
 use reveal_embedder::{
-    BoxHeightStyle, BoxWidthStyle, ClipOp, FontCollection, Offset, Rect, Size, TextAlign, TextBox,
-    TextDirection, TextHeightBehavior, TextPosition, TextRange,
+    BoxHeightStyle, BoxWidthStyle, ClipOp, FontCollection, Offset, Rect, Size, TextAlign,
+    TextBaseline, TextBox, TextDirection, TextHeightBehavior, TextPosition, TextRange,
 };
 use reveal_foundation::{App, Handle};
 use reveal_painting::{
@@ -16,7 +16,7 @@ use reveal_painting::{
 use reveal_services::TextSelection;
 
 use crate::box_::{BoxConstraints, BoxHitTestResult, RenderBox, RenderBoxData};
-use crate::object::{AnyRenderObject, RenderHandle, RenderObject, RenderObjectData};
+use crate::object::{AnyRenderObject, Constraints, RenderHandle, RenderObject, RenderObjectData};
 use crate::painting_context::PaintingContext;
 
 const K_ELLIPSIS: &str = "\u{2026}";
@@ -30,6 +30,7 @@ pub struct RenderParagraph {
     render_object: RenderObjectData,
     render_box: RenderBoxData,
     text_painter: TextPainter,
+    text_intrinsics: Option<TextPainter>,
     fonts_override: Option<Handle<FontCollection>>,
     soft_wrap: bool,
     overflow: TextOverflow,
@@ -55,6 +56,7 @@ impl RenderParagraph {
                 render_object: RenderObjectData::new(),
                 render_box: RenderBoxData::new(),
                 text_painter,
+                text_intrinsics: None,
                 fonts_override: fonts,
                 soft_wrap: true,
                 overflow: TextOverflow::Clip,
@@ -277,6 +279,38 @@ impl RenderParagraph {
         painter.preferred_line_height(fonts)
     }
 
+    /// Flutter's `_textIntrinsics`: a second painter kept in sync with this paragraph's own,
+    /// together with the collection it shapes against.
+    ///
+    /// Laying the paragraph's painter out for intrinsics would destroy the state its own layout
+    /// left behind.
+    fn text_intrinsics_with_fonts(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> (&mut TextPainter, &mut FontCollection) {
+        let fonts = self.fonts(app);
+        let (this, fonts) = app.get_disjoint_mut(self.handle(), fonts);
+        let painter = &this.text_painter;
+        let intrinsics = this.text_intrinsics.get_or_insert_with(TextPainter::new);
+        intrinsics.set_text(painter.text().cloned());
+        intrinsics.set_text_align(painter.text_align());
+        intrinsics.set_text_direction(painter.text_direction());
+        intrinsics.set_text_scaler(painter.text_scaler().clone());
+        intrinsics.set_max_lines(painter.max_lines());
+        intrinsics.set_ellipsis(painter.ellipsis().map(str::to_owned));
+        intrinsics.set_text_width_basis(painter.text_width_basis());
+        intrinsics.set_text_height_behavior(painter.text_height_behavior());
+        (intrinsics, fonts)
+    }
+
+    /// Flutter's `_computeIntrinsicHeight`: the height the text takes at `width`.
+    fn compute_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        let max_width = self.adjust_max_width(app, width);
+        let (intrinsics, fonts) = self.text_intrinsics_with_fonts(app);
+        intrinsics.layout(fonts, width, max_width);
+        intrinsics.height()
+    }
+
     fn adjust_max_width(self: RenderHandle<Self>, app: &App, max_width: f64) -> f64 {
         if self.get(app).soft_wrap || self.get(app).overflow == TextOverflow::Ellipsis {
             max_width
@@ -483,6 +517,69 @@ impl RenderObject for RenderParagraph {
 impl RenderBox for RenderParagraph {
     crate::render_box_accessors!();
 
+    fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, _height: f64) -> f64 {
+        let (intrinsics, fonts) = self.text_intrinsics_with_fonts(app);
+        intrinsics.layout(fonts, 0.0, f64::INFINITY);
+        intrinsics.min_intrinsic_width()
+    }
+
+    fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, _height: f64) -> f64 {
+        let (intrinsics, fonts) = self.text_intrinsics_with_fonts(app);
+        intrinsics.layout(fonts, 0.0, f64::INFINITY);
+        intrinsics.max_intrinsic_width()
+    }
+
+    fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        self.compute_intrinsic_height(app, width)
+    }
+
+    fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        self.compute_intrinsic_height(app, width)
+    }
+
+    fn compute_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        let max_width = self.adjust_max_width(app, constraints.max_width);
+        let (intrinsics, fonts) = self.text_intrinsics_with_fonts(app);
+        intrinsics.layout(fonts, constraints.min_width, max_width);
+        let size = intrinsics.size();
+        constraints.constrain(size)
+    }
+
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        _baseline: TextBaseline,
+    ) -> Option<f64> {
+        debug_assert!(!self.as_object().debug_needs_layout(app));
+        let constraints = self.constraints(app);
+        debug_assert!(constraints.debug_assert_is_valid(false));
+        self.layout_text_with_constraints(app, constraints);
+        // Since the metric for the ideographic baseline is inaccurate and the non-alphabetic
+        // baselines are based off of the alphabetic baseline, the alphabetic one is used for
+        // now to produce correct layouts.
+        Some(
+            self.painter(app)
+                .compute_distance_to_actual_baseline(TextBaseline::Alphabetic),
+        )
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        _baseline: TextBaseline,
+    ) -> Option<f64> {
+        debug_assert!(constraints.debug_assert_is_valid(false));
+        let max_width = self.adjust_max_width(app, constraints.max_width);
+        let (intrinsics, fonts) = self.text_intrinsics_with_fonts(app);
+        intrinsics.layout(fonts, constraints.min_width, max_width);
+        Some(intrinsics.compute_distance_to_actual_baseline(TextBaseline::Alphabetic))
+    }
+
     fn hit_test_self(self: RenderHandle<Self>, _app: &App, _position: Offset) -> bool {
         true
     }
@@ -544,6 +641,58 @@ mod tests {
         root.as_object()
             .schedule_initial_paint(app, CompositedLayer::default());
         (paragraph, root)
+    }
+
+    /// `paragraph_test.dart`: the minimum intrinsic width is the widest word, the maximum is the
+    /// whole text on one line, and the intrinsic height at a width is what the text takes there.
+    #[test]
+    fn paragraph_intrinsics_come_from_the_text() {
+        let mut app = App::new();
+        install_fonts(&mut app);
+        let paragraph = RenderParagraph::new(
+            &mut app,
+            span("one two three four"),
+            TextDirection::Ltr,
+            None,
+        );
+        let box_ = paragraph.as_box();
+        let min_width = box_.get_min_intrinsic_width(&mut app, f64::INFINITY);
+        let max_width = box_.get_max_intrinsic_width(&mut app, f64::INFINITY);
+        assert!(min_width > 0.0);
+        assert!(
+            min_width < max_width,
+            "the widest word is narrower than the whole text"
+        );
+
+        let one_line = box_.get_min_intrinsic_height(&mut app, max_width);
+        let wrapped = box_.get_min_intrinsic_height(&mut app, max_width / 2.0);
+        assert!(wrapped > one_line, "half the width takes more lines");
+        assert_eq!(box_.get_max_intrinsic_height(&mut app, max_width), one_line);
+    }
+
+    /// The dry layout of a paragraph is the size it lays out to, and its dry baseline is the
+    /// baseline that layout reports.
+    #[test]
+    fn paragraph_dry_layout_and_baseline_match_its_layout() {
+        let mut app = App::new();
+        let constraints = BoxConstraints::new().max_width(200.0).max_height(1000.0);
+        install_fonts(&mut app);
+        let paragraph =
+            RenderParagraph::new(&mut app, span("one two three"), TextDirection::Ltr, None);
+        let dry = paragraph.as_box().get_dry_layout(&mut app, constraints);
+        let dry_baseline =
+            paragraph
+                .as_box()
+                .get_dry_baseline(&mut app, constraints, TextBaseline::Alphabetic);
+
+        let (paragraph, _root) = laid_out(&mut app, "one two three", constraints);
+        assert_eq!(dry, paragraph.size(&app));
+        let baseline =
+            paragraph
+                .as_box()
+                .get_distance_to_baseline(&mut app, TextBaseline::Alphabetic, true);
+        assert_eq!(dry_baseline, baseline);
+        assert!(baseline.is_some_and(|baseline| baseline > 0.0));
     }
 
     #[test]

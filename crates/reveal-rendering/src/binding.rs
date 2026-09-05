@@ -1,6 +1,6 @@
 //! Flutter counterpart: `rendering/binding.dart` (`RendererBinding`).
 //!
-//! Semantics, `PipelineManifold`, and `performReassemble` wait.
+//! Semantics and `performReassemble` wait.
 
 use std::rc::Rc;
 
@@ -11,7 +11,7 @@ use reveal_scheduler::{FrameCallback, SchedulerBinding};
 
 use crate::mouse_tracker::MouseTracker;
 use crate::object::RenderHandle;
-use crate::pipeline_owner::PipelineOwner;
+use crate::pipeline_owner::{PipelineManifold, PipelineOwner};
 use crate::view::{RenderView, ViewConfiguration};
 
 /// The object side of Flutter's `WidgetsBinding` overrides of `RendererBinding.drawFrame`:
@@ -24,6 +24,12 @@ pub trait RendererBindingOverridesObject: Sized + 'static {
 
     /// Runs at the end of [`RendererBinding::draw_frame`], after compositing.
     fn did_draw_frame(self: Handle<Self>, app: &mut App);
+
+    /// Runs at the end of [`RendererBinding::handle_metrics_changed`]: Flutter's
+    /// `WidgetsBinding.handleMetricsChanged` override, which tells its observers.
+    fn did_handle_metrics_changed(self: Handle<Self>, app: &mut App) {
+        let _ = app;
+    }
 }
 
 /// What the binding above this one adds around `drawFrame`; kept erased.
@@ -33,6 +39,9 @@ pub trait RendererBindingOverrides {
 
     /// See [`RendererBindingOverridesObject::did_draw_frame`].
     fn did_draw_frame(&self, app: &mut App);
+
+    /// See [`RendererBindingOverridesObject::did_handle_metrics_changed`].
+    fn did_handle_metrics_changed(&self, app: &mut App);
 }
 
 impl<T: RendererBindingOverridesObject> RendererBindingOverrides for Handle<T> {
@@ -42,6 +51,20 @@ impl<T: RendererBindingOverridesObject> RendererBindingOverrides for Handle<T> {
 
     fn did_draw_frame(&self, app: &mut App) {
         T::did_draw_frame(*self, app);
+    }
+
+    fn did_handle_metrics_changed(&self, app: &mut App) {
+        T::did_handle_metrics_changed(*self, app);
+    }
+}
+
+/// Dart's `_BindingPipelineManifold`: the [`PipelineManifold`] the binding attaches its
+/// root [`PipelineOwner`] to. Its `semanticsEnabled` waits with semantics.
+struct BindingPipelineManifold;
+
+impl PipelineManifold for BindingPipelineManifold {
+    fn request_visual_update(&self, app: &mut App) {
+        SchedulerBinding::ensure_visual_update(app);
     }
 }
 
@@ -68,6 +91,7 @@ impl RendererBinding {
         if app.get(this).root_pipeline_owner.is_none() {
             let root_pipeline_owner = this.create_root_pipeline_owner(app);
             app.get_mut(this).root_pipeline_owner = Some(root_pipeline_owner);
+            root_pipeline_owner.attach(app, Rc::new(BindingPipelineManifold));
             SchedulerBinding::add_persistent_frame_callback(
                 app,
                 FrameCallback::new(|app, _time_stamp| {
@@ -226,6 +250,9 @@ impl RendererBinding {
         }
         if force_frame {
             SchedulerBinding::schedule_forced_frame(app);
+        }
+        if let Some(overrides) = app.get(self).overrides.clone() {
+            overrides.did_handle_metrics_changed(app);
         }
     }
 

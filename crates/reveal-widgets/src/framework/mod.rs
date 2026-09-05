@@ -2,7 +2,7 @@
 //!
 //! - `widget`: `Widget`, its kinds, keys, and the `IntoWidget` erasure.
 //! - `state`: `State`.
-//! - `element`: `Element`, `ElementData`, the erased `AnyElement` edge, `BuildContext`.
+//! - `element`: `Element`, `ElementData`, the type-erased handle `AnyElement`, `BuildContext`.
 //! - `build_owner`: `BuildScope`, `BuildOwner`, the inactive-element list.
 //! - `elements`: the concrete element classes.
 //!

@@ -34,7 +34,10 @@ use crate::team::GestureArenaTeam;
 pub type AllowedButtonsFilter = Rc<dyn Fn(i64) -> bool>;
 
 /// `-1` is used as a sentinel value to indicate no touch slop was specified.
-pub(crate) const UNSET_TOUCH_SLOP: f64 = -1.0;
+///
+/// Pass it to [`PrimaryPointerData::new`] where Dart omits `preAcceptSlopTolerance`
+/// or `postAcceptSlopTolerance`.
+pub const UNSET_TOUCH_SLOP: f64 = -1.0;
 
 /// The default value for `allowedButtonsFilter`.
 /// Accept any input.
@@ -127,16 +130,21 @@ pub(crate) struct RecognizerEventData {
     pub buttons: i64,
 }
 
-/// Field bag for Dart's `GestureRecognizer`.
-pub(crate) struct GestureRecognizerData {
-    pub gesture_settings: Option<DeviceGestureSettings>,
-    pub supported_devices: Option<HashSet<PointerDeviceKind>>,
-    pub allowed_buttons_filter: AllowedButtonsFilter,
-    pub pointer_to_event_data: HashMap<i64, RecognizerEventData>,
+/// Field bag for Dart's `GestureRecognizer`, the base class that all gesture
+/// recognizers inherit from.
+///
+/// A leaf holds one and hands it out through [`RecognizerLeafData::recognizer`].
+pub struct GestureRecognizerData {
+    pub(crate) gesture_settings: Option<DeviceGestureSettings>,
+    pub(crate) supported_devices: Option<HashSet<PointerDeviceKind>>,
+    pub(crate) allowed_buttons_filter: AllowedButtonsFilter,
+    pub(crate) pointer_to_event_data: HashMap<i64, RecognizerEventData>,
 }
 
 impl GestureRecognizerData {
-    pub(crate) fn new() -> GestureRecognizerData {
+    /// Initializes the gesture recognizer: every device kind is recognized, and
+    /// every input button is accepted.
+    pub fn new() -> GestureRecognizerData {
         GestureRecognizerData {
             gesture_settings: None,
             supported_devices: None,
@@ -146,15 +154,47 @@ impl GestureRecognizerData {
     }
 }
 
-/// Field bag for Dart's `OneSequenceGestureRecognizer`.
-pub(crate) struct OneSequenceData {
-    pub entries: HashMap<i64, GestureArenaEntry>,
-    pub tracked_pointers: HashSet<i64>,
-    pub team: Option<Handle<GestureArenaTeam>>,
+impl GestureRecognizerData {
+    /// Optional device specific configuration that takes precedence over framework defaults.
+    pub fn gesture_settings(&self) -> Option<DeviceGestureSettings> {
+        self.gesture_settings
+    }
+
+    /// Sets [`gesture_settings`](Self::gesture_settings).
+    pub fn set_gesture_settings(&mut self, settings: Option<DeviceGestureSettings>) {
+        self.gesture_settings = settings;
+    }
+
+    /// Called when interaction starts; limits the buttons this recognizer accepts.
+    pub fn allowed_buttons_filter(&self) -> &AllowedButtonsFilter {
+        &self.allowed_buttons_filter
+    }
+
+    /// Sets [`allowed_buttons_filter`](Self::allowed_buttons_filter).
+    pub fn set_allowed_buttons_filter(&mut self, filter: AllowedButtonsFilter) {
+        self.allowed_buttons_filter = filter;
+    }
+}
+
+impl Default for GestureRecognizerData {
+    fn default() -> GestureRecognizerData {
+        GestureRecognizerData::new()
+    }
+}
+
+/// Field bag for Dart's `OneSequenceGestureRecognizer`, the base class for
+/// gesture recognizers that can only recognize one gesture at a time.
+///
+/// A leaf holds one and hands it out through [`RecognizerLeafData::one_sequence`].
+pub struct OneSequenceData {
+    pub(crate) entries: HashMap<i64, GestureArenaEntry>,
+    pub(crate) tracked_pointers: HashSet<i64>,
+    pub(crate) team: Option<Handle<GestureArenaTeam>>,
 }
 
 impl OneSequenceData {
-    pub(crate) fn new() -> OneSequenceData {
+    /// Initializes the object: no arena entries, no tracked pointers, no team.
+    pub fn new() -> OneSequenceData {
         OneSequenceData {
             entries: HashMap::new(),
             tracked_pointers: HashSet::new(),
@@ -163,21 +203,40 @@ impl OneSequenceData {
     }
 }
 
-/// Field bag for Dart's `PrimaryPointerGestureRecognizer`.
-pub(crate) struct PrimaryPointerData {
-    pub deadline: Option<Duration>,
-    pub pre_accept_slop_tolerance: Option<f64>,
-    pub post_accept_slop_tolerance: Option<f64>,
-    pub state: GestureRecognizerState,
-    pub primary_pointer: Option<i64>,
-    pub initial_position: Option<OffsetPair>,
-    pub gesture_accepted: bool,
-    pub timer: Option<Timer>,
-    pub deadline_event: Option<crate::events::PointerDownEvent>,
+impl Default for OneSequenceData {
+    fn default() -> OneSequenceData {
+        OneSequenceData::new()
+    }
+}
+
+/// Field bag for Dart's `PrimaryPointerGestureRecognizer`, the base class for
+/// gesture recognizers that track a single primary pointer.
+///
+/// A leaf holds one and hands it out through [`PrimaryPointerLeafData::primary`].
+pub struct PrimaryPointerData {
+    pub(crate) deadline: Option<Duration>,
+    pub(crate) pre_accept_slop_tolerance: Option<f64>,
+    pub(crate) post_accept_slop_tolerance: Option<f64>,
+    pub(crate) state: GestureRecognizerState,
+    pub(crate) primary_pointer: Option<i64>,
+    pub(crate) initial_position: Option<OffsetPair>,
+    pub(crate) gesture_accepted: bool,
+    pub(crate) timer: Option<Timer>,
+    pub(crate) deadline_event: Option<crate::events::PointerDownEvent>,
 }
 
 impl PrimaryPointerData {
-    pub(crate) fn new(
+    /// Initializes the `deadline` field during construction of a leaf.
+    ///
+    /// If `deadline` is non-null, the recognizer calls
+    /// [`PrimaryPointerLeaf::did_exceed_deadline`] after that amount of time has
+    /// elapsed since starting to track the primary pointer.
+    ///
+    /// A slop tolerance of [`UNSET_TOUCH_SLOP`] is Dart's omitted argument: the
+    /// tolerance then follows `gesture_settings.touch_slop`, falling back to
+    /// [`K_TOUCH_SLOP`](crate::K_TOUCH_SLOP). `None` lets the gesture drift any
+    /// distance.
+    pub fn new(
         deadline: Option<Duration>,
         pre_accept_slop_tolerance: Option<f64>,
         post_accept_slop_tolerance: Option<f64>,
@@ -286,37 +345,74 @@ impl fmt::Display for OffsetPair {
     }
 }
 
-/// Superclass fields on every `OneSequence` / `PrimaryPointer` leaf.
-pub(crate) trait RecognizerLeafData {
+/// Superclass fields on every `OneSequence` leaf.
+pub trait RecognizerLeafData {
+    /// The leaf's [`GestureRecognizer`] bag.
     fn recognizer(&self) -> &GestureRecognizerData;
+
+    /// The leaf's [`GestureRecognizer`] bag, mutably.
     fn recognizer_mut(&mut self) -> &mut GestureRecognizerData;
+
+    /// The leaf's [`OneSequenceGestureRecognizer`] bag.
     fn one_sequence(&self) -> &OneSequenceData;
+
+    /// The leaf's [`OneSequenceGestureRecognizer`] bag, mutably.
     fn one_sequence_mut(&mut self) -> &mut OneSequenceData;
+}
+
+/// The extra field bag a [`PrimaryPointerGestureRecognizer`] leaf carries.
+pub trait PrimaryPointerLeafData: RecognizerLeafData {
+    /// The leaf's [`PrimaryPointerGestureRecognizer`] bag.
     fn primary(&self) -> &PrimaryPointerData;
+
+    /// The leaf's [`PrimaryPointerGestureRecognizer`] bag, mutably.
     fn primary_mut(&mut self) -> &mut PrimaryPointerData;
 }
 
 /// Virtuals a superclass body calls on the leaf. Defaults match
-/// `PrimaryPointerGestureRecognizer` (the next class after `OneSequence`).
+/// `OneSequenceGestureRecognizer` (the last class every recognizer leaf here
+/// shares); a `PrimaryPointerGestureRecognizer` leaf overrides them with
+/// [`PrimaryPointerGestureRecognizer`]'s bodies.
 ///
 /// A leaf competes in the arena as its `Handle`: see the [`GestureArenaMember`]
 /// impl below.
-pub(crate) trait RecognizerLeaf: RecognizerLeafData + Sized + 'static {
+pub trait RecognizerLeaf: RecognizerLeafData + Sized + 'static {
     /// The route registered per tracked pointer. A distinct fn item per leaf, so
     /// the `TypeId` matches on remove.
     fn handle_event_route(self: Handle<Self>, app: &mut App, event: PointerEvent) {
         self.handle_event(app, event);
     }
 
-    /// The deadline timer's callback. A distinct fn item per leaf.
-    fn deadline_fired(self: Handle<Self>, app: &mut App) {
-        self.did_exceed_deadline_with_event(app);
+    /// Registers a new pointer that might be relevant to this gesture recognizer.
+    ///
+    /// This is called for each and all pointers being added. A leaf that only
+    /// cares about the pointers it accepts overrides
+    /// [`add_allowed_pointer`](Self::add_allowed_pointer) instead.
+    fn add_pointer(self: Handle<Self>, app: &mut App, event: PointerDownEvent) {
+        GestureRecognizer::add_pointer(self, app, event);
     }
 
+    /// Registers a new pointer pan/zoom that might be relevant to this gesture
+    /// recognizer.
+    fn add_pointer_pan_zoom(
+        self: Handle<Self>,
+        app: &mut App,
+        event: crate::events::PointerPanZoomStartEvent,
+    ) {
+        GestureRecognizer::add_pointer_pan_zoom(self, app, event);
+    }
+
+    /// Registers a new pointer that's been checked to be allowed by this gesture
+    /// recognizer.
+    ///
+    /// Override this instead of [`add_pointer`](Self::add_pointer), which is
+    /// called for each and all pointers being added.
     fn add_allowed_pointer(self: Handle<Self>, app: &mut App, event: PointerDownEvent) {
-        PrimaryPointerGestureRecognizer::add_allowed_pointer(self, app, event);
+        OneSequenceGestureRecognizer::add_allowed_pointer(self, app, &event);
     }
 
+    /// Registers a new pointer pan/zoom that's been checked to be allowed by this
+    /// gesture recognizer.
     fn add_allowed_pointer_pan_zoom(
         self: Handle<Self>,
         _app: &mut App,
@@ -324,10 +420,13 @@ pub(crate) trait RecognizerLeaf: RecognizerLeafData + Sized + 'static {
     ) {
     }
 
-    fn handle_non_allowed_pointer(self: Handle<Self>, app: &mut App, event: &PointerDownEvent) {
-        PrimaryPointerGestureRecognizer::handle_non_allowed_pointer(self, app, event);
+    /// Handles a pointer being added that's not allowed by this recognizer.
+    fn handle_non_allowed_pointer(self: Handle<Self>, app: &mut App, _event: &PointerDownEvent) {
+        OneSequenceGestureRecognizer::handle_non_allowed_pointer(self, app);
     }
 
+    /// Handles a pointer pan/zoom being added that's not allowed by this
+    /// recognizer.
     fn handle_non_allowed_pointer_pan_zoom(
         self: Handle<Self>,
         _app: &mut App,
@@ -335,10 +434,14 @@ pub(crate) trait RecognizerLeaf: RecognizerLeafData + Sized + 'static {
     ) {
     }
 
+    /// Checks whether or not a pointer is allowed to be tracked by this
+    /// recognizer.
     fn is_pointer_allowed(self: Handle<Self>, app: &App, event: &PointerDownEvent) -> bool {
         GestureRecognizer::is_pointer_allowed(self, app, event)
     }
 
+    /// Checks whether or not a pointer pan/zoom is allowed to be tracked by this
+    /// recognizer.
     fn is_pointer_pan_zoom_allowed(
         self: Handle<Self>,
         app: &App,
@@ -347,6 +450,8 @@ pub(crate) trait RecognizerLeaf: RecognizerLeafData + Sized + 'static {
         GestureRecognizer::is_pointer_pan_zoom_allowed(self, app, event)
     }
 
+    /// Causes events related to the given pointer ID to be routed to this
+    /// recognizer.
     fn start_tracking_pointer(
         self: Handle<Self>,
         app: &mut App,
@@ -356,12 +461,50 @@ pub(crate) trait RecognizerLeaf: RecognizerLeafData + Sized + 'static {
         OneSequenceGestureRecognizer::start_tracking_pointer(self, app, pointer, transform);
     }
 
-    fn handle_event(self: Handle<Self>, app: &mut App, event: PointerEvent) {
-        PrimaryPointerGestureRecognizer::handle_event(self, app, event);
+    /// Called when a pointer event is routed to this recognizer.
+    fn handle_event(self: Handle<Self>, app: &mut App, event: PointerEvent);
+
+    /// Called when this member wins the arena for the given pointer id.
+    fn accept_gesture(self: Handle<Self>, _app: &mut App, _pointer: i64) {}
+
+    /// Called when this member loses the arena for the given pointer id.
+    fn reject_gesture(self: Handle<Self>, _app: &mut App, _pointer: i64) {}
+
+    /// Called when the number of pointers this recognizer is tracking changes
+    /// from one to zero.
+    fn did_stop_tracking_last_pointer(self: Handle<Self>, app: &mut App, pointer: i64);
+
+    /// Resolves this recognizer's participation in each gesture arena with the
+    /// given disposition.
+    fn resolve(self: Handle<Self>, app: &mut App, disposition: GestureDisposition) {
+        OneSequenceGestureRecognizer::resolve(self, app, disposition);
     }
 
+    /// Releases any resources used by the object.
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        OneSequenceGestureRecognizer::dispose(self, app);
+    }
+
+    /// Returns a very short pretty description of the gesture that the
+    /// recognizer looks for.
+    fn debug_description(self: Handle<Self>) -> &'static str;
+}
+
+/// Virtuals [`PrimaryPointerGestureRecognizer`]'s bodies call on its leaves.
+pub trait PrimaryPointerLeaf: RecognizerLeaf + PrimaryPointerLeafData {
+    /// The deadline timer's callback. A distinct fn item per leaf.
+    fn deadline_fired(self: Handle<Self>, app: &mut App) {
+        self.did_exceed_deadline_with_event(app);
+    }
+
+    /// Override to provide behavior for the primary pointer when the gesture is
+    /// still possible.
     fn handle_primary_pointer(self: Handle<Self>, app: &mut App, event: PointerEvent);
 
+    /// Override to be notified when the deadline is exceeded.
+    ///
+    /// You must override this method or [`did_exceed_deadline_with_event`](Self::did_exceed_deadline_with_event)
+    /// if you supply a deadline. An override must _not_ call this body.
     fn did_exceed_deadline(self: Handle<Self>, app: &mut App) {
         debug_assert!(
             app.get(self).primary().deadline.is_none(),
@@ -369,33 +512,14 @@ pub(crate) trait RecognizerLeaf: RecognizerLeafData + Sized + 'static {
         );
     }
 
+    /// Same as [`did_exceed_deadline`](Self::did_exceed_deadline), for the down
+    /// event that initiated the gesture.
+    ///
+    /// You must override this method or [`did_exceed_deadline`](Self::did_exceed_deadline)
+    /// if you supply a deadline. An override must _not_ call this body.
     fn did_exceed_deadline_with_event(self: Handle<Self>, app: &mut App) {
         PrimaryPointerGestureRecognizer::did_exceed_deadline_with_event(self, app);
     }
-
-    fn accept_gesture(self: Handle<Self>, app: &mut App, pointer: i64) {
-        PrimaryPointerGestureRecognizer::accept_gesture(self, app, pointer);
-    }
-
-    fn reject_gesture(self: Handle<Self>, app: &mut App, pointer: i64) {
-        PrimaryPointerGestureRecognizer::reject_gesture(self, app, pointer);
-    }
-
-    fn did_stop_tracking_last_pointer(self: Handle<Self>, app: &mut App, pointer: i64) {
-        PrimaryPointerGestureRecognizer::did_stop_tracking_last_pointer(self, app, pointer);
-    }
-
-    fn resolve(self: Handle<Self>, app: &mut App, disposition: GestureDisposition) {
-        OneSequenceGestureRecognizer::resolve(self, app, disposition);
-    }
-
-    fn dispose(self: Handle<Self>, app: &mut App) {
-        PrimaryPointerGestureRecognizer::dispose(self, app);
-    }
-
-    /// Returns a very short pretty description of the gesture that the
-    /// recognizer looks for.
-    fn debug_description(self: Handle<Self>) -> &'static str;
 }
 
 /// Dart's `GestureRecognizer extends GestureArenaMember`: every leaf competes in
@@ -439,7 +563,7 @@ impl<R: RecognizerLeaf> GestureRecognizerLeaf for R {
 }
 
 /// The vtable of an erased [`AnyGestureRecognizer`]: one `&'static` table per leaf type,
-/// built by [`GestureRecognizerVTable::of`]. Copied out of the edge before a virtual call,
+/// built by [`GestureRecognizerVTable::of`]. Copied out of the handle before a virtual call,
 /// so the slot is not borrowed across it.
 pub(crate) struct GestureRecognizerVTable {
     type_id: fn() -> TypeId,
@@ -463,11 +587,9 @@ impl GestureRecognizerVTable {
         GestureRecognizerVTable {
             type_id: TypeId::of::<R>,
             type_name: std::any::type_name::<R>,
-            add_pointer: |app, id, event| {
-                GestureRecognizer::add_pointer(resolve::<R>(id), app, event)
-            },
+            add_pointer: |app, id, event| R::add_pointer(resolve::<R>(id), app, event),
             add_pointer_pan_zoom: |app, id, event| {
-                GestureRecognizer::add_pointer_pan_zoom(resolve::<R>(id), app, event)
+                R::add_pointer_pan_zoom(resolve::<R>(id), app, event)
             },
             is_pointer_allowed: |app, id, event| R::is_pointer_allowed(resolve(id), app, event),
             is_pointer_pan_zoom_allowed: |app, id, event| {
@@ -514,12 +636,12 @@ impl fmt::Debug for AnyGestureRecognizer {
 }
 
 impl AnyGestureRecognizer {
-    /// The arena id behind this edge.
+    /// The arena id behind this handle.
     pub fn id(self) -> HandleId {
         self.id
     }
 
-    /// Dart's `runtimeType`: the leaf type this edge was minted from.
+    /// Dart's `runtimeType`: the leaf type this handle was minted from.
     pub fn type_id(self) -> TypeId {
         (self.vtable.type_id)()
     }
@@ -552,7 +674,7 @@ impl AnyGestureRecognizer {
         (self.vtable.is_pointer_pan_zoom_allowed)(app, self.id, event)
     }
 
-    /// Releases any resources used by the object and frees its arena slot. Every edge to it
+    /// Releases any resources used by the object and frees its arena slot. Every handle to it
     /// is stale afterwards.
     pub fn dispose(self, app: &mut App) {
         (self.vtable.dispose)(app, self.id);
@@ -564,10 +686,23 @@ impl AnyGestureRecognizer {
     }
 }
 
-pub(crate) struct GestureRecognizer;
+/// Dart's `GestureRecognizer`: the base class that all gesture recognizers
+/// inherit from.
+///
+/// Its bodies are associated fns taking the leaf's `Handle`; a leaf's override
+/// calls one where Dart writes `super`. Its fields are [`GestureRecognizerData`].
+pub struct GestureRecognizer;
 
 impl GestureRecognizer {
-    pub(crate) fn add_pointer_pan_zoom<R: RecognizerLeaf>(
+    /// Registers a new pointer pan/zoom that might be relevant to this gesture
+    /// detector.
+    ///
+    /// A pointer pan/zoom is a stream of events that conveys data covering pan,
+    /// zoom, and rotate data from a multi-finger trackpad gesture.
+    ///
+    /// This is called for each and all pointers being added. In most cases, a leaf
+    /// overrides [`RecognizerLeaf::add_allowed_pointer_pan_zoom`] instead.
+    pub fn add_pointer_pan_zoom<R: RecognizerLeaf>(
         this: Handle<R>,
         app: &mut App,
         event: crate::events::PointerPanZoomStartEvent,
@@ -589,11 +724,14 @@ impl GestureRecognizer {
         }
     }
 
-    pub(crate) fn add_pointer<R: RecognizerLeaf>(
-        this: Handle<R>,
-        app: &mut App,
-        event: PointerDownEvent,
-    ) {
+    /// Registers a new pointer that might be relevant to this gesture detector.
+    ///
+    /// The owner of this gesture recognizer calls it with the [`PointerDownEvent`]
+    /// of each pointer that should be considered for this gesture.
+    ///
+    /// This is called for each and all pointers being added. In most cases, a leaf
+    /// overrides [`RecognizerLeaf::add_allowed_pointer`] instead.
+    pub fn add_pointer<R: RecognizerLeaf>(this: Handle<R>, app: &mut App, event: PointerDownEvent) {
         app.get_mut(this)
             .recognizer_mut()
             .pointer_to_event_data
@@ -611,7 +749,9 @@ impl GestureRecognizer {
         }
     }
 
-    pub(crate) fn is_pointer_allowed<R: RecognizerLeaf>(
+    /// Checks whether or not a pointer is allowed to be tracked by this
+    /// recognizer.
+    pub fn is_pointer_allowed<R: RecognizerLeaf>(
         this: Handle<R>,
         app: &App,
         event: &PointerDownEvent,
@@ -625,7 +765,9 @@ impl GestureRecognizer {
             && filter(event.buttons)
     }
 
-    pub(crate) fn is_pointer_pan_zoom_allowed<R: RecognizerLeaf>(
+    /// Checks whether or not a pointer pan/zoom is allowed to be tracked by this
+    /// recognizer.
+    pub fn is_pointer_pan_zoom_allowed<R: RecognizerLeaf>(
         this: Handle<R>,
         app: &App,
         event: &crate::events::PointerPanZoomStartEvent,
@@ -637,7 +779,11 @@ impl GestureRecognizer {
                 .is_some_and(|set| set.contains(&event.kind))
     }
 
-    pub(crate) fn kind_for_pointer<R: RecognizerLeaf>(
+    /// For a given pointer ID, returns the device kind associated with it.
+    ///
+    /// The pointer ID is expected to be a valid one, i.e. an event was received
+    /// with that pointer ID.
+    pub fn kind_for_pointer<R: RecognizerLeaf>(
         this: Handle<R>,
         app: &App,
         pointer: i64,
@@ -647,24 +793,30 @@ impl GestureRecognizer {
         data[&pointer].kind
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn buttons_for_pointer<R: RecognizerLeaf>(
-        this: Handle<R>,
-        app: &App,
-        pointer: i64,
-    ) -> i64 {
+    /// For a given pointer ID, returns the buttons associated with it.
+    ///
+    /// The pointer ID is expected to be valid, meaning an event related to it has
+    /// been received.
+    pub fn buttons_for_pointer<R: RecognizerLeaf>(this: Handle<R>, app: &App, pointer: i64) -> i64 {
         let data = &app.get(this).recognizer().pointer_to_event_data;
         debug_assert!(data.contains_key(&pointer));
         data[&pointer].buttons
     }
 
+    /// Releases any resources used by the object.
+    ///
     /// Dart's body is a diagnostics assert and leaves the object to the collector; the arena
     /// has no collector, so the slot goes too.
-    pub(crate) fn dispose<R: RecognizerLeaf>(this: Handle<R>, app: &mut App) {
+    pub fn dispose<R: RecognizerLeaf>(this: Handle<R>, app: &mut App) {
         app.destroy(this);
     }
 
-    pub(crate) fn invoke_callback<R: RecognizerLeaf, T>(
+    /// Invoke a callback provided by the application.
+    ///
+    /// The `name` argument is ignored except when
+    /// [`debug_print_recognizer_callbacks_trace`](crate::debug_print_recognizer_callbacks_trace)
+    /// is true.
+    pub fn invoke_callback<R: RecognizerLeaf, T>(
         this: Handle<R>,
         app: &mut App,
         name: &str,
@@ -682,10 +834,16 @@ impl GestureRecognizer {
     }
 }
 
-pub(crate) struct OneSequenceGestureRecognizer;
+/// Dart's `OneSequenceGestureRecognizer`: the base class for gesture recognizers
+/// that can only recognize one gesture at a time.
+///
+/// Its bodies are associated fns taking the leaf's `Handle`; a leaf's override
+/// calls one where Dart writes `super`. Its fields are [`OneSequenceData`].
+pub struct OneSequenceGestureRecognizer;
 
 impl OneSequenceGestureRecognizer {
-    pub(crate) fn add_allowed_pointer<R: RecognizerLeaf>(
+    /// Starts tracking the pointer of the given down event.
+    pub fn add_allowed_pointer<R: RecognizerLeaf>(
         this: Handle<R>,
         app: &mut App,
         event: &PointerDownEvent,
@@ -693,11 +851,14 @@ impl OneSequenceGestureRecognizer {
         this.start_tracking_pointer(app, event.pointer, event.transform);
     }
 
-    pub(crate) fn handle_non_allowed_pointer<R: RecognizerLeaf>(this: Handle<R>, app: &mut App) {
+    /// Rejects the gesture in every arena this recognizer takes part in.
+    pub fn handle_non_allowed_pointer<R: RecognizerLeaf>(this: Handle<R>, app: &mut App) {
         this.resolve(app, GestureDisposition::Rejected);
     }
 
-    pub(crate) fn resolve<R: RecognizerLeaf>(
+    /// Resolves this recognizer's participation in each gesture arena with the
+    /// given disposition.
+    pub fn resolve<R: RecognizerLeaf>(
         this: Handle<R>,
         app: &mut App,
         disposition: GestureDisposition,
@@ -715,8 +876,9 @@ impl OneSequenceGestureRecognizer {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn resolve_pointer<R: RecognizerLeaf>(
+    /// Resolves this recognizer's participation in the given gesture arena with
+    /// the given disposition.
+    pub fn resolve_pointer<R: RecognizerLeaf>(
         this: Handle<R>,
         app: &mut App,
         pointer: i64,
@@ -732,7 +894,9 @@ impl OneSequenceGestureRecognizer {
         }
     }
 
-    pub(crate) fn dispose<R: RecognizerLeaf>(this: Handle<R>, app: &mut App) {
+    /// Rejects every arena this recognizer takes part in, drops its routes, then
+    /// runs [`GestureRecognizer::dispose`].
+    pub fn dispose<R: RecognizerLeaf>(this: Handle<R>, app: &mut App) {
         this.resolve(app, GestureDisposition::Rejected);
         let pointers: Vec<i64> = app
             .get(this)
@@ -772,7 +936,13 @@ impl OneSequenceGestureRecognizer {
         }
     }
 
-    pub(crate) fn start_tracking_pointer<R: RecognizerLeaf>(
+    /// Causes events related to the given pointer ID to be routed to this
+    /// recognizer, and adds it (or its team) to that pointer's gesture arena.
+    ///
+    /// The pointer events are transformed according to `transform` and then
+    /// delivered to [`RecognizerLeaf::handle_event`]. Use
+    /// [`stop_tracking_pointer`](Self::stop_tracking_pointer) to remove the route.
+    pub fn start_tracking_pointer<R: RecognizerLeaf>(
         this: Handle<R>,
         app: &mut App,
         pointer: i64,
@@ -796,11 +966,12 @@ impl OneSequenceGestureRecognizer {
             .insert(pointer, entry);
     }
 
-    pub(crate) fn stop_tracking_pointer<R: RecognizerLeaf>(
-        this: Handle<R>,
-        app: &mut App,
-        pointer: i64,
-    ) {
+    /// Stops events related to the given pointer ID from being routed to this
+    /// recognizer.
+    ///
+    /// If this reduces the number of tracked pointers to zero, it calls
+    /// [`RecognizerLeaf::did_stop_tracking_last_pointer`] synchronously.
+    pub fn stop_tracking_pointer<R: RecognizerLeaf>(this: Handle<R>, app: &mut App, pointer: i64) {
         if app
             .get(this)
             .one_sequence()
@@ -823,7 +994,11 @@ impl OneSequenceGestureRecognizer {
         }
     }
 
-    pub(crate) fn stop_tracking_if_pointer_no_longer_down<R: RecognizerLeaf>(
+    /// Stops tracking the pointer associated with the given event if the event is
+    /// a [`PointerUpEvent`](crate::PointerUpEvent), a
+    /// [`PointerCancelEvent`](crate::PointerCancelEvent) or a
+    /// [`PointerPanZoomEndEvent`](crate::PointerPanZoomEndEvent).
+    pub fn stop_tracking_if_pointer_no_longer_down<R: RecognizerLeaf>(
         this: Handle<R>,
         app: &mut App,
         event: &PointerEvent,
@@ -837,10 +1012,24 @@ impl OneSequenceGestureRecognizer {
     }
 }
 
-pub(crate) struct PrimaryPointerGestureRecognizer;
+/// Dart's `PrimaryPointerGestureRecognizer`: the base class for gesture
+/// recognizers that track a single primary pointer.
+///
+/// Gestures based on it stop tracking the gesture if the primary pointer travels
+/// beyond [`pre_accept_slop_tolerance`](Self::pre_accept_slop_tolerance) or
+/// [`post_accept_slop_tolerance`](Self::post_accept_slop_tolerance) pixels from
+/// the original contact point. If the pre-accept tolerance was breached before
+/// the gesture was accepted in the gesture arena, the gesture is rejected.
+///
+/// Its bodies are associated fns taking the leaf's `Handle`; a leaf's override
+/// calls one where Dart writes `super`. Its fields are [`PrimaryPointerData`].
+pub struct PrimaryPointerGestureRecognizer;
 
 impl PrimaryPointerGestureRecognizer {
-    pub(crate) fn add_allowed_pointer<R: RecognizerLeaf>(
+    /// Starts tracking the pointer, and if the recognizer is
+    /// [`Ready`](GestureRecognizerState::Ready), makes it the primary pointer and
+    /// arms the deadline timer.
+    pub fn add_allowed_pointer<R: PrimaryPointerLeaf>(
         this: Handle<R>,
         app: &mut App,
         event: PointerDownEvent,
@@ -864,7 +1053,8 @@ impl PrimaryPointerGestureRecognizer {
         }
     }
 
-    pub(crate) fn handle_non_allowed_pointer<R: RecognizerLeaf>(
+    /// Rejects the gesture unless it has already been accepted.
+    pub fn handle_non_allowed_pointer<R: PrimaryPointerLeaf>(
         this: Handle<R>,
         app: &mut App,
         _event: &PointerDownEvent,
@@ -874,7 +1064,10 @@ impl PrimaryPointerGestureRecognizer {
         }
     }
 
-    pub(crate) fn handle_event<R: RecognizerLeaf>(
+    /// Rejects the gesture once the primary pointer drifts past the slop
+    /// tolerance, and otherwise hands the event to
+    /// [`PrimaryPointerLeaf::handle_primary_pointer`].
+    pub fn handle_event<R: PrimaryPointerLeaf>(
         this: Handle<R>,
         app: &mut App,
         event: PointerEvent,
@@ -904,21 +1097,24 @@ impl PrimaryPointerGestureRecognizer {
         OneSequenceGestureRecognizer::stop_tracking_if_pointer_no_longer_down(this, app, &event);
     }
 
-    pub(crate) fn did_exceed_deadline_with_event<R: RecognizerLeaf>(
-        this: Handle<R>,
-        app: &mut App,
-    ) {
+    /// Calls [`PrimaryPointerLeaf::did_exceed_deadline`].
+    pub fn did_exceed_deadline_with_event<R: PrimaryPointerLeaf>(this: Handle<R>, app: &mut App) {
         this.did_exceed_deadline(app);
     }
 
-    pub(crate) fn accept_gesture<R: RecognizerLeaf>(this: Handle<R>, app: &mut App, pointer: i64) {
+    /// Stops the deadline timer and marks the gesture accepted when `pointer` is
+    /// the primary pointer.
+    pub fn accept_gesture<R: PrimaryPointerLeaf>(this: Handle<R>, app: &mut App, pointer: i64) {
         if Some(pointer) == app.get(this).primary().primary_pointer {
             Self::stop_timer(this, app);
             app.get_mut(this).primary_mut().gesture_accepted = true;
         }
     }
 
-    pub(crate) fn reject_gesture<R: RecognizerLeaf>(this: Handle<R>, app: &mut App, pointer: i64) {
+    /// Stops the deadline timer and makes the recognizer
+    /// [`Defunct`](GestureRecognizerState::Defunct) when `pointer` is the primary
+    /// pointer of a still-possible gesture.
+    pub fn reject_gesture<R: PrimaryPointerLeaf>(this: Handle<R>, app: &mut App, pointer: i64) {
         if Some(pointer) == app.get(this).primary().primary_pointer
             && app.get(this).primary().state == GestureRecognizerState::Possible
         {
@@ -927,7 +1123,9 @@ impl PrimaryPointerGestureRecognizer {
         }
     }
 
-    pub(crate) fn did_stop_tracking_last_pointer<R: RecognizerLeaf>(
+    /// Returns the recognizer to the [`Ready`](GestureRecognizerState::Ready)
+    /// state.
+    pub fn did_stop_tracking_last_pointer<R: PrimaryPointerLeaf>(
         this: Handle<R>,
         app: &mut App,
         _pointer: i64,
@@ -939,18 +1137,25 @@ impl PrimaryPointerGestureRecognizer {
         app.get_mut(this).primary_mut().gesture_accepted = false;
     }
 
-    pub(crate) fn dispose<R: RecognizerLeaf>(this: Handle<R>, app: &mut App) {
+    /// Stops the deadline timer, then runs
+    /// [`OneSequenceGestureRecognizer::dispose`].
+    pub fn dispose<R: PrimaryPointerLeaf>(this: Handle<R>, app: &mut App) {
         Self::stop_timer(this, app);
         OneSequenceGestureRecognizer::dispose(this, app);
     }
 
-    pub(crate) fn stop_timer<R: RecognizerLeaf>(this: Handle<R>, app: &mut App) {
+    /// Cancels the deadline timer, if one is running.
+    pub fn stop_timer<R: PrimaryPointerLeaf>(this: Handle<R>, app: &mut App) {
         if let Some(timer) = app.get_mut(this).primary_mut().timer.take() {
             timer.cancel(app);
         }
     }
 
-    pub(crate) fn pre_accept_slop_tolerance<R: RecognizerLeaf>(
+    /// The maximum distance in logical pixels the gesture is allowed to drift
+    /// from the initial touch down position before the gesture is accepted.
+    ///
+    /// `None` means the gesture can drift for any distance.
+    pub fn pre_accept_slop_tolerance<R: PrimaryPointerLeaf>(
         this: Handle<R>,
         app: &App,
     ) -> Option<f64> {
@@ -962,7 +1167,11 @@ impl PrimaryPointerGestureRecognizer {
         }
     }
 
-    pub(crate) fn post_accept_slop_tolerance<R: RecognizerLeaf>(
+    /// The maximum distance in logical pixels the gesture is allowed to drift
+    /// after the gesture has been accepted.
+    ///
+    /// `None` means the gesture can drift for any distance.
+    pub fn post_accept_slop_tolerance<R: PrimaryPointerLeaf>(
         this: Handle<R>,
         app: &App,
     ) -> Option<f64> {
@@ -974,7 +1183,9 @@ impl PrimaryPointerGestureRecognizer {
         }
     }
 
-    pub(crate) fn default_touch_slop<R: RecognizerLeaf>(this: Handle<R>, app: &App) -> f64 {
+    /// `gesture_settings.touch_slop`, falling back to
+    /// [`K_TOUCH_SLOP`](crate::K_TOUCH_SLOP).
+    pub fn default_touch_slop<R: PrimaryPointerLeaf>(this: Handle<R>, app: &App) -> f64 {
         app.get(this)
             .recognizer()
             .gesture_settings
@@ -982,7 +1193,8 @@ impl PrimaryPointerGestureRecognizer {
             .unwrap_or(K_TOUCH_SLOP)
     }
 
-    pub(crate) fn global_distance<R: RecognizerLeaf>(
+    /// How far the event is from the primary pointer's initial global position.
+    pub fn global_distance<R: PrimaryPointerLeaf>(
         this: Handle<R>,
         app: &App,
         event: &PointerEvent,

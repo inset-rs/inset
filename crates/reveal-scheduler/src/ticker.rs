@@ -1,5 +1,6 @@
 //! Flutter counterpart: `scheduler/ticker.dart`.
 
+use std::rc::Rc;
 use std::time::Duration;
 
 use reveal_foundation::{App, Handle, Listener};
@@ -19,13 +20,14 @@ pub type TickerCallback = FrameCallback;
 /// `AnimationController`. `AnimationController`s need a [`TickerProvider`] to
 /// obtain their [`Ticker`].
 ///
-/// `create_ticker` takes `self` by value so a [`Handle`] in the App can
-/// implement this — Dart's `TickerProviderStateMixin` is `vsync: this`.
+/// An object in the App implements [`TickerProviderObject`]; its [`Handle`] is then a
+/// provider — Dart's `TickerProviderStateMixin` is `vsync: this` — and a field that Dart types
+/// as `TickerProvider` holds an `Rc<dyn TickerProvider>`.
 pub trait TickerProvider {
     /// Creates a ticker with the given callback.
     ///
     /// The kind of ticker provided depends on the kind of ticker provider.
-    fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker>;
+    fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker>;
 }
 
 /// [`TickerProvider`] for an object in the App: Dart's `implements TickerProvider` on a
@@ -36,8 +38,14 @@ pub trait TickerProviderObject: Sized + 'static {
 }
 
 impl<T: TickerProviderObject> TickerProvider for Handle<T> {
-    fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
-        TickerProviderObject::create_ticker(self, app, on_tick)
+    fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+        TickerProviderObject::create_ticker(*self, app, on_tick)
+    }
+}
+
+impl<T: TickerProvider + ?Sized> TickerProvider for Rc<T> {
+    fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+        T::create_ticker(self, app, on_tick)
     }
 }
 
@@ -654,7 +662,7 @@ mod tests {
     struct TestVSync;
 
     impl TickerProvider for TestVSync {
-        fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
             Ticker::new(app, on_tick)
         }
     }
@@ -675,9 +683,9 @@ mod tests {
     }
 
     impl TickerProvider for Handle<Host> {
-        fn create_ticker(self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
             let ticker = Ticker::new(app, on_tick);
-            app.get_mut(self).ticker = Some(ticker);
+            app.get_mut(*self).ticker = Some(ticker);
             ticker
         }
     }

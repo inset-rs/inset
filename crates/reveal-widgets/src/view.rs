@@ -1,7 +1,8 @@
 //! Flutter counterpart: `widgets/view.dart` (`View`, `RawView`, the view scopes).
 //!
-//! `View` wraps its child in `MediaQuery::from_view` only: the focus traversal group and
-//! focus scope wait with the focus system. `ViewCollection` / `ViewAnchor` wait too.
+//! `View` wraps its child in `MediaQuery::from_view`, a `FocusTraversalGroup` parented on the
+//! root scope, and a `FocusScope` over its own scope node. `ViewCollection` / `ViewAnchor`
+//! wait.
 
 use std::fmt;
 use std::rc::Rc;
@@ -16,6 +17,11 @@ use crate::framework::{
     RenderObjectWidget, RenderTreeRootElement, Slot, State, StateData, StatefulWidget,
     StatelessWidget, Widget, WidgetKind, WidgetRef, downcast_widget,
 };
+use crate::widgets::focus_manager::{FocusManager, FocusNodeLeaf, FocusScopeNode};
+use crate::widgets::focus_scope::FocusScope;
+use crate::widgets::focus_traversal::{
+    AnyFocusTraversalPolicy, FocusTraversalGroup, FocusTraversalPolicy, ReadingOrderTraversalPolicy,
+};
 use crate::widgets::media_query::MediaQuery;
 
 /// Bootstraps a render tree that is rendered into the provided `FlutterView`.
@@ -25,7 +31,7 @@ use crate::widgets::media_query::MediaQuery;
 /// they are rendered into via [`View::of`] and [`View::maybe_of`].
 ///
 /// The provided [`child`](Self::child) is wrapped in a `MediaQuery` constructed from the given
-/// view, a `FocusScope` (deferred here), and a [`RawView`] widget.
+/// view, a `FocusScope`, and a [`RawView`] widget.
 ///
 /// For most use cases, using `MediaQuery.of`, or its associated "...Of" methods are a more
 /// appropriate way of obtaining the information that a `FlutterView` exposes. For example,
@@ -136,26 +142,62 @@ impl StatefulWidget for View {
     fn create_state(&self) -> ViewState {
         ViewState {
             state: StateData::new(),
+            scope_node: None,
+            policy: None,
         }
     }
 }
 
-/// The state of a [`View`]. Flutter's `_ViewState` keeps the view's focus scope and observes
-/// view focus; both wait with the focus system.
+/// The state of a [`View`]. Flutter's `_ViewState` also observes view focus events, which wait
+/// with the platform's view-focus channel.
 pub struct ViewState {
     state: StateData<View>,
+    scope_node: Option<Handle<FocusScopeNode>>,
+    policy: Option<AnyFocusTraversalPolicy>,
+}
+
+impl ViewState {
+    /// The focus scope node this view's subtree is scoped by.
+    fn scope_node(self: Handle<Self>, app: &App) -> Handle<FocusScopeNode> {
+        app.get(self).scope_node.expect("created in init_state")
+    }
 }
 
 impl State for ViewState {
     type Widget = View;
     crate::state_accessors!();
 
+    fn init_state(self: Handle<Self>, app: &mut App) {
+        let scope_node = FocusScopeNode::new(app);
+        scope_node.set_debug_label(app, Some("View Scope".to_string()));
+        let policy = ReadingOrderTraversalPolicy::new(app).as_policy();
+        let this = app.get_mut(self);
+        this.scope_node = Some(scope_node);
+        this.policy = Some(policy);
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        self.scope_node(app).dispose(app);
+    }
+
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         let (view, child) = {
             let widget = self.widget(app);
             (Rc::clone(&widget.view), widget.child.clone())
         };
-        let content = MediaQuery::from_view(None, Rc::clone(&view), child);
+        let scope_node = self.scope_node(app);
+        let policy = app.get(self).policy.expect("created in init_state");
+        let root_scope = FocusManager::instance(app).root_scope(app);
+        // Attach this view's focus subtree directly to the root scope rather than nesting it
+        // under an enclosing view's scope (which happens when a view is rendered inside another
+        // via a `ViewAnchor`). Each view is an independent focus root: nesting would otherwise
+        // make an ancestor view report `has_focus` when a descendant view is focused.
+        let scoped = FocusTraversalGroup::new(
+            FocusScope::with_external_focus_node(child, scope_node).include_semantics(false),
+        )
+        .policy(policy)
+        .parent_node(root_scope.as_node());
+        let content = MediaQuery::from_view(None, Rc::clone(&view), scoped);
         RawView::new(view, content).into_widget()
     }
 }
@@ -591,5 +633,52 @@ impl InheritedWidget for PipelineOwnerScope {
 
     fn update_should_notify(&self, old_widget: &PipelineOwnerScope) -> bool {
         self.pipeline_owner != old_widget.pipeline_owner
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use reveal_scheduler::SchedulerBinding;
+
+    use crate::framework::{GlobalKey, IntoWidget};
+    use crate::test_harness::{binding_app, binding_mount, binding_pump};
+    use crate::widgets::basic::SizedBox;
+
+    /// A view's render tree lives under the view's own `PipelineOwner`, which has no visual
+    /// update callback: its requests must reach the binding through the manifold.
+    #[test]
+    fn a_dirty_render_object_under_a_view_schedules_a_frame() {
+        let mut app = binding_app();
+        let key = Rc::new(GlobalKey::new());
+        binding_mount(
+            &mut app,
+            SizedBox::new()
+                .key(key.clone())
+                .width(10.0)
+                .height(10.0)
+                .into_widget(),
+        );
+        for _ in 0..5 {
+            binding_pump(&mut app, std::time::Duration::from_millis(16));
+        }
+        assert!(
+            !SchedulerBinding::has_scheduled_frame(&mut app),
+            "the tree is idle before the probe"
+        );
+        let render_object = key
+            .current_context(&mut app)
+            .expect("mounted")
+            .find_render_object(&app)
+            .expect("a render object");
+
+        render_object.mark_needs_paint(&mut app);
+        assert!(SchedulerBinding::has_scheduled_frame(&mut app));
+
+        binding_pump(&mut app, std::time::Duration::from_millis(32));
+        assert!(!SchedulerBinding::has_scheduled_frame(&mut app));
+        render_object.mark_needs_layout(&mut app);
+        assert!(SchedulerBinding::has_scheduled_frame(&mut app));
     }
 }

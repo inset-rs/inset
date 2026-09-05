@@ -12,6 +12,7 @@ reveal-gestures.workspace = true
 reveal-painting.workspace = true
 reveal-rendering.workspace = true
 reveal-scheduler.workspace = true
+reveal-services.workspace = true
 
 [lints]
 workspace = true

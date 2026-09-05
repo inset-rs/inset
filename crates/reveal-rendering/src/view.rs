@@ -124,7 +124,9 @@ impl RenderView {
             view,
             root_transform: None,
         }));
-        this.render_object_data_mut(app).was_repaint_boundary = true;
+        let data = this.render_object_data_mut(app);
+        data.object_vtable = Some(&VTABLE);
+        data.was_repaint_boundary = true;
         if let Some(configuration) = configuration {
             this.set_configuration(app, configuration);
         }
@@ -132,7 +134,7 @@ impl RenderView {
         this
     }
 
-    /// The erased `RenderObject` edge.
+    /// The type-erased `RenderObject` handle.
     pub fn as_object(self: RenderHandle<Self>) -> AnyRenderObject {
         AnyRenderObject::from_vtable(self.id(), const { &VTABLE })
     }
@@ -394,6 +396,8 @@ static VTABLE: RenderObjectVTable = RenderObjectVTable::of::<RenderView>(
     |app, id, child, transform| {
         <RenderView as RenderObject>::apply_paint_transform(resolve(id), app, child, transform)
     },
+    |app, id| <RenderView as RenderObject>::perform_resize(resolve(id), app),
+    |app, id| crate::object::RenderObjectBase::mark_needs_layout(resolve::<RenderView>(id), app),
     None,
     None,
 );

@@ -22,8 +22,7 @@ use crate::basic_types::{Axis, TextDirection};
 ///
 ///  * `Padding`, a widget that describes margins using [`EdgeInsetsGeometry`].
 ///
-/// Non-exhaustive: `_MixedEdgeInsets` (cross-kind `add`/`subtract`) is a later
-/// arm.
+/// Non-exhaustive: Flutter may add a subclass.
 #[non_exhaustive]
 #[derive(Clone, Copy)]
 pub enum EdgeInsetsGeometry {
@@ -31,6 +30,22 @@ pub enum EdgeInsetsGeometry {
     Insets(EdgeInsets),
     /// Insets relative to the writing direction — Dart's `EdgeInsetsDirectional`.
     Directional(EdgeInsetsDirectional),
+    /// Visual and directional offsets at once — Dart's private `_MixedEdgeInsets`,
+    /// what combining the two kinds produces.
+    Mixed {
+        /// The offset from the left.
+        left: f64,
+        /// The offset from the right.
+        right: f64,
+        /// The offset from the start side.
+        start: f64,
+        /// The offset from the end side.
+        end: f64,
+        /// The offset from the top.
+        top: f64,
+        /// The offset from the bottom.
+        bottom: f64,
+    },
 }
 
 impl EdgeInsetsGeometry {
@@ -73,6 +88,7 @@ impl EdgeInsetsGeometry {
         match self {
             EdgeInsetsGeometry::Insets(insets) => insets.left,
             EdgeInsetsGeometry::Directional(_) => 0.0,
+            EdgeInsetsGeometry::Mixed { left, .. } => *left,
         }
     }
 
@@ -80,6 +96,7 @@ impl EdgeInsetsGeometry {
         match self {
             EdgeInsetsGeometry::Insets(insets) => insets.right,
             EdgeInsetsGeometry::Directional(_) => 0.0,
+            EdgeInsetsGeometry::Mixed { right, .. } => *right,
         }
     }
 
@@ -87,6 +104,7 @@ impl EdgeInsetsGeometry {
         match self {
             EdgeInsetsGeometry::Insets(_) => 0.0,
             EdgeInsetsGeometry::Directional(insets) => insets.start,
+            EdgeInsetsGeometry::Mixed { start, .. } => *start,
         }
     }
 
@@ -94,6 +112,7 @@ impl EdgeInsetsGeometry {
         match self {
             EdgeInsetsGeometry::Insets(_) => 0.0,
             EdgeInsetsGeometry::Directional(insets) => insets.end,
+            EdgeInsetsGeometry::Mixed { end, .. } => *end,
         }
     }
 
@@ -101,6 +120,7 @@ impl EdgeInsetsGeometry {
         match self {
             EdgeInsetsGeometry::Insets(insets) => insets.top,
             EdgeInsetsGeometry::Directional(insets) => insets.top,
+            EdgeInsetsGeometry::Mixed { top, .. } => *top,
         }
     }
 
@@ -108,8 +128,40 @@ impl EdgeInsetsGeometry {
         match self {
             EdgeInsetsGeometry::Insets(insets) => insets.bottom,
             EdgeInsetsGeometry::Directional(insets) => insets.bottom,
+            EdgeInsetsGeometry::Mixed { bottom, .. } => *bottom,
         }
     }
+
+    /// Dart's private `_MixedEdgeInsets.fromLRSETB`.
+    const fn from_lrsetb(
+        left: f64,
+        right: f64,
+        start: f64,
+        end: f64,
+        top: f64,
+        bottom: f64,
+    ) -> EdgeInsetsGeometry {
+        EdgeInsetsGeometry::Mixed {
+            left,
+            right,
+            start,
+            end,
+            top,
+            bottom,
+        }
+    }
+
+    /// An [`EdgeInsetsGeometry`] with infinite offsets in each direction.
+    ///
+    /// Can be used as an infinite upper bound for [`clamp`](Self::clamp).
+    pub const INFINITY: EdgeInsetsGeometry = EdgeInsetsGeometry::from_lrsetb(
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::INFINITY,
+    );
 
     /// Whether every dimension is non-negative.
     pub fn is_non_negative(&self) -> bool {
@@ -142,6 +194,25 @@ impl EdgeInsetsGeometry {
     /// The size that this [`EdgeInsets`] would occupy with an empty interior.
     pub fn collapsed_size(&self) -> Size {
         Size::new(self.horizontal(), self.vertical())
+    }
+
+    /// An [`EdgeInsetsGeometry`] with top and bottom, left and right, and start
+    /// and end flipped.
+    pub fn flipped(&self) -> EdgeInsetsGeometry {
+        match self {
+            EdgeInsetsGeometry::Insets(insets) => EdgeInsetsGeometry::Insets(insets.flipped()),
+            EdgeInsetsGeometry::Directional(insets) => {
+                EdgeInsetsGeometry::Directional(insets.flipped())
+            }
+            EdgeInsetsGeometry::Mixed { .. } => EdgeInsetsGeometry::from_lrsetb(
+                self.right(),
+                self.left(),
+                self.end(),
+                self.start(),
+                self.bottom(),
+                self.top(),
+            ),
+        }
     }
 
     /// Returns a new size that is bigger than the given size by the amount of
@@ -183,6 +254,86 @@ impl EdgeInsetsGeometry {
         )
     }
 
+    /// Returns the difference between two [`EdgeInsetsGeometry`] objects.
+    ///
+    /// If you know you are applying this to two [`EdgeInsets`] or two
+    /// [`EdgeInsetsDirectional`] objects, consider using the binary infix `-`
+    /// operator instead, which always returns an object of the same type as the
+    /// operands, and is typed accordingly.
+    ///
+    /// Applied to two objects of the same kind, the result is of that kind;
+    /// otherwise it is the mixed arm, which [`resolve`](Self::resolve) turns
+    /// into a concrete [`EdgeInsets`].
+    ///
+    /// This method returns the same result as [`add`](Self::add) applied to the
+    /// negation of the argument.
+    pub fn subtract(self, other: EdgeInsetsGeometry) -> EdgeInsetsGeometry {
+        match (self, other) {
+            (EdgeInsetsGeometry::Insets(a), EdgeInsetsGeometry::Insets(b)) => {
+                EdgeInsetsGeometry::Insets(a - b)
+            }
+            (EdgeInsetsGeometry::Directional(a), EdgeInsetsGeometry::Directional(b)) => {
+                EdgeInsetsGeometry::Directional(a - b)
+            }
+            _ => EdgeInsetsGeometry::from_lrsetb(
+                self.left() - other.left(),
+                self.right() - other.right(),
+                self.start() - other.start(),
+                self.end() - other.end(),
+                self.top() - other.top(),
+                self.bottom() - other.bottom(),
+            ),
+        }
+    }
+
+    /// Returns the sum of two [`EdgeInsetsGeometry`] objects.
+    ///
+    /// If you know you are adding two [`EdgeInsets`] or two
+    /// [`EdgeInsetsDirectional`] objects, consider using the `+` operator
+    /// instead, which always returns an object of the same type as the operands,
+    /// and is typed accordingly.
+    ///
+    /// Applied to two objects of the same kind, the result is of that kind;
+    /// otherwise it is the mixed arm, which [`resolve`](Self::resolve) turns
+    /// into a concrete [`EdgeInsets`].
+    #[allow(clippy::should_implement_trait)]
+    pub fn add(self, other: EdgeInsetsGeometry) -> EdgeInsetsGeometry {
+        match (self, other) {
+            (EdgeInsetsGeometry::Insets(a), EdgeInsetsGeometry::Insets(b)) => {
+                EdgeInsetsGeometry::Insets(a + b)
+            }
+            (EdgeInsetsGeometry::Directional(a), EdgeInsetsGeometry::Directional(b)) => {
+                EdgeInsetsGeometry::Directional(a + b)
+            }
+            _ => EdgeInsetsGeometry::from_lrsetb(
+                self.left() + other.left(),
+                self.right() + other.right(),
+                self.start() + other.start(),
+                self.end() + other.end(),
+                self.top() + other.top(),
+                self.bottom() + other.bottom(),
+            ),
+        }
+    }
+
+    /// Returns a new [`EdgeInsetsGeometry`] object with all values greater than
+    /// or equal to `min`, and less than or equal to `max`.
+    pub fn clamp(&self, min: &EdgeInsetsGeometry, max: &EdgeInsetsGeometry) -> EdgeInsetsGeometry {
+        match self {
+            EdgeInsetsGeometry::Insets(insets) => {
+                EdgeInsetsGeometry::Insets(insets.clamp(min, max))
+            }
+            _ => EdgeInsetsGeometry::from_lrsetb(
+                clamp_double(self.left(), min.left(), max.left()),
+                clamp_double(self.right(), min.right(), max.right()),
+                clamp_double(self.start(), min.start(), max.start()),
+                clamp_double(self.end(), min.end(), max.end()),
+                clamp_double(self.top(), min.top(), max.top()),
+                clamp_double(self.bottom(), min.bottom(), max.bottom()),
+            ),
+        }
+    }
+
     /// Integer divides the [`EdgeInsetsGeometry`] object in each dimension by
     /// the given factor.
     pub fn truncating_div(&self, other: f64) -> EdgeInsetsGeometry {
@@ -193,6 +344,54 @@ impl EdgeInsetsGeometry {
             EdgeInsetsGeometry::Directional(insets) => {
                 EdgeInsetsGeometry::Directional(insets.truncating_div(other))
             }
+            EdgeInsetsGeometry::Mixed { .. } => EdgeInsetsGeometry::from_lrsetb(
+                (self.left() / other).trunc(),
+                (self.right() / other).trunc(),
+                (self.start() / other).trunc(),
+                (self.end() / other).trunc(),
+                (self.top() / other).trunc(),
+                (self.bottom() / other).trunc(),
+            ),
+        }
+    }
+
+    /// Linearly interpolate between two [`EdgeInsetsGeometry`] objects.
+    ///
+    /// If either is `None`, this function interpolates from
+    /// [`EdgeInsets::ZERO`], and the result is of the same kind as the non-`None`
+    /// argument.
+    ///
+    /// Applied to two objects of the same kind, the result is of that kind;
+    /// otherwise it is the mixed arm, which [`resolve`](Self::resolve) turns
+    /// into a concrete [`EdgeInsets`].
+    pub fn lerp(
+        a: Option<EdgeInsetsGeometry>,
+        b: Option<EdgeInsetsGeometry>,
+        t: f64,
+    ) -> Option<EdgeInsetsGeometry> {
+        if a == b {
+            return a;
+        }
+        match (a, b) {
+            (None, None) => None,
+            (None, Some(b)) => Some(b * t),
+            (Some(a), None) => Some(a * (1.0 - t)),
+            (Some(EdgeInsetsGeometry::Insets(a)), Some(EdgeInsetsGeometry::Insets(b))) => {
+                EdgeInsets::lerp(Some(a), Some(b), t).map(EdgeInsetsGeometry::Insets)
+            }
+            (
+                Some(EdgeInsetsGeometry::Directional(a)),
+                Some(EdgeInsetsGeometry::Directional(b)),
+            ) => EdgeInsetsDirectional::lerp(Some(a), Some(b), t)
+                .map(EdgeInsetsGeometry::Directional),
+            (Some(a), Some(b)) => Some(EdgeInsetsGeometry::from_lrsetb(
+                lerp_double(Some(a.left()), Some(b.left()), t).unwrap(),
+                lerp_double(Some(a.right()), Some(b.right()), t).unwrap(),
+                lerp_double(Some(a.start()), Some(b.start()), t).unwrap(),
+                lerp_double(Some(a.end()), Some(b.end()), t).unwrap(),
+                lerp_double(Some(a.top()), Some(b.top()), t).unwrap(),
+                lerp_double(Some(a.bottom()), Some(b.bottom()), t).unwrap(),
+            )),
         }
     }
 
@@ -210,23 +409,22 @@ impl EdgeInsetsGeometry {
         match self {
             EdgeInsetsGeometry::Insets(insets) => insets.resolve(direction),
             EdgeInsetsGeometry::Directional(insets) => insets.resolve(direction),
-        }
-    }
-
-    /// Returns the sum of two [`EdgeInsetsGeometry`] objects.
-    ///
-    /// Same-kind add returns that kind. Cross-kind add (`_MixedEdgeInsets`) is
-    /// deferred.
-    #[allow(clippy::should_implement_trait)]
-    pub fn add(self, other: EdgeInsetsGeometry) -> EdgeInsetsGeometry {
-        match (self, other) {
-            (EdgeInsetsGeometry::Insets(a), EdgeInsetsGeometry::Insets(b)) => {
-                EdgeInsetsGeometry::Insets(a + b)
+            EdgeInsetsGeometry::Mixed { .. } => {
+                match direction.expect("EdgeInsetsGeometry.resolve needs a TextDirection") {
+                    TextDirection::Rtl => EdgeInsets::from_ltrb(
+                        self.end() + self.left(),
+                        self.top(),
+                        self.start() + self.right(),
+                        self.bottom(),
+                    ),
+                    TextDirection::Ltr => EdgeInsets::from_ltrb(
+                        self.start() + self.left(),
+                        self.top(),
+                        self.end() + self.right(),
+                        self.bottom(),
+                    ),
+                }
             }
-            (EdgeInsetsGeometry::Directional(a), EdgeInsetsGeometry::Directional(b)) => {
-                EdgeInsetsGeometry::Directional(a + b)
-            }
-            _ => panic!("cross-kind EdgeInsetsGeometry::add (_MixedEdgeInsets) is deferred"),
         }
     }
 }
@@ -266,6 +464,14 @@ impl Neg for EdgeInsetsGeometry {
         match self {
             EdgeInsetsGeometry::Insets(insets) => EdgeInsetsGeometry::Insets(-insets),
             EdgeInsetsGeometry::Directional(insets) => EdgeInsetsGeometry::Directional(-insets),
+            EdgeInsetsGeometry::Mixed { .. } => EdgeInsetsGeometry::from_lrsetb(
+                -self.left(),
+                -self.right(),
+                -self.start(),
+                -self.end(),
+                -self.top(),
+                -self.bottom(),
+            ),
         }
     }
 }
@@ -283,6 +489,14 @@ impl Mul<f64> for EdgeInsetsGeometry {
             EdgeInsetsGeometry::Directional(insets) => {
                 EdgeInsetsGeometry::Directional(insets * other)
             }
+            EdgeInsetsGeometry::Mixed { .. } => EdgeInsetsGeometry::from_lrsetb(
+                self.left() * other,
+                self.right() * other,
+                self.start() * other,
+                self.end() * other,
+                self.top() * other,
+                self.bottom() * other,
+            ),
         }
     }
 }
@@ -300,6 +514,14 @@ impl Div<f64> for EdgeInsetsGeometry {
             EdgeInsetsGeometry::Directional(insets) => {
                 EdgeInsetsGeometry::Directional(insets / other)
             }
+            EdgeInsetsGeometry::Mixed { .. } => EdgeInsetsGeometry::from_lrsetb(
+                self.left() / other,
+                self.right() / other,
+                self.start() / other,
+                self.end() / other,
+                self.top() / other,
+                self.bottom() / other,
+            ),
         }
     }
 }
@@ -316,6 +538,14 @@ impl Rem<f64> for EdgeInsetsGeometry {
             EdgeInsetsGeometry::Directional(insets) => {
                 EdgeInsetsGeometry::Directional(insets % other)
             }
+            EdgeInsetsGeometry::Mixed { .. } => EdgeInsetsGeometry::from_lrsetb(
+                self.left() % other,
+                self.right() % other,
+                self.start() % other,
+                self.end() % other,
+                self.top() % other,
+                self.bottom() % other,
+            ),
         }
     }
 }
@@ -1219,6 +1449,74 @@ mod tests {
             format!("{:?}", EdgeInsetsDirectional::only(1.01, 1.01, 1.01, 1.01)),
             "EdgeInsetsDirectional(1.0, 1.0, 1.0, 1.0)"
         );
+    }
+
+    #[test]
+    fn a_cross_kind_lerp_resolves_per_direction() {
+        let a = EdgeInsetsGeometry::from_ltrb(10.0, 0.0, 0.0, 0.0);
+        let b = EdgeInsetsGeometry::from_steb(20.0, 0.0, 0.0, 0.0);
+        let halfway = EdgeInsetsGeometry::lerp(Some(a), Some(b), 0.5).expect("both ends are set");
+        assert!(matches!(halfway, EdgeInsetsGeometry::Mixed { .. }));
+        assert_eq!(
+            halfway.resolve(Some(TextDirection::Ltr)),
+            EdgeInsets::from_ltrb(15.0, 0.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            halfway.resolve(Some(TextDirection::Rtl)),
+            EdgeInsets::from_ltrb(5.0, 0.0, 10.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn a_same_kind_lerp_keeps_the_kind() {
+        let lerp = |a, b, t| EdgeInsetsGeometry::lerp(Some(a), Some(b), t).expect("both ends");
+        assert_eq!(
+            lerp(
+                EdgeInsetsGeometry::all(10.0),
+                EdgeInsetsGeometry::all(20.0),
+                0.5
+            ),
+            EdgeInsetsGeometry::Insets(EdgeInsets::all(15.0))
+        );
+        assert_eq!(
+            lerp(
+                EdgeInsetsGeometry::from_steb(10.0, 0.0, 0.0, 0.0),
+                EdgeInsetsGeometry::from_steb(20.0, 0.0, 0.0, 0.0),
+                0.5
+            ),
+            EdgeInsetsGeometry::Directional(EdgeInsetsDirectional::from_steb(15.0, 0.0, 0.0, 0.0))
+        );
+    }
+
+    #[test]
+    fn clamping_against_infinity_keeps_a_non_negative_inset() {
+        let padding = EdgeInsetsGeometry::from_steb(-5.0, 4.0, 0.0, 0.0);
+        let clamped = padding.clamp(&EdgeInsetsGeometry::ZERO, &EdgeInsetsGeometry::INFINITY);
+        assert_eq!(
+            clamped.resolve(Some(TextDirection::Ltr)),
+            EdgeInsets::from_ltrb(0.0, 4.0, 0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn a_cross_kind_add_is_the_mixed_arm() {
+        let sum = EdgeInsetsGeometry::from_ltrb(1.0, 2.0, 3.0, 4.0)
+            .add(EdgeInsetsGeometry::from_steb(10.0, 0.0, 20.0, 0.0));
+        assert_eq!(
+            sum.resolve(Some(TextDirection::Ltr)),
+            EdgeInsets::from_ltrb(11.0, 2.0, 23.0, 4.0)
+        );
+        assert_eq!(
+            sum.resolve(Some(TextDirection::Rtl)),
+            EdgeInsets::from_ltrb(21.0, 2.0, 13.0, 4.0)
+        );
+    }
+
+    #[test]
+    fn a_cross_kind_subtract_negates_the_argument() {
+        let a = EdgeInsetsGeometry::from_ltrb(1.0, 2.0, 3.0, 4.0);
+        let b = EdgeInsetsGeometry::from_steb(10.0, 0.0, 20.0, 0.0);
+        assert_eq!(a.subtract(b), a.add(-b));
     }
 
     #[test]

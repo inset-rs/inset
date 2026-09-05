@@ -7,8 +7,7 @@ use reveal_embedder::Size;
 use reveal_foundation::{App, Handle};
 use reveal_painting::EdgeInsetsGeometry;
 use reveal_rendering::{
-    AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderHandle,
-    RenderObjectWithChildMixin, RenderPadding,
+    AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderHandle, RenderPadding,
 };
 
 use super::*;

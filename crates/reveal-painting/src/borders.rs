@@ -636,8 +636,8 @@ impl ShapeBorder for CompoundBorder {
     }
 
     fn get_inner_path(&self, mut rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
-        for index in 0..self.borders.len() - 1 {
-            rect = self.borders[index]
+        for border in &self.borders[..self.borders.len() - 1] {
+            rect = border
                 .dimensions()
                 .resolve(text_direction)
                 .deflate_rect(rect);

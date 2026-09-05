@@ -8,6 +8,7 @@ use reveal_painting::ImageConfiguration;
 
 use crate::framework::BuildContext;
 use crate::widgets::basic::Directionality;
+use crate::widgets::localizations::Localizations;
 use crate::widgets::media_query::MediaQuery;
 
 /// Creates an [`ImageConfiguration`] based on the given [`BuildContext`] (and optionally
@@ -20,7 +21,7 @@ use crate::widgets::media_query::MediaQuery;
 /// dependencies change, e.g. by calling it from `State::did_change_dependencies`, so that
 /// any changes in the environment cause the image to be re-resolved.
 ///
-/// The asset bundle and locale wait with `DefaultAssetBundle` and `Localizations`.
+/// The asset bundle waits with `DefaultAssetBundle`.
 pub fn create_local_image_configuration(
     app: &mut App,
     context: BuildContext,
@@ -31,6 +32,7 @@ pub fn create_local_image_configuration(
         device_pixel_ratio: Some(
             MediaQuery::maybe_device_pixel_ratio_of(app, context).unwrap_or(1.0),
         ),
+        locale: Localizations::maybe_locale_of(app, context),
         text_direction: Directionality::maybe_of(app, context),
         size,
         platform: Some(app.platform().target_platform()),

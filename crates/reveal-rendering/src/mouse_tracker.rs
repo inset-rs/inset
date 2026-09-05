@@ -551,8 +551,9 @@ mod tests {
     use reveal_foundation::{Listenable, Listener};
 
     use super::*;
-    use crate::box_::{BoxConstraints, BoxHitTestResult, RenderBox, RenderObjectWithChildMixin};
+    use crate::box_::{BoxConstraints, BoxHitTestResult, RenderBox};
     use crate::object::RenderObject;
+    use crate::object::RenderObjectWithChildMixin;
     use crate::pipeline_owner::PipelineOwner;
     use crate::proxy_box::{RenderConstrainedBox, RenderMouseRegion, RenderRepaintBoundary};
     use crate::shifted_box::RenderPadding;
