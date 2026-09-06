@@ -11,7 +11,6 @@ valo.workspace = true
 wgpu.workspace = true
 pollster.workspace = true
 winit.workspace = true
-valo-system-fonts.workspace = true
 
 [lints]
 workspace = true

@@ -13,6 +13,10 @@ No Flutter counterpart. Dart has no type — the engine owns the isolate.
   Reason: platform — there is no isolate-global callback table; the host reads the key answer from the call.
   Affect: a host calls `client.frame(..)`, `client.pointer_data_packet(..)` and `client.key_data(..)`, learning from the last whether a `HardwareKeyboard` handler took the key; tests may still pump the handlers directly.
 
+- Change: `platform_brightness_changed` and `locales_changed` invoke the callbacks `WidgetsBinding` assigned on `App::platform_callbacks`, each in a turn of its own.
+  Reason: platform — the shell cannot name `WidgetsBinding`, which lives above it; Dart's dispatcher holds the handler the binding assigned.
+  Affect: a host that reports a theme or locale change reaches `MediaQuery` observers without the shell knowing widgets.
+
 - Change: `Shell::new` installs the platform's fonts into `PaintingBinding` before `setup` runs.
   Reason: platform — Flutter's engine collects platform fonts on its own; here the shell asks `Platform::font_source` once.
   Affect: text shapes against the OS fonts without application code; a test shell with the inert platform has an empty collection until `PaintingBinding::install_fonts`.

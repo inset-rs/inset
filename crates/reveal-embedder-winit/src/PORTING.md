@@ -37,9 +37,9 @@ No Flutter counterpart. Flutter's engine is C++ and is not in this checkout.
   Reason: platform — valo's backdrop has no colour stage, and its `Paint`'s colour filter applies to the whole composited layer.
   Affect: a `CupertinoPopupSurface` is blurred but not saturated, as is any frosted surface that composes a colour matrix over a backdrop blur; anything else composed into a backdrop filter is likewise dropped.
 
-- Change: `Platform::font_source` is `valo-system-fonts`' OS scanner.
+- Change: `Platform::font_source` is `SystemFontSource::platform()`, the engine's font manager over the OS font API.
   Reason: platform — Flutter's engine finds platform fonts itself; valo needs a `FontSource`.
-  Affect: text uses installed fonts; a family that is not installed falls back to the nearest face.
+  Affect: text uses installed fonts through CoreText on macOS, the Cupertino system-font names resolve to SF, and a family that is not installed falls back to the face the OS picks for the character.
 
 - Change: `present` asks the window for another redraw when valo cannot acquire a surface texture (wgpu's `Timeout` on the first frame of a just-shown window), so the retained scene is presented next vsync.
   Reason: platform — Flutter's Metal surface always has a drawable, so its engine drops a frame whose surface was not ready and resubmits only on Android's first-frame path; the redraw request is that resubmit here.
@@ -47,7 +47,6 @@ No Flutter counterpart. Flutter's engine is C++ and is not in this checkout.
 
 ## Deferred
 
-- `ThemeChanged` → `onPlatformBrightnessChanged`. Trigger: `MediaQuery` / `CupertinoTheme`.
 - The layout keymap for character keys: a shifted symbol reports the symbol's own logical key (`!`), where Flutter's engine consults the layout and reports the key that produced it (`digit1`); letters and digits are unaffected, since the character is lower-cased. Trigger: a shortcut that matches a shifted symbol by logical key.
 - Dead keys (`Key::Dead`) and `Key::Unidentified`. Trigger: composing input, or a host key winit cannot name.
 - Synthesizing the key ups a focus change swallowed; winit's `is_synthetic` covers Windows and X11, and macOS delivers nothing. Trigger: `HardwareKeyboard::sync_keyboard_state` gaining a host query.

@@ -134,6 +134,17 @@ pub struct App {
     timers: Timers,
     executor: ForegroundExecutor,
     platform: PlatformRef,
+    platform_callbacks: PlatformCallbacks,
+}
+
+/// The callbacks the framework assigns onto dart:ui's `PlatformDispatcher`
+/// (`onPlatformBrightnessChanged`, `onLocaleChanged`). The host's half of the dispatcher
+/// is the `Platform` the `App` holds; this is the half the framework sets and the host's
+/// client invokes.
+#[derive(Default)]
+pub struct PlatformCallbacks {
+    pub on_platform_brightness_changed: Option<Listener>,
+    pub on_locale_changed: Option<Listener>,
 }
 
 impl App {
@@ -150,6 +161,7 @@ impl App {
             timers: Timers::default(),
             executor,
             platform,
+            platform_callbacks: PlatformCallbacks::default(),
         }
     }
 
@@ -174,6 +186,15 @@ impl App {
 
     pub fn platform(&self) -> PlatformRef {
         Rc::clone(&self.platform)
+    }
+
+    /// The dispatcher callbacks the framework has assigned.
+    pub fn platform_callbacks(&self) -> &PlatformCallbacks {
+        &self.platform_callbacks
+    }
+
+    pub fn platform_callbacks_mut(&mut self) -> &mut PlatformCallbacks {
+        &mut self.platform_callbacks
     }
 
     /// One `T` per App (`SchedulerBinding.instance`, `kAlwaysCompleteAnimation`). Do not destroy it — the stored id goes stale and the next call panics.

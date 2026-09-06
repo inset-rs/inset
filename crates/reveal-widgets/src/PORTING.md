@@ -54,6 +54,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — no mixin on a state; Dart's observer set compares identity.
   Affect: keep the registered `Rc` to remove it; the route, lifecycle, memory-pressure, back-gesture and view-focus callbacks wait with their platform events.
 
+- Change: `WidgetsBinding::instance` assigns the brightness and locale callbacks on `App::platform_callbacks`, where Dart's `initInstances` assigns them onto `platformDispatcher`.
+  Reason: platform — there is no dispatcher singleton to assign onto; the shell invokes what it finds there.
+  Affect: observers hear `did_change_platform_brightness` and `did_change_locales` once a host reports the change through its client.
+
 - Change: `run_app` schedules the root attach with a zero-duration `Timer` (Dart's `Timer.run`) and then a normal frame; there is no warm-up frame.
   Reason: platform — `scheduleWarmUpFrame` waits in `reveal-scheduler`.
   Affect: a host must `cell.elapse(..)` (or run its event loop) before the first frame builds anything; the first frame is a regular frame.

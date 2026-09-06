@@ -51,6 +51,14 @@ impl Entry {
     ///
     /// "Navigation" is ten characters on purpose: the back label keeps a previous title
     /// verbatim only up to twelve, and that entry is where the rule is demonstrated.
+    /// The entry named by its variant, case-insensitively: how a launcher picks a screen.
+    pub fn from_name(name: &str) -> Option<Entry> {
+        let name = name.to_ascii_lowercase();
+        Entry::ALL
+            .into_iter()
+            .find(|entry| format!("{entry:?}").to_ascii_lowercase() == name)
+    }
+
     pub fn title(self) -> &'static str {
         match self {
             Entry::Navigation => "Navigation",

@@ -10,14 +10,24 @@ indexmap.workspace = true
 reveal-animation.workspace = true
 reveal-cupertino.workspace = true
 reveal-embedder.workspace = true
-reveal-embedder-winit.workspace = true
+reveal-embedder-winit = { workspace = true, optional = true }
 reveal-foundation.workspace = true
 reveal-painting.workspace = true
 # The flex enums (`MainAxisAlignment`, `CrossAxisAlignment`) live here, as Flutter's do in
 # `rendering/`; reveal-widgets re-exports the widget half only.
 reveal-rendering.workspace = true
-reveal-shell.workspace = true
+reveal-shell = { workspace = true, optional = true }
 reveal-widgets.workspace = true
+
+[features]
+default = ["native"]
+# The winit binary. Off, the library builds for a host that brings its own embedder (wasm).
+native = ["dep:reveal-embedder-winit", "dep:reveal-shell"]
+
+[[bin]]
+name = "cupertino-gallery"
+path = "src/main.rs"
+required-features = ["native"]
 
 [dev-dependencies]
 reveal-gestures.workspace = true

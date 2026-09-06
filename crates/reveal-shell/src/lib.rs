@@ -97,6 +97,24 @@ impl EmbedderClient for Shell {
         self.turn(|app| KeyEventManager::instance(app).handle_key_data(app, data))
     }
 
+    fn platform_brightness_changed(&mut self) {
+        self.turn(|app| {
+            let callback = app.platform_callbacks().on_platform_brightness_changed.clone();
+            if let Some(callback) = callback {
+                callback.call(app);
+            }
+        });
+    }
+
+    fn locales_changed(&mut self) {
+        self.turn(|app| {
+            let callback = app.platform_callbacks().on_locale_changed.clone();
+            if let Some(callback) = callback {
+                callback.call(app);
+            }
+        });
+    }
+
     fn wake(&mut self, elapsed: Duration) {
         self.advance_clock(elapsed);
     }

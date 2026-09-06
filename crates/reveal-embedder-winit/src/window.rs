@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 use reveal_embedder::{
     Brightness, EmbedderClient, FontSource, Frame, KeyData, KeyEventDeviceType, KeyEventType,
     Picture, Platform, PlatformRef, PointerChange, PointerData, PointerDataPacket,
-    PointerDeviceKind, PointerSignalKind, SystemMouseCursorKind, TargetPlatform, View,
+    PointerDeviceKind, PointerSignalKind, SystemFontSource, SystemMouseCursorKind, TargetPlatform,
+    View,
     ViewConstraints, ViewId, ViewMetrics, ViewPadding, ViewRef,
 };
 use winit::application::ApplicationHandler;
@@ -128,7 +129,7 @@ impl Platform for WinitPlatform {
 
     /// The OS font database, scanned on request; the shell asks once at start-up.
     fn font_source(&self) -> Option<Box<dyn FontSource>> {
-        Some(Box::new(valo_system_fonts::SystemFonts::load()))
+        Some(Box::new(SystemFontSource::platform()))
     }
 
     /// One mouse: the device is not needed to pick the window; the window the pointer was
@@ -605,6 +606,9 @@ impl<C: EmbedderClient> ApplicationHandler for WinitApp<C> {
             }
             WindowEvent::ThemeChanged(theme) => {
                 self.platform.brightness.set(brightness_of(theme));
+                if let Some(client) = &mut self.client {
+                    client.platform_brightness_changed();
+                }
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.pointer_window = Some(id);

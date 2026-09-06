@@ -146,6 +146,14 @@ impl WidgetsBinding {
             app.get_mut(this).build_owner = Some(build_owner);
             // Flutter's `WidgetsBinding` overrides `RendererBinding.drawFrame`.
             RendererBinding::instance(app).set_overrides(app, Rc::new(this));
+            // Flutter's `initInstances` assigns the dispatcher callbacks the binding handles.
+            let callbacks = app.platform_callbacks_mut();
+            callbacks.on_platform_brightness_changed = Some(Listener::new(|app| {
+                WidgetsBinding::instance(app).handle_platform_brightness_changed(app)
+            }));
+            callbacks.on_locale_changed = Some(Listener::new(|app| {
+                WidgetsBinding::instance(app).handle_locale_changed(app)
+            }));
         }
         this
     }

@@ -14,5 +14,5 @@ pub mod catalog;
 pub mod pages;
 pub mod support;
 
-pub use app::{entry_route, gallery, open_entry, open_sub_page, sub_route};
+pub use app::{entry_route, gallery, open_entry, open_sub_page, run_gallery, sub_route};
 pub use catalog::Entry;

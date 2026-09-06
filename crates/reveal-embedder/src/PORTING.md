@@ -20,6 +20,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — Flutter's engine holds one font manager per process; valo shapes against a collection the caller owns.
   Affect: a host implements `font_source`; `builder.build(&mut fonts)` where Dart writes `builder.build()`.
 
+- Change: `SystemFontSource` is the engine's font manager: valo's `FontManager` (the platform's font API in Skia's `SkFontMgr` shape) behind `FontSource`, answering `CupertinoSystemText` and `CupertinoSystemDisplay` with every weight of the platform's user-interface font at 17 and 29 points, as the engine's `platform_mac.mm` registers them.
+  Reason: platform — the engine registers those names into its own font manager at startup; here the source answers them on demand, and a host with its own lookup (a guest across a boundary) passes a manager instead of the platform's.
+  Affect: a host returns `SystemFontSource::platform()` (or `::new(manager)`) from `font_source`, and Cupertino text shapes with the system font on every platform that has one. The optical size the engine gets from CoreText (SF Pro Text below 29 points, Display above) is not applied: both names answer the same variable face at its default optical size.
+
 - Change: `Paragraph` and `ParagraphBuilder` wrap valo's, with offsets kept as UTF-16 code units. There are no placeholders, the box styles are ignored (every box is tight and carries the paragraph's direction), and the ideographic baseline is the first line's bottom.
   Reason: platform — valo's paragraph has no placeholders, box styles, per-box direction or ideographic metrics.
   Affect: `add_placeholder` does not exist, so a `WidgetSpan` cannot be laid out; `TextBox.direction` is the paragraph's, not the run's; `BoxHeightStyle::Strut` and `Max` read as `Tight`.
@@ -68,6 +72,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — Dart's event loop fires `Timer`s on its own; the `App` owns its timers and needs the host to say time passed.
   Affect: a host calls `wake` when its wait ends; the shell turns it into `App::elapse`.
 
+- Change: `platform_brightness_changed` and `locales_changed` are `onPlatformBrightnessChanged` and `onLocaleChanged`; the new value is read back from `Platform`, not carried by the call.
+  Reason: platform — as with `frame`, the host pushes a notification and the framework reads the dispatcher.
+  Affect: a host updates what its `Platform` answers before calling the hook; `MediaQuery` observers, and so `CupertinoTheme`, then rebuild.
+
 ## pointer.rs → dart:ui `pointer.dart`
 
 - Change: `PointerData.respond` / `onRespond` are omitted.
@@ -77,9 +85,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 ## Deferred
 
 - `StrutStyle` / `ParagraphStyle.strutStyle`, `TextStyle.locale` / `ParagraphStyle.locale`, `ParagraphBuilder.addPlaceholder` / `placeholderScales`, `Paragraph.getBoxesForPlaceholders` contents. Trigger: strut, locale-specific glyphs, `WidgetSpan`; valo has none of them.
-- `onMetricsChanged` / `onPlatformBrightnessChanged`. Trigger: `MediaQuery` / `CupertinoTheme`.
 - `ImageFilter.blur(tileMode:)` and the `dilate` / `erode` / `matrix` / `shader` filters. Trigger: valo growing those ops.
-- `PlatformDispatcher.locale` and `onLocaleChanged` (the client event that would call `WidgetsBinding::handle_locale_changed`). Trigger: a host that observes the OS locale list.
+- `PlatformDispatcher.locale`, the first of `locales`. Trigger: a caller of the single-locale getter.
+- The system font's optical size (`opsz`) by text size, which CoreText applies for the engine. Trigger: valo-text setting variation axes from the text size.
 - `FontFeature` named tag constructors (`alternative`, `fractions`, …). Trigger: a caller that uses those factories instead of `new` / `enable` / `disable`.
 - `debugDefaultTargetPlatformOverride`. Trigger: a debug switcher that must override a live host without swapping `Platform`.
 - Semantics callbacks. Trigger: semantics.

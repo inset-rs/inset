@@ -9,28 +9,20 @@
 //! cargo run -p cupertino_gallery
 //! ```
 
-use cupertino_gallery::gallery;
-use reveal_cupertino::install_cupertino_icon_font;
+use cupertino_gallery::{Entry, run_gallery};
 use reveal_embedder_winit::{ImplicitViewConfig, WinitEmbedder};
 use reveal_shell::Shell;
-use reveal_widgets::{IntoWidget, run_app};
 
 fn main() {
+    // `GALLERY_ENTRY=indicators` opens that screen over the index without a tap.
+    let opening = std::env::var("GALLERY_ENTRY")
+        .ok()
+        .and_then(|name| Entry::from_name(&name));
     WinitEmbedder {
         implicit_view: Some(ImplicitViewConfig {
             title: "reveal — cupertino gallery".to_owned(),
             logical_size: [420.0, 720.0],
         }),
     }
-    .run(|platform| {
-        Shell::new(platform, |app| {
-            run_app(app, gallery().into_widget());
-            // AFTER `run_app`, which is what installs the default font collection this
-            // registers into. Without the icon face every glyph in the gallery — the back
-            // chevron, the row badges, the whole Icons entry — is a missing glyph and draws
-            // nothing at all, silently. There is no asset manifest here, so registration is
-            // explicit.
-            install_cupertino_icon_font(app);
-        })
-    });
+    .run(move |platform| Shell::new(platform, move |app| run_gallery(app, opening)));
 }

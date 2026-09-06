@@ -33,6 +33,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — dart:ui is host-bound; there is no isolate global to hang it on.
   Affect: host requests and view queries go through `app.platform()`.
 
+- Change: the callbacks Flutter assigns onto `PlatformDispatcher` (`onPlatformBrightnessChanged`, `onLocaleChanged`) are `App::platform_callbacks`, which `WidgetsBinding::instance` fills and the shell invokes.
+  Reason: platform — there is no isolate-global dispatcher to assign a handler onto; the framework's half of the dispatcher lives beside the host's half that `App` holds.
+  Affect: a binding that handles a dispatcher callback sets it there; a host reports the change through its client and never calls a binding.
+
 ## key.rs → key.dart
 
 - Change: `Key` equality and hashing go through `eq_key` / `hash_key`, so `dyn Key` can be `PartialEq` and `Hash`; a `UniqueKey`'s identity is a monotonic id, not object identity.

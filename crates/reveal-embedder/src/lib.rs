@@ -21,7 +21,9 @@ mod text;
 mod views;
 
 pub use client::EmbedderClient;
-pub use fonts::{FontCollection, FontDemand, FontId, FontSource};
+pub use fonts::{
+    FontCollection, FontDemand, FontId, FontManager, FontSource, SystemFontSource, Typeface,
+};
 pub use geometry::*;
 pub use key::{KeyData, KeyEventDeviceType, KeyEventType};
 pub use locale::Locale;

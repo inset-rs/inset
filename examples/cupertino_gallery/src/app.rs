@@ -6,11 +6,13 @@
 //! is the stack.
 
 use std::rc::Rc;
+use std::time::Duration;
 
-use reveal_cupertino::{CupertinoApp, CupertinoPageRoute};
-use reveal_foundation::{App, Handle};
+use reveal_cupertino::{CupertinoApp, CupertinoPageRoute, install_cupertino_icon_font};
+use reveal_foundation::{App, Handle, Listener, Timer};
 use reveal_widgets::{
-    AnyRoute, BuildContext, IntoWidget, Navigator, Route, RouteSettingsRef, WidgetBuilder,
+    AnyRoute, BuildContext, GlobalKey, IntoWidget, Navigator, NavigatorState, Route,
+    RouteSettingsRef, WidgetBuilder, run_app,
 };
 
 use crate::catalog::Entry;
@@ -39,6 +41,36 @@ pub fn gallery() -> CupertinoApp {
                     .as_route()
             })
         })
+}
+
+/// Runs the gallery, then opens `opening` over the index once the tree is attached: the
+/// screen a user would tap to, reached without input, for a bench or a smoke run.
+pub fn run_gallery(app: &mut App, opening: Option<Entry>) {
+    let navigator = GlobalKey::new();
+    run_app(
+        app,
+        gallery().navigator_key(navigator.clone()).into_widget(),
+    );
+    // AFTER `run_app`, which is what installs the default font collection this registers
+    // into. Without the icon face every glyph in the gallery — the back chevron, the row
+    // badges, the whole Icons entry — is a missing glyph and draws nothing at all, silently.
+    // There is no asset manifest here, so registration is explicit.
+    install_cupertino_icon_font(app);
+    let Some(entry) = opening else {
+        return;
+    };
+    // `run_app` attaches the tree on the next timer turn; this timer runs right after it.
+    Timer::new(
+        app,
+        Duration::ZERO,
+        Listener::new(move |app| {
+            let state = navigator
+                .current_state::<NavigatorState>(app)
+                .expect("the gallery's navigator is mounted once run_app has attached the tree");
+            let route = entry_route(app, entry);
+            state.push(app, route);
+        }),
+    );
 }
 
 /// The route one catalog entry's screen is pushed as.

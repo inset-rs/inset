@@ -26,6 +26,14 @@ pub trait EmbedderClient {
     /// keyboard with other native components should not propagate a handled one.
     fn key_data(&mut self, data: KeyData) -> bool;
 
+    /// Flutter `PlatformDispatcher.onPlatformBrightnessChanged`: the host's light or dark
+    /// preference changed, and `Platform::platform_brightness` already answers the new one.
+    fn platform_brightness_changed(&mut self);
+
+    /// Flutter `PlatformDispatcher.onLocaleChanged`: the host's locale list changed, and
+    /// `Platform::locales` already answers the new one.
+    fn locales_changed(&mut self);
+
     /// A deadline requested through `Platform::wake_at` has passed.
     ///
     /// `elapsed` is the platform clock, the same one `Frame::elapsed` reports. Dart's
