@@ -1,6 +1,6 @@
 //! The one [`App`] and the arena of [`Handle`]s inside it. Not a Dart file.
 
-use std::any::{Any, type_name};
+use std::any::type_name;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
@@ -9,11 +9,13 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use reveal_embedder::PlatformRef;
-use slotmap::{SlotMap, new_key_type};
+use slotmap::new_key_type;
 
 use crate::app_cell::{AppCell, AsyncApp};
 use crate::change_notifier::Listener;
 use crate::executor::{ForegroundExecutor, Task};
+use crate::handle_map::HandleMap;
+pub use crate::handle_map::RetainedHandle;
 use crate::timers::{Timer, Timers};
 
 /// Drain budget for one [`App::drain_microtasks`]: two callbacks scheduling
@@ -37,13 +39,13 @@ new_key_type! {
 ///
 /// `Copy` and owns nothing. A parent–child edge is a field, not an `Rc`. Do not add a refcount:
 /// that would drop `Copy` and is the `Entity` design, reserved for user stores. Stale is
-/// detected by generation, not by keeping the slot alive.
+/// detected by generation, not by keeping the entry alive.
 ///
 /// Point access, not a lease: [`App::get`] / [`App::get_mut`] for one field, then drop the borrow
 /// before any call that can run framework code. Holding the object out of the arena for a whole
 /// pass (shaft-rs-next) meant a layout callback could not re-enter the node it was laying out.
 ///
-/// [`App::get`] panics on stale — a typed handle is a promise the slot is live. [`App::handle`]
+/// [`App::get`] panics on stale — a typed handle is a promise the entry is live. [`App::handle`]
 /// returns [`None`] for an id that might be dead or the wrong type.
 ///
 /// `PhantomData<fn() -> T>` so `Handle<T>: Copy` even when `T` is not.
@@ -55,14 +57,14 @@ pub struct Handle<T> {
 impl<T> Handle<T> {
     /// Unchecked. [`App::create`] mints these; [`App::handle`] is the checked path and
     /// [`from_id`](Self::from_id) the trusted one.
-    fn new(id: HandleId) -> Handle<T> {
+    pub(crate) fn new(id: HandleId) -> Handle<T> {
         Handle {
             id,
             state: PhantomData,
         }
     }
 
-    /// Wraps an id that was minted for `T` without looking at the slot. The check is deferred to
+    /// Wraps an id that was minted for `T` without looking at the entry. The check is deferred to
     /// [`App::get`], which panics on a stale or wrong-typed id. For a type-erased handle that
     /// reconstructs the typed handle it was made from.
     pub fn from_id(id: HandleId) -> Handle<T> {
@@ -114,11 +116,6 @@ impl<T> From<Handle<T>> for HandleId {
     }
 }
 
-struct Slot {
-    type_name: &'static str,
-    state: Box<dyn Any>,
-}
-
 /// Owns every Flutter object. Callbacks receive `&mut App` plus a [`Handle`] to themselves.
 ///
 /// Lives in an [`AppCell`], which is what the shell and the tests hold; a task reaches it
@@ -128,7 +125,7 @@ struct Slot {
 pub struct App {
     /// The cell this App lives in — gpui's `App::this`.
     this: Weak<AppCell>,
-    slots: SlotMap<HandleId, Slot>,
+    handles: HandleMap,
     singletons: HashMap<std::any::TypeId, HandleId>,
     microtasks: VecDeque<Listener>,
     timers: Timers,
@@ -155,7 +152,7 @@ impl App {
     ) -> App {
         App {
             this,
-            slots: SlotMap::with_key(),
+            handles: HandleMap::new(),
             singletons: HashMap::new(),
             microtasks: VecDeque::new(),
             timers: Timers::default(),
@@ -288,103 +285,79 @@ impl App {
         self.timers.advance_to(target);
     }
 
+    /// Asks the platform to wake for the earliest pending timer. Called once the timers due by
+    /// now have fired: the deadline the platform held was theirs, and the ones still queued
+    /// (scheduled while an earlier timer was pending, or by the callbacks that just ran) need one.
+    pub(crate) fn request_wake_for_next_timer(&mut self) {
+        if let Some(delay) = self.timers.next_wake() {
+            self.platform.wake_at(self.platform.now() + delay);
+        }
+    }
+
     pub fn create<T: 'static>(&mut self, state: T) -> Handle<T> {
-        Handle::new(self.slots.insert(Slot {
-            type_name: type_name::<T>(),
-            state: Box::new(state),
-        }))
+        self.handles.create(state)
     }
 
-    /// Vacates the slot. Later [`get`](App::get) through this id panics.
-    ///
-    /// # Panics
-    ///
-    /// If already destroyed.
+    /// Dart's `dispose`: see [`HandleMap::destroy`].
     pub fn destroy(&mut self, handle: impl Into<HandleId>) {
-        let id = handle.into();
-        assert!(
-            self.slots.remove(id).is_some(),
-            "stale handle: {id:?} was already destroyed"
-        );
+        self.handles.destroy(handle.into());
     }
 
+    /// Whether the entry exists: live, or destroyed but still retained.
     pub fn contains(&self, handle: impl Into<HandleId>) -> bool {
-        self.slots.contains_key(handle.into())
+        self.handles.contains(handle.into())
+    }
+
+    /// A [`RetainedHandle`] that keeps the object past its owner's `destroy`; see
+    /// [`HandleMap::retain`].
+    pub fn retain(&mut self, handle: impl Into<HandleId>) -> RetainedHandle {
+        self.handles.retain(handle.into())
+    }
+
+    /// Gives a [`RetainedHandle`] back now; a dropped one is released at the next checkpoint.
+    pub fn release(&mut self, handle: RetainedHandle) {
+        self.handles.release(handle);
+    }
+
+    pub(crate) fn release_dropped_retained_handles(&mut self) {
+        self.handles.release_dropped_retained_handles();
+    }
+
+    /// Whether the owner destroyed the object while a [`RetainedHandle`] still keeps it.
+    pub fn is_disposed(&self, handle: impl Into<HandleId>) -> bool {
+        self.handles.is_disposed(handle.into())
     }
 
     /// Narrow a [`HandleId`]. `None` if stale or the wrong type. [`get`](App::get) panics instead.
     pub fn handle<T: 'static>(&self, handle: impl Into<HandleId>) -> Option<Handle<T>> {
-        let id = handle.into();
-        if !self.slots.get(id)?.state.is::<T>() {
-            return None;
-        }
-        Some(Handle::new(id))
+        self.handles.handle(handle.into())
     }
 
     /// # Panics
     ///
     /// If the handle is stale.
     pub fn get<T: 'static>(&self, handle: Handle<T>) -> &T {
-        let slot = self.resolve(handle.id);
-        slot.state.downcast_ref::<T>().unwrap_or_else(|| {
-            panic!(
-                "handle {:?} holds `{}`, not `{}`",
-                handle.id,
-                slot.type_name,
-                type_name::<T>()
-            )
-        })
+        self.handles.get(handle)
     }
 
     /// See [`get`](App::get).
     pub fn get_mut<T: 'static>(&mut self, handle: Handle<T>) -> &mut T {
-        let id = handle.id;
-        let slot = self.resolve_mut(id);
-        downcast_slot_mut(slot, id)
+        self.handles.get_mut(handle)
     }
 
-    /// Two live slots at once, for an object that works on another (a render object shaping
+    /// Two live entries at once, for an object that works on another (a render object shaping
     /// its text against the font collection).
     ///
     /// # Panics
     ///
-    /// If either handle is stale, or both name the same slot.
+    /// If either handle is stale, or both name the same entry.
     pub fn get_disjoint_mut<A: 'static, B: 'static>(
         &mut self,
         a: Handle<A>,
         b: Handle<B>,
     ) -> (&mut A, &mut B) {
-        let [slot_a, slot_b] = self
-            .slots
-            .get_disjoint_mut([a.id, b.id])
-            .unwrap_or_else(|| panic!("handles {:?} and {:?} are not two live slots", a.id, b.id));
-        (
-            downcast_slot_mut(slot_a, a.id),
-            downcast_slot_mut(slot_b, b.id),
-        )
+        self.handles.get_disjoint_mut(a, b)
     }
-
-    fn resolve(&self, id: HandleId) -> &Slot {
-        self.slots
-            .get(id)
-            .unwrap_or_else(|| panic!("stale handle: {id:?} was destroyed"))
-    }
-
-    fn resolve_mut(&mut self, id: HandleId) -> &mut Slot {
-        self.slots
-            .get_mut(id)
-            .unwrap_or_else(|| panic!("stale handle: {id:?} was destroyed"))
-    }
-}
-
-fn downcast_slot_mut<T: 'static>(slot: &mut Slot, id: HandleId) -> &mut T {
-    let type_name_in_slot = slot.type_name;
-    slot.state.downcast_mut::<T>().unwrap_or_else(|| {
-        panic!(
-            "handle {id:?} holds `{type_name_in_slot}`, not `{}`",
-            type_name::<T>()
-        )
-    })
 }
 
 #[cfg(test)]
@@ -421,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn a_destroyed_slot_is_reused_but_its_handle_is_not() {
+    fn a_destroyed_entry_is_reused_but_its_handle_is_not() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let first = app.create(Counter(1));
@@ -430,11 +403,11 @@ mod tests {
 
         let second = app.create(Counter(2));
         // slotmap: version in high 32 bits, index in low 32. Without reuse this test is vacuous.
-        let slot_index = |id: HandleId| slotmap::Key::data(&id).as_ffi() & 0xffff_ffff;
+        let entry_index = |id: HandleId| slotmap::Key::data(&id).as_ffi() & 0xffff_ffff;
         assert_eq!(
-            slot_index(second.id()),
-            slot_index(first_id),
-            "the vacated slot is reused, so the version is what tells them apart"
+            entry_index(second.id()),
+            entry_index(first_id),
+            "the freed entry is reused, so the version is what tells them apart"
         );
         assert_ne!(second.id(), first_id);
         assert!(!app.contains(first_id));
@@ -475,7 +448,7 @@ mod tests {
         assert_eq!(first, second);
 
         app.get_mut(first).0 = 9;
-        assert_eq!(app.get(second).0, 9, "one slot behind both handles");
+        assert_eq!(app.get(second).0, 9, "one entry behind both handles");
 
         let other_cell = AppCell::new();
         let mut other_app = other_cell.borrow_mut();
@@ -590,7 +563,7 @@ mod tests {
         assert_eq!(app.get(counter).0, 0);
     }
     #[test]
-    fn get_disjoint_mut_borrows_two_slots_at_once() {
+    fn get_disjoint_mut_borrows_two_entries_at_once() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let a = app.create(1u32);
@@ -603,8 +576,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "not two live slots")]
-    fn get_disjoint_mut_rejects_the_same_slot_twice() {
+    #[should_panic(expected = "not two live entries")]
+    fn get_disjoint_mut_rejects_the_same_entry_twice() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let a = app.create(1u32);

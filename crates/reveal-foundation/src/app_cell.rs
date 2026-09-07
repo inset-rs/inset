@@ -78,6 +78,7 @@ impl AppCell {
         );
         let mut rounds = 0usize;
         loop {
+            self.borrow_mut().release_dropped_retained_handles();
             let had_microtasks = self.borrow().has_pending_microtasks();
             if had_microtasks {
                 self.borrow_mut().drain_microtasks();
@@ -120,6 +121,7 @@ impl AppCell {
             self.checkpoint();
         }
         self.borrow_mut().advance_clock_to(target);
+        self.borrow_mut().request_wake_for_next_timer();
     }
 }
 

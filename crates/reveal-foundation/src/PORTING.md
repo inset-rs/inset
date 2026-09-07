@@ -25,9 +25,13 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — there is no isolate event loop; tests play FakeAsync via `elapse`.
   Affect: write `Timer::new(app, duration, Listener::new(..))`, `timer.cancel(app)`, `timer.is_active(app)`; tests call `cell.elapse(duration)`.
 
-- Change: the `App` lives in an `AppCell`, which the shell and the tests hold. A Dart `async` body is ported with everything up to its first `await` inline — including the call whose future is awaited — and the rest as `app.spawn(async move |cx| ..)`, a continuation that reaches the `App` through `cx.update(|app| ..)` one closure at a time. Microtasks and continuations run only through `AppCell::checkpoint`, which repeats until neither queue has work, with nothing borrowed. `Completer` and its future are `dart:async`'s (`CompleterFuture::ready` is `Future.value`, `peek` tells a `SynchronousFuture` apart, `then(app, ..)` runs a callback at the checkpoint after completion, `wait_all` is `Future.wait`); a `Task` is a continuation's future, and dropping it does not cancel it.
-  Reason: language — a Rust future cannot hold `&mut App` across an `await`, so a continuation borrows the cell for each step instead (gpui's `AppCell` / `AsyncApp`), and it cannot start inline because the caller holds the `App`.
-  Affect: a Dart `Future<T> m() async {..}` is `fn m(..) -> Task<T>` whose prefix runs where Dart's does; a method that only hands back a future returns that future's type (`CompleterFuture<T>` or `Task<T>`; edition 2024's `impl Future` would capture the `&mut App`). The shell runs the checkpoint at the end of every platform event and `AppCell::elapse` runs it around every timer, so `app.drain_microtasks()` is for a borrowed `App` only; nothing else may run the checkpoint, and `cx.update` while the `App` is borrowed panics.
+- Change: a Dart `async` method is a `Task`: the part before its first `await` runs inline, the rest at the next checkpoint.
+  Reason: language — a Rust future cannot hold the `App` across an `await`; it borrows the cell per step, as gpui does.
+  Affect: `async` methods return `Task<T>`; dropping one does not cancel it.
+
+- Change: `App::retain` keeps an object past its `destroy` for as long as the `RetainedHandle` lives.
+  Reason: language — Dart keeps an object alive while anything references it; the arena frees it, and a cached hit-test path or the mouse tracker may still name it.
+  Affect: a `Listener` rebuilt mid-press still receives its release, as in Flutter.
 
 - Change: `App` holds the host `Platform`: `AppCell::new` uses an inert one and `AppCell::with_platform` installs a live one before user code.
   Reason: platform — dart:ui is host-bound; there is no isolate global to hang it on.
@@ -79,8 +83,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Rust closures have no identity; Dart's `VoidCallback` compares by identity and tear-offs canonicalize.
   Affect: keep the `Listener` passed to `add_listener`, or rebuild a `handle_method` tear-off at the removal site.
 
-- Change: `remove_listener` on a `Handle` whose arena slot is gone is a no-op.
-  Reason: language — Dart allows `removeListener` on a disposed `ChangeNotifier`, whose object the collector still holds; here the slot may already be destroyed, and a stale `app.get_mut` panics.
+- Change: `remove_listener` on a `Handle` whose entry is gone is a no-op.
+  Reason: language — Dart allows `removeListener` on a disposed `ChangeNotifier`, whose object the collector still holds; here the entry may already be destroyed, and a stale `app.get_mut` panics.
   Affect: a state that unmounts after its listenable (a route's `TickerMode`, during a hero flight's pop) removes its listener without panicking, as in Dart; removal on a handle that was never valid is silently ignored too.
 
 - Change: Dart's mixin class `ChangeNotifier` is the trait `ChangeNotifier` plus a `ChangeNotifierData` field, and the listener methods live on the handle: `Handle<T>` is `Listenable` whenever `T` implements `ListenableObject`, which every `ChangeNotifier` does and an object with its own listener lists does itself.

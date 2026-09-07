@@ -46,6 +46,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — no subclassing of the gesture crate's result and entry types.
   Affect: `hit_test` receives `&mut BoxHitTestResult<'_>` and adds with `result.add(BoxHitTestEntry::new(box, position).into())`; `handle_event` receives the `BoxHitTestEntry`.
 
+- Change: a render object named by a pressed pointer's hit-test path, or by the mouse tracker, outlives its `dispose` until they let go.
+  Reason: language — Dart keeps it alive by holding it; here the holder retains it (`App::retain`).
+  Affect: a `Listener` rebuilt mid-press still receives its release; a region that just left the tree still receives its exit.
+
 ## painting_context.rs → object.dart (PaintingContext), layer.rs → layer.dart
 
 - Change: there is no `Layer` object tree. A repaint boundary keeps its recording as retained items (pictures, references to child boundaries, push/pop effects) plus one `CompositedLayer` value standing in for Flutter's offset, opacity and transform layers. The host recomposes the frame from those retained pieces every time, so a boundary that did not change contributes the same pictures.
@@ -245,7 +249,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: `animation.drive(app, AlignmentGeometryTween::new(Some(a), Some(b)))` drives a clone; writing `begin` or `end` afterwards does not reach the driven animation, as it does on a Dart `Tween`.
 
 ## Deferred
-- Anisotropic backdrop blurs, and a backdrop colour stage for the colour filter `ImageFilterConfig.compose` can carry. Trigger: valo growing an anisotropic backdrop blur and a `Backdrop` colour stage.
 - `PaintingContext.addLayer` / `addCompositionCallback` / `pushColorFilter`, `LeaderLayer` / `FollowerLayer`, `toImage`. Trigger: `CompositedTransformFollower`, `RepaintBoundary.toImage`.
 - Debug paint overlays: `debugPaint` on boxes, slivers and the viewport (with the sliver arrow and `debugPaintSize` helpers), `describeApproximatePaintClip` and `CustomClipper.getApproximateClipRect`, the custom clip's `debugPaintSize`, and the `DebugOverflowIndicatorMixin` overlays of `RenderFlex` and `RenderConstraintsTransformBox` (an overflowing box clips but paints no striped hint). With them, `paintsChild` as a virtual: `RenderOffstage` and `RenderFittedBox` keep it inherent meanwhile, and the opacity boxes' overrides wait. Trigger: inspector; semantics.
 - Semantics: on `PipelineOwner` and `RenderObject`; `RenderCustomPaint`'s `CustomPainterSemantics` and the painter's semantics builder; the deprecated `ignoringSemantics` of the ignore- and absorb-pointer boxes; `RenderOffstage.visitChildrenForSemantics`; the viewport and sliver semantics overrides (configuration, clip, children, `useTwoPaneSemantics` / `excludeFromScrolling`, `ensureSemantics` / `semanticBounds`) and the `markNeedsSemanticsUpdate` calls in the viewport's `paintOrder` and `clipBehavior` setters. Trigger: a11y; do not stub.

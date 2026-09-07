@@ -46,6 +46,8 @@ pub(crate) struct Timers {
     queue: Vec<ScheduledTimer>,
     next_id: u64,
     now: Duration,
+    /// The due time the platform was last asked to wake for, so it is not asked twice.
+    wake_requested_for: Option<Duration>,
 }
 
 impl Timers {
@@ -59,12 +61,19 @@ impl Timers {
         let id = self.next_id;
         self.next_id += 1;
         let due = self.now + duration;
-        let previous_earliest = self.earliest_due();
         self.queue.push(ScheduledTimer { id, due, callback });
-        let wake = previous_earliest
-            .is_none_or(|earliest| due < earliest)
-            .then_some(duration);
-        (Timer { id }, wake)
+        (Timer { id }, self.next_wake())
+    }
+
+    /// The delay to pass to `wake_at` for the earliest pending timer, unless the platform was
+    /// already asked to wake for that deadline.
+    pub(crate) fn next_wake(&mut self) -> Option<Duration> {
+        let due = self.earliest_due()?;
+        if self.wake_requested_for == Some(due) {
+            return None;
+        }
+        self.wake_requested_for = Some(due);
+        Some(due.saturating_sub(self.now))
     }
 
     pub(crate) fn cancel(&mut self, timer: Timer) {
@@ -93,6 +102,10 @@ impl Timers {
         if scheduled.due > self.now {
             self.now = scheduled.due;
         }
+        if self.wake_requested_for == Some(scheduled.due) {
+            // The platform's deadline was this timer's; it has passed.
+            self.wake_requested_for = None;
+        }
         Some(scheduled.callback)
     }
 
@@ -108,7 +121,7 @@ impl Timers {
         );
     }
 
-    fn earliest_due(&self) -> Option<Duration> {
+    pub(crate) fn earliest_due(&self) -> Option<Duration> {
         self.queue.iter().map(|scheduled| scheduled.due).min()
     }
 }

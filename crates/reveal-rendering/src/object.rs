@@ -1482,6 +1482,10 @@ impl AnyRenderObject {
     /// Flutter's `RenderObject.attach` body, then the [`RenderObject::did_attach`] hook, which
     /// by default attaches the children.
     pub fn attach(self, app: &mut App, owner: Handle<PipelineOwner>) {
+        debug_assert!(
+            !app.is_disposed(self.id),
+            "attach on a disposed render object"
+        );
         debug_assert!(self.owner(app).is_none());
         self.data_mut(app).owner = Some(owner);
         if self.needs_layout(app) && self.is_relayout_boundary(app).is_some() {
@@ -1515,6 +1519,10 @@ impl AnyRenderObject {
     /// The box protocol overrides this with [`crate::RenderBox::mark_needs_layout`], which
     /// clears the intrinsics and dry-layout caches first.
     pub fn mark_needs_layout(self, app: &mut App) {
+        debug_assert!(
+            !app.is_disposed(self.id),
+            "mark_needs_layout on a disposed render object"
+        );
         (self.vtable.mark_needs_layout)(app, self.id)
     }
 
@@ -1913,6 +1921,10 @@ impl AnyRenderObject {
     /// As part of the visual update, the rendering pipeline will give this render object an
     /// opportunity to update its display list.
     pub fn mark_needs_paint(self, app: &mut App) {
+        debug_assert!(
+            !app.is_disposed(self.id),
+            "mark_needs_paint on a disposed render object"
+        );
         debug_assert!(
             self.owner(app)
                 .is_none_or(|owner| !owner.debug_doing_paint(app))

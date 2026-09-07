@@ -684,6 +684,10 @@ impl SliverHitTestEntry {
 }
 
 impl HitTestTarget for SliverHitTestEntry {
+    fn retained_handle(&self) -> Option<HandleId> {
+        Some(self.target.id)
+    }
+
     fn handle_event(&self, app: &mut App, event: &PointerEvent, _entry: &HitTestEntry) {
         self.target.handle_event(app, event, self);
     }

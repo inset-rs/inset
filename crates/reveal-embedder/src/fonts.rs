@@ -5,8 +5,8 @@
 
 use valo::{Font, FontAttrs};
 pub use valo::{FontCollection, FontDemand, FontId, FontSource};
-pub use valo_system_fonts::fontmgr::{FontManager, Typeface};
 use valo_system_fonts::SystemFonts;
+pub use valo_system_fonts::fontmgr::{FontManager, Typeface};
 
 /// The engine's font manager: the platform's installed fonts through a [`FontManager`], and
 /// the two family names Flutter's engine defines for the platform's own user-interface font.

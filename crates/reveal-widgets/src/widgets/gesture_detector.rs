@@ -1522,8 +1522,9 @@ mod tests {
     };
 
     use super::*;
-    use crate::framework::{Element, LeafRenderObjectWidget, RenderObjectWidget};
+    use crate::framework::{AnyElement, Element, LeafRenderObjectWidget, RenderObjectWidget};
     use crate::test_harness::Harness;
+    use crate::widgets::basic::SizedBox;
 
     // ---- the test tree ----
 
@@ -1725,6 +1726,116 @@ mod tests {
     }
 
     // ---- GestureDetector ----
+
+    /// A widget that changes the shape of its subtree on the press, so the `Listener` under it
+    /// is re-inflated while the pointer is down.
+    #[derive(Debug)]
+    struct SwapOnPress {
+        ups: Rc<Cell<u32>>,
+    }
+
+    struct SwapOnPressState {
+        state: StateData<SwapOnPress>,
+        swapped: bool,
+    }
+
+    impl StatefulWidget for SwapOnPress {
+        type State = SwapOnPressState;
+        fn create_state(&self) -> SwapOnPressState {
+            SwapOnPressState {
+                state: StateData::new(),
+                swapped: false,
+            }
+        }
+    }
+
+    impl State for SwapOnPressState {
+        type Widget = SwapOnPress;
+        crate::state_accessors!();
+        fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+            let ups = Rc::clone(&self.widget(app).ups);
+            let listener = crate::Listener::new()
+                .behavior(HitTestBehavior::Opaque)
+                .on_pointer_down(Rc::new(move |app: &mut App, _event| {
+                    self.set_state(app, |state| state.swapped = true);
+                }))
+                .on_pointer_up(Rc::new(move |_app: &mut App, _event| {
+                    ups.set(ups.get() + 1);
+                }))
+                .child(Sized {
+                    size: Size::new(100.0, 100.0),
+                });
+            if app.get(self).swapped {
+                SizedBox::new().child(listener).into_widget()
+            } else {
+                listener.into_widget()
+            }
+        }
+    }
+
+    fn pointer_listener_under(app: &App, root: AnyElement) -> AnyRenderObject {
+        let mut pending = vec![root];
+        while let Some(element) = pending.pop() {
+            if let Some(object) = element.render_object(app)
+                && object.downcast::<RenderPointerListener>(app).is_some()
+            {
+                return object;
+            }
+            pending.extend(element.children(app));
+        }
+        panic!("no pointer listener under the root");
+    }
+
+    /// Flutter's gesture binding replays the press's hit-test path for the release, and the
+    /// `RenderPointerListener` it names stays alive in Dart even after a rebuild disposed it. The
+    /// arena retains it for as long as the path does, so the release still reaches it.
+    #[test]
+    fn a_listener_rebuilt_mid_press_still_receives_the_release() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let ups = Rc::new(Cell::new(0));
+        let harness = mount(
+            &mut app,
+            SwapOnPress {
+                ups: Rc::clone(&ups),
+            }
+            .into_widget(),
+        );
+        let pressed_listener = pointer_listener_under(&app, harness.root.as_element());
+
+        press(
+            &mut app,
+            1,
+            Offset::new(20.0, 30.0),
+            PointerDeviceKind::Touch,
+        );
+        harness.pump(&mut app);
+        let rebuilt_listener = pointer_listener_under(&app, harness.root.as_element());
+        assert_ne!(
+            rebuilt_listener, pressed_listener,
+            "the press swapped the subtree"
+        );
+        assert!(
+            app.is_disposed(pressed_listener.id()),
+            "disposed by the rebuild"
+        );
+        assert!(
+            app.contains(pressed_listener.id()),
+            "kept by the cached path"
+        );
+
+        release(
+            &mut app,
+            1,
+            Offset::new(20.0, 30.0),
+            PointerDeviceKind::Touch,
+        );
+        assert_eq!(ups.get(), 1, "the release reached the pressed listener");
+        assert!(
+            !app.contains(pressed_listener.id()),
+            "vacated with the path"
+        );
+    }
 
     #[test]
     fn a_gesture_detector_fires_its_tap_callbacks_end_to_end() {

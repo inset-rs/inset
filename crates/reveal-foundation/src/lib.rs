@@ -9,6 +9,7 @@ mod completer;
 mod constants;
 mod date_time;
 mod executor;
+mod handle_map;
 mod key;
 mod observer_list;
 mod timers;

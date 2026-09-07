@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use indexmap::IndexMap;
 use reveal_embedder::{Matrix4, Offset, PointerDeviceKind, ViewId};
-use reveal_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle};
+use reveal_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, RetainedHandle};
 use reveal_gestures::{
     HitTestEntry, HitTestResult, PointerEnterEvent, PointerEvent, PointerExitEvent,
 };
@@ -30,6 +30,8 @@ type Annotations = IndexMap<AnyRenderObject, Matrix4>;
 
 // Various states of a connected mouse device used by [MouseTracker].
 struct MouseState {
+    /// The retained handles that keep the annotations' render objects past a rebuild.
+    retained: Vec<RetainedHandle>,
     // The list of annotations that contains this device.
     //
     // It uses [IndexMap] to keep the insertion order.
@@ -41,13 +43,21 @@ struct MouseState {
 impl MouseState {
     fn new(initial_event: PointerEvent) -> MouseState {
         MouseState {
+            retained: Vec::new(),
             annotations: Annotations::new(),
             latest_event: initial_event,
         }
     }
 
-    fn replace_annotations(&mut self, value: Annotations) -> Annotations {
-        std::mem::replace(&mut self.annotations, value)
+    fn replace_annotations(
+        &mut self,
+        value: Annotations,
+        retained: Vec<RetainedHandle>,
+    ) -> (Annotations, Vec<RetainedHandle>) {
+        (
+            std::mem::replace(&mut self.annotations, value),
+            std::mem::replace(&mut self.retained, retained),
+        )
     }
 
     fn replace_latest_event(&mut self, value: PointerEvent) -> PointerEvent {
@@ -198,7 +208,26 @@ impl MouseTracker {
     /// Discards any resources used by the object. After this is called, the
     /// object is not in a usable state and should be discarded.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
+        let states = std::mem::take(&mut app.get_mut(self).mouse_states);
+        for state in states.into_values() {
+            MouseTracker::release_annotations(app, state.retained);
+        }
         app.get_mut(self).change_notifier.dispose();
+    }
+
+    /// The remembered annotations keep their render objects past a rebuild, as Dart's map holds
+    /// the annotation objects: an exit is still delivered to a region that just left the tree.
+    fn retain_annotations(app: &mut App, annotations: &Annotations) -> Vec<RetainedHandle> {
+        annotations
+            .keys()
+            .map(|target| app.retain(target.id()))
+            .collect()
+    }
+
+    fn release_annotations(app: &mut App, retained: Vec<RetainedHandle>) {
+        for handle in retained {
+            app.release(handle);
+        }
     }
 
     // Whether an observed event might update a device.
@@ -371,7 +400,14 @@ impl MouseTracker {
                     .get_mut(&device)
                     .expect("the state was just found or created");
                 let last_event = target_state.replace_latest_event(event.clone());
-                let last_annotations = target_state.replace_annotations(next_annotations.clone());
+                let retained = MouseTracker::retain_annotations(app, &next_annotations);
+                let target_state = app
+                    .get_mut(self)
+                    .mouse_states
+                    .get_mut(&device)
+                    .expect("the state was just found or created");
+                let (last_annotations, last_retained) =
+                    target_state.replace_annotations(next_annotations.clone(), retained);
                 if is_removed {
                     app.get_mut(self).mouse_states.shift_remove(&device);
                 }
@@ -384,6 +420,7 @@ impl MouseTracker {
                         event.clone(),
                     ),
                 );
+                MouseTracker::release_annotations(app, last_retained);
             });
         });
     }
@@ -410,10 +447,15 @@ impl MouseTracker {
                     continue;
                 };
                 let next_annotations = self.find_annotations(app, &last_event);
+                if !app.get(self).mouse_states.contains_key(&device) {
+                    continue;
+                }
+                let retained = MouseTracker::retain_annotations(app, &next_annotations);
                 let Some(dirty_state) = app.get_mut(self).mouse_states.get_mut(&device) else {
                     continue;
                 };
-                let last_annotations = dirty_state.replace_annotations(next_annotations.clone());
+                let (last_annotations, last_retained) =
+                    dirty_state.replace_annotations(next_annotations.clone(), retained);
                 self.handle_device_update(
                     app,
                     MouseTrackerUpdateDetails::by_new_frame(
@@ -422,6 +464,7 @@ impl MouseTracker {
                         last_event,
                     ),
                 );
+                MouseTracker::release_annotations(app, last_retained);
             }
         });
     }

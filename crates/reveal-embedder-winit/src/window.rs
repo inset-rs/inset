@@ -8,8 +8,7 @@ use reveal_embedder::{
     Brightness, EmbedderClient, FontSource, Frame, KeyData, KeyEventDeviceType, KeyEventType,
     Picture, Platform, PlatformRef, PointerChange, PointerData, PointerDataPacket,
     PointerDeviceKind, PointerSignalKind, SystemFontSource, SystemMouseCursorKind, TargetPlatform,
-    View,
-    ViewConstraints, ViewId, ViewMetrics, ViewPadding, ViewRef,
+    View, ViewConstraints, ViewId, ViewMetrics, ViewPadding, ViewRef,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};

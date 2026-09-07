@@ -95,6 +95,7 @@ pub struct GestureBinding {
     pointer_router: Option<Handle<PointerRouter>>,
     gesture_arena: Option<Handle<GestureArenaManager>>,
     pointer_signal_resolver: Option<Handle<PointerSignalResolver>>,
+    /// The path each pressed pointer was hit-tested to, its targets retained.
     hit_tests: HashMap<i64, HitTestResult>,
     /// Flutter's `hitTestInView` override point: the renderer binding registers itself here.
     overrides: Option<Rc<dyn GestureBindingOverrides>>,
@@ -207,6 +208,9 @@ impl GestureBinding {
                 | PointerEvent::PanZoomStart(_)
         );
 
+        // A cached result retains the objects on its path (Dart holds them; see
+        // `HitTestResult::retain_targets`), so a target a rebuild destroyed mid-press still
+        // receives the pointer's later events, as it does in Flutter.
         let (hit_test_result, cache_after) = if is_new_hit_test {
             debug_assert!(
                 !app.get(self).hit_tests.contains_key(&pointer),
@@ -241,8 +245,13 @@ impl GestureBinding {
         {
             self.dispatch_event(app, event, hit_test_result.as_ref());
         }
-        if cache_after && let Some(result) = hit_test_result {
-            app.get_mut(self).hit_tests.insert(pointer, result);
+        if let Some(mut result) = hit_test_result {
+            if cache_after {
+                result.retain_targets(app);
+                app.get_mut(self).hit_tests.insert(pointer, result);
+            } else {
+                result.release_targets(app);
+            }
         }
     }
 
@@ -309,7 +318,10 @@ impl GestureBinding {
     ///
     /// This is typically called between tests.
     pub fn reset_gesture_binding(self: Handle<Self>, app: &mut App) {
-        app.get_mut(self).hit_tests.clear();
+        let hit_tests = std::mem::take(&mut app.get_mut(self).hit_tests);
+        for mut result in hit_tests.into_values() {
+            result.release_targets(app);
+        }
     }
 }
 

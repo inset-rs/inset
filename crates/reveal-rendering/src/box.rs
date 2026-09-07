@@ -861,6 +861,10 @@ impl HitTestTarget for BoxHitTestEntry {
     fn handle_event(&self, app: &mut App, event: &PointerEvent, _entry: &HitTestEntry) {
         self.target.handle_event(app, event, self);
     }
+
+    fn retained_handle(&self) -> Option<HandleId> {
+        Some(self.target.id)
+    }
 }
 
 impl From<BoxHitTestEntry> for HitTestEntry {
@@ -2027,6 +2031,10 @@ impl AnyRenderBox {
 
     /// Compute the layout for this box.
     pub fn layout(self, app: &mut App, constraints: BoxConstraints, parent_uses_size: bool) {
+        debug_assert!(
+            !app.is_disposed(self.id),
+            "layout on a disposed render object"
+        );
         debug_assert!(constraints.debug_assert_is_valid(true));
         let same = self.box_data(app).constraints == Some(constraints);
         self.as_object()

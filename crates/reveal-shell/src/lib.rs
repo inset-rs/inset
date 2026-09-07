@@ -8,7 +8,7 @@
 
 use std::cell::RefMut;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use reveal_embedder::{EmbedderClient, Frame, KeyData, PlatformRef, PointerDataPacket, ViewId};
 use reveal_foundation::{App, AppCell};
@@ -24,8 +24,11 @@ use reveal_services::KeyEventManager;
 /// cell's checkpoint, where the microtasks and futures the event queued run.
 pub struct Shell {
     app: Rc<AppCell>,
+    platform: PlatformRef,
     /// The platform time the app clock was last advanced to.
     clock: Duration,
+    /// The platform's `now` at its `elapsed` zero, known once a frame has reported its `elapsed`; lets every push, not only a frame or wake, move the app clock to the platform's.
+    origin: Option<Instant>,
 }
 
 impl Shell {
@@ -35,8 +38,10 @@ impl Shell {
     /// installs work that needs one.
     pub fn new(platform: PlatformRef, setup: impl FnOnce(&mut App)) -> Shell {
         let shell = Shell {
-            app: AppCell::with_platform(platform),
+            app: AppCell::with_platform(platform.clone()),
+            platform,
             clock: Duration::ZERO,
+            origin: None,
         };
         shell.turn(|app| {
             // Flutter's engine collects the platform's fonts before the framework runs.
@@ -63,6 +68,16 @@ impl Shell {
         result
     }
 
+    /// An input or platform push: the app clock catches up with the platform's first, as Dart's
+    /// timers measure real time from the moment they are created, then the turn runs.
+    fn push<R>(&mut self, f: impl FnOnce(&mut App) -> R) -> R {
+        if let Some(origin) = self.origin {
+            let elapsed = self.platform.now().saturating_duration_since(origin);
+            self.advance_clock(elapsed);
+        }
+        self.turn(f)
+    }
+
     /// Moves the app clock up to the platform's `elapsed`, firing the timers that came due.
     fn advance_clock(&mut self, elapsed: Duration) {
         if elapsed <= self.clock {
@@ -75,6 +90,7 @@ impl Shell {
 
 impl EmbedderClient for Shell {
     fn frame(&mut self, frame: Frame) {
+        self.origin = Some(self.platform.now() - frame.elapsed);
         self.advance_clock(frame.elapsed);
         // The engine runs `_beginFrame` and `_drawFrame` as two native tasks: two turns.
         self.turn(|app| SchedulerBinding::handle_begin_frame(app, Some(frame.elapsed)));
@@ -84,22 +100,25 @@ impl EmbedderClient for Shell {
     fn view_added(&mut self, _id: ViewId) {}
 
     fn view_metrics_changed(&mut self, _id: ViewId) {
-        self.turn(|app| RendererBinding::instance(app).handle_metrics_changed(app));
+        self.push(|app| RendererBinding::instance(app).handle_metrics_changed(app));
     }
 
     fn view_removed(&mut self, _id: ViewId) {}
 
     fn pointer_data_packet(&mut self, packet: PointerDataPacket) {
-        self.turn(|app| GestureBinding::instance(app).handle_pointer_data_packet(app, packet));
+        self.push(|app| GestureBinding::instance(app).handle_pointer_data_packet(app, packet));
     }
 
     fn key_data(&mut self, data: KeyData) -> bool {
-        self.turn(|app| KeyEventManager::instance(app).handle_key_data(app, data))
+        self.push(|app| KeyEventManager::instance(app).handle_key_data(app, data))
     }
 
     fn platform_brightness_changed(&mut self) {
-        self.turn(|app| {
-            let callback = app.platform_callbacks().on_platform_brightness_changed.clone();
+        self.push(|app| {
+            let callback = app
+                .platform_callbacks()
+                .on_platform_brightness_changed
+                .clone();
             if let Some(callback) = callback {
                 callback.call(app);
             }
@@ -107,7 +126,7 @@ impl EmbedderClient for Shell {
     }
 
     fn locales_changed(&mut self) {
-        self.turn(|app| {
+        self.push(|app| {
             let callback = app.platform_callbacks().on_locale_changed.clone();
             if let Some(callback) = callback {
                 callback.call(app);
