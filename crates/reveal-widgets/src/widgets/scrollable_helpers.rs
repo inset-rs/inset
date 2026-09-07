@@ -337,7 +337,9 @@ impl EdgeDraggingAutoScroller {
         let velocity_scalar = app.get(self).velocity_scalar;
         let duration = Duration::from_millis((1000.0 / velocity_scalar).round() as u64);
         let animated = position.animate_to(app, new_offset, duration, Curves::linear());
+        let retained = app.retain(self);
         app.spawn(async move |cx| {
+            let _retained = retained;
             animated.await;
             let scrolling = cx.update(|app| {
                 if let Some(on_scroll_view_scrolled) = app.get(self).on_scroll_view_scrolled.clone()

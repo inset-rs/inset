@@ -18,9 +18,9 @@ use crate::gesture_details::PositionedGestureDetails;
 use crate::gesture_settings::DeviceGestureSettings;
 use crate::recognizer::{
     GestureRecognizer, GestureRecognizerData, GestureRecognizerState, OneSequenceData,
-    OneSequenceGestureRecognizer, PrimaryPointerData, PrimaryPointerGestureRecognizer,
-    PrimaryPointerLeaf, PrimaryPointerLeafData, RecognizerLeaf, RecognizerLeafData,
-    UNSET_TOUCH_SLOP,
+    OneSequenceGestureRecognizer, OneSequenceLeafData, PrimaryPointerData,
+    PrimaryPointerGestureRecognizer, PrimaryPointerLeaf, PrimaryPointerLeafData, RecognizerLeaf,
+    RecognizerLeafData, UNSET_TOUCH_SLOP,
 };
 use crate::team::GestureArenaTeam;
 
@@ -572,6 +572,9 @@ impl RecognizerLeafData for TapGestureRecognizer {
     fn recognizer_mut(&mut self) -> &mut GestureRecognizerData {
         &mut self.recognizer
     }
+}
+
+impl OneSequenceLeafData for TapGestureRecognizer {
     fn one_sequence(&self) -> &OneSequenceData {
         &self.one_sequence
     }

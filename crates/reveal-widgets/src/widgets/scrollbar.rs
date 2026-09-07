@@ -31,7 +31,7 @@ use reveal_gestures::{
     DragStartBehavior, DragStartDetails, DragUpdateDetails, GestureBinding, GestureDisposition,
     GestureRecognizer, GestureRecognizerData, GestureTapDownCallback,
     HorizontalDragGestureRecognizerBase, K_PRESS_TIMEOUT, K_PRIMARY_BUTTON, OneSequenceData,
-    PointerCancelEvent, PointerDownEvent, PointerEvent, PointerHoverEvent,
+    OneSequenceLeafData, PointerCancelEvent, PointerDownEvent, PointerEvent, PointerHoverEvent,
     PointerPanZoomStartEvent, PointerScrollEvent, PointerUpEvent, PrimaryPointerData,
     PrimaryPointerGestureRecognizer, PrimaryPointerLeaf, PrimaryPointerLeafData, RecognizerLeaf,
     RecognizerLeafData, TapDownDetails, UNSET_TOUCH_SLOP, Velocity, VelocityEstimate,
@@ -3412,7 +3412,9 @@ macro_rules! thumb_drag_gesture_recognizer_leaf {
             fn recognizer_mut(&mut self) -> &mut GestureRecognizerData {
                 &mut self.recognizer
             }
+        }
 
+        impl OneSequenceLeafData for $name {
             fn one_sequence(&self) -> &OneSequenceData {
                 &self.one_sequence
             }
@@ -3433,6 +3435,16 @@ macro_rules! thumb_drag_gesture_recognizer_leaf {
         }
 
         impl RecognizerLeaf for $name {
+            fn handle_non_allowed_pointer(
+                self: Handle<Self>,
+                app: &mut App,
+                _event: &PointerDownEvent,
+            ) {
+                reveal_gestures::OneSequenceGestureRecognizer::handle_non_allowed_pointer(
+                    self, app,
+                );
+            }
+
             fn is_pointer_allowed(self: Handle<Self>, app: &App, event: &PointerDownEvent) -> bool {
                 let recognizer = app.get(self);
                 is_thumb_event(app, recognizer.owner, &recognizer.custom_paint_key, event)
@@ -3664,7 +3676,9 @@ impl RecognizerLeafData for TrackTapGestureRecognizer {
     fn recognizer_mut(&mut self) -> &mut GestureRecognizerData {
         &mut self.recognizer
     }
+}
 
+impl OneSequenceLeafData for TrackTapGestureRecognizer {
     fn one_sequence(&self) -> &OneSequenceData {
         &self.one_sequence
     }

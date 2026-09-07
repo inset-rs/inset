@@ -1736,13 +1736,17 @@ impl AnyRenderObject {
 
     /// Release any resources held by this render object and free its arena slot. Dart's
     /// `dispose` releases the layers and leaves the object to the collector; the arena has no
-    /// collector, so the slot goes too. Every handle to it is stale afterwards.
+    /// collector, so the slot is destroyed once no parent layer retains its recording.
     ///
     /// The object must be detached. Its parent may still hold a handle to it: the widget layer
     /// unmounts bottom-up and disposes the parent next, as Dart does.
     pub fn dispose(self, app: &mut App) {
         debug_assert!(!self.attached(app));
-        self.data_mut(app).layer = None;
+        // Dart releases its LayerHandle; a parent ContainerLayer can still retain the layer.
+        if self.layer(app).is_none_or(|layer| layer.parent.is_none()) {
+            self.remove_all_layer_children(app);
+            self.data_mut(app).layer = None;
+        }
         app.destroy(self.id);
     }
 

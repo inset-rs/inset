@@ -18,9 +18,9 @@ use reveal_foundation::{App, Handle, K_IS_WEB, Listener, ValueSetter};
 use reveal_gestures::{
     DragData, DragDirection, DragDownDetails, DragEndDetails, DragGestureRecognizer, DragLeaf,
     DragLeafData, DragStartBehavior, GestureBinding, GestureRecognizer, GestureRecognizerData,
-    HitTestResult, OneSequenceData, OneSequenceGestureRecognizer, PointerDownEvent, PointerEvent,
-    PointerPanZoomStartEvent, RecognizerLeaf, RecognizerLeafData, VelocityEstimate,
-    VerticalDragGestureRecognizerBase,
+    HitTestResult, OneSequenceData, OneSequenceGestureRecognizer, OneSequenceLeafData,
+    PointerDownEvent, PointerEvent, PointerPanZoomStartEvent, RecognizerLeaf, RecognizerLeafData,
+    VelocityEstimate, VerticalDragGestureRecognizerBase,
 };
 use reveal_painting::{
     AnyColor, Axis, BorderRadius, BorderRadiusGeometry, BoxDecoration, BoxFit, EdgeInsets,
@@ -1002,7 +1002,9 @@ impl RecognizerLeafData for SlidingTapGestureRecognizer {
     fn recognizer_mut(&mut self) -> &mut GestureRecognizerData {
         &mut self.recognizer
     }
+}
 
+impl OneSequenceLeafData for SlidingTapGestureRecognizer {
     fn one_sequence(&self) -> &OneSequenceData {
         &self.one_sequence
     }
@@ -1023,6 +1025,10 @@ impl DragLeafData for SlidingTapGestureRecognizer {
 }
 
 impl RecognizerLeaf for SlidingTapGestureRecognizer {
+    fn handle_non_allowed_pointer(self: Handle<Self>, app: &mut App, _event: &PointerDownEvent) {
+        reveal_gestures::OneSequenceGestureRecognizer::handle_non_allowed_pointer(self, app);
+    }
+
     fn is_pointer_allowed(self: Handle<Self>, app: &App, event: &PointerDownEvent) -> bool {
         DragGestureRecognizer::is_pointer_allowed(self, app, event)
     }
@@ -1359,7 +1365,9 @@ impl RecognizerLeafData for TargetSelectionGestureRecognizer {
     fn recognizer_mut(&mut self) -> &mut GestureRecognizerData {
         &mut self.recognizer
     }
+}
 
+impl OneSequenceLeafData for TargetSelectionGestureRecognizer {
     fn one_sequence(&self) -> &OneSequenceData {
         &self.one_sequence
     }

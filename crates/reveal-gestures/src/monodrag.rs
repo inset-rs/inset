@@ -28,7 +28,8 @@ use crate::events::{
 use crate::gesture_settings::DeviceGestureSettings;
 use crate::recognizer::{
     DragStartBehavior, GestureRecognizer, GestureRecognizerData, MultitouchDragStrategy,
-    OffsetPair, OneSequenceData, OneSequenceGestureRecognizer, RecognizerLeaf, RecognizerLeafData,
+    OffsetPair, OneSequenceData, OneSequenceGestureRecognizer, OneSequenceLeafData, RecognizerLeaf,
+    RecognizerLeafData,
 };
 use crate::team::GestureArenaTeam;
 use crate::velocity::{Velocity, VelocityEstimate};
@@ -169,7 +170,7 @@ impl Default for DragData {
 }
 
 /// The `DragGestureRecognizer` field bag on every drag leaf.
-pub trait DragLeafData: RecognizerLeafData {
+pub trait DragLeafData: OneSequenceLeafData {
     /// The leaf's [`DragGestureRecognizer`] bag.
     fn drag(&self) -> &DragData;
 
@@ -1379,6 +1380,9 @@ macro_rules! drag_gesture_recognizer_leaf {
             fn recognizer_mut(&mut self) -> &mut GestureRecognizerData {
                 &mut self.recognizer
             }
+        }
+
+        impl OneSequenceLeafData for $name {
             fn one_sequence(&self) -> &OneSequenceData {
                 &self.one_sequence
             }
@@ -1397,6 +1401,14 @@ macro_rules! drag_gesture_recognizer_leaf {
         }
 
         impl RecognizerLeaf for $name {
+            fn handle_non_allowed_pointer(
+                self: Handle<Self>,
+                app: &mut App,
+                _event: &PointerDownEvent,
+            ) {
+                OneSequenceGestureRecognizer::handle_non_allowed_pointer(self, app);
+            }
+
             fn is_pointer_allowed(self: Handle<Self>, app: &App, event: &PointerDownEvent) -> bool {
                 DragGestureRecognizer::is_pointer_allowed(self, app, event)
             }

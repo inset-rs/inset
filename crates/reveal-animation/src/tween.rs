@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 
 use reveal_embedder::{Color, Offset, Rect, Size};
-use reveal_foundation::{App, Handle, Listener};
+use reveal_foundation::{App, Handle, Listener, RetainedHandle};
 
 use crate::animation::{Animation, AnimationStatus, AnimationStatusListener, AnyAnimation};
 use crate::curves::Curve;
@@ -46,8 +46,10 @@ pub trait Animatable<T> {
         Self: Sized + Clone + 'static,
         T: 'static,
     {
+        let parent_reference = app.retain(parent.id());
         app.create(AnimatedEvaluation {
             parent,
+            _parent_reference: parent_reference,
             evaluatable: self,
             _value: PhantomData,
         })
@@ -100,6 +102,8 @@ impl<T> Debug for CallbackAnimatable<T> {
 /// [`Animatable::animate`].
 struct AnimatedEvaluation<T, A> {
     parent: AnyAnimation<f64>,
+    // Dart keeps parent alive even after its owner calls dispose.
+    _parent_reference: RetainedHandle,
     evaluatable: A,
     _value: PhantomData<fn() -> T>,
 }

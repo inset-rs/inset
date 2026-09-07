@@ -187,7 +187,7 @@ fn sort_dirty_elements(app: &mut App, scope: Handle<BuildScope>) {
         .iter()
         .map(|element| (element.depth(app), element.dirty(app), *element))
         .collect();
-    keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
+    keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
     app.get_mut(scope).dirty_elements = keyed.into_iter().map(|(_, _, element)| element).collect();
 }
 
@@ -502,7 +502,7 @@ impl BuildOwner {
             .drain(..)
             .map(|element| (element.depth(app), element.dirty(app), element))
             .collect();
-        keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
+        keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
         for (_, _, element) in keyed.into_iter().rev() {
             unmount_recursively(app, element);
         }
@@ -539,5 +539,43 @@ fn deactivate_recursively(app: &mut App, element: AnyElement) {
     }
     if cfg!(debug_assertions) {
         element.debug_deactivated(app);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ElementBase, IntoWidget, SingleChildRenderObjectElement, SizedBox};
+    use reveal_foundation::AppCell;
+
+    /// A rebuild can leave clean and dirty siblings at the same depth before a resort.
+    #[test]
+    fn dirty_scope_resort_keeps_clean_siblings_before_pending_builds() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let widget = SizedBox::shrink().into_widget();
+        let pending = widget.create_element(&mut app, widget.clone());
+        let cleaned = widget.create_element(&mut app, widget.clone());
+        let focus = FocusManager::new(&mut app);
+        let owner = BuildOwner::with_focus_manager(&mut app, None, focus);
+        for element in [pending, cleaned] {
+            element.assign_owner(&mut app, owner);
+            let handle = element
+                .downcast::<SingleChildRenderObjectElement<SizedBox>>(&app)
+                .unwrap();
+            ElementBase::mount(handle, &mut app, None, None);
+        }
+        pending.set_dirty(&mut app, true);
+        cleaned.set_dirty(&mut app, false);
+        let scope = BuildScope::new(&mut app, None);
+        app.get_mut(scope).dirty_elements = vec![pending, cleaned];
+        app.get_mut(scope).dirty_elements_needs_resorting = Some(true);
+        let next = scope.dirty_element_index_after(&mut app, 0);
+        assert_eq!(app.get(scope).dirty_elements, [cleaned, pending]);
+        assert_eq!(
+            next, 1,
+            "the resume index must point after the last clean sibling"
+        );
+        assert!(app.get(scope).dirty_elements[next].dirty(&app));
     }
 }

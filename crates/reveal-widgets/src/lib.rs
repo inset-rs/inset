@@ -21,6 +21,7 @@ pub use widgets::banner::*;
 pub use widgets::basic::*;
 pub use widgets::container::*;
 pub use widgets::default_text_editing_shortcuts::*;
+pub use widgets::drag_target::*;
 pub use widgets::draggable_scrollable_sheet::*;
 pub use widgets::expansible::*;
 pub use widgets::focus_manager::*;

@@ -661,3 +661,13 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - overlay.rs: `_RenderTheater.markNeedsLayout`'s `_outstandingDeferredChildUpdateCalls` gate and `_RenderDeferredLayoutBox._needsLayout`. Trigger: a public `RenderBox` super-hook for `markNeedsLayout` and a readable dirty flag in `reveal-rendering`.
 - heroes.rs: `Hero.debugFillProperties` (the `tag` property), `HeroMode.debugFillProperties` (the `mode` flag), `_HeroFlightManifest.toString`, `_HeroFlight.toString`, and the `FlutterError.fromParts` report behind `Hero._allHeroesFor`'s duplicate-tag check (a `debug_assert!` carrying Dart's message meanwhile). Trigger: diagnostics.
 - implicit_animations.rs: `AnimatedPhysicalModel`. Trigger: `PhysicalModel` (basic.rs); its `BorderRadiusTween` and `ColorTween` slots are ready.
+
+## widgets/drag_target.rs → drag_target.dart
+
+- Change: drag payloads are `Option<Rc<T>>`, and target compatibility uses Rust's concrete payload type.
+  Reason: language — Rust has no Dart runtime subtype relation or implicit object-reference sharing.
+  Affect: targets with a shared payload model use the same Rust type, such as a shared enum; callbacks receive shared payload references.
+
+- Change: active drags retain their source state, entered targets and feedback avatar through arena lifetime guards.
+  Reason: language — Rust arena objects need explicit retention when pointer callbacks outlive widget disposal.
+  Affect: drags continue after their source is removed, and completion or cancellation releases the retained state.

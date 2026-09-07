@@ -18,7 +18,7 @@ use reveal_embedder::{
     Backdrop, BlendMode, Canvas, Clip, ClipOp, Color, FillRule, ImageFilter, Matrix4, Offset,
     Paint, Path, Picture, RRect, Rect, Size, rrect_radii_elliptical,
 };
-use reveal_foundation::App;
+use reveal_foundation::{App, RetainedHandle};
 
 use crate::debug::debug_disable_opacity_layers;
 use crate::object::AnyRenderObject;
@@ -282,7 +282,11 @@ pub(crate) enum PaintItem {
     /// `PictureLayer`. `cache` is Flutter's `isComplexHint`: a raster-cache candidate.
     Picture { picture: Arc<Picture>, cache: bool },
     /// A child repaint boundary, composited through its own [`BoundaryLayer`].
-    ChildBoundary(AnyRenderObject),
+    ChildBoundary {
+        child: AnyRenderObject,
+        /// The parent layer owns this layer even after its render object is disposed.
+        _retained: RetainedHandle,
+    },
     /// `OpacityLayer` from `PaintingContext::push_opacity`. Closed by [`Pop`](Self::Pop).
     PushOpacity { alpha: i32, offset: Offset },
     /// `BackdropFilterLayer` from `PaintingContext::push_backdrop_filter`: blurs what is
@@ -374,7 +378,7 @@ impl BoundaryLayer {
                         canvas.draw_display_list(picture);
                     }
                 }
-                PaintItem::ChildBoundary(child) => {
+                PaintItem::ChildBoundary { child, .. } => {
                     if let Some(layer) = child.layer(app) {
                         layer.add_to_scene(app, canvas);
                     }
@@ -546,7 +550,7 @@ fn find_annotations_in_item<T: Any>(
     match item {
         // `PictureLayer.findAnnotations` is `Layer`'s: no annotations, no absorption.
         PaintItem::Picture { .. } => false,
-        PaintItem::ChildBoundary(child) => child
+        PaintItem::ChildBoundary { child, .. } => child
             .layer(app)
             .is_some_and(|layer| layer.find_annotations(app, result, local_position, only_first)),
         // `OpacityLayer` and `BackdropFilterLayer` reach their children through the offset the
@@ -796,9 +800,9 @@ impl AnyRenderObject {
             return;
         };
         if let Some(parent_layer) = parent.layer_mut(app) {
-            parent_layer
-                .items
-                .retain(|item| !matches!(item, PaintItem::ChildBoundary(child) if *child == self));
+            parent_layer.items.retain(
+                |item| !matches!(item, PaintItem::ChildBoundary { child, .. } if *child == self),
+            );
         }
         self.drop_layer_from_parent(app);
     }
@@ -823,6 +827,10 @@ impl AnyRenderObject {
         if layer.attached {
             self.detach_layer(app);
         }
+        if app.is_disposed(self.id()) {
+            self.remove_all_layer_children(app);
+            self.set_layer(app, None);
+        }
     }
 
     /// The boundaries this boundary's recording composites.
@@ -833,7 +841,7 @@ impl AnyRenderObject {
                     .items
                     .iter()
                     .filter_map(|item| match item {
-                        PaintItem::ChildBoundary(child) => Some(*child),
+                        PaintItem::ChildBoundary { child, .. } => Some(*child),
                         _ => None,
                     })
                     .collect()
@@ -870,6 +878,45 @@ mod tests {
         let mut canvas = Canvas::new();
         layer.add_to_scene(&app, &mut canvas);
         canvas.build().ops().to_vec()
+    }
+
+    /// RenderObject.dispose drops its own layer handle, not the parent's retained picture.
+    #[test]
+    fn parent_layer_retains_disposed_child_until_recording_is_replaced() {
+        use crate::{RenderObject, RenderOpacity};
+        let cell = AppCell::new();
+        let (parent, child) = {
+            let mut app = cell.borrow_mut();
+            let parent = RenderOpacity::new(&mut app, 0.5, None).as_render_object(&app);
+            let child = RenderOpacity::new(&mut app, 0.5, None).as_render_object(&app);
+            let mut child_layer =
+                BoundaryLayer::new(CompositedLayer::opacity_layer(128, Offset::ZERO), false);
+            child_layer.parent = Some(parent);
+            child_layer.items.push(picture());
+            child.set_layer(&mut app, Some(child_layer));
+            let mut parent_layer =
+                BoundaryLayer::new(CompositedLayer::offset_layer(Offset::ZERO), false);
+            parent_layer.items.push(PaintItem::ChildBoundary {
+                child,
+                _retained: app.retain(child.id()),
+            });
+            parent.set_layer(&mut app, Some(parent_layer));
+            let mut before = Canvas::new();
+            parent.layer(&app).unwrap().add_to_scene(&app, &mut before);
+            let before = format!("{:?}", before.build().ops());
+            child.dispose(&mut app);
+            assert!(app.is_disposed(child.id()));
+            let mut after = Canvas::new();
+            parent.layer(&app).unwrap().add_to_scene(&app, &mut after);
+            assert_eq!(before, format!("{:?}", after.build().ops()));
+            (parent, child)
+        };
+        cell.checkpoint();
+        assert!(cell.borrow().contains(child.id()));
+        parent.remove_all_layer_children(&mut cell.borrow_mut());
+        cell.checkpoint();
+        assert!(!cell.borrow().contains(child.id()));
+        parent.dispose(&mut cell.borrow_mut());
     }
 
     /// `layers_test.dart`: `OpacityLayer does not push an OffsetLayer if there are no children`.

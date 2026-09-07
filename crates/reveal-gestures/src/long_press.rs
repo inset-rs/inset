@@ -16,9 +16,9 @@ use crate::gesture_details::PositionedGestureDetails;
 use crate::gesture_settings::DeviceGestureSettings;
 use crate::recognizer::{
     GestureRecognizer, GestureRecognizerData, GestureRecognizerState, OffsetPair, OneSequenceData,
-    OneSequenceGestureRecognizer, PrimaryPointerData, PrimaryPointerGestureRecognizer,
-    PrimaryPointerLeaf, PrimaryPointerLeafData, RecognizerLeaf, RecognizerLeafData,
-    UNSET_TOUCH_SLOP,
+    OneSequenceGestureRecognizer, OneSequenceLeafData, PrimaryPointerData,
+    PrimaryPointerGestureRecognizer, PrimaryPointerLeaf, PrimaryPointerLeafData, RecognizerLeaf,
+    RecognizerLeafData, UNSET_TOUCH_SLOP,
 };
 use crate::team::GestureArenaTeam;
 use crate::velocity::Velocity;
@@ -882,6 +882,9 @@ impl RecognizerLeafData for LongPressGestureRecognizer {
     fn recognizer_mut(&mut self) -> &mut GestureRecognizerData {
         &mut self.recognizer
     }
+}
+
+impl OneSequenceLeafData for LongPressGestureRecognizer {
     fn one_sequence(&self) -> &OneSequenceData {
         &self.one_sequence
     }

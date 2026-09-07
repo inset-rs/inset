@@ -135,7 +135,10 @@ impl PaintingContext {
     fn append_layer(&mut self, app: &mut App, child: AnyRenderObject) {
         debug_assert!(!self.is_recording());
         child.remove_layer(app);
-        self.items.push(PaintItem::ChildBoundary(child));
+        self.items.push(PaintItem::ChildBoundary {
+            child,
+            _retained: app.retain(child.id()),
+        });
         if let Some(layer) = child.layer_mut(app) {
             layer.parent = Some(self.boundary);
         }

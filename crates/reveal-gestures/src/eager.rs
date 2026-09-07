@@ -7,8 +7,8 @@ use reveal_foundation::{App, Handle};
 use crate::arena::GestureDisposition;
 use crate::events::{PointerDownEvent, PointerEvent};
 use crate::recognizer::{
-    GestureRecognizerData, OneSequenceData, OneSequenceGestureRecognizer, RecognizerLeaf,
-    RecognizerLeafData,
+    GestureRecognizerData, OneSequenceData, OneSequenceGestureRecognizer, OneSequenceLeafData,
+    RecognizerLeaf, RecognizerLeafData,
 };
 
 /// A gesture recognizer that eagerly claims victory in all gesture arenas.
@@ -37,7 +37,9 @@ impl RecognizerLeafData for EagerGestureRecognizer {
     fn recognizer_mut(&mut self) -> &mut GestureRecognizerData {
         &mut self.recognizer
     }
+}
 
+impl OneSequenceLeafData for EagerGestureRecognizer {
     fn one_sequence(&self) -> &OneSequenceData {
         &self.one_sequence
     }
@@ -48,6 +50,14 @@ impl RecognizerLeafData for EagerGestureRecognizer {
 }
 
 impl RecognizerLeaf for EagerGestureRecognizer {
+    fn handle_non_allowed_pointer(self: Handle<Self>, app: &mut App, _event: &PointerDownEvent) {
+        OneSequenceGestureRecognizer::handle_non_allowed_pointer(self, app);
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        OneSequenceGestureRecognizer::dispose(self, app);
+    }
+
     fn add_allowed_pointer(self: Handle<Self>, app: &mut App, event: PointerDownEvent) {
         self.start_tracking_pointer(app, event.pointer, event.transform);
         self.resolve(app, GestureDisposition::Accepted);

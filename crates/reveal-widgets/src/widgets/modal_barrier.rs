@@ -9,10 +9,10 @@ use reveal_embedder::Color;
 use reveal_foundation::{App, Handle, Listenable, Listener, ValueNotifier};
 use reveal_gestures::{
     BaseTapData, BaseTapGestureRecognizer, BaseTapLeaf, BaseTapLeafData, GestureDisposition,
-    GestureRecognizer, GestureRecognizerData, K_PRESS_TIMEOUT, OneSequenceData, PointerCancelEvent,
-    PointerDownEvent, PointerEvent, PointerUpEvent, PrimaryPointerData,
-    PrimaryPointerGestureRecognizer, PrimaryPointerLeaf, PrimaryPointerLeafData, RecognizerLeaf,
-    RecognizerLeafData, UNSET_TOUCH_SLOP,
+    GestureRecognizer, GestureRecognizerData, K_PRESS_TIMEOUT, OneSequenceData,
+    OneSequenceLeafData, PointerCancelEvent, PointerDownEvent, PointerEvent, PointerUpEvent,
+    PrimaryPointerData, PrimaryPointerGestureRecognizer, PrimaryPointerLeaf,
+    PrimaryPointerLeafData, RecognizerLeaf, RecognizerLeafData, UNSET_TOUCH_SLOP,
 };
 use reveal_painting::{EdgeInsets, Matrix4};
 use reveal_rendering::{BoxConstraints, HitTestBehavior};
@@ -394,7 +394,9 @@ impl RecognizerLeafData for AnyTapGestureRecognizer {
     fn recognizer_mut(&mut self) -> &mut GestureRecognizerData {
         &mut self.recognizer
     }
+}
 
+impl OneSequenceLeafData for AnyTapGestureRecognizer {
     fn one_sequence(&self) -> &OneSequenceData {
         &self.one_sequence
     }

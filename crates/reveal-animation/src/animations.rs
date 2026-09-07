@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use reveal_foundation::{App, Handle, ListenableObject, Listener};
+use reveal_foundation::{App, Handle, ListenableObject, Listener, RetainedHandle};
 
 use crate::animation::{Animation, AnimationStatus, AnimationStatusListener, AnyAnimation};
 use crate::curves::Curve;
@@ -610,6 +610,8 @@ pub struct CurvedAnimation {
     // `AnimationWithParent::parent` getter, so it cannot be rebound away from
     // the animation the constructor subscribed to.
     parent: AnyAnimation<f64>,
+    // Dart retains this final parent reference after dispose removes the status listener.
+    _parent_reference: RetainedHandle,
 
     /// The curve to use in the forward direction.
     pub curve: Rc<dyn Curve>,
@@ -649,8 +651,10 @@ impl CurvedAnimation {
         curve: Rc<dyn Curve>,
         reverse_curve: Option<Rc<dyn Curve>>,
     ) -> Handle<CurvedAnimation> {
+        let parent_reference = app.retain(parent.id());
         let this = app.create(CurvedAnimation {
             parent,
+            _parent_reference: parent_reference,
             curve,
             reverse_curve,
             curve_direction: None,
@@ -1709,6 +1713,33 @@ mod tests {
 
     use super::*;
     use crate::curves::Curves;
+
+    /// Dart's final parent references outlive dispose until the driven animation is released.
+    #[test]
+    fn driven_animation_retains_disposed_curve_and_its_parent() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let parent = app.create(AlwaysStoppedAnimation::new(0.5));
+        let curve =
+            CurvedAnimation::create(&mut app, parent.as_animation(), Curves::linear(), None);
+        let driven = crate::tween::CallbackAnimatable::from_callback(|value| value * 10.0)
+            .animate(&mut app, curve.as_animation());
+        let listener = Listener::new(|_| {});
+        driven.add_listener(&mut app, listener.clone());
+        curve.dispose(&mut app);
+        app.destroy(curve);
+        app.destroy(parent);
+        assert_eq!(driven.value(&app), 5.0);
+        driven.remove_listener(&mut app, &listener);
+        assert!(app.contains(curve));
+        assert!(app.contains(parent));
+        app.destroy(driven.id());
+        drop(app);
+        cell.checkpoint();
+        let app = cell.borrow();
+        assert!(!app.contains(curve));
+        assert!(!app.contains(parent));
+    }
 
     #[test]
     fn the_constant_animations_report_flutters_values() {

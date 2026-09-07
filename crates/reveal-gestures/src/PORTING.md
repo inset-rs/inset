@@ -129,3 +129,9 @@ Pattern: [leaf-inheritance](../../../.cursor/skills/porting-flutter/patterns/lea
 - `_Resampler` / `SamplingClock` / `resamplingEnabled`. Trigger: a host that wants touch resampling.
 - `multidrag.dart` (`MultiDragGestureRecognizer` and its `Immediate` / `HorizontalMulti` / `VerticalMulti` / `Delayed` leaves). Trigger: the first widget that drags several pointers independently (`ReorderableListView`).
 - Engine `onHitTest`. Trigger: platform views.
+
+## multidrag.rs → multidrag.dart
+
+- Change: multi-drag recognizers store each pointer state in a typed arena handle and dispatch its virtual methods through an erased handle.
+  Reason: language — Rust has no garbage-collected subclass instances; the same handle and leaf-inheritance pattern represents Flutter's per-pointer objects.
+  Affect: custom recognizers implement `MultiDragGestureRecognizer` and a `MultiDragPointerState` leaf.

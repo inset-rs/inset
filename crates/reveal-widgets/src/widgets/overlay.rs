@@ -416,15 +416,6 @@ impl OverlayEntryWidgetState {
         self.create_child_list(app, false)
     }
 
-    // The children in the child model in hit-test order (from closest to the user to the
-    // farthest to the user).
-    fn hit_test_order_children(
-        self: Handle<Self>,
-        app: &App,
-    ) -> Vec<RenderHandle<RenderDeferredLayoutBox>> {
-        self.create_child_list(app, true)
-    }
-
     fn create_child_list(
         self: Handle<Self>,
         app: &App,
@@ -1422,13 +1413,6 @@ impl TheaterParentData {
         }
     }
 
-    fn hit_test_order_children(&self, app: &App) -> Vec<RenderHandle<RenderDeferredLayoutBox>> {
-        match self.child_model(app) {
-            Some(child_model) => child_model.hit_test_order_children(app),
-            None => Vec::new(),
-        }
-    }
-
     fn child_model(&self, app: &App) -> Option<Handle<OverlayEntryWidgetState>> {
         let notifier = app.get(self.overlay_entry?).overlay_entry_state_notifier?;
         Some((*app.get(notifier).value()).expect("the entry is mounted"))
@@ -1528,6 +1512,154 @@ fn layout_positioned_theater_child(
         .set_offset(Offset::new(x, y));
 }
 
+/// An App-aware cursor for Flutter's lazy theater child generators.
+///
+/// Entry layout can mutate its portal list, so that list is opened only after
+/// yielding the entry. Portal candidates advance before yielding, as in Dart.
+pub struct TheaterChildren {
+    /// The owning theater; absent for a deferred box's single normal child.
+    theater: Option<RenderHandle<RenderTheater>>,
+
+    /// The current entry, kept until its portal children have been traversed.
+    entry: Option<AnyRenderBox>,
+
+    /// Hit testing traverses portals before entries, from front to back.
+    reversed: bool,
+
+    /// Hit-test entries left before reaching the offstage prefix.
+    remaining: usize,
+
+    /// The source generator's suspension point between child operations.
+    phase: TheaterChildrenPhase,
+
+    /// The next portal location, advanced before yielding its render box.
+    candidate: Option<Handle<OverlayEntryLocation>>,
+}
+
+/// Suspension points in Flutter's paint-order and hit-test-order generators.
+enum TheaterChildrenPhase {
+    /// Yields the entry first when traversing in paint order.
+    Entry,
+
+    /// Opens the current portal list after the previous yield has completed.
+    OpenPortals,
+
+    /// Yields portal boxes while reading links from the current child model.
+    Portals,
+
+    /// Advances to the adjacent entry after its portals and entry were yielded.
+    NextEntry,
+}
+
+impl TheaterChildren {
+    /// Creates the one-child generator used by deferred layout boxes.
+    fn single(child: Option<AnyRenderBox>) -> Self {
+        Self {
+            theater: None,
+            entry: child,
+            reversed: false,
+            remaining: 0,
+            phase: TheaterChildrenPhase::Entry,
+            candidate: None,
+        }
+    }
+
+    /// Starts at the first or last onstage entry without reading its portals.
+    fn theater(theater: RenderHandle<RenderTheater>, app: &App, reversed: bool) -> Self {
+        Self {
+            theater: Some(theater),
+            entry: if reversed {
+                theater.last_onstage_child(app)
+            } else {
+                theater.first_onstage_child(app)
+            },
+            reversed,
+            remaining: theater.child_count(app) - theater.get(app).skip_count,
+            phase: TheaterChildrenPhase::Entry,
+            candidate: None,
+        }
+    }
+
+    /// Advances after the caller has finished operating on the previous child.
+    pub fn next(&mut self, app: &App) -> Option<AnyRenderBox> {
+        let Some(theater) = self.theater else {
+            return self.entry.take();
+        };
+        loop {
+            let entry = self.entry?;
+            match self.phase {
+                TheaterChildrenPhase::Entry => {
+                    self.phase = TheaterChildrenPhase::OpenPortals;
+                    if !self.reversed {
+                        return Some(entry);
+                    }
+                }
+                TheaterChildrenPhase::OpenPortals => {
+                    let model = entry
+                        .as_object()
+                        .parent_data_of::<TheaterParentData>(app)
+                        .child_model(app);
+                    self.candidate = model.and_then(|model| {
+                        let list = app.get(model).sorted_theater_siblings.as_ref()?;
+                        if self.reversed {
+                            list.last().copied()
+                        } else {
+                            list.first().copied()
+                        }
+                    });
+                    self.phase = TheaterChildrenPhase::Portals;
+                }
+                TheaterChildrenPhase::Portals => {
+                    if let Some(candidate) = self.candidate {
+                        let render_box = app.get(candidate).overlay_child_render_box;
+                        self.candidate = (|| {
+                            let model = app.get(candidate).child_model;
+                            let list = app.get(model).sorted_theater_siblings.as_ref()?;
+                            let index = list.iter().position(|value| *value == candidate)?;
+                            if self.reversed {
+                                index.checked_sub(1).and_then(|i| list.get(i).copied())
+                            } else {
+                                list.get(index + 1).copied()
+                            }
+                        })();
+                        if let Some(render_box) = render_box {
+                            return Some(render_box.as_box());
+                        }
+                    } else {
+                        self.phase = TheaterChildrenPhase::NextEntry;
+                        if self.reversed {
+                            return Some(entry);
+                        }
+                    }
+                }
+                TheaterChildrenPhase::NextEntry => {
+                    self.entry = if self.reversed {
+                        self.remaining -= 1;
+                        if self.remaining == 0 {
+                            None
+                        } else {
+                            theater.child_before(app, entry)
+                        }
+                    } else {
+                        theater.child_after(app, entry)
+                    };
+                    self.phase = TheaterChildrenPhase::Entry;
+                }
+            }
+        }
+    }
+
+    /// Collects a snapshot for tests that do not mutate children between yields.
+    #[cfg(test)]
+    fn collect(mut self, app: &App) -> Vec<AnyRenderBox> {
+        let mut children = Vec::new();
+        while let Some(child) = self.next(app) {
+            children.push(child);
+        }
+        children
+    }
+}
+
 /// A `RenderBox` that sizes itself to its parent's size, implements the stack layout algorithm
 /// and renders its children in the given [`theater`](Self::theater).
 ///
@@ -1537,10 +1669,10 @@ pub trait RenderTheaterMixin: RenderBox {
     fn theater(self: RenderHandle<Self>, app: &App) -> RenderHandle<RenderTheater>;
 
     /// The children in paint order: from farthest to the user to the closest to the user.
-    fn children_in_paint_order(self: RenderHandle<Self>, app: &App) -> Vec<AnyRenderBox>;
+    fn children_in_paint_order(self: RenderHandle<Self>, app: &App) -> TheaterChildren;
 
     /// The children in hit-test order: from closest to the user to the farthest.
-    fn children_in_hit_test_order(self: RenderHandle<Self>, app: &App) -> Vec<AnyRenderBox>;
+    fn children_in_hit_test_order(self: RenderHandle<Self>, app: &App) -> TheaterChildren;
 
     /// The body of Flutter's `setupParentData` override.
     fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
@@ -1600,7 +1732,8 @@ pub trait RenderTheaterMixin: RenderBox {
         result: &mut BoxHitTestResult<'_>,
         position: Offset,
     ) -> bool {
-        for child in self.children_in_hit_test_order(app) {
+        let mut children = self.children_in_hit_test_order(app);
+        while let Some(child) = children.next(app) {
             let offset = child
                 .as_object()
                 .parent_data_of::<TheaterParentData>(app)
@@ -1622,7 +1755,8 @@ pub trait RenderTheaterMixin: RenderBox {
         context: &mut PaintingContext,
         offset: Offset,
     ) {
-        for child in self.children_in_paint_order(app) {
+        let mut children = self.children_in_paint_order(app);
+        while let Some(child) = children.next(app) {
             let child_offset = child
                 .as_object()
                 .parent_data_of::<TheaterParentData>(app)
@@ -1851,40 +1985,12 @@ impl RenderTheaterMixin for RenderTheater {
         self
     }
 
-    fn children_in_paint_order(self: RenderHandle<Self>, app: &App) -> Vec<AnyRenderBox> {
-        let mut children = Vec::new();
-        let mut child = self.first_onstage_child(app);
-        while let Some(current) = child {
-            children.push(current);
-            let deferred = current
-                .as_object()
-                .parent_data_of::<TheaterParentData>(app)
-                .paint_order_children(app);
-            children.extend(deferred.into_iter().map(|child| child.as_box()));
-            child = self.child_after(app, current);
-        }
-        children
+    fn children_in_paint_order(self: RenderHandle<Self>, app: &App) -> TheaterChildren {
+        TheaterChildren::theater(self, app, false)
     }
 
-    fn children_in_hit_test_order(self: RenderHandle<Self>, app: &App) -> Vec<AnyRenderBox> {
-        let mut children = Vec::new();
-        let mut child = self.last_onstage_child(app);
-        let mut child_left = self.child_count(app) - self.get(app).skip_count;
-        while let Some(current) = child {
-            let deferred = current
-                .as_object()
-                .parent_data_of::<TheaterParentData>(app)
-                .hit_test_order_children(app);
-            children.extend(deferred.into_iter().map(|child| child.as_box()));
-            children.push(current);
-            child_left -= 1;
-            child = if child_left == 0 {
-                None
-            } else {
-                self.child_before(app, current)
-            };
-        }
-        children
+    fn children_in_hit_test_order(self: RenderHandle<Self>, app: &App) -> TheaterChildren {
+        TheaterChildren::theater(self, app, true)
     }
 }
 
@@ -1908,7 +2014,8 @@ impl RenderObject for RenderTheater {
 
         // Equivalent to the BoxConstraints RenderStack uses for StackFit.expand.
         let non_positioned_child_constraints = BoxConstraints::tight(self.size(app));
-        for child in self.children_in_paint_order(app) {
+        let mut children = self.children_in_paint_order(app);
+        while let Some(child) = children.next(app) {
             if Some(child) != size_determining_child {
                 self.layout_child(app, child, non_positioned_child_constraints);
             }
@@ -3302,11 +3409,11 @@ impl RenderTheaterMixin for RenderDeferredLayoutBox {
             .expect("the parent of a deferred layout box is a RenderTheater")
     }
 
-    fn children_in_paint_order(self: RenderHandle<Self>, app: &App) -> Vec<AnyRenderBox> {
-        self.child(app).into_iter().collect()
+    fn children_in_paint_order(self: RenderHandle<Self>, app: &App) -> TheaterChildren {
+        TheaterChildren::single(self.child(app))
     }
 
-    fn children_in_hit_test_order(self: RenderHandle<Self>, app: &App) -> Vec<AnyRenderBox> {
+    fn children_in_hit_test_order(self: RenderHandle<Self>, app: &App) -> TheaterChildren {
         RenderTheaterMixin::children_in_paint_order(self, app)
     }
 }
@@ -3316,11 +3423,6 @@ impl RenderObject for RenderDeferredLayoutBox {
 
     fn sized_by_parent(self: RenderHandle<Self>, _app: &App) -> bool {
         true
-    }
-
-    fn perform_resize(self: RenderHandle<Self>, app: &mut App) {
-        let size = self.constraints(app).biggest();
-        self.set_size(app, size);
     }
 
     fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
@@ -3380,6 +3482,11 @@ impl RenderObject for RenderDeferredLayoutBox {
 
 impl RenderBox for RenderDeferredLayoutBox {
     reveal_rendering::render_box_accessors!();
+
+    fn perform_resize(self: RenderHandle<Self>, app: &mut App) {
+        let size = self.constraints(app).biggest();
+        self.set_size(app, size);
+    }
 
     fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
         RenderTheaterMixin::setup_parent_data(self, app, child);
@@ -4113,11 +4220,11 @@ impl RenderTheaterMixin for RenderOverlayChildLayoutBuilder {
             .theater(app)
     }
 
-    fn children_in_paint_order(self: RenderHandle<Self>, app: &App) -> Vec<AnyRenderBox> {
-        self.child(app).into_iter().collect()
+    fn children_in_paint_order(self: RenderHandle<Self>, app: &App) -> TheaterChildren {
+        TheaterChildren::single(self.child(app))
     }
 
-    fn children_in_hit_test_order(self: RenderHandle<Self>, app: &App) -> Vec<AnyRenderBox> {
+    fn children_in_hit_test_order(self: RenderHandle<Self>, app: &App) -> TheaterChildren {
         RenderTheaterMixin::children_in_paint_order(self, app)
     }
 }
@@ -4127,11 +4234,6 @@ impl RenderObject for RenderOverlayChildLayoutBuilder {
 
     fn sized_by_parent(self: RenderHandle<Self>, _app: &App) -> bool {
         true
-    }
-
-    fn perform_resize(self: RenderHandle<Self>, app: &mut App) {
-        let size = self.constraints(app).biggest();
-        self.set_size(app, size);
     }
 
     fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
@@ -4174,6 +4276,11 @@ impl RenderObject for RenderOverlayChildLayoutBuilder {
 
 impl RenderBox for RenderOverlayChildLayoutBuilder {
     reveal_rendering::render_box_accessors!();
+
+    fn perform_resize(self: RenderHandle<Self>, app: &mut App) {
+        let size = self.constraints(app).biggest();
+        self.set_size(app, size);
+    }
 
     fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
         RenderTheaterMixin::setup_parent_data(self, app, child);
@@ -4316,7 +4423,7 @@ mod tests {
         // `bottom` is kept in the tree by maintain_state, but skipped when painting.
         assert_eq!(theater.child_count(&app), 2);
         assert_eq!(theater.skip_count(&app), 1);
-        let painted = RenderTheaterMixin::children_in_paint_order(theater, &app);
+        let painted = RenderTheaterMixin::children_in_paint_order(theater, &app).collect(&app);
         assert_eq!(painted.len(), 1);
         assert_eq!(entry_of(&app, painted[0]), top);
 
@@ -4332,7 +4439,9 @@ mod tests {
         harness.pump(&mut app);
         assert_eq!(theater.skip_count(&app), 0);
         assert_eq!(
-            RenderTheaterMixin::children_in_paint_order(theater, &app).len(),
+            RenderTheaterMixin::children_in_paint_order(theater, &app)
+                .collect(&app)
+                .len(),
             2
         );
     }
@@ -4359,14 +4468,16 @@ mod tests {
         let theater = theater_of(&harness, &app);
         assert!(!controller.is_showing(&app));
         assert_eq!(
-            RenderTheaterMixin::children_in_paint_order(theater, &app).len(),
+            RenderTheaterMixin::children_in_paint_order(theater, &app)
+                .collect(&app)
+                .len(),
             1
         );
 
         controller.show(&mut app);
         assert!(controller.is_showing(&app));
         harness.pump(&mut app);
-        let painted = RenderTheaterMixin::children_in_paint_order(theater, &app);
+        let painted = RenderTheaterMixin::children_in_paint_order(theater, &app).collect(&app);
         assert_eq!(painted.len(), 2);
         // The overlay child is a render child of the theater, painted above the entry.
         let deferred = painted[1]
@@ -4382,11 +4493,17 @@ mod tests {
         // The theater's child model still holds one entry child.
         assert_eq!(theater.child_count(&app), 1);
 
+        // Resume the lazy generator after entry layout removes its portal.
+        let mut children = theater.children_in_paint_order(&app);
+        assert_eq!(children.next(&app), Some(painted[0]));
         controller.toggle(&mut app);
         assert!(!controller.is_showing(&app));
         harness.pump(&mut app);
+        assert_eq!(children.next(&app), None);
         assert_eq!(
-            RenderTheaterMixin::children_in_paint_order(theater, &app).len(),
+            RenderTheaterMixin::children_in_paint_order(theater, &app)
+                .collect(&app)
+                .len(),
             1
         );
 
@@ -4394,15 +4511,88 @@ mod tests {
         assert!(controller.is_showing(&app));
         harness.pump(&mut app);
         assert_eq!(
-            RenderTheaterMixin::children_in_paint_order(theater, &app).len(),
+            RenderTheaterMixin::children_in_paint_order(theater, &app)
+                .collect(&app)
+                .len(),
             2
         );
 
         controller.hide(&mut app);
         harness.pump(&mut app);
         assert_eq!(
-            RenderTheaterMixin::children_in_paint_order(theater, &app).len(),
+            RenderTheaterMixin::children_in_paint_order(theater, &app)
+                .collect(&app)
+                .len(),
             1
         );
+    }
+
+    #[test]
+    fn overlay_layout_builder_resizes_without_requesting_child_dry_layout() {
+        use crate::widgets::basic::Positioned;
+        use std::cell::Cell;
+
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let controller = OverlayPortalController::new(&mut app, None);
+        let observed = Rc::new(Cell::new(None::<OverlayChildLayoutInfo>));
+        let output = observed.clone();
+        let entry = OverlayEntry::new(
+            &mut app,
+            Rc::new(move |_, _| {
+                let output = output.clone();
+                Positioned::new(
+                    OverlayPortal::overlay_child_layout_builder(controller, move |_, _, info| {
+                        output.set(Some(info));
+                        Positioned::new(SizedBox::expand())
+                            .left(0.0)
+                            .top(0.0)
+                            .width(40.0)
+                            .height(20.0)
+                            .into_widget()
+                    })
+                    .child(SizedBox::expand()),
+                )
+                .left(30.0)
+                .top(40.0)
+                .width(80.0)
+                .height(60.0)
+                .into_widget()
+            }),
+            false,
+            false,
+            false,
+        );
+        let harness = mount_overlay(&mut app, vec![entry]);
+        let theater = theater_of(&harness, &app);
+        for _ in 0..2 {
+            controller.show(&mut app);
+            harness.pump(&mut app);
+            let info = observed.get().expect("the overlay built after layout");
+            assert_eq!(info.child_size(), Size::new(80.0, 60.0));
+            assert_eq!(info.overlay_size(), theater.size(&app));
+            assert_eq!(
+                reveal_painting::transform_point(&info.child_paint_transform(), Offset::ZERO),
+                Offset::new(30.0, 40.0),
+            );
+            let painted = RenderTheaterMixin::children_in_paint_order(theater, &app).collect(&app);
+            let deferred = painted[1]
+                .as_object()
+                .downcast::<RenderDeferredLayoutBox>(&app)
+                .unwrap();
+            let builder = deferred.child(&app).unwrap();
+            assert_eq!(deferred.size(&app), theater.size(&app));
+            assert_eq!(builder.size(&app), theater.size(&app));
+            let builder = builder
+                .as_object()
+                .downcast::<RenderOverlayChildLayoutBuilder>(&app)
+                .unwrap();
+            assert_eq!(
+                builder.child(&app).unwrap().size(&app),
+                Size::new(40.0, 20.0)
+            );
+            controller.hide(&mut app);
+            harness.pump(&mut app);
+        }
     }
 }

@@ -345,14 +345,17 @@ impl fmt::Display for OffsetPair {
     }
 }
 
-/// Superclass fields on every `OneSequence` leaf.
+/// Superclass fields on every `GestureRecognizer` leaf.
 pub trait RecognizerLeafData {
     /// The leaf's [`GestureRecognizer`] bag.
     fn recognizer(&self) -> &GestureRecognizerData;
 
     /// The leaf's [`GestureRecognizer`] bag, mutably.
     fn recognizer_mut(&mut self) -> &mut GestureRecognizerData;
+}
 
+/// The extra field bag carried by `OneSequenceGestureRecognizer` leaves.
+pub trait OneSequenceLeafData: RecognizerLeafData {
     /// The leaf's [`OneSequenceGestureRecognizer`] bag.
     fn one_sequence(&self) -> &OneSequenceData;
 
@@ -361,7 +364,7 @@ pub trait RecognizerLeafData {
 }
 
 /// The extra field bag a [`PrimaryPointerGestureRecognizer`] leaf carries.
-pub trait PrimaryPointerLeafData: RecognizerLeafData {
+pub trait PrimaryPointerLeafData: OneSequenceLeafData {
     /// The leaf's [`PrimaryPointerGestureRecognizer`] bag.
     fn primary(&self) -> &PrimaryPointerData;
 
@@ -369,10 +372,8 @@ pub trait PrimaryPointerLeafData: RecognizerLeafData {
     fn primary_mut(&mut self) -> &mut PrimaryPointerData;
 }
 
-/// Virtuals a superclass body calls on the leaf. Defaults match
-/// `OneSequenceGestureRecognizer` (the last class every recognizer leaf here
-/// shares); a `PrimaryPointerGestureRecognizer` leaf overrides them with
-/// [`PrimaryPointerGestureRecognizer`]'s bodies.
+/// Virtuals a superclass body calls on the leaf. Defaults match `GestureRecognizer`;
+/// leaves forward inherited overrides to their immediate superclass.
 ///
 /// A leaf competes in the arena as its `Handle`: see the [`GestureArenaMember`]
 /// impl below.
@@ -407,9 +408,7 @@ pub trait RecognizerLeaf: RecognizerLeafData + Sized + 'static {
     ///
     /// Override this instead of [`add_pointer`](Self::add_pointer), which is
     /// called for each and all pointers being added.
-    fn add_allowed_pointer(self: Handle<Self>, app: &mut App, event: PointerDownEvent) {
-        OneSequenceGestureRecognizer::add_allowed_pointer(self, app, &event);
-    }
+    fn add_allowed_pointer(self: Handle<Self>, _app: &mut App, _event: PointerDownEvent) {}
 
     /// Registers a new pointer pan/zoom that's been checked to be allowed by this
     /// gesture recognizer.
@@ -421,9 +420,7 @@ pub trait RecognizerLeaf: RecognizerLeafData + Sized + 'static {
     }
 
     /// Handles a pointer being added that's not allowed by this recognizer.
-    fn handle_non_allowed_pointer(self: Handle<Self>, app: &mut App, _event: &PointerDownEvent) {
-        OneSequenceGestureRecognizer::handle_non_allowed_pointer(self, app);
-    }
+    fn handle_non_allowed_pointer(self: Handle<Self>, _app: &mut App, _event: &PointerDownEvent) {}
 
     /// Handles a pointer pan/zoom being added that's not allowed by this
     /// recognizer.
@@ -457,7 +454,9 @@ pub trait RecognizerLeaf: RecognizerLeafData + Sized + 'static {
         app: &mut App,
         pointer: i64,
         transform: Option<Matrix4>,
-    ) {
+    ) where
+        Self: OneSequenceLeafData,
+    {
         OneSequenceGestureRecognizer::start_tracking_pointer(self, app, pointer, transform);
     }
 
@@ -472,17 +471,20 @@ pub trait RecognizerLeaf: RecognizerLeafData + Sized + 'static {
 
     /// Called when the number of pointers this recognizer is tracking changes
     /// from one to zero.
-    fn did_stop_tracking_last_pointer(self: Handle<Self>, app: &mut App, pointer: i64);
+    fn did_stop_tracking_last_pointer(self: Handle<Self>, _app: &mut App, _pointer: i64) {}
 
     /// Resolves this recognizer's participation in each gesture arena with the
     /// given disposition.
-    fn resolve(self: Handle<Self>, app: &mut App, disposition: GestureDisposition) {
+    fn resolve(self: Handle<Self>, app: &mut App, disposition: GestureDisposition)
+    where
+        Self: OneSequenceLeafData,
+    {
         OneSequenceGestureRecognizer::resolve(self, app, disposition);
     }
 
     /// Releases any resources used by the object.
     fn dispose(self: Handle<Self>, app: &mut App) {
-        OneSequenceGestureRecognizer::dispose(self, app);
+        GestureRecognizer::dispose(self, app);
     }
 
     /// Returns a very short pretty description of the gesture that the
@@ -573,6 +575,7 @@ pub(crate) struct GestureRecognizerVTable {
     is_pointer_allowed: fn(&App, HandleId, &PointerDownEvent) -> bool,
     is_pointer_pan_zoom_allowed: fn(&App, HandleId, &PointerPanZoomStartEvent) -> bool,
     dispose: fn(&mut App, HandleId),
+    set_gesture_settings: fn(&mut App, HandleId, Option<DeviceGestureSettings>),
     debug_description: fn(HandleId) -> &'static str,
 }
 
@@ -596,6 +599,11 @@ impl GestureRecognizerVTable {
                 R::is_pointer_pan_zoom_allowed(resolve(id), app, event)
             },
             dispose: |app, id| R::dispose(resolve(id), app),
+            set_gesture_settings: |app, id, value| {
+                app.get_mut(resolve::<R>(id))
+                    .recognizer_mut()
+                    .set_gesture_settings(value)
+            },
             debug_description: |id| R::debug_description(resolve(id)),
         }
     }
@@ -649,6 +657,11 @@ impl AnyGestureRecognizer {
     /// Dart's `recognizer as T`: the typed handle when this recognizer is a `T`, else `None`.
     pub fn downcast<T: 'static>(self, app: &App) -> Option<Handle<T>> {
         app.handle::<T>(self.id)
+    }
+
+    /// Optional device-specific configuration for device gestures.
+    pub fn set_gesture_settings(self, app: &mut App, value: Option<DeviceGestureSettings>) {
+        (self.vtable.set_gesture_settings)(app, self.id, value);
     }
 
     /// Registers a new pointer that might be relevant to this gesture detector.
@@ -843,7 +856,7 @@ pub struct OneSequenceGestureRecognizer;
 
 impl OneSequenceGestureRecognizer {
     /// Starts tracking the pointer of the given down event.
-    pub fn add_allowed_pointer<R: RecognizerLeaf>(
+    pub fn add_allowed_pointer<R: RecognizerLeaf + OneSequenceLeafData>(
         this: Handle<R>,
         app: &mut App,
         event: &PointerDownEvent,
@@ -852,13 +865,16 @@ impl OneSequenceGestureRecognizer {
     }
 
     /// Rejects the gesture in every arena this recognizer takes part in.
-    pub fn handle_non_allowed_pointer<R: RecognizerLeaf>(this: Handle<R>, app: &mut App) {
+    pub fn handle_non_allowed_pointer<R: RecognizerLeaf + OneSequenceLeafData>(
+        this: Handle<R>,
+        app: &mut App,
+    ) {
         this.resolve(app, GestureDisposition::Rejected);
     }
 
     /// Resolves this recognizer's participation in each gesture arena with the
     /// given disposition.
-    pub fn resolve<R: RecognizerLeaf>(
+    pub fn resolve<R: RecognizerLeaf + OneSequenceLeafData>(
         this: Handle<R>,
         app: &mut App,
         disposition: GestureDisposition,
@@ -878,7 +894,7 @@ impl OneSequenceGestureRecognizer {
 
     /// Resolves this recognizer's participation in the given gesture arena with
     /// the given disposition.
-    pub fn resolve_pointer<R: RecognizerLeaf>(
+    pub fn resolve_pointer<R: RecognizerLeaf + OneSequenceLeafData>(
         this: Handle<R>,
         app: &mut App,
         pointer: i64,
@@ -896,7 +912,7 @@ impl OneSequenceGestureRecognizer {
 
     /// Rejects every arena this recognizer takes part in, drops its routes, then
     /// runs [`GestureRecognizer::dispose`].
-    pub fn dispose<R: RecognizerLeaf>(this: Handle<R>, app: &mut App) {
+    pub fn dispose<R: RecognizerLeaf + OneSequenceLeafData>(this: Handle<R>, app: &mut App) {
         this.resolve(app, GestureDisposition::Rejected);
         let pointers: Vec<i64> = app
             .get(this)
@@ -921,7 +937,7 @@ impl OneSequenceGestureRecognizer {
         GestureRecognizer::dispose(this, app);
     }
 
-    pub(crate) fn add_pointer_to_arena<R: RecognizerLeaf>(
+    pub(crate) fn add_pointer_to_arena<R: RecognizerLeaf + OneSequenceLeafData>(
         this: Handle<R>,
         app: &mut App,
         pointer: i64,
@@ -942,7 +958,7 @@ impl OneSequenceGestureRecognizer {
     /// The pointer events are transformed according to `transform` and then
     /// delivered to [`RecognizerLeaf::handle_event`]. Use
     /// [`stop_tracking_pointer`](Self::stop_tracking_pointer) to remove the route.
-    pub fn start_tracking_pointer<R: RecognizerLeaf>(
+    pub fn start_tracking_pointer<R: RecognizerLeaf + OneSequenceLeafData>(
         this: Handle<R>,
         app: &mut App,
         pointer: i64,
@@ -971,7 +987,11 @@ impl OneSequenceGestureRecognizer {
     ///
     /// If this reduces the number of tracked pointers to zero, it calls
     /// [`RecognizerLeaf::did_stop_tracking_last_pointer`] synchronously.
-    pub fn stop_tracking_pointer<R: RecognizerLeaf>(this: Handle<R>, app: &mut App, pointer: i64) {
+    pub fn stop_tracking_pointer<R: RecognizerLeaf + OneSequenceLeafData>(
+        this: Handle<R>,
+        app: &mut App,
+        pointer: i64,
+    ) {
         if app
             .get(this)
             .one_sequence()
@@ -998,7 +1018,7 @@ impl OneSequenceGestureRecognizer {
     /// a [`PointerUpEvent`](crate::PointerUpEvent), a
     /// [`PointerCancelEvent`](crate::PointerCancelEvent) or a
     /// [`PointerPanZoomEndEvent`](crate::PointerPanZoomEndEvent).
-    pub fn stop_tracking_if_pointer_no_longer_down<R: RecognizerLeaf>(
+    pub fn stop_tracking_if_pointer_no_longer_down<R: RecognizerLeaf + OneSequenceLeafData>(
         this: Handle<R>,
         app: &mut App,
         event: &PointerEvent,

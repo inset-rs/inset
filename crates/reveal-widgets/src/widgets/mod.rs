@@ -7,6 +7,7 @@ pub mod banner;
 pub mod basic;
 pub mod container;
 pub mod default_text_editing_shortcuts;
+pub mod drag_target;
 pub mod draggable_scrollable_sheet;
 pub mod expansible;
 pub mod focus_manager;
