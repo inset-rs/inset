@@ -4,7 +4,7 @@ use std::any::Any;
 use std::fmt::{self, Debug};
 
 use reveal_embedder::{Matrix4, Offset, ViewId};
-use reveal_foundation::{App, HandleId, PRECISION_ERROR_TOLERANCE, RetainedHandle};
+use reveal_foundation::{App, HandleId, PRECISION_ERROR_TOLERANCE, RetainedHandleId};
 
 use crate::events::PointerEvent;
 
@@ -114,7 +114,7 @@ pub struct HitTestResult {
     path: Vec<HitTestEntry>,
     /// The retained handles that keep the path's targets while the result outlives its turn;
     /// empty until [`retain_targets`](Self::retain_targets).
-    retained: Vec<RetainedHandle>,
+    retained: Vec<RetainedHandleId>,
     // A stack of transform parts.
     //
     // The transform part stack leading from global to the current object is stored
@@ -153,7 +153,7 @@ impl HitTestResult {
             .path
             .iter()
             .filter_map(|entry| entry.target.retained_handle())
-            .map(|id| app.retain(id))
+            .map(|id| app.retain_id(id))
             .collect();
     }
 
@@ -161,7 +161,7 @@ impl HitTestResult {
     /// checkpoint.
     pub fn release_targets(&mut self, app: &mut App) {
         for handle in self.retained.drain(..) {
-            app.release(handle);
+            app.release_id(handle);
         }
     }
 

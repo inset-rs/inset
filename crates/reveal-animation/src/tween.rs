@@ -46,10 +46,9 @@ pub trait Animatable<T> {
         Self: Sized + Clone + 'static,
         T: 'static,
     {
-        let parent_reference = app.retain(parent.id());
+        let parent = app.retain(parent);
         app.create(AnimatedEvaluation {
             parent,
-            _parent_reference: parent_reference,
             evaluatable: self,
             _value: PhantomData,
         })
@@ -101,9 +100,7 @@ impl<T> Debug for CallbackAnimatable<T> {
 /// Dart's `_AnimatedEvaluation<T>` — the animation returned by
 /// [`Animatable::animate`].
 struct AnimatedEvaluation<T, A> {
-    parent: AnyAnimation<f64>,
-    // Dart keeps parent alive even after its owner calls dispose.
-    _parent_reference: RetainedHandle,
+    parent: RetainedHandle<AnyAnimation<f64>>,
     evaluatable: A,
     _value: PhantomData<fn() -> T>,
 }
@@ -134,7 +131,7 @@ impl<T: 'static, A: Animatable<T> + Clone + 'static> Animation<T> for AnimatedEv
     }
 
     fn value(self: Handle<Self>, app: &App) -> T {
-        let parent = app.get(self).parent;
+        let parent = app.get(self).parent.get();
         let evaluatable = app.get(self).evaluatable.clone();
         evaluatable.evaluate(app, parent)
     }

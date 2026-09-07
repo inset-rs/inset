@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use reveal_embedder::{Offset, ViewId};
-use reveal_foundation::{App, Handle, HandleId, Listener, RetainedHandle};
+use reveal_foundation::{App, Handle, HandleId, Listener, RetainedHandleId};
 use reveal_gestures::*;
 use reveal_painting::Axis;
 use reveal_rendering::{BoxHitTestEntry, HitTestBehavior, RenderMetaData};
@@ -1019,7 +1019,7 @@ struct DragTargetMetadata {
     handler: Rc<dyn DragTargetHandler>,
 
     /// Keeps the target state alive while metadata is held by a drag.
-    _retained: RetainedHandle,
+    _retained: RetainedHandleId,
 }
 
 impl<T: 'static> DragTargetHandler for Handle<DragTargetState<T>> {
@@ -1159,7 +1159,7 @@ impl<T: 'static> State for DragTargetState<T> {
         MetaData::new()
             .meta_data(Rc::new(DragTargetMetadata {
                 handler: Rc::new(self),
-                _retained: app.retain(self),
+                _retained: app.retain_id(self.id()),
             }))
             .behavior(self.widget(app).hit_test_behavior)
             .child(child)

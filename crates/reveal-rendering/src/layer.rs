@@ -282,11 +282,10 @@ pub(crate) enum PaintItem {
     /// `PictureLayer`. `cache` is Flutter's `isComplexHint`: a raster-cache candidate.
     Picture { picture: Arc<Picture>, cache: bool },
     /// A child repaint boundary, composited through its own [`BoundaryLayer`].
-    ChildBoundary {
-        child: AnyRenderObject,
-        /// The parent layer owns this layer even after its render object is disposed.
-        _retained: RetainedHandle,
-    },
+    ///
+    /// The parent recording keeps the child (and its pictures) after the child's render object
+    /// is disposed, Dart's `LayerHandle` on the parent `ContainerLayer`.
+    ChildBoundary(RetainedHandle<AnyRenderObject>),
     /// `OpacityLayer` from `PaintingContext::push_opacity`. Closed by [`Pop`](Self::Pop).
     PushOpacity { alpha: i32, offset: Offset },
     /// `BackdropFilterLayer` from `PaintingContext::push_backdrop_filter`: blurs what is
@@ -378,7 +377,7 @@ impl BoundaryLayer {
                         canvas.draw_display_list(picture);
                     }
                 }
-                PaintItem::ChildBoundary { child, .. } => {
+                PaintItem::ChildBoundary(child) => {
                     if let Some(layer) = child.layer(app) {
                         layer.add_to_scene(app, canvas);
                     }
@@ -550,7 +549,7 @@ fn find_annotations_in_item<T: Any>(
     match item {
         // `PictureLayer.findAnnotations` is `Layer`'s: no annotations, no absorption.
         PaintItem::Picture { .. } => false,
-        PaintItem::ChildBoundary { child, .. } => child
+        PaintItem::ChildBoundary(child) => child
             .layer(app)
             .is_some_and(|layer| layer.find_annotations(app, result, local_position, only_first)),
         // `OpacityLayer` and `BackdropFilterLayer` reach their children through the offset the
@@ -801,7 +800,7 @@ impl AnyRenderObject {
         };
         if let Some(parent_layer) = parent.layer_mut(app) {
             parent_layer.items.retain(
-                |item| !matches!(item, PaintItem::ChildBoundary { child, .. } if *child == self),
+                |item| !matches!(item, PaintItem::ChildBoundary(child) if child.get() == self),
             );
         }
         self.drop_layer_from_parent(app);
@@ -841,7 +840,7 @@ impl AnyRenderObject {
                     .items
                     .iter()
                     .filter_map(|item| match item {
-                        PaintItem::ChildBoundary { child, .. } => Some(*child),
+                        PaintItem::ChildBoundary(child) => Some(child.get()),
                         _ => None,
                     })
                     .collect()
@@ -896,10 +895,9 @@ mod tests {
             child.set_layer(&mut app, Some(child_layer));
             let mut parent_layer =
                 BoundaryLayer::new(CompositedLayer::offset_layer(Offset::ZERO), false);
-            parent_layer.items.push(PaintItem::ChildBoundary {
-                child,
-                _retained: app.retain(child.id()),
-            });
+            parent_layer
+                .items
+                .push(PaintItem::ChildBoundary(app.retain(child)));
             parent.set_layer(&mut app, Some(parent_layer));
             let mut before = Canvas::new();
             parent.layer(&app).unwrap().add_to_scene(&app, &mut before);

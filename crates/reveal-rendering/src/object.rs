@@ -1228,6 +1228,12 @@ impl Hash for AnyRenderObject {
     }
 }
 
+impl From<AnyRenderObject> for HandleId {
+    fn from(object: AnyRenderObject) -> HandleId {
+        object.id
+    }
+}
+
 impl Debug for AnyRenderObject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "AnyRenderObject({:?})", self.id)

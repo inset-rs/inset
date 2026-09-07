@@ -31,7 +31,7 @@ type Annotations = IndexMap<AnyRenderObject, Matrix4>;
 // Various states of a connected mouse device used by [MouseTracker].
 struct MouseState {
     /// The retained handles that keep the annotations' render objects past a rebuild.
-    retained: Vec<RetainedHandle>,
+    retained: Vec<RetainedHandle<AnyRenderObject>>,
     // The list of annotations that contains this device.
     //
     // It uses [IndexMap] to keep the insertion order.
@@ -52,8 +52,8 @@ impl MouseState {
     fn replace_annotations(
         &mut self,
         value: Annotations,
-        retained: Vec<RetainedHandle>,
-    ) -> (Annotations, Vec<RetainedHandle>) {
+        retained: Vec<RetainedHandle<AnyRenderObject>>,
+    ) -> (Annotations, Vec<RetainedHandle<AnyRenderObject>>) {
         (
             std::mem::replace(&mut self.annotations, value),
             std::mem::replace(&mut self.retained, retained),
@@ -217,14 +217,18 @@ impl MouseTracker {
 
     /// The remembered annotations keep their render objects past a rebuild, as Dart's map holds
     /// the annotation objects: an exit is still delivered to a region that just left the tree.
-    fn retain_annotations(app: &mut App, annotations: &Annotations) -> Vec<RetainedHandle> {
+    fn retain_annotations(
+        app: &mut App,
+        annotations: &Annotations,
+    ) -> Vec<RetainedHandle<AnyRenderObject>> {
         annotations
             .keys()
-            .map(|target| app.retain(target.id()))
+            .copied()
+            .map(|target| app.retain(target))
             .collect()
     }
 
-    fn release_annotations(app: &mut App, retained: Vec<RetainedHandle>) {
+    fn release_annotations(app: &mut App, retained: Vec<RetainedHandle<AnyRenderObject>>) {
         for handle in retained {
             app.release(handle);
         }

@@ -422,6 +422,12 @@ impl<T> Clone for AnyAnimation<T> {
 
 impl<T> Copy for AnyAnimation<T> {}
 
+impl<T> From<AnyAnimation<T>> for HandleId {
+    fn from(animation: AnyAnimation<T>) -> HandleId {
+        animation.id
+    }
+}
+
 impl<T> PartialEq for AnyAnimation<T> {
     fn eq(&self, other: &AnyAnimation<T>) -> bool {
         // The id alone. Dart's `==` on an `Animation` is object identity,

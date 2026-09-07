@@ -52,7 +52,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## painting_context.rs → object.dart (PaintingContext), layer.rs → layer.dart
 
-- Change: there is no `Layer` object tree. A repaint boundary keeps its recording as retained items (pictures, references to child boundaries, push/pop effects) plus one `CompositedLayer` value standing in for Flutter's offset, opacity and transform layers. The host recomposes the frame from those retained pieces every time, so a boundary that did not change contributes the same pictures.
+- Change: there is no `Layer` object tree. A repaint boundary keeps its recording as retained items (pictures, references to child boundaries, push/pop effects) plus one `CompositedLayer` value standing in for Flutter's offset, opacity and transform layers. The host recomposes the frame from those retained pieces every time, so a boundary that did not change contributes the same pictures. A `ChildBoundary` is a `RetainedHandle<AnyRenderObject>`: the parent recording keeps the child's render object (and its pictures) after `dispose`, Dart's `LayerHandle` on the parent `ContainerLayer`.
   Reason: platform — valo composes a display list from retained pictures and has no engine layers to retain between frames.
   Affect: the `push_*` effects take no `needsCompositing` or `oldLayer` argument and return nothing; `update_composited_layer` returns a `CompositedLayer`, and `mark_needs_composited_layer_update` swaps it in without repainting the subtree; `schedule_initial_paint` takes a `CompositedLayer`.
 

@@ -2,14 +2,16 @@
 //! [`Handle`]. Dart has no counterpart; see PORTING.md.
 //!
 //! An entry is kept by its owner from [`HandleMap::create`] until [`HandleMap::destroy`], and by
-//! each [`RetainedHandle`] a cross-turn holder takes with [`HandleMap::retain`]. The last of those
-//! to go removes the entry. `destroy` is Dart's `dispose`: after it the object is out of every tree and
-//! stays readable only while a retained handle keeps it, the way a Dart object stays alive while
-//! something still references it.
+//! each [`RetainedHandle`] / [`RetainedHandleId`] a cross-turn holder takes with
+//! [`HandleMap::retain`] / [`HandleMap::retain_id`]. The last of those to go removes the entry.
+//! `destroy` is Dart's `dispose`: after it the object is out of every tree and stays readable
+//! only while a retained handle keeps it, the way a Dart object stays alive while something still
+//! references it.
 
 use std::any::{Any, type_name};
 use std::cell::RefCell;
 use std::fmt;
+use std::ops::Deref;
 use std::rc::Rc;
 
 use slotmap::SlotMap;
@@ -19,21 +21,33 @@ use crate::app::{Handle, HandleId};
 struct HandleEntry {
     type_name: &'static str,
     state: Box<dyn Any>,
-    /// Who keeps the object: the owner, from `create`, plus one per [`RetainedHandle`]. The entry
-    /// is removed when this reaches zero.
+    /// Who keeps the object: the owner, from `create`, plus one per [`RetainedHandle`] or
+    /// [`RetainedHandleId`]. The entry is removed when this reaches zero.
     retained: u32,
     /// The owner called `destroy`: Dart's `dispose` has run, whether or not a retained handle
     /// still keeps the object readable.
     disposed: bool,
 }
 
-/// Keeps an object past its owner's `destroy`, from [`HandleMap::retain`]. Give it back with
-/// [`HandleMap::release`] to remove the entry at once; one that is merely dropped is released at
-/// the next checkpoint, the way gpui sweeps its dropped entities, so forgetting the explicit
-/// release costs a turn, not correctness.
-pub struct RetainedHandle {
+/// Keeps a Copy handle past its owner's `destroy`, from [`HandleMap::retain`].
+///
+/// A [`RetainedHandleId`] plus the handle it keeps. [`Deref`] to `T` for method calls;
+/// [`get`](Self::get) copies `T` out. It is not `Copy`: the retain count is unique.
+/// Give it back with [`HandleMap::release`]; a drop is released at the next checkpoint.
+///
+/// A mixed list of ids, with nothing useful to `Deref` to, is [`RetainedHandleId`] alone.
+pub struct RetainedHandle<T> {
+    value: T,
+    retained: RetainedHandleId,
+}
+
+/// Keeps an arena entry past its owner's `destroy` when the holder has only a [`HandleId`].
+///
+/// [`HandleMap::release_id`] frees it now; drop frees it at the next checkpoint. Use
+/// [`RetainedHandle`] when the stored value is the handle you call.
+pub struct RetainedHandleId {
     id: HandleId,
-    /// The map's list of dropped retained handles; taken by `release`, which then owns the
+    /// The map's list of dropped retained handles; taken by `release_id`, which then owns the
     /// release itself.
     dropped: Option<DroppedRetainedHandles>,
 }
@@ -53,13 +67,40 @@ impl DroppedRetainedHandles {
     }
 }
 
-impl RetainedHandle {
+impl<T> RetainedHandle<T> {
+    pub fn id(&self) -> HandleId {
+        self.retained.id()
+    }
+}
+
+impl<T: Copy> RetainedHandle<T> {
+    /// The Copy handle this retain keeps alive.
+    pub fn get(&self) -> T {
+        self.value
+    }
+}
+
+impl<T> Deref for RetainedHandle<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for RetainedHandle<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "RetainedHandle({:?})", self.value)
+    }
+}
+
+impl RetainedHandleId {
     pub fn id(&self) -> HandleId {
         self.id
     }
 }
 
-impl Drop for RetainedHandle {
+impl Drop for RetainedHandleId {
     fn drop(&mut self) {
         if let Some(dropped) = self.dropped.take() {
             dropped.push(self.id);
@@ -67,9 +108,9 @@ impl Drop for RetainedHandle {
     }
 }
 
-impl fmt::Debug for RetainedHandle {
+impl fmt::Debug for RetainedHandleId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "RetainedHandle({:?})", self.id)
+        write!(f, "RetainedHandleId({:?})", self.id)
     }
 }
 
@@ -97,7 +138,7 @@ impl HandleMap {
     }
 
     /// The owner is done with the object: Dart's `dispose`. Marks it disposed and gives up the
-    /// owner's part, which removes the entry unless a [`RetainedHandle`] keeps it.
+    /// owner's part, which removes the entry unless a retain keeps it.
     ///
     /// # Panics
     ///
@@ -123,16 +164,29 @@ impl HandleMap {
     /// Keeps the object past its owner's `destroy`, for the few holders that use an object
     /// across turns and rely on Dart's lingering: a cached hit-test path, the mouse tracker's
     /// remembered annotations.
-    pub(crate) fn retain(&mut self, id: HandleId) -> RetainedHandle {
-        self.resolve_mut(id).retained += 1;
+    pub(crate) fn retain<T: Copy + Into<HandleId>>(&mut self, value: T) -> RetainedHandle<T> {
         RetainedHandle {
+            value,
+            retained: self.retain_id(value.into()),
+        }
+    }
+
+    /// Keeps the entry past `destroy` when the holder has only the id.
+    pub(crate) fn retain_id(&mut self, id: HandleId) -> RetainedHandleId {
+        self.resolve_mut(id).retained += 1;
+        RetainedHandleId {
             id,
             dropped: Some(self.dropped_retained_handles.clone()),
         }
     }
 
     /// Gives a retained handle back now; the last one removes the entry.
-    pub(crate) fn release(&mut self, mut handle: RetainedHandle) {
+    pub(crate) fn release<T>(&mut self, handle: RetainedHandle<T>) {
+        self.release_id(handle.retained);
+    }
+
+    /// See [`release`](Self::release).
+    pub(crate) fn release_id(&mut self, mut handle: RetainedHandleId) {
         handle.dropped = None;
         self.release_retained(handle.id);
     }
@@ -252,7 +306,7 @@ mod tests {
     fn a_retained_object_outlives_destroy_until_released() {
         let mut handles = HandleMap::new();
         let handle = handles.create(7u32);
-        let retained = handles.retain(handle.id());
+        let retained = handles.retain(handle);
         handles.destroy(handle.id());
         assert!(handles.contains(handle.id()), "kept while retained");
         assert!(handles.is_disposed(handle.id()));
@@ -268,7 +322,7 @@ mod tests {
     fn a_dropped_retained_handle_is_released_by_the_sweep() {
         let mut handles = HandleMap::new();
         let handle = handles.create(7u32);
-        let retained = handles.retain(handle.id());
+        let retained = handles.retain(handle);
         handles.destroy(handle.id());
         drop(retained);
         assert!(
@@ -283,7 +337,7 @@ mod tests {
     fn an_unretained_object_is_removed_by_destroy() {
         let mut handles = HandleMap::new();
         let handle = handles.create(1u8);
-        let retained = handles.retain(handle.id());
+        let retained = handles.retain(handle);
         handles.release(retained);
         assert!(!handles.is_disposed(handle.id()));
         handles.destroy(handle.id());
@@ -297,5 +351,16 @@ mod tests {
         let handle = handles.create(1u8);
         handles.destroy(handle.id());
         handles.destroy(handle.id());
+    }
+
+    #[test]
+    fn retain_id_keeps_the_entry_without_a_typed_handle() {
+        let mut handles = HandleMap::new();
+        let handle = handles.create(7u32);
+        let retained = handles.retain_id(handle.id());
+        handles.destroy(handle.id());
+        assert!(handles.contains(handle.id()));
+        handles.release_id(retained);
+        assert!(!handles.contains(handle.id()));
     }
 }

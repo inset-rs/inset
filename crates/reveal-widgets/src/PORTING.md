@@ -670,4 +670,4 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 
 - Change: active drags retain their source state, entered targets and feedback avatar through arena lifetime guards.
   Reason: language — Rust arena objects need explicit retention when pointer callbacks outlive widget disposal.
-  Affect: drags continue after their source is removed, and completion or cancellation releases the retained state.
+  Affect: store a `RetainedHandle` of those objects; drags continue after their source is removed, and completion or cancellation releases them.

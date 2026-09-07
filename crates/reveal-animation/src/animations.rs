@@ -609,9 +609,7 @@ pub struct CurvedAnimation {
     // Dart: `final Animation<double> parent` — private with the
     // `AnimationWithParent::parent` getter, so it cannot be rebound away from
     // the animation the constructor subscribed to.
-    parent: AnyAnimation<f64>,
-    // Dart retains this final parent reference after dispose removes the status listener.
-    _parent_reference: RetainedHandle,
+    parent: RetainedHandle<AnyAnimation<f64>>,
 
     /// The curve to use in the forward direction.
     pub curve: Rc<dyn Curve>,
@@ -651,10 +649,9 @@ impl CurvedAnimation {
         curve: Rc<dyn Curve>,
         reverse_curve: Option<Rc<dyn Curve>>,
     ) -> Handle<CurvedAnimation> {
-        let parent_reference = app.retain(parent.id());
+        let retained_parent = app.retain(parent);
         let this = app.create(CurvedAnimation {
-            parent,
-            _parent_reference: parent_reference,
+            parent: retained_parent,
             curve,
             reverse_curve,
             curve_direction: None,
@@ -690,7 +687,7 @@ impl CurvedAnimation {
     /// Cleans up any listeners added by this CurvedAnimation.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
         app.get_mut(self).is_disposed = true;
-        let parent = app.get(self).parent;
+        let parent = app.get(self).parent.get();
         parent.remove_status_listener(
             app,
             &AnimationStatusListener::handle_method(self, CurvedAnimation::update_curve_direction),
@@ -700,7 +697,7 @@ impl CurvedAnimation {
 
 impl AnimationWithParent<f64> for CurvedAnimation {
     fn parent(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
-        app.get(self).parent
+        app.get(self).parent.get()
     }
 }
 

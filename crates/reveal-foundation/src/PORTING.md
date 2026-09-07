@@ -29,9 +29,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — a Rust future cannot hold the `App` across an `await`; it borrows the cell per step, as gpui does.
   Affect: `async` methods return `Task<T>`; dropping one does not cancel it.
 
-- Change: `App::retain` keeps an object past its `destroy` for as long as the `RetainedHandle` lives.
+- Change: `App::retain(handle)` returns a `RetainedHandle<T>` (`RetainedHandleId` plus the Copy handle) that keeps the object past `destroy`. A mixed list of ids is `App::retain_id` → `RetainedHandleId`.
   Reason: language — Dart keeps an object alive while anything references it; the arena frees it, and a cached hit-test path or the mouse tracker may still name it.
-  Affect: a `Listener` rebuilt mid-press still receives its release, as in Flutter.
+  Affect: store the `RetainedHandle` in place of the handle; it `Deref`s to `T`. A path that only has `HandleId`s stores `RetainedHandleId`. A `Listener` rebuilt mid-press still receives its release, as in Flutter.
 
 - Change: `App` holds the host `Platform`: `AppCell::new` uses an inert one and `AppCell::with_platform` installs a live one before user code.
   Reason: platform — dart:ui is host-bound; there is no isolate global to hang it on.

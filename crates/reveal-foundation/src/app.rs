@@ -15,7 +15,7 @@ use crate::app_cell::{AppCell, AsyncApp};
 use crate::change_notifier::Listener;
 use crate::executor::{ForegroundExecutor, Task};
 use crate::handle_map::HandleMap;
-pub use crate::handle_map::RetainedHandle;
+pub use crate::handle_map::{RetainedHandle, RetainedHandleId};
 use crate::timers::{Timer, Timers};
 
 /// Drain budget for one [`App::drain_microtasks`]: two callbacks scheduling
@@ -309,14 +309,24 @@ impl App {
     }
 
     /// A [`RetainedHandle`] that keeps the object past its owner's `destroy`; see
-    /// [`HandleMap::retain`].
-    pub fn retain(&mut self, handle: impl Into<HandleId>) -> RetainedHandle {
-        self.handles.retain(handle.into())
+    /// [`HandleMap::retain`]. `T` is the Copy handle to keep (`Handle<U>` or an erased handle).
+    pub fn retain<T: Copy + Into<HandleId>>(&mut self, handle: T) -> RetainedHandle<T> {
+        self.handles.retain(handle)
+    }
+
+    /// A [`RetainedHandleId`] when the holder has only the id; see [`HandleMap::retain_id`].
+    pub fn retain_id(&mut self, id: HandleId) -> RetainedHandleId {
+        self.handles.retain_id(id)
     }
 
     /// Gives a [`RetainedHandle`] back now; a dropped one is released at the next checkpoint.
-    pub fn release(&mut self, handle: RetainedHandle) {
+    pub fn release<T>(&mut self, handle: RetainedHandle<T>) {
         self.handles.release(handle);
+    }
+
+    /// See [`release`](Self::release).
+    pub fn release_id(&mut self, handle: RetainedHandleId) {
+        self.handles.release_id(handle);
     }
 
     pub(crate) fn release_dropped_retained_handles(&mut self) {

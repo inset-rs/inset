@@ -188,6 +188,12 @@ pub struct AnyMultiDragPointerState {
     table: &'static PointerStateVTable,
 }
 
+impl From<AnyMultiDragPointerState> for HandleId {
+    fn from(state: AnyMultiDragPointerState) -> HandleId {
+        state.id
+    }
+}
+
 struct PointerStateVTable {
     set_entry: fn(&mut App, HandleId, GestureArenaEntry),
     moved: fn(&mut App, HandleId, PointerMoveEvent),
@@ -323,7 +329,7 @@ fn handle_event<R: MultiDragGestureRecognizer>(
     let state = app.get(this).multi_drag().pointers.as_ref().unwrap()[&pointer];
     // Dart keeps the receiver alive if a client's callback disposes the recognizer.
     let _retained = app.retain(this);
-    let _state_retained = app.retain(state.id);
+    let _state_retained = app.retain(state);
     match event {
         PointerEvent::Move(event) => (state.table.moved)(app, state.id, event),
         PointerEvent::Up(_) | PointerEvent::Cancel(_) => {
@@ -361,7 +367,7 @@ fn start_drag<R: MultiDragGestureRecognizer>(
 ) -> Option<Rc<dyn Drag>> {
     let state = app.get(this).multi_drag().pointers.as_ref().unwrap()[&pointer];
     let _retained = app.retain(this);
-    let _state_retained = app.retain(state.id);
+    let _state_retained = app.retain(state);
     let drag = this.on_start(app).and_then(|callback| {
         GestureRecognizer::invoke_callback(this, app, "onStart", |app| callback(app, position))
             .flatten()
