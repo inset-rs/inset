@@ -368,6 +368,12 @@ impl<C: EmbedderClient> WinitApp<C> {
             [size.width, size.height],
         )
         .expect("create valo surface");
+        #[cfg(target_os = "macos")]
+        let surface = {
+            let mut surface = surface;
+            surface.set_presents_with_transaction(true);
+            surface
+        };
         let context = valo::Context::new(gpu.device, gpu.queue);
         let view = Rc::new(WinitView {
             id: IMPLICIT_VIEW,
@@ -592,6 +598,15 @@ impl<C: EmbedderClient> ApplicationHandler for WinitApp<C> {
                         .set(window_metrics(&hosted_view.window));
                     if let Some(client) = &mut self.client {
                         client.view_metrics_changed(hosted_view.view.id());
+                        // Present the resized layout before AppKit commits the
+                        // window geometry, rather than stretching the old frame.
+                        #[cfg(target_os = "macos")]
+                        if size.width > 0 && size.height > 0 {
+                            self.platform.frame_requested.set(false);
+                            client.frame(Frame {
+                                elapsed: self.platform.elapsed(),
+                            });
+                        }
                     }
                 }
             }

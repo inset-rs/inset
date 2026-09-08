@@ -2227,9 +2227,9 @@ checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
 
 [[package]]
 name = "valo"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71db7801019b0ec4ea0e08405ac25f98443a6a912e899fa951577adee5feac52"
+checksum = "c90c6efb6bcb7aa1e9fa2c2026736fb6b650d80e8db7999ef3638e09d6c1f9a1"
 dependencies = [
  "objc2 0.6.4",
  "objc2-metal 0.3.2",
@@ -2243,9 +2243,9 @@ dependencies = [
 
 [[package]]
 name = "valo-dl"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94e4e7432058f1a184282063bd79777a8a93bc2c5fb8cf7c7ee197ffb4023ac1"
+checksum = "45408a274766df4c4c4996a5a049ba88539adfeeef7c8a3ae03e2fa8ad92c222"
 dependencies = [
  "valo-geometry",
  "valo-text",
@@ -2254,9 +2254,9 @@ dependencies = [
 
 [[package]]
 name = "valo-fontmgr"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f515439a3821257bd7a51eb7a465fea3b585ef7d8e8f71004e8aaf731843d03d"
+checksum = "00843d8a96973d414e7b2ef99f47dc09a54cff492700b3cad79885e8f3d707b2"
 dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
@@ -2268,18 +2268,18 @@ dependencies = [
 
 [[package]]
 name = "valo-geometry"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1895518f29f50ebd9613122ba66698225a502b7b81574af3dbe1adf79cf848ec"
+checksum = "3d7fd0b41124d61bb121fcff0e4ce50f50c15e90492945a2d20a85baede31ee7"
 dependencies = [
  "glam",
 ]
 
 [[package]]
 name = "valo-renderer"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fd4f090a389c4250873361630ff05d80113d92d154e64853e0476d68bb23a6d"
+checksum = "08833e2070ceb636cc87521abb6ac5161e2a2c7df6677c2e0910b5d830671149"
 dependencies = [
  "bytemuck",
  "etagere",
@@ -2294,9 +2294,9 @@ dependencies = [
 
 [[package]]
 name = "valo-system-fonts"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25c4256a0e089779facdfb5a9156d98e7ec3f3cf6051628f4dc1e4f0e587ad1d"
+checksum = "680fe6e9563b0a6f8043eb67b05222846d297fbebd34ce9d61f43d3c73e12f1a"
 dependencies = [
  "valo-fontmgr",
  "valo-text",
@@ -2304,9 +2304,9 @@ dependencies = [
 
 [[package]]
 name = "valo-text"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c1c20b73aada4bc4c2fc5a6e7d90a3d398be58a79e85155b16b69624f7ae2aa"
+checksum = "8cf8de70ed5f91bfd7925ea47bc9e246f3d4b4ae68b6e5976dfaabe6ed40a3b3"
 dependencies = [
  "harfrust",
  "skrifa 0.35.0",

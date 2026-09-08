@@ -7978,7 +7978,7 @@ mod tests {
                 matches!(
                     op,
                     Op::SaveLayer {
-                        backdrop_sigma: Some(_),
+                        backdrop_filter: Some(_),
                         ..
                     }
                 )
@@ -7990,12 +7990,15 @@ mod tests {
             .expect("the child's paint");
         assert!(blur < draw, "the blur precedes the child: {ops:?}");
         if let Op::SaveLayer {
-            backdrop_sigma,
+            backdrop_filter,
             backdrop_key,
             ..
         } = &ops[blur]
         {
-            assert_eq!(*backdrop_sigma, Some(6.0));
+            assert_eq!(
+                *backdrop_filter,
+                Some(reveal_embedder::valo::ImageFilter::blur(6.0, 6.0))
+            );
             assert_eq!(*backdrop_key, None);
         }
 
@@ -8021,7 +8024,7 @@ mod tests {
             !ops.iter().any(|op| matches!(
                 op,
                 Op::SaveLayer {
-                    backdrop_sigma: Some(_),
+                    backdrop_filter: Some(_),
                     ..
                 }
             )),
@@ -8046,14 +8049,14 @@ mod tests {
         let root = RenderRepaintBoundary::new(&mut app, Some(filter.as_box()));
         first_frame(&mut app, root.as_box());
         let ops = scene_ops(&app, root);
-        // The colour filter is dropped: valo's backdrop is a blur (see the host's PORTING.md).
+        // The current Reveal adapter extracts only blur (see the host's PORTING.md).
         assert!(
             ops.iter().any(|op| matches!(
                 op,
                 Op::SaveLayer {
-                    backdrop_sigma: Some(sigma),
+                    backdrop_filter: Some(reveal_embedder::valo::ImageFilter::Blur { sigma_x, sigma_y }),
                     ..
-                } if *sigma == 4.0
+                } if *sigma_x == 4.0 && *sigma_y == 4.0
             )),
             "the composed blur reaches the backdrop: {ops:?}"
         );
