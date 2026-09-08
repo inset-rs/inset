@@ -37,7 +37,11 @@ use crate::box_::{
     RenderBoxData,
 };
 use crate::image_filter_config::{ImageFilterConfig, ImageFilterContext};
-use crate::layer::{AnnotatedRegionLayer, BackdropKey, CompositedLayer};
+use crate::layer::{
+    AnnotatedRegionLayer, BackdropFilterLayer, BackdropKey, ClipPathLayer, ClipRRectLayer,
+    ClipRectLayer, ContainerLayer, FollowerLayer, LayerHandle, LayerLink, LeaderLayer,
+    OffsetLayerMixin, OpacityLayer, TransformLayer,
+};
 use crate::layout_helper::{ChildLayoutHelper, ChildLayouter};
 use crate::object::{
     AnyRenderObject, Constraints, EmptyParentData, RenderHandle, RenderObject, RenderObjectData,
@@ -507,13 +511,12 @@ impl RenderOpacity {
         if self.get(app).opacity == value {
             return;
         }
-        let did_need_compositing = self.is_repaint_boundary(app);
+        let did_need_compositing = self.always_needs_compositing(app);
         let this = self.get_mut(app);
         this.opacity = value;
         this.alpha = Color::get_alpha_from_opacity(value);
-        // Flutter: `markNeedsCompositingBitsUpdate`, whose effect on a boundary change is a repaint.
-        if did_need_compositing != self.is_repaint_boundary(app) {
-            self.mark_needs_paint(app);
+        if did_need_compositing != self.always_needs_compositing(app) {
+            self.mark_needs_compositing_bits_update(app);
         }
         self.mark_needs_composited_layer_update(app);
     }
@@ -539,18 +542,27 @@ impl RenderProxyBoxMixin for RenderOpacity {}
 impl RenderObject for RenderOpacity {
     crate::render_object_accessors!();
 
-    /// Flutter's `alwaysNeedsCompositing`: a visible child composites through its own layer.
-    fn is_repaint_boundary(self: RenderHandle<Self>, app: &App) -> bool {
+    fn always_needs_compositing(self: RenderHandle<Self>, app: &App) -> bool {
         self.child(app).is_some() && self.get(app).alpha > 0
+    }
+
+    fn is_repaint_boundary(self: RenderHandle<Self>, app: &App) -> bool {
+        self.always_needs_compositing(app)
     }
 
     fn update_composited_layer(
         self: RenderHandle<Self>,
         app: &mut App,
-        old_layer: Option<CompositedLayer>,
-    ) -> CompositedLayer {
-        let offset = old_layer.map_or(Offset::ZERO, |layer| layer.offset);
-        CompositedLayer::opacity_layer(self.get(app).alpha, offset)
+        old_layer: Option<crate::AnyOffsetLayer>,
+    ) -> crate::AnyOffsetLayer {
+        let layer = match old_layer {
+            Some(old) => app
+                .handle::<OpacityLayer>(old.id())
+                .expect("RenderOpacity reuses an OpacityLayer"),
+            None => OpacityLayer::new(app),
+        };
+        layer.set_alpha(app, self.get(app).alpha);
+        layer.as_offset_layer()
     }
 
     fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
@@ -603,6 +615,525 @@ impl RenderBox for RenderOpacity {
         position: Offset,
     ) -> bool {
         RenderProxyBoxMixin::hit_test_children(self, app, result, position)
+    }
+
+    fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_width(self, app, height)
+    }
+
+    fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_width(self, app, height)
+    }
+
+    fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_height(self, app, width)
+    }
+
+    fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_height(self, app, width)
+    }
+
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_distance_to_actual_baseline(self, app, baseline)
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_dry_baseline(self, app, constraints, baseline)
+    }
+
+    fn compute_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        RenderProxyBoxMixin::compute_dry_layout(self, app, constraints)
+    }
+}
+
+/// Provides an anchor for a [`RenderFollowerLayer`].
+///
+/// Flutter's `RenderLeaderLayer`: paints its child through a leader item that records where the
+/// child lands for the link's followers.
+pub struct RenderLeaderLayer {
+    render_object: RenderObjectData,
+    render_box: RenderBoxData,
+    child: RenderObjectWithChildData<AnyRenderBox>,
+    link: Handle<LayerLink>,
+    /// The size of the last layout, which `link.leader_size` reports.
+    previous_layout_size: Option<Size>,
+}
+
+impl RenderLeaderLayer {
+    pub fn new(
+        app: &mut App,
+        link: Handle<LayerLink>,
+        child: Option<AnyRenderBox>,
+    ) -> RenderHandle<Self> {
+        let this = RenderHandle::new_box(
+            app,
+            RenderLeaderLayer {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                child: RenderObjectWithChildData::new(),
+                link,
+                previous_layout_size: None,
+            },
+        );
+        this.set_child(app, child);
+        this
+    }
+
+    /// The link object that connects this [`RenderLeaderLayer`] with one or more
+    /// [`RenderFollowerLayer`]s.
+    pub fn link(self: RenderHandle<Self>, app: &App) -> Handle<LayerLink> {
+        self.get(app).link
+    }
+
+    /// Sets [`link`](Self::link).
+    pub fn set_link(self: RenderHandle<Self>, app: &mut App, value: Handle<LayerLink>) {
+        let link = self.get(app).link;
+        if link == value {
+            return;
+        }
+        let old = app.get_mut(link);
+        old.leader_size = None;
+        self.get_mut(app).link = value;
+        if let Some(size) = self.get(app).previous_layout_size {
+            app.get_mut(value).leader_size = Some(size);
+        }
+        self.mark_needs_paint(app);
+    }
+}
+
+impl RenderObjectWithChildMixin for RenderLeaderLayer {
+    type ChildType = AnyRenderBox;
+
+    fn child_data(self: RenderHandle<Self>, app: &App) -> &RenderObjectWithChildData<AnyRenderBox> {
+        &self.get(app).child
+    }
+
+    fn child_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderObjectWithChildData<AnyRenderBox> {
+        &mut self.get_mut(app).child
+    }
+}
+
+impl RenderProxyBoxMixin for RenderLeaderLayer {}
+
+impl RenderObject for RenderLeaderLayer {
+    crate::render_object_accessors!();
+
+    fn always_needs_compositing(self: RenderHandle<Self>, _app: &App) -> bool {
+        true
+    }
+
+    fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+        RenderProxyBoxMixin::perform_layout(self, app);
+        let size = self.size(app);
+        self.get_mut(app).previous_layout_size = Some(size);
+        let link = self.get(app).link;
+        app.get_mut(link).leader_size = Some(size);
+    }
+
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        let link = self.get(app).link;
+        let layer = match self.as_object().layer_as::<LeaderLayer>(app) {
+            None => {
+                let layer = LeaderLayer::new(app, link);
+                layer.set_offset(app, offset);
+                self.as_object()
+                    .set_layer(app, Some(layer.as_container_layer()));
+                layer
+            }
+            Some(layer) => {
+                layer.set_link(app, link);
+                layer.set_offset(app, offset);
+                layer
+            }
+        };
+        context.push_layer(
+            app,
+            layer.as_container_layer(),
+            |app, context, offset| {
+                RenderProxyBoxMixin::paint(self, app, context, offset);
+            },
+            Offset::ZERO,
+            None,
+        );
+    }
+
+    fn visit_children(
+        self: RenderHandle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyRenderObject),
+    ) {
+        if let Some(child) = self.child(app) {
+            visitor(child.as_object());
+        }
+    }
+}
+
+impl RenderBox for RenderLeaderLayer {
+    crate::render_box_accessors!();
+
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        RenderProxyBoxMixin::setup_parent_data(self, app, child);
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
+    }
+
+    fn hit_test_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        RenderProxyBoxMixin::hit_test_children(self, app, result, position)
+    }
+
+    fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_width(self, app, height)
+    }
+
+    fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_width(self, app, height)
+    }
+
+    fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_height(self, app, width)
+    }
+
+    fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_height(self, app, width)
+    }
+
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_distance_to_actual_baseline(self, app, baseline)
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_dry_baseline(self, app, constraints, baseline)
+    }
+
+    fn compute_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        RenderProxyBoxMixin::compute_dry_layout(self, app, constraints)
+    }
+}
+
+/// Transforms its child using a transform matrix computed at composite time from the link's
+/// [`RenderLeaderLayer`]: the child paints where the leader is, whatever lies between them.
+///
+/// Flutter's `RenderFollowerLayer`.
+pub struct RenderFollowerLayer {
+    render_object: RenderObjectData,
+    render_box: RenderBoxData,
+    child: RenderObjectWithChildData<AnyRenderBox>,
+    link: Handle<LayerLink>,
+    show_when_unlinked: bool,
+    offset: Offset,
+    leader_anchor: Alignment,
+    follower_anchor: Alignment,
+}
+
+impl RenderFollowerLayer {
+    pub fn new(
+        app: &mut App,
+        link: Handle<LayerLink>,
+        show_when_unlinked: bool,
+        offset: Offset,
+        leader_anchor: Alignment,
+        follower_anchor: Alignment,
+        child: Option<AnyRenderBox>,
+    ) -> RenderHandle<Self> {
+        let this = RenderHandle::new_box(
+            app,
+            RenderFollowerLayer {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                child: RenderObjectWithChildData::new(),
+                link,
+                show_when_unlinked,
+                offset,
+                leader_anchor,
+                follower_anchor,
+            },
+        );
+        this.set_child(app, child);
+        this
+    }
+
+    /// The link object that connects this [`RenderFollowerLayer`] with a [`RenderLeaderLayer`].
+    pub fn link(self: RenderHandle<Self>, app: &App) -> Handle<LayerLink> {
+        self.get(app).link
+    }
+
+    /// Sets [`link`](Self::link).
+    pub fn set_link(self: RenderHandle<Self>, app: &mut App, value: Handle<LayerLink>) {
+        if self.get(app).link == value {
+            return;
+        }
+        self.get_mut(app).link = value;
+        self.mark_needs_paint(app);
+    }
+
+    /// Whether to show the render object's contents when there is no corresponding
+    /// [`RenderLeaderLayer`].
+    pub fn show_when_unlinked(self: RenderHandle<Self>, app: &App) -> bool {
+        self.get(app).show_when_unlinked
+    }
+
+    /// Sets [`show_when_unlinked`](Self::show_when_unlinked).
+    pub fn set_show_when_unlinked(self: RenderHandle<Self>, app: &mut App, value: bool) {
+        if self.get(app).show_when_unlinked == value {
+            return;
+        }
+        self.get_mut(app).show_when_unlinked = value;
+        self.mark_needs_paint(app);
+    }
+
+    /// The offset to apply to the origin of the linked [`RenderLeaderLayer`] to obtain this
+    /// render object's origin.
+    pub fn offset(self: RenderHandle<Self>, app: &App) -> Offset {
+        self.get(app).offset
+    }
+
+    /// Sets [`offset`](Self::offset).
+    pub fn set_offset(self: RenderHandle<Self>, app: &mut App, value: Offset) {
+        if self.get(app).offset == value {
+            return;
+        }
+        self.get_mut(app).offset = value;
+        self.mark_needs_paint(app);
+    }
+
+    /// The anchor point on the linked [`RenderLeaderLayer`] that [`follower_anchor`] lines up
+    /// with.
+    ///
+    /// [`follower_anchor`]: Self::follower_anchor
+    pub fn leader_anchor(self: RenderHandle<Self>, app: &App) -> Alignment {
+        self.get(app).leader_anchor
+    }
+
+    /// Sets [`leader_anchor`](Self::leader_anchor).
+    pub fn set_leader_anchor(self: RenderHandle<Self>, app: &mut App, value: Alignment) {
+        if self.get(app).leader_anchor == value {
+            return;
+        }
+        self.get_mut(app).leader_anchor = value;
+        self.mark_needs_paint(app);
+    }
+
+    /// The anchor point on this render object that lines up with [`leader_anchor`].
+    ///
+    /// [`leader_anchor`]: Self::leader_anchor
+    pub fn follower_anchor(self: RenderHandle<Self>, app: &App) -> Alignment {
+        self.get(app).follower_anchor
+    }
+
+    /// Sets [`follower_anchor`](Self::follower_anchor).
+    pub fn set_follower_anchor(self: RenderHandle<Self>, app: &mut App, value: Alignment) {
+        if self.get(app).follower_anchor == value {
+            return;
+        }
+        self.get_mut(app).follower_anchor = value;
+        self.mark_needs_paint(app);
+    }
+
+    /// The transform that was used during the last composite, from this render object's
+    /// children to its own coordinates, or the identity when there was none.
+    ///
+    /// Flutter's `getCurrentTransform`.
+    pub fn current_transform(self: RenderHandle<Self>, app: &App) -> Matrix4 {
+        self.as_object()
+            .layer_as::<FollowerLayer>(app)
+            .and_then(|layer| layer.get_last_transform(app))
+            .unwrap_or(Matrix4::IDENTITY)
+    }
+}
+
+impl RenderObjectWithChildMixin for RenderFollowerLayer {
+    type ChildType = AnyRenderBox;
+
+    fn child_data(self: RenderHandle<Self>, app: &App) -> &RenderObjectWithChildData<AnyRenderBox> {
+        &self.get(app).child
+    }
+
+    fn child_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderObjectWithChildData<AnyRenderBox> {
+        &mut self.get_mut(app).child
+    }
+}
+
+impl RenderProxyBoxMixin for RenderFollowerLayer {}
+
+impl RenderObject for RenderFollowerLayer {
+    crate::render_object_accessors!();
+
+    fn always_needs_compositing(self: RenderHandle<Self>, _app: &App) -> bool {
+        true
+    }
+
+    fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+        RenderProxyBoxMixin::perform_layout(self, app);
+    }
+
+    /// Flutter's `detach`: `layer = null`.
+    fn did_detach(self: RenderHandle<Self>, app: &mut App) {
+        self.as_object().set_layer(app, None);
+        if let Some(child) = self.child(app) {
+            child.as_object().detach(app);
+        }
+    }
+
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        let link = self.get(app).link;
+        let leader_size = app.get(link).leader_size;
+        debug_assert!(
+            leader_size.is_some()
+                || link.leader(app).is_none()
+                || self.get(app).leader_anchor == Alignment::TOP_LEFT,
+            "a leader size is required when leader_anchor is not Alignment::TOP_LEFT"
+        );
+        let this = self.get(app);
+        let effective_linked_offset = match leader_size {
+            None => this.offset,
+            Some(leader_size) => {
+                this.leader_anchor.along_size(leader_size)
+                    - this.follower_anchor.along_size(self.size(app))
+                    + this.offset
+            }
+        };
+        let show_when_unlinked = this.show_when_unlinked;
+        let layer = match self.as_object().layer_as::<FollowerLayer>(app) {
+            None => {
+                let layer = FollowerLayer::new(app, link);
+                layer.set_show_when_unlinked(app, show_when_unlinked);
+                layer.set_linked_offset(app, effective_linked_offset);
+                layer.set_unlinked_offset(app, offset);
+                self.as_object()
+                    .set_layer(app, Some(layer.as_container_layer()));
+                layer
+            }
+            Some(layer) => {
+                layer.set_link(app, link);
+                layer.set_show_when_unlinked(app, show_when_unlinked);
+                layer.set_linked_offset(app, effective_linked_offset);
+                layer.set_unlinked_offset(app, offset);
+                layer
+            }
+        };
+        context.push_layer(
+            app,
+            layer.as_container_layer(),
+            |app, context, offset| {
+                RenderProxyBoxMixin::paint(self, app, context, offset);
+            },
+            Offset::ZERO,
+            Some(Rect::from_ltrb(
+                f64::NEG_INFINITY,
+                f64::NEG_INFINITY,
+                f64::INFINITY,
+                f64::INFINITY,
+            )),
+        );
+    }
+
+    fn visit_children(
+        self: RenderHandle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyRenderObject),
+    ) {
+        if let Some(child) = self.child(app) {
+            visitor(child.as_object());
+        }
+    }
+}
+
+impl RenderBox for RenderFollowerLayer {
+    crate::render_box_accessors!();
+
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        RenderProxyBoxMixin::setup_parent_data(self, app, child);
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        _child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        *transform = transform.then(&self.current_transform(app));
+    }
+
+    /// Disables the hit testing if this render object is hidden. A follower does not check
+    /// whether it is itself hit: the untransformed size and the child's transformed position
+    /// do not relate.
+    fn hit_test(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        let link = self.get(app).link;
+        if link.leader(app).is_none() && !self.get(app).show_when_unlinked {
+            return false;
+        }
+        RenderBox::hit_test_children(self, app, result, position)
+    }
+
+    fn hit_test_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        let transform = self.current_transform(app);
+        result.add_with_paint_transform(Some(transform), position, |result, position| {
+            RenderProxyBoxMixin::hit_test_children(self, app, result, position)
+        })
     }
 
     fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
@@ -704,14 +1235,20 @@ pub trait RenderAnimatedOpacityMixin:
     fn update_composited_layer(
         self: RenderHandle<Self>,
         app: &mut App,
-        old_layer: Option<CompositedLayer>,
-    ) -> CompositedLayer {
+        old_layer: Option<crate::AnyOffsetLayer>,
+    ) -> crate::AnyOffsetLayer {
         let alpha = self
             .animated_opacity_data(app)
             .alpha
             .expect("set by the opacity setter");
-        let offset = old_layer.map_or(Offset::ZERO, |layer| layer.offset);
-        CompositedLayer::opacity_layer(alpha, offset)
+        let layer = match old_layer {
+            Some(old) => app
+                .handle::<OpacityLayer>(old.id())
+                .expect("RenderAnimatedOpacity reuses an OpacityLayer"),
+            None => OpacityLayer::new(app),
+        };
+        layer.set_alpha(app, alpha);
+        layer.as_offset_layer()
     }
 
     /// The animation that drives this render object's opacity.
@@ -771,7 +1308,7 @@ pub trait RenderAnimatedOpacityMixin:
                 .currently_is_repaint_boundary = Some(alpha > 0);
             // Flutter: `markNeedsCompositingBitsUpdate`, whose effect on a boundary change is a repaint.
             if self.child(app).is_some() && was_repaint_boundary != Some(alpha > 0) {
-                self.mark_needs_paint(app);
+                self.mark_needs_compositing_bits_update(app);
             }
             self.mark_needs_composited_layer_update(app);
         }
@@ -866,8 +1403,8 @@ impl RenderObject for RenderAnimatedOpacity {
     fn update_composited_layer(
         self: RenderHandle<Self>,
         app: &mut App,
-        old_layer: Option<CompositedLayer>,
-    ) -> CompositedLayer {
+        old_layer: Option<crate::AnyOffsetLayer>,
+    ) -> crate::AnyOffsetLayer {
         RenderAnimatedOpacityMixin::update_composited_layer(self, app, old_layer)
     }
 
@@ -3387,23 +3924,30 @@ impl RenderObject for RenderClipRect {
         context: &mut PaintingContext,
         offset: Offset,
     ) {
-        let Some(child) = self.child(app) else {
-            return;
-        };
-        let clip_behavior = self.clip_behavior(app);
-        if clip_behavior == Clip::None {
-            context.paint_child(app, child.as_object(), offset);
-            return;
+        if let Some(child) = self.child(app) {
+            let clip_behavior = self.clip_behavior(app);
+            if clip_behavior != Clip::None {
+                self.update_clip(app);
+                let clip = self.clip(app);
+                let old = self.as_object().layer_as::<ClipRectLayer>(app);
+                let layer = context.push_clip_rect(
+                    app,
+                    self.as_object().needs_compositing(app),
+                    offset,
+                    clip,
+                    |app, context, offset| RenderProxyBoxMixin::paint(self, app, context, offset),
+                    clip_behavior,
+                    old,
+                );
+                self.as_object()
+                    .set_layer(app, layer.map(|layer| layer.as_container_layer()));
+            } else {
+                context.paint_child(app, child.as_object(), offset);
+                self.as_object().set_layer(app, None);
+            }
+        } else {
+            self.as_object().set_layer(app, None);
         }
-        self.update_clip(app);
-        let clip = self.clip(app);
-        context.push_clip_rect(
-            app,
-            offset,
-            clip,
-            |app, context, offset| RenderProxyBoxMixin::paint(self, app, context, offset),
-            clip_behavior,
-        );
     }
 
     fn visit_children(
@@ -3647,24 +4191,31 @@ impl RenderObject for RenderClipRRect {
         context: &mut PaintingContext,
         offset: Offset,
     ) {
-        let Some(child) = self.child(app) else {
-            return;
-        };
-        let clip_behavior = self.clip_behavior(app);
-        if clip_behavior == Clip::None {
-            context.paint_child(app, child.as_object(), offset);
-            return;
+        if let Some(child) = self.child(app) {
+            let clip_behavior = self.clip_behavior(app);
+            if clip_behavior != Clip::None {
+                self.update_clip(app);
+                let clip = self.clip(app);
+                let old = self.as_object().layer_as::<ClipRRectLayer>(app);
+                let layer = context.push_clip_rrect(
+                    app,
+                    self.as_object().needs_compositing(app),
+                    offset,
+                    clip.outer_rect(),
+                    clip,
+                    |app, context, offset| RenderProxyBoxMixin::paint(self, app, context, offset),
+                    clip_behavior,
+                    old,
+                );
+                self.as_object()
+                    .set_layer(app, layer.map(|layer| layer.as_container_layer()));
+            } else {
+                context.paint_child(app, child.as_object(), offset);
+                self.as_object().set_layer(app, None);
+            }
+        } else {
+            self.as_object().set_layer(app, None);
         }
-        self.update_clip(app);
-        let clip = self.clip(app);
-        context.push_clip_rrect(
-            app,
-            offset,
-            clip.outer_rect(),
-            clip,
-            |app, context, offset| RenderProxyBoxMixin::paint(self, app, context, offset),
-            clip_behavior,
-        );
     }
 
     fn visit_children(
@@ -3875,25 +4426,32 @@ impl RenderObject for RenderClipOval {
         context: &mut PaintingContext,
         offset: Offset,
     ) {
-        let Some(child) = self.child(app) else {
-            return;
-        };
-        let clip_behavior = self.clip_behavior(app);
-        if clip_behavior == Clip::None {
-            context.paint_child(app, child.as_object(), offset);
-            return;
+        if let Some(child) = self.child(app) {
+            let clip_behavior = self.clip_behavior(app);
+            if clip_behavior != Clip::None {
+                self.update_clip(app);
+                let clip = self.clip(app);
+                let clip_path = self.get_clip_path(app, clip);
+                let old = self.as_object().layer_as::<ClipPathLayer>(app);
+                let layer = context.push_clip_path(
+                    app,
+                    self.as_object().needs_compositing(app),
+                    offset,
+                    clip,
+                    clip_path,
+                    |app, context, offset| RenderProxyBoxMixin::paint(self, app, context, offset),
+                    clip_behavior,
+                    old,
+                );
+                self.as_object()
+                    .set_layer(app, layer.map(|layer| layer.as_container_layer()));
+            } else {
+                context.paint_child(app, child.as_object(), offset);
+                self.as_object().set_layer(app, None);
+            }
+        } else {
+            self.as_object().set_layer(app, None);
         }
-        self.update_clip(app);
-        let clip = self.clip(app);
-        let clip_path = self.get_clip_path(app, clip);
-        context.push_clip_path(
-            app,
-            offset,
-            clip,
-            clip_path,
-            |app, context, offset| RenderProxyBoxMixin::paint(self, app, context, offset),
-            clip_behavior,
-        );
     }
 
     fn visit_children(
@@ -4106,25 +4664,32 @@ impl RenderObject for RenderClipPath {
         context: &mut PaintingContext,
         offset: Offset,
     ) {
-        let Some(child) = self.child(app) else {
-            return;
-        };
-        let clip_behavior = self.clip_behavior(app);
-        if clip_behavior == Clip::None {
-            context.paint_child(app, child.as_object(), offset);
-            return;
+        if let Some(child) = self.child(app) {
+            let clip_behavior = self.clip_behavior(app);
+            if clip_behavior != Clip::None {
+                self.update_clip(app);
+                let clip = self.clip(app);
+                let bounds = Offset::ZERO & self.size(app);
+                let old = self.as_object().layer_as::<ClipPathLayer>(app);
+                let layer = context.push_clip_path(
+                    app,
+                    self.as_object().needs_compositing(app),
+                    offset,
+                    bounds,
+                    clip,
+                    |app, context, offset| RenderProxyBoxMixin::paint(self, app, context, offset),
+                    clip_behavior,
+                    old,
+                );
+                self.as_object()
+                    .set_layer(app, layer.map(|layer| layer.as_container_layer()));
+            } else {
+                context.paint_child(app, child.as_object(), offset);
+                self.as_object().set_layer(app, None);
+            }
+        } else {
+            self.as_object().set_layer(app, None);
         }
-        self.update_clip(app);
-        let clip = self.clip(app);
-        let bounds = Offset::ZERO & self.size(app);
-        context.push_clip_path(
-            app,
-            offset,
-            bounds,
-            clip,
-            |app, context, offset| RenderProxyBoxMixin::paint(self, app, context, offset),
-            clip_behavior,
-        );
     }
 
     fn visit_children(
@@ -4372,29 +4937,36 @@ impl RenderObject for RenderClipRSuperellipse {
         context: &mut PaintingContext,
         offset: Offset,
     ) {
-        let Some(child) = self.child(app) else {
-            return;
-        };
-        let clip_behavior = self.clip_behavior(app);
-        if clip_behavior == Clip::None {
-            context.paint_child(app, child.as_object(), offset);
-            return;
+        if let Some(child) = self.child(app) {
+            let clip_behavior = self.clip_behavior(app);
+            if clip_behavior != Clip::None {
+                self.update_clip(app);
+                let clip = self.clip(app);
+                let mut clip_path = PathBuilder::new();
+                clip_path.rsuperellipse_radii(
+                    clip.outer_rect().into(),
+                    rsuperellipse_radii_elliptical(clip),
+                );
+                let old = self.as_object().layer_as::<ClipPathLayer>(app);
+                let layer = context.push_clip_path(
+                    app,
+                    self.as_object().needs_compositing(app),
+                    offset,
+                    clip.outer_rect(),
+                    clip_path.build(),
+                    |app, context, offset| RenderProxyBoxMixin::paint(self, app, context, offset),
+                    clip_behavior,
+                    old,
+                );
+                self.as_object()
+                    .set_layer(app, layer.map(|layer| layer.as_container_layer()));
+            } else {
+                context.paint_child(app, child.as_object(), offset);
+                self.as_object().set_layer(app, None);
+            }
+        } else {
+            self.as_object().set_layer(app, None);
         }
-        self.update_clip(app);
-        let clip = self.clip(app);
-        let mut clip_path = PathBuilder::new();
-        clip_path.rsuperellipse_radii(
-            clip.outer_rect().into(),
-            rsuperellipse_radii_elliptical(clip),
-        );
-        context.push_clip_path(
-            app,
-            offset,
-            clip.outer_rect(),
-            clip_path.build(),
-            |app, context, offset| RenderProxyBoxMixin::paint(self, app, context, offset),
-            clip_behavior,
-        );
     }
 
     fn visit_children(
@@ -4774,14 +5346,26 @@ impl RenderObject for RenderTransform {
             // single point, instead short-circuit and paint nothing.
             let determinant = transform.determinant();
             if determinant == 0.0 || !determinant.is_finite() {
+                self.as_object().set_layer(app, None);
                 return;
             }
-            context.push_transform(app, offset, transform, |app, context, offset| {
-                RenderProxyBoxMixin::paint(self, app, context, offset);
-            });
+            let old = self.as_object().layer_as::<TransformLayer>(app);
+            let layer = context.push_transform(
+                app,
+                self.as_object().needs_compositing(app),
+                offset,
+                transform,
+                |app, context, offset| {
+                    RenderProxyBoxMixin::paint(self, app, context, offset);
+                },
+                old,
+            );
+            self.as_object()
+                .set_layer(app, layer.map(|layer| layer.as_container_layer()));
             return;
         };
         RenderProxyBoxMixin::paint(self, app, context, offset + child_offset);
+        self.as_object().set_layer(app, None);
     }
 
     fn visit_children(
@@ -5084,15 +5668,21 @@ impl RenderFittedBox {
         app: &mut App,
         context: &mut PaintingContext,
         offset: Offset,
-    ) {
+    ) -> Option<Handle<TransformLayer>> {
         let transform = self.get(app).transform.expect("update_paint_data ran");
         match get_as_translation(transform) {
             Some(child_offset) => {
                 RenderProxyBoxMixin::paint(self, app, context, offset + child_offset);
+                None
             }
-            None => context.push_transform(app, offset, transform, |app, context, offset| {
-                RenderProxyBoxMixin::paint(self, app, context, offset)
-            }),
+            None => context.push_transform(
+                app,
+                self.as_object().needs_compositing(app),
+                offset,
+                transform,
+                |app, context, offset| RenderProxyBoxMixin::paint(self, app, context, offset),
+                self.as_object().layer_as::<TransformLayer>(app),
+            ),
         }
     }
 }
@@ -5161,15 +5751,24 @@ impl RenderObject for RenderFittedBox {
         let clip_behavior = self.clip_behavior(app);
         if self.get(app).has_visual_overflow == Some(true) && clip_behavior != Clip::None {
             let clip_rect = Offset::ZERO & self.size(app);
-            context.push_clip_rect(
+            let old = self.as_object().layer_as::<ClipRectLayer>(app);
+            let layer = context.push_clip_rect(
                 app,
+                self.as_object().needs_compositing(app),
                 offset,
                 clip_rect,
-                |app, context, offset| self.paint_child_with_transform(app, context, offset),
+                |app, context, offset| {
+                    let _ = self.paint_child_with_transform(app, context, offset);
+                },
                 clip_behavior,
+                old,
             );
+            self.as_object()
+                .set_layer(app, layer.map(|layer| layer.as_container_layer()));
         } else {
-            self.paint_child_with_transform(app, context, offset);
+            let layer = self.paint_child_with_transform(app, context, offset);
+            self.as_object()
+                .set_layer(app, layer.map(|layer| layer.as_container_layer()));
         }
     }
 
@@ -6618,6 +7217,10 @@ impl RenderProxyBoxMixin for RenderBackdropFilter {}
 impl RenderObject for RenderBackdropFilter {
     crate::render_object_accessors!();
 
+    fn always_needs_compositing(self: RenderHandle<Self>, app: &App) -> bool {
+        self.child(app).is_some()
+    }
+
     fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
         RenderProxyBoxMixin::perform_layout(self, app);
     }
@@ -6638,19 +7241,32 @@ impl RenderObject for RenderBackdropFilter {
             .filter_config
             .resolve(ImageFilterContext { bounds });
         if self.child(app).is_some() {
+            debug_assert!(self.as_object().needs_compositing(app));
             let (blend_mode, backdrop_key) = {
                 let this = self.get(app);
                 (this.blend_mode, this.backdrop_key)
             };
-            context.push_backdrop_filter(
+            let layer = match self.as_object().layer_as::<BackdropFilterLayer>(app) {
+                Some(layer) => layer,
+                None => {
+                    let layer = BackdropFilterLayer::new(app);
+                    self.as_object()
+                        .set_layer(app, Some(layer.as_container_layer()));
+                    layer
+                }
+            };
+            layer.set_filter(app, Some(effective_filter));
+            layer.set_blend_mode(app, blend_mode);
+            layer.set_backdrop_key(app, backdrop_key);
+            context.push_layer(
                 app,
-                offset,
-                bounds,
-                effective_filter,
-                blend_mode,
-                backdrop_key,
+                layer.as_container_layer(),
                 |app, context, offset| RenderProxyBoxMixin::paint(self, app, context, offset),
+                offset,
+                None,
             );
+        } else {
+            self.as_object().set_layer(app, None);
         }
     }
 
@@ -6734,7 +7350,7 @@ impl RenderBox for RenderBackdropFilter {
 
 /// Annotates a region of the layer tree with a value.
 ///
-/// The value can be retrieved with [`BoundaryLayer::find`](crate::BoundaryLayer::find) at a
+/// The value can be retrieved with [`AnyLayer::find`](crate::AnyLayer::find) at a
 /// position; `AnnotatedRegion` is the widget that inserts one.
 pub struct RenderAnnotatedRegion<T> {
     render_object: RenderObjectData,
@@ -6742,13 +7358,14 @@ pub struct RenderAnnotatedRegion<T> {
     child: RenderObjectWithChildData<AnyRenderBox>,
     value: Rc<T>,
     sized: bool,
+    layer_handle: LayerHandle<Handle<AnnotatedRegionLayer>>,
 }
 
 impl<T: PartialEq + 'static> RenderAnnotatedRegion<T> {
     /// Creates a new [`RenderAnnotatedRegion`] to insert `value` into the layer tree.
     ///
     /// If `sized` is true, the layer is provided with the size of this render object to clip
-    /// the results of [`BoundaryLayer::find`](crate::BoundaryLayer::find).
+    /// the results of [`AnyLayer::find`](crate::AnyLayer::find).
     pub fn new(
         app: &mut App,
         value: Rc<T>,
@@ -6763,6 +7380,7 @@ impl<T: PartialEq + 'static> RenderAnnotatedRegion<T> {
                 child: RenderObjectWithChildData::new(),
                 value,
                 sized,
+                layer_handle: LayerHandle::new(),
             },
         );
         this.set_child(app, child);
@@ -6770,7 +7388,7 @@ impl<T: PartialEq + 'static> RenderAnnotatedRegion<T> {
     }
 
     /// A value which can be retrieved using
-    /// [`BoundaryLayer::find`](crate::BoundaryLayer::find).
+    /// [`AnyLayer::find`](crate::AnyLayer::find).
     pub fn value(self: RenderHandle<Self>, app: &App) -> Rc<T> {
         Rc::clone(&self.get(app).value)
     }
@@ -6819,6 +7437,10 @@ impl<T: PartialEq + 'static> RenderProxyBoxMixin for RenderAnnotatedRegion<T> {}
 impl<T: PartialEq + 'static> RenderObject for RenderAnnotatedRegion<T> {
     crate::render_object_accessors!();
 
+    fn always_needs_compositing(self: RenderHandle<Self>, _app: &App) -> bool {
+        true
+    }
+
     fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
         RenderProxyBoxMixin::perform_layout(self, app);
     }
@@ -6830,17 +7452,25 @@ impl<T: PartialEq + 'static> RenderObject for RenderAnnotatedRegion<T> {
         offset: Offset,
     ) {
         let sized = self.sized(app);
-        let value = self.value(app) as Rc<dyn Any>;
-        let mut layer = AnnotatedRegionLayer::new(value);
+        let value: Rc<dyn Any> = self.value(app);
+        let layer = AnnotatedRegionLayer::new(app, value);
         if sized {
-            layer = layer.size(self.size(app)).offset(offset);
+            layer.set_size(app, Some(self.size(app)));
+            layer.set_offset(app, offset);
         }
-        context.push_annotated_region(
+        LayerHandle::set_layer(app, |app| &mut self.get_mut(app).layer_handle, Some(layer));
+        context.push_layer(
             app,
-            layer,
+            layer.as_container_layer(),
             |app, context, offset| RenderProxyBoxMixin::paint(self, app, context, offset),
             offset,
+            None,
         );
+    }
+
+    fn dispose(self: RenderHandle<Self>, app: &mut App) {
+        LayerHandle::set_layer(app, |app| &mut self.get_mut(app).layer_handle, None);
+        crate::object::RenderObjectBase::dispose(self, app);
     }
 
     fn visit_children(
@@ -6932,8 +7562,9 @@ mod tests {
     use reveal_painting::BoxDecoration;
 
     use super::*;
-    use crate::layer::PaintItem;
+    use crate::layer::{ErasedLayer, OffsetLayer, PictureLayer};
     use crate::pipeline_owner::PipelineOwner;
+    use reveal_embedder::SceneBuilder;
 
     fn sized_box(app: &mut App, size: Size) -> RenderHandle<RenderConstrainedBox> {
         RenderConstrainedBox::new(app, BoxConstraints::tight(size), None)
@@ -7012,19 +7643,26 @@ mod tests {
         )
     }
 
+    fn schedule_root_paint(app: &mut App, node: AnyRenderObject) {
+        let root = OffsetLayer::new(app, Offset::ZERO);
+        root.as_layer().attach(app, node.id());
+        node.schedule_initial_paint(app, root.as_container_layer());
+    }
+
     /// The test binding's first frame: attach, lay the root out, schedule and flush paint.
     fn first_frame(app: &mut App, root: AnyRenderBox) -> Handle<PipelineOwner> {
         let owner = PipelineOwner::new(app, None);
         owner.set_root_node(app, Some(root.as_object()));
         root.layout(app, BoxConstraints::tight(Size::new(100.0, 100.0)), false);
-        root.as_object()
-            .schedule_initial_paint(app, CompositedLayer::default());
+        schedule_root_paint(app, root.as_object());
+        owner.flush_compositing_bits(app);
         owner.flush_paint(app);
         owner
     }
 
     fn pump_frame(app: &mut App, owner: Handle<PipelineOwner>) {
         owner.flush_layout(app);
+        owner.flush_compositing_bits(app);
         owner.flush_paint(app);
     }
 
@@ -7239,18 +7877,18 @@ mod tests {
         assert!(inner.as_object().debug_layer(&app).is_none());
         assert!(boundary.as_object().is_repaint_boundary(&app));
         let layer = boundary.as_object().debug_layer(&app).expect("painted");
-        assert!(layer.attached(), "this time it painted");
+        assert!(layer.as_layer().attached(&app), "this time it painted");
 
         opacity.set_opacity(&mut app, 0.0);
         pump_frame(&mut app, owner);
         assert!(inner.as_object().debug_layer(&app).is_none());
         let layer = boundary.as_object().debug_layer(&app).expect("kept");
-        assert!(!layer.attached(), "this time it did not");
+        assert!(!layer.as_layer().attached(&app), "this time it did not");
 
         opacity.set_opacity(&mut app, 0.5);
         pump_frame(&mut app, owner);
         let layer = boundary.as_object().debug_layer(&app).expect("kept");
-        assert!(layer.attached(), "this time it did again");
+        assert!(layer.as_layer().attached(&app), "this time it did again");
     }
 
     #[test]
@@ -7270,10 +7908,10 @@ mod tests {
         assert!(fade.as_object().debug_needs_paint(&app));
         pump_frame(&mut app, owner);
         let layer = fade.as_object().debug_layer(&app).expect("a boundary now");
-        assert_eq!(
-            layer.composited().kind,
-            crate::layer::CompositedLayerKind::Opacity { alpha: 255 }
-        );
+        let opacity = app
+            .handle::<OpacityLayer>(layer.id())
+            .expect("an OpacityLayer");
+        assert_eq!(opacity.alpha(&app), Some(255));
     }
 
     #[test]
@@ -7289,12 +7927,7 @@ mod tests {
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(decorated.as_box()));
         first_frame(&mut app, root.as_box());
-        let mut canvas = reveal_embedder::Canvas::new();
-        root.as_object()
-            .debug_layer(&app)
-            .expect("root layer")
-            .add_to_scene(&app, &mut canvas);
-        let ops = canvas.build().ops().to_vec();
+        let ops = scene_ops(&mut app, root.as_object());
         assert!(
             ops.iter()
                 .any(|op| matches!(op, reveal_embedder::valo::Op::DrawDisplayList { .. })),
@@ -7321,21 +7954,24 @@ mod tests {
         (is_hit, result.path().len())
     }
 
-    /// The retained recording of a repaint boundary.
-    fn paint_items(app: &App, boundary: AnyRenderObject) -> &[PaintItem] {
-        &boundary.debug_layer(app).expect("painted").items
-    }
-
-    /// Every canvas operation of the pictures in a repaint boundary's recording.
+    /// Every canvas operation of the pictures in a repaint boundary's layer tree.
     fn picture_ops(app: &App, boundary: AnyRenderObject) -> Vec<Op> {
-        paint_items(app, boundary)
-            .iter()
-            .filter_map(|item| match item {
-                PaintItem::Picture { picture, .. } => Some(picture.ops().to_vec()),
-                _ => None,
+        let layer = boundary.debug_layer(app).expect("painted");
+        layer
+            .depth_first_iterate_children(app)
+            .into_iter()
+            .filter_map(|child| {
+                app.handle::<PictureLayer>(child.id())
+                    .and_then(|picture| picture.picture(app).map(|p| p.ops().to_vec()))
             })
             .flatten()
             .collect()
+    }
+
+    fn picture_has_clip(app: &App, boundary: AnyRenderObject) -> bool {
+        picture_ops(app, boundary)
+            .iter()
+            .any(|op| matches!(op, Op::ClipPath { .. }))
     }
 
     /// The rect and color of every fill in a repaint boundary's recording.
@@ -7457,18 +8093,18 @@ mod tests {
         let root = RenderRepaintBoundary::new(&mut app, Some(clip.as_box()));
         first_frame(&mut app, root.as_box());
 
-        let items = paint_items(&app, root.as_object());
-        assert_eq!(items.len(), 2, "the clip and its pop");
-        let PaintItem::PushClipRect {
-            clip_rect,
-            clip_behavior,
-        } = items[0]
-        else {
-            panic!("the recording starts with the clip")
-        };
-        assert_eq!(clip_rect, Rect::from_ltwh(0.0, 0.0, 50.0, 100.0));
-        assert_eq!(clip_behavior, Clip::HardEdge);
-        assert!(matches!(items[1], PaintItem::Pop));
+        let ops = picture_ops(&app, root.as_object());
+        let clip_path = ops
+            .iter()
+            .find_map(|op| match op {
+                Op::ClipPath { path, .. } => Some(path),
+                _ => None,
+            })
+            .expect("the recording clips");
+        assert_eq!(
+            clip_path.bounds(),
+            Rect::from_ltwh(0.0, 0.0, 50.0, 100.0).into()
+        );
 
         assert!(hit_test(&mut app, clip.as_box(), Offset::new(25.0, 50.0)).0);
         assert!(
@@ -7486,10 +8122,10 @@ mod tests {
         let root = RenderRepaintBoundary::new(&mut app, Some(clip.as_box()));
         first_frame(&mut app, root.as_box());
 
-        assert!(matches!(
-            paint_items(&app, root.as_object()),
-            [PaintItem::Picture { .. }]
-        ));
+        assert!(
+            !picture_has_clip(&app, root.as_object()),
+            "Clip::None paints the child directly"
+        );
         assert_eq!(
             drawn_rects(&app, root.as_object()),
             [fill(Rect::from_ltwh(0.0, 0.0, 100.0, 100.0), RED)]
@@ -7513,24 +8149,15 @@ mod tests {
         first_frame(&mut app, root.as_box());
 
         let bounds = Rect::from_ltwh(0.0, 0.0, 100.0, 100.0);
-        let items = paint_items(&app, root.as_object());
-        let PaintItem::PushClipRRect {
-            clip_rrect,
-            bounds: clip_bounds,
-            clip_behavior,
-            ..
-        } = items[0]
-        else {
-            panic!("the recording starts with the clip")
-        };
-        assert_eq!(
-            clip_rrect,
-            BorderRadiusGeometry::circular(20.0)
-                .resolve(None)
-                .to_rrect(bounds)
-        );
-        assert_eq!(clip_bounds, bounds);
-        assert_eq!(clip_behavior, Clip::AntiAlias);
+        let ops = picture_ops(&app, root.as_object());
+        let clip_path = ops
+            .iter()
+            .find_map(|op| match op {
+                Op::ClipPath { path, .. } => Some(path),
+                _ => None,
+            })
+            .expect("the recording starts with the clip");
+        assert_eq!(clip_path.bounds(), bounds.into());
 
         assert!(
             hit_test(&mut app, clip.as_box(), Offset::new(99.0, 99.0)).0,
@@ -7619,12 +8246,12 @@ mod tests {
         let root = RenderRepaintBoundary::new(&mut app, Some(transform.as_box()));
         first_frame(&mut app, root.as_box());
 
-        let items = paint_items(&app, root.as_object());
-        let PaintItem::PushTransform { transform: pushed } = items[0] else {
-            panic!("the recording starts with the transform")
-        };
-        assert_eq!(pushed, Matrix4::scale(2.0, 2.0));
-        assert!(matches!(items[1], PaintItem::Picture { .. }));
+        let ops = picture_ops(&app, root.as_object());
+        let pushed = ops.iter().find_map(|op| match op {
+            Op::Transform(transform) => Some(*transform),
+            _ => None,
+        });
+        assert_eq!(pushed, Some(Matrix4::scale(2.0, 2.0)));
     }
 
     /// A translation is folded into the child's paint offset instead of a pushed transform.
@@ -7645,10 +8272,12 @@ mod tests {
         let root = RenderRepaintBoundary::new(&mut app, Some(transform.as_box()));
         first_frame(&mut app, root.as_box());
 
-        assert!(matches!(
-            paint_items(&app, root.as_object()),
-            [PaintItem::Picture { .. }]
-        ));
+        assert!(
+            !picture_ops(&app, root.as_object())
+                .iter()
+                .any(|op| matches!(op, Op::Transform(_))),
+            "a translation is folded into the child's paint offset"
+        );
         assert_eq!(
             drawn_rects(&app, root.as_object()),
             [fill(Rect::from_ltwh(10.0, 20.0, 100.0, 100.0), RED)]
@@ -7832,7 +8461,10 @@ mod tests {
 
         assert!(RenderObject::sized_by_parent(offstage, &app));
         assert_eq!(child.size(&app), Size::new(100.0, 100.0), "still laid out");
-        assert!(paint_items(&app, root.as_object()).is_empty());
+        assert!(
+            !picture_has_clip(&app, root.as_object()),
+            "offstage paints nothing"
+        );
         assert_eq!(
             hit_test(&mut app, offstage.as_box(), Offset::new(50.0, 50.0)),
             (false, 0)
@@ -7947,13 +8579,12 @@ mod tests {
     }
 
     /// The scene of a repaint-boundary root after a frame, as display-list ops.
-    fn scene_ops(app: &App, root: RenderHandle<RenderRepaintBoundary>) -> Vec<Op> {
-        let mut canvas = reveal_embedder::Canvas::new();
-        root.as_object()
-            .debug_layer(app)
-            .expect("root layer")
-            .add_to_scene(app, &mut canvas);
-        canvas.build().ops().to_vec()
+    fn scene_ops(app: &mut App, root: AnyRenderObject) -> Vec<Op> {
+        root.debug_layer(app)
+            .expect("painted")
+            .build_scene(app, SceneBuilder::new())
+            .ops()
+            .to_vec()
     }
 
     #[test]
@@ -7971,7 +8602,7 @@ mod tests {
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(filter.as_box()));
         let owner = first_frame(&mut app, root.as_box());
-        let ops = scene_ops(&app, root);
+        let ops = scene_ops(&mut app, root.as_object());
         let blur = ops
             .iter()
             .position(|op| {
@@ -8005,7 +8636,7 @@ mod tests {
         let key = BackdropKey::new();
         filter.set_backdrop_key(&mut app, Some(key));
         pump_frame(&mut app, owner);
-        let ops = scene_ops(&app, root);
+        let ops = scene_ops(&mut app, root.as_object());
         assert!(
             ops.iter().any(|op| matches!(
                 op,
@@ -8019,7 +8650,7 @@ mod tests {
 
         filter.set_enabled(&mut app, false);
         pump_frame(&mut app, owner);
-        let ops = scene_ops(&app, root);
+        let ops = scene_ops(&mut app, root.as_object());
         assert!(
             !ops.iter().any(|op| matches!(
                 op,
@@ -8048,7 +8679,7 @@ mod tests {
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(filter.as_box()));
         first_frame(&mut app, root.as_box());
-        let ops = scene_ops(&app, root);
+        let ops = scene_ops(&mut app, root.as_object());
         // The current Reveal adapter extracts only blur (see the host's PORTING.md).
         assert!(
             ops.iter().any(|op| matches!(
@@ -8081,9 +8712,7 @@ mod tests {
         assert!(hit(&mut app, 50.0, 50.0), "the center is inside");
         assert!(!hit(&mut app, 2.0, 2.0), "a corner is outside the oval");
         assert!(
-            paint_items(&app, root.as_object())
-                .iter()
-                .any(|item| matches!(item, PaintItem::PushClipPath { .. })),
+            picture_has_clip(&app, root.as_object()),
             "an oval clips with a path"
         );
     }
@@ -8167,9 +8796,7 @@ mod tests {
             Rect::from_ltwh(0.0, 0.0, 100.0, 100.0)
         );
         assert!(
-            paint_items(&app, root.as_object())
-                .iter()
-                .any(|item| matches!(item, PaintItem::PushClipPath { .. })),
+            picture_has_clip(&app, root.as_object()),
             "a superellipse clips with its path"
         );
         clip.set_border_radius(&mut app, BorderRadiusGeometry::circular(4.0));

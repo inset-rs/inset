@@ -16,9 +16,10 @@ use reveal_painting::{
 };
 use reveal_rendering::{
     AnyRenderAbstractViewport, AnyRenderBox, AnyRenderObject, AnyViewportOffset, BoxConstraints,
-    BoxHitTestResult, EmptyParentData, HitTestBehavior, PaintingContext, PipelineOwner,
-    RenderAbstractViewport, RenderBox, RenderBoxData, RenderHandle, RenderObject, RenderObjectData,
-    RenderObjectWithChildData, RenderObjectWithChildMixin, RevealedOffset, show_in_viewport,
+    BoxHitTestResult, ClipRectLayer, EmptyParentData, HitTestBehavior, LayerHandle,
+    PaintingContext, PipelineOwner, RenderAbstractViewport, RenderBox, RenderBoxData, RenderHandle,
+    RenderObject, RenderObjectData, RenderObjectWithChildData, RenderObjectWithChildMixin,
+    RevealedOffset, show_in_viewport,
 };
 
 use crate::framework::{
@@ -601,6 +602,7 @@ pub struct RenderSingleChildViewport {
     axis_direction: AxisDirection,
     offset: AnyViewportOffset,
     clip_behavior: Clip,
+    clip_rect_layer: LayerHandle<Handle<ClipRectLayer>>,
 }
 
 impl RenderSingleChildViewport {
@@ -621,6 +623,7 @@ impl RenderSingleChildViewport {
                 axis_direction,
                 offset,
                 clip_behavior,
+                clip_rect_layer: LayerHandle::new(),
             },
         );
         this.set_child(app, child);
@@ -878,16 +881,26 @@ impl RenderObject for RenderSingleChildViewport {
         if self.should_clip_at_paint_offset(app, paint_offset) {
             let bounds = Offset::ZERO & self.size(app);
             let clip_behavior = self.clip_behavior(app);
-            context.push_clip_rect(
+            let old = self.get(app).clip_rect_layer.layer();
+            let layer = context.push_clip_rect(
                 app,
+                self.as_object().needs_compositing(app),
                 offset,
                 bounds,
                 |app, context, offset| self.paint_contents(app, context, offset),
                 clip_behavior,
+                old,
             );
+            LayerHandle::set_layer(app, |app| &mut self.get_mut(app).clip_rect_layer, layer);
         } else {
+            LayerHandle::set_layer(app, |app| &mut self.get_mut(app).clip_rect_layer, None);
             self.paint_contents(app, context, offset);
         }
+    }
+
+    fn dispose(self: RenderHandle<Self>, app: &mut App) {
+        LayerHandle::set_layer(app, |app| &mut self.get_mut(app).clip_rect_layer, None);
+        reveal_rendering::RenderObjectBase::dispose(self, app);
     }
 
     fn show_on_screen(
@@ -1057,7 +1070,7 @@ mod tests {
     use reveal_foundation::AppCell;
     use std::any::Any;
 
-    use reveal_embedder::{Size, TextDirection, valo::Op};
+    use reveal_embedder::{SceneBuilder, Size, TextDirection, valo::Op};
     use reveal_gestures::{HitTestEntry, HitTestResult};
     use reveal_painting::{EdgeInsets, transform_point};
     use reveal_rendering::{BoxHitTestEntry, RenderPadding};
@@ -1165,14 +1178,14 @@ mod tests {
     }
 
     /// The valo ops the viewport's own layer records.
-    fn scene_ops(app: &App, viewport: RenderHandle<RenderSingleChildViewport>) -> Vec<Op> {
-        let mut canvas = reveal_embedder::Canvas::new();
+    fn scene_ops(app: &mut App, viewport: RenderHandle<RenderSingleChildViewport>) -> Vec<Op> {
         viewport
             .as_object()
             .debug_layer(app)
-            .expect("the viewport is a repaint boundary")
-            .add_to_scene(app, &mut canvas);
-        canvas.build().ops().to_vec()
+            .expect("painted")
+            .build_scene(app, SceneBuilder::new())
+            .ops()
+            .to_vec()
     }
 
     #[test]
@@ -1341,9 +1354,9 @@ mod tests {
             SingleChildScrollView::new()
                 .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
         );
-        let app = cell.borrow();
+        let mut app = cell.borrow_mut();
         assert!(
-            scene_ops(&app, viewport)
+            scene_ops(&mut app, viewport)
                 .iter()
                 .any(|op| matches!(op, Op::ClipPath { .. })),
             "content taller than the viewport is clipped"
@@ -1356,9 +1369,9 @@ mod tests {
                 .clip_behavior(Clip::None)
                 .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
         );
-        let app = cell.borrow();
+        let mut app = cell.borrow_mut();
         assert!(
-            !scene_ops(&app, viewport)
+            !scene_ops(&mut app, viewport)
                 .iter()
                 .any(|op| matches!(op, Op::ClipPath { .. })),
             "Clip::None paints the content unclipped"
@@ -1370,9 +1383,9 @@ mod tests {
             SingleChildScrollView::new()
                 .child(SizedBox::new().width(CONTENT_WIDTH).height(VIEW_HEIGHT)),
         );
-        let app = cell.borrow();
+        let mut app = cell.borrow_mut();
         assert!(
-            !scene_ops(&app, viewport)
+            !scene_ops(&mut app, viewport)
                 .iter()
                 .any(|op| matches!(op, Op::ClipPath { .. })),
             "content that fits needs no clip"

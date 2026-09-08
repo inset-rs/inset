@@ -21,6 +21,7 @@ pub enum Entry {
     Scrolling,
     Icons,
     Text,
+    TextFields,
     Heroes,
     Indicators,
     Theming,
@@ -30,7 +31,7 @@ pub enum Entry {
 
 impl Entry {
     /// Index order — the order the rows appear in.
-    pub const ALL: [Entry; 13] = [
+    pub const ALL: [Entry; 14] = [
         Entry::Navigation,
         Entry::PageScaffold,
         Entry::Buttons,
@@ -39,6 +40,7 @@ impl Entry {
         Entry::Scrolling,
         Entry::Icons,
         Entry::Text,
+        Entry::TextFields,
         Entry::Heroes,
         Entry::Indicators,
         Entry::Theming,
@@ -69,6 +71,7 @@ impl Entry {
             Entry::Scrolling => "Scrolling",
             Entry::Icons => "Icons",
             Entry::Text => "Text",
+            Entry::TextFields => "Text Fields",
             Entry::Heroes => "Hero Flights",
             Entry::Indicators => "Activity",
             Entry::Theming => "Theming",
@@ -88,6 +91,7 @@ impl Entry {
             Entry::Scrolling => "Scrolled under",
             Entry::Icons => "1,322",
             Entry::Text => "Overflow, scale",
+            Entry::TextFields => "Type, placeholder",
             Entry::Heroes => "Shared tags",
             Entry::Indicators => "Spinner, bar",
             Entry::Theming => "Light & dark",
@@ -107,6 +111,7 @@ impl Entry {
             Entry::Scrolling => CupertinoIcons::arrow_up_down(),
             Entry::Icons => CupertinoIcons::sparkles(),
             Entry::Text => CupertinoIcons::textformat(),
+            Entry::TextFields => CupertinoIcons::text_cursor(),
             Entry::Heroes => CupertinoIcons::wand_stars(),
             Entry::Indicators => CupertinoIcons::speedometer(),
             Entry::Theming => CupertinoIcons::moon_fill(),
@@ -126,6 +131,7 @@ impl Entry {
             Entry::Scrolling => CupertinoColors::SYSTEM_TEAL,
             Entry::Icons => CupertinoColors::SYSTEM_PINK,
             Entry::Text => CupertinoColors::SYSTEM_PURPLE,
+            Entry::TextFields => CupertinoColors::SYSTEM_INDIGO,
             Entry::Heroes => CupertinoColors::SYSTEM_RED,
             Entry::Indicators => CupertinoColors::SYSTEM_CYAN,
             Entry::Theming => CupertinoColors::SYSTEM_GREY,
@@ -159,6 +165,7 @@ impl Entry {
             Entry::Scrolling => pages::scrolling::body(app, context),
             Entry::Icons => pages::icons::body(app, context),
             Entry::Text => pages::text::body(app, context),
+            Entry::TextFields => pages::text_fields::body(app, context),
             Entry::Heroes => pages::heroes::body(app, context),
             Entry::Indicators => pages::indicators::body(app, context),
             Entry::Theming => pages::theming::body(app, context),

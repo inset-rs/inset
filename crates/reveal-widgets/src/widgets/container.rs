@@ -660,7 +660,7 @@ impl StatelessWidget for Container {
 
 #[cfg(test)]
 mod tests {
-    use reveal_embedder::{Clip, Color, Offset, Size, TextDirection};
+    use reveal_embedder::{Clip, Color, Offset, SceneBuilder, Size, TextDirection};
     use reveal_foundation::AppCell;
     use reveal_painting::{Border, BorderSide, BorderStyle, BoxDecoration};
     use reveal_rendering::{
@@ -715,14 +715,14 @@ mod tests {
         harness.pump(&mut app);
         let render_object = root_child::<RenderDecoratedBox>(&harness, &app);
         assert!(!render_object.as_object().debug_needs_paint(&app));
-        let mut canvas = reveal_embedder::Canvas::new();
-        harness
+        let ops = harness
             .render_root(&app)
             .as_object()
             .debug_layer(&app)
-            .expect("the root painted")
-            .add_to_scene(&app, &mut canvas);
-        let ops = canvas.build().ops().to_vec();
+            .expect("painted")
+            .build_scene(&mut app, SceneBuilder::new())
+            .ops()
+            .to_vec();
         assert!(
             ops.iter()
                 .any(|op| matches!(op, reveal_embedder::valo::Op::DrawDisplayList { .. })),

@@ -4,6 +4,7 @@
 //! lets authored methods take `self: RenderHandle<Self>`.
 
 #![feature(arbitrary_self_types)]
+#![allow(recursion_depth_exceeding_limit)] // valo `DisplayList` nests `Op::DrawDisplayList`
 
 mod binding;
 #[path = "box.rs"]

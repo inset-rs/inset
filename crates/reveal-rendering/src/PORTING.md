@@ -53,17 +53,37 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## painting_context.rs → object.dart (PaintingContext), layer.rs → layer.dart
 
-- Change: there is no `Layer` object tree. A repaint boundary keeps its recording as retained items (pictures, references to child boundaries, push/pop effects) plus one `CompositedLayer` value standing in for Flutter's offset, opacity and transform layers. The host recomposes the frame from those retained pieces every time, so a boundary that did not change contributes the same pictures. A `ChildBoundary` is a `RetainedHandle<AnyRenderObject>`: the parent recording keeps the child's render object (and its pictures) after `dispose`, Dart's `LayerHandle` on the parent `ContainerLayer`.
-  Reason: platform — valo composes a display list from retained pictures and has no engine layers to retain between frames.
-  Affect: the `push_*` effects take no `needsCompositing` or `oldLayer` argument and return nothing; `update_composited_layer` returns a `CompositedLayer`, and `mark_needs_composited_layer_update` swaps it in without repainting the subtree; `schedule_initial_paint` takes a `CompositedLayer`.
+- Change: there are no engine layers. valo composites a display list, so `addToScene` runs for every layer every frame; `engineLayer`, `_needsAddToScene`, `markNeedsAddToScene`, `alwaysNeedsAddToScene`, `addRetained`, `updateSubtreeNeedsAddToScene`, and `debugMarkClean` are not ported.
+  Reason: platform — the host paints one display list per frame and has nothing to retain between frames.
+  Affect: none of those members exist; a layer property setter does not need a "mark".
 
-- Change: no compositing bits: `needsCompositing`, `alwaysNeedsCompositing` and `flushCompositingBits` are gone, and every pushed effect spans child boundaries.
-  Reason: platform — the layer-versus-canvas choice exists because a Skia clip cannot cross an engine layer, and retained items have no such split.
-  Affect: `is_repaint_boundary` alone decides where recordings split; where Flutter calls `markNeedsCompositingBitsUpdate`, call `mark_needs_paint`. A frame is `flush_layout` then `flush_paint`.
+- Change: `LayerHandle::set_layer(app, slot, layer)` instead of `handle.layer = x`.
+  Reason: language — the handle lives inside an arena object, so `&mut self` would alias `App`.
+  Affect: call shape; a handle that is dropped without clearing keeps its layer until the `App` drops.
 
-- Change: `Layer.find` / `findAllAnnotations` are `BoundaryLayer::find` / `find_all_annotations`, which walk a boundary's recorded items in reverse. Each item kind carries its Dart layer's hit rule, so `findAnnotations` is not an override point, and `AnnotatedRegionLayer` is the one item that adds an annotation; its value is stored erased, since one recording carries annotations of every type, and comes back as an `Rc<T>` by exact downcast, Dart's `T == S`.
-  Reason: platform — the recording has items, not retained layers (the entry above), so there is no `Layer` to subclass.
-  Affect: `layer.find::<T>(app, position)` answers `Option<Rc<T>>`, and needs the `App` because a child boundary's recording lives in the arena; a render object annotates by pushing an `AnnotatedRegionLayer` through `PaintingContext::push_annotated_region`, never by overriding a method.
+- Change: `Layer.dispose` ends in `App::destroy`.
+  Reason: language — no GC.
+  Affect: a handle to a disposed layer is stale (`app.get` panics); `AnyLayer::debug_disposed` answers true for it.
+
+- Change: `AnnotationSearch` replaces the generic `AnnotationResult<S>` during the walk.
+  Reason: language — a generic method cannot sit in a vtable.
+  Affect: `find::<T>` / `find_all_annotations::<T>` are typed; a `find_annotations` override checks `result.accepts(&*value)` then `result.add(value, position)`. `AnnotatedRegionLayer` value is `Rc<dyn Any>`.
+
+- Change: `LeaderLayer` / `FollowerLayer` hold the `LayerLink` as a `RetainedHandle`.
+  Reason: language — Dart's GC keeps a link alive while a detached layer still names it; the State that owns the link destroys it in `dispose`.
+  Affect: the link's entry lingers until those layers are disposed.
+
+- Change: `OffsetLayerMixin` trait plus `OffsetLayer` struct.
+  Reason: language — a concrete class that is also a base.
+  Affect: `TransformLayer` / `OpacityLayer` are not `OffsetLayer` by type; `AnyContainerLayer::as_offset_layer()` is Dart's `as OffsetLayer`.
+
+- Change: `PaintingContext` creates and appends the `PictureLayer` in `stop_recording_if_needed(app)` rather than in `_startRecording`.
+  Reason: language — `ClipContext::canvas(&mut self)` has no `App`.
+  Affect: `stop_recording_if_needed` takes `app`; the hints are applied at stop; layer order is unchanged.
+
+- Change: `Layer.owner` is a `HandleId`.
+  Reason: language — Dart stores an `Object`; the arena names it with a `HandleId`.
+  Affect: `attach` takes the owner's id; `attached` is whether that id is set.
 
 - Change: `RenderAnnotatedRegion<T>` needs `T: PartialEq`.
   Reason: language — Dart's `==` in the setter is a trait bound here.
@@ -87,10 +107,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## proxy_box.rs → proxy_box.dart / shifted_box.rs → shifted_box.dart
 
-- Change: `RenderBackdropFilter` paints through `PaintingContext::push_backdrop_filter`, a retained item that composites as a backdrop blur bounded to the render object's paint bounds (or the filter's own bounds), using the horizontal sigma alone, with the blend mode on the layer paint. Only the blur reaches the backdrop: a composed filter contributes the blur it composes, and a colour filter contributes nothing.
-  Reason: platform — valo's backdrop is a blur with one sigma and a rect, and a colour filter on the layer paint would filter the children too.
-  Affect: a backdrop filter blurs what lies under the widget's bounds (Flutter's unbounded filter blurs the enclosing clip's area, the same thing for a clipped dialog); an anisotropic blur uses its horizontal sigma; a colour filter composed into a backdrop filter is dropped, so a saturating frosted-glass surface is blurred but not saturated. `reveal-embedder-winit`'s `PORTING.md` records the same for the host.
-
 - Change: Flutter's intermediate base classes and mixins here (`RenderProxyBox`, `RenderShiftedBox`, the aligning, custom-clip and animated-opacity mixins) take the trait-over-a-field shape from `object.rs`: the shared bodies live on the trait, mixin state is a data field with an accessor, and a render object is always a leaf struct that implements them.
   Reason: language — no inheritance.
   Affect: implement the trait and, where Dart would run the inherited method, call it by name, `RenderProxyBoxMixin::paint(self, app, context, offset)`; a clip leaf implements `default_clip` (Dart's `_defaultClip`) and reads the cached clip with `clip()` after `update_clip()`.
@@ -108,7 +124,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: implement `reclip` to get reclip-on-notify, downcast `old_clipper` with `as_any().downcast_ref()`, and pass the same `Rc` to keep a clipper's subscription.
 
 - Change: `RenderTransform` has no `filterQuality`.
-  Reason: platform — the filtered path is an `ImageFilterLayer` over `ImageFilter.matrix`, which neither the embedder's `Paint` nor the retained-item model has.
+  Reason: platform — the filtered path is an `ImageFilterLayer` over `ImageFilter.matrix`, which neither the embedder's `Paint` nor `SceneBuilder` has.
   Affect: a transform always paints through `push_transform`, or through the child's paint offset when the matrix is a translation.
 
 - Change: `RenderColoredBox` (Flutter's private `_RenderColoredBox` from `widgets/basic.dart`) does not pass `is_anti_alias` to the canvas.
@@ -142,6 +158,16 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: `TextOverflow::Fade` clips like `Clip`.
   Reason: platform — the fade is a gradient shader, and gradients are deferred.
   Affect: overflowing text is cut, not faded.
+
+## editable.rs → editable.dart
+
+- Change: `RenderEditable` is a leaf: no inline children, no `_RenderEditableCustomPaint` boxes, no internal tap / long-press recognizers, no `RelayoutWhenSystemFontsChangeMixin`. Caret, selection and the handle leaders paint in `paint`.
+  Reason: platform — `WidgetSpan` placeholders, engine layers, and `PaintingBinding.systemFonts` wait, as on `RenderParagraph`.
+  Affect: pass no children; call `select_position_at` and friends from above (`ignore_pointer`); the selection handles' links are led from `paint` for a `CompositedTransformFollower` to follow.
+
+- Change: `VerticalCaretMovementRun::is_valid` compares the editable's layout generation.
+  Reason: language — `compute_line_metrics` returns a new `Vec` each call, so Dart's `identical` on the list would always fail.
+  Affect: a run stays valid across reads until the next layout.
 
 ## object.rs / box.rs → object.dart / box.dart (container children)
 
@@ -250,7 +276,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: `animation.drive(app, AlignmentGeometryTween::new(Some(a), Some(b)))` drives a clone; writing `begin` or `end` afterwards does not reach the driven animation, as it does on a Dart `Tween`.
 
 ## Deferred
-- `PaintingContext.addLayer` / `addCompositionCallback` / `pushColorFilter`, `LeaderLayer` / `FollowerLayer`, `toImage`. Trigger: `CompositedTransformFollower`, `RepaintBoundary.toImage`.
+- `TextureLayer`, `PlatformViewLayer`, `PerformanceOverlayLayer`, `ClipRSuperellipseLayer`, `ColorFilterLayer`, `ImageFilterLayer`, `ShaderMaskLayer`, `OffsetLayer.toImage` / `toImageSync`, `PaintingContext.pushColorFilter`, `RenderView._updateSystemChrome`. Trigger: a texture/platform view, a superellipse clip, a colour/image/shader filter widget, `RepaintBoundary.toImage`, system chrome.
+- `PaintingContext.addCompositionCallback`. Trigger: a caller that needs composition callbacks on the painting context (layers already have them).
 - Debug paint overlays: `debugPaint` on boxes, slivers and the viewport (with the sliver arrow and `debugPaintSize` helpers), `describeApproximatePaintClip` and `CustomClipper.getApproximateClipRect`, the custom clip's `debugPaintSize`, and the `DebugOverflowIndicatorMixin` overlays of `RenderFlex` and `RenderConstraintsTransformBox` (an overflowing box clips but paints no striped hint). With them, `paintsChild` as a virtual: `RenderOffstage` and `RenderFittedBox` keep it inherent meanwhile, and the opacity boxes' overrides wait. Trigger: inspector; semantics.
 - Semantics: on `PipelineOwner` and `RenderObject`; `RenderCustomPaint`'s `CustomPainterSemantics` and the painter's semantics builder; the deprecated `ignoringSemantics` of the ignore- and absorb-pointer boxes; `RenderOffstage.visitChildrenForSemantics`; the viewport and sliver semantics overrides (configuration, clip, children, `useTwoPaneSemantics` / `excludeFromScrolling`, `ensureSemantics` / `semanticBounds`) and the `markNeedsSemanticsUpdate` calls in the viewport's `paintOrder` and `clipBehavior` setters. Trigger: a11y; do not stub.
 - The semantics half of `PipelineManifold`: `semanticsEnabled`, its `Listenable` surface, and the semantics owner an attached `PipelineOwner` updates. The frame-request half is ported: the binding attaches its root owner to a manifold that calls `ensure_visual_update`, and `adopt_child` hands it down to the child owner the widgets `View` creates per `RenderView`. `RendererBinding::init_render_view` stays for render-tree-only hosts, rooting the implicit view's `RenderView` in `root_pipeline_owner` as Flutter's test binding does — never call it in an app that runs `run_app`. Trigger: semantics.
@@ -258,7 +285,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `layout` and `constraints` as override points. `markNeedsLayout` is one on the box protocol (its vtable slot resolves `RenderBox::mark_needs_layout`, which the layout cache overrides); a sliver and the view keep the base body. Trigger: OverlayPortal, `RenderView`. Ask before adding.
 - `RenderView.applyPaintTransform` / `updateSystemChrome`; `performReassemble`. Trigger: `getTransformTo`, hot reload.
 - `RenderParagraph.RelayoutWhenSystemFontsChangeMixin` and `applyPaintTransform`. Trigger: `PaintingBinding.systemFonts`.
-- `RenderEditable` and `VerticalCaretMovementRun` (`editable.rs` has `TextSelectionPoint`). Trigger: `EditableText`. The run holds the editable and its line metrics; the box mixes `RelayoutWhenSystemFontsChangeMixin`, inline children, and `TextLayoutMetrics`.
+- `RenderEditable` inline children, `RelayoutWhenSystemFontsChangeMixin`, the `_RenderEditableCustomPaint` child boxes, and the internal tap / long-press recognizers. Caret and selection paint in `paint`. Trigger: `WidgetSpan`; `PaintingBinding.systemFonts`; a field that does not set `ignorePointer`.
 - `SliverConstraints.debugAssertIsValid` extra numeric checks. Trigger: a caller that relies on those messages.
 - Baseline alignment on the multi-child boxes: `RenderFlex`'s ascent/descent pass with its actual and dry baseline computations, `RenderStack` / `RenderIndexedStack`'s per-child baseline and their baseline computations, and `RenderIgnoreBaseline`; until it lands a `CrossAxisAlignment::Baseline` row top-aligns its children and stores the `text_baseline` unused. The one-child boxes report baselines, and `RenderBoxContainerDefaultsMixin`'s two baseline helpers are ported. Trigger: the first baseline-aligned `Row`.
 - `RenderCustomSingleChildLayoutBox` and `SingleChildLayoutDelegate` (`shifted_box.dart`; `custom_layout.rs` holds only the multi-child pair, as Dart does). Trigger: `CustomSingleChildLayout`.

@@ -1509,7 +1509,7 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
-    use reveal_embedder::{Offset, Size, ViewId};
+    use reveal_embedder::{Matrix4, Offset, SceneBuilder, Size, TextDirection, ViewId};
     use reveal_foundation::{App, AppCell, Handle, HandleId, Listener};
     use reveal_gestures::{
         GestureBinding, GestureBindingOverridesObject, HitTestResult, K_LONG_PRESS_TIMEOUT,
@@ -1524,7 +1524,9 @@ mod tests {
     use super::*;
     use crate::framework::{AnyElement, Element, LeafRenderObjectWidget, RenderObjectWidget};
     use crate::test_harness::Harness;
-    use crate::widgets::basic::SizedBox;
+    use crate::widgets::basic::{
+        CompositedTransformFollower, CompositedTransformTarget, SizedBox, Stack,
+    };
 
     // ---- the test tree ----
 
@@ -1834,6 +1836,76 @@ mod tests {
         assert!(
             !app.contains(pressed_listener.id()),
             "vacated with the path"
+        );
+    }
+
+    /// `CompositedTransformFollower`: the follower's child paints and hit-tests where the
+    /// target is, through the transform between them, once a frame has been composited.
+    #[test]
+    fn a_follower_lands_on_its_target_and_is_hit_there() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let link = reveal_rendering::LayerLink::new(&mut app);
+        let downs = Rc::new(Cell::new(0));
+        let on_down = Rc::clone(&downs);
+        let target = crate::widgets::basic::Transform::new(Matrix4::translation(40.0, 30.0)).child(
+            CompositedTransformTarget::new(link).child(Sized {
+                size: Size::new(10.0, 10.0),
+            }),
+        );
+        let follower = CompositedTransformFollower::new(link)
+            .offset(Offset::new(5.0, 5.0))
+            .child(
+                crate::Listener::new()
+                    .behavior(HitTestBehavior::Opaque)
+                    .on_pointer_down(Rc::new(move |_app: &mut App, _event| {
+                        on_down.set(on_down.get() + 1);
+                    }))
+                    .child(Sized {
+                        size: Size::new(20.0, 20.0),
+                    }),
+            );
+        // The stack fills the view, as an `Overlay` does: a follower is only hit where its
+        // parent considers itself hittable.
+        let harness = mount(
+            &mut app,
+            SizedBox::expand()
+                .child(
+                    Stack::new()
+                        .text_direction(TextDirection::Ltr)
+                        .children(vec![target.into_widget(), follower.into_widget()]),
+                )
+                .into_widget(),
+        );
+        // The follower's transform is established when the frame is composited.
+        let _scene = harness
+            .render_root(&app)
+            .as_object()
+            .debug_layer(&app)
+            .expect("painted")
+            .build_scene(&mut app, SceneBuilder::new());
+
+        let listener = pointer_listener_under(&app, harness.root.as_element())
+            .as_box()
+            .expect("a box");
+        assert_eq!(
+            listener.local_to_global(&app, Offset::ZERO, None),
+            Offset::new(45.0, 35.0),
+            "the target's 40,30 plus the follower's 5,5 offset"
+        );
+
+        press(
+            &mut app,
+            1,
+            Offset::new(50.0, 40.0),
+            PointerDeviceKind::Touch,
+        );
+        assert_eq!(downs.get(), 1, "hit where the follower painted");
+        press(&mut app, 2, Offset::new(5.0, 5.0), PointerDeviceKind::Touch);
+        assert_eq!(
+            downs.get(),
+            1,
+            "not where the follower would have been unlinked"
         );
     }
 

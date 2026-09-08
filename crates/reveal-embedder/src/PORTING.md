@@ -7,6 +7,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - key.rs → dart:ui key.dart
 - text.rs → dart:ui text.dart (the text and font enums, `FontFeature`, `FontVariation`)
 - locale.rs → dart:ui `Locale`
+- `AppLifecycleState`, `AppExitResponse` in platform.rs → dart:ui `platform_dispatcher.dart`
 
 ## painting.rs → dart:ui `Canvas` / `Paint` / `Paragraph` / `TextStyle`
 
@@ -42,9 +43,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the host-supplied `Platform` is the source of truth, so two Apps can differ.
   Affect: a test that needs iOS installs a `Platform` that says so.
 
-- Change: the system channels and dispatcher fields that reach the host are methods on `Platform`, each defaulted to do nothing or to answer a neutral value: the mouse cursor, restoration get and put, the locales and the application locale, the default route name, the application switcher description, the system UI overlay style and haptic feedback. The payloads cross as typed values, so Dart's `_toMap` string encodings are gone, and the argument-less `HapticFeedback.vibrate()` is the `Vibrate` kind.
+- Change: the system channels and dispatcher fields that reach the host are methods on `Platform`, each defaulted to do nothing or to answer a neutral value: the mouse cursor, restoration get and put, the locales and the application locale, the default route name, the application switcher description, the system UI overlay style, haptic feedback, the clipboard (`setData` / `getData` / `hasStrings`), the system context menu (`supportsShowingSystemContextMenu` / `showSystemContextMenu` / `hideSystemContextMenu`), and Look Up / Search Web / Share. The payloads cross as typed values, so Dart's `_toMap` string encodings are gone, and the argument-less `HapticFeedback.vibrate()` is the `Vibrate` kind.
   Reason: platform — there are no method channels; the host trait is the channel.
-  Affect: `reveal-services` and the widget layer call them; a host with the capability overrides the method, and one without leaves the default — restoration stays off, the initial route is `/`, and the locale list is empty until the host reports it.
+  Affect: `reveal-services` and the widget layer call them; a host with the capability overrides the method, and one without leaves the default — restoration stays off, the initial route is `/`, the locale list is empty until the host reports it, the clipboard is empty, and the system context menu is unsupported.
 
 ## restoration.rs → services `message_codecs.dart` (`StandardMessageCodec`)
 
@@ -95,6 +96,12 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - Change: `TextEditingValue`, `TextInputConfiguration`, and the neighbouring value types live here because `View` and `EmbedderClient` name them. `toJSON` / `fromJSON` are omitted.
   Reason: platform — there are no method channels; the host trait is the channel, so the data travels as itself.
   Affect: a host receives a `TextEditingValue`, not a map; framework callers still write `reveal_services::TextEditingValue`.
+
+## scene_builder.rs → dart:ui `SceneBuilder`
+
+- Change: each `push_*` is a canvas scope on one display list; `build` closes it. There is no `oldLayer`, `EngineLayer`, `addRetained`, `addTexture`, `addPlatformView`, `pushShaderMask`, `pushColorFilter`, or `pushImageFilter`. `pushBackdropFilter` is blur-only, as already recorded for the host.
+  Reason: platform — valo composites a display list and has no engine layers to retain between frames.
+  Affect: every layer calls `addToScene` every frame; a caller that needs a retained engine layer or those missing pushes waits.
 
 ## pointer.rs → dart:ui `pointer.dart`
 

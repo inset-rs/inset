@@ -14,7 +14,7 @@ use crate::framework::{
 ///
 /// See also:
 ///
-///  * [`BoundaryLayer::find`](reveal_rendering::BoundaryLayer::find), for how this value is
+///  * [`Layer::find`](reveal_rendering::AnyLayer::find), for how this value is
 ///    retrieved.
 ///  * [`AnnotatedRegionLayer`](reveal_rendering::AnnotatedRegionLayer), the layer pushed into
 ///    the recording.
@@ -22,14 +22,14 @@ use crate::framework::{
 pub struct AnnotatedRegion<T> {
     pub key: Option<KeyRef>,
     /// A value which can be retrieved using
-    /// [`BoundaryLayer::find`](reveal_rendering::BoundaryLayer::find).
+    /// [`AnyLayer::find`](reveal_rendering::AnyLayer::find).
     ///
     /// Dart's `T value`; it is shared rather than copied so the recording can carry it.
     pub value: Rc<T>,
     /// If false, the layer pushed into the tree will not be provided with a size.
     ///
     /// An [`AnnotatedRegionLayer`](reveal_rendering::AnnotatedRegionLayer) with a size checks
-    /// that the offset provided in [`BoundaryLayer::find`](reveal_rendering::BoundaryLayer::find)
+    /// that the offset provided in [`AnyLayer::find`](reveal_rendering::AnyLayer::find)
     /// is within the bounds, returning `None` otherwise.
     pub sized: bool,
     pub child: WidgetRef,
@@ -94,7 +94,7 @@ impl<T: PartialEq + Debug + 'static> SingleChildRenderObjectWidget for Annotated
 mod tests {
     use reveal_embedder::Offset;
     use reveal_foundation::AppCell;
-    use reveal_rendering::{AnnotationResult, BoundaryLayer};
+    use reveal_rendering::{AnnotationResult, AnyContainerLayer, ErasedLayer};
 
     use super::*;
     use crate::test_harness::Harness;
@@ -113,8 +113,8 @@ mod tests {
         .into_widget()
     }
 
-    /// The root recording of a mounted tree, which `find` searches.
-    fn root_layer<'a>(harness: &Harness, app: &'a App) -> &'a BoundaryLayer {
+    /// The root layer of a mounted tree, which `find` searches.
+    fn root_layer(harness: &Harness, app: &App) -> AnyContainerLayer {
         harness
             .render_root(app)
             .as_object()
@@ -148,7 +148,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let harness = Harness::mount(&mut app, centred_region(true));
         harness.pump(&mut app);
-        let layer = root_layer(&harness, &app);
+        let layer = root_layer(&harness, &app).as_layer();
 
         let inside = layer.find::<Marker>(&app, Offset::new(150.0, 100.0));
         assert_eq!(inside.as_deref(), Some(&Marker(1)));
@@ -178,7 +178,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let harness = Harness::mount(&mut app, centred_region(false));
         harness.pump(&mut app);
-        let layer = root_layer(&harness, &app);
+        let layer = root_layer(&harness, &app).as_layer();
 
         assert_eq!(
             layer
@@ -201,6 +201,7 @@ mod tests {
         harness.pump(&mut app);
         assert!(
             root_layer(&harness, &app)
+                .as_layer()
                 .find::<u32>(&app, Offset::new(150.0, 100.0))
                 .is_none(),
             "the target type must be identical to the annotated type"
@@ -239,7 +240,7 @@ mod tests {
             .into_widget();
         let harness = Harness::mount(&mut app, tree);
         harness.pump(&mut app);
-        let layer = root_layer(&harness, &app);
+        let layer = root_layer(&harness, &app).as_layer();
 
         let result: AnnotationResult<Marker> =
             layer.find_all_annotations(&app, Offset::new(150.0, 100.0));

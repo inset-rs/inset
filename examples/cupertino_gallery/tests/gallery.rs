@@ -350,6 +350,7 @@ fn marker(entry: Entry) -> &'static str {
         Entry::Scrolling => "Rows 1\u{2013}10",
         Entry::Icons => "house_fill",
         Entry::Text => "action_small_text_style",
+        Entry::TextFields => "Type here",
         Entry::Heroes => "Swatches",
         Entry::Indicators => "Partially revealed",
         Entry::Theming => "SECONDARY_LABEL",

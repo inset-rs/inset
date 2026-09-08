@@ -21,10 +21,11 @@ use reveal_painting::{
     TextStyle,
 };
 use reveal_rendering::{
-    AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, BoxParentData, MainAxisSize,
-    OverScrollHeaderStretchConfiguration, PaintingContext, RelativeRect, RenderAnimatedOpacity,
-    RenderAnimatedOpacityMixin, RenderBox, RenderBoxData, RenderHandle, RenderObject,
-    RenderObjectData, RenderObjectWithChildData, RenderObjectWithChildMixin, RenderShiftedBox,
+    AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, BoxParentData, ContainerLayer,
+    MainAxisSize, OverScrollHeaderStretchConfiguration, PaintingContext, RelativeRect,
+    RenderAnimatedOpacity, RenderAnimatedOpacityMixin, RenderBox, RenderBoxData, RenderHandle,
+    RenderObject, RenderObjectData, RenderObjectWithChildData, RenderObjectWithChildMixin,
+    RenderShiftedBox, TransformLayer,
 };
 use reveal_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use reveal_widgets::{
@@ -2384,16 +2385,22 @@ impl RenderObject for RenderLargeTitle {
         offset: Offset,
     ) {
         let Some(child) = self.child(app) else {
+            self.as_object().set_layer(app, None);
             return;
         };
         let child_offset = child.box_parent_data(app).offset;
         let scale = self.get(app).scale as f32;
-        context.push_transform(
+        let old = self.as_object().layer_as::<TransformLayer>(app);
+        let layer = context.push_transform(
             app,
+            self.as_object().needs_compositing(app),
             offset + child_offset,
             Matrix4::scale(scale, scale),
             |app, context, offset| context.paint_child(app, child.as_object(), offset),
+            old,
         );
+        self.as_object()
+            .set_layer(app, layer.map(|layer| layer.as_container_layer()));
     }
 
     fn visit_children(

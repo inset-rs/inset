@@ -9,8 +9,9 @@ use std::fmt::Debug;
 use reveal_foundation::{
     App, ChangeNotifier, ChangeNotifierData, DateTime, Handle, Listenable, Listener,
 };
-use reveal_services::RestorationData;
+use reveal_services::{RestorationData, TextEditingValue};
 
+use crate::widgets::editable_text::TextEditingController;
 use crate::widgets::restoration::{RestorableProperty, RestorablePropertyData};
 
 // ---------------------------------------------------------------------------------------------
@@ -1387,7 +1388,7 @@ pub trait RestorableListenable: RestorableProperty<Value: Listenable + Clone + '
 
     /// Dart's `RestorableListenable.dispose`.
     fn dispose(self: Handle<Self>, app: &mut App) {
-        RestorableProperty::dispose(self, app);
+        RestorableProperty::dispose_property(self, app);
         let listener = self.notification_listener();
         if let Some(value) = self.restorable_listenable_data(app).value.clone() {
             value.remove_listener(app, &listener);
@@ -1444,6 +1445,105 @@ pub trait RestorableChangeNotifier: RestorableListenable {
                 Self::dispose_value(self, app, value.clone());
             }));
         }
+    }
+}
+
+/// A [`RestorableProperty`] that knows how to store and restore a
+/// [`TextEditingController`].
+///
+/// The [`TextEditingController`] is accessible via the [`value`](RestorableListenable::value)
+/// getter. During state restoration, the property will restore
+/// [`TextEditingController::text_value`] to the value it had when the restoration data it is
+/// getting restored from was collected.
+pub struct RestorableTextEditingController {
+    change_notifier: ChangeNotifierData,
+    property: RestorablePropertyData,
+    listenable: RestorableListenableData<Handle<TextEditingController>>,
+    initial_value: TextEditingValue,
+}
+
+impl RestorableTextEditingController {
+    /// Creates a [`RestorableTextEditingController`].
+    ///
+    /// This constructor treats a missing `text` argument as if it were the empty string.
+    pub fn new(app: &mut App) -> Handle<RestorableTextEditingController> {
+        Self::from_value(app, TextEditingValue::EMPTY)
+    }
+
+    /// Dart `RestorableTextEditingController(text:)`.
+    pub fn text(app: &mut App, text: impl Into<String>) -> Handle<RestorableTextEditingController> {
+        Self::from_value(app, TextEditingValue::new().text(text))
+    }
+
+    /// Creates a [`RestorableTextEditingController`] from an initial [`TextEditingValue`].
+    pub fn from_value(
+        app: &mut App,
+        value: TextEditingValue,
+    ) -> Handle<RestorableTextEditingController> {
+        app.create(RestorableTextEditingController {
+            change_notifier: ChangeNotifierData::new(),
+            property: RestorablePropertyData::new(),
+            listenable: RestorableListenableData::new(),
+            initial_value: value,
+        })
+    }
+}
+
+impl ChangeNotifier for RestorableTextEditingController {
+    fn change_notifier_data(&self) -> &ChangeNotifierData {
+        &self.change_notifier
+    }
+
+    fn change_notifier_data_mut(&mut self) -> &mut ChangeNotifierData {
+        &mut self.change_notifier
+    }
+}
+
+impl RestorableProperty for RestorableTextEditingController {
+    type Value = Handle<TextEditingController>;
+    crate::restorable_property_accessors!();
+
+    fn create_default_value(self: Handle<Self>, app: &mut App) -> Handle<TextEditingController> {
+        let initial_value = app.get(self).initial_value.clone();
+        TextEditingController::from_value(app, Some(initial_value))
+    }
+
+    fn from_primitives(
+        self: Handle<Self>,
+        app: &mut App,
+        data: &RestorationData,
+    ) -> Handle<TextEditingController> {
+        TextEditingController::new(app).text(
+            app,
+            data.as_str()
+                .expect("RestorableTextEditingController stores a String"),
+        )
+    }
+
+    fn init_with_value(self: Handle<Self>, app: &mut App, value: Handle<TextEditingController>) {
+        RestorableChangeNotifier::init_with_value(self, app, value);
+    }
+
+    fn to_primitives(self: Handle<Self>, app: &App) -> RestorationData {
+        RestorationData::String(
+            RestorableListenable::value(self, app)
+                .text_value(app)
+                .to_string(),
+        )
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        RestorableChangeNotifier::dispose(self, app);
+    }
+}
+
+impl RestorableListenable for RestorableTextEditingController {
+    crate::restorable_listenable_accessors!();
+}
+
+impl RestorableChangeNotifier for RestorableTextEditingController {
+    fn dispose_value(self: Handle<Self>, app: &mut App, value: Handle<TextEditingController>) {
+        app.get_mut(value).dispose();
     }
 }
 
@@ -1817,5 +1917,128 @@ mod tests {
 
         assert_eq!(fixture.stored("int"), None);
         assert!(!int.as_property().is_registered(&fixture.cell.borrow()));
+    }
+
+    #[test]
+    fn restorable_text_editing_controller_create_default_value_holds_initial_text() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let property = RestorableTextEditingController::from_value(
+            &mut app,
+            TextEditingValue::new().text("hello"),
+        );
+        let controller = RestorableProperty::create_default_value(property, &mut app);
+        assert_eq!(controller.text_value(&app), "hello");
+        let restored = RestorableProperty::from_primitives(
+            property,
+            &mut app,
+            &RestorationData::String("hello".into()),
+        );
+        assert_eq!(restored.text_value(&app), "hello");
+    }
+
+    #[derive(Debug)]
+    struct Editor {
+        key: Option<KeyRef>,
+    }
+
+    impl StatefulWidget for Editor {
+        type State = EditorState;
+
+        fn key(&self) -> Option<&KeyRef> {
+            self.key.as_ref()
+        }
+
+        fn create_state(&self) -> EditorState {
+            EditorState {
+                state: StateData::new(),
+                restoration: RestorationMixinData::new(),
+                controller: None,
+            }
+        }
+    }
+
+    struct EditorState {
+        state: StateData<Editor>,
+        restoration: RestorationMixinData,
+        controller: Option<Handle<RestorableTextEditingController>>,
+    }
+
+    impl RestorationMixin for EditorState {
+        crate::restoration_mixin_accessors!();
+
+        fn restoration_id(self: Handle<Self>, _app: &App) -> Option<&str> {
+            Some("editor")
+        }
+
+        fn restore_state(
+            self: Handle<Self>,
+            app: &mut App,
+            _old_bucket: Option<Handle<RestorationBucket>>,
+            _initial_restore: bool,
+        ) {
+            let controller = match app.get(self).controller {
+                Some(controller) => controller,
+                None => {
+                    let controller = RestorableTextEditingController::text(app, "hello");
+                    app.get_mut(self).controller = Some(controller);
+                    controller
+                }
+            };
+            self.register_for_restoration(app, controller.as_property(), "controller");
+        }
+    }
+
+    impl State for EditorState {
+        type Widget = Editor;
+        crate::state_accessors!();
+
+        fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
+            self.did_change_dependencies_restoration(app);
+        }
+
+        fn dispose(self: Handle<Self>, app: &mut App) {
+            self.dispose_restoration(app);
+        }
+
+        fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+            let _ = app;
+            SizedBox::shrink().into_widget()
+        }
+    }
+
+    #[test]
+    fn restorable_text_editing_to_primitives_is_the_controller_text() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let manager = RestorationManager::instance(&mut app);
+        manager.handle_restoration_update_from_engine(&mut app, true, None);
+        let key = GlobalKey::new();
+        let harness = Harness::mount(
+            &mut app,
+            RootRestorationScope::new(
+                Some("app".to_string()),
+                Editor {
+                    key: Some(Rc::new(key.clone())),
+                },
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let state = harness
+            .owner
+            .global_key_element(&app, key.identity())
+            .expect("the editor is in the tree")
+            .state_handle::<EditorState>(&app)
+            .expect("an EditorState");
+        let controller = app.get(state).controller.expect("restore_state ran");
+        assert_eq!(
+            RestorableListenable::value(controller, &app).text_value(&app),
+            "hello"
+        );
+        assert_eq!(
+            RestorableProperty::to_primitives(controller, &app),
+            RestorationData::String("hello".into())
+        );
     }
 }

@@ -14,7 +14,7 @@ use reveal_embedder::{
     BlendMode, Clip, ImageFilter, Matrix4, Offset, Path, RRect, RSuperellipse, Rect, Size,
     TextBaseline, TextDirection,
 };
-use reveal_foundation::App;
+use reveal_foundation::{App, Handle};
 use reveal_gestures::{
     PointerCancelEventListener, PointerDownEventListener, PointerEnterEventListener,
     PointerExitEventListener, PointerHoverEventListener, PointerMoveEventListener,
@@ -22,26 +22,27 @@ use reveal_gestures::{
     PointerPanZoomUpdateEventListener, PointerSignalEventListener, PointerUpEventListener,
 };
 use reveal_painting::{
-    AlignmentGeometry, AnyColor, Axis, AxisDirection, BorderRadiusGeometry, BoxFit,
+    Alignment, AlignmentGeometry, AnyColor, Axis, AxisDirection, BorderRadiusGeometry, BoxFit,
     EdgeInsetsGeometry, ShapeBorder, VerticalDirection, flip_axis_direction,
     text_direction_to_axis_direction,
 };
 use reveal_rendering::{
     AnyRenderObject, BackdropKey, BoxConstraints, BoxConstraintsTransform, ChildLayoutId,
     CrossAxisAlignment, CustomClipper, CustomPainter, FlexFit, FlexParentData, HitTestBehavior,
-    ImageFilterConfig, MainAxisAlignment, MainAxisSize, MultiChildLayoutDelegate,
+    ImageFilterConfig, LayerLink, MainAxisAlignment, MainAxisSize, MultiChildLayoutDelegate,
     MultiChildLayoutParentData, OverflowBoxFit, RelativeRect, RenderAbsorbPointer,
     RenderAligningShiftedBox, RenderAspectRatio, RenderBackdropFilter, RenderBaseline, RenderBox,
     RenderClipOval, RenderClipPath, RenderClipRRect, RenderClipRSuperellipse, RenderClipRect,
     RenderColoredBox, RenderConstrainedBox, RenderConstrainedOverflowBox,
     RenderConstraintsTransformBox, RenderCustomClip, RenderCustomMultiChildLayoutBox,
-    RenderCustomPaint, RenderFittedBox, RenderFlex, RenderFractionalTranslation,
-    RenderFractionallySizedOverflowBox, RenderHandle, RenderIgnorePointer, RenderIndexedStack,
-    RenderIntrinsicHeight, RenderIntrinsicWidth, RenderLimitedBox, RenderMetaData,
-    RenderMouseRegion, RenderOffstage, RenderOpacity, RenderPadding, RenderPointerListener,
-    RenderPositionedBox, RenderRepaintBoundary, RenderSizedOverflowBox, RenderSliver,
-    RenderSliverPadding, RenderSliverToBoxAdapter, RenderStack, RenderStackBase, RenderTransform,
-    ShapeBorderClipper, StackFit, StackParentData,
+    RenderCustomPaint, RenderFittedBox, RenderFlex, RenderFollowerLayer,
+    RenderFractionalTranslation, RenderFractionallySizedOverflowBox, RenderHandle,
+    RenderIgnorePointer, RenderIndexedStack, RenderIntrinsicHeight, RenderIntrinsicWidth,
+    RenderLeaderLayer, RenderLimitedBox, RenderMetaData, RenderMouseRegion, RenderOffstage,
+    RenderOpacity, RenderPadding, RenderPointerListener, RenderPositionedBox,
+    RenderRepaintBoundary, RenderSizedOverflowBox, RenderSliver, RenderSliverPadding,
+    RenderSliverToBoxAdapter, RenderStack, RenderStackBase, RenderTransform, ShapeBorderClipper,
+    StackFit, StackParentData,
 };
 use reveal_services::{MouseCursor, MouseCursorRef};
 
@@ -165,6 +166,222 @@ impl InheritedWidget for Directionality {
 }
 
 // PAINTING NODES
+
+/// A widget that can be targeted by a [`CompositedTransformFollower`].
+///
+/// When this widget is composited during the compositing phase (which comes after the paint
+/// phase, as described in `WidgetsBinding.drawFrame`), it updates the [`link`](Self::link)
+/// object so that any [`CompositedTransformFollower`] widgets that are subsequently composited
+/// in the same frame and were given the same [`LayerLink`] can position themselves at the same
+/// screen location.
+///
+/// A single [`CompositedTransformTarget`] can be followed by multiple
+/// [`CompositedTransformFollower`] widgets.
+///
+/// The [`CompositedTransformTarget`] must come earlier in the paint order than any linked
+/// [`CompositedTransformFollower`]s.
+#[derive(Debug)]
+pub struct CompositedTransformTarget {
+    pub key: Option<KeyRef>,
+    /// The link object that connects this [`CompositedTransformTarget`] with one or more
+    /// [`CompositedTransformFollower`]s.
+    pub link: Handle<LayerLink>,
+    pub child: Option<WidgetRef>,
+}
+
+impl CompositedTransformTarget {
+    /// Dart's `CompositedTransformTarget({required link, child})`.
+    pub fn new(link: Handle<LayerLink>) -> CompositedTransformTarget {
+        CompositedTransformTarget {
+            key: None,
+            link,
+            child: None,
+        }
+    }
+
+    /// Dart `CompositedTransformTarget(key:)`.
+    pub fn key(mut self, key: KeyRef) -> CompositedTransformTarget {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `CompositedTransformTarget(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> CompositedTransformTarget {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
+impl RenderObjectWidget for CompositedTransformTarget {
+    type RenderObject = RenderLeaderLayer;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+        RenderLeaderLayer::new(app, self.link, None).as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        _context: BuildContext,
+        render_object: RenderHandle<RenderLeaderLayer>,
+    ) {
+        render_object.set_link(app, self.link);
+    }
+}
+
+impl SingleChildRenderObjectWidget for CompositedTransformTarget {
+    fn child(&self) -> Option<&WidgetRef> {
+        self.child.as_ref()
+    }
+}
+
+/// A widget that follows a [`CompositedTransformTarget`].
+///
+/// When this widget is composited during the compositing phase (which comes after the paint
+/// phase, as described in `WidgetsBinding.drawFrame`), it applies a transformation that brings
+/// [`target_anchor`](Self::target_anchor) of the linked [`CompositedTransformTarget`] and
+/// [`follower_anchor`](Self::follower_anchor) of this widget together. The two anchor points
+/// will have the same global coordinates, unless [`offset`](Self::offset) is not zero, in
+/// which case [`follower_anchor`](Self::follower_anchor) will be offset by
+/// [`offset`](Self::offset) in the linked [`CompositedTransformTarget`]'s coordinate space.
+///
+/// The [`LayerLink`] object used as the [`link`](Self::link) must be the same object as that
+/// provided to the matching [`CompositedTransformTarget`].
+///
+/// The [`CompositedTransformTarget`] must come earlier in the paint order than this
+/// [`CompositedTransformFollower`].
+///
+/// Hit testing on descendants of this widget will only work if the target position is within
+/// the box that this widget's parent considers to be hittable. If the parent covers the screen,
+/// this is trivially achievable, so this widget is usually used as the root of an
+/// `OverlayEntry` in an app-wide `Overlay` (e.g. as created by `WidgetsApp`).
+#[derive(Debug)]
+pub struct CompositedTransformFollower {
+    pub key: Option<KeyRef>,
+    /// The link object that connects this [`CompositedTransformFollower`] with a
+    /// [`CompositedTransformTarget`].
+    pub link: Handle<LayerLink>,
+    /// Whether to show the widget's contents when there is no corresponding
+    /// [`CompositedTransformTarget`] with the same [`link`](Self::link).
+    ///
+    /// When the widget is linked, the child is positioned such that it has the same global
+    /// position as the linked [`CompositedTransformTarget`].
+    ///
+    /// When the widget is not linked, then: if [`show_when_unlinked`](Self::show_when_unlinked)
+    /// is true, the child is visible and not repositioned; if it is false, then the child is
+    /// hidden.
+    pub show_when_unlinked: bool,
+    /// The anchor point on the linked [`CompositedTransformTarget`] that
+    /// [`follower_anchor`](Self::follower_anchor) will line up with.
+    ///
+    /// Defaults to [`Alignment::TOP_LEFT`].
+    pub target_anchor: Alignment,
+    /// The anchor point on this widget that will line up with
+    /// [`target_anchor`](Self::target_anchor) on the linked [`CompositedTransformTarget`].
+    ///
+    /// Defaults to [`Alignment::TOP_LEFT`].
+    pub follower_anchor: Alignment,
+    /// The additional offset to apply to the [`target_anchor`](Self::target_anchor) of the
+    /// linked [`CompositedTransformTarget`] to obtain this widget's
+    /// [`follower_anchor`](Self::follower_anchor) position.
+    pub offset: Offset,
+    pub child: Option<WidgetRef>,
+}
+
+impl CompositedTransformFollower {
+    /// Dart's `CompositedTransformFollower({required link, ..})`.
+    pub fn new(link: Handle<LayerLink>) -> CompositedTransformFollower {
+        CompositedTransformFollower {
+            key: None,
+            link,
+            show_when_unlinked: true,
+            target_anchor: Alignment::TOP_LEFT,
+            follower_anchor: Alignment::TOP_LEFT,
+            offset: Offset::ZERO,
+            child: None,
+        }
+    }
+
+    /// Dart `CompositedTransformFollower(key:)`.
+    pub fn key(mut self, key: KeyRef) -> CompositedTransformFollower {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `CompositedTransformFollower(showWhenUnlinked:)`.
+    pub fn show_when_unlinked(mut self, show_when_unlinked: bool) -> CompositedTransformFollower {
+        self.show_when_unlinked = show_when_unlinked;
+        self
+    }
+
+    /// Dart `CompositedTransformFollower(targetAnchor:)`.
+    pub fn target_anchor(mut self, target_anchor: Alignment) -> CompositedTransformFollower {
+        self.target_anchor = target_anchor;
+        self
+    }
+
+    /// Dart `CompositedTransformFollower(followerAnchor:)`.
+    pub fn follower_anchor(mut self, follower_anchor: Alignment) -> CompositedTransformFollower {
+        self.follower_anchor = follower_anchor;
+        self
+    }
+
+    /// Dart `CompositedTransformFollower(offset:)`.
+    pub fn offset(mut self, offset: Offset) -> CompositedTransformFollower {
+        self.offset = offset;
+        self
+    }
+
+    /// Dart `CompositedTransformFollower(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> CompositedTransformFollower {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
+impl RenderObjectWidget for CompositedTransformFollower {
+    type RenderObject = RenderFollowerLayer;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+        RenderFollowerLayer::new(
+            app,
+            self.link,
+            self.show_when_unlinked,
+            self.offset,
+            self.target_anchor,
+            self.follower_anchor,
+            None,
+        )
+        .as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        _context: BuildContext,
+        render_object: RenderHandle<RenderFollowerLayer>,
+    ) {
+        render_object.set_link(app, self.link);
+        render_object.set_show_when_unlinked(app, self.show_when_unlinked);
+        render_object.set_offset(app, self.offset);
+        render_object.set_leader_anchor(app, self.target_anchor);
+        render_object.set_follower_anchor(app, self.follower_anchor);
+    }
+}
+
+impl SingleChildRenderObjectWidget for CompositedTransformFollower {
+    fn child(&self) -> Option<&WidgetRef> {
+        self.child.as_ref()
+    }
+}
 
 /// A widget that makes its child partially transparent.
 ///

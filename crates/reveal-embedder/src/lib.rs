@@ -17,6 +17,8 @@ mod paragraph;
 mod platform;
 mod pointer;
 mod restoration;
+mod scene_builder;
+mod system_context_menu;
 mod text;
 mod text_editing;
 mod text_input;
@@ -33,13 +35,16 @@ pub use mouse_cursor::SystemMouseCursorKind;
 pub use painting::*;
 pub use paragraph::*;
 pub use platform::{
-    ApplicationSwitcherDescription, Brightness, Frame, HapticFeedbackType, InertPlatform, Platform,
-    PlatformRef, SystemUiOverlayStyle, TargetPlatform, ViewRef,
+    AppExitResponse, AppLifecycleState, ApplicationSwitcherDescription, Brightness, Frame,
+    HapticFeedbackType, InertPlatform, Platform, PlatformRef, SystemUiOverlayStyle, TargetPlatform,
+    ViewRef,
 };
 pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
 };
 pub use restoration::{RestorationData, RestorationMap, RestorationUpdate};
+pub use scene_builder::{Scene, SceneBuilder};
+pub use system_context_menu::SystemContextMenuItem;
 pub use text::*;
 pub use text_editing::*;
 pub use text_input::*;

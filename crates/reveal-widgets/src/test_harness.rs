@@ -248,6 +248,7 @@ impl Harness {
         self.owner.build_scope(app, self.root.as_element(), None);
         let pipeline = app.get(self.root).pipeline_owner.expect("mounted");
         pipeline.flush_layout(app);
+        pipeline.flush_compositing_bits(app);
         pipeline.flush_paint(app);
         self.owner.finalize_tree(app);
     }

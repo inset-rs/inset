@@ -1544,9 +1544,14 @@ impl<T: RenderSliver> RenderHandle<T> {
         let this = create(app, object);
         let data = this.render_object_data_mut(app);
         data.object_vtable = Some(&const { RenderSliverVTable::of::<T>() }.object);
-        // Flutter's `RenderObject()` constructor: `_wasRepaintBoundary = isRepaintBoundary`.
+        // Flutter's `RenderObject()` constructor:
+        // `_needsCompositing = isRepaintBoundary || alwaysNeedsCompositing` and
+        // `_wasRepaintBoundary = isRepaintBoundary`.
         let is_repaint_boundary = this.is_repaint_boundary(app);
-        this.render_object_data_mut(app).was_repaint_boundary = is_repaint_boundary;
+        let always_needs_compositing = this.always_needs_compositing(app);
+        let data = this.render_object_data_mut(app);
+        data.was_repaint_boundary = is_repaint_boundary;
+        data.needs_compositing = is_repaint_boundary || always_needs_compositing;
         this
     }
 }

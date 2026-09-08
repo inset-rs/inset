@@ -699,8 +699,9 @@ pub trait RestorableProperty: ChangeNotifier + Sized + 'static {
         true
     }
 
-    /// Discards any resources used by the property, unregistering it from its owner.
-    fn dispose(self: Handle<Self>, app: &mut App) {
+    /// Dart's `RestorableProperty.dispose` body. An override that runs `super.dispose()`
+    /// calls this.
+    fn dispose_property(self: Handle<Self>, app: &mut App) {
         debug_assert!(ChangeNotifierData::debug_assert_not_disposed(
             app.get(self).change_notifier_data()
         ));
@@ -710,6 +711,11 @@ pub trait RestorableProperty: ChangeNotifier + Sized + 'static {
         app.get_mut(self).change_notifier_data_mut().dispose();
         self.restorable_property_data_mut(app).disposed = true;
         self.did_dispose(app);
+    }
+
+    /// Discards any resources used by the property, unregistering it from its owner.
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        self.dispose_property(app);
     }
 
     /// Runs at the end of [`dispose`](Self::dispose): what a Dart override does after its

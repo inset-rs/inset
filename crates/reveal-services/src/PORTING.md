@@ -3,12 +3,12 @@ Syntax (constructors, setters, `Option`, erasure calls) follows `.cursor/skills/
 Flutter home: packages/flutter/lib/src/services
 Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
-Only the hardware keyboard, haptic feedback, mouse cursors, the mouse tracking annotation, state restoration, the application switcher description, the system overlay style, `TextInput` / `TextInputConnection` / `TextInputClient`, `SelectionChangedCause`, `AutofillHints`, and re-exports of the text-input value types are here; the rest of the package waits.
+Only the hardware keyboard, haptic feedback, mouse cursors, the mouse tracking annotation, state restoration, the application switcher description, the system overlay style, `TextInput` / `TextInputConnection` / `TextInputClient` / `TextSelectionDelegate`, text layout metric statics, the clipboard, text input formatters, `SelectionChangedCause`, autofill (`AutofillHints` / `AutofillClient` / `AutofillScope`), keyboard-inserted content, spell check, live text, process text, `UndoManager` / `UndoManagerClient`, and re-exports of the text-input value types are here; the rest of the package waits.
 
 ## Identical
 
 - text_editing.rs → text_editing.dart (re-export of embedder `TextSelection`)
-- autofill.rs → autofill.dart (`AutofillHints`; `AutofillConfiguration` is re-exported from reveal-embedder)
+- text_layout_metrics.rs → text_layout_metrics.dart (`isWhitespace` / `isLineTerminator`)
 
 ## text_input.rs → text_input.dart
 
@@ -29,8 +29,82 @@ Only the hardware keyboard, haptic feedback, mouse cursors, the mouse tracking a
   Affect: `connection.attached(app)` needs a mutable `App`.
 
 - Change: `performPrivateCommand` takes only the action string; `insertContent`, `currentAutofillScope`, `didChangeInputControl`, `onFocusReceived`, and `TextInputStyle.toJson` are omitted.
-  Reason: platform — those payloads were maps or types this crate does not have yet (`KeyboardInsertedContent`, `AutofillScope`, a custom `TextInputControl`).
-  Affect: a private-command `data` map is dropped; autofill scope and content insertion wait.
+  Reason: platform — those payloads were maps or a custom `TextInputControl`; `KeyboardInsertedContent` and `AutofillScope` exist but are not wired onto this client yet.
+  Affect: a private-command `data` map is dropped; a client does not receive inserted content or expose its autofill scope here.
+
+- Change: `TextInput::request_autofill` and `TextInput::finish_autofill_context` are empty.
+  Reason: platform — there is no host autofill API; Flutter talks to `TextInputControl` over a method channel.
+  Affect: `TextInput::finish_autofill_context(app, true)` where Dart writes `TextInput.finishAutofillContext()`; `TextInput::request_autofill(app)` where Dart writes `connection.requestAutofill()`. The calls exist so `AutofillGroup` dispose can invoke them; nothing reaches the host.
+
+- Change: `TextSelectionDelegate` is a handle-receiver trait; `RenderEditable` holds an [`AnyTextSelectionDelegate`]. `pasteText` is synchronous. The toolbar methods default to no-ops.
+  Reason: language — Dart's mixin is also a type; a Rust trait is not stored by value. Platform — `Clipboard` answers within the call.
+  Affect: `editable.set_text_selection_delegate(app, state.as_text_selection_delegate())`; a leaf that only drives selection can omit cut/copy/paste.
+
+## clipboard.rs → clipboard.dart
+
+- Change: `Clipboard.setData` / `getData` / `hasStrings` are synchronous calls on `Platform` that return nothing or the value within the call.
+  Reason: platform — there are no method channels and no `Future` to await; the host trait is the channel.
+  Affect: `Clipboard::set_data(app, data)`; a host without a clipboard leaves `get_data` as `None`.
+
+## keyboard_inserted_content.rs → keyboard_inserted_content.dart
+
+- Change: `fromJson` is omitted.
+  Reason: platform — there are no method-channel maps.
+  Affect: construct with `KeyboardInsertedContent::new(mime, uri).data(bytes)`.
+
+## spell_check.rs → spell_check.dart
+
+- Change: `fetchSpellCheckSuggestions` is synchronous and answers `None`; `spellCheckChannel` is omitted.
+  Reason: platform — there are no method channels; a host that can spell-check implements [`SpellCheckService`].
+  Affect: `service.fetch_spell_check_suggestions(app, locale, text)` returns `None`.
+
+## live_text.rs → live_text.dart
+
+- Change: `isLiveTextInputAvailable` / `startLiveTextInput` take `&App` and answer `false` / do nothing.
+  Reason: platform — there are no method channels.
+  Affect: `LiveText::is_live_text_input_available(app)` is `false`; `start_live_text_input` is a no-op.
+
+## process_text.rs → process_text.dart
+
+- Change: `queryTextActions` / `processTextAction` are synchronous and answer an empty list / `None`; `setChannel` is omitted.
+  Reason: platform — there are no method channels.
+  Affect: `service.query_text_actions(app)` is empty; tests implement [`ProcessTextService`] instead of injecting a channel.
+
+## autofill.rs → autofill.dart
+
+- Change: `AutofillClient` and `AutofillScope` are handle-receiver traits; a scope holds [`AnyAutofillClient`]. `AutofillConfiguration` stays in reveal-embedder (re-exported from `text_input.rs`).
+  Reason: language — Dart's mixin is also a type; a Rust trait is not stored by value.
+  Affect: `client.as_autofill_client()`; `scope.attach(app, trigger.as_text_input_client(), configuration)`.
+
+- Change: `AutofillScope.attach` calls `TextInput::attach` with the trigger's configuration and does not wrap it in `_AutofillScopeTextInputConfiguration`.
+  Reason: platform — that subclass exists only to add `fields` to `toJson`; there is no channel JSON, and `View::start_text_input` takes one `TextInputConfiguration`.
+  Affect: sibling autofill clients are not sent to the host on attach.
+
+## text_formatter.rs → text_formatter.dart
+
+- Change: Dart's `Pattern` is [`FilterPattern`] (`Literal` or `Digits`); `TextInputFormatter.withFunction` is [`TextInputFormatterRef::with_function`].
+  Reason: language — there is no `regex` crate and no const factory on a trait.
+  Affect: `FilteringTextInputFormatter::deny(FilterPattern::Literal("\\n".into()))`; `digits_only` is the `[0-9]` allow list.
+
+- Change: `LengthLimitingTextInputFormatter` counts Unicode scalar values, and `getDefaultMaxLengthEnforcement` has no web branch.
+  Reason: language — Dart's `characters` package counts grapheme clusters. Platform — there is no `kIsWeb`.
+  Affect: a family emoji counts as more than one character; web is not a case.
+
+## undo_manager.rs → undo_manager.dart
+
+- Change: `UndoManagerClient` is a handle-receiver trait; `UndoManager` holds [`AnyUndoManagerClient`].
+  Reason: language — Dart's mixin is also a type; a Rust trait is not stored by value.
+  Affect: `UndoManager::set_client(app, Some(state.as_undo_manager_client()))`.
+
+- Change: `setUndoState` is a no-op; `setChannel` is omitted. Inbound `handleUndo` is `UndoManager::handle_platform_undo`.
+  Reason: platform — there are no method channels; the host trait is the channel.
+  Affect: the host is not told `canUndo` / `canRedo`; a host calls `UndoManager::handle_platform_undo(app, direction)` instead of injecting a channel.
+
+## text_layout_metrics.rs → text_layout_metrics.dart
+
+- Change: only the statics live here; `getLineAtOffset` and the other instance methods live on `RenderEditable`.
+  Reason: language — those methods need the arena (`App`) and the render handle, which this crate cannot name.
+  Affect: `TextLayoutMetrics::is_whitespace(c)`; `editable.get_line_at_offset(app, position)`.
 
 ## keyboard_key.rs → keyboard_key.g.dart
 
@@ -107,7 +181,7 @@ The key constants and the four tables are machine-written from the Dart, as Flut
 - Platform channels, `SystemChannels`, `BinaryMessenger`. Trigger: the first service that talks to the host over a named channel; so far each need is a `Platform` method.
 - `MouseCursor` diagnostics (`debugFillProperties`, `toString(minLevel)`). Trigger: diagnostics.
 - An `EmbedderClient` hook for restoration data that arrives while the app runs (Flutter's `push` message on `SystemChannels.restoration`). Trigger: an embedder whose OS hands it new restoration data after start; until then the host calls `RestorationManager::handle_restoration_update_from_engine`.
-- The rest of text input (`TextSelectionDelegate`, `ScribbleClient`, `DeltaTextInputClient`, `TextInputControl` / `setInputControl`, `SystemContextMenuController`, `requestAutofill`, `finishAutofillContext`, `setSelectionRects` reaching the host, `updateStyle` reaching the host), autofill's `AutofillClient` / `AutofillScope` / `AutofillScopeMixin`, the clipboard, asset bundles. Trigger: `EditableText`, scribble, a custom input control, or a host that implements autofill.
+- The rest of text input (`ScribbleClient`, `DeltaTextInputClient`, `TextInputControl` / `setInputControl`, `SystemContextMenuController`, `setSelectionRects` reaching the host, `updateStyle` reaching the host), asset bundles. Trigger: `EditableText`, scribble, a custom input control, or a host that implements autofill. The `request_autofill` / `finish_autofill_context` interface exists; the host no-ops.
 - The rest of `SystemChrome` (`setPreferredOrientations`, `setEnabledSystemUIMode` with `restoreSystemUIOverlays` — which restores what only that call sets — `setSystemUIChangeCallback`, `handleAppLifecycleStateChanged`, `DeviceOrientation`, `SystemUiMode`); `SystemUiOverlay` is here, as the type `setEnabledSystemUIMode` and `SystemUiChangeCallback` name. Trigger: an orientation-aware or fullscreen-capable host, and the app lifecycle.
 - The raw key path: `RawKeyboard`, `RawKeyEvent`, `RawKeyEventData*`, `KeyMessage`, `KeyMessageHandler`, `KeyDataTransitMode`, `KeyEventManager.handleRawKeyMessage`; Flutter has deprecated all of it. Trigger: an embedder that can only send raw key data.
 - `debugPrintKeyboardEvents` and `HardwareKeyboard._logEventIfIrregular`. Trigger: `services/debug.dart`.

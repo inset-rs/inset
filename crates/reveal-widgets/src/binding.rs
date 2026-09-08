@@ -3,12 +3,13 @@
 //!
 //! `WidgetsBindingObserver` and the observer callbacks (locale, metrics, lifecycle, memory,
 //! back gestures, view focus), `performReassemble`, and the platform menu / windowing owners
-//! wait.
+//! wait. Lifecycle observer methods exist so a listener can override them;
+//! `handleAppLifecycleStateChanged` waits.
 
 use std::rc::Rc;
 use std::time::Duration;
 
-use reveal_embedder::Locale;
+use reveal_embedder::{AppExitResponse, AppLifecycleState, Locale};
 use reveal_foundation::{App, Handle, Listener, Timer};
 use reveal_rendering::{RendererBinding, RendererBindingOverridesObject};
 use reveal_scheduler::SchedulerBinding;
@@ -42,9 +43,10 @@ pub struct WidgetsBinding {
 /// accessibility settings. It is used to implement features such as `MediaQuery`.
 ///
 /// A `State` registers itself through the object twin
-/// [`WidgetsBindingObserverObject`], whose handle is the observer. The route, lifecycle,
+/// [`WidgetsBindingObserverObject`], whose handle is the observer. The route,
 /// memory-pressure, back-gesture, and view-focus callbacks wait with their platform
-/// events; only the ones the renderer raises, and the locale list, are here.
+/// events; only the ones the renderer raises, the locale list, and the lifecycle
+/// observer methods are here. `handleAppLifecycleStateChanged` waits.
 pub trait WidgetsBindingObserver {
     /// Called when the application's dimensions change. For example, when a phone is rotated.
     fn did_change_metrics(&self, app: &mut App) {
@@ -67,6 +69,33 @@ pub trait WidgetsBindingObserver {
     /// Called when the platform brightness changes.
     fn did_change_platform_brightness(&self, app: &mut App) {
         let _ = app;
+    }
+
+    /// Called when the system puts the app in the background or returns the app to the
+    /// foreground.
+    ///
+    /// This method exposes notifications from `SystemChannels.lifecycle`.
+    ///
+    /// See also:
+    ///
+    ///  * [`AppLifecycleListener`](crate::AppLifecycleListener), an alternative API for
+    ///    responding to application lifecycle changes.
+    fn did_change_app_lifecycle_state(&self, app: &mut App, state: AppLifecycleState) {
+        let _ = (app, state);
+    }
+
+    /// Called when a request is received from the system to exit the application.
+    ///
+    /// If any observer responds with [`AppExitResponse::Cancel`], it will cancel the exit.
+    /// All observers will be asked before exiting.
+    ///
+    /// See also:
+    ///
+    ///  * `ServicesBinding::exit_application` for a function to call that will request
+    ///    that the application exits.
+    fn did_request_app_exit(&self, app: &mut App) -> AppExitResponse {
+        let _ = app;
+        AppExitResponse::Exit
     }
 
     /// Called when the system changes the set of currently active accessibility features.
@@ -98,6 +127,17 @@ pub trait WidgetsBindingObserverObject: Sized + 'static {
         let _ = app;
     }
 
+    /// See [`WidgetsBindingObserver::did_change_app_lifecycle_state`].
+    fn did_change_app_lifecycle_state(self: Handle<Self>, app: &mut App, state: AppLifecycleState) {
+        let _ = (app, state);
+    }
+
+    /// See [`WidgetsBindingObserver::did_request_app_exit`].
+    fn did_request_app_exit(self: Handle<Self>, app: &mut App) -> AppExitResponse {
+        let _ = app;
+        AppExitResponse::Exit
+    }
+
     /// See [`WidgetsBindingObserver::did_change_accessibility_features`].
     fn did_change_accessibility_features(self: Handle<Self>, app: &mut App) {
         let _ = app;
@@ -119,6 +159,14 @@ impl<T: WidgetsBindingObserverObject> WidgetsBindingObserver for Handle<T> {
 
     fn did_change_platform_brightness(&self, app: &mut App) {
         T::did_change_platform_brightness(*self, app);
+    }
+
+    fn did_change_app_lifecycle_state(&self, app: &mut App, state: AppLifecycleState) {
+        T::did_change_app_lifecycle_state(*self, app, state);
+    }
+
+    fn did_request_app_exit(&self, app: &mut App) -> AppExitResponse {
+        T::did_request_app_exit(*self, app)
     }
 
     fn did_change_accessibility_features(&self, app: &mut App) {
@@ -288,6 +336,11 @@ impl WidgetsBinding {
         let before = observers.len();
         observers.retain(|registered| !Rc::ptr_eq(registered, observer));
         observers.len() < before
+    }
+
+    #[cfg(test)]
+    pub(crate) fn observer_count(self: Handle<Self>, app: &App) -> usize {
+        app.get(self).observers.len()
     }
 
     /// Called when the platform's text scale factor changes: tells the observers.

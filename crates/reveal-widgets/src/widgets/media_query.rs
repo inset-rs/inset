@@ -593,8 +593,10 @@ impl MediaQueryData {
             navigation_mode: platform_data
                 .map_or(NavigationMode::Traditional, |data| data.navigation_mode),
             gesture_settings: DeviceGestureSettings::from_view(view),
-            supports_showing_system_context_menu: platform_data
-                .is_some_and(|data| data.supports_showing_system_context_menu),
+            supports_showing_system_context_menu: platform_data.map_or_else(
+                || app.platform().supports_showing_system_context_menu(),
+                |data| data.supports_showing_system_context_menu,
+            ),
             line_height_scale_factor_override: platform_data
                 .and_then(|data| data.line_height_scale_factor_override),
             letter_spacing_override: platform_data.and_then(|data| data.letter_spacing_override),

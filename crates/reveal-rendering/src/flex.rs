@@ -15,6 +15,7 @@ use crate::box_::{
     AnyRenderBox, BoxConstraints, BoxHitTestResult, BoxParentData, ContainerBoxParentData,
     DryLayoutFailure, RenderBox, RenderBoxContainerDefaultsMixin, RenderBoxData,
 };
+use crate::layer::{ClipRectLayer, LayerHandle};
 use crate::layout_helper::ChildLayoutHelper;
 use crate::object::{
     AnyRenderObject, ContainerParentData, ContainerParentDataMixin, ContainerRenderObjectData,
@@ -405,6 +406,7 @@ pub struct RenderFlexData {
     spacing: f64,
     /// Set during layout if overflow occurred on the main axis.
     overflow: f64,
+    clip_rect_layer: LayerHandle<Handle<ClipRectLayer>>,
 }
 
 impl RenderFlexData {
@@ -424,6 +426,7 @@ impl RenderFlexData {
             clip_behavior: Clip::None,
             spacing: 0.0,
             overflow: 0.0,
+            clip_rect_layer: LayerHandle::new(),
         }
     }
 }
@@ -1118,13 +1121,31 @@ pub trait RenderFlexMixin:
         }
 
         let clip_behavior = self.clip_behavior(app);
-        context.push_clip_rect(
+        let old = self.flex_data(app).clip_rect_layer.layer();
+        let layer = context.push_clip_rect(
             app,
+            self.as_object().needs_compositing(app),
             offset,
             Offset::ZERO & size,
             |app, context, offset| self.default_paint(app, context, offset),
             clip_behavior,
+            old,
         );
+        LayerHandle::set_layer(
+            app,
+            |app| &mut self.flex_data_mut(app).clip_rect_layer,
+            layer,
+        );
+    }
+
+    /// Flutter's `dispose`: drop the clip layer handle, then `super.dispose()`.
+    fn dispose(self: RenderHandle<Self>, app: &mut App) {
+        LayerHandle::set_layer(
+            app,
+            |app| &mut self.flex_data_mut(app).clip_rect_layer,
+            None,
+        );
+        crate::object::RenderObjectBase::dispose(self, app);
     }
 
     /// A flex child gets a [`FlexParentData`].
@@ -1454,6 +1475,10 @@ impl RenderObject for RenderFlex {
     ) {
         RenderFlexMixin::paint(self, app, context, offset)
     }
+
+    fn dispose(self: RenderHandle<Self>, app: &mut App) {
+        RenderFlexMixin::dispose(self, app)
+    }
 }
 
 impl RenderBox for RenderFlex {
@@ -1507,9 +1532,10 @@ mod tests {
 
     use super::*;
     use crate::box_::BoxHitTestEntry;
-    use crate::layer::{CompositedLayer, PaintItem};
+    use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer, PictureLayer};
     use crate::pipeline_owner::PipelineOwner;
     use crate::proxy_box::RenderRepaintBoundary;
+    use reveal_embedder::valo::Op;
 
     /// A leaf that takes its preferred size where the constraints allow, and answers hit tests
     /// within its bounds.
@@ -1561,6 +1587,12 @@ mod tests {
         child.box_parent_data(app).offset
     }
 
+    fn schedule_root_paint(app: &mut App, node: AnyRenderObject) {
+        let root = OffsetLayer::new(app, Offset::ZERO);
+        root.as_layer().attach(app, node.id());
+        node.schedule_initial_paint(app, root.as_container_layer());
+    }
+
     /// The test binding's first frame: attach, lay the root out, schedule and flush paint.
     fn first_frame(
         app: &mut App,
@@ -1570,10 +1602,23 @@ mod tests {
         let owner = PipelineOwner::new(app, None);
         owner.set_root_node(app, Some(root.as_object()));
         root.layout(app, constraints, false);
-        root.as_object()
-            .schedule_initial_paint(app, CompositedLayer::default());
+        schedule_root_paint(app, root.as_object());
+        owner.flush_compositing_bits(app);
         owner.flush_paint(app);
         owner
+    }
+
+    fn picture_has_clip(app: &App, boundary: AnyRenderObject) -> bool {
+        let layer = boundary.debug_layer(app).expect("painted");
+        layer
+            .depth_first_iterate_children(app)
+            .into_iter()
+            .filter_map(|child| {
+                app.handle::<PictureLayer>(child.id())
+                    .and_then(|picture| picture.picture(app).map(|p| p.ops().to_vec()))
+            })
+            .flatten()
+            .any(|op| matches!(op, Op::ClipPath { .. }))
     }
 
     fn hit_boxes(result: &HitTestResult) -> Vec<AnyRenderBox> {
@@ -1882,11 +1927,7 @@ mod tests {
             );
 
             assert_eq!(flex.size(&app), Size::new(100.0, 20.0));
-            let layer = root.as_object().debug_layer(&app).expect("painted");
-            let clipped = layer
-                .items
-                .iter()
-                .any(|item| matches!(item, PaintItem::PushClipRect { .. }));
+            let clipped = picture_has_clip(&app, root.as_object());
             assert_eq!(clipped, clips, "{clip_behavior:?}");
             let _ = owner;
         }

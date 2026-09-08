@@ -14,6 +14,7 @@ use crate::box_::{
     AnyRenderBox, BoxConstraints, BoxHitTestResult, BoxParentData, ContainerBoxParentData,
     RenderBox, RenderBoxContainerDefaultsMixin, RenderBoxData,
 };
+use crate::layer::{ClipRectLayer, LayerHandle};
 use crate::layout_helper::ChildLayoutHelper;
 use crate::object::{
     AnyRenderObject, ContainerParentData, ContainerParentDataMixin, ContainerRenderObjectData,
@@ -439,6 +440,7 @@ pub struct RenderStackData {
     fit: StackFit,
     clip_behavior: Clip,
     resolved_alignment_cache: Option<Alignment>,
+    clip_rect_layer: LayerHandle<Handle<ClipRectLayer>>,
 }
 
 impl RenderStackData {
@@ -451,6 +453,7 @@ impl RenderStackData {
             fit: StackFit::Loose,
             clip_behavior: Clip::HardEdge,
             resolved_alignment_cache: None,
+            clip_rect_layer: LayerHandle::new(),
         }
     }
 }
@@ -824,16 +827,39 @@ pub trait RenderStackBase:
         let clip_behavior = self.clip_behavior(app);
         if clip_behavior != Clip::None && self.stack_data(app).has_visual_overflow {
             let size = self.size(app);
-            context.push_clip_rect(
+            let old = self.stack_data(app).clip_rect_layer.layer();
+            let layer = context.push_clip_rect(
                 app,
+                self.as_object().needs_compositing(app),
                 offset,
                 Offset::ZERO & size,
                 |app, context, offset| self.paint_stack(app, context, offset),
                 clip_behavior,
+                old,
+            );
+            LayerHandle::set_layer(
+                app,
+                |app| &mut self.stack_data_mut(app).clip_rect_layer,
+                layer,
             );
         } else {
+            LayerHandle::set_layer(
+                app,
+                |app| &mut self.stack_data_mut(app).clip_rect_layer,
+                None,
+            );
             self.paint_stack(app, context, offset);
         }
+    }
+
+    /// Flutter's `dispose`: drop the clip layer handle, then `super.dispose()`.
+    fn dispose(self: RenderHandle<Self>, app: &mut App) {
+        LayerHandle::set_layer(
+            app,
+            |app| &mut self.stack_data_mut(app).clip_rect_layer,
+            None,
+        );
+        crate::object::RenderObjectBase::dispose(self, app);
     }
 }
 
@@ -929,6 +955,10 @@ impl RenderObject for RenderStack {
         offset: Offset,
     ) {
         RenderStackBase::paint(self, app, context, offset)
+    }
+
+    fn dispose(self: RenderHandle<Self>, app: &mut App) {
+        RenderStackBase::dispose(self, app)
     }
 }
 
@@ -1113,6 +1143,10 @@ impl RenderObject for RenderIndexedStack {
     ) {
         RenderStackBase::paint(self, app, context, offset)
     }
+
+    fn dispose(self: RenderHandle<Self>, app: &mut App) {
+        RenderStackBase::dispose(self, app)
+    }
 }
 
 impl RenderBox for RenderIndexedStack {
@@ -1174,10 +1208,11 @@ mod tests {
 
     use super::*;
     use crate::flex::{MainAxisSize, RenderFlex};
-    use crate::layer::CompositedLayer;
+    use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer, PictureLayer};
     use crate::pipeline_owner::PipelineOwner;
     use crate::proxy_box::{RenderConstrainedBox, RenderRepaintBoundary};
     use crate::shifted_box::RenderPadding;
+    use reveal_embedder::valo::Op;
     use reveal_painting::EdgeInsetsGeometry;
 
     /// A leaf that takes its preferred size where the constraints allow, and counts its paints.
@@ -1227,6 +1262,12 @@ mod tests {
         (box_, paints)
     }
 
+    fn schedule_root_paint(app: &mut App, node: AnyRenderObject) {
+        let root = OffsetLayer::new(app, Offset::ZERO);
+        root.as_layer().attach(app, node.id());
+        node.schedule_initial_paint(app, root.as_container_layer());
+    }
+
     /// The test binding's first frame: attach, lay the root out, schedule and flush paint.
     fn first_frame(
         app: &mut App,
@@ -1236,10 +1277,23 @@ mod tests {
         let owner = PipelineOwner::new(app, None);
         owner.set_root_node(app, Some(root.as_object()));
         root.layout(app, constraints, false);
-        root.as_object()
-            .schedule_initial_paint(app, CompositedLayer::default());
+        schedule_root_paint(app, root.as_object());
+        owner.flush_compositing_bits(app);
         owner.flush_paint(app);
         owner
+    }
+
+    fn picture_has_clip(app: &App, boundary: AnyRenderObject) -> bool {
+        let layer = boundary.debug_layer(app).expect("painted");
+        layer
+            .depth_first_iterate_children(app)
+            .into_iter()
+            .filter_map(|child| {
+                app.handle::<PictureLayer>(child.id())
+                    .and_then(|picture| picture.picture(app).map(|p| p.ops().to_vec()))
+            })
+            .flatten()
+            .any(|op| matches!(op, Op::ClipPath { .. }))
     }
 
     /// `stack_test.dart`: a positioned child is sized and placed by its [`RelativeRect`], and does
@@ -1405,6 +1459,7 @@ mod tests {
 
         stack.set_index(&mut app, Some(0));
         owner.flush_layout(&mut app);
+        owner.flush_compositing_bits(&mut app);
         owner.flush_paint(&mut app);
         assert_eq!(first_paints.get(), 1);
         assert_eq!(second_paints.get(), 1);
@@ -1430,11 +1485,7 @@ mod tests {
                 BoxConstraints::tight(Size::new(100.0, 100.0)),
             );
 
-            let layer = root.as_object().debug_layer(&app).expect("painted");
-            let clipped = layer
-                .items
-                .iter()
-                .any(|item| matches!(item, crate::layer::PaintItem::PushClipRect { .. }));
+            let clipped = picture_has_clip(&app, root.as_object());
             assert_eq!(clipped, clips, "{clip_behavior:?}");
             let _ = owner;
         }

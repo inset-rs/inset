@@ -9,11 +9,12 @@ use std::time::Duration;
 
 use reveal_animation::Curve;
 use reveal_embedder::{Clip, Matrix4, Offset, Rect, Size, clamp_double};
-use reveal_foundation::{App, HandleId, Listenable, Listener};
+use reveal_foundation::{App, Handle, HandleId, Listenable, Listener};
 use reveal_painting::{Axis, AxisDirection, axis_direction_to_axis, transform_rect};
 
 use crate::box_::{BoxConstraints, BoxHitTestResult, RenderBox, RenderBoxData};
 use crate::debug::debug_check_has_bounded_axis;
+use crate::layer::{ClipRectLayer, LayerHandle};
 use crate::object::{
     AnyRenderObject, ContainerRenderObjectData, ContainerRenderObjectMixin, RenderHandle,
     RenderObject, RenderObjectData, debug_checking_intrinsics, resolve, translate,
@@ -366,6 +367,7 @@ pub struct RenderViewportBaseData {
     calculated_cache_extent: Option<f64>,
     paint_order: SliverPaintOrder,
     clip_behavior: Clip,
+    clip_rect_layer: LayerHandle<Handle<ClipRectLayer>>,
 }
 
 impl RenderViewportBaseData {
@@ -386,6 +388,7 @@ impl RenderViewportBaseData {
             calculated_cache_extent: None,
             paint_order: SliverPaintOrder::FirstIsTop,
             clip_behavior: Clip::HardEdge,
+            clip_rect_layer: LayerHandle::new(),
         }
     }
 }
@@ -848,16 +851,39 @@ pub trait RenderViewportBase:
         let clip_behavior = self.clip_behavior(app);
         if self.has_visual_overflow(app) && clip_behavior != Clip::None {
             let bounds = Offset::ZERO & self.size(app);
-            context.push_clip_rect(
+            let old = self.viewport_data(app).clip_rect_layer.layer();
+            let layer = context.push_clip_rect(
                 app,
+                self.as_object().needs_compositing(app),
                 offset,
                 bounds,
                 |app, context, offset| self.paint_contents(app, context, offset),
                 clip_behavior,
+                old,
+            );
+            LayerHandle::set_layer(
+                app,
+                |app| &mut self.viewport_data_mut(app).clip_rect_layer,
+                layer,
             );
         } else {
+            LayerHandle::set_layer(
+                app,
+                |app| &mut self.viewport_data_mut(app).clip_rect_layer,
+                None,
+            );
             self.paint_contents(app, context, offset);
         }
+    }
+
+    /// Flutter's `dispose`: drop the clip layer handle, then `super.dispose()`.
+    fn dispose(self: RenderHandle<Self>, app: &mut App) {
+        LayerHandle::set_layer(
+            app,
+            |app| &mut self.viewport_data_mut(app).clip_rect_layer,
+            None,
+        );
+        crate::object::RenderObjectBase::dispose(self, app);
     }
 
     /// Flutter's `_paintContents`.
@@ -1860,6 +1886,10 @@ impl RenderObject for RenderViewport {
         RenderViewportBase::paint(self, app, context, offset)
     }
 
+    fn dispose(self: RenderHandle<Self>, app: &mut App) {
+        RenderViewportBase::dispose(self, app)
+    }
+
     fn show_on_screen(
         self: RenderHandle<Self>,
         app: &mut App,
@@ -2327,6 +2357,10 @@ impl RenderObject for RenderShrinkWrappingViewport {
         RenderViewportBase::paint(self, app, context, offset)
     }
 
+    fn dispose(self: RenderHandle<Self>, app: &mut App) {
+        RenderViewportBase::dispose(self, app)
+    }
+
     fn show_on_screen(
         self: RenderHandle<Self>,
         app: &mut App,
@@ -2401,7 +2435,7 @@ mod tests {
 
     use super::*;
     use crate::box_::BoxConstraints;
-    use crate::layer::CompositedLayer;
+    use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer};
     use crate::proxy_box::RenderConstrainedBox;
     use crate::sliver::{RenderSliver, RenderSliverToBoxAdapter};
     use crate::viewport_offset::{FixedViewportOffset, ViewportOffset};
@@ -2483,8 +2517,11 @@ mod tests {
         let owner = PipelineOwner::new(app, None);
         owner.set_root_node(app, Some(root.as_object()));
         root.layout(app, constraints, false);
+        let paint_root = OffsetLayer::new(app, Offset::ZERO);
+        paint_root.as_layer().attach(app, root.as_object().id());
         root.as_object()
-            .schedule_initial_paint(app, CompositedLayer::default());
+            .schedule_initial_paint(app, paint_root.as_container_layer());
+        owner.flush_compositing_bits(app);
         owner.flush_paint(app);
         owner
     }

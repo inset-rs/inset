@@ -318,6 +318,238 @@ impl PartialEq for AnyTextInputClient {
 
 impl Eq for AnyTextInputClient {}
 
+/// An interface for manipulating the selection, to be used by the implementor
+/// of the toolbar widget.
+pub trait TextSelectionDelegate: Sized + 'static {
+    /// Gets the current text input.
+    fn text_editing_value(self: Handle<Self>, app: &App) -> TextEditingValue;
+
+    /// Indicates that the user has requested the delegate to replace its current
+    /// text editing state with `value`.
+    ///
+    /// The new `value` is treated as user input and thus may subject to input
+    /// formatting.
+    fn user_update_text_editing_value(
+        self: Handle<Self>,
+        app: &mut App,
+        value: TextEditingValue,
+        cause: SelectionChangedCause,
+    );
+
+    /// Hides the text selection toolbar.
+    ///
+    /// By default, `hide_handles` is true, and the toolbar is hidden along with its
+    /// handles. If `hide_handles` is set to false, then the toolbar will be hidden
+    /// but the handles will remain.
+    fn hide_toolbar(self: Handle<Self>, app: &mut App, hide_handles: bool) {
+        let _ = (self, app, hide_handles);
+    }
+
+    /// Brings the provided [`TextPosition`] into the visible area of the text
+    /// input.
+    fn bring_into_view(self: Handle<Self>, app: &mut App, position: reveal_embedder::TextPosition) {
+        let _ = (self, app, position);
+    }
+
+    /// Whether cut is enabled.
+    fn cut_enabled(self: Handle<Self>, _app: &App) -> bool {
+        true
+    }
+
+    /// Whether copy is enabled.
+    fn copy_enabled(self: Handle<Self>, _app: &App) -> bool {
+        true
+    }
+
+    /// Whether paste is enabled.
+    fn paste_enabled(self: Handle<Self>, _app: &App) -> bool {
+        true
+    }
+
+    /// Whether select all is enabled.
+    fn select_all_enabled(self: Handle<Self>, _app: &App) -> bool {
+        true
+    }
+
+    /// Whether look up is enabled.
+    fn look_up_enabled(self: Handle<Self>, _app: &App) -> bool {
+        true
+    }
+
+    /// Whether search web is enabled.
+    fn search_web_enabled(self: Handle<Self>, _app: &App) -> bool {
+        true
+    }
+
+    /// Whether share is enabled.
+    fn share_enabled(self: Handle<Self>, _app: &App) -> bool {
+        true
+    }
+
+    /// Whether Live Text input is enabled.
+    fn live_text_input_enabled(self: Handle<Self>, _app: &App) -> bool {
+        false
+    }
+
+    /// Cut current selection to [`crate::Clipboard`].
+    fn cut_selection(self: Handle<Self>, app: &mut App, cause: SelectionChangedCause) {
+        let _ = (self, app, cause);
+    }
+
+    /// Paste text from [`crate::Clipboard`].
+    fn paste_text(self: Handle<Self>, app: &mut App, cause: SelectionChangedCause) {
+        let _ = (self, app, cause);
+    }
+
+    /// Set the current selection to contain the entire text value.
+    fn select_all(self: Handle<Self>, app: &mut App, cause: SelectionChangedCause) {
+        let _ = (self, app, cause);
+    }
+
+    /// Copy current selection to [`crate::Clipboard`].
+    fn copy_selection(self: Handle<Self>, app: &mut App, cause: SelectionChangedCause) {
+        let _ = (self, app, cause);
+    }
+
+    /// This delegate as the erased [`AnyTextSelectionDelegate`].
+    fn as_text_selection_delegate(self: Handle<Self>) -> AnyTextSelectionDelegate {
+        AnyTextSelectionDelegate {
+            id: self.id(),
+            vtable: const { &TextSelectionDelegateVTable::of::<Self>() },
+        }
+    }
+}
+
+struct TextSelectionDelegateVTable {
+    text_editing_value: fn(&App, HandleId) -> TextEditingValue,
+    user_update_text_editing_value: fn(&mut App, HandleId, TextEditingValue, SelectionChangedCause),
+    hide_toolbar: fn(&mut App, HandleId, bool),
+    bring_into_view: fn(&mut App, HandleId, reveal_embedder::TextPosition),
+    cut_enabled: fn(&App, HandleId) -> bool,
+    copy_enabled: fn(&App, HandleId) -> bool,
+    paste_enabled: fn(&App, HandleId) -> bool,
+    select_all_enabled: fn(&App, HandleId) -> bool,
+    look_up_enabled: fn(&App, HandleId) -> bool,
+    search_web_enabled: fn(&App, HandleId) -> bool,
+    share_enabled: fn(&App, HandleId) -> bool,
+    live_text_input_enabled: fn(&App, HandleId) -> bool,
+    cut_selection: fn(&mut App, HandleId, SelectionChangedCause),
+    paste_text: fn(&mut App, HandleId, SelectionChangedCause),
+    select_all: fn(&mut App, HandleId, SelectionChangedCause),
+    copy_selection: fn(&mut App, HandleId, SelectionChangedCause),
+}
+
+impl TextSelectionDelegateVTable {
+    const fn of<D: TextSelectionDelegate>() -> TextSelectionDelegateVTable {
+        TextSelectionDelegateVTable {
+            text_editing_value: |app, id| D::text_editing_value(resolve(id), app),
+            user_update_text_editing_value: |app, id, value, cause| {
+                D::user_update_text_editing_value(resolve(id), app, value, cause)
+            },
+            hide_toolbar: |app, id, hide_handles| D::hide_toolbar(resolve(id), app, hide_handles),
+            bring_into_view: |app, id, position| D::bring_into_view(resolve(id), app, position),
+            cut_enabled: |app, id| D::cut_enabled(resolve(id), app),
+            copy_enabled: |app, id| D::copy_enabled(resolve(id), app),
+            paste_enabled: |app, id| D::paste_enabled(resolve(id), app),
+            select_all_enabled: |app, id| D::select_all_enabled(resolve(id), app),
+            look_up_enabled: |app, id| D::look_up_enabled(resolve(id), app),
+            search_web_enabled: |app, id| D::search_web_enabled(resolve(id), app),
+            share_enabled: |app, id| D::share_enabled(resolve(id), app),
+            live_text_input_enabled: |app, id| D::live_text_input_enabled(resolve(id), app),
+            cut_selection: |app, id, cause| D::cut_selection(resolve(id), app, cause),
+            paste_text: |app, id, cause| D::paste_text(resolve(id), app, cause),
+            select_all: |app, id, cause| D::select_all(resolve(id), app, cause),
+            copy_selection: |app, id, cause| D::copy_selection(resolve(id), app, cause),
+        }
+    }
+}
+
+/// Erased [`TextSelectionDelegate`]: one identity and a static vtable.
+#[derive(Clone, Copy)]
+pub struct AnyTextSelectionDelegate {
+    id: HandleId,
+    vtable: &'static TextSelectionDelegateVTable,
+}
+
+impl AnyTextSelectionDelegate {
+    pub fn text_editing_value(self, app: &App) -> TextEditingValue {
+        (self.vtable.text_editing_value)(app, self.id)
+    }
+
+    pub fn user_update_text_editing_value(
+        self,
+        app: &mut App,
+        value: TextEditingValue,
+        cause: SelectionChangedCause,
+    ) {
+        (self.vtable.user_update_text_editing_value)(app, self.id, value, cause);
+    }
+
+    pub fn hide_toolbar(self, app: &mut App, hide_handles: bool) {
+        (self.vtable.hide_toolbar)(app, self.id, hide_handles);
+    }
+
+    pub fn bring_into_view(self, app: &mut App, position: reveal_embedder::TextPosition) {
+        (self.vtable.bring_into_view)(app, self.id, position);
+    }
+
+    pub fn cut_enabled(self, app: &App) -> bool {
+        (self.vtable.cut_enabled)(app, self.id)
+    }
+
+    pub fn copy_enabled(self, app: &App) -> bool {
+        (self.vtable.copy_enabled)(app, self.id)
+    }
+
+    pub fn paste_enabled(self, app: &App) -> bool {
+        (self.vtable.paste_enabled)(app, self.id)
+    }
+
+    pub fn select_all_enabled(self, app: &App) -> bool {
+        (self.vtable.select_all_enabled)(app, self.id)
+    }
+
+    pub fn look_up_enabled(self, app: &App) -> bool {
+        (self.vtable.look_up_enabled)(app, self.id)
+    }
+
+    pub fn search_web_enabled(self, app: &App) -> bool {
+        (self.vtable.search_web_enabled)(app, self.id)
+    }
+
+    pub fn share_enabled(self, app: &App) -> bool {
+        (self.vtable.share_enabled)(app, self.id)
+    }
+
+    pub fn live_text_input_enabled(self, app: &App) -> bool {
+        (self.vtable.live_text_input_enabled)(app, self.id)
+    }
+
+    pub fn cut_selection(self, app: &mut App, cause: SelectionChangedCause) {
+        (self.vtable.cut_selection)(app, self.id, cause);
+    }
+
+    pub fn paste_text(self, app: &mut App, cause: SelectionChangedCause) {
+        (self.vtable.paste_text)(app, self.id, cause);
+    }
+
+    pub fn select_all(self, app: &mut App, cause: SelectionChangedCause) {
+        (self.vtable.select_all)(app, self.id, cause);
+    }
+
+    pub fn copy_selection(self, app: &mut App, cause: SelectionChangedCause) {
+        (self.vtable.copy_selection)(app, self.id, cause);
+    }
+}
+
+impl PartialEq for AnyTextSelectionDelegate {
+    fn eq(&self, other: &AnyTextSelectionDelegate) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for AnyTextSelectionDelegate {}
+
 /// An interface for interacting with a text input control.
 ///
 /// See also:
@@ -498,6 +730,14 @@ impl TextInput {
         app.singleton::<TextInput>()
     }
 
+    /// The currently attached connection, if any.
+    pub fn current_connection(
+        self: Handle<Self>,
+        app: &App,
+    ) -> Option<Handle<TextInputConnection>> {
+        app.get(self).current_connection
+    }
+
     /// Ensure that a [`TextInput`] instance has been set up so that the platform
     /// can handle messages on the text input method channel.
     pub fn ensure_initialized(app: &mut App) {
@@ -537,6 +777,59 @@ impl TextInput {
         input.attach_connection(app, connection, configuration);
         connection
     }
+
+    /// Requests the system autofill UI to appear.
+    ///
+    /// Currently only works on Android. Other platforms do not respond to this
+    /// message.
+    ///
+    /// See also:
+    ///
+    ///  * `EditableText`, a `TextInputClient` that calls this method when focused.
+    pub fn request_autofill(_app: &mut App) {}
+
+    /// Finishes the current autofill context, and potentially saves the user
+    /// input for future use if `should_save` is true.
+    ///
+    /// Typically, this method should be called when the user has finalized their
+    /// input. For example, in a `Form`, it's typically done immediately before or
+    /// after its content is submitted.
+    ///
+    /// The topmost [`crate::AutofillScope`]s also call [`finish_autofill_context`]
+    /// automatically when they are disposed.
+    ///
+    /// An autofill context is a collection of input fields that live in the
+    /// platform's text input plugin. The platform is encouraged to save the user
+    /// input stored in the current autofill context before the context is
+    /// destroyed, when [`TextInput::finish_autofill_context`] is called with
+    /// `should_save` set to true.
+    ///
+    /// Currently, there can only be at most one autofill context at any given
+    /// time. When any input field in an autofill group requests autofill (which
+    /// is done automatically when an autofillable `EditableText` gains focus),
+    /// the current autofill context will merge the content of that group into
+    /// itself. When there isn't an existing autofill context, one will be created
+    /// to hold the newly added input fields from the group.
+    ///
+    /// Once added to an autofill context, an input field will stay in the context
+    /// until the context is destroyed. To prevent leaks, call
+    /// [`TextInput::finish_autofill_context`] to signal the text input plugin that
+    /// the user has finalized their input in the current autofill context. The
+    /// platform text input plugin either encourages or discourages the platform
+    /// from saving the user input based on the value of the `should_save`
+    /// parameter. The platform usually shows a "Save for autofill?" prompt for
+    /// user confirmation.
+    ///
+    /// On many platforms, calling [`finish_autofill_context`] shows the save user
+    /// input dialog and disrupts the user's flow. Ideally the dialog should only
+    /// be shown no more than once for every screen. Consider removing premature
+    /// [`finish_autofill_context`] calls to prevent showing the save user input UI
+    /// too frequently. However, calling [`finish_autofill_context`] when there's no
+    /// existing autofill context usually does not bring up the save user input
+    /// UI.
+    ///
+    /// Dart's default is `shouldSave == true`.
+    pub fn finish_autofill_context(_app: &mut App, _should_save: bool) {}
 
     fn attach_connection(
         self: Handle<Self>,

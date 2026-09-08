@@ -28,6 +28,7 @@ mod segmented_control;
 mod sheet;
 #[cfg(test)]
 mod test_support;
+mod text_field;
 mod text_theme;
 mod theme;
 
@@ -54,5 +55,6 @@ pub use route::*;
 pub use scrollbar::*;
 pub use segmented_control::*;
 pub use sheet::*;
+pub use text_field::*;
 pub use text_theme::*;
 pub use theme::*;

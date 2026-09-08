@@ -89,6 +89,17 @@ pub fn transform_rect(transform: &Matrix4, rect: Rect) -> Rect {
     Rect::from_ltrb(left, top, right, bottom)
 }
 
+/// Flutter `MatrixUtils.inverseTransformRect`.
+pub fn inverse_transform_rect(transform: Matrix4, rect: Rect) -> Rect {
+    if transform == Matrix4::IDENTITY {
+        return rect;
+    }
+    let inverted = transform
+        .invert()
+        .unwrap_or_else(|| Matrix4::from_flutter_array(&[0.0; 16]));
+    transform_rect(&inverted, rect)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

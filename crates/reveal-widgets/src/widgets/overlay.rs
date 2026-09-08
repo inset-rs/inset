@@ -9,12 +9,13 @@ use reveal_embedder::{Clip, Matrix4, Offset, Size, TextDirection};
 use reveal_foundation::{App, Handle, ListenableObject, Listener, ValueNotifier};
 use reveal_painting::{Alignment, AlignmentGeometry};
 use reveal_rendering::{
-    AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, Constraints,
+    AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, ClipRectLayer, Constraints,
     ContainerBoxParentData, ContainerParentData, ContainerParentDataMixin,
-    ContainerRenderObjectData, ContainerRenderObjectMixin, PaintingContext, ParentData,
-    PipelineOwner, RenderBox, RenderBoxData, RenderHandle, RenderObject, RenderObjectData,
-    RenderObjectWithChildData, RenderObjectWithChildMixin, RenderObjectWithLayoutCallbackData,
-    RenderObjectWithLayoutCallbackMixin, RenderProxyBoxMixin, StackParentData,
+    ContainerRenderObjectData, ContainerRenderObjectMixin, LayerHandle, PaintingContext,
+    ParentData, PipelineOwner, RenderBox, RenderBoxData, RenderHandle, RenderObject,
+    RenderObjectData, RenderObjectWithChildData, RenderObjectWithChildMixin,
+    RenderObjectWithLayoutCallbackData, RenderObjectWithLayoutCallbackMixin, RenderProxyBoxMixin,
+    StackParentData,
 };
 use reveal_scheduler::{
     FrameCallback, SchedulerBinding, SchedulerPhase, Ticker, TickerCallback, TickerProviderObject,
@@ -1778,6 +1779,7 @@ pub struct RenderTheater {
     text_direction: TextDirection,
     skip_count: usize,
     clip_behavior: Clip,
+    clip_rect_layer: LayerHandle<Handle<ClipRectLayer>>,
     always_size_to_content: bool,
     laying_out_size_determining_child: bool,
 }
@@ -1802,6 +1804,7 @@ impl RenderTheater {
                 text_direction,
                 skip_count,
                 clip_behavior,
+                clip_rect_layer: LayerHandle::new(),
                 always_size_to_content,
                 laying_out_size_determining_child: false,
             },
@@ -2085,16 +2088,26 @@ impl RenderObject for RenderTheater {
         let clip_behavior = self.clip_behavior(app);
         if clip_behavior != Clip::None {
             let size = self.size(app);
-            context.push_clip_rect(
+            let old = self.get(app).clip_rect_layer.layer();
+            let layer = context.push_clip_rect(
                 app,
+                self.as_object().needs_compositing(app),
                 offset,
                 Offset::ZERO & size,
                 |app, context, offset| RenderTheaterMixin::paint(self, app, context, offset),
                 clip_behavior,
+                old,
             );
+            LayerHandle::set_layer(app, |app| &mut self.get_mut(app).clip_rect_layer, layer);
         } else {
+            LayerHandle::set_layer(app, |app| &mut self.get_mut(app).clip_rect_layer, None);
             RenderTheaterMixin::paint(self, app, context, offset);
         }
+    }
+
+    fn dispose(self: RenderHandle<Self>, app: &mut App) {
+        LayerHandle::set_layer(app, |app| &mut self.get_mut(app).clip_rect_layer, None);
+        reveal_rendering::RenderObjectBase::dispose(self, app);
     }
 }
 

@@ -1756,6 +1756,11 @@ pub trait RenderBox: RenderObject {
         self.as_object().mark_needs_composited_layer_update(app)
     }
 
+    /// See [`AnyRenderObject::mark_needs_compositing_bits_update`].
+    fn mark_needs_compositing_bits_update(self: RenderHandle<Self>, app: &mut App) {
+        self.as_object().mark_needs_compositing_bits_update(app)
+    }
+
     /// See [`AnyRenderObject::schedule_initial_layout`].
     fn schedule_initial_layout(self: RenderHandle<Self>, app: &mut App) {
         self.as_object().schedule_initial_layout(app)
@@ -1886,9 +1891,14 @@ impl<T: RenderBox> RenderHandle<T> {
         let this = create(app, object);
         let data = this.render_object_data_mut(app);
         data.object_vtable = Some(&const { RenderBoxVTable::of::<T>() }.object);
-        // Flutter's `RenderObject()` constructor: `_wasRepaintBoundary = isRepaintBoundary`.
+        // Flutter's `RenderObject()` constructor:
+        // `_needsCompositing = isRepaintBoundary || alwaysNeedsCompositing` and
+        // `_wasRepaintBoundary = isRepaintBoundary`.
         let is_repaint_boundary = this.is_repaint_boundary(app);
-        this.render_object_data_mut(app).was_repaint_boundary = is_repaint_boundary;
+        let always_needs_compositing = this.always_needs_compositing(app);
+        let data = this.render_object_data_mut(app);
+        data.was_repaint_boundary = is_repaint_boundary;
+        data.needs_compositing = is_repaint_boundary || always_needs_compositing;
         this
     }
 }

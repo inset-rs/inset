@@ -24,6 +24,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - widgets/text.rs → text.dart (+ `RichText` from basic.dart)
 - widgets/status_transitions.rs → status_transitions.dart
 - widgets/text_editing_intents.rs → text_editing_intents.dart
+- widgets/text.rs → text.dart (+ `RichText` from basic.dart)
 - widgets/preferred_size.rs → preferred_size.dart
 
 ## framework/ → framework.dart
@@ -580,6 +581,12 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: language — Dart's `List` `==` is identity, and a `Vec` has none.
   Affect: rebuilding a snapping sheet with a fresh list of the same sizes does not schedule the post-frame snap Dart schedules; the snap targets are the same either way, so the snap it skips would move the sheet nowhere new.
 
+## widgets/editable_text.rs → editable_text.dart
+
+- Change: `TextEditingController` is a leaf with `ChangeNotifierData` and a `TextEditingValue`, not a `ValueNotifier` subclass, and its handle is a `Listenable` rather than a `ValueListenable<TextEditingValue>`.
+  Reason: language — foundation's `ValueNotifier` is a leaf arena object with no bag to build on (orphan rule).
+  Affect: `TextEditingController::new(app)`; `controller.set_value(app, value)` where Dart writes `controller.value = value`; passing it where a `ValueListenable` is wanted waits.
+
 ## Deferred
 
 - focus_manager.rs: `FocusManager.listenToApplicationLifecycleChangesIfSupported`, `_AppLifecycleListener`, `_appLifecycleChange`, `_respondToLifecycleChange`, `_suspendedNode`. Trigger: `WidgetsBindingObserver.didChangeAppLifecycleState`.
@@ -624,6 +631,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - app.rs: the `TapRegionSurface` between the `FocusTraversalGroup` and the `ShortcutRegistrar`, and the escape-key handler of the `Focus` above the title, which calls `RawTooltip.dismissAllToolTips` (the `Focus` itself is built, without an `onKeyEvent`). Trigger: `tap_region.dart`; `raw_tooltip.dart`.
 - app.rs: `showPerformanceOverlay`'s `PerformanceOverlay` stack, `showSemanticsDebugger`'s `SemanticsDebugger`, and `debugShowWidgetInspector`'s `ValueListenableBuilder` over `WidgetsBinding.debugShowWidgetInspectorOverrideNotifier` with the `WidgetInspector` and its three button builders (`exitWidgetSelectionButtonBuilder`, `moveExitWidgetSelectionButtonBuilder`, `tapBehaviorButtonBuilder`) and the deprecated `debugShowWidgetInspectorOverride` pair; the three flags are carried. Trigger: `performance_overlay.dart`; accessibility (do not stub); `widget_inspector.dart`.
 - default_text_editing_shortcuts.rs: the text editing actions that consume these intents live in `editable_text.dart`. Trigger: `EditableText`.
+- editable_text.rs: `EditableText` / `EditableTextState` / `_Editable`, `ContentInsertionConfiguration`, scribble, spell check, the magnifier, undo, autofill, the selection overlay / toolbar / `contextMenuBuilder`, `ClipboardStatusNotifier`, `LiveTextInputStatusNotifier`, `AutomaticKeepAliveClientMixin`, `AppLifecycleListener`, `ProcessTextService`. `TextEditingController` and `ToolbarOptions` are ported. Trigger: those types.
 - layout_builder.rs: `SliverLayoutBuilder` and the abstract generics, `ErrorWidget` on a builder panic. Trigger: slivers; diagnostics.
 - sliver.rs: `SliverGrid` and `SliverOpacity` / `SliverIgnorePointer` / `SliverOffstage` (with `_SliverOffstageElement`), `SliverConstrainedCrossAxis` (with `_SliverZeroFlexParentDataWidget` and `_SliverConstrainedCrossAxis`), `SliverCrossAxisExpanded`, `SliverCrossAxisGroup`, `SliverMainAxisGroup` (with `_SliverMainAxisGroupElement`). Trigger: `RenderSliverGrid`, `RenderSliverOpacity`, `RenderSliverIgnorePointer`, `RenderSliverOffstage`, `RenderSliverConstrainedCrossAxis`, `RenderSliverCrossAxisGroup`, `RenderSliverMainAxisGroup`.
 - sliver.rs: `SliverEnsureSemantics` and `_RenderSliverEnsureSemantics`; `SliverMultiBoxAdaptorElement.debugVisitOnstageChildren`. Trigger: accessibility (do not stub); diagnostics.
@@ -639,7 +647,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - scroll_view.rs: `ScrollView.debugFillProperties`, `BoxScrollView.debugFillProperties`, `ListView.debugFillProperties`. Trigger: diagnostics.
 - single_child_scroll_view.rs: `_RenderSingleChildViewport.describeSemanticsClip`, the `markNeedsSemanticsUpdate` in its `clipBehavior` setter and in `_hasScrolled`, and `describeApproximatePaintClip` (deferred crate-wide in rendering's `PORTING.md`); its `debugFillProperties`. Trigger: accessibility (do not stub); the inspector; diagnostics.
 - scrollbar.rs: `ScrollbarPainter.semanticsBuilder` / `shouldRebuildSemantics` and `toString`; `RawScrollbarState`'s `FlutterError.fromParts` diagnostics, which are a plain assert message here. Trigger: accessibility (do not stub); diagnostics.
-- restoration_properties.rs: `RestorableTextEditingController` (and with it the only implementor of `RestorableChangeNotifier`). Trigger: `TextEditingController` (`editable_text.dart`).
+- restoration_properties.rs: `RestorableTextEditingController` (and with it the only implementor of `RestorableChangeNotifier`). Trigger: a restorable text field; `TextEditingController` is ported.
 - radio_group.rs: the `Semantics(container: true, role: SemanticsRole.radioGroup)` wrapper `_RadioGroupState.build` returns. Trigger: accessibility (do not stub).
 - radio_group.rs: `_debugScheduleSingleSelectionCheck` / `_debugCheckOnlySingleSelection`, which post-frame-check that at most one radio carries the group value. Trigger: diagnostics; it needs `WidgetsBinding.instance.addPostFrameCallback`, which would create the binding from a state that may run without one.
 - shortcuts.rs: `ShortcutMapProperty`, `MenuSerializableShortcut` / `serializeForMenu` on `SingleActivator` and `CharacterActivator`, the deprecated `ShortcutActivator.isActivatedBy`, `ShortcutRegistry._debugCheckForDuplicates`, and `Shortcuts.includeSemantics` (carried, but the `Focus` it builds has no `Semantics` wrapper). Trigger: diagnostics; `platform_menu_bar.dart`; content equality on `ShortcutActivator`; accessibility.

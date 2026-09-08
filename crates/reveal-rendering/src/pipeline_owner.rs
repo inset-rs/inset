@@ -1,12 +1,12 @@
 //! Flutter counterpart: `rendering/object.dart` (`PipelineOwner`).
 //!
 //! Semantics callbacks and the semantics half of [`PipelineManifold`] wait.
-//! Compositing bits are not a phase here (see `PORTING.md`).
 
 use std::rc::Rc;
 
 use reveal_foundation::{App, Handle, Listener};
 
+use crate::layer::ErasedLayer;
 use crate::object::AnyRenderObject;
 use crate::painting_context::PaintingContext;
 
@@ -56,6 +56,7 @@ pub struct PipelineOwner {
     manifold: Option<Rc<dyn PipelineManifold>>,
     root_node: Option<AnyRenderObject>,
     nodes_needing_layout: Vec<AnyRenderObject>,
+    nodes_needing_compositing_bits_update: Vec<AnyRenderObject>,
     should_merge_dirty_nodes: bool,
     /// Dart's `_debugAllowMutationsToDirtySubtrees`.
     debug_allow_mutations_to_dirty_subtrees: bool,
@@ -78,6 +79,7 @@ impl PipelineOwner {
             manifold: None,
             root_node: None,
             nodes_needing_layout: Vec::new(),
+            nodes_needing_compositing_bits_update: Vec::new(),
             should_merge_dirty_nodes: false,
             debug_allow_mutations_to_dirty_subtrees: false,
             debug_doing_layout: false,
@@ -134,6 +136,26 @@ impl PipelineOwner {
         node: AnyRenderObject,
     ) {
         app.get_mut(self).nodes_needing_layout.push(node);
+    }
+
+    pub(crate) fn add_node_needing_compositing_bits_update(
+        self: Handle<Self>,
+        app: &mut App,
+        node: AnyRenderObject,
+    ) {
+        app.get_mut(self)
+            .nodes_needing_compositing_bits_update
+            .push(node);
+    }
+
+    pub(crate) fn remove_node_needing_paint(
+        self: Handle<Self>,
+        app: &mut App,
+        node: AnyRenderObject,
+    ) {
+        app.get_mut(self)
+            .nodes_needing_paint
+            .retain(|candidate| *candidate != node);
     }
 
     /// Whether this pipeline is currently in the layout phase.
@@ -212,6 +234,31 @@ impl PipelineOwner {
         }
     }
 
+    /// Updates the [`AnyRenderObject::needs_compositing`] bits.
+    ///
+    /// Called as part of the rendering pipeline after [`flush_layout`](Self::flush_layout) and
+    /// before [`flush_paint`](Self::flush_paint).
+    pub fn flush_compositing_bits(self: Handle<Self>, app: &mut App) {
+        let mut dirty_nodes =
+            std::mem::take(&mut app.get_mut(self).nodes_needing_compositing_bits_update);
+        dirty_nodes.sort_by_key(|node| node.depth(app));
+        for node in dirty_nodes {
+            if node.needs_compositing_bits_update(app) && node.owner(app) == Some(self) {
+                node.update_compositing_bits(app);
+            }
+        }
+        let children = app.get(self).children.clone();
+        for child in children {
+            child.flush_compositing_bits(app);
+        }
+        debug_assert!(
+            app.get(self)
+                .nodes_needing_compositing_bits_update
+                .is_empty(),
+            "Child PipelineOwners must not dirty nodes in their parent."
+        );
+    }
+
     /// Nodes with a dirty layer or paint state, to be updated in the next
     /// [`flush_paint`](Self::flush_paint) pass.
     pub fn nodes_needing_paint(self: Handle<Self>, app: &App) -> Vec<AnyRenderObject> {
@@ -241,11 +288,14 @@ impl PipelineOwner {
         let mut dirty_nodes = std::mem::take(&mut app.get_mut(self).nodes_needing_paint);
         dirty_nodes.sort_by_key(|node| std::cmp::Reverse(node.depth(app)));
         for node in dirty_nodes {
-            debug_assert!(node.debug_layer(app).is_some() || !cfg!(debug_assertions));
+            debug_assert!(node.layer(app).is_some() || !cfg!(debug_assertions));
             if (node.needs_paint(app) || node.needs_composited_layer_update(app))
                 && node.owner(app) == Some(self)
             {
-                if node.layer(app).is_some_and(|layer| layer.attached()) {
+                if node
+                    .layer(app)
+                    .is_some_and(|layer| layer.as_layer().attached(app))
+                {
                     debug_assert!(node.is_repaint_boundary(app));
                     if node.needs_paint(app) {
                         PaintingContext::repaint_composited_child(app, node);

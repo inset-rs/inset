@@ -332,6 +332,7 @@ impl RendererBinding {
         }
         let root_pipeline_owner = self.root_pipeline_owner(app);
         root_pipeline_owner.flush_layout(app);
+        root_pipeline_owner.flush_compositing_bits(app);
         root_pipeline_owner.flush_paint(app);
         if self.send_frames_to_engine(app) {
             for render_view in self.render_views(app) {

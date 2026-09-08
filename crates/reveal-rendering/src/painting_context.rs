@@ -2,39 +2,56 @@
 
 use std::sync::Arc;
 
-use reveal_embedder::{BlendMode, Canvas, Clip, ImageFilter, Matrix4, Offset, Path, RRect, Rect};
-use reveal_foundation::App;
-use reveal_painting::ClipContext;
+use reveal_embedder::{Canvas, Clip, Matrix4, Offset, Path, PathBuilder, RRect, Rect};
+use reveal_foundation::{App, Handle};
+use reveal_painting::{ClipContext, inverse_transform_rect};
 
-use crate::layer::{AnnotatedRegionLayer, BackdropKey, BoundaryLayer, PaintItem};
+use crate::layer::{
+    AnyContainerLayer, AnyLayer, ClipPathLayer, ClipRRectLayer, ClipRectLayer, CompositionCallback,
+    ContainerLayer, ErasedLayer, LayerHandle, OffsetLayerMixin, OpacityLayer, PictureLayer,
+    TransformLayer,
+};
 use crate::object::AnyRenderObject;
 
 /// A place to paint.
 ///
-/// Rather than holding a canvas directly, render objects paint using a painting context. The
-/// painting context has a [`canvas`](ClipContext::canvas), which receives the individual draw
-/// operations, and also has functions for painting child render objects.
+/// Rather than holding a canvas directly, [`crate::RenderObject`]s paint using a painting
+/// context. The painting context has a [`Canvas`](ClipContext::canvas), which receives the
+/// individual draw operations, and also has functions for painting child
+/// render objects.
 ///
-/// The recording is retained by the repaint boundary being painted; see `layer.rs`.
+/// When painting a child render object, the canvas held by the painting context
+/// can change because the draw operations issued before and after painting the
+/// child might be recorded in separate compositing layers. For this reason, do
+/// not hold a reference to the canvas across operations that might paint
+/// child render objects.
+///
+/// New [`PaintingContext`] objects are created automatically when using
+/// [`PaintingContext::repaint_composited_child`] and [`push_layer`](Self::push_layer).
 pub struct PaintingContext {
-    /// The repaint boundary whose recording this context fills. Flutter's `_containerLayer`.
-    boundary: AnyRenderObject,
-    /// An estimate of the bounds within which the painting context's canvas will record painting
-    /// commands. This can be useful for debugging.
+    container_layer: AnyContainerLayer,
+    /// An estimate of the bounds within which the painting context's [`canvas`](ClipContext::canvas)
+    /// will record painting commands. This can be useful for debugging.
+    ///
+    /// The canvas will allow painting outside these bounds.
+    ///
+    /// The [`estimated_bounds`](Self::estimated_bounds) rectangle is in the canvas coordinate
+    /// system.
     pub estimated_bounds: Rect,
-    items: Vec<PaintItem>,
-    /// Flutter's `_recorder` and `_canvas`: one object here. `Some` while recording.
     canvas: Option<Canvas>,
     is_complex_hint: bool,
     will_change_hint: bool,
 }
 
 impl PaintingContext {
-    pub(crate) fn new(boundary: AnyRenderObject, estimated_bounds: Rect) -> PaintingContext {
+    /// Creates a painting context.
+    ///
+    /// Typically only called by [`repaint_composited_child`](Self::repaint_composited_child)
+    /// and [`push_layer`](Self::push_layer).
+    pub fn new(container_layer: AnyContainerLayer, estimated_bounds: Rect) -> PaintingContext {
         PaintingContext {
-            boundary,
+            container_layer,
             estimated_bounds,
-            items: Vec::new(),
             canvas: None,
             is_complex_hint: false,
             will_change_hint: false,
@@ -43,70 +60,124 @@ impl PaintingContext {
 
     /// Repaint the given render object.
     ///
-    /// The render object must be attached to a [`crate::PipelineOwner`], must have a composited
-    /// layer, and must be in need of painting. The render object's layer is re-used, along with
-    /// any layers in the subtree that don't need to be repainted.
+    /// The render object must be attached to a [`crate::PipelineOwner`], must have a
+    /// composited layer, and must be in need of painting. The render object's
+    /// layer, if any, is re-used, along with any layers in the subtree that don't
+    /// need to be repainted.
     pub fn repaint_composited_child(app: &mut App, child: AnyRenderObject) {
         debug_assert!(child.needs_paint(app));
-        Self::repaint_composited_child_inner(app, child, false);
+        Self::repaint_composited_child_inner(app, child, false, None);
     }
 
     fn repaint_composited_child_inner(
         app: &mut App,
         child: AnyRenderObject,
         debug_also_painted_parent: bool,
+        child_context: Option<PaintingContext>,
     ) {
         debug_assert!(child.is_repaint_boundary(app));
-        if child.layer(app).is_none() {
-            debug_assert!(debug_also_painted_parent);
-            let layer = child.update_composited_layer(app, None);
-            child.set_layer(app, Some(BoundaryLayer::new(layer, false)));
-        } else {
-            debug_assert!(
-                debug_also_painted_parent || child.layer(app).is_some_and(BoundaryLayer::attached)
+        let child_layer = if let Some(child_layer) =
+            child.layer(app).and_then(|layer| layer.as_offset_layer())
+        {
+            debug_assert!(debug_also_painted_parent || child_layer.as_layer().attached(app));
+            let debug_old_offset = if cfg!(debug_assertions) {
+                Some(child_layer.offset(app))
+            } else {
+                None
+            };
+            child_layer.as_container_layer().remove_all_children(app);
+            let updated_layer = child.update_composited_layer(app, Some(child_layer));
+            debug_assert_eq!(
+                updated_layer, child_layer,
+                "{child:?} created a new layer instance {updated_layer:?} instead of reusing the \
+                 existing layer {child_layer:?}. See the documentation of RenderObject.updateCompositedLayer \
+                 for more information on how to correctly implement this method."
             );
-            child.remove_all_layer_children(app);
-            let old = child.layer(app).expect("checked").composited;
-            let updated = child.update_composited_layer(app, Some(old));
-            debug_assert_eq!(updated.offset, old.offset);
-            child.layer_mut(app).expect("checked").composited = updated;
-        }
-        child.set_needs_composited_layer_update(app, false);
+            debug_assert_eq!(debug_old_offset, Some(updated_layer.offset(app)));
+            child_layer
+        } else {
+            debug_assert!(debug_also_painted_parent);
+            debug_assert!(child.layer(app).is_none());
 
-        let mut child_context = PaintingContext::new(child, child.paint_bounds(app));
+            // Not using the `layer` setter because the setter asserts that we not
+            // replace the layer for repaint boundaries. That assertion does not
+            // apply here because this is exactly the place designed to create a
+            // layer for repaint boundaries.
+            let layer = child.update_composited_layer(app, None);
+            LayerHandle::set_layer(
+                app,
+                |app| &mut child.data_mut(app).layer,
+                Some(layer.as_container_layer()),
+            );
+            layer
+        };
+        child.set_needs_composited_layer_update(app, false);
+        debug_assert_eq!(Some(child_layer.as_container_layer()), child.layer(app));
+        debug_assert!(
+            child
+                .layer(app)
+                .is_some_and(|layer| layer.as_offset_layer().is_some())
+        );
+
+        let mut child_context = child_context.unwrap_or_else(|| {
+            PaintingContext::new(child_layer.as_container_layer(), child.paint_bounds(app))
+        });
         child.paint_with_context(app, &mut child_context, Offset::ZERO);
-        child_context.stop_recording_if_needed();
-        child.layer_mut(app).expect("set above").items = child_context.items;
+
+        // Double-check that the paint method did not replace the layer (the first
+        // check is done in the [layer] setter itself).
+        debug_assert_eq!(Some(child_layer.as_container_layer()), child.layer(app));
+        child_context.stop_recording_if_needed(app);
     }
 
     /// Update the composited layer of `child` without repainting its children.
     ///
-    /// The render object must be attached to a [`crate::PipelineOwner`], must have a composited
-    /// layer, and must be in need of a composited layer update but not in need of painting.
+    /// The render object must be attached to a [`crate::PipelineOwner`], must have a
+    /// composited layer, and must be in need of a composited layer update but
+    /// not in need of painting. The render object's layer is re-used, and none
+    /// of its children are repaint or their layers updated.
     pub fn update_layer_properties(app: &mut App, child: AnyRenderObject) {
         debug_assert!(child.is_repaint_boundary(app) && child.was_repaint_boundary(app));
         debug_assert!(!child.needs_paint(app));
-        let old = child
+        debug_assert!(child.layer(app).is_some());
+
+        let child_layer = child
             .layer(app)
-            .expect("repaint boundary has a layer")
-            .composited;
-        let updated = child.update_composited_layer(app, Some(old));
-        debug_assert_eq!(updated.offset, old.offset);
-        child.layer_mut(app).expect("checked").composited = updated;
+            .expect("checked")
+            .as_offset_layer()
+            .expect("a repaint boundary's layer is an OffsetLayer");
+        let debug_old_offset = if cfg!(debug_assertions) {
+            Some(child_layer.offset(app))
+        } else {
+            None
+        };
+        let updated_layer = child.update_composited_layer(app, Some(child_layer));
+        debug_assert_eq!(
+            updated_layer, child_layer,
+            "{child:?} created a new layer instance {updated_layer:?} instead of reusing the \
+             existing layer {child_layer:?}. See the documentation of RenderObject.updateCompositedLayer \
+             for more information on how to correctly implement this method."
+        );
+        debug_assert_eq!(debug_old_offset, Some(updated_layer.offset(app)));
         child.set_needs_composited_layer_update(app, false);
     }
 
-    /// Paint a child render object.
+    /// Paint a child [`crate::RenderObject`].
     ///
-    /// If the child has its own composited layer, the child will be composited into the layer
-    /// subtree associated with this painting context. Otherwise, the child will be painted into
-    /// the current picture for this context.
+    /// If the child has its own composited layer, the child will be composited
+    /// into the layer subtree associated with this painting context. Otherwise,
+    /// the child will be painted into the current PictureLayer for this context.
     pub fn paint_child(&mut self, app: &mut App, child: AnyRenderObject, offset: Offset) {
         if child.is_repaint_boundary(app) {
-            self.stop_recording_if_needed();
+            self.stop_recording_if_needed(app);
             self.composite_child(app, child, offset);
         } else if child.was_repaint_boundary(app) {
-            child.set_layer(app, None);
+            debug_assert!(
+                child
+                    .layer(app)
+                    .is_some_and(|layer| layer.as_offset_layer().is_some())
+            );
+            LayerHandle::set_layer(app, |app| &mut child.data_mut(app).layer, None);
             child.paint_with_context(app, self, offset);
         } else {
             child.paint_with_context(app, self, offset);
@@ -118,283 +189,389 @@ impl PaintingContext {
         debug_assert!(child.is_repaint_boundary(app));
 
         if child.needs_paint(app) || !child.was_repaint_boundary(app) {
-            Self::repaint_composited_child_inner(app, child, true);
+            Self::repaint_composited_child_inner(app, child, true, None);
         } else if child.needs_composited_layer_update(app) {
             Self::update_layer_properties(app, child);
         }
-        child
-            .layer_mut(app)
-            .expect("repaint boundary has a layer")
-            .composited
-            .offset = offset;
-        self.append_layer(app, child);
+        debug_assert!(
+            child
+                .layer(app)
+                .is_some_and(|layer| layer.as_offset_layer().is_some())
+        );
+        let child_offset_layer = child
+            .layer(app)
+            .expect("checked")
+            .as_offset_layer()
+            .expect("a repaint boundary's layer is an OffsetLayer");
+        child_offset_layer.set_offset(app, offset);
+        self.append_layer(app, child_offset_layer.as_layer());
     }
 
-    /// Adds a child boundary's layer to the recording. Flutter's `appendLayer`: the layer is
-    /// removed from its previous parent first.
-    fn append_layer(&mut self, app: &mut App, child: AnyRenderObject) {
+    /// Adds a layer to the recording requiring that the recording is already
+    /// stopped.
+    ///
+    /// Do not call this function directly: call [`add_layer`](Self::add_layer) or
+    /// [`push_layer`](Self::push_layer) instead. This function is called internally when all
+    /// layers not generated from the canvas are added.
+    fn append_layer(&mut self, app: &mut App, layer: AnyLayer) {
         debug_assert!(!self.is_recording());
-        child.remove_layer(app);
-        self.items.push(PaintItem::ChildBoundary(app.retain(child)));
-        if let Some(layer) = child.layer_mut(app) {
-            layer.parent = Some(self.boundary);
-        }
-        if self
-            .boundary
-            .layer(app)
-            .is_some_and(BoundaryLayer::attached)
-        {
-            child.attach_layer(app);
-        }
+        layer.remove(app);
+        self.container_layer.append(app, layer);
     }
 
     fn is_recording(&self) -> bool {
         self.canvas.is_some()
     }
 
-    /// Stop recording to a canvas if recording has started.
-    ///
-    /// Do not call this function directly: the framework calls it when a child needs to be
-    /// composited into the layer tree or when a layer is pushed.
-    pub(crate) fn stop_recording_if_needed(&mut self) {
-        let Some(canvas) = self.canvas.take() else {
-            return;
-        };
-        self.items.push(PaintItem::Picture {
-            picture: canvas.build().into(),
-            cache: self.is_complex_hint && !self.will_change_hint,
-        });
+    fn start_recording(&mut self) {
+        debug_assert!(!self.is_recording());
+        self.canvas = Some(Canvas::new());
         self.is_complex_hint = false;
         self.will_change_hint = false;
     }
 
-    /// Hints that the painting in the current picture is complex and would benefit from caching.
+    /// Adds a [`CompositionCallback`] for the current [`AnyContainerLayer`] used by this
+    /// context.
+    pub fn add_composition_callback(
+        &self,
+        app: &mut App,
+        callback: CompositionCallback,
+    ) -> Box<dyn FnOnce(&mut App)> {
+        self.container_layer
+            .as_layer()
+            .add_composition_callback(app, callback)
+    }
+
+    /// Stop recording to a canvas if recording has started.
+    ///
+    /// Do not call this function directly: functions in this class will call
+    /// this method as needed. This function is called internally to ensure that
+    /// recording is stopped before adding layers or finalizing the results of a
+    /// paint.
+    ///
+    /// Creates and appends the [`PictureLayer`] here rather than in
+    /// [`start_recording`](Self::start_recording): [`ClipContext::canvas`] has no `App`. See
+    /// `PORTING.md`.
+    pub fn stop_recording_if_needed(&mut self, app: &mut App) {
+        if !self.is_recording() {
+            return;
+        }
+        let canvas = self.canvas.take().expect("recording");
+        let picture = PictureLayer::new(app, self.estimated_bounds);
+        picture.set_picture(app, Some(Arc::new(canvas.build())));
+        picture.set_is_complex_hint(app, self.is_complex_hint);
+        picture.set_will_change_hint(app, self.will_change_hint);
+        self.is_complex_hint = false;
+        self.will_change_hint = false;
+        self.container_layer.append(app, picture.as_layer());
+    }
+
+    /// Hints that the painting in the current layer is complex and would benefit
+    /// from caching.
     pub fn set_is_complex_hint(&mut self) {
-        self.canvas();
+        if self.canvas.is_none() {
+            self.start_recording();
+        }
         self.is_complex_hint = true;
     }
 
-    /// Hints that the painting in the current picture is likely to change next frame.
+    /// Hints that the painting in the current layer is likely to change next frame.
     pub fn set_will_change_hint(&mut self) {
-        self.canvas();
+        if self.canvas.is_none() {
+            self.start_recording();
+        }
         self.will_change_hint = true;
     }
 
-    /// Flutter's `pushLayer`: `item` opens a scope, `painter` records into it, `Pop` closes it.
-    fn push_layer(
+    /// Adds a composited leaf layer to the recording.
+    ///
+    /// After calling this function, the [`canvas`](ClipContext::canvas) property will change to
+    /// refer to a new [`Canvas`] that draws on top of the given layer.
+    pub fn add_layer(&mut self, app: &mut App, layer: AnyLayer) {
+        self.stop_recording_if_needed(app);
+        self.append_layer(app, layer);
+    }
+
+    /// Appends the given layer to the recording, and calls the `painter` callback
+    /// with that layer, providing the `child_paint_bounds` as the estimated paint
+    /// bounds of the child. The `child_paint_bounds` can be used for debugging but
+    /// have no effect on painting.
+    ///
+    /// The given layer must be an unattached orphan. (Providing a newly created
+    /// object, rather than reusing an existing layer, satisfies that
+    /// requirement.)
+    ///
+    /// The `offset` is the offset to pass to the `painter`. In particular, it is
+    /// not an offset applied to the layer itself. Layers conceptually by default
+    /// have no position or size, though they can transform their contents. For
+    /// example, an [`crate::OffsetLayer`] applies an offset to its children.
+    ///
+    /// If the `child_paint_bounds` are not specified then the current layer's paint
+    /// bounds are used. This is appropriate if the child layer does not apply any
+    /// transformation or clipping to its contents. The `child_paint_bounds`, if
+    /// specified, must be in the coordinate system of the new layer (i.e. as seen
+    /// by its children after it applies whatever transform to its contents), and
+    /// should not go outside the current layer's paint bounds.
+    pub fn push_layer(
         &mut self,
         app: &mut App,
-        item: PaintItem,
+        child_layer: AnyContainerLayer,
         painter: impl FnOnce(&mut App, &mut PaintingContext, Offset),
         offset: Offset,
         child_paint_bounds: Option<Rect>,
     ) {
-        self.stop_recording_if_needed();
-        self.items.push(item);
-        let child_bounds = child_paint_bounds.unwrap_or(self.estimated_bounds);
-        let bounds = std::mem::replace(&mut self.estimated_bounds, child_bounds);
-        painter(app, self, offset);
-        self.stop_recording_if_needed();
-        self.estimated_bounds = bounds;
-        self.items.push(PaintItem::Pop);
+        // If a layer is being reused, it may already contain children. We remove
+        // them so that `painter` can add children that are relevant for this frame.
+        if child_layer.has_children(app) {
+            child_layer.remove_all_children(app);
+        }
+        self.stop_recording_if_needed(app);
+        self.append_layer(app, child_layer.as_layer());
+        let mut child_context = self.create_child_context(
+            child_layer,
+            child_paint_bounds.unwrap_or(self.estimated_bounds),
+        );
+
+        painter(app, &mut child_context, offset);
+        child_context.stop_recording_if_needed(app);
+    }
+
+    /// Creates a painting context configured to paint into `child_layer`.
+    ///
+    /// The `bounds` are estimated paint bounds for debugging purposes.
+    fn create_child_context(
+        &self,
+        child_layer: AnyContainerLayer,
+        bounds: Rect,
+    ) -> PaintingContext {
+        PaintingContext::new(child_layer, bounds)
     }
 
     /// Clip further painting using a rectangle.
     ///
-    /// `offset` is the offset from the origin of the canvas' coordinate system to the origin of
-    /// the caller's coordinate system. `clip_rect` is the rectangle (in the caller's coordinate
-    /// system) to use to clip the painting done by `painter`, which paints on a canvas whose
-    /// origin is `offset`.
+    /// The `needs_compositing` argument specifies whether the child needs
+    /// compositing. Typically this matches the value of
+    /// [`AnyRenderObject::needs_compositing`] for the caller. If false, this method
+    /// returns `None`, indicating that a layer is no longer necessary. If a render
+    /// object calling this method stores the `old_layer` in its
+    /// [`AnyRenderObject::layer`] field, it should set that field to `None`.
+    ///
+    /// When `needs_compositing` is false, this method will use a more efficient
+    /// way to apply the layer effect than actually creating a layer.
+    ///
+    /// The `offset` argument is the offset from the origin of the canvas'
+    /// coordinate system to the origin of the caller's coordinate system.
+    ///
+    /// The `clip_rect` is the rectangle (in the caller's coordinate system) to use
+    /// to clip the painting done by `painter`. It should not include the
+    /// `offset`.
+    #[allow(clippy::too_many_arguments)]
     pub fn push_clip_rect(
         &mut self,
         app: &mut App,
+        needs_compositing: bool,
         offset: Offset,
         clip_rect: Rect,
         painter: impl FnOnce(&mut App, &mut PaintingContext, Offset),
         clip_behavior: Clip,
-    ) {
+        old_layer: Option<Handle<ClipRectLayer>>,
+    ) -> Option<Handle<ClipRectLayer>> {
         if clip_behavior == Clip::None {
             painter(app, self, offset);
-            return;
+            return None;
         }
         let offset_clip_rect = clip_rect.shift(offset);
-        self.push_layer(
-            app,
-            PaintItem::PushClipRect {
-                clip_rect: offset_clip_rect,
+        if needs_compositing {
+            let layer = old_layer.unwrap_or_else(|| ClipRectLayer::new(app));
+            layer.set_clip_rect(app, Some(offset_clip_rect));
+            layer.set_clip_behavior(app, clip_behavior);
+            self.push_layer(
+                app,
+                layer.as_container_layer(),
+                painter,
+                offset,
+                Some(offset_clip_rect),
+            );
+            Some(layer)
+        } else {
+            self.clip_rect_and_paint(
+                offset_clip_rect,
                 clip_behavior,
-            },
-            painter,
-            offset,
-            Some(offset_clip_rect),
-        );
+                offset_clip_rect,
+                |context| painter(app, context, offset),
+            );
+            None
+        }
     }
 
     /// Clip further painting using a rounded rectangle.
-    ///
-    /// `bounds` is the region of the canvas (in the caller's coordinate system) into which
-    /// `painter` will paint.
+    #[allow(clippy::too_many_arguments)]
     pub fn push_clip_rrect(
         &mut self,
         app: &mut App,
+        needs_compositing: bool,
         offset: Offset,
         bounds: Rect,
         clip_rrect: RRect,
         painter: impl FnOnce(&mut App, &mut PaintingContext, Offset),
         clip_behavior: Clip,
-    ) {
+        old_layer: Option<Handle<ClipRRectLayer>>,
+    ) -> Option<Handle<ClipRRectLayer>> {
         if clip_behavior == Clip::None {
             painter(app, self, offset);
-            return;
+            return None;
         }
         let offset_bounds = bounds.shift(offset);
-        self.push_layer(
-            app,
-            PaintItem::PushClipRRect {
-                clip_rrect,
+        let offset_clip_rrect = clip_rrect.shift(offset);
+        if needs_compositing {
+            let layer = old_layer.unwrap_or_else(|| ClipRRectLayer::new(app));
+            layer.set_clip_rrect(app, Some(offset_clip_rrect));
+            layer.set_clip_behavior(app, clip_behavior);
+            self.push_layer(
+                app,
+                layer.as_container_layer(),
+                painter,
                 offset,
-                bounds: offset_bounds,
-                clip_behavior,
-            },
-            painter,
-            offset,
-            Some(offset_bounds),
-        );
+                Some(offset_bounds),
+            );
+            Some(layer)
+        } else {
+            self.clip_rrect_and_paint(offset_clip_rrect, clip_behavior, offset_bounds, |context| {
+                painter(app, context, offset)
+            });
+            None
+        }
     }
 
     /// Clip further painting using a path.
+    #[allow(clippy::too_many_arguments)]
     pub fn push_clip_path(
         &mut self,
         app: &mut App,
+        needs_compositing: bool,
         offset: Offset,
         bounds: Rect,
         clip_path: Arc<Path>,
         painter: impl FnOnce(&mut App, &mut PaintingContext, Offset),
         clip_behavior: Clip,
-    ) {
+        old_layer: Option<Handle<ClipPathLayer>>,
+    ) -> Option<Handle<ClipPathLayer>> {
         if clip_behavior == Clip::None {
             painter(app, self, offset);
-            return;
+            return None;
         }
         let offset_bounds = bounds.shift(offset);
-        self.push_layer(
-            app,
-            PaintItem::PushClipPath {
-                clip_path,
+        let offset_clip_path = shift_path(&clip_path, offset);
+        if needs_compositing {
+            let layer = old_layer.unwrap_or_else(|| ClipPathLayer::new(app));
+            layer.set_clip_path(app, Some(offset_clip_path));
+            layer.set_clip_behavior(app, clip_behavior);
+            self.push_layer(
+                app,
+                layer.as_container_layer(),
+                painter,
                 offset,
-                bounds: offset_bounds,
-                clip_behavior,
-            },
-            painter,
-            offset,
-            Some(offset_bounds),
-        );
+                Some(offset_bounds),
+            );
+            Some(layer)
+        } else {
+            self.clip_path_and_paint(&offset_clip_path, clip_behavior, offset_bounds, |context| {
+                painter(app, context, offset)
+            });
+            None
+        }
     }
 
     /// Transform further painting using a matrix.
     ///
-    /// `transform` is applied in the caller's coordinate system: the painting is translated by
-    /// `offset`, transformed, and translated back.
+    /// The `offset` argument is the offset to pass to `painter` and the offset to
+    /// the origin used by `transform`.
+    ///
+    /// The `transform` argument is the [`Matrix4`] with which to transform the
+    /// coordinate system while calling `painter`. It should not include `offset`.
+    /// It is applied effectively after applying `offset`.
     pub fn push_transform(
         &mut self,
         app: &mut App,
+        needs_compositing: bool,
         offset: Offset,
         transform: Matrix4,
         painter: impl FnOnce(&mut App, &mut PaintingContext, Offset),
-    ) {
+        old_layer: Option<Handle<TransformLayer>>,
+    ) -> Option<Handle<TransformLayer>> {
         let (dx, dy) = (offset.dx() as f32, offset.dy() as f32);
         let effective_transform = Matrix4::translation(dx, dy)
             .then(&transform)
             .then(&Matrix4::translation(-dx, -dy));
-        self.push_layer(
-            app,
-            PaintItem::PushTransform {
-                transform: effective_transform,
-            },
-            painter,
-            offset,
-            None,
-        );
-    }
-
-    /// Annotate further painting with a value [`BoundaryLayer::find`] can answer.
-    ///
-    /// Flutter's `pushLayer(AnnotatedRegionLayer(...), painter, offset)`. The layer paints
-    /// nothing of its own, so `painter` records at `offset` unchanged; the layer's own
-    /// `offset` only shifts the rectangle its `size` clips the search to.
-    pub fn push_annotated_region(
-        &mut self,
-        app: &mut App,
-        layer: AnnotatedRegionLayer,
-        painter: impl FnOnce(&mut App, &mut PaintingContext, Offset),
-        offset: Offset,
-    ) {
-        self.push_layer(
-            app,
-            PaintItem::PushAnnotatedRegion(layer),
-            painter,
-            offset,
-            None,
-        );
+        if needs_compositing {
+            let layer = old_layer.unwrap_or_else(|| TransformLayer::new(app));
+            layer.set_transform(app, effective_transform);
+            let child_paint_bounds =
+                inverse_transform_rect(effective_transform, self.estimated_bounds);
+            self.push_layer(
+                app,
+                layer.as_container_layer(),
+                painter,
+                offset,
+                Some(child_paint_bounds),
+            );
+            Some(layer)
+        } else {
+            self.canvas().save();
+            self.canvas().concat(&effective_transform);
+            painter(app, self, offset);
+            self.canvas().restore();
+            None
+        }
     }
 
     /// Blend further painting with an alpha value.
     ///
-    /// `alpha` is 0 to 255. `painter` paints at `Offset::ZERO`; the layer applies `offset`.
+    /// The `offset` argument indicates an offset to apply to all the children
+    /// (the rendering created by `painter`).
+    ///
+    /// The `alpha` argument is the alpha value to use when blending the painting
+    /// done by `painter`. An alpha value of 0 means the painting is fully
+    /// transparent and an alpha value of 255 means the painting is fully opaque.
     pub fn push_opacity(
         &mut self,
         app: &mut App,
         offset: Offset,
         alpha: i32,
         painter: impl FnOnce(&mut App, &mut PaintingContext, Offset),
-    ) {
-        self.push_layer(
-            app,
-            PaintItem::PushOpacity { alpha, offset },
-            painter,
-            Offset::ZERO,
-            None,
-        );
+        old_layer: Option<Handle<OpacityLayer>>,
+    ) -> Handle<OpacityLayer> {
+        let layer = old_layer.unwrap_or_else(|| OpacityLayer::new(app));
+        layer.set_alpha(app, alpha);
+        layer.set_offset(app, offset);
+        self.push_layer(app, layer.as_container_layer(), painter, Offset::ZERO, None);
+        layer
     }
 }
 
-impl PaintingContext {
-    /// Blur what is already painted under `bounds` and paint `painter` on top: Flutter's
-    /// `pushLayer(BackdropFilterLayer(filter, blendMode, backdropKey), painter, offset)`.
-    ///
-    /// `bounds` is the filtered render object's paint bounds in the caller's coordinate
-    /// system; a filter carrying its own bounds wins.
-    #[allow(clippy::too_many_arguments)]
-    pub fn push_backdrop_filter(
-        &mut self,
-        app: &mut App,
-        offset: Offset,
-        bounds: Rect,
-        filter: ImageFilter,
-        blend_mode: BlendMode,
-        backdrop_key: Option<BackdropKey>,
-        painter: impl FnOnce(&mut App, &mut PaintingContext, Offset),
-    ) {
-        self.push_layer(
-            app,
-            PaintItem::PushBackdropFilter {
-                filter,
-                blend_mode,
-                backdrop_key,
-                bounds,
-                offset,
-            },
-            painter,
-            Offset::ZERO,
-            None,
-        );
+fn shift_path(path: &Arc<Path>, offset: Offset) -> Arc<Path> {
+    if offset == Offset::ZERO {
+        return Arc::clone(path);
     }
+    let mut builder = PathBuilder::new();
+    builder.append(
+        path,
+        &Matrix4::translation(offset.dx() as f32, offset.dy() as f32),
+    );
+    builder.build()
 }
 
 impl ClipContext for PaintingContext {
-    /// The canvas on which to paint. Starts recording a new picture on first use.
+    /// The canvas on which to paint.
+    ///
+    /// The current canvas can change whenever you paint a child using this
+    /// context, which means it's fragile to hold a reference to the canvas
+    /// returned by this getter.
     fn canvas(&mut self) -> &mut Canvas {
-        self.canvas.get_or_insert_with(Canvas::new)
+        if self.canvas.is_none() {
+            self.start_recording();
+        }
+        self.canvas.as_mut().expect("recording")
     }
 }
 
@@ -404,11 +581,11 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
-    use reveal_embedder::{Color, Paint, Size, valo::Op};
+    use reveal_embedder::{Color, Paint, SceneBuilder, Size, valo::Op};
 
     use super::*;
     use crate::box_::{AnyRenderBox, BoxConstraints, RenderBox, RenderBoxData};
-    use crate::layer::{CompositedLayer, CompositedLayerKind};
+    use crate::layer::{AnyOffsetLayer, ContainerLayer, ErasedLayer, OffsetLayer, OpacityLayer};
     use crate::object::{RenderHandle, RenderObject, RenderObjectData};
     use reveal_foundation::Handle;
 
@@ -439,10 +616,17 @@ mod tests {
         fn update_composited_layer(
             self: RenderHandle<Self>,
             app: &mut App,
-            old_layer: Option<CompositedLayer>,
-        ) -> CompositedLayer {
-            let offset = old_layer.map_or(Offset::ZERO, |layer| layer.offset);
-            CompositedLayer::opacity_layer(self.get(app).alpha, offset)
+            old_layer: Option<AnyOffsetLayer>,
+        ) -> AnyOffsetLayer {
+            debug_assert!(self.is_repaint_boundary(app));
+            let layer = match old_layer {
+                Some(old) => app
+                    .handle::<OpacityLayer>(old.id())
+                    .expect("Leaf reuses an OpacityLayer"),
+                None => OpacityLayer::new(app),
+            };
+            layer.set_alpha(app, self.get(app).alpha);
+            layer.as_offset_layer()
         }
 
         fn paint(
@@ -560,9 +744,7 @@ mod tests {
         parent.adopt_child(app, leaf.as_object());
         owner.set_root_node(app, Some(parent.as_object()));
         parent.schedule_initial_layout(app);
-        parent
-            .as_object()
-            .schedule_initial_paint(app, CompositedLayer::default());
+        schedule_root_paint(app, parent.as_object());
         Tree {
             owner,
             parent,
@@ -572,8 +754,15 @@ mod tests {
         }
     }
 
+    fn schedule_root_paint(app: &mut App, node: AnyRenderObject) {
+        let root = OffsetLayer::new(app, Offset::ZERO);
+        root.as_layer().attach(app, node.id());
+        node.schedule_initial_paint(app, root.as_container_layer());
+    }
+
     fn frame(app: &mut App, owner: Handle<PipelineOwner>) {
         owner.flush_layout(app);
+        owner.flush_compositing_bits(app);
         owner.flush_paint(app);
     }
 
@@ -586,7 +775,8 @@ mod tests {
             .as_object()
             .debug_layer(app)
             .expect("leaf has a layer")
-            .attached()
+            .as_layer()
+            .attached(app)
     }
 
     /// `object_test.dart`: `nodesNeedingPaint updated with paint changes`.
@@ -609,10 +799,13 @@ mod tests {
         assert!(owner.nodes_needing_paint(&app).is_empty());
 
         node.mark_needs_paint(&mut app);
+        let root = OpacityLayer::new(&mut app);
+        root.as_layer().attach(&mut app, node.as_object().id());
         node.as_object()
-            .schedule_initial_paint(&mut app, CompositedLayer::default());
+            .schedule_initial_paint(&mut app, root.as_container_layer());
         assert!(owner.nodes_needing_paint(&app).contains(&node.as_object()));
 
+        owner.flush_compositing_bits(&mut app);
         owner.flush_paint(&mut app);
         assert!(owner.nodes_needing_paint(&app).is_empty());
     }
@@ -625,10 +818,9 @@ mod tests {
         frame(&mut app, tree.owner);
         assert_eq!(paints(&tree), (1, 1));
         assert!(leaf_layer_attached(&app, &tree));
-        assert_eq!(
-            tree.parent.as_object().layer_children(&app),
-            vec![tree.leaf.as_object()]
-        );
+        let parent_layer = tree.parent.as_object().debug_layer(&app).expect("parent");
+        let leaf_layer = tree.leaf.as_object().debug_layer(&app).expect("leaf");
+        assert_eq!(leaf_layer.as_layer().parent(&app), Some(parent_layer));
 
         tree.leaf.mark_needs_paint(&mut app);
         assert_eq!(
@@ -637,10 +829,9 @@ mod tests {
         );
         frame(&mut app, tree.owner);
         assert_eq!(paints(&tree), (1, 2));
-        assert_eq!(
-            tree.parent.as_object().layer_children(&app),
-            vec![tree.leaf.as_object()]
-        );
+        let parent_layer = tree.parent.as_object().debug_layer(&app).expect("parent");
+        let leaf_layer = tree.leaf.as_object().debug_layer(&app).expect("leaf");
+        assert_eq!(leaf_layer.as_layer().parent(&app), Some(parent_layer));
     }
 
     #[test]
@@ -660,10 +851,10 @@ mod tests {
         frame(&mut app, tree.owner);
         assert_eq!(paints(&tree), (1, 1));
         let layer = tree.leaf.as_object().debug_layer(&app).expect("layer");
-        assert_eq!(
-            layer.composited().kind,
-            CompositedLayerKind::Opacity { alpha: 128 }
-        );
+        let opacity = app
+            .handle::<OpacityLayer>(layer.id())
+            .expect("OpacityLayer");
+        assert_eq!(opacity.alpha(&app), Some(128));
     }
 
     /// `layers_test.dart`: `non-painted layers are detached`.
@@ -704,7 +895,6 @@ mod tests {
         let tree = tree(&mut app, false);
         frame(&mut app, tree.owner);
         assert_eq!(paints(&tree), (1, 1));
-        assert!(tree.parent.as_object().layer_children(&app).is_empty());
         assert!(tree.leaf.as_object().debug_layer(&app).is_none());
 
         tree.leaf.mark_needs_paint(&mut app);
@@ -724,13 +914,9 @@ mod tests {
         tree.leaf.get_mut(&mut app).alpha = 128;
         frame(&mut app, tree.owner);
 
-        let mut canvas = Canvas::new();
-        tree.parent
-            .as_object()
-            .debug_layer(&app)
-            .expect("root layer")
-            .add_to_scene(&app, &mut canvas);
-        let ops = canvas.build().ops().to_vec();
+        let layer = tree.parent.as_object().layer(&app).expect("painted");
+        let scene = layer.build_scene(&mut app, SceneBuilder::new());
+        let ops = scene.ops().to_vec();
         let pictures = ops
             .iter()
             .filter(|op| matches!(op, Op::DrawDisplayList { .. }))

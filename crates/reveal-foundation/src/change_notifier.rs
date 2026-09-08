@@ -541,6 +541,7 @@ pub trait ListenableObject: Sized + 'static {
 
 impl<T: ChangeNotifier> ListenableObject for T {
     fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
+        ChangeNotifier::will_add_listener(self, app);
         app.get_mut(self)
             .change_notifier_data_mut()
             .add_listener(listener);
@@ -555,6 +556,7 @@ impl<T: ChangeNotifier> ListenableObject for T {
         app.get_mut(self)
             .change_notifier_data_mut()
             .remove_listener(listener);
+        ChangeNotifier::did_remove_listener(self, app);
     }
 }
 
@@ -581,10 +583,22 @@ impl<T: ListenableObject> Listenable for Handle<T> {
 ///
 ///  * [`ValueNotifier`], which is a [`ChangeNotifier`] that wraps a single
 ///    value.
-pub trait ChangeNotifier: 'static {
+pub trait ChangeNotifier: Sized + 'static {
     fn change_notifier_data(&self) -> &ChangeNotifierData;
 
     fn change_notifier_data_mut(&mut self) -> &mut ChangeNotifierData;
+
+    /// Runs before the listener is stored. Dart overrides of `addListener` that
+    /// work before `super.addListener` go here.
+    fn will_add_listener(self: Handle<Self>, app: &mut App) {
+        let _ = app;
+    }
+
+    /// Runs after the listener is removed. Dart overrides of `removeListener` that
+    /// work after `super.removeListener` go here.
+    fn did_remove_listener(self: Handle<Self>, app: &mut App) {
+        let _ = app;
+    }
 }
 
 impl ChangeNotifier for ChangeNotifierData {

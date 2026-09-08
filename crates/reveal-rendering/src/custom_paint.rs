@@ -584,7 +584,7 @@ mod tests {
 
     use super::*;
     use crate::box_::BoxHitTestResult;
-    use crate::layer::{CompositedLayer, PaintItem};
+    use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer, PictureLayer};
     use crate::object::AnyRenderObject;
     use crate::proxy_box::RenderRepaintBoundary;
 
@@ -643,32 +643,38 @@ mod tests {
         }
     }
 
+    fn schedule_root_paint(app: &mut App, node: AnyRenderObject) {
+        let root = OffsetLayer::new(app, Offset::ZERO);
+        root.as_layer().attach(app, node.id());
+        node.schedule_initial_paint(app, root.as_container_layer());
+    }
+
     /// The test binding's first frame: attach, lay the root out, schedule and flush paint.
     fn first_frame(app: &mut App, root: AnyRenderBox) -> Handle<PipelineOwner> {
         let owner = PipelineOwner::new(app, None);
         owner.set_root_node(app, Some(root.as_object()));
         root.layout(app, BoxConstraints::tight(Size::new(100.0, 100.0)), false);
-        root.as_object()
-            .schedule_initial_paint(app, CompositedLayer::default());
+        schedule_root_paint(app, root.as_object());
+        owner.flush_compositing_bits(app);
         owner.flush_paint(app);
         owner
     }
 
     fn pump_frame(app: &mut App, owner: Handle<PipelineOwner>) {
         owner.flush_layout(app);
+        owner.flush_compositing_bits(app);
         owner.flush_paint(app);
     }
 
     /// The color of every fill in a repaint boundary's recording, in paint order.
     fn drawn_colors(app: &App, boundary: AnyRenderObject) -> Vec<valo::Color> {
-        boundary
-            .debug_layer(app)
-            .expect("painted")
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                PaintItem::Picture { picture, .. } => Some(picture.ops().to_vec()),
-                _ => None,
+        let layer = boundary.debug_layer(app).expect("painted");
+        layer
+            .depth_first_iterate_children(app)
+            .into_iter()
+            .filter_map(|child| {
+                app.handle::<PictureLayer>(child.id())
+                    .and_then(|picture| picture.picture(app).map(|p| p.ops().to_vec()))
             })
             .flatten()
             .filter_map(|op| match op {

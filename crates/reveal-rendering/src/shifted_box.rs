@@ -6,7 +6,7 @@
 //! `RenderCustomSingleChildLayoutBox` waits; see `PORTING.md`.
 
 use reveal_embedder::{Clip, Offset, Rect, Size, TextBaseline};
-use reveal_foundation::App;
+use reveal_foundation::{App, Handle};
 use reveal_painting::{
     Alignment, AlignmentGeometry, EdgeInsets, EdgeInsetsGeometry, TextDirection,
 };
@@ -14,6 +14,7 @@ use reveal_painting::{
 use crate::box_::{
     AnyRenderBox, BoxConstraints, BoxHitTestResult, BoxParentData, RenderBox, RenderBoxData,
 };
+use crate::layer::{ClipRectLayer, LayerHandle};
 use crate::layout_helper::{ChildBaselineGetter, ChildLayoutHelper, ChildLayouter};
 use crate::object::{
     AnyRenderObject, Constraints, RenderHandle, RenderObject, RenderObjectData,
@@ -1071,6 +1072,7 @@ pub struct RenderConstraintsTransformBox {
     aligning: RenderAligningShiftedBoxData,
     constraints_transform: BoxConstraintsTransform,
     clip_behavior: Clip,
+    clip_rect_layer: LayerHandle<Handle<ClipRectLayer>>,
     overflow_container_rect: Rect,
     overflow_child_rect: Rect,
     is_overflowing: bool,
@@ -1096,6 +1098,7 @@ impl RenderConstraintsTransformBox {
                 aligning: RenderAligningShiftedBoxData::new(alignment, text_direction),
                 constraints_transform,
                 clip_behavior: Clip::None,
+                clip_rect_layer: LayerHandle::new(),
                 overflow_container_rect: Rect::ZERO,
                 overflow_child_rect: Rect::ZERO,
                 is_overflowing: false,
@@ -1229,16 +1232,25 @@ impl RenderObject for RenderConstraintsTransformBox {
             RenderShiftedBox::paint(self, app, context, offset);
             return;
         }
-        // There is overflow: clip it, unless the clip behavior says not to.
+        // We have overflow and the clipBehavior isn't none. Clip it.
         let clip_rect = Offset::ZERO & self.size(app);
         let clip_behavior = self.clip_behavior(app);
-        context.push_clip_rect(
+        let old = self.get(app).clip_rect_layer.layer();
+        let layer = context.push_clip_rect(
             app,
+            self.as_object().needs_compositing(app),
             offset,
             clip_rect,
             |app, context, offset| RenderShiftedBox::paint(self, app, context, offset),
             clip_behavior,
+            old,
         );
+        LayerHandle::set_layer(app, |app| &mut self.get_mut(app).clip_rect_layer, layer);
+    }
+
+    fn dispose(self: RenderHandle<Self>, app: &mut App) {
+        LayerHandle::set_layer(app, |app| &mut self.get_mut(app).clip_rect_layer, None);
+        crate::object::RenderObjectBase::dispose(self, app);
     }
 
     fn visit_children(
@@ -2034,9 +2046,10 @@ mod tests {
     use reveal_foundation::AppCell;
 
     use crate::box_::BoxConstraints;
-    use crate::layer::{CompositedLayer, PaintItem};
+    use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer, PictureLayer};
     use crate::pipeline_owner::PipelineOwner;
     use crate::proxy_box::{RenderConstrainedBox, RenderRepaintBoundary};
+    use reveal_embedder::valo::Op;
 
     /// `padding_test.dart`: the padding is added to the child's intrinsics, and taken off the
     /// extent handed to the child.
@@ -2149,16 +2162,26 @@ mod tests {
             BoxConstraints::tight(Size::new(100.0, 100.0)),
             false,
         );
+        let paint_root = OffsetLayer::new(&mut app, Offset::ZERO);
+        paint_root
+            .as_layer()
+            .attach(&mut app, root.as_object().id());
         root.as_object()
-            .schedule_initial_paint(&mut app, CompositedLayer::default());
+            .schedule_initial_paint(&mut app, paint_root.as_container_layer());
+        owner.flush_compositing_bits(&mut app);
         owner.flush_paint(&mut app);
 
         assert_eq!(unconstrained.size(&app), Size::new(100.0, 100.0));
         let layer = root.as_object().debug_layer(&app).expect("painted");
         let clipped = layer
-            .items
-            .iter()
-            .any(|item| matches!(item, PaintItem::PushClipRect { .. }));
+            .depth_first_iterate_children(&app)
+            .into_iter()
+            .filter_map(|child| {
+                app.handle::<PictureLayer>(child.id())
+                    .and_then(|picture| picture.picture(&app).map(|p| p.ops().to_vec()))
+            })
+            .flatten()
+            .any(|op| matches!(op, Op::ClipPath { .. }));
         assert!(clipped, "the overflowing child is clipped");
     }
 

@@ -152,6 +152,17 @@ impl EmbedderClient for Shell {
     fn text_input_closed(&mut self, _view: ViewId) {
         self.push(|app| TextInput::instance(app).connection_closed(app));
     }
+
+    fn system_context_menu_hidden(&mut self) {
+        self.push(reveal_services::SystemContextMenuController::dispatch_system_hide);
+    }
+
+    fn custom_context_menu_action(&mut self, callback_id: &str) {
+        let callback_id = callback_id.to_string();
+        self.push(move |app| {
+            reveal_services::SystemContextMenuController::dispatch_custom_action(app, &callback_id);
+        });
+    }
 }
 
 #[cfg(test)]

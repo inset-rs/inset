@@ -14,6 +14,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - constants.rs → constants.dart
 - theme.rs → theme.dart
 - localizations.rs → localizations.dart
+- text_field.rs → text_field.dart
 
 ## colors.rs → colors.dart
 
@@ -144,6 +145,14 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: writing both `middle` and `large_title` panics in debug, where Dart's two constructors make it unsayable.
 
 ## Deferred
+- text_field.rs: `TextSelectionGestureDetectorBuilder` / `_CupertinoTextFieldSelectionGestureDetectorBuilder`; tap-to-focus is a `GestureDetector` that calls `requestKeyboard`. Trigger: widgets' `text_selection.dart` (the builder is listed there).
+- text_field.rs: `_BaselineAlignedStack` / `_RenderBaselineAlignedStack`; the placeholder and the editable share a `Stack`. Trigger: widgets' `SlottedMultiChildRenderObjectWidget`.
+- text_field.rs: `cupertinoTextSelectionHandleControls` / `cupertinoDesktopTextSelectionHandleControls` and `CupertinoAdaptiveTextSelectionToolbar`. The default `contextMenuBuilder` returns `SizedBox.shrink` when the system menu is not supported. Trigger: those cupertino files.
+- text_field.rs: `CupertinoTextMagnifier` / `_iosMagnifierConfiguration`. Trigger: that cupertino file.
+- text_field.rs: `CupertinoSpellCheckSuggestionsToolbar` / `defaultSpellCheckSuggestionsToolbarBuilder`. Trigger: that cupertino file.
+- text_field.rs: the `Semantics` wrappers (enabled, onTap, accessibility focus). Trigger: accessibility (do not stub).
+- text_field.rs: `strutStyle`. Trigger: painting's `StrutStyle` (valo has no strut).
+- text_field.rs: `CupertinoTextFieldState` as `AutofillClient` / `TextSelectionGestureDetectorBuilderDelegate`. Trigger: the gesture builder; `EditableText` is the autofill client until then.
 - nav_bar.rs: every `Semantics` wrapper the file carries — the header semantics around the static and sliver bars' large titles and around the persistent bar's middle, and the labelled button semantics around `CupertinoNavigationBarBackButton`'s content, whose label is `CupertinoLocalizations.backButtonLabel`. Trigger: accessibility (do not stub).
 - nav_bar.rs: `_LargeTitleNavigationBarSliverDelegate`'s `DiagnosticableTreeMixin`. Trigger: diagnostics.
 - route.rs, sheet.rs, nav_bar.rs: a `CurvedAnimation` that a transition state, a delegated-transition function or the sliver navigation bar's state disposes keeps its arena slot, and so does every `_AnimatedEvaluation` a `drive` mints — in the navigation bar, one set per `didChangeDependencies` and per hero flight. Trigger: an arena-slot lifetime for disposed foundation objects (the trigger reveal-widgets records for disposed routes).

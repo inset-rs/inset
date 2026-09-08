@@ -54,4 +54,12 @@ pub trait EmbedderClient {
     fn text_input_closed(&mut self, view: ViewId) {
         let _ = view;
     }
+
+    /// Flutter `SystemContextMenuClient.handleSystemHide`. The default drops it.
+    fn system_context_menu_hidden(&mut self) {}
+
+    /// Flutter `SystemContextMenuClient.handleCustomContextMenuAction`. The default drops it.
+    fn custom_context_menu_action(&mut self, callback_id: &str) {
+        let _ = callback_id;
+    }
 }

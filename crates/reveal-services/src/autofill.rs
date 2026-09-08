@@ -1,8 +1,13 @@
-//! Flutter counterpart: `services/autofill.dart` (`AutofillHints`).
+//! Flutter counterpart: `services/autofill.dart`.
 //!
 //! `AutofillConfiguration` lives in `reveal-embedder` (re-exported from
-//! `text_input.rs`) because `View` names `TextInputConfiguration`. `AutofillClient` /
-//! `AutofillScope` wait on `TextInput.attach`.
+//! `text_input.rs`) because `View` names `TextInputConfiguration`.
+
+use reveal_foundation::{App, Handle, HandleId};
+
+use crate::text_input::{
+    AnyTextInputClient, TextEditingValue, TextInput, TextInputConfiguration, TextInputConnection,
+};
 
 /// A collection of commonly used autofill hint strings on different platforms.
 ///
@@ -627,14 +632,248 @@ impl AutofillHints {
     pub const USERNAME: &str = "username";
 }
 
+/// An object that represents an autofillable input field in the autofill workflow.
+///
+/// An [`AutofillClient`] provides autofill-related information of the input field
+/// it represents to the platform, and consumes autofill inputs from the platform.
+pub trait AutofillClient: Sized + 'static {
+    /// The unique identifier of this [`AutofillClient`].
+    ///
+    /// The identifier must not be changed.
+    fn autofill_id(self: Handle<Self>, app: &App) -> String;
+
+    /// The [`TextInputConfiguration`] that describes this [`AutofillClient`].
+    ///
+    /// In order to participate in autofill, its
+    /// [`TextInputConfiguration::autofill_configuration`] must not be
+    /// [`AutofillConfiguration::DISABLED`](crate::AutofillConfiguration::DISABLED).
+    fn text_input_configuration(self: Handle<Self>, app: &App) -> TextInputConfiguration;
+
+    /// Requests this [`AutofillClient`] update its [`TextEditingValue`] to the given
+    /// value.
+    fn autofill(self: Handle<Self>, app: &mut App, new_editing_value: TextEditingValue);
+
+    /// This client as the erased [`AnyAutofillClient`].
+    fn as_autofill_client(self: Handle<Self>) -> AnyAutofillClient {
+        AnyAutofillClient {
+            id: self.id(),
+            vtable: const { &AutofillClientVTable::of::<Self>() },
+        }
+    }
+}
+
+struct AutofillClientVTable {
+    autofill_id: fn(&App, HandleId) -> String,
+    text_input_configuration: fn(&App, HandleId) -> TextInputConfiguration,
+    autofill: fn(&mut App, HandleId, TextEditingValue),
+}
+
+fn resolve<T: 'static>(id: HandleId) -> Handle<T> {
+    Handle::from_id(id)
+}
+
+impl AutofillClientVTable {
+    const fn of<C: AutofillClient>() -> AutofillClientVTable {
+        AutofillClientVTable {
+            autofill_id: |app, id| C::autofill_id(resolve(id), app),
+            text_input_configuration: |app, id| C::text_input_configuration(resolve(id), app),
+            autofill: |app, id, value| C::autofill(resolve(id), app, value),
+        }
+    }
+}
+
+/// Erased [`AutofillClient`]: one identity and a static vtable.
+#[derive(Clone, Copy)]
+pub struct AnyAutofillClient {
+    id: HandleId,
+    vtable: &'static AutofillClientVTable,
+}
+
+impl AnyAutofillClient {
+    pub fn autofill_id(self, app: &App) -> String {
+        (self.vtable.autofill_id)(app, self.id)
+    }
+
+    pub fn text_input_configuration(self, app: &App) -> TextInputConfiguration {
+        (self.vtable.text_input_configuration)(app, self.id)
+    }
+
+    pub fn autofill(self, app: &mut App, new_editing_value: TextEditingValue) {
+        (self.vtable.autofill)(app, self.id, new_editing_value);
+    }
+}
+
+impl PartialEq for AnyAutofillClient {
+    fn eq(&self, other: &AnyAutofillClient) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for AnyAutofillClient {}
+
+/// An ordered group within which [`AutofillClient`]s are logically connected.
+///
+/// [`AutofillClient`]s within the same [`AutofillScope`] are isolated from other
+/// input fields during autofill. That is, when an autofillable `TextInputClient`
+/// gains focus, only the [`AutofillClient`]s within the same [`AutofillScope`] will
+/// be visible to the autofill service, in the same order as they appear in
+/// [`AutofillScope::autofill_clients`].
+///
+/// [`AutofillScope`] also allows `TextInput` to redirect autofill values from the
+/// platform to the [`AutofillClient`] with the given identifier, by calling
+/// [`AutofillScope::get_autofill_client`].
+///
+/// An [`AutofillClient`] that's not tied to any [`AutofillScope`] will only
+/// participate in autofill if the autofill is directly triggered by its own
+/// `TextInputClient`.
+pub trait AutofillScope: Sized + 'static {
+    /// Gets the [`AutofillClient`] associated with the given `autofill_id`, in
+    /// this [`AutofillScope`].
+    ///
+    /// Returns [`None`] if there's no matching [`AutofillClient`].
+    fn get_autofill_client(
+        self: Handle<Self>,
+        app: &App,
+        autofill_id: &str,
+    ) -> Option<AnyAutofillClient>;
+
+    /// The collection of [`AutofillClient`]s currently tied to this [`AutofillScope`].
+    ///
+    /// Every [`AutofillClient`] in this list must have autofill enabled (i.e. its
+    /// [`AutofillClient::text_input_configuration`] must have a non-disabled
+    /// [`crate::AutofillConfiguration`].)
+    fn autofill_clients(self: Handle<Self>, app: &App) -> Vec<AnyAutofillClient>;
+
+    /// Allows a `TextInputClient` to attach to this scope. This method should be
+    /// called in lieu of [`TextInput::attach`], when the `TextInputClient` wishes to
+    /// participate in autofill.
+    ///
+    /// Flutter `AutofillScopeMixin.attach`.
+    fn attach(
+        self: Handle<Self>,
+        app: &mut App,
+        trigger: AnyTextInputClient,
+        configuration: TextInputConfiguration,
+    ) -> Handle<TextInputConnection> {
+        debug_assert!(
+            !self.autofill_clients(app).iter().any(|client| {
+                !client
+                    .text_input_configuration(app)
+                    .autofill_configuration
+                    .enabled
+            }),
+            "Every client in AutofillScope.autofillClients must enable autofill"
+        );
+        TextInput::attach(app, trigger, configuration)
+    }
+}
+
+/// A partial implementation of [`AutofillScope`].
+///
+/// The mixin provides a default implementation for [`AutofillScope::attach`].
+pub trait AutofillScopeMixin: AutofillScope {}
+
+impl<T: AutofillScope> AutofillScopeMixin for T {}
+
 #[cfg(test)]
 mod tests {
+    use reveal_foundation::AppCell;
+
     use super::*;
+    use crate::text_input::TextInputClient;
 
     #[test]
     fn hint_strings_match_dart() {
         assert_eq!(AutofillHints::EMAIL, "email");
         assert_eq!(AutofillHints::ONE_TIME_CODE, "oneTimeCode");
         assert_eq!(AutofillHints::EMAIL_OTP_CODE, "emailOTPCode");
+    }
+
+    #[derive(Default)]
+    struct RecordingField {
+        autofill_id: String,
+        value: TextEditingValue,
+        filled: Option<TextEditingValue>,
+    }
+
+    impl AutofillClient for RecordingField {
+        fn autofill_id(self: Handle<Self>, app: &App) -> String {
+            app.get(self).autofill_id.clone()
+        }
+
+        fn text_input_configuration(self: Handle<Self>, app: &App) -> TextInputConfiguration {
+            TextInputConfiguration::new().autofill_configuration(crate::AutofillConfiguration::new(
+                app.get(self).autofill_id.clone(),
+                vec![AutofillHints::EMAIL.to_owned()],
+                app.get(self).value.clone(),
+            ))
+        }
+
+        fn autofill(self: Handle<Self>, app: &mut App, new_editing_value: TextEditingValue) {
+            app.get_mut(self).filled = Some(new_editing_value);
+        }
+    }
+
+    impl TextInputClient for RecordingField {
+        fn current_text_editing_value(self: Handle<Self>, app: &App) -> Option<TextEditingValue> {
+            Some(app.get(self).value.clone())
+        }
+
+        fn update_editing_value(self: Handle<Self>, app: &mut App, value: TextEditingValue) {
+            app.get_mut(self).value = value;
+        }
+
+        fn perform_action(self: Handle<Self>, _app: &mut App, _action: crate::TextInputAction) {}
+
+        fn connection_closed(self: Handle<Self>, _app: &mut App) {}
+    }
+
+    struct RecordingScope {
+        clients: Vec<AnyAutofillClient>,
+    }
+
+    impl AutofillScope for RecordingScope {
+        fn get_autofill_client(
+            self: Handle<Self>,
+            app: &App,
+            autofill_id: &str,
+        ) -> Option<AnyAutofillClient> {
+            self.autofill_clients(app)
+                .into_iter()
+                .find(|client| client.autofill_id(app) == autofill_id)
+        }
+
+        fn autofill_clients(self: Handle<Self>, app: &App) -> Vec<AnyAutofillClient> {
+            app.get(self).clients.clone()
+        }
+    }
+
+    #[test]
+    fn scope_attach_uses_text_input_attach() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let field = app.create(RecordingField {
+            autofill_id: "email".into(),
+            ..RecordingField::default()
+        });
+        let scope = app.create(RecordingScope {
+            clients: vec![field.as_autofill_client()],
+        });
+        let configuration = field.text_input_configuration(&app);
+        let connection = scope.attach(&mut app, field.as_text_input_client(), configuration);
+        assert!(connection.attached(&mut app));
+        assert_eq!(
+            scope
+                .get_autofill_client(&app, "email")
+                .map(|c| c.autofill_id(&app)),
+            Some("email".into())
+        );
+        field
+            .as_autofill_client()
+            .autofill(&mut app, TextEditingValue::new().text("user@example.com"));
+        assert_eq!(
+            app.get(field).filled.as_ref().map(|v| v.text.as_str()),
+            Some("user@example.com")
+        );
     }
 }

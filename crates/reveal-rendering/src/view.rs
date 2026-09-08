@@ -2,12 +2,12 @@
 //!
 //! `applyPaintTransform`, `updateSystemChrome`, and semantics wait.
 
-use reveal_embedder::{Canvas, Matrix4, Offset, Rect, Size, View, ViewRef};
-use reveal_foundation::App;
+use reveal_embedder::{Matrix4, Offset, Rect, SceneBuilder, Size, View, ViewRef};
+use reveal_foundation::{App, Handle};
 use reveal_gestures::{HitTestEntry, HitTestResult, HitTestTarget, PointerEvent};
 
 use crate::box_::{AnyRenderBox, BoxConstraints, BoxHitTestResult};
-use crate::layer::CompositedLayer;
+use crate::layer::{ContainerLayer, OffsetLayerMixin, TransformLayer};
 use crate::object::{
     AnyRenderObject, Constraints, RenderHandle, RenderObject, RenderObjectData, RenderObjectVTable,
     resolve,
@@ -127,6 +127,7 @@ impl RenderView {
         let data = this.render_object_data_mut(app);
         data.object_vtable = Some(&VTABLE);
         data.was_repaint_boundary = true;
+        data.needs_compositing = true;
         if let Some(configuration) = configuration {
             this.set_configuration(app, configuration);
         }
@@ -190,7 +191,8 @@ impl RenderView {
         }
         if old_configuration.is_none_or(|old| value.should_update_matrix(&old)) {
             let root_layer = self.update_matrices_and_create_new_root_layer(app);
-            self.as_object().replace_root_layer(app, root_layer);
+            self.as_object()
+                .replace_root_layer(app, root_layer.as_offset_layer());
         }
         debug_assert!(self.get(app).root_transform.is_some());
         self.as_object().mark_needs_layout(app);
@@ -243,18 +245,23 @@ impl RenderView {
         );
         self.as_object().schedule_initial_layout(app);
         let root_layer = self.update_matrices_and_create_new_root_layer(app);
-        self.as_object().schedule_initial_paint(app, root_layer);
+        self.as_object()
+            .schedule_initial_paint(app, root_layer.as_container_layer());
         debug_assert!(self.get(app).root_transform.is_some());
     }
 
     fn update_matrices_and_create_new_root_layer(
         self: RenderHandle<Self>,
         app: &mut App,
-    ) -> CompositedLayer {
+    ) -> Handle<TransformLayer> {
         debug_assert!(self.has_configuration(app));
         let root_transform = self.configuration(app).to_matrix();
         self.get_mut(app).root_transform = Some(root_transform);
-        CompositedLayer::transform_layer(root_transform, Offset::ZERO)
+        let root_layer = TransformLayer::new(app);
+        root_layer.set_transform(app, root_transform);
+        root_layer.attach(app, self.id());
+        debug_assert!(self.get(app).root_transform.is_some());
+        root_layer
     }
 
     /// Determines the set of render objects located at the given position.
@@ -290,14 +297,11 @@ impl RenderView {
             self.get(app).root_transform.is_some(),
             "call prepare_initial_frame before calling composite_frame"
         );
-        let node = self.as_object();
-        let layer = node
-            .debug_layer(app)
-            .or_else(|| node.layer(app))
+        let layer = self
+            .as_object()
+            .layer(app)
             .expect("call prepare_initial_frame before calling composite_frame");
-        let mut builder = Canvas::new();
-        layer.add_to_scene(app, &mut builder);
-        let scene = builder.build();
+        let scene = layer.build_scene(app, SceneBuilder::new());
         debug_assert!(
             self.configuration(app)
                 .logical_constraints
@@ -412,7 +416,7 @@ mod tests {
 
     use super::*;
     use crate::box_::RenderBox;
-    use crate::layer::CompositedLayerKind;
+    use crate::layer::TransformLayer;
     use crate::pipeline_owner::PipelineOwner;
     use crate::proxy_box::RenderConstrainedBox;
     use crate::shifted_box::RenderPadding;
@@ -522,6 +526,7 @@ mod tests {
         owner.set_root_node(&mut app, Some(view.as_object()));
         view.prepare_initial_frame(&mut app);
         owner.flush_layout(&mut app);
+        owner.flush_compositing_bits(&mut app);
         owner.flush_paint(&mut app);
         assert!(!view.as_object().debug_needs_paint(&app));
 
@@ -543,12 +548,10 @@ mod tests {
             "a new ratio replaces it"
         );
         let layer = view.as_object().debug_layer(&app).expect("root layer");
-        assert_eq!(
-            layer.composited().kind,
-            CompositedLayerKind::Transform {
-                transform: Matrix4::scale(5.0, 5.0)
-            }
-        );
+        let transform = app
+            .handle::<TransformLayer>(layer.id())
+            .expect("the root is a TransformLayer");
+        assert_eq!(transform.transform(&app), Some(Matrix4::scale(5.0, 5.0)));
     }
 
     /// `view_test.dart`: `accounts for device pixel ratio in paintBounds`, plus one frame
@@ -570,6 +573,7 @@ mod tests {
         owner.set_root_node(&mut app, Some(view.as_object()));
         view.prepare_initial_frame(&mut app);
         owner.flush_layout(&mut app);
+        owner.flush_compositing_bits(&mut app);
         owner.flush_paint(&mut app);
         view.composite_frame(&mut app);
 

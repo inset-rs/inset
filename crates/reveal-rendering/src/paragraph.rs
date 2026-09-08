@@ -603,7 +603,7 @@ mod tests {
     use reveal_painting::{TextSpan, TextStyle};
 
     use super::*;
-    use crate::layer::CompositedLayer;
+    use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer};
     use crate::pipeline_owner::PipelineOwner;
     use crate::proxy_box::RenderRepaintBoundary;
 
@@ -639,8 +639,10 @@ mod tests {
         owner.set_root_node(app, Some(root.as_object()));
         root.schedule_initial_layout(app);
         root.layout(app, constraints, false);
+        let paint_root = OffsetLayer::new(app, Offset::ZERO);
+        paint_root.as_layer().attach(app, root.as_object().id());
         root.as_object()
-            .schedule_initial_paint(app, CompositedLayer::default());
+            .schedule_initial_paint(app, paint_root.as_container_layer());
         (paragraph, root)
     }
 
@@ -799,6 +801,7 @@ mod tests {
         let loose = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
         let (paragraph, root) = laid_out(&mut app, "Hello", loose);
         let owner = root.owner(&app).unwrap();
+        owner.flush_compositing_bits(&mut app);
         owner.flush_paint(&mut app);
         assert!(!paragraph.debug_needs_layout(&app));
 
@@ -828,6 +831,7 @@ mod tests {
         let loose = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
         let (paragraph, root) = laid_out(&mut app, "Hello", loose);
         let owner = root.owner(&app).unwrap();
+        owner.flush_compositing_bits(&mut app);
         owner.flush_paint(&mut app);
         assert!(!paragraph.as_object().debug_needs_paint(&app));
 

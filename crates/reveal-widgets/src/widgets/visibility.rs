@@ -619,7 +619,9 @@ mod tests {
 
     use reveal_embedder::{Size, TextDirection};
     use reveal_foundation::{App, AppCell, Handle};
-    use reveal_rendering::{RenderConstrainedBox, RenderIgnorePointer, RenderOffstage};
+    use reveal_rendering::{
+        ErasedLayer, RenderConstrainedBox, RenderIgnorePointer, RenderOffstage,
+    };
 
     use super::*;
     use crate::framework::{State, StateData, StatefulWidget};
@@ -894,14 +896,22 @@ mod tests {
             .expect("a RepaintBoundary")
             .as_object();
         assert!(
-            boundary.debug_layer(&app).expect("painted").attached(),
+            boundary
+                .debug_layer(&app)
+                .expect("painted")
+                .as_layer()
+                .attached(&app),
             "a visible child paints"
         );
 
         harness.set_child(&mut app, tree(false));
         harness.pump(&mut app);
         assert!(
-            !boundary.debug_layer(&app).expect("a layer").attached(),
+            !boundary
+                .debug_layer(&app)
+                .expect("a layer")
+                .as_layer()
+                .attached(&app),
             "the hidden child is not painted"
         );
     }

@@ -8,9 +8,10 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use crate::fonts::FontSource;
-use crate::geometry::Color;
+use crate::geometry::{Color, Rect};
 use crate::mouse_cursor::SystemMouseCursorKind;
 use crate::restoration::{RestorationMap, RestorationUpdate};
+use crate::system_context_menu::SystemContextMenuItem;
 use crate::{View, ViewId};
 
 pub type PlatformRef = Rc<dyn Platform>;
@@ -239,6 +240,107 @@ pub enum Brightness {
     Light,
 }
 
+/// States that an application can be in once it is running.
+///
+/// States not supported on a platform are synthesized so the state machine stays the same
+/// everywhere. For example, [`Hidden`](AppLifecycleState::Hidden) is synthesized on mobile
+/// before [`Paused`](AppLifecycleState::Paused) when coming from
+/// [`Inactive`](AppLifecycleState::Inactive), and before [`Inactive`](AppLifecycleState::Inactive)
+/// when coming from [`Paused`](AppLifecycleState::Paused).
+///
+/// The values below are listed in the expected state machine transition order. The initial
+/// state is [`Detached`](AppLifecycleState::Detached).
+///
+/// Flutter counterpart: `AppLifecycleState` (`dart:ui` `platform_dispatcher.dart`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AppLifecycleState {
+    /// The application is still hosted by a Flutter engine but is detached from any host
+    /// views.
+    ///
+    /// The application defaults to this state before it initializes, and can be in this
+    /// state (applicable on Android, iOS, and web) after all views have been detached.
+    ///
+    /// When the application is in this state, the engine is running without a view.
+    ///
+    /// This state is only entered on iOS, Android, and web, although on all platforms it is
+    /// the default state before the application begins running.
+    Detached,
+
+    /// On all platforms, this state indicates that the application is in the default
+    /// running mode for a running application that has input focus and is visible.
+    ///
+    /// On Android, this state corresponds to the Flutter host view having focus while in
+    /// Android's "resumed" state. It is possible for the Flutter app to be in the
+    /// [`Inactive`](AppLifecycleState::Inactive) state while still being in Android's
+    /// "onResume" state if the app has lost focus but hasn't had `Activity.onPause` called
+    /// on it.
+    ///
+    /// On iOS and macOS, this corresponds to the app running in the foreground active
+    /// state.
+    Resumed,
+
+    /// At least one view of the application is visible, but none have input focus. The
+    /// application is otherwise running normally.
+    ///
+    /// On non-web desktop platforms, this corresponds to an application that is not in the
+    /// foreground, but still has visible windows.
+    ///
+    /// On the web, this corresponds to an application that is running in a window or tab
+    /// that does not have input focus.
+    ///
+    /// On iOS and macOS, this state corresponds to the Flutter host view running in the
+    /// foreground inactive state. Apps transition to this state when in a phone call, when
+    /// responding to a TouchID request, when entering the app switcher or the control
+    /// center, or when the UIViewController hosting the Flutter app is transitioning.
+    ///
+    /// On Android, this corresponds to the Flutter host view running in Android's paused
+    /// state (i.e. `Activity.onPause` has been called), or in Android's "resumed" state
+    /// (i.e. `Activity.onResume` has been called) but does not have window focus.
+    ///
+    /// On Android and iOS, apps in this state should assume that they may be
+    /// [`Hidden`](AppLifecycleState::Hidden) and [`Paused`](AppLifecycleState::Paused) at any
+    /// time.
+    Inactive,
+
+    /// All views of an application are hidden, either because the application is about to
+    /// be paused (on iOS and Android), or because it has been minimized or placed on a
+    /// desktop that is no longer visible (on non-web desktop), or is running in a window or
+    /// tab that is no longer visible (on the web).
+    ///
+    /// On iOS and Android, in order to keep the state machine the same on all platforms, a
+    /// transition to this state is synthesized before the [`Paused`](AppLifecycleState::Paused)
+    /// state is entered when coming from [`Inactive`](AppLifecycleState::Inactive), and
+    /// before the [`Inactive`](AppLifecycleState::Inactive) state is entered when coming
+    /// from [`Paused`](AppLifecycleState::Paused). This allows cross-platform implementations
+    /// that want to know when an app is conceptually "hidden" to only write one handler.
+    Hidden,
+
+    /// The application is not currently visible to the user, and not responding to user
+    /// input.
+    ///
+    /// When the application is in this state, the engine will not call
+    /// `PlatformDispatcher.onBeginFrame` and `PlatformDispatcher.onDrawFrame`.
+    ///
+    /// This state is only entered on iOS and Android.
+    Paused,
+}
+
+/// The possible responses to a request to exit the application.
+///
+/// The request is typically responded to by creating an `AppLifecycleListener` and supplying
+/// an `on_exit_requested` callback, or by overriding
+/// `WidgetsBindingObserver::did_request_app_exit`.
+///
+/// Flutter counterpart: `AppExitResponse` (`dart:ui` `platform_dispatcher.dart`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AppExitResponse {
+    /// Exiting the application can proceed.
+    Exit,
+
+    /// Cancel the exit: do not exit the application.
+    Cancel,
+}
+
 /// The platform that user interaction should adapt to target.
 ///
 /// Flutter counterpart: `TargetPlatform` (`foundation/platform.dart`). Flutter
@@ -312,6 +414,68 @@ pub trait Platform: 'static {
     /// message on `SystemChannels.platform`); the default drops it.
     fn haptic_feedback(&self, kind: HapticFeedbackType) {
         let _ = kind;
+    }
+
+    /// Stores plain text on the system clipboard (Flutter's `Clipboard.setData`
+    /// message on `SystemChannels.platform`); the default drops it.
+    fn clipboard_set_data(&self, text: &str) {
+        let _ = text;
+    }
+
+    /// Retrieves plain text from the system clipboard (Flutter's `Clipboard.getData`);
+    /// the default answers [`None`].
+    fn clipboard_get_data(&self) -> Option<String> {
+        None
+    }
+
+    /// Whether the clipboard contains string data (Flutter's `Clipboard.hasStrings`);
+    /// the default answers `false`.
+    fn clipboard_has_strings(&self) -> bool {
+        false
+    }
+
+    /// Whether this host can show a system-rendered context menu (Flutter
+    /// `PlatformDispatcher.supportsShowingSystemContextMenu`).
+    ///
+    /// Defaults to `false`. A host that can show one (iOS 16+ `UIEditMenuInteraction`)
+    /// answers `true`.
+    fn supports_showing_system_context_menu(&self) -> bool {
+        false
+    }
+
+    /// Shows the system context menu (Flutter's `ContextMenu.showSystemContextMenu`).
+    ///
+    /// `items` is `None` for the deprecated call that lets the platform pick default
+    /// buttons. Defaults to dropping it. Built-in items are performed by the host;
+    /// custom items are reported through [`crate::EmbedderClient::custom_context_menu_action`].
+    fn show_system_context_menu(&self, target_rect: Rect, items: Option<&[SystemContextMenuItem]>) {
+        let _ = (target_rect, items);
+    }
+
+    /// Hides the system context menu (Flutter's `ContextMenu.hideSystemContextMenu`).
+    ///
+    /// Defaults to dropping it.
+    fn hide_system_context_menu(&self) {}
+
+    /// Looks up the given text (Flutter's `LookUp.invoke`).
+    ///
+    /// Defaults to dropping it.
+    fn look_up(&self, text: &str) {
+        let _ = text;
+    }
+
+    /// Searches the web for the given text (Flutter's `SearchWeb.invoke`).
+    ///
+    /// Defaults to dropping it.
+    fn search_web(&self, text: &str) {
+        let _ = text;
+    }
+
+    /// Shares the given text (Flutter's `Share.invoke`).
+    ///
+    /// Defaults to dropping it.
+    fn share(&self, text: &str) {
+        let _ = text;
     }
 
     /// The platform's light/dark preference (Flutter
