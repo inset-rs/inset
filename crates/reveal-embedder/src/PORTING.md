@@ -62,6 +62,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the host paints a valo display list, not an engine `Scene`.
   Affect: `view.present(&picture)` after recording into a `Canvas`.
 
+- Change: text input is methods on `View` (`start_text_input`, `stop_text_input`, `set_text_input_editing_state`, composing and caret rects, client geometry), each defaulted to do nothing.
+  Reason: platform — there are no method channels; the host trait is the channel.
+  Affect: `TextInput` will call them; a host with an IME overrides the methods, and one without leaves the default.
+
 ## client.rs → dart:ui `hooks.dart`
 
 - Change: the isolate-global engine hooks are methods on `EmbedderClient`: one `frame` is a complete engine frame, pointer packets and key data arrive as calls, and view lifecycle is typed notifications. `key_data` answers whether the framework handled the key.
@@ -75,6 +79,22 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - Change: `platform_brightness_changed` and `locales_changed` are `onPlatformBrightnessChanged` and `onLocaleChanged`; the new value is read back from `Platform`, not carried by the call.
   Reason: platform — as with `frame`, the host pushes a notification and the framework reads the dispatcher.
   Affect: a host updates what its `Platform` answers before calling the hook; `MediaQuery` observers, and so `CupertinoTheme`, then rebuild.
+
+- Change: `text_input_editing_value`, `text_input_action`, and `text_input_closed` are `TextInputClient.updateEditingValue` / `performAction` / `connectionClosed`, each defaulted to do nothing.
+  Reason: platform — there are no method channels; the host trait is the channel.
+  Affect: a host that has an IME calls them; `Shell` turns them into `TextInput` singleton methods.
+
+## text_editing.rs → services `text_editing.dart`
+
+- Change: `TextSelection` lives here because `View` names `TextEditingValue`, which holds it.
+  Reason: platform — the host trait is the channel, so the payloads live with the trait.
+  Affect: painting and rendering import it from `reveal-embedder`; widgets still use the services re-export.
+
+## text_input.rs → services `text_input.dart`
+
+- Change: `TextEditingValue`, `TextInputConfiguration`, and the neighbouring value types live here because `View` and `EmbedderClient` name them. `toJSON` / `fromJSON` are omitted.
+  Reason: platform — there are no method channels; the host trait is the channel, so the data travels as itself.
+  Affect: a host receives a `TextEditingValue`, not a map; framework callers still write `reveal_services::TextEditingValue`.
 
 ## pointer.rs → dart:ui `pointer.dart`
 

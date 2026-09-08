@@ -29,12 +29,16 @@ No Flutter counterpart. Flutter's engine is C++ and is not in this checkout.
   Reason: platform — there is no winit plane in `LogicalKeyboardKey`, and a minted physical usage would collide with a real one.
   Affect: `NumpadHash`, `NumpadStar`, `F25` and up, the legacy `Hiragana` / `Katakana`, and keys winit cannot identify are silently dropped.
 
+- Change: `View` text-input methods map onto winit IME: `start_text_input` / `stop_text_input` are `set_ime_allowed`, obscure text sets `ImePurpose::Password`, composing and caret rects become `set_ime_cursor_area` (transform × device pixel ratio), and `WindowEvent::Ime` is translated to a `TextEditingValue` (UTF-8 byte offsets → UTF-16) and pushed through `EmbedderClient`.
+  Reason: platform — winit's IME is preedit/commit, not Flutter's method channel; the host adapts.
+  Affect: a focused field that has called `TextInput::attach` receives commits and composing updates; `Ime::Disabled` is `text_input_closed`.
+
 - Change: `Platform::haptic_feedback` and `Platform::set_system_ui_overlay_style` are left at the trait defaults, which drop the request.
   Reason: platform — a desktop machine has no haptic engine and no status bar to style; Flutter's own Linux and Windows embedders answer both channels with not-implemented.
   Affect: `HapticFeedback::selection_click(&app)` and its siblings are silent, and the status-bar style a `CupertinoNavigationBar` or `CupertinoApp` asks for shows nowhere; the same calls work on a phone host.
 
 - Change: a backdrop filter is replayed as a blur only; the colour filter a Flutter `ImageFilter.compose` puts over the blur is dropped rather than moved onto the layer paint, which would filter the children as well as the glass.
-  Reason: platform — valo's backdrop has no colour stage, and its `Paint`'s colour filter applies to the whole composited layer.
+  Reason: platform — Reveal’s scene adapter currently extracts only the first blur from the filter tree; it does not yet pass that tree to Valo’s composed backdrop-filter API.
   Affect: a `CupertinoPopupSurface` is blurred but not saturated, as is any frosted surface that composes a colour matrix over a backdrop blur; anything else composed into a backdrop filter is likewise dropped.
 
 - Change: `Platform::font_source` is `SystemFontSource::platform()`, the engine's font manager over the OS font API.
@@ -44,6 +48,10 @@ No Flutter counterpart. Flutter's engine is C++ and is not in this checkout.
 - Change: `present` asks the window for another redraw when valo cannot acquire a surface texture (wgpu's `Timeout` on the first frame of a just-shown window), so the retained scene is presented next vsync.
   Reason: platform — Flutter's Metal surface always has a drawable, so its engine drops a frame whose surface was not ready and resubmits only on Android's first-frame path; the redraw request is that resubmit here.
   Affect: the first frame appears without a resize; a frame is never dropped for a surface that was not ready.
+
+- Change: `WinitView` enables Metal presentation with Core Animation transactions on macOS, and resize callbacks deliver updated metrics and a frame before returning.
+  Reason: platform — AppKit commits window geometry independently of a later winit redraw; wgpu's transaction presentation schedules the drawable with that geometry.
+  Affect: live resizing displays newly laid-out content together with the window size instead of temporarily stretching the previous frame.
 
 ## Deferred
 

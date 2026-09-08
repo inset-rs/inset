@@ -1,6 +1,8 @@
 //! Flutter counterpart: dart:ui `FlutterView`. The host owns the native
 //! window; this stable handle exposes its identity and current configuration.
 
+use crate::{Matrix4, Rect, Size, TextEditingValue, TextInputConfiguration};
+
 /// Opaque id for one [`View`] (`FlutterView.viewId`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ViewId(pub u64);
@@ -146,4 +148,34 @@ pub trait View: 'static {
     /// Renders and presents one picture. Physical pixels; the presenter
     /// applies no extra scaling.
     fn present(&self, picture: &crate::Picture);
+
+    /// Flutter `TextInput.attach` / `TextInputConnection.show`: start an IME
+    /// session for this view. The default drops it.
+    fn start_text_input(&self, configuration: &TextInputConfiguration) {
+        let _ = configuration;
+    }
+
+    /// Flutter `TextInputConnection.close`: end the IME session. The default
+    /// drops it.
+    fn stop_text_input(&self) {}
+
+    /// Flutter `TextInputConnection.setEditingState`. The default drops it.
+    fn set_text_input_editing_state(&self, value: &TextEditingValue) {
+        let _ = value;
+    }
+
+    /// Flutter `TextInput.setComposingRect`. The default drops it.
+    fn set_text_input_composing_rect(&self, rect: Rect) {
+        let _ = rect;
+    }
+
+    /// Flutter `TextInput.setCaretRect`. The default drops it.
+    fn set_text_input_caret_rect(&self, rect: Rect) {
+        let _ = rect;
+    }
+
+    /// Flutter `TextInput.setEditableSizeAndTransform`. The default drops it.
+    fn set_text_input_client_geometry(&self, size: Size, transform: &Matrix4) {
+        let _ = (size, transform);
+    }
 }

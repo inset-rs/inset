@@ -8,7 +8,6 @@ publish.workspace = true
 [dependencies]
 reveal-embedder.workspace = true
 reveal-foundation.workspace = true
-reveal-services.workspace = true
 
 [dev-dependencies]
 valo-system-fonts.workspace = true

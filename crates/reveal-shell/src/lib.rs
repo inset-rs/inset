@@ -10,13 +10,16 @@ use std::cell::RefMut;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use reveal_embedder::{EmbedderClient, Frame, KeyData, PlatformRef, PointerDataPacket, ViewId};
+use reveal_embedder::{
+    EmbedderClient, Frame, KeyData, PlatformRef, PointerDataPacket, TextEditingValue,
+    TextInputAction, ViewId,
+};
 use reveal_foundation::{App, AppCell};
 use reveal_gestures::GestureBinding;
 use reveal_painting::PaintingBinding;
 use reveal_rendering::RendererBinding;
 use reveal_scheduler::SchedulerBinding;
-use reveal_services::KeyEventManager;
+use reveal_services::{KeyEventManager, TextInput};
 
 /// Host-facing isolate: the [`AppCell`] plus the methods the embedder pushes.
 ///
@@ -136,6 +139,18 @@ impl EmbedderClient for Shell {
 
     fn wake(&mut self, elapsed: Duration) {
         self.advance_clock(elapsed);
+    }
+
+    fn text_input_editing_value(&mut self, _view: ViewId, value: TextEditingValue) {
+        self.push(|app| TextInput::instance(app).update_editing_value(app, value));
+    }
+
+    fn text_input_action(&mut self, _view: ViewId, action: TextInputAction) {
+        self.push(|app| TextInput::instance(app).perform_action(app, action));
+    }
+
+    fn text_input_closed(&mut self, _view: ViewId) {
+        self.push(|app| TextInput::instance(app).connection_closed(app));
     }
 }
 

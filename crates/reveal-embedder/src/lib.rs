@@ -18,6 +18,8 @@ mod platform;
 mod pointer;
 mod restoration;
 mod text;
+mod text_editing;
+mod text_input;
 mod views;
 
 pub use client::EmbedderClient;
@@ -39,4 +41,6 @@ pub use pointer::{
 };
 pub use restoration::{RestorationData, RestorationMap, RestorationUpdate};
 pub use text::*;
+pub use text_editing::*;
+pub use text_input::*;
 pub use views::{GestureSettings, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding};

@@ -1689,7 +1689,6 @@ version = "0.1.0"
 dependencies = [
  "reveal-embedder",
  "reveal-foundation",
- "reveal-services",
  "valo-system-fonts",
 ]
 

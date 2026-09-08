@@ -2,10 +2,12 @@
 //!
 //! Only the hardware keyboard, haptic feedback, the mouse cursor, the mouse tracking
 //! annotation, state restoration, the application switcher description, the system overlay
-//! style, `TextSelection`, and `SelectionChangedCause` are here. Platform channels, the raw
-//! keyboard, the rest of text input, the clipboard, and the rest of system chrome wait.
+//! style, `TextInput` / `TextInputConnection` / `TextInputClient`, `SelectionChangedCause`,
+//! `AutofillHints`, and re-exports of the text-input value types are here. Platform channels,
+//! the raw keyboard, the clipboard, and the rest of system chrome wait.
 #![feature(arbitrary_self_types)]
 
+mod autofill;
 mod haptic_feedback;
 mod hardware_keyboard;
 mod keyboard_key;
@@ -16,6 +18,7 @@ mod system_chrome;
 mod text_editing;
 mod text_input;
 
+pub use autofill::*;
 pub use haptic_feedback::*;
 pub use hardware_keyboard::*;
 pub use keyboard_key::*;

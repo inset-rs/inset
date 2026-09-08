@@ -9,10 +9,9 @@ use reveal_embedder::{
     BoxHeightStyle, BoxWidthStyle, Canvas, CanvasText, Color, FontCollection, GlyphInfo,
     LineMetrics, Offset, Paint, PaintStyle, Paragraph, ParagraphBuilder, ParagraphConstraints,
     ParagraphStyle, Rect, Size, Stroke, TextAffinity, TextAlign, TextBaseline, TextBox,
-    TextDirection, TextHeightBehavior, TextPosition, TextRange, clamp_double,
+    TextDirection, TextHeightBehavior, TextPosition, TextRange, TextSelection, clamp_double,
 };
 use reveal_foundation::PRECISION_ERROR_TOLERANCE;
-use reveal_services::TextSelection;
 
 use crate::basic_types::RenderComparison;
 use crate::inline_span::{InlineSpanRef, utf16_len};

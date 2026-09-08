@@ -5,8 +5,9 @@
 
 use std::any::Any;
 
+use reveal_embedder::TextRange;
 use reveal_gestures::{PointerDownEvent, PointerUpEvent};
-use reveal_services::SelectionChangedCause;
+use reveal_services::{SelectionChangedCause, TextEditingValue, TextSelection};
 
 use crate::widgets::actions::Intent;
 use crate::widgets::focus_manager::AnyFocusNode;
@@ -739,6 +740,43 @@ impl Intent for RedoTextIntent {
     }
 }
 
+/// An [`Intent`] that represents a user interaction that attempts to modify the
+/// current [`TextEditingValue`] in an input field.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReplaceTextIntent {
+    /// The [`TextEditingValue`] that this [`Intent`]'s action should perform on.
+    pub current_text_editing_value: TextEditingValue,
+    /// The text to replace the original text within the [`replacement_range`](Self::replacement_range) with.
+    pub replacement_text: String,
+    /// The range of text in [`current_text_editing_value`](Self::current_text_editing_value) that needs to be replaced.
+    pub replacement_range: TextRange,
+    /// The [`SelectionChangedCause`] that triggered the intent.
+    pub cause: SelectionChangedCause,
+}
+
+impl ReplaceTextIntent {
+    /// Creates a [`ReplaceTextIntent`].
+    pub fn new(
+        current_text_editing_value: TextEditingValue,
+        replacement_text: impl Into<String>,
+        replacement_range: TextRange,
+        cause: SelectionChangedCause,
+    ) -> ReplaceTextIntent {
+        ReplaceTextIntent {
+            current_text_editing_value,
+            replacement_text: replacement_text.into(),
+            replacement_range,
+            cause,
+        }
+    }
+}
+
+impl Intent for ReplaceTextIntent {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
 /// An [`Intent`] that represents a user interaction that attempts to go back to
 /// the previous editing state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -755,6 +793,39 @@ impl UndoTextIntent {
 }
 
 impl Intent for UndoTextIntent {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// An [`Intent`] that represents a user interaction that attempts to change the
+/// selection in an input field.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UpdateSelectionIntent {
+    /// The [`TextEditingValue`] that this [`Intent`]'s action should perform on.
+    pub current_text_editing_value: TextEditingValue,
+    /// The new [`TextSelection`] the input field should adopt.
+    pub new_selection: TextSelection,
+    /// The [`SelectionChangedCause`] that triggered the intent.
+    pub cause: SelectionChangedCause,
+}
+
+impl UpdateSelectionIntent {
+    /// Creates an [`UpdateSelectionIntent`].
+    pub fn new(
+        current_text_editing_value: TextEditingValue,
+        new_selection: TextSelection,
+        cause: SelectionChangedCause,
+    ) -> UpdateSelectionIntent {
+        UpdateSelectionIntent {
+            current_text_editing_value,
+            new_selection,
+            cause,
+        }
+    }
+}
+
+impl Intent for UpdateSelectionIntent {
     fn as_any(&self) -> &dyn Any {
         self
     }

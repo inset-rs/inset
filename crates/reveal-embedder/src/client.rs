@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use crate::{Frame, KeyData, PointerDataPacket, ViewId};
+use crate::{Frame, KeyData, PointerDataPacket, TextEditingValue, TextInputAction, ViewId};
 
 /// Complete frames and typed view lifecycle notifications.
 ///
@@ -39,4 +39,19 @@ pub trait EmbedderClient {
     /// `elapsed` is the platform clock, the same one `Frame::elapsed` reports. Dart's
     /// event loop runs due `Timer`s itself; here the client advances its own clock.
     fn wake(&mut self, elapsed: Duration);
+
+    /// Flutter `TextInputClient.updateEditingValue`. The default drops it.
+    fn text_input_editing_value(&mut self, view: ViewId, value: TextEditingValue) {
+        let _ = (view, value);
+    }
+
+    /// Flutter `TextInputClient.performAction`. The default drops it.
+    fn text_input_action(&mut self, view: ViewId, action: TextInputAction) {
+        let _ = (view, action);
+    }
+
+    /// Flutter `TextInputClient.connectionClosed`. The default drops it.
+    fn text_input_closed(&mut self, view: ViewId) {
+        let _ = view;
+    }
 }

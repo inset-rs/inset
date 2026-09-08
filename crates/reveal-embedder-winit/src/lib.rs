@@ -5,6 +5,7 @@
 #![recursion_limit = "256"]
 
 mod gpu;
+mod ime;
 mod keys;
 mod window;
 

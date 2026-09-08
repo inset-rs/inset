@@ -18,6 +18,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - shifted_box.rs → OverflowBoxFit, RenderConstrainedOverflowBox, RenderSizedOverflowBox, RenderFractionallySizedOverflowBox, RenderBaseline
 - viewport.rs → RenderViewportBase.debugThrowIfNotCheckingIntrinsics and the four intrinsics, RenderViewport.computeDryLayout
 - object.rs / box.rs → getTransformTo, globalToLocal, localToGlobal
+- editable.rs → TextSelectionPoint
 - debug.rs → debug.dart
 - pipeline_owner.rs → object.dart (PipelineOwner)
 - sliver_fixed_extent_list.rs → sliver_fixed_extent_list.dart
@@ -256,7 +257,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - The layout-contract asserts: `_DebugSize`, the wrapper that reports a child's size read during a dry layout; `RenderBox.debugAssertDoesMeetConstraints`; `RenderSliver.debugAssertDoesMeetConstraints` with the `geometry` setter's contract asserts; and `RenderSliverFixedExtentBoxAdaptor.debugAssertDoesMeetConstraints`. `SliverGeometry::debug_assert_is_valid` is ported and the viewport calls it on every child. Trigger: the first layout bug one of them would have caught.
 - `layout` and `constraints` as override points. `markNeedsLayout` is one on the box protocol (its vtable slot resolves `RenderBox::mark_needs_layout`, which the layout cache overrides); a sliver and the view keep the base body. Trigger: OverlayPortal, `RenderView`. Ask before adding.
 - `RenderView.applyPaintTransform` / `updateSystemChrome`; `performReassemble`. Trigger: `getTransformTo`, hot reload.
-- `RenderParagraph.RelayoutWhenSystemFontsChangeMixin` and `applyPaintTransform`; `RenderEditable`. Trigger: `PaintingBinding.systemFonts`; `EditableText`.
+- `RenderParagraph.RelayoutWhenSystemFontsChangeMixin` and `applyPaintTransform`. Trigger: `PaintingBinding.systemFonts`.
+- `RenderEditable` and `VerticalCaretMovementRun` (`editable.rs` has `TextSelectionPoint`). Trigger: `EditableText`. The run holds the editable and its line metrics; the box mixes `RelayoutWhenSystemFontsChangeMixin`, inline children, and `TextLayoutMetrics`.
 - `SliverConstraints.debugAssertIsValid` extra numeric checks. Trigger: a caller that relies on those messages.
 - Baseline alignment on the multi-child boxes: `RenderFlex`'s ascent/descent pass with its actual and dry baseline computations, `RenderStack` / `RenderIndexedStack`'s per-child baseline and their baseline computations, and `RenderIgnoreBaseline`; until it lands a `CrossAxisAlignment::Baseline` row top-aligns its children and stores the `text_baseline` unused. The one-child boxes report baselines, and `RenderBoxContainerDefaultsMixin`'s two baseline helpers are ported. Trigger: the first baseline-aligned `Row`.
 - `RenderCustomSingleChildLayoutBox` and `SingleChildLayoutDelegate` (`shifted_box.dart`; `custom_layout.rs` holds only the multi-child pair, as Dart does). Trigger: `CustomSingleChildLayout`.

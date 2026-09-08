@@ -6,14 +6,18 @@ use std::time::{Duration, Instant};
 
 use reveal_embedder::{
     Brightness, EmbedderClient, FontSource, Frame, KeyData, KeyEventDeviceType, KeyEventType,
-    Picture, Platform, PlatformRef, PointerChange, PointerData, PointerDataPacket,
-    PointerDeviceKind, PointerSignalKind, SystemFontSource, SystemMouseCursorKind, TargetPlatform,
-    View, ViewConstraints, ViewId, ViewMetrics, ViewPadding, ViewRef,
+    Matrix4, Offset, Picture, Platform, PlatformRef, PointerChange, PointerData, PointerDataPacket,
+    PointerDeviceKind, PointerSignalKind, Rect, Size, SystemFontSource, SystemMouseCursorKind,
+    TargetPlatform, TextEditingValue, TextInputConfiguration, View, ViewConstraints, ViewId,
+    ViewMetrics, ViewPadding, ViewRef, transform3,
 };
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::dpi::{PhysicalPosition, PhysicalSize};
+use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
-use winit::window::{CursorIcon, Window, WindowId};
+use winit::window::{CursorIcon, ImePurpose, Window, WindowId};
+
+use crate::ime::{ImeOutcome, apply_ime};
 
 use crate::gpu::Gpu;
 use crate::keys;
@@ -146,6 +150,8 @@ struct WinitView {
     surface: Arc<Mutex<WinitSurface>>,
     /// The window this view draws into, for retrying a present the surface refused.
     window: Arc<Window>,
+    editing_state: RefCell<TextEditingValue>,
+    transform: RefCell<Option<Matrix4>>,
 }
 
 struct WinitSurface {
@@ -175,6 +181,49 @@ impl View for WinitView {
             .context
             .render(picture, &surface_frame.target(Some(valo::Color::WHITE)));
         state.context.present(surface_frame);
+    }
+
+    fn start_text_input(&self, configuration: &TextInputConfiguration) {
+        self.window.set_ime_allowed(true);
+        self.window.set_ime_purpose(if configuration.obscure_text {
+            ImePurpose::Password
+        } else {
+            ImePurpose::Normal
+        });
+    }
+
+    fn stop_text_input(&self) {
+        self.window.set_ime_allowed(false);
+    }
+
+    fn set_text_input_editing_state(&self, value: &TextEditingValue) {
+        *self.editing_state.borrow_mut() = value.clone();
+    }
+
+    fn set_text_input_composing_rect(&self, rect: Rect) {
+        self.set_ime_area(rect);
+    }
+
+    fn set_text_input_caret_rect(&self, rect: Rect) {
+        self.set_ime_area(rect);
+    }
+
+    fn set_text_input_client_geometry(&self, _size: Size, transform: &Matrix4) {
+        *self.transform.borrow_mut() = Some(*transform);
+    }
+}
+
+impl WinitView {
+    fn set_ime_area(&self, rect: Rect) {
+        let origin = match *self.transform.borrow() {
+            Some(transform) => transform3(transform, Offset::new(rect.left, rect.top)),
+            None => Offset::new(rect.left, rect.top),
+        };
+        let scale = self.metrics.get().device_pixel_ratio;
+        self.window.set_ime_cursor_area(
+            PhysicalPosition::new(origin.dx() * scale, origin.dy() * scale),
+            PhysicalSize::new(rect.width() * scale, rect.height() * scale),
+        );
     }
 }
 
@@ -380,6 +429,8 @@ impl<C: EmbedderClient> WinitApp<C> {
             metrics: Cell::new(window_metrics(&window)),
             surface: Arc::new(Mutex::new(WinitSurface { surface, context })),
             window: Arc::clone(&window),
+            editing_state: RefCell::new(TextEditingValue::EMPTY),
+            transform: RefCell::new(None),
         });
         if let Some(theme) = window.theme() {
             self.platform.brightness.set(brightness_of(theme));
@@ -428,6 +479,28 @@ impl<C: EmbedderClient> WinitApp<C> {
         };
         if let Some(client) = &mut self.client {
             client.pointer_data_packet(packet);
+        }
+    }
+
+    fn send_ime(&mut self, window_id: WindowId, ime: Ime) {
+        let Some(hosted) = self.views.get(&window_id) else {
+            return;
+        };
+        let view_id = hosted.view.id();
+        let outcome = apply_ime(&hosted.view.editing_state.borrow(), &ime);
+        match outcome {
+            ImeOutcome::None => {}
+            ImeOutcome::Closed => {
+                if let Some(client) = &mut self.client {
+                    client.text_input_closed(view_id);
+                }
+            }
+            ImeOutcome::Value(value) => {
+                *hosted.view.editing_state.borrow_mut() = value.clone();
+                if let Some(client) = &mut self.client {
+                    client.text_input_editing_value(view_id, value);
+                }
+            }
         }
     }
 
@@ -642,6 +715,9 @@ impl<C: EmbedderClient> ApplicationHandler for WinitApp<C> {
                 ..
             } => {
                 self.send_key(event, is_synthetic);
+            }
+            WindowEvent::Ime(ime) => {
+                self.send_ime(id, ime);
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 self.send_scroll(id, delta);

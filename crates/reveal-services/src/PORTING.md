@@ -3,12 +3,34 @@ Syntax (constructors, setters, `Option`, erasure calls) follows `.cursor/skills/
 Flutter home: packages/flutter/lib/src/services
 Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
-Only the hardware keyboard, haptic feedback, mouse cursors, the mouse tracking annotation, state restoration, the application switcher description, the system overlay style, `TextSelection` and `SelectionChangedCause` are here; the rest of the package waits.
+Only the hardware keyboard, haptic feedback, mouse cursors, the mouse tracking annotation, state restoration, the application switcher description, the system overlay style, `TextInput` / `TextInputConnection` / `TextInputClient`, `SelectionChangedCause`, `AutofillHints`, and re-exports of the text-input value types are here; the rest of the package waits.
 
 ## Identical
 
-- text_input.rs → text_input.dart (`SelectionChangedCause`)
-- text_editing.rs → text_editing.dart
+- text_editing.rs → text_editing.dart (re-export of embedder `TextSelection`)
+- autofill.rs → autofill.dart (`AutofillHints`; `AutofillConfiguration` is re-exported from reveal-embedder)
+
+## text_input.rs → text_input.dart
+
+- Change: `_PlatformTextInputControl` talks to `View` (`start_text_input`, `stop_text_input`, editing state, composing/caret rects, client geometry) instead of `SystemChannels.textInput`.
+  Reason: platform — there are no method channels; the host trait is the channel.
+  Affect: `TextInput::attach` / `TextInputConnection::show` reach the view; a host without IME leaves the `View` defaults.
+
+- Change: inbound `updateEditingValue` / `performAction` / `connectionClosed` are methods on the `TextInput` singleton; the host calls `EmbedderClient` and `Shell` forwards them. There is no method-call dispatcher and no client-id check.
+  Reason: platform — the host trait is the channel, and one connection is attached at a time.
+  Affect: a host calls `text_input_editing_value` / `text_input_action` / `text_input_closed`; it does not send a client id.
+
+- Change: `TextInputClient` is a handle-receiver trait; a `TextInputConnection` holds an [`AnyTextInputClient`].
+  Reason: language — Dart's mixin is also a type; a Rust trait is not stored by value.
+  Affect: `TextInput::attach(app, client.as_text_input_client(), configuration)`.
+
+- Change: `TextInputConnection.attached` takes `&mut App` so it can mint the `TextInput` singleton.
+  Reason: language — Dart's `_instance` is a static field; ours is created on first `instance`.
+  Affect: `connection.attached(app)` needs a mutable `App`.
+
+- Change: `performPrivateCommand` takes only the action string; `insertContent`, `currentAutofillScope`, `didChangeInputControl`, `onFocusReceived`, and `TextInputStyle.toJson` are omitted.
+  Reason: platform — those payloads were maps or types this crate does not have yet (`KeyboardInsertedContent`, `AutofillScope`, a custom `TextInputControl`).
+  Affect: a private-command `data` map is dropped; autofill scope and content insertion wait.
 
 ## keyboard_key.rs → keyboard_key.g.dart
 
@@ -85,7 +107,7 @@ The key constants and the four tables are machine-written from the Dart, as Flut
 - Platform channels, `SystemChannels`, `BinaryMessenger`. Trigger: the first service that talks to the host over a named channel; so far each need is a `Platform` method.
 - `MouseCursor` diagnostics (`debugFillProperties`, `toString(minLevel)`). Trigger: diagnostics.
 - An `EmbedderClient` hook for restoration data that arrives while the app runs (Flutter's `push` message on `SystemChannels.restoration`). Trigger: an embedder whose OS hands it new restoration data after start; until then the host calls `RestorationManager::handle_restoration_update_from_engine`.
-- The rest of text input (`TextEditingValue`, `TextInputConnection`, `TextInputClient`, `TextSelectionDelegate`), the clipboard, asset bundles. Trigger: `Focus`, `EditableText`.
+- The rest of text input (`TextSelectionDelegate`, `ScribbleClient`, `DeltaTextInputClient`, `TextInputControl` / `setInputControl`, `SystemContextMenuController`, `requestAutofill`, `finishAutofillContext`, `setSelectionRects` reaching the host, `updateStyle` reaching the host), autofill's `AutofillClient` / `AutofillScope` / `AutofillScopeMixin`, the clipboard, asset bundles. Trigger: `EditableText`, scribble, a custom input control, or a host that implements autofill.
 - The rest of `SystemChrome` (`setPreferredOrientations`, `setEnabledSystemUIMode` with `restoreSystemUIOverlays` — which restores what only that call sets — `setSystemUIChangeCallback`, `handleAppLifecycleStateChanged`, `DeviceOrientation`, `SystemUiMode`); `SystemUiOverlay` is here, as the type `setEnabledSystemUIMode` and `SystemUiChangeCallback` name. Trigger: an orientation-aware or fullscreen-capable host, and the app lifecycle.
 - The raw key path: `RawKeyboard`, `RawKeyEvent`, `RawKeyEventData*`, `KeyMessage`, `KeyMessageHandler`, `KeyDataTransitMode`, `KeyEventManager.handleRawKeyMessage`; Flutter has deprecated all of it. Trigger: an embedder that can only send raw key data.
 - `debugPrintKeyboardEvents` and `HardwareKeyboard._logEventIfIrregular`. Trigger: `services/debug.dart`.

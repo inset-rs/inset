@@ -7,13 +7,13 @@
 use reveal_embedder::{
     BoxHeightStyle, BoxWidthStyle, ClipOp, FontCollection, Offset, Rect, Size, TextAlign,
     TextBaseline, TextBox, TextDirection, TextHeightBehavior, TextPosition, TextRange,
+    TextSelection,
 };
 use reveal_foundation::{App, Handle};
 use reveal_painting::{
     ClipContext, InlineSpanRef, PaintingBinding, RenderComparison, TextOverflow, TextPainter,
     TextScaler, TextWidthBasis,
 };
-use reveal_services::TextSelection;
 
 use crate::box_::{BoxConstraints, BoxHitTestResult, RenderBox, RenderBoxData};
 use crate::object::{AnyRenderObject, Constraints, RenderHandle, RenderObject, RenderObjectData};
