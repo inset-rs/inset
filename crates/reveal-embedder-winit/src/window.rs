@@ -30,7 +30,7 @@ const IMPLICIT_VIEW: ViewId = ViewId(0);
 
 /// The long-lived host capability held by `App`.
 ///
-/// Requests only write state and poke the event loop; they never re-enter the
+/// Requests only write state and wake the event loop; they never re-enter the
 /// client synchronously.
 struct WinitPlatform {
     deadline: Cell<Option<Instant>>,
@@ -72,7 +72,7 @@ impl WinitPlatform {
         slot.as_mut().map(f)
     }
 
-    fn poke(&self) {
+    fn wake_event_loop(&self) {
         let _ = self.proxy.send_event(());
     }
 
@@ -122,7 +122,7 @@ impl Platform for WinitPlatform {
 
     fn request_frame(&self) {
         if !self.frame_requested.replace(true) {
-            self.poke();
+            self.wake_event_loop();
         }
     }
 
@@ -132,7 +132,7 @@ impl Platform for WinitPlatform {
 
     fn wake_at(&self, deadline: Instant) {
         self.deadline.set(Some(deadline));
-        self.poke();
+        self.wake_event_loop();
     }
 
     fn views(&self) -> Vec<ViewRef> {
@@ -154,7 +154,7 @@ impl Platform for WinitPlatform {
             state,
             direction,
         });
-        self.poke();
+        self.wake_event_loop();
     }
 
     fn implicit_view(&self) -> Option<ViewRef> {
@@ -170,7 +170,7 @@ impl Platform for WinitPlatform {
     /// last seen in shows the cursor.
     fn activate_system_cursor(&self, _device: i64, kind: SystemMouseCursorKind) {
         self.cursor_request.set(Some(kind));
-        self.poke();
+        self.wake_event_loop();
     }
 
     fn clipboard_set_data(&self, text: &str) {
