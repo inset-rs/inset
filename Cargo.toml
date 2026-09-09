@@ -28,6 +28,8 @@ reveal-services = { path = "crates/reveal-services" }
 reveal-shell = { path = "crates/reveal-shell" }
 reveal-widgets = { path = "crates/reveal-widgets" }
 slotmap = "1"
+unicode-general-category = "1"
+unicode-segmentation = "1"
 winit = "0.30"
 valo = "0.4.1"
 valo-system-fonts = "0.4.1"

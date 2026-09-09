@@ -51,6 +51,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — there are no method channels; the host trait is the channel, so payloads cross as values rather than Dart's `_toMap` encodings.
   Affect: a capability a host does not override stays inert — restoration off, the initial route `/`, no locales, an empty clipboard, no system context menu — instead of failing on a missing channel.
 
+- Change: `Platform` asks the host whether its own text input turns editing keys into edits — backspace, delete, caret movement — and the default answer is no.
+  Reason: platform — Flutter writes one embedder per host and settles this per target platform, where one framework here meets hosts that differ on the same platform.
+  Affect: on a host that reports plain key presses, a text field's editing keys work whichever platform the host claims to be.
+
 ## restoration.rs → services `message_codecs.dart` (`StandardMessageCodec`)
 
 - Change: `RestorationData` is a value enum over the kinds `StandardMessageCodec` can carry, and there is no encode or decode step.

@@ -25,6 +25,7 @@ use crate::layer::{ClipRectLayer, ContainerLayer, LayerHandle, LayerLink, Leader
 use crate::object::{AnyRenderObject, RenderHandle, RenderObject, RenderObjectData};
 use crate::painting_context::PaintingContext;
 use crate::pipeline_owner::PipelineOwner;
+use crate::text_boundary::WordBoundary;
 use crate::viewport_offset::AnyViewportOffset;
 
 const K_CARET_GAP: f64 = 1.0;
@@ -1506,6 +1507,16 @@ impl RenderEditable {
         TextSelection::new(line.start, line.end)
     }
 
+    /// A [`WordBoundary`] over this render object's text and layout.
+    ///
+    /// Dart's `RenderEditable.wordBoundaries`, which forwards to the text painter's.
+    pub fn word_boundaries(self: RenderHandle<Self>, app: &App) -> WordBoundary {
+        WordBoundary::new(
+            self.text(app).expect("RenderEditable always has text"),
+            self,
+        )
+    }
+
     /// See `TextPainter.get_word_boundary`.
     pub fn get_word_boundary(
         self: RenderHandle<Self>,
@@ -2101,6 +2112,47 @@ mod tests {
         root.as_object()
             .schedule_initial_paint(app, paint_root.as_container_layer());
         editable
+    }
+
+    #[test]
+    fn move_by_word_boundary_skips_spaces_and_punctuation() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let text = concat!(
+            "ABC   ABC\n",              // [0, 10)
+            "A\u{41}\u{301}    \u{41}\u{301}\n", // [10, 20)
+            "         \n",              // [20, 30)
+            "ABC!!!ABC\n",              // [30, 40)
+            "  !ABC !!\n",              // [40, 50)
+            "A  \u{115CB}\u{115CB} A\n",   // [50, 60)
+        );
+        let editable = laid_out(&mut app, text);
+        let boundary = editable.word_boundaries(&app).move_by_word_boundary();
+
+        // 4 points to the 2nd whitespace in the first line.
+        // Don't break between horizontal spaces and letters/numbers.
+        assert_eq!(boundary.get_leading_text_boundary_at(&mut app, 4), Some(0));
+        assert_eq!(boundary.get_trailing_text_boundary_at(&mut app, 4), Some(9));
+
+        // Works when words are starting/ending with a combining diacritical mark.
+        assert_eq!(boundary.get_leading_text_boundary_at(&mut app, 14), Some(10));
+        assert_eq!(boundary.get_trailing_text_boundary_at(&mut app, 14), Some(19));
+
+        // Do break before and after newlines.
+        assert_eq!(boundary.get_leading_text_boundary_at(&mut app, 24), Some(20));
+        assert_eq!(boundary.get_trailing_text_boundary_at(&mut app, 24), Some(29));
+
+        // Do not break on punctuations.
+        assert_eq!(boundary.get_leading_text_boundary_at(&mut app, 34), Some(30));
+        assert_eq!(boundary.get_trailing_text_boundary_at(&mut app, 34), Some(39));
+
+        // Ok to break if next to punctuations or separating spaces.
+        assert_eq!(boundary.get_leading_text_boundary_at(&mut app, 44), Some(43));
+        assert_eq!(boundary.get_trailing_text_boundary_at(&mut app, 44), Some(46));
+
+        // 54 points to a low surrogate of a punctuation.
+        assert_eq!(boundary.get_leading_text_boundary_at(&mut app, 54), Some(50));
+        assert_eq!(boundary.get_trailing_text_boundary_at(&mut app, 54), Some(59));
     }
 
     #[test]

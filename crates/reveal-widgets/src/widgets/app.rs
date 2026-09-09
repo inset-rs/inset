@@ -46,6 +46,7 @@ use crate::widgets::restoration::RootRestorationScope;
 use crate::widgets::scrollable_helpers::{ScrollAction, ScrollIncrementType, ScrollIntent};
 use crate::widgets::shared_app_data::SharedAppData;
 use crate::widgets::shortcuts::{ShortcutMap, ShortcutRegistrar, Shortcuts};
+use crate::widgets::tap_region::TapRegionSurface;
 use crate::widgets::text::DefaultTextStyle;
 use crate::widgets::title::Title;
 use crate::widgets::transitions::{ListenableBuilder, TransitionBuilder};
@@ -1680,8 +1681,10 @@ impl State for WidgetsAppState {
                         shortcuts,
                         DefaultTextEditingShortcuts::new(Actions::new(
                             actions,
-                            FocusTraversalGroup::new(ShortcutRegistrar::new(localizations))
-                                .policy(policy),
+                            FocusTraversalGroup::new(TapRegionSurface::new(
+                                ShortcutRegistrar::new(localizations),
+                            ))
+                            .policy(policy),
                         )),
                     )
                     .debug_label("<Default WidgetsApp Shortcuts>"),

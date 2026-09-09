@@ -3,6 +3,7 @@
 use std::any::{Any, TypeId};
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,7 +31,7 @@ use reveal_rendering::{
     CompositionCallback, HitTestBehavior, LayerLink, PaintingContext, RenderBox, RenderBoxData,
     RenderEditable, RenderHandle, RenderObject, RenderObjectData, RenderObjectWithChildData,
     RenderObjectWithChildMixin, RenderProxyBoxMixin, RenderProxyBoxWithHitTestBehavior,
-    RevealedOffset,
+    LineBoundary, RevealedOffset, VerticalCaretMovementRun,
 };
 use reveal_scheduler::{
     FrameCallback, SchedulerBinding, Ticker, TickerCallback, TickerProviderObject,
@@ -39,18 +40,22 @@ use reveal_services::{
     AnyAutofillClient, AnyTextSelectionDelegate, AutofillClient, AutofillHints, Clipboard,
     ClipboardData, DefaultProcessTextService, FilteringTextInputFormatter, KeyboardInsertedContent,
     LiveText, MouseCursorRef, ProcessTextAction, ProcessTextService, SelectionChangedCause,
-    SpellCheckResults, SuggestionSpan, TextEditingValue, TextInput, TextInputClient,
+    CharacterBoundary, DocumentBoundary, ParagraphBoundary, SpellCheckResults, SuggestionSpan,
+    TextBoundary, TextEditingValue, TextInput, TextInputClient,
     TextInputConnection, TextInputFormatter, TextInputFormatterRef, TextInputStyle,
     TextSelectionDelegate,
 };
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 use crate::framework::{
-    BuildContext, IntoWidget, KeyRef, LeafRenderObjectWidget, RenderObjectWidget,
+    BuildContext, GlobalKey, IntoWidget, KeyRef, LeafRenderObjectWidget, RenderObjectWidget,
     SingleChildRenderObjectWidget, State, StateData, StatefulWidget, WidgetRef,
 };
 use crate::state_accessors;
-use crate::widgets::actions::{Action, Actions, AnyAction, CallbackAction};
+use crate::widgets::actions::{
+    Action, ActionData, Actions, AnyAction, CallbackAction, ContextAction, DismissIntent,
+    DoNothingAction, Intent, OnInvokeCallback,
+};
 use crate::widgets::app_lifecycle_listener::AppLifecycleListener;
 use crate::widgets::autofill::{AutofillGroup, AutofillGroupState};
 use crate::widgets::automatic_keep_alive::{
@@ -60,21 +65,36 @@ use crate::widgets::basic::CompositedTransformTarget;
 use crate::widgets::basic::WidgetBuilder;
 use crate::widgets::basic::{Builder, Directionality};
 use crate::widgets::context_menu_button_item::{ContextMenuButtonItem, ContextMenuButtonType};
+use crate::widgets::default_text_editing_shortcuts::intent_for_macos_selector;
 use crate::widgets::focus_manager::{FocusManager, FocusNode, FocusNodeLeaf, UnfocusDisposition};
+use crate::widgets::focus_traversal::{DirectionalFocusAction, DirectionalFocusIntent};
 use crate::widgets::focus_scope::{Focus, FocusScope};
 use crate::widgets::magnifier::TextMagnifierConfiguration;
 use crate::widgets::media_query::{MediaQuery, Orientation};
 use crate::widgets::scroll_configuration::{ScrollBehaviorRef, ScrollConfiguration};
 use crate::widgets::scroll_controller::{ScrollController, ScrollControllerLeaf};
 use crate::widgets::scroll_physics::{ScrollPhysics, ScrollPhysicsBase, ScrollPhysicsRef};
-use crate::widgets::scrollable::{Scrollable, ViewportBuilder};
+use crate::widgets::scrollable_helpers::{ScrollAction, ScrollIncrementType, ScrollIntent};
+use crate::widgets::scrollable::{Scrollable, ScrollableState, ViewportBuilder};
 use crate::widgets::spell_check::{
     SpellCheckConfiguration, build_text_span_with_spell_check_suggestions,
 };
 use crate::widgets::tap_region::{TapRegionGroupId, TextFieldTapRegion};
 use crate::widgets::text::DefaultTextHeightBehavior;
 use crate::widgets::text_editing_intents::{
-    EditableTextTapOutsideIntent, EditableTextTapUpOutsideIntent,
+    CopySelectionTextIntent, DeleteCharacterIntent, DeleteToLineBreakIntent,
+    DeleteToNextWordBoundaryIntent, DirectionalCaretMovementIntent, DirectionalTextEditingIntent,
+    DoNothingAndStopPropagationTextIntent, EditableTextTapOutsideIntent,
+    EditableTextTapUpOutsideIntent, ExpandSelectionToDocumentBoundaryIntent,
+    ExpandSelectionToLineBreakIntent, ExtendSelectionByCharacterIntent,
+    ExtendSelectionToDocumentBoundaryIntent, ExtendSelectionToLineBreakIntent,
+    ExtendSelectionToNextParagraphBoundaryIntent,
+    ExtendSelectionToNextParagraphBoundaryOrCaretLocationIntent,
+    ExtendSelectionToNextWordBoundaryIntent,
+    ExtendSelectionToNextWordBoundaryOrCaretLocationIntent,
+    ExtendSelectionVerticallyToAdjacentLineIntent, ExtendSelectionVerticallyToAdjacentPageIntent,
+    PasteTextIntent, ReplaceTextIntent, ScrollToDocumentBoundaryIntent, SelectAllTextIntent,
+    TransposeCharactersIntent, UpdateSelectionIntent,
 };
 use crate::widgets::text_selection::{
     ClipboardStatus, ClipboardStatusNotifier, LiveTextInputStatus, LiveTextInputStatusNotifier,
@@ -1697,7 +1717,11 @@ impl StatefulWidget for EditableText {
             app_lifecycle_listener: None,
             just_resumed: false,
             had_focus_on_tap_down: false,
-            tap_outside_actions: None,
+            actions: None,
+            vertical_movement_run: None,
+            run_selection: None,
+            editable_key: Rc::new(GlobalKey::new()),
+            scrollable_key: Rc::new(GlobalKey::new()),
             style: TextStyle::new(),
             tickers_enabled: true,
             batch_edit_depth: 0,
@@ -1844,7 +1868,13 @@ pub struct EditableTextState {
     app_lifecycle_listener: Option<Handle<AppLifecycleListener>>,
     just_resumed: bool,
     had_focus_on_tap_down: bool,
-    tap_outside_actions: Option<HashMap<TypeId, AnyAction>>,
+    actions: Option<HashMap<TypeId, AnyAction>>,
+    /// Dart keeps these on the one shared vertical action; both vertical intents map
+    /// to that instance, so the run is shared here instead.
+    vertical_movement_run: Option<VerticalCaretMovementRun>,
+    run_selection: Option<TextSelection>,
+    editable_key: Rc<GlobalKey>,
+    scrollable_key: Rc<GlobalKey>,
     style: TextStyle,
     tickers_enabled: bool,
     batch_edit_depth: i32,
@@ -2817,14 +2847,636 @@ impl EditableTextState {
         }
     }
 
-    fn ensure_tap_outside_actions(
+    // --------------------------- Text Editing Actions ---------------------------
+
+    fn character_boundary(self: Handle<Self>, app: &mut App) -> Box<dyn TextBoundary> {
+        let text = self.value(app).text;
+        if self.widget(app).obscure_text {
+            Box::new(CodePointBoundary::new(text))
+        } else {
+            Box::new(CharacterBoundary::new(text))
+        }
+    }
+
+    fn next_word_boundary(self: Handle<Self>, app: &mut App) -> Box<dyn TextBoundary> {
+        if self.widget(app).obscure_text {
+            self.document_boundary(app)
+        } else {
+            self.render_editable(app)
+                .word_boundaries(app)
+                .move_by_word_boundary()
+        }
+    }
+
+    fn linebreak(self: Handle<Self>, app: &mut App) -> Box<dyn TextBoundary> {
+        if self.widget(app).obscure_text {
+            self.document_boundary(app)
+        } else {
+            Box::new(LineBoundary::new(self.render_editable(app)))
+        }
+    }
+
+    fn paragraph_boundary(self: Handle<Self>, app: &mut App) -> Box<dyn TextBoundary> {
+        Box::new(ParagraphBoundary::new(&self.value(app).text))
+    }
+
+    fn document_boundary(self: Handle<Self>, app: &mut App) -> Box<dyn TextBoundary> {
+        Box::new(DocumentBoundary::new(self.value(app).text))
+    }
+
+    /// Returns the closest boundary location to `extent` but not including `extent`
+    /// itself (unless already at the start/end of the text), in the direction
+    /// specified by `forward`.
+    fn move_beyond_text_boundary(
+        self: Handle<Self>,
+        app: &mut App,
+        extent: TextPosition,
+        forward: bool,
+        text_boundary: &dyn TextBoundary,
+    ) -> TextPosition {
+        debug_assert!(extent.offset >= 0);
+        let text_length = utf16_len(&self.value(app).text);
+        let new_offset = if forward {
+            text_boundary
+                .get_trailing_text_boundary_at(app, extent.offset)
+                .unwrap_or(text_length)
+        } else {
+            // if x is a boundary defined by `text_boundary`, most text boundaries (except
+            // LineBoundary) guarantee `x == text_boundary.get_leading_text_boundary_at(x)`.
+            // Use x - 1 here to make sure we don't get stuck at the fixed point x.
+            text_boundary
+                .get_leading_text_boundary_at(app, extent.offset - 1)
+                .unwrap_or(0)
+        };
+        TextPosition::new(new_offset)
+    }
+
+    /// Returns the closest boundary location to `extent`, including `extent`
+    /// itself, in the direction specified by `forward`.
+    ///
+    /// This method returns a fixed point of itself: applying it again on the returned
+    /// [`TextPosition`] gives the same [`TextPosition`]. It's used exclusively for handling
+    /// line boundaries, since performing "move to line start" more than once usually doesn't
+    /// move you to the previous line.
+    fn move_to_text_boundary(
+        self: Handle<Self>,
+        app: &mut App,
+        extent: TextPosition,
+        forward: bool,
+        text_boundary: &dyn TextBoundary,
+    ) -> TextPosition {
+        debug_assert!(extent.offset >= 0);
+        let caret_offset = match extent.affinity {
+            TextAffinity::Upstream => {
+                if extent.offset < 1 && !forward {
+                    debug_assert!(extent.offset == 0);
+                    return TextPosition::new(0);
+                }
+                // When the text affinity is upstream, the caret is associated with the
+                // grapheme before the offset.
+                (extent.offset - 1).max(0)
+            }
+            TextAffinity::Downstream => extent.offset,
+        };
+        // The line boundary range does not include some control characters (most notably,
+        // Line Feed), in which case there's `x ∉ get_text_boundary_at(x)`. In case
+        // `caret_offset` points to one such control character, we define that these control
+        // characters themselves are still part of the previous line, but also exclude them
+        // from the line boundary range since they're non-printing. IOW, no additional
+        // processing needed since the LineBoundary class does exactly that.
+        let text_length = utf16_len(&self.value(app).text);
+        if forward {
+            TextPosition::with_affinity(
+                text_boundary
+                    .get_trailing_text_boundary_at(app, caret_offset)
+                    .unwrap_or(text_length),
+                TextAffinity::Upstream,
+            )
+        } else {
+            TextPosition::new(
+                text_boundary
+                    .get_leading_text_boundary_at(app, caret_offset)
+                    .unwrap_or(0),
+            )
+        }
+    }
+
+    /// Transpose the characters immediately before and after the current
+    /// collapsed selection.
+    ///
+    /// When the cursor is at the end of the text, transposes the last two
+    /// characters, if they exist.
+    ///
+    /// When the cursor is at the start of the text, does nothing.
+    fn transpose_characters(self: Handle<Self>, app: &mut App) {
+        let value = self.value(app);
+        let text = value.text.clone();
+        let selection = value.selection;
+        let text_length = utf16_len(&text);
+        let boundary = CharacterBoundary::new(text.clone());
+        // Dart's `_value.text.characters.length <= 1`.
+        let single_character = boundary
+            .get_trailing_text_boundary_at(app, 0)
+            .is_none_or(|end| end >= text_length);
+        if single_character || !selection.is_collapsed() || selection.base_offset == 0 {
+            return;
+        }
+
+        // Dart walks a `CharacterRange` back over two graphemes, or back one and forward
+        // one; both leave a range covering exactly the two graphemes to swap.
+        let at_end = selection.base_offset == text_length;
+        let (start, middle, end) = if at_end {
+            let middle = boundary
+                .get_leading_text_boundary_at(app, text_length - 1)
+                .unwrap_or(0);
+            let start = boundary
+                .get_leading_text_boundary_at(app, middle - 1)
+                .unwrap_or(0);
+            (start, middle, text_length)
+        } else {
+            let start = boundary
+                .get_leading_text_boundary_at(app, selection.base_offset - 1)
+                .unwrap_or(0);
+            let end = boundary
+                .get_trailing_text_boundary_at(app, selection.base_offset)
+                .unwrap_or(text_length);
+            (start, selection.base_offset, end)
+        };
+        let transposing = TextRange::new(start, end);
+        let first = TextRange::new(start, middle).text_inside(&text);
+        let second = TextRange::new(middle, end).text_inside(&text);
+
+        let value = TextEditingValue::new()
+            .text(format!(
+                "{}{second}{first}{}",
+                transposing.text_before(&text),
+                transposing.text_after(&text)
+            ))
+            .selection(TextSelection::collapsed(end, TextAffinity::Downstream));
+        self.user_update_text_editing_value(app, value, SelectionChangedCause::Keyboard);
+    }
+
+    fn replace_text(self: Handle<Self>, app: &mut App, intent: &ReplaceTextIntent) {
+        let old_value = self.value(app);
+        let new_value = intent.current_text_editing_value.replaced(
+            intent.replacement_range,
+            &intent.replacement_text,
+        );
+        self.user_update_text_editing_value(app, new_value.clone(), intent.cause);
+
+        // If there's no change in text and selection (e.g. when selecting and pasting
+        // identical text), the widget won't be rebuilt on value update. Handle this by
+        // calling did_change_text_editing_value() so caret and scroll updates can happen.
+        if new_value == old_value {
+            self.did_change_text_editing_value(app);
+        }
+    }
+
+    /// Scrolls either to the beginning or end of the document depending on the
+    /// intent's `forward` parameter.
+    fn scroll_to_document_boundary(
+        self: Handle<Self>,
+        app: &mut App,
+        intent: &ScrollToDocumentBoundaryIntent,
+    ) {
+        if intent.forward {
+            let offset = utf16_len(&self.value(app).text);
+            self.bring_into_view(app, TextPosition::new(offset));
+        } else {
+            self.bring_into_view(app, TextPosition::new(0));
+        }
+    }
+
+    /// Handles [`ScrollIntent`] by scrolling the `Scrollable` inside of [`EditableText`].
+    fn scroll(self: Handle<Self>, app: &mut App, intent: &ScrollIntent) {
+        if intent.r#type != ScrollIncrementType::Page {
+            return;
+        }
+
+        let controller = self.scroll_controller(app);
+        let position = controller.position(app);
+        if self.widget(app).max_lines == Some(1) {
+            let max = position.max_scroll_extent(app);
+            controller.jump_to(app, max);
+            return;
+        }
+
+        // If the field isn't scrollable, do nothing. For example, when the lines of text is
+        // less than max_lines, the field has nothing to scroll.
+        if position.max_scroll_extent(app) == 0.0 && position.min_scroll_extent(app) == 0.0 {
+            return;
+        }
+
+        let key = Rc::clone(&app.get(self).scrollable_key);
+        let state = key
+            .current_state::<ScrollableState>(app)
+            .expect("EditableText mounts a Scrollable");
+        let increment = ScrollAction::get_directional_increment(app, state, intent);
+        let destination = (position.pixels(app) + increment).clamp(
+            position.min_scroll_extent(app),
+            position.max_scroll_extent(app),
+        );
+        if destination == position.pixels(app) {
+            return;
+        }
+        controller.jump_to(app, destination);
+    }
+
+    fn update_selection(self: Handle<Self>, app: &mut App, intent: &UpdateSelectionIntent) {
+        debug_assert!(
+            intent.new_selection.start() <= utf16_len(&intent.current_text_editing_value.text),
+            "invalid selection: it must not exceed the current text length"
+        );
+        debug_assert!(
+            intent.new_selection.end() <= utf16_len(&intent.current_text_editing_value.text),
+            "invalid selection: it must not exceed the current text length"
+        );
+
+        self.bring_into_view(app, intent.new_selection.extent());
+        let value = intent
+            .current_text_editing_value
+            .clone()
+            .copy_with()
+            .selection(intent.new_selection);
+        self.user_update_text_editing_value(app, value, intent.cause);
+    }
+
+    /// The value the editable was last laid out with, which the vertical caret run walks.
+    ///
+    /// Dart's `_textEditingValueforTextLayoutMetrics`.
+    fn text_editing_value_for_text_layout_metrics(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> TextEditingValue {
+        let key = Rc::clone(&app.get(self).editable_key);
+        let widget = key.current_widget(app).expect("Editable must be mounted");
+        widget
+            .as_any()
+            .downcast_ref::<Editable>()
+            .expect("Editable must be mounted")
+            .value
+            .clone()
+    }
+
+    fn hide_toolbar_if_visible(self: Handle<Self>, app: &mut App) -> Option<Rc<dyn Any>> {
+        if app
+            .get(self)
+            .selection_overlay
+            .is_some_and(|overlay| overlay.toolbar_is_visible(app))
+        {
+            self.hide_toolbar(app, false);
+            return None;
+        }
+        let context = self.context(app);
+        Actions::invoke(app, context, &DismissIntent)
+    }
+
+    /// Ends the vertical caret run when the selection moved somewhere the run did not put it.
+    ///
+    /// Dart keeps the run on the single shared vertical action; both intents map to that one
+    /// instance, so the run lives on the state here to stay shared.
+    fn stop_current_vertical_run_if_selection_changes(self: Handle<Self>, app: &mut App) {
+        let Some(run_selection) = app.get(self).run_selection else {
+            debug_assert!(app.get(self).vertical_movement_run.is_none());
+            return;
+        };
+        app.get_mut(self).run_selection = Some(self.value(app).selection);
+        let current_selection = self.widget(app).controller.selection(app);
+        let continue_current_run = current_selection.is_valid()
+            && current_selection.is_collapsed()
+            && current_selection.base_offset == run_selection.base_offset
+            && current_selection.extent_offset == run_selection.extent_offset;
+        if !continue_current_run {
+            app.get_mut(self).vertical_movement_run = None;
+            app.get_mut(self).run_selection = None;
+        }
+    }
+
+    /// Dart's `_actions`, built once and kept for the life of the state.
+    fn ensure_actions(
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
     ) -> HashMap<TypeId, AnyAction> {
-        if let Some(actions) = app.get(self).tap_outside_actions.clone() {
+        if let Some(actions) = app.get(self).actions.clone() {
             return actions;
         }
+        let mut actions: HashMap<TypeId, AnyAction> = HashMap::new();
+
+        let do_nothing = DoNothingAction::new(app);
+        do_nothing.set_consumes_key(app, false);
+        actions.insert(
+            TypeId::of::<DoNothingAndStopPropagationTextIntent>(),
+            Action::as_action(do_nothing),
+        );
+
+        let replace_text = CallbackAction::<ReplaceTextIntent>::new(
+            app,
+            Rc::new(move |app, intent| {
+                self.replace_text(app, intent);
+                None
+            }),
+        );
+        actions.insert(
+            TypeId::of::<ReplaceTextIntent>(),
+            Action::as_action(replace_text),
+        );
+
+        let update_selection = CallbackAction::<UpdateSelectionIntent>::new(
+            app,
+            Rc::new(move |app, intent| {
+                self.update_selection(app, intent);
+                None
+            }),
+        );
+        actions.insert(
+            TypeId::of::<UpdateSelectionIntent>(),
+            Action::as_action(update_selection),
+        );
+
+        let directional_focus = DirectionalFocusAction::for_text_field(app);
+        actions.insert(
+            TypeId::of::<DirectionalFocusIntent>(),
+            Action::as_action(directional_focus),
+        );
+
+        let dismiss = CallbackAction::<DismissIntent>::new(
+            app,
+            Rc::new(move |app, _intent| self.hide_toolbar_if_visible(app)),
+        );
+        actions.insert(TypeId::of::<DismissIntent>(), Action::as_action(dismiss));
+
+        // Delete
+        let delete_character = DeleteTextAction::<DeleteCharacterIntent>::new(
+            app,
+            self,
+            EditableTextState::character_boundary,
+            EditableTextState::move_beyond_text_boundary,
+        );
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<DeleteCharacterIntent>(),
+            Action::as_action(delete_character),
+        );
+        let delete_word = DeleteTextAction::<DeleteToNextWordBoundaryIntent>::new(
+            app,
+            self,
+            EditableTextState::next_word_boundary,
+            EditableTextState::move_beyond_text_boundary,
+        );
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<DeleteToNextWordBoundaryIntent>(),
+            Action::as_action(delete_word),
+        );
+        let delete_to_line_break = DeleteTextAction::<DeleteToLineBreakIntent>::new(
+            app,
+            self,
+            EditableTextState::linebreak,
+            EditableTextState::move_to_text_boundary,
+        );
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<DeleteToLineBreakIntent>(),
+            Action::as_action(delete_to_line_break),
+        );
+
+        // Extend/Move Selection
+        let by_character = UpdateTextSelectionAction::<ExtendSelectionByCharacterIntent>::new(
+            app,
+            self,
+            EditableTextState::character_boundary,
+            EditableTextState::move_beyond_text_boundary,
+            false,
+        );
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<ExtendSelectionByCharacterIntent>(),
+            Action::as_action(by_character),
+        );
+        let by_word = UpdateTextSelectionAction::<ExtendSelectionToNextWordBoundaryIntent>::new(
+            app,
+            self,
+            EditableTextState::next_word_boundary,
+            EditableTextState::move_beyond_text_boundary,
+            true,
+        );
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<ExtendSelectionToNextWordBoundaryIntent>(),
+            Action::as_action(by_word),
+        );
+        let by_paragraph =
+            UpdateTextSelectionAction::<ExtendSelectionToNextParagraphBoundaryIntent>::new(
+                app,
+                self,
+                EditableTextState::paragraph_boundary,
+                EditableTextState::move_beyond_text_boundary,
+                true,
+            );
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<ExtendSelectionToNextParagraphBoundaryIntent>(),
+            Action::as_action(by_paragraph),
+        );
+        let to_line_break = UpdateTextSelectionAction::<ExtendSelectionToLineBreakIntent>::new(
+            app,
+            self,
+            EditableTextState::linebreak,
+            EditableTextState::move_to_text_boundary,
+            true,
+        );
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<ExtendSelectionToLineBreakIntent>(),
+            Action::as_action(to_line_break),
+        );
+        let by_line =
+            UpdateTextSelectionVerticallyAction::<ExtendSelectionVerticallyToAdjacentLineIntent>::new(
+                app, self, false,
+            );
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<ExtendSelectionVerticallyToAdjacentLineIntent>(),
+            Action::as_action(by_line),
+        );
+        let by_page =
+            UpdateTextSelectionVerticallyAction::<ExtendSelectionVerticallyToAdjacentPageIntent>::new(
+                app, self, true,
+            );
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<ExtendSelectionVerticallyToAdjacentPageIntent>(),
+            Action::as_action(by_page),
+        );
+        let by_paragraph_or_caret = UpdateTextSelectionAction::<
+            ExtendSelectionToNextParagraphBoundaryOrCaretLocationIntent,
+        >::new(
+            app,
+            self,
+            EditableTextState::paragraph_boundary,
+            EditableTextState::move_beyond_text_boundary,
+            true,
+        );
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<ExtendSelectionToNextParagraphBoundaryOrCaretLocationIntent>(),
+            Action::as_action(by_paragraph_or_caret),
+        );
+        let to_document =
+            UpdateTextSelectionAction::<ExtendSelectionToDocumentBoundaryIntent>::new(
+                app,
+                self,
+                EditableTextState::document_boundary,
+                EditableTextState::move_beyond_text_boundary,
+                true,
+            );
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<ExtendSelectionToDocumentBoundaryIntent>(),
+            Action::as_action(to_document),
+        );
+        let by_word_or_caret = UpdateTextSelectionAction::<
+            ExtendSelectionToNextWordBoundaryOrCaretLocationIntent,
+        >::new(
+            app,
+            self,
+            EditableTextState::next_word_boundary,
+            EditableTextState::move_beyond_text_boundary,
+            true,
+        );
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<ExtendSelectionToNextWordBoundaryOrCaretLocationIntent>(),
+            Action::as_action(by_word_or_caret),
+        );
+
+        let scroll_to_boundary = WebComposingDisablingCallbackAction::<
+            ScrollToDocumentBoundaryIntent,
+        >::new(
+            app,
+            self,
+            Rc::new(move |app, intent| {
+                self.scroll_to_document_boundary(app, intent);
+                None
+            }),
+        );
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<ScrollToDocumentBoundaryIntent>(),
+            Action::as_action(scroll_to_boundary),
+        );
+
+        let scroll = CallbackAction::<ScrollIntent>::new(
+            app,
+            Rc::new(move |app, intent| {
+                self.scroll(app, intent);
+                None
+            }),
+        );
+        actions.insert(TypeId::of::<ScrollIntent>(), Action::as_action(scroll));
+
+        // Expand Selection
+        let expand_to_line_break =
+            UpdateTextSelectionAction::<ExpandSelectionToLineBreakIntent>::new(
+                app,
+                self,
+                EditableTextState::linebreak,
+                EditableTextState::move_to_text_boundary,
+                true,
+            )
+            .expanding(app, false);
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<ExpandSelectionToLineBreakIntent>(),
+            Action::as_action(expand_to_line_break),
+        );
+        let expand_to_document =
+            UpdateTextSelectionAction::<ExpandSelectionToDocumentBoundaryIntent>::new(
+                app,
+                self,
+                EditableTextState::document_boundary,
+                EditableTextState::move_to_text_boundary,
+                true,
+            )
+            .expanding(app, true);
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<ExpandSelectionToDocumentBoundaryIntent>(),
+            Action::as_action(expand_to_document),
+        );
+
+        // Copy Paste
+        let select_all = SelectAllAction::new(app, self);
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<SelectAllTextIntent>(),
+            Action::as_action(select_all),
+        );
+        let copy = CopySelectionAction::new(app, self);
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<CopySelectionTextIntent>(),
+            Action::as_action(copy),
+        );
+        let paste = PasteSelectionAction::new(app, self);
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<PasteTextIntent>(),
+            Action::as_action(paste),
+        );
+
+        let transpose = CallbackAction::<TransposeCharactersIntent>::new(
+            app,
+            Rc::new(move |app, _intent| {
+                self.transpose_characters(app);
+                None
+            }),
+        );
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<TransposeCharactersIntent>(),
+            Action::as_action(transpose),
+        );
+
         let tap_outside = CallbackAction::<EditableTextTapOutsideIntent>::new(
             app,
             Rc::new(|app, intent| {
@@ -2832,21 +3484,26 @@ impl EditableTextState {
                 None
             }),
         );
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<EditableTextTapOutsideIntent>(),
+            Action::as_action(tap_outside),
+        );
         let tap_up_outside = CallbackAction::<EditableTextTapUpOutsideIntent>::new(
             app,
             Rc::new(|_app, _intent| None),
         );
-        let actions = HashMap::from([
-            (
-                TypeId::of::<EditableTextTapOutsideIntent>(),
-                AnyAction::overridable(app, Action::as_action(tap_outside), context),
-            ),
-            (
-                TypeId::of::<EditableTextTapUpOutsideIntent>(),
-                AnyAction::overridable(app, Action::as_action(tap_up_outside), context),
-            ),
-        ]);
-        app.get_mut(self).tap_outside_actions = Some(actions.clone());
+        insert_overridable(
+            app,
+            &mut actions,
+            context,
+            TypeId::of::<EditableTextTapUpOutsideIntent>(),
+            Action::as_action(tap_up_outside),
+        );
+
+        app.get_mut(self).actions = Some(actions.clone());
         actions
     }
 
@@ -2876,7 +3533,10 @@ impl EditableTextState {
         self.update_remote_editing_value_if_needed(app);
         self.start_or_stop_cursor_timer_if_needed(app);
         self.update_or_dispose_selection_overlay_if_needed(app);
+        // Dart also notes here that RenderEditable should learn about
+        // ValueNotifier<TextEditingValue> so this set_state can go.
         self.set_state(app, |_| {});
+        self.stop_current_vertical_run_if_selection_changes(app);
     }
 
     fn handle_focus_changed(self: Handle<Self>, app: &mut App) {
@@ -3422,7 +4082,7 @@ impl EditableTextState {
         let clip_behavior = self.widget(app).clip_behavior;
         // `CompositedTransformTarget(link: _toolbarLayerLink, child: ..)` around the editable.
         let editable = Editable {
-            key: None,
+            key: Some(Rc::clone(&app.get(self).editable_key) as KeyRef),
             inline_span,
             value,
             start_handle_layer_link: self.start_handle_layer_link(app),
@@ -3884,6 +4544,7 @@ impl State for EditableTextState {
         let viewport_builder: ViewportBuilder =
             Rc::new(move |app, context, offset| state.build_editable(app, context, offset));
         let mut scrollable = Scrollable::new(viewport_builder)
+            .key(Rc::clone(&app.get(self).scrollable_key) as KeyRef)
             .axis_direction(if is_multiline {
                 AxisDirection::Down
             } else {
@@ -3944,7 +4605,7 @@ impl State for EditableTextState {
             history = history.controller(undo_controller);
         }
         let focused = history.into_widget();
-        let actions = self.ensure_tap_outside_actions(app, context);
+        let actions = self.ensure_actions(app, context);
         let has_focus = app.get(self).has_focus;
         let group_id = self.widget(app).group_id;
         let state = self;
@@ -4141,6 +4802,19 @@ impl TextInputClient for EditableTextState {
 
     fn show_toolbar(self: Handle<Self>, app: &mut App) {
         let _ = EditableTextState::show_toolbar(self, app);
+    }
+
+    fn perform_selector(self: Handle<Self>, app: &mut App, selector_name: &str) {
+        let Some(intent) = intent_for_macos_selector(selector_name) else {
+            return;
+        };
+        let Some(primary_context) = FocusManager::instance(app)
+            .primary_focus(app)
+            .and_then(|focus| focus.context(app))
+        else {
+            return;
+        };
+        Actions::invoke(app, primary_context, &*intent);
     }
 }
 
@@ -4563,6 +5237,732 @@ impl Debug for NeverUserScrollableScrollPhysics {
         f.debug_struct("NeverUserScrollableScrollPhysics")
             .field("parent", &self.parent)
             .finish()
+    }
+}
+
+/// Signature for a function that determines the target location of the given
+/// [`TextPosition`] after applying the given [`TextBoundary`].
+///
+/// Dart's `_ApplyTextBoundary`.
+type ApplyTextBoundary =
+    fn(Handle<EditableTextState>, &mut App, TextPosition, bool, &dyn TextBoundary) -> TextPosition;
+
+/// Builds the [`TextBoundary`] an action moves by, from the state's current value.
+///
+/// Dart passes the state's `TextBoundary Function()` tear-offs.
+type GetTextBoundary = fn(Handle<EditableTextState>, &mut App) -> Box<dyn TextBoundary>;
+
+/// Dart's `_makeOverridable`, at the one place the map needs it.
+fn insert_overridable(
+    app: &mut App,
+    actions: &mut HashMap<TypeId, AnyAction>,
+    context: BuildContext,
+    intent: TypeId,
+    action: AnyAction,
+) {
+    actions.insert(intent, AnyAction::overridable(app, action, context));
+}
+
+/// Dart `String.codeUnitAt`, or `None` past either end.
+fn code_unit_at(text: &str, index: i32) -> Option<i32> {
+    if index < 0 {
+        return None;
+    }
+    text.encode_utf16().nth(index as usize).map(i32::from)
+}
+
+/// A [`TextBoundary`] that clamps to code point boundaries, so an obscured field walks by
+/// the bullets it shows rather than by the graphemes it hides.
+///
+/// Dart's `_CodePointBoundary`.
+#[derive(Clone, Debug)]
+struct CodePointBoundary {
+    text: Vec<u16>,
+}
+
+impl CodePointBoundary {
+    fn new(text: impl AsRef<str>) -> CodePointBoundary {
+        CodePointBoundary {
+            text: text.as_ref().encode_utf16().collect(),
+        }
+    }
+
+    fn len(&self) -> i32 {
+        self.text.len() as i32
+    }
+
+    /// Returns true if the given position falls in the center of a surrogate pair.
+    fn breaks_surrogate_pair(&self, position: i32) -> bool {
+        debug_assert!(position > 0 && position < self.len() && self.len() > 1);
+        let high = self.text[position as usize - 1];
+        let low = self.text[position as usize];
+        (0xD800..0xDC00).contains(&high) && (0xDC00..0xE000).contains(&low)
+    }
+}
+
+impl TextBoundary for CodePointBoundary {
+    fn get_leading_text_boundary_at(&self, _app: &mut App, position: i32) -> Option<i32> {
+        if self.text.is_empty() || position < 0 {
+            return None;
+        }
+        if position == 0 {
+            return Some(0);
+        }
+        if position >= self.len() {
+            return Some(self.len());
+        }
+        if self.len() <= 1 {
+            return Some(position);
+        }
+        Some(if self.breaks_surrogate_pair(position) {
+            position - 1
+        } else {
+            position
+        })
+    }
+
+    fn get_trailing_text_boundary_at(&self, _app: &mut App, position: i32) -> Option<i32> {
+        if self.text.is_empty() || position >= self.len() {
+            return None;
+        }
+        if position < 0 {
+            return Some(0);
+        }
+        if position == self.len() - 1 {
+            return Some(self.len());
+        }
+        if self.len() <= 1 {
+            return Some(position);
+        }
+        Some(if self.breaks_surrogate_pair(position + 1) {
+            position + 2
+        } else {
+            position + 1
+        })
+    }
+}
+
+// -------------------------------  Text Actions -------------------------------
+
+/// Deletes from the caret to the boundary `get_text_boundary` names.
+///
+/// Dart's `_DeleteTextAction`.
+struct DeleteTextAction<T: DirectionalTextEditingIntent> {
+    action: ActionData,
+    state: Handle<EditableTextState>,
+    get_text_boundary: GetTextBoundary,
+    apply_text_boundary: ApplyTextBoundary,
+    intent: PhantomData<T>,
+}
+
+impl<T: DirectionalTextEditingIntent> DeleteTextAction<T> {
+    fn new(
+        app: &mut App,
+        state: Handle<EditableTextState>,
+        get_text_boundary: GetTextBoundary,
+        apply_text_boundary: ApplyTextBoundary,
+    ) -> Handle<DeleteTextAction<T>> {
+        app.create(DeleteTextAction {
+            action: ActionData::new(),
+            state,
+            get_text_boundary,
+            apply_text_boundary,
+            intent: PhantomData,
+        })
+    }
+
+    fn hide_toolbar_if_text_changed(
+        self: Handle<Self>,
+        app: &mut App,
+        intent: &ReplaceTextIntent,
+    ) {
+        let state = app.get(self).state;
+        let visible = app
+            .get(state)
+            .selection_overlay
+            .is_some_and(|overlay| overlay.toolbar_is_visible(app));
+        if !visible {
+            return;
+        }
+        let old_value = intent.current_text_editing_value.clone();
+        let new_value = old_value
+            .replaced(intent.replacement_range, &intent.replacement_text);
+        if old_value.text != new_value.text {
+            // Hide the toolbar if the text was changed, but only hide the toolbar overlay;
+            // the selection handle's visibility will be handled by handle_selection_changed.
+            state.hide_toolbar(app, false);
+        }
+    }
+}
+
+impl<T: DirectionalTextEditingIntent> Action for DeleteTextAction<T> {
+    type Intent = T;
+    crate::action_accessors!();
+    crate::context_action_overrides!();
+}
+
+impl<T: DirectionalTextEditingIntent> ContextAction for DeleteTextAction<T> {
+    fn is_enabled(
+        self: Handle<Self>,
+        app: &mut App,
+        _intent: &T,
+        _context: Option<BuildContext>,
+    ) -> bool {
+        let state = app.get(self).state;
+        !state.widget(app).read_only && state.value(app).selection.is_valid()
+    }
+
+    fn invoke(
+        self: Handle<Self>,
+        app: &mut App,
+        intent: &T,
+        context: Option<BuildContext>,
+    ) -> Option<Rc<dyn Any>> {
+        let state = app.get(self).state;
+        let selection = state.value(app).selection;
+        if !selection.is_valid() {
+            return None;
+        }
+        let context = context.expect("a delete needs a context");
+        let text_length = utf16_len(&state.value(app).text);
+        // Expands the selection to ensure the range covers full graphemes.
+        let atomic_boundary = state.character_boundary(app);
+        if !selection.is_collapsed() {
+            let range = TextRange::new(
+                atomic_boundary
+                    .get_leading_text_boundary_at(app, selection.start())
+                    .unwrap_or(text_length),
+                atomic_boundary
+                    .get_trailing_text_boundary_at(app, selection.end() - 1)
+                    .unwrap_or(0),
+            );
+            let replace_text_intent = ReplaceTextIntent::new(
+                state.value(app),
+                String::new(),
+                range,
+                SelectionChangedCause::Keyboard,
+            );
+            self.hide_toolbar_if_text_changed(app, &replace_text_intent);
+            return Actions::invoke(app, context, &replace_text_intent);
+        }
+
+        let boundary = (app.get(self).get_text_boundary)(state, app);
+        let apply = app.get(self).apply_text_boundary;
+        let target = apply(state, app, selection.base(), intent.forward(), &*boundary).offset;
+
+        let range_to_delete = TextSelection::new(
+            if intent.forward() {
+                atomic_boundary
+                    .get_leading_text_boundary_at(app, selection.base_offset)
+                    .unwrap_or(text_length)
+            } else {
+                atomic_boundary
+                    .get_trailing_text_boundary_at(app, selection.base_offset - 1)
+                    .unwrap_or(0)
+            },
+            target,
+        );
+        let replace_text_intent = ReplaceTextIntent::new(
+            state.value(app),
+            String::new(),
+            range_to_delete.range(),
+            SelectionChangedCause::Keyboard,
+        );
+        self.hide_toolbar_if_text_changed(app, &replace_text_intent);
+        Actions::invoke(app, context, &replace_text_intent)
+    }
+}
+
+/// Moves or extends the selection to the boundary `get_text_boundary` names.
+///
+/// Dart's `_UpdateTextSelectionAction`.
+struct UpdateTextSelectionAction<T: DirectionalCaretMovementIntent> {
+    action: ActionData,
+    state: Handle<EditableTextState>,
+    ignore_non_collapsed_selection: bool,
+    is_expand: bool,
+    extent_at_index: bool,
+    get_text_boundary: GetTextBoundary,
+    apply_text_boundary: ApplyTextBoundary,
+    intent: PhantomData<T>,
+}
+
+/// Dart's `_UpdateTextSelectionAction.NEWLINE_CODE_UNIT`.
+const NEWLINE_CODE_UNIT: i32 = 10;
+
+impl<T: DirectionalCaretMovementIntent> UpdateTextSelectionAction<T> {
+    fn new(
+        app: &mut App,
+        state: Handle<EditableTextState>,
+        get_text_boundary: GetTextBoundary,
+        apply_text_boundary: ApplyTextBoundary,
+        ignore_non_collapsed_selection: bool,
+    ) -> Handle<UpdateTextSelectionAction<T>> {
+        app.create(UpdateTextSelectionAction {
+            action: ActionData::new(),
+            state,
+            ignore_non_collapsed_selection,
+            is_expand: false,
+            extent_at_index: false,
+            get_text_boundary,
+            apply_text_boundary,
+            intent: PhantomData,
+        })
+    }
+
+    /// Dart's named `isExpand` and `extentAtIndex` arguments.
+    fn expanding(
+        self: Handle<Self>,
+        app: &mut App,
+        extent_at_index: bool,
+    ) -> Handle<UpdateTextSelectionAction<T>> {
+        app.get_mut(self).is_expand = true;
+        app.get_mut(self).extent_at_index = extent_at_index;
+        self
+    }
+
+    /// Returns true iff the given position is at a wordwrap boundary in the
+    /// upstream position.
+    fn is_at_wordwrap_upstream(self: Handle<Self>, app: &mut App, position: TextPosition) -> bool {
+        let state = app.get(self).state;
+        let end = TextPosition::with_affinity(
+            state
+                .render_editable(app)
+                .get_line_at_offset(app, position)
+                .end(),
+            TextAffinity::Upstream,
+        );
+        let text = state.value(app).text;
+        end == position
+            && end.offset != utf16_len(&text)
+            && code_unit_at(&text, position.offset) != Some(NEWLINE_CODE_UNIT)
+    }
+
+    /// Returns true if the given position at a wordwrap boundary in the
+    /// downstream position.
+    fn is_at_wordwrap_downstream(
+        self: Handle<Self>,
+        app: &mut App,
+        position: TextPosition,
+    ) -> bool {
+        let state = app.get(self).state;
+        let start = TextPosition::new(
+            state
+                .render_editable(app)
+                .get_line_at_offset(app, position)
+                .start(),
+        );
+        let text = state.value(app).text;
+        start == position
+            && start.offset != 0
+            && code_unit_at(&text, position.offset - 1) != Some(NEWLINE_CODE_UNIT)
+    }
+}
+
+impl<T: DirectionalCaretMovementIntent> Action for UpdateTextSelectionAction<T> {
+    type Intent = T;
+    crate::action_accessors!();
+    crate::context_action_overrides!();
+}
+
+impl<T: DirectionalCaretMovementIntent> ContextAction for UpdateTextSelectionAction<T> {
+    fn is_enabled(
+        self: Handle<Self>,
+        app: &mut App,
+        _intent: &T,
+        _context: Option<BuildContext>,
+    ) -> bool {
+        let state = app.get(self).state;
+        if K_IS_WEB
+            && state.widget(app).user_selection_enabled()
+            && state.value(app).composing.is_valid()
+        {
+            return false;
+        }
+        state.value(app).selection.is_valid()
+    }
+
+    fn invoke(
+        self: Handle<Self>,
+        app: &mut App,
+        intent: &T,
+        context: Option<BuildContext>,
+    ) -> Option<Rc<dyn Any>> {
+        let state = app.get(self).state;
+        let selection = state.value(app).selection;
+        debug_assert!(selection.is_valid());
+        let context = context.expect("a selection move needs a context");
+
+        let collapse_selection =
+            intent.collapse_selection() || !state.widget(app).user_selection_enabled();
+        if !selection.is_collapsed()
+            && !app.get(self).ignore_non_collapsed_selection
+            && collapse_selection
+        {
+            let offset = if intent.forward() {
+                selection.end()
+            } else {
+                selection.start()
+            };
+            return Actions::invoke(
+                app,
+                context,
+                &UpdateSelectionIntent::new(
+                    state.value(app),
+                    TextSelection::collapsed(offset, TextAffinity::Downstream),
+                    SelectionChangedCause::Keyboard,
+                ),
+            );
+        }
+
+        let mut extent = selection.extent();
+        // If continues_at_wrap is true and extent is at the relevant wordwrap, then move it
+        // just to the other side of the wordwrap.
+        if intent.continues_at_wrap() {
+            if intent.forward() && self.is_at_wordwrap_upstream(app, extent) {
+                extent = TextPosition::new(extent.offset);
+            } else if !intent.forward() && self.is_at_wordwrap_downstream(app, extent) {
+                extent = TextPosition::with_affinity(extent.offset, TextAffinity::Upstream);
+            }
+        }
+
+        let is_expand = app.get(self).is_expand;
+        let extent_at_index = app.get(self).extent_at_index;
+        let should_target_base = is_expand
+            && if intent.forward() {
+                selection.base_offset > selection.extent_offset
+            } else {
+                selection.base_offset < selection.extent_offset
+            };
+        let boundary = (app.get(self).get_text_boundary)(state, app);
+        let apply = app.get(self).apply_text_boundary;
+        let new_extent = apply(
+            state,
+            app,
+            if should_target_base {
+                selection.base()
+            } else {
+                extent
+            },
+            intent.forward(),
+            &*boundary,
+        );
+        let new_selection = if collapse_selection
+            || (!is_expand && new_extent.offset == selection.base_offset)
+        {
+            TextSelection::from_position(new_extent)
+        } else if is_expand {
+            selection.expand_to(new_extent, extent_at_index || selection.is_collapsed())
+        } else {
+            selection.extend_to(new_extent)
+        };
+
+        let should_collapse_to_base = intent.collapse_at_reversal()
+            && (selection.base_offset - selection.extent_offset)
+                * (selection.base_offset - new_selection.extent_offset)
+                < 0;
+        let new_range = if should_collapse_to_base {
+            TextSelection::from_position(selection.base())
+        } else {
+            new_selection
+        };
+        Actions::invoke(
+            app,
+            context,
+            &UpdateSelectionIntent::new(
+                state.value(app),
+                new_range,
+                SelectionChangedCause::Keyboard,
+            ),
+        )
+    }
+}
+
+/// Moves the caret to the adjacent line or page, keeping the column across a run of moves.
+///
+/// Dart's `_UpdateTextSelectionVerticallyAction`.
+struct UpdateTextSelectionVerticallyAction<T: DirectionalCaretMovementIntent> {
+    action: ActionData,
+    state: Handle<EditableTextState>,
+    by_page: bool,
+    intent: PhantomData<T>,
+}
+
+impl<T: DirectionalCaretMovementIntent> UpdateTextSelectionVerticallyAction<T> {
+    fn new(
+        app: &mut App,
+        state: Handle<EditableTextState>,
+        by_page: bool,
+    ) -> Handle<UpdateTextSelectionVerticallyAction<T>> {
+        app.create(UpdateTextSelectionVerticallyAction {
+            action: ActionData::new(),
+            state,
+            by_page,
+            intent: PhantomData,
+        })
+    }
+}
+
+impl<T: DirectionalCaretMovementIntent> Action for UpdateTextSelectionVerticallyAction<T> {
+    type Intent = T;
+    crate::action_accessors!();
+    crate::context_action_overrides!();
+}
+
+impl<T: DirectionalCaretMovementIntent> ContextAction for UpdateTextSelectionVerticallyAction<T> {
+    fn is_enabled(
+        self: Handle<Self>,
+        app: &mut App,
+        _intent: &T,
+        _context: Option<BuildContext>,
+    ) -> bool {
+        let state = app.get(self).state;
+        if K_IS_WEB
+            && state.widget(app).user_selection_enabled()
+            && state.value(app).composing.is_valid()
+        {
+            return false;
+        }
+        state.value(app).selection.is_valid()
+    }
+
+    fn invoke(
+        self: Handle<Self>,
+        app: &mut App,
+        intent: &T,
+        context: Option<BuildContext>,
+    ) -> Option<Rc<dyn Any>> {
+        let state = app.get(self).state;
+        debug_assert!(state.value(app).selection.is_valid());
+        let context = context.expect("a vertical move needs a context");
+
+        let collapse_selection =
+            intent.collapse_selection() || !state.widget(app).user_selection_enabled();
+        let value = state.text_editing_value_for_text_layout_metrics(app);
+        if !value.selection.is_valid() {
+            return None;
+        }
+
+        let mut taken = app.get_mut(state).vertical_movement_run.take();
+        if taken.as_mut().is_some_and(|run| !run.is_valid(app)) {
+            taken = None;
+            app.get_mut(state).run_selection = None;
+        }
+
+        let mut current_run = match taken {
+            Some(run) => run,
+            None => {
+                let render_editable = state.render_editable(app);
+                let extent = render_editable
+                    .selection(app)
+                    .expect("the render editable has a selection")
+                    .extent();
+                render_editable.start_vertical_caret_movement(app, extent)
+            }
+        };
+
+        let should_move = if app.get(self).by_page {
+            let height = state.render_editable(app).size(app).height();
+            let offset = if intent.forward() { 1.0 } else { -1.0 } * height;
+            current_run.move_by_offset(app, offset)
+        } else if intent.forward() {
+            current_run.move_next(app)
+        } else {
+            current_run.move_previous(app)
+        };
+        let new_extent = if should_move {
+            current_run.current()
+        } else if intent.forward() {
+            TextPosition::new(utf16_len(&value.text))
+        } else {
+            TextPosition::new(0)
+        };
+        let new_selection = if collapse_selection {
+            TextSelection::from_position(new_extent)
+        } else {
+            value.selection.extend_to(new_extent)
+        };
+
+        Actions::invoke(
+            app,
+            context,
+            &UpdateSelectionIntent::new(
+                value,
+                new_selection,
+                SelectionChangedCause::Keyboard,
+            ),
+        );
+        if state.value(app).selection == new_selection {
+            app.get_mut(state).vertical_movement_run = Some(current_run);
+            app.get_mut(state).run_selection = Some(new_selection);
+        }
+        None
+    }
+}
+
+/// A [`CallbackAction`] that a composing web field disables.
+///
+/// Dart's `_WebComposingDisablingCallbackAction`.
+struct WebComposingDisablingCallbackAction<T: Intent> {
+    action: ActionData,
+    state: Handle<EditableTextState>,
+    on_invoke: OnInvokeCallback<T>,
+}
+
+impl<T: Intent> WebComposingDisablingCallbackAction<T> {
+    fn new(
+        app: &mut App,
+        state: Handle<EditableTextState>,
+        on_invoke: OnInvokeCallback<T>,
+    ) -> Handle<WebComposingDisablingCallbackAction<T>> {
+        app.create(WebComposingDisablingCallbackAction {
+            action: ActionData::new(),
+            state,
+            on_invoke,
+        })
+    }
+}
+
+impl<T: Intent> Action for WebComposingDisablingCallbackAction<T> {
+    type Intent = T;
+    crate::action_accessors!();
+
+    fn is_enabled(self: Handle<Self>, app: &mut App, _intent: &T) -> bool {
+        let state = app.get(self).state;
+        // Dart falls through to `super.isActionEnabled`, which a CallbackAction leaves true.
+        !(K_IS_WEB
+            && state.widget(app).user_selection_enabled()
+            && state.value(app).composing.is_valid())
+    }
+
+    fn invoke(self: Handle<Self>, app: &mut App, intent: &T) -> Option<Rc<dyn Any>> {
+        let on_invoke = Rc::clone(&app.get(self).on_invoke);
+        on_invoke(app, intent)
+    }
+}
+
+/// Dart's `_SelectAllAction`.
+struct SelectAllAction {
+    action: ActionData,
+    state: Handle<EditableTextState>,
+}
+
+impl SelectAllAction {
+    fn new(app: &mut App, state: Handle<EditableTextState>) -> Handle<SelectAllAction> {
+        app.create(SelectAllAction {
+            action: ActionData::new(),
+            state,
+        })
+    }
+}
+
+impl Action for SelectAllAction {
+    type Intent = SelectAllTextIntent;
+    crate::action_accessors!();
+    crate::context_action_overrides!();
+}
+
+impl ContextAction for SelectAllAction {
+    fn invoke(
+        self: Handle<Self>,
+        app: &mut App,
+        intent: &SelectAllTextIntent,
+        context: Option<BuildContext>,
+    ) -> Option<Rc<dyn Any>> {
+        let state = app.get(self).state;
+        if !state.widget(app).user_selection_enabled() {
+            return None;
+        }
+        let context = context.expect("a select all needs a context");
+        let value = state.value(app);
+        let selection = TextSelection::new(0, utf16_len(&value.text));
+        Actions::invoke(
+            app,
+            context,
+            &UpdateSelectionIntent::new(value, selection, intent.cause),
+        )
+    }
+}
+
+/// Dart's `_CopySelectionAction`.
+struct CopySelectionAction {
+    action: ActionData,
+    state: Handle<EditableTextState>,
+}
+
+impl CopySelectionAction {
+    fn new(app: &mut App, state: Handle<EditableTextState>) -> Handle<CopySelectionAction> {
+        app.create(CopySelectionAction {
+            action: ActionData::new(),
+            state,
+        })
+    }
+}
+
+impl Action for CopySelectionAction {
+    type Intent = CopySelectionTextIntent;
+    crate::action_accessors!();
+    crate::context_action_overrides!();
+}
+
+impl ContextAction for CopySelectionAction {
+    fn invoke(
+        self: Handle<Self>,
+        app: &mut App,
+        intent: &CopySelectionTextIntent,
+        _context: Option<BuildContext>,
+    ) -> Option<Rc<dyn Any>> {
+        let state = app.get(self).state;
+        let selection = state.value(app).selection;
+        if !selection.is_valid() || selection.is_collapsed() {
+            return None;
+        }
+        if !state.widget(app).user_selection_enabled() {
+            return None;
+        }
+        if intent.collapse_selection() {
+            state.cut_selection(app, intent.cause());
+        } else {
+            state.copy_selection(app, intent.cause());
+        }
+        None
+    }
+}
+
+/// Dart's `_PasteSelectionAction`.
+struct PasteSelectionAction {
+    action: ActionData,
+    state: Handle<EditableTextState>,
+}
+
+impl PasteSelectionAction {
+    fn new(app: &mut App, state: Handle<EditableTextState>) -> Handle<PasteSelectionAction> {
+        app.create(PasteSelectionAction {
+            action: ActionData::new(),
+            state,
+        })
+    }
+}
+
+impl Action for PasteSelectionAction {
+    type Intent = PasteTextIntent;
+    crate::action_accessors!();
+    crate::context_action_overrides!();
+}
+
+impl ContextAction for PasteSelectionAction {
+    fn invoke(
+        self: Handle<Self>,
+        app: &mut App,
+        intent: &PasteTextIntent,
+        _context: Option<BuildContext>,
+    ) -> Option<Rc<dyn Any>> {
+        let state = app.get(self).state;
+        if !state.widget(app).user_selection_enabled() {
+            return None;
+        }
+        state.paste_text(app, intent.cause);
+        None
     }
 }
 

@@ -375,6 +375,21 @@ pub trait Platform: 'static {
     /// default would let one silently claim the wrong conventions.
     fn target_platform(&self) -> TargetPlatform;
 
+    /// Whether the host's own text input turns editing keys into edits before the framework
+    /// sees them — backspace and delete, caret movement, the line and document ends.
+    ///
+    /// Flutter has no such question because each of its embedders is written for one host:
+    /// its macOS and iOS embedders do interpret those keys, and its text field bindings for
+    /// those platforms step aside so a key is not acted on twice.
+    ///
+    /// Defaults to false, which is what a host built on a windowing library that reports
+    /// plain key presses should answer, whichever platform it runs on. A host that hands the
+    /// framework the operating system's own editing commands answers true, and the field
+    /// then leaves those keys to it.
+    fn handles_text_editing_keys(&self) -> bool {
+        false
+    }
+
     /// The full system-reported supported locales of the device (Flutter
     /// `PlatformDispatcher.locales`), in order of preference; empty until the host
     /// reports them.

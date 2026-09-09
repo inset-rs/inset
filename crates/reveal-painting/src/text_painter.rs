@@ -1,7 +1,7 @@
 //! Flutter counterpart: `painting/text_painter.dart`.
 //!
-//! `WordBoundary` / `wordBoundaries` (they need `TextBoundary`), `strutStyle`, and `locale`
-//! wait; see `PORTING.md`.
+//! `wordBoundaries` sits with `RenderEditable` in rendering, which owns the laid-out
+//! paragraph it reads; `strutStyle` and `locale` wait. See `PORTING.md`.
 
 use std::cell::OnceCell;
 

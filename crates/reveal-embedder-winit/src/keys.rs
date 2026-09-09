@@ -308,9 +308,13 @@ fn named_key_value(key: NamedKey) -> &'static str {
         NamedKey::Shift => "Shift",
         NamedKey::Symbol => "Symbol",
         NamedKey::SymbolLock => "SymbolLock",
-        NamedKey::Meta => "Meta",
+        // winit names these two the other way round from the web values the tables below
+        // are keyed by: its `Super` is the Windows logo and Command key, which the web calls
+        // "Meta", and its `Meta` is the legacy modifier the web calls "Super". winit's own
+        // web backend reads the web's "Meta" back as `Super`.
+        NamedKey::Meta => "Super",
         NamedKey::Hyper => "Hyper",
-        NamedKey::Super => "Super",
+        NamedKey::Super => "Meta",
         NamedKey::Enter => "Enter",
         NamedKey::Tab => "Tab",
         NamedKey::Space => " ",
@@ -1111,6 +1115,33 @@ mod tests {
             logical_key_id(&Key::Named(NamedKey::Shift), KeyLocation::Standard),
             Some(0x00200000102),
             "a side-less report is the left key, as on the web"
+        );
+    }
+
+    #[test]
+    fn the_command_key_is_the_meta_key_the_shortcut_tables_name() {
+        // winit calls it `Super`; the web, and so every shortcut with a Command chord,
+        // calls it Meta.
+        assert_eq!(
+            physical_key_usage(PhysicalKey::Code(KeyCode::SuperLeft)),
+            Some(0x000700e3)
+        );
+        assert_eq!(
+            logical_key_id(&Key::Named(NamedKey::Super), KeyLocation::Left),
+            Some(0x00200000106)
+        );
+        assert_eq!(
+            logical_key_id(&Key::Named(NamedKey::Super), KeyLocation::Right),
+            Some(0x00200000107)
+        );
+        assert_eq!(
+            logical_key_id(&Key::Named(NamedKey::Super), KeyLocation::Standard),
+            Some(0x00200000106)
+        );
+        assert_eq!(
+            logical_key_id(&Key::Named(NamedKey::Meta), KeyLocation::Standard),
+            Some(0x0010000010e),
+            "winit's legacy Meta is the key the web calls Super"
         );
     }
 

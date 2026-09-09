@@ -61,6 +61,10 @@ No Flutter counterpart. Flutter's engine is C++ and is not in this checkout.
   Reason: platform — AppKit commits window geometry independently of a later winit redraw.
   Affect: live resizing shows newly laid-out content together with the new window size instead of stretching the previous frame.
 
+- Change: the host leaves `Platform::handles_text_editing_keys` at no, and does not forward the editing commands macOS names for a key.
+  Reason: platform — winit does run the key through AppKit, but keeps only the plain key press and drops the command name, as gpui's own macOS window does.
+  Affect: a text field is edited by the framework's own key bindings, so a user's personal key-binding overrides and the Control-key editing bindings macOS would supply do not reach it.
+
 ## window.rs → native view focus
 
 - Change: view-focus requests are queued and `WindowEvent::Focused` is forwarded as a `ViewFocusEvent`.

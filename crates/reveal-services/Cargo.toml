@@ -11,6 +11,7 @@ reveal-embedder.workspace = true
 reveal-foundation.workspace = true
 reveal-gestures.workspace = true
 reveal-scheduler.workspace = true
+unicode-segmentation.workspace = true
 
 [lints]
 workspace = true

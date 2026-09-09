@@ -124,6 +124,12 @@ impl DefaultTextEditingShortcuts {
                 | TargetPlatform::MacOS => Some(web_disabling_text_shortcuts()),
             };
         }
+        // Dart steps aside for every macOS and iOS host, since its embedders for those two
+        // are the only ones it has. A host that reports plain key presses interprets nothing,
+        // so stepping aside would leave the keys to nobody.
+        if !app.platform().handles_text_editing_keys() {
+            return None;
+        }
         match app.platform().target_platform() {
             TargetPlatform::Android
             | TargetPlatform::Fuchsia
@@ -736,14 +742,21 @@ mod tests {
     use crate::binding::WidgetsBinding;
     use crate::framework::{AnyElement, downcast_widget};
     use crate::widgets::basic::SizedBox;
-    use crate::widgets::focus_manager::tests::{app_with_view, mount};
+    use crate::widgets::focus_manager::tests::{app_with_view_whose_host_edits, mount};
 
     /// A platform with no views, for the tables that only read the target platform.
-    struct PlatformOf(TargetPlatform);
+    struct PlatformOf {
+        target: TargetPlatform,
+        handles_text_editing_keys: bool,
+    }
 
     impl Platform for PlatformOf {
         fn target_platform(&self) -> TargetPlatform {
-            self.0
+            self.target
+        }
+
+        fn handles_text_editing_keys(&self) -> bool {
+            self.handles_text_editing_keys
         }
 
         fn request_frame(&self) {}
@@ -767,8 +780,21 @@ mod tests {
         }
     }
 
+    /// An app over a host that reports plain key presses.
     fn app_of(platform: TargetPlatform) -> Rc<AppCell> {
-        AppCell::with_platform(Rc::new(PlatformOf(platform)) as PlatformRef)
+        app_of_host(platform, false)
+    }
+
+    /// An app over a host that turns editing keys into edits itself.
+    fn app_of_host_that_edits(platform: TargetPlatform) -> Rc<AppCell> {
+        app_of_host(platform, true)
+    }
+
+    fn app_of_host(platform: TargetPlatform, handles_text_editing_keys: bool) -> Rc<AppCell> {
+        AppCell::with_platform(Rc::new(PlatformOf {
+            target: platform,
+            handles_text_editing_keys,
+        }) as PlatformRef)
     }
 
     /// How the copy shortcut of a platform's table is described.
@@ -833,7 +859,7 @@ mod tests {
 
     #[test]
     fn an_apple_platform_hands_the_keys_it_handles_itself_back_to_the_ime() {
-        let mac_cell = app_of(TargetPlatform::MacOS);
+        let mac_cell = app_of_host_that_edits(TargetPlatform::MacOS);
         let mac = mac_cell.borrow();
         let disabling = DefaultTextEditingShortcuts::get_disabling_shortcut(&mac)
             .expect("macOS disables the shortcuts the platform handles");
@@ -842,7 +868,7 @@ mod tests {
                 .as_any()
                 .is::<DoNothingAndStopPropagationTextIntent>()
         }));
-        let linux_cell = app_of(TargetPlatform::Linux);
+        let linux_cell = app_of_host_that_edits(TargetPlatform::Linux);
         let linux = linux_cell.borrow();
         assert!(
             DefaultTextEditingShortcuts::get_disabling_shortcut(&linux).is_none(),
@@ -851,8 +877,18 @@ mod tests {
     }
 
     #[test]
+    fn a_host_that_reports_plain_keys_keeps_every_editing_key() {
+        let mac_cell = app_of(TargetPlatform::MacOS);
+        let mac = mac_cell.borrow();
+        assert!(
+            DefaultTextEditingShortcuts::get_disabling_shortcut(&mac).is_none(),
+            "nothing interprets those keys, so standing aside would leave them to nobody"
+        );
+    }
+
+    #[test]
     fn the_widget_wraps_its_child_in_the_platform_table_and_the_disabling_table() {
-        let cell = app_with_view();
+        let cell = app_with_view_whose_host_edits();
         mount(
             &cell,
             DefaultTextEditingShortcuts::new(SizedBox::shrink()).into_widget(),

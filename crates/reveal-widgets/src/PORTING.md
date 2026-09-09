@@ -194,6 +194,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — an `Rc` value cannot be a `const`, and the target platform is a property of the host-supplied `Platform`.
   Affect: the `ShortcutManager` re-indexes on every rebuild of this widget instead of seeing an unchanged const map.
 
+- Change: the keys a platform is said to handle itself are only stood aside for when the host says it turns editing keys into edits.
+  Reason: platform — Dart stands aside for every macOS and iOS host because its embedders for those two are the only ones it has; a host that reports plain key presses interprets nothing, so standing aside would leave those keys to nobody.
+  Affect: over such a host a field's backspace, delete and arrow keys edit the text instead of doing nothing, on macOS and iOS as everywhere else.
+
 ## widgets/app.rs → app.dart
 
 - `WidgetsApp`'s constructor asserts run when the widget is inflated, so a contradictory configuration panics at mount; see basic.rs's assert entry.
@@ -486,11 +490,11 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - app.rs: `WidgetsApp.router` and every router field it fills, with their branches of `_updateRouting` and `build`. Trigger: `router.dart`.
 - app.rs: the state's route-push and route-pop handlers. Trigger: the binding's route events.
 - app.rs: the app lifecycle state and the `SystemNavigator.setFrameworkHandlesBack` branch of the default navigation-notification handler. Trigger: lifecycle events; services' `SystemNavigator`.
-- app.rs: the `TapRegionSurface` under the traversal group, and the escape-key handler that dismisses tooltips. Trigger: `tap_region.dart`; `raw_tooltip.dart`.
+- app.rs: the escape-key handler that dismisses tooltips. Trigger: `raw_tooltip.dart`.
 - app.rs: the performance overlay, semantics debugger and widget inspector the three carried debug flags would show. Trigger: `performance_overlay.dart`; accessibility (do not stub); `widget_inspector.dart`.
-- default_text_editing_shortcuts.rs: the text editing actions that consume these intents live in `editable_text.dart`. Trigger: `EditableText`'s action map.
+- default_text_editing_shortcuts.rs: the Control-key editing bindings macOS supplies from its own key tables (Control-A, Control-E, Control-K, Control-D), which Dart's macOS map leaves to the host. Trigger: nothing else supplies them over a host that reports plain key presses.
 - editable_text.rs: `_Editable` stays a leaf until `WidgetSpan` and host placeholders exist. Trigger: embedder placeholders.
-- editable_text.rs: scribble and stylus support, the rest of the private action map, the spell-check fetch, the magnifier overlay, `StrutStyle`, the floating cursor, `insertContent`, and the semantics wrappers. Trigger: `StrutStyle`; `UndoManagerClient`; `RenderEditable.setFloatingCursor`; accessibility.
+- editable_text.rs: scribble and stylus support, the spell-check fetch, the magnifier overlay, `StrutStyle`, the floating cursor, `insertContent`, and the semantics wrappers. Trigger: `StrutStyle`; `UndoManagerClient`; `RenderEditable.setFloatingCursor`; accessibility.
 - app_lifecycle_listener.rs: diagnostics. Trigger: diagnostics.
 - text_selection.rs: the resume refresh of the clipboard and live-text status notifiers. Trigger: `WidgetsBindingObserver.didChangeAppLifecycleState`.
 - text_selection.rs: the selection handle overlay and the empty selection controls; handle entries do not yet follow a composited transform. Trigger: those types; `EditableText`.

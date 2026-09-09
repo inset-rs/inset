@@ -3,12 +3,13 @@ Syntax (constructors, setters, `Option`, erasure calls) follows `.cursor/skills/
 Flutter home: packages/flutter/lib/src/services
 Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
-Only the hardware keyboard, haptic feedback, mouse cursors, the mouse tracking annotation, state restoration, the application switcher description, the system overlay style, `TextInput` / `TextInputConnection` / `TextInputClient` / `TextSelectionDelegate`, text layout metric statics, the clipboard, text input formatters, `SelectionChangedCause`, autofill (`AutofillHints` / `AutofillClient` / `AutofillScope`), keyboard-inserted content, spell check, live text, process text, `UndoManager` / `UndoManagerClient`, and re-exports of the text-input value types are here; the rest of the package waits.
+Only the hardware keyboard, haptic feedback, mouse cursors, the mouse tracking annotation, state restoration, the application switcher description, the system overlay style, `TextInput` / `TextInputConnection` / `TextInputClient` / `TextSelectionDelegate`, text layout metric statics, the text boundaries, the clipboard, text input formatters, `SelectionChangedCause`, autofill (`AutofillHints` / `AutofillClient` / `AutofillScope`), keyboard-inserted content, spell check, live text, process text, `UndoManager` / `UndoManagerClient`, and re-exports of the text-input value types are here; the rest of the package waits.
 
 ## Identical
 
 - text_editing.rs → text_editing.dart (re-export of embedder `TextSelection`)
 - text_layout_metrics.rs → text_layout_metrics.dart (`isWhitespace` / `isLineTerminator`)
+- text_boundary.rs → text_boundary.dart (`LineBoundary` needs layout, so it sits in rendering)
 
 ## text_input.rs → text_input.dart
 

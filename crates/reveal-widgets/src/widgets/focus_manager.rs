@@ -2593,11 +2593,16 @@ pub(crate) mod tests {
 
     struct TestPlatform {
         view: ViewRef,
+        handles_text_editing_keys: bool,
     }
 
     impl Platform for TestPlatform {
         fn target_platform(&self) -> TargetPlatform {
             TargetPlatform::MacOS
+        }
+
+        fn handles_text_editing_keys(&self) -> bool {
+            self.handles_text_editing_keys
         }
 
         fn request_frame(&self) {}
@@ -2622,9 +2627,22 @@ pub(crate) mod tests {
     }
 
     /// An [`App`] with a single view, ready for [`run_app`].
+    ///
+    /// Its host reports plain key presses, so a text field keeps its own key bindings.
     pub(crate) fn app_with_view() -> Rc<AppCell> {
+        app_with_view_of(false)
+    }
+
+    /// The same, over a host that turns editing keys into edits itself, as Flutter's macOS
+    /// and iOS embedders do.
+    pub(crate) fn app_with_view_whose_host_edits() -> Rc<AppCell> {
+        app_with_view_of(true)
+    }
+
+    fn app_with_view_of(handles_text_editing_keys: bool) -> Rc<AppCell> {
         let platform: PlatformRef = Rc::new(TestPlatform {
             view: Rc::new(TestView),
+            handles_text_editing_keys,
         });
         AppCell::with_platform(platform)
     }

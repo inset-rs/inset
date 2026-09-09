@@ -14,6 +14,7 @@ reveal-gestures.workspace = true
 reveal-painting.workspace = true
 reveal-scheduler.workspace = true
 reveal-services.workspace = true
+unicode-general-category.workspace = true
 
 [dev-dependencies]
 valo-system-fonts.workspace = true

@@ -1826,11 +1826,20 @@ mod tests {
     use crate::adaptive_text_selection_toolbar::CupertinoAdaptiveTextSelectionToolbar;
     use crate::app::CupertinoApp;
     use crate::test_support::{build, pump, test_cell};
-    use reveal_embedder::{PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
+    use reveal_embedder::{
+        KeyData, KeyEventDeviceType, KeyEventType, PointerChange, PointerData, PointerDataPacket,
+        PointerDeviceKind, TextAffinity, TextSelection,
+    };
+    use reveal_services::{
+        KeyEventManager, LogicalKeyboardKey, PhysicalKeyboardKey, TextInputClient,
+    };
     use reveal_foundation::AppCell;
     use reveal_gestures::GestureBinding;
     use reveal_painting::PaintingBinding;
-    use reveal_widgets::{AnyElement, WidgetsBinding};
+    use reveal_widgets::{
+        AnyElement, Column, Expanded, Listener, SizedBox, WidgetsBinding,
+    };
+    use reveal_rendering::HitTestBehavior;
 
     fn install_fonts(app: &mut App) {
         let binding = PaintingBinding::instance(app);
@@ -1961,6 +1970,360 @@ mod tests {
                 .into_widget(),
         );
         (cell, controller, key)
+    }
+
+    /// One key down and up, the way the shell delivers a platform key.
+    fn send_key(
+        app: &mut App,
+        physical: PhysicalKeyboardKey,
+        logical: LogicalKeyboardKey,
+        character: Option<&str>,
+    ) {
+        press_key(app, physical, logical, character);
+        release_key(app, physical, logical);
+    }
+
+    fn press_key(
+        app: &mut App,
+        physical: PhysicalKeyboardKey,
+        logical: LogicalKeyboardKey,
+        character: Option<&str>,
+    ) {
+        KeyEventManager::instance(app).handle_key_data(
+            app,
+            KeyData {
+                time_stamp: Duration::ZERO,
+                event_type: KeyEventType::Down,
+                device_type: KeyEventDeviceType::Keyboard,
+                physical: physical.usb_hid_usage,
+                logical: logical.key_id,
+                character: character.map(str::to_owned),
+                synthesized: false,
+            },
+        );
+    }
+
+    fn release_key(app: &mut App, physical: PhysicalKeyboardKey, logical: LogicalKeyboardKey) {
+        KeyEventManager::instance(app).handle_key_data(
+            app,
+            KeyData {
+                time_stamp: Duration::ZERO,
+                event_type: KeyEventType::Up,
+                device_type: KeyEventDeviceType::Keyboard,
+                physical: physical.usb_hid_usage,
+                logical: logical.key_id,
+                character: None,
+                synthesized: false,
+            },
+        );
+    }
+
+    /// Clicks the field so it takes focus, which is what puts it under the shortcuts.
+    fn focus_field(app: &mut App, key: &GlobalKey) {
+        let at = field_point(app, key, Offset::new(12.0, 12.0));
+        send_mouse(app, PointerChange::Down, at.dx(), at.dy(), 1);
+        send_mouse(app, PointerChange::Up, at.dx(), at.dy(), 1);
+        pump(app, Duration::ZERO);
+    }
+
+    fn utf16_len(text: &str) -> i32 {
+        text.encode_utf16().count() as i32
+    }
+
+    /// A grapheme of four code points joined by zero-width joiners: eleven UTF-16 code units
+    /// that the caret must cross in one step.
+    const FAMILY: &str = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+
+    /// A field at the top of the page, with an opaque region under it to click on.
+    ///
+    /// `mount_field` gives the field the whole view, so there is no outside to tap.
+    fn mount_field_with_room_below(
+        text: &str,
+    ) -> (Rc<AppCell>, Handle<TextEditingController>, GlobalKey) {
+        let cell = test_cell();
+        let mut app = cell.borrow_mut();
+        install_fonts(&mut app);
+        let controller = TextEditingController::new(&mut app);
+        controller.set_text(&mut app, text);
+        let key = GlobalKey::new();
+        let key_ref: KeyRef = Rc::new(key.clone());
+        drop(app);
+        build(
+            &cell,
+            CupertinoApp::new()
+                .home(Column::new().children([
+                    SizedBox::new()
+                        .height(40.0)
+                        .child(
+                            CupertinoTextField::new()
+                                .key(key_ref)
+                                .controller(controller),
+                        )
+                        .into_widget(),
+                    // Something for a click below the field to land on, the way the gallery's
+                    // scrollable covers its page.
+                    Expanded::new(
+                        Listener::new()
+                            .behavior(HitTestBehavior::Opaque)
+                            .child(SizedBox::expand()),
+                    )
+                    .into_widget(),
+                ]))
+                .into_widget(),
+        );
+        (cell, controller, key)
+    }
+
+    #[test]
+    fn a_click_outside_the_field_drops_its_focus() {
+        let (cell, _controller, key) = mount_field_with_room_below("Hello world");
+        let mut app = cell.borrow_mut();
+        focus_field(&mut app, &key);
+        let state = key
+            .current_state::<CupertinoTextFieldState>(&mut app)
+            .expect("the field mounted");
+        assert!(
+            state.effective_focus_node(&mut app).has_focus(&mut app),
+            "clicking the field should focus it"
+        );
+
+        // Well below the field. The tap region surface is what turns this into the field's
+        // on_tap_outside.
+        send_mouse(&mut app, PointerChange::Down, 200.0, 250.0, 1);
+        send_mouse(&mut app, PointerChange::Up, 200.0, 250.0, 1);
+        pump(&mut app, Duration::ZERO);
+
+        assert!(
+            !state.effective_focus_node(&mut app).has_focus(&mut app),
+            "a click outside the field should unfocus it"
+        );
+    }
+
+    #[test]
+    fn backspace_deletes_a_whole_grapheme() {
+        // The host reports plain key presses, so the field keeps its own key bindings and
+        // backspace reaches them.
+        let text = format!("a{FAMILY}");
+        let (cell, controller, key) = mount_field(&text);
+        let mut app = cell.borrow_mut();
+        focus_field(&mut app, &key);
+        controller.set_selection(
+            &mut app,
+            TextSelection::collapsed(utf16_len(&text), TextAffinity::Downstream),
+        );
+        pump(&mut app, Duration::ZERO);
+
+        send_key(
+            &mut app,
+            PhysicalKeyboardKey::BACKSPACE,
+            LogicalKeyboardKey::BACKSPACE,
+            None,
+        );
+        pump(&mut app, Duration::ZERO);
+
+        assert_eq!(
+            controller.value(&app).text,
+            "a",
+            "one backspace should take the whole family emoji"
+        );
+    }
+
+    #[test]
+    fn a_right_click_keeps_a_selection_it_lands_on_and_takes_the_word_otherwise() {
+        let (cell, controller, key) = mount_field("Hello world again");
+        let mut app = cell.borrow_mut();
+        focus_field(&mut app, &key);
+        controller.set_selection(&mut app, TextSelection::new(0, 11));
+        pump(&mut app, Duration::ZERO);
+
+        let inside = field_point(&mut app, &key, Offset::new(20.0, 12.0));
+        right_click(&mut app, inside, 2);
+        let kept = controller.selection(&app);
+        assert_eq!(
+            (kept.start(), kept.end()),
+            (0, 11),
+            "a right click on the selection leaves it alone, so the menu acts on it"
+        );
+
+        let outside = field_point(&mut app, &key, Offset::new(120.0, 12.0));
+        right_click(&mut app, outside, 3);
+        let word = controller.selection(&app);
+        assert_eq!(
+            (word.start(), word.end()),
+            (12, 17),
+            "a right click off the selection takes the word under it"
+        );
+    }
+
+    #[test]
+    fn a_right_button_drag_selects_nothing() {
+        let (cell, controller, key) = mount_field("Hello world again");
+        let mut app = cell.borrow_mut();
+        focus_field(&mut app, &key);
+        controller.set_selection(
+            &mut app,
+            TextSelection::collapsed(0, TextAffinity::Downstream),
+        );
+        pump(&mut app, Duration::ZERO);
+
+        // The drift a hand makes between pressing the right button and reaching the menu.
+        let start = field_point(&mut app, &key, Offset::new(20.0, 12.0));
+        send_mouse_buttons(&mut app, PointerChange::Hover, start, Offset::ZERO, 2, 0);
+        send_mouse_buttons(&mut app, PointerChange::Down, start, Offset::ZERO, 2, 2);
+        for step in 1..=4 {
+            let to = Offset::new(start.dx() + f64::from(step) * 25.0, start.dy());
+            send_mouse_buttons(&mut app, PointerChange::Move, to, Offset::new(25.0, 0.0), 2, 2);
+        }
+        let end = Offset::new(start.dx() + 100.0, start.dy());
+        send_mouse_buttons(&mut app, PointerChange::Up, end, Offset::ZERO, 2, 0);
+        pump(&mut app, Duration::ZERO);
+
+        let selection = controller.selection(&app);
+        assert!(
+            selection.is_collapsed(),
+            "the right button never drag-selects, got {selection:?}"
+        );
+    }
+
+    fn right_click(app: &mut App, at: Offset, pointer: i64) {
+        send_mouse_buttons(app, PointerChange::Hover, at, Offset::ZERO, pointer, 0);
+        send_mouse_buttons(app, PointerChange::Down, at, Offset::ZERO, pointer, 2);
+        send_mouse_buttons(app, PointerChange::Up, at, Offset::ZERO, pointer, 0);
+        pump(app, Duration::ZERO);
+    }
+
+    #[test]
+    fn meta_a_selects_all_the_text() {
+        let (cell, controller, key) = mount_field("Hello world");
+        let mut app = cell.borrow_mut();
+        focus_field(&mut app, &key);
+
+        press_key(
+            &mut app,
+            PhysicalKeyboardKey::META_LEFT,
+            LogicalKeyboardKey::META_LEFT,
+            None,
+        );
+        send_key(
+            &mut app,
+            PhysicalKeyboardKey::KEY_A,
+            LogicalKeyboardKey::KEY_A,
+            Some("a"),
+        );
+        release_key(
+            &mut app,
+            PhysicalKeyboardKey::META_LEFT,
+            LogicalKeyboardKey::META_LEFT,
+        );
+        pump(&mut app, Duration::ZERO);
+
+        let selection = controller.selection(&app);
+        assert_eq!(
+            (selection.start(), selection.end()),
+            (0, utf16_len("Hello world")),
+            "meta+A should select the whole field, got {selection:?}"
+        );
+    }
+
+    #[test]
+    fn an_arrow_key_walks_the_caret_over_a_whole_grapheme() {
+        let text = format!("a{FAMILY}b");
+        let (cell, controller, key) = mount_field(&text);
+        let mut app = cell.borrow_mut();
+        focus_field(&mut app, &key);
+        controller.set_selection(
+            &mut app,
+            TextSelection::collapsed(0, TextAffinity::Downstream),
+        );
+        pump(&mut app, Duration::ZERO);
+
+        send_key(
+            &mut app,
+            PhysicalKeyboardKey::ARROW_RIGHT,
+            LogicalKeyboardKey::ARROW_RIGHT,
+            None,
+        );
+        pump(&mut app, Duration::ZERO);
+        assert_eq!(controller.selection(&app).base_offset, 1, "past the 'a'");
+
+        send_key(
+            &mut app,
+            PhysicalKeyboardKey::ARROW_RIGHT,
+            LogicalKeyboardKey::ARROW_RIGHT,
+            None,
+        );
+        pump(&mut app, Duration::ZERO);
+        assert_eq!(
+            controller.selection(&app).base_offset,
+            utf16_len(&text) - 1,
+            "one press should step over the whole family emoji"
+        );
+    }
+
+    #[test]
+    fn shift_and_an_arrow_key_extend_the_selection() {
+        let (cell, controller, key) = mount_field("Hello world");
+        let mut app = cell.borrow_mut();
+        focus_field(&mut app, &key);
+        controller.set_selection(
+            &mut app,
+            TextSelection::collapsed(0, TextAffinity::Downstream),
+        );
+        pump(&mut app, Duration::ZERO);
+
+        press_key(
+            &mut app,
+            PhysicalKeyboardKey::SHIFT_LEFT,
+            LogicalKeyboardKey::SHIFT_LEFT,
+            None,
+        );
+        send_key(
+            &mut app,
+            PhysicalKeyboardKey::ARROW_RIGHT,
+            LogicalKeyboardKey::ARROW_RIGHT,
+            None,
+        );
+        release_key(
+            &mut app,
+            PhysicalKeyboardKey::SHIFT_LEFT,
+            LogicalKeyboardKey::SHIFT_LEFT,
+        );
+        pump(&mut app, Duration::ZERO);
+
+        let selection = controller.selection(&app);
+        assert_eq!((selection.base_offset, selection.extent_offset), (0, 1));
+    }
+
+    #[test]
+    fn the_macos_delete_selector_removes_a_whole_grapheme() {
+        // What `NSStandardKeyBindingResponding` sends for the backspace key. The macOS and
+        // iOS shortcut tables leave backspace to the host, so this is the path it takes.
+        let text = format!("a{FAMILY}");
+        let (cell, controller, key) = mount_field(&text);
+        let mut app = cell.borrow_mut();
+        focus_field(&mut app, &key);
+        let end = utf16_len(&text);
+        controller.set_selection(
+            &mut app,
+            TextSelection::collapsed(end, TextAffinity::Downstream),
+        );
+        pump(&mut app, Duration::ZERO);
+
+        let state = key
+            .current_state::<CupertinoTextFieldState>(&mut app)
+            .expect("the field mounted");
+        let editable_key = state.editable_text_key(&app);
+        let editable = editable_key
+            .current_state::<EditableTextState>(&mut app)
+            .expect("the field mounts an EditableText");
+        TextInputClient::perform_selector(editable, &mut app, "deleteBackward:");
+        pump(&mut app, Duration::ZERO);
+
+        assert_eq!(
+            controller.value(&app).text,
+            "a",
+            "one deleteBackward: should take the whole family emoji"
+        );
     }
 
     #[test]
