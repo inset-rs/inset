@@ -8,19 +8,22 @@ use reveal_embedder::{
     Brightness, EmbedderClient, FontSource, Frame, KeyData, KeyEventDeviceType, KeyEventType,
     Matrix4, Offset, Picture, Platform, PlatformRef, PointerChange, PointerData, PointerDataPacket,
     PointerDeviceKind, PointerSignalKind, Rect, Size, SystemFontSource, SystemMouseCursorKind,
-    TargetPlatform, TextEditingValue, TextInputConfiguration, View, ViewConstraints, ViewId,
-    ViewMetrics, ViewPadding, ViewRef, transform3,
+    TargetPlatform, TextEditingValue, TextInputConfiguration, View, ViewConstraints,
+    ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId, ViewMetrics, ViewPadding, ViewRef,
+    transform3,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
-use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
+use winit::keyboard::ModifiersState;
 use winit::window::{CursorIcon, ImePurpose, Window, WindowId};
 
 use crate::ime::{ImeOutcome, apply_ime};
 
 use crate::gpu::Gpu;
 use crate::keys;
+use crate::text_input::{ActiveTextInput, TextInputKeyEffect};
 use crate::{ImplicitViewConfig, WinitEmbedder};
 
 const IMPLICIT_VIEW: ViewId = ViewId(0);
@@ -39,6 +42,10 @@ struct WinitPlatform {
     brightness: Cell<Brightness>,
     /// The latest system cursor request, applied by the event loop.
     cursor_request: Cell<Option<SystemMouseCursorKind>>,
+    /// Requests from the framework, drained by the native event loop.
+    focus_requests: RefCell<Vec<ViewFocusEvent>>,
+    /// The OS pasteboard; created on first use so a missing clipboard host is not fatal.
+    clipboard: RefCell<Option<arboard::Clipboard>>,
 }
 
 impl WinitPlatform {
@@ -52,7 +59,17 @@ impl WinitPlatform {
             origin: Instant::now(),
             brightness: Cell::new(Brightness::Light),
             cursor_request: Cell::new(None),
+            focus_requests: RefCell::new(Vec::new()),
+            clipboard: RefCell::new(None),
         }
+    }
+
+    fn with_clipboard<T>(&self, f: impl FnOnce(&mut arboard::Clipboard) -> T) -> Option<T> {
+        let mut slot = self.clipboard.borrow_mut();
+        if slot.is_none() {
+            *slot = arboard::Clipboard::new().ok();
+        }
+        slot.as_mut().map(f)
     }
 
     fn poke(&self) {
@@ -126,6 +143,20 @@ impl Platform for WinitPlatform {
         self.views.borrow().get(&id).cloned()
     }
 
+    fn request_view_focus_change(
+        &self,
+        view_id: ViewId,
+        state: ViewFocusState,
+        direction: ViewFocusDirection,
+    ) {
+        self.focus_requests.borrow_mut().push(ViewFocusEvent {
+            view_id,
+            state,
+            direction,
+        });
+        self.poke();
+    }
+
     fn implicit_view(&self) -> Option<ViewRef> {
         self.implicit_view.and_then(|id| self.view(id))
     }
@@ -141,6 +172,19 @@ impl Platform for WinitPlatform {
         self.cursor_request.set(Some(kind));
         self.poke();
     }
+
+    fn clipboard_set_data(&self, text: &str) {
+        let _ = self.with_clipboard(|clipboard| clipboard.set_text(text));
+    }
+
+    fn clipboard_get_data(&self) -> Option<String> {
+        self.with_clipboard(|clipboard| clipboard.get_text().ok())
+            .flatten()
+    }
+
+    fn clipboard_has_strings(&self) -> bool {
+        self.clipboard_get_data().is_some()
+    }
 }
 
 /// Stable view identity, current winit geometry, and the valo present line.
@@ -151,6 +195,8 @@ struct WinitView {
     /// The window this view draws into, for retrying a present the surface refused.
     window: Arc<Window>,
     editing_state: RefCell<TextEditingValue>,
+    /// Set from `start_text_input` to `stop_text_input`; an unhandled key types into it.
+    text_input: Cell<Option<ActiveTextInput>>,
     transform: RefCell<Option<Matrix4>>,
 }
 
@@ -184,6 +230,8 @@ impl View for WinitView {
     }
 
     fn start_text_input(&self, configuration: &TextInputConfiguration) {
+        self.text_input
+            .set(Some(ActiveTextInput::new(configuration)));
         self.window.set_ime_allowed(true);
         self.window.set_ime_purpose(if configuration.obscure_text {
             ImePurpose::Password
@@ -193,6 +241,7 @@ impl View for WinitView {
     }
 
     fn stop_text_input(&self) {
+        self.text_input.set(None);
         self.window.set_ime_allowed(false);
     }
 
@@ -244,7 +293,9 @@ struct WinitApp<C> {
     started: bool,
     cursor: [f64; 2],
     last_cursor: [f64; 2],
-    mouse_down: bool,
+    /// Flutter `PointerData.buttons` for the mouse.
+    mouse_buttons: i64,
+    modifiers: ModifiersState,
     pointer_id: i64,
     embedder_id: i64,
     /// The logical key each held physical key went down with, keyed by USB HID usage.
@@ -269,7 +320,8 @@ pub(crate) fn run<C: EmbedderClient + 'static>(
         started: false,
         cursor: [0.0, 0.0],
         last_cursor: [0.0, 0.0],
-        mouse_down: false,
+        mouse_buttons: 0,
+        modifiers: ModifiersState::empty(),
         pointer_id: 0,
         embedder_id: 0,
         pressing_records: HashMap::new(),
@@ -298,8 +350,49 @@ fn brightness_of(theme: winit::window::Theme) -> Brightness {
     }
 }
 
-/// Flutter `kPrimaryButton` / `kPrimaryMouseButton` (`gestures/events.dart`).
-const PRIMARY_MOUSE_BUTTON: i64 = 0x01;
+/// Flutter `kFlutterPointerButtonMousePrimary` (`embedder.h`).
+const PRIMARY_MOUSE_BUTTON: i64 = 1 << 0;
+/// Flutter `kFlutterPointerButtonMouseSecondary`.
+const SECONDARY_MOUSE_BUTTON: i64 = 1 << 1;
+/// Flutter `kFlutterPointerButtonMouseMiddle`.
+const MIDDLE_MOUSE_BUTTON: i64 = 1 << 2;
+/// Flutter `kFlutterPointerButtonMouseBack`.
+const BACK_MOUSE_BUTTON: i64 = 1 << 3;
+/// Flutter `kFlutterPointerButtonMouseForward`.
+const FORWARD_MOUSE_BUTTON: i64 = 1 << 4;
+
+/// Flutter engine mouse-button bits for a winit button.
+///
+/// Named buttons follow `kFlutterPointerButtonMouse*` in `embedder.h`. Extra buttons use
+/// `1 << n`, matching the macOS embedder's `otherMouseDown:` (`1 << event.buttonNumber`).
+fn flutter_mouse_button(button: MouseButton) -> Option<i64> {
+    match button {
+        MouseButton::Left => Some(PRIMARY_MOUSE_BUTTON),
+        MouseButton::Right => Some(SECONDARY_MOUSE_BUTTON),
+        MouseButton::Middle => Some(MIDDLE_MOUSE_BUTTON),
+        MouseButton::Back => Some(BACK_MOUSE_BUTTON),
+        MouseButton::Forward => Some(FORWARD_MOUSE_BUTTON),
+        MouseButton::Other(n) => {
+            let shift = u32::from(n);
+            (shift < i64::BITS).then_some(1_i64 << shift)
+        }
+    }
+}
+
+/// Down when the first button goes down, Move while any remain, Up when the last is released.
+/// Flutter's macOS `dispatchMouseEvent:` uses the same three-way split.
+fn pointer_change_for_buttons(previous: i64, next: i64) -> Option<PointerChange> {
+    if previous == next {
+        return None;
+    }
+    Some(if next == 0 {
+        PointerChange::Up
+    } else if previous == 0 {
+        PointerChange::Down
+    } else {
+        PointerChange::Move
+    })
+}
 
 /// The winit icon for a system cursor kind; `None` hides the cursor
 /// ([`SystemMouseCursorKind::None`]). Kinds winit lacks fall back to the default arrow, as
@@ -391,6 +484,21 @@ impl<C: EmbedderClient> WinitApp<C> {
         }
     }
 
+    /// Flutter's macOS host honors requests to focus a view; native focus events report the result.
+    fn apply_focus_requests(&mut self) {
+        for request in self.platform.focus_requests.take() {
+            if request.state == ViewFocusState::Focused
+                && let Some(view) = self
+                    .views
+                    .values()
+                    .find(|view| view.view.id() == request.view_id)
+                && !view.window.has_focus()
+            {
+                view.window.focus_window();
+            }
+        }
+    }
+
     fn start_client(&mut self) {
         let start = self.start.take().expect("start runs once");
         self.client = Some(start(self.platform.clone()));
@@ -430,6 +538,7 @@ impl<C: EmbedderClient> WinitApp<C> {
             surface: Arc::new(Mutex::new(WinitSurface { surface, context })),
             window: Arc::clone(&window),
             editing_state: RefCell::new(TextEditingValue::EMPTY),
+            text_input: Cell::new(None),
             transform: RefCell::new(None),
         });
         if let Some(theme) = window.theme() {
@@ -461,6 +570,22 @@ impl<C: EmbedderClient> WinitApp<C> {
         if let Some(client) = &mut self.client {
             client.pointer_data_packet(packet);
         }
+    }
+
+    fn apply_mouse_button(&mut self, window_id: WindowId, button: MouseButton, pressed: bool) {
+        let Some(bit) = flutter_mouse_button(button) else {
+            return;
+        };
+        let previous = self.mouse_buttons;
+        if pressed {
+            self.mouse_buttons |= bit;
+        } else {
+            self.mouse_buttons &= !bit;
+        }
+        let Some(change) = pointer_change_for_buttons(previous, self.mouse_buttons) else {
+            return;
+        };
+        self.send_pointer(window_id, change);
     }
 
     fn send_scroll(&mut self, window_id: WindowId, delta: MouseScrollDelta) {
@@ -504,20 +629,46 @@ impl<C: EmbedderClient> WinitApp<C> {
         }
     }
 
-    fn send_key(&mut self, event: winit::event::KeyEvent, is_synthetic: bool) {
+    fn send_key(&mut self, window_id: WindowId, event: &KeyEvent, is_synthetic: bool) {
         let Some(data) = self.key_data(event, is_synthetic) else {
             return;
         };
-        if let Some(client) = &mut self.client {
-            // The window is the last stop for the event: there is no native component
-            // below it to keep an unhandled key from.
-            let _handled = client.key_data(data);
+        let Some(client) = &mut self.client else {
+            return;
+        };
+        // Flutter's macOS `FlutterKeyboardManager`: the text input plugin sees a key only
+        // after the framework declined it.
+        if !client.key_data(data) && event.state == ElementState::Pressed {
+            self.type_into_text_input(window_id, event);
+        }
+    }
+
+    /// `FlutterTextInputPlugin.handleKeyEvent` for the view's active text input, if any.
+    fn type_into_text_input(&mut self, window_id: WindowId, event: &KeyEvent) {
+        let Some(hosted) = self.views.get(&window_id) else {
+            return;
+        };
+        let Some(text_input) = hosted.view.text_input.get() else {
+            return;
+        };
+        let view_id = hosted.view.id();
+        match text_input.key_effect(&event.logical_key, event.text.as_deref(), self.modifiers) {
+            TextInputKeyEffect::None => {}
+            TextInputKeyEffect::Insert(text) => self.send_ime(window_id, Ime::Commit(text)),
+            TextInputKeyEffect::Enter { insert, action } => {
+                if let Some(text) = insert {
+                    self.send_ime(window_id, Ime::Commit(text));
+                }
+                if let Some(client) = &mut self.client {
+                    client.text_input_action(view_id, action);
+                }
+            }
         }
     }
 
     /// A winit key event as dart:ui [`KeyData`], or `None` for a key this host
     /// cannot name in Flutter's tables.
-    fn key_data(&mut self, event: winit::event::KeyEvent, is_synthetic: bool) -> Option<KeyData> {
+    fn key_data(&mut self, event: &KeyEvent, is_synthetic: bool) -> Option<KeyData> {
         let physical = keys::physical_key_usage(event.physical_key)?;
         let event_type = match (event.state, event.repeat) {
             (ElementState::Pressed, false) => KeyEventType::Down,
@@ -566,11 +717,7 @@ impl<C: EmbedderClient> WinitApp<C> {
         self.embedder_id += 1;
         let [x, y] = self.cursor;
         let [last_x, last_y] = self.last_cursor;
-        let buttons = if self.mouse_down {
-            PRIMARY_MOUSE_BUTTON
-        } else {
-            0
-        };
+        let buttons = self.mouse_buttons;
         let pointer_identifier = if change == PointerChange::Hover && buttons == 0 {
             0
         } else {
@@ -617,6 +764,7 @@ impl<C: EmbedderClient> ApplicationHandler for WinitApp<C> {
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: ()) {
         self.apply_cursor_request();
+        self.apply_focus_requests();
         if self.frame_source.is_some() {
             self.flush_frame_request();
         } else if self.platform.frame_requested.replace(false)
@@ -649,6 +797,21 @@ impl<C: EmbedderClient> ApplicationHandler for WinitApp<C> {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         match event {
+            WindowEvent::Focused(focused) => {
+                if let Some(view) = self.views.get(&id)
+                    && let Some(client) = &mut self.client
+                {
+                    client.view_focus_changed(ViewFocusEvent {
+                        view_id: view.view.id(),
+                        state: if focused {
+                            ViewFocusState::Focused
+                        } else {
+                            ViewFocusState::Unfocused
+                        },
+                        direction: ViewFocusDirection::Undefined,
+                    });
+                }
+            }
             WindowEvent::CloseRequested => {
                 self.remove_view(id);
                 if self.views.is_empty() {
@@ -702,19 +865,22 @@ impl<C: EmbedderClient> ApplicationHandler for WinitApp<C> {
                 self.cursor = [position.x, position.y];
                 self.send_pointer(
                     id,
-                    if self.mouse_down {
+                    if self.mouse_buttons != 0 {
                         PointerChange::Move
                     } else {
                         PointerChange::Hover
                     },
                 );
             }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.modifiers = modifiers.state();
+            }
             WindowEvent::KeyboardInput {
                 event,
                 is_synthetic,
                 ..
             } => {
-                self.send_key(event, is_synthetic);
+                self.send_key(id, &event, is_synthetic);
             }
             WindowEvent::Ime(ime) => {
                 self.send_ime(id, ime);
@@ -722,20 +888,8 @@ impl<C: EmbedderClient> ApplicationHandler for WinitApp<C> {
             WindowEvent::MouseWheel { delta, .. } => {
                 self.send_scroll(id, delta);
             }
-            WindowEvent::MouseInput {
-                state,
-                button: MouseButton::Left,
-                ..
-            } => {
-                self.mouse_down = state == ElementState::Pressed;
-                self.send_pointer(
-                    id,
-                    if self.mouse_down {
-                        PointerChange::Down
-                    } else {
-                        PointerChange::Up
-                    },
-                );
+            WindowEvent::MouseInput { state, button, .. } => {
+                self.apply_mouse_button(id, button, state == ElementState::Pressed);
             }
             _ => {}
         }
@@ -747,10 +901,15 @@ mod tests {
     use winit::dpi::PhysicalPosition;
     use winit::event::MouseScrollDelta;
 
-    use reveal_embedder::SystemMouseCursorKind;
+    use reveal_embedder::{PointerChange, SystemMouseCursorKind};
+    use winit::event::MouseButton;
     use winit::window::CursorIcon;
 
-    use super::{cursor_icon_of, wheel_to_physical};
+    use super::{
+        BACK_MOUSE_BUTTON, FORWARD_MOUSE_BUTTON, MIDDLE_MOUSE_BUTTON, PRIMARY_MOUSE_BUTTON,
+        SECONDARY_MOUSE_BUTTON, cursor_icon_of, flutter_mouse_button, pointer_change_for_buttons,
+        wheel_to_physical,
+    };
 
     #[test]
     fn cursor_kinds_map_to_winit_icons() {
@@ -794,6 +953,54 @@ mod tests {
                 2.0
             ),
             [0.0, 100.0]
+        );
+    }
+
+    #[test]
+    fn winit_mouse_buttons_map_to_flutter_bits() {
+        assert_eq!(
+            flutter_mouse_button(MouseButton::Left),
+            Some(PRIMARY_MOUSE_BUTTON)
+        );
+        assert_eq!(
+            flutter_mouse_button(MouseButton::Right),
+            Some(SECONDARY_MOUSE_BUTTON)
+        );
+        assert_eq!(
+            flutter_mouse_button(MouseButton::Middle),
+            Some(MIDDLE_MOUSE_BUTTON)
+        );
+        assert_eq!(
+            flutter_mouse_button(MouseButton::Back),
+            Some(BACK_MOUSE_BUTTON)
+        );
+        assert_eq!(
+            flutter_mouse_button(MouseButton::Forward),
+            Some(FORWARD_MOUSE_BUTTON)
+        );
+        assert_eq!(flutter_mouse_button(MouseButton::Other(5)), Some(1 << 5));
+    }
+
+    #[test]
+    fn mouse_button_chords_are_down_move_up() {
+        assert_eq!(
+            pointer_change_for_buttons(0, SECONDARY_MOUSE_BUTTON),
+            Some(PointerChange::Down)
+        );
+        assert_eq!(
+            pointer_change_for_buttons(SECONDARY_MOUSE_BUTTON, 0),
+            Some(PointerChange::Up)
+        );
+        assert_eq!(
+            pointer_change_for_buttons(
+                PRIMARY_MOUSE_BUTTON,
+                PRIMARY_MOUSE_BUTTON | SECONDARY_MOUSE_BUTTON
+            ),
+            Some(PointerChange::Move)
+        );
+        assert_eq!(
+            pointer_change_for_buttons(PRIMARY_MOUSE_BUTTON, PRIMARY_MOUSE_BUTTON),
+            None
         );
     }
 }

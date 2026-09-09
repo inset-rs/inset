@@ -2,14 +2,14 @@
 //! `RootElement`, `runApp`).
 //!
 //! `WidgetsBindingObserver` and the observer callbacks (locale, metrics, lifecycle, memory,
-//! back gestures, view focus), `performReassemble`, and the platform menu / windowing owners
+//! back gestures), `performReassemble`, and the platform menu / windowing owners
 //! wait. Lifecycle observer methods exist so a listener can override them;
 //! `handleAppLifecycleStateChanged` waits.
 
 use std::rc::Rc;
 use std::time::Duration;
 
-use reveal_embedder::{AppExitResponse, AppLifecycleState, Locale};
+use reveal_embedder::{AppExitResponse, AppLifecycleState, Locale, ViewFocusEvent};
 use reveal_foundation::{App, Handle, Listener, Timer};
 use reveal_rendering::{RendererBinding, RendererBindingOverridesObject};
 use reveal_scheduler::SchedulerBinding;
@@ -44,7 +44,7 @@ pub struct WidgetsBinding {
 ///
 /// A `State` registers itself through the object twin
 /// [`WidgetsBindingObserverObject`], whose handle is the observer. The route,
-/// memory-pressure, back-gesture, and view-focus callbacks wait with their platform
+/// memory-pressure and back-gesture callbacks wait with their platform
 /// events; only the ones the renderer raises, the locale list, and the lifecycle
 /// observer methods are here. `handleAppLifecycleStateChanged` waits.
 pub trait WidgetsBindingObserver {
@@ -59,6 +59,11 @@ pub trait WidgetsBindingObserver {
     /// This method exposes notifications from `PlatformDispatcher.onLocaleChanged`.
     fn did_change_locales(&self, app: &mut App, locales: Option<&[Locale]>) {
         let _ = (app, locales);
+    }
+
+    /// Called when the platform reports a change in the focus state of a view.
+    fn did_change_view_focus(&self, app: &mut App, event: ViewFocusEvent) {
+        let _ = (app, event);
     }
 
     /// Called when the platform's text scale factor changes.
@@ -117,6 +122,11 @@ pub trait WidgetsBindingObserverObject: Sized + 'static {
         let _ = (app, locales);
     }
 
+    /// See [`WidgetsBindingObserver::did_change_view_focus`].
+    fn did_change_view_focus(self: Handle<Self>, app: &mut App, event: ViewFocusEvent) {
+        let _ = (app, event);
+    }
+
     /// See [`WidgetsBindingObserver::did_change_text_scale_factor`].
     fn did_change_text_scale_factor(self: Handle<Self>, app: &mut App) {
         let _ = app;
@@ -151,6 +161,10 @@ impl<T: WidgetsBindingObserverObject> WidgetsBindingObserver for Handle<T> {
 
     fn did_change_locales(&self, app: &mut App, locales: Option<&[Locale]>) {
         T::did_change_locales(*self, app, locales);
+    }
+
+    fn did_change_view_focus(&self, app: &mut App, event: ViewFocusEvent) {
+        T::did_change_view_focus(*self, app, event);
     }
 
     fn did_change_text_scale_factor(&self, app: &mut App) {
@@ -198,6 +212,9 @@ impl WidgetsBinding {
             let callbacks = app.platform_callbacks_mut();
             callbacks.on_platform_brightness_changed = Some(Listener::new(|app| {
                 WidgetsBinding::instance(app).handle_platform_brightness_changed(app)
+            }));
+            callbacks.on_view_focus_change = Some(Rc::new(|app, event| {
+                WidgetsBinding::instance(app).handle_view_focus_changed(app, event)
             }));
             callbacks.on_locale_changed = Some(Listener::new(|app| {
                 WidgetsBinding::instance(app).handle_locale_changed(app)
@@ -347,6 +364,13 @@ impl WidgetsBinding {
     pub fn handle_text_scale_factor_changed(self: Handle<Self>, app: &mut App) {
         for observer in app.get(self).observers.clone() {
             observer.did_change_text_scale_factor(app);
+        }
+    }
+
+    /// Notifies observers that the platform focus of a view has changed.
+    pub fn handle_view_focus_changed(self: Handle<Self>, app: &mut App, event: ViewFocusEvent) {
+        for observer in app.get(self).observers.clone() {
+            observer.did_change_view_focus(app, event);
         }
     }
 

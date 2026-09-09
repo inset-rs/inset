@@ -27,6 +27,7 @@ mod views;
 pub use client::EmbedderClient;
 pub use fonts::{
     FontCollection, FontDemand, FontId, FontManager, FontSource, SystemFontSource, Typeface,
+    default_font_families, set_default_font_manager,
 };
 pub use geometry::*;
 pub use key::{KeyData, KeyEventDeviceType, KeyEventType};
@@ -48,4 +49,7 @@ pub use system_context_menu::SystemContextMenuItem;
 pub use text::*;
 pub use text_editing::*;
 pub use text_input::*;
-pub use views::{GestureSettings, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding};
+pub use views::{
+    GestureSettings, View, ViewConstraints, ViewFocusDirection, ViewFocusEvent, ViewFocusState,
+    ViewId, ViewMetrics, ViewPadding,
+};

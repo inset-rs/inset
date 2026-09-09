@@ -1,9 +1,7 @@
 //! Flutter counterpart: `cupertino/text_field.dart`.
 //!
-//! `TextSelectionGestureDetectorBuilder`, `_BaselineAlignedStack`, handle controls, the
-//! adaptive toolbar, the iOS magnifier, and `Semantics` wait; tap-to-focus is a
-//! `GestureDetector` that requests focus. Placeholder and editable share a `Stack` rather
-//! than baseline alignment.
+//! `_BaselineAlignedStack`, the iOS magnifier, and `Semantics` wait.
+//! Placeholder and editable share a `Stack` rather than baseline alignment.
 
 use std::any::TypeId;
 use std::fmt::{self, Debug};
@@ -11,16 +9,19 @@ use std::rc::Rc;
 
 use reveal_embedder::{
     BoxHeightStyle, BoxWidthStyle, Brightness, Clip, Color, FontWeight, Offset, Radius,
-    SmartDashesType, SmartQuotesType, TextAlign, TextCapitalization, TextDecoration,
+    SmartDashesType, SmartQuotesType, TargetPlatform, TextAlign, TextCapitalization, TextDecoration,
     TextDecorationStyle, TextDirection, TextInputAction, TextInputType,
 };
 use reveal_foundation::{App, Handle, Listenable, Listener};
-use reveal_gestures::{DragStartBehavior, GestureTapCallback, PointerDownEvent, PointerUpEvent};
+use reveal_gestures::{
+    DragStartBehavior, GestureTapCallback, HitTestResult, PointerDownEvent, PointerUpEvent,
+    TapDragEndDetails, TapDragUpDetails,
+};
 use reveal_painting::{
     Alignment, AlignmentGeometry, AnyColor, Border, BorderRadius, BorderSide, BorderStyle,
     BoxDecoration, EdgeInsets, EdgeInsetsGeometry, TextAlignVertical, TextStyle,
 };
-use reveal_rendering::{CrossAxisAlignment, HitTestBehavior};
+use reveal_rendering::{BoxHitTestResult, CrossAxisAlignment, HitTestBehavior};
 use reveal_services::{
     LengthLimitingTextInputFormatter, MaxLengthEnforcement, TextInputFormatterRef,
 };
@@ -33,11 +34,16 @@ use reveal_widgets::{
     RestorationBucket, RestorationMixin, RestorationMixinData, Row, ScrollController,
     ScrollPhysicsRef, SizedBox, SpellCheckConfiguration, Stack, State, StateData, StatefulWidget,
     SystemContextMenu, Text, TextEditingController, TextFieldTapRegion, TextMagnifierConfiguration,
-    TextSelectionControls, ToolbarOptions, UndoHistoryController, UnmanagedRestorationScope,
-    Visibility, WidgetRef,
+    TextSelectionControls, TextSelectionGestureDetectorBuilder,
+    TextSelectionGestureDetectorBuilderBase, TextSelectionGestureDetectorBuilderData,
+    TextSelectionGestureDetectorBuilderDelegate, ToolbarOptions, UndoHistoryController,
+    UnmanagedRestorationScope, Visibility, WidgetRef,
 };
 
+use crate::adaptive_text_selection_toolbar::CupertinoAdaptiveTextSelectionToolbar;
 use crate::colors::{CupertinoColors, CupertinoDynamicColor};
+use crate::desktop_text_selection::cupertino_desktop_text_selection_handle_controls;
+use crate::text_selection::cupertino_text_selection_handle_controls;
 use crate::icons::CupertinoIcons;
 use crate::theme::CupertinoTheme;
 
@@ -851,7 +857,7 @@ impl CupertinoTextField {
         if SystemContextMenu::is_supported_by_field(app, editable_text_state) {
             return SystemContextMenu::editable_text(app, editable_text_state).into_widget();
         }
-        SizedBox::shrink().into_widget()
+        CupertinoAdaptiveTextSelectionToolbar::editable_text(app, editable_text_state).into_widget()
     }
 
     /// Dart `CupertinoTextField(spellCheckConfiguration:)`.
@@ -954,7 +960,43 @@ impl StatefulWidget for CupertinoTextField {
             controller: None,
             focus_node: None,
             listening_controller: None,
+            selection_gesture_detector_builder: None,
         }
+    }
+}
+
+/// Dart's `_CupertinoTextFieldSelectionGestureDetectorBuilder`.
+pub struct CupertinoTextFieldSelectionGestureDetectorBuilder {
+    builder: TextSelectionGestureDetectorBuilderData,
+    state: Handle<CupertinoTextFieldState>,
+}
+
+impl TextSelectionGestureDetectorBuilder for CupertinoTextFieldSelectionGestureDetectorBuilder {
+    reveal_widgets::text_selection_gesture_detector_builder_accessors!(builder);
+
+    fn on_single_tap_up(self: Handle<Self>, app: &mut App, details: TapDragUpDetails) {
+        let state = app.get(self).state;
+        let clear_key = app.get(state).clear_global_key.clone();
+        if let Some(context) = clear_key.current_context(app)
+            && let Some(object) = context.find_render_object(app)
+            && let Some(render_box) = object.as_box()
+        {
+            let local_offset = render_box.global_to_local(app, details.global_position, None);
+            let mut result = HitTestResult::new();
+            if render_box.hit_test(app, &mut BoxHitTestResult::wrap(&mut result), local_offset) {
+                return;
+            }
+        }
+        TextSelectionGestureDetectorBuilderBase::on_single_tap_up(self, app, details);
+        if let Some(on_tap) = state.widget(app).on_tap.clone() {
+            on_tap.call(app);
+        }
+    }
+
+    fn on_drag_selection_end(self: Handle<Self>, app: &mut App, details: TapDragEndDetails) {
+        let state = app.get(self).state;
+        state.request_keyboard(app);
+        TextSelectionGestureDetectorBuilderBase::on_drag_selection_end(self, app, details);
     }
 }
 
@@ -968,6 +1010,8 @@ pub struct CupertinoTextFieldState {
     controller: Option<Handle<RestorableTextEditingController>>,
     focus_node: Option<Handle<FocusNode>>,
     listening_controller: Option<Handle<TextEditingController>>,
+    selection_gesture_detector_builder:
+        Option<Handle<CupertinoTextFieldSelectionGestureDetectorBuilder>>,
 }
 
 impl CupertinoTextFieldState {
@@ -1263,6 +1307,13 @@ impl State for CupertinoTextFieldState {
         if self.widget(app).controller.is_some() {
             self.listen_to_controller(app);
         }
+        let builder = app.create(CupertinoTextFieldSelectionGestureDetectorBuilder {
+            builder: TextSelectionGestureDetectorBuilderData::new(
+                self.as_text_selection_gesture_detector_builder_delegate(),
+            ),
+            state: self,
+        });
+        app.get_mut(self).selection_gesture_detector_builder = Some(builder);
     }
 
     fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
@@ -1330,6 +1381,10 @@ impl State for CupertinoTextFieldState {
         if let Some(controller) = app.get(self).controller {
             RestorableProperty::dispose(controller, app);
         }
+        if let Some(builder) = app.get(self).selection_gesture_detector_builder {
+            app.destroy(builder);
+        }
+        app.get_mut(self).selection_gesture_detector_builder = None;
         self.dispose_restoration(app);
     }
 
@@ -1619,7 +1674,21 @@ impl State for CupertinoTextFieldState {
         if let Some(enable_inline_prediction) = self.widget(app).enable_inline_prediction {
             editable = editable.enable_inline_prediction(enable_inline_prediction);
         }
-        if let Some(selection_controls) = self.widget(app).selection_controls.clone()
+        let mut text_selection_controls = self.widget(app).selection_controls.clone();
+        match app.platform().target_platform() {
+            TargetPlatform::IOS | TargetPlatform::Android | TargetPlatform::Fuchsia => {
+                if text_selection_controls.is_none() {
+                    text_selection_controls = Some(cupertino_text_selection_handle_controls());
+                }
+            }
+            TargetPlatform::Linux | TargetPlatform::MacOS | TargetPlatform::Windows => {
+                if text_selection_controls.is_none() {
+                    text_selection_controls =
+                        Some(cupertino_desktop_text_selection_handle_controls());
+                }
+            }
+        }
+        if let Some(selection_controls) = text_selection_controls
             && enable_interactive_selection
         {
             editable = editable.selection_controls(selection_controls);
@@ -1636,8 +1705,6 @@ impl State for CupertinoTextFieldState {
             padded_editable.into_widget(),
             &placeholder_style,
         );
-        let this = self;
-        let on_tap = self.widget(app).on_tap.clone();
         let aligned = Align::new()
             .alignment(AlignmentGeometry::Alignment(Alignment::new(
                 -1.0,
@@ -1646,15 +1713,17 @@ impl State for CupertinoTextFieldState {
             .width_factor(1.0)
             .height_factor(1.0)
             .child(attachments);
-        let gestured = GestureDetector::new()
-            .behavior(HitTestBehavior::Translucent)
-            .on_tap(Listener::new(move |app| {
-                this.request_keyboard(app);
-                if let Some(on_tap) = on_tap.clone() {
-                    on_tap.call(app);
-                }
-            }))
-            .child(aligned);
+        let builder = app
+            .get(self)
+            .selection_gesture_detector_builder
+            .expect("created in initState");
+        let gestured = TextSelectionGestureDetectorBuilder::build_gesture_detector(
+            builder,
+            app,
+            None,
+            Some(HitTestBehavior::Translucent),
+            aligned.into_widget(),
+        );
         let mut container = Container::new();
         if let Some(decoration) = effective_decoration {
             container = container.decoration(decoration);
@@ -1667,6 +1736,20 @@ impl State for CupertinoTextFieldState {
                 .child(container.child(gestured)),
         )
         .into_widget()
+    }
+}
+
+impl TextSelectionGestureDetectorBuilderDelegate for CupertinoTextFieldState {
+    fn editable_text_key(self: Handle<Self>, app: &App) -> GlobalKey {
+        app.get(self).editable_text_key.clone()
+    }
+
+    fn force_press_enabled(self: Handle<Self>, _app: &App) -> bool {
+        true
+    }
+
+    fn selection_enabled(self: Handle<Self>, app: &App) -> bool {
+        self.widget(app).selection_enabled()
     }
 }
 
@@ -1737,9 +1820,17 @@ fn debug_assert_widget_invariants(state: Handle<CupertinoTextFieldState>, app: &
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::any::TypeId;
+    use std::time::Duration;
+
+    use crate::adaptive_text_selection_toolbar::CupertinoAdaptiveTextSelectionToolbar;
     use crate::app::CupertinoApp;
-    use crate::test_support::{build, test_cell};
+    use crate::test_support::{build, pump, test_cell};
+    use reveal_embedder::{PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
+    use reveal_foundation::AppCell;
+    use reveal_gestures::GestureBinding;
     use reveal_painting::PaintingBinding;
+    use reveal_widgets::{AnyElement, WidgetsBinding};
 
     fn install_fonts(app: &mut App) {
         let binding = PaintingBinding::instance(app);
@@ -1776,6 +1867,186 @@ mod tests {
                         .autofocus(true),
                 )
                 .into_widget(),
+        );
+    }
+
+    fn send_mouse(app: &mut App, change: PointerChange, x: f64, y: f64, pointer: i64) {
+        send_mouse_buttons(app, change, Offset::new(x, y), Offset::ZERO, pointer, 1);
+    }
+
+    fn send_mouse_delta(
+        app: &mut App,
+        change: PointerChange,
+        x: f64,
+        y: f64,
+        dx: f64,
+        dy: f64,
+        pointer: i64,
+    ) {
+        send_mouse_buttons(
+            app,
+            change,
+            Offset::new(x, y),
+            Offset::new(dx, dy),
+            pointer,
+            1,
+        );
+    }
+
+    fn send_mouse_buttons(
+        app: &mut App,
+        change: PointerChange,
+        position: Offset,
+        delta: Offset,
+        pointer: i64,
+        buttons: i64,
+    ) {
+        GestureBinding::instance(app).handle_pointer_data_packet(
+            app,
+            PointerDataPacket::new(vec![PointerData {
+                change,
+                kind: PointerDeviceKind::Mouse,
+                pointer_identifier: pointer,
+                physical_x: position.dx() * 2.0,
+                physical_y: position.dy() * 2.0,
+                physical_delta_x: delta.dx() * 2.0,
+                physical_delta_y: delta.dy() * 2.0,
+                buttons,
+                ..PointerData::default()
+            }]),
+        );
+        app.drain_microtasks();
+    }
+
+    fn tree_contains(app: &App, element: AnyElement, type_id: TypeId) -> bool {
+        if element.widget(app).widget_type() == type_id {
+            return true;
+        }
+        let mut found = false;
+        element.visit_children(app, &mut |child| {
+            if !found {
+                found = tree_contains(app, child, type_id);
+            }
+        });
+        found
+    }
+
+    fn field_point(app: &mut App, key: &GlobalKey, local: Offset) -> Offset {
+        let context = key.current_context(app).expect("the field mounted");
+        let render_box = context
+            .find_render_object(app)
+            .expect("the field has a render object")
+            .as_box()
+            .expect("the field is a box");
+        render_box.local_to_global(app, local, None)
+    }
+
+    fn mount_field(text: &str) -> (Rc<AppCell>, Handle<TextEditingController>, GlobalKey) {
+        let cell = test_cell();
+        let mut app = cell.borrow_mut();
+        install_fonts(&mut app);
+        let controller = TextEditingController::new(&mut app);
+        controller.set_text(&mut app, text);
+        let key = GlobalKey::new();
+        let key_ref: KeyRef = Rc::new(key.clone());
+        drop(app);
+        build(
+            &cell,
+            CupertinoApp::new()
+                .home(
+                    CupertinoTextField::new()
+                        .key(key_ref)
+                        .controller(controller),
+                )
+                .into_widget(),
+        );
+        (cell, controller, key)
+    }
+
+    #[test]
+    fn a_mouse_click_moves_the_caret() {
+        let (cell, controller, key) = mount_field("Hello world");
+        let mut app = cell.borrow_mut();
+        let at = field_point(&mut app, &key, Offset::new(12.0, 12.0));
+        send_mouse(&mut app, PointerChange::Down, at.dx(), at.dy(), 1);
+        send_mouse(&mut app, PointerChange::Up, at.dx(), at.dy(), 1);
+        pump(&mut app, Duration::ZERO);
+        let selection = controller.selection(&app);
+        assert!(selection.is_collapsed(), "{selection:?}");
+        assert!(selection.base_offset >= 0);
+    }
+
+    #[test]
+    fn a_mouse_drag_selects_a_range() {
+        let (cell, controller, key) = mount_field("Hello world");
+        let mut app = cell.borrow_mut();
+        let start = field_point(&mut app, &key, Offset::new(8.0, 12.0));
+        let end = field_point(&mut app, &key, Offset::new(80.0, 12.0));
+        send_mouse(&mut app, PointerChange::Down, start.dx(), start.dy(), 1);
+        let mid = Offset::new((start.dx() + end.dx()) / 2.0, start.dy());
+        send_mouse_delta(
+            &mut app,
+            PointerChange::Move,
+            mid.dx(),
+            mid.dy(),
+            mid.dx() - start.dx(),
+            0.0,
+            1,
+        );
+        send_mouse_delta(
+            &mut app,
+            PointerChange::Move,
+            end.dx(),
+            end.dy(),
+            end.dx() - mid.dx(),
+            0.0,
+            1,
+        );
+        send_mouse(&mut app, PointerChange::Up, end.dx(), end.dy(), 1);
+        pump(&mut app, Duration::ZERO);
+        let selection = controller.selection(&app);
+        assert!(
+            !selection.is_collapsed(),
+            "expected a range, got {selection:?}"
+        );
+    }
+
+    #[test]
+    fn a_mouse_double_click_selects_a_word() {
+        let (cell, controller, key) = mount_field("Hello world");
+        let mut app = cell.borrow_mut();
+        let at = field_point(&mut app, &key, Offset::new(16.0, 12.0));
+        send_mouse(&mut app, PointerChange::Down, at.dx(), at.dy(), 1);
+        send_mouse(&mut app, PointerChange::Up, at.dx(), at.dy(), 1);
+        send_mouse(&mut app, PointerChange::Down, at.dx(), at.dy(), 2);
+        send_mouse(&mut app, PointerChange::Up, at.dx(), at.dy(), 2);
+        pump(&mut app, Duration::ZERO);
+        let selection = controller.selection(&app);
+        assert!(
+            !selection.is_collapsed() && selection.end() - selection.start() > 1,
+            "expected a word, got {selection:?}"
+        );
+    }
+
+    #[test]
+    fn a_secondary_mouse_click_shows_the_selection_toolbar() {
+        let (cell, _controller, key) = mount_field("Hello world");
+        let mut app = cell.borrow_mut();
+        let at = field_point(&mut app, &key, Offset::new(16.0, 12.0));
+        send_mouse_buttons(&mut app, PointerChange::Down, at, Offset::ZERO, 1, 2);
+        send_mouse_buttons(&mut app, PointerChange::Up, at, Offset::ZERO, 1, 0);
+        pump(&mut app, Duration::ZERO);
+        let binding = WidgetsBinding::instance(&mut app);
+        let root = binding
+            .root_element(&app)
+            .expect("the tree is attached");
+        assert!(
+            tree_contains(
+                &app,
+                root,
+                TypeId::of::<CupertinoAdaptiveTextSelectionToolbar>(),
+            ),
+            "right-click should insert the adaptive selection toolbar"
         );
     }
 }

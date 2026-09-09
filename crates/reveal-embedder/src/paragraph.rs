@@ -1096,6 +1096,16 @@ mod tests {
             "no direction reads as LTR"
         );
     }
+
+    #[test]
+    fn unspecified_font_family_stays_unset_on_the_native_style() {
+        let mut builder = ParagraphBuilder::new(ParagraphStyle::new());
+        builder.add_text("x");
+        assert!(
+            builder.runs[0].1.families.is_empty(),
+            "dart:ui leaves fontFamily unset; the collection's default manager supplies the face"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1225,5 +1235,36 @@ mod layout_tests {
         canvas.draw_paragraph(&paragraph, Offset::new(10.0, 10.0));
         let picture = canvas.build();
         assert!(!picture.ops().is_empty());
+    }
+
+    #[test]
+    fn unspecified_family_at_black_weight_covers_latin() {
+        let mut fonts = FontCollection::new();
+        crate::set_default_font_manager(
+            &mut fonts,
+            Box::new(crate::SystemFontSource::platform()),
+        );
+        let mut builder = ParagraphBuilder::new(ParagraphStyle::new());
+        builder.push_style(TextStyle {
+            font_size: Some(10.2),
+            font_weight: Some(FontWeight::W900),
+            ..TextStyle::default()
+        });
+        builder.add_text("DEBUG");
+        let mut paragraph = builder.build(&mut fonts);
+        paragraph.layout(ParagraphConstraints::new(f64::INFINITY));
+        assert!(paragraph.longest_line() > 0.0);
+        assert!(
+            fonts.take_unanswered().is_empty(),
+            "the engine default family covers Latin at weight 900"
+        );
+        for line in paragraph.inner.lines() {
+            for run in &line.runs {
+                assert!(
+                    run.glyphs.iter().all(|glyph| glyph.id != 0),
+                    "no .notdef tofu"
+                );
+            }
+        }
     }
 }

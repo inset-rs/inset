@@ -2,6 +2,7 @@
 
 pub mod actions;
 pub mod annotated_region;
+pub mod animated_size;
 pub mod app;
 pub mod app_lifecycle_listener;
 pub mod autofill;
@@ -11,10 +12,12 @@ pub mod basic;
 pub mod container;
 pub mod context_menu_button_item;
 pub mod default_text_editing_shortcuts;
+pub mod desktop_text_selection_toolbar_layout_delegate;
 pub mod drag_target;
 pub mod draggable_scrollable_sheet;
 pub mod editable_text;
 pub mod expansible;
+pub mod feedback;
 pub mod focus_manager;
 pub mod focus_scope;
 pub mod focus_traversal;
@@ -77,6 +80,7 @@ pub mod text;
 pub mod text_editing_intents;
 pub mod text_selection;
 pub mod text_selection_toolbar_anchors;
+pub mod text_selection_toolbar_layout_delegate;
 pub mod ticker_provider;
 pub mod title;
 pub mod transitions;

@@ -13,49 +13,39 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Rust has no isolate-global GC, so a named owner has to hold the arena.
   Affect: Flutter objects are `Handle`s; callbacks take `&mut App` plus a handle to themselves.
 
-- Change: `Handle<T>` is a method receiver: a Flutter object is one struct in the arena, and its methods take `self: Handle<Self>` plus `&App` / `&mut App`, reading `app.get(self)`.
-  Reason: language — `Handle` is foreign to every other crate, so `impl Handle<T>` there is an orphan; nightly `arbitrary_self_types` lets the methods live on `T` instead of a newtype around the handle.
-  Affect: `let controller = AnimationController::new(app, ..)` is a `Handle<AnimationController>`; call `controller.forward(app)`. A crate that calls an inherent `self: Handle<Self>` method needs `#![feature(arbitrary_self_types)]`; trait methods resolve without it.
+- Change: a Flutter object is one struct in the arena and its methods take `self: Handle<Self>` plus the `App`.
+  Reason: language — `Handle` is foreign to every other crate, so `impl Handle<T>` there is an orphan; nightly `arbitrary_self_types` puts the methods on `T` instead.
+  Affect: a crate that calls an inherent handle-receiver method needs `#![feature(arbitrary_self_types)]`; trait methods resolve without it.
 
-- Change: Dart's isolate microtask queue is on `App`; a drain has a budget and panics on a cycle.
+- Change: Dart's isolate microtask queue is on `App`, and a drain has a budget that panics on a cycle.
   Reason: language — there is no isolate event loop.
-  Affect: port `scheduleMicrotask(f)` as `app.schedule_microtask(..)`. Drain after platform events and between begin-frame and draw-frame; a cycle panics where the isolate hangs.
+  Affect: the queue drains after platform events and between begin-frame and draw-frame, and a microtask cycle panics where the isolate would hang.
 
-- Change: `dart:async`'s `Timer` is `Timer::new` on a logical clock: `AppCell::elapse` fires due timers (microtasks first, then due order, microtasks after each, tasks polled after each). `Timer.periodic` is omitted.
-  Reason: language — there is no isolate event loop; tests play FakeAsync via `elapse`.
-  Affect: write `Timer::new(app, duration, Listener::new(..))`, `timer.cancel(app)`, `timer.is_active(app)`; tests call `cell.elapse(duration)`.
+- Change: `dart:async`'s `Timer` runs on a logical clock that `AppCell::elapse` advances (microtasks first, then due order, microtasks after each); `Timer.periodic` is absent.
+  Reason: language — there is no isolate event loop; tests play FakeAsync through `elapse`.
+  Affect: no timer fires until the host or a test elapses the clock, and a repeating timer has to re-arm itself.
 
 - Change: a Dart `async` method is a `Task`: the part before its first `await` runs inline, the rest at the next checkpoint.
   Reason: language — a Rust future cannot hold the `App` across an `await`; it borrows the cell per step, as gpui does.
-  Affect: `async` methods return `Task<T>`; dropping one does not cancel it.
+  Affect: everything after an `await` lands at a later checkpoint, and dropping a `Task` does not cancel it.
 
-- Change: `App::retain(handle)` returns a `RetainedHandle<T>` (`RetainedHandleId` plus the Copy handle) that keeps the object past `destroy`. A mixed list of ids is `App::retain_id` → `RetainedHandleId`.
+- Change: `App::retain(handle)` returns a `RetainedHandle<T>` (and `retain_id` a `RetainedHandleId`) that keeps an object alive past its `destroy`.
   Reason: language — Dart keeps an object alive while anything references it; the arena frees it, and a cached hit-test path or the mouse tracker may still name it.
-  Affect: store the `RetainedHandle` in place of the handle; it `Deref`s to `T`. A path that only has `HandleId`s stores `RetainedHandleId`. A `Listener` rebuilt mid-press still receives its release, as in Flutter.
+  Affect: a `Listener` rebuilt mid-press still receives its release, and a retained entry lingers until its holder lets go.
 
 - Change: `App` holds the host `Platform`: `AppCell::new` uses an inert one and `AppCell::with_platform` installs a live one before user code.
   Reason: platform — dart:ui is host-bound; there is no isolate global to hang it on.
-  Affect: host requests and view queries go through `app.platform()`.
+  Affect: host requests and view queries go through `app.platform()`, and one built without a live platform answers nothing.
 
 - Change: the callbacks Flutter assigns onto `PlatformDispatcher` (`onPlatformBrightnessChanged`, `onLocaleChanged`) are `App::platform_callbacks`, which `WidgetsBinding::instance` fills and the shell invokes.
-  Reason: platform — there is no isolate-global dispatcher to assign a handler onto; the framework's half of the dispatcher lives beside the host's half that `App` holds.
-  Affect: a binding that handles a dispatcher callback sets it there; a host reports the change through its client and never calls a binding.
+  Reason: platform — there is no isolate-global dispatcher to assign a handler onto.
+  Affect: a host reports the change through its client and never calls a binding.
 
 ## key.rs → key.dart
 
 - Change: `Key` equality and hashing go through `eq_key` / `hash_key`, so `dyn Key` can be `PartialEq` and `Hash`; a `UniqueKey`'s identity is a monotonic id, not object identity.
   Reason: language — `PartialEq` and `Hash` are not object-safe, and a Rust value type has no implicit object identity.
   Affect: two `UniqueKey::new` calls are never equal; copying a `UniqueKey` keeps the same id.
-
-## basic_types.rs → basic_types.dart
-
-- Change: `ValueChanged` / `ValueSetter` / `ValueGetter` receive the `App`, as `Listener` does for `VoidCallback`.
-  Reason: language — a Rust closure cannot capture what it mutates.
-  Affect: `Rc::new(|app, value| …)` where Dart writes a `ValueChanged<T>` tear-off.
-
-- Change: `AsyncCallback` / `AsyncValueSetter` / `AsyncValueGetter` return a `Task`, and a body with nothing to await returns `Task::ready`.
-  Reason: language — a Rust future that nobody polls never runs, where a Dart `async` body runs whether or not its future is awaited; a `Task` is already queued when it is handed back, so a caller that ignores it (Dart's unawaited call) still lets it run.
-  Affect: an implementor runs its prefix and returns `app.spawn(async move |cx| ..)`; a caller that awaits it does so in its own continuation.
 
 ## constants.rs → constants.dart
 
@@ -69,27 +59,19 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## date_time.rs → dart:core `DateTime`
 
-- Change: only UTC exists: `DateTime::utc(year, month, day)` / `utc_with_time(..)`, `now()` read as UTC, and epoch constructors with no `isUtc`. Local time, `parse` and `difference` are absent (Deferred).
+- Change: only UTC exists: `DateTime::utc(..)`, `now()` read as UTC, and epoch constructors with no `isUtc`.
   Reason: platform — the standard library has no time zone database, and its duration is unsigned.
-  Affect: `DateTime::utc(2026, 9, 5)`; subtract `microseconds_since_epoch()` values for a difference.
+  Affect: every `DateTime` reads as UTC whatever the host's zone; local time, `parse` and `difference` are absent, so a difference is a subtraction of `microseconds_since_epoch()`.
 
 ## change_notifier.rs → change_notifier.dart
 
-- Change: Dart's `VoidCallback` is `Listener`, which receives `&mut App`; `notify_listeners` and `ValueNotifier::set_value` take `&mut App`.
-  Reason: language — a Rust closure cannot capture what it mutates, and a `&mut self` dispatch would borrow the owner for the whole loop, so a listener could not re-enter it.
-  Affect: register `Listener::new(|app| …)`; notify with `this.notify_listeners(app)`.
-
 - Change: `remove_listener` matches a `Listener` by identity (`Rc::ptr_eq`, or the `(Handle, function)` pair for `handle_method`).
   Reason: language — Rust closures have no identity; Dart's `VoidCallback` compares by identity and tear-offs canonicalize.
-  Affect: keep the `Listener` passed to `add_listener`, or rebuild a `handle_method` tear-off at the removal site.
+  Affect: an equivalent-looking closure built at the removal site removes nothing and the listener keeps firing; keep the `Listener` that was added, or rebuild the `handle_method` tear-off.
 
 - Change: `remove_listener` on a `Handle` whose entry is gone is a no-op.
   Reason: language — Dart allows `removeListener` on a disposed `ChangeNotifier`, whose object the collector still holds; here the entry may already be destroyed, and a stale `app.get_mut` panics.
-  Affect: a state that unmounts after its listenable (a route's `TickerMode`, during a hero flight's pop) removes its listener without panicking, as in Dart; removal on a handle that was never valid is silently ignored too.
-
-- Change: Dart's mixin class `ChangeNotifier` is the trait `ChangeNotifier` plus a `ChangeNotifierData` field, and the listener methods live on the handle: `Handle<T>` is `Listenable` whenever `T` implements `ListenableObject`, which every `ChangeNotifier` does and an object with its own listener lists does itself.
-  Reason: language — a Rust trait holds no state, and a `&mut self` receiver on the slot cannot also produce the `&mut App` a registration hands onward.
-  Affect: hold `change_notifier: ChangeNotifierData` and implement `ChangeNotifier` for the type by handing that field out; then `this.notify_listeners(app)` and `this.add_listener(app, l)` where Dart writes `notifyListeners()` and `addListener(l)`. A standalone `ChangeNotifier()` is `ChangeNotifierData::new()`; the data's inherent `add_listener` remains for code that already holds the slot.
+  Affect: a state that unmounts after its listenable (a route's `TickerMode`, during a hero flight's pop) removes its listener without panicking; a handle that was never valid is ignored too.
 
 - Change: a panicking listener ends the notification, and `dispose` also clears the reentrant-removal count.
   Reason: language — Rust has no catchable exception for ordinary control flow, so a panic skips the compaction Dart's `catch` always reaches.
@@ -97,10 +79,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## Deferred
 
-- date_time.rs: local time (`DateTime(..)`, `toLocal`, `timeZoneName` / `timeZoneOffset`), `parse` / `tryParse`, `difference`. Trigger: a host with a time zone database (the date picker showing `DateTime.now()`); a signed duration.
+- date_time.rs: local time, `parse` / `tryParse`, `difference`. Trigger: a host with a time zone database; a signed duration.
 - The form a `Listenable` takes when held as a value (stored, re-pointed, compared). Trigger: `AnimatedBuilder` / `ValueListenableBuilder`.
 - `ChangeNotifier.maybeDispatchObjectCreation` / `memory_allocations`. Trigger: leak tracker / devtools.
-- Diagnostics / `FlutterError` structured trees. Trigger: porting diagnostics; until then messages are `debug_assert!` strings.
+- Diagnostics / `FlutterError` structured trees; messages are `debug_assert!` strings meanwhile. Trigger: porting diagnostics.
 - `GlobalKey` / `ObjectKey`. Trigger: `widgets/framework.dart`.
 - `IterableFilter`. Trigger: the first iterable-filter call site.
-- Waking a task from another thread. Tasks are woken only from the main thread today, so a wake always lands before the next drain; a background task would need a `Send` poke into the host's event loop (winit's `EventLoopProxy`). Trigger: the first background executor or platform callback off the main thread.
+- Waking a task from another thread; it would need a `Send` poke into the host's event loop. Trigger: the first background executor or platform callback off the main thread.

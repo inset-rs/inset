@@ -7506,6 +7506,41 @@ mod tests {
     }
 
     #[test]
+    fn latin_without_a_family_does_not_use_the_icon_font() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let binding = PaintingBinding::instance(&mut app);
+        binding.install_fonts(&mut app, |fonts| {
+            reveal_embedder::set_default_font_manager(
+                fonts,
+                Box::new(reveal_embedder::SystemFontSource::platform()),
+            );
+        });
+        install_cupertino_icon_font(&mut app);
+        let fonts = binding.fonts(&app);
+        let mut painter = TextPainter::new();
+        painter.set_text(Some(
+            TextSpan::new()
+                .text("DEBUG Copy")
+                .style(
+                    TextStyle::new()
+                        .inherit(false)
+                        .font_size(14.0)
+                        .font_weight(reveal_embedder::FontWeight::W900),
+                )
+                .into_span(),
+        ));
+        painter.set_text_direction(Some(TextDirection::Ltr));
+        painter.layout(app.get_mut(fonts), 0.0, f64::INFINITY);
+        assert!(painter.width() > 0.0 && painter.height() > 0.0);
+        assert!(
+            app.get_mut(fonts).take_unanswered().is_empty(),
+            "the engine default family covers Latin even when the icon font is FontId(0)"
+        );
+        painter.dispose();
+    }
+
+    #[test]
     fn an_installed_icon_lays_out_as_one_glyph() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();

@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use reveal_embedder::{
     EmbedderClient, Frame, KeyData, PlatformRef, PointerDataPacket, TextEditingValue,
-    TextInputAction, ViewId,
+    TextInputAction, ViewFocusEvent, ViewId,
 };
 use reveal_foundation::{App, AppCell};
 use reveal_gestures::GestureBinding;
@@ -107,6 +107,15 @@ impl EmbedderClient for Shell {
     }
 
     fn view_removed(&mut self, _id: ViewId) {}
+
+    fn view_focus_changed(&mut self, event: ViewFocusEvent) {
+        self.push(|app| {
+            let callback = app.platform_callbacks().on_view_focus_change.clone();
+            if let Some(callback) = callback {
+                callback(app, event);
+            }
+        });
+    }
 
     fn pointer_data_packet(&mut self, packet: PointerDataPacket) {
         self.push(|app| GestureBinding::instance(app).handle_pointer_data_packet(app, packet));
@@ -344,5 +353,35 @@ mod tests {
             elapsed: Duration::from_millis(32),
         });
         assert_eq!(fired.take(), vec!["late"]);
+    }
+
+    #[test]
+    fn view_focus_is_delivered_through_the_dispatcher_callback() {
+        use reveal_embedder::{ViewFocusDirection, ViewFocusEvent, ViewFocusState};
+        let received = Rc::new(Cell::new(None));
+        let sink = received.clone();
+        let platform = Rc::new(RecordingPlatform {
+            frames: Arc::default(),
+            view: Some(Rc::new(TestView)),
+        });
+        let mut shell = Shell::new(platform, move |app| {
+            app.platform_callbacks_mut().on_view_focus_change = Some(Rc::new(move |app, event| {
+                let sink = sink.clone();
+                app.schedule_microtask(reveal_foundation::Listener::new(move |_| {
+                    sink.set(Some(event))
+                }));
+            }));
+        });
+        shell.view_focus_changed(ViewFocusEvent {
+            view_id: ViewId(0),
+            state: ViewFocusState::Focused,
+            direction: ViewFocusDirection::Backward,
+        });
+        let event = received
+            .get()
+            .expect("the shell checkpoints the callback's microtask");
+        assert_eq!(event.view_id, ViewId(0));
+        assert_eq!(event.state, ViewFocusState::Focused);
+        assert_eq!(event.direction, ViewFocusDirection::Backward);
     }
 }

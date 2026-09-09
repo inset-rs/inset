@@ -11,113 +11,100 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 
 ## painting.rs → dart:ui `Canvas` / `Paint` / `Paragraph` / `TextStyle`
 
-- Change: `ImageFilter` is an enum over the filters this host can replay — a blur, a colour filter (Dart's `ColorFilter implements ImageFilter`) and a composition of two; the tile-mode blur and the dilate, erode, matrix and shader filters are absent.
-  Reason: platform — valo's display list has a backdrop blur, a colour filter and a composition, and no other image filter.
-  Affect: `ImageFilter::blur(sx, sy)` (plus `.bounds(rect)`), `ImageFilter::Color(filter)`, `ImageFilter::compose(outer, inner)`; a caller that needs another filter waits for valo. What a host's backdrop can show of a composition is recorded in `reveal-embedder-winit`'s `PORTING.md`.
+- Change: `ImageFilter` is an enum over what this host can replay — a blur, a colour filter and a composition of two.
+  Reason: platform — valo's display list has no other image filter.
+  Affect: the tile-mode blur and the dilate, erode, matrix and shader filters cannot be built at all; what a backdrop shows of a composition is recorded in `reveal-embedder-winit`'s `PORTING.md`.
 
 ## paragraph.rs → text.dart (`TextStyle`, `ParagraphStyle`, `ParagraphBuilder`, `Paragraph`), fonts.rs
 
-- Change: fonts are explicit. `Platform::font_source` is the host's font lookup, and `ParagraphBuilder::build` takes the `FontCollection` to shape against, which the framework keeps (painting's `PaintingBinding`) and hands down.
+- Change: fonts are explicit — `Platform::font_source` is the host's font lookup, and `ParagraphBuilder::build` shapes against a `FontCollection` the caller passes.
   Reason: platform — Flutter's engine holds one font manager per process; valo shapes against a collection the caller owns.
-  Affect: a host implements `font_source`; `builder.build(&mut fonts)` where Dart writes `builder.build()`.
+  Affect: two Apps in one process can shape the same text against different fonts, and a host that supplies no source renders no text.
 
-- Change: `SystemFontSource` is the engine's font manager: valo's `FontManager` (the platform's font API in Skia's `SkFontMgr` shape) behind `FontSource`, answering `CupertinoSystemText` and `CupertinoSystemDisplay` with every weight of the platform's user-interface font at 17 and 29 points, as the engine's `platform_mac.mm` registers them.
-  Reason: platform — the engine registers those names into its own font manager at startup; here the source answers them on demand, and a host with its own lookup (a guest across a boundary) passes a manager instead of the platform's.
-  Affect: a host returns `SystemFontSource::platform()` (or `::new(manager)`) from `font_source`, and Cupertino text shapes with the system font on every platform that has one. The optical size the engine gets from CoreText (SF Pro Text below 29 points, Display above) is not applied: both names answer the same variable face at its default optical size.
+- Change: `SystemFontSource` answers `CupertinoSystemText` and `CupertinoSystemDisplay` from the platform's user-interface font on demand, where the engine registers those names into its font manager at startup.
+  Reason: platform — a host with its own lookup (a guest across a boundary) passes a font manager instead of the platform's.
+  Affect: Cupertino text shapes with the system font on every platform that has one.
 
-- Change: `Paragraph` and `ParagraphBuilder` wrap valo's, with offsets kept as UTF-16 code units. There are no placeholders, the box styles are ignored (every box is tight and carries the paragraph's direction), and the ideographic baseline is the first line's bottom.
+- Change: `set_default_font_manager` registers the platform's default family as the collection's fallback chain, as Skia's `FontCollection::setDefaultFontManager` does.
+  Reason: platform — valo has no default font manager, so an empty `families` list would walk fallbacks and land on `FontId(0)`.
+  Affect: text that leaves `font_family` unset paints in the platform UI font instead of whichever face happened to be registered first.
+
+- Change: `Paragraph` and `ParagraphBuilder` wrap valo's, with offsets in UTF-16 code units; there are no placeholders, box styles are ignored, and the ideographic baseline is the first line's bottom.
   Reason: platform — valo's paragraph has no placeholders, box styles, per-box direction or ideographic metrics.
-  Affect: `add_placeholder` does not exist, so a `WidgetSpan` cannot be laid out; `TextBox.direction` is the paragraph's, not the run's; `BoxHeightStyle::Strut` and `Max` read as `Tight`.
+  Affect: a `WidgetSpan` cannot be laid out, `TextBox::direction` is the paragraph's rather than the run's, and `BoxHeightStyle::Strut` and `Max` measure as `Tight`.
 
-- Change: a run has no decoration style, background paint, font features or variations, baseline, or leading distribution; a combined decoration paints underline, else overline, else line-through, and an unset `fontSize` shapes at valo's 14.
+- Change: a run carries no decoration style, background paint, font features or variations, baseline or leading distribution; a combined decoration paints underline, else overline, else line-through, and an unset `font_size` shapes at valo's 14.
   Reason: platform — those are not valo span fields.
-  Affect: setting them on a `TextStyle` has no visible effect.
+  Affect: setting them on a `TextStyle` changes nothing on screen.
 
 ## platform.rs → dart:ui `platform_dispatcher.dart`
 
 - Change: Dart's isolate-global `PlatformDispatcher` is a host-supplied `Platform` that `App` holds; frame, clock and view lookup are requests on that object, not a callback table the framework assigns into.
-  Reason: platform — there is no isolate-global dispatcher; the host supplies `Platform`.
-  Affect: outgoing host requests go through `app.platform()`.
+  Reason: platform — the host supplies `Platform`, and there is no isolate-global dispatcher.
+  Affect: nothing can install a dispatcher callback behind the host's back, and two Apps in one process answer independently.
 
-- Change: `defaultTargetPlatform` and `platformBrightness` are queries on `Platform`; there is no library global and no `debugDefaultTargetPlatformOverride`. The inert platform answers Android and light, as Flutter's test binding and view configuration do.
-  Reason: platform — the host-supplied `Platform` is the source of truth, so two Apps can differ.
-  Affect: a test that needs iOS installs a `Platform` that says so.
+- Change: `default_target_platform` and `platform_brightness` are queries on `Platform`, with no library global and no `debugDefaultTargetPlatformOverride`; the inert platform answers Android and light, as Flutter's test binding does.
+  Reason: platform — the host-supplied `Platform` is the only source of truth.
+  Affect: changing the target platform means swapping the host's `Platform`, and two Apps can disagree at once.
 
-- Change: the system channels and dispatcher fields that reach the host are methods on `Platform`, each defaulted to do nothing or to answer a neutral value: the mouse cursor, restoration get and put, the locales and the application locale, the default route name, the application switcher description, the system UI overlay style, haptic feedback, the clipboard (`setData` / `getData` / `hasStrings`), the system context menu (`supportsShowingSystemContextMenu` / `showSystemContextMenu` / `hideSystemContextMenu`), and Look Up / Search Web / Share. The payloads cross as typed values, so Dart's `_toMap` string encodings are gone, and the argument-less `HapticFeedback.vibrate()` is the `Vibrate` kind.
-  Reason: platform — there are no method channels; the host trait is the channel.
-  Affect: `reveal-services` and the widget layer call them; a host with the capability overrides the method, and one without leaves the default — restoration stays off, the initial route is `/`, the locale list is empty until the host reports it, the clipboard is empty, and the system context menu is unsupported.
+- Change: the system channels and dispatcher fields that reach the host are typed methods on `Platform`, each defaulted to do nothing or to answer a neutral value.
+  Reason: platform — there are no method channels; the host trait is the channel, so payloads cross as values rather than Dart's `_toMap` encodings.
+  Affect: a capability a host does not override stays inert — restoration off, the initial route `/`, no locales, an empty clipboard, no system context menu — instead of failing on a missing channel.
 
 ## restoration.rs → services `message_codecs.dart` (`StandardMessageCodec`)
 
-- Change: `RestorationData` is a value enum over the kinds `StandardMessageCodec` can carry, `RestorationMap` is Dart's `Map<Object?, Object?>`, and `RestorationUpdate` is the `{enabled, data}` reply of the channel's `get`. There is no encode or decode; the types live here because `Platform` names them.
-  Reason: platform — the framework and the host meet at a Rust trait, not at a byte channel, so the data travels as itself.
-  Affect: a host keeps the `RestorationMap` it is given and hands the same value back.
+- Change: `RestorationData` is a value enum over the kinds `StandardMessageCodec` can carry, and there is no encode or decode step.
+  Reason: platform — the framework and the host meet at a Rust trait, not at a byte channel.
+  Affect: a host stores and returns the `RestorationMap` it was given; a host that needs bytes on disk has to serialise it itself.
 
 ## views.rs → dart:ui `FlutterView` / `ViewPadding` / `ViewConstraints`
 
 - Change: `View` is a handle to the native surface; the host owns the window and answers metrics from it, and the framework keeps no copy.
   Reason: platform — the native window is the source of truth; a framework-side copy would go stale.
-  Affect: after a view-lifecycle notification, read `view.metrics()` from the host's current `View`.
+  Affect: metrics read after a view-lifecycle notification are the window's current ones, never a cached frame behind.
 
-- Change: `View::present` takes a valo `Picture` where `FlutterView.render` takes a `Scene`, and `Canvas` is valo's `DisplayListBuilder`.
+- Change: `View::present` takes a valo `Picture` where `FlutterView.render` takes a `Scene`.
   Reason: platform — the host paints a valo display list, not an engine `Scene`.
-  Affect: `view.present(&picture)` after recording into a `Canvas`.
+  Affect: what reaches the host is a recorded display list it replays itself.
 
-- Change: text input is methods on `View` (`start_text_input`, `stop_text_input`, `set_text_input_editing_state`, composing and caret rects, client geometry), each defaulted to do nothing.
+- Change: text input is methods on `View` (start and stop, editing state, composing and caret rects, client geometry), each defaulted to do nothing.
   Reason: platform — there are no method channels; the host trait is the channel.
-  Affect: `TextInput` will call them; a host with an IME overrides the methods, and one without leaves the default.
+  Affect: on a host that does not implement them, a focused field still edits from key events but no IME opens and no composing or caret rect reaches the platform.
 
 ## client.rs → dart:ui `hooks.dart`
 
-- Change: the isolate-global engine hooks are methods on `EmbedderClient`: one `frame` is a complete engine frame, pointer packets and key data arrive as calls, and view lifecycle is typed notifications. `key_data` answers whether the framework handled the key.
+- Change: the isolate-global engine hooks are methods on `EmbedderClient`: one `frame` is a complete engine frame, pointer packets and key data arrive as calls, view lifecycle is a typed notification, and `key_data` returns whether the framework handled the key.
   Reason: platform — there is no isolate-global hooks table; the host drives a client without naming `App`.
-  Affect: the host delivers frames, packets, key data and view events, and does not run scheduler phases or convert to `PointerEvent` / `KeyEvent` itself; it reads `key_data`'s bool to decide whether to keep propagating the native event.
+  Affect: the host does not run scheduler phases or build `PointerEvent` / `KeyEvent` itself, and decides from `key_data`'s answer whether to keep propagating the native event.
 
 - Change: `EmbedderClient::wake(elapsed)` reports that a `Platform::wake_at` deadline passed, on the clock `Frame::elapsed` uses.
-  Reason: platform — Dart's event loop fires `Timer`s on its own; the `App` owns its timers and needs the host to say time passed.
-  Affect: a host calls `wake` when its wait ends; the shell turns it into `App::elapse`.
+  Reason: platform — the `App` owns its timers and has no event loop firing them.
+  Affect: a `Timer` fires only when the host calls `wake` or delivers a frame, so a host that never wakes never runs one.
 
-- Change: `platform_brightness_changed` and `locales_changed` are `onPlatformBrightnessChanged` and `onLocaleChanged`; the new value is read back from `Platform`, not carried by the call.
-  Reason: platform — as with `frame`, the host pushes a notification and the framework reads the dispatcher.
-  Affect: a host updates what its `Platform` answers before calling the hook; `MediaQuery` observers, and so `CupertinoTheme`, then rebuild.
+- Change: `platform_brightness_changed` and `locales_changed` carry no value; the new one is read back from `Platform`.
+  Reason: platform — the host pushes a notification and the framework reads the dispatcher, as with `frame`.
+  Affect: a host must update what its `Platform` answers before calling the hook, or observers rebuild against the old value.
 
-- Change: `text_input_editing_value`, `text_input_action`, and `text_input_closed` are `TextInputClient.updateEditingValue` / `performAction` / `connectionClosed`, each defaulted to do nothing.
+- Change: `TextInputClient.updateEditingValue` / `performAction` / `connectionClosed` are `EmbedderClient` methods the host calls.
   Reason: platform — there are no method channels; the host trait is the channel.
-  Affect: a host that has an IME calls them; `Shell` turns them into `TextInput` singleton methods.
-
-## text_editing.rs → services `text_editing.dart`
-
-- Change: `TextSelection` lives here because `View` names `TextEditingValue`, which holds it.
-  Reason: platform — the host trait is the channel, so the payloads live with the trait.
-  Affect: painting and rendering import it from `reveal-embedder`; widgets still use the services re-export.
-
-## text_input.rs → services `text_input.dart`
-
-- Change: `TextEditingValue`, `TextInputConfiguration`, and the neighbouring value types live here because `View` and `EmbedderClient` name them. `toJSON` / `fromJSON` are omitted.
-  Reason: platform — there are no method channels; the host trait is the channel, so the data travels as itself.
-  Affect: a host receives a `TextEditingValue`, not a map; framework callers still write `reveal_services::TextEditingValue`.
+  Affect: IME edits reach `TextInput` only through these calls, in the host's own order relative to key data.
 
 ## scene_builder.rs → dart:ui `SceneBuilder`
 
-- Change: each `push_*` is a canvas scope on one display list; `build` closes it. There is no `oldLayer`, `EngineLayer`, `addRetained`, `addTexture`, `addPlatformView`, `pushShaderMask`, `pushColorFilter`, or `pushImageFilter`. `pushBackdropFilter` is blur-only, as already recorded for the host.
+- Change: each `push_*` is a canvas scope on one display list and `build` closes it; there is no `oldLayer`, `EngineLayer`, `addRetained`, `addTexture`, `addPlatformView`, or the shader-mask, colour-filter and image-filter pushes, and `push_backdrop_filter` is blur-only.
   Reason: platform — valo composites a display list and has no engine layers to retain between frames.
-  Affect: every layer calls `addToScene` every frame; a caller that needs a retained engine layer or those missing pushes waits.
-
-## pointer.rs → dart:ui `pointer.dart`
-
-- Change: `PointerData.respond` / `onRespond` are omitted.
-  Reason: platform — they exist to call `preventDefault` on the web DOM event that produced the sample.
-  Affect: there is no `pointer_data.respond(..)`.
+  Affect: every layer re-records itself every frame, so nothing is saved by a subtree that did not change.
 
 ## Deferred
 
-- `StrutStyle` / `ParagraphStyle.strutStyle`, `TextStyle.locale` / `ParagraphStyle.locale`, `ParagraphBuilder.addPlaceholder` / `placeholderScales`, `Paragraph.getBoxesForPlaceholders` contents. Trigger: strut, locale-specific glyphs, `WidgetSpan`; valo has none of them.
+- `StrutStyle`, `TextStyle.locale` / `ParagraphStyle.locale`, `addPlaceholder` / `placeholderScales`, `getBoxesForPlaceholders` contents. Trigger: strut, locale-specific glyphs, `WidgetSpan`; valo has none of them.
 - `ImageFilter.blur(tileMode:)` and the `dilate` / `erode` / `matrix` / `shader` filters. Trigger: valo growing those ops.
 - `PlatformDispatcher.locale`, the first of `locales`. Trigger: a caller of the single-locale getter.
-- The system font's optical size (`opsz`) by text size, which CoreText applies for the engine. Trigger: valo-text setting variation axes from the text size.
-- `FontFeature` named tag constructors (`alternative`, `fractions`, …). Trigger: a caller that uses those factories instead of `new` / `enable` / `disable`.
+- The system font's optical size by text size, which CoreText applies for the engine. Trigger: valo-text setting variation axes from the text size.
+- `FontFeature` named tag constructors. Trigger: a caller that uses those factories instead of `new` / `enable` / `disable`.
 - `debugDefaultTargetPlatformOverride`. Trigger: a debug switcher that must override a live host without swapping `Platform`.
+- `PointerData.respond` / `onRespond`. Trigger: a web host, where they call `preventDefault` on the originating DOM event.
 - Semantics callbacks. Trigger: semantics.
 - `PlatformDispatcher` callback setters and Zones. Trigger: a requirement to expose dart:ui callbacks independently of `Shell`.
-- `_updateFrameData` / the `frameNumber` argument to `_beginFrame`. Trigger: `FrameData`.
+- `_updateFrameData` and the `frameNumber` argument to `_beginFrame`. Trigger: `FrameData`.
 - The rest of `hooks.dart`. Trigger: the matching dart:ui callback.

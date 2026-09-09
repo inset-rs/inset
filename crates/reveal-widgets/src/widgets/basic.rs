@@ -30,11 +30,13 @@ use reveal_rendering::{
     AnyRenderObject, BackdropKey, BoxConstraints, BoxConstraintsTransform, ChildLayoutId,
     CrossAxisAlignment, CustomClipper, CustomPainter, FlexFit, FlexParentData, HitTestBehavior,
     ImageFilterConfig, LayerLink, MainAxisAlignment, MainAxisSize, MultiChildLayoutDelegate,
+    SingleChildLayoutDelegate,
     MultiChildLayoutParentData, OverflowBoxFit, RelativeRect, RenderAbsorbPointer,
     RenderAligningShiftedBox, RenderAspectRatio, RenderBackdropFilter, RenderBaseline, RenderBox,
     RenderClipOval, RenderClipPath, RenderClipRRect, RenderClipRSuperellipse, RenderClipRect,
     RenderColoredBox, RenderConstrainedBox, RenderConstrainedOverflowBox,
     RenderConstraintsTransformBox, RenderCustomClip, RenderCustomMultiChildLayoutBox,
+    RenderCustomSingleChildLayoutBox,
     RenderCustomPaint, RenderFittedBox, RenderFlex, RenderFollowerLayer,
     RenderFractionalTranslation, RenderFractionallySizedOverflowBox, RenderHandle,
     RenderIgnorePointer, RenderIndexedStack, RenderIntrinsicHeight, RenderIntrinsicWidth,
@@ -2392,6 +2394,79 @@ impl RenderObjectWidget for Center {
 }
 
 impl SingleChildRenderObjectWidget for Center {
+    fn child(&self) -> Option<&WidgetRef> {
+        self.child.as_ref()
+    }
+}
+
+/// A widget that defers the layout of its single child to a delegate.
+///
+/// The delegate can determine the layout constraints for the child and can decide where to
+/// position the child. The delegate can also determine the size of the parent, but the size of
+/// the parent cannot depend on the size of the child.
+///
+/// See also:
+///
+///  * [`SingleChildLayoutDelegate`], which controls the layout of the child.
+///  * [`Align`], which sizes itself based on its child's size and positions the child according
+///    to an [`Alignment`] value.
+///  * `FractionallySizedBox`, which sizes its child based on a fraction of its own size and
+///    positions the child according to an [`Alignment`] value.
+///  * [`CustomMultiChildLayout`], which uses a delegate to position multiple children.
+///  * The [catalog of layout widgets](https://flutter.dev/widgets/layout/).
+#[derive(Debug)]
+pub struct CustomSingleChildLayout {
+    pub key: Option<KeyRef>,
+    /// The delegate that controls the layout of the child.
+    pub delegate: Rc<dyn SingleChildLayoutDelegate>,
+    pub child: Option<WidgetRef>,
+}
+
+impl CustomSingleChildLayout {
+    /// Creates a custom single child layout; Dart's optional named arguments are the setters.
+    pub fn new(delegate: Rc<dyn SingleChildLayoutDelegate>) -> CustomSingleChildLayout {
+        CustomSingleChildLayout {
+            key: None,
+            delegate,
+            child: None,
+        }
+    }
+
+    /// Dart `CustomSingleChildLayout(key:)`.
+    pub fn key(mut self, key: KeyRef) -> CustomSingleChildLayout {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `CustomSingleChildLayout(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> CustomSingleChildLayout {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
+impl RenderObjectWidget for CustomSingleChildLayout {
+    type RenderObject = RenderCustomSingleChildLayoutBox;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+        RenderCustomSingleChildLayoutBox::new(app, Rc::clone(&self.delegate), None).as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        _context: BuildContext,
+        render_object: RenderHandle<RenderCustomSingleChildLayoutBox>,
+    ) {
+        render_object.set_delegate(app, Rc::clone(&self.delegate));
+    }
+}
+
+impl SingleChildRenderObjectWidget for CustomSingleChildLayout {
     fn child(&self) -> Option<&WidgetRef> {
         self.child.as_ref()
     }

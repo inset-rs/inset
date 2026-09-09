@@ -12,7 +12,7 @@ use crate::geometry::{Color, Rect};
 use crate::mouse_cursor::SystemMouseCursorKind;
 use crate::restoration::{RestorationMap, RestorationUpdate};
 use crate::system_context_menu::SystemContextMenuItem;
-use crate::{View, ViewId};
+use crate::{View, ViewFocusDirection, ViewFocusState, ViewId};
 
 pub type PlatformRef = Rc<dyn Platform>;
 pub type ViewRef = Rc<dyn View>;
@@ -501,6 +501,17 @@ pub trait Platform: 'static {
 
     /// Looks up a current host-provided view.
     fn view(&self, id: ViewId) -> Option<ViewRef>;
+
+    /// Flutter `PlatformDispatcher.requestViewFocusChange`: asks the host to move view focus.
+    /// A host without native focus support ignores the request.
+    fn request_view_focus_change(
+        &self,
+        view_id: ViewId,
+        state: ViewFocusState,
+        direction: ViewFocusDirection,
+    ) {
+        let _ = (view_id, state, direction);
+    }
 
     /// The stable implicit view, when this embedding provides one.
     fn implicit_view(&self) -> Option<ViewRef>;

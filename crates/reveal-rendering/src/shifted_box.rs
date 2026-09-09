@@ -1,12 +1,15 @@
 //! Flutter counterpart: `rendering/shifted_box.dart` (`BoxConstraintsTransform`,
 //! `RenderShiftedBox`, `RenderPadding`, `RenderAligningShiftedBox`, `RenderPositionedBox`,
 //! `OverflowBoxFit`, `RenderConstrainedOverflowBox`, `RenderConstraintsTransformBox`,
-//! `RenderSizedOverflowBox`, `RenderFractionallySizedOverflowBox`, `RenderBaseline`).
-//!
-//! `RenderCustomSingleChildLayoutBox` waits; see `PORTING.md`.
+//! `RenderSizedOverflowBox`, `RenderFractionallySizedOverflowBox`,
+//! `RenderCustomSingleChildLayoutBox`, `SingleChildLayoutDelegate`, `RenderBaseline`).
+
+use std::any::Any;
+use std::fmt::Debug;
+use std::rc::Rc;
 
 use reveal_embedder::{Clip, Offset, Rect, Size, TextBaseline};
-use reveal_foundation::{App, Handle};
+use reveal_foundation::{App, Handle, Listenable, Listener};
 use reveal_painting::{
     Alignment, AlignmentGeometry, EdgeInsets, EdgeInsetsGeometry, TextDirection,
 };
@@ -21,6 +24,7 @@ use crate::object::{
     RenderObjectWithChildData, RenderObjectWithChildMixin,
 };
 use crate::painting_context::PaintingContext;
+use crate::pipeline_owner::PipelineOwner;
 use crate::stack::RelativeRect;
 
 /// Signature for a function that transforms a [`BoxConstraints`] to another [`BoxConstraints`].
@@ -2039,6 +2043,327 @@ impl RenderBox for RenderBaseline {
     }
 }
 
+/// A delegate for computing the layout of a render object with a single child.
+///
+/// Used by [`RenderCustomSingleChildLayoutBox`] and `CustomSingleChildLayout` (in the widgets
+/// library).
+///
+/// When asked to layout, [`RenderCustomSingleChildLayoutBox`] first calls
+/// [`get_size`](Self::get_size) with its incoming constraints to determine its size. It then
+/// uses [`get_constraints_for_child`](Self::get_constraints_for_child) to determine the
+/// constraints to apply to the child. After the child completes its layout,
+/// [`RenderCustomSingleChildLayoutBox`] calls [`get_position_for_child`](Self::get_position_for_child)
+/// to determine the child's position.
+///
+/// The [`relayout`](Self::relayout) listenable causes the layout to update whenever it
+/// notifies its listeners.
+pub trait SingleChildLayoutDelegate: Debug + 'static {
+    /// The [`Listenable`] the layout will update on, Dart's `relayout` constructor argument.
+    ///
+    /// Defaults to `None`.
+    fn relayout(&self) -> Option<&Rc<dyn Listenable>> {
+        None
+    }
+
+    /// The size of this object given the incoming constraints.
+    ///
+    /// Defaults to the biggest size that satisfies the given constraints.
+    fn get_size(&self, constraints: BoxConstraints) -> Size {
+        constraints.biggest()
+    }
+
+    /// The constraints for the child given the incoming constraints.
+    ///
+    /// During layout, the child is given the layout constraints returned by this function. The
+    /// child is required to pick a size for itself that satisfies these constraints.
+    ///
+    /// Defaults to the given constraints.
+    fn get_constraints_for_child(&self, constraints: BoxConstraints) -> BoxConstraints {
+        constraints
+    }
+
+    /// The position where the child should be placed.
+    ///
+    /// The `size` argument is the size of the parent, which might be different from the value
+    /// returned by [`get_size`](Self::get_size) if that size doesn't satisfy the constraints
+    /// passed to [`get_size`](Self::get_size). The `child_size` argument is the size of the
+    /// child, which will satisfy the constraints returned by
+    /// [`get_constraints_for_child`](Self::get_constraints_for_child).
+    ///
+    /// Defaults to positioning the child in the upper left corner of the parent.
+    fn get_position_for_child(&self, size: Size, child_size: Size) -> Offset {
+        let _ = (size, child_size);
+        Offset::ZERO
+    }
+
+    /// Called whenever a new instance of the custom layout delegate class is provided to the
+    /// [`RenderCustomSingleChildLayoutBox`] object, or any time that a new `CustomSingleChildLayout`
+    /// object is created with a new instance of the custom layout delegate class (which amounts
+    /// to the same thing, because the latter is implemented in terms of the former).
+    ///
+    /// If the new instance represents different information than the old instance, then the
+    /// method should return true, otherwise it should return false.
+    ///
+    /// If the method returns false, then the [`get_size`](Self::get_size),
+    /// [`get_constraints_for_child`](Self::get_constraints_for_child), and
+    /// [`get_position_for_child`](Self::get_position_for_child) calls might be optimized away.
+    ///
+    /// It's possible that the layout methods will get called even if [`should_relayout`](Self::should_relayout)
+    /// returns false (e.g. if an ancestor changed its layout). It's also possible that the
+    /// layout method will get called without [`should_relayout`](Self::should_relayout) being
+    /// called at all (e.g. if the parent changes size).
+    ///
+    /// `old_delegate` is of the same concrete type, Dart's `covariant`: narrow it with
+    /// [`as_any`](Self::as_any).
+    fn should_relayout(&self, old_delegate: &dyn SingleChildLayoutDelegate) -> bool;
+
+    /// The concrete delegate, for Dart's `runtimeType` comparison and its `covariant`
+    /// narrowing of [`should_relayout`](Self::should_relayout)'s argument.
+    fn as_any(&self) -> &dyn Any;
+}
+
+/// Defers the layout of its single child to a delegate.
+///
+/// The delegate can determine the layout constraints for the child and can decide where to
+/// position the child. The delegate can also determine the size of the parent, but the size of
+/// the parent cannot depend on the size of the child.
+pub struct RenderCustomSingleChildLayoutBox {
+    render_object: RenderObjectData,
+    render_box: RenderBoxData,
+    child: RenderObjectWithChildData<AnyRenderBox>,
+    delegate: Rc<dyn SingleChildLayoutDelegate>,
+}
+
+impl RenderCustomSingleChildLayoutBox {
+    /// Creates a render box that defers its layout to a delegate.
+    pub fn new(
+        app: &mut App,
+        delegate: Rc<dyn SingleChildLayoutDelegate>,
+        child: Option<AnyRenderBox>,
+    ) -> RenderHandle<RenderCustomSingleChildLayoutBox> {
+        let this = RenderHandle::new_box(
+            app,
+            RenderCustomSingleChildLayoutBox {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                child: RenderObjectWithChildData::new(),
+                delegate,
+            },
+        );
+        this.set_child(app, child);
+        this
+    }
+
+    /// A delegate that controls this object's layout.
+    pub fn delegate(self: RenderHandle<Self>, app: &App) -> Rc<dyn SingleChildLayoutDelegate> {
+        Rc::clone(&self.get(app).delegate)
+    }
+
+    /// Sets [`delegate`](Self::delegate).
+    pub fn set_delegate(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        new_delegate: Rc<dyn SingleChildLayoutDelegate>,
+    ) {
+        let old_delegate = Rc::clone(&self.get(app).delegate);
+        if Rc::ptr_eq(&old_delegate, &new_delegate) {
+            return;
+        }
+        if new_delegate.as_any().type_id() != old_delegate.as_any().type_id()
+            || new_delegate.should_relayout(&*old_delegate)
+        {
+            self.mark_needs_layout(app);
+        }
+        self.get_mut(app).delegate = Rc::clone(&new_delegate);
+        if self.attached(app) {
+            if let Some(relayout) = old_delegate.relayout() {
+                relayout.remove_listener(app, &self.relayout_listener());
+            }
+            if let Some(relayout) = new_delegate.relayout() {
+                relayout.add_listener(app, self.relayout_listener());
+            }
+        }
+    }
+
+    /// The `markNeedsLayout` tear-off, equal to itself across registrations.
+    fn relayout_listener(self: RenderHandle<Self>) -> Listener {
+        Listener::handle_method(self.handle(), mark_needs_layout_custom_single_child)
+    }
+
+    /// Dart's `_getSize`.
+    fn get_size(self: RenderHandle<Self>, app: &App, constraints: BoxConstraints) -> Size {
+        constraints.constrain(self.get(app).delegate.get_size(constraints))
+    }
+}
+
+fn mark_needs_layout_custom_single_child(
+    this: Handle<RenderCustomSingleChildLayoutBox>,
+    app: &mut App,
+) {
+    RenderHandle::from_handle(this).mark_needs_layout(app);
+}
+
+impl RenderObjectWithChildMixin for RenderCustomSingleChildLayoutBox {
+    type ChildType = AnyRenderBox;
+
+    fn child_data(self: RenderHandle<Self>, app: &App) -> &RenderObjectWithChildData<AnyRenderBox> {
+        &self.get(app).child
+    }
+
+    fn child_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderObjectWithChildData<AnyRenderBox> {
+        &mut self.get_mut(app).child
+    }
+}
+
+impl RenderShiftedBox for RenderCustomSingleChildLayoutBox {}
+
+impl RenderObject for RenderCustomSingleChildLayoutBox {
+    crate::render_object_accessors!();
+
+    fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+        let constraints = self.constraints(app);
+        let size = self.get_size(app, constraints);
+        self.set_size(app, size);
+        if let Some(child) = self.child(app) {
+            let child_constraints = self
+                .get(app)
+                .delegate
+                .get_constraints_for_child(constraints);
+            debug_assert!(child_constraints.debug_assert_is_valid(true));
+            child.layout(app, child_constraints, !child_constraints.is_tight());
+            let child_size = if child_constraints.is_tight() {
+                child_constraints.smallest()
+            } else {
+                child.size(app)
+            };
+            child.parent_data_of_mut::<BoxParentData>(app).offset = self
+                .get(app)
+                .delegate
+                .get_position_for_child(size, child_size);
+        }
+    }
+
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        RenderShiftedBox::paint(self, app, context, offset);
+    }
+
+    fn visit_children(
+        self: RenderHandle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyRenderObject),
+    ) {
+        if let Some(child) = self.child(app) {
+            visitor(child.as_object());
+        }
+    }
+
+    fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: Handle<PipelineOwner>) {
+        if let Some(child) = self.child(app) {
+            child.as_object().attach(app, owner);
+        }
+        if let Some(relayout) = self.delegate(app).relayout() {
+            relayout.add_listener(app, self.relayout_listener());
+        }
+    }
+
+    fn did_detach(self: RenderHandle<Self>, app: &mut App) {
+        if let Some(relayout) = self.delegate(app).relayout() {
+            relayout.remove_listener(app, &self.relayout_listener());
+        }
+        if let Some(child) = self.child(app) {
+            child.as_object().detach(app);
+        }
+    }
+}
+
+impl RenderBox for RenderCustomSingleChildLayoutBox {
+    crate::render_box_accessors!();
+
+    fn hit_test_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        RenderShiftedBox::hit_test_children(self, app, result, position)
+    }
+
+    // TODO(ianh): It's a bit dubious to be using the getSize function from the delegate to
+    // figure out the intrinsic dimensions. We really should either not support intrinsics,
+    // or we should expose intrinsic delegate callbacks and throw if they're not implemented.
+
+    fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        let width = self
+            .get_size(app, BoxConstraints::tight_for_finite(f64::INFINITY, height))
+            .width();
+        if width.is_finite() { width } else { 0.0 }
+    }
+
+    fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        let width = self
+            .get_size(app, BoxConstraints::tight_for_finite(f64::INFINITY, height))
+            .width();
+        if width.is_finite() { width } else { 0.0 }
+    }
+
+    fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        let height = self
+            .get_size(app, BoxConstraints::tight_for_finite(width, f64::INFINITY))
+            .height();
+        if height.is_finite() { height } else { 0.0 }
+    }
+
+    fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        let height = self
+            .get_size(app, BoxConstraints::tight_for_finite(width, f64::INFINITY))
+            .height();
+        if height.is_finite() { height } else { 0.0 }
+    }
+
+    fn compute_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        self.get_size(app, constraints)
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        let child = self.child(app)?;
+        let child_constraints = self
+            .get(app)
+            .delegate
+            .get_constraints_for_child(constraints);
+        let result = child.get_dry_baseline(app, child_constraints, baseline)?;
+        let child_size = if child_constraints.is_tight() {
+            child_constraints.smallest()
+        } else {
+            child.get_dry_layout(app, child_constraints)
+        };
+        Some(
+            result
+                + self
+                    .get(app)
+                    .delegate
+                    .get_position_for_child(self.get_size(app, constraints), child_size)
+                    .dy(),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2364,5 +2689,63 @@ mod tests {
             false,
         );
         assert_eq!(padding.size(&app), Size::new(100.0, 100.0));
+    }
+
+    #[derive(Debug)]
+    struct OffsetDelegate {
+        offset: Offset,
+    }
+
+    impl SingleChildLayoutDelegate for OffsetDelegate {
+        fn get_size(&self, constraints: BoxConstraints) -> Size {
+            constraints.biggest()
+        }
+
+        fn get_constraints_for_child(&self, constraints: BoxConstraints) -> BoxConstraints {
+            constraints.loosen()
+        }
+
+        fn get_position_for_child(&self, _size: Size, _child_size: Size) -> Offset {
+            self.offset
+        }
+
+        fn should_relayout(&self, old_delegate: &dyn SingleChildLayoutDelegate) -> bool {
+            old_delegate
+                .as_any()
+                .downcast_ref::<OffsetDelegate>()
+                .is_none_or(|old| old.offset != self.offset)
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    #[test]
+    fn custom_single_child_layout_positions_the_child() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let child = RenderConstrainedBox::new(
+            &mut app,
+            BoxConstraints::tight(Size::new(20.0, 10.0)),
+            None,
+        );
+        let parent = RenderCustomSingleChildLayoutBox::new(
+            &mut app,
+            Rc::new(OffsetDelegate {
+                offset: Offset::new(8.0, 4.0),
+            }),
+            Some(child.as_box()),
+        );
+        parent.layout(
+            &mut app,
+            BoxConstraints::tight(Size::new(100.0, 50.0)),
+            false,
+        );
+        assert_eq!(parent.size(&app), Size::new(100.0, 50.0));
+        assert_eq!(
+            child.as_box().box_parent_data(&app).offset,
+            Offset::new(8.0, 4.0)
+        );
     }
 }

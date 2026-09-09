@@ -1,7 +1,7 @@
 //! Flutter counterpart: `widgets/gesture_detector.dart`.
 //!
 //! The recognizer factories, [`RawGestureDetector`] with its state, and [`GestureDetector`]
-//! over the recognizers ported so far (tap, long press). The semantics half
+//! over the recognizers ported so far (tap, long press, horizontal drag). The semantics half
 //! (`excludeFromSemantics`, `semantics`, `SemanticsGestureDelegate`, `_GestureSemantics`) is
 //! accessibility and waits.
 
@@ -14,12 +14,15 @@ use std::rc::Rc;
 use reveal_embedder::PointerDeviceKind;
 use reveal_foundation::{App, Handle};
 use reveal_gestures::{
-    AnyGestureRecognizer, DeviceGestureSettings, GestureLongPressCallback,
-    GestureLongPressCancelCallback, GestureLongPressDownCallback, GestureLongPressEndCallback,
-    GestureLongPressMoveUpdateCallback, GestureLongPressStartCallback, GestureLongPressUpCallback,
-    GestureRecognizerLeaf, GestureTapCallback, GestureTapCancelCallback, GestureTapDownCallback,
-    GestureTapMoveCallback, GestureTapUpCallback, LongPressGestureRecognizer, PointerDownEvent,
-    PointerPanZoomStartEvent, TapGestureRecognizer,
+    AnyGestureRecognizer, DeviceGestureSettings, DragStartBehavior, GestureDragCancelCallback,
+    GestureDragDownCallback, GestureDragEndCallback, GestureDragStartCallback,
+    GestureDragUpdateCallback, GestureLongPressCallback, GestureLongPressCancelCallback,
+    GestureLongPressDownCallback, GestureLongPressEndCallback, GestureLongPressMoveUpdateCallback,
+    GestureLongPressStartCallback, GestureLongPressUpCallback, GestureRecognizerLeaf,
+    GestureTapCallback, GestureTapCancelCallback, GestureTapDownCallback, GestureTapMoveCallback,
+    GestureTapUpCallback, HorizontalDragGestureRecognizer, LongPressGestureRecognizer,
+    PointerDownEvent, PointerPanZoomStartEvent, TapGestureRecognizer,
+    DragGestureRecognizer,
 };
 use reveal_rendering::HitTestBehavior;
 
@@ -702,6 +705,40 @@ pub struct GestureDetector {
     ///    this callback at the gesture layer.
     pub on_tertiary_long_press_end: Option<GestureLongPressEndCallback>,
 
+    /// A pointer has contacted the screen with a primary button and might begin
+    /// to move horizontally.
+    pub on_horizontal_drag_down: Option<GestureDragDownCallback>,
+
+    /// A pointer has contacted the screen with a primary button and has begun to
+    /// move horizontally.
+    pub on_horizontal_drag_start: Option<GestureDragStartCallback>,
+
+    /// A pointer that is in contact with the screen with a primary button and
+    /// moving horizontally has moved in the horizontal direction.
+    pub on_horizontal_drag_update: Option<GestureDragUpdateCallback>,
+
+    /// A pointer that was previously in contact with the screen with a primary
+    /// button and moving horizontally is no longer in contact with the screen and
+    /// was moving at a specific velocity when it stopped contacting the screen.
+    pub on_horizontal_drag_end: Option<GestureDragEndCallback>,
+
+    /// The pointer that previously triggered [`on_horizontal_drag_down`](Self::on_horizontal_drag_down)
+    /// did not complete.
+    pub on_horizontal_drag_cancel: Option<GestureDragCancelCallback>,
+
+    /// Determines the way that drag start behavior is handled.
+    ///
+    /// If set to [`DragStartBehavior::Start`], the drag gesture used for
+    /// [`on_horizontal_drag_start`](Self::on_horizontal_drag_start) will begin at the position
+    /// where the drag gesture won the arena. If set to [`DragStartBehavior::Down`] it
+    /// will begin at the position where a down event is first detected.
+    ///
+    /// For more information about the tradeoffs involved in using start vs down
+    /// drag start behavior, see [`DragStartBehavior`].
+    ///
+    /// By default, the drag start behavior is [`DragStartBehavior::Start`].
+    pub drag_start_behavior: DragStartBehavior,
+
     /// How this gesture detector should behave during hit testing when deciding
     /// how the hit test propagates to children and whether to consider targets
     /// behind this one.
@@ -1013,6 +1050,60 @@ impl GestureDetector {
         self
     }
 
+    /// Dart `GestureDetector(on_horizontal_drag_down:)`.
+    pub fn on_horizontal_drag_down(
+        mut self,
+        on_horizontal_drag_down: GestureDragDownCallback,
+    ) -> GestureDetector {
+        self.on_horizontal_drag_down = Some(on_horizontal_drag_down);
+        self
+    }
+
+    /// Dart `GestureDetector(on_horizontal_drag_start:)`.
+    pub fn on_horizontal_drag_start(
+        mut self,
+        on_horizontal_drag_start: GestureDragStartCallback,
+    ) -> GestureDetector {
+        self.on_horizontal_drag_start = Some(on_horizontal_drag_start);
+        self
+    }
+
+    /// Dart `GestureDetector(on_horizontal_drag_update:)`.
+    pub fn on_horizontal_drag_update(
+        mut self,
+        on_horizontal_drag_update: GestureDragUpdateCallback,
+    ) -> GestureDetector {
+        self.on_horizontal_drag_update = Some(on_horizontal_drag_update);
+        self
+    }
+
+    /// Dart `GestureDetector(on_horizontal_drag_end:)`.
+    pub fn on_horizontal_drag_end(
+        mut self,
+        on_horizontal_drag_end: GestureDragEndCallback,
+    ) -> GestureDetector {
+        self.on_horizontal_drag_end = Some(on_horizontal_drag_end);
+        self
+    }
+
+    /// Dart `GestureDetector(on_horizontal_drag_cancel:)`.
+    pub fn on_horizontal_drag_cancel(
+        mut self,
+        on_horizontal_drag_cancel: GestureDragCancelCallback,
+    ) -> GestureDetector {
+        self.on_horizontal_drag_cancel = Some(on_horizontal_drag_cancel);
+        self
+    }
+
+    /// Dart `GestureDetector(drag_start_behavior:)`.
+    pub fn drag_start_behavior(
+        mut self,
+        drag_start_behavior: DragStartBehavior,
+    ) -> GestureDetector {
+        self.drag_start_behavior = drag_start_behavior;
+        self
+    }
+
     /// Dart `GestureDetector(behavior:)`.
     pub fn behavior(mut self, behavior: HitTestBehavior) -> GestureDetector {
         self.behavior = Some(behavior);
@@ -1064,6 +1155,14 @@ impl GestureDetector {
             || self.on_tertiary_long_press_move_update.is_some()
             || self.on_tertiary_long_press_up.is_some()
             || self.on_tertiary_long_press_end.is_some()
+    }
+
+    fn has_horizontal_drag_callback(&self) -> bool {
+        self.on_horizontal_drag_down.is_some()
+            || self.on_horizontal_drag_start.is_some()
+            || self.on_horizontal_drag_update.is_some()
+            || self.on_horizontal_drag_end.is_some()
+            || self.on_horizontal_drag_cancel.is_some()
     }
 
     /// The `TapGestureRecognizer` factory of Dart's `build`; the closures capture the
@@ -1165,6 +1264,33 @@ impl GestureDetector {
         )
         .into_factory()
     }
+
+    /// The `HorizontalDragGestureRecognizer` factory of Dart's `build`.
+    fn horizontal_drag_factory(
+        &self,
+        gesture_settings: Option<DeviceGestureSettings>,
+    ) -> GestureRecognizerFactoryRef {
+        let this = self.clone();
+        let constructed = self.clone();
+        GestureRecognizerFactoryWithHandlers::<HorizontalDragGestureRecognizer>::new(
+            move |app| {
+                let instance = HorizontalDragGestureRecognizer::new(app);
+                instance.set_supported_devices(app, constructed.supported_devices.clone());
+                instance
+            },
+            move |app, instance| {
+                instance.set_on_down(app, this.on_horizontal_drag_down.clone());
+                instance.set_on_start(app, this.on_horizontal_drag_start.clone());
+                instance.set_on_update(app, this.on_horizontal_drag_update.clone());
+                instance.set_on_end(app, this.on_horizontal_drag_end.clone());
+                instance.set_on_cancel(app, this.on_horizontal_drag_cancel.clone());
+                instance.set_drag_start_behavior(app, this.drag_start_behavior);
+                instance.set_gesture_settings(app, gesture_settings);
+                instance.set_supported_devices(app, this.supported_devices.clone());
+            },
+        )
+        .into_factory()
+    }
 }
 
 impl StatelessWidget for GestureDetector {
@@ -1187,6 +1313,13 @@ impl StatelessWidget for GestureDetector {
             gestures.push((
                 TypeId::of::<LongPressGestureRecognizer>(),
                 self.long_press_factory(gesture_settings),
+            ));
+        }
+
+        if self.has_horizontal_drag_callback() {
+            gestures.push((
+                TypeId::of::<HorizontalDragGestureRecognizer>(),
+                self.horizontal_drag_factory(gesture_settings),
             ));
         }
 

@@ -8,7 +8,7 @@ use std::ops::Receiver;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
-use reveal_embedder::PlatformRef;
+use reveal_embedder::{PlatformRef, ViewFocusEvent};
 use slotmap::new_key_type;
 
 use crate::app_cell::{AppCell, AsyncApp};
@@ -142,6 +142,8 @@ pub struct App {
 pub struct PlatformCallbacks {
     pub on_platform_brightness_changed: Option<Listener>,
     pub on_locale_changed: Option<Listener>,
+    /// Flutter `PlatformDispatcher.onViewFocusChange`.
+    pub on_view_focus_change: Option<Rc<dyn Fn(&mut App, ViewFocusEvent)>>,
 }
 
 impl App {

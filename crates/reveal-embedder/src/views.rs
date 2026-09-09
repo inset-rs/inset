@@ -7,6 +7,38 @@ use crate::{Matrix4, Rect, Size, TextEditingValue, TextInputConfiguration};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ViewId(pub u64);
 
+/// An event for the engine to communicate view focus changes to the app.
+/// Flutter counterpart: `ViewFocusEvent` in `dart:ui/platform_dispatcher.dart`.
+#[derive(Clone, Copy, Debug)]
+pub struct ViewFocusEvent {
+    /// The ID of the view that experienced a focus change.
+    pub view_id: ViewId,
+    /// The state focus changed to.
+    pub state: ViewFocusState,
+    /// The direction focus changed to.
+    pub direction: ViewFocusDirection,
+}
+
+/// Represents the focus state of a given view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewFocusState {
+    /// The view does not have platform focus.
+    Unfocused,
+    /// The view has platform focus.
+    Focused,
+}
+
+/// Represents the direction in which focus transitioned across views.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewFocusDirection {
+    /// The transition did not have a direction, such as a programmatic request or focus loss.
+    Undefined,
+    /// The transition was forward, typically from pressing Tab.
+    Forward,
+    /// The transition was backward, typically from pressing Shift+Tab.
+    Backward,
+}
+
 /// Physical padding on each side of a view (`dart:ui` `ViewPadding`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ViewPadding {

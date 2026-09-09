@@ -7,6 +7,7 @@
 mod gpu;
 mod ime;
 mod keys;
+mod text_input;
 mod window;
 
 use reveal_embedder::{EmbedderClient, PlatformRef};

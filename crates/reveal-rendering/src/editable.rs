@@ -231,8 +231,8 @@ impl RenderEditable {
         text_selection_delegate: AnyTextSelectionDelegate,
     ) -> RenderHandle<Self> {
         let show_cursor = app.create(ValueNotifier::new(false));
-        let selection_start_in_viewport = app.create(ValueNotifier::new(false));
-        let selection_end_in_viewport = app.create(ValueNotifier::new(false));
+        let selection_start_in_viewport = app.create(ValueNotifier::new(true));
+        let selection_end_in_viewport = app.create(ValueNotifier::new(true));
         let mut text_painter = TextPainter::new();
         text_painter.set_text_direction(Some(text_direction));
         text_painter.set_max_lines(Some(1));
@@ -905,6 +905,38 @@ impl RenderEditable {
         app: &App,
     ) -> Handle<ValueNotifier<bool>> {
         self.get(app).selection_end_in_viewport
+    }
+
+    fn update_selection_extents_visibility(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        effective_offset: Offset,
+    ) {
+        let Some(selection) = self.selection(app) else {
+            return;
+        };
+        let start_notifier = self.get(app).selection_start_in_viewport;
+        let end_notifier = self.get(app).selection_end_in_viewport;
+        if !selection.is_valid() {
+            start_notifier.set_value(app, false);
+            end_notifier.set_value(app, false);
+            return;
+        }
+        let visible_region = Offset::ZERO & self.size(app);
+        let caret_prototype = self.get(app).caret_prototype;
+        let start = TextPosition::with_affinity(selection.start(), selection.affinity);
+        let end = TextPosition::with_affinity(selection.end(), selection.affinity);
+        let (start_offset, end_offset) = {
+            let (painter, fonts) = self.painter_with_fonts(app);
+            (
+                painter.get_offset_for_caret(fonts, start, caret_prototype),
+                painter.get_offset_for_caret(fonts, end, caret_prototype),
+            )
+        };
+        const VISIBLE_REGION_SLOP: f64 = 0.5;
+        let region = visible_region.inflate(VISIBLE_REGION_SLOP);
+        start_notifier.set_value(app, region.contains(start_offset + effective_offset));
+        end_notifier.set_value(app, region.contains(end_offset + effective_offset));
     }
 
     /// If [`obscure_text`](Self::obscure_text) is true, returns the obscured text.
@@ -1616,12 +1648,15 @@ impl RenderEditable {
         context: &mut PaintingContext,
         offset: Offset,
     ) {
+        let effective = offset + self.paint_offset(app);
+        if self.selection(app).is_some() {
+            self.update_selection_extents_visibility(app, effective);
+        }
         let above = self.get(app).paint_cursor_above_text;
         if !above {
             self.paint_caret(app, context.canvas(), offset);
         }
         self.paint_highlights(app, context.canvas(), offset);
-        let effective = offset + self.paint_offset(app);
         let (painter, fonts) = self.painter_with_fonts(app);
         painter.paint(fonts, context.canvas(), effective);
         if above {
@@ -1766,6 +1801,10 @@ impl RenderObject for RenderEditable {
     fn dispose(self: RenderHandle<Self>, app: &mut App) {
         LayerHandle::set_layer(app, |app| &mut self.get_mut(app).leader_layer_handler, None);
         LayerHandle::set_layer(app, |app| &mut self.get_mut(app).clip_rect_layer, None);
+        let start_in_viewport = self.get(app).selection_start_in_viewport;
+        let end_in_viewport = self.get(app).selection_end_in_viewport;
+        app.get_mut(start_in_viewport).dispose();
+        app.get_mut(end_in_viewport).dispose();
         crate::object::RenderObjectBase::dispose(self, app);
     }
 
@@ -1982,7 +2021,7 @@ impl RenderEditable {
 #[cfg(test)]
 mod tests {
     use reveal_embedder::TextAffinity;
-    use reveal_foundation::AppCell;
+    use reveal_foundation::{AppCell, ValueListenable};
     use reveal_painting::{TextSpan, TextStyle};
     use reveal_services::{TextEditingValue, TextSelectionDelegate};
 
@@ -2114,5 +2153,20 @@ mod tests {
         let at = Offset::new(12.0, 8.0);
         editable.handle_secondary_tap_down(&mut app, &TapDownDetails::new(at, None, None));
         assert_eq!(editable.last_secondary_tap_down_position(&app), Some(at));
+    }
+
+    #[test]
+    fn selection_extents_default_in_the_viewport() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let editable = laid_out(&mut app, "hello");
+        assert!(
+            *editable.selection_start_in_viewport(&app).value(&app),
+            "Flutter defaults selectionStartInViewport to true"
+        );
+        assert!(
+            *editable.selection_end_in_viewport(&app).value(&app),
+            "Flutter defaults selectionEndInViewport to true"
+        );
     }
 }

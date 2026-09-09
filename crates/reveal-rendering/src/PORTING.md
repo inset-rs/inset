@@ -15,7 +15,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - box.rs → RenderBox intrinsics, dry layout and dry baselines with their caches
 - layout_helper.rs → layout_helper.dart
 - proxy_box.rs → RenderAspectRatio, RenderIntrinsicWidth, RenderIntrinsicHeight, RenderFittedBox
-- shifted_box.rs → OverflowBoxFit, RenderConstrainedOverflowBox, RenderSizedOverflowBox, RenderFractionallySizedOverflowBox, RenderBaseline
+- shifted_box.rs → OverflowBoxFit, RenderConstrainedOverflowBox, RenderSizedOverflowBox, RenderFractionallySizedOverflowBox, RenderCustomSingleChildLayoutBox, SingleChildLayoutDelegate, RenderBaseline
+- animated_size.rs → animated_size.dart
 - viewport.rs → RenderViewportBase.debugThrowIfNotCheckingIntrinsics and the four intrinsics, RenderViewport.computeDryLayout
 - object.rs / box.rs → getTransformTo, globalToLocal, localToGlobal
 - editable.rs → TextSelectionPoint
@@ -25,13 +26,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## object.rs → object.dart (RenderObject)
 
-- Change: a render object is a struct in the `App` arena reached through a typed `RenderHandle`. What Flutter inherits as state from a base class or mixin is a field on the struct with an accessor the trait asks for; what it inherits as a method body is a trait method the leaf calls by name where Dart would run the inherited one. Methods take the handle and `&mut App` rather than `&mut self`, and a reference to "some render object" is a type-erased handle: `AnyRenderObject`, or `AnyRenderBox` / `AnyRenderSliver` once the protocol is known.
-  Reason: language — no inheritance and no GC identity; a `&mut self` receiver would hold the node borrowed while its child lays out, and the child must be able to reach back into it.
-  Affect: a render object is a struct carrying the base fields, an `impl RenderObject` for layout, paint and the child walk, and an `impl RenderBox` (or `RenderSliver`) for the protocol's accessors and the overrides the protocol dispatches through, `apply_paint_transform` and `setup_parent_data` among them; `RenderHandle::new_box` creates it. Parents hold a child's type-erased handle, tree methods come from the protocol trait (import it to call them), and an erased handle downcasts with `as_box()` / `as_sliver()` where Dart writes `as RenderBox`. A crate that calls an inherent handle-receiver method needs `#![feature(arbitrary_self_types)]` itself; trait methods resolve without it.
-
-- Change: Flutter's `attach` / `detach` overrides are the post-hooks `did_attach` / `did_detach`, run after the base body; their defaults, like `redepth_children`'s, walk `visit_children`.
-  Reason: language — a trait default cannot call `super`; every Flutter override calls `super.attach` first and none reads its owner before `super.detach`, so a post-hook is equivalent.
-  Affect: put what Dart writes after `super.attach(owner)` in `did_attach`; implement `visit_children` and the walks come for free.
+- Change: Flutter's `attach` / `detach` overrides are the post-hooks `did_attach` / `did_detach`, which run after the base body.
+  Reason: language — a trait default cannot call `super`; no Flutter override reads its owner before `super.detach`.
+  Affect: a hook cannot act before the owner is set, and `did_detach` runs with the owner already cleared.
 
 - Change: a panic in `perform_layout`, `perform_resize` or `paint` unwinds.
   Reason: language — no `FlutterError.reportError` hook to catch and continue.
@@ -39,13 +36,13 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 - Change: `layout` lives on the protocol's type-erased handle and takes that protocol's constraints.
   Reason: language — there is no abstract `Constraints` an erased node can hold.
-  Affect: `child.layout(app, box_constraints, parent_uses_size)` on an `AnyRenderBox`; there is no protocol-neutral `layout`.
+  Affect: a parent that does not know its child's protocol cannot lay it out; there is no protocol-neutral `layout`.
 
 ## box.rs → box.dart (hit testing)
 
-- Change: `BoxHitTestResult` only wraps: `BoxHitTestResult::wrap(&mut result)` is a view over a `HitTestResult` with no standalone constructor, and `BoxHitTestEntry` is the entry's target, carrying the box and its local position.
+- Change: `BoxHitTestResult` is a view over a `HitTestResult` with no standalone constructor, and `BoxHitTestEntry` is the entry's target rather than a subclass of the entry.
   Reason: language — no subclassing of the gesture crate's result and entry types.
-  Affect: `hit_test` receives `&mut BoxHitTestResult<'_>` and adds with `result.add(BoxHitTestEntry::new(box, position).into())`; `handle_event` receives the `BoxHitTestEntry`.
+  Affect: a box hit test only runs inside a live `HitTestResult`; `handle_event` receives the `BoxHitTestEntry`.
 
 - Change: a render object named by a pressed pointer's hit-test path, or by the mouse tracker, outlives its `dispose` until they let go.
   Reason: language — Dart keeps it alive by holding it; here the holder retains it (`App::retain`).
@@ -53,81 +50,53 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## painting_context.rs → object.dart (PaintingContext), layer.rs → layer.dart
 
-- Change: there are no engine layers. valo composites a display list, so `addToScene` runs for every layer every frame; `engineLayer`, `_needsAddToScene`, `markNeedsAddToScene`, `alwaysNeedsAddToScene`, `addRetained`, `updateSubtreeNeedsAddToScene`, and `debugMarkClean` are not ported.
+- Change: there are no engine layers: `addToScene` runs for every layer every frame, and the retained-layer members (`engineLayer`, `markNeedsAddToScene`, `addRetained` and the rest) do not exist.
   Reason: platform — the host paints one display list per frame and has nothing to retain between frames.
-  Affect: none of those members exist; a layer property setter does not need a "mark".
+  Affect: a layer property setter needs no "mark", and no subtree is ever skipped at composite time.
 
-- Change: `LayerHandle::set_layer(app, slot, layer)` instead of `handle.layer = x`.
-  Reason: language — the handle lives inside an arena object, so `&mut self` would alias `App`.
-  Affect: call shape; a handle that is dropped without clearing keeps its layer until the `App` drops.
+- Change: a `LayerHandle` dropped without being cleared keeps its layer.
+  Reason: language — the handle lives inside an arena object, so its setter takes the `App` (`LayerHandle::set_layer`) and its drop has none.
+  Affect: that layer's entry lives until the `App` drops, where Dart's collector would take it.
 
 - Change: `Layer.dispose` ends in `App::destroy`.
   Reason: language — no GC.
-  Affect: a handle to a disposed layer is stale (`app.get` panics); `AnyLayer::debug_disposed` answers true for it.
+  Affect: a handle to a disposed layer is stale and `app.get` panics on it; `AnyLayer::debug_disposed` answers true, and a composition callback for it is a no-op.
 
-- Change: `AnnotationSearch` replaces the generic `AnnotationResult<S>` during the walk.
+- Change: annotation search is the non-generic `AnnotationSearch` in place of `AnnotationResult<S>`.
   Reason: language — a generic method cannot sit in a vtable.
-  Affect: `find::<T>` / `find_all_annotations::<T>` are typed; a `find_annotations` override checks `result.accepts(&*value)` then `result.add(value, position)`. `AnnotatedRegionLayer` value is `Rc<dyn Any>`.
+  Affect: an annotated region's value is an `Rc<dyn Any>` found only by its exact type, and a `find_annotations` override asks `result.accepts(..)` before adding.
 
 - Change: `LeaderLayer` / `FollowerLayer` hold the `LayerLink` as a `RetainedHandle`.
-  Reason: language — Dart's GC keeps a link alive while a detached layer still names it; the State that owns the link destroys it in `dispose`.
-  Affect: the link's entry lingers until those layers are disposed.
-
-- Change: `OffsetLayerMixin` trait plus `OffsetLayer` struct.
-  Reason: language — a concrete class that is also a base.
-  Affect: `TransformLayer` / `OpacityLayer` are not `OffsetLayer` by type; `AnyContainerLayer::as_offset_layer()` is Dart's `as OffsetLayer`.
-
-- Change: `PaintingContext` creates and appends the `PictureLayer` in `stop_recording_if_needed(app)` rather than in `_startRecording`.
-  Reason: language — `ClipContext::canvas(&mut self)` has no `App`.
-  Affect: `stop_recording_if_needed` takes `app`; the hints are applied at stop; layer order is unchanged.
-
-- Change: `Layer.owner` is a `HandleId`.
-  Reason: language — Dart stores an `Object`; the arena names it with a `HandleId`.
-  Affect: `attach` takes the owner's id; `attached` is whether that id is set.
-
-- Change: `RenderAnnotatedRegion<T>` needs `T: PartialEq`.
-  Reason: language — Dart's `==` in the setter is a trait bound here.
-  Affect: a value type that cannot be compared cannot be annotated.
+  Reason: language — Dart's GC keeps a link alive while a detached layer still names it.
+  Affect: the link's entry lingers until those layers are disposed, past the `dispose` of the state that owns it.
 
 ## view.rs → view.dart, binding.rs → binding.dart
 
-- Change: `RenderView` is its own kind of render object, neither box nor sliver: its `constraints` and `size` are inherent, its child slot is written out, and it has no type-erased protocol handle (neither `AnyRenderBox` nor `AnyRenderSliver`).
-  Reason: language — Flutter overrides the `constraints` getter on `RenderObject`; here constraints belong to a protocol trait, and the view's come from its configuration.
-  Affect: `RenderView::new(app, child, configuration, view)` returns a typed handle; use `as_object()` for the tree.
-
-- Change: `RendererBinding` opens hooks (`will_draw_frame`, `did_draw_frame`, `did_handle_metrics_changed`) to a registered `RendererBindingOverrides`: before layout, after compositing, and after `handle_metrics_changed`. The widgets binding registers itself with `set_overrides` and implements the object-side `RendererBindingOverridesObject`.
+- Change: `RendererBinding` calls the hooks `will_draw_frame`, `did_draw_frame` and `did_handle_metrics_changed` on a registered `RendererBindingOverrides` instead of being overridden.
   Reason: language — Flutter's `WidgetsBinding` overrides `drawFrame` and `handleMetricsChanged` through mixin order, and a crate above cannot override a method below it.
-  Affect: a binding layered above this crate registers with `set_overrides` and fills the hooks instead of overriding `draw_frame`; a render-tree-only host sees nothing.
+  Affect: a binding layered above registers with `set_overrides` to get its build phase; a render-tree-only host runs the plain frame.
 
 ## mouse_tracker.rs → mouse_tracker.dart
 
-- Change: Dart's `target is MouseTrackerAnnotation` is the virtual `RenderObject::mouse_tracker_annotation`, `None` by default, which `RenderMouseRegion` answers with its current callbacks and cursor. The tracker keys its per-device maps by the render object and reads the annotation from it again each time it dispatches.
-  Reason: language — an erased render object cannot be asked whether it implements an interface; the object is the annotation's identity, as in Dart.
-  Affect: a render object that should receive enter/exit events overrides `mouse_tracker_annotation`. One that has left the arena reads as no annotation, where Dart would still hold the object with `validForMouseTracker == false`; both skip it.
+- Change: Dart's `target is MouseTrackerAnnotation` is the virtual `RenderObject::mouse_tracker_annotation`, which the tracker re-reads from the render object on every dispatch.
+  Reason: language — an erased render object cannot be asked whether it implements an interface.
+  Affect: a render object receives enter and exit only if it overrides that virtual; one that has left the arena reads as no annotation and is skipped.
 
 ## proxy_box.rs → proxy_box.dart / shifted_box.rs → shifted_box.dart
 
-- Change: Flutter's intermediate base classes and mixins here (`RenderProxyBox`, `RenderShiftedBox`, the aligning, custom-clip and animated-opacity mixins) take the trait-over-a-field shape from `object.rs`: the shared bodies live on the trait, mixin state is a data field with an accessor, and a render object is always a leaf struct that implements them.
-  Reason: language — no inheritance.
-  Affect: implement the trait and, where Dart would run the inherited method, call it by name, `RenderProxyBoxMixin::paint(self, app, context, offset)`; a clip leaf implements `default_clip` (Dart's `_defaultClip`) and reads the cached clip with `clip()` after `update_clip()`.
-
 - Change: `RenderOpacity` and `RenderAnimatedOpacity` have no `alwaysIncludeSemantics`, and `RenderDecoratedBox` gives its painter no `onChanged`.
   Reason: platform — accessibility is deferred, and a `BoxPainter` callback cannot reach `App` yet.
-  Affect: pass no semantics flag; a decoration that loads an image does not repaint on its own when the image arrives.
+  Affect: a decoration that loads an image does not repaint when the image arrives.
 
-- Change: where a Flutter override calls `super` on a method whose Rust default the leaf's own impl shadows, the base body sits on a sibling `…Base` trait blanket-implemented for every implementor: `RenderBoxBase::hit_test` is `super.hitTest`.
-  Reason: language — a trait default cannot call `super`, and a leaf's own `hit_test` shadows the default it would call.
-  Affect: a box whose `hit_test` override needs the base behaviour, as the clips and the pointer-filtering boxes do, calls `RenderBoxBase::hit_test(self, app, result, position)` where Dart writes `super.hitTest`.
-
-- Change: `CustomClipper<T>` is a trait: Dart's `reclip` constructor argument is a `reclip()` method the implementor answers, the trait object is itself the `Listenable` that forwards to it, `should_reclip` receives the old clipper as `&dyn CustomClipper<T>`, and `as_any` answers Dart's `runtimeType` comparison and `covariant` cast. A clipper is held as an `Rc`, and Dart's `==` between two of them is `Rc::ptr_eq`.
-  Reason: language — a Rust trait has no fields, no constructor, no `runtimeType`, and no identity equality on a boxed value.
-  Affect: implement `reclip` to get reclip-on-notify, downcast `old_clipper` with `as_any().downcast_ref()`, and pass the same `Rc` to keep a clipper's subscription.
+- Change: `CustomClipper<T>` is a trait held as an `Rc`: `reclip()` is a method the implementor answers, `should_reclip` receives the old clipper as `&dyn CustomClipper<T>`, and two clippers compare by `Rc::ptr_eq`.
+  Reason: language — a Rust trait has no fields, no constructor, no `runtimeType` and no identity equality on a boxed value.
+  Affect: a fresh `Rc` around an equal clipper counts as a different clipper and re-subscribes; `old_clipper` is read with `as_any().downcast_ref()`.
 
 - Change: `RenderTransform` has no `filterQuality`.
   Reason: platform — the filtered path is an `ImageFilterLayer` over `ImageFilter.matrix`, which neither the embedder's `Paint` nor `SceneBuilder` has.
   Affect: a transform always paints through `push_transform`, or through the child's paint offset when the matrix is a translation.
 
-- Change: `RenderColoredBox` (Flutter's private `_RenderColoredBox` from `widgets/basic.dart`) does not pass `is_anti_alias` to the canvas.
+- Change: `RenderColoredBox` does not pass `is_anti_alias` to the canvas.
   Reason: platform — valo's `Paint` has no anti-alias flag; painting's `PORTING.md` records the same for `Clip`.
   Affect: the fill is drawn the way valo draws it, and setting the flag only marks a repaint.
 
@@ -135,25 +104,25 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 - Change: `BoxConstraintsTransform` is a plain `fn(BoxConstraints) -> BoxConstraints`, and the setter compares the old and new transform by function address.
   Reason: language — a Rust closure has no identity, and Dart's setter compares two function values to decide whether anything changed.
-  Affect: pass a named function or a non-capturing closure, not one that captures state; when the address comparison says "different" for the same function, the setter still only marks layout if the transform maps the current constraints to a different value.
+  Affect: a transform that captures state cannot be used; when the addresses differ for the same function the setter still only marks layout if the current constraints map to a different value.
 
 ## image_filter_config.rs → image_filter_config.dart
 
 - Change: a blur has no `tileMode`.
   Reason: platform — valo's blur has no tile mode (`reveal-embedder`'s `PORTING.md` records that).
-  Affect: `debug_short_description` on a blur reads `blur(5, 5, bounded)`, without Dart's tile-mode word.
+  Affect: every blur uses valo's edge behaviour, and `debug_short_description` prints no tile-mode word.
 
 ## custom_paint.rs → custom_paint.dart
 
-- Change: `CustomPainter` is the `CustomClipper` shape (a `repaint()` method, `as_any`, `Rc` identity).
+- Change: `CustomPainter` is a trait held as an `Rc`, with `repaint()` a method the implementor answers and identity by `Rc::ptr_eq`.
   Reason: language — a trait has no fields, constructor or identity.
-  Affect: implement `repaint` to get repaint-on-notify; `set_painter` / `set_foreground_painter` skip the same `Rc` and re-subscribe any other, so a painter wrapped in a new `Rc` each frame is re-subscribed each frame (the same listener set either way).
+  Affect: a painter wrapped in a new `Rc` each frame is unsubscribed and re-subscribed each frame.
 
 ## paragraph.rs → paragraph.dart
 
-- Change: `RenderParagraph::new` takes a `fonts` argument, an optional `FontCollection` handle that falls back to `PaintingBinding`'s app-wide one, and the paragraph is a leaf: no inline children, no selection registrar, no `selectionColor`.
+- Change: `RenderParagraph` takes an optional `FontCollection` handle, falling back to `PaintingBinding`'s app-wide one, and is a leaf: no inline children, no selection registrar, no `selectionColor`.
   Reason: platform — the font collection is explicit (painting's `binding.rs`), `WidgetSpan` needs placeholders the host lacks, and selection waits on `selection.dart`.
-  Affect: pass the fonts or `None`; a hit test stops at the paragraph, so `RichText` span recognizers cannot fire.
+  Affect: a hit test stops at the paragraph, so a `RichText` span recognizer never fires and text in it cannot be selected.
 
 - Change: `TextOverflow::Fade` clips like `Clip`.
   Reason: platform — the fade is a gradient shader, and gradients are deferred.
@@ -161,9 +130,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## editable.rs → editable.dart
 
-- Change: `RenderEditable` is a leaf: no inline children, no `_RenderEditableCustomPaint` boxes, no internal tap / long-press recognizers, no `RelayoutWhenSystemFontsChangeMixin`. Caret, selection and the handle leaders paint in `paint`.
-  Reason: platform — `WidgetSpan` placeholders, engine layers, and `PaintingBinding.systemFonts` wait, as on `RenderParagraph`.
-  Affect: pass no children; call `select_position_at` and friends from above (`ignore_pointer`); the selection handles' links are led from `paint` for a `CompositedTransformFollower` to follow.
+- Change: `RenderEditable` is a leaf: no inline children, no custom-paint child boxes, no internal tap / long-press recognizers, and caret, selection and the handle leaders paint in `paint`.
+  Reason: platform — `WidgetSpan` placeholders, engine layers and `PaintingBinding.systemFonts` wait, as on `RenderParagraph`.
+  Affect: selection is driven from above (`select_position_at` under an `ignore_pointer`) rather than by the editable's own recognizers, and the handles' links are led from `paint` for a `CompositedTransformFollower`.
 
 - Change: `VerticalCaretMovementRun::is_valid` compares the editable's layout generation.
   Reason: language — `compute_line_metrics` returns a new `Vec` each call, so Dart's `identical` on the list would always fail.
@@ -171,123 +140,62 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## object.rs / box.rs → object.dart / box.dart (container children)
 
-- Change: the container mixins (`RenderObjectWithChildMixin`, `ContainerParentDataMixin`, `ContainerRenderObjectMixin`) take the trait-over-a-field shape on the object protocol, with Dart's type parameters as associated types: the child type is a `ErasedRenderObject` (`AnyRenderBox` or `AnyRenderSliver`), which converts to and from `AnyRenderObject`, and the container mixin also names its parent-data type. `RenderBoxContainerDefaultsMixin` is a stateless trait over a container of box children.
-  Reason: language — no mixins, a trait cannot carry state, and a Dart type argument bounded by `RenderObject` has to name a concrete type-erased handle.
-  Affect: a multi-child render object implements `ContainerRenderObjectMixin` naming the type-erased handle of its child and its parent-data type, its parent data implements `ContainerParentDataMixin` with the same child type, and a box container adds an empty `impl RenderBoxContainerDefaultsMixin`. Dart's `attach` / `detach` / `redepthChildren` / `visitChildren` overrides are the mixin's bodies, which the leaf's `impl RenderObject` calls by name.
+- Change: `ParentData` answers the type-keyed query `provide(TypeId)` / `provide_mut`, read as `part::<P>()`, so a value built from several halves answers for each of them; `ContainerBoxParentData` joins the container half with `BoxParentData`.
+  Reason: language — an exact downcast cannot reach Dart's `parentData! as BoxParentData` on a subclass, and one cast method per half would close the set of halves to this crate.
+  Affect: parent data that does not answer `BoxParentData` from `provide` cannot be positioned by a box parent; a child's offset is read as `child.box_parent_data(app).offset`.
 
-- Change: `super.insert` / `move` / `remove` / `removeAll` from a container override, and `super.showOnScreen` / `super.markNeedsLayout`, take the sibling-base shape of `RenderBoxBase`: `ContainerRenderObjectBase` and `RenderObjectBase`. Because the base trait carries the virtual's name, it is path-called and never imported, or a plain `self.mark_needs_layout(app)` becomes ambiguous.
-  Reason: language — a trait default cannot call `super`.
-  Affect: a container that overrides one of them (`RenderSliverMultiBoxAdaptor`, the persistent headers) and the box protocol's `mark_needs_layout` call the base by name where Dart writes `super`.
+## custom_layout.rs → custom_layout.dart
 
-- Change: `ContainerBoxParentData` is a trait joining the container half with `BoxParentData`, and `ParentData` gained the type-keyed query `provide(TypeId)` / `provide_mut`, read as `part::<P>()` on the erased value, the `Error::provide` shape: a half answers for its own type, and a type that embeds one answers for itself and then forwards to the half, so a chain composes. `AnyRenderBox` and `apply_paint_transform` read the offset through it.
-  Reason: language — `parent_data_of::<BoxParentData>` is an exact downcast, so Dart's `parentData! as BoxParentData` cannot reach a subclass; the value has to answer the cast, and one cast method per half would close the set of halves to this crate.
-  Affect: parent data a box parent positions must answer `BoxParentData` from `provide` and `provide_mut`; read a container child's offset with `child.box_parent_data(app).offset` or `parent_data.offset()`, and any other half with `parent_data.part::<P>()`.
+- Change: `MultiChildLayoutDelegate` is a trait held as an `Rc`, with `relayout()` a method the implementor answers and identity by `Rc::ptr_eq`.
+  Reason: language — a Rust trait has no constructor, no fields, no `runtimeType` and no identity equality on a boxed value.
+  Affect: a delegate rewrapped in a new `Rc` re-subscribes; `old_delegate` is read with `as_any().downcast_ref()`.
 
-## flex.rs → flex.dart
-
-- Change: `RenderFlex`'s bodies live on `RenderFlexMixin` over a `RenderFlexData` field, and `RenderFlex` is a leaf that implements it with a one-line inherent wrapper per public getter and setter, so callers name no trait. This is the shape for every Flutter base class that is itself instantiable, where the trait cannot take the class's name.
-  Reason: language — no inheritance.
-  Affect: a flex subclass is a struct with a `RenderFlexData` field, an `impl RenderFlexMixin`, and render impls that call the base bodies by name, `RenderFlexMixin::perform_layout(self, app)`; `RenderFlexData::new()` with its setters is Dart's `super(direction:, mainAxisSize:)`.
+- Change: Dart's four `FlutterError`s (no such child, a child laid out twice, invalid constraints, a child left unlaid-out) are panics, and the ones Dart raises from an `assert` are debug-only.
+  Reason: language — no catchable exception, and the set of children still needing layout is debug state.
+  Affect: a delegate that misuses its children takes the frame down instead of reporting a `FlutterError`.
 
 ## stack.rs → stack.dart
-
-- Change: `RenderStack` and `RenderIndexedStack` are both leaves over `RenderStackBase` and a `RenderStackData` field, the `RenderFlex` shape; `RenderIndexedStack` overrides `paint_stack`.
-  Reason: language — no inheritance, and Flutter's base class is itself instantiable.
-  Affect: a stack subclass carries the data field, implements `RenderStackBase`, and calls the base bodies by name from its render impls.
 
 - Change: `RelativeRect::lerp(Some(a), None, t)` interpolates `a` towards `RelativeRect::FILL`.
   Reason: language — Dart's branch reads `b!` on the null `b`, which Rust cannot express.
   Affect: the call returns a value where Dart throws.
 
-## custom_layout.rs → custom_layout.dart
-
-- Change: `MultiChildLayoutDelegate` is the `CustomClipper` shape: `relayout()` is a method the implementor answers, the delegate is held as an `Rc` compared by pointer, and `as_any` answers `runtimeType` and the `covariant oldDelegate` cast.
-  Reason: language — a Rust trait has no constructor, no fields, no `runtimeType`, and no identity equality on a boxed value.
-  Affect: implement `relayout` to get relayout-on-notify, downcast `old_delegate` with `as_any().downcast_ref()`, and pass the same `Rc` to keep the delegate's subscription.
-
-- Change: Dart's four `FlutterError`s (no such child, a child laid out twice, invalid constraints, a child left unlaid-out) are panics, and the ones Dart raises from an `assert` are debug-only.
-  Reason: language — no catchable exception, and the set of children still needing layout is debug state.
-  Affect: a delegate that misuses its children panics instead of reporting a `FlutterError`.
-
-## object.rs → object.dart (layout callbacks)
-
-- Change: `RenderObjectWithLayoutCallbackMixin` is a trait on the box protocol over a `RenderObjectWithLayoutCallbackData` field; `PipelineOwner::enable_mutations_to_dirty_subtrees` is crate-private.
-  Reason: language — the mixin needs the tree methods, which live on the protocol traits.
-  Affect: a layout-building render object implements the mixin's accessors and `layout_callback`, and calls `run_layout_callback` from `perform_layout`.
-
-## viewport_offset.rs → viewport_offset.dart
-
-- Change: `super.moveTo` is `ViewportOffsetBase::move_to`, the sibling-base shape, and `debug_fill_description` is the `@protected` hook Dart's `toString` fills; `toString` itself is not ported.
-  Reason: language — a trait default cannot call `super`, and widgets' `ScrollPosition` overrides both and calls the `super` bodies.
-  Affect: an implementor that overrides either calls `ViewportOffsetBase::move_to(self, ..)` or `ViewportOffset::debug_fill_description(self, ..)` where Dart writes `super.…`.
-
-## viewport.rs → viewport.dart
-
-- Change: `RenderViewportBase` is a trait over a `RenderViewportBaseData` field, the `RenderFlex` shape; `RenderViewport` and `RenderShrinkWrappingViewport` are leaves that implement it alongside the box protocol, `RenderAbstractViewport` and the sliver-child container mixin, whose parent-data associated type is Dart's `ParentDataClass` parameter.
-  Reason: language — no inheritance and no generic superclass.
-  Affect: a viewport subclass carries the data field and calls the base bodies by name from its render impls, `RenderViewportBase::paint(self, app, context, offset)`.
-
-- Change: Dart's `object is RenderAbstractViewport` is the type-keyed query `RenderObject::interface(TypeId)`, read as `object.interface::<AnyRenderAbstractViewport>()` on the type-erased handle, the `Error::provide` shape: a viewport answers that id with its own erased handle, boxed, and a type that implements several interfaces answers each.
-  Reason: language — an erased render object cannot be asked whether it implements an interface, and one virtual per interface would close the set of interfaces to this crate.
-  Affect: a render object that is a viewport overrides `interface` and answers `AnyRenderAbstractViewport` with `as_abstract_viewport()`; a floating header answers `AnyRenderSliverFloatingPersistentHeader` the same way.
-
 ## sliver.rs → sliver.dart
-
-- Change: `SliverHitTestResult` and `SliverHitTestEntry` take the `BoxHitTestResult` shape: the result only wraps a `HitTestResult`, and the entry is the target, carrying the sliver and its two positions.
-  Reason: language — no subclassing of the gesture crate's result and entry types.
-  Affect: `hit_test` receives `&mut SliverHitTestResult<'_>` and adds with `result.add(SliverHitTestEntry::new(sliver, main, cross).into())`; `handle_event` receives the `SliverHitTestEntry`.
 
 - Change: `SliverGeometry::is_zero()` answers Dart's `geometry == SliverGeometry.zero` by comparing the fields.
   Reason: language — `SliverGeometry` does not override `==`, so Dart compares canonicalized const identity, which a `Copy` value has none of.
-  Affect: call `geometry.is_zero()`; a geometry that happens to equal `SliverGeometry::ZERO` field by field reads as zero.
+  Affect: a geometry that happens to equal `SliverGeometry::ZERO` field by field reads as zero where Dart's identity check says no.
 
-- Change: the child-position helpers (`child_main_axis_position` and its siblings) take an `AnyRenderObject`.
-  Reason: language — no `covariant` parameter narrowing.
-  Affect: a sliver whose children are boxes downcasts with `child.as_box()`.
+## viewport.rs → viewport.dart
 
-## sliver_multi_box_adaptor.rs → sliver_multi_box_adaptor.dart
-
-- Change: Dart's `KeepAliveParentDataMixin` is the `KeepAliveParentData` half, and `parentData is KeepAliveParentDataMixin` is `parent_data.part::<KeepAliveParentData>()`, which `SliverMultiBoxAdaptorParentData` answers from `provide` with its embedded half.
-  Reason: language — no mixins and no subclass check on an erased `ParentData`.
-  Affect: parent data used under `RenderSliverWithKeepAliveMixin` embeds a `KeepAliveParentData` and answers it from `provide` and `provide_mut`; `KeepAlive` sets `keep_alive` on the half it gets back.
-
-- Change: Flutter's `adoptChild` override is the post-hook `did_adopt_child`, the `did_attach` shape, which `insert` runs after the child joins the list; `paintsChild` is an inherent `paints_child`; and the keep-alive bucket rebuilds a returning child's parent data around `drop_child` instead of re-assigning the value Dart saved.
-  Reason: language — `adopt_child` is an inherent method on the type-erased handle, not a virtual, and `drop_child` clears the parent data box rather than leaving a reference behind.
-  Affect: a subclass that would override `adoptChild` implements `did_adopt_child`; a keep-alive child comes back out of the bucket with the same index, layout offset and keep-alive flag it went in with.
+- Change: Dart's `object is RenderAbstractViewport` is the type-keyed query `RenderObject::interface(TypeId)`, read as `object.interface::<AnyRenderAbstractViewport>()`.
+  Reason: language — an erased render object cannot be asked whether it implements an interface, and one virtual per interface would close the set of interfaces to this crate.
+  Affect: a viewport that does not answer that id is not found by `RenderAbstractViewport::of`, and neither is a floating header that does not answer its own.
 
 ## sliver_persistent_header.rs → sliver_persistent_header.dart
 
-- Change: the `vsync` field is a `TickerProviderRef`, an `Rc<dyn TickerProvider>` that compares by pointer.
-  Reason: language — Dart compares the provider by object identity, which `Option<Rc<dyn TickerProvider>>` has no `==` for.
-  Affect: `header.set_vsync(app, Some(TickerProviderRef::new(state_handle)))`.
-
-- Change: `RenderSliverFloatingPinnedPersistentHeader` carries only its `update_geometry` body; a leaf that is one overrides `RenderSliverFloatingPersistentHeader::update_geometry` and forwards to it.
-  Reason: language — no inheritance, so the pinned variant's override has to be installed on the trait the base body dispatches through.
-  Affect: a floating pinned header's `impl RenderSliverFloatingPersistentHeader` forwards `update_geometry` to `RenderSliverFloatingPinnedPersistentHeader::update_geometry(self, app)` by name.
-
 - Change: Flutter's `markNeedsLayout` override is the named `RenderSliverPersistentHeader::mark_needs_layout`.
   Reason: language — `mark_needs_layout` is an inherent method on the type-erased handle, not a virtual.
-  Affect: call `RenderSliverPersistentHeader::mark_needs_layout(self, app)` on a persistent header so that the child is remeasured next layout; the type-erased handle's `mark_needs_layout` does not set that flag.
+  Affect: marking a persistent header through the erased handle does not remeasure its child; the named call does.
 
 ## tweens.rs → tweens.dart
 
-- Change: `FractionalOffsetTween`, `AlignmentTween` and `AlignmentGeometryTween` are `Clone` values that implement `Animatable<T>` directly, and their `new(begin, end)` takes no `App`, where `reveal_animation`'s tweens are arena objects.
-  Reason: language — orphan rule: an `Animatable` impl for a `Handle` of one of these tweens names no type of this crate (widgets' `EdgeInsetsTween` has the same shape for the same reason).
-  Affect: `animation.drive(app, AlignmentGeometryTween::new(Some(a), Some(b)))` drives a clone; writing `begin` or `end` afterwards does not reach the driven animation, as it does on a Dart `Tween`.
+- Change: `FractionalOffsetTween`, `AlignmentTween` and `AlignmentGeometryTween` are `Clone` values that implement `Animatable<T>` directly, where `reveal_animation`'s tweens are arena objects.
+  Reason: language — orphan rule: an `Animatable` impl for a `Handle` of one of these tweens names no type of this crate.
+  Affect: `drive` takes a clone, so writing `begin` or `end` afterwards does not reach the driven animation, as it does on a Dart `Tween`.
 
 ## Deferred
-- `TextureLayer`, `PlatformViewLayer`, `PerformanceOverlayLayer`, `ClipRSuperellipseLayer`, `ColorFilterLayer`, `ImageFilterLayer`, `ShaderMaskLayer`, `OffsetLayer.toImage` / `toImageSync`, `PaintingContext.pushColorFilter`, `RenderView._updateSystemChrome`. Trigger: a texture/platform view, a superellipse clip, a colour/image/shader filter widget, `RepaintBoundary.toImage`, system chrome.
+- `TextureLayer`, `PlatformViewLayer`, `PerformanceOverlayLayer`, `ClipRSuperellipseLayer`, `ColorFilterLayer`, `ImageFilterLayer`, `ShaderMaskLayer`, `OffsetLayer.toImage` / `toImageSync`, `PaintingContext.pushColorFilter`, `RenderView._updateSystemChrome`. Trigger: a texture or platform view, a superellipse clip, a colour/image/shader filter widget, `RepaintBoundary.toImage`, system chrome.
 - `PaintingContext.addCompositionCallback`. Trigger: a caller that needs composition callbacks on the painting context (layers already have them).
-- Debug paint overlays: `debugPaint` on boxes, slivers and the viewport (with the sliver arrow and `debugPaintSize` helpers), `describeApproximatePaintClip` and `CustomClipper.getApproximateClipRect`, the custom clip's `debugPaintSize`, and the `DebugOverflowIndicatorMixin` overlays of `RenderFlex` and `RenderConstraintsTransformBox` (an overflowing box clips but paints no striped hint). With them, `paintsChild` as a virtual: `RenderOffstage` and `RenderFittedBox` keep it inherent meanwhile, and the opacity boxes' overrides wait. Trigger: inspector; semantics.
-- Semantics: on `PipelineOwner` and `RenderObject`; `RenderCustomPaint`'s `CustomPainterSemantics` and the painter's semantics builder; the deprecated `ignoringSemantics` of the ignore- and absorb-pointer boxes; `RenderOffstage.visitChildrenForSemantics`; the viewport and sliver semantics overrides (configuration, clip, children, `useTwoPaneSemantics` / `excludeFromScrolling`, `ensureSemantics` / `semanticBounds`) and the `markNeedsSemanticsUpdate` calls in the viewport's `paintOrder` and `clipBehavior` setters. Trigger: a11y; do not stub.
-- The semantics half of `PipelineManifold`: `semanticsEnabled`, its `Listenable` surface, and the semantics owner an attached `PipelineOwner` updates. The frame-request half is ported: the binding attaches its root owner to a manifold that calls `ensure_visual_update`, and `adopt_child` hands it down to the child owner the widgets `View` creates per `RenderView`. `RendererBinding::init_render_view` stays for render-tree-only hosts, rooting the implicit view's `RenderView` in `root_pipeline_owner` as Flutter's test binding does — never call it in an app that runs `run_app`. Trigger: semantics.
-- The layout-contract asserts: `_DebugSize`, the wrapper that reports a child's size read during a dry layout; `RenderBox.debugAssertDoesMeetConstraints`; `RenderSliver.debugAssertDoesMeetConstraints` with the `geometry` setter's contract asserts; and `RenderSliverFixedExtentBoxAdaptor.debugAssertDoesMeetConstraints`. `SliverGeometry::debug_assert_is_valid` is ported and the viewport calls it on every child. Trigger: the first layout bug one of them would have caught.
-- `layout` and `constraints` as override points. `markNeedsLayout` is one on the box protocol (its vtable slot resolves `RenderBox::mark_needs_layout`, which the layout cache overrides); a sliver and the view keep the base body. Trigger: OverlayPortal, `RenderView`. Ask before adding.
+- Debug paint overlays on boxes, slivers and the viewport, and the overflow indicators of `RenderFlex` and `RenderConstraintsTransformBox` (an overflowing box clips but paints no striped hint); with them, `paintsChild` as a virtual. Trigger: inspector.
+- Semantics on `PipelineOwner`, `RenderObject`, `RenderCustomPaint`, the ignore- and absorb-pointer boxes, `RenderOffstage`, the viewport and the slivers. Trigger: a11y; do not stub.
+- The semantics half of `PipelineManifold`; the frame-request half is ported, and `RendererBinding::init_render_view` stays for render-tree-only hosts and must never be called in an app that runs `run_app`. Trigger: semantics.
+- The layout-contract asserts: `_DebugSize` and `debugAssertDoesMeetConstraints` on box, sliver and the fixed-extent adaptor; `SliverGeometry::debug_assert_is_valid` is ported and the viewport calls it. Trigger: the first layout bug one of them would have caught.
+- `layout` and `constraints` as override points; `markNeedsLayout` is one on the box protocol only. Trigger: OverlayPortal, `RenderView`. Ask before adding.
 - `RenderView.applyPaintTransform` / `updateSystemChrome`; `performReassemble`. Trigger: `getTransformTo`, hot reload.
 - `RenderParagraph.RelayoutWhenSystemFontsChangeMixin` and `applyPaintTransform`. Trigger: `PaintingBinding.systemFonts`.
-- `RenderEditable` inline children, `RelayoutWhenSystemFontsChangeMixin`, the `_RenderEditableCustomPaint` child boxes, and the internal tap / long-press recognizers. Caret and selection paint in `paint`. Trigger: `WidgetSpan`; `PaintingBinding.systemFonts`; a field that does not set `ignorePointer`.
+- `RenderEditable` inline children, system-font relayout, the custom-paint child boxes and the internal tap / long-press recognizers. Trigger: `WidgetSpan`; `PaintingBinding.systemFonts`; a field that does not set `ignorePointer`.
 - `SliverConstraints.debugAssertIsValid` extra numeric checks. Trigger: a caller that relies on those messages.
-- Baseline alignment on the multi-child boxes: `RenderFlex`'s ascent/descent pass with its actual and dry baseline computations, `RenderStack` / `RenderIndexedStack`'s per-child baseline and their baseline computations, and `RenderIgnoreBaseline`; until it lands a `CrossAxisAlignment::Baseline` row top-aligns its children and stores the `text_baseline` unused. The one-child boxes report baselines, and `RenderBoxContainerDefaultsMixin`'s two baseline helpers are ported. Trigger: the first baseline-aligned `Row`.
-- `RenderCustomSingleChildLayoutBox` and `SingleChildLayoutDelegate` (`shifted_box.dart`; `custom_layout.rs` holds only the multi-child pair, as Dart does). Trigger: `CustomSingleChildLayout`.
-- `RenderBoxBase`, Flutter's `RenderBox.hitTest` body reachable from an override, sits in `proxy_box.rs` next to its callers and repeats `RenderBox::hit_test`'s default. Trigger: the next edit of `box.rs` — move it beside `RenderBox` and have the default forward to it.
+- Baseline alignment on the multi-child boxes and `RenderIgnoreBaseline`; meanwhile a `CrossAxisAlignment::Baseline` row top-aligns its children. Trigger: the first baseline-aligned `Row`.
+- `RenderBoxBase` sits in `proxy_box.rs` beside its callers instead of next to `RenderBox`. Trigger: the next edit of `box.rs`.
 - `RenderTransform.filterQuality` and Dart's `ImageFilterLayer` path. Trigger: the first `Transform(filterQuality:)`, with `PaintingContext.pushColorFilter`.

@@ -3,7 +3,7 @@
 //! Only the font collection is here; `imageCache`, `shaderWarmUp`, and the `systemFonts`
 //! listenable wait.
 
-use reveal_embedder::{FontCollection, FontId};
+use reveal_embedder::{FontCollection, FontId, set_default_font_manager};
 use reveal_foundation::{App, Handle};
 
 /// Binding for the painting library: the fonts every paragraph shapes against.
@@ -45,7 +45,9 @@ impl PaintingBinding {
         let source = app.platform().font_source();
         self.install_fonts(app, |fonts| {
             if let Some(source) = source {
-                fonts.add_boxed_source(source);
+                // txt::FontCollection::CreateSktFontCollection:
+                // setDefaultFontManager(mgr, GetDefaultFontFamilies()).
+                set_default_font_manager(fonts, source);
             }
         })
     }

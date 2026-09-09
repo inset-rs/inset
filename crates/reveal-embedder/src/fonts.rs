@@ -64,3 +64,76 @@ impl FontSource for SystemFontSource {
         self.fonts.face_for_codepoint(codepoint, attrs)
     }
 }
+
+/// Flutter `txt::GetDefaultFontFamilies()`: the family names
+/// `FontCollection::setDefaultFontManager` looks up when a style leaves `fontFamily` unset.
+///
+/// On Apple, Flutter reads `[systemFontOfSize:14].familyName`. That face is what this source
+/// answers as `CupertinoSystemText`, so that is the name the default manager is given.
+pub fn default_font_families() -> Vec<String> {
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        vec![CUPERTINO_TEXT.to_owned()]
+    }
+    #[cfg(target_os = "android")]
+    {
+        vec!["sans-serif".to_owned()]
+    }
+    #[cfg(target_os = "windows")]
+    {
+        vec!["Segoe UI".to_owned(), "Arial".to_owned()]
+    }
+    #[cfg(target_os = "linux")]
+    {
+        vec![
+            "Ubuntu".to_owned(),
+            "Adwaita Sans".to_owned(),
+            "Cantarell".to_owned(),
+            "DejaVu Sans".to_owned(),
+            "Liberation Sans".to_owned(),
+            "Arial".to_owned(),
+        ]
+    }
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "android",
+        target_os = "windows",
+        target_os = "linux",
+    )))]
+    {
+        vec!["Arial".to_owned()]
+    }
+}
+
+/// Flutter `skia::textlayout::FontCollection::setDefaultFontManager`: register the default
+/// family's faces as the collection's fallback chain, then keep `source` for later lookups.
+///
+/// Valo has no default font manager. An empty style `families` list walks this fallback
+/// chain, then `FontId(0)`. Without the chain, a later `register` (the Cupertino icon font)
+/// becomes font 0 and unspecified-family text paints `.notdef`.
+pub fn set_default_font_manager(fonts: &mut FontCollection, mut source: Box<dyn FontSource>) {
+    for name in default_font_families() {
+        for mut font in source.family(&name) {
+            font.add_alias(&name);
+            let id = fonts.add(font);
+            fonts.add_fallback(id);
+        }
+    }
+    fonts.add_boxed_source(source);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_font_families_match_the_engine_on_this_os() {
+        let names = default_font_families();
+        assert!(!names.is_empty());
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        assert_eq!(names, vec![CUPERTINO_TEXT]);
+        #[cfg(target_os = "android")]
+        assert_eq!(names, vec!["sans-serif"]);
+    }
+}

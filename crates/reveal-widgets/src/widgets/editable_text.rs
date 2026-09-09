@@ -8,12 +8,13 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use reveal_animation::{AnimationBehavior, AnimationController};
+use reveal_animation::{AnimationBehavior, AnimationController, Curves};
 use reveal_embedder::{
     AutofillConfiguration, BoxHeightStyle, BoxWidthStyle, Brightness, Clip, Color, FontWeight,
-    Locale, Offset, PointerDeviceKind, Radius, SmartDashesType, SmartQuotesType, TargetPlatform,
-    TextAffinity, TextAlign, TextCapitalization, TextDecoration, TextDirection, TextHeightBehavior,
-    TextInputAction, TextInputConfiguration, TextInputType, TextRange, TextSelection,
+    Locale, Matrix4, Offset, PointerDeviceKind, Radius, Rect, Size, SmartDashesType,
+    SmartQuotesType, TargetPlatform, TextAffinity, TextAlign, TextBaseline, TextCapitalization,
+    TextDecoration, TextDirection, TextHeightBehavior, TextInputAction, TextInputConfiguration,
+    TextInputType, TextPosition, TextRange, TextSelection, clamp_double,
 };
 use reveal_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB, Listenable, Listener, Timer,
@@ -25,7 +26,11 @@ use reveal_painting::{
 };
 use reveal_physics::{Simulation, Tolerance};
 use reveal_rendering::{
-    AnyRenderObject, AnyViewportOffset, LayerLink, RenderBox, RenderEditable, RenderHandle,
+    AnyLayer, AnyRenderBox, AnyRenderObject, AnyViewportOffset, BoxConstraints, BoxHitTestResult,
+    CompositionCallback, HitTestBehavior, LayerLink, PaintingContext, RenderBox, RenderBoxData,
+    RenderEditable, RenderHandle, RenderObject, RenderObjectData, RenderObjectWithChildData,
+    RenderObjectWithChildMixin, RenderProxyBoxMixin, RenderProxyBoxWithHitTestBehavior,
+    RevealedOffset,
 };
 use reveal_scheduler::{
     FrameCallback, SchedulerBinding, Ticker, TickerCallback, TickerProviderObject,
@@ -34,14 +39,15 @@ use reveal_services::{
     AnyAutofillClient, AnyTextSelectionDelegate, AutofillClient, AutofillHints, Clipboard,
     ClipboardData, DefaultProcessTextService, FilteringTextInputFormatter, KeyboardInsertedContent,
     LiveText, MouseCursorRef, ProcessTextAction, ProcessTextService, SelectionChangedCause,
-    SpellCheckResults, TextEditingValue, TextInput, TextInputClient, TextInputConnection,
-    TextInputFormatter, TextInputFormatterRef, TextInputStyle, TextSelectionDelegate,
+    SpellCheckResults, SuggestionSpan, TextEditingValue, TextInput, TextInputClient,
+    TextInputConnection, TextInputFormatter, TextInputFormatterRef, TextInputStyle,
+    TextSelectionDelegate,
 };
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 use crate::framework::{
-    BuildContext, IntoWidget, KeyRef, LeafRenderObjectWidget, RenderObjectWidget, State, StateData,
-    StatefulWidget, WidgetRef,
+    BuildContext, IntoWidget, KeyRef, LeafRenderObjectWidget, RenderObjectWidget,
+    SingleChildRenderObjectWidget, State, StateData, StatefulWidget, WidgetRef,
 };
 use crate::state_accessors;
 use crate::widgets::actions::{Action, Actions, AnyAction, CallbackAction};
@@ -51,6 +57,7 @@ use crate::widgets::automatic_keep_alive::{
     AutomaticKeepAliveClientMixin, AutomaticKeepAliveClientMixinData,
 };
 use crate::widgets::basic::CompositedTransformTarget;
+use crate::widgets::basic::WidgetBuilder;
 use crate::widgets::basic::{Builder, Directionality};
 use crate::widgets::context_menu_button_item::{ContextMenuButtonItem, ContextMenuButtonType};
 use crate::widgets::focus_manager::{FocusManager, FocusNode, FocusNodeLeaf, UnfocusDisposition};
@@ -71,7 +78,7 @@ use crate::widgets::text_editing_intents::{
 };
 use crate::widgets::text_selection::{
     ClipboardStatus, ClipboardStatusNotifier, LiveTextInputStatus, LiveTextInputStatusNotifier,
-    TextSelectionControls,
+    TextSelectionControls, TextSelectionOverlay,
 };
 use crate::widgets::text_selection_toolbar_anchors::TextSelectionToolbarAnchors;
 use crate::widgets::ticker_provider::{
@@ -286,6 +293,14 @@ fn utf16_len(text: &str) -> i32 {
     text.encode_utf16().count() as i32
 }
 
+fn option_rc_eq<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+        _ => false,
+    }
+}
+
 impl ChangeNotifier for TextEditingController {
     fn change_notifier_data(&self) -> &ChangeNotifierData {
         &self.change_notifier
@@ -382,6 +397,251 @@ pub const K_DEFAULT_CONTENT_INSERTION_MIME_TYPES: &[&str] = &[
     "image/jpeg",
     "image/webp",
 ];
+
+struct CompositionCallbackWidget {
+    composite_callback: CompositionCallback,
+    enabled: bool,
+    child: WidgetRef,
+}
+
+impl Debug for CompositionCallbackWidget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("_CompositionCallback")
+            .field("enabled", &self.enabled)
+            .field("child", &self.child)
+            .finish_non_exhaustive()
+    }
+}
+
+impl CompositionCallbackWidget {
+    fn new(composite_callback: CompositionCallback, enabled: bool, child: WidgetRef) -> Self {
+        CompositionCallbackWidget {
+            composite_callback,
+            enabled,
+            child,
+        }
+    }
+}
+
+impl RenderObjectWidget for CompositionCallbackWidget {
+    type RenderObject = RenderCompositionCallback;
+
+    fn key(&self) -> Option<&KeyRef> {
+        None
+    }
+
+    fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+        RenderCompositionCallback::new(app, self.composite_callback.clone(), self.enabled)
+            .as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        _context: BuildContext,
+        render_object: RenderHandle<RenderCompositionCallback>,
+    ) {
+        // _EditableTextState always uses the same callback.
+        debug_assert!(Rc::ptr_eq(
+            &render_object.get(app).composite_callback,
+            &self.composite_callback
+        ));
+        render_object.set_enabled(app, self.enabled);
+    }
+}
+
+impl SingleChildRenderObjectWidget for CompositionCallbackWidget {
+    fn child(&self) -> Option<&WidgetRef> {
+        Some(&self.child)
+    }
+}
+
+/// What `Layer::add_composition_callback` returns: Dart's `VoidCallback` that removes the callback.
+type CancelCompositionCallback = Box<dyn FnOnce(&mut App)>;
+
+struct RenderCompositionCallback {
+    render_object: RenderObjectData,
+    render_box: RenderBoxData,
+    child: RenderObjectWithChildData<AnyRenderBox>,
+    composite_callback: CompositionCallback,
+    cancel_callback: Option<CancelCompositionCallback>,
+    enabled: bool,
+}
+
+impl RenderCompositionCallback {
+    fn new(
+        app: &mut App,
+        composite_callback: CompositionCallback,
+        enabled: bool,
+    ) -> RenderHandle<Self> {
+        RenderHandle::new_box(
+            app,
+            RenderCompositionCallback {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                child: RenderObjectWithChildData::new(),
+                composite_callback,
+                cancel_callback: None,
+                enabled,
+            },
+        )
+    }
+
+    fn set_enabled(self: RenderHandle<Self>, app: &mut App, new_value: bool) {
+        self.get_mut(app).enabled = new_value;
+        if !new_value {
+            if let Some(cancel) = self.get_mut(app).cancel_callback.take() {
+                cancel(app);
+            }
+        } else if self.get(app).cancel_callback.is_none() {
+            self.as_object().mark_needs_paint(app);
+        }
+    }
+}
+
+impl RenderObjectWithChildMixin for RenderCompositionCallback {
+    type ChildType = AnyRenderBox;
+
+    fn child_data(self: RenderHandle<Self>, app: &App) -> &RenderObjectWithChildData<AnyRenderBox> {
+        &self.get(app).child
+    }
+
+    fn child_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderObjectWithChildData<AnyRenderBox> {
+        &mut self.get_mut(app).child
+    }
+}
+
+impl RenderProxyBoxMixin for RenderCompositionCallback {}
+
+impl RenderProxyBoxWithHitTestBehavior for RenderCompositionCallback {
+    fn behavior(self: RenderHandle<Self>, _app: &App) -> HitTestBehavior {
+        HitTestBehavior::DeferToChild
+    }
+}
+
+impl RenderObject for RenderCompositionCallback {
+    reveal_rendering::render_object_accessors!();
+
+    fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+        RenderProxyBoxMixin::perform_layout(self, app);
+    }
+
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        if self.get(app).enabled && self.get(app).cancel_callback.is_none() {
+            let callback = self.get(app).composite_callback.clone();
+            let cancel = context.add_composition_callback(app, callback);
+            self.get_mut(app).cancel_callback = Some(cancel);
+        }
+        RenderProxyBoxMixin::paint(self, app, context, offset);
+    }
+
+    fn visit_children(
+        self: RenderHandle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyRenderObject),
+    ) {
+        if let Some(child) = self.child(app) {
+            visitor(child.as_object());
+        }
+    }
+
+    /// Not in Dart: the callback holds the state's `Handle`, which is stale once the state is
+    /// destroyed, where Dart's tear-off keeps the state alive to find `renderEditable` detached.
+    fn dispose(self: RenderHandle<Self>, app: &mut App) {
+        if let Some(cancel) = self.get_mut(app).cancel_callback.take() {
+            cancel(app);
+        }
+        reveal_rendering::RenderObjectBase::dispose(self, app);
+    }
+}
+
+impl RenderBox for RenderCompositionCallback {
+    reveal_rendering::render_box_accessors!();
+
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        RenderProxyBoxMixin::setup_parent_data(self, app, child);
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
+    }
+
+    fn hit_test(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        RenderProxyBoxWithHitTestBehavior::hit_test(self, app, result, position)
+    }
+
+    fn hit_test_self(self: RenderHandle<Self>, app: &App, position: Offset) -> bool {
+        RenderProxyBoxWithHitTestBehavior::hit_test_self(self, app, position)
+    }
+
+    fn hit_test_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        RenderProxyBoxMixin::hit_test_children(self, app, result, position)
+    }
+
+    fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_width(self, app, height)
+    }
+
+    fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_width(self, app, height)
+    }
+
+    fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_height(self, app, width)
+    }
+
+    fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_height(self, app, width)
+    }
+
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_distance_to_actual_baseline(self, app, baseline)
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_dry_baseline(self, app, constraints, baseline)
+    }
+
+    fn compute_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        RenderProxyBoxMixin::compute_dry_layout(self, app, constraints)
+    }
+}
 
 /// Configures the ability to insert media content through the soft keyboard.
 ///
@@ -1422,6 +1682,7 @@ impl StatefulWidget for EditableText {
             clipboard_status: None,
             live_text_input_status: None,
             text_input_connection: None,
+            composite_callback: None,
             last_known_remote_text_editing_value: None,
             internal_scroll_controller: None,
             toolbar_layer_link: None,
@@ -1448,6 +1709,7 @@ impl StatefulWidget for EditableText {
             registered_as_observer: false,
             has_focus: false,
             next_focus_change_is_internal: false,
+            selection_overlay: None,
         }
     }
 }
@@ -1566,6 +1828,8 @@ pub struct EditableTextState {
     clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
     live_text_input_status: Option<Handle<LiveTextInputStatusNotifier>>,
     text_input_connection: Option<Handle<TextInputConnection>>,
+    /// Dart's `_compositeCallback` tear-off; one `Rc` so the widget can assert identity.
+    composite_callback: Option<CompositionCallback>,
     last_known_remote_text_editing_value: Option<TextEditingValue>,
     internal_scroll_controller: Option<Handle<ScrollController>>,
     toolbar_layer_link: Option<Handle<LayerLink>>,
@@ -1592,6 +1856,7 @@ pub struct EditableTextState {
     registered_as_observer: bool,
     has_focus: bool,
     next_focus_change_is_internal: bool,
+    selection_overlay: Option<Handle<TextSelectionOverlay>>,
 }
 
 impl Debug for EditableTextState {
@@ -1914,6 +2179,10 @@ impl EditableTextState {
             .selection(TextSelection::collapsed(last, TextAffinity::Downstream));
         self.user_update_text_editing_value(app, collapsed.replaced(value.selection, text), cause);
         if cause == SelectionChangedCause::Toolbar {
+            SchedulerBinding::add_post_frame_callback(
+                app,
+                FrameCallback::handle_method(self, Self::bring_selection_into_view_after_frame),
+            );
             TextSelectionDelegate::hide_toolbar(self, app, true);
         }
     }
@@ -1966,6 +2235,295 @@ impl EditableTextState {
             app.get_mut(self).next_focus_change_is_internal = true;
             let focus_node = self.widget(app).focus_node;
             focus_node.request_focus(app, None);
+        }
+    }
+
+    /// The current status of the text selection handles.
+    pub fn selection_overlay(
+        self: Handle<Self>,
+        app: &App,
+    ) -> Option<Handle<TextSelectionOverlay>> {
+        app.get(self).selection_overlay
+    }
+
+    fn web_context_menu_enabled() -> bool {
+        K_IS_WEB
+    }
+
+    fn create_selection_overlay(self: Handle<Self>, app: &mut App) -> Handle<TextSelectionOverlay> {
+        let value = self.value(app);
+        let context = self.context(app);
+        let debug_required_for = context.widget(app).clone();
+        let toolbar_layer_link = self.toolbar_layer_link(app);
+        let start_handle_layer_link = self.start_handle_layer_link(app);
+        let end_handle_layer_link = self.end_handle_layer_link(app);
+        let render_object = self.render_editable(app);
+        let selection_delegate = self.as_text_selection_delegate();
+        let magnifier_configuration = self.widget(app).magnifier_configuration.clone();
+        let clipboard_status = self.clipboard_status(app);
+        let drag_start_behavior = self.widget(app).drag_start_behavior;
+        let selection_controls = self.widget(app).selection_controls.clone();
+        let on_selection_handle_tapped = self.widget(app).on_selection_handle_tapped.clone();
+        let context_menu_builder = self.widget(app).context_menu_builder.clone();
+        let mut overlay = TextSelectionOverlay::new(
+            app,
+            value,
+            context,
+            toolbar_layer_link,
+            start_handle_layer_link,
+            end_handle_layer_link,
+            render_object,
+            selection_delegate,
+            magnifier_configuration,
+        )
+        .clipboard_status(app, clipboard_status)
+        .debug_required_for(app, debug_required_for)
+        .drag_start_behavior(app, drag_start_behavior);
+        if let Some(controls) = selection_controls {
+            overlay = overlay.selection_controls(app, controls);
+        }
+        if let Some(on_tapped) = on_selection_handle_tapped {
+            overlay =
+                overlay.on_selection_handle_tapped(app, Listener::new(move |app| on_tapped(app)));
+        }
+        if !Self::web_context_menu_enabled()
+            && let Some(builder) = context_menu_builder
+        {
+            let this = self;
+            let widget_builder: WidgetBuilder =
+                Rc::new(move |app, context| builder(app, context, this));
+            overlay = overlay.context_menu_builder(app, widget_builder);
+        }
+        overlay
+    }
+
+    fn update_or_dispose_selection_overlay_if_needed(self: Handle<Self>, app: &mut App) {
+        if let Some(overlay) = app.get(self).selection_overlay {
+            if app.get(self).has_focus {
+                overlay.update(app, self.value(app));
+            } else {
+                overlay.dispose(app);
+                app.get_mut(self).selection_overlay = None;
+            }
+        }
+    }
+
+    fn get_offset_to_reveal_caret(self: Handle<Self>, app: &mut App, rect: Rect) -> RevealedOffset {
+        let scroll_controller = self.scroll_controller(app);
+        let position = scroll_controller.position(app);
+        if !position.allow_implicit_scrolling(app) {
+            return RevealedOffset::new(scroll_controller.offset(app), rect);
+        }
+
+        let editable_size = self.render_editable(app).size(app);
+        let (additional_offset, unit_offset, reveal_rect) = if !self.is_multiline(app) {
+            let additional = if rect.width() >= editable_size.width() {
+                editable_size.width() / 2.0 - rect.center().dx()
+            } else {
+                clamp_double(0.0, rect.right - editable_size.width(), rect.left)
+            };
+            (additional, Offset::new(1.0, 0.0), rect)
+        } else {
+            let expanded = Rect::from_center(
+                rect.center(),
+                rect.width(),
+                rect.height()
+                    .max(self.render_editable(app).preferred_line_height(app)),
+            );
+            let additional = if expanded.height() >= editable_size.height() {
+                editable_size.height() / 2.0 - expanded.center().dy()
+            } else {
+                clamp_double(0.0, expanded.bottom - editable_size.height(), expanded.top)
+            };
+            (additional, Offset::new(0.0, 1.0), expanded)
+        };
+
+        let target_offset = clamp_double(
+            additional_offset + scroll_controller.offset(app),
+            position.min_scroll_extent(app),
+            position.max_scroll_extent(app),
+        );
+        let offset_delta = scroll_controller.offset(app) - target_offset;
+        RevealedOffset::new(target_offset, reveal_rect.shift(unit_offset * offset_delta))
+    }
+
+    fn bring_selection_into_view_after_frame(
+        self: Handle<Self>,
+        app: &mut App,
+        _time_stamp: Duration,
+    ) {
+        if !self.mounted(app) {
+            return;
+        }
+        self.bring_into_view(app, self.value(app).selection.extent());
+    }
+
+    /// Brings the provided [`TextPosition`] into the visible area of the text
+    /// input.
+    pub fn bring_into_view(self: Handle<Self>, app: &mut App, position: TextPosition) {
+        let local_rect = self
+            .render_editable(app)
+            .get_local_rect_for_caret(app, position);
+        let target_offset = self.get_offset_to_reveal_caret(app, local_rect);
+        self.scroll_controller(app)
+            .jump_to(app, target_offset.offset);
+        self.render_editable(app).show_on_screen(
+            app,
+            None,
+            Some(target_offset.rect),
+            Duration::ZERO,
+            Curves::ease(),
+        );
+    }
+
+    /// Shows the selection toolbar at the location of the current cursor.
+    pub fn show_toolbar(self: Handle<Self>, app: &mut App) -> bool {
+        if Self::web_context_menu_enabled() {
+            return false;
+        }
+        let Some(overlay) = app.get(self).selection_overlay else {
+            return false;
+        };
+        if overlay.toolbar_is_visible(app) {
+            return false;
+        }
+        if let Some(status) = app.get(self).live_text_input_status {
+            status.update(app);
+        }
+        self.clipboard_status(app).update(app);
+        overlay.show_toolbar(app);
+        true
+    }
+
+    /// Hides the text selection toolbar.
+    pub fn hide_toolbar(self: Handle<Self>, app: &mut App, hide_handles: bool) {
+        if hide_handles {
+            if let Some(overlay) = app.get(self).selection_overlay {
+                overlay.hide(app);
+            }
+        } else if let Some(overlay) = app.get(self).selection_overlay
+            && overlay.toolbar_is_visible(app)
+        {
+            overlay.hide_toolbar(app);
+        }
+    }
+
+    /// Toggles the visibility of the toolbar.
+    pub fn toggle_toolbar(self: Handle<Self>, app: &mut App, hide_handles: bool) {
+        if app.get(self).selection_overlay.is_none() {
+            let overlay = self.create_selection_overlay(app);
+            app.get_mut(self).selection_overlay = Some(overlay);
+        }
+        let overlay = app.get(self).selection_overlay.expect("created above");
+        if overlay.toolbar_is_visible(app) {
+            self.hide_toolbar(app, hide_handles);
+        } else {
+            let _ = self.show_toolbar(app);
+        }
+    }
+
+    /// Shows toolbar with spell check suggestions of misspelled words that are
+    /// available for click-and-replace.
+    pub fn show_spell_check_suggestions_toolbar(self: Handle<Self>, app: &mut App) -> bool {
+        if !self.spell_check_enabled(app)
+            || Self::web_context_menu_enabled()
+            || self.widget(app).read_only
+            || app.get(self).selection_overlay.is_none()
+            || !self.spell_check_results_received(app)
+            || self
+                .find_suggestion_span_at_cursor_index(app, self.value(app).selection.extent_offset)
+                .is_none()
+        {
+            return false;
+        }
+        debug_assert!(
+            app.get(self)
+                .spell_check_configuration
+                .spell_check_suggestions_toolbar_builder
+                .is_some(),
+            "spellCheckSuggestionsToolbarBuilder must be defined in SpellCheckConfiguration to show a toolbar with spell check suggestions"
+        );
+        let Some(builder) = app
+            .get(self)
+            .spell_check_configuration
+            .spell_check_suggestions_toolbar_builder
+            .clone()
+        else {
+            return false;
+        };
+        let this = self;
+        let overlay = app.get(self).selection_overlay.expect("checked above");
+        overlay.show_spell_check_suggestions_toolbar(
+            app,
+            Rc::new(move |app, context| builder(app, context, this)),
+        );
+        true
+    }
+
+    /// Shows the magnifier at the position given by `position_to_show`,
+    /// if no magnifier exists.
+    pub fn show_magnifier(self: Handle<Self>, app: &mut App, position_to_show: Offset) {
+        let Some(overlay) = app.get(self).selection_overlay else {
+            return;
+        };
+        if overlay.magnifier_exists(app) {
+            overlay.update_magnifier(app, position_to_show);
+        } else {
+            overlay.show_magnifier(app, position_to_show);
+        }
+    }
+
+    /// Hides the magnifier.
+    pub fn hide_magnifier(self: Handle<Self>, app: &mut App) {
+        if let Some(overlay) = app.get(self).selection_overlay {
+            overlay.hide_magnifier(app);
+        }
+    }
+
+    /// Finds specified [`SuggestionSpan`] that matches the provided index using
+    /// binary search.
+    pub fn find_suggestion_span_at_cursor_index(
+        self: Handle<Self>,
+        app: &App,
+        cursor_index: i32,
+    ) -> Option<SuggestionSpan> {
+        if !self.spell_check_results_received(app) {
+            return None;
+        }
+        let results = app.get(self).spell_check_results.as_ref()?;
+        if results.suggestion_spans.last()?.range.end < cursor_index {
+            return None;
+        }
+        let suggestion_spans = &results.suggestion_spans;
+        let mut left_index: i32 = 0;
+        let mut right_index = suggestion_spans.len() as i32 - 1;
+        while left_index <= right_index {
+            let mid_index = (left_index + right_index).div_euclid(2) as usize;
+            let current_span_start = suggestion_spans[mid_index].range.start;
+            let current_span_end = suggestion_spans[mid_index].range.end;
+            if cursor_index <= current_span_end && cursor_index >= current_span_start {
+                return Some(suggestion_spans[mid_index].clone());
+            } else if cursor_index <= current_span_start {
+                right_index = mid_index as i32 - 1;
+            } else {
+                left_index = mid_index as i32 + 1;
+            }
+        }
+        None
+    }
+
+    fn post_frame_rebuild_toolbar(self: Handle<Self>, app: &mut App, _time_stamp: Duration) {
+        if self.mounted(app)
+            && let Some(overlay) = app.get(self).selection_overlay
+            && overlay.toolbar_is_visible(app)
+        {
+            overlay.show_toolbar(app);
+        }
+    }
+
+    fn post_frame_update_for_scroll(self: Handle<Self>, app: &mut App, _time_stamp: Duration) {
+        if let Some(overlay) = app.get(self).selection_overlay {
+            overlay.update_for_scroll(app);
         }
     }
 
@@ -2317,6 +2875,7 @@ impl EditableTextState {
         }
         self.update_remote_editing_value_if_needed(app);
         self.start_or_stop_cursor_timer_if_needed(app);
+        self.update_or_dispose_selection_overlay_if_needed(app);
         self.set_state(app, |_| {});
     }
 
@@ -2325,6 +2884,7 @@ impl EditableTextState {
         app.get_mut(self).has_focus = has_focus;
         self.open_or_close_input_connection_if_needed(app);
         self.start_or_stop_cursor_timer_if_needed(app);
+        self.update_or_dispose_selection_overlay_if_needed(app);
         if has_focus {
             let observer = self.observer(app);
             if !app.get(self).registered_as_observer {
@@ -2412,13 +2972,15 @@ impl EditableTextState {
                 .effective_autofill_client(app)
                 .text_input_configuration(app);
             let connection = TextInput::attach(app, self.as_text_input_client(), config);
+            app.get_mut(self).text_input_connection = Some(connection);
+            self.update_size_and_transform(app);
+            self.schedule_periodic_post_frame_callbacks(app, Duration::ZERO);
             if let Some(context) = self.mounted(app).then(|| self.context(app)) {
                 let style = self.get_text_input_style(app, context);
                 connection.update_style(app, style);
             }
             connection.set_editing_state(app, local_value.clone());
             connection.show(app);
-            app.get_mut(self).text_input_connection = Some(connection);
             app.get_mut(self).last_known_remote_text_editing_value = Some(local_value);
         } else if let Some(connection) = app.get(self).text_input_connection {
             connection.show(app);
@@ -2523,6 +3085,25 @@ impl EditableTextState {
                 self.request_keyboard(app);
             }
             Some(SelectionChangedCause::Keyboard) => {}
+        }
+        if self.widget(app).selection_controls.is_none()
+            && self.widget(app).context_menu_builder.is_none()
+        {
+            if let Some(overlay) = app.get(self).selection_overlay {
+                overlay.dispose(app);
+            }
+            app.get_mut(self).selection_overlay = None;
+        } else {
+            if app.get(self).selection_overlay.is_none() {
+                let overlay = self.create_selection_overlay(app);
+                app.get_mut(self).selection_overlay = Some(overlay);
+            } else if let Some(overlay) = app.get(self).selection_overlay {
+                overlay.update(app, self.value(app));
+            }
+            if let Some(overlay) = app.get(self).selection_overlay {
+                overlay.set_handles_visible(app, self.widget(app).show_selection_handles);
+                overlay.show_handles(app);
+            }
         }
         if let Some(on_selection_changed) = self.widget(app).on_selection_changed.clone() {
             on_selection_changed(app, selection, cause);
@@ -2701,20 +3282,100 @@ impl EditableTextState {
         }
     }
 
-    /// Flutter's `_updateSizeAndTransform`, run from `_compositeCallback`.
-    fn post_frame_update_size_and_transform(self: Handle<Self>, app: &mut App, _elapsed: Duration) {
-        if !self.mounted(app) || !self.has_input_connection(app) {
+    fn composite_callback(self: Handle<Self>, app: &mut App, _layer: AnyLayer) {
+        // The callback can be invoked when the layer is detached.
+        // The input connection can be closed by the platform in which case this
+        // widget doesn't rebuild.
+        if !self.render_editable(app).as_object().attached(app) || !self.has_input_connection(app) {
             return;
         }
+        debug_assert!(self.mounted(app));
+        self.update_size_and_transform(app);
+    }
+
+    // Must be called after layout.
+    // See https://github.com/flutter/flutter/issues/126312
+    fn update_size_and_transform(self: Handle<Self>, app: &mut App) {
         let render_editable = self.render_editable(app);
-        if !render_editable.as_object().attached(app) {
-            return;
-        }
         let size = render_editable.size(app);
         let transform = render_editable.as_object().get_transform_to(app, None);
-        if let Some(connection) = app.get(self).text_input_connection {
-            connection.set_editable_size_and_transform(app, size, transform);
+        let connection = self.text_input_connection(app);
+        connection.set_editable_size_and_transform(app, size, transform);
+    }
+
+    fn schedule_periodic_post_frame_callbacks(
+        self: Handle<Self>,
+        app: &mut App,
+        _duration: Duration,
+    ) {
+        if !self.has_input_connection(app) {
+            return;
         }
+        // `_updateSelectionRects` waits with scribble (PORTING.md).
+        self.update_composing_rect_if_needed(app);
+        self.update_caret_rect_if_needed(app);
+        SchedulerBinding::add_post_frame_callback(
+            app,
+            FrameCallback::handle_method(self, Self::schedule_periodic_post_frame_callbacks),
+        );
+    }
+
+    // Sends the current composing rect to the embedder's text input plugin.
+    //
+    // In cases where the composing rect hasn't been updated in the embedder due
+    // to the lag of asynchronous messages over the channel, the position of the
+    // current caret rect is used instead.
+    //
+    // See: [_updateCaretRectIfNeeded]
+    fn update_composing_rect_if_needed(self: Handle<Self>, app: &mut App) {
+        let composing_range = self.value(app).composing;
+        debug_assert!(self.mounted(app));
+        let render_editable = self.render_editable(app);
+        let composing_rect = render_editable.get_rect_for_composing_range(app, composing_range);
+        // Send the caret location instead if there's no marked text yet.
+        let composing_rect = composing_rect.unwrap_or_else(|| {
+            let offset = if composing_range.is_valid() {
+                composing_range.start
+            } else {
+                0
+            };
+            render_editable.get_local_rect_for_caret(app, TextPosition::new(offset))
+        });
+        self.text_input_connection(app)
+            .set_composing_rect(app, composing_rect);
+    }
+
+    // Sends the current caret rect to the embedder's text input plugin.
+    //
+    // The position of the caret rect is updated periodically such that if the
+    // user initiates composing input, the current cursor rect can be used for
+    // the first character until the composing rect can be sent.
+    //
+    // On selection changes, the start of the selection is used. This ensures
+    // that regardless of the direction the selection was created, the cursor is
+    // set to the position where next text input occurs. This position is used to
+    // position the IME's candidate selection menu.
+    //
+    // See: [_updateComposingRectIfNeeded]
+    fn update_caret_rect_if_needed(self: Handle<Self>, app: &mut App) {
+        let render_editable = self.render_editable(app);
+        let Some(selection) = render_editable.selection(app) else {
+            return;
+        };
+        if !selection.is_valid() {
+            return;
+        }
+        let current_text_position = TextPosition::new(selection.start());
+        let caret_rect = render_editable.get_local_rect_for_caret(app, current_text_position);
+        self.text_input_connection(app)
+            .set_caret_rect(app, caret_rect);
+    }
+
+    /// Dart's `_textInputConnection!`.
+    fn text_input_connection(self: Handle<Self>, app: &App) -> Handle<TextInputConnection> {
+        app.get(self)
+            .text_input_connection
+            .expect("EditableText has an input connection")
     }
 
     fn build_editable(
@@ -2813,6 +3474,9 @@ impl State for EditableTextState {
     state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
+        app.get_mut(self).composite_callback = Some(Rc::new(move |app, layer| {
+            self.composite_callback(app, layer)
+        }));
         let clipboard_status = if K_IS_WEB {
             ClipboardStatusNotifier::web(app)
         } else {
@@ -2914,12 +3578,6 @@ impl State for EditableTextState {
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::handle_method(self, Self::post_frame_update_style),
-            );
-            // `_CompositionCallback`: the field's size and transform go to the IME after the
-            // frame that composited it; a post-frame callback sees the same layout.
-            SchedulerBinding::add_post_frame_callback(
-                app,
-                FrameCallback::handle_method(self, Self::post_frame_update_size_and_transform),
             );
         }
         let platform = app.platform().target_platform();
@@ -3038,6 +3696,68 @@ impl State for EditableTextState {
         if self.widget(app).show_cursor != old_widget.show_cursor {
             self.start_or_stop_cursor_timer_if_needed(app);
         }
+        let selection_overlay = app.get(self).selection_overlay;
+        if let Some(overlay) = selection_overlay
+            && overlay.toolbar_is_visible(app)
+            && !option_rc_eq(
+                &self.widget(app).context_menu_builder,
+                &old_widget.context_menu_builder,
+            )
+            && self.widget(app).context_menu_builder.is_none()
+                == old_widget.context_menu_builder.is_none()
+        {
+            SchedulerBinding::add_post_frame_callback(
+                app,
+                FrameCallback::handle_method(self, Self::post_frame_rebuild_toolbar),
+            );
+        }
+        if app.get(self).selection_overlay.is_some()
+            && (self.widget(app).context_menu_builder.is_none()
+                != old_widget.context_menu_builder.is_none()
+                || !option_rc_eq(
+                    &self.widget(app).selection_controls,
+                    &old_widget.selection_controls,
+                )
+                || !option_rc_eq(
+                    &self.widget(app).on_selection_handle_tapped,
+                    &old_widget.on_selection_handle_tapped,
+                )
+                || self.widget(app).drag_start_behavior != old_widget.drag_start_behavior
+                || !self
+                    .widget(app)
+                    .magnifier_configuration
+                    .same_configuration(&old_widget.magnifier_configuration))
+        {
+            let overlay = app.get(self).selection_overlay.expect("checked above");
+            let should_show_toolbar = overlay.toolbar_is_visible(app);
+            let should_show_handles = overlay.handles_visible_value(app);
+            overlay.dispose(app);
+            let created = self.create_selection_overlay(app);
+            app.get_mut(self).selection_overlay = Some(created);
+            if should_show_toolbar || should_show_handles {
+                let this = self;
+                SchedulerBinding::add_post_frame_callback(
+                    app,
+                    FrameCallback::new(move |app, _| {
+                        if let Some(overlay) = app.get(this).selection_overlay {
+                            if should_show_toolbar {
+                                overlay.show_toolbar(app);
+                            }
+                            if should_show_handles {
+                                overlay.show_handles(app);
+                            }
+                        }
+                    }),
+                );
+            }
+        } else if self.widget(app).controller.selection(app) != old_widget.controller.selection(app)
+            && let Some(overlay) = app.get(self).selection_overlay
+        {
+            overlay.update(app, self.value(app));
+        }
+        if let Some(overlay) = app.get(self).selection_overlay {
+            overlay.set_handles_visible(app, self.widget(app).show_selection_handles);
+        }
         #[allow(deprecated)]
         let can_paste = self
             .widget(app)
@@ -3080,6 +3800,10 @@ impl State for EditableTextState {
             controller.dispose(app);
         }
         app.get_mut(self).backing_cursor_blink_opacity_controller = None;
+        if let Some(overlay) = app.get(self).selection_overlay {
+            overlay.dispose(app);
+        }
+        app.get_mut(self).selection_overlay = None;
         let focus_node = self.widget(app).focus_node;
         focus_node.remove_listener(
             app,
@@ -3224,7 +3948,13 @@ impl State for EditableTextState {
         let has_focus = app.get(self).has_focus;
         let group_id = self.widget(app).group_id;
         let state = self;
-        Actions::new(
+        let composite_callback = app
+            .get(self)
+            .composite_callback
+            .clone()
+            .expect("set in init_state");
+        let enabled = self.has_input_connection(app);
+        let child = Actions::new(
             actions,
             Builder::new(move |_app, tap_context| {
                 let mut region = TextFieldTapRegion::new(focused.clone())
@@ -3245,7 +3975,8 @@ impl State for EditableTextState {
                 region.into_widget()
             }),
         )
-        .into_widget()
+        .into_widget();
+        CompositionCallbackWidget::new(composite_callback, enabled, child).into_widget()
     }
 }
 
@@ -3288,7 +4019,17 @@ impl TickerProviderObject for EditableTextState {
     }
 }
 
-impl WidgetsBindingObserverObject for EditableTextState {}
+impl WidgetsBindingObserverObject for EditableTextState {
+    fn did_change_metrics(self: Handle<Self>, app: &mut App) {
+        if !self.mounted(app) {
+            return;
+        }
+        SchedulerBinding::add_post_frame_callback(
+            app,
+            FrameCallback::handle_method(self, Self::post_frame_update_for_scroll),
+        );
+    }
+}
 
 impl TextInputClient for EditableTextState {
     fn current_text_editing_value(self: Handle<Self>, app: &App) -> Option<TextEditingValue> {
@@ -3397,6 +4138,10 @@ impl TextInputClient for EditableTextState {
             state.current_prompt_rect_range = Some(TextRange::new(start, end));
         });
     }
+
+    fn show_toolbar(self: Handle<Self>, app: &mut App) {
+        let _ = EditableTextState::show_toolbar(self, app);
+    }
 }
 
 impl AutofillClient for EditableTextState {
@@ -3466,10 +4211,22 @@ impl TextSelectionDelegate for EditableTextState {
                 app.get_mut(self).next_focus_change_is_internal = true;
                 let focus_node = self.widget(app).focus_node;
                 focus_node.request_focus(app, None);
+                if app.get(self).selection_overlay.is_none() {
+                    let overlay = self.create_selection_overlay(app);
+                    app.get_mut(self).selection_overlay = Some(overlay);
+                }
             }
             return;
         }
         self.format_and_set_value(app, value, Some(cause), true);
+    }
+
+    fn hide_toolbar(self: Handle<Self>, app: &mut App, hide_handles: bool) {
+        EditableTextState::hide_toolbar(self, app, hide_handles);
+    }
+
+    fn bring_into_view(self: Handle<Self>, app: &mut App, position: TextPosition) {
+        EditableTextState::bring_into_view(self, app, position);
     }
 
     fn cut_enabled(self: Handle<Self>, app: &App) -> bool {
@@ -3545,24 +4302,38 @@ impl TextSelectionDelegate for EditableTextState {
         if value.selection.is_collapsed() || self.widget(app).obscure_text {
             return;
         }
-        let text = value.selection.range().text_inside(&value.text).to_string();
-        Clipboard::set_data(app, ClipboardData::new(text));
-        if cause == SelectionChangedCause::Toolbar
-            && matches!(
-                app.platform().target_platform(),
-                TargetPlatform::Android | TargetPlatform::Fuchsia
-            )
-        {
-            let collapsed = value.copy_with().selection(TextSelection::collapsed(
-                value.selection.end(),
-                TextAffinity::Downstream,
-            ));
-            self.user_update_text_editing_value(app, collapsed, SelectionChangedCause::Toolbar);
+        let text = value.text.clone();
+        Clipboard::set_data(
+            app,
+            ClipboardData::new(value.selection.range().text_inside(&text).to_string()),
+        );
+        if cause == SelectionChangedCause::Toolbar {
+            self.bring_into_view(app, self.value(app).selection.extent());
+            TextSelectionDelegate::hide_toolbar(self, app, false);
+
+            match app.platform().target_platform() {
+                TargetPlatform::IOS
+                | TargetPlatform::MacOS
+                | TargetPlatform::Linux
+                | TargetPlatform::Windows => {}
+                TargetPlatform::Android | TargetPlatform::Fuchsia => {
+                    let value = self.value(app);
+                    let collapsed = value.copy_with().selection(TextSelection::collapsed(
+                        value.selection.end(),
+                        TextAffinity::Downstream,
+                    ));
+                    self.user_update_text_editing_value(
+                        app,
+                        collapsed,
+                        SelectionChangedCause::Toolbar,
+                    );
+                }
+            }
         }
         self.clipboard_status(app).update(app);
     }
 
-    fn cut_selection(self: Handle<Self>, app: &mut App, _cause: SelectionChangedCause) {
+    fn cut_selection(self: Handle<Self>, app: &mut App, cause: SelectionChangedCause) {
         if self.widget(app).read_only || self.widget(app).obscure_text {
             return;
         }
@@ -3573,7 +4344,14 @@ impl TextSelectionDelegate for EditableTextState {
         let text = value.selection.range().text_inside(&value.text).to_string();
         Clipboard::set_data(app, ClipboardData::new(text));
         let next = value.replaced(value.selection, "");
-        self.user_update_text_editing_value(app, next, SelectionChangedCause::Keyboard);
+        self.user_update_text_editing_value(app, next, cause);
+        if cause == SelectionChangedCause::Toolbar {
+            SchedulerBinding::add_post_frame_callback(
+                app,
+                FrameCallback::handle_method(self, Self::bring_selection_into_view_after_frame),
+            );
+            TextSelectionDelegate::hide_toolbar(self, app, true);
+        }
         self.clipboard_status(app).update(app);
     }
 
@@ -3599,6 +4377,24 @@ impl TextSelectionDelegate for EditableTextState {
             .copy_with()
             .selection(TextSelection::new(0, utf16_len(&value.text)));
         self.user_update_text_editing_value(app, next, cause);
+
+        if cause == SelectionChangedCause::Toolbar {
+            match app.platform().target_platform() {
+                TargetPlatform::Android | TargetPlatform::IOS | TargetPlatform::Fuchsia => {}
+                TargetPlatform::MacOS | TargetPlatform::Linux | TargetPlatform::Windows => {
+                    TextSelectionDelegate::hide_toolbar(self, app, true);
+                }
+            }
+            match app.platform().target_platform() {
+                TargetPlatform::Android
+                | TargetPlatform::Fuchsia
+                | TargetPlatform::Linux
+                | TargetPlatform::Windows => {
+                    self.bring_into_view(app, self.value(app).selection.extent());
+                }
+                TargetPlatform::MacOS | TargetPlatform::IOS => {}
+            }
+        }
     }
 }
 

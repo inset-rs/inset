@@ -142,6 +142,15 @@ impl TextMagnifierConfiguration {
         self
     }
 
+    pub(crate) fn same_configuration(&self, other: &TextMagnifierConfiguration) -> bool {
+        self.should_display_handles_in_magnifier == other.should_display_handles_in_magnifier
+            && match (&self.magnifier_builder, &other.magnifier_builder) {
+                (None, None) => true,
+                (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+                _ => false,
+            }
+    }
+
     /// A constant for a [`TextMagnifierConfiguration`] that is disabled, meaning it
     /// never builds anything, regardless of platform.
     pub const DISABLED: TextMagnifierConfiguration = TextMagnifierConfiguration::new();

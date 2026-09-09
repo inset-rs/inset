@@ -2,7 +2,7 @@
 //! `MultiChildLayoutDelegate`, `RenderCustomMultiChildLayoutBox`).
 //!
 //! `SingleChildLayoutDelegate` and `RenderCustomSingleChildLayoutBox` live in
-//! `shifted_box.dart`; they wait. See `PORTING.md`.
+//! `shifted_box.dart`.
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;

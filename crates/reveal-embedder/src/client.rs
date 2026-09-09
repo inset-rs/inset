@@ -5,7 +5,9 @@
 
 use std::time::Duration;
 
-use crate::{Frame, KeyData, PointerDataPacket, TextEditingValue, TextInputAction, ViewId};
+use crate::{
+    Frame, KeyData, PointerDataPacket, TextEditingValue, TextInputAction, ViewFocusEvent, ViewId,
+};
 
 /// Complete frames and typed view lifecycle notifications.
 ///
@@ -16,6 +18,11 @@ pub trait EmbedderClient {
     fn view_added(&mut self, id: ViewId);
     fn view_metrics_changed(&mut self, id: ViewId);
     fn view_removed(&mut self, id: ViewId);
+
+    /// Flutter `PlatformDispatcher.onViewFocusChange`.
+    fn view_focus_changed(&mut self, event: ViewFocusEvent) {
+        let _ = event;
+    }
 
     /// Flutter `PlatformDispatcher.onPointerDataPacket`.
     fn pointer_data_packet(&mut self, packet: PointerDataPacket);

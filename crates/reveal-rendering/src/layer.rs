@@ -617,6 +617,10 @@ impl AnyLayer {
         let callback_id = NEXT_CALLBACK_ID.fetch_add(1, Ordering::Relaxed) + 1;
         self.data_mut(app).callbacks.push((callback_id, callback));
         Box::new(move |app: &mut App| {
+            // Dart's closure still finds a disposed layer; here dispose freed the entry.
+            if !app.contains(self.id) {
+                return;
+            }
             let index = self
                 .data(app)
                 .callbacks

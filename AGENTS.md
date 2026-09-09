@@ -53,7 +53,7 @@ When a port has tests, you can ref to cases from Flutter's matching file under `
 
 ## Docs
 
-`PORTING.md` in a source folder records functional divergences from Flutter, for a reader who knows Rust and only surface Flutter. Each entry is Change / Reason / Affect. No visible Affect means Identical — omit the entry. Straight transcriptions go under `## Identical`. Empty file: omit. Format is in the porting skill.
+`PORTING.md` in a source folder records functional divergences from Flutter, for a reader who knows Rust and only surface Flutter. Each entry is Change / Reason / Affect, one sentence each, and says what a reader would notice when the code runs. No visible Affect means Identical — omit the entry; the skill lists what else does not warrant one. Straight transcriptions go under `## Identical`. Empty file: omit. Format is in the porting skill.
 
 Doc comments: the invariant a later editor will break. Inline comments: only what the next line does that the code cannot say. When copying from the experiment, strip its commentary.
 

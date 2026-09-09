@@ -6,6 +6,7 @@
 #![feature(arbitrary_self_types)]
 #![allow(recursion_depth_exceeding_limit)] // valo `DisplayList` nests `Op::DrawDisplayList`
 
+mod animated_size;
 mod binding;
 #[path = "box.rs"]
 mod box_;
@@ -36,6 +37,7 @@ mod view;
 mod viewport;
 mod viewport_offset;
 
+pub use animated_size::*;
 pub use binding::*;
 pub use box_::*;
 pub use custom_layout::*;

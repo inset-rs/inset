@@ -7,10 +7,11 @@
 use std::fmt;
 use std::rc::Rc;
 
-use reveal_embedder::ViewRef;
-use reveal_foundation::{App, Handle, ValueKey};
+use reveal_embedder::{ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewRef};
+use reveal_foundation::{App, Handle, ListenableObject, Listener, ValueKey};
 use reveal_rendering::{AnyRenderObject, PipelineOwner, RenderHandle, RenderView, RendererBinding};
 
+use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 use crate::framework::{
     AnyElement, BuildContext, Element, ElementBase, ElementData, InheritedWidget, IntoWidget,
     KeyRef, RenderObjectElement, RenderObjectElementData, RenderObjectElementWidget,
@@ -144,22 +145,75 @@ impl StatefulWidget for View {
             state: StateData::new(),
             scope_node: None,
             policy: None,
+            view_has_focus: false,
+            observer: None,
+            scope_listener: None,
         }
     }
 }
 
-/// The state of a [`View`]. Flutter's `_ViewState` also observes view focus events, which wait
-/// with the platform's view-focus channel.
+/// The state of a [`View`], including synchronization with native view focus.
 pub struct ViewState {
     state: StateData<View>,
     scope_node: Option<Handle<FocusScopeNode>>,
     policy: Option<AnyFocusTraversalPolicy>,
+    /// Whether the native view owns focus, independently of its widget subtree.
+    view_has_focus: bool,
+    /// Retains the observer identity for removal on disposal.
+    observer: Option<WidgetsBindingObserverRef>,
+    /// Retains the bound callback identity for removal on disposal.
+    scope_listener: Option<Listener>,
 }
 
 impl ViewState {
     /// The focus scope node this view's subtree is scoped by.
     fn scope_node(self: Handle<Self>, app: &App) -> Handle<FocusScopeNode> {
         app.get(self).scope_node.expect("created in init_state")
+    }
+
+    /// Requests native focus when the framework focuses a descendant of this view.
+    fn scope_focus_change_listener(self: Handle<Self>, app: &mut App) {
+        let has_focus = self.scope_node(app).has_focus(app);
+        if app.get(self).view_has_focus == has_focus || !has_focus {
+            return;
+        }
+        app.platform().request_view_focus_change(
+            self.widget(app).view.id(),
+            ViewFocusState::Focused,
+            ViewFocusDirection::Forward,
+        );
+    }
+}
+
+impl WidgetsBindingObserverObject for ViewState {
+    fn did_change_view_focus(self: Handle<Self>, app: &mut App, event: ViewFocusEvent) {
+        let view_id = self.widget(app).view.id();
+        app.get_mut(self).view_has_focus = match event.state {
+            ViewFocusState::Focused => event.view_id == view_id,
+            ViewFocusState::Unfocused => false,
+        };
+        if event.view_id != view_id {
+            return;
+        }
+        match event.state {
+            ViewFocusState::Focused => {
+                let scope = self.scope_node(app).as_node();
+                let policy = app.get(self).policy.expect("created in init_state");
+                let next_focus = match event.direction {
+                    ViewFocusDirection::Forward => {
+                        policy.find_first_focus(app, scope, true).unwrap_or(scope)
+                    }
+                    ViewFocusDirection::Backward => policy.find_last_focus(app, scope, true),
+                    ViewFocusDirection::Undefined => scope,
+                };
+                next_focus.request_focus(app, None);
+            }
+            ViewFocusState::Unfocused => {
+                FocusManager::instance(app)
+                    .root_scope(app)
+                    .request_scope_focus(app);
+            }
+        }
     }
 }
 
@@ -174,9 +228,21 @@ impl State for ViewState {
         let this = app.get_mut(self);
         this.scope_node = Some(scope_node);
         this.policy = Some(policy);
+        let observer: WidgetsBindingObserverRef = Rc::new(self);
+        WidgetsBinding::instance(app).add_observer(app, observer.clone());
+        app.get_mut(self).observer = Some(observer);
+        let listener = Listener::handle_method(self, ViewState::scope_focus_change_listener);
+        scope_node.add_listener(app, listener.clone());
+        app.get_mut(self).scope_listener = Some(listener);
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
+        if let Some(observer) = app.get_mut(self).observer.take() {
+            WidgetsBinding::instance(app).remove_observer(app, &observer);
+        }
+        if let Some(listener) = app.get_mut(self).scope_listener.take() {
+            self.scope_node(app).remove_listener(app, &listener);
+        }
         self.scope_node(app).dispose(app);
     }
 
@@ -642,6 +708,7 @@ mod tests {
 
     use reveal_scheduler::SchedulerBinding;
 
+    use crate::binding::WidgetsBinding;
     use crate::framework::{GlobalKey, IntoWidget};
     use crate::test_harness::{binding_cell, binding_mount, binding_pump};
     use crate::widgets::basic::SizedBox;
@@ -683,5 +750,67 @@ mod tests {
         assert!(!SchedulerBinding::has_scheduled_frame(&mut app));
         render_object.mark_needs_layout(&mut app);
         assert!(SchedulerBinding::has_scheduled_frame(&mut app));
+    }
+
+    /// Flutter view_test.dart: platform focus parks on the root and restores the view's history.
+    #[test]
+    fn platform_focus_enters_parks_and_restores_the_view() {
+        use crate::{Focus, FocusManager, FocusNode, FocusNodeLeaf, Row};
+        use reveal_embedder::{
+            ViewFocusDirection as Direction, ViewFocusEvent, ViewFocusState as State,
+        };
+        let cell = binding_cell();
+        let (first, last) = {
+            let mut app = cell.borrow_mut();
+            (FocusNode::new(&mut app), FocusNode::new(&mut app))
+        };
+        binding_mount(
+            &cell,
+            crate::Directionality::new(
+                reveal_embedder::TextDirection::Ltr,
+                Row::new().children(vec![
+                    Focus::new(SizedBox::new().width(20.0).height(20.0))
+                        .focus_node(first.as_node())
+                        .into_widget(),
+                    Focus::new(SizedBox::new().width(20.0).height(20.0))
+                        .focus_node(last.as_node())
+                        .into_widget(),
+                ]),
+            )
+            .into_widget(),
+        );
+        let event = |state, direction| {
+            let mut app = cell.borrow_mut();
+            let view_id = app.platform().implicit_view().unwrap().id();
+            WidgetsBinding::instance(&mut app).handle_view_focus_changed(
+                &mut app,
+                ViewFocusEvent {
+                    view_id,
+                    state,
+                    direction,
+                },
+            );
+            drop(app);
+            cell.checkpoint();
+        };
+        event(State::Focused, Direction::Forward);
+        assert!(first.has_primary_focus(&cell.borrow()));
+        event(State::Unfocused, Direction::Undefined);
+        {
+            let mut app = cell.borrow_mut();
+            assert!(
+                FocusManager::instance(&mut app)
+                    .root_scope(&app)
+                    .has_primary_focus(&app)
+            );
+        }
+        event(State::Focused, Direction::Undefined);
+        assert!(first.has_primary_focus(&cell.borrow()));
+        event(State::Unfocused, Direction::Undefined);
+        event(State::Focused, Direction::Backward);
+        assert!(last.has_primary_focus(&cell.borrow()));
+        event(State::Unfocused, Direction::Undefined);
+        event(State::Focused, Direction::Undefined);
+        assert!(last.has_primary_focus(&cell.borrow()));
     }
 }

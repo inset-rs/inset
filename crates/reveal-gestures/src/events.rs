@@ -643,6 +643,34 @@ impl PointerEvent {
         with_variant!(self, e => e.buttons)
     }
 
+    /// The pressure of the touch.
+    ///
+    /// This value is a number ranging from 0.0, indicating a touch with no
+    /// discernible pressure, to 1.0, indicating a touch with "normal" pressure,
+    /// and possibly beyond, indicating a stronger touch. For devices that do not
+    /// detect pressure (e.g. mice), returns 1.0.
+    pub fn pressure(&self) -> f64 {
+        with_variant!(self, e => e.pressure)
+    }
+
+    /// The minimum value that [`pressure`](Self::pressure) can return for this
+    /// pointer.
+    ///
+    /// For devices that do not detect pressure (e.g. mice), returns 1.0. This
+    /// will always be a number less than or equal to 1.0.
+    pub fn pressure_min(&self) -> f64 {
+        with_variant!(self, e => e.pressure_min)
+    }
+
+    /// The maximum value that [`pressure`](Self::pressure) can return for this
+    /// pointer.
+    ///
+    /// For devices that do not detect pressure (e.g. mice), returns 1.0. This
+    /// will always be a greater than or equal to 1.0.
+    pub fn pressure_max(&self) -> f64 {
+        with_variant!(self, e => e.pressure_max)
+    }
+
     /// Time of event dispatch, relative to an arbitrary timeline.
     pub fn time_stamp(&self) -> Duration {
         with_variant!(self, e => e.time_stamp)

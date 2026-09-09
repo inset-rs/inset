@@ -51,7 +51,7 @@ pub(crate) fn default_button_accept_behavior(_buttons: i64) -> bool {
 ///
 ///  * `DragGestureRecognizer.dragStartBehavior`, which gives an example for the
 ///    different behaviors.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DragStartBehavior {
     /// Set the initial offset at the position where the first down event was
     /// detected.
@@ -59,6 +59,7 @@ pub enum DragStartBehavior {
 
     /// Set the initial position at the position where this gesture recognizer
     /// won the arena.
+    #[default]
     Start,
 }
 
