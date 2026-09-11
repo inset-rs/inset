@@ -296,6 +296,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "color_quant"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
+
+[[package]]
 name = "combine"
 version = "4.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -715,6 +721,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gif"
+version = "0.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee8cfcc411d9adbbaba82fb72661cc1bcca13e8bba98b364e62b2dba8f960159"
+dependencies = [
+ "color_quant",
+ "weezl",
+]
+
+[[package]]
 name = "gl_generator"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -825,10 +841,25 @@ checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
 dependencies = [
  "bytemuck",
  "byteorder-lite",
+ "color_quant",
+ "gif",
+ "image-webp",
  "moxcms",
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
+]
+
+[[package]]
+name = "image-webp"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "525e9ff3e1a4be2fbea1fdf0e98686a6d98b4d8f937e1bf7402245af1909e8c3"
+dependencies = [
+ "byteorder-lite",
+ "quick-error",
 ]
 
 [[package]]
@@ -1255,7 +1286,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
 dependencies = [
  "bitflags 2.13.1",
+ "block2 0.6.2",
  "dispatch2",
+ "libc",
  "objc2 0.6.4",
 ]
 
@@ -1294,6 +1327,21 @@ dependencies = [
  "objc2 0.5.2",
  "objc2-contacts",
  "objc2-foundation 0.2.2",
+]
+
+[[package]]
+name = "objc2-core-video"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d425caf1df73233f29fd8a5c3e5edbc30d2d4307870f802d18f00d83dc5141a6"
+dependencies = [
+ "bitflags 2.13.1",
+ "block2 0.6.2",
+ "objc2 0.6.4",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-io-surface",
+ "objc2-metal 0.3.2",
 ]
 
 [[package]]
@@ -1811,9 +1859,11 @@ name = "reveal-embedder"
 version = "0.1.0"
 dependencies = [
  "indexmap",
+ "pollster",
  "valo",
  "valo-geometry",
  "valo-system-fonts",
+ "wgpu",
 ]
 
 [[package]]
@@ -1824,6 +1874,9 @@ dependencies = [
  "pollster",
  "reveal-embedder",
  "valo",
+ "valo-codec",
+ "valo-codec-apple",
+ "valo-codec-software",
  "wgpu",
  "winit",
 ]
@@ -1852,8 +1905,10 @@ dependencies = [
 name = "reveal-painting"
 version = "0.1.0"
 dependencies = [
+ "indexmap",
  "reveal-embedder",
  "reveal-foundation",
+ "reveal-scheduler",
  "valo-system-fonts",
 ]
 
@@ -2419,9 +2474,9 @@ checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
 
 [[package]]
 name = "valo"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c90c6efb6bcb7aa1e9fa2c2026736fb6b650d80e8db7999ef3638e09d6c1f9a1"
+checksum = "4094d960f043f4d25f89637016f8cd8948e1e57ac7ba317c4f1cd6c38085bf6d"
 dependencies = [
  "objc2 0.6.4",
  "objc2-metal 0.3.2",
@@ -2434,10 +2489,54 @@ dependencies = [
 ]
 
 [[package]]
-name = "valo-dl"
-version = "0.4.1"
+name = "valo-codec"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45408a274766df4c4c4996a5a049ba88539adfeeef7c8a3ae03e2fa8ad92c222"
+checksum = "ef05060a5516eb1791f8e0ce9309f0c5d70f51c2381edaf6597ec79fcb146e1f"
+dependencies = [
+ "valo",
+ "wgpu",
+]
+
+[[package]]
+name = "valo-codec-apple"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bfd53b58267c3971f9959b2690b18ce0be660853a4f51b81c59f285c782f2ae"
+dependencies = [
+ "core-foundation 0.10.1",
+ "core-foundation-sys",
+ "core-graphics 0.24.0",
+ "foreign-types",
+ "objc2 0.6.4",
+ "objc2-core-foundation",
+ "objc2-core-video",
+ "objc2-metal 0.3.2",
+ "valo",
+ "valo-codec",
+ "wgpu",
+]
+
+[[package]]
+name = "valo-codec-software"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d740f431358f956cce47c35db1599f26d84931d743b2d356ecfc061e3d24bb9d"
+dependencies = [
+ "gif",
+ "image",
+ "image-webp",
+ "moxcms",
+ "png",
+ "valo",
+ "valo-codec",
+]
+
+[[package]]
+name = "valo-dl"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1ff776b60466fec4e3d08346ec7ef374463603f3b8549bd92bf7d722a939aa3"
 dependencies = [
  "valo-geometry",
  "valo-text",
@@ -2446,9 +2545,9 @@ dependencies = [
 
 [[package]]
 name = "valo-fontmgr"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00843d8a96973d414e7b2ef99f47dc09a54cff492700b3cad79885e8f3d707b2"
+checksum = "8c67930cf3456f991296e8d486f35f2111aaf05be09040b81b57fd240fb43972"
 dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
@@ -2460,18 +2559,18 @@ dependencies = [
 
 [[package]]
 name = "valo-geometry"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d7fd0b41124d61bb121fcff0e4ce50f50c15e90492945a2d20a85baede31ee7"
+checksum = "8a3c1bd0c8c261f0873e55d37e2d4e8f1b2f2d1fba0e3b36265b89103af624ca"
 dependencies = [
  "glam",
 ]
 
 [[package]]
 name = "valo-renderer"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08833e2070ceb636cc87521abb6ac5161e2a2c7df6677c2e0910b5d830671149"
+checksum = "9dbbd4b180e588ed0fa3562b96be520a815b8731f01af03e87db0dc17b70ed69"
 dependencies = [
  "bytemuck",
  "etagere",
@@ -2486,9 +2585,9 @@ dependencies = [
 
 [[package]]
 name = "valo-system-fonts"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "680fe6e9563b0a6f8043eb67b05222846d297fbebd34ce9d61f43d3c73e12f1a"
+checksum = "2e6e7234a817d360f22a8398b16e7e4be4c9f59e97895c63cee13ba9ea05edfb"
 dependencies = [
  "valo-fontmgr",
  "valo-text",
@@ -2496,9 +2595,9 @@ dependencies = [
 
 [[package]]
 name = "valo-text"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cf8de70ed5f91bfd7925ea47bc9e246f3d4b4ae68b6e5976dfaabe6ed40a3b3"
+checksum = "d16ad7b7fc25ff926d19008df675ef2181e5ade0d79a9dc11db793ce63c7e3e7"
 dependencies = [
  "harfrust",
  "skrifa 0.35.0",

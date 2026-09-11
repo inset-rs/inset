@@ -53,8 +53,12 @@ pub trait TextBoundary {
     /// The returned [`TextRange`] may contain `-1`, which indicates no boundaries
     /// can be found in that direction.
     fn get_text_boundary_at(&self, app: &mut App, position: i32) -> TextRange {
-        let start = self.get_leading_text_boundary_at(app, position).unwrap_or(-1);
-        let end = self.get_trailing_text_boundary_at(app, position).unwrap_or(-1);
+        let start = self
+            .get_leading_text_boundary_at(app, position)
+            .unwrap_or(-1);
+        let end = self
+            .get_trailing_text_boundary_at(app, position)
+            .unwrap_or(-1);
         TextRange::new(start, end)
     }
 }
@@ -81,8 +85,8 @@ impl TextBoundary for CharacterBoundary {
         if position < 0 {
             return None;
         }
-        let grapheme_start =
-            CharacterRange::at(&self.text, position.min(utf16_len(&self.text))).string_before_length;
+        let grapheme_start = CharacterRange::at(&self.text, position.min(utf16_len(&self.text)))
+            .string_before_length;
         debug_assert!(CharacterRange::at(&self.text, grapheme_start).is_empty());
         Some(grapheme_start)
     }
@@ -92,7 +96,8 @@ impl TextBoundary for CharacterBoundary {
             return None;
         }
         let range_at_position = CharacterRange::at(&self.text, (position + 1).max(0));
-        let next_boundary = range_at_position.string_before_length + range_at_position.current_length;
+        let next_boundary =
+            range_at_position.string_before_length + range_at_position.current_length;
         debug_assert!(
             next_boundary == utf16_len(&self.text)
                 || CharacterRange::at(&self.text, next_boundary).is_empty()
@@ -104,11 +109,13 @@ impl TextBoundary for CharacterBoundary {
         if position < 0 {
             return TextRange::new(
                 -1,
-                self.get_trailing_text_boundary_at(app, position).unwrap_or(-1),
+                self.get_trailing_text_boundary_at(app, position)
+                    .unwrap_or(-1),
             );
         } else if position >= utf16_len(&self.text) {
             return TextRange::new(
-                self.get_leading_text_boundary_at(app, position).unwrap_or(-1),
+                self.get_leading_text_boundary_at(app, position)
+                    .unwrap_or(-1),
                 -1,
             );
         }
@@ -117,7 +124,8 @@ impl TextBoundary for CharacterBoundary {
             // An empty range means `position` is a grapheme boundary.
             TextRange::new(
                 range_at_position.string_before_length,
-                self.get_trailing_text_boundary_at(app, position).unwrap_or(-1),
+                self.get_trailing_text_boundary_at(app, position)
+                    .unwrap_or(-1),
             )
         } else {
             TextRange::new(
@@ -401,10 +409,10 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let boundary = ParagraphBoundary::new(concat!(
-            "Now is the time for\n",   // 20
-            "all good people\n\r\n",   // 20 + 18 => 38
-            "to come to the aid\n",    // 38 + 19 => 57
-            "of their country.",       // 57 + 17 => 74
+            "Now is the time for\n", // 20
+            "all good people\n\r\n", // 20 + 18 => 38
+            "to come to the aid\n",  // 38 + 19 => 57
+            "of their country.",     // 57 + 17 => 74
         ));
         assert_eq!(leading(&mut app, &boundary, 56), Some(38));
         assert_eq!(trailing(&mut app, &boundary, 56), Some(57));

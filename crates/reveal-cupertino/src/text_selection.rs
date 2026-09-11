@@ -192,7 +192,11 @@ impl TextSelectionControls for CupertinoTextSelectionControls {
         }
     }
 
-    fn get_handle_anchor(&self, handle_type: TextSelectionHandleType, text_line_height: f64) -> Offset {
+    fn get_handle_anchor(
+        &self,
+        handle_type: TextSelectionHandleType,
+        text_line_height: f64,
+    ) -> Offset {
         let handle_size = self.get_handle_size(text_line_height);
         match handle_type {
             TextSelectionHandleType::Left => {

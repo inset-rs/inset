@@ -23,6 +23,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - debug.rs → debug.dart
 - pipeline_owner.rs → object.dart (PipelineOwner)
 - sliver_fixed_extent_list.rs → sliver_fixed_extent_list.dart
+- image.rs → image.dart (RenderImage)
 
 ## object.rs → object.dart (RenderObject)
 
@@ -185,6 +186,11 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: `drive` takes a clone, so writing `begin` or `end` afterwards does not reach the driven animation, as it does on a Dart `Tween`.
 
 ## Deferred
+
+- `RenderImage`'s `color` / `colorBlendMode` and `invertColors`. Trigger: painting's colour filters.
+- `RenderImage`'s `centerSlice`. Trigger: an image drawn as a resizable frame.
+- `RenderImage`'s `filterQuality` and `isAntiAlias`. Trigger: a caller that needs to choose how an image is sampled.
+- `RenderImage`'s semantics label. Trigger: accessibility.
 - `TextureLayer`, `PlatformViewLayer`, `PerformanceOverlayLayer`, `ClipRSuperellipseLayer`, `ColorFilterLayer`, `ImageFilterLayer`, `ShaderMaskLayer`, `OffsetLayer.toImage` / `toImageSync`, `PaintingContext.pushColorFilter`, `RenderView._updateSystemChrome`. Trigger: a texture or platform view, a superellipse clip, a colour/image/shader filter widget, `RepaintBoundary.toImage`, system chrome.
 - `PaintingContext.addCompositionCallback`. Trigger: a caller that needs composition callbacks on the painting context (layers already have them).
 - Debug paint overlays on boxes, slivers and the viewport, and the overflow indicators of `RenderFlex` and `RenderConstraintsTransformBox` (an overflowing box clips but paints no striped hint); with them, `paintsChild` as a virtual. Trigger: inspector.

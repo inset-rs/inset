@@ -12,21 +12,20 @@ use reveal_animation::{
     Animation, AnimationBehavior, AnimationController, AnimationStatus, AnimationStatusListener,
     Curves,
 };
+use reveal_embedder::valo::{Cap, Join};
 use reveal_embedder::{
     BlurStyle, Brightness, Canvas, Clip, Color, FillRule, Offset, Paint, PaintStyle, Path,
     PathBuilder, RRect, Radius, Rect, Size, Stroke, clamp_double, rrect_radii_elliptical,
 };
-use reveal_embedder::valo::{Cap, Join};
 use reveal_foundation::{App, Handle, Listener};
 use reveal_gestures::DragEndDetails;
 use reveal_painting::{BoxShadow, ClipContext, EdgeInsetsGeometry, draw_rrect};
 use reveal_rendering::{
-    AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, BoxParentData,
+    AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, BoxParentData, ClipPathLayer,
     ContainerBoxParentData, ContainerParentDataMixin, ContainerRenderObjectData,
-    ContainerRenderObjectMixin, CustomPainter,
-    ErasedRenderObject, LayerHandle, PaintingContext, RenderBox, RenderBoxData, RenderHandle,
-    RenderObject, RenderObjectData, RenderObjectWithChildData, RenderObjectWithChildMixin,
-    RenderShiftedBox, ClipPathLayer,
+    ContainerRenderObjectMixin, CustomPainter, ErasedRenderObject, LayerHandle, PaintingContext,
+    RenderBox, RenderBoxData, RenderHandle, RenderObject, RenderObjectData,
+    RenderObjectWithChildData, RenderObjectWithChildMixin, RenderShiftedBox,
 };
 use reveal_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use reveal_widgets::{
@@ -367,7 +366,10 @@ impl RenderCupertinoTextSelectionToolbarShape {
             let corner = Rect::from_points(vertex, other_vertex);
             path.ellipse(
                 corner.center(),
-                [(corner.width() / 2.0) as f32, (corner.height() / 2.0) as f32],
+                [
+                    (corner.width() / 2.0) as f32,
+                    (corner.height() / 2.0) as f32,
+                ],
                 0.0,
                 (half_pi * i as f64) as f32,
                 half_pi as f32,
@@ -497,13 +499,8 @@ impl RenderObject for RenderCupertinoTextSelectionToolbarShape {
         let rrect = Self::shape_rrect(child.size(app));
         let clip_path = self.clip_path(app, child, rrect);
         if let Some(shadow_color) = self.get(app).shadow_color {
-            let box_shadow = BoxShadow::new(
-                shadow_color,
-                Offset::ZERO,
-                15.0,
-                0.0,
-                BlurStyle::Normal,
-            );
+            let box_shadow =
+                BoxShadow::new(shadow_color, Offset::ZERO, 15.0, 0.0, BlurStyle::Normal);
             let shadow_rrect = RRect::from_ltrbr(
                 rrect.left,
                 rrect.top,
@@ -797,30 +794,30 @@ impl State for CupertinoTextSelectionToolbarContentState {
         let back_button = Center::new()
             .width_factor(1.0)
             .height_factor(1.0)
-            .child(
-                CupertinoTextSelectionToolbarButton::new(
-                    Some(Listener::handle_method(self, Self::handle_previous_page)),
-                    IgnorePointer::new().child(
-                        CustomPaint::new()
-                            .painter(LeftCupertinoChevronPainter { color: chevron_color })
-                            .size(Size::square(K_TOOLBAR_CHEVRON_SIZE)),
-                    ),
+            .child(CupertinoTextSelectionToolbarButton::new(
+                Some(Listener::handle_method(self, Self::handle_previous_page)),
+                IgnorePointer::new().child(
+                    CustomPaint::new()
+                        .painter(LeftCupertinoChevronPainter {
+                            color: chevron_color,
+                        })
+                        .size(Size::square(K_TOOLBAR_CHEVRON_SIZE)),
                 ),
-            )
+            ))
             .into_widget();
         let next_button = Center::new()
             .width_factor(1.0)
             .height_factor(1.0)
-            .child(
-                CupertinoTextSelectionToolbarButton::new(
-                    Some(Listener::handle_method(self, Self::handle_next_page)),
-                    IgnorePointer::new().child(
-                        CustomPaint::new()
-                            .painter(RightCupertinoChevronPainter { color: chevron_color })
-                            .size(Size::square(K_TOOLBAR_CHEVRON_SIZE)),
-                    ),
+            .child(CupertinoTextSelectionToolbarButton::new(
+                Some(Listener::handle_method(self, Self::handle_next_page)),
+                IgnorePointer::new().child(
+                    CustomPaint::new()
+                        .painter(RightCupertinoChevronPainter {
+                            color: chevron_color,
+                        })
+                        .size(Size::square(K_TOOLBAR_CHEVRON_SIZE)),
                 ),
-            )
+            ))
             .into_widget();
         let children: Vec<WidgetRef> = self
             .widget(app)
@@ -1043,7 +1040,10 @@ struct CupertinoTextSelectionToolbarItemsElement {
 }
 
 impl CupertinoTextSelectionToolbarItemsElement {
-    fn create(app: &mut App, widget: WidgetRef) -> Handle<CupertinoTextSelectionToolbarItemsElement> {
+    fn create(
+        app: &mut App,
+        widget: WidgetRef,
+    ) -> Handle<CupertinoTextSelectionToolbarItemsElement> {
         debug_assert!(downcast_widget::<CupertinoTextSelectionToolbarItems>(&*widget).is_some());
         app.create(CupertinoTextSelectionToolbarItemsElement {
             element: ElementData::new(widget),

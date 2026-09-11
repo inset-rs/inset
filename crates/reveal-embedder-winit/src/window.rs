@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use reveal_embedder::{
-    Brightness, EmbedderClient, FontSource, Frame, KeyData, KeyEventDeviceType, KeyEventType,
+    Brightness, EmbedderClient, FontSource, Frame, ImageCodec, ImageCodecFuture, ImageDecodeError,
+    ImageFrame, ImageFrameFuture, ImageRepetition, KeyData, KeyEventDeviceType, KeyEventType,
     Matrix4, Offset, Picture, Platform, PlatformRef, PointerChange, PointerData, PointerDataPacket,
     PointerDeviceKind, PointerSignalKind, Rect, Size, SystemFontSource, SystemMouseCursorKind,
     TargetPlatform, TextEditingValue, TextInputConfiguration, View, ViewConstraints,
@@ -22,11 +23,21 @@ use winit::window::{CursorIcon, ImePurpose, Window, WindowId};
 use crate::ime::{ImeOutcome, apply_ime};
 
 use crate::gpu::Gpu;
+use crate::images::with_event_loop_wake;
 use crate::keys;
 use crate::text_input::{ActiveTextInput, TextInputKeyEffect};
-use crate::{ImplicitViewConfig, WinitEmbedder};
+use crate::{DecodeExecution, ImplicitViewConfig, WinitEmbedder, create_image_loader};
 
 const IMPLICIT_VIEW: ViewId = ViewId(0);
+
+/// Work requests and asynchronous completions both enter through winit's proxy.
+#[derive(Clone, Copy, Debug)]
+enum HostEvent {
+    Requests,
+    Wake,
+}
+
+type CreateImageLoader = Box<dyn FnOnce(valo::ImageContext) -> valo_codec::ImageLoader>;
 
 /// The long-lived host capability held by `App`.
 ///
@@ -37,7 +48,7 @@ struct WinitPlatform {
     frame_requested: Cell<bool>,
     views: RefCell<HashMap<ViewId, ViewRef>>,
     implicit_view: Option<ViewId>,
-    proxy: EventLoopProxy<()>,
+    proxy: EventLoopProxy<HostEvent>,
     origin: Instant,
     brightness: Cell<Brightness>,
     /// The latest system cursor request, applied by the event loop.
@@ -46,10 +57,12 @@ struct WinitPlatform {
     focus_requests: RefCell<Vec<ViewFocusEvent>>,
     /// The OS pasteboard; created on first use so a missing clipboard host is not fatal.
     clipboard: RefCell<Option<arboard::Clipboard>>,
+    /// Decoded images belong to the device and do not retain a window surface.
+    image_loader: RefCell<Option<valo_codec::ImageLoader>>,
 }
 
 impl WinitPlatform {
-    fn new(proxy: EventLoopProxy<()>, implicit_view: Option<ViewId>) -> WinitPlatform {
+    fn new(proxy: EventLoopProxy<HostEvent>, implicit_view: Option<ViewId>) -> WinitPlatform {
         WinitPlatform {
             deadline: Cell::new(None),
             frame_requested: Cell::new(false),
@@ -60,6 +73,7 @@ impl WinitPlatform {
             brightness: Cell::new(Brightness::Light),
             cursor_request: Cell::new(None),
             focus_requests: RefCell::new(Vec::new()),
+            image_loader: RefCell::new(None),
             clipboard: RefCell::new(None),
         }
     }
@@ -73,7 +87,7 @@ impl WinitPlatform {
     }
 
     fn wake_event_loop(&self) {
-        let _ = self.proxy.send_event(());
+        let _ = self.proxy.send_event(HostEvent::Requests);
     }
 
     fn elapsed(&self) -> Duration {
@@ -141,6 +155,40 @@ impl Platform for WinitPlatform {
 
     fn view(&self, id: ViewId) -> Option<ViewRef> {
         self.views.borrow().get(&id).cloned()
+    }
+
+    fn open_image_codec(&self, bytes: Arc<[u8]>) -> ImageCodecFuture {
+        let loader = self.image_loader.borrow().clone();
+        let proxy = self.proxy.clone();
+        let codec_proxy = proxy.clone();
+        with_event_loop_wake(
+            async move {
+                if bytes.is_empty() {
+                    return Err(ImageDecodeError::Empty);
+                }
+                let loader = loader.ok_or(ImageDecodeError::NoDecoder)?;
+                let codec = loader
+                    .open(
+                        bytes,
+                        valo_codec::DecodeOptions {
+                            // Pictures are routinely drawn smaller than they decode, and mip
+                            // levels are the difference between a smooth downscale and a
+                            // shimmering one.
+                            mipmaps: true,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .map_err(as_decode_error)?;
+                Ok(Box::new(WinitImageCodec {
+                    codec,
+                    proxy: codec_proxy,
+                }) as Box<dyn ImageCodec>)
+            },
+            move || {
+                let _ = proxy.send_event(HostEvent::Wake);
+            },
+        )
     }
 
     fn request_view_focus_change(
@@ -282,6 +330,7 @@ struct HostedView {
 }
 
 struct WinitApp<C> {
+    image_loader_setup: Option<CreateImageLoader>,
     implicit_view_config: Option<ImplicitViewConfig>,
     start: Option<Box<dyn FnOnce(PlatformRef) -> C>>,
     client: Option<C>,
@@ -305,11 +354,15 @@ struct WinitApp<C> {
 pub(crate) fn run<C: EmbedderClient + 'static>(
     config: WinitEmbedder,
     start: impl FnOnce(PlatformRef) -> C + 'static,
+    image_loader_setup: Option<CreateImageLoader>,
 ) {
-    let event_loop = EventLoop::new().expect("create winit event loop");
+    let event_loop = EventLoop::<HostEvent>::with_user_event()
+        .build()
+        .expect("create winit event loop");
     let implicit_view = config.implicit_view.is_some().then_some(IMPLICIT_VIEW);
     let platform = Rc::new(WinitPlatform::new(event_loop.create_proxy(), implicit_view));
     let mut host = WinitApp {
+        image_loader_setup,
         implicit_view_config: config.implicit_view,
         start: Some(Box::new(start)),
         client: None,
@@ -531,11 +584,19 @@ impl<C: EmbedderClient> WinitApp<C> {
             surface.set_presents_with_transaction(true);
             surface
         };
-        let context = valo::Context::new(gpu.device, gpu.queue);
+        let context = valo::Context::new(gpu.device.clone(), gpu.queue.clone());
+        let images = context.image_context();
+        let loader = match self.image_loader_setup.take() {
+            Some(make_loader) => make_loader(images),
+            None => create_image_loader(images, DecodeExecution::default())
+                .expect("start the image decode worker"),
+        };
+        *self.platform.image_loader.borrow_mut() = Some(loader);
+        let surface = Arc::new(Mutex::new(WinitSurface { surface, context }));
         let view = Rc::new(WinitView {
             id: IMPLICIT_VIEW,
             metrics: Cell::new(window_metrics(&window)),
-            surface: Arc::new(Mutex::new(WinitSurface { surface, context })),
+            surface,
             window: Arc::clone(&window),
             editing_state: RefCell::new(TextEditingValue::EMPTY),
             text_input: Cell::new(None),
@@ -752,7 +813,54 @@ impl<C: EmbedderClient> WinitApp<C> {
     }
 }
 
-impl<C: EmbedderClient> ApplicationHandler for WinitApp<C> {
+/// Adapts Valo's drawable frames to the framework's codec contract.
+struct WinitImageCodec {
+    codec: valo_codec::Codec,
+    proxy: EventLoopProxy<HostEvent>,
+}
+
+impl ImageCodec for WinitImageCodec {
+    fn frame_count(&self) -> u32 {
+        self.codec.info().frame_count
+    }
+
+    fn repetition(&self) -> ImageRepetition {
+        match self.codec.info().repetition {
+            valo_codec::Repetition::Once => ImageRepetition::Once,
+            valo_codec::Repetition::Times(times) => ImageRepetition::Times(times),
+            valo_codec::Repetition::Forever => ImageRepetition::Forever,
+        }
+    }
+
+    fn next_frame(&mut self) -> ImageFrameFuture<'_> {
+        let frame = self.codec.next_frame();
+        let proxy = self.proxy.clone();
+        with_event_loop_wake(
+            async move {
+                let frame = frame.await.map_err(as_decode_error)?;
+                Ok(ImageFrame {
+                    image: frame.image,
+                    duration: frame.duration,
+                })
+            },
+            move || {
+                let _ = proxy.send_event(HostEvent::Wake);
+            },
+        )
+    }
+}
+
+/// Preserves decoder diagnostics at the framework's existing error boundary.
+fn as_decode_error(error: valo_codec::DecodeError) -> ImageDecodeError {
+    match error {
+        valo_codec::DecodeError::NoDecoder => ImageDecodeError::NoDecoder,
+        valo_codec::DecodeError::Unsupported(_) => ImageDecodeError::UnknownFormat,
+        valo_codec::DecodeError::InvalidData(reason) => ImageDecodeError::Damaged(reason),
+        other => ImageDecodeError::Failed(other.to_string()),
+    }
+}
+
+impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: winit::event::StartCause) {
         if matches!(cause, winit::event::StartCause::ResumeTimeReached { .. }) {
             self.platform.deadline.set(None);
@@ -762,7 +870,12 @@ impl<C: EmbedderClient> ApplicationHandler for WinitApp<C> {
         }
     }
 
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: ()) {
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: HostEvent) {
+        if matches!(event, HostEvent::Wake)
+            && let Some(client) = &mut self.client
+        {
+            client.wake(self.platform.elapsed());
+        }
         self.apply_cursor_request();
         self.apply_focus_requests();
         if self.frame_source.is_some() {

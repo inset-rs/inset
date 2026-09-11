@@ -1240,10 +1240,7 @@ mod layout_tests {
     #[test]
     fn unspecified_family_at_black_weight_covers_latin() {
         let mut fonts = FontCollection::new();
-        crate::set_default_font_manager(
-            &mut fonts,
-            Box::new(crate::SystemFontSource::platform()),
-        );
+        crate::set_default_font_manager(&mut fonts, Box::new(crate::SystemFontSource::platform()));
         let mut builder = ParagraphBuilder::new(ParagraphStyle::new());
         builder.push_style(TextStyle {
             font_size: Some(10.2),

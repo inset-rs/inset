@@ -6,6 +6,7 @@ pub mod expansion_tiles;
 pub mod heroes;
 pub mod home;
 pub mod icons;
+pub mod images;
 pub mod indicators;
 pub mod lists;
 pub mod navigation;

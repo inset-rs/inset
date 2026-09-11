@@ -17,6 +17,7 @@ reveal-services.workspace = true
 unicode-general-category.workspace = true
 
 [dev-dependencies]
+reveal-embedder = { workspace = true, features = ["test-support"] }
 valo-system-fonts.workspace = true
 
 [lints]

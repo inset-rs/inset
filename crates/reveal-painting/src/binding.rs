@@ -1,7 +1,7 @@
 //! Flutter counterpart: `painting/binding.dart` (`PaintingBinding`).
 //!
-//! Only the font collection is here; `imageCache`, `shaderWarmUp`, and the `systemFonts`
-//! listenable wait.
+//! Only the font collection is here; images are opened through the host directly, and
+//! `shaderWarmUp` and the `systemFonts` listenable wait.
 
 use reveal_embedder::{FontCollection, FontId, set_default_font_manager};
 use reveal_foundation::{App, Handle};

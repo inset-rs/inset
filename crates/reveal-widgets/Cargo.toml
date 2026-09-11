@@ -18,6 +18,7 @@ reveal-scheduler.workspace = true
 reveal-services.workspace = true
 
 [dev-dependencies]
+reveal-embedder = { workspace = true, features = ["test-support"] }
 valo-system-fonts.workspace = true
 
 [lints]

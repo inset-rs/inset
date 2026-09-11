@@ -5,12 +5,15 @@
 #![recursion_limit = "256"]
 
 mod gpu;
+mod images;
 mod ime;
 mod keys;
 mod text_input;
 mod window;
 
 use reveal_embedder::{EmbedderClient, PlatformRef};
+
+pub use images::{DecodeExecution, create_image_loader};
 
 /// Configuration for the implicit view created before application startup.
 #[derive(Clone, Debug, PartialEq)]
@@ -46,6 +49,19 @@ impl WinitEmbedder {
     /// Starts the native loop. `start` runs on the first `resumed`, after the
     /// configured implicit view is created, and returns the client.
     pub fn run<C: EmbedderClient + 'static>(self, start: impl FnOnce(PlatformRef) -> C + 'static) {
-        window::run(self, start);
+        window::run(self, start, None);
+    }
+
+    /// Starts the native loop with an image loader of the application's choosing.
+    ///
+    /// The factory receives the renderer's device resources before `start` runs. Use
+    /// `create_image_loader(images, DecodeExecution::Local)` to decode without a worker
+    /// thread, or build a `valo_codec::ImageLoader` with decoders and an order of your own.
+    pub fn run_with_image_loader<C: EmbedderClient + 'static>(
+        self,
+        make_loader: impl FnOnce(valo::ImageContext) -> valo_codec::ImageLoader + 'static,
+        start: impl FnOnce(PlatformRef) -> C + 'static,
+    ) {
+        window::run(self, start, Some(Box::new(make_loader)));
     }
 }

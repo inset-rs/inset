@@ -30,15 +30,11 @@ fn k_toolbar_button_font_style() -> TextStyle {
         .font_weight(FontWeight::W400)
 }
 
-const K_TOOLBAR_TEXT_COLOR: CupertinoDynamicColor = CupertinoDynamicColor::with_brightness(
-    Color::new(0xFF000000),
-    Color::new(0xFFFFFFFF),
-);
+const K_TOOLBAR_TEXT_COLOR: CupertinoDynamicColor =
+    CupertinoDynamicColor::with_brightness(Color::new(0xFF000000), Color::new(0xFFFFFFFF));
 
-const K_TOOLBAR_PRESSED_COLOR: CupertinoDynamicColor = CupertinoDynamicColor::with_brightness(
-    Color::new(0x10000000),
-    Color::new(0x10FFFFFF),
-);
+const K_TOOLBAR_PRESSED_COLOR: CupertinoDynamicColor =
+    CupertinoDynamicColor::with_brightness(Color::new(0x10000000), Color::new(0x10FFFFFF));
 
 const K_TOOLBAR_BUTTON_PADDING: EdgeInsets = EdgeInsets::from_ltrb(16.0, 18.0, 16.0, 18.0);
 
@@ -103,9 +99,7 @@ impl CupertinoTextSelectionToolbarButton {
 
     /// Create an instance of [`CupertinoTextSelectionToolbarButton`] from the given
     /// [`ContextMenuButtonItem`].
-    pub fn button_item(
-        button_item: ContextMenuButtonItem,
-    ) -> CupertinoTextSelectionToolbarButton {
+    pub fn button_item(button_item: ContextMenuButtonItem) -> CupertinoTextSelectionToolbarButton {
         let on_pressed = button_item.on_pressed.clone();
         CupertinoTextSelectionToolbarButton {
             key: None,
@@ -212,11 +206,13 @@ impl CupertinoTextSelectionToolbarButtonState {
             .into_widget();
         match button_item.as_ref().map(|item| item.r#type) {
             Some(ContextMenuButtonType::LiveTextInput) => SizedBox::square(Some(13.0))
-                .child(CustomPaint::new().painter(LiveTextIconPainter {
-                    color: K_TOOLBAR_TEXT_COLOR
-                        .resolve_from(app, context)
-                        .effective_color(),
-                }))
+                .child(
+                    CustomPaint::new().painter(LiveTextIconPainter {
+                        color: K_TOOLBAR_TEXT_COLOR
+                            .resolve_from(app, context)
+                            .effective_color(),
+                    }),
+                )
                 .into_widget(),
             _ => text_widget,
         }

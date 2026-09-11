@@ -375,6 +375,18 @@ pub trait Platform: 'static {
     /// default would let one silently claim the wrong conventions.
     fn target_platform(&self) -> TargetPlatform;
 
+    /// Open an encoded image, answering with a codec for its frames.
+    ///
+    /// Flutter dart:ui `instantiateImageCodec`. The host decodes with whatever its platform
+    /// provides and uploads each frame, so the framework never sees pixels and the set of
+    /// readable formats is the platform's rather than the framework's.
+    ///
+    /// The default answers a failure at once, so a host with no decoder leaves nobody waiting.
+    fn open_image_codec(&self, bytes: std::sync::Arc<[u8]>) -> crate::ImageCodecFuture {
+        let _ = bytes;
+        Box::pin(std::future::ready(Err(crate::ImageDecodeError::NoDecoder)))
+    }
+
     /// Whether the host's own text input turns editing keys into edits before the framework
     /// sees them — backspace and delete, caret movement, the line and document ends.
     ///

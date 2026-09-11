@@ -1,8 +1,8 @@
 //! The widgets: one file per Flutter file.
 
 pub mod actions;
-pub mod annotated_region;
 pub mod animated_size;
+pub mod annotated_region;
 pub mod app;
 pub mod app_lifecycle_listener;
 pub mod autofill;

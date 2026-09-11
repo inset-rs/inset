@@ -5,8 +5,14 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Images for tests above the host, which need a GPU device to exist at all.
+test-support = ["dep:pollster", "dep:wgpu"]
+
 [dependencies]
 indexmap.workspace = true
+pollster = { workspace = true, optional = true }
+wgpu = { workspace = true, optional = true }
 valo.workspace = true
 valo-geometry.workspace = true
 valo-system-fonts.workspace = true

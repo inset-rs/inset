@@ -55,6 +55,13 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — Flutter writes one embedder per host and settles this per target platform, where one framework here meets hosts that differ on the same platform.
   Affect: on a host that reports plain key presses, a text field's editing keys work whichever platform the host claims to be.
 
+## image.rs → dart:ui `instantiateImageCodec` / `Codec` / `FrameInfo`
+
+- Change: `Image` is a counted handle to the host's texture, with no clone and no dispose.
+  Reason: language — the texture is freed when the last holder drops it, where Dart's collector needs `Image.clone` and `Image.dispose` to be told when that is.
+  Affect: a picture is freed when the last holder lets go of it, so Flutter code being ported has no `dispose` call to make and no freed picture left to draw by mistake.
+
+
 ## restoration.rs → services `message_codecs.dart` (`StandardMessageCodec`)
 
 - Change: `RestorationData` is a value enum over the kinds `StandardMessageCodec` can carry, and there is no encode or decode step.
@@ -101,6 +108,11 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 
 ## Deferred
 
+- Decoding at any size but the file's own, which in Dart is `instantiateImageCodec`'s target width and height and the `getTargetSize` callback of `instantiateImageCodecWithSize`. Trigger: `ResizeImage`, which is what the image widget's `cacheWidth` and `cacheHeight` become.
+- Reading an image's pixels back (`Image.toByteData`). Trigger: golden tests.
+- The colour space an image carries beyond sRGB, so a photograph in a wider one is drawn as though it were sRGB. Trigger: a display that shows more colours than sRGB.
+- Making an image from pixels that were never encoded (`ImageDescriptor.raw`, `decodeImageFromPixels`). Trigger: a caller holding pixels rather than a file.
+- How far along a decode is, which Dart's codec reports as it reads the file. Trigger: a provider that reports progress.
 - `StrutStyle`, `TextStyle.locale` / `ParagraphStyle.locale`, `addPlaceholder` / `placeholderScales`, `getBoxesForPlaceholders` contents. Trigger: strut, locale-specific glyphs, `WidgetSpan`; valo has none of them.
 - `ImageFilter.blur(tileMode:)` and the `dilate` / `erode` / `matrix` / `shader` filters. Trigger: valo growing those ops.
 - `PlatformDispatcher.locale`, the first of `locales`. Trigger: a caller of the single-locale getter.

@@ -26,6 +26,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - stadium_border.rs → stadium_border.dart
 - inline_span.rs → inline_span.dart
 - text_span.rs → text_span.dart
+- image_stream.rs → image_stream.dart (ImageInfo, ImageStreamListener, completer listener/keep-alive lifetime)
+- image_cache.rs → image_cache.dart (pending/live/LRU tracking, limits, status, and post-frame retention release)
 
 ## colors.rs → colors.dart (+ the `Color` subclass mechanism)
 
@@ -59,12 +61,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Rust has no inheritance.
   Affect: a `BoxShadow` stored where Flutter stores it as a `Shadow` loses `spread_radius` and `blur_style`, so it paints tighter than Flutter's.
 
-## image_provider.rs → image_provider.dart (`ImageConfiguration`) / services `asset_bundle.dart`
-
-- Change: `AssetBundle` is one synchronous `load`; there is no `ImageProvider`, `ImageStream` or `ImageCache`.
-  Reason: platform — a host or test can implement this completely, where Flutter's Future plus codec/cache pipeline is the engine talking to Dart.
-  Affect: an asset resolves within the frame that asks for it, and nothing is cached or shared between two loads of the same key.
-
 ## box_decoration.rs → box_decoration.dart
 
 - Change: `BoxDecoration` and `ShapeDecoration` have no `image` or `gradient` field.
@@ -87,8 +83,32 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — no optional named parameters.
   Affect: measuring with a scaler, `max_lines` or the other options means building a `TextPainter` and laying it out.
 
+## image_stream.rs → image_stream.dart
+
+- Change: `ImageStream` consumers explicitly call `dispose(app)` when replacing or releasing a stream; `Image` widgets do this automatically.
+  Reason: language — an arena's Copy handle does not release its entry when the last Dart-equivalent reference leaves scope.
+  Affect: custom stream consumers must dispose their streams to release their arena storage; image resources still follow Flutter's listener and keep-alive lifetime.
+
+## image_provider.rs → image_provider.dart / services `asset_bundle.dart`
+
+- Change: `AssetImage` reads the file it was given and no other, where Flutter's picks between the copies of a picture an app ships for different screen densities.
+  Reason: platform — choosing among those copies means reading the list of them a bundle publishes, and no bundle here publishes one.
+  Affect: on a high-density screen a picture is drawn from the file named rather than from a sharper copy shipped beside it, unless that copy is named itself.
+
+## decoration_image.rs → decoration_image.dart
+
+- Change: `paint_image` draws with the paint's alpha alone and carries no colour or blend mode over the image.
+  Reason: platform — the renderer tints an image by alpha and ignores the paint's colour channels.
+  Affect: fading an image works; tinting one does nothing.
+
 ## Deferred
 
+- `DecorationImage`, and the `image` field on `BoxDecoration` and `ShapeDecoration`. Trigger: a decoration that paints an image.
+- `paintImage`'s nine-patch centre slice, which stretches the middle of a picture and leaves its edges alone, along with its colour filter, `invertColors`, and the choice of how it is sampled. Trigger: an image drawn as a resizable frame; painting's colour filters; a caller that needs to choose how an image is sampled.
+- Deciding what an image is called only after reading something: Dart's `ImageProvider.obtainKey` answers with a future so a provider can go and look first, where ours answers straight away. Trigger: a provider that has to read a bundle's list of files before it can name one.
+- `ImageChunkEvent` reports loading progress to stream listeners. Trigger: a provider that reports progress, such as a network provider.
+- `ResizeImage`, `FileImage` and `NetworkImage`. Trigger: decoding to a chosen size; a file system; an HTTP client.
+- `ImageProvider.evict` and `obtainCacheStatus`. Trigger: a caller that drops or inspects one image in the cache.
 - `debug.dart` beyond `debugDisableShadows`. Trigger: image loading, or tests that need it.
 - `ColorProperty`; `ColorSwatch` as a `const` table. Trigger: diagnostics; Material's `Colors`.
 - Custom `TextScaler` / `SystemTextScaler`. Trigger: `MediaQuery`.
@@ -96,7 +116,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `_MixedBorderRadius` and cross-kind `add` / `subtract` / `lerp`. Trigger: first consumer that adds a `BorderRadius` to a `BorderRadiusDirectional`.
 - `hashCode` / `Hash`. Trigger: the first map or set keyed by insets, alignment, border radius, `TextScaler` or `TextStyle`.
 - Diagnostics / `debugCheckCanResolveTextDirection`. Trigger: porting diagnostics; a missing `TextDirection` on resolve panics until then.
-- `DecorationImage` and the decoration `image` fields. Trigger: first decoration that paints an image.
 - `ui.Locale`, `ImageConfiguration.locale`, `TextStyle.locale`. Trigger: locale-specific assets or region-specific glyphs.
 - `Gradient`, the decoration `gradient` fields, `createShader`. Trigger: first decoration that paints a gradient; `TileMode.decal` and sweep `endAngle` have no valo counterpart.
 - `AssetBundle.loadString` / `loadStructuredData` / `loadBuffer` / caching, `NetworkAssetBundle`, `rootBundle`. Trigger: string or structured assets, or a default bundle on `App`.

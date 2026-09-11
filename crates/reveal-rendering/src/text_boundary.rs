@@ -66,7 +66,10 @@ pub struct WordBoundary {
 
 impl WordBoundary {
     /// Creates a [`WordBoundary`] with the text and layout information.
-    pub(crate) fn new(text: InlineSpanRef, paragraph: RenderHandle<RenderEditable>) -> WordBoundary {
+    pub(crate) fn new(
+        text: InlineSpanRef,
+        paragraph: RenderHandle<RenderEditable>,
+    ) -> WordBoundary {
         WordBoundary { text, paragraph }
     }
 
@@ -110,14 +113,12 @@ fn code_point_from_surrogates(high_surrogate: i32, low_surrogate: i32) -> i32 {
 fn code_point_at(text: &InlineSpanRef, index: i32) -> Option<i32> {
     let code_unit_at_index = i32::from(text.code_unit_at(index)?);
     Some(match code_unit_at_index & 0xFC00 {
-        0xD800 => code_point_from_surrogates(
-            code_unit_at_index,
-            i32::from(text.code_unit_at(index + 1)?),
-        ),
-        0xDC00 => code_point_from_surrogates(
-            i32::from(text.code_unit_at(index - 1)?),
-            code_unit_at_index,
-        ),
+        0xD800 => {
+            code_point_from_surrogates(code_unit_at_index, i32::from(text.code_unit_at(index + 1)?))
+        }
+        0xDC00 => {
+            code_point_from_surrogates(i32::from(text.code_unit_at(index - 1)?), code_unit_at_index)
+        }
         _ => code_unit_at_index,
     })
 }
@@ -190,7 +191,9 @@ impl TextBoundary for UntilTextBoundary {
         if position < 0 {
             return None;
         }
-        let offset = self.text_boundary.get_leading_text_boundary_at(app, position)?;
+        let offset = self
+            .text_boundary
+            .get_leading_text_boundary_at(app, position)?;
         if (self.predicate)(offset, false) {
             Some(offset)
         } else {

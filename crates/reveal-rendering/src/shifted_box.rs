@@ -2725,11 +2725,8 @@ mod tests {
     fn custom_single_child_layout_positions_the_child() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let child = RenderConstrainedBox::new(
-            &mut app,
-            BoxConstraints::tight(Size::new(20.0, 10.0)),
-            None,
-        );
+        let child =
+            RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(20.0, 10.0)), None);
         let parent = RenderCustomSingleChildLayoutBox::new(
             &mut app,
             Rc::new(OffsetDelegate {

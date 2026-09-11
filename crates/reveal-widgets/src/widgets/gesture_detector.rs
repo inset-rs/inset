@@ -14,15 +14,14 @@ use std::rc::Rc;
 use reveal_embedder::PointerDeviceKind;
 use reveal_foundation::{App, Handle};
 use reveal_gestures::{
-    AnyGestureRecognizer, DeviceGestureSettings, DragStartBehavior, GestureDragCancelCallback,
-    GestureDragDownCallback, GestureDragEndCallback, GestureDragStartCallback,
-    GestureDragUpdateCallback, GestureLongPressCallback, GestureLongPressCancelCallback,
-    GestureLongPressDownCallback, GestureLongPressEndCallback, GestureLongPressMoveUpdateCallback,
-    GestureLongPressStartCallback, GestureLongPressUpCallback, GestureRecognizerLeaf,
-    GestureTapCallback, GestureTapCancelCallback, GestureTapDownCallback, GestureTapMoveCallback,
-    GestureTapUpCallback, HorizontalDragGestureRecognizer, LongPressGestureRecognizer,
-    PointerDownEvent, PointerPanZoomStartEvent, TapGestureRecognizer,
-    DragGestureRecognizer,
+    AnyGestureRecognizer, DeviceGestureSettings, DragGestureRecognizer, DragStartBehavior,
+    GestureDragCancelCallback, GestureDragDownCallback, GestureDragEndCallback,
+    GestureDragStartCallback, GestureDragUpdateCallback, GestureLongPressCallback,
+    GestureLongPressCancelCallback, GestureLongPressDownCallback, GestureLongPressEndCallback,
+    GestureLongPressMoveUpdateCallback, GestureLongPressStartCallback, GestureLongPressUpCallback,
+    GestureRecognizerLeaf, GestureTapCallback, GestureTapCancelCallback, GestureTapDownCallback,
+    GestureTapMoveCallback, GestureTapUpCallback, HorizontalDragGestureRecognizer,
+    LongPressGestureRecognizer, PointerDownEvent, PointerPanZoomStartEvent, TapGestureRecognizer,
 };
 use reveal_rendering::HitTestBehavior;
 

@@ -146,7 +146,11 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the text scale factor, brightness and accessibility flags have no host events yet.
   Affect: a platform brightness change after mount is not reflected until the shell forwards it.
 
-## widgets/image.rs → image.dart (`createLocalImageConfiguration` only)
+## widgets/image.rs → image.dart
+
+- Change: `ImageState` keeps a failed load to itself, where Dart also hands the failure to `FlutterError.onError`.
+  Reason: language — there is no isolate-wide error hook to report it to.
+  Affect: a failed image leaves an empty box and nothing in the log, and a caller that wants to react reads the failure off the state.
 
 - Change: `create_local_image_configuration` leaves `bundle` and `locale` unset.
   Reason: platform — `DefaultAssetBundle` and `Localizations` wait.
@@ -451,6 +455,12 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 
 ## Deferred
 
+- image.rs: `Image.network` and `Image.file`. Trigger: an HTTP client; a file system.
+- image.rs: `Image.asset`'s bundle lookup, and the bundle `createLocalImageConfiguration` would carry, without which `AssetImage` cannot resolve from a widget. Trigger: `DefaultAssetBundle`.
+- image.rs: the frame, loading and error builders, and `gaplessPlayback`. Trigger: a caller that wants to show something while an image loads or after it fails.
+- image.rs: `precacheImage`. Trigger: a caller that warms an image before showing it.
+- image.rs: `color` / `colorBlendMode`, `centerSlice` and `filterQuality`. Trigger: painting's colour filters; an image drawn as a resizable frame; a caller that needs to choose how an image is sampled.
+- image.rs: `excludeFromSemantics` and the semantics label. Trigger: accessibility.
 - focus_manager.rs: the manager's app-lifecycle listening and suspended-node handling. Trigger: `WidgetsBindingObserver.didChangeAppLifecycleState`.
 - focus_manager.rs: `FocusNode.onKey` and the Android IME key check. Trigger: services' raw key path.
 - focus_manager.rs, focus_scope.rs: the focus semantics actions and the `Semantics` wrapper `Focus.includeSemantics` controls. Trigger: accessibility.

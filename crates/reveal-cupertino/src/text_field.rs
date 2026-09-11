@@ -9,8 +9,8 @@ use std::rc::Rc;
 
 use reveal_embedder::{
     BoxHeightStyle, BoxWidthStyle, Brightness, Clip, Color, FontWeight, Offset, Radius,
-    SmartDashesType, SmartQuotesType, TargetPlatform, TextAlign, TextCapitalization, TextDecoration,
-    TextDecorationStyle, TextDirection, TextInputAction, TextInputType,
+    SmartDashesType, SmartQuotesType, TargetPlatform, TextAlign, TextCapitalization,
+    TextDecoration, TextDecorationStyle, TextDirection, TextInputAction, TextInputType,
 };
 use reveal_foundation::{App, Handle, Listenable, Listener};
 use reveal_gestures::{
@@ -43,8 +43,8 @@ use reveal_widgets::{
 use crate::adaptive_text_selection_toolbar::CupertinoAdaptiveTextSelectionToolbar;
 use crate::colors::{CupertinoColors, CupertinoDynamicColor};
 use crate::desktop_text_selection::cupertino_desktop_text_selection_handle_controls;
-use crate::text_selection::cupertino_text_selection_handle_controls;
 use crate::icons::CupertinoIcons;
+use crate::text_selection::cupertino_text_selection_handle_controls;
 use crate::theme::CupertinoTheme;
 
 /// Value inspected from Xcode 11 & iOS 13.0 Simulator.
@@ -1830,16 +1830,14 @@ mod tests {
         KeyData, KeyEventDeviceType, KeyEventType, PointerChange, PointerData, PointerDataPacket,
         PointerDeviceKind, TextAffinity, TextSelection,
     };
-    use reveal_services::{
-        KeyEventManager, LogicalKeyboardKey, PhysicalKeyboardKey, TextInputClient,
-    };
     use reveal_foundation::AppCell;
     use reveal_gestures::GestureBinding;
     use reveal_painting::PaintingBinding;
-    use reveal_widgets::{
-        AnyElement, Column, Expanded, Listener, SizedBox, WidgetsBinding,
-    };
     use reveal_rendering::HitTestBehavior;
+    use reveal_services::{
+        KeyEventManager, LogicalKeyboardKey, PhysicalKeyboardKey, TextInputClient,
+    };
+    use reveal_widgets::{AnyElement, Column, Expanded, Listener, SizedBox, WidgetsBinding};
 
     fn install_fonts(app: &mut App) {
         let binding = PaintingBinding::instance(app);
@@ -2051,24 +2049,26 @@ mod tests {
         build(
             &cell,
             CupertinoApp::new()
-                .home(Column::new().children([
-                    SizedBox::new()
-                        .height(40.0)
-                        .child(
-                            CupertinoTextField::new()
-                                .key(key_ref)
-                                .controller(controller),
+                .home(
+                    Column::new().children([
+                        SizedBox::new()
+                            .height(40.0)
+                            .child(
+                                CupertinoTextField::new()
+                                    .key(key_ref)
+                                    .controller(controller),
+                            )
+                            .into_widget(),
+                        // Something for a click below the field to land on, the way the gallery's
+                        // scrollable covers its page.
+                        Expanded::new(
+                            Listener::new()
+                                .behavior(HitTestBehavior::Opaque)
+                                .child(SizedBox::expand()),
                         )
                         .into_widget(),
-                    // Something for a click below the field to land on, the way the gallery's
-                    // scrollable covers its page.
-                    Expanded::new(
-                        Listener::new()
-                            .behavior(HitTestBehavior::Opaque)
-                            .child(SizedBox::expand()),
-                    )
-                    .into_widget(),
-                ]))
+                    ]),
+                )
                 .into_widget(),
         );
         (cell, controller, key)
@@ -2083,7 +2083,7 @@ mod tests {
             .current_state::<CupertinoTextFieldState>(&mut app)
             .expect("the field mounted");
         assert!(
-            state.effective_focus_node(&mut app).has_focus(&mut app),
+            state.effective_focus_node(&app).has_focus(&mut app),
             "clicking the field should focus it"
         );
 
@@ -2094,7 +2094,7 @@ mod tests {
         pump(&mut app, Duration::ZERO);
 
         assert!(
-            !state.effective_focus_node(&mut app).has_focus(&mut app),
+            !state.effective_focus_node(&app).has_focus(&mut app),
             "a click outside the field should unfocus it"
         );
     }
@@ -2172,7 +2172,14 @@ mod tests {
         send_mouse_buttons(&mut app, PointerChange::Down, start, Offset::ZERO, 2, 2);
         for step in 1..=4 {
             let to = Offset::new(start.dx() + f64::from(step) * 25.0, start.dy());
-            send_mouse_buttons(&mut app, PointerChange::Move, to, Offset::new(25.0, 0.0), 2, 2);
+            send_mouse_buttons(
+                &mut app,
+                PointerChange::Move,
+                to,
+                Offset::new(25.0, 0.0),
+                2,
+                2,
+            );
         }
         let end = Offset::new(start.dx() + 100.0, start.dy());
         send_mouse_buttons(&mut app, PointerChange::Up, end, Offset::ZERO, 2, 0);
@@ -2400,9 +2407,7 @@ mod tests {
         send_mouse_buttons(&mut app, PointerChange::Up, at, Offset::ZERO, 1, 0);
         pump(&mut app, Duration::ZERO);
         let binding = WidgetsBinding::instance(&mut app);
-        let root = binding
-            .root_element(&app)
-            .expect("the tree is attached");
+        let root = binding.root_element(&app).expect("the tree is attached");
         assert!(
             tree_contains(
                 &app,

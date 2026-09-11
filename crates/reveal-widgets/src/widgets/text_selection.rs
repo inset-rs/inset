@@ -50,9 +50,7 @@ use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindin
 use crate::framework::{
     BuildContext, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
 };
-use crate::widgets::basic::{
-    CompositedTransformFollower, Directionality, SizedBox, WidgetBuilder,
-};
+use crate::widgets::basic::{CompositedTransformFollower, Directionality, SizedBox, WidgetBuilder};
 use crate::widgets::editable_text::EditableTextState;
 use crate::widgets::feedback::Feedback;
 use crate::widgets::gesture_detector::{
@@ -2765,17 +2763,15 @@ impl State for SelectionToolbarWrapperState {
         let widget = self.widget(app);
         let (layer_link, offset, child) = (widget.layer_link, widget.offset, widget.child.clone());
         let text_direction = Directionality::of(app, context);
-        TextFieldTapRegion::new(
-            Directionality::new(
-                text_direction,
-                FadeTransition::new(opacity).child(
-                    CompositedTransformFollower::new(layer_link)
-                        .show_when_unlinked(false)
-                        .offset(offset)
-                        .child(child),
-                ),
+        TextFieldTapRegion::new(Directionality::new(
+            text_direction,
+            FadeTransition::new(opacity).child(
+                CompositedTransformFollower::new(layer_link)
+                    .show_when_unlinked(false)
+                    .offset(offset)
+                    .child(child),
             ),
-        )
+        ))
         .into_widget()
     }
 }
@@ -3773,10 +3769,7 @@ pub trait TextSelectionGestureDetectorBuilderBase: TextSelectionGestureDetectorB
                             None,
                             SelectionChangedCause::Drag,
                         );
-                        self.show_magnifier_if_supported_by_platform(
-                            app,
-                            details.global_position,
-                        );
+                        self.show_magnifier_if_supported_by_platform(app, details.global_position);
                     }
                     _ => {}
                 },
@@ -3930,10 +3923,7 @@ pub trait TextSelectionGestureDetectorBuilderBase: TextSelectionGestureDetectorB
                             None,
                             SelectionChangedCause::Drag,
                         );
-                        self.show_magnifier_if_supported_by_platform(
-                            app,
-                            details.global_position,
-                        );
+                        self.show_magnifier_if_supported_by_platform(app, details.global_position);
                     }
                     _ => {}
                 },

@@ -3,8 +3,8 @@
 use std::any::{Any, TypeId};
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::fmt::{self, Debug};
+use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -28,20 +28,20 @@ use reveal_painting::{
 use reveal_physics::{Simulation, Tolerance};
 use reveal_rendering::{
     AnyLayer, AnyRenderBox, AnyRenderObject, AnyViewportOffset, BoxConstraints, BoxHitTestResult,
-    CompositionCallback, HitTestBehavior, LayerLink, PaintingContext, RenderBox, RenderBoxData,
-    RenderEditable, RenderHandle, RenderObject, RenderObjectData, RenderObjectWithChildData,
-    RenderObjectWithChildMixin, RenderProxyBoxMixin, RenderProxyBoxWithHitTestBehavior,
-    LineBoundary, RevealedOffset, VerticalCaretMovementRun,
+    CompositionCallback, HitTestBehavior, LayerLink, LineBoundary, PaintingContext, RenderBox,
+    RenderBoxData, RenderEditable, RenderHandle, RenderObject, RenderObjectData,
+    RenderObjectWithChildData, RenderObjectWithChildMixin, RenderProxyBoxMixin,
+    RenderProxyBoxWithHitTestBehavior, RevealedOffset, VerticalCaretMovementRun,
 };
 use reveal_scheduler::{
     FrameCallback, SchedulerBinding, Ticker, TickerCallback, TickerProviderObject,
 };
 use reveal_services::{
-    AnyAutofillClient, AnyTextSelectionDelegate, AutofillClient, AutofillHints, Clipboard,
-    ClipboardData, DefaultProcessTextService, FilteringTextInputFormatter, KeyboardInsertedContent,
-    LiveText, MouseCursorRef, ProcessTextAction, ProcessTextService, SelectionChangedCause,
-    CharacterBoundary, DocumentBoundary, ParagraphBoundary, SpellCheckResults, SuggestionSpan,
-    TextBoundary, TextEditingValue, TextInput, TextInputClient,
+    AnyAutofillClient, AnyTextSelectionDelegate, AutofillClient, AutofillHints, CharacterBoundary,
+    Clipboard, ClipboardData, DefaultProcessTextService, DocumentBoundary,
+    FilteringTextInputFormatter, KeyboardInsertedContent, LiveText, MouseCursorRef,
+    ParagraphBoundary, ProcessTextAction, ProcessTextService, SelectionChangedCause,
+    SpellCheckResults, SuggestionSpan, TextBoundary, TextEditingValue, TextInput, TextInputClient,
     TextInputConnection, TextInputFormatter, TextInputFormatterRef, TextInputStyle,
     TextSelectionDelegate,
 };
@@ -67,15 +67,15 @@ use crate::widgets::basic::{Builder, Directionality};
 use crate::widgets::context_menu_button_item::{ContextMenuButtonItem, ContextMenuButtonType};
 use crate::widgets::default_text_editing_shortcuts::intent_for_macos_selector;
 use crate::widgets::focus_manager::{FocusManager, FocusNode, FocusNodeLeaf, UnfocusDisposition};
-use crate::widgets::focus_traversal::{DirectionalFocusAction, DirectionalFocusIntent};
 use crate::widgets::focus_scope::{Focus, FocusScope};
+use crate::widgets::focus_traversal::{DirectionalFocusAction, DirectionalFocusIntent};
 use crate::widgets::magnifier::TextMagnifierConfiguration;
 use crate::widgets::media_query::{MediaQuery, Orientation};
 use crate::widgets::scroll_configuration::{ScrollBehaviorRef, ScrollConfiguration};
 use crate::widgets::scroll_controller::{ScrollController, ScrollControllerLeaf};
 use crate::widgets::scroll_physics::{ScrollPhysics, ScrollPhysicsBase, ScrollPhysicsRef};
-use crate::widgets::scrollable_helpers::{ScrollAction, ScrollIncrementType, ScrollIntent};
 use crate::widgets::scrollable::{Scrollable, ScrollableState, ViewportBuilder};
+use crate::widgets::scrollable_helpers::{ScrollAction, ScrollIncrementType, ScrollIntent};
 use crate::widgets::spell_check::{
     SpellCheckConfiguration, build_text_span_with_spell_check_suggestions,
 };
@@ -3018,10 +3018,9 @@ impl EditableTextState {
 
     fn replace_text(self: Handle<Self>, app: &mut App, intent: &ReplaceTextIntent) {
         let old_value = self.value(app);
-        let new_value = intent.current_text_editing_value.replaced(
-            intent.replacement_range,
-            &intent.replacement_text,
-        );
+        let new_value = intent
+            .current_text_editing_value
+            .replaced(intent.replacement_range, &intent.replacement_text);
         self.user_update_text_editing_value(app, new_value.clone(), intent.cause);
 
         // If there's no change in text and selection (e.g. when selecting and pasting
@@ -3305,10 +3304,9 @@ impl EditableTextState {
             TypeId::of::<ExtendSelectionToLineBreakIntent>(),
             Action::as_action(to_line_break),
         );
-        let by_line =
-            UpdateTextSelectionVerticallyAction::<ExtendSelectionVerticallyToAdjacentLineIntent>::new(
-                app, self, false,
-            );
+        let by_line = UpdateTextSelectionVerticallyAction::<
+            ExtendSelectionVerticallyToAdjacentLineIntent,
+        >::new(app, self, false);
         insert_overridable(
             app,
             &mut actions,
@@ -3316,10 +3314,9 @@ impl EditableTextState {
             TypeId::of::<ExtendSelectionVerticallyToAdjacentLineIntent>(),
             Action::as_action(by_line),
         );
-        let by_page =
-            UpdateTextSelectionVerticallyAction::<ExtendSelectionVerticallyToAdjacentPageIntent>::new(
-                app, self, true,
-            );
+        let by_page = UpdateTextSelectionVerticallyAction::<
+            ExtendSelectionVerticallyToAdjacentPageIntent,
+        >::new(app, self, true);
         insert_overridable(
             app,
             &mut actions,
@@ -3343,14 +3340,13 @@ impl EditableTextState {
             TypeId::of::<ExtendSelectionToNextParagraphBoundaryOrCaretLocationIntent>(),
             Action::as_action(by_paragraph_or_caret),
         );
-        let to_document =
-            UpdateTextSelectionAction::<ExtendSelectionToDocumentBoundaryIntent>::new(
-                app,
-                self,
-                EditableTextState::document_boundary,
-                EditableTextState::move_beyond_text_boundary,
-                true,
-            );
+        let to_document = UpdateTextSelectionAction::<ExtendSelectionToDocumentBoundaryIntent>::new(
+            app,
+            self,
+            EditableTextState::document_boundary,
+            EditableTextState::move_beyond_text_boundary,
+            true,
+        );
         insert_overridable(
             app,
             &mut actions,
@@ -3375,16 +3371,15 @@ impl EditableTextState {
             Action::as_action(by_word_or_caret),
         );
 
-        let scroll_to_boundary = WebComposingDisablingCallbackAction::<
-            ScrollToDocumentBoundaryIntent,
-        >::new(
-            app,
-            self,
-            Rc::new(move |app, intent| {
-                self.scroll_to_document_boundary(app, intent);
-                None
-            }),
-        );
+        let scroll_to_boundary =
+            WebComposingDisablingCallbackAction::<ScrollToDocumentBoundaryIntent>::new(
+                app,
+                self,
+                Rc::new(move |app, intent| {
+                    self.scroll_to_document_boundary(app, intent);
+                    None
+                }),
+            );
         insert_overridable(
             app,
             &mut actions,
@@ -5371,11 +5366,7 @@ impl<T: DirectionalTextEditingIntent> DeleteTextAction<T> {
         })
     }
 
-    fn hide_toolbar_if_text_changed(
-        self: Handle<Self>,
-        app: &mut App,
-        intent: &ReplaceTextIntent,
-    ) {
+    fn hide_toolbar_if_text_changed(self: Handle<Self>, app: &mut App, intent: &ReplaceTextIntent) {
         let state = app.get(self).state;
         let visible = app
             .get(state)
@@ -5385,8 +5376,7 @@ impl<T: DirectionalTextEditingIntent> DeleteTextAction<T> {
             return;
         }
         let old_value = intent.current_text_editing_value.clone();
-        let new_value = old_value
-            .replaced(intent.replacement_range, &intent.replacement_text);
+        let new_value = old_value.replaced(intent.replacement_range, &intent.replacement_text);
         if old_value.text != new_value.text {
             // Hide the toolbar if the text was changed, but only hide the toolbar overlay;
             // the selection handle's visibility will be handled by handle_selection_changed.
@@ -5647,15 +5637,14 @@ impl<T: DirectionalCaretMovementIntent> ContextAction for UpdateTextSelectionAct
             intent.forward(),
             &*boundary,
         );
-        let new_selection = if collapse_selection
-            || (!is_expand && new_extent.offset == selection.base_offset)
-        {
-            TextSelection::from_position(new_extent)
-        } else if is_expand {
-            selection.expand_to(new_extent, extent_at_index || selection.is_collapsed())
-        } else {
-            selection.extend_to(new_extent)
-        };
+        let new_selection =
+            if collapse_selection || (!is_expand && new_extent.offset == selection.base_offset) {
+                TextSelection::from_position(new_extent)
+            } else if is_expand {
+                selection.expand_to(new_extent, extent_at_index || selection.is_collapsed())
+            } else {
+                selection.extend_to(new_extent)
+            };
 
         let should_collapse_to_base = intent.collapse_at_reversal()
             && (selection.base_offset - selection.extent_offset)
@@ -5786,11 +5775,7 @@ impl<T: DirectionalCaretMovementIntent> ContextAction for UpdateTextSelectionVer
         Actions::invoke(
             app,
             context,
-            &UpdateSelectionIntent::new(
-                value,
-                new_selection,
-                SelectionChangedCause::Keyboard,
-            ),
+            &UpdateSelectionIntent::new(value, new_selection, SelectionChangedCause::Keyboard),
         );
         if state.value(app).selection == new_selection {
             app.get_mut(state).vertical_movement_run = Some(current_run);

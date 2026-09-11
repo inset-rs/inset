@@ -349,6 +349,7 @@ fn marker(entry: Entry) -> &'static str {
         Entry::Dialogs => "Ask a question",
         Entry::Scrolling => "Rows 1\u{2013}10",
         Entry::Icons => "house_fill",
+        Entry::Images => "Animated GIF",
         Entry::Text => "action_small_text_style",
         Entry::TextFields => "Type here",
         Entry::Heroes => "Swatches",

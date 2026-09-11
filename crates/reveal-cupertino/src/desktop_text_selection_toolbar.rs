@@ -121,7 +121,11 @@ impl CupertinoDesktopTextSelectionToolbar {
         ]
     }
 
-    fn default_toolbar_builder(app: &mut App, context: BuildContext, child: WidgetRef) -> WidgetRef {
+    fn default_toolbar_builder(
+        app: &mut App,
+        context: BuildContext,
+        child: WidgetRef,
+    ) -> WidgetRef {
         let background = K_TOOLBAR_BACKGROUND_COLOR.resolve_from(app, context);
         let border = K_TOOLBAR_BORDER_COLOR.resolve_from(app, context);
         Container::new()
@@ -154,7 +158,9 @@ impl CupertinoDesktopTextSelectionToolbar {
                         ))
                         .color(background),
                     )
-                    .child(Padding::new(EdgeInsetsGeometry::Insets(K_TOOLBAR_PADDING)).child(child)),
+                    .child(
+                        Padding::new(EdgeInsetsGeometry::Insets(K_TOOLBAR_PADDING)).child(child),
+                    ),
                 ),
             )
             .into_widget()
@@ -167,8 +173,7 @@ impl StatelessWidget for CupertinoDesktopTextSelectionToolbar {
     }
 
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
-        let padding_above =
-            MediaQuery::padding_of(app, context).top + K_TOOLBAR_SCREEN_PADDING;
+        let padding_above = MediaQuery::padding_of(app, context).top + K_TOOLBAR_SCREEN_PADDING;
         let local_adjustment = Offset::new(K_TOOLBAR_SCREEN_PADDING, padding_above);
         Padding::new(EdgeInsetsGeometry::from_ltrb(
             K_TOOLBAR_SCREEN_PADDING,
@@ -177,9 +182,9 @@ impl StatelessWidget for CupertinoDesktopTextSelectionToolbar {
             K_TOOLBAR_SCREEN_PADDING,
         ))
         .child(
-            CustomSingleChildLayout::new(Rc::new(
-                DesktopTextSelectionToolbarLayoutDelegate::new(self.anchor - local_adjustment),
-            ))
+            CustomSingleChildLayout::new(Rc::new(DesktopTextSelectionToolbarLayoutDelegate::new(
+                self.anchor - local_adjustment,
+            )))
             .child(Self::default_toolbar_builder(
                 app,
                 context,
