@@ -8,7 +8,7 @@ description: >-
 
 # Porting Flutter
 
-Ground truth: `/Users/mac/code/flutter/packages/flutter/lib/src`. Read the Dart. Do not write it from memory.
+Ground truth: `.reference/flutter/packages/flutter/lib/src`. If that checkout is missing, clone it as `AGENTS.md` says. Read the Dart. Do not write it from memory.
 
 Copy the file, then change only what Rust forces. Names, member order, defaults, branches, who decides, when hooks run — same as Flutter. A Flutter-shaped name on a different mechanism is a bug.
 
@@ -48,7 +48,8 @@ Not an entry:
 
 - Rust's standard type in place of Dart's: `Duration`, `String`, the collections. Record it only where the substitute behaves differently and a caller sees it, such as an unordered map where Dart's keeps insertion order.
 - What every ported type does the same way: the `App` parameter and typed handles, closures in `Rc`, `Debug` for `toString`. These are written down once, above, in `AGENTS.md` and in `patterns/`, and not repeated for one type.
-- Spelling: names, `iterator` → `iter()`, `~/` → `truncating_div`, widget construction.
+- Spelling: names, `iterator` → `iter()`, `~/` → `truncating_div`.
+- Syntax: constructors, setters, `Option`, erasure calls, `into_widget`, `with_*` on data classes. That is [patterns/widget-syntax.md](patterns/widget-syntax.md). Write it here, not as a line at the top of each `PORTING.md`.
 - Anything else a reader cannot notice when the code runs. That is Identical.
 
 `## Deferred` is one line per item: what is missing, and the trigger.
@@ -77,4 +78,3 @@ Ported against: <commit>
 ## Deferred
 - `Listenable.merge`. Trigger: first widget that holds a `Listenable` as a value.
 ```
-- Widget construction and what counts as a divergence: [patterns/widget-syntax.md](patterns/widget-syntax.md).

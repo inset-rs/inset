@@ -2,14 +2,17 @@
 
 A Flutter port in Rust. The framework matches Flutter closely enough that upstream changes land without worry. Below it, dart:ui as an embedder interface (value types and host traits) so the same framework runs in tests and on real hosts.
 
-Flutter's source is the spec: `/Users/mac/code/flutter/packages/flutter/lib/src`. Read the Dart. Do not write Flutter from memory. If the checkout is missing, ask.
+Reference checkouts live under `.reference/` at the repo root. That folder is not committed.
 
-Prior art, not specs:
+- Flutter is the spec: `.reference/flutter/packages/flutter/lib/src`. Read the Dart. Do not write Flutter from memory.
+- Zed (`crates/gpui`) is prior art for `Entity` as a user-facing store (later; not used to implement Flutter): `.reference/zed/crates/gpui`.
 
-- `/Users/mac/code/reveal-rs-experiment` — ownership spike and handle-newtype experiment. Prior art, not a spec: take the code, not the commentary.
-- `/Users/mac/code/shaft-rs-next` — earlier port; its `PORTING.md` files record what divergence cost
-- `/Users/mac/code/ShaftUI` — `Backend` / `NativeView` split (vocabulary, not API)
-- `/Users/mac/code/zed/crates/gpui` — `Entity` as a user-facing store (later; not used to implement Flutter)
+If a checkout is missing, clone it there.
+
+```
+git clone https://github.com/flutter/flutter.git .reference/flutter
+git clone https://github.com/zed-industries/zed.git .reference/zed
+```
 
 ## Commands
 
@@ -41,7 +44,7 @@ Do not lease a Handle out of the arena for a pass. shaft-rs-next did that; layou
 
 ## Porting
 
-**Before writing or changing any Rust that corresponds to a Flutter file, read `.cursor/skills/porting-flutter/SKILL.md`.**
+**Before writing or changing any Rust that corresponds to a Flutter file, read `.agents/skills/porting-flutter/SKILL.md`.**
 
 Copy the Dart, then modify. Do not rewrite from understanding — models are bad at repeating a file they have only read.
 
@@ -53,9 +56,9 @@ When a port has tests, you can ref to cases from Flutter's matching file under `
 
 ## Docs
 
-`PORTING.md` in a source folder records functional divergences from Flutter, for a reader who knows Rust and only surface Flutter. Each entry is Change / Reason / Affect, one sentence each, and says what a reader would notice when the code runs. No visible Affect means Identical — omit the entry; the skill lists what else does not warrant one. Straight transcriptions go under `## Identical`. Empty file: omit. Format is in the porting skill.
+`PORTING.md` in a source folder records functional divergences from Flutter, for a reader who knows Rust and only surface Flutter. Each entry is Change / Reason / Affect, one sentence each, and says what a reader would notice when the code runs. No visible Affect means Identical — omit the entry; the skill lists what else does not warrant one. Straight transcriptions go under `## Identical`. Empty file: omit. Constructor / setter / `Option` / erasure / `into_widget` syntax is in the porting skill, not in each `PORTING.md`. Format is in the porting skill.
 
-Doc comments: the invariant a later editor will break. Inline comments: only what the next line does that the code cannot say. When copying from the experiment, strip its commentary.
+Doc comments: the invariant a later editor will break. Inline comments: only what the next line does that the code cannot say.
 
 Do not hard-wrap Markdown at 80 columns.
 

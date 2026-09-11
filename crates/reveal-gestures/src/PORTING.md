@@ -1,5 +1,4 @@
 # reveal-gestures/src
-Syntax (constructors, setters, `Option`, erasure calls) follows `.cursor/skills/porting-flutter/patterns/widget-syntax.md` and is not a divergence.
 Flutter home: packages/flutter/lib/src/gestures
 Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
@@ -57,7 +56,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## monodrag.rs → monodrag.dart
 
-Pattern: [leaf-inheritance](../../../.cursor/skills/porting-flutter/patterns/leaf-inheritance.md). `DragGestureRecognizer` is a trait blanket-implemented for the three axis leaves, which carry the `GestureRecognizer` and `OneSequence` bags only; a drag subclass outside this crate holds those bags and calls the shared bodies where Dart writes `super`.
+Pattern: [leaf-inheritance](../../../.agents/skills/porting-flutter/patterns/leaf-inheritance.md). `DragGestureRecognizer` is a trait blanket-implemented for the three axis leaves, which carry the `GestureRecognizer` and `OneSequence` bags only; a drag subclass outside this crate holds those bags and calls the shared bodies where Dart writes `super`.
 
 ## tap_and_drag.rs → tap_and_drag.dart
 
@@ -69,7 +68,7 @@ Pattern: same leaf-inheritance. Each per-pointer state is an arena object, and a
 
 ## recognizer.rs / tap.rs / long_press.rs / monodrag.rs / tap_and_drag.rs / force_press.rs — GestureRecognizer hierarchy
 
-Pattern: [leaf-inheritance](../../../.cursor/skills/porting-flutter/patterns/leaf-inheritance.md). The field bags, leaf traits and `super` namespaces of every level are public, since a leaf written in another crate has to name each piece it would have inherited; `AnyGestureRecognizer` is the erased form Dart uses `GestureRecognizer` as a type for.
+Pattern: [leaf-inheritance](../../../.agents/skills/porting-flutter/patterns/leaf-inheritance.md). The field bags, leaf traits and `super` namespaces of every level are public, since a leaf written in another crate has to name each piece it would have inherited; `AnyGestureRecognizer` is the erased form Dart uses `GestureRecognizer` as a type for.
 
 - Change: `dispose` frees the arena slot after Dart's body, on the typed and the erased handle alike.
   Reason: language — Dart leaves the disposed object to the collector; the arena has none.

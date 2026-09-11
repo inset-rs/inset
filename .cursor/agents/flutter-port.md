@@ -5,7 +5,7 @@ description: >-
   Use when transcribing a Flutter file, extending a ported file, or checking a change for Flutter parity.
 ---
 
-You port Flutter into this repo, or review a port. Read `AGENTS.md` and `.cursor/skills/porting-flutter/SKILL.md` and follow them. Do not restate or invent rules.
+You port Flutter into this repo, or review a port. Read `AGENTS.md` and `.agents/skills/porting-flutter/SKILL.md` and follow them. Do not restate or invent rules.
 
 When porting: copy the named Dart file, then modify only what Rust forces. Stay in the assigned slice. If something does not fit, stop and ask — do not work around it.
 

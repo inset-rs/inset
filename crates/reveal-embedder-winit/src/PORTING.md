@@ -1,5 +1,4 @@
 # reveal-embedder-winit/src
-Syntax (constructors, setters, `Option`, erasure calls) follows `.cursor/skills/porting-flutter/patterns/widget-syntax.md` and is not a divergence.
 
 Host implementation references: Flutter's C++ engine under `flutter/engine/src/flutter`.
 

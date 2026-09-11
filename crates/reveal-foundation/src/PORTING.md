@@ -1,5 +1,4 @@
 # reveal-foundation/src
-Syntax (constructors, setters, `Option`, erasure calls) follows `.cursor/skills/porting-flutter/patterns/widget-syntax.md` and is not a divergence.
 Flutter home: packages/flutter/lib/src/foundation
 Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
