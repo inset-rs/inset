@@ -28,11 +28,12 @@ pub enum Entry {
     Theming,
     Lists,
     ExpansionTiles,
+    ShoppingCart,
 }
 
 impl Entry {
     /// Index order — the order the rows appear in.
-    pub const ALL: [Entry; 15] = [
+    pub const ALL: [Entry; 16] = [
         Entry::Navigation,
         Entry::PageScaffold,
         Entry::Buttons,
@@ -48,6 +49,7 @@ impl Entry {
         Entry::Theming,
         Entry::Lists,
         Entry::ExpansionTiles,
+        Entry::ShoppingCart,
     ];
 
     /// The row's title, the screen's navigation-bar middle, and the label the next screen's
@@ -80,6 +82,7 @@ impl Entry {
             Entry::Theming => "Theming",
             Entry::Lists => "Lists & Forms",
             Entry::ExpansionTiles => "Expansion Tiles",
+            Entry::ShoppingCart => "State Management",
         }
     }
 
@@ -101,6 +104,7 @@ impl Entry {
             Entry::Theming => "Light & dark",
             Entry::Lists => "This screen",
             Entry::ExpansionTiles => "Fade, scroll",
+            Entry::ShoppingCart => "Shopping cart",
         }
     }
 
@@ -122,6 +126,7 @@ impl Entry {
             Entry::Theming => CupertinoIcons::moon_fill(),
             Entry::Lists => CupertinoIcons::list_bullet(),
             Entry::ExpansionTiles => CupertinoIcons::chevron_down_square(),
+            Entry::ShoppingCart => CupertinoIcons::cart(),
         }
     }
 
@@ -143,6 +148,7 @@ impl Entry {
             Entry::Theming => CupertinoColors::SYSTEM_GREY,
             Entry::Lists => CupertinoColors::SYSTEM_BROWN,
             Entry::ExpansionTiles => CupertinoColors::SYSTEM_MINT,
+            Entry::ShoppingCart => CupertinoColors::SYSTEM_GREEN,
         }
     }
 
@@ -156,6 +162,7 @@ impl Entry {
             Entry::PageScaffold => 1,
             Entry::Heroes => pages::heroes::SUBJECTS.len(),
             Entry::Theming => 1,
+            Entry::ShoppingCart => 1,
             _ => 0,
         }
     }
@@ -178,6 +185,7 @@ impl Entry {
             Entry::Theming => pages::theming::body(app, context),
             Entry::Lists => pages::lists::body(app, context),
             Entry::ExpansionTiles => pages::expansion_tiles::body(app, context),
+            Entry::ShoppingCart => pages::stores::body(app, context),
         }
     }
 
@@ -189,6 +197,7 @@ impl Entry {
             Entry::PageScaffold => pages::scaffold::SUB_TITLE,
             Entry::Heroes => pages::heroes::SUBJECTS[index].title,
             Entry::Theming => pages::theming::SUB_TITLE,
+            Entry::ShoppingCart => pages::stores::SUB_TITLE,
             _ => panic!("{self:?} has no sub-page {index}"),
         }
     }
@@ -200,6 +209,7 @@ impl Entry {
             Entry::PageScaffold => pages::scaffold::sub_body(app, context),
             Entry::Heroes => pages::heroes::sub_body(index, app, context),
             Entry::Theming => pages::theming::sub_body(app, context),
+            Entry::ShoppingCart => pages::stores::sub_body(app, context),
             _ => panic!("{self:?} has no sub-page {index}"),
         }
     }

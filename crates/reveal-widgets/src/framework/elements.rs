@@ -54,6 +54,14 @@ pub trait ComponentElement: Element {
     /// function (e.g., `StatelessWidget::build` or `State::build`) for their widget.
     fn build(self: Handle<Self>, app: &mut App) -> WidgetRef;
 
+    /// Runs [`build`](Self::build) inside [`App::entity_track`] and binds watches.
+    fn build_tracked(self: Handle<Self>, app: &mut App) -> WidgetRef {
+        let element = self.as_element();
+        let (built, tracked) = app.entity_track(|app| self.build(app));
+        element.bind_entity_watches(app, tracked);
+        built
+    }
+
     /// The child this element built, if any.
     fn child(self: Handle<Self>, app: &App) -> Option<AnyElement> {
         self.component_data(app).child
@@ -86,7 +94,7 @@ pub trait ComponentElement: Element {
         if cfg!(debug_assertions) {
             self.component_data_mut(app).debug_doing_build = true;
         }
-        let built = self.build(app);
+        let built = self.build_tracked(app);
         if cfg!(debug_assertions) {
             self.component_data_mut(app).debug_doing_build = false;
         }
@@ -293,7 +301,7 @@ impl<W: StatefulWidget> ComponentElement for StatefulElement<W> {
         if cfg!(debug_assertions) {
             self.component_data_mut(app).debug_doing_build = true;
         }
-        let built = self.build(app);
+        let built = self.build_tracked(app);
         if cfg!(debug_assertions) {
             self.component_data_mut(app).debug_doing_build = false;
         }

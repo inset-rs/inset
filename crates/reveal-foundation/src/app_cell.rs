@@ -79,6 +79,7 @@ impl AppCell {
         let mut rounds = 0usize;
         loop {
             self.borrow_mut().release_dropped_retained_handles();
+            self.borrow_mut().flush_entity_effects();
             let had_microtasks = self.borrow().has_pending_microtasks();
             if had_microtasks {
                 self.borrow_mut().drain_microtasks();

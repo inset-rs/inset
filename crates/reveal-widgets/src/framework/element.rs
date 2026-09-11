@@ -16,7 +16,7 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use reveal_embedder::Size;
-use reveal_foundation::{App, Handle, HandleId};
+use reveal_foundation::{App, EntityId, Handle, HandleId, Subscription, TrackedSet};
 use reveal_rendering::{AnyRenderObject, RenderHandle, RenderObject};
 
 use super::build_owner::{BuildOwner, BuildScope};
@@ -191,6 +191,9 @@ pub struct ElementData {
     dependencies: Option<HashSet<AnyElement>>,
     had_unsatisfied_dependencies: bool,
     debug_built_once: bool,
+    /// Entities this element's last `build` read. Kept across deactivate; dropped on unmount.
+    /// Activate rebuilds if this is non-empty, the way `hadDependencies` rebuilds for inherited widgets.
+    entity_watches: HashMap<EntityId, Subscription>,
 }
 
 impl ElementData {
@@ -211,6 +214,7 @@ impl ElementData {
             dependencies: None,
             had_unsatisfied_dependencies: false,
             debug_built_once: false,
+            entity_watches: HashMap::new(),
         }
     }
 
@@ -697,6 +701,27 @@ impl AnyElement {
 
     pub(crate) fn data_mut(self, app: &mut App) -> &mut ElementData {
         (self.vtable.element_data_mut)(app, self.id)
+    }
+
+    /// Diffs the entities `build` read and binds [`observe`](App::observe_entity_id) watches.
+    pub(crate) fn bind_entity_watches(self, app: &mut App, tracked: TrackedSet) {
+        let current: HashSet<EntityId> = self.data(app).entity_watches.keys().copied().collect();
+        let tracked: HashSet<EntityId> = tracked.iter().collect();
+        for id in current.difference(&tracked) {
+            self.data_mut(app).entity_watches.remove(id);
+        }
+        let added: Vec<EntityId> = tracked.difference(&current).copied().collect();
+        for id in added {
+            let element = self;
+            let subscription = app.observe_entity_id(id, move |app| {
+                if element.lifecycle(app) == ElementLifecycle::Active {
+                    element.mark_needs_build(app);
+                }
+                true
+            });
+            self.data_mut(app).entity_watches.insert(id, subscription);
+        }
+        app.flush_entity_effects();
     }
 
     // ---- fields ----
@@ -1982,6 +2007,7 @@ pub trait ElementBase: Element {
             .owner(app)
             .expect("an inactive element keeps its owner");
         let had_dependencies = this.had_dependencies(app);
+        let had_entity_watches = !this.data(app).entity_watches.is_empty();
         let data = this.data_mut(app);
         data.lifecycle = ElementLifecycle::Active;
         // We unregistered our dependencies in deactivate, but never cleared the list.
@@ -1997,6 +2023,8 @@ pub trait ElementBase: Element {
         }
         if had_dependencies {
             this.did_change_dependencies(app);
+        } else if had_entity_watches {
+            this.mark_needs_build(app);
         }
     }
 
@@ -2024,6 +2052,7 @@ pub trait ElementBase: Element {
         let data = this.data_mut(app);
         data.widget = None;
         data.dependencies = None;
+        data.entity_watches.clear();
         data.lifecycle = ElementLifecycle::Defunct;
     }
 

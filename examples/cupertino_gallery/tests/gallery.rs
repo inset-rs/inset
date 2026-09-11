@@ -357,6 +357,7 @@ fn marker(entry: Entry) -> &'static str {
         Entry::Theming => "SECONDARY_LABEL",
         Entry::Lists => "Title only",
         Entry::ExpansionTiles => "Fade transition",
+        Entry::ShoppingCart => "Espresso",
     }
 }
 
@@ -565,6 +566,37 @@ fn an_expansion_tile_opens_from_its_header_and_from_its_controller() {
     assert!(
         fixture.shows("is_expanded: false"),
         "the button drove the same controller back; saw {:?}",
+        fixture.texts()
+    );
+}
+
+/// A tap updates the cart Entity; the summary rebuilds, and the cart route reads the same store.
+#[test]
+fn a_cart_tap_rebuilds_from_the_entity_and_the_cart_route_sees_it() {
+    let mut fixture = Fixture::new();
+    fixture.push_entry(Entry::ShoppingCart);
+    assert!(
+        fixture.shows("Empty"),
+        "the cart starts empty; saw {:?}",
+        fixture.texts()
+    );
+
+    fixture.tap("Espresso");
+    assert!(
+        fixture.shows("1 item"),
+        "the cart row read Totals after Cart notified; saw {:?}",
+        fixture.texts()
+    );
+    assert!(
+        fixture.shows("$4.00"),
+        "the menu price and the cart total stay in dollars; saw {:?}",
+        fixture.texts()
+    );
+
+    fixture.tap("Your cart");
+    assert!(
+        fixture.shows("Espresso"),
+        "the cart route shares the Entity; saw {:?}",
         fixture.texts()
     );
 }

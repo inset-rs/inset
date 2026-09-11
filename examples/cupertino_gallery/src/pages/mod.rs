@@ -13,6 +13,7 @@ pub mod navigation;
 pub mod scaffold;
 pub mod scrolling;
 pub mod segments;
+pub mod stores;
 pub mod text;
 pub mod text_fields;
 pub mod theming;

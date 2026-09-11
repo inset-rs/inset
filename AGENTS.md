@@ -5,7 +5,7 @@ A Flutter port in Rust. The framework matches Flutter closely enough that upstre
 Reference checkouts live under `.reference/` at the repo root. That folder is not committed.
 
 - Flutter is the spec: `.reference/flutter/packages/flutter/lib/src`. Read the Dart. Do not write Flutter from memory.
-- Zed (`crates/gpui`) is prior art for `Entity` as a user-facing store (later; not used to implement Flutter): `.reference/zed/crates/gpui`.
+- Zed (`crates/gpui`) is prior art for `Entity` as a user-facing store (not used to implement Flutter): `.reference/zed/crates/gpui`.
 
 If a checkout is missing, clone it there.
 
@@ -38,7 +38,7 @@ Accessibility is deferred. Do not stub `SemanticsBinding`, reduced-motion behavi
 One `App`. Every framework callback gets `&mut App` plus a typed handle to itself.
 
 - **`Handle<T>`** — Copy generational id, point access (`app.get` / `app.get_mut`). Exclusivity lasts one field access, never a whole pass. Flutter objects live here: elements, render objects, `AnimationController`, `ScrollController`, `FocusNode`, and the rest. `ChangeNotifier` is mixed in as a `ChangeNotifierData` field (mixin-as-field).
-- **`Entity<T>`** — reserved for app-level stores the *user* writes, gpui-shaped. Not used to implement Flutter. Not built; how it is accessed is undecided.
+- **`Entity<T>`** — Clone, refcounted store the app author writes (`reveal-foundation`). Not a Flutter type, and not where Elements, render objects, or controllers live. Construct with `app.new_entity(|cx| Counter { count: 0 })`. Read with `entity.read(app)`. Mutate with `entity.update(app, |counter, cx| { … })`, which takes `T` out of the map for the closure (`cx` is `Context<T>`). Updating the same entity again inside that closure panics; other entities and every Handle stay reachable. `cx.notify()` runs `observe` callbacks and marks any element whose last widget `build` called `read` or `update` on this entity. `cx.emit` and `subscribe` carry a typed payload and do not rebuild. A `read` inside `StatelessWidget::build` or `State::build` is a dependency; a `read` in a pointer callback is not.
 
 Do not lease a Handle out of the arena for a pass. shaft-rs-next did that; layout then could not re-enter the node it was laying out.
 

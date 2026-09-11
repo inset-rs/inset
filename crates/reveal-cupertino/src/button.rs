@@ -1209,4 +1209,58 @@ mod tests {
             pump(&mut app, Duration::from_millis(at));
         }
     }
+
+    struct Counter {
+        count: i32,
+    }
+
+    struct Doubler {
+        count: i32,
+    }
+
+    #[test]
+    fn a_button_that_updates_an_entity_rebuilds_and_an_observer_follows() {
+        let cell = crate::test_support::test_cell();
+        let mut app = cell.borrow_mut();
+        let counter = app.new_entity(|_cx| Counter { count: 0 });
+        let doubler = app.new_entity(|cx| {
+            cx.observe(&counter, |doubler: &mut Doubler, counter, cx| {
+                doubler.count = counter.read(cx).count * 2;
+            })
+            .detach();
+            Doubler { count: 0 }
+        });
+        let shown = Rc::new(Cell::new((0, 0)));
+        let tree = Builder::new({
+            let counter = counter.clone();
+            let doubler = doubler.clone();
+            let shown = Rc::clone(&shown);
+            move |app, _context| {
+                let n = counter.read(app).count;
+                let d = doubler.read(app).count;
+                shown.set((n, d));
+                CupertinoButton::new(
+                    SizedBox::square(Some(40.0)).into_widget(),
+                    Some(Listener::new({
+                        let counter = counter.clone();
+                        move |app| {
+                            counter.update(app, |counter, cx| {
+                                counter.count += 1;
+                                cx.notify();
+                            });
+                        }
+                    })),
+                )
+                .into_widget()
+            }
+        });
+        drop(app);
+        build(&cell, tree.into_widget());
+        assert_eq!(shown.get(), (0, 0));
+
+        click(&mut cell.borrow_mut(), 20.0, 20.0);
+        pump(&mut cell.borrow_mut(), Duration::from_millis(16));
+        assert_eq!(shown.get(), (1, 2));
+        assert_eq!(doubler.read(&cell.borrow()).count, 2);
+    }
 }

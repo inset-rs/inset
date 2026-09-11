@@ -13,6 +13,7 @@ use slotmap::new_key_type;
 
 use crate::app_cell::{AppCell, AsyncApp};
 use crate::change_notifier::Listener;
+use crate::entity::EntityMap;
 use crate::executor::{ForegroundExecutor, Task};
 use crate::handle_map::HandleMap;
 pub use crate::handle_map::{RetainedHandle, RetainedHandleId};
@@ -126,6 +127,7 @@ pub struct App {
     /// The cell this App lives in — gpui's `App::this`.
     this: Weak<AppCell>,
     handles: HandleMap,
+    pub(crate) entities: EntityMap,
     singletons: HashMap<std::any::TypeId, HandleId>,
     microtasks: VecDeque<Listener>,
     timers: Timers,
@@ -143,8 +145,11 @@ pub struct PlatformCallbacks {
     pub on_platform_brightness_changed: Option<Listener>,
     pub on_locale_changed: Option<Listener>,
     /// Flutter `PlatformDispatcher.onViewFocusChange`.
-    pub on_view_focus_change: Option<Rc<dyn Fn(&mut App, ViewFocusEvent)>>,
+    pub on_view_focus_change: Option<ViewFocusChangeCallback>,
 }
+
+/// Flutter `PlatformDispatcher.onViewFocusChange`.
+pub type ViewFocusChangeCallback = Rc<dyn Fn(&mut App, ViewFocusEvent)>;
 
 impl App {
     pub(crate) fn build(
@@ -155,6 +160,7 @@ impl App {
         App {
             this,
             handles: HandleMap::new(),
+            entities: EntityMap::new(),
             singletons: HashMap::new(),
             microtasks: VecDeque::new(),
             timers: Timers::default(),

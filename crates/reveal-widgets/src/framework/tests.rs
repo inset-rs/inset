@@ -4,7 +4,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use reveal_embedder::Size;
-use reveal_foundation::{App, AppCell, Handle};
+use reveal_foundation::{App, AppCell, Entity, Handle};
 use reveal_painting::EdgeInsetsGeometry;
 use reveal_rendering::{
     AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderHandle, RenderPadding,
@@ -482,4 +482,154 @@ fn downcast_key(key: &KeyRef) -> &GlobalKey {
     ((&**key) as &dyn std::any::Any)
         .downcast_ref::<GlobalKey>()
         .expect("a global key")
+}
+
+struct Store {
+    count: i32,
+}
+
+#[derive(Debug)]
+struct StoreView {
+    key: Option<KeyRef>,
+    store: Entity<Store>,
+    builds: Rc<Cell<u32>>,
+    last: Rc<Cell<i32>>,
+}
+
+impl StatelessWidget for StoreView {
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
+        self.builds.set(self.builds.get() + 1);
+        self.last.set(self.store.read(app).count);
+        Sized {
+            size: Size::new(10.0, 10.0),
+        }
+        .into_widget()
+    }
+}
+
+#[test]
+fn a_build_that_reads_an_entity_rebuilds_when_it_notifies() {
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
+    let store = app.new_entity(|_cx| Store { count: 1 });
+    let builds = Rc::new(Cell::new(0));
+    let last = Rc::new(Cell::new(0));
+    let harness = Harness::mount(
+        &mut app,
+        StoreView {
+            key: None,
+            store: store.clone(),
+            builds: Rc::clone(&builds),
+            last: Rc::clone(&last),
+        }
+        .into_widget(),
+    );
+    harness.pump(&mut app);
+    assert_eq!(builds.get(), 1);
+    assert_eq!(last.get(), 1);
+
+    store.update(&mut app, |store, cx| {
+        store.count = 4;
+        cx.notify();
+    });
+    harness.pump(&mut app);
+    assert_eq!(builds.get(), 2);
+    assert_eq!(last.get(), 4);
+}
+
+#[derive(Debug)]
+struct BlindView {
+    builds: Rc<Cell<u32>>,
+}
+
+impl StatelessWidget for BlindView {
+    fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
+        self.builds.set(self.builds.get() + 1);
+        Sized {
+            size: Size::new(10.0, 10.0),
+        }
+        .into_widget()
+    }
+}
+
+#[test]
+fn a_read_outside_build_does_not_subscribe() {
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
+    let store = app.new_entity(|_cx| Store { count: 1 });
+    let builds = Rc::new(Cell::new(0));
+    let harness = Harness::mount(
+        &mut app,
+        BlindView {
+            builds: Rc::clone(&builds),
+        }
+        .into_widget(),
+    );
+    harness.pump(&mut app);
+    assert_eq!(builds.get(), 1);
+
+    let _ = store.read(&app).count;
+    store.update(&mut app, |_store, cx| cx.notify());
+    harness.pump(&mut app);
+    assert_eq!(builds.get(), 1);
+}
+
+#[test]
+fn an_entity_notify_while_inactive_rebuilds_on_activate() {
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
+    let store = app.new_entity(|_cx| Store { count: 1 });
+    let builds = Rc::new(Cell::new(0));
+    let last = Rc::new(Cell::new(0));
+    let key: KeyRef = Rc::new(GlobalKey::new());
+    let view = || {
+        StoreView {
+            key: Some(key.clone()),
+            store: store.clone(),
+            builds: Rc::clone(&builds),
+            last: Rc::clone(&last),
+        }
+        .into_widget()
+    };
+    let harness = Harness::mount(
+        &mut app,
+        Padding {
+            key: None,
+            padding: 1.0,
+            child: Some(view()),
+        }
+        .into_widget(),
+    );
+    harness.pump(&mut app);
+    assert_eq!(builds.get(), 1);
+
+    // Park on the inactive list; do not pump, or finalize_tree unmounts it.
+    harness.set_child(
+        &mut app,
+        Sized {
+            size: Size::new(10.0, 10.0),
+        }
+        .into_widget(),
+    );
+    store.update(&mut app, |store, cx| {
+        store.count = 4;
+        cx.notify();
+    });
+
+    harness.set_child(
+        &mut app,
+        Padding {
+            key: None,
+            padding: 1.0,
+            child: Some(view()),
+        }
+        .into_widget(),
+    );
+    harness.pump(&mut app);
+    assert_eq!(builds.get(), 2);
+    assert_eq!(last.get(), 4);
 }
