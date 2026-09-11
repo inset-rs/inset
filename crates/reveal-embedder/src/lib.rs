@@ -63,3 +63,4 @@ pub use views::{
     GestureSettings, View, ViewConstraints, ViewFocusDirection, ViewFocusEvent, ViewFocusState,
     ViewId, ViewMetrics, ViewPadding,
 };
+pub use web_time::Instant;

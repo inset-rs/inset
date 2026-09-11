@@ -24,6 +24,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — a host with its own lookup (a guest across a boundary) passes a font manager instead of the platform's.
   Affect: Cupertino text shapes with the system font on every platform that has one.
 
+- Change: `default_font_families` on wasm answers `Roboto`, Flutter web's default, not `Arial`.
+  Reason: platform — the browser has no OS UI font; Flutter's web engine ships Roboto as the fallback family.
+  Affect: unspecified-family text on the web host waits for Roboto (and Noto chunks for other scripts) instead of looking for Arial.
+
 - Change: `set_default_font_manager` registers the platform's default family as the collection's fallback chain, as Skia's `FontCollection::setDefaultFontManager` does.
   Reason: platform — valo has no default font manager, so an empty `families` list would walk fallbacks and land on `FontId(0)`.
   Affect: text that leaves `font_family` unset paints in the platform UI font instead of whichever face happened to be registered first.
@@ -94,6 +98,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - Change: `platform_brightness_changed` and `locales_changed` carry no value; the new one is read back from `Platform`.
   Reason: platform — the host pushes a notification and the framework reads the dispatcher, as with `frame`.
   Affect: a host must update what its `Platform` answers before calling the hook, or observers rebuild against the old value.
+
+- Change: `system_fonts_changed` is a client method, where Dart's engine posts a `fontsChange` system message that `PaintingBinding` turns into `systemFonts.notifyListeners`.
+  Reason: platform — there are no method channels; the host trait is the channel.
+  Affect: a host that loads faces after start-up must call this or laid-out text keeps the glyphs it had.
 
 - Change: `TextInputClient.updateEditingValue` / `performAction` / `connectionClosed` are `EmbedderClient` methods the host calls.
   Reason: platform — there are no method channels; the host trait is the channel.

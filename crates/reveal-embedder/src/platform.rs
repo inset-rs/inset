@@ -5,7 +5,9 @@
 //! `EmbedderClient`, so this interface contains requests and state only.
 
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use web_time::Instant;
 
 use crate::fonts::FontSource;
 use crate::geometry::{Color, Rect};

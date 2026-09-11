@@ -1,8 +1,8 @@
 //! Flutter counterpart: `rendering/paragraph.dart` (`RenderParagraph`).
 //!
 //! The paragraph is a leaf here: inline children (`WidgetSpan` placeholders), selection
-//! (`SelectionRegistrar` / `_SelectableFragment`), the fade overflow shader, semantics, and
-//! `RelayoutWhenSystemFontsChangeMixin` wait; see `PORTING.md`.
+//! (`SelectionRegistrar` / `_SelectableFragment`), the fade overflow shader, and semantics
+//! wait; see `PORTING.md`.
 
 use reveal_embedder::{
     BoxHeightStyle, BoxWidthStyle, ClipOp, FontCollection, Offset, Rect, Size, TextAlign,
@@ -18,6 +18,7 @@ use reveal_painting::{
 use crate::box_::{BoxConstraints, BoxHitTestResult, RenderBox, RenderBoxData};
 use crate::object::{AnyRenderObject, Constraints, RenderHandle, RenderObject, RenderObjectData};
 use crate::painting_context::PaintingContext;
+use crate::{RelayoutWhenSystemFontsChangeData, RelayoutWhenSystemFontsChangeMixin};
 
 const K_ELLIPSIS: &str = "\u{2026}";
 
@@ -36,6 +37,7 @@ pub struct RenderParagraph {
     overflow: TextOverflow,
     device_pixel_ratio: f64,
     needs_clipping: bool,
+    system_fonts: RelayoutWhenSystemFontsChangeData,
 }
 
 impl RenderParagraph {
@@ -62,6 +64,7 @@ impl RenderParagraph {
                 overflow: TextOverflow::Clip,
                 device_pixel_ratio: 1.0,
                 needs_clipping: false,
+                system_fonts: RelayoutWhenSystemFontsChangeData::new(),
             },
         )
     }
@@ -445,6 +448,27 @@ impl RenderParagraph {
     }
 }
 
+impl RelayoutWhenSystemFontsChangeMixin for RenderParagraph {
+    fn relayout_when_system_fonts_change_data(
+        self: RenderHandle<Self>,
+        app: &App,
+    ) -> &RelayoutWhenSystemFontsChangeData {
+        &self.get(app).system_fonts
+    }
+
+    fn relayout_when_system_fonts_change_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RelayoutWhenSystemFontsChangeData {
+        &mut self.get_mut(app).system_fonts
+    }
+
+    fn system_fonts_did_change(self: RenderHandle<Self>, app: &mut App) {
+        self.as_render_object(app).mark_needs_layout(app);
+        self.painter_mut(app).mark_needs_layout();
+    }
+}
+
 impl RenderObject for RenderParagraph {
     crate::render_object_accessors!();
 
@@ -454,6 +478,14 @@ impl RenderObject for RenderParagraph {
         _visitor: &mut dyn FnMut(AnyRenderObject),
     ) {
         // A leaf until inline children (`WidgetSpan`) are ported.
+    }
+
+    fn did_attach(self: RenderHandle<Self>, app: &mut App, _owner: Handle<crate::PipelineOwner>) {
+        RelayoutWhenSystemFontsChangeMixin::attach_system_fonts(self, app);
+    }
+
+    fn did_detach(self: RenderHandle<Self>, app: &mut App) {
+        RelayoutWhenSystemFontsChangeMixin::detach_system_fonts(self, app);
     }
 
     fn perform_layout(self: RenderHandle<Self>, app: &mut App) {

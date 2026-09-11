@@ -41,6 +41,10 @@ pub trait EmbedderClient {
     /// `Platform::locales` already answers the new one.
     fn locales_changed(&mut self);
 
+    /// Flutter `PlatformDispatcher.onSystemFontsChanged`: the host registered faces the
+    /// framework did not have when text last laid out.
+    fn system_fonts_changed(&mut self) {}
+
     /// A deadline requested through `Platform::wake_at` has passed.
     ///
     /// `elapsed` is the platform clock, the same one `Frame::elapsed` reports. Dart's

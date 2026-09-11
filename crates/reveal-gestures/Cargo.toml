@@ -10,6 +10,7 @@ indexmap.workspace = true
 reveal-embedder.workspace = true
 reveal-foundation.workspace = true
 reveal-scheduler.workspace = true
+web-time.workspace = true
 
 [lints]
 workspace = true

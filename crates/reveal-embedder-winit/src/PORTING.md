@@ -52,6 +52,10 @@ Host implementation references: Flutter's C++ engine under `flutter/engine/src/f
   Reason: platform — Flutter's engine finds platform fonts itself; valo needs a `FontSource`.
   Affect: text uses installed fonts, the Cupertino system-font names resolve to SF, and an uninstalled family falls back to whatever the OS picks for the character.
 
+- Change: the valo context hides missing glyphs.
+  Reason: platform — Valo paints `.notdef` tofu unless asked not to.
+  Affect: a character with no face occupies layout space and draws nothing.
+
 - Change: `present` asks the window for another redraw when valo cannot acquire a surface texture, so the retained scene is presented next vsync.
   Reason: platform — Flutter's Metal surface always has a drawable, so its engine drops such a frame and resubmits only on Android's first-frame path.
   Affect: the first frame of a just-shown window appears without needing a resize, and no frame is lost to a surface that was not ready.

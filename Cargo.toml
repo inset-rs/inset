@@ -17,6 +17,8 @@ indexmap = "2"
 reveal-animation = { path = "crates/reveal-animation" }
 reveal-cupertino = { path = "crates/reveal-cupertino" }
 reveal-embedder = { path = "crates/reveal-embedder" }
+reveal-embedder-default = { path = "crates/reveal-embedder-default" }
+reveal-embedder-web = { path = "crates/reveal-embedder-web" }
 reveal-embedder-winit = { path = "crates/reveal-embedder-winit" }
 reveal-foundation = { path = "crates/reveal-foundation" }
 reveal-gestures = { path = "crates/reveal-gestures" }
@@ -37,3 +39,4 @@ valo-system-fonts = "0.4.3"
 valo-geometry = "0.4.3"
 wgpu = "30"
 pollster = "0.4"
+web-time = "1"

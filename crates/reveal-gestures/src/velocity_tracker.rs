@@ -2,7 +2,9 @@
 //! and the iOS / macOS fling subclasses). [`Velocity`](crate::velocity::Velocity)
 //! / [`VelocityEstimate`](crate::velocity::VelocityEstimate) live in `velocity.rs`.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use web_time::Instant;
 
 use reveal_embedder::{Offset, PointerDeviceKind};
 

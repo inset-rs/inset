@@ -584,7 +584,8 @@ impl<C: EmbedderClient> WinitApp<C> {
             surface.set_presents_with_transaction(true);
             surface
         };
-        let context = valo::Context::new(gpu.device.clone(), gpu.queue.clone());
+        let mut context = valo::Context::new(gpu.device.clone(), gpu.queue.clone());
+        context.set_hide_missing_glyphs(true);
         let images = context.image_context();
         let loader = match self.image_loader_setup.take() {
             Some(make_loader) => make_loader(images),

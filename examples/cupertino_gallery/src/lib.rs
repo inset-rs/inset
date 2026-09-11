@@ -14,5 +14,8 @@ pub mod catalog;
 pub mod pages;
 pub mod support;
 
+#[cfg(target_arch = "wasm32")]
+mod web;
+
 pub use app::{entry_route, gallery, open_entry, open_sub_page, run_gallery, sub_route};
 pub use catalog::Entry;

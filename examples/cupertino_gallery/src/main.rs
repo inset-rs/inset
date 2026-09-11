@@ -10,7 +10,7 @@
 //! ```
 
 use cupertino_gallery::{Entry, run_gallery};
-use reveal_embedder_winit::{ImplicitViewConfig, WinitEmbedder};
+use reveal_embedder_default::{DefaultEmbedder, ImplicitViewConfig};
 use reveal_shell::Shell;
 
 fn main() {
@@ -18,11 +18,10 @@ fn main() {
     let opening = std::env::var("GALLERY_ENTRY")
         .ok()
         .and_then(|name| Entry::from_name(&name));
-    WinitEmbedder {
-        implicit_view: Some(ImplicitViewConfig {
+    DefaultEmbedder::default()
+        .implicit_view(Some(ImplicitViewConfig {
             title: "reveal — cupertino gallery".to_owned(),
             logical_size: [420.0, 720.0],
-        }),
-    }
-    .run(move |platform| Shell::new(platform, move |app| run_gallery(app, opening)));
+        }))
+        .run(move |platform| Shell::new(platform, move |app| run_gallery(app, opening)));
 }

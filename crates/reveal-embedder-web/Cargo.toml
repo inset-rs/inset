@@ -1,0 +1,38 @@
+[package]
+name = "reveal-embedder-web"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1"
+getrandom = { version = "0.3", features = ["wasm_js"] }
+js-sys = "0.3"
+reveal-embedder.workspace = true
+valo = { workspace = true, features = ["woff2"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-time.workspace = true
+wgpu = { workspace = true, features = ["webgpu"] }
+web-sys = { version = "0.3", features = [
+    "AddEventListenerOptions",
+    "Clipboard",
+    "CssStyleDeclaration",
+    "Document",
+    "Element",
+    "EventTarget",
+    "HtmlCanvasElement",
+    "HtmlElement",
+    "KeyboardEvent",
+    "MediaQueryList",
+    "MouseEvent",
+    "Navigator",
+    "PointerEvent",
+    "Response",
+    "Window",
+    "WheelEvent",
+] }
+
+[lints]
+workspace = true

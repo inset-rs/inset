@@ -336,22 +336,17 @@ impl<T> Context<'_, T> {
     {
         let this = self.weak_entity();
         let watched = entity.clone();
-        self.app.subscribe_entity_id(
-            entity.entity_id(),
-            TypeId::of::<E>(),
-            move |app, event| {
+        self.app
+            .subscribe_entity_id(entity.entity_id(), TypeId::of::<E>(), move |app, event| {
                 let Some(this) = this.upgrade() else {
                     return false;
                 };
                 let event = event
                     .downcast_ref::<E>()
                     .expect("subscriber event type matches the emitter");
-                this.update(app, |this, cx| {
-                    on_event(this, watched.clone(), event, cx)
-                });
+                this.update(app, |this, cx| on_event(this, watched.clone(), event, cx));
                 true
-            },
-        )
+            })
     }
 }
 
@@ -401,10 +396,18 @@ impl App {
             taken: false,
         };
         let result = f(self);
-        (result, TrackedSet { ids: frame.finish() })
+        (
+            result,
+            TrackedSet {
+                ids: frame.finish(),
+            },
+        )
     }
 
-    pub fn new_entity<T: 'static>(&mut self, build: impl FnOnce(&mut Context<T>) -> T) -> Entity<T> {
+    pub fn new_entity<T: 'static>(
+        &mut self,
+        build: impl FnOnce(&mut Context<T>) -> T,
+    ) -> Entity<T> {
         self.begin_entity_update();
         let entity = self.reserve_entity::<T>();
         let value = {
@@ -485,11 +488,15 @@ impl App {
         handler: impl FnMut(&mut App) -> bool + 'static,
     ) -> Subscription {
         let cancelled = Rc::new(Cell::new(false));
-        self.entities.observers.entry(id).or_default().push(Observer {
-            active: false,
-            cancelled: Rc::clone(&cancelled),
-            handler: Box::new(handler),
-        });
+        self.entities
+            .observers
+            .entry(id)
+            .or_default()
+            .push(Observer {
+                active: false,
+                cancelled: Rc::clone(&cancelled),
+                handler: Box::new(handler),
+            });
         if self.entities.update_depth == 0 && !self.entities.flushing {
             self.flush_entity_effects();
         }
@@ -575,11 +582,7 @@ impl App {
 
     fn apply_entity_notify(&mut self, emitter: EntityId) {
         self.entities.pending_notifications.remove(&emitter);
-        let mut observers = self
-            .entities
-            .observers
-            .remove(&emitter)
-            .unwrap_or_default();
+        let mut observers = self.entities.observers.remove(&emitter).unwrap_or_default();
         let mut i = 0;
         while i < observers.len() {
             let run = !observers[i].cancelled.get() && observers[i].active;
@@ -647,10 +650,7 @@ impl App {
             value: None,
             keep: Weak::new(),
         });
-        let keep = Rc::new(EntityKeep {
-            id,
-            dropped,
-        });
+        let keep = Rc::new(EntityKeep { id, dropped });
         self.entities.slots[id].keep = Rc::downgrade(&keep);
         Entity {
             id,
@@ -670,9 +670,11 @@ impl App {
     }
 
     fn entity_ref<T: 'static>(&self, id: EntityId) -> &T {
-        let slot = self.entities.slots.get(id).unwrap_or_else(|| {
-            panic!("stale entity {}", type_name::<T>())
-        });
+        let slot = self
+            .entities
+            .slots
+            .get(id)
+            .unwrap_or_else(|| panic!("stale entity {}", type_name::<T>()));
         assert_eq!(
             slot.type_id,
             TypeId::of::<T>(),
@@ -706,9 +708,11 @@ impl App {
     }
 
     fn take_entity<T: 'static>(&mut self, id: EntityId) -> T {
-        let slot = self.entities.slots.get_mut(id).unwrap_or_else(|| {
-            panic!("stale entity {}", type_name::<T>())
-        });
+        let slot = self
+            .entities
+            .slots
+            .get_mut(id)
+            .unwrap_or_else(|| panic!("stale entity {}", type_name::<T>()));
         assert_eq!(slot.type_id, TypeId::of::<T>());
         let boxed = slot.value.take().unwrap_or_else(|| {
             panic!(
@@ -835,9 +839,12 @@ mod tests {
         let mut app = cell.borrow_mut();
         let first = app.new_entity(|_cx| Counter { count: 0 });
         let second = app.new_entity(|cx| {
-            cx.subscribe(&first, |second: &mut Doubler, _first, event: &Changed, _cx| {
-                second.count += event.by;
-            })
+            cx.subscribe(
+                &first,
+                |second: &mut Doubler, _first, event: &Changed, _cx| {
+                    second.count += event.by;
+                },
+            )
             .detach();
             Doubler { count: 0 }
         });

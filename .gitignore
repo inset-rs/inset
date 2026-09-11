@@ -1,3 +1,4 @@
 /target
 .DS_Store
 .reference/
+examples/cupertino_gallery/pkg/

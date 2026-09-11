@@ -78,5 +78,7 @@ fn headless_context() -> Context {
     let (device, queue) =
         pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
             .expect("a GPU device for tests");
-    Context::new(device, queue)
+    let mut context = Context::new(device, queue);
+    context.set_hide_missing_glyphs(true);
+    context
 }

@@ -94,12 +94,17 @@ pub fn default_font_families() -> Vec<String> {
             "Arial".to_owned(),
         ]
     }
+    #[cfg(target_arch = "wasm32")]
+    {
+        vec!["Roboto".to_owned()]
+    }
     #[cfg(not(any(
         target_os = "macos",
         target_os = "ios",
         target_os = "android",
         target_os = "windows",
         target_os = "linux",
+        target_arch = "wasm32",
     )))]
     {
         vec!["Arial".to_owned()]

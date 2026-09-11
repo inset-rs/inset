@@ -7,6 +7,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - box.rs → BoxConstraints
 - proxy_box.rs → HitTestBehavior
 - object.rs → Constraints (`isTight` / `isNormalized` / `debugAssertIsValid`)
+- relayout_when_system_fonts_change.rs → object.dart (`RelayoutWhenSystemFontsChangeMixin`)
 - sliver.rs → GrowthDirection, applyGrowthDirectionToAxisDirection / ScrollDirection, SliverConstraints (`isTight` / `isNormalized` / `asBoxConstraints` / `==`)
 - viewport_offset.rs → ScrollDirection, flipScrollDirection
 - flex.rs → FlexFit, MainAxisSize, MainAxisAlignment
@@ -131,7 +132,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 ## editable.rs → editable.dart
 
 - Change: `RenderEditable` is a leaf: no inline children, no custom-paint child boxes, no internal tap / long-press recognizers, and caret, selection and the handle leaders paint in `paint`.
-  Reason: platform — `WidgetSpan` placeholders, engine layers and `PaintingBinding.systemFonts` wait, as on `RenderParagraph`.
+  Reason: platform — `WidgetSpan` placeholders and engine layers wait, as on `RenderParagraph`.
   Affect: selection is driven from above (`select_position_at` under an `ignore_pointer`) rather than by the editable's own recognizers, and the handles' links are led from `paint` for a `CompositedTransformFollower`.
 
 - Change: `VerticalCaretMovementRun::is_valid` compares the editable's layout generation.
@@ -198,8 +199,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - The layout-contract asserts: `_DebugSize` and `debugAssertDoesMeetConstraints` on box, sliver and the fixed-extent adaptor; `SliverGeometry::debug_assert_is_valid` is ported and the viewport calls it. Trigger: the first layout bug one of them would have caught.
 - `layout` and `constraints` as override points; `markNeedsLayout` is one on the box protocol only. Trigger: OverlayPortal, `RenderView`. Ask before adding.
 - `RenderView.applyPaintTransform` / `updateSystemChrome`; `performReassemble`. Trigger: `getTransformTo`, hot reload.
-- `RenderParagraph.RelayoutWhenSystemFontsChangeMixin` and `applyPaintTransform`. Trigger: `PaintingBinding.systemFonts`.
-- `RenderEditable` inline children, system-font relayout, the custom-paint child boxes and the internal tap / long-press recognizers. Trigger: `WidgetSpan`; `PaintingBinding.systemFonts`; a field that does not set `ignorePointer`.
+- `RenderParagraph.applyPaintTransform`. Trigger: a caller that needs the paragraph's paint transform.
+- `RenderEditable` inline children, system-font relayout, the custom-paint child boxes and the internal tap / long-press recognizers. Trigger: `WidgetSpan`; a field that does not set `ignorePointer`.
 - `SliverConstraints.debugAssertIsValid` extra numeric checks. Trigger: a caller that relies on those messages.
 - Baseline alignment on the multi-child boxes and `RenderIgnoreBaseline`; meanwhile a `CrossAxisAlignment::Baseline` row top-aligns its children. Trigger: the first baseline-aligned `Row`.
 - `RenderBoxBase` sits in `proxy_box.rs` beside its callers instead of next to `RenderBox`. Trigger: the next edit of `box.rs`.

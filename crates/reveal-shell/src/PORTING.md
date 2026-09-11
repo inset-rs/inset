@@ -16,6 +16,10 @@ No Flutter counterpart. Dart has no type — the engine owns the isolate.
   Reason: platform — the shell cannot name `WidgetsBinding`, which lives above it.
   Affect: a host that reports a theme or locale change reaches `MediaQuery` observers without the shell knowing widgets.
 
+- Change: `system_fonts_changed` notifies `PaintingBinding.systemFonts` in a turn of its own.
+  Reason: platform — Dart's engine posts `fontsChange` on a system channel; here the host calls the client.
+  Affect: paragraphs listening to `systemFonts` relayout after the host loads faces.
+
 - Change: `Shell::new` installs the platform's fonts into `PaintingBinding` before `setup` runs.
   Reason: platform — Flutter's engine collects platform fonts on its own; here the shell asks `Platform::font_source` once.
   Affect: text shapes against the OS fonts with no application code, while a test shell on the inert platform has an empty collection until `PaintingBinding::install_fonts`.

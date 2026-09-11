@@ -8,10 +8,10 @@
 
 use std::cell::RefMut;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use reveal_embedder::{
-    EmbedderClient, Frame, KeyData, PlatformRef, PointerDataPacket, TextEditingValue,
+    EmbedderClient, Frame, Instant, KeyData, PlatformRef, PointerDataPacket, TextEditingValue,
     TextInputAction, ViewFocusEvent, ViewId,
 };
 use reveal_foundation::{App, AppCell};
@@ -143,6 +143,12 @@ impl EmbedderClient for Shell {
             if let Some(callback) = callback {
                 callback.call(app);
             }
+        });
+    }
+
+    fn system_fonts_changed(&mut self) {
+        self.push(|app| {
+            PaintingBinding::instance(app).handle_system_fonts_did_change(app);
         });
     }
 
