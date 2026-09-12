@@ -1,11 +1,11 @@
 [package]
 name = "cupertino-gallery"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-publish.workspace = true
+publish = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]

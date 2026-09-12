@@ -1,11 +1,13 @@
 [package]
 name = "inset-embedder"
-version = "0.1.0"
+description = "dart:ui host traits and value types for Inset"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-publish.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [features]
 # Images for tests above the host, which need a GPU device to exist at all.

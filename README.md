@@ -12,7 +12,7 @@ The project is in alpha, while is ready to build apps on. Inset currently has tw
 
 ## Try it
 
-Inset **requires nightly Rust**. To install it run:
+Inset **requires nightly Rust**. To install run:
 
 ```sh
 rustup install nightly
@@ -32,7 +32,7 @@ Inset keeps a clean interface between the framework and the platform (the embedd
 
 ```rust
 use inset_cupertino::CupertinoApp;
-use inset_embedder_default::{DefaultEmbedder, ImplicitViewConfig};
+use inset_embedder_default::DefaultEmbedder;
 use inset_shell::Shell;
 use inset_widgets::{IntoWidget, run_app};
 
@@ -76,6 +76,9 @@ App state lives in an `Entity`. Create one with `app.new_entity`, read it with `
 
 
 ```rust
+use inset_foundation::{App, Entity};
+use inset_widgets::{BuildContext, IntoWidget, StatelessWidget, Text, WidgetRef};
+
 let count = app.new_entity(|_cx| 0);
 
 struct Label {

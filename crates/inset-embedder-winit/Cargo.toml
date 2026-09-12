@@ -1,11 +1,13 @@
 [package]
 name = "inset-embedder-winit"
-version = "0.1.0"
+description = "Native winit host for Inset"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-publish.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [features]
 default = ["image-apple", "image-software", "image-worker"]

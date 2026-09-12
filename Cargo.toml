@@ -4,10 +4,12 @@ members = ["crates/*", "examples/*"]
 
 [workspace.package]
 edition = "2024"
+version = "0.1.0"
 license = "MIT"
-publish = false
 repository = "https://github.com/inset-rs/inset"
 homepage = "https://inset.rs"
+keywords = ["ui", "gui", "flutter"]
+categories = ["gui"]
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -16,21 +18,21 @@ unsafe_code = "forbid"
 arboard = "3"
 async-task = "4"
 indexmap = "2"
-inset-animation = { path = "crates/inset-animation" }
-inset-cupertino = { path = "crates/inset-cupertino" }
-inset-embedder = { path = "crates/inset-embedder" }
-inset-embedder-default = { path = "crates/inset-embedder-default" }
-inset-embedder-web = { path = "crates/inset-embedder-web" }
-inset-embedder-winit = { path = "crates/inset-embedder-winit" }
-inset-foundation = { path = "crates/inset-foundation" }
-inset-gestures = { path = "crates/inset-gestures" }
-inset-painting = { path = "crates/inset-painting" }
-inset-physics = { path = "crates/inset-physics" }
-inset-rendering = { path = "crates/inset-rendering" }
-inset-scheduler = { path = "crates/inset-scheduler" }
-inset-services = { path = "crates/inset-services" }
-inset-shell = { path = "crates/inset-shell" }
-inset-widgets = { path = "crates/inset-widgets" }
+inset-animation = { version = "0.1.0", path = "crates/inset-animation" }
+inset-cupertino = { version = "0.1.0", path = "crates/inset-cupertino" }
+inset-embedder = { version = "0.1.0", path = "crates/inset-embedder" }
+inset-embedder-default = { version = "0.1.0", path = "crates/inset-embedder-default" }
+inset-embedder-web = { version = "0.1.0", path = "crates/inset-embedder-web" }
+inset-embedder-winit = { version = "0.1.0", path = "crates/inset-embedder-winit" }
+inset-foundation = { version = "0.1.0", path = "crates/inset-foundation" }
+inset-gestures = { version = "0.1.0", path = "crates/inset-gestures" }
+inset-painting = { version = "0.1.0", path = "crates/inset-painting" }
+inset-physics = { version = "0.1.0", path = "crates/inset-physics" }
+inset-rendering = { version = "0.1.0", path = "crates/inset-rendering" }
+inset-scheduler = { version = "0.1.0", path = "crates/inset-scheduler" }
+inset-services = { version = "0.1.0", path = "crates/inset-services" }
+inset-shell = { version = "0.1.0", path = "crates/inset-shell" }
+inset-widgets = { version = "0.1.0", path = "crates/inset-widgets" }
 slotmap = "1"
 unicode-general-category = "1"
 unicode-segmentation = "1"
