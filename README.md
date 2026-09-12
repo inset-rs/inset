@@ -25,7 +25,7 @@ cd examples/cupertino_gallery
 wasm-pack build --target web --no-default-features
 ```
 
-Serve that folder (`python3 -m http.server` in `examples/cupertino_gallery`). The page is `index.html`; the wasm module lands in `pkg/`. Chrome or Edge with WebGPU. Body text loads Roboto and Noto subsets from Google Fonts (CJK is chunked by the characters on screen).
+Serve that folder (`python3 -m http.server` in `examples/cupertino_gallery`). The page is `index.html`; the wasm module lands in `pkg/`. Chrome or Edge with WebGPU. Body text is a Roboto Latin slice compiled into the wasm, so the first frame has ink; other scripts load Google Fonts' unicode-range slices of Roboto or of the script's Noto family on first use.
 
 ## Write a widget
 

@@ -200,7 +200,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `layout` and `constraints` as override points; `markNeedsLayout` is one on the box protocol only. Trigger: OverlayPortal, `RenderView`. Ask before adding.
 - `RenderView.applyPaintTransform` / `updateSystemChrome`; `performReassemble`. Trigger: `getTransformTo`, hot reload.
 - `RenderParagraph.applyPaintTransform`. Trigger: a caller that needs the paragraph's paint transform.
-- `RenderEditable` inline children, system-font relayout, the custom-paint child boxes and the internal tap / long-press recognizers. Trigger: `WidgetSpan`; a field that does not set `ignorePointer`.
+- `RenderEditable` inline children, the custom-paint child boxes and the internal tap / long-press recognizers. Trigger: `WidgetSpan`; a field that does not set `ignorePointer`.
 - `SliverConstraints.debugAssertIsValid` extra numeric checks. Trigger: a caller that relies on those messages.
 - Baseline alignment on the multi-child boxes and `RenderIgnoreBaseline`; meanwhile a `CrossAxisAlignment::Baseline` row top-aligns its children. Trigger: the first baseline-aligned `Row`.
 - `RenderBoxBase` sits in `proxy_box.rs` beside its callers instead of next to `RenderBox`. Trigger: the next edit of `box.rs`.

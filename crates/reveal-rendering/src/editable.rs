@@ -1,7 +1,7 @@
 //! Flutter counterpart: `rendering/editable.dart`.
 //!
 //! A leaf until inline children, the custom-paint child boxes, `LeaderLayer`
-//! handles, pointer recognizers, and `RelayoutWhenSystemFontsChangeMixin` land.
+//! handles, and pointer recognizers land.
 //! Caret and selection paint in `paint`, the same work Flutter's child painters
 //! do.
 
@@ -25,6 +25,9 @@ use crate::layer::{ClipRectLayer, ContainerLayer, LayerHandle, LayerLink, Leader
 use crate::object::{AnyRenderObject, RenderHandle, RenderObject, RenderObjectData};
 use crate::painting_context::PaintingContext;
 use crate::pipeline_owner::PipelineOwner;
+use crate::relayout_when_system_fonts_change::{
+    RelayoutWhenSystemFontsChangeData, RelayoutWhenSystemFontsChangeMixin,
+};
 use crate::text_boundary::WordBoundary;
 use crate::viewport_offset::AnyViewportOffset;
 
@@ -175,6 +178,7 @@ pub struct RenderEditable {
     render_box: RenderBoxData,
     text_painter: TextPainter,
     text_intrinsics: Option<TextPainter>,
+    system_fonts: RelayoutWhenSystemFontsChangeData,
     fonts_override: Option<Handle<FontCollection>>,
     show_cursor: Handle<ValueNotifier<bool>>,
     #[allow(dead_code)]
@@ -244,6 +248,7 @@ impl RenderEditable {
                 render_box: RenderBoxData::new(),
                 text_painter,
                 text_intrinsics: None,
+                system_fonts: RelayoutWhenSystemFontsChangeData::new(),
                 fonts_override: None,
                 show_cursor,
                 dispose_show_cursor: true,
@@ -1784,6 +1789,27 @@ fn paint_range(
     }
 }
 
+impl RelayoutWhenSystemFontsChangeMixin for RenderEditable {
+    fn relayout_when_system_fonts_change_data(
+        self: RenderHandle<Self>,
+        app: &App,
+    ) -> &RelayoutWhenSystemFontsChangeData {
+        &self.get(app).system_fonts
+    }
+
+    fn relayout_when_system_fonts_change_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RelayoutWhenSystemFontsChangeData {
+        &mut self.get_mut(app).system_fonts
+    }
+
+    fn system_fonts_did_change(self: RenderHandle<Self>, app: &mut App) {
+        self.as_render_object(app).mark_needs_layout(app);
+        self.get_mut(app).text_painter.mark_needs_layout();
+    }
+}
+
 impl RenderObject for RenderEditable {
     crate::render_object_accessors!();
 
@@ -1796,6 +1822,7 @@ impl RenderObject for RenderEditable {
     }
 
     fn did_attach(self: RenderHandle<Self>, app: &mut App, _owner: Handle<PipelineOwner>) {
+        RelayoutWhenSystemFontsChangeMixin::attach_system_fonts(self, app);
         let offset = self.get(app).offset;
         offset.add_listener(app, self.mark_needs_paint_listener());
         let show_cursor = self.get(app).show_cursor;
@@ -1807,6 +1834,7 @@ impl RenderObject for RenderEditable {
         offset.remove_listener(app, &self.mark_needs_paint_listener());
         let show_cursor = self.get(app).show_cursor;
         show_cursor.remove_listener(app, &self.mark_needs_paint_listener());
+        RelayoutWhenSystemFontsChangeMixin::detach_system_fonts(self, app);
     }
 
     fn dispose(self: RenderHandle<Self>, app: &mut App) {
@@ -2031,10 +2059,15 @@ impl RenderEditable {
 
 #[cfg(test)]
 mod tests {
-    use reveal_embedder::TextAffinity;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use reveal_embedder::{FontSource, TextAffinity};
     use reveal_foundation::{AppCell, ValueListenable};
-    use reveal_painting::{TextSpan, TextStyle};
+    use reveal_painting::{PaintingBinding, TextSpan, TextStyle};
+    use reveal_scheduler::SchedulerBinding;
     use reveal_services::{TextEditingValue, TextSelectionDelegate};
+    use valo::{Font, FontAttrs};
 
     use super::*;
     use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer};
@@ -2249,6 +2282,102 @@ mod tests {
         assert!(
             *editable.selection_end_in_viewport(&app).value(&app),
             "Flutter defaults selectionEndInViewport to true"
+        );
+    }
+
+    #[test]
+    fn system_fonts_change_marks_the_editable_dirty() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let editable = laid_out(&mut app, "hello");
+        assert!(!editable.as_object().debug_needs_layout(&app));
+        PaintingBinding::instance(&mut app).handle_system_fonts_did_change(&mut app);
+        SchedulerBinding::handle_begin_frame(&mut app, None);
+        assert!(
+            editable.as_object().debug_needs_layout(&app),
+            "RenderEditable listens to PaintingBinding.system_fonts"
+        );
+    }
+
+    /// A source that can answer ASCII immediately and hold non-ASCII until the
+    /// test opens the gate — the web host's delayed Noto path.
+    struct GatedFonts {
+        inner: valo_system_fonts::SystemFonts,
+        allow_non_ascii: Rc<Cell<bool>>,
+    }
+
+    impl FontSource for GatedFonts {
+        fn family(&mut self, _name: &str) -> Vec<Font> {
+            // Named families on this machine (PingFang, the system UI font) cover
+            // CJK. The gate is the codepoint path, so family lookup stays empty.
+            Vec::new()
+        }
+
+        fn face_for_codepoint(&mut self, codepoint: char, attrs: FontAttrs) -> Option<Font> {
+            if !self.allow_non_ascii.get() && !codepoint.is_ascii() {
+                return None;
+            }
+            self.inner.face_for_codepoint(codepoint, attrs)
+        }
+    }
+
+    #[test]
+    fn system_fonts_change_rebuilds_glyphs_once_a_fallback_face_arrives() {
+        let allow_non_ascii = Rc::new(Cell::new(false));
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        PaintingBinding::instance(&mut app).install_fonts(&mut app, {
+            let allow_non_ascii = Rc::clone(&allow_non_ascii);
+            move |fonts| {
+                fonts.add_source(GatedFonts {
+                    inner: valo_system_fonts::SystemFonts::load(),
+                    allow_non_ascii,
+                });
+            }
+        });
+
+        let text = "a你";
+        let delegate = app.create(TestDelegate {
+            value: TextEditingValue::new()
+                .text(text)
+                .selection(TextSelection::collapsed(0, TextAffinity::Downstream)),
+        });
+        let start = LayerLink::new(&mut app);
+        let end = LayerLink::new(&mut app);
+        let offset = FixedViewportOffset::zero(&mut app).as_viewport_offset();
+        let editable = RenderEditable::new(
+            &mut app,
+            TextDirection::Ltr,
+            start,
+            end,
+            offset,
+            delegate.as_text_selection_delegate(),
+        );
+        editable.set_text(&mut app, Some(span(text)));
+        let root = RenderRepaintBoundary::new(&mut app, Some(editable.as_box()));
+        let owner = PipelineOwner::new(&mut app, None);
+        owner.set_root_node(&mut app, Some(root.as_object()));
+        root.schedule_initial_layout(&mut app);
+        let constraints = BoxConstraints::tight_for(Some(200.0), Some(40.0));
+        root.layout(&mut app, constraints, false);
+
+        let cjk = TextRange::new(1, 2);
+        let before = editable
+            .get_rect_for_composing_range(&mut app, cjk)
+            .expect("an uncovered CJK character still occupies .notdef space");
+
+        allow_non_ascii.set(true);
+        PaintingBinding::instance(&mut app).handle_system_fonts_did_change(&mut app);
+        SchedulerBinding::handle_begin_frame(&mut app, None);
+        root.layout(&mut app, constraints, false);
+
+        let after = editable
+            .get_rect_for_composing_range(&mut app, cjk)
+            .expect("systemFontsDidChange rebuilds the painter against the new face");
+        assert_ne!(
+            before.width(),
+            after.width(),
+            "the CJK glyph replaces .notdef once its face is available"
         );
     }
 }

@@ -5,13 +5,14 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use reveal_embedder::{
-    Brightness, Picture, Platform, SystemMouseCursorKind, TargetPlatform, View, ViewId,
-    ViewMetrics, ViewRef,
+    Brightness, ImageCodecFuture, Matrix4, Picture, Platform, Rect, Size, SystemMouseCursorKind,
+    TargetPlatform, TextEditingValue, TextInputConfiguration, View, ViewId, ViewMetrics, ViewRef,
 };
 use web_sys::HtmlCanvasElement;
 use web_time::Instant;
 
 use crate::gpu::Gpu;
+use crate::text_input::{TextInputListener, WebTextInput};
 
 pub const IMPLICIT_VIEW: ViewId = ViewId(0);
 
@@ -28,6 +29,7 @@ pub struct WebPlatform {
     /// Set by the host so `request_frame` / `wake_at` can ask for a turn.
     /// Shared with the font source, which is created before the host installs the callback.
     on_schedule: OnSchedule,
+    images: RefCell<Option<valo::ImageContext>>,
 }
 
 impl WebPlatform {
@@ -41,6 +43,7 @@ impl WebPlatform {
             view: RefCell::new(None),
             brightness: Cell::new(brightness),
             on_schedule: Rc::new(RefCell::new(None)),
+            images: RefCell::new(None),
         }
     }
 
@@ -50,6 +53,10 @@ impl WebPlatform {
 
     pub fn set_on_schedule(&self, callback: Rc<dyn Fn()>) {
         *self.on_schedule.borrow_mut() = Some(callback);
+    }
+
+    pub fn set_images(&self, images: valo::ImageContext) {
+        *self.images.borrow_mut() = Some(images);
     }
 
     pub fn take_frame_request(&self) -> bool {
@@ -154,11 +161,27 @@ impl Platform for WebPlatform {
         let clipboard = window.navigator().clipboard();
         let _ = clipboard.write_text(text);
     }
+
+    fn open_image_codec(&self, bytes: std::sync::Arc<[u8]>) -> ImageCodecFuture {
+        let Some(images) = self.images.borrow().clone() else {
+            return Box::pin(std::future::ready(Err(
+                reveal_embedder::ImageDecodeError::NoDecoder,
+            )));
+        };
+        crate::images::open_codec(
+            bytes,
+            images,
+            Rc::clone(&self.frame_requested),
+            Rc::clone(&self.on_schedule),
+        )
+    }
 }
 
 pub struct WebView {
     metrics: Cell<ViewMetrics>,
     gpu: RefCell<Gpu>,
+    text_input: RefCell<Option<WebTextInput>>,
+    notify_text_input: RefCell<Option<TextInputListener>>,
 }
 
 impl WebView {
@@ -166,7 +189,17 @@ impl WebView {
         WebView {
             metrics: Cell::new(metrics),
             gpu: RefCell::new(gpu),
+            text_input: RefCell::new(None),
+            notify_text_input: RefCell::new(None),
         }
+    }
+
+    pub fn set_text_input_listener(&self, listener: TextInputListener) {
+        *self.notify_text_input.borrow_mut() = Some(listener);
+    }
+
+    pub fn has_text_input(&self) -> bool {
+        self.text_input.borrow().is_some()
     }
 
     pub fn set_metrics(&self, metrics: ViewMetrics) {
@@ -189,6 +222,52 @@ impl View for WebView {
 
     fn present(&self, picture: &Picture) {
         self.gpu.borrow_mut().present(picture);
+    }
+
+    fn start_text_input(&self, configuration: &TextInputConfiguration) {
+        if let Some(input) = self.text_input.borrow().as_ref() {
+            input.apply_configuration(configuration);
+            input.set_dpr(self.metrics.get().device_pixel_ratio);
+            return;
+        }
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        let Some(notify) = self.notify_text_input.borrow().clone() else {
+            return;
+        };
+        let input = WebTextInput::start(&document, configuration, notify);
+        input.set_dpr(self.metrics.get().device_pixel_ratio);
+        *self.text_input.borrow_mut() = Some(input);
+    }
+
+    fn stop_text_input(&self) {
+        if let Some(input) = self.text_input.borrow_mut().take() {
+            input.stop();
+        }
+    }
+
+    fn set_text_input_editing_state(&self, value: &TextEditingValue) {
+        if let Some(input) = self.text_input.borrow().as_ref() {
+            input.set_editing_state(value);
+        }
+    }
+
+    fn set_text_input_composing_rect(&self, rect: Rect) {
+        self.set_text_input_caret_rect(rect);
+    }
+
+    fn set_text_input_caret_rect(&self, rect: Rect) {
+        if let Some(input) = self.text_input.borrow().as_ref() {
+            input.set_dpr(self.metrics.get().device_pixel_ratio);
+            input.set_caret_rect(rect);
+        }
+    }
+
+    fn set_text_input_client_geometry(&self, size: Size, transform: &Matrix4) {
+        if let Some(input) = self.text_input.borrow().as_ref() {
+            input.set_client_geometry(size, transform);
+        }
     }
 }
 

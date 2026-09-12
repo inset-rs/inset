@@ -19,6 +19,7 @@ use crate::gpu::Gpu;
 use crate::keys;
 use crate::platform::{IMPLICIT_VIEW, WebPlatform, WebView};
 use crate::pointer;
+use crate::text_input::TextInputNotify;
 
 type RafCallback = Closure<dyn FnMut(f64)>;
 type TimeoutCallback = Closure<dyn FnMut()>;
@@ -89,7 +90,9 @@ async fn run_async<C: EmbedderClient + 'static>(
     };
     let (metrics, size) = fit_canvas(&window, &canvas);
     let gpu = Gpu::attach(canvas.clone(), size).await;
+    let images = gpu.context.image_context();
     let platform = Rc::new(WebPlatform::new(canvas.clone(), brightness));
+    platform.set_images(images);
     let view = Rc::new(WebView::new(metrics, gpu));
     platform.set_view(Rc::clone(&view) as ViewRef);
     let client = start(Rc::clone(&platform) as PlatformRef);
@@ -97,7 +100,7 @@ async fn run_async<C: EmbedderClient + 'static>(
         window: window.clone(),
         canvas: canvas.clone(),
         platform: Rc::clone(&platform),
-        view,
+        view: Rc::clone(&view),
         client: RefCell::new(client),
         raf_held: Cell::new(false),
         raf_callback: RefCell::new(None),
@@ -115,6 +118,24 @@ async fn run_async<C: EmbedderClient + 'static>(
     platform.set_on_schedule(Rc::new(move || {
         if let Some(host) = weak.upgrade() {
             schedule_next(&host);
+        }
+    }));
+    let weak = Rc::downgrade(&host);
+    view.set_text_input_listener(Rc::new(move |event| {
+        let Some(host) = weak.upgrade() else {
+            return;
+        };
+        match event {
+            TextInputNotify::Value(value) => {
+                host.client
+                    .borrow_mut()
+                    .text_input_editing_value(IMPLICIT_VIEW, value);
+            }
+            TextInputNotify::Action(action) => {
+                host.client
+                    .borrow_mut()
+                    .text_input_action(IMPLICIT_VIEW, action);
+            }
         }
     }));
     bind_events(&host);
@@ -276,7 +297,9 @@ fn dispatch_pointer<C: EmbedderClient + 'static>(
         return;
     }
     if matches!(phase, PointerPhase::Down) {
-        let _ = host.canvas.focus();
+        if !host.view.has_text_input() {
+            let _ = host.canvas.focus();
+        }
         let _ = host.canvas.set_pointer_capture(event.pointer_id());
     }
     let dpr = host.view.metrics().device_pixel_ratio;
@@ -350,7 +373,7 @@ fn bind_keyboard<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
     for (name, down) in [("keydown", true), ("keyup", false)] {
         let listener = Rc::clone(host);
         let closure = Closure::<dyn FnMut(KeyboardEvent)>::new(move |event: KeyboardEvent| {
-            if dispatch_key(&listener, &event, down) {
+            if dispatch_key(&listener, &event, down) && !event.is_composing() {
                 event.prevent_default();
             }
         });
