@@ -1,7 +1,7 @@
 ---
 name: porting-flutter
 description: >-
-  Transcribe a Flutter Dart file into reveal-rs. Copy the Dart then modify;
+  Transcribe a Flutter Dart file into Inset. Copy the Dart then modify;
   record divergences in PORTING.md; stop and ask when something does not fit.
   Use before writing or changing any Rust that corresponds to a Flutter source file.
 ---

@@ -6,7 +6,7 @@ The widgets are a [Flutter](https://github.com/flutter/flutter) port. Below them
 
 Alpha: the public API will change. The Cupertino gallery in this repo is a real app you can run.
 
-Crate names are still `reveal-*`. They will become `inset-*`; `reveal` was taken on crates.io.
+Site: [inset.rs](https://inset.rs). Source: [github.com/inset-rs/inset](https://github.com/inset-rs/inset).
 
 ## Try it
 
@@ -16,7 +16,7 @@ cargo run -p cupertino-gallery
 
 macOS, Windows, and Linux.
 
-A browser host ships in `reveal-embedder-default` (canvas, `requestAnimationFrame`, WebGPU). Same app library, same embedder traits. An application depends on that crate instead of picking winit or the web host itself.
+A browser host ships in `inset-embedder-default` (canvas, `requestAnimationFrame`, WebGPU). Same app library, same embedder traits. An application depends on that crate instead of picking winit or the web host itself.
 
 ```sh
 rustup target add wasm32-unknown-unknown

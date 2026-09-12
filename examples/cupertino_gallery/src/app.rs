@@ -8,9 +8,9 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use reveal_cupertino::{CupertinoApp, CupertinoPageRoute, install_cupertino_icon_font};
-use reveal_foundation::{App, Handle, Listener, Timer};
-use reveal_widgets::{
+use inset_cupertino::{CupertinoApp, CupertinoPageRoute, install_cupertino_icon_font};
+use inset_foundation::{App, Handle, Listener, Timer};
+use inset_widgets::{
     AnyRoute, BuildContext, GlobalKey, IntoWidget, Navigator, NavigatorState, Route,
     RouteSettingsRef, WidgetBuilder, run_app,
 };

@@ -4,17 +4,17 @@
 use std::f32::consts::TAU;
 use std::time::Duration;
 
-use reveal_embedder::ViewMetrics;
-use reveal_embedder::{Color, ColorSpace, RRect, Radius, Rect};
-use reveal_embedder_winit::{ImplicitViewConfig, WinitEmbedder};
-use reveal_painting::{Canvas, Paint, Picture, draw_rrect};
-use reveal_scheduler::{FrameCallback, SchedulerBinding};
-use reveal_shell::Shell;
+use inset_embedder::ViewMetrics;
+use inset_embedder::{Color, ColorSpace, RRect, Radius, Rect};
+use inset_embedder_winit::{ImplicitViewConfig, WinitEmbedder};
+use inset_painting::{Canvas, Paint, Picture, draw_rrect};
+use inset_scheduler::{FrameCallback, SchedulerBinding};
+use inset_shell::Shell;
 
 fn main() {
     WinitEmbedder {
         implicit_view: Some(ImplicitViewConfig {
-            title: "reveal — paint".to_owned(),
+            title: "Inset — paint".to_owned(),
             logical_size: [900.0, 600.0],
         }),
     }

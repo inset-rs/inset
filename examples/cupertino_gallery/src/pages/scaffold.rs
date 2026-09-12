@@ -13,14 +13,14 @@
 
 use std::rc::Rc;
 
-use reveal_cupertino::{
+use inset_cupertino::{
     CupertinoColors, CupertinoDynamicColor, CupertinoListTile, CupertinoListTileChevron,
     CupertinoNavigationBar,
 };
-use reveal_foundation::{App, Task};
-use reveal_painting::{AlignmentGeometry, BoxDecoration, EdgeInsetsGeometry};
-use reveal_rendering::CrossAxisAlignment;
-use reveal_widgets::{BuildContext, Column, Container, IntoWidget, SafeArea, Text, WidgetRef};
+use inset_foundation::{App, Task};
+use inset_painting::{AlignmentGeometry, BoxDecoration, EdgeInsetsGeometry};
+use inset_rendering::CrossAxisAlignment;
+use inset_widgets::{BuildContext, Column, Container, IntoWidget, SafeArea, Text, WidgetRef};
 
 use crate::app::open_sub_page;
 use crate::catalog::Entry;

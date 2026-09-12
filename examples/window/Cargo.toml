@@ -3,18 +3,20 @@ name = "window"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 publish.workspace = true
 
 [dependencies]
-reveal-cupertino.workspace = true
-reveal-embedder.workspace = true
-reveal-embedder-winit.workspace = true
-reveal-foundation.workspace = true
-reveal-painting.workspace = true
-reveal-rendering.workspace = true
-reveal-services.workspace = true
-reveal-shell.workspace = true
-reveal-widgets.workspace = true
+inset-cupertino.workspace = true
+inset-embedder.workspace = true
+inset-embedder-winit.workspace = true
+inset-foundation.workspace = true
+inset-painting.workspace = true
+inset-rendering.workspace = true
+inset-services.workspace = true
+inset-shell.workspace = true
+inset-widgets.workspace = true
 
 [lints]
 workspace = true

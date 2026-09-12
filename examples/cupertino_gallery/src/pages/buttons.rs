@@ -4,14 +4,14 @@
 //! which is why a quick tap looks instant and a held press does not. The disabled one never
 //! fades: it takes no tap-down at all.
 
-use reveal_cupertino::{
+use inset_cupertino::{
     CupertinoButton, CupertinoButtonSize, CupertinoColors, CupertinoIcons, CupertinoTheme,
 };
-use reveal_embedder::Size;
-use reveal_foundation::{App, Handle, Listener};
-use reveal_painting::EdgeInsetsGeometry;
-use reveal_rendering::{CrossAxisAlignment, MainAxisAlignment, MainAxisSize};
-use reveal_widgets::{
+use inset_embedder::Size;
+use inset_foundation::{App, Handle, Listener};
+use inset_painting::EdgeInsetsGeometry;
+use inset_rendering::{CrossAxisAlignment, MainAxisAlignment, MainAxisSize};
+use inset_widgets::{
     BuildContext, Icon, IntoWidget, Padding, Row, State, StateData, StatefulWidget, Text, WidgetRef,
 };
 
@@ -49,7 +49,7 @@ impl StatefulWidget for ButtonsDemo {
 
 impl State for Counts {
     type Widget = ButtonsDemo;
-    reveal_widgets::state_accessors!();
+    inset_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let count = Listener::new(move |app: &mut App| {

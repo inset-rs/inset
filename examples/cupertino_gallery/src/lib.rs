@@ -1,8 +1,8 @@
 //! A Cupertino widget gallery: an index of entries, each opening one screen that demonstrates
 //! one feature.
 //!
-//! The index is itself a [`CupertinoListSection`](reveal_cupertino::CupertinoListSection) of
-//! [`CupertinoListTile`](reveal_cupertino::CupertinoListTile)s, so the gallery's own structure
+//! The index is itself a [`CupertinoListSection`](inset_cupertino::CupertinoListSection) of
+//! [`CupertinoListTile`](inset_cupertino::CupertinoListTile)s, so the gallery's own structure
 //! is built out of the widgets it shows.
 //!
 //! The crate is a library as well as a binary so `tests/` can push the real gallery's pages

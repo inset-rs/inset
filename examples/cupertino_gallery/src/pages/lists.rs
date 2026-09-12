@@ -4,12 +4,12 @@
 //! detail worth watching: a section with leading widgets starts its dividers past them, and
 //! `has_leading(false)` is what tells it there are none.
 
-use reveal_cupertino::{
+use inset_cupertino::{
     CupertinoColors, CupertinoDynamicColor, CupertinoFormRow, CupertinoFormSection, CupertinoIcons,
     CupertinoListSection, CupertinoListTile, CupertinoListTileChevron,
 };
-use reveal_foundation::App;
-use reveal_widgets::{BuildContext, IntoWidget, Text, WidgetRef};
+use inset_foundation::App;
+use inset_widgets::{BuildContext, IntoWidget, Text, WidgetRef};
 
 use crate::support::{badge, screen, scrolling_body, secondary, section_with_footer};
 
@@ -88,7 +88,7 @@ fn no_leading_section() -> WidgetRef {
 
 fn form_section() -> WidgetRef {
     CupertinoFormSection::inset_grouped([
-        CupertinoFormRow::new(Text::new("reveal"))
+        CupertinoFormRow::new(Text::new("inset"))
             .prefix(Text::new("Framework"))
             .into_widget(),
         CupertinoFormRow::new(Text::new("valo"))

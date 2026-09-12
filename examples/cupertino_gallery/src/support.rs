@@ -5,15 +5,15 @@
 
 use std::rc::Rc;
 
-use reveal_cupertino::{
+use inset_cupertino::{
     CupertinoColors, CupertinoDynamicColor, CupertinoListSection, CupertinoNavigationBar,
     CupertinoPageScaffold, CupertinoTheme, ObstructingPreferredSizeWidgetRef,
 };
-use reveal_foundation::App;
-use reveal_painting::{
+use inset_foundation::App;
+use inset_painting::{
     AlignmentGeometry, AnyColor, BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry, TextStyle,
 };
-use reveal_widgets::{
+use inset_widgets::{
     Align, BuildContext, Container, Icon, IconData, IntoWidget, ListView, MediaQuery, Padding,
     SizedBox, Text, WidgetRef,
 };

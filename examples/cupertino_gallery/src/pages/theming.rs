@@ -6,16 +6,16 @@
 
 use std::rc::Rc;
 
-use reveal_cupertino::CupertinoDynamicColor;
-use reveal_cupertino::{
+use inset_cupertino::CupertinoDynamicColor;
+use inset_cupertino::{
     CupertinoColors, CupertinoListTile, CupertinoListTileChevron, CupertinoNavigationBar,
     CupertinoTheme, CupertinoThemeData,
 };
-use reveal_embedder::Brightness;
-use reveal_foundation::{App, Task};
-use reveal_painting::{AnyColor, BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry};
-use reveal_rendering::{CrossAxisAlignment, MainAxisAlignment};
-use reveal_widgets::{
+use inset_embedder::Brightness;
+use inset_foundation::{App, Task};
+use inset_painting::{AnyColor, BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry};
+use inset_rendering::{CrossAxisAlignment, MainAxisAlignment};
+use inset_widgets::{
     BuildContext, Builder, Column, Container, IntoWidget, Padding, Row, SizedBox, Text, WidgetRef,
 };
 

@@ -1,4 +1,4 @@
-# reveal-rs
+# Inset
 
 A Flutter port in Rust. The framework matches Flutter closely enough that upstream changes land without worry. Below it, dart:ui as an embedder interface (value types and host traits) so the same framework runs in tests and on real hosts.
 
@@ -26,8 +26,8 @@ Run affected tests during ordinary work. Full workspace tests and clippy for a f
 
 ## Two layers
 
-- **Embedder interface** — dart:ui as host traits and value types, so the same framework runs in tests and on real hosts. The framework depends on `reveal-embedder`, never on a host crate. Hosts implement the traits and drive the client; they do not name `App`.
-- **Framework** — a verbatim Flutter port. Crate order follows Flutter: dart:ui (`reveal-embedder`) → foundation → scheduler / painting → gestures → rendering → widgets. Lower crates do not name higher crates. dart:ui value types (`Offset`, `Color`, `Shadow`, …) live in `reveal-embedder` with the host traits.
+- **Embedder interface** — dart:ui as host traits and value types, so the same framework runs in tests and on real hosts. The framework depends on `inset-embedder`, never on a host crate. Hosts implement the traits and drive the client; they do not name `App`.
+- **Framework** — a verbatim Flutter port. Crate order follows Flutter: dart:ui (`inset-embedder`) → foundation → scheduler / painting → gestures → rendering → widgets. Lower crates do not name higher crates. dart:ui value types (`Offset`, `Color`, `Shadow`, …) live in `inset-embedder` with the host traits.
 
 Current loose target: cupertino widgets, first `CupertinoButton` that presses and fades, sitting on that stack — not a shortcut past it.
 
@@ -38,7 +38,7 @@ Accessibility is deferred. Do not stub `SemanticsBinding`, reduced-motion behavi
 One `App`. Every framework callback gets `&mut App` plus a typed handle to itself.
 
 - **`Handle<T>`** — Copy generational id, point access (`app.get` / `app.get_mut`). Exclusivity lasts one field access, never a whole pass. Flutter objects live here: elements, render objects, `AnimationController`, `ScrollController`, `FocusNode`, and the rest. `ChangeNotifier` is mixed in as a `ChangeNotifierData` field (mixin-as-field).
-- **`Entity<T>`** — Clone, refcounted store the app author writes (`reveal-foundation`). Not a Flutter type, and not where Elements, render objects, or controllers live. Construct with `app.new_entity(|cx| Counter { count: 0 })`. Read with `entity.read(app)`. Mutate with `entity.update(app, |counter, cx| { … })`, which takes `T` out of the map for the closure (`cx` is `Context<T>`). Updating the same entity again inside that closure panics; other entities and every Handle stay reachable. `cx.notify()` runs `observe` callbacks and marks any element whose last widget `build` called `read` or `update` on this entity. `cx.emit` and `subscribe` carry a typed payload and do not rebuild. A `read` inside `StatelessWidget::build` or `State::build` is a dependency; a `read` in a pointer callback is not.
+- **`Entity<T>`** — Clone, refcounted store the app author writes (`inset-foundation`). Not a Flutter type, and not where Elements, render objects, or controllers live. Construct with `app.new_entity(|cx| Counter { count: 0 })`. Read with `entity.read(app)`. Mutate with `entity.update(app, |counter, cx| { … })`, which takes `T` out of the map for the closure (`cx` is `Context<T>`). Updating the same entity again inside that closure panics; other entities and every Handle stay reachable. `cx.notify()` runs `observe` callbacks and marks any element whose last widget `build` called `read` or `update` on this entity. `cx.emit` and `subscribe` carry a typed payload and do not rebuild. A `read` inside `StatelessWidget::build` or `State::build` is a dependency; a `read` in a pointer callback is not.
 
 Do not lease a Handle out of the arena for a pass. shaft-rs-next did that; layout then could not re-enter the node it was laying out.
 

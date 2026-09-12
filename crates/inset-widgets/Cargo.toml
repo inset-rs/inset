@@ -1,0 +1,27 @@
+[package]
+name = "inset-widgets"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[dependencies]
+indexmap.workspace = true
+inset-animation.workspace = true
+inset-embedder.workspace = true
+inset-foundation.workspace = true
+inset-gestures.workspace = true
+inset-painting.workspace = true
+inset-physics.workspace = true
+inset-rendering.workspace = true
+inset-scheduler.workspace = true
+inset-services.workspace = true
+
+[dev-dependencies]
+inset-embedder = { workspace = true, features = ["test-support"] }
+valo-system-fonts.workspace = true
+
+[lints]
+workspace = true

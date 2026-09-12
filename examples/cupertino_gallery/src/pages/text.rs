@@ -1,12 +1,12 @@
 //! Text: the theme's styles, what happens when a line does not fit, and what a larger
 //! accessibility text size does to a layout.
 
-use reveal_cupertino::{CupertinoColors, CupertinoDynamicColor, CupertinoTheme};
-use reveal_embedder::FontWeight;
-use reveal_foundation::App;
-use reveal_painting::{EdgeInsetsGeometry, TextOverflow, TextScaler, TextSpan, TextStyle};
-use reveal_rendering::CrossAxisAlignment;
-use reveal_widgets::{
+use inset_cupertino::{CupertinoColors, CupertinoDynamicColor, CupertinoTheme};
+use inset_embedder::FontWeight;
+use inset_foundation::App;
+use inset_painting::{EdgeInsetsGeometry, TextOverflow, TextScaler, TextSpan, TextStyle};
+use inset_rendering::CrossAxisAlignment;
+use inset_widgets::{
     BuildContext, Column, IntoWidget, MediaQuery, Padding, RichText, SizedBox, Text, WidgetRef,
 };
 

@@ -5,15 +5,15 @@
 
 use std::rc::Rc;
 
-use reveal_cupertino::{
+use inset_cupertino::{
     CupertinoButton, CupertinoButtonSize, CupertinoColors, CupertinoDynamicColor, CupertinoIcons,
     CupertinoListSection, CupertinoListTile, CupertinoListTileChevron, CupertinoTheme,
 };
-use reveal_embedder::{FontFeature, FontWeight, TextAlign};
-use reveal_foundation::{App, Entity, Listener, Task};
-use reveal_painting::{AnyColor, EdgeInsetsGeometry};
-use reveal_rendering::{CrossAxisAlignment, MainAxisAlignment, MainAxisSize};
-use reveal_widgets::{
+use inset_embedder::{FontFeature, FontWeight, TextAlign};
+use inset_foundation::{App, Entity, Listener, Task};
+use inset_painting::{AnyColor, EdgeInsetsGeometry};
+use inset_rendering::{CrossAxisAlignment, MainAxisAlignment, MainAxisSize};
+use inset_widgets::{
     BuildContext, Column, Icon, IconData, IntoWidget, Padding, Row, SizedBox, StatelessWidget,
     Text, WidgetRef,
 };

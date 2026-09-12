@@ -4,7 +4,7 @@ Dart compares function values by identity. Tear-offs of the same method on the s
 
 Rust closures have no identity. Wrap the callback:
 
-- [`Listener`](../../../crates/reveal-foundation/src/change_notifier.rs) for `VoidCallback`
+- [`Listener`](../../../crates/inset-foundation/src/change_notifier.rs) for `VoidCallback`
 - `PointerRoute` for `typedef PointerRoute = void Function(PointerEvent event)`
 
 `new` equals only its clones (`Rc::ptr_eq`). `handle_method(handle, function_name)` equals any other built from the same handle and function (`TypeId` of `F`, not a fn pointer address — release codegen can merge identical bodies). Pass the function by name: a capturing closure or fn pointer is rejected at compile time (`size_of::<F>() == 0`).

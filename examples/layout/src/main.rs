@@ -7,10 +7,10 @@
 //! ```
 #![feature(arbitrary_self_types)]
 
-use reveal_embedder::Size;
-use reveal_foundation::AppCell;
-use reveal_painting::EdgeInsetsGeometry;
-use reveal_rendering::{
+use inset_embedder::Size;
+use inset_foundation::AppCell;
+use inset_painting::EdgeInsetsGeometry;
+use inset_rendering::{
     BoxConstraints, PipelineOwner, RenderBox, RenderConstrainedBox, RenderPadding,
 };
 

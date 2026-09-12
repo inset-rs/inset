@@ -1,7 +1,7 @@
 ---
 name: flutter-port
 description: >-
-  Ports Flutter Dart into reveal-rs, and reviews those ports against the Dart source.
+  Ports Flutter Dart into Inset, and reviews those ports against the Dart source.
   Use when transcribing a Flutter file, extending a ported file, or checking a change for Flutter parity.
 ---
 

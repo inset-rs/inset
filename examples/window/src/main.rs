@@ -10,14 +10,14 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use reveal_cupertino::{CupertinoButton, CupertinoTheme, CupertinoThemeData};
-use reveal_embedder::{Brightness, Color, TextDirection};
-use reveal_embedder_winit::{ImplicitViewConfig, WinitEmbedder};
-use reveal_foundation::Listener;
-use reveal_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
-use reveal_services::SystemMouseCursors;
-use reveal_shell::Shell;
-use reveal_widgets::{
+use inset_cupertino::{CupertinoButton, CupertinoTheme, CupertinoThemeData};
+use inset_embedder::{Brightness, Color, TextDirection};
+use inset_embedder_winit::{ImplicitViewConfig, WinitEmbedder};
+use inset_foundation::Listener;
+use inset_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
+use inset_services::SystemMouseCursors;
+use inset_shell::Shell;
+use inset_widgets::{
     Center, DecoratedBox, Directionality, IntoWidget, MouseRegion, Padding, SizedBox, Text,
     WidgetRef, run_app,
 };
@@ -29,7 +29,7 @@ const LABEL: Color = Color::from_argb(255, 245, 245, 240);
 fn main() {
     WinitEmbedder {
         implicit_view: Some(ImplicitViewConfig {
-            title: "reveal — widgets".to_owned(),
+            title: "Inset — widgets".to_owned(),
             logical_size: [600.0, 400.0],
         }),
     }

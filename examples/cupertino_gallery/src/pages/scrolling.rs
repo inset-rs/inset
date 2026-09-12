@@ -5,12 +5,12 @@
 //! in over the first ten points. Neither is a scroll callback this page wired up — the bar is a
 //! `SliverPersistentHeader`, and the fade reaches it through `ScrollNotificationObserver`.
 
-use reveal_cupertino::{
+use inset_cupertino::{
     CupertinoColors, CupertinoListSection, CupertinoListTile, CupertinoPageScaffold,
     CupertinoSliverNavigationBar,
 };
-use reveal_foundation::App;
-use reveal_widgets::{
+use inset_foundation::App;
+use inset_widgets::{
     BuildContext, CustomScrollView, IntoWidget, SliverList, SliverSafeArea, Text, WidgetRef,
 };
 

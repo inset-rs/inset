@@ -10,8 +10,8 @@
 //! ```
 
 use cupertino_gallery::{Entry, run_gallery};
-use reveal_embedder_default::{DefaultEmbedder, ImplicitViewConfig};
-use reveal_shell::Shell;
+use inset_embedder_default::{DefaultEmbedder, ImplicitViewConfig};
+use inset_shell::Shell;
 
 fn main() {
     // `GALLERY_ENTRY=indicators` opens that screen over the index without a tap.
@@ -20,7 +20,7 @@ fn main() {
         .and_then(|name| Entry::from_name(&name));
     DefaultEmbedder::default()
         .implicit_view(Some(ImplicitViewConfig {
-            title: "reveal — cupertino gallery".to_owned(),
+            title: "Inset — cupertino gallery".to_owned(),
             logical_size: [420.0, 720.0],
         }))
         .run(move |platform| Shell::new(platform, move |app| run_gallery(app, opening)));

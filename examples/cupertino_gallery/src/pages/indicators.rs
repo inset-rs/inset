@@ -4,12 +4,12 @@
 //! false` freezes it, and the partially revealed constructor shows only the first fraction of
 //! its ticks — which is what iOS does while a pull-to-refresh is still being dragged.
 
-use reveal_cupertino::{
+use inset_cupertino::{
     CupertinoActivityIndicator, CupertinoColors, CupertinoLinearActivityIndicator,
 };
-use reveal_foundation::App;
-use reveal_rendering::{CrossAxisAlignment, MainAxisAlignment};
-use reveal_widgets::{BuildContext, Column, IntoWidget, Row, SizedBox, WidgetRef};
+use inset_foundation::App;
+use inset_rendering::{CrossAxisAlignment, MainAxisAlignment};
+use inset_widgets::{BuildContext, Column, IntoWidget, Row, SizedBox, WidgetRef};
 
 use crate::support::{
     screen, scrolling_body, secondary, section_with_footer, showcase, showcase_leading,

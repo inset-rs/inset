@@ -1,8 +1,8 @@
 //! Browser entry: the same gallery library on the web canvas host.
 
 use crate::run_gallery;
-use reveal_embedder_default::DefaultEmbedder;
-use reveal_shell::Shell;
+use inset_embedder_default::DefaultEmbedder;
+use inset_shell::Shell;
 use wasm_bindgen::prelude::wasm_bindgen;
 
 #[wasm_bindgen(start)]

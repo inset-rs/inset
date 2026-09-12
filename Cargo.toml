@@ -6,6 +6,8 @@ members = ["crates/*", "examples/*"]
 edition = "2024"
 license = "MIT"
 publish = false
+repository = "https://github.com/inset-rs/inset"
+homepage = "https://inset.rs"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -14,21 +16,21 @@ unsafe_code = "forbid"
 arboard = "3"
 async-task = "4"
 indexmap = "2"
-reveal-animation = { path = "crates/reveal-animation" }
-reveal-cupertino = { path = "crates/reveal-cupertino" }
-reveal-embedder = { path = "crates/reveal-embedder" }
-reveal-embedder-default = { path = "crates/reveal-embedder-default" }
-reveal-embedder-web = { path = "crates/reveal-embedder-web" }
-reveal-embedder-winit = { path = "crates/reveal-embedder-winit" }
-reveal-foundation = { path = "crates/reveal-foundation" }
-reveal-gestures = { path = "crates/reveal-gestures" }
-reveal-painting = { path = "crates/reveal-painting" }
-reveal-physics = { path = "crates/reveal-physics" }
-reveal-rendering = { path = "crates/reveal-rendering" }
-reveal-scheduler = { path = "crates/reveal-scheduler" }
-reveal-services = { path = "crates/reveal-services" }
-reveal-shell = { path = "crates/reveal-shell" }
-reveal-widgets = { path = "crates/reveal-widgets" }
+inset-animation = { path = "crates/inset-animation" }
+inset-cupertino = { path = "crates/inset-cupertino" }
+inset-embedder = { path = "crates/inset-embedder" }
+inset-embedder-default = { path = "crates/inset-embedder-default" }
+inset-embedder-web = { path = "crates/inset-embedder-web" }
+inset-embedder-winit = { path = "crates/inset-embedder-winit" }
+inset-foundation = { path = "crates/inset-foundation" }
+inset-gestures = { path = "crates/inset-gestures" }
+inset-painting = { path = "crates/inset-painting" }
+inset-physics = { path = "crates/inset-physics" }
+inset-rendering = { path = "crates/inset-rendering" }
+inset-scheduler = { path = "crates/inset-scheduler" }
+inset-services = { path = "crates/inset-services" }
+inset-shell = { path = "crates/inset-shell" }
+inset-widgets = { path = "crates/inset-widgets" }
 slotmap = "1"
 unicode-general-category = "1"
 unicode-segmentation = "1"

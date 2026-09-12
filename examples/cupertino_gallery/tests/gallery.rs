@@ -9,18 +9,18 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use cupertino_gallery::{Entry, entry_route, gallery, sub_route};
-use reveal_cupertino::{CupertinoNavigationBarBackButton, install_cupertino_icon_font};
-use reveal_embedder::{
+use inset_cupertino::{CupertinoNavigationBarBackButton, install_cupertino_icon_font};
+use inset_embedder::{
     Offset, Picture, Platform, PlatformRef, PointerChange, PointerData, PointerDataPacket,
     PointerDeviceKind, TargetPlatform, View as EmbedderView, ViewConstraints, ViewId, ViewMetrics,
     ViewRef,
 };
-use reveal_foundation::AppCell;
-use reveal_gestures::GestureBinding;
-use reveal_painting::PaintingBinding;
-use reveal_rendering::{AnyRenderObject, RenderParagraph};
-use reveal_scheduler::SchedulerBinding;
-use reveal_widgets::{
+use inset_foundation::AppCell;
+use inset_gestures::GestureBinding;
+use inset_painting::PaintingBinding;
+use inset_rendering::{AnyRenderObject, RenderParagraph};
+use inset_scheduler::SchedulerBinding;
+use inset_widgets::{
     AnyElement, AnyRoute, GlobalKey, IntoWidget, NavigatorState, Text, WidgetsBinding,
     downcast_widget, run_app,
 };
@@ -144,7 +144,7 @@ impl Fixture {
         }
     }
 
-    fn navigator(&mut self) -> reveal_foundation::Handle<NavigatorState> {
+    fn navigator(&mut self) -> inset_foundation::Handle<NavigatorState> {
         self.navigator
             .current_state::<NavigatorState>(&mut self.cell.borrow_mut())
             .expect("the CupertinoApp's navigator is mounted")
