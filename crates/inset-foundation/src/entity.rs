@@ -1,7 +1,7 @@
 //! App-level stores the user writes. Not a Flutter type and not how the framework is implemented.
 //!
 //! [`Handle`](crate::Handle) is the Flutter object: Copy, point access, no lease. [`Entity`] is
-//! Clone and refcounted; [`update`](Entity::update) leases `T` out of the map so the store can
+//! Clone and refcounted; [`App::update`] leases `T` out of the map so the store can
 //! [`notify`](Context::notify) and [`emit`](Context::emit) without naming itself. Re-entering the
 //! same entity panics. Other entities and every Handle stay visible.
 
@@ -190,22 +190,20 @@ impl<T> Entity<T> {
         }
     }
 
-    /// Records this id when a tracking frame is open.
+    /// Same as [`App::read`].
     pub fn read<'a>(&self, app: &'a App) -> &'a T
     where
         T: 'static,
     {
-        app.record_entity_access(self.id);
-        app.entity_ref(self.id)
+        app.read(self)
     }
 
-    /// Leases `T` for the closure. Re-entering this entity panics.
+    /// Same as [`App::update`].
     pub fn update<R>(&self, app: &mut App, f: impl FnOnce(&mut T, &mut Context<T>) -> R) -> R
     where
         T: 'static,
     {
-        app.record_entity_access(self.id);
-        app.update_entity(self, f)
+        app.update(self, f)
     }
 }
 
@@ -388,7 +386,7 @@ impl Drop for TrackFrame {
 }
 
 impl App {
-    /// Opens a tracking frame. [`Entity::read`] and [`Entity::update`] record into it.
+    /// Opens a tracking frame. [`App::read`] and [`App::update`] record into it.
     pub fn entity_track<R>(&mut self, f: impl FnOnce(&mut App) -> R) -> (R, TrackedSet) {
         self.entities.tracking.borrow_mut().push(HashSet::new());
         let frame = TrackFrame {
@@ -402,6 +400,22 @@ impl App {
                 ids: frame.finish(),
             },
         )
+    }
+
+    /// Records a build dependency when a tracking frame is open.
+    pub fn read<'a, T: 'static>(&'a self, entity: &Entity<T>) -> &'a T {
+        self.record_entity_access(entity.id);
+        self.entity_ref(entity.id)
+    }
+
+    /// Leases `T` for the closure. Re-entering this entity panics.
+    pub fn update<T: 'static, R>(
+        &mut self,
+        entity: &Entity<T>,
+        f: impl FnOnce(&mut T, &mut Context<T>) -> R,
+    ) -> R {
+        self.record_entity_access(entity.id);
+        self.update_entity(entity, f)
     }
 
     pub fn new_entity<T: 'static>(
