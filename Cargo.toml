@@ -18,6 +18,7 @@ unsafe_code = "forbid"
 arboard = "3"
 async-task = "4"
 indexmap = "2"
+inset = { version = "0.1.0", path = "crates/inset" }
 inset-animation = { version = "0.1.0", path = "crates/inset-animation" }
 inset-cupertino = { version = "0.1.0", path = "crates/inset-cupertino" }
 inset-embedder = { version = "0.1.0", path = "crates/inset-embedder" }

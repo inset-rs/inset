@@ -1,0 +1,27 @@
+[package]
+name = "inset"
+description = "UI framework: Flutter's widgets, plus Entity, on a Rust render engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = ["cupertino"]
+cupertino = ["dep:inset-cupertino"]
+
+[dependencies]
+inset-cupertino = { workspace = true, optional = true }
+inset-embedder.workspace = true
+inset-embedder-default.workspace = true
+inset-foundation.workspace = true
+inset-painting.workspace = true
+inset-rendering.workspace = true
+inset-shell.workspace = true
+inset-widgets.workspace = true
+
+[lints]
+workspace = true

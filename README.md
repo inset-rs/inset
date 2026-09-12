@@ -31,10 +31,7 @@ cargo run -p cupertino-gallery
 Inset keeps a clean interface between the framework and the platform (the embedder). Usually `DefaultEmbedder` is enough with good defaults.
 
 ```rust
-use inset_cupertino::CupertinoApp;
-use inset_embedder_default::DefaultEmbedder;
-use inset_shell::Shell;
-use inset_widgets::{IntoWidget, run_app};
+use inset::{CupertinoApp, DefaultEmbedder, IntoWidget, Shell, run_app};
 
 fn main() {
     DefaultEmbedder::default().run(|platform| {
@@ -50,8 +47,7 @@ fn main() {
 The framework is a faithful port of Flutter with a large number of widgets available. Use them as you would in Flutter:
 
 ```rust
-use inset_foundation::App;
-use inset_widgets::{BuildContext, Column, IntoWidget, StatelessWidget, Text, WidgetRef};
+use inset::{App, BuildContext, Column, IntoWidget, StatelessWidget, Text, WidgetRef};
 
 #[derive(Debug)]
 struct Counter;
@@ -76,8 +72,7 @@ App state lives in an `Entity`. Create one with `app.new_entity`, read it with `
 
 
 ```rust
-use inset_foundation::{App, Entity};
-use inset_widgets::{BuildContext, IntoWidget, StatelessWidget, Text, WidgetRef};
+use inset::{App, BuildContext, Entity, IntoWidget, StatelessWidget, Text, WidgetRef};
 
 let count = app.new_entity(|_cx| 0);
 

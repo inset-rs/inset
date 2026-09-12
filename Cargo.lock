@@ -1020,6 +1020,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "inset"
+version = "0.1.0"
+dependencies = [
+ "inset-cupertino",
+ "inset-embedder",
+ "inset-embedder-default",
+ "inset-foundation",
+ "inset-painting",
+ "inset-rendering",
+ "inset-shell",
+ "inset-widgets",
+]
+
+[[package]]
 name = "inset-animation"
 version = "0.1.0"
 dependencies = [
