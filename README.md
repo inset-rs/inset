@@ -1,76 +1,99 @@
 # Inset
 
-Inset is a UI framework for solid, efficient cross-platform apps. It is written in Rust, including the render engine, [Valo](https://github.com/seedeai/valo).
+Inset is a UI framework for writing solid, fluent cross-platform apps.
 
-The widgets are a [Flutter](https://github.com/flutter/flutter) port. Below them, Flutter’s engine interface (`dart:ui`) is a small set of host traits: size, color, a view. The framework never names a window or a GPU. Valo draws.
+Inset is a full-stack Rust framework. Everything from app logic down to the render engine, [valo](https://github.com/seedeai/valo), is written in Rust and works like a normal Rust package.
 
-Alpha: the public API will change. The Cupertino gallery in this repo is a real app you can run.
+The framework layer is a faithful port of [Flutter](https://github.com/flutter/flutter). Everything the framework needs from the platform sits behind a cleanly defined interface, which makes porting to a new platform really easy.
 
-Site: [inset.rs](https://inset.rs). Source: [github.com/inset-rs/inset](https://github.com/inset-rs/inset).
+The project is in alpha, while is ready to build apps on. Inset currently has two widget libraries ready to use:
+- Cupertino: for mobile apps
+- WinUI: for desktop and web apps
 
 ## Try it
+
+Inset **requires nightly Rust**. To install it run:
+
+```sh
+rustup install nightly
+```
+
+Then clone the repository and run the gallery app:
 
 ```sh
 cargo run -p cupertino-gallery
 ```
 
-macOS, Windows, and Linux.
+> Inset also runs in the browser. Try it at https://cupertino.inset.rs. To run it yourself, see [`inset-embedder-web`](crates/inset-embedder-web/README.md).
 
-A browser host ships in `inset-embedder-default` (canvas, `requestAnimationFrame`, WebGPU). Same app library, same embedder traits. An application depends on that crate instead of picking winit or the web host itself.
+## Building an app with Inset
 
-```sh
-rustup target add wasm32-unknown-unknown
-cargo install wasm-pack
-cd examples/cupertino_gallery
-wasm-pack build --target web --no-default-features
-```
-
-Serve that folder (`python3 -m http.server` in `examples/cupertino_gallery`). The page is `index.html`; the wasm module lands in `pkg/`. Chrome or Edge with WebGPU. Body text is a Roboto Latin slice compiled into the wasm, so the first frame has ink; other scripts load Google Fonts' unicode-range slices of Roboto or of the script's Noto family on first use.
-
-## Write a widget
-
-**Cupertino** (iOS-styled) is the kit for phones. **WinUI** (Windows-styled) is the kit for the desktop. This tree ships Cupertino; WinUI is not here yet.
-
-App state is an `Entity`. Create it with `app.new_entity`. A `read` during `build` rebuilds that widget when the store `notify`s. A tap may `update` without rebuilding until something that `read` during `build` is notified.
+Inset keeps a clean interface between the framework and the platform (the embedder). Usually `DefaultEmbedder` is enough with good defaults.
 
 ```rust
-let count = app.new_entity(|_cx| 0);
+use inset_cupertino::CupertinoApp;
+use inset_embedder_default::{DefaultEmbedder, ImplicitViewConfig};
+use inset_shell::Shell;
+use inset_widgets::{IntoWidget, run_app};
 
-struct Counter {
-    count: Entity<i32>,
+fn main() {
+    DefaultEmbedder::default().run(|platform| {
+        Shell::new(platform, |app| {
+            run_app(app, CupertinoApp::new().home(Counter).into_widget());
+        })
+    });
 }
+```
+
+### Writing the UI
+
+The framework is a faithful port of Flutter with a large number of widgets available. Use them as you would in Flutter:
+
+```rust
+use inset_foundation::App;
+use inset_widgets::{BuildContext, Column, IntoWidget, StatelessWidget, Text, WidgetRef};
+
+#[derive(Debug)]
+struct Counter;
 
 impl StatelessWidget for Counter {
-    fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
-        let n = *self.count.read(app);
-        CupertinoButton::new(
-            Text::new(format!("{n}")).into_widget(),
-            Some(Listener::new({
-                let count = self.count.clone();
-                move |app| {
-                    count.update(app, |n, cx| {
-                        *n += 1;
-                        cx.notify();
-                    });
-                }
-            })),
-        )
-        .into_widget()
+    fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
+        Column::new()
+            .children([
+                Text::new("Counter").into_widget(),
+                Text::new("0").into_widget(),
+            ])
+            .into_widget()
     }
 }
 ```
 
-If you know Flutter, the widgets match the Dart. `Entity` is Inset’s, not Flutter’s.
+### State management
 
-## Architecture
+Unlike Flutter, Inset has a built-in state management solution, inspired by [Zed's GPUI](https://zed.dev/blog/gpui-ownership).
 
-Three layers:
+App state lives in an `Entity`. Create one with `app.new_entity`, read it with `read`, and change it with `update`. A `read` inside a widget's `build` observes the entity: `notify` rebuilds that widget.
 
-1. **Widgets** — Flutter’s framework, in Rust.
-2. **Embedder** — those host traits. Tests implement them. So does a real host.
-3. **Host** — implements the traits and drives frames. Desktop is winit plus Valo. The browser is the web host behind `DefaultEmbedder`. Tests implement the same traits without a window.
 
-Swap the host; keep the app.
+```rust
+let count = app.new_entity(|_cx| 0);
+
+struct Label {
+    count: Entity<i32>,
+}
+
+impl StatelessWidget for Label {
+    fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
+        let n = *app.read(&self.count);
+        Text::new(format!("{n}")).into_widget()
+    }
+}
+
+app.update(&count, |n, cx| {
+    *n += 1;
+    cx.notify();
+});
+```
 
 ## Contributing and AI
 
