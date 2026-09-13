@@ -281,14 +281,14 @@ fn entitlements_plist(bundle_id: &str, team: &str) -> Value {
     Value::Dictionary(entitlements)
 }
 
-struct Identity {
-    hash: String,
-    name: String,
-    team: String,
+pub struct Identity {
+    pub hash: String,
+    pub name: String,
+    pub team: String,
 }
 
 /// The development certificate in the login keychain, from `security find-identity`.
-fn signing_identity(team: Option<&str>) -> Result<Identity> {
+pub fn signing_identity(team: Option<&str>) -> Result<Identity> {
     let listing = tools::output(
         Command::new("security").args(["find-identity", "-v", "-p", "codesigning"]),
         "security find-identity",

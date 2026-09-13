@@ -45,6 +45,10 @@ pub struct Metadata {
 #[serde(default)]
 pub struct MacosMetadata {
     pub minimum_system_version: Option<String>,
+    /// `LSUIElement`: no Dock tile and no menu bar, for agents that live in a panel.
+    pub background_app: bool,
+    /// Apple team id. Narrows the signing identity when a machine has several.
+    pub team: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

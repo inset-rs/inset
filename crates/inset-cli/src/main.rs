@@ -114,7 +114,11 @@ fn main() {
 fn run() -> Result<()> {
     let cli = Cli::parse_from(args());
     match cli.command {
-        Command::New { name, template, path } => new::create(&name, template, path.as_deref()),
+        Command::New {
+            name,
+            template,
+            path,
+        } => new::create(&name, template, path.as_deref()),
         Command::Doctor => doctor::report(),
         Command::Devices => {
             devices::print(&devices::list()?);
@@ -167,6 +171,9 @@ fn run_on(
     let target = devices::resolve(device)?;
     let project = Project::load(package)?;
     match target {
+        Target::Desktop if cfg!(target_os = "macos") => {
+            desktop::run_bundle(&project, profile, args)
+        }
         Target::Desktop => cargo::run(&project, profile, args),
         Target::Web { browser } => {
             let out = web::build(&project, profile)?;

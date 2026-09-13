@@ -13,7 +13,7 @@ cargo inset new myapp            # a crate every host can load
 cargo inset doctor               # what this machine can build for, with the fix for each gap
 cargo inset devices              # what `run -d` accepts
 
-cargo inset run                  # this desktop, same as cargo run
+cargo inset run                  # this desktop: on macOS the built .app, elsewhere cargo run
 cargo inset run -d ios           # the booted simulator, or the newest iPhone
 cargo inset run -d "iPhone 16"   # a simulator by name or id
 cargo inset run -d web           # build, serve locally, open the default browser (`chrome` for Chrome)
@@ -63,6 +63,8 @@ resources = ["assets/**"]          # globs copied into the bundle at the same re
 
 [package.metadata.inset.macos]
 minimum_system_version = "11.0"
+background_app = true              # LSUIElement: no Dock tile or menu bar
+team = "ABCDE12345"                # narrows the signing identity when a machine has several
 
 [package.metadata.inset.ios]
 team = "ABCDE12345"                # narrows the signing identity when a machine has several
@@ -77,7 +79,7 @@ Signing happens when credentials are present, never by flag.
 
 - iOS simulator: no account and no signing.
 - iOS device: the Apple Development certificate in your keychain and a provisioning profile Xcode stored, found the way Flutter finds them; nothing to configure once you have signed in under Xcode Settings > Accounts and run any app on the device. `doctor` names the certificate that will be used; `ios.team` in the metadata picks one when a machine has several. `build ipa` needs a distribution profile and is uploaded with Transporter or `xcrun altool`.
-- macOS: unsigned by default, which runs locally. Distribution needs a Developer ID and notarization, which Apple only grants against an account: `APPLE_SIGNING_IDENTITY` signs; `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, or an `APPLE_KEYCHAIN_PROFILE` stored with `xcrun notarytool store-credentials`, notarize and staple `build dmg`. These are cargo-packager's variables, so its docs apply.
+- macOS: the `.app` is signed with the keychain's Apple Development certificate when there is one, so permission grants such as Accessibility survive a rebuild; ad hoc otherwise. Distribution needs a Developer ID and notarization, which Apple only grants against an account: `APPLE_SIGNING_IDENTITY` signs; `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, or an `APPLE_KEYCHAIN_PROFILE` stored with `xcrun notarytool store-credentials`, notarize and staple `build dmg`. These are cargo-packager's variables, so its docs apply.
 - Windows: `certificate_thumbprint` or a custom sign command, through cargo-packager.
 
 ## Size
