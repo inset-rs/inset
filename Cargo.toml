@@ -18,13 +18,13 @@ unsafe_code = "forbid"
 arboard = "3"
 async-task = "4"
 indexmap = "2"
-inset = { version = "0.1.0", path = "crates/inset" }
+inset = { version = "0.1.1", path = "crates/inset" }
 inset-animation = { version = "0.1.0", path = "crates/inset-animation" }
 inset-cupertino = { version = "0.1.0", path = "crates/inset-cupertino" }
 inset-embedder = { version = "0.1.0", path = "crates/inset-embedder" }
 inset-embedder-default = { version = "0.1.0", path = "crates/inset-embedder-default" }
 inset-embedder-web = { version = "0.1.0", path = "crates/inset-embedder-web" }
-inset-embedder-winit = { version = "0.1.0", path = "crates/inset-embedder-winit" }
+inset-embedder-winit = { version = "0.1.1", path = "crates/inset-embedder-winit" }
 inset-foundation = { version = "0.1.0", path = "crates/inset-foundation" }
 inset-gestures = { version = "0.1.0", path = "crates/inset-gestures" }
 inset-macros = { version = "0.1.0", path = "crates/inset-macros" }

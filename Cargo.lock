@@ -1853,7 +1853,7 @@ dependencies = [
 
 [[package]]
 name = "inset"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "inset-embedder",
  "inset-embedder-default",
@@ -1952,7 +1952,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder-winit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arboard",
  "inset-embedder",
