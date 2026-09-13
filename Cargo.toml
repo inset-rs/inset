@@ -27,6 +27,7 @@ inset-embedder-web = { version = "0.1.0", path = "crates/inset-embedder-web" }
 inset-embedder-winit = { version = "0.1.0", path = "crates/inset-embedder-winit" }
 inset-foundation = { version = "0.1.0", path = "crates/inset-foundation" }
 inset-gestures = { version = "0.1.0", path = "crates/inset-gestures" }
+inset-macros = { version = "0.1.0", path = "crates/inset-macros" }
 inset-painting = { version = "0.1.0", path = "crates/inset-painting" }
 inset-physics = { version = "0.1.0", path = "crates/inset-physics" }
 inset-rendering = { version = "0.1.0", path = "crates/inset-rendering" }

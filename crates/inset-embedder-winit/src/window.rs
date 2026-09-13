@@ -383,16 +383,44 @@ pub(crate) fn run<C: EmbedderClient + 'static>(
 }
 
 fn window_metrics(window: &Window) -> ViewMetrics {
-    let size = window.inner_size();
-    let width = f64::from(size.width);
-    let height = f64::from(size.height);
+    let [width, height] = surface_size(window).map(f64::from);
+    let padding = safe_area_padding(window, width, height);
     ViewMetrics {
         physical_size: [width, height],
         physical_constraints: ViewConstraints::tight(width, height),
         device_pixel_ratio: window.scale_factor(),
-        padding: ViewPadding::ZERO,
-        view_padding: ViewPadding::ZERO,
+        padding,
+        view_padding: padding,
         view_insets: ViewPadding::ZERO,
+    }
+}
+
+/// The pixels valo presents into. On iOS winit's `inner_size` is the safe
+/// area while the layer covers the whole window, which `outer_size` reports.
+fn surface_size(window: &Window) -> [u32; 2] {
+    let size = if cfg!(target_os = "ios") {
+        window.outer_size()
+    } else {
+        window.inner_size()
+    };
+    [size.width, size.height]
+}
+
+/// The safe area as Flutter reports it: the whole view is the size, the status
+/// bar and home indicator are padding. Zero on desktops.
+fn safe_area_padding(window: &Window, width: f64, height: f64) -> ViewPadding {
+    if !cfg!(target_os = "ios") {
+        return ViewPadding::ZERO;
+    }
+    let safe = window.inner_size();
+    let origin = window.inner_position().unwrap_or_default();
+    let left = f64::from(origin.x);
+    let top = f64::from(origin.y);
+    ViewPadding {
+        left,
+        top,
+        right: (width - f64::from(safe.width) - left).max(0.0),
+        bottom: (height - f64::from(safe.height) - top).max(0.0),
     }
 }
 
@@ -559,23 +587,25 @@ impl<C: EmbedderClient> WinitApp<C> {
     }
 
     fn create_implicit_view(&mut self, event_loop: &ActiveEventLoop, config: ImplicitViewConfig) {
-        let attributes = Window::default_attributes()
-            .with_title(config.title)
-            .with_inner_size(winit::dpi::LogicalSize::new(
+        let mut attributes = Window::default_attributes().with_title(config.title);
+        // A phone's window is the screen; winit on iOS would size the window to
+        // the request instead.
+        if !cfg!(any(target_os = "ios", target_os = "android")) {
+            attributes = attributes.with_inner_size(winit::dpi::LogicalSize::new(
                 config.logical_size[0],
                 config.logical_size[1],
             ));
+        }
         let window = event_loop.create_window(attributes).expect("create window");
         let window = Arc::new(window);
         let window_id = window.id();
         let gpu = Gpu::acquire();
-        let size = window.inner_size();
         let surface = valo::Surface::new(
             &gpu.instance,
             &gpu.adapter,
             &gpu.device,
             window.clone(),
-            [size.width, size.height],
+            surface_size(&window),
         )
         .expect("create valo surface");
         #[cfg(target_os = "macos")]
@@ -934,14 +964,14 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
             }
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                 if let Some(hosted_view) = self.views.get(&id) {
-                    let size = hosted_view.window.inner_size();
+                    let size = surface_size(&hosted_view.window);
                     hosted_view
                         .view
                         .surface
                         .lock()
                         .expect("surface lock")
                         .surface
-                        .resize([size.width, size.height]);
+                        .resize(size);
                     hosted_view
                         .view
                         .metrics
@@ -951,7 +981,7 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
                         // Present the resized layout before AppKit commits the
                         // window geometry, rather than stretching the old frame.
                         #[cfg(target_os = "macos")]
-                        if size.width > 0 && size.height > 0 {
+                        if size[0] > 0 && size[1] > 0 {
                             self.platform.frame_requested.set(false);
                             client.frame(Frame {
                                 elapsed: self.platform.elapsed(),

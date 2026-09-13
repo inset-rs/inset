@@ -24,14 +24,31 @@ Then clone the repository and run the gallery app:
 cargo run -p cupertino-gallery
 ```
 
-> Inset also runs in the browser. Try it at https://cupertino.inset.rs. To run it yourself, see [`inset-embedder-web`](crates/inset-embedder-web/README.md).
+> Inset also runs in the browser. Try it at https://cupertino.inset.rs.
+
+## Start an app
+
+`cargo inset` is a convenient CLI for scaffolding and running app with Inset:
+
+```sh
+cargo install inset-cli
+cargo inset new myapp                  # --template winui for a desktop app
+cd myapp
+cargo inset run                        # this desktop
+cargo inset run -d ios                 # an iOS simulator
+cargo inset run -d web                 # a browser
+cargo inset build dmg                  # and macos, ios, ipa, msi, nsis, deb, appimage, web
+```
+
+> For more details, see [`inset-cli`](crates/inset-cli/README.md).
 
 ## Building an app with Inset
 
-Inset keeps a clean interface between the framework and the platform (the embedder). Usually `DefaultEmbedder` is enough with good defaults.
+Inset keeps a clean interface between the framework and the platform (the embedder). The usual way to start an app is creating an embedder and providing a root widget to it:
 
 ```rust
-use inset::{CupertinoApp, DefaultEmbedder, IntoWidget, Shell, run_app};
+use inset::{DefaultEmbedder, IntoWidget, Shell, run_app};
+use inset_cupertino::CupertinoApp;
 
 fn main() {
     DefaultEmbedder::default().run(|platform| {
@@ -39,6 +56,18 @@ fn main() {
             run_app(app, CupertinoApp::new().home(Counter).into_widget());
         })
     });
+}
+```
+
+Or you can also use the `#[inset::main]` macro to write the main function:
+
+```rust
+use inset::{App, IntoWidget, run_app};
+use inset_cupertino::CupertinoApp;
+
+#[inset::main]
+fn main(app: &mut App) {
+    run_app(app, CupertinoApp::new().home(Counter).into_widget());
 }
 ```
 

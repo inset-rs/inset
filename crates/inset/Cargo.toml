@@ -9,19 +9,17 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
-[features]
-default = ["cupertino"]
-cupertino = ["dep:inset-cupertino"]
-
 [dependencies]
-inset-cupertino = { workspace = true, optional = true }
 inset-embedder.workspace = true
 inset-embedder-default.workspace = true
 inset-foundation.workspace = true
+inset-macros.workspace = true
 inset-painting.workspace = true
-inset-rendering.workspace = true
 inset-shell.workspace = true
 inset-widgets.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
 
 [lints]
 workspace = true

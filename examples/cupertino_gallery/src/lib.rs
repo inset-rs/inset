@@ -14,8 +14,15 @@ pub mod catalog;
 pub mod pages;
 pub mod support;
 
-#[cfg(target_arch = "wasm32")]
-mod web;
-
 pub use app::{entry_route, gallery, open_entry, open_sub_page, run_gallery, sub_route};
 pub use catalog::Entry;
+
+/// Every host's entry point; `src/main.rs` calls the generated `main`.
+#[inset::main(title = "Inset — cupertino gallery", size = [420.0, 720.0])]
+fn main(app: &mut inset::App) {
+    // `GALLERY_ENTRY=indicators` opens that screen over the index without a tap.
+    let opening = std::env::var("GALLERY_ENTRY")
+        .ok()
+        .and_then(|name| Entry::from_name(&name));
+    run_gallery(app, opening);
+}

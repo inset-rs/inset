@@ -21,6 +21,7 @@ impl Gpu {
             let (device, queue) = adapter
                 .request_device(&wgpu::DeviceDescriptor {
                     label: Some("inset.winit"),
+                    required_limits: limits_within(&adapter.limits()),
                     ..Default::default()
                 })
                 .await
@@ -33,4 +34,15 @@ impl Gpu {
             }
         })
     }
+}
+
+/// wgpu's default limits, lowered where this adapter offers less. The iOS
+/// simulator's Metal allows 15 inter-stage shader variables against the
+/// default request of 16; valo's shaders use two.
+fn limits_within(supported: &wgpu::Limits) -> wgpu::Limits {
+    let mut limits = wgpu::Limits::default();
+    limits.max_inter_stage_shader_variables = limits
+        .max_inter_stage_shader_variables
+        .min(supported.max_inter_stage_shader_variables);
+    limits
 }

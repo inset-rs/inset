@@ -7,11 +7,16 @@ repository.workspace = true
 homepage.workspace = true
 publish = false
 
+[package.metadata.inset]
+identifier = "rs.inset.cupertino-gallery"
+name = "Cupertino gallery"
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 indexmap.workspace = true
+inset.workspace = true
 inset-animation.workspace = true
 inset-cupertino.workspace = true
 inset-embedder.workspace = true
@@ -24,18 +29,9 @@ inset-rendering.workspace = true
 inset-shell.workspace = true
 inset-widgets.workspace = true
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "0.2"
-
-[features]
-default = ["native"]
-# The binary. Off, wasm-pack does not build `src/main.rs`.
-native = []
-
 [[bin]]
 name = "cupertino-gallery"
 path = "src/main.rs"
-required-features = ["native"]
 
 [dev-dependencies]
 inset-gestures.workspace = true
