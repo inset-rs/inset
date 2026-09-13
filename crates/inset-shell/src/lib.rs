@@ -154,6 +154,8 @@ impl EmbedderClient for Shell {
 
     fn wake(&mut self, elapsed: Duration) {
         self.advance_clock(elapsed);
+        // A wake with no time behind it is a post from a native callback.
+        self.app.wake();
     }
 
     fn text_input_editing_value(&mut self, _view: ViewId, value: TextEditingValue) {

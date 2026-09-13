@@ -8,10 +8,10 @@ use inset_embedder::{
     Brightness, EmbedderClient, FontSource, Frame, ImageCodec, ImageCodecFuture, ImageDecodeError,
     ImageFrame, ImageFrameFuture, ImageRepetition, KeyData, KeyEventDeviceType, KeyEventType,
     Matrix4, Offset, Picture, Platform, PlatformRef, PointerChange, PointerData, PointerDataPacket,
-    PointerDeviceKind, PointerSignalKind, Rect, Size, SystemFontSource, SystemMouseCursorKind,
-    TargetPlatform, TextEditingValue, TextInputConfiguration, View, ViewConstraints,
-    ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId, ViewMetrics, ViewPadding, ViewRef,
-    transform3,
+    PointerDeviceKind, PointerSignalKind, PopupMenuEntry, Rect, Size, SystemFontSource,
+    SystemMouseCursorKind, TargetPlatform, TextEditingValue, TextInputConfiguration, View,
+    ViewConstraints, ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId, ViewMetrics,
+    ViewPadding, ViewRef, WindowError, WindowRef, WindowingOwner, transform3,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
@@ -25,16 +25,20 @@ use crate::ime::{ImeOutcome, apply_ime};
 use crate::gpu::Gpu;
 use crate::images::with_event_loop_wake;
 use crate::keys;
+use crate::os;
 use crate::text_input::{ActiveTextInput, TextInputKeyEffect};
+use crate::windows::{self, WinitWindow, WinitWindowing};
 use crate::{DecodeExecution, ImplicitViewConfig, WinitEmbedder, create_image_loader};
 
 const IMPLICIT_VIEW: ViewId = ViewId(0);
 
 /// Work requests and asynchronous completions both enter through winit's proxy.
 #[derive(Clone, Copy, Debug)]
-enum HostEvent {
+pub(crate) enum HostEvent {
     Requests,
     Wake,
+    /// A created window's `close`: dropped when the loop next turns.
+    CloseWindow(WindowId),
 }
 
 type CreateImageLoader = Box<dyn FnOnce(valo::ImageContext) -> valo_codec::ImageLoader>;
@@ -43,12 +47,20 @@ type CreateImageLoader = Box<dyn FnOnce(valo::ImageContext) -> valo_codec::Image
 ///
 /// Requests only write state and wake the event loop; they never re-enter the
 /// client synchronously.
-struct WinitPlatform {
+///
+/// Beyond [`Platform`], the host hands out its renderer's [`image_context`], for an image
+/// from a texture the app makes itself; an app reaches that with
+/// `platform.downcast_ref::<WinitPlatform>()`.
+///
+/// [`image_context`]: WinitPlatform::image_context
+pub struct WinitPlatform {
     deadline: Cell<Option<Instant>>,
     frame_requested: Cell<bool>,
     views: RefCell<HashMap<ViewId, ViewRef>>,
     implicit_view: Option<ViewId>,
     proxy: EventLoopProxy<HostEvent>,
+    /// The window maker handed to the app; its requests are served by the event loop.
+    windowing: Rc<WinitWindowing>,
     origin: Instant,
     brightness: Cell<Brightness>,
     /// The latest system cursor request, applied by the event loop.
@@ -59,6 +71,9 @@ struct WinitPlatform {
     clipboard: RefCell<Option<arboard::Clipboard>>,
     /// Decoded images belong to the device and do not retain a window surface.
     image_loader: RefCell<Option<valo_codec::ImageLoader>>,
+    /// The renderer's image store, for images the app brings its own pixels or textures
+    /// for; set with the loader, once the first window has a device.
+    images: RefCell<Option<valo::ImageContext>>,
 }
 
 impl WinitPlatform {
@@ -68,14 +83,24 @@ impl WinitPlatform {
             frame_requested: Cell::new(false),
             views: RefCell::new(HashMap::new()),
             implicit_view,
+            windowing: Rc::new(WinitWindowing::new(proxy.clone())),
             proxy,
             origin: Instant::now(),
             brightness: Cell::new(Brightness::Light),
             cursor_request: Cell::new(None),
             focus_requests: RefCell::new(Vec::new()),
             image_loader: RefCell::new(None),
+            images: RefCell::new(None),
             clipboard: RefCell::new(None),
         }
+    }
+
+    /// The renderer's image context, on the device every window draws with: an image made
+    /// through it, from pixels or from a texture imported from a buffer only this system
+    /// has, is one `RawImage` shows. `None` until the first window has given the host a
+    /// device.
+    pub fn image_context(&self) -> Option<valo::ImageContext> {
+        self.images.borrow().clone()
     }
 
     fn with_clipboard<T>(&self, f: impl FnOnce(&mut arboard::Clipboard) -> T) -> Option<T> {
@@ -221,6 +246,22 @@ impl Platform for WinitPlatform {
         self.wake_event_loop();
     }
 
+    fn windowing_owner(&self) -> Option<Rc<dyn WindowingOwner>> {
+        Some(Rc::clone(&self.windowing) as Rc<dyn WindowingOwner>)
+    }
+
+    fn import_pixels(&self, pixels: valo::PixelBuffer) -> Option<valo::Image> {
+        self.image_context()?.upload_pixels(pixels, false).ok()
+    }
+
+    fn show_popup_menu(&self, entries: &[PopupMenuEntry]) -> Option<usize> {
+        let chosen = os::popup_menu(entries);
+        // The menu ran its own event loop and kept the release of the button that opened
+        // it; the next turn reconciles the buttons.
+        let _ = self.proxy.send_event(HostEvent::Wake);
+        chosen
+    }
+
     fn clipboard_set_data(&self, text: &str) {
         let _ = self.with_clipboard(|clipboard| clipboard.set_text(text));
     }
@@ -236,7 +277,7 @@ impl Platform for WinitPlatform {
 }
 
 /// Stable view identity, current winit geometry, and the valo present line.
-struct WinitView {
+pub(crate) struct WinitView {
     id: ViewId,
     metrics: Cell<ViewMetrics>,
     surface: Arc<Mutex<WinitSurface>>,
@@ -246,6 +287,11 @@ struct WinitView {
     /// Set from `start_text_input` to `stop_text_input`; an unhandled key types into it.
     text_input: Cell<Option<ActiveTextInput>>,
     transform: RefCell<Option<Matrix4>>,
+    /// What a frame starts from: white, or nothing for a window that shows what is behind it.
+    clear: valo::Color,
+    /// Whether the last frame could not be drawn, for want of a texture, and is
+    /// to be drawn once the window is seen again.
+    owes_frame: Cell<bool>,
 }
 
 struct WinitSurface {
@@ -265,15 +311,17 @@ impl View for WinitView {
     fn present(&self, picture: &Picture) {
         let mut state = self.surface.lock().expect("surface lock");
         let Some(surface_frame) = state.surface.acquire() else {
-            // The swapchain has no texture yet (a window just shown, a surface being
-            // reconfigured): the scene stays retained, so a redraw presents it next vsync,
-            // as Flutter's rasterizer retries a frame it could not draw.
-            self.window.request_redraw();
+            // No texture to draw into: the window is occluded, hidden or being
+            // reconfigured. Asking for a redraw here would ask again on the next one,
+            // at the speed of rendering, for as long as the window stays hidden; so the
+            // frame is owed instead, and paid when the window is seen again.
+            self.owes_frame.set(true);
             return;
         };
+        self.owes_frame.set(false);
         state
             .context
-            .render(picture, &surface_frame.target(Some(valo::Color::WHITE)));
+            .render(picture, &surface_frame.target(Some(self.clear)));
         state.context.present(surface_frame);
     }
 
@@ -327,6 +375,8 @@ impl WinitView {
 struct HostedView {
     window: Arc<Window>,
     view: Rc<WinitView>,
+    /// The app's handle on a window it created; the implicit window has none.
+    handle: Option<Rc<WinitWindow>>,
 }
 
 struct WinitApp<C> {
@@ -336,6 +386,9 @@ struct WinitApp<C> {
     client: Option<C>,
     platform: Rc<WinitPlatform>,
     views: HashMap<WindowId, HostedView>,
+    /// One device for every window: decoded images belong to it.
+    gpu: Option<Gpu>,
+    next_view_id: u64,
     frame_source: Option<WindowId>,
     /// The window the mouse pointer was last seen in; system cursor requests go there.
     pointer_window: Option<WindowId>,
@@ -344,6 +397,9 @@ struct WinitApp<C> {
     last_cursor: [f64; 2],
     /// Flutter `PointerData.buttons` for the mouse.
     mouse_buttons: i64,
+    /// Whether the framework has been told the mouse is present. Flutter's embedders add
+    /// the device before its first hover and remove it when it leaves the view.
+    pointer_added: bool,
     modifiers: ModifiersState,
     pointer_id: i64,
     embedder_id: i64,
@@ -368,11 +424,14 @@ pub(crate) fn run<C: EmbedderClient + 'static>(
         client: None,
         platform,
         views: HashMap::new(),
+        gpu: None,
+        next_view_id: 1,
         frame_source: None,
         pointer_window: None,
         started: false,
         cursor: [0.0, 0.0],
         last_cursor: [0.0, 0.0],
+        pointer_added: false,
         mouse_buttons: 0,
         modifiers: ModifiersState::empty(),
         pointer_id: 0,
@@ -596,49 +655,123 @@ impl<C: EmbedderClient> WinitApp<C> {
                 config.logical_size[1],
             ));
         }
-        let window = event_loop.create_window(attributes).expect("create window");
+        let (window_id, _, _) = self
+            .open_window(event_loop, attributes, IMPLICIT_VIEW, false)
+            .expect("create window");
+        self.frame_source = Some(window_id);
+    }
+
+    /// Opens a window on the shared device and registers its view. A window that sees
+    /// through gets a surface whose alpha the compositor honours, cleared to nothing, so
+    /// what the app leaves unpainted shows what is behind the window.
+    fn open_window(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        attributes: winit::window::WindowAttributes,
+        view_id: ViewId,
+        sees_through: bool,
+    ) -> Result<(WindowId, Arc<Window>, Rc<WinitView>), String> {
+        let window = event_loop
+            .create_window(attributes)
+            .map_err(|error| error.to_string())?;
         let window = Arc::new(window);
         let window_id = window.id();
-        let gpu = Gpu::acquire();
-        let surface = valo::Surface::new(
+        let gpu = self.gpu.get_or_insert_with(Gpu::acquire).clone();
+        let (alpha, clear) = if sees_through {
+            (valo::SurfaceAlpha::Transparent, valo::Color::TRANSPARENT)
+        } else {
+            (valo::SurfaceAlpha::Opaque, valo::Color::WHITE)
+        };
+        let mut surface = valo::Surface::new_with_options(
             &gpu.instance,
             &gpu.adapter,
             &gpu.device,
             window.clone(),
             surface_size(&window),
+            valo::SurfaceOptions::default().with_alpha(alpha),
         )
-        .expect("create valo surface");
-        #[cfg(target_os = "macos")]
-        let surface = {
-            let mut surface = surface;
-            surface.set_presents_with_transaction(true);
-            surface
-        };
+        .map_err(|error| error.to_string())?;
+        os::prepare_surface(&mut surface);
         let mut context = valo::Context::new(gpu.device.clone(), gpu.queue.clone());
         context.set_hide_missing_glyphs(true);
-        let images = context.image_context();
-        let loader = match self.image_loader_setup.take() {
-            Some(make_loader) => make_loader(images),
-            None => create_image_loader(images, DecodeExecution::default())
-                .expect("start the image decode worker"),
-        };
-        *self.platform.image_loader.borrow_mut() = Some(loader);
+        if self.platform.image_loader.borrow().is_none() {
+            let images = context.image_context();
+            let loader = match self.image_loader_setup.take() {
+                Some(make_loader) => make_loader(images),
+                None => create_image_loader(images, DecodeExecution::default())
+                    .expect("start the image decode worker"),
+            };
+            *self.platform.image_loader.borrow_mut() = Some(loader);
+            *self.platform.images.borrow_mut() = Some(context.image_context());
+        }
         let surface = Arc::new(Mutex::new(WinitSurface { surface, context }));
         let view = Rc::new(WinitView {
-            id: IMPLICIT_VIEW,
+            id: view_id,
             metrics: Cell::new(window_metrics(&window)),
             surface,
             window: Arc::clone(&window),
             editing_state: RefCell::new(TextEditingValue::EMPTY),
             text_input: Cell::new(None),
             transform: RefCell::new(None),
+            clear,
+            owes_frame: Cell::new(false),
         });
         if let Some(theme) = window.theme() {
             self.platform.brightness.set(brightness_of(theme));
         }
         self.platform.add_view(view.clone());
-        self.views.insert(window_id, HostedView { window, view });
-        self.frame_source = Some(window_id);
+        self.views.insert(
+            window_id,
+            HostedView {
+                window: Arc::clone(&window),
+                view: Rc::clone(&view),
+                handle: None,
+            },
+        );
+        Ok((window_id, window, view))
+    }
+
+    /// Serves the windows the app asked for since the loop last turned.
+    fn open_requested_windows(&mut self, event_loop: &ActiveEventLoop) {
+        let requests = self.platform.windowing.take_requests();
+        if requests.is_empty() {
+            return;
+        }
+        for request in requests {
+            let view_id = ViewId(self.next_view_id);
+            self.next_view_id += 1;
+            let attributes = windows::attributes_for(&request.config);
+            let sees_through = request.config.background.sees_through();
+            let opened = self.open_window(event_loop, attributes, view_id, sees_through);
+            let result = match opened {
+                Ok((window_id, window, view)) => {
+                    os::configure(&window, &request.config);
+                    let handle = Rc::new(WinitWindow::new(
+                        window_id,
+                        Arc::downgrade(&window),
+                        view,
+                        self.platform.proxy.clone(),
+                    ));
+                    if let Some(hosted) = self.views.get_mut(&window_id) {
+                        hosted.handle = Some(Rc::clone(&handle));
+                    }
+                    if self.frame_source.is_none() {
+                        self.frame_source = Some(window_id);
+                    }
+                    if let Some(client) = &mut self.client {
+                        client.view_added(view_id);
+                    }
+                    let window: WindowRef = handle;
+                    Ok(window)
+                }
+                Err(reason) => Err(WindowError::Failed(reason)),
+            };
+            request.reply.complete(result);
+        }
+        // The futures resolve at the app's checkpoint; a wake brings one.
+        if let Some(client) = &mut self.client {
+            client.wake(self.platform.elapsed());
+        }
     }
 
     fn remove_view(&mut self, window_id: WindowId) {
@@ -655,6 +788,14 @@ impl<C: EmbedderClient> WinitApp<C> {
         }
     }
 
+    /// Tells the framework the mouse is present, once, before anything else about it.
+    fn add_pointer(&mut self, window_id: WindowId) {
+        if !self.pointer_added {
+            self.pointer_added = true;
+            self.send_pointer(window_id, PointerChange::Add);
+        }
+    }
+
     fn send_pointer(&mut self, window_id: WindowId, change: PointerChange) {
         let Some(packet) = self.pointer_packet(window_id, change, None) else {
             return;
@@ -664,10 +805,36 @@ impl<C: EmbedderClient> WinitApp<C> {
         }
     }
 
+    /// Brings the host's record of the mouse buttons in line with what is held down now,
+    /// sending the presses and releases it missed. A native menu opened from a press runs
+    /// its own event loop and swallows the release, which would leave the app holding a
+    /// button forever: no hovers, no taps.
+    fn reconcile_buttons(&mut self, window_id: WindowId) {
+        let Some(actual) = os::pressed_buttons() else {
+            return;
+        };
+        for bit in [
+            PRIMARY_MOUSE_BUTTON,
+            SECONDARY_MOUSE_BUTTON,
+            MIDDLE_MOUSE_BUTTON,
+            BACK_MOUSE_BUTTON,
+            FORWARD_MOUSE_BUTTON,
+        ] {
+            let held = actual & bit != 0;
+            if held != (self.mouse_buttons & bit != 0) {
+                self.apply_mouse_bit(window_id, bit, held);
+            }
+        }
+    }
+
     fn apply_mouse_button(&mut self, window_id: WindowId, button: MouseButton, pressed: bool) {
         let Some(bit) = flutter_mouse_button(button) else {
             return;
         };
+        self.apply_mouse_bit(window_id, bit, pressed);
+    }
+
+    fn apply_mouse_bit(&mut self, window_id: WindowId, bit: i64, pressed: bool) {
         let previous = self.mouse_buttons;
         if pressed {
             self.mouse_buttons |= bit;
@@ -810,7 +977,11 @@ impl<C: EmbedderClient> WinitApp<C> {
         let [x, y] = self.cursor;
         let [last_x, last_y] = self.last_cursor;
         let buttons = self.mouse_buttons;
-        let pointer_identifier = if change == PointerChange::Hover && buttons == 0 {
+        let pointer_identifier = if buttons == 0
+            && matches!(
+                change,
+                PointerChange::Hover | PointerChange::Add | PointerChange::Remove
+            ) {
             0
         } else {
             self.pointer_id
@@ -901,25 +1072,6 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
         }
     }
 
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: HostEvent) {
-        if matches!(event, HostEvent::Wake)
-            && let Some(client) = &mut self.client
-        {
-            client.wake(self.platform.elapsed());
-        }
-        self.apply_cursor_request();
-        self.apply_focus_requests();
-        if self.frame_source.is_some() {
-            self.flush_frame_request();
-        } else if self.platform.frame_requested.replace(false)
-            && let Some(client) = &mut self.client
-        {
-            client.frame(Frame {
-                elapsed: self.platform.elapsed(),
-            });
-        }
-    }
-
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         event_loop.set_control_flow(match self.platform.deadline.get() {
             Some(deadline) => winit::event_loop::ControlFlow::WaitUntil(deadline),
@@ -937,6 +1089,36 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
             self.create_implicit_view(event_loop, config);
         }
         self.start_client();
+    }
+
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: HostEvent) {
+        if let HostEvent::CloseWindow(window_id) = event {
+            self.remove_view(window_id);
+            if self.views.is_empty() {
+                event_loop.exit();
+            }
+            return;
+        }
+        if matches!(event, HostEvent::Wake) {
+            if let Some(window_id) = self.pointer_window {
+                self.reconcile_buttons(window_id);
+            }
+            if let Some(client) = &mut self.client {
+                client.wake(self.platform.elapsed());
+            }
+        }
+        self.open_requested_windows(event_loop);
+        self.apply_cursor_request();
+        self.apply_focus_requests();
+        if self.frame_source.is_some() {
+            self.flush_frame_request();
+        } else if self.platform.frame_requested.replace(false)
+            && let Some(client) = &mut self.client
+        {
+            client.frame(Frame {
+                elapsed: self.platform.elapsed(),
+            });
+        }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
@@ -957,9 +1139,20 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
                 }
             }
             WindowEvent::CloseRequested => {
-                self.remove_view(id);
-                if self.views.is_empty() {
-                    event_loop.exit();
+                let handler = self
+                    .views
+                    .get(&id)
+                    .and_then(|hosted| hosted.handle.as_ref())
+                    .and_then(|handle| handle.close_handler());
+                match handler {
+                    // The app answers a created window's close request itself.
+                    Some(handler) => handler(),
+                    None => {
+                        self.remove_view(id);
+                        if self.views.is_empty() {
+                            event_loop.exit();
+                        }
+                    }
                 }
             }
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
@@ -978,10 +1171,9 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
                         .set(window_metrics(&hosted_view.window));
                     if let Some(client) = &mut self.client {
                         client.view_metrics_changed(hosted_view.view.id());
-                        // Present the resized layout before AppKit commits the
+                        // Present the resized layout before the system commits the
                         // window geometry, rather than stretching the old frame.
-                        #[cfg(target_os = "macos")]
-                        if size[0] > 0 && size[1] > 0 {
+                        if os::FRAME_ON_RESIZE && size[0] > 0 && size[1] > 0 {
                             self.platform.frame_requested.set(false);
                             client.frame(Frame {
                                 elapsed: self.platform.elapsed(),
@@ -998,15 +1190,49 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
                 }
                 self.flush_frame_request();
             }
+            WindowEvent::Occluded(false) => {
+                // The window is seen again; a frame it could not draw while hidden is
+                // drawn now.
+                if let Some(hosted) = self.views.get(&id)
+                    && hosted.view.owes_frame.get()
+                {
+                    self.platform.request_frame();
+                    self.flush_frame_request();
+                }
+            }
             WindowEvent::ThemeChanged(theme) => {
                 self.platform.brightness.set(brightness_of(theme));
                 if let Some(client) = &mut self.client {
                     client.platform_brightness_changed();
                 }
             }
+            // Flutter's macOS embedder sends `kAdd` on `mouseEntered` and `kRemove` on
+            // `mouseExited`; a `MouseRegion` exits on the remove. A drag that leaves the
+            // window keeps its button and goes on as moves.
+            WindowEvent::CursorEntered { .. } => {
+                self.pointer_window = Some(id);
+                // The entry carries no position, and the last one seen may be from
+                // before the window moved; the add goes out at where the pointer is.
+                if let Some(position) = self
+                    .views
+                    .get(&id)
+                    .and_then(|hosted| os::pointer_position(&hosted.window))
+                {
+                    self.cursor = position;
+                }
+                self.add_pointer(id);
+            }
+            WindowEvent::CursorLeft { .. } => {
+                if self.pointer_added && self.mouse_buttons == 0 {
+                    self.pointer_added = false;
+                    self.send_pointer(id, PointerChange::Remove);
+                }
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 self.pointer_window = Some(id);
                 self.cursor = [position.x, position.y];
+                self.add_pointer(id);
+                self.reconcile_buttons(id);
                 self.send_pointer(
                     id,
                     if self.mouse_buttons != 0 {

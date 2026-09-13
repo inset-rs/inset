@@ -835,9 +835,7 @@ mod tests {
     use std::time::Duration;
 
     use inset_embedder::{Rect, TextDirection};
-    use inset_services::{
-        HardwareKeyboard, KeyDownEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
-    };
+    use inset_services::{HardwareKeyboard, KeyDownEvent, LogicalKeyboardKey, PhysicalKeyboardKey};
 
     use super::*;
     use crate::widgets::actions::{Action, Actions, VoidCallbackAction};

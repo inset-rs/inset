@@ -8,12 +8,15 @@ mod gpu;
 mod images;
 mod ime;
 mod keys;
+mod os;
 mod text_input;
 mod window;
+mod windows;
 
 use inset_embedder::{EmbedderClient, PlatformRef};
 
 pub use images::{DecodeExecution, create_image_loader};
+pub use window::WinitPlatform;
 
 /// Configuration for the implicit view created before application startup.
 #[derive(Clone, Debug, PartialEq)]

@@ -15,6 +15,7 @@ test-support = ["dep:pollster", "dep:wgpu"]
 
 [dependencies]
 indexmap.workspace = true
+raw-window-handle.workspace = true
 pollster = { workspace = true, optional = true }
 wgpu = { workspace = true, optional = true }
 valo.workspace = true

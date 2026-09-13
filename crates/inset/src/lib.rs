@@ -16,8 +16,16 @@
 //! }
 //! ```
 
+/// The engine layer whole, for the few types the facade's own names shadow: `ui::Image` is the
+/// picture the `Image` widget shows, as `dart:ui`'s `Image` is to Flutter's.
+pub use inset_embedder as ui;
 pub use inset_embedder::{
-    Brightness, Color, FontFeature, FontWeight, Offset, Rect, Size, TextAlign, TextDirection,
+    BlurStyle, HostWindow, Platform, PopupMenuEntry, WindowBackground, WindowConfig, WindowError,
+    WindowLevel, WindowRef, WindowingOwner,
+};
+pub use inset_embedder::{
+    Brightness, Color, FontFeature, FontWeight, Offset, Radius, Rect, Size, TextAlign,
+    TextDirection,
 };
 pub use inset_embedder_default::DefaultEmbedder;
 #[cfg(not(target_arch = "wasm32"))]
@@ -27,8 +35,14 @@ pub use inset_foundation::Listener;
 pub use inset_foundation::*;
 pub use inset_macros::main;
 pub use inset_painting::{
-    Alignment, AlignmentGeometry, AnyColor, BorderRadiusGeometry, BoxDecoration, BoxFit,
+    Alignment, AlignmentGeometry, AnyColor, Axis, Border, BorderRadius, BorderRadiusGeometry,
+    BorderSide, BorderStyle, BoxDecoration, BoxFit, BoxShadow, BoxShape, Clip, EdgeInsets,
     EdgeInsetsGeometry, TextOverflow, TextScaler, TextSpan, TextStyle,
+};
+/// The frame scheduler, for what must wait for a frame to be drawn: Flutter's
+/// `scheduler.dart`, reached through `WidgetsBinding.instance.addPostFrameCallback`.
+pub use inset_scheduler::{
+    FrameCallback, SchedulerBinding, Ticker, TickerCallback, TickerProviderObject,
 };
 pub use inset_shell::Shell;
 pub use inset_widgets::*;

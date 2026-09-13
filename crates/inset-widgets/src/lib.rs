@@ -10,9 +10,38 @@ mod framework;
 mod test_harness;
 mod view;
 mod widgets;
+mod window;
 
 pub use binding::*;
 pub use framework::*;
+// Flutter's `basic.dart` re-exports the animation and painting libraries whole, and these
+// from `rendering.dart`, so a widget author never names those layers for a `Row`, a curve
+// or a border. The animation mixins stay behind: they are Rust's spelling of Dart's, and
+// beside `Animation` they would make its methods ambiguous.
+pub use inset_animation::{
+    AlwaysStoppedAnimation, Animatable, Animation, AnimationBehavior, AnimationController,
+    AnimationMax, AnimationMean, AnimationMin, AnimationStatus, AnimationStatusListener,
+    AnimationStyle, AnimationWithParent, AnyAnimation, CallbackAnimatable, ChainedEvaluation,
+    ColorTween, CompoundAnimation, ConstantTween, Cubic, Curve, CurveTween, CurvedAnimation,
+    Curves, ElasticInCurve, ElasticInOutCurve, ElasticOutCurve, FlippedCurve, FlippedTweenSequence,
+    IntTween, Interval, ProxyAnimation, RectTween, ReverseAnimation, ReverseTween, SawTooth,
+    SizeTween, Split, StepTween, ThreePointCubic, Threshold, TrainHoppingAnimation, Tween,
+    TweenLerp, TweenSequence, TweenSequenceItem, k_always_complete_animation,
+    k_always_dismissed_animation,
+};
+pub use inset_painting::*;
+pub use inset_rendering::{
+    BoxConstraints, CrossAxisAlignment, FlexFit, MainAxisAlignment, MainAxisSize, StackFit,
+};
+// The widget, not dart:ui's `Image` that painting carries: Flutter's `widgets.dart` makes
+// the same choice, leaving the other as `ui.Image`.
+pub use widgets::image::Image;
+
+/// Paths the crate's macros name. Not an API.
+#[doc(hidden)]
+pub mod __private {
+    pub use inset_foundation as foundation;
+}
 pub use view::*;
 pub use widgets::actions::*;
 pub use widgets::animated_size::*;
@@ -103,3 +132,4 @@ pub use widgets::value_listenable_builder::*;
 pub use widgets::viewport::*;
 pub use widgets::visibility::*;
 pub use widgets::widget_state::*;
+pub use window::*;

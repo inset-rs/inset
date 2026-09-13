@@ -30,6 +30,7 @@ mod text;
 mod text_editing;
 mod text_input;
 mod views;
+mod window;
 
 pub use client::EmbedderClient;
 pub use fonts::{
@@ -47,8 +48,8 @@ pub use painting::*;
 pub use paragraph::*;
 pub use platform::{
     AppExitResponse, AppLifecycleState, ApplicationSwitcherDescription, Brightness, Frame,
-    HapticFeedbackType, InertPlatform, Platform, PlatformRef, SystemUiOverlayStyle, TargetPlatform,
-    ViewRef,
+    HapticFeedbackType, InertPlatform, Platform, PlatformRef, PopupMenuEntry, SystemUiOverlayStyle,
+    TargetPlatform, ViewRef,
 };
 pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
@@ -64,3 +65,7 @@ pub use views::{
     ViewId, ViewMetrics, ViewPadding,
 };
 pub use web_time::Instant;
+pub use window::{
+    HostWindow, RawWindowHandle, WindowBackground, WindowConfig, WindowError, WindowFuture,
+    WindowLevel, WindowRef, WindowingOwner,
+};

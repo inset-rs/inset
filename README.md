@@ -12,7 +12,7 @@ The project is in alpha, while is ready to build apps on. Inset currently has tw
 
 ## Try it
 
-Inset **requires nightly Rust**. To install run:
+Inset **requires nightly Rust**: a widget's `State` takes `self: Handle<Self>`, so an app with one starts with `#![feature(arbitrary_self_types)]`. To install run:
 
 ```sh
 rustup install nightly
@@ -121,6 +121,16 @@ app.update(&count, |n, cx| {
     cx.notify();
 });
 ```
+
+### Structuring an app
+
+The recommended architecture is three layers:
+
+- **Logic**: the business logic, as plain Rust. It does not depend on `App` or `Entity`, so it runs and is tested on its own.
+- **State**: the app's state as entities, built on the logic layer. This is where `App`, `Entity` and `Timer` are used. Entity events model what happens: an entity emits with `cx.emit`, another subscribes and reacts. A callback from outside the app reaches an entity through `AsyncApp::post`. This layer depends on `inset-foundation` alone, so it is tested with `AppCell` and no display.
+- **UI**: widgets, kept thin. A widget reads entities in `build`, which subscribes it to them, and calls their methods from callbacks. It keeps only view state, such as whether a panel is open.
+
+A new feature is one entity plus the widgets that show it.
 
 ## Contributing and AI
 

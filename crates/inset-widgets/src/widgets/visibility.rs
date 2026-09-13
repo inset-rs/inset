@@ -619,9 +619,7 @@ mod tests {
 
     use inset_embedder::{Size, TextDirection};
     use inset_foundation::{App, AppCell, Handle};
-    use inset_rendering::{
-        ErasedLayer, RenderConstrainedBox, RenderIgnorePointer, RenderOffstage,
-    };
+    use inset_rendering::{ErasedLayer, RenderConstrainedBox, RenderIgnorePointer, RenderOffstage};
 
     use super::*;
     use crate::framework::{State, StateData, StatefulWidget};

@@ -42,9 +42,21 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 
 ## platform.rs → dart:ui `platform_dispatcher.dart`
 
+- Change: `Platform` is `Any`, and `downcast_ref` on the trait object hands an app its host's own type; `PlatformDispatcher` is one class on every platform.
+  Reason: platform — what a host offers beyond the interface (a picture from an `IOSurface`-backed buffer, its renderer's image context) belongs to that host, and naming each system's kinds in the interface would close it to the next system.
+  Affect: the interface carries only what every host can answer, such as `import_pixels` for `decodeImageFromPixels`; an app that wants more names its host crate and downcasts.
+
 - Change: Dart's isolate-global `PlatformDispatcher` is a host-supplied `Platform` that `App` holds; frame, clock and view lookup are requests on that object, not a callback table the framework assigns into.
   Reason: platform — the host supplies `Platform`, and there is no isolate-global dispatcher.
   Affect: nothing can install a dispatcher callback behind the host's back, and two Apps in one process answer independently.
+
+- Change: `Platform::windowing_owner` hands the app a `WindowingOwner` that makes further windows from a `WindowConfig` (size, position, decorations, level, activation, every desktop, background, shadow) and answers a `HostWindow` — a view plus its frame, visibility, native handle and close request — or adopts a native window the app made; Flutter's experimental windowing API builds regular, dialog, popup, tooltip and satellite controllers over the engine's views instead.
+  Reason: platform — the common configuration and the raw handle cover what a Rust app configures itself, as winit and wgpu expose theirs, and adoption is Flutter's own macOS shape, where the app's window hosts the view.
+  Affect: an app names its windows' properties directly rather than choosing an archetype; a property the config lacks is set through the native handle; hosts without windows answer no owner and the implicit view stays the only one.
+
+- Change: `Platform::show_popup_menu` shows the host's own popup menu at the pointer and answers the chosen entry; Flutter has no such call, only in-view context menus and the macOS menu bar.
+  Reason: platform — a desktop window narrower than its menu, such as a panel at a screen's edge, cannot hold a menu drawn inside its view.
+  Affect: a menu shown this way is the system's, drawn outside the window and styled by the OS; the app waits inside the call while it is open, and hosts without menus answer `None`.
 
 - Change: `default_target_platform` and `platform_brightness` are queries on `Platform`, with no library global and no `debugDefaultTargetPlatformOverride`; the inert platform answers Android and light, as Flutter's test binding does.
   Reason: platform — the host-supplied `Platform` is the only source of truth.

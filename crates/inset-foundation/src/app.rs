@@ -14,7 +14,7 @@ use slotmap::new_key_type;
 use crate::app_cell::{AppCell, AsyncApp};
 use crate::change_notifier::Listener;
 use crate::entity::EntityMap;
-use crate::executor::{ForegroundExecutor, Task};
+use crate::executor::{ExecutorHandle, ForegroundExecutor, Task};
 use crate::handle_map::HandleMap;
 pub use crate::handle_map::{RetainedHandle, RetainedHandleId};
 use crate::timers::{Timer, Timers};
@@ -172,7 +172,16 @@ impl App {
 
     /// This App as a task sees it: the handle an `async` body captures across its `await`s.
     pub fn to_async(&self) -> AsyncApp {
-        AsyncApp::new(self.this.clone())
+        AsyncApp::new(
+            self.this.clone(),
+            self.executor.handle(),
+            Rc::clone(&self.platform),
+        )
+    }
+
+    /// The polling side of this App's executor, for the cell's checkpoint.
+    pub(crate) fn executor_handle(&self) -> ExecutorHandle {
+        self.executor.handle()
     }
 
     /// Queues `f` as a task on this App: the continuation of a Dart `async` body.

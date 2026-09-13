@@ -10,9 +10,7 @@ use std::rc::Rc;
 
 use inset_embedder::{Clip, Offset, Rect, Size, TextBaseline};
 use inset_foundation::{App, Handle, Listenable, Listener};
-use inset_painting::{
-    Alignment, AlignmentGeometry, EdgeInsets, EdgeInsetsGeometry, TextDirection,
-};
+use inset_painting::{Alignment, AlignmentGeometry, EdgeInsets, EdgeInsetsGeometry, TextDirection};
 
 use crate::box_::{
     AnyRenderBox, BoxConstraints, BoxHitTestResult, BoxParentData, RenderBox, RenderBoxData,

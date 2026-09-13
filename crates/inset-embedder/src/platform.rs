@@ -4,6 +4,7 @@
 //! by the embedder and held by `App`. Incoming host events travel through
 //! `EmbedderClient`, so this interface contains requests and state only.
 
+use std::any::Any;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -17,6 +18,7 @@ use crate::system_context_menu::SystemContextMenuItem;
 use crate::{View, ViewFocusDirection, ViewFocusState, ViewId};
 
 pub type PlatformRef = Rc<dyn Platform>;
+
 pub type ViewRef = Rc<dyn View>;
 
 /// Specifies a description of the application that is pertinent to the
@@ -365,11 +367,60 @@ pub enum TargetPlatform {
     Windows,
 }
 
+/// One line of a popup menu the host shows with its own menu system.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PopupMenuEntry {
+    Item {
+        label: String,
+        enabled: bool,
+        /// Drawn with a check mark, for a setting the menu toggles.
+        checked: bool,
+    },
+    Separator,
+}
+
+impl PopupMenuEntry {
+    pub fn item(label: impl Into<String>) -> PopupMenuEntry {
+        PopupMenuEntry::Item {
+            label: label.into(),
+            enabled: true,
+            checked: false,
+        }
+    }
+
+    pub fn checked(self, checked: bool) -> PopupMenuEntry {
+        match self {
+            PopupMenuEntry::Item { label, enabled, .. } => PopupMenuEntry::Item {
+                label,
+                enabled,
+                checked,
+            },
+            separator => separator,
+        }
+    }
+
+    pub fn enabled(self, enabled: bool) -> PopupMenuEntry {
+        match self {
+            PopupMenuEntry::Item { label, checked, .. } => PopupMenuEntry::Item {
+                label,
+                enabled,
+                checked,
+            },
+            separator => separator,
+        }
+    }
+}
+
 /// The long-lived host object held by the application.
 ///
 /// Implementations must queue requests and return. They must not synchronously
 /// re-enter the [`EmbedderClient`](crate::EmbedderClient) while `App` is active.
-pub trait Platform: 'static {
+///
+/// A host may offer more than this interface — a picture from a buffer only its system
+/// has, a handle to its renderer. An app that knows its host reaches that through
+/// [`downcast_ref`](dyn Platform::downcast_ref); the interface itself names nothing of any
+/// one system.
+pub trait Platform: Any {
     /// Which host this is, for behaviour that follows platform convention
     /// (Flutter `defaultTargetPlatform`).
     ///
@@ -387,6 +438,13 @@ pub trait Platform: 'static {
     fn open_image_codec(&self, bytes: std::sync::Arc<[u8]>) -> crate::ImageCodecFuture {
         let _ = bytes;
         Box::pin(std::future::ready(Err(crate::ImageDecodeError::NoDecoder)))
+    }
+
+    /// An image from pixels the app already holds, with no codec in between: Flutter's
+    /// `decodeImageFromPixels`. `None` when the host has no renderer to put it on yet.
+    fn import_pixels(&self, pixels: valo::PixelBuffer) -> Option<crate::Image> {
+        let _ = pixels;
+        None
     }
 
     /// Whether the host's own text input turns editing keys into edits before the framework
@@ -486,6 +544,19 @@ pub trait Platform: 'static {
     /// Defaults to dropping it.
     fn hide_system_context_menu(&self) {}
 
+    /// Shows `entries` as the platform's own popup menu at the pointer and waits for it to
+    /// close; answers the index of the entry chosen. Not a Flutter call: Flutter's context
+    /// menus draw inside the view, and a desktop panel narrower than its menu needs the
+    /// system's, which is its own window.
+    ///
+    /// The host runs the menu's event loop inside this call, so nothing else of the app runs
+    /// meanwhile and a native callback that arrives then must post, not borrow. Defaults to
+    /// `None`, for a host with no menus.
+    fn show_popup_menu(&self, entries: &[PopupMenuEntry]) -> Option<usize> {
+        let _ = entries;
+        None
+    }
+
     /// Looks up the given text (Flutter's `LookUp.invoke`).
     ///
     /// Defaults to dropping it.
@@ -545,6 +616,12 @@ pub trait Platform: 'static {
     /// The stable implicit view, when this embedding provides one.
     fn implicit_view(&self) -> Option<ViewRef>;
 
+    /// The host's window maker, for an app that opens windows of its own. `None`, the
+    /// default, where the implicit view is the only one there can be: mobile and the web.
+    fn windowing_owner(&self) -> Option<Rc<dyn crate::WindowingOwner>> {
+        None
+    }
+
     /// The platform's own font lookup: faces by family name and by codepoint, the way
     /// Flutter's engine asks the OS. `None` for a host without one; text then shapes only
     /// against fonts the application registers.
@@ -576,6 +653,13 @@ pub trait Platform: 'static {
     /// Defaults to dropping it: a host without state restoration has nowhere to put it.
     fn restoration_put(&self, data: RestorationMap) {
         let _ = data;
+    }
+}
+
+impl dyn Platform {
+    /// The host as its own type, for what it offers beyond the interface.
+    pub fn downcast_ref<T: Platform>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref::<T>()
     }
 }
 
@@ -629,5 +713,32 @@ mod tests {
     #[test]
     fn inert_platform_brightness_is_light() {
         assert_eq!(InertPlatform.platform_brightness(), Brightness::Light);
+    }
+
+    #[test]
+    fn a_platform_downcasts_to_its_own_type_and_no_other() {
+        struct Other;
+        impl Platform for Other {
+            fn target_platform(&self) -> TargetPlatform {
+                TargetPlatform::Linux
+            }
+            fn request_frame(&self) {}
+            fn now(&self) -> super::Instant {
+                super::Instant::now()
+            }
+            fn wake_at(&self, _deadline: super::Instant) {}
+            fn views(&self) -> Vec<super::ViewRef> {
+                Vec::new()
+            }
+            fn view(&self, _id: super::ViewId) -> Option<super::ViewRef> {
+                None
+            }
+            fn implicit_view(&self) -> Option<super::ViewRef> {
+                None
+            }
+        }
+        let platform: super::PlatformRef = std::rc::Rc::new(InertPlatform);
+        assert!(platform.downcast_ref::<InertPlatform>().is_some());
+        assert!(platform.downcast_ref::<Other>().is_none());
     }
 }

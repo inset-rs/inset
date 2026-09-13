@@ -24,7 +24,7 @@ pub use constants::*;
 pub use date_time::DateTime;
 pub use entity::*;
 pub use executor::Task;
+pub use inset_embedder::TargetPlatform;
 pub use key::*;
 pub use observer_list::*;
-pub use inset_embedder::TargetPlatform;
 pub use timers::Timer;

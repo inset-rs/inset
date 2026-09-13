@@ -16,6 +16,7 @@ inset-foundation.workspace = true
 inset-macros.workspace = true
 inset-painting.workspace = true
 inset-shell.workspace = true
+inset-scheduler.workspace = true
 inset-widgets.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

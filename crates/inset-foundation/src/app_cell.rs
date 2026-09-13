@@ -23,7 +23,6 @@ const CHECKPOINT_BUDGET: usize = 100_000;
 /// Owns the [`App`] and the one door through which its microtasks and tasks run.
 pub struct AppCell {
     app: RefCell<App>,
-    executor: ExecutorHandle,
 }
 
 impl AppCell {
@@ -34,11 +33,12 @@ impl AppCell {
 
     /// The `App` of a running program, on the host's platform.
     pub fn with_platform(platform: PlatformRef) -> Rc<AppCell> {
-        let executor = ForegroundExecutor::new();
-        let handle = executor.handle();
         Rc::new_cyclic(|this| AppCell {
-            app: RefCell::new(App::build(this.clone(), platform, executor)),
-            executor: handle,
+            app: RefCell::new(App::build(
+                this.clone(),
+                platform,
+                ForegroundExecutor::new(),
+            )),
         })
     }
 
@@ -76,6 +76,7 @@ impl AppCell {
             "AppCell::checkpoint while the App is borrowed: release it first; each task \
              borrows the App for its own steps"
         );
+        let executor = self.borrow().executor_handle();
         let mut rounds = 0usize;
         loop {
             self.borrow_mut().release_dropped_retained_handles();
@@ -84,7 +85,7 @@ impl AppCell {
             if had_microtasks {
                 self.borrow_mut().drain_microtasks();
             }
-            let polled = self.executor.drain();
+            let polled = executor.drain();
             if !had_microtasks && polled == 0 {
                 break;
             }
@@ -96,6 +97,18 @@ impl AppCell {
             );
         }
         rounds
+    }
+
+    /// A host wake that carried no time: runs the checkpoint, for whatever a native callback
+    /// posted, and re-arms the host for the next timer, since the post's own wake took the
+    /// host's deadline.
+    ///
+    /// # Panics
+    ///
+    /// While the `App` is borrowed.
+    pub fn wake(&self) {
+        self.checkpoint();
+        self.borrow_mut().request_wake_for_next_timer();
     }
 
     /// Advances the App clock by `duration`, firing the timers that come due.
@@ -127,14 +140,27 @@ impl AppCell {
 }
 
 /// A task's handle on the [`App`]: what an `async` continuation captures across its `await`s.
+///
+/// Carries the executor's queue and the host besides the cell, as gpui's `AsyncApp` carries
+/// its executors: a [`post`](Self::post) reaches both without the `App`.
 #[derive(Clone)]
 pub struct AsyncApp {
     app: Weak<AppCell>,
+    executor: ExecutorHandle,
+    platform: PlatformRef,
 }
 
 impl AsyncApp {
-    pub(crate) fn new(app: Weak<AppCell>) -> AsyncApp {
-        AsyncApp { app }
+    pub(crate) fn new(
+        app: Weak<AppCell>,
+        executor: ExecutorHandle,
+        platform: PlatformRef,
+    ) -> AsyncApp {
+        AsyncApp {
+            app,
+            executor,
+            platform,
+        }
     }
 
     /// Runs `f` on the `App`, borrowing the cell for just that closure.
@@ -156,6 +182,23 @@ impl AsyncApp {
         });
         f(&mut app)
     }
+
+    /// Queues `f` to run on the `App` at the next checkpoint and wakes the host so one comes.
+    ///
+    /// The door for a native callback — a notification, an observer — that the host delivers
+    /// outside any event it drives, possibly while the `App` is borrowed: nothing here touches
+    /// the `App`, so it never panics where [`update`](Self::update) would. Dart's counterpart
+    /// is a native port message, which lands in the isolate's event queue. After the `App` is
+    /// dropped the closure is discarded.
+    pub fn post(&self, f: impl FnOnce(&mut App) + 'static) {
+        if self.app.strong_count() == 0 {
+            return;
+        }
+        let cx = self.clone();
+        // Dropping the handle detaches the task; it runs to completion regardless.
+        drop(self.executor.spawn(async move { cx.update(f) }));
+        self.platform.wake_at(self.platform.now());
+    }
 }
 
 #[cfg(test)]
@@ -175,6 +218,42 @@ mod tests {
 
     fn log() -> Rc<RefCell<Vec<&'static str>>> {
         Rc::new(RefCell::new(Vec::new()))
+    }
+
+    #[test]
+    fn a_post_runs_at_the_next_checkpoint_even_when_made_while_borrowed() {
+        let cell = AppCell::new();
+        let ran = counter();
+        let cx = cell.borrow().to_async();
+        {
+            let _borrowed = cell.borrow_mut();
+            let ran = Rc::clone(&ran);
+            cx.post(move |_app| ran.set(ran.get() + 1));
+        }
+        assert_eq!(ran.get(), 0, "a post never runs inline");
+        cell.checkpoint();
+        assert_eq!(ran.get(), 1);
+        cell.checkpoint();
+        assert_eq!(ran.get(), 1, "a post runs once");
+    }
+
+    #[test]
+    fn a_post_after_the_app_is_gone_is_dropped() {
+        let cx = AppCell::new().borrow().to_async();
+        cx.post(|_app| panic!("the App is gone"));
+    }
+
+    #[test]
+    fn a_wake_runs_the_checkpoint() {
+        let cell = AppCell::new();
+        let ran = counter();
+        let cx = cell.borrow().to_async();
+        {
+            let ran = Rc::clone(&ran);
+            cx.post(move |_app| ran.set(ran.get() + 1));
+        }
+        cell.wake();
+        assert_eq!(ran.get(), 1);
     }
 
     #[test]

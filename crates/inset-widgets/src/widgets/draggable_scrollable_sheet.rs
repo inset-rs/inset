@@ -1930,10 +1930,7 @@ mod tests {
             controller.size(&app)
         );
         // The sheet, not the list, took the drag.
-        assert_eq!(
-            inset_rendering::ViewportOffset::pixels(position, &app),
-            0.0
-        );
+        assert_eq!(inset_rendering::ViewportOffset::pixels(position, &app), 0.0);
 
         // Past the maximum it stops at the maximum, and then the list scrolls.
         drag.update(&mut app, drag_by(-VIEW_HEIGHT));

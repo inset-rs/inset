@@ -1,5 +1,6 @@
 /// The wgpu handles the embedder owns: valo requires the host to bring the
 /// device.
+#[derive(Clone)]
 pub struct Gpu {
     pub instance: wgpu::Instance,
     pub adapter: wgpu::Adapter,

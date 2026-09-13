@@ -1,9 +1,11 @@
 //! Flutter counterpart: `widgets/view.dart` (`View`, `RawView`, the view scopes).
 //!
 //! `View` wraps its child in `MediaQuery::from_view`, a `FocusTraversalGroup` parented on the
-//! root scope, and a `FocusScope` over its own scope node. `ViewCollection` / `ViewAnchor`
-//! wait.
+//! root scope, and a `FocusScope` over its own scope node. `ViewCollection` and `ViewAnchor`
+//! place further views beside or under a tree.
 
+use std::any::Any;
+use std::collections::HashSet;
 use std::fmt;
 use std::rc::Rc;
 
@@ -702,6 +704,370 @@ impl InheritedWidget for PipelineOwnerScope {
     }
 }
 
+/// Dart's `_MultiChildComponentWidget`: views that each bootstrap a render tree of their
+/// own, and at most one child that takes part in the surrounding render tree. Subclasses
+/// choose what to make public.
+pub struct MultiChildComponentWidget {
+    key: Option<KeyRef>,
+    views: Vec<WidgetRef>,
+    child: Option<WidgetRef>,
+}
+
+impl MultiChildComponentWidget {
+    fn new(key: Option<KeyRef>, views: Vec<WidgetRef>, child: Option<WidgetRef>) -> Self {
+        MultiChildComponentWidget { key, views, child }
+    }
+
+    fn into_widget(self) -> WidgetRef {
+        Rc::new(self)
+    }
+}
+
+impl fmt::Debug for MultiChildComponentWidget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MultiChildComponentWidget")
+            .field("views", &self.views.len())
+            .field("has_child", &self.child.is_some())
+            .finish()
+    }
+}
+
+impl Widget for MultiChildComponentWidget {
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
+        MultiChildComponentElement::create(app, this).as_element()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn widget_type(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<MultiChildComponentWidget>()
+    }
+
+    fn kind(&self) -> WidgetKind {
+        WidgetKind::Other
+    }
+}
+
+/// A collection of sibling [`View`]s.
+///
+/// This widget can only be used in places were a [`View`] widget is allowed, i.e. in a
+/// non-rendering zone of the widget tree. In practical terms, it can be used at the root of
+/// the widget tree outside of any [`View`] widget, as a child of a [`ViewAnchor`], or in the
+/// `view` slot of a [`ViewAnchor`]. It cannot be used as a normal child of a widget that
+/// expects a `RenderObject` as its child.
+pub struct ViewCollection {
+    pub key: Option<KeyRef>,
+    /// The [`View`] widgets that are part of this collection.
+    pub views: Vec<WidgetRef>,
+}
+
+impl ViewCollection {
+    pub fn new(views: Vec<WidgetRef>) -> ViewCollection {
+        ViewCollection { key: None, views }
+    }
+
+    /// Dart `ViewCollection(key:)`.
+    pub fn key(mut self, key: KeyRef) -> ViewCollection {
+        self.key = Some(key);
+        self
+    }
+
+    pub fn into_widget(self) -> WidgetRef {
+        Rc::new(self)
+    }
+}
+
+impl fmt::Debug for ViewCollection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ViewCollection")
+            .field("views", &self.views.len())
+            .finish()
+    }
+}
+
+impl Widget for ViewCollection {
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
+        MultiChildComponentElement::create(app, this).as_element()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn widget_type(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<ViewCollection>()
+    }
+
+    fn kind(&self) -> WidgetKind {
+        WidgetKind::Other
+    }
+}
+
+/// Decorates a `child` widget with a side [`View`].
+///
+/// This widget must have a [`View`] ancestor, into which the `child` widget is rendered. The
+/// `view` widget is rendered into a view of its own, while the `child` renders into the
+/// enclosing one.
+#[derive(Debug)]
+pub struct ViewAnchor {
+    pub key: Option<KeyRef>,
+    /// The widget that defines the view anchored to this widget.
+    pub view: Option<WidgetRef>,
+    /// The widget below this widget in the tree, rendered into the enclosing view.
+    pub child: WidgetRef,
+}
+
+impl ViewAnchor {
+    pub fn new<K>(child: impl IntoWidget<K>) -> ViewAnchor {
+        ViewAnchor {
+            key: None,
+            view: None,
+            child: child.into_widget(),
+        }
+    }
+
+    /// Dart `ViewAnchor(key:)`.
+    pub fn key(mut self, key: KeyRef) -> ViewAnchor {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `ViewAnchor(view:)`.
+    pub fn view<K>(mut self, view: impl IntoWidget<K>) -> ViewAnchor {
+        self.view = Some(view.into_widget());
+        self
+    }
+}
+
+impl StatelessWidget for ViewAnchor {
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
+        // `LookupBoundary` around the view waits (`## Deferred`).
+        MultiChildComponentWidget::new(
+            None,
+            self.view.iter().cloned().collect(),
+            Some(self.child.clone()),
+        )
+        .into_widget()
+    }
+}
+
+thread_local! {
+    /// Dart's `_MultiChildComponentElement._viewSlot`: one object every view child is
+    /// slotted with, told apart from a render slot by identity.
+    static VIEW_SLOT: Rc<dyn Any> = Rc::new(());
+}
+
+fn view_slot() -> Slot {
+    Slot::Custom(VIEW_SLOT.with(Rc::clone))
+}
+
+fn is_view_slot(slot: Option<&Slot>) -> bool {
+    matches!(slot, Some(Slot::Custom(slot)) if VIEW_SLOT.with(|view_slot| Rc::ptr_eq(view_slot, slot)))
+}
+
+/// Dart's `_MultiChildComponentElement`.
+pub struct MultiChildComponentElement {
+    element: ElementData,
+    view_elements: Vec<AnyElement>,
+    forgotten_view_elements: HashSet<AnyElement>,
+    child_element: Option<AnyElement>,
+}
+
+impl MultiChildComponentElement {
+    fn create(app: &mut App, widget: WidgetRef) -> Handle<MultiChildComponentElement> {
+        app.create(MultiChildComponentElement {
+            element: ElementData::new(widget),
+            view_elements: Vec::new(),
+            forgotten_view_elements: HashSet::new(),
+            child_element: None,
+        })
+    }
+
+    /// The views and the child the widget carries, whichever of the two widget types it is.
+    fn parts(widget: &WidgetRef) -> (Vec<WidgetRef>, Option<WidgetRef>) {
+        if let Some(collection) = downcast_widget::<ViewCollection>(&**widget) {
+            return (collection.views.clone(), None);
+        }
+        let widget = downcast_widget::<MultiChildComponentWidget>(&**widget)
+            .expect("a MultiChildComponentElement holds a ViewCollection or a ViewAnchor's widget");
+        (widget.views.clone(), widget.child.clone())
+    }
+
+    fn debug_assert_children(self: Handle<Self>, app: &App) -> bool {
+        let (views, child) = Self::parts(self.as_element().widget(app));
+        let this = app.get(self);
+        // Each view widget must have a corresponding element.
+        debug_assert!(this.view_elements.len() == views.len());
+        // Iff there is a child widget, it must have a corresponding element.
+        debug_assert!(this.child_element.is_none() == child.is_none());
+        // The child element is not also a view element.
+        debug_assert!(
+            this.child_element
+                .is_none_or(|child| !this.view_elements.contains(&child))
+        );
+        true
+    }
+
+    /// Dart's `_debugCheckMustAttachRenderObject`: in the [`ViewCollection`] configuration,
+    /// no ancestor may expect a render object in this element's slot.
+    fn debug_check_must_attach_render_object(
+        self: Handle<Self>,
+        app: &App,
+        slot: Option<&Slot>,
+    ) -> bool {
+        if !cfg!(debug_assertions) || Self::parts(self.as_element().widget(app)).1.is_some() {
+            return true;
+        }
+        let mut has_ancestor_render_object_element = false;
+        let mut ancestor_wants_render_object = true;
+        self.as_element()
+            .visit_ancestor_elements(app, &mut |ancestor| {
+                if !ancestor.debug_expects_render_object_for_slot(app, slot) {
+                    ancestor_wants_render_object = false;
+                    return false;
+                }
+                if ancestor.is_render_object_element() {
+                    has_ancestor_render_object_element = true;
+                    return false;
+                }
+                true
+            });
+        debug_assert!(
+            !(has_ancestor_render_object_element && ancestor_wants_render_object),
+            "A ViewCollection cannot be inserted into a slot its ancestor expects a render \
+             object in; move it into the view property of a ViewAnchor widget or to the root \
+             of the widget tree."
+        );
+        true
+    }
+
+    /// The body of `performRebuild`: the child in this element's own slot, the views in the
+    /// view slot.
+    fn update_children(self: Handle<Self>, app: &mut App) {
+        let (views, child) = Self::parts(self.as_element().widget(app));
+        let slot = self.as_element().slot(app);
+        let child_element = app.get(self).child_element;
+        let child_element = self
+            .as_element()
+            .update_child(app, child_element, child, slot);
+        app.get_mut(self).child_element = child_element;
+
+        let old_views = app.get(self).view_elements.clone();
+        let is_forgotten =
+            |app: &App, child: AnyElement| app.get(self).forgotten_view_elements.contains(&child);
+        let slots: Vec<Option<Slot>> = views.iter().map(|_| Some(view_slot())).collect();
+        let view_elements = self.as_element().update_children(
+            app,
+            &old_views,
+            &views,
+            Some(&is_forgotten),
+            Some(&slots),
+        );
+        let this = app.get_mut(self);
+        this.view_elements = view_elements;
+        this.forgotten_view_elements.clear();
+    }
+}
+
+impl Element for MultiChildComponentElement {
+    crate::element_accessors!();
+
+    fn attach_render_object(self: Handle<Self>, app: &mut App, new_slot: Option<Slot>) {
+        ElementBase::attach_render_object(self, app, new_slot.clone());
+        debug_assert!(self.debug_check_must_attach_render_object(app, new_slot.as_ref()));
+    }
+
+    fn mount(
+        self: Handle<Self>,
+        app: &mut App,
+        parent: Option<AnyElement>,
+        new_slot: Option<Slot>,
+    ) {
+        ElementBase::mount(self, app, parent, new_slot.clone());
+        debug_assert!(self.debug_check_must_attach_render_object(app, new_slot.as_ref()));
+        debug_assert!(app.get(self).view_elements.is_empty());
+        debug_assert!(app.get(self).child_element.is_none());
+        self.update_children(app);
+        ElementBase::perform_rebuild(self, app);
+        debug_assert!(self.debug_assert_children(app));
+    }
+
+    fn update_slot(self: Handle<Self>, app: &mut App, new_slot: Option<Slot>) {
+        ElementBase::update_slot(self, app, new_slot.clone());
+        debug_assert!(self.debug_check_must_attach_render_object(app, new_slot.as_ref()));
+    }
+
+    fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
+        // Cannot switch from ViewAnchor config to ViewCollection config.
+        debug_assert!(
+            Self::parts(&new_widget).1.is_none()
+                == Self::parts(self.as_element().widget(app)).1.is_none()
+        );
+        ElementBase::update(self, app, new_widget);
+        self.as_element().rebuild(app, true);
+        debug_assert!(self.debug_assert_children(app));
+    }
+
+    fn debug_expects_render_object_for_slot(
+        self: Handle<Self>,
+        _app: &App,
+        slot: Option<&Slot>,
+    ) -> bool {
+        !is_view_slot(slot)
+    }
+
+    fn perform_rebuild(self: Handle<Self>, app: &mut App) {
+        self.update_children(app);
+        ElementBase::perform_rebuild(self, app); // clears the dirty flag
+        debug_assert!(self.debug_assert_children(app));
+    }
+
+    fn forget_child(self: Handle<Self>, app: &mut App, child: AnyElement) {
+        let this = app.get_mut(self);
+        if this.child_element == Some(child) {
+            this.child_element = None;
+        } else {
+            debug_assert!(this.view_elements.contains(&child));
+            debug_assert!(!this.forgotten_view_elements.contains(&child));
+            this.forgotten_view_elements.insert(child);
+        }
+    }
+
+    fn visit_children(self: Handle<Self>, app: &App, visitor: &mut dyn FnMut(AnyElement)) {
+        let this = app.get(self);
+        if let Some(child) = this.child_element {
+            visitor(child);
+        }
+        for child in &this.view_elements {
+            if !this.forgotten_view_elements.contains(child) {
+                visitor(*child);
+            }
+        }
+    }
+
+    fn debug_doing_build(self: Handle<Self>, _app: &App) -> bool {
+        false // This element does not have a concept of "building".
+    }
+
+    fn render_object_attaching_child(self: Handle<Self>, app: &App) -> Option<AnyElement> {
+        app.get(self).child_element
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
@@ -812,5 +1178,149 @@ mod tests {
         event(State::Unfocused, Direction::Undefined);
         event(State::Focused, Direction::Undefined);
         assert!(last.has_primary_focus(&cell.borrow()));
+    }
+
+    /// A host view that counts its presents, for trees with more than one view.
+    struct CountingView {
+        id: inset_embedder::ViewId,
+        presented: Rc<std::cell::Cell<u32>>,
+    }
+
+    impl inset_embedder::View for CountingView {
+        fn id(&self) -> inset_embedder::ViewId {
+            self.id
+        }
+
+        fn metrics(&self) -> inset_embedder::ViewMetrics {
+            inset_embedder::ViewMetrics {
+                physical_size: [400.0, 300.0],
+                physical_constraints: inset_embedder::ViewConstraints::tight(400.0, 300.0),
+                device_pixel_ratio: 2.0,
+                ..inset_embedder::ViewMetrics::default()
+            }
+        }
+
+        fn present(&self, _picture: &inset_embedder::Picture) {
+            self.presented.set(self.presented.get() + 1);
+        }
+    }
+
+    fn counting_view(id: u64) -> (inset_embedder::ViewRef, Rc<std::cell::Cell<u32>>) {
+        let presented = Rc::new(std::cell::Cell::new(0));
+        let view: inset_embedder::ViewRef = Rc::new(CountingView {
+            id: inset_embedder::ViewId(id),
+            presented: Rc::clone(&presented),
+        });
+        (view, presented)
+    }
+
+    /// Attaches `root` as the whole tree and runs the first frame.
+    fn mount_root(cell: &inset_foundation::AppCell, root: crate::WidgetRef) {
+        crate::binding::run_widget(&mut cell.borrow_mut(), root);
+        cell.elapse(std::time::Duration::ZERO);
+        binding_pump(&mut cell.borrow_mut(), std::time::Duration::ZERO);
+    }
+
+    #[test]
+    fn a_view_collection_bootstraps_one_render_tree_per_view() {
+        use inset_rendering::RendererBinding;
+
+        let cell = binding_cell();
+        let (first, first_presented) = counting_view(1);
+        let (second, second_presented) = counting_view(2);
+        mount_root(
+            &cell,
+            super::ViewCollection::new(vec![
+                super::View::new(first, SizedBox::new()).into_widget(),
+                super::View::new(second, SizedBox::new()).into_widget(),
+            ])
+            .into_widget(),
+        );
+        let mut app = cell.borrow_mut();
+        let binding = RendererBinding::instance(&mut app);
+        assert_eq!(binding.render_views(&app).len(), 2);
+        assert_eq!(first_presented.get(), 1);
+        assert_eq!(second_presented.get(), 1);
+    }
+
+    #[test]
+    fn a_view_anchor_renders_its_child_in_place_and_its_view_beside_it() {
+        use inset_rendering::RendererBinding;
+
+        let cell = binding_cell();
+        let (enclosing, enclosing_presented) = counting_view(1);
+        let (side, side_presented) = counting_view(2);
+        mount_root(
+            &cell,
+            super::View::new(
+                enclosing,
+                super::ViewAnchor::new(SizedBox::new().width(10.0).height(10.0))
+                    .view(super::View::new(side, SizedBox::new())),
+            )
+            .into_widget(),
+        );
+        let mut app = cell.borrow_mut();
+        let binding = RendererBinding::instance(&mut app);
+        assert_eq!(binding.render_views(&app).len(), 2);
+        assert_eq!(enclosing_presented.get(), 1);
+        assert_eq!(side_presented.get(), 1);
+    }
+
+    struct FakeWindow {
+        view: inset_embedder::ViewRef,
+    }
+
+    impl inset_embedder::HostWindow for FakeWindow {
+        fn view(&self) -> inset_embedder::ViewRef {
+            Rc::clone(&self.view)
+        }
+
+        fn frame(&self) -> inset_embedder::Rect {
+            inset_embedder::Rect::from_ltwh(1.0, 2.0, 3.0, 4.0)
+        }
+
+        fn set_frame(&self, _frame: inset_embedder::Rect, _animate: Option<std::time::Duration>) {}
+
+        fn set_title(&self, _title: &str) {}
+
+        fn show(&self) {}
+
+        fn hide(&self) {}
+
+        fn close(&self) {}
+
+        fn native_handle(&self) -> Option<inset_embedder::RawWindowHandle> {
+            None
+        }
+
+        fn set_close_requested(&self, _handler: Option<Rc<dyn Fn()>>) {}
+    }
+
+    #[test]
+    fn a_window_hands_itself_to_its_subtree() {
+        use crate::widgets::basic::Builder;
+        use crate::window::{Window, WindowScope};
+
+        let cell = binding_cell();
+        let (view, presented) = counting_view(7);
+        let window: inset_embedder::WindowRef = Rc::new(FakeWindow { view });
+        let seen = Rc::new(std::cell::Cell::new(None));
+        let probe = {
+            let seen = Rc::clone(&seen);
+            Builder::new(move |app, context| {
+                seen.set(Some(WindowScope::of(app, context).frame()));
+                SizedBox::new().into_widget()
+            })
+        };
+        mount_root(
+            &cell,
+            super::ViewCollection::new(vec![Window::new(window, probe).into_widget()])
+                .into_widget(),
+        );
+        assert_eq!(
+            seen.get(),
+            Some(inset_embedder::Rect::from_ltwh(1.0, 2.0, 3.0, 4.0))
+        );
+        assert_eq!(presented.get(), 1);
     }
 }

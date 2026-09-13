@@ -229,15 +229,15 @@ impl ElementData {
 macro_rules! element_accessors {
     () => {
         fn element_data(
-            self: ::inset_foundation::Handle<Self>,
-            app: &::inset_foundation::App,
+            self: $crate::__private::foundation::Handle<Self>,
+            app: &$crate::__private::foundation::App,
         ) -> &$crate::ElementData {
             &app.get(self).element
         }
 
         fn element_data_mut(
-            self: ::inset_foundation::Handle<Self>,
-            app: &mut ::inset_foundation::App,
+            self: $crate::__private::foundation::Handle<Self>,
+            app: &mut $crate::__private::foundation::App,
         ) -> &mut $crate::ElementData {
             &mut app.get_mut(self).element
         }

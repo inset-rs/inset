@@ -452,6 +452,12 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: language — no garbage collector, and the pointer callbacks outlive the widgets that started the drag.
   Affect: a drag continues after its source widget is removed, and the retained objects are released when it completes or is cancelled.
 
+## window.rs → _window.dart
+
+- Change: `Window` and `WindowScope` carry the host's `HostWindow`, a view with a frame, visibility and a native handle, where Flutter's `Window` carries a `WindowController` and its siblings each carry one archetype's controller; there is no `WindowManager` or registry, and a `Window` does not rebuild on its own when the window's size changes.
+  Reason: platform — the host makes windows from one configuration and hands back a view, and a size change reaches the tree through the view's metrics, as it does for the implicit view.
+  Affect: an app lists its `Window`s in a `ViewCollection` itself and reads the window from `WindowScope::of`; size and position come from `HostWindow::frame`, not a listenable.
+
 ## Deferred
 
 - image.rs: `Image.network` and `Image.file`. Trigger: an HTTP client; a file system.
@@ -471,7 +477,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - framework/: `ObjectKey`, `GlobalObjectKey`. Trigger: a widget keyed by object identity.
 - binding.rs: the observer callbacks with no host event (memory pressure, back gestures, lifecycle), the platform menu delegate and windowing owner, `scheduleWarmUpFrame`, `framesEnabled`. Trigger: the shell forwarding those platform events.
 - binding.rs: first-frame-rasterized reporting and the push/pop route handlers. Trigger: `SchedulerBinding.addTimingsCallback`; navigation.
-- view.rs: `ViewCollection`, `ViewAnchor`, and the view's semantics owner callbacks. Trigger: multi-view; accessibility.
+- view.rs: `LookupBoundary` around a `ViewAnchor`'s view, and the view's semantics owner callbacks. Trigger: `LookupBoundary`; accessibility.
 - `LookupBoundary` in the `View`, `Overlay` and theater-marker lookups, which look straight up the tree. Trigger: `LookupBoundary` in framework.
 - `debugCheckHasDirectionality` in the widgets that resolve a directional value. Trigger: diagnostics.
 - `InheritedTheme` capture on `DefaultTextStyle`, `DefaultTextHeightBehavior` and `IconTheme`, and `DefaultTextStyle.merge`. Trigger: `InheritedTheme`; `Builder`.

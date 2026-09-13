@@ -40,10 +40,6 @@ Host implementation references: Flutter's C++ engine under `flutter/engine/src/f
   Reason: platform — a desktop machine has no haptic engine and no status bar, and Flutter's own Linux and Windows embedders answer both with not-implemented.
   Affect: `HapticFeedback` calls are silent and the status-bar style a `CupertinoNavigationBar` asks for shows nowhere; the same calls work on a phone host.
 
-- Change: winit mouse buttons become dart:ui `PointerData.buttons` bits; a Down is sent when the first button goes down, Move while any remain, Up when the last is released.
-  Reason: platform — Flutter's engine maps host mouse buttons this way, and winit is the OS here.
-  Affect: a right-click reaches secondary-tap handlers and a middle-click is tertiary.
-
 - Change: a backdrop filter is replayed as its blur only; a colour filter composed over the blur is dropped rather than moved onto the layer paint, which would filter the children too.
   Reason: platform — only the first blur of the filter tree reaches valo's backdrop op.
   Affect: a `CupertinoPopupSurface`, and any frosted surface that composes a colour matrix over a backdrop blur, is blurred but not saturated.
@@ -55,14 +51,6 @@ Host implementation references: Flutter's C++ engine under `flutter/engine/src/f
 - Change: the valo context hides missing glyphs.
   Reason: platform — Valo paints `.notdef` tofu unless asked not to.
   Affect: a character with no face occupies layout space and draws nothing.
-
-- Change: `present` asks the window for another redraw when valo cannot acquire a surface texture, so the retained scene is presented next vsync.
-  Reason: platform — Flutter's Metal surface always has a drawable, so its engine drops such a frame and resubmits only on Android's first-frame path.
-  Affect: the first frame of a just-shown window appears without needing a resize, and no frame is lost to a surface that was not ready.
-
-- Change: `WinitView` presents through Core Animation transactions on macOS, and a resize callback delivers updated metrics and a frame before returning.
-  Reason: platform — AppKit commits window geometry independently of a later winit redraw.
-  Affect: live resizing shows newly laid-out content together with the new window size instead of stretching the previous frame.
 
 - Change: the host leaves `Platform::handles_text_editing_keys` at no, and does not forward the editing commands macOS names for a key.
   Reason: platform — winit does run the key through AppKit, but keeps only the plain key press and drops the command name, as gpui's own macOS window does.

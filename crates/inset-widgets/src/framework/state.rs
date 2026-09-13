@@ -75,15 +75,15 @@ impl<W: StatefulWidget> Default for StateData<W> {
 macro_rules! state_accessors {
     () => {
         fn state_data(
-            self: ::inset_foundation::Handle<Self>,
-            app: &::inset_foundation::App,
+            self: $crate::__private::foundation::Handle<Self>,
+            app: &$crate::__private::foundation::App,
         ) -> &$crate::StateData<Self::Widget> {
             &app.get(self).state
         }
 
         fn state_data_mut(
-            self: ::inset_foundation::Handle<Self>,
-            app: &mut ::inset_foundation::App,
+            self: $crate::__private::foundation::Handle<Self>,
+            app: &mut $crate::__private::foundation::App,
         ) -> &mut $crate::StateData<Self::Widget> {
             &mut app.get_mut(self).state
         }

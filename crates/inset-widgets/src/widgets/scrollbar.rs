@@ -3440,9 +3440,7 @@ macro_rules! thumb_drag_gesture_recognizer_leaf {
                 app: &mut App,
                 _event: &PointerDownEvent,
             ) {
-                inset_gestures::OneSequenceGestureRecognizer::handle_non_allowed_pointer(
-                    self, app,
-                );
+                inset_gestures::OneSequenceGestureRecognizer::handle_non_allowed_pointer(self, app);
             }
 
             fn is_pointer_allowed(self: Handle<Self>, app: &App, event: &PointerDownEvent) -> bool {

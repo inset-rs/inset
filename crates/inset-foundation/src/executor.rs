@@ -39,11 +39,7 @@ impl ForegroundExecutor {
     /// Queues `future` for its first poll at the next checkpoint — never inline, since the
     /// caller holds the `App` the future will borrow.
     pub(crate) fn spawn<R: 'static>(&self, future: impl Future<Output = R> + 'static) -> Task<R> {
-        let ready = Arc::clone(&self.ready);
-        let schedule = move |runnable| lock(&ready).push_back(runnable);
-        let (runnable, task) = async_task::spawn_local(future, schedule);
-        runnable.schedule();
-        Task::spawned(task)
+        spawn_on(&self.ready, future)
     }
 
     pub(crate) fn handle(&self) -> ExecutorHandle {
@@ -68,12 +64,20 @@ impl Drop for ForegroundExecutor {
     }
 }
 
-/// The polling side of a [`ForegroundExecutor`], held by the `AppCell`.
+/// The polling side of a [`ForegroundExecutor`]: the cell's checkpoint drains through one,
+/// and every `AsyncApp` carries one to queue with.
+#[derive(Clone)]
 pub(crate) struct ExecutorHandle {
     ready: ReadyQueue,
 }
 
 impl ExecutorHandle {
+    /// Queues `future` from outside the `App`: the door for a host callback that arrives while
+    /// the `App` may be borrowed, since the queue is all this touches.
+    pub(crate) fn spawn<R: 'static>(&self, future: impl Future<Output = R> + 'static) -> Task<R> {
+        spawn_on(&self.ready, future)
+    }
+
     /// Polls ready tasks until none is left, including the tasks they wake, and returns how
     /// many polls ran.
     ///
@@ -98,6 +102,14 @@ impl ExecutorHandle {
         }
         polled
     }
+}
+
+fn spawn_on<R: 'static>(ready: &ReadyQueue, future: impl Future<Output = R> + 'static) -> Task<R> {
+    let ready = Arc::clone(ready);
+    let schedule = move |runnable| lock(&ready).push_back(runnable);
+    let (runnable, task) = async_task::spawn_local(future, schedule);
+    runnable.schedule();
+    Task::spawned(task)
 }
 
 fn lock(ready: &ReadyQueue) -> MutexGuard<'_, VecDeque<Runnable>> {
