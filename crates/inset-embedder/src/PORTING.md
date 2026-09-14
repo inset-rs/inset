@@ -121,9 +121,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 
 ## scene_builder.rs → dart:ui `SceneBuilder`
 
-- Change: each `push_*` is a canvas scope on one display list and `build` closes it; there is no `oldLayer`, `EngineLayer`, `addRetained`, `addTexture`, `addPlatformView`, or the shader-mask, colour-filter and image-filter pushes, and `push_backdrop_filter` is blur-only.
-  Reason: platform — valo composites a display list and has no engine layers to retain between frames.
-  Affect: every layer re-records itself every frame, so nothing is saved by a subtree that did not change.
+- Change: a push records into a display list of its own, which `pop` returns as the engine layer; there is no `oldLayer`, `addTexture`, `addPlatformView` or the shader-mask, colour-filter and image-filter pushes, and `push_backdrop_filter` is blur-only.
+  Reason: platform — valo composites display lists, and a list closes at its restore.
+  Affect: the engine layer is known at `pop`, not at the push.
 
 ## Deferred
 

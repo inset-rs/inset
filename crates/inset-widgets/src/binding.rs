@@ -474,8 +474,7 @@ pub fn run_widget(app: &mut App, widget: WidgetRef) {
 
 fn run_widget_internal(app: &mut App, binding: Handle<WidgetsBinding>, widget: WidgetRef) {
     binding.schedule_attach_root_widget(app, widget);
-    // `scheduleWarmUpFrame` waits; a normal frame is scheduled instead.
-    SchedulerBinding::schedule_frame(app);
+    SchedulerBinding::schedule_warm_up_frame(app);
 }
 
 /// A wrapper widget that will be used as the root of the widget tree.
@@ -876,8 +875,8 @@ mod tests {
     }
 
     #[test]
-    fn run_app_attaches_on_the_next_timer_turn_and_draws_the_first_frame() {
-        let (cell, presented, frames) = app_with_view();
+    fn run_app_attaches_on_the_next_timer_turn_and_draws_a_warm_up_frame() {
+        let (cell, presented, _frames) = app_with_view();
         let mut app = cell.borrow_mut();
         run_app(
             &mut app,
@@ -888,7 +887,7 @@ mod tests {
         );
         let binding = WidgetsBinding::instance(&mut app);
         assert!(!binding.is_root_widget_attached(&app));
-        assert_eq!(frames.get(), 1);
+        assert_eq!(presented.get(), 0);
 
         drop(app);
         cell.elapse(Duration::ZERO);
@@ -899,9 +898,11 @@ mod tests {
             .and_then(|element| element.downcast::<RootElement>(&app))
             .expect("the root element is a RootElement");
         assert!(root.child(&app).is_some());
-
-        pump_frame(&mut app, Duration::ZERO);
-        assert_eq!(presented.get(), 1);
+        assert_eq!(
+            presented.get(),
+            1,
+            "the warm-up frame drew without a host frame"
+        );
         assert_eq!(root_child_size(&mut app), Size::new(400.0, 300.0));
     }
 
@@ -922,7 +923,7 @@ mod tests {
         drop(app);
         cell.elapse(Duration::ZERO);
         let mut app = cell.borrow_mut();
-        pump_frame(&mut app, Duration::ZERO);
+        assert_eq!(presented.get(), 1, "the warm-up frame");
         let frames_before = frames.get();
 
         size.set(Size::new(50.0, 60.0));

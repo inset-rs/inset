@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use indexmap::IndexMap;
-use inset_foundation::{App, Handle};
+use inset_foundation::{App, Handle, Listener, Timer};
 
 /// Signature for frame-related callbacks from the scheduler.
 ///
@@ -115,6 +115,10 @@ pub struct SchedulerBinding {
     persistent_callbacks: Vec<FrameCallback>,
     post_frame_callbacks: Vec<FrameCallback>,
     has_scheduled_frame: bool,
+    /// A warm-up frame is scheduled or running: the host's frames wait for it.
+    warm_up_frame: bool,
+    /// The host asked for a frame while the warm-up frame ran; it is rescheduled after.
+    reschedule_after_warm_up_frame: bool,
     // Detached from the arena so the frame handlers' `finally` guards can
     // reach them without the App.
     scheduler_phase: Rc<Cell<SchedulerPhase>>,
@@ -153,6 +157,8 @@ impl Default for SchedulerBinding {
             persistent_callbacks: Vec::new(),
             post_frame_callbacks: Vec::new(),
             has_scheduled_frame: false,
+            warm_up_frame: false,
+            reschedule_after_warm_up_frame: false,
             scheduler_phase: Rc::new(Cell::new(SchedulerPhase::Idle)),
             frames_enabled: true,
             time_dilation: 1.0,
@@ -326,6 +332,111 @@ impl SchedulerBinding {
         }
         app.platform().request_frame();
         app.get_mut(this).has_scheduled_frame = true;
+    }
+
+    /// Schedule a frame to run as soon as possible, rather than waiting for the
+    /// host to request a frame in response to a system "Vsync" signal.
+    ///
+    /// This is used during application startup so that the first frame (which
+    /// is likely to be quite expensive, being the first time the app has been
+    /// rendered) can start a few milliseconds earlier.
+    ///
+    /// If a frame has already been scheduled with
+    /// [`schedule_frame`](SchedulerBinding::schedule_frame) or
+    /// [`schedule_forced_frame`](SchedulerBinding::schedule_forced_frame), this
+    /// call may delay that frame.
+    ///
+    /// If any scheduled frame has already begun or if another
+    /// [`schedule_warm_up_frame`](SchedulerBinding::schedule_warm_up_frame) was
+    /// already called, this call will be ignored.
+    ///
+    /// Prefer [`schedule_frame`](SchedulerBinding::schedule_frame) to update the
+    /// display in normal operation.
+    ///
+    /// The frame runs on two zero-duration timers, "begin" and "draw", with the
+    /// microtasks drained between them; the host runs the timers it owes before
+    /// it takes new events, so nothing reaches the framework in between. Dart
+    /// locks events for the same reason.
+    pub fn schedule_warm_up_frame(app: &mut App) {
+        let this = SchedulerBinding::instance(app);
+        if app.get(this).warm_up_frame
+            || app.get(this).scheduler_phase.get() != SchedulerPhase::Idle
+        {
+            return;
+        }
+        app.get_mut(this).warm_up_frame = true;
+        let had_scheduled_frame = app.get(this).has_scheduled_frame;
+        Timer::new(
+            app,
+            Duration::ZERO,
+            Listener::new(|app| SchedulerBinding::handle_begin_frame(app, None)),
+        );
+        Timer::new(
+            app,
+            Duration::ZERO,
+            Listener::new(move |app| {
+                SchedulerBinding::handle_draw_frame(app);
+                // `reset_epoch` after this frame so that, in the hot reload case,
+                // the very next frame pretends to have occurred immediately after
+                // this warm-up frame. The warm-up frame's timestamp will typically
+                // be far in the past (the time of the last real frame), so without
+                // the reset there would be a sudden jump from the old time in the
+                // warm-up frame to the new time in the "real" frame: implicit
+                // animations would be triggered at the old time and then skip
+                // every frame and finish in the new time.
+                SchedulerBinding::reset_epoch(app);
+                let this = SchedulerBinding::instance(app);
+                app.get_mut(this).warm_up_frame = false;
+                if had_scheduled_frame {
+                    SchedulerBinding::schedule_frame(app);
+                }
+            }),
+        );
+    }
+
+    /// Dart's `_handleBeginFrame`, what `PlatformDispatcher.onBeginFrame` is
+    /// set to: the host's signal that a frame begins. A warm-up frame in
+    /// progress takes the frame's place, and the frame is scheduled again
+    /// once it is done.
+    pub fn on_begin_frame(app: &mut App, raw_time_stamp: Option<Duration>) {
+        let this = SchedulerBinding::instance(app);
+        if app.get(this).warm_up_frame {
+            // "begin frame" and "draw frame" must strictly alternate. Therefore
+            // reschedule_after_warm_up_frame cannot possibly be true here as it
+            // is reset by on_draw_frame.
+            debug_assert!(!app.get(this).reschedule_after_warm_up_frame);
+            app.get_mut(this).reschedule_after_warm_up_frame = true;
+            return;
+        }
+        SchedulerBinding::handle_begin_frame(app, raw_time_stamp);
+    }
+
+    /// Dart's `_handleDrawFrame`, what `PlatformDispatcher.onDrawFrame` is set
+    /// to: the host's signal to draw the frame, after the microtasks that
+    /// followed [`on_begin_frame`](SchedulerBinding::on_begin_frame).
+    pub fn on_draw_frame(app: &mut App) {
+        let this = SchedulerBinding::instance(app);
+        if app.get(this).reschedule_after_warm_up_frame {
+            app.get_mut(this).reschedule_after_warm_up_frame = false;
+            // Reschedule in a post-frame callback to allow the draw-frame phase
+            // of the warm-up frame to finish.
+            SchedulerBinding::add_post_frame_callback(
+                app,
+                FrameCallback::new(|app, _time_stamp| {
+                    // Force a host frame. `has_scheduled_frame` is reset here
+                    // because the original host frame was cancelled, and
+                    // therefore `handle_begin_frame`, which is responsible for
+                    // resetting it, did not run. So if a frame callback set it
+                    // in the "so far" part of the frame, the flag would be wrong
+                    // and any later frame request would be dropped.
+                    let this = SchedulerBinding::instance(app);
+                    app.get_mut(this).has_scheduled_frame = false;
+                    SchedulerBinding::schedule_frame(app);
+                }),
+            );
+            return;
+        }
+        SchedulerBinding::handle_draw_frame(app);
     }
 
     /// Schedules a new frame even when frames would normally not be scheduled

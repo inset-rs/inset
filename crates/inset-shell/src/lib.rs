@@ -96,8 +96,8 @@ impl EmbedderClient for Shell {
         self.origin = Some(self.platform.now() - frame.elapsed);
         self.advance_clock(frame.elapsed);
         // The engine runs `_beginFrame` and `_drawFrame` as two native tasks: two turns.
-        self.turn(|app| SchedulerBinding::handle_begin_frame(app, Some(frame.elapsed)));
-        self.turn(SchedulerBinding::handle_draw_frame);
+        self.turn(|app| SchedulerBinding::on_begin_frame(app, Some(frame.elapsed)));
+        self.turn(SchedulerBinding::on_draw_frame);
     }
 
     fn view_added(&mut self, _id: ViewId) {}

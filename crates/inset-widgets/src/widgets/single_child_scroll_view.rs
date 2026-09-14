@@ -1179,13 +1179,12 @@ mod tests {
 
     /// The valo ops the viewport's own layer records.
     fn scene_ops(app: &mut App, viewport: RenderHandle<RenderSingleChildViewport>) -> Vec<Op> {
-        viewport
+        let scene = viewport
             .as_object()
             .debug_layer(app)
             .expect("painted")
-            .build_scene(app, SceneBuilder::new())
-            .ops()
-            .to_vec()
+            .build_scene(app, SceneBuilder::new());
+        inset_embedder::flattened_ops(&scene)
     }
 
     #[test]
@@ -1346,20 +1345,29 @@ mod tests {
         );
     }
 
+    /// Content that paints, so a clip around it reaches the scene: valo drops a scope that
+    /// draws nothing.
+    fn painted(width: f64, height: f64) -> SizedBox {
+        SizedBox::new()
+            .width(width)
+            .height(height)
+            .child(crate::widgets::basic::ColoredBox::new(
+                inset_embedder::Color::new(0xFF00FF00),
+            ))
+    }
+
     #[test]
     fn overflowing_content_is_clipped_unless_the_clip_behavior_says_otherwise() {
         let cell = binding_cell();
         let viewport = mount(
             &cell,
-            SingleChildScrollView::new()
-                .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
+            SingleChildScrollView::new().child(painted(CONTENT_WIDTH, CONTENT_HEIGHT)),
         );
         let mut app = cell.borrow_mut();
+        let ops = scene_ops(&mut app, viewport);
         assert!(
-            scene_ops(&mut app, viewport)
-                .iter()
-                .any(|op| matches!(op, Op::ClipPath { .. })),
-            "content taller than the viewport is clipped"
+            ops.iter().any(|op| matches!(op, Op::ClipPath { .. })),
+            "content taller than the viewport is clipped: {ops:?}"
         );
 
         let cell = binding_cell();
@@ -1367,7 +1375,7 @@ mod tests {
             &cell,
             SingleChildScrollView::new()
                 .clip_behavior(Clip::None)
-                .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
+                .child(painted(CONTENT_WIDTH, CONTENT_HEIGHT)),
         );
         let mut app = cell.borrow_mut();
         assert!(
@@ -1380,8 +1388,7 @@ mod tests {
         let cell = binding_cell();
         let viewport = mount(
             &cell,
-            SingleChildScrollView::new()
-                .child(SizedBox::new().width(CONTENT_WIDTH).height(VIEW_HEIGHT)),
+            SingleChildScrollView::new().child(painted(CONTENT_WIDTH, VIEW_HEIGHT)),
         );
         let mut app = cell.borrow_mut();
         assert!(

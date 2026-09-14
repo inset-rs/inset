@@ -916,12 +916,13 @@ mod tests {
 
         let layer = tree.parent.as_object().layer(&app).expect("painted");
         let scene = layer.build_scene(&mut app, SceneBuilder::new());
-        let ops = scene.ops().to_vec();
+        let ops = inset_embedder::flattened_ops(&scene);
         let pictures = ops
             .iter()
             .filter(|op| matches!(op, Op::DrawDisplayList { .. }))
             .count();
-        assert_eq!(pictures, 1, "{ops:?}");
+        // The parent's and the child's layer scopes, and the child's picture.
+        assert_eq!(pictures, 3, "{ops:?}");
         assert!(
             ops.iter().any(|op| matches!(op, Op::SaveLayer { .. })),
             "the child's OpacityLayer: {ops:?}"

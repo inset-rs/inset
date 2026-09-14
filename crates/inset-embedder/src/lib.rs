@@ -55,7 +55,7 @@ pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
 };
 pub use restoration::{RestorationData, RestorationMap, RestorationUpdate};
-pub use scene_builder::{Scene, SceneBuilder};
+pub use scene_builder::{EngineLayer, Scene, SceneBuilder};
 pub use system_context_menu::SystemContextMenuItem;
 pub use text::*;
 pub use text_editing::*;

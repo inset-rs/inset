@@ -70,10 +70,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the route, memory-pressure and back-gesture events have no host surface yet.
   Affect: an observer hears metrics and locale changes; a lifecycle change reaches it only when something calls the method directly.
 
-- Change: `run_app` schedules the root attach on a zero-duration timer and then a normal frame; there is no warm-up frame.
-  Reason: platform — `scheduleWarmUpFrame` waits in `inset-scheduler`.
-  Affect: nothing is built until the host runs that timer, and the first frame is an ordinary frame.
-
 ## widgets/banner.rs → banner.dart
 
 - Change: `BannerPainter` answers no `repaint` listenable, where Dart repaints on `PaintingBinding.systemFonts`.

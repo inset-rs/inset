@@ -8580,11 +8580,11 @@ mod tests {
 
     /// The scene of a repaint-boundary root after a frame, as display-list ops.
     fn scene_ops(app: &mut App, root: AnyRenderObject) -> Vec<Op> {
-        root.debug_layer(app)
+        let scene = root
+            .debug_layer(app)
             .expect("painted")
-            .build_scene(app, SceneBuilder::new())
-            .ops()
-            .to_vec()
+            .build_scene(app, SceneBuilder::new());
+        inset_embedder::flattened_ops(&scene)
     }
 
     #[test]
@@ -8617,7 +8617,7 @@ mod tests {
             .expect("a backdrop layer");
         let draw = ops
             .iter()
-            .position(|op| matches!(op, Op::DrawRect { .. } | Op::DrawDisplayList { .. }))
+            .position(|op| matches!(op, Op::DrawRect { .. }))
             .expect("the child's paint");
         assert!(blur < draw, "the blur precedes the child: {ops:?}");
         if let Op::SaveLayer {

@@ -1,8 +1,10 @@
 //! Flutter counterpart: dart:ui `SceneBuilder` / `Scene`.
 //!
 //! The engine's builder composites retained `EngineLayer`s; valo composites a display list, so
-//! every push is a canvas scope on one recording and `build` closes it. Layers push here every
-//! frame; nothing is retained between frames (see the rendering crate's `PORTING.md`).
+//! every push opens a nested recording that `pop` closes into a list of its own: that list is
+//! the engine layer, embedded in the enclosing recording and handed back for the layer to keep,
+//! and `add_retained` embeds it again while the subtree has not changed (see the rendering
+//! crate's `PORTING.md`).
 
 use std::fmt;
 use std::sync::Arc;
@@ -15,24 +17,31 @@ use crate::painting::{
 /// Flutter `Scene` — what [`SceneBuilder::build`] produces and [`crate::View::present`] takes.
 pub type Scene = Picture;
 
+/// Flutter `EngineLayer` — the display list a layer's subtree recorded when it was last added to
+/// a scene, which [`SceneBuilder::add_retained`] embeds again while nothing in it changed. The
+/// engine keeps a node of its layer tree; valo keeps a nested list.
+pub type EngineLayer = Arc<Picture>;
+
 /// Builds a [`Scene`] containing the given visuals.
 ///
 /// A [`Scene`] can then be rendered using [`crate::View::present`].
 ///
 /// To draw graphical operations onto a [`Scene`], first create a [`Canvas`], record into it, and
 /// add the resulting [`Picture`] with [`add_picture`](Self::add_picture). Each `push_*` opens a
-/// compositing scope that [`pop`](Self::pop) closes; unbalanced scopes are a bug the builder
-/// asserts on.
+/// compositing scope that [`pop`](Self::pop) closes into an [`EngineLayer`]; unbalanced scopes
+/// are a bug the builder asserts on.
 pub struct SceneBuilder {
+    /// The recording of the innermost open scope, or of the scene itself outside any.
     canvas: Canvas,
-    /// Open `push_*` scopes; every `pop` closes one. dart:ui asserts the same balance.
-    open_scopes: usize,
+    /// The recordings of the scopes enclosing the open one, outermost first; every `push_*`
+    /// adds one and every `pop` takes one back. dart:ui asserts the same balance.
+    enclosing: Vec<Canvas>,
 }
 
 impl fmt::Debug for SceneBuilder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SceneBuilder")
-            .field("open_scopes", &self.open_scopes)
+            .field("open_scopes", &self.enclosing.len())
             .finish_non_exhaustive()
     }
 }
@@ -48,7 +57,7 @@ impl SceneBuilder {
     pub fn new() -> SceneBuilder {
         SceneBuilder {
             canvas: Canvas::new(),
-            open_scopes: 0,
+            enclosing: Vec::new(),
         }
     }
 
@@ -154,13 +163,32 @@ impl SceneBuilder {
 
     /// Ends the effect of the most recently pushed operation.
     ///
+    /// The scope's recording becomes the [`EngineLayer`] returned, embedded in the enclosing
+    /// recording: the layer that pushed keeps it and hands it to
+    /// [`add_retained`](Self::add_retained) while its subtree stays unchanged. dart:ui returns
+    /// the engine layer from the push; a display list is only closed at its restore.
+    ///
     /// # Panics
     ///
-    /// In debug builds, if nothing is pushed.
-    pub fn pop(&mut self) {
-        debug_assert!(self.open_scopes > 0, "SceneBuilder::pop without a push");
-        self.open_scopes -= 1;
+    /// If nothing is pushed.
+    pub fn pop(&mut self) -> EngineLayer {
+        let enclosing = self
+            .enclosing
+            .pop()
+            .expect("SceneBuilder::pop without a push");
         self.canvas.restore();
+        let scope = std::mem::replace(&mut self.canvas, enclosing);
+        let layer = Arc::new(scope.build());
+        self.canvas.draw_display_list(&layer);
+        layer
+    }
+
+    /// Adds a retained [`EngineLayer`] subtree from a previous frame.
+    ///
+    /// All the engine layers that are already in the subtree are kept as-is: the subtree is
+    /// embedded exactly as it was recorded, under the scopes open now.
+    pub fn add_retained(&mut self, retained_layer: &EngineLayer) {
+        self.canvas.draw_display_list(retained_layer);
     }
 
     /// Adds a [`Picture`] to the scene.
@@ -188,13 +216,19 @@ impl SceneBuilder {
     ///
     /// In debug builds, if a pushed operation was not popped.
     pub fn build(self) -> Scene {
-        debug_assert_eq!(self.open_scopes, 0, "SceneBuilder::build with an open push");
+        debug_assert!(
+            self.enclosing.is_empty(),
+            "SceneBuilder::build with an open push"
+        );
         self.canvas.build()
     }
 
+    /// Opens a scope: a recording of its own, so that `pop` can hand the scope back as one
+    /// list, with `push` recording the scope's own effect at its start.
     fn open(&mut self, push: impl FnOnce(&mut Canvas)) {
+        let enclosing = std::mem::replace(&mut self.canvas, Canvas::new());
+        self.enclosing.push(enclosing);
         push(&mut self.canvas);
-        self.open_scopes += 1;
     }
 }
 
@@ -233,6 +267,30 @@ mod tests {
         builder.pop();
         builder.pop();
         let _scene = builder.build();
+    }
+
+    #[test]
+    fn a_popped_scope_is_the_engine_layer_embedded_in_its_parent() {
+        let mut canvas = Canvas::new();
+        canvas.draw_rect(Rect::from_ltwh(0.0, 0.0, 10.0, 10.0), &Paint::default());
+        let picture = Arc::new(canvas.build());
+        let mut builder = SceneBuilder::new();
+        builder.push_offset(1.0, 2.0);
+        builder.add_picture(Offset::ZERO, &picture, false, false);
+        let layer = builder.pop();
+        builder.add_retained(&layer);
+        let scene = builder.build();
+        let embedded = scene
+            .ops()
+            .iter()
+            .filter(|op| matches!(op, valo::Op::DrawDisplayList { list, .. } if Arc::ptr_eq(list, &layer)))
+            .count();
+        assert_eq!(
+            embedded,
+            2,
+            "once from the pop, once retained: {:?}",
+            scene.ops()
+        );
     }
 
     #[test]

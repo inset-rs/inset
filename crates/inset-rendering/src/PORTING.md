@@ -51,9 +51,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## painting_context.rs → object.dart (PaintingContext), layer.rs → layer.dart
 
-- Change: there are no engine layers: `addToScene` runs for every layer every frame, and the retained-layer members (`engineLayer`, `markNeedsAddToScene`, `addRetained` and the rest) do not exist.
-  Reason: platform — the host paints one display list per frame and has nothing to retain between frames.
-  Affect: a layer property setter needs no "mark", and no subtree is ever skipped at composite time.
+- Change: a layer's engine layer is a valo display list, the one its subtree recorded when it was last added to a scene.
+  Reason: platform — valo has no engine layer objects; a nested display list is what it retains.
+  Affect: a subtree that did not change is embedded again rather than re-recorded, as with Flutter's `addRetained`.
 
 - Change: a `LayerHandle` dropped without being cleared keeps its layer.
   Reason: language — the handle lives inside an arena object, so its setter takes the `App` (`LayerHandle::set_layer`) and its drop has none.

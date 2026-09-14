@@ -1215,10 +1215,10 @@ mod tests {
     }
 
     /// Attaches `root` as the whole tree and runs the first frame.
+    /// `run_widget` and the timer turn that attaches the root and draws the warm-up frame.
     fn mount_root(cell: &inset_foundation::AppCell, root: crate::WidgetRef) {
         crate::binding::run_widget(&mut cell.borrow_mut(), root);
         cell.elapse(std::time::Duration::ZERO);
-        binding_pump(&mut cell.borrow_mut(), std::time::Duration::ZERO);
     }
 
     #[test]

@@ -20,8 +20,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use inset_embedder::{
-    BlendMode, Clip, FillRule, ImageFilter, Matrix4, Offset, Picture, RRect, Rect, Scene,
-    SceneBuilder, Size,
+    BlendMode, Clip, EngineLayer, FillRule, ImageFilter, Matrix4, Offset, Picture, RRect, Rect,
+    Scene, SceneBuilder, Size,
 };
 use inset_foundation::{App, Handle, HandleId, RetainedHandle};
 use inset_scheduler::{FrameCallback, SchedulerBinding};
@@ -171,6 +171,13 @@ pub struct LayerData {
     depth: i32,
     next_sibling: Option<AnyLayer>,
     previous_sibling: Option<AnyLayer>,
+    /// Whether `add_to_scene` must run for this layer: it changed since it was last added, or
+    /// never was. `update_subtree_needs_add_to_scene` folds the descendants' in before a scene
+    /// is built.
+    needs_add_to_scene: bool,
+    /// The list this layer's subtree recorded when it was last added, for
+    /// [`SceneBuilder::add_retained`] while nothing in the subtree changed.
+    engine_layer: Option<EngineLayer>,
 }
 
 impl LayerData {
@@ -188,6 +195,8 @@ impl LayerData {
             depth: 0,
             next_sibling: None,
             previous_sibling: None,
+            needs_add_to_scene: true,
+            engine_layer: None,
         }
     }
 }
@@ -285,6 +294,12 @@ pub trait Layer: Sized + 'static {
     fn describe_clip_bounds(self: Handle<Self>, app: &App) -> Option<Rect> {
         let _ = (self, app);
         None
+    }
+
+    /// Subclasses may override this to true to disable retained rendering.
+    fn always_needs_add_to_scene(self: Handle<Self>, app: &App) -> bool {
+        let _ = (self, app);
+        false
     }
 
     /// Clears any retained resources that this layer holds.
@@ -455,6 +470,7 @@ pub struct LayerVTable {
     layer_data_mut: fn(&mut App, HandleId) -> &mut LayerData,
     supports_rasterization: fn(&App, HandleId) -> bool,
     describe_clip_bounds: fn(&App, HandleId) -> Option<Rect>,
+    always_needs_add_to_scene: fn(&App, HandleId) -> bool,
     dispose: fn(&mut App, HandleId),
     attach: fn(&mut App, HandleId, HandleId),
     detach: fn(&mut App, HandleId),
@@ -472,6 +488,7 @@ impl LayerVTable {
             layer_data_mut: |app, id| T::layer_data_mut(resolve(id), app),
             supports_rasterization: |app, id| T::supports_rasterization(resolve(id), app),
             describe_clip_bounds: |app, id| T::describe_clip_bounds(resolve(id), app),
+            always_needs_add_to_scene: |app, id| T::always_needs_add_to_scene(resolve(id), app),
             dispose: |app, id| T::dispose(resolve(id), app),
             attach: |app, id, owner| T::attach(resolve(id), app, owner),
             detach: |app, id| T::detach(resolve(id), app),
@@ -804,6 +821,110 @@ impl AnyLayer {
     pub fn add_to_scene(self, app: &mut App, builder: &mut SceneBuilder) {
         (self.vtable.add_to_scene)(app, self.id, builder);
     }
+
+    /// Whether `add_to_scene` must run for this layer when a scene is next built: it changed
+    /// since it was last added, or never was, or a descendant did as far as
+    /// [`update_subtree_needs_add_to_scene`](Self::update_subtree_needs_add_to_scene) has
+    /// found out.
+    pub fn needs_add_to_scene(self, app: &App) -> bool {
+        self.data(app).needs_add_to_scene
+    }
+
+    /// Mark that this layer has changed and `add_to_scene` needs to be called.
+    pub fn mark_needs_add_to_scene(self, app: &mut App) {
+        debug_assert!(!self.data(app).debug_mutations_locked);
+        debug_assert!(
+            !self.always_needs_add_to_scene(app),
+            "a layer with always_needs_add_to_scene set called mark_needs_add_to_scene"
+        );
+        debug_assert!(!self.data(app).debug_disposed);
+        // Already marked. Short-circuit.
+        if self.data(app).needs_add_to_scene {
+            return;
+        }
+        self.data_mut(app).needs_add_to_scene = true;
+    }
+
+    /// See [`Layer::always_needs_add_to_scene`].
+    pub fn always_needs_add_to_scene(self, app: &App) -> bool {
+        (self.vtable.always_needs_add_to_scene)(app, self.id)
+    }
+
+    /// The engine layer used to render this layer: the list its subtree recorded when it was
+    /// last added to a scene, which [`SceneBuilder::add_retained`] embeds again while nothing
+    /// in the subtree changed.
+    pub fn engine_layer(self, app: &App) -> Option<EngineLayer> {
+        self.data(app).engine_layer.clone()
+    }
+
+    /// Sets the engine layer used to render this layer.
+    ///
+    /// Typically this is set to the value [`SceneBuilder::pop`] returned in `add_to_scene`.
+    pub fn set_engine_layer(self, app: &mut App, value: Option<EngineLayer>) {
+        debug_assert!(!self.data(app).debug_mutations_locked);
+        debug_assert!(!self.data(app).debug_disposed);
+        self.data_mut(app).engine_layer = value;
+        if !self.always_needs_add_to_scene(app) {
+            // The parent must record a new list to embed this one in, and so is marked as
+            // needing `add_to_scene`. When the whole tree is rendered the parent is adding
+            // itself already and clears the flag when it is done; when an interior layer is
+            // rendered on its own (an `OffsetLayer::to_image`) the mark waits for the frame
+            // that next renders the parent.
+            if let Some(parent) = self.parent(app)
+                && !parent.as_layer().always_needs_add_to_scene(app)
+            {
+                parent.as_layer().mark_needs_add_to_scene(app);
+            }
+        }
+    }
+
+    /// Traverses the layer subtree starting from this layer and determines whether it needs
+    /// `add_to_scene`.
+    ///
+    /// A layer needs `add_to_scene` if any of the following is true:
+    ///
+    /// - [`always_needs_add_to_scene`](Self::always_needs_add_to_scene) is true.
+    /// - [`mark_needs_add_to_scene`](Self::mark_needs_add_to_scene) has been called.
+    /// - Any of its descendants need `add_to_scene`.
+    ///
+    /// Dart's `ContainerLayer` override recurses into the children; here the erased handle
+    /// knows whether it is a container.
+    pub fn update_subtree_needs_add_to_scene(self, app: &mut App) {
+        debug_assert!(!self.data(app).debug_mutations_locked);
+        let always = self.always_needs_add_to_scene(app);
+        let data = self.data_mut(app);
+        data.needs_add_to_scene = data.needs_add_to_scene || always;
+        let Some(container) = self.as_container_layer() else {
+            return;
+        };
+        let mut child = container.first_child(app);
+        while let Some(layer) = child {
+            layer.update_subtree_needs_add_to_scene(app);
+            if layer.data(app).needs_add_to_scene {
+                self.data_mut(app).needs_add_to_scene = true;
+            }
+            child = layer.next_sibling(app);
+        }
+    }
+
+    /// Dart's `_addToSceneWithRetainedRendering`: the retained engine layer where the subtree
+    /// has not changed, `add_to_scene` otherwise.
+    pub fn add_to_scene_with_retained_rendering(self, app: &mut App, builder: &mut SceneBuilder) {
+        debug_assert!(!self.data(app).debug_mutations_locked);
+        // There can't be a loop by adding a retained layer subtree whose needs_add_to_scene is
+        // false: a retained layer appended to one of its own descendants changes that
+        // descendant's children, which sets the flag.
+        if !self.data(app).needs_add_to_scene
+            && let Some(engine_layer) = self.engine_layer(app)
+        {
+            builder.add_retained(&engine_layer);
+            return;
+        }
+        self.add_to_scene(app, builder);
+        // Clearing the flag after `add_to_scene`, not before: it calls the children's, which
+        // may mark this layer.
+        self.data_mut(app).needs_add_to_scene = false;
+    }
 }
 
 /// A layer handle of any concreteness — [`AnyLayer`], [`AnyContainerLayer`], [`AnyOffsetLayer`]
@@ -959,6 +1080,7 @@ impl PictureLayer {
     /// See [`picture`](Self::picture). Dart's `_picture?.dispose()` is the drop of the old one.
     pub fn set_picture(self: Handle<Self>, app: &mut App, picture: Option<Arc<Picture>>) {
         debug_assert!(!app.get(self).layer.debug_disposed);
+        self.as_layer().mark_needs_add_to_scene(app);
         app.get_mut(self).picture = picture;
     }
 
@@ -972,7 +1094,10 @@ impl PictureLayer {
 
     /// See [`is_complex_hint`](Self::is_complex_hint).
     pub fn set_is_complex_hint(self: Handle<Self>, app: &mut App, value: bool) {
-        app.get_mut(self).is_complex_hint = value;
+        if value != app.get(self).is_complex_hint {
+            app.get_mut(self).is_complex_hint = value;
+            self.as_layer().mark_needs_add_to_scene(app);
+        }
     }
 
     /// Hints that the painting in this layer is likely to change next frame.
@@ -986,7 +1111,10 @@ impl PictureLayer {
 
     /// See [`will_change_hint`](Self::will_change_hint).
     pub fn set_will_change_hint(self: Handle<Self>, app: &mut App, value: bool) {
-        app.get_mut(self).will_change_hint = value;
+        if value != app.get(self).will_change_hint {
+            app.get_mut(self).will_change_hint = value;
+            self.as_layer().mark_needs_add_to_scene(app);
+        }
     }
 }
 
@@ -1341,10 +1469,14 @@ impl AnyContainerLayer {
     // to render a subtree (e.g. `OffsetLayer.toImage`).
     pub fn build_scene(self, app: &mut App, mut builder: SceneBuilder) -> Scene {
         let this = self.as_layer();
+        this.update_subtree_needs_add_to_scene(app);
         this.add_to_scene(app, &mut builder);
         if this.subtree_has_composition_callbacks(app) {
             this.fire_composition_callbacks(app, true);
         }
+        // Clearing the flag after `add_to_scene`, not before: it calls the children's, which
+        // may mark this layer.
+        this.data_mut(app).needs_add_to_scene = false;
         builder.build()
     }
 
@@ -1423,6 +1555,9 @@ impl AnyContainerLayer {
     fn adopt_child(self, app: &mut App, child: AnyLayer) {
         let this = self.as_layer();
         debug_assert!(!this.data(app).debug_mutations_locked);
+        if !this.always_needs_add_to_scene(app) {
+            this.mark_needs_add_to_scene(app);
+        }
         let callback_count = child.data(app).composition_callback_count;
         if callback_count != 0 {
             this.update_subtree_composition_observer_count(app, callback_count);
@@ -1507,6 +1642,9 @@ impl AnyContainerLayer {
     fn drop_child(self, app: &mut App, child: AnyLayer) {
         let this = self.as_layer();
         debug_assert!(!this.data(app).debug_mutations_locked);
+        if !this.always_needs_add_to_scene(app) {
+            this.mark_needs_add_to_scene(app);
+        }
         let callback_count = child.data(app).composition_callback_count;
         if callback_count != 0 {
             this.update_subtree_composition_observer_count(app, -callback_count);
@@ -1549,7 +1687,7 @@ impl AnyContainerLayer {
     pub fn add_children_to_scene(self, app: &mut App, builder: &mut SceneBuilder) {
         let mut child = self.first_child(app);
         while let Some(layer) = child {
-            layer.add_to_scene(app, builder);
+            layer.add_to_scene_with_retained_rendering(app, builder);
             child = layer.next_sibling(app);
         }
     }
@@ -1688,7 +1826,8 @@ pub trait OffsetLayerMixin: ContainerLayer {
         builder.push_offset(offset.dx(), offset.dy());
         self.as_container_layer()
             .add_children_to_scene(app, builder);
-        builder.pop();
+        let engine_layer = builder.pop();
+        self.as_layer().set_engine_layer(app, Some(engine_layer));
     }
 }
 
@@ -1773,7 +1912,13 @@ impl AnyOffsetLayer {
 
     /// See [`OffsetLayerMixin::set_offset`].
     pub fn set_offset(self, app: &mut App, value: Offset) {
+        if value == self.offset(app) {
+            return;
+        }
         (self.vtable.offset_data_mut)(app, self.id).offset = value;
+        if !self.as_layer().always_needs_add_to_scene(app) {
+            self.as_layer().mark_needs_add_to_scene(app);
+        }
     }
 }
 
@@ -1922,6 +2067,7 @@ impl ClipRectLayer {
     pub fn set_clip_rect(self: Handle<Self>, app: &mut App, value: Option<Rect>) {
         if value != app.get(self).clip_rect {
             app.get_mut(self).clip_rect = value;
+            self.as_layer().mark_needs_add_to_scene(app);
         }
     }
 
@@ -1939,6 +2085,7 @@ impl ClipRectLayer {
         debug_assert!(value != Clip::None);
         if value != app.get(self).clip_behavior {
             app.get_mut(self).clip_behavior = value;
+            self.as_layer().mark_needs_add_to_scene(app);
         }
     }
 }
@@ -2002,9 +2149,8 @@ impl Layer for ClipRectLayer {
         }
         self.as_container_layer()
             .add_children_to_scene(app, builder);
-        if enabled {
-            builder.pop();
-        }
+        let engine_layer = enabled.then(|| builder.pop());
+        self.as_layer().set_engine_layer(app, engine_layer);
     }
 
     fn fire_composition_callbacks(self: Handle<Self>, app: &mut App, include_children: bool) {
@@ -2055,6 +2201,7 @@ impl ClipRRectLayer {
     pub fn set_clip_rrect(self: Handle<Self>, app: &mut App, value: Option<RRect>) {
         if value != app.get(self).clip_rrect {
             app.get_mut(self).clip_rrect = value;
+            self.as_layer().mark_needs_add_to_scene(app);
         }
     }
 
@@ -2072,6 +2219,7 @@ impl ClipRRectLayer {
         debug_assert!(value != Clip::None);
         if value != app.get(self).clip_behavior {
             app.get_mut(self).clip_behavior = value;
+            self.as_layer().mark_needs_add_to_scene(app);
         }
     }
 }
@@ -2135,9 +2283,8 @@ impl Layer for ClipRRectLayer {
         }
         self.as_container_layer()
             .add_children_to_scene(app, builder);
-        if enabled {
-            builder.pop();
-        }
+        let engine_layer = enabled.then(|| builder.pop());
+        self.as_layer().set_engine_layer(app, engine_layer);
     }
 
     fn fire_composition_callbacks(self: Handle<Self>, app: &mut App, include_children: bool) {
@@ -2191,6 +2338,7 @@ impl ClipPathLayer {
         value: Option<Arc<inset_embedder::Path>>,
     ) {
         app.get_mut(self).clip_path = value;
+        self.as_layer().mark_needs_add_to_scene(app);
     }
 
     /// Controls how to clip.
@@ -2207,6 +2355,7 @@ impl ClipPathLayer {
         debug_assert!(value != Clip::None);
         if value != app.get(self).clip_behavior {
             app.get_mut(self).clip_behavior = value;
+            self.as_layer().mark_needs_add_to_scene(app);
         }
     }
 }
@@ -2280,9 +2429,8 @@ impl Layer for ClipPathLayer {
         }
         self.as_container_layer()
             .add_children_to_scene(app, builder);
-        if enabled {
-            builder.pop();
-        }
+        let engine_layer = enabled.then(|| builder.pop());
+        self.as_layer().set_engine_layer(app, engine_layer);
     }
 
     fn fire_composition_callbacks(self: Handle<Self>, app: &mut App, include_children: bool) {
@@ -2381,6 +2529,7 @@ impl TransformLayer {
         }
         app.get_mut(self).transform = Some(value);
         app.get(self).inverse_dirty.set(true);
+        self.as_layer().mark_needs_add_to_scene(app);
     }
 
     fn transform_offset(self: Handle<Self>, app: &App, local_position: Offset) -> Option<Offset> {
@@ -2451,7 +2600,8 @@ impl Layer for TransformLayer {
         builder.push_transform(&last_effective);
         self.as_container_layer()
             .add_children_to_scene(app, builder);
-        builder.pop();
+        let engine_layer = builder.pop();
+        self.as_layer().set_engine_layer(app, Some(engine_layer));
     }
 
     fn fire_composition_callbacks(self: Handle<Self>, app: &mut App, include_children: bool) {
@@ -2531,6 +2681,7 @@ impl OpacityLayer {
     pub fn set_alpha(self: Handle<Self>, app: &mut App, value: i32) {
         if app.get(self).alpha != Some(value) {
             app.get_mut(self).alpha = Some(value);
+            self.as_layer().mark_needs_add_to_scene(app);
         }
     }
 }
@@ -2574,6 +2725,8 @@ impl Layer for OpacityLayer {
         // Don't add this layer if there's no child.
         let mut enabled = self.as_container_layer().first_child(app).is_some();
         if !enabled {
+            // Ensure the engine layer is disposed.
+            self.as_layer().set_engine_layer(app, None);
             return;
         }
 
@@ -2592,7 +2745,8 @@ impl Layer for OpacityLayer {
         }
         self.as_container_layer()
             .add_children_to_scene(app, builder);
-        builder.pop();
+        let engine_layer = builder.pop();
+        self.as_layer().set_engine_layer(app, Some(engine_layer));
     }
 
     fn fire_composition_callbacks(self: Handle<Self>, app: &mut App, include_children: bool) {
@@ -2654,6 +2808,7 @@ impl BackdropFilterLayer {
     /// See [`filter`](Self::filter).
     pub fn set_filter(self: Handle<Self>, app: &mut App, value: Option<ImageFilter>) {
         app.get_mut(self).filter = value;
+        self.as_layer().mark_needs_add_to_scene(app);
     }
 
     /// The blend mode to use to apply the filtered background content onto the background
@@ -2671,6 +2826,7 @@ impl BackdropFilterLayer {
     pub fn set_blend_mode(self: Handle<Self>, app: &mut App, value: BlendMode) {
         if value != app.get(self).blend_mode {
             app.get_mut(self).blend_mode = value;
+            self.as_layer().mark_needs_add_to_scene(app);
         }
     }
 
@@ -2689,6 +2845,7 @@ impl BackdropFilterLayer {
     pub fn set_backdrop_key(self: Handle<Self>, app: &mut App, value: Option<BackdropKey>) {
         if value != app.get(self).backdrop_key {
             app.get_mut(self).backdrop_key = value;
+            self.as_layer().mark_needs_add_to_scene(app);
         }
     }
 }
@@ -2738,7 +2895,8 @@ impl Layer for BackdropFilterLayer {
         builder.push_backdrop_filter(&filter, blend_mode, backdrop_id);
         self.as_container_layer()
             .add_children_to_scene(app, builder);
-        builder.pop();
+        let engine_layer = builder.pop();
+        self.as_layer().set_engine_layer(app, Some(engine_layer));
     }
 
     fn fire_composition_callbacks(self: Handle<Self>, app: &mut App, include_children: bool) {
@@ -2924,6 +3082,9 @@ impl LeaderLayer {
             return;
         }
         app.get_mut(self).offset = value;
+        if !self.as_layer().always_needs_add_to_scene(app) {
+            self.as_layer().mark_needs_add_to_scene(app);
+        }
     }
 }
 
@@ -2981,9 +3142,8 @@ impl Layer for LeaderLayer {
         }
         self.as_container_layer()
             .add_children_to_scene(app, builder);
-        if offset != Offset::ZERO {
-            builder.pop();
-        }
+        let engine_layer = (offset != Offset::ZERO).then(|| builder.pop());
+        self.as_layer().set_engine_layer(app, engine_layer);
     }
 
     fn fire_composition_callbacks(self: Handle<Self>, app: &mut App, include_children: bool) {
@@ -3338,6 +3498,13 @@ impl FollowerLayer {
 impl Layer for FollowerLayer {
     crate::layer_accessors!(container);
 
+    /// A [`FollowerLayer`] copies changes from a [`LeaderLayer`] that could be anywhere in the
+    /// layer tree, and that leader layer could change without notifying the follower layer.
+    /// Therefore a follower layer's `add_to_scene` is always called.
+    fn always_needs_add_to_scene(self: Handle<Self>, _app: &App) -> bool {
+        true
+    }
+
     fn supports_rasterization(self: Handle<Self>, app: &App) -> bool {
         ContainerLayer::supports_rasterization(self, app)
     }
@@ -3394,6 +3561,7 @@ impl Layer for FollowerLayer {
             app.get_mut(self).last_transform = None;
             app.get_mut(self).last_offset = None;
             app.get(self).inverse_dirty.set(true);
+            self.as_layer().set_engine_layer(app, None);
             return;
         }
         self.establish_transform(app);
@@ -3407,7 +3575,8 @@ impl Layer for FollowerLayer {
             builder.push_transform(&last_transform);
             self.as_container_layer()
                 .add_children_to_scene(app, builder);
-            builder.pop();
+            let engine_layer = builder.pop();
+            self.as_layer().set_engine_layer(app, Some(engine_layer));
         } else {
             app.get_mut(self).last_offset = None;
             let unlinked_offset = self.unlinked_offset(app);
@@ -3416,7 +3585,8 @@ impl Layer for FollowerLayer {
             builder.push_transform(&matrix);
             self.as_container_layer()
                 .add_children_to_scene(app, builder);
-            builder.pop();
+            let engine_layer = builder.pop();
+            self.as_layer().set_engine_layer(app, Some(engine_layer));
         }
         app.get(self).inverse_dirty.set(true);
     }
@@ -3827,6 +3997,122 @@ mod tests {
         assert_eq!(all.entries().len(), 2);
         assert_eq!(all.entries()[0].local_position, Offset::new(5.0, 5.0));
         assert!(root.as_layer().find::<String>(&app, Offset::ZERO).is_none());
+    }
+
+    /// An opacity layer over one leaf under a root, with a frame's scene built: the shape
+    /// retained rendering acts on.
+    fn retained_tree(app: &mut App) -> (Handle<OffsetLayer>, Handle<OpacityLayer>) {
+        let root = OffsetLayer::new(app, Offset::ZERO);
+        let opacity = OpacityLayer::new(app);
+        opacity.set_alpha(app, 128);
+        let leaf = offset_layer(app);
+        opacity.as_container_layer().append(app, leaf);
+        root.as_container_layer().append(app, opacity.as_layer());
+        let _scene = root
+            .as_container_layer()
+            .build_scene(app, SceneBuilder::new());
+        (root, opacity)
+    }
+
+    #[test]
+    fn an_unchanged_subtree_is_retained_across_scenes() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let (root, opacity) = retained_tree(&mut app);
+        let recorded = opacity.as_layer().engine_layer(&app).expect("recorded");
+        assert!(!opacity.as_layer().needs_add_to_scene(&app));
+
+        let scene = root
+            .as_container_layer()
+            .build_scene(&mut app, SceneBuilder::new());
+        let retained = opacity.as_layer().engine_layer(&app).expect("recorded");
+        assert!(
+            Arc::ptr_eq(&recorded, &retained),
+            "the same list is retained"
+        );
+        let root_list = root
+            .as_layer()
+            .engine_layer(&app)
+            .expect("the root re-records");
+        assert!(
+            root_list.ops().iter().any(|op| matches!(
+                op,
+                inset_embedder::valo::Op::DrawDisplayList { list, .. } if Arc::ptr_eq(list, &retained)
+            )),
+            "embedded again: {:?}",
+            root_list.ops()
+        );
+        assert_eq!(
+            inset_embedder::flattened_ops(&scene)
+                .iter()
+                .filter(|op| matches!(op, inset_embedder::valo::Op::SaveLayer { .. }))
+                .count(),
+            1,
+            "the retained opacity layer still draws"
+        );
+    }
+
+    #[test]
+    fn a_changed_property_re_records_the_subtree() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let (root, opacity) = retained_tree(&mut app);
+        let recorded = opacity.as_layer().engine_layer(&app).expect("recorded");
+
+        opacity.set_alpha(&mut app, 200);
+        assert!(opacity.as_layer().needs_add_to_scene(&app));
+        let _scene = root
+            .as_container_layer()
+            .build_scene(&mut app, SceneBuilder::new());
+        let again = opacity.as_layer().engine_layer(&app).expect("recorded");
+        assert!(
+            !Arc::ptr_eq(&recorded, &again),
+            "a new list for the new alpha"
+        );
+        assert!(!opacity.as_layer().needs_add_to_scene(&app));
+    }
+
+    #[test]
+    fn appending_a_child_marks_the_parent_and_its_ancestors_at_build() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let (root, opacity) = retained_tree(&mut app);
+        assert!(!root.as_layer().needs_add_to_scene(&app));
+
+        let leaf = offset_layer(&mut app);
+        opacity.as_container_layer().append(&mut app, leaf);
+        assert!(opacity.as_layer().needs_add_to_scene(&app));
+        assert!(
+            !root.as_layer().needs_add_to_scene(&app),
+            "the mark does not climb until the scene is built"
+        );
+        root.as_layer().update_subtree_needs_add_to_scene(&mut app);
+        assert!(root.as_layer().needs_add_to_scene(&app));
+    }
+
+    #[test]
+    fn a_follower_layer_always_re_records() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let link = LayerLink::new(&mut app);
+        let follower = FollowerLayer::new(&mut app, link);
+        let child = offset_layer(&mut app);
+        follower.as_container_layer().append(&mut app, child);
+        for _ in 0..2 {
+            let _scene = follower
+                .as_container_layer()
+                .build_scene(&mut app, SceneBuilder::new());
+            assert!(
+                follower.as_layer().needs_add_to_scene(&app)
+                    || follower.as_layer().always_needs_add_to_scene(&app)
+            );
+        }
+        let first = follower.as_layer().engine_layer(&app).expect("recorded");
+        let _scene = follower
+            .as_container_layer()
+            .build_scene(&mut app, SceneBuilder::new());
+        let second = follower.as_layer().engine_layer(&app).expect("recorded");
+        assert!(!Arc::ptr_eq(&first, &second), "never retained");
     }
 
     fn tag(app: &mut App, n: u32) -> Handle<AnnotatedRegionLayer> {

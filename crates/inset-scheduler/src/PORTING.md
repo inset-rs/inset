@@ -25,7 +25,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 ## Deferred
 
 - `scheduleTask` and the priority task queue. Trigger: a `Timer` counterpart for `_ensureEventLoopCallback`.
-- Warm-up-frame guards in `_handleBeginFrame` / `_handleDrawFrame`. Trigger: `scheduleWarmUpFrame`.
+- `lockEvents` around the warm-up frame. Trigger: a host that takes events between two of the framework's own tasks.
 - `endOfFrame`. Trigger: `RendererBinding.performReassemble`.
 - The app lifecycle (`lifecycleState`, `handleAppLifecycleStateChanged`, the `framesEnabled` setter). Trigger: the services layer, where lifecycle messages arrive.
 - `requestPerformanceMode` and `PerformanceModeRequestHandle`. Trigger: an engine to request modes from.

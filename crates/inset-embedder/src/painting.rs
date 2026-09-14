@@ -10,6 +10,7 @@ use std::rc::Rc;
 
 use valo::DisplayList;
 use valo::DisplayListBuilder;
+use valo::Op;
 
 /// Flutter `Canvas` — valo records into a display list.
 pub type Canvas = DisplayListBuilder;
@@ -17,6 +18,24 @@ pub type Canvas = DisplayListBuilder;
 /// Flutter `Picture` — a finished display list, what [`crate::View::present`]
 /// takes (Flutter `FlutterView.render` takes a `Scene`).
 pub type Picture = DisplayList;
+
+/// The picture's operations in replay order with every embedded list's following its embedding
+/// op, for a test or a diagnostic that asks what a scene draws regardless of how its layers
+/// nested it.
+pub fn flattened_ops(picture: &Picture) -> Vec<Op> {
+    let mut ops = Vec::new();
+    flatten_into(picture, &mut ops);
+    ops
+}
+
+fn flatten_into(picture: &Picture, ops: &mut Vec<Op>) {
+    for op in picture.ops() {
+        ops.push(op.clone());
+        if let Op::DrawDisplayList { list, .. } = op {
+            flatten_into(list, ops);
+        }
+    }
+}
 
 pub use valo::{
     Backdrop, BlendMode, BlurStyle, ClipOp, FillRule, Image, MaskBlur, Paint, PaintStyle, Path,

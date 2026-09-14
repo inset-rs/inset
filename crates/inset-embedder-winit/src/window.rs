@@ -58,7 +58,9 @@ type CreateImageLoader = Box<dyn FnOnce(valo::ImageContext) -> valo_codec::Image
 ///
 /// [`image_context`]: WinitPlatform::image_context
 pub struct WinitPlatform {
-    deadline: Cell<Option<Instant>>,
+    /// When the framework asked to be woken, for its earliest timer (`Platform::wake_at`);
+    /// `None` once the wake has been delivered.
+    wake_due: Cell<Option<Instant>>,
     frame_requested: Cell<bool>,
     views: RefCell<HashMap<ViewId, ViewRef>>,
     implicit_view: Option<ViewId>,
@@ -83,7 +85,7 @@ pub struct WinitPlatform {
 impl WinitPlatform {
     fn new(proxy: EventLoopProxy<HostEvent>, implicit_view: Option<ViewId>) -> WinitPlatform {
         WinitPlatform {
-            deadline: Cell::new(None),
+            wake_due: Cell::new(None),
             frame_requested: Cell::new(false),
             views: RefCell::new(HashMap::new()),
             implicit_view,
@@ -174,7 +176,7 @@ impl Platform for WinitPlatform {
     }
 
     fn wake_at(&self, deadline: Instant) {
-        self.deadline.set(Some(deadline));
+        self.wake_due.set(Some(deadline));
         self.wake_event_loop();
     }
 
@@ -664,7 +666,6 @@ impl<C: EmbedderClient> WinitApp<C> {
         client.frame(Frame {
             elapsed: self.platform.elapsed(),
         });
-        self.pacing.drawn();
     }
 
     fn apply_cursor_request(&mut self) {
@@ -1030,11 +1031,11 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
         }
         if self
             .platform
-            .deadline
+            .wake_due
             .get()
-            .is_some_and(|deadline| deadline <= requested_resume)
+            .is_some_and(|due| due <= requested_resume)
         {
-            self.platform.deadline.set(None);
+            self.platform.wake_due.set(None);
             if let Some(client) = &mut self.client {
                 client.wake(self.platform.elapsed());
             }
@@ -1043,12 +1044,27 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        let deadline = match (self.platform.deadline.get(), self.pacing.tick_due()) {
-            (Some(timer), Some(tick)) => Some(timer.min(tick)),
-            (timer, tick) => timer.or(tick),
+        // A wake already due is delivered before the loop waits: a task the framework posted
+        // to itself, a zero-duration timer, runs ahead of whatever the system delivers next,
+        // as Dart's event queue orders them.
+        if self
+            .platform
+            .wake_due
+            .get()
+            .is_some_and(|due| due <= Instant::now())
+        {
+            self.platform.wake_due.set(None);
+            if let Some(client) = &mut self.client {
+                client.wake(self.platform.elapsed());
+            }
+            self.pace();
+        }
+        let resume_at = match (self.platform.wake_due.get(), self.pacing.tick_due()) {
+            (Some(wake), Some(tick)) => Some(wake.min(tick)),
+            (wake, tick) => wake.or(tick),
         };
-        event_loop.set_control_flow(match deadline {
-            Some(deadline) => winit::event_loop::ControlFlow::WaitUntil(deadline),
+        event_loop.set_control_flow(match resume_at {
+            Some(resume_at) => winit::event_loop::ControlFlow::WaitUntil(resume_at),
             None => winit::event_loop::ControlFlow::Wait,
         });
     }
@@ -1143,6 +1159,7 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
                     if os::FRAME_ON_RESIZE && size[0] > 0 && size[1] > 0 {
                         self.platform.frame_requested.set(false);
                         self.draw_frame();
+                        self.pacing.drawn();
                     }
                 }
             }
