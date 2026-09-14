@@ -84,7 +84,7 @@ mod tests {
             self.gesture_settings
         }
 
-        fn present(&self, _picture: &inset_embedder::Picture) {}
+        fn present(&self, _picture: std::sync::Arc<inset_embedder::Picture>) {}
     }
 
     #[test]

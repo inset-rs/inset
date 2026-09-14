@@ -1,5 +1,6 @@
-//! Desktop host: winit event loop and native windows. Frame pacing is
-//! `Window::request_redraw`. Presents through valo.
+//! Desktop host: winit event loop and native windows. Frames are paced to the display,
+//! one per refresh: from a display link on macOS, from a timer at the display's rate
+//! elsewhere. Presents through valo.
 
 // wgpu's handle registry nests auto-trait obligations past the default depth.
 #![recursion_limit = "256"]
@@ -9,6 +10,8 @@ mod images;
 mod ime;
 mod keys;
 mod os;
+mod pacing;
+mod pointer;
 mod text_input;
 mod window;
 mod windows;

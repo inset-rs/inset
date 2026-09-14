@@ -19,9 +19,13 @@ impl Gpu {
                 })
                 .await
                 .expect("request wgpu adapter");
+            // Primary buffers that the host can write to directly, where memory is
+            // unified: valo then uploads its draws without a copy.
+            let required_features = adapter.features() & wgpu::Features::MAPPABLE_PRIMARY_BUFFERS;
             let (device, queue) = adapter
                 .request_device(&wgpu::DeviceDescriptor {
                     label: Some("inset.winit"),
+                    required_features,
                     required_limits: limits_within(&adapter.limits()),
                     ..Default::default()
                 })

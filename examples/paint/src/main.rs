@@ -1,4 +1,6 @@
 //! Records a display list each frame and presents it on the implicit view.
+// Proving a shared display list `Send` walks its nesting past the default limit.
+#![recursion_limit = "256"]
 #![feature(arbitrary_self_types)]
 
 use std::f32::consts::TAU;
@@ -27,7 +29,7 @@ fn main() {
                         return;
                     };
                     let picture = record(view.metrics(), elapsed);
-                    view.present(&picture);
+                    view.present(std::sync::Arc::new(picture));
                     SchedulerBinding::schedule_frame(app);
                 }),
             );

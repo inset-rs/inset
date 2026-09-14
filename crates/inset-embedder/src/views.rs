@@ -177,9 +177,10 @@ pub trait View: 'static {
         GestureSettings::default()
     }
 
-    /// Renders and presents one picture. Physical pixels; the presenter
-    /// applies no extra scaling.
-    fn present(&self, picture: &crate::Picture);
+    /// Renders and presents one picture, shared so the host may keep it: to present it
+    /// again when the window is seen again, and to tell a picture equal to the last from
+    /// one worth drawing. Physical pixels; the presenter applies no extra scaling.
+    fn present(&self, picture: std::sync::Arc<crate::Picture>);
 
     /// Flutter `TextInput.attach` / `TextInputConnection.show`: start an IME
     /// session for this view. The default drops it.

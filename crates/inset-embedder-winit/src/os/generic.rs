@@ -40,3 +40,14 @@ pub(crate) fn animate_frame(_window: &Window, _frame: Rect, _duration: Duration)
 pub(crate) fn popup_menu(_entries: &[PopupMenuEntry]) -> Option<usize> {
     None
 }
+
+/// The system has no refresh signal to offer; the host paces frames by a timer instead.
+pub(crate) struct Vsync;
+
+impl Vsync {
+    pub(crate) fn start(_window: &Window, _on_tick: Box<dyn Fn()>) -> Option<Vsync> {
+        None
+    }
+
+    pub(crate) fn set_paused(&self, _paused: bool) {}
+}

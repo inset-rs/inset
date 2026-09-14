@@ -1961,6 +1961,7 @@ dependencies = [
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
+ "objc2-quartz-core 0.3.2",
  "pollster",
  "valo",
  "valo-codec",
@@ -2938,9 +2939,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96c1358452b371bf9f104e21ec536d37a650eb10f7ee379fff67d2e08d537f1f"
 dependencies = [
  "bitflags 2.13.2",
+ "block2 0.6.2",
+ "libc",
  "objc2 0.6.4",
  "objc2-core-foundation",
  "objc2-core-graphics",
+ "objc2-core-video",
  "objc2-foundation 0.3.2",
  "objc2-metal 0.3.2",
 ]
@@ -4640,9 +4644,9 @@ dependencies = [
 
 [[package]]
 name = "valo"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6a318c109f2e3fdba70fc9f9f4a81702e35c5392d2e69fdee565842f3b0b165"
+checksum = "41bfb1089d5c300675a25bc610081503a1637955dff7cd6a1c8cc08445bbccaf"
 dependencies = [
  "objc2 0.6.4",
  "objc2-metal 0.3.2",
@@ -4656,9 +4660,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fc0e7b9cec4fadfd04b8fcf8aebb8ff7ce0a1e6a716a644290cb51d8c70c688"
+checksum = "2627461d4340d0ccddc4a02084b27a038775a2846ebb03dd5cc6e5a7e3e93c70"
 dependencies = [
  "valo",
  "wgpu",
@@ -4666,9 +4670,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec-apple"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7d6bb46d20d31df081210ea4c2b80b75cd27e508e7b2c46c6157e6a7c2a3cf3"
+checksum = "7f9907a55b6c093c1a94dd6d4f5489b77e4c9895ffc24b439aedf0149f2c1b22"
 dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
@@ -4685,9 +4689,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec-software"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51372e1bf7b0c20ed20478615bafd8d10610a8401f578fee28418dc9286158cb"
+checksum = "65b633f2058799a32535916bd1b8b8d9007ad4bc91073ef1a823a859b0d60920"
 dependencies = [
  "gif",
  "image",
@@ -4700,9 +4704,9 @@ dependencies = [
 
 [[package]]
 name = "valo-dl"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c32328ce05e720adad0e3d1b2ea8d75ae8f0d79dd421ee9b985c6aa4e1fb176b"
+checksum = "4de6d693b02b6fbb97e082cfa41c7a24479a67d42c88c228ce04959504f8aa16"
 dependencies = [
  "valo-geometry",
  "valo-text",
@@ -4711,9 +4715,9 @@ dependencies = [
 
 [[package]]
 name = "valo-fontmgr"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b4f3d60e2420d6ac00aae1b862b5f50d93bf48d8aba2117c52694799c87da6b"
+checksum = "f6c851d3618eea37b4289d0bfd9aa4cd257a4a1df715a05e76504d597f502f27"
 dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
@@ -4725,18 +4729,18 @@ dependencies = [
 
 [[package]]
 name = "valo-geometry"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bac91b6542552a4bfe27f557cfcea4bb27eb7c0b3f1f52ecaedafe5e4b5ee07a"
+checksum = "af5364d68e53a29d5b68e1712dbdb108060c64b5474dffa93d37ff70b09598a9"
 dependencies = [
  "glam",
 ]
 
 [[package]]
 name = "valo-renderer"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3b6d53e5ef3af08ae0cb61044b16c17fe3fe06f2d04066eb5a392f3c372a188"
+checksum = "24dad6ff47d751e8054a6cc6a5837a17ae994896be8c08a3b5add41eb6564c50"
 dependencies = [
  "bytemuck",
  "etagere",
@@ -4751,9 +4755,9 @@ dependencies = [
 
 [[package]]
 name = "valo-system-fonts"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9543a79732ad2fa74483365255676d57a9ac9872e88536e167459286375921ab"
+checksum = "94a7cc53381c15f00b69ccb48e808115d1e66e0a9c08ba38f2fefe35d94c874e"
 dependencies = [
  "valo-fontmgr",
  "valo-text",
@@ -4761,9 +4765,9 @@ dependencies = [
 
 [[package]]
 name = "valo-text"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0ceeee9470066b3a3f5fd2a298258986305bafc5835a7876e6615ba10f276bb"
+checksum = "b2efdaae131447d12279e05d4898331e872e0f99f1049f14080388e90c3bbb8e"
 dependencies = [
  "allsorts",
  "harfrust",

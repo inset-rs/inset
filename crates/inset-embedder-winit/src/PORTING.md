@@ -52,6 +52,10 @@ Host implementation references: Flutter's C++ engine under `flutter/engine/src/f
   Reason: platform — Valo paints `.notdef` tofu unless asked not to.
   Affect: a character with no face occupies layout space and draws nothing.
 
+- Change: where the system has no display link for a view (macOS before 14, and the other desktops), the framework's frames are paced by a timer at the display's nominal refresh rate.
+  Reason: platform — Flutter's embedders each take a vsync signal from their system; winit offers none, and only AppKit's `CADisplayLink` is reachable through the view.
+  Affect: on those hosts an animation's frames land at the display's rate but not on its refresh, so a step can arrive a little early or late.
+
 - Change: the host leaves `Platform::handles_text_editing_keys` at no, and does not forward the editing commands macOS names for a key.
   Reason: platform — winit does run the key through AppKit, but keeps only the plain key press and drops the command name, as gpui's own macOS window does.
   Affect: a text field is edited by the framework's own key bindings, so a user's personal key-binding overrides and the Control-key editing bindings macOS would supply do not reach it.

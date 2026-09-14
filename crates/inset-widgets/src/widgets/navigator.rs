@@ -5988,7 +5988,7 @@ mod tests {
             }
         }
 
-        fn present(&self, _picture: &Picture) {}
+        fn present(&self, _picture: std::sync::Arc<Picture>) {}
     }
 
     struct TestPlatform {

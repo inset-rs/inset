@@ -2375,7 +2375,7 @@ mod tests {
             }
         }
 
-        fn present(&self, _picture: &Picture) {}
+        fn present(&self, _picture: std::sync::Arc<Picture>) {}
     }
 
     /// A dark-themed platform with one view, for the binding's frame pipeline.

@@ -220,8 +220,8 @@ impl View for WebView {
         self.metrics.get()
     }
 
-    fn present(&self, picture: &Picture) {
-        self.gpu.borrow_mut().present(picture);
+    fn present(&self, picture: std::sync::Arc<Picture>) {
+        self.gpu.borrow_mut().present(&picture);
     }
 
     fn start_text_input(&self, configuration: &TextInputConfiguration) {

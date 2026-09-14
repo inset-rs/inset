@@ -1200,7 +1200,7 @@ mod tests {
             }
         }
 
-        fn present(&self, _picture: &inset_embedder::Picture) {
+        fn present(&self, _picture: std::sync::Arc<inset_embedder::Picture>) {
             self.presented.set(self.presented.get() + 1);
         }
     }

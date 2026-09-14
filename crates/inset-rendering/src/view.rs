@@ -307,7 +307,7 @@ impl RenderView {
                 .logical_constraints
                 .is_satisfied_by(self.size(app))
         );
-        self.get(app).view.present(&scene);
+        self.get(app).view.present(std::sync::Arc::new(scene));
     }
 
     /// An estimate of the bounds within which this render object will paint, in physical
@@ -436,7 +436,7 @@ mod tests {
             self.metrics
         }
 
-        fn present(&self, _picture: &Picture) {
+        fn present(&self, _picture: std::sync::Arc<Picture>) {
             self.presented.set(self.presented.get() + 1);
         }
     }

@@ -7,6 +7,7 @@
 #![allow(unsafe_code)]
 
 mod menu;
+mod vsync;
 
 use std::time::Duration;
 
@@ -21,11 +22,13 @@ use objc2_app_kit::{
     NSVisualEffectView, NSWindow, NSWindowCollectionBehavior, NSWindowOrderingMode,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize};
+use objc2_quartz_core::{CAMediaTimingFunction, kCAMediaTimingFunctionEaseInEaseOut};
 use winit::platform::macos::WindowAttributesExtMacOS;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Window, WindowAttributes};
 
 pub(crate) use menu::popup_menu;
+pub(crate) use vsync::Vsync;
 
 /// AppKit commits window geometry before winit's next redraw, so a resize presents the
 /// new layout before it returns.
@@ -167,8 +170,9 @@ fn background_view(
     Retained::into_super(blur)
 }
 
-/// Moves and sizes the window over `duration` with AppKit's own animation. `false` when
-/// the window cannot be reached, so the caller sets the frame at once instead.
+/// Moves and sizes the window over `duration` with AppKit's own animation, easing in and
+/// out, as a window a person drags settles. `false` when the window cannot be reached, so
+/// the caller sets the frame at once instead.
 pub(crate) fn animate_frame(window: &Window, frame: Rect, duration: Duration) -> bool {
     let Some(mtm) = MainThreadMarker::new() else {
         return false;
@@ -187,7 +191,12 @@ pub(crate) fn animate_frame(window: &Window, frame: Rect, duration: Duration) ->
         NSSize::new(frame.width(), frame.height()),
     );
     NSAnimationContext::beginGrouping();
-    NSAnimationContext::currentContext().setDuration(duration.as_secs_f64());
+    let context = NSAnimationContext::currentContext();
+    context.setDuration(duration.as_secs_f64());
+    // SAFETY: a constant name Core Animation exports for the life of the process.
+    let ease =
+        CAMediaTimingFunction::functionWithName(unsafe { kCAMediaTimingFunctionEaseInEaseOut });
+    context.setTimingFunction(Some(&ease));
     ns_window.animator().setFrame_display(rect, true);
     NSAnimationContext::endGrouping();
     true

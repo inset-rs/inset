@@ -45,7 +45,7 @@ impl EmbedderView for TestView {
         }
     }
 
-    fn present(&self, _picture: &Picture) {}
+    fn present(&self, _picture: std::sync::Arc<Picture>) {}
 }
 
 /// A platform whose implicit view is [`TestView`], so `run_app` finds one to attach to.

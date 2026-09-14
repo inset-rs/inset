@@ -89,9 +89,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the native window is the source of truth; a framework-side copy would go stale.
   Affect: metrics read after a view-lifecycle notification are the window's current ones, never a cached frame behind.
 
-- Change: `View::present` takes a valo `Picture` where `FlutterView.render` takes a `Scene`.
-  Reason: platform — the host paints a valo display list, not an engine `Scene`.
-  Affect: what reaches the host is a recorded display list it replays itself.
+- Change: `View::present` takes a valo `Picture`, shared, where `FlutterView.render` takes a `Scene` the engine consumes.
+  Reason: platform — the host paints a valo display list, not an engine `Scene`, and keeps it: a window seen again is repainted from it without a frame, and a picture equal to the last, which valo can tell from its retained nested lists, is not drawn again.
+  Affect: what reaches the host is a recorded display list it replays itself and may hold past the call; a frame whose windows all show what they showed before draws nothing.
 
 - Change: text input is methods on `View` (start and stop, editing state, composing and caret rects, client geometry), each defaulted to do nothing.
   Reason: platform — there are no method channels; the host trait is the channel.

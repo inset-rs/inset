@@ -36,7 +36,7 @@ impl EmbedderView for TestView {
         }
     }
 
-    fn present(&self, _picture: &Picture) {}
+    fn present(&self, _picture: std::sync::Arc<Picture>) {}
 }
 
 #[derive(Debug)]

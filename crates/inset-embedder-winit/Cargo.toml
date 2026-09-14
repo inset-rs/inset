@@ -20,18 +20,19 @@ arboard.workspace = true
 inset-embedder.workspace = true
 valo.workspace = true
 valo-codec.workspace = true
-valo-codec-software = { version = "0.4.5", optional = true }
+valo-codec-software = { version = "0.4.6", optional = true }
 wgpu.workspace = true
 pollster.workspace = true
 winit.workspace = true
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
-valo-codec-apple = { version = "0.4.5", optional = true }
+valo-codec-apple = { version = "0.4.6", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSMenu", "NSMenuItem", "NSEvent", "NSView", "NSCell", "NSResponder", "NSWindow", "NSScreen", "NSAnimation", "NSAnimationContext", "NSVisualEffectView", "NSGlassEffectView", "NSGraphics", "NSTrackingArea"] }
-objc2-foundation = { version = "0.3", features = ["NSString", "NSObject", "NSGeometry", "NSArray"] }
+objc2-app-kit = { version = "0.3", features = ["NSMenu", "NSMenuItem", "NSEvent", "NSView", "NSCell", "NSResponder", "NSWindow", "NSScreen", "NSAnimation", "NSAnimationContext", "NSVisualEffectView", "NSGlassEffectView", "NSGraphics", "NSTrackingArea", "objc2-quartz-core"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSObject", "NSGeometry", "NSArray", "NSRunLoop"] }
+objc2-quartz-core = { version = "0.3", features = ["CAMediaTimingFunction", "CADisplayLink"] }
 
 # AppKit's selectors and view hierarchy need `unsafe`, which the workspace forbids; here it
 # is denied instead, and `os/macos` alone allows it.

@@ -1231,7 +1231,7 @@ pub(crate) mod viewport_test_support {
             ViewMetrics::default()
         }
 
-        fn present(&self, _picture: &Picture) {}
+        fn present(&self, _picture: std::sync::Arc<Picture>) {}
     }
 
     /// The scrolling machinery a lazy sliver needs: a viewport inside a [`RenderView`] rooted in
