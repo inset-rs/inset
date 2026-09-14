@@ -73,7 +73,7 @@ impl Gpu {
                 clear: Some(Color::WHITE),
             },
         );
-        let Some(frame) = self.surface.acquire() else {
+        let Ok(frame) = self.surface.acquire() else {
             return;
         };
         let mut builder = DisplayListBuilder::new();

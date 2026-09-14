@@ -23,7 +23,7 @@ inset-animation = { version = "0.3.0", path = "crates/inset-animation" }
 inset-cupertino = { version = "0.3.0", path = "crates/inset-cupertino" }
 inset-embedder = { version = "0.3.0", path = "crates/inset-embedder" }
 inset-embedder-default = { version = "0.3.0", path = "crates/inset-embedder-default" }
-inset-embedder-web = { version = "0.3.0", path = "crates/inset-embedder-web" }
+inset-embedder-web = { version = "0.3.1", path = "crates/inset-embedder-web" }
 inset-embedder-winit = { version = "0.3.0", path = "crates/inset-embedder-winit" }
 inset-foundation = { version = "0.3.0", path = "crates/inset-foundation" }
 inset-gestures = { version = "0.3.0", path = "crates/inset-gestures" }
