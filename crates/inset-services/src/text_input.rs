@@ -856,8 +856,10 @@ impl TextInput {
     }
 
     fn set_editing_state(self: Handle<Self>, app: &App, value: TextEditingValue) {
-        if let Some(view) = self.target_view(app) {
-            view.set_text_input_editing_state(&value);
+        if let Some(view) = self.target_view(app)
+            && let Some(text_input) = view.text_input()
+        {
+            text_input.set_editing_state(&value);
         }
     }
 
@@ -867,20 +869,26 @@ impl TextInput {
         editable_box_size: Size,
         transform: Matrix4,
     ) {
-        if let Some(view) = self.target_view(app) {
-            view.set_text_input_client_geometry(editable_box_size, &transform);
+        if let Some(view) = self.target_view(app)
+            && let Some(text_input) = view.text_input()
+        {
+            text_input.set_client_geometry(editable_box_size, &transform);
         }
     }
 
     fn set_composing_text_rect(self: Handle<Self>, app: &App, rect: Rect) {
-        if let Some(view) = self.target_view(app) {
-            view.set_text_input_composing_rect(rect);
+        if let Some(view) = self.target_view(app)
+            && let Some(text_input) = view.text_input()
+        {
+            text_input.set_composing_rect(rect);
         }
     }
 
     fn set_caret_rect(self: Handle<Self>, app: &App, rect: Rect) {
-        if let Some(view) = self.target_view(app) {
-            view.set_text_input_caret_rect(rect);
+        if let Some(view) = self.target_view(app)
+            && let Some(text_input) = view.text_input()
+        {
+            text_input.set_caret_rect(rect);
         }
     }
 
@@ -955,14 +963,18 @@ fn target_view(app: &App, configuration: &TextInputConfiguration) -> Option<View
 }
 
 fn platform_attach(app: &App, configuration: &TextInputConfiguration) {
-    if let Some(view) = target_view(app, configuration) {
-        view.start_text_input(configuration);
+    if let Some(view) = target_view(app, configuration)
+        && let Some(text_input) = view.text_input()
+    {
+        text_input.start(configuration);
     }
 }
 
 fn platform_detach(app: &App, input: Handle<TextInput>) {
-    if let Some(view) = input.target_view(app) {
-        view.stop_text_input();
+    if let Some(view) = input.target_view(app)
+        && let Some(text_input) = view.text_input()
+    {
+        text_input.stop();
     }
 }
 

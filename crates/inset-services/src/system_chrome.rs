@@ -40,8 +40,9 @@ impl SystemChrome {
         app: &App,
         description: &ApplicationSwitcherDescription,
     ) {
-        app.platform()
-            .set_application_switcher_description(description);
+        if let Some(chrome) = app.platform().system_chrome() {
+            chrome.set_application_switcher_description(description);
+        }
     }
 
     /// Specifies the style to use for the system overlays (e.g. the status bar on
@@ -86,8 +87,8 @@ impl SystemChrome {
         let pending = app.get(styles).pending_style;
         debug_assert!(pending.is_some());
         if pending != app.get(styles).latest_style {
-            if let Some(style) = pending {
-                app.platform().set_system_ui_overlay_style(&style);
+            if let (Some(style), Some(chrome)) = (pending, app.platform().system_chrome()) {
+                chrome.set_overlay_style(&style);
             }
             app.get_mut(styles).latest_style = pending;
         }
@@ -110,7 +111,8 @@ mod tests {
     use std::time::Instant;
 
     use inset_embedder::{
-        Brightness, Color, Platform, PlatformRef, TargetPlatform, ViewId, ViewRef,
+        Brightness, Color, Platform, PlatformRef, SystemChrome as SystemChromeHost, TargetPlatform,
+        ViewId, ViewRef,
     };
 
     use super::*;
@@ -145,8 +147,20 @@ mod tests {
             None
         }
 
-        fn set_system_ui_overlay_style(&self, style: &SystemUiOverlayStyle) {
+        fn system_chrome(&self) -> Option<&dyn SystemChromeHost> {
+            Some(self)
+        }
+    }
+
+    impl SystemChromeHost for RecordingPlatform {
+        fn set_overlay_style(&self, style: &SystemUiOverlayStyle) {
             self.styles.borrow_mut().push(*style);
+        }
+
+        fn set_application_switcher_description(
+            &self,
+            _description: &ApplicationSwitcherDescription,
+        ) {
         }
     }
 

@@ -5953,8 +5953,8 @@ mod tests {
     use std::time::Duration;
 
     use inset_embedder::{
-        Picture, Platform, PlatformRef, TargetPlatform, TextDirection, View as EmbedderView,
-        ViewConstraints, ViewId, ViewMetrics, ViewRef,
+        Picture, Platform, PlatformRef, Restoration, TargetPlatform, TextDirection,
+        View as EmbedderView, ViewConstraints, ViewId, ViewMetrics, ViewRef,
     };
     use inset_scheduler::SchedulerBinding;
     use inset_services::{RestorationMap, RestorationUpdate};
@@ -6022,11 +6022,17 @@ mod tests {
             Some(Rc::clone(&self.view))
         }
 
-        fn restoration_get(&self) -> Option<RestorationUpdate> {
+        fn restoration(&self) -> Option<&dyn Restoration> {
+            Some(self)
+        }
+    }
+
+    impl Restoration for TestPlatform {
+        fn get(&self) -> Option<RestorationUpdate> {
             self.stored.borrow().clone()
         }
 
-        fn restoration_put(&self, data: RestorationMap) {
+        fn put(&self, data: RestorationMap) {
             self.puts.borrow_mut().push(data);
         }
     }

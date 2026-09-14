@@ -5,21 +5,26 @@
 // wgpu's handle registry nests auto-trait obligations past the default depth.
 #![recursion_limit = "256"]
 
+mod frames;
 mod gpu;
 mod images;
 mod ime;
+mod input;
 mod keys;
 mod os;
 mod pacing;
+mod platform;
 mod pointer;
+mod surface;
 mod text_input;
+mod view;
 mod window;
 mod windows;
 
 use inset_embedder::{EmbedderClient, PlatformRef};
 
 pub use images::{DecodeExecution, create_image_loader};
-pub use window::WinitPlatform;
+pub use platform::WinitPlatform;
 
 /// Configuration for the implicit view created before application startup.
 #[derive(Clone, Debug, PartialEq)]

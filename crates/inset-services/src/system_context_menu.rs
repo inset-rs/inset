@@ -246,7 +246,9 @@ impl SystemContextMenuController {
         app.get_mut(self).last_target_rect = Some(target_rect);
         app.get_mut(registry).last_shown = Some(self);
         app.get_mut(self).hidden_by_system = false;
-        app.platform().show_system_context_menu(target_rect, None);
+        if let Some(menu) = app.platform().system_context_menu() {
+            menu.show(target_rect, None);
+        }
     }
 
     /// Shows the system context menu anchored on the given [`Rect`] with the given
@@ -300,8 +302,9 @@ impl SystemContextMenuController {
         let registry = SystemContextMenuRegistry::instance(app);
         app.get_mut(registry).last_shown = Some(self);
         app.get_mut(self).hidden_by_system = false;
-        app.platform()
-            .show_system_context_menu(target_rect, Some(&host_items));
+        if let Some(menu) = app.platform().system_context_menu() {
+            menu.show(target_rect, Some(&host_items));
+        }
     }
 
     /// Hides this system context menu.
@@ -313,7 +316,9 @@ impl SystemContextMenuController {
         }
         app.get_mut(registry).last_shown = None;
         app.get_mut(self).custom_action_callbacks.clear();
-        app.platform().hide_system_context_menu();
+        if let Some(menu) = app.platform().system_context_menu() {
+            menu.hide();
+        }
     }
 
     /// Used to release resources when this instance will never be used again.

@@ -5,8 +5,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use inset_embedder::{
-    Brightness, ImageCodecFuture, Matrix4, Picture, Platform, Rect, Size, SystemMouseCursorKind,
-    TargetPlatform, TextEditingValue, TextInputConfiguration, View, ViewId, ViewMetrics, ViewRef,
+    Brightness, Clipboard, ImageCodecFuture, Matrix4, MouseCursor, Picture, Platform, Rect, Size,
+    SystemMouseCursorKind, TargetPlatform, TextEditingValue, TextInputConfiguration, TextInputHost,
+    View, ViewId, ViewMetrics, ViewRef,
 };
 use web_sys::HtmlCanvasElement;
 use web_time::Instant;
@@ -149,17 +150,12 @@ impl Platform for WebPlatform {
         self.view.borrow().clone()
     }
 
-    fn activate_system_cursor(&self, _device: i64, kind: SystemMouseCursorKind) {
-        let css = cursor_css(kind);
-        let _ = self.canvas.style().set_property("cursor", css);
+    fn clipboard(&self) -> Option<&dyn Clipboard> {
+        Some(self)
     }
 
-    fn clipboard_set_data(&self, text: &str) {
-        let Some(window) = web_sys::window() else {
-            return;
-        };
-        let clipboard = window.navigator().clipboard();
-        let _ = clipboard.write_text(text);
+    fn mouse_cursor(&self) -> Option<&dyn MouseCursor> {
+        Some(self)
     }
 
     fn open_image_codec(&self, bytes: std::sync::Arc<[u8]>) -> ImageCodecFuture {
@@ -174,6 +170,33 @@ impl Platform for WebPlatform {
             Rc::clone(&self.frame_requested),
             Rc::clone(&self.on_schedule),
         )
+    }
+}
+
+impl Clipboard for WebPlatform {
+    fn set_text(&self, text: &str) {
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let clipboard = window.navigator().clipboard();
+        let _ = clipboard.write_text(text);
+    }
+
+    /// Reading the browser clipboard resolves a promise and needs the user's permission,
+    /// which this synchronous call cannot wait for; a paste arrives as a paste event instead.
+    fn text(&self) -> Option<String> {
+        None
+    }
+
+    fn has_strings(&self) -> bool {
+        false
+    }
+}
+
+impl MouseCursor for WebPlatform {
+    fn activate_system_cursor(&self, _device: i64, kind: SystemMouseCursorKind) {
+        let css = cursor_css(kind);
+        let _ = self.canvas.style().set_property("cursor", css);
     }
 }
 
@@ -224,7 +247,13 @@ impl View for WebView {
         self.gpu.borrow_mut().present(&picture);
     }
 
-    fn start_text_input(&self, configuration: &TextInputConfiguration) {
+    fn text_input(&self) -> Option<&dyn TextInputHost> {
+        Some(self)
+    }
+}
+
+impl TextInputHost for WebView {
+    fn start(&self, configuration: &TextInputConfiguration) {
         if let Some(input) = self.text_input.borrow().as_ref() {
             input.apply_configuration(configuration);
             input.set_dpr(self.metrics.get().device_pixel_ratio);
@@ -241,30 +270,30 @@ impl View for WebView {
         *self.text_input.borrow_mut() = Some(input);
     }
 
-    fn stop_text_input(&self) {
+    fn stop(&self) {
         if let Some(input) = self.text_input.borrow_mut().take() {
             input.stop();
         }
     }
 
-    fn set_text_input_editing_state(&self, value: &TextEditingValue) {
+    fn set_editing_state(&self, value: &TextEditingValue) {
         if let Some(input) = self.text_input.borrow().as_ref() {
             input.set_editing_state(value);
         }
     }
 
-    fn set_text_input_composing_rect(&self, rect: Rect) {
-        self.set_text_input_caret_rect(rect);
+    fn set_composing_rect(&self, rect: Rect) {
+        self.set_caret_rect(rect);
     }
 
-    fn set_text_input_caret_rect(&self, rect: Rect) {
+    fn set_caret_rect(&self, rect: Rect) {
         if let Some(input) = self.text_input.borrow().as_ref() {
             input.set_dpr(self.metrics.get().device_pixel_ratio);
             input.set_caret_rect(rect);
         }
     }
 
-    fn set_text_input_client_geometry(&self, size: Size, transform: &Matrix4) {
+    fn set_client_geometry(&self, size: Size, transform: &Matrix4) {
         if let Some(input) = self.text_input.borrow().as_ref() {
             input.set_client_geometry(size, transform);
         }

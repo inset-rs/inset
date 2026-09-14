@@ -590,7 +590,8 @@ mod tests {
     use std::cell::{Cell, RefCell};
 
     use inset_embedder::{
-        InertPlatform, Platform, PlatformRef, Size, SystemMouseCursorKind, TargetPlatform, ViewRef,
+        InertPlatform, MouseCursor, Platform, PlatformRef, Size, SystemMouseCursorKind,
+        TargetPlatform, ViewRef,
     };
     use inset_gestures::{
         PointerAddedEvent, PointerHoverEvent, PointerRemovedEvent, PointerScrollEvent,
@@ -636,6 +637,12 @@ mod tests {
             None
         }
 
+        fn mouse_cursor(&self) -> Option<&dyn MouseCursor> {
+            Some(self)
+        }
+    }
+
+    impl MouseCursor for CursorRecordingPlatform {
         fn activate_system_cursor(&self, device: i64, kind: SystemMouseCursorKind) {
             self.activated.borrow_mut().push((device, kind));
         }

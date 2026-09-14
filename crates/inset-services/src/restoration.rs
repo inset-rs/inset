@@ -165,7 +165,10 @@ impl RestorationManager {
     }
 
     fn get_root_bucket_from_engine(self: Handle<Self>, app: &mut App) {
-        let config = app.platform().restoration_get();
+        let config = app
+            .platform()
+            .restoration()
+            .and_then(|restoration| restoration.get());
         if !app.get(self).pending_root_bucket {
             // The restoration data was obtained via other means (e.g. by calling
             // `handle_restoration_update_from_engine` while the request to the host was
@@ -239,7 +242,9 @@ impl RestorationManager {
     /// The `encoded_data` describes the entire bucket hierarchy that makes up the
     /// current restoration data.
     pub fn send_to_engine(self: Handle<Self>, app: &mut App, encoded_data: RestorationMap) {
-        app.platform().restoration_put(encoded_data);
+        if let Some(restoration) = app.platform().restoration() {
+            restoration.put(encoded_data);
+        }
     }
 
     /// Called by a [`RestorationBucket`] to request serialization for that bucket.
@@ -1111,13 +1116,15 @@ mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::time::{Duration, Instant};
 
-    use inset_embedder::{InertPlatform, Platform, PlatformRef, TargetPlatform, ViewId, ViewRef};
+    use inset_embedder::{
+        InertPlatform, Platform, PlatformRef, Restoration, TargetPlatform, ViewId, ViewRef,
+    };
     use inset_foundation::{ListenableObject, Listener};
 
     use super::*;
 
-    /// A host that answers `restoration_get` with what it was handed and records every
-    /// `restoration_put`.
+    /// A host that answers `Restoration::get` with what it was handed and records every
+    /// `Restoration::put`.
     #[derive(Default)]
     struct RecordingPlatform {
         stored: RefCell<Option<RestorationUpdate>>,
@@ -1150,12 +1157,18 @@ mod tests {
             None
         }
 
-        fn restoration_get(&self) -> Option<RestorationUpdate> {
+        fn restoration(&self) -> Option<&dyn Restoration> {
+            Some(self)
+        }
+    }
+
+    impl Restoration for RecordingPlatform {
+        fn get(&self) -> Option<RestorationUpdate> {
             self.gets.set(self.gets.get() + 1);
             self.stored.borrow().clone()
         }
 
-        fn restoration_put(&self, data: RestorationMap) {
+        fn put(&self, data: RestorationMap) {
             self.puts.borrow_mut().push(data);
         }
     }

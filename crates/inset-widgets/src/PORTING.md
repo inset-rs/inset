@@ -304,7 +304,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 ## widgets/restoration.rs → restoration.dart, widgets/restoration_properties.rs → restoration_properties.dart
 
 - Change: the root bucket is read within the call, so what Dart runs from the future's continuation runs inline.
-  Reason: platform — the host answers `Platform::restoration_get` within the call (inset-services' `root_bucket`).
+  Reason: platform — the host's `Restoration` capability answers within the call (inset-services' `root_bucket`).
   Affect: the first frame is never held back and a `RootRestorationScope` hands its child a bucket on its very first build, where Dart renders an empty container first.
 
 - Change: `RestorableEnum` and `RestorableEnumN` serialize a value with its `Debug` output where Dart uses the enum's name, and keep duplicate `values`.

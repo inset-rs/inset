@@ -22,7 +22,9 @@ impl HapticFeedback {
     /// On Android, this uses the platform haptic feedback API to simulate a
     /// response to a long press (`HapticFeedbackConstants.LONG_PRESS`).
     pub fn vibrate(app: &App) {
-        app.platform().haptic_feedback(HapticFeedbackType::Vibrate);
+        if let Some(haptics) = app.platform().haptics() {
+            haptics.feedback(HapticFeedbackType::Vibrate);
+        }
     }
 
     /// Provides a haptic feedback corresponding a collision impact with a light mass.
@@ -37,8 +39,9 @@ impl HapticFeedback {
     ///
     /// * [Human Interface Selection Playing Impact Haptic](https://developer.apple.com/design/human-interface-guidelines/playing-haptics#Impact)
     pub fn light_impact(app: &App) {
-        app.platform()
-            .haptic_feedback(HapticFeedbackType::LightImpact);
+        if let Some(haptics) = app.platform().haptics() {
+            haptics.feedback(HapticFeedbackType::LightImpact);
+        }
     }
 
     /// Provides a haptic feedback corresponding a collision impact with a medium mass.
@@ -49,8 +52,9 @@ impl HapticFeedback {
     ///
     /// On Android, this uses `HapticFeedbackConstants.KEYBOARD_TAP`.
     pub fn medium_impact(app: &App) {
-        app.platform()
-            .haptic_feedback(HapticFeedbackType::MediumImpact);
+        if let Some(haptics) = app.platform().haptics() {
+            haptics.feedback(HapticFeedbackType::MediumImpact);
+        }
     }
 
     /// Provides a haptic feedback corresponding a collision impact with a heavy mass.
@@ -62,8 +66,9 @@ impl HapticFeedback {
     /// On Android, this uses `HapticFeedbackConstants.CONTEXT_CLICK` on API levels
     /// 23 and above. This call has no effects on Android API levels below 23.
     pub fn heavy_impact(app: &App) {
-        app.platform()
-            .haptic_feedback(HapticFeedbackType::HeavyImpact);
+        if let Some(haptics) = app.platform().haptics() {
+            haptics.feedback(HapticFeedbackType::HeavyImpact);
+        }
     }
 
     /// Provides a haptic feedback indication selection changing through discrete values.
@@ -77,8 +82,9 @@ impl HapticFeedback {
     ///
     /// * [Human Interface Selection Playing Selection Haptics](https://developer.apple.com/design/human-interface-guidelines/playing-haptics#Selection)
     pub fn selection_click(app: &App) {
-        app.platform()
-            .haptic_feedback(HapticFeedbackType::SelectionClick);
+        if let Some(haptics) = app.platform().haptics() {
+            haptics.feedback(HapticFeedbackType::SelectionClick);
+        }
     }
 
     /// Provides a haptic feedback indicating that a task or action has completed
@@ -94,8 +100,9 @@ impl HapticFeedback {
     ///
     ///  * [Human Interface Guidelines Playing Haptics](https://developer.apple.com/design/human-interface-guidelines/playing-haptics#Notification)
     pub fn success_notification(app: &App) {
-        app.platform()
-            .haptic_feedback(HapticFeedbackType::SuccessNotification);
+        if let Some(haptics) = app.platform().haptics() {
+            haptics.feedback(HapticFeedbackType::SuccessNotification);
+        }
     }
 
     /// Provides a haptic feedback indicating that a task or action has produced
@@ -108,8 +115,9 @@ impl HapticFeedback {
     /// levels 30 and above. This call has no effects on Android API levels below
     /// 30.
     pub fn warning_notification(app: &App) {
-        app.platform()
-            .haptic_feedback(HapticFeedbackType::WarningNotification);
+        if let Some(haptics) = app.platform().haptics() {
+            haptics.feedback(HapticFeedbackType::WarningNotification);
+        }
     }
 
     /// Provides a haptic feedback indicating that a task or action has failed.
@@ -120,8 +128,9 @@ impl HapticFeedback {
     /// On Android, this uses `HapticFeedbackConstants.REJECT` on API levels 30
     /// and above. This call has no effects on Android API levels below 30.
     pub fn error_notification(app: &App) {
-        app.platform()
-            .haptic_feedback(HapticFeedbackType::ErrorNotification);
+        if let Some(haptics) = app.platform().haptics() {
+            haptics.feedback(HapticFeedbackType::ErrorNotification);
+        }
     }
 }
 
@@ -132,7 +141,7 @@ mod tests {
     use std::rc::Rc;
     use std::time::Instant;
 
-    use inset_embedder::{Platform, PlatformRef, TargetPlatform, ViewId, ViewRef};
+    use inset_embedder::{Haptics, Platform, PlatformRef, TargetPlatform, ViewId, ViewRef};
 
     use super::*;
 
@@ -166,7 +175,13 @@ mod tests {
             None
         }
 
-        fn haptic_feedback(&self, kind: HapticFeedbackType) {
+        fn haptics(&self) -> Option<&dyn Haptics> {
+            Some(self)
+        }
+    }
+
+    impl Haptics for RecordingPlatform {
+        fn feedback(&self, kind: HapticFeedbackType) {
             self.kinds.borrow_mut().push(kind);
         }
     }

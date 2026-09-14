@@ -23,7 +23,8 @@ use winit::raw_window_handle::HasWindowHandle;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use crate::os;
-use crate::window::{HostEvent, WinitView};
+use crate::view::WinitView;
+use crate::window::HostEvent;
 
 /// A window the app asked for, waiting for the loop.
 pub(crate) struct WindowRequest {
@@ -143,8 +144,13 @@ impl HostWindow for WinitWindow {
         {
             return;
         }
-        window.set_outer_position(LogicalPosition::new(frame.left, frame.top));
+        if os::set_frame(&window, frame) {
+            return;
+        }
+        // Size before position: a system that anchors a window at its bottom-left, as
+        // AppKit does, places the top edge from the size the window has at the time.
         let _ = window.request_inner_size(LogicalSize::new(frame.width(), frame.height()));
+        window.set_outer_position(LogicalPosition::new(frame.left, frame.top));
     }
 
     fn set_title(&self, title: &str) {

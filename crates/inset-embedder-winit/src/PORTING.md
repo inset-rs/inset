@@ -2,7 +2,7 @@
 
 Host implementation references: Flutter's C++ engine under `flutter/engine/src/flutter`.
 
-## lib.rs / window.rs / keys.rs
+## lib.rs / window.rs / platform.rs / view.rs / frames.rs / input.rs / keys.rs
 
 - Change: this crate is a host — it implements `Platform` and `View`, creates the implicit window once winit resumes, and hands `Platform` to a start closure that returns the client, never naming `App`.
   Reason: platform — Flutter's native embedding does not name the framework, and winit cannot create a window before `resumed`.
@@ -12,7 +12,7 @@ Host implementation references: Flutter's C++ engine under `flutter/engine/src/f
   Reason: platform — winit redraw is per window and the window must stay on the event-loop thread.
   Affect: one frame request redraws every window, and closing the last window ends `run`.
 
-- Change: `Platform::activate_system_cursor` sets the winit cursor icon on the window the pointer was last seen in; `None` hides the cursor and kinds winit lacks show the arrow.
+- Change: the host's `MouseCursor` capability sets the winit cursor icon on the window the pointer was last seen in; `None` hides the cursor and kinds winit lacks show the arrow.
   Reason: platform — winit has one cursor per window where Flutter's engine maps cursor kinds per host.
   Affect: a `MouseRegion` cursor shows on hover, the device id is ignored (one mouse), and an unsupported kind is silently the arrow.
 
@@ -36,7 +36,7 @@ Host implementation references: Flutter's C++ engine under `flutter/engine/src/f
   Reason: platform — winit does not own the pasteboard, so the host implements the channel.
   Affect: copy and paste work with other apps; a host that cannot open the pasteboard reads an empty clipboard rather than failing.
 
-- Change: `haptic_feedback` and `set_system_ui_overlay_style` are left at the trait defaults, which drop the request.
+- Change: the host offers neither the `Haptics` nor the `SystemChrome` capability, so both answer `None`.
   Reason: platform — a desktop machine has no haptic engine and no status bar, and Flutter's own Linux and Windows embedders answer both with not-implemented.
   Affect: `HapticFeedback` calls are silent and the status-bar style a `CupertinoNavigationBar` asks for shows nowhere; the same calls work on a phone host.
 
@@ -56,11 +56,11 @@ Host implementation references: Flutter's C++ engine under `flutter/engine/src/f
   Reason: platform — Flutter's embedders each take a vsync signal from their system; winit offers none, and only AppKit's `CADisplayLink` is reachable through the view.
   Affect: on those hosts an animation's frames land at the display's rate but not on its refresh, so a step can arrive a little early or late.
 
-- Change: the host leaves `Platform::handles_text_editing_keys` at no, and does not forward the editing commands macOS names for a key.
+- Change: the host's text input leaves `handles_editing_keys` at no, and does not forward the editing commands macOS names for a key.
   Reason: platform — winit does run the key through AppKit, but keeps only the plain key press and drops the command name, as gpui's own macOS window does.
   Affect: a text field is edited by the framework's own key bindings, so a user's personal key-binding overrides and the Control-key editing bindings macOS would supply do not reach it.
 
-## window.rs → native view focus
+## window.rs / platform.rs → native view focus
 
 - Change: view-focus requests are queued and `WindowEvent::Focused` is forwarded as a `ViewFocusEvent`.
   Reason: platform — winit reports window focus without a traversal direction.

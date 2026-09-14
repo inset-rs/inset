@@ -182,33 +182,45 @@ pub trait View: 'static {
     /// one worth drawing. Physical pixels; the presenter applies no extra scaling.
     fn present(&self, picture: std::sync::Arc<crate::Picture>);
 
+    /// The view's text input, where the host has one.
+    fn text_input(&self) -> Option<&dyn TextInputHost> {
+        None
+    }
+}
+
+/// The host side of Flutter's text input connection for one view.
+pub trait TextInputHost {
     /// Flutter `TextInput.attach` / `TextInputConnection.show`: start an IME
-    /// session for this view. The default drops it.
-    fn start_text_input(&self, configuration: &TextInputConfiguration) {
-        let _ = configuration;
-    }
+    /// session for this view.
+    fn start(&self, configuration: &TextInputConfiguration);
 
-    /// Flutter `TextInputConnection.close`: end the IME session. The default
-    /// drops it.
-    fn stop_text_input(&self) {}
+    /// Flutter `TextInputConnection.close`: end the IME session.
+    fn stop(&self);
 
-    /// Flutter `TextInputConnection.setEditingState`. The default drops it.
-    fn set_text_input_editing_state(&self, value: &TextEditingValue) {
-        let _ = value;
-    }
+    /// Flutter `TextInputConnection.setEditingState`.
+    fn set_editing_state(&self, value: &TextEditingValue);
 
-    /// Flutter `TextInput.setComposingRect`. The default drops it.
-    fn set_text_input_composing_rect(&self, rect: Rect) {
-        let _ = rect;
-    }
+    /// Flutter `TextInput.setComposingRect`.
+    fn set_composing_rect(&self, rect: Rect);
 
-    /// Flutter `TextInput.setCaretRect`. The default drops it.
-    fn set_text_input_caret_rect(&self, rect: Rect) {
-        let _ = rect;
-    }
+    /// Flutter `TextInput.setCaretRect`.
+    fn set_caret_rect(&self, rect: Rect);
 
-    /// Flutter `TextInput.setEditableSizeAndTransform`. The default drops it.
-    fn set_text_input_client_geometry(&self, size: Size, transform: &Matrix4) {
-        let _ = (size, transform);
+    /// Flutter `TextInput.setEditableSizeAndTransform`.
+    fn set_client_geometry(&self, size: Size, transform: &Matrix4);
+
+    /// Whether this text input turns editing keys into edits before the framework sees
+    /// them: backspace and delete, caret movement, the line and document ends.
+    ///
+    /// Flutter has no such question because each of its embedders is written for one host:
+    /// its macOS and iOS embedders do interpret those keys, and its text field bindings for
+    /// those platforms step aside so a key is not acted on twice.
+    ///
+    /// Defaults to false, which is what a host built on a windowing library that reports
+    /// plain key presses should answer, whichever platform it runs on. A host that hands the
+    /// framework the operating system's own editing commands answers true, and the field
+    /// then leaves those keys to it.
+    fn handles_editing_keys(&self) -> bool {
+        false
     }
 }

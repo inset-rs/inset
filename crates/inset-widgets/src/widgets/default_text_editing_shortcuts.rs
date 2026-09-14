@@ -103,41 +103,15 @@ impl DefaultTextEditingShortcuts {
     }
 
     /// The shortcuts the platform handles itself, which the framework must hand back to it
-    /// (Dart's `_getDisablingShortcut`).
-    fn get_disabling_shortcut(app: &App) -> Option<ShortcutMap> {
-        if K_IS_WEB {
-            return match app.platform().target_platform() {
-                TargetPlatform::Linux => {
-                    let mut shortcuts = web_disabling_text_shortcuts();
-                    for (activator, _) in linux_numpad_shortcuts() {
-                        shortcuts.push((
-                            activator,
-                            Rc::new(DoNothingAndStopPropagationTextIntent::new()) as IntentRef,
-                        ));
-                    }
-                    Some(shortcuts)
-                }
-                TargetPlatform::Android
-                | TargetPlatform::Fuchsia
-                | TargetPlatform::Windows
-                | TargetPlatform::IOS
-                | TargetPlatform::MacOS => Some(web_disabling_text_shortcuts()),
-            };
-        }
-        // Dart steps aside for every macOS and iOS host, since its embedders for those two
-        // are the only ones it has. A host that reports plain key presses interprets nothing,
-        // so stepping aside would leave the keys to nobody.
-        if !app.platform().handles_text_editing_keys() {
-            return None;
-        }
-        match app.platform().target_platform() {
-            TargetPlatform::Android
-            | TargetPlatform::Fuchsia
-            | TargetPlatform::Linux
-            | TargetPlatform::Windows => None,
-            TargetPlatform::IOS => Some(ios_disabling_text_shortcuts()),
-            TargetPlatform::MacOS => Some(mac_disabling_text_shortcuts()),
-        }
+    /// (Dart's `_getDisablingShortcut`): the table for this host, and for whether the
+    /// view's text input edits keys itself.
+    fn get_disabling_shortcut(app: &mut App, context: BuildContext) -> Option<ShortcutMap> {
+        let platform = app.platform().target_platform();
+        let host_edits = crate::view::View::maybe_of(app, context).is_some_and(|view| {
+            view.text_input()
+                .is_some_and(|input| input.handles_editing_keys())
+        });
+        disabling_shortcuts_for(platform, host_edits)
     }
 }
 
@@ -146,9 +120,11 @@ impl StatelessWidget for DefaultTextEditingShortcuts {
         self.key.as_ref()
     }
 
-    fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
+    fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
         let mut result = self.child.clone();
-        if let Some(disabling_shortcut) = DefaultTextEditingShortcuts::get_disabling_shortcut(app) {
+        if let Some(disabling_shortcut) =
+            DefaultTextEditingShortcuts::get_disabling_shortcut(app, context)
+        {
             // These shortcuts make sure of the following:
             //
             // 1. Shortcuts fired when an EditableText is focused are ignored and
@@ -164,6 +140,45 @@ impl StatelessWidget for DefaultTextEditingShortcuts {
         Shortcuts::new(DefaultTextEditingShortcuts::shortcuts(app), result)
             .debug_label("<Default Text Editing Shortcuts>")
             .into_widget()
+    }
+}
+
+/// The shortcuts a platform's own text input handles, which the framework then leaves to
+/// it: on the web, the browser's; elsewhere, only where the host's text input edits keys
+/// itself, as Flutter's macOS and iOS embedders do. Dart steps aside for every macOS and
+/// iOS host, since its embedders for those two are the only ones it has; a host that
+/// reports plain key presses interprets nothing, so stepping aside would leave the keys
+/// to nobody.
+fn disabling_shortcuts_for(platform: TargetPlatform, host_edits: bool) -> Option<ShortcutMap> {
+    if K_IS_WEB {
+        return match platform {
+            TargetPlatform::Linux => {
+                let mut shortcuts = web_disabling_text_shortcuts();
+                for (activator, _) in linux_numpad_shortcuts() {
+                    shortcuts.push((
+                        activator,
+                        Rc::new(DoNothingAndStopPropagationTextIntent::new()) as IntentRef,
+                    ));
+                }
+                Some(shortcuts)
+            }
+            TargetPlatform::Android
+            | TargetPlatform::Fuchsia
+            | TargetPlatform::Windows
+            | TargetPlatform::IOS
+            | TargetPlatform::MacOS => Some(web_disabling_text_shortcuts()),
+        };
+    }
+    if !host_edits {
+        return None;
+    }
+    match platform {
+        TargetPlatform::Android
+        | TargetPlatform::Fuchsia
+        | TargetPlatform::Linux
+        | TargetPlatform::Windows => None,
+        TargetPlatform::IOS => Some(ios_disabling_text_shortcuts()),
+        TargetPlatform::MacOS => Some(mac_disabling_text_shortcuts()),
     }
 }
 
@@ -735,67 +750,12 @@ pub fn intent_for_macos_selector(selector_name: &str) -> Option<IntentRef> {
 
 #[cfg(test)]
 mod tests {
-    use inset_embedder::{Platform, PlatformRef, ViewId, ViewRef};
-    use inset_foundation::AppCell;
 
     use super::*;
     use crate::binding::WidgetsBinding;
     use crate::framework::{AnyElement, downcast_widget};
     use crate::widgets::basic::SizedBox;
     use crate::widgets::focus_manager::tests::{app_with_view_whose_host_edits, mount};
-
-    /// A platform with no views, for the tables that only read the target platform.
-    struct PlatformOf {
-        target: TargetPlatform,
-        handles_text_editing_keys: bool,
-    }
-
-    impl Platform for PlatformOf {
-        fn target_platform(&self) -> TargetPlatform {
-            self.target
-        }
-
-        fn handles_text_editing_keys(&self) -> bool {
-            self.handles_text_editing_keys
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> std::time::Instant {
-            std::time::Instant::now()
-        }
-
-        fn wake_at(&self, _deadline: std::time::Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            Vec::new()
-        }
-
-        fn view(&self, _id: ViewId) -> Option<ViewRef> {
-            None
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            None
-        }
-    }
-
-    /// An app over a host that reports plain key presses.
-    fn app_of(platform: TargetPlatform) -> Rc<AppCell> {
-        app_of_host(platform, false)
-    }
-
-    /// An app over a host that turns editing keys into edits itself.
-    fn app_of_host_that_edits(platform: TargetPlatform) -> Rc<AppCell> {
-        app_of_host(platform, true)
-    }
-
-    fn app_of_host(platform: TargetPlatform, handles_text_editing_keys: bool) -> Rc<AppCell> {
-        AppCell::with_platform(Rc::new(PlatformOf {
-            target: platform,
-            handles_text_editing_keys,
-        }) as PlatformRef)
-    }
 
     /// How the copy shortcut of a platform's table is described.
     fn copy_shortcut(shortcuts: &ShortcutMap) -> String {
@@ -859,29 +819,23 @@ mod tests {
 
     #[test]
     fn an_apple_platform_hands_the_keys_it_handles_itself_back_to_the_ime() {
-        let mac_cell = app_of_host_that_edits(TargetPlatform::MacOS);
-        let mac = mac_cell.borrow();
-        let disabling = DefaultTextEditingShortcuts::get_disabling_shortcut(&mac)
+        let disabling = disabling_shortcuts_for(TargetPlatform::MacOS, true)
             .expect("macOS disables the shortcuts the platform handles");
         assert!(disabling.iter().all(|(_, intent)| {
             intent
                 .as_any()
                 .is::<DoNothingAndStopPropagationTextIntent>()
         }));
-        let linux_cell = app_of_host_that_edits(TargetPlatform::Linux);
-        let linux = linux_cell.borrow();
         assert!(
-            DefaultTextEditingShortcuts::get_disabling_shortcut(&linux).is_none(),
+            disabling_shortcuts_for(TargetPlatform::Linux, true).is_none(),
             "a non-Apple, non-web platform disables nothing"
         );
     }
 
     #[test]
     fn a_host_that_reports_plain_keys_keeps_every_editing_key() {
-        let mac_cell = app_of(TargetPlatform::MacOS);
-        let mac = mac_cell.borrow();
         assert!(
-            DefaultTextEditingShortcuts::get_disabling_shortcut(&mac).is_none(),
+            disabling_shortcuts_for(TargetPlatform::MacOS, false).is_none(),
             "nothing interprets those keys, so standing aside would leave them to nobody"
         );
     }

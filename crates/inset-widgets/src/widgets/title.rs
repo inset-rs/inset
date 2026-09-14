@@ -111,7 +111,9 @@ mod tests {
     use std::rc::Rc;
     use std::time::Instant;
 
-    use inset_embedder::{Platform, PlatformRef, TargetPlatform, ViewId, ViewRef};
+    use inset_embedder::{
+        Platform, PlatformRef, SystemChrome, SystemUiOverlayStyle, TargetPlatform, ViewId, ViewRef,
+    };
 
     use super::*;
     use crate::test_harness::Harness;
@@ -146,6 +148,14 @@ mod tests {
         fn implicit_view(&self) -> Option<ViewRef> {
             None
         }
+
+        fn system_chrome(&self) -> Option<&dyn SystemChrome> {
+            Some(self)
+        }
+    }
+
+    impl SystemChrome for RecordingPlatform {
+        fn set_overlay_style(&self, _style: &SystemUiOverlayStyle) {}
 
         fn set_application_switcher_description(
             &self,

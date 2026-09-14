@@ -2561,7 +2561,8 @@ pub(crate) mod tests {
     use std::time::Duration;
 
     use inset_embedder::{
-        Picture, Platform, PlatformRef, View as EmbedderView, ViewId, ViewMetrics, ViewRef,
+        Matrix4, Picture, Platform, PlatformRef, Rect, Size, TextEditingValue,
+        TextInputConfiguration, TextInputHost, View as EmbedderView, ViewId, ViewMetrics, ViewRef,
     };
     use inset_gestures::{PointerDownEvent, PointerEvent};
     use inset_scheduler::SchedulerBinding;
@@ -2572,7 +2573,28 @@ pub(crate) mod tests {
     use crate::framework::{IntoWidget, WidgetRef};
     use crate::widgets::basic::{Builder, SizedBox};
 
-    struct TestView;
+    /// A view whose text input answers whether its host edits keys itself.
+    struct TestView {
+        handles_editing_keys: bool,
+    }
+
+    impl TextInputHost for TestView {
+        fn start(&self, _configuration: &TextInputConfiguration) {}
+
+        fn stop(&self) {}
+
+        fn set_editing_state(&self, _value: &TextEditingValue) {}
+
+        fn set_composing_rect(&self, _rect: Rect) {}
+
+        fn set_caret_rect(&self, _rect: Rect) {}
+
+        fn set_client_geometry(&self, _size: Size, _transform: &Matrix4) {}
+
+        fn handles_editing_keys(&self) -> bool {
+            self.handles_editing_keys
+        }
+    }
 
     impl EmbedderView for TestView {
         fn id(&self) -> ViewId {
@@ -2589,20 +2611,20 @@ pub(crate) mod tests {
         }
 
         fn present(&self, _picture: std::sync::Arc<Picture>) {}
+
+        fn text_input(&self) -> Option<&dyn TextInputHost> {
+            Some(self)
+        }
     }
 
     struct TestPlatform {
         view: ViewRef,
-        handles_text_editing_keys: bool,
+        target: TargetPlatform,
     }
 
     impl Platform for TestPlatform {
         fn target_platform(&self) -> TargetPlatform {
-            TargetPlatform::MacOS
-        }
-
-        fn handles_text_editing_keys(&self) -> bool {
-            self.handles_text_editing_keys
+            self.target
         }
 
         fn request_frame(&self) {}
@@ -2630,19 +2652,26 @@ pub(crate) mod tests {
     ///
     /// Its host reports plain key presses, so a text field keeps its own key bindings.
     pub(crate) fn app_with_view() -> Rc<AppCell> {
-        app_with_view_of(false)
+        app_with_view_of_host(TargetPlatform::MacOS, false)
     }
 
     /// The same, over a host that turns editing keys into edits itself, as Flutter's macOS
     /// and iOS embedders do.
     pub(crate) fn app_with_view_whose_host_edits() -> Rc<AppCell> {
-        app_with_view_of(true)
+        app_with_view_of_host(TargetPlatform::MacOS, true)
     }
 
-    fn app_with_view_of(handles_text_editing_keys: bool) -> Rc<AppCell> {
+    /// An [`App`] with a single view on a host of `target`, whose text input edits keys
+    /// itself or not.
+    pub(crate) fn app_with_view_of_host(
+        target: TargetPlatform,
+        handles_editing_keys: bool,
+    ) -> Rc<AppCell> {
         let platform: PlatformRef = Rc::new(TestPlatform {
-            view: Rc::new(TestView),
-            handles_text_editing_keys,
+            view: Rc::new(TestView {
+                handles_editing_keys,
+            }),
+            target,
         });
         AppCell::with_platform(platform)
     }

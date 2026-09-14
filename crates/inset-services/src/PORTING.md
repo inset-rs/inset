@@ -65,7 +65,7 @@ Only the hardware keyboard, haptic feedback, mouse cursors, the mouse tracking a
 ## autofill.rs → autofill.dart
 
 - Change: `AutofillScope::attach` hands `TextInput::attach` the trigger's own configuration and does not wrap it to carry the group's other fields.
-  Reason: platform — Dart's wrapper exists only to add `fields` to the channel JSON, and `View::start_text_input` takes one configuration.
+  Reason: platform — Dart's wrapper exists only to add `fields` to the channel JSON, and `TextInputHost::start` takes one configuration.
   Affect: the host never learns the sibling fields of a group, so OS autofill fills the focused field alone.
 
 ## text_formatter.rs → text_formatter.dart
@@ -104,9 +104,9 @@ The key constants and the four tables are machine-written from the Dart, as Flut
 
 ## mouse_cursor.rs → mouse_cursor.dart
 
-- Change: a session's `activate` calls `Platform::activate_system_cursor` with a `SystemMouseCursorKind` and returns nothing.
+- Change: a session's `activate` calls the host's `MouseCursor` capability with a `SystemMouseCursorKind` and returns nothing.
   Reason: platform — the host trait is the channel; there is no channel reply to await and nothing needs the string encoding.
-  Affect: the cursor changes without waiting a frame, and a host that ignores the call leaves the cursor as it was.
+  Affect: the cursor changes without waiting a frame, and a host with no such capability leaves the cursor as it was.
 
 ## restoration.rs → restoration.dart
 
@@ -114,7 +114,7 @@ The key constants and the four tables are machine-written from the Dart, as Flut
   Reason: language — Rust has no `Object?`, so the enum is the only thing a bucket can hold.
   Affect: a value Dart would reject at run time cannot be written at all, and `read` answers data the caller narrows with `as_int` and friends.
 
-- Change: restoration reaches the host through `Platform::restoration_get` and `restoration_put`, passing a `RestorationMap` rather than an encoded byte buffer.
+- Change: restoration reaches the host through its `Restoration` capability, passing a `RestorationMap` rather than an encoded byte buffer.
   Reason: platform — the host trait is the channel and nothing on it needs an encoding.
   Affect: a host stores the map as it stands, and pushes data that arrives later by calling `RestorationManager::handle_restoration_update_from_engine` itself.
 
@@ -128,17 +128,17 @@ The key constants and the four tables are machine-written from the Dart, as Flut
 
 - Change: `RestorationBucket::root` takes the raw map by value and the hierarchy owns it from then on.
   Reason: language — a Rust value has one owner, so the caller cannot keep watching the map it handed over.
-  Affect: a child bucket's writes are no longer visible through the caller's map; read the data back through the buckets or from what `restoration_put` receives.
+  Affect: a child bucket's writes are no longer visible through the caller's map; read the data back through the buckets or from what `Restoration::put` receives.
 
 ## system_chrome.rs → system_chrome.dart
 
-- Change: `set_application_switcher_description` and `set_system_ui_overlay_style` are `Platform` calls that complete in place and cannot fail.
+- Change: the switcher description and the overlay style are calls on the host's `SystemChrome` capability that complete in place and cannot fail.
   Reason: platform — the host trait is the channel; there is no `Future` and no channel error.
   Affect: `Title` and `CupertinoApp` apply them mid-build, and the failure Dart's `onError` handler reports cannot happen.
 
 ## haptic_feedback.rs → haptic_feedback.dart
 
-- Change: each `HapticFeedback` member calls `Platform::haptic_feedback` with a `HapticFeedbackType`, and the argument-less `vibrate` passes the `Vibrate` kind.
+- Change: each `HapticFeedback` member calls the host's `Haptics` capability with a `HapticFeedbackType`, and the argument-less `vibrate` passes the `Vibrate` kind.
   Reason: platform — the host trait is the channel, so Dart's `'HapticFeedbackType.xxx'` strings are the enum's variants.
   Affect: a host without a vibrator, which is every desktop one, drops the call.
 

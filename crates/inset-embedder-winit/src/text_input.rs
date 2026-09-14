@@ -9,7 +9,7 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 use crate::keys;
 
-/// The text input a view opened with `start_text_input`, kept until `stop_text_input`.
+/// The text input a view opened with `TextInputHost::start`, kept until `TextInputHost::stop`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ActiveTextInput {
     multiline: bool,

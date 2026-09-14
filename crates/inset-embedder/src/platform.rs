@@ -428,6 +428,73 @@ pub trait Platform: Any {
     /// default would let one silently claim the wrong conventions.
     fn target_platform(&self) -> TargetPlatform;
 
+    /// Requests one isolate frame at the host's next appropriate opportunity.
+    fn request_frame(&self);
+
+    /// The host clock used for frame and timer timestamps.
+    fn now(&self) -> Instant;
+
+    /// Asks the host to wake the application at `deadline`.
+    fn wake_at(&self, deadline: Instant);
+
+    /// Current host-provided views.
+    fn views(&self) -> Vec<ViewRef>;
+
+    /// Looks up a current host-provided view.
+    fn view(&self, id: ViewId) -> Option<ViewRef>;
+
+    /// The stable implicit view, when this embedding provides one.
+    fn implicit_view(&self) -> Option<ViewRef>;
+
+    /// Flutter `PlatformDispatcher.requestViewFocusChange`: asks the host to move view focus.
+    /// A host without native focus support ignores the request.
+    fn request_view_focus_change(
+        &self,
+        view_id: ViewId,
+        state: ViewFocusState,
+        direction: ViewFocusDirection,
+    ) {
+        let _ = (view_id, state, direction);
+    }
+
+    /// The full system-reported supported locales of the device (Flutter
+    /// `PlatformDispatcher.locales`), in order of preference; empty until the host
+    /// reports them.
+    fn locales(&self) -> Vec<crate::Locale> {
+        Vec::new()
+    }
+
+    /// Tells the host which locale the application resolved to (Flutter
+    /// `PlatformDispatcher.setApplicationLocale`); the default drops it.
+    fn set_application_locale(&self, locale: &crate::Locale) {
+        let _ = locale;
+    }
+
+    /// The platform's light/dark preference (Flutter
+    /// `PlatformDispatcher.platformBrightness`).
+    ///
+    /// Defaults to [`Brightness::Light`], matching Flutter's view configuration
+    /// default. A live host that can see the OS theme overrides this.
+    fn platform_brightness(&self) -> Brightness {
+        Brightness::Light
+    }
+
+    /// The route the application was started with (Flutter
+    /// `PlatformDispatcher.defaultRouteName`).
+    ///
+    /// Defaults to `"/"`, Flutter's value for a host that was not asked to open a
+    /// particular route; a host that receives a deep link answers it here.
+    fn default_route_name(&self) -> String {
+        String::from("/")
+    }
+
+    /// The platform's own font lookup: faces by family name and by codepoint, the way
+    /// Flutter's engine asks the OS. `None` for a host without one; text then shapes only
+    /// against fonts the application registers.
+    fn font_source(&self) -> Option<Box<dyn FontSource>> {
+        None
+    }
+
     /// Open an encoded image, answering with a codec for its frames.
     ///
     /// Flutter dart:ui `instantiateImageCodec`. The host decodes with whatever its platform
@@ -447,212 +514,50 @@ pub trait Platform: Any {
         None
     }
 
-    /// Whether the host's own text input turns editing keys into edits before the framework
-    /// sees them — backspace and delete, caret movement, the line and document ends.
-    ///
-    /// Flutter has no such question because each of its embedders is written for one host:
-    /// its macOS and iOS embedders do interpret those keys, and its text field bindings for
-    /// those platforms step aside so a key is not acted on twice.
-    ///
-    /// Defaults to false, which is what a host built on a windowing library that reports
-    /// plain key presses should answer, whichever platform it runs on. A host that hands the
-    /// framework the operating system's own editing commands answers true, and the field
-    /// then leaves those keys to it.
-    fn handles_text_editing_keys(&self) -> bool {
-        false
-    }
-
-    /// The full system-reported supported locales of the device (Flutter
-    /// `PlatformDispatcher.locales`), in order of preference; empty until the host
-    /// reports them.
-    fn locales(&self) -> Vec<crate::Locale> {
-        Vec::new()
-    }
-
-    /// Tells the host which locale the application resolved to (Flutter
-    /// `PlatformDispatcher.setApplicationLocale`); the default drops it.
-    fn set_application_locale(&self, locale: &crate::Locale) {
-        let _ = locale;
-    }
-
-    /// The route the application was started with (Flutter
-    /// `PlatformDispatcher.defaultRouteName`).
-    ///
-    /// Defaults to `"/"`, Flutter's value for a host that was not asked to open a
-    /// particular route; a host that receives a deep link answers it here.
-    fn default_route_name(&self) -> String {
-        String::from("/")
-    }
-
-    /// Describes the app in the host's application switcher (Flutter
-    /// `SystemChrome.setApplicationSwitcherDescription`); the default drops it.
-    fn set_application_switcher_description(&self, description: &ApplicationSwitcherDescription) {
-        let _ = description;
-    }
-
-    /// Styles the system overlays the host draws over the app — the status bar, and on
-    /// Android the system navigation bar (Flutter
-    /// `SystemChrome.setSystemUIOverlayStyle`); the default drops it.
-    fn set_system_ui_overlay_style(&self, style: &SystemUiOverlayStyle) {
-        let _ = style;
-    }
-
-    /// Plays haptic feedback on the device (Flutter's `HapticFeedback.vibrate`
-    /// message on `SystemChannels.platform`); the default drops it.
-    fn haptic_feedback(&self, kind: HapticFeedbackType) {
-        let _ = kind;
-    }
-
-    /// Stores plain text on the system clipboard (Flutter's `Clipboard.setData`
-    /// message on `SystemChannels.platform`); the default drops it.
-    fn clipboard_set_data(&self, text: &str) {
-        let _ = text;
-    }
-
-    /// Retrieves plain text from the system clipboard (Flutter's `Clipboard.getData`);
-    /// the default answers [`None`].
-    fn clipboard_get_data(&self) -> Option<String> {
-        None
-    }
-
-    /// Whether the clipboard contains string data (Flutter's `Clipboard.hasStrings`);
-    /// the default answers `false`.
-    fn clipboard_has_strings(&self) -> bool {
-        false
-    }
-
-    /// Whether this host can show a system-rendered context menu (Flutter
-    /// `PlatformDispatcher.supportsShowingSystemContextMenu`).
-    ///
-    /// Defaults to `false`. A host that can show one (iOS 16+ `UIEditMenuInteraction`)
-    /// answers `true`.
-    fn supports_showing_system_context_menu(&self) -> bool {
-        false
-    }
-
-    /// Shows the system context menu (Flutter's `ContextMenu.showSystemContextMenu`).
-    ///
-    /// `items` is `None` for the deprecated call that lets the platform pick default
-    /// buttons. Defaults to dropping it. Built-in items are performed by the host;
-    /// custom items are reported through [`crate::EmbedderClient::custom_context_menu_action`].
-    fn show_system_context_menu(&self, target_rect: Rect, items: Option<&[SystemContextMenuItem]>) {
-        let _ = (target_rect, items);
-    }
-
-    /// Hides the system context menu (Flutter's `ContextMenu.hideSystemContextMenu`).
-    ///
-    /// Defaults to dropping it.
-    fn hide_system_context_menu(&self) {}
-
-    /// Shows `entries` as the platform's own popup menu at the pointer and waits for it to
-    /// close; answers the index of the entry chosen. Not a Flutter call: Flutter's context
-    /// menus draw inside the view, and a desktop panel narrower than its menu needs the
-    /// system's, which is its own window.
-    ///
-    /// The host runs the menu's event loop inside this call, so nothing else of the app runs
-    /// meanwhile and a native callback that arrives then must post, not borrow. Defaults to
-    /// `None`, for a host with no menus.
-    fn show_popup_menu(&self, entries: &[PopupMenuEntry]) -> Option<usize> {
-        let _ = entries;
-        None
-    }
-
-    /// Looks up the given text (Flutter's `LookUp.invoke`).
-    ///
-    /// Defaults to dropping it.
-    fn look_up(&self, text: &str) {
-        let _ = text;
-    }
-
-    /// Searches the web for the given text (Flutter's `SearchWeb.invoke`).
-    ///
-    /// Defaults to dropping it.
-    fn search_web(&self, text: &str) {
-        let _ = text;
-    }
-
-    /// Shares the given text (Flutter's `Share.invoke`).
-    ///
-    /// Defaults to dropping it.
-    fn share(&self, text: &str) {
-        let _ = text;
-    }
-
-    /// The platform's light/dark preference (Flutter
-    /// `PlatformDispatcher.platformBrightness`).
-    ///
-    /// Defaults to [`Brightness::Light`], matching Flutter's view configuration
-    /// default. A live host that can see the OS theme overrides this.
-    fn platform_brightness(&self) -> Brightness {
-        Brightness::Light
-    }
-
-    /// Requests one isolate frame at the host's next appropriate opportunity.
-    fn request_frame(&self);
-
-    /// The host clock used for frame and timer timestamps.
-    fn now(&self) -> Instant;
-
-    /// Asks the host to wake the application at `deadline`.
-    fn wake_at(&self, deadline: Instant);
-
-    /// Current host-provided views.
-    fn views(&self) -> Vec<ViewRef>;
-
-    /// Looks up a current host-provided view.
-    fn view(&self, id: ViewId) -> Option<ViewRef>;
-
-    /// Flutter `PlatformDispatcher.requestViewFocusChange`: asks the host to move view focus.
-    /// A host without native focus support ignores the request.
-    fn request_view_focus_change(
-        &self,
-        view_id: ViewId,
-        state: ViewFocusState,
-        direction: ViewFocusDirection,
-    ) {
-        let _ = (view_id, state, direction);
-    }
-
-    /// The stable implicit view, when this embedding provides one.
-    fn implicit_view(&self) -> Option<ViewRef>;
-
     /// The host's window maker, for an app that opens windows of its own. `None`, the
     /// default, where the implicit view is the only one there can be: mobile and the web.
     fn windowing_owner(&self) -> Option<Rc<dyn crate::WindowingOwner>> {
         None
     }
 
-    /// The platform's own font lookup: faces by family name and by codepoint, the way
-    /// Flutter's engine asks the OS. `None` for a host without one; text then shapes only
-    /// against fonts the application registers.
-    fn font_source(&self) -> Option<Box<dyn FontSource>> {
+    /// The system clipboard, or `None` where the host has none.
+    fn clipboard(&self) -> Option<&dyn Clipboard> {
         None
     }
 
-    /// Shows a system cursor for a pointing device (Flutter's `activateSystemCursor`
-    /// message on `SystemChannels.mouseCursor`).
-    ///
-    /// Defaults to nothing: a host without a system cursor ignores the request.
-    fn activate_system_cursor(&self, device: i64, kind: SystemMouseCursorKind) {
-        let _ = (device, kind);
-    }
-
-    /// The restoration data the host kept for this application (the `get` message of
-    /// Flutter's `SystemChannels.restoration`).
-    ///
-    /// Defaults to `None`, Dart's null reply: a host that cannot store restoration data
-    /// leaves state restoration turned off.
-    fn restoration_get(&self) -> Option<RestorationUpdate> {
+    /// The system UI drawn around the app, or `None` where the host has none.
+    fn system_chrome(&self) -> Option<&dyn SystemChrome> {
         None
     }
 
-    /// Hands the host the current restoration data (the `put` message of Flutter's
-    /// `SystemChannels.restoration`), which keeps it until the operating system asks for
-    /// it.
-    ///
-    /// Defaults to dropping it: a host without state restoration has nowhere to put it.
-    fn restoration_put(&self, data: RestorationMap) {
-        let _ = data;
+    /// Haptic feedback on the device, or `None` where the host has none.
+    fn haptics(&self) -> Option<&dyn Haptics> {
+        None
+    }
+
+    /// The system's own menu over a text selection, or `None` where the host has none.
+    fn system_context_menu(&self) -> Option<&dyn SystemContextMenu> {
+        None
+    }
+
+    /// Native pop-up menus shown at the pointer, or `None` where the host has none.
+    fn popup_menus(&self) -> Option<&dyn PopupMenus> {
+        None
+    }
+
+    /// The system services a selection toolbar offers, or `None` where the host has none.
+    fn text_services(&self) -> Option<&dyn TextServices> {
+        None
+    }
+
+    /// The system cursor shown for a pointing device, or `None` where the host has none.
+    fn mouse_cursor(&self) -> Option<&dyn MouseCursor> {
+        None
+    }
+
+    /// Application state kept across relaunches, or `None` where the host has none.
+    fn restoration(&self) -> Option<&dyn Restoration> {
+        None
     }
 }
 
@@ -661,6 +566,92 @@ impl dyn Platform {
     pub fn downcast_ref<T: Platform>(&self) -> Option<&T> {
         (self as &dyn Any).downcast_ref::<T>()
     }
+}
+
+/// The system clipboard: Flutter's `Clipboard` over the platform channel.
+pub trait Clipboard {
+    /// Stores plain text on the system clipboard (Flutter's `Clipboard.setData`).
+    fn set_text(&self, text: &str);
+
+    /// Retrieves plain text from the system clipboard (Flutter's `Clipboard.getData`).
+    fn text(&self) -> Option<String>;
+
+    /// Whether the clipboard contains string data (Flutter's `Clipboard.hasStrings`).
+    fn has_strings(&self) -> bool;
+}
+
+/// Flutter's `SystemChrome`: the system UI around the app.
+pub trait SystemChrome {
+    /// Styles the system overlays the host draws over the app — the status bar, and on
+    /// Android the system navigation bar (Flutter `SystemChrome.setSystemUIOverlayStyle`).
+    fn set_overlay_style(&self, style: &SystemUiOverlayStyle);
+
+    /// Describes the app in the host's application switcher (Flutter
+    /// `SystemChrome.setApplicationSwitcherDescription`).
+    fn set_application_switcher_description(&self, description: &ApplicationSwitcherDescription);
+}
+
+/// Flutter's `HapticFeedback`.
+pub trait Haptics {
+    /// Plays haptic feedback on the device (Flutter's `HapticFeedback.vibrate`
+    /// message on `SystemChannels.platform`).
+    fn feedback(&self, kind: HapticFeedbackType);
+}
+
+/// Flutter's `SystemContextMenu`: the system's own menu over a text selection.
+pub trait SystemContextMenu {
+    /// Shows the system context menu (Flutter's `ContextMenu.showSystemContextMenu`).
+    ///
+    /// `items` is `None` for the deprecated call that lets the platform pick default
+    /// buttons. Built-in items are performed by the host; custom items are reported
+    /// through [`crate::EmbedderClient::custom_context_menu_action`].
+    fn show(&self, target_rect: Rect, items: Option<&[SystemContextMenuItem]>);
+
+    /// Hides the system context menu (Flutter's `ContextMenu.hideSystemContextMenu`).
+    fn hide(&self);
+}
+
+/// A native pop-up menu shown at the pointer, answered with the index chosen.
+pub trait PopupMenus {
+    /// Shows `entries` as the platform's own popup menu at the pointer and waits for it to
+    /// close; answers the index of the entry chosen. Not a Flutter call: Flutter's context
+    /// menus draw inside the view, and a desktop panel narrower than its menu needs the
+    /// system's, which is its own window.
+    ///
+    /// The host runs the menu's event loop inside this call, so nothing else of the app runs
+    /// meanwhile and a native callback that arrives then must post, not borrow.
+    fn show(&self, entries: &[PopupMenuEntry]) -> Option<usize>;
+}
+
+/// The text services a selection toolbar offers: Flutter's LookUp, SearchWeb and Share
+/// platform-channel calls.
+pub trait TextServices {
+    /// Looks up the given text (Flutter's `LookUp.invoke`).
+    fn look_up(&self, text: &str);
+
+    /// Searches the web for the given text (Flutter's `SearchWeb.invoke`).
+    fn search_web(&self, text: &str);
+
+    /// Shares the given text (Flutter's `Share.invoke`).
+    fn share(&self, text: &str);
+}
+
+/// Flutter's mouse cursor channel.
+pub trait MouseCursor {
+    /// Shows a system cursor for a pointing device (Flutter's `activateSystemCursor`
+    /// message on `SystemChannels.mouseCursor`).
+    fn activate_system_cursor(&self, device: i64, kind: SystemMouseCursorKind);
+}
+
+/// Flutter's restoration channel: state kept across relaunches.
+pub trait Restoration {
+    /// The restoration data the host kept for this application (the `get` message of
+    /// Flutter's `SystemChannels.restoration`).
+    fn get(&self) -> Option<RestorationUpdate>;
+
+    /// Hands the host the current restoration data (the `put` message of Flutter's
+    /// `SystemChannels.restoration`), which keeps it until the operating system asks for it.
+    fn put(&self, data: RestorationMap);
 }
 
 /// Platform for hand-pumped tests.

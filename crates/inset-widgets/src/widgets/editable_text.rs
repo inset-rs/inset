@@ -2052,7 +2052,9 @@ impl EditableTextState {
         if text.is_empty() {
             return;
         }
-        app.platform().look_up(text);
+        if let Some(services) = app.platform().text_services() {
+            services.look_up(text);
+        }
     }
 
     /// Launch a web search on the current selection.
@@ -2067,8 +2069,10 @@ impl EditableTextState {
         }
         let value = self.value(app);
         let text = value.selection.range().text_inside(&value.text);
-        if !text.is_empty() {
-            app.platform().search_web(text);
+        if !text.is_empty()
+            && let Some(services) = app.platform().text_services()
+        {
+            services.search_web(text);
         }
     }
 
@@ -2080,8 +2084,10 @@ impl EditableTextState {
         }
         let value = self.value(app);
         let text = value.selection.range().text_inside(&value.text);
-        if !text.is_empty() {
-            app.platform().share(text);
+        if !text.is_empty()
+            && let Some(services) = app.platform().text_services()
+        {
+            services.share(text);
         }
     }
 

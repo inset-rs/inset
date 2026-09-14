@@ -36,8 +36,11 @@ impl Clipboard {
 
     /// Stores the given clipboard data on the clipboard.
     pub fn set_data(app: &App, data: ClipboardData) {
-        if let Some(text) = data.text.as_deref() {
-            app.platform().clipboard_set_data(text);
+        let Some(text) = data.text.as_deref() else {
+            return;
+        };
+        if let Some(clipboard) = app.platform().clipboard() {
+            clipboard.set_text(text);
         }
     }
 
@@ -51,11 +54,16 @@ impl Clipboard {
         if format != Self::K_TEXT_PLAIN {
             return None;
         }
-        app.platform().clipboard_get_data().map(ClipboardData::new)
+        app.platform()
+            .clipboard()
+            .and_then(|clipboard| clipboard.text())
+            .map(ClipboardData::new)
     }
 
     /// Returns true if (and only if) the clipboard contains string data.
     pub fn has_strings(app: &App) -> bool {
-        app.platform().clipboard_has_strings()
+        app.platform()
+            .clipboard()
+            .is_some_and(|clipboard| clipboard.has_strings())
     }
 }

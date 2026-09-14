@@ -19,8 +19,6 @@ pub(crate) fn extend_attributes(
 
 pub(crate) fn configure(_window: &Window, _config: &WindowConfig) {}
 
-pub(crate) fn prepare_surface(_surface: &mut valo::Surface) {}
-
 /// The system cannot be asked which mouse buttons are down.
 pub(crate) fn pressed_buttons() -> Option<i64> {
     None
@@ -32,6 +30,10 @@ pub(crate) fn pointer_position(_window: &Window) -> Option<[f64; 2]> {
 }
 
 /// The system animates no frames; the caller sets the frame at once.
+pub(crate) fn set_frame(_window: &Window, _frame: Rect) -> bool {
+    false
+}
+
 pub(crate) fn animate_frame(_window: &Window, _frame: Rect, _duration: Duration) -> bool {
     false
 }

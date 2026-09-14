@@ -1617,7 +1617,9 @@ mod tests {
     use std::cell::RefCell;
     use std::time::{Duration, Instant};
 
-    use inset_embedder::{InertPlatform, Platform, PlatformRef, TargetPlatform, ViewId, ViewRef};
+    use inset_embedder::{
+        InertPlatform, Platform, PlatformRef, Restoration, TargetPlatform, ViewId, ViewRef,
+    };
     use inset_scheduler::SchedulerBinding;
     use inset_services::{RestorationMap, RestorationUpdate};
 
@@ -1626,8 +1628,8 @@ mod tests {
     use crate::test_harness::Harness;
     use crate::widgets::restoration_properties::{RestorableInt, RestorableValue};
 
-    /// A host that answers `restoration_get` with what it was handed and records every
-    /// `restoration_put`.
+    /// A host that answers `Restoration::get` with what it was handed and records every
+    /// `Restoration::put`.
     #[derive(Default)]
     struct RecordingPlatform {
         stored: RefCell<Option<RestorationUpdate>>,
@@ -1659,11 +1661,17 @@ mod tests {
             None
         }
 
-        fn restoration_get(&self) -> Option<RestorationUpdate> {
+        fn restoration(&self) -> Option<&dyn Restoration> {
+            Some(self)
+        }
+    }
+
+    impl Restoration for RecordingPlatform {
+        fn get(&self) -> Option<RestorationUpdate> {
             self.stored.borrow().clone()
         }
 
-        fn restoration_put(&self, data: RestorationMap) {
+        fn put(&self, data: RestorationMap) {
             self.puts.borrow_mut().push(data);
         }
     }

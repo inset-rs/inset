@@ -47,9 +47,10 @@ pub use mouse_cursor::SystemMouseCursorKind;
 pub use painting::*;
 pub use paragraph::*;
 pub use platform::{
-    AppExitResponse, AppLifecycleState, ApplicationSwitcherDescription, Brightness, Frame,
-    HapticFeedbackType, InertPlatform, Platform, PlatformRef, PopupMenuEntry, SystemUiOverlayStyle,
-    TargetPlatform, ViewRef,
+    AppExitResponse, AppLifecycleState, ApplicationSwitcherDescription, Brightness, Clipboard,
+    Frame, HapticFeedbackType, Haptics, InertPlatform, MouseCursor, Platform, PlatformRef,
+    PopupMenuEntry, PopupMenus, Restoration, SystemChrome, SystemContextMenu, SystemUiOverlayStyle,
+    TargetPlatform, TextServices, ViewRef,
 };
 pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
@@ -61,8 +62,8 @@ pub use text::*;
 pub use text_editing::*;
 pub use text_input::*;
 pub use views::{
-    GestureSettings, View, ViewConstraints, ViewFocusDirection, ViewFocusEvent, ViewFocusState,
-    ViewId, ViewMetrics, ViewPadding,
+    GestureSettings, TextInputHost, View, ViewConstraints, ViewFocusDirection, ViewFocusEvent,
+    ViewFocusState, ViewId, ViewMetrics, ViewPadding,
 };
 pub use web_time::Instant;
 pub use window::{

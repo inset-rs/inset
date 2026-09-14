@@ -54,7 +54,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the common configuration and the raw handle cover what a Rust app configures itself, as winit and wgpu expose theirs, and adoption is Flutter's own macOS shape, where the app's window hosts the view.
   Affect: an app names its windows' properties directly rather than choosing an archetype; a property the config lacks is set through the native handle; hosts without windows answer no owner and the implicit view stays the only one.
 
-- Change: `Platform::show_popup_menu` shows the host's own popup menu at the pointer and answers the chosen entry; Flutter has no such call, only in-view context menus and the macOS menu bar.
+- Change: a host's `PopupMenus` capability shows the host's own popup menu at the pointer and answers the chosen entry; Flutter has no such call, only in-view context menus and the macOS menu bar.
   Reason: platform — a desktop window narrower than its menu, such as a panel at a screen's edge, cannot hold a menu drawn inside its view.
   Affect: a menu shown this way is the system's, drawn outside the window and styled by the OS; the app waits inside the call while it is open, and hosts without menus answer `None`.
 
@@ -62,9 +62,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the host-supplied `Platform` is the only source of truth.
   Affect: changing the target platform means swapping the host's `Platform`, and two Apps can disagree at once.
 
-- Change: the system channels and dispatcher fields that reach the host are typed methods on `Platform`, each defaulted to do nothing or to answer a neutral value.
+- Change: the system channels that reach the host are capability traits a `Platform` hands out, and a host that has none of one answers `None`.
   Reason: platform — there are no method channels; the host trait is the channel, so payloads cross as values rather than Dart's `_toMap` encodings.
-  Affect: a capability a host does not override stays inert — restoration off, the initial route `/`, no locales, an empty clipboard, no system context menu — instead of failing on a missing channel.
+  Affect: a caller sees an unsupported capability as a `None` it can act on, where Dart's missing-channel failure and a defaulted method are both invisible to it.
 
 - Change: `Platform` asks the host whether its own text input turns editing keys into edits — backspace, delete, caret movement — and the default answer is no.
   Reason: platform — Flutter writes one embedder per host and settles this per target platform, where one framework here meets hosts that differ on the same platform.
@@ -93,9 +93,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the host paints a valo display list, not an engine `Scene`, and keeps it: a window seen again is repainted from it without a frame, and a picture equal to the last, which valo can tell from its retained nested lists, is not drawn again.
   Affect: what reaches the host is a recorded display list it replays itself and may hold past the call; a frame whose windows all show what they showed before draws nothing.
 
-- Change: text input is methods on `View` (start and stop, editing state, composing and caret rects, client geometry), each defaulted to do nothing.
+- Change: text input is a capability a `View` hands out, and a view with no IME behind it answers `None`.
   Reason: platform — there are no method channels; the host trait is the channel.
-  Affect: on a host that does not implement them, a focused field still edits from key events but no IME opens and no composing or caret rect reaches the platform.
+  Affect: a caller sees the absent IME as a `None` it can act on, where a focused field still edits from key events but nothing composing reaches the platform.
 
 ## client.rs → dart:ui `hooks.dart`
 

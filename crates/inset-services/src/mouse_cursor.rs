@@ -332,7 +332,9 @@ impl MouseCursorSession for SystemMouseCursorSession {
     }
 
     fn activate(&mut self, platform: &dyn Platform) {
-        platform.activate_system_cursor(self.device, self.cursor.kind());
+        if let Some(cursor) = platform.mouse_cursor() {
+            cursor.activate_system_cursor(self.device, self.cursor.kind());
+        }
     }
 
     fn dispose(&mut self) {
@@ -666,7 +668,7 @@ impl SystemMouseCursors {
 mod tests {
     use std::cell::RefCell;
 
-    use inset_embedder::InertPlatform;
+    use inset_embedder::{InertPlatform, MouseCursor as MouseCursorHost};
     use inset_gestures::{PointerHoverEvent, PointerRemovedEvent};
 
     use super::*;
@@ -701,6 +703,12 @@ mod tests {
             None
         }
 
+        fn mouse_cursor(&self) -> Option<&dyn MouseCursorHost> {
+            Some(self)
+        }
+    }
+
+    impl MouseCursorHost for RecordingPlatform {
         fn activate_system_cursor(&self, device: i64, kind: SystemMouseCursorKind) {
             self.activated.borrow_mut().push((device, kind));
         }

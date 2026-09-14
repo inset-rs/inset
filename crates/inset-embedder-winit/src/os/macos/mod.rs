@@ -31,7 +31,8 @@ pub(crate) use menu::popup_menu;
 pub(crate) use vsync::Vsync;
 
 /// AppKit commits window geometry before winit's next redraw, so a resize presents the
-/// new layout before it returns.
+/// new layout before it returns, through the window's own transaction so the frame and
+/// the geometry it was laid out for are committed together.
 pub(crate) const FRAME_ON_RESIZE: bool = true;
 
 fn ns_view(window: &Window) -> Option<Retained<NSView>> {
@@ -104,12 +105,6 @@ pub(crate) fn pressed_buttons() -> Option<i64> {
     Some(NSEvent::pressedMouseButtons() as i64)
 }
 
-/// Presents through Core Animation transactions, so a frame and the window geometry it
-/// was laid out for are committed together.
-pub(crate) fn prepare_surface(surface: &mut valo::Surface) {
-    surface.set_presents_with_transaction(true);
-}
-
 /// Has AppKit report the pointer's moves to the view whether or not its window is key.
 ///
 /// winit tracks the mouse with a tracking rect, which reports entry and exit alone, and
@@ -173,23 +168,25 @@ fn background_view(
 /// Moves and sizes the window over `duration` with AppKit's own animation, easing in and
 /// out, as a window a person drags settles. `false` when the window cannot be reached, so
 /// the caller sets the frame at once instead.
-pub(crate) fn animate_frame(window: &Window, frame: Rect, duration: Duration) -> bool {
-    let Some(mtm) = MainThreadMarker::new() else {
-        return false;
-    };
+/// Puts `window` at `frame` in one step, position and size together.
+pub(crate) fn set_frame(window: &Window, frame: Rect) -> bool {
     let Some(ns_window) = ns_window(window) else {
         return false;
     };
-    let Some(primary) = NSScreen::screens(mtm).firstObject() else {
+    let Some(rect) = appkit_rect(frame) else {
         return false;
     };
-    // AppKit measures from the bottom left of the primary screen; the frame comes in
-    // winit's top-left points.
-    let screen_height = primary.frame().size.height;
-    let rect = NSRect::new(
-        NSPoint::new(frame.left, screen_height - frame.top - frame.height()),
-        NSSize::new(frame.width(), frame.height()),
-    );
+    ns_window.setFrame_display(rect, true);
+    true
+}
+
+pub(crate) fn animate_frame(window: &Window, frame: Rect, duration: Duration) -> bool {
+    let Some(ns_window) = ns_window(window) else {
+        return false;
+    };
+    let Some(rect) = appkit_rect(frame) else {
+        return false;
+    };
     NSAnimationContext::beginGrouping();
     let context = NSAnimationContext::currentContext();
     context.setDuration(duration.as_secs_f64());
@@ -200,4 +197,16 @@ pub(crate) fn animate_frame(window: &Window, frame: Rect, duration: Duration) ->
     ns_window.animator().setFrame_display(rect, true);
     NSAnimationContext::endGrouping();
     true
+}
+
+/// `frame`, given in winit's top-left points, as AppKit measures it: from the bottom left
+/// of the primary screen.
+fn appkit_rect(frame: Rect) -> Option<NSRect> {
+    let mtm = MainThreadMarker::new()?;
+    let primary = NSScreen::screens(mtm).firstObject()?;
+    let screen_height = primary.frame().size.height;
+    Some(NSRect::new(
+        NSPoint::new(frame.left, screen_height - frame.top - frame.height()),
+        NSSize::new(frame.width(), frame.height()),
+    ))
 }

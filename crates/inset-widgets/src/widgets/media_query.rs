@@ -594,7 +594,7 @@ impl MediaQueryData {
                 .map_or(NavigationMode::Traditional, |data| data.navigation_mode),
             gesture_settings: DeviceGestureSettings::from_view(view),
             supports_showing_system_context_menu: platform_data.map_or_else(
-                || app.platform().supports_showing_system_context_menu(),
+                || app.platform().system_context_menu().is_some(),
                 |data| data.supports_showing_system_context_menu,
             ),
             line_height_scale_factor_override: platform_data
