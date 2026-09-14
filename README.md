@@ -4,27 +4,11 @@ Inset is a UI framework for writing solid, fluent cross-platform apps.
 
 Inset is a full-stack Rust framework. Everything from app logic down to the render engine, [valo](https://github.com/seedeai/valo), is written in Rust and works like a normal Rust package.
 
-The framework layer is a faithful port of [Flutter](https://github.com/flutter/flutter). Everything the framework needs from the platform sits behind a cleanly defined interface, which makes porting to a new platform really easy.
+The framework layer is a port of [Flutter](https://github.com/flutter/flutter). Everything the framework needs from the platform sits behind a clear interface, which makes porting to a new platform easy.
 
 The project is in alpha, while is ready to build apps on. Inset currently has two widget libraries ready to use:
 - Cupertino: for mobile apps
-- WinUI: for desktop and web apps
-
-## Try it
-
-Inset **requires nightly Rust**: a widget's `State` takes `self: Handle<Self>`, so an app with one starts with `#![feature(arbitrary_self_types)]`. To install run:
-
-```sh
-rustup install nightly
-```
-
-Then clone the repository and run the gallery app:
-
-```sh
-cargo run -p cupertino-gallery
-```
-
-> Inset also runs in the browser. Try it at https://cupertino.inset.rs.
+- [WinUI](https://github.com/inset-rs/inset-winui): for desktop and web apps
 
 ## Start an app
 
