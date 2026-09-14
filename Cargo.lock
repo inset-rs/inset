@@ -962,7 +962,7 @@ dependencies = [
 
 [[package]]
 name = "cupertino-gallery"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "indexmap",
  "inset",
@@ -1853,7 +1853,7 @@ dependencies = [
 
 [[package]]
 name = "inset"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "inset-embedder",
  "inset-embedder-default",
@@ -1868,7 +1868,7 @@ dependencies = [
 
 [[package]]
 name = "inset-animation"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "inset-embedder",
  "inset-foundation",
@@ -1878,7 +1878,7 @@ dependencies = [
 
 [[package]]
 name = "inset-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "brotli",
@@ -1897,7 +1897,7 @@ dependencies = [
 
 [[package]]
 name = "inset-cupertino"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "indexmap",
  "inset-animation",
@@ -1915,7 +1915,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "indexmap",
  "pollster",
@@ -1929,7 +1929,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder-default"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "inset-embedder",
  "inset-embedder-web",
@@ -1938,7 +1938,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder-web"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.3.4",
@@ -1954,7 +1954,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder-winit"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arboard",
  "inset-embedder",
@@ -1973,7 +1973,7 @@ dependencies = [
 
 [[package]]
 name = "inset-foundation"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-task",
  "indexmap",
@@ -1983,7 +1983,7 @@ dependencies = [
 
 [[package]]
 name = "inset-gestures"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "indexmap",
  "inset-embedder",
@@ -1994,7 +1994,7 @@ dependencies = [
 
 [[package]]
 name = "inset-macros"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2003,7 +2003,7 @@ dependencies = [
 
 [[package]]
 name = "inset-painting"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "indexmap",
  "inset-embedder",
@@ -2014,14 +2014,14 @@ dependencies = [
 
 [[package]]
 name = "inset-physics"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "inset-embedder",
 ]
 
 [[package]]
 name = "inset-rendering"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "indexmap",
  "inset-animation",
@@ -2038,7 +2038,7 @@ dependencies = [
 
 [[package]]
 name = "inset-scheduler"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "indexmap",
  "inset-embedder",
@@ -2047,7 +2047,7 @@ dependencies = [
 
 [[package]]
 name = "inset-services"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "indexmap",
  "inset-embedder",
@@ -2059,7 +2059,7 @@ dependencies = [
 
 [[package]]
 name = "inset-shell"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "inset-embedder",
  "inset-foundation",
@@ -2072,7 +2072,7 @@ dependencies = [
 
 [[package]]
 name = "inset-widgets"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "indexmap",
  "inset-animation",
@@ -2217,7 +2217,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "layout"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "inset-embedder",
  "inset-foundation",
@@ -3086,7 +3086,7 @@ dependencies = [
 
 [[package]]
 name = "paint"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "inset-embedder",
  "inset-embedder-winit",
@@ -5203,7 +5203,7 @@ dependencies = [
 
 [[package]]
 name = "window"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "inset-cupertino",
  "inset-embedder",
