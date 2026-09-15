@@ -7,7 +7,7 @@
 //!
 //! ```toml
 //! [dev-dependencies]
-//! inset-test = "0.3"
+//! inset-test = "0.4"
 //! ```
 
 mod platform;

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <title>Inset logo</title>
+  <desc>Two offset corner brackets in navy and blue.</desc>
+  <path fill="#07358C" d="M112 80H280Q304 80 304 104V136Q304 160 280 160H176Q160 160 160 176V280Q160 304 136 304H104Q80 304 80 280V112Q80 80 112 80Z"/>
+  <path fill="#009BFA" transform="rotate(180 256 256)" d="M112 80H280Q304 80 304 104V136Q304 160 280 160H176Q160 160 160 176V280Q160 304 136 304H104Q80 304 80 280V112Q80 80 112 80Z"/>
+</svg>
