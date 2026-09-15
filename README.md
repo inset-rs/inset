@@ -16,44 +16,51 @@ The project is in alpha, while is ready to build apps on. Inset currently has tw
 - Cupertino: for mobile apps
 - [WinUI](https://github.com/inset-rs/inset-winui): for desktop and web apps
 
-## Try the galleries
-
-Live demos of the widget kits in the browser:
+## Apps built with Inset
 
 <table>
   <tr>
-    <td align="center" valign="top" width="42%">
-      <a href="https://cupertino-gallery.inset.rs">
-        <img src="assets/cupertino-gallery.png" alt="Cupertino gallery">
+    <td align="center" valign="bottom" width="33%">
+      <a href="https://edged2.app">
+        <img src="https://edged2.app/edged.png" alt="Edged 2" width="72" height="72">
       </a>
-      <br>
-      <a href="https://cupertino-gallery.inset.rs"><strong>Cupertino gallery</strong></a>
-      <br>
-      iOS-style widgets
     </td>
-    <td align="center" valign="top" width="58%">
-      <a href="https://winui-gallery.inset.rs">
-        <img src="assets/winui-gallery.png" alt="WinUI gallery">
+    <td align="center" valign="bottom" width="33%">
+      <a href="https://cupertino-gallery.inset.rs">
+        <img src="assets/cupertino-gallery.png" alt="Cupertino gallery" width="140">
       </a>
-      <br>
+    </td>
+    <td align="center" valign="bottom" width="33%">
+      <a href="https://winui-gallery.inset.rs">
+        <img src="assets/winui-gallery.png" alt="WinUI gallery" width="180">
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top">
+      <a href="https://edged2.app"><strong>Edged 2</strong></a>
+    </td>
+    <td align="center" valign="top">
+      <a href="https://cupertino-gallery.inset.rs"><strong>Cupertino gallery</strong></a>
+    </td>
+    <td align="center" valign="top">
       <a href="https://winui-gallery.inset.rs"><strong>WinUI gallery</strong></a>
-      <br>
-      Desktop and web widgets
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top">
+      A window switcher for macOS
+    </td>
+    <td align="center" valign="top">
+      iOS-style widgets, from<br>
+      <a href="https://github.com/inset-rs/inset/tree/main/crates/inset-cupertino">inset-cupertino</a>
+    </td>
+    <td align="center" valign="top">
+      Desktop and web widgets, from<br>
+      <a href="https://github.com/inset-rs/inset-winui">inset-winui</a>
     </td>
   </tr>
 </table>
-
-## Apps built with Inset
-
-<p align="center">
-  <a href="https://edged2.app">
-    <img src="https://edged2.app/edged.png" alt="Edged 2" width="72" height="72">
-  </a>
-  <br>
-  <a href="https://edged2.app"><strong>Edged 2</strong></a>
-  <br>
-  A window switcher for macOS
-</p>
 
 ## Start an app
 
