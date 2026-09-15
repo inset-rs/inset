@@ -1300,13 +1300,11 @@ impl RestorableValue for RestorableScrollOffset {
 mod tests {
     use inset_foundation::AppCell;
     use std::cell::{Cell, RefCell};
-    use std::time::Instant;
 
-    use inset_embedder::{
-        InertPlatform, Platform, PlatformRef, Restoration, TargetPlatform, ViewId, ViewRef,
-    };
+    use inset_embedder::Restoration;
     use inset_scheduler::SchedulerBinding;
     use inset_services::{RestorationMap, RestorationUpdate};
+    use inset_test::TestPlatform;
 
     use super::*;
     use crate::framework::Element;
@@ -1320,42 +1318,12 @@ mod tests {
     /// A host that answers `Restoration::get` with what it was handed and records every
     /// `Restoration::put`.
     #[derive(Default)]
-    struct RecordingPlatform {
+    struct RecordingRestoration {
         stored: RefCell<Option<RestorationUpdate>>,
         puts: RefCell<Vec<RestorationMap>>,
     }
 
-    impl Platform for RecordingPlatform {
-        fn target_platform(&self) -> TargetPlatform {
-            InertPlatform.target_platform()
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> Instant {
-            InertPlatform.now()
-        }
-
-        fn wake_at(&self, _deadline: Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            Vec::new()
-        }
-
-        fn view(&self, _id: ViewId) -> Option<ViewRef> {
-            None
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            None
-        }
-
-        fn restoration(&self) -> Option<&dyn Restoration> {
-            Some(self)
-        }
-    }
-
-    impl Restoration for RecordingPlatform {
+    impl Restoration for RecordingRestoration {
         fn get(&self) -> Option<RestorationUpdate> {
             self.stored.borrow().clone()
         }
@@ -1365,14 +1333,14 @@ mod tests {
         }
     }
 
-    fn app_restoring(data: Option<RestorationMap>) -> (Rc<AppCell>, Rc<RecordingPlatform>) {
-        let platform = Rc::new(RecordingPlatform::default());
-        *platform.stored.borrow_mut() = Some(RestorationUpdate {
+    fn app_restoring(data: Option<RestorationMap>) -> (Rc<AppCell>, Rc<RecordingRestoration>) {
+        let restoration = Rc::new(RecordingRestoration::default());
+        *restoration.stored.borrow_mut() = Some(RestorationUpdate {
             enabled: true,
             data,
         });
-        let cell = AppCell::with_platform(Rc::clone(&platform) as PlatformRef);
-        (cell, platform)
+        let platform = TestPlatform::new().with_restoration(restoration.clone());
+        (AppCell::with_platform(Rc::new(platform)), restoration)
     }
 
     fn map<const N: usize>(entries: [(&str, RestorationData); N]) -> RestorationMap {
@@ -1566,7 +1534,7 @@ mod tests {
 
     #[test]
     fn a_scrollable_restores_its_offset_through_the_restoration_mixin() {
-        let (cell, _platform) = app_restoring(Some(child(
+        let (cell, _restoration) = app_restoring(Some(child(
             "app",
             child(
                 "scroll",
@@ -1597,7 +1565,7 @@ mod tests {
 
     #[test]
     fn saving_an_offset_writes_it_into_the_restoration_data() {
-        let (cell, platform) = app_restoring(None);
+        let (cell, restoration) = app_restoring(None);
         let mut app = cell.borrow_mut();
         let scrollable = Scrollable::new(box_viewport()).restoration_id("scroll");
         let harness = Harness::mount(
@@ -1620,7 +1588,7 @@ mod tests {
         ScrollContext::save_offset(&state, &mut app, 55.0);
         pump_frame(&mut app);
 
-        let stored = platform.puts.borrow();
+        let stored = restoration.puts.borrow();
         let last = stored.last().expect("the manager sent the data");
         assert_eq!(
             at(last, &["c", "app", "c", "scroll", "v", "offset"]),

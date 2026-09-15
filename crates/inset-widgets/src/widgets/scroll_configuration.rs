@@ -711,46 +711,16 @@ impl InheritedWidget for ScrollConfiguration {
 #[cfg(test)]
 mod tests {
     use inset_foundation::AppCell;
-    use std::time::Instant;
 
-    use inset_embedder::{InertPlatform, Platform, PlatformRef, ViewId, ViewRef};
+    use inset_test::TestPlatform;
 
     use super::*;
     use crate::framework::{AnyElement, Element, IntoWidget};
     use crate::test_harness::Harness;
     use crate::widgets::basic::SizedBox;
 
-    /// A host that claims to be one particular platform.
-    struct FixedPlatform(TargetPlatform);
-
-    impl Platform for FixedPlatform {
-        fn target_platform(&self) -> TargetPlatform {
-            self.0
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> Instant {
-            InertPlatform.now()
-        }
-
-        fn wake_at(&self, _deadline: Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            Vec::new()
-        }
-
-        fn view(&self, _id: ViewId) -> Option<ViewRef> {
-            None
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            None
-        }
-    }
-
     fn app_on(platform: TargetPlatform) -> Rc<AppCell> {
-        AppCell::with_platform(Rc::new(FixedPlatform(platform)) as PlatformRef)
+        AppCell::with_platform(Rc::new(TestPlatform::new().on(platform)))
     }
 
     fn descendant(harness: &Harness, app: &App, depth: usize) -> AnyElement {

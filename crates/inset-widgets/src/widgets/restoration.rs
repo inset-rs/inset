@@ -1615,13 +1615,12 @@ impl AnyRestorationMixin {
 mod tests {
     use inset_foundation::AppCell;
     use std::cell::RefCell;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
-    use inset_embedder::{
-        InertPlatform, Platform, PlatformRef, Restoration, TargetPlatform, ViewId, ViewRef,
-    };
+    use inset_embedder::Restoration;
     use inset_scheduler::SchedulerBinding;
     use inset_services::{RestorationMap, RestorationUpdate};
+    use inset_test::TestPlatform;
 
     use super::*;
     use crate::framework::{Element, GlobalKey, StatelessWidget};
@@ -1631,42 +1630,12 @@ mod tests {
     /// A host that answers `Restoration::get` with what it was handed and records every
     /// `Restoration::put`.
     #[derive(Default)]
-    struct RecordingPlatform {
+    struct RecordingRestoration {
         stored: RefCell<Option<RestorationUpdate>>,
         puts: RefCell<Vec<RestorationMap>>,
     }
 
-    impl Platform for RecordingPlatform {
-        fn target_platform(&self) -> TargetPlatform {
-            InertPlatform.target_platform()
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> Instant {
-            InertPlatform.now()
-        }
-
-        fn wake_at(&self, _deadline: Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            Vec::new()
-        }
-
-        fn view(&self, _id: ViewId) -> Option<ViewRef> {
-            None
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            None
-        }
-
-        fn restoration(&self) -> Option<&dyn Restoration> {
-            Some(self)
-        }
-    }
-
-    impl Restoration for RecordingPlatform {
+    impl Restoration for RecordingRestoration {
         fn get(&self) -> Option<RestorationUpdate> {
             self.stored.borrow().clone()
         }
@@ -1677,14 +1646,14 @@ mod tests {
     }
 
     /// An [`App`] whose host restores the provided bucket hierarchy.
-    fn app_restoring(data: Option<RestorationMap>) -> (Rc<AppCell>, Rc<RecordingPlatform>) {
-        let platform = Rc::new(RecordingPlatform::default());
-        *platform.stored.borrow_mut() = Some(RestorationUpdate {
+    fn app_restoring(data: Option<RestorationMap>) -> (Rc<AppCell>, Rc<RecordingRestoration>) {
+        let restoration = Rc::new(RecordingRestoration::default());
+        *restoration.stored.borrow_mut() = Some(RestorationUpdate {
             enabled: true,
             data,
         });
-        let cell = AppCell::with_platform(Rc::clone(&platform) as PlatformRef);
-        (cell, platform)
+        let platform = TestPlatform::new().with_restoration(restoration.clone());
+        (AppCell::with_platform(Rc::new(platform)), restoration)
     }
 
     fn map<const N: usize>(entries: [(&str, RestorationData); N]) -> RestorationMap {
@@ -1850,7 +1819,7 @@ mod tests {
 
     #[test]
     fn the_root_scope_hands_the_hosts_root_bucket_down() {
-        let (cell, _platform) =
+        let (cell, _restoration) =
             app_restoring(Some(child("app", values([("count", 42i64.into())]))));
         let (probe, seen) = probe();
         let mut app = cell.borrow_mut();
@@ -1866,7 +1835,7 @@ mod tests {
 
     #[test]
     fn the_root_scope_hands_nothing_down_without_a_restoration_id() {
-        let (cell, _platform) = app_restoring(None);
+        let (cell, _restoration) = app_restoring(None);
         let mut app = cell.borrow_mut();
         let (probe, seen) = probe();
         mount(
@@ -1879,7 +1848,7 @@ mod tests {
 
     #[test]
     fn a_restoration_scope_claims_the_child_bucket_named_by_its_id() {
-        let (cell, _platform) = app_restoring(Some(child(
+        let (cell, _restoration) = app_restoring(Some(child(
             "app",
             child("greeting", values([("hello", "world".into())])),
         )));
@@ -1901,7 +1870,7 @@ mod tests {
 
     #[test]
     fn a_restoration_scope_without_an_id_turns_restoration_off_for_its_subtree() {
-        let (cell, _platform) = app_restoring(None);
+        let (cell, _restoration) = app_restoring(None);
         let mut app = cell.borrow_mut();
         let (probe, seen) = probe();
         mount(
@@ -1915,7 +1884,7 @@ mod tests {
 
     #[test]
     fn a_registered_property_is_restored_from_the_hosts_data() {
-        let (cell, _platform) = app_restoring(Some(child(
+        let (cell, _restoration) = app_restoring(Some(child(
             "app",
             child("counter", values([("count", 7i64.into())])),
         )));
@@ -1941,7 +1910,7 @@ mod tests {
 
     #[test]
     fn a_property_with_no_stored_value_takes_its_default_and_writes_it_out() {
-        let (cell, platform) = app_restoring(None);
+        let (cell, restoration) = app_restoring(None);
         let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
         let harness = mount(
@@ -1960,7 +1929,12 @@ mod tests {
         assert_eq!(*count.value(&app), 0);
 
         pump_frame(&mut app);
-        let sent = platform.puts.borrow().last().cloned().expect("serialized");
+        let sent = restoration
+            .puts
+            .borrow()
+            .last()
+            .cloned()
+            .expect("serialized");
         assert_eq!(
             at(&sent, &["c", "app", "c", "counter", "v", "count"]),
             Some(&0i64.into())
@@ -1969,7 +1943,7 @@ mod tests {
 
     #[test]
     fn a_changed_property_reaches_the_host_at_the_end_of_the_frame() {
-        let (cell, platform) = app_restoring(Some(child(
+        let (cell, restoration) = app_restoring(Some(child(
             "app",
             child("counter", values([("count", 7i64.into())])),
         )));
@@ -1987,17 +1961,22 @@ mod tests {
             .into_widget(),
         );
         pump_frame(&mut app);
-        platform.puts.borrow_mut().clear();
+        restoration.puts.borrow_mut().clear();
 
         let count = counter_state(&harness, &app, &key).count(&app);
         count.set_value(&mut app, 9);
         assert!(
-            platform.puts.borrow().is_empty(),
+            restoration.puts.borrow().is_empty(),
             "the write waits for the end of the frame"
         );
 
         pump_frame(&mut app);
-        let sent = platform.puts.borrow().last().cloned().expect("serialized");
+        let sent = restoration
+            .puts
+            .borrow()
+            .last()
+            .cloned()
+            .expect("serialized");
         assert_eq!(
             at(&sent, &["c", "app", "c", "counter", "v", "count"]),
             Some(&9i64.into())
@@ -2006,7 +1985,7 @@ mod tests {
 
     #[test]
     fn did_update_restoration_id_moves_the_bucket_and_its_data() {
-        let (cell, platform) = app_restoring(Some(child(
+        let (cell, restoration) = app_restoring(Some(child(
             "app",
             child("counter", values([("count", 7i64.into())])),
         )));
@@ -2040,7 +2019,12 @@ mod tests {
         assert_eq!(*state.count(&app).value(&app), 7);
 
         pump_frame(&mut app);
-        let sent = platform.puts.borrow().last().cloned().expect("serialized");
+        let sent = restoration
+            .puts
+            .borrow()
+            .last()
+            .cloned()
+            .expect("serialized");
         assert_eq!(
             at(&sent, &["c", "app", "c", "renamed", "v", "count"]),
             Some(&7i64.into())
@@ -2050,7 +2034,7 @@ mod tests {
 
     #[test]
     fn new_data_from_the_host_restores_the_registered_properties_again() {
-        let (cell, _platform) = app_restoring(Some(child(
+        let (cell, _restoration) = app_restoring(Some(child(
             "app",
             child("counter", values([("count", 7i64.into())])),
         )));
@@ -2087,7 +2071,7 @@ mod tests {
 
     #[test]
     fn a_state_without_a_surrounding_scope_gets_no_bucket() {
-        let (cell, _platform) = app_restoring(None);
+        let (cell, _restoration) = app_restoring(None);
         let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
         let harness = mount(

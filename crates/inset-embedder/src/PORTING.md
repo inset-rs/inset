@@ -70,6 +70,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — Flutter writes one embedder per host and settles this per target platform, where one framework here meets hosts that differ on the same platform.
   Affect: on a host that reports plain key presses, a text field's editing keys work whichever platform the host claims to be.
 
+- Change: `Platform::dispatcher` hands out the host's threads as one `Send + Sync` object: any thread asks it for a turn at a time, answered by `EmbedderClient::wake`, and the framework hands it work to run off the main thread; Dart's isolate is woken by its message port and `Isolate.run` uses the VM's own threads.
+  Reason: platform — the host owns the event loop and knows its system's work queues, and a task completed on another thread has no other way to give the app a turn.
+  Affect: a spawned task can await a future completed on any thread and runs at the next checkpoint instead of at the next input, and `run_in_background` work lands on the system's queue where there is one.
+
 ## image.rs → dart:ui `instantiateImageCodec` / `Codec` / `FrameInfo`
 
 - Change: `Image` is a counted handle to the host's texture, with no clone and no dispose.

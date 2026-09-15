@@ -4,7 +4,8 @@
 //!
 //! The one type every module supplies is `Vsync`: the system's signal for each refresh of
 //! a window's display, started with `Vsync::start` and paused with `set_paused`, or `None`
-//! from a system that has none to give, which the host paces by a timer instead.
+//! from a system that has none to give, which the host paces by a timer instead. Every module
+//! also supplies `run_off_main`: the system's work queue, or a thread where it has none.
 
 #[cfg(not(target_os = "macos"))]
 mod generic;

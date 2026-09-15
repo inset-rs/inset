@@ -11,6 +11,7 @@ mod vsync;
 
 use std::time::Duration;
 
+use dispatch2::{DispatchQueue, DispatchQueueGlobalPriority, GlobalQueueIdentifier};
 use inset_embedder::{Rect, WindowBackground, WindowConfig};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject};
@@ -209,4 +210,13 @@ fn appkit_rect(frame: Rect) -> Option<NSRect> {
         NSPoint::new(frame.left, screen_height - frame.top - frame.height()),
         NSSize::new(frame.width(), frame.height()),
     ))
+}
+
+/// Runs `work` on the system's default-priority global queue: Grand Central Dispatch's worker
+/// pool, which the system sizes and schedules with everything else on the machine.
+pub(crate) fn run_off_main(work: Box<dyn FnOnce() + Send>) {
+    let queue = DispatchQueue::global_queue(GlobalQueueIdentifier::Priority(
+        DispatchQueueGlobalPriority::Default,
+    ));
+    queue.exec_async(work);
 }

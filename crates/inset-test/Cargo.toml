@@ -1,6 +1,6 @@
 [package]
-name = "inset-scheduler"
-description = "Frame callbacks and tickers for Inset"
+name = "inset-test"
+description = "Test scaffolding for Inset: a platform and a view to run an App under"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,12 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-indexmap.workspace = true
 inset-embedder.workspace = true
-inset-foundation.workspace = true
-
-[dev-dependencies]
-inset-test.workspace = true
 
 [lints]
 workspace = true

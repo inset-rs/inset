@@ -976,6 +976,7 @@ dependencies = [
  "inset-rendering",
  "inset-scheduler",
  "inset-shell",
+ "inset-test",
  "inset-widgets",
  "valo-system-fonts",
 ]
@@ -1103,6 +1104,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e0e367e4e7da84520dedcac1901e4da967309406d1e51017ae1abfb97adbd38"
 dependencies = [
  "bitflags 2.13.2",
+ "block2 0.6.2",
+ "libc",
  "objc2 0.6.4",
 ]
 
@@ -1909,6 +1912,7 @@ dependencies = [
  "inset-rendering",
  "inset-scheduler",
  "inset-services",
+ "inset-test",
  "inset-widgets",
  "valo-system-fonts",
 ]
@@ -1957,6 +1961,7 @@ name = "inset-embedder-winit"
 version = "0.3.1"
 dependencies = [
  "arboard",
+ "dispatch2",
  "inset-embedder",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
@@ -2031,6 +2036,7 @@ dependencies = [
  "inset-painting",
  "inset-scheduler",
  "inset-services",
+ "inset-test",
  "unicode-general-category",
  "valo",
  "valo-system-fonts",
@@ -2043,6 +2049,7 @@ dependencies = [
  "indexmap",
  "inset-embedder",
  "inset-foundation",
+ "inset-test",
 ]
 
 [[package]]
@@ -2054,6 +2061,7 @@ dependencies = [
  "inset-foundation",
  "inset-gestures",
  "inset-scheduler",
+ "inset-test",
  "unicode-segmentation",
 ]
 
@@ -2068,6 +2076,14 @@ dependencies = [
  "inset-rendering",
  "inset-scheduler",
  "inset-services",
+ "inset-test",
+]
+
+[[package]]
+name = "inset-test"
+version = "0.3.1"
+dependencies = [
+ "inset-embedder",
 ]
 
 [[package]]
@@ -2084,6 +2100,7 @@ dependencies = [
  "inset-rendering",
  "inset-scheduler",
  "inset-services",
+ "inset-test",
  "valo-system-fonts",
 ]
 

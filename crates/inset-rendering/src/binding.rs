@@ -413,88 +413,29 @@ impl GestureBindingOverridesObject for RendererBinding {
 #[cfg(test)]
 mod tests {
     use inset_foundation::AppCell;
-    use std::cell::Cell;
     use std::time::Duration;
 
-    use inset_embedder::{
-        Picture, Platform, PlatformRef, Size, TargetPlatform, View, ViewMetrics, ViewRef,
-    };
+    use inset_embedder::{Size, TargetPlatform};
+    use inset_test::{TestPlatform, TestView};
 
     use super::*;
     use crate::box_::{BoxConstraints, RenderBox};
     use crate::proxy_box::RenderConstrainedBox;
 
-    struct TestView {
-        presented: Rc<Cell<u32>>,
-    }
-
-    impl View for TestView {
-        fn id(&self) -> ViewId {
-            ViewId(0)
-        }
-
-        fn metrics(&self) -> ViewMetrics {
-            ViewMetrics {
-                physical_size: [800.0, 600.0],
-                physical_constraints: inset_embedder::ViewConstraints::tight(800.0, 600.0),
-                device_pixel_ratio: 2.0,
-                ..ViewMetrics::default()
-            }
-        }
-
-        fn present(&self, _picture: std::sync::Arc<Picture>) {
-            self.presented.set(self.presented.get() + 1);
-        }
-    }
-
-    struct TestPlatform {
-        view: ViewRef,
-        frames: Rc<Cell<u32>>,
-    }
-
-    impl Platform for TestPlatform {
-        fn target_platform(&self) -> TargetPlatform {
-            TargetPlatform::MacOS
-        }
-
-        fn request_frame(&self) {
-            self.frames.set(self.frames.get() + 1);
-        }
-
-        fn now(&self) -> std::time::Instant {
-            std::time::Instant::now()
-        }
-
-        fn wake_at(&self, _deadline: std::time::Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            vec![Rc::clone(&self.view)]
-        }
-
-        fn view(&self, id: ViewId) -> Option<ViewRef> {
-            (self.view.id() == id).then(|| Rc::clone(&self.view))
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            Some(Rc::clone(&self.view))
-        }
-    }
-
-    fn app_with_view() -> (Rc<AppCell>, Rc<Cell<u32>>, Rc<Cell<u32>>) {
-        let presented = Rc::new(Cell::new(0));
-        let frames = Rc::new(Cell::new(0));
-        let platform: PlatformRef = Rc::new(TestPlatform {
-            view: Rc::new(TestView {
-                presented: Rc::clone(&presented),
-            }),
-            frames: Rc::clone(&frames),
-        });
-        (AppCell::with_platform(platform), presented, frames)
+    /// An [`App`] over one 800x600 view at 2x, with the view and the platform to read back.
+    fn app_with_view() -> (Rc<AppCell>, Rc<TestView>, Rc<TestPlatform>) {
+        let view = Rc::new(TestView::with_pixel_ratio(800.0, 600.0, 2.0));
+        let platform = Rc::new(
+            TestPlatform::new()
+                .on(TargetPlatform::MacOS)
+                .with_view(view.clone()),
+        );
+        (AppCell::with_platform(platform.clone()), view, platform)
     }
 
     #[test]
     fn a_frame_lays_out_paints_and_presents_the_implicit_view() {
-        let (cell, presented, _frames) = app_with_view();
+        let (cell, view, _platform) = app_with_view();
         let mut app = cell.borrow_mut();
         let binding = RendererBinding::instance(&mut app);
         let render_view = binding.init_render_view(&mut app);
@@ -511,14 +452,14 @@ mod tests {
 
         assert_eq!(render_view.size(&app), Size::new(400.0, 300.0));
         assert_eq!(child.size(&app), Size::new(400.0, 300.0));
-        assert_eq!(presented.get(), 1);
+        assert_eq!(view.presented(), 1);
         assert!(!child.debug_needs_layout(&app));
         assert!(!child.as_object().debug_needs_paint(&app));
     }
 
     #[test]
     fn a_dirty_node_requests_a_visual_update() {
-        let (cell, _presented, frames) = app_with_view();
+        let (cell, _view, platform) = app_with_view();
         let mut app = cell.borrow_mut();
         let binding = RendererBinding::instance(&mut app);
         let render_view = binding.init_render_view(&mut app);
@@ -527,11 +468,11 @@ mod tests {
         render_view.set_child(&mut app, Some(child.as_box()));
         SchedulerBinding::handle_begin_frame(&mut app, Some(Duration::ZERO));
         SchedulerBinding::handle_draw_frame(&mut app);
-        let before = frames.get();
+        let before = platform.frames_requested();
 
         child.mark_needs_layout(&mut app);
         assert!(
-            frames.get() > before,
+            platform.frames_requested() > before,
             "the root owner's visual update reaches the host"
         );
     }
@@ -542,7 +483,7 @@ mod tests {
 
         use crate::proxy_box::{HitTestBehavior, RenderPointerListener};
 
-        let (cell, _presented, _frames) = app_with_view();
+        let (cell, _view, _platform) = app_with_view();
         let mut app = cell.borrow_mut();
         let binding = RendererBinding::instance(&mut app);
         let render_view = binding.init_render_view(&mut app);
@@ -580,7 +521,7 @@ mod tests {
         use crate::proxy_box::RenderMouseRegion;
         use crate::shifted_box::RenderPadding;
 
-        let (cell, _presented, _frames) = app_with_view();
+        let (cell, _view, _platform) = app_with_view();
         let mut app = cell.borrow_mut();
         let binding = RendererBinding::instance(&mut app);
         let render_view = binding.init_render_view(&mut app);
@@ -638,18 +579,18 @@ mod tests {
 
     #[test]
     fn deferred_first_frame_is_not_presented() {
-        let (cell, presented, _frames) = app_with_view();
+        let (cell, view, _platform) = app_with_view();
         let mut app = cell.borrow_mut();
         let binding = RendererBinding::instance(&mut app);
         binding.init_render_view(&mut app);
         binding.defer_first_frame(&mut app);
         SchedulerBinding::handle_begin_frame(&mut app, Some(Duration::ZERO));
         SchedulerBinding::handle_draw_frame(&mut app);
-        assert_eq!(presented.get(), 0);
+        assert_eq!(view.presented(), 0);
 
         binding.allow_first_frame(&mut app);
         SchedulerBinding::handle_begin_frame(&mut app, Some(Duration::ZERO));
         SchedulerBinding::handle_draw_frame(&mut app);
-        assert_eq!(presented.get(), 1);
+        assert_eq!(view.presented(), 1);
     }
 }

@@ -1114,55 +1114,24 @@ mod tests {
     use inset_foundation::AppCell;
     use std::cell::{Cell, RefCell};
     use std::panic::{AssertUnwindSafe, catch_unwind};
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
-    use inset_embedder::{
-        InertPlatform, Platform, PlatformRef, Restoration, TargetPlatform, ViewId, ViewRef,
-    };
+    use inset_embedder::Restoration;
     use inset_foundation::{ListenableObject, Listener};
+    use inset_test::TestPlatform;
 
     use super::*;
 
     /// A host that answers `Restoration::get` with what it was handed and records every
     /// `Restoration::put`.
     #[derive(Default)]
-    struct RecordingPlatform {
+    struct RecordingRestoration {
         stored: RefCell<Option<RestorationUpdate>>,
         puts: RefCell<Vec<RestorationMap>>,
         gets: Cell<usize>,
     }
 
-    impl Platform for RecordingPlatform {
-        fn target_platform(&self) -> TargetPlatform {
-            InertPlatform.target_platform()
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> Instant {
-            InertPlatform.now()
-        }
-
-        fn wake_at(&self, _deadline: Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            Vec::new()
-        }
-
-        fn view(&self, _id: ViewId) -> Option<ViewRef> {
-            None
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            None
-        }
-
-        fn restoration(&self) -> Option<&dyn Restoration> {
-            Some(self)
-        }
-    }
-
-    impl Restoration for RecordingPlatform {
+    impl Restoration for RecordingRestoration {
         fn get(&self) -> Option<RestorationUpdate> {
             self.gets.set(self.gets.get() + 1);
             self.stored.borrow().clone()
@@ -1175,20 +1144,21 @@ mod tests {
 
     struct Fixture {
         cell: Rc<AppCell>,
-        platform: Rc<RecordingPlatform>,
+        restoration: Rc<RecordingRestoration>,
         manager: Handle<RestorationManager>,
     }
 
     impl Fixture {
         fn new() -> Fixture {
-            let platform = Rc::new(RecordingPlatform::default());
-            let cell = AppCell::with_platform(Rc::clone(&platform) as PlatformRef);
+            let restoration = Rc::new(RecordingRestoration::default());
+            let platform = TestPlatform::new().with_restoration(restoration.clone());
+            let cell = AppCell::with_platform(Rc::new(platform));
             let mut app = cell.borrow_mut();
             let manager = RestorationManager::instance(&mut app);
             drop(app);
             Fixture {
                 cell,
-                platform,
+                restoration,
                 manager,
             }
         }
@@ -1216,7 +1186,7 @@ mod tests {
         /// Flutter's `MockRestorationManager.doSerialization`: what reached the host.
         fn serialize(&mut self) -> Vec<RestorationMap> {
             self.manager.flush_data(&mut self.cell.borrow_mut());
-            self.platform.puts.borrow_mut().drain(..).collect()
+            self.restoration.puts.borrow_mut().drain(..).collect()
         }
 
         /// The data the host would keep, or `None` when nothing was scheduled.
@@ -1299,7 +1269,7 @@ mod tests {
     #[test]
     fn the_root_bucket_comes_from_the_host_and_is_asked_for_once() {
         let fixture = Fixture::new();
-        *fixture.platform.stored.borrow_mut() = Some(RestorationUpdate {
+        *fixture.restoration.stored.borrow_mut() = Some(RestorationUpdate {
             enabled: true,
             data: Some(raw_data_set()),
         });
@@ -1308,7 +1278,7 @@ mod tests {
             .manager
             .root_bucket(&mut fixture.cell.borrow_mut())
             .expect("the host enabled restoration");
-        assert_eq!(fixture.platform.gets.get(), 1);
+        assert_eq!(fixture.restoration.gets.get(), 1);
         assert_eq!(root.restoration_id(&fixture.cell.borrow()), "root");
         assert_eq!(
             root.read(&mut fixture.cell.borrow_mut(), "value1"),
@@ -1330,7 +1300,7 @@ mod tests {
             Some(root)
         );
         assert_eq!(
-            fixture.platform.gets.get(),
+            fixture.restoration.gets.get(),
             1,
             "the host is asked once, then the answer is kept"
         );
@@ -1343,7 +1313,7 @@ mod tests {
 
         let root = fixture.manager.root_bucket(&mut fixture.cell.borrow_mut());
         assert!(root.is_some());
-        assert_eq!(fixture.platform.gets.get(), 0);
+        assert_eq!(fixture.restoration.gets.get(), 0);
     }
 
     #[test]
@@ -1395,7 +1365,7 @@ mod tests {
     #[test]
     fn there_is_no_root_bucket_while_restoration_is_disabled() {
         let mut fixture = Fixture::new();
-        *fixture.platform.stored.borrow_mut() = Some(RestorationUpdate {
+        *fixture.restoration.stored.borrow_mut() = Some(RestorationUpdate {
             enabled: false,
             data: None,
         });
@@ -1436,7 +1406,7 @@ mod tests {
             fixture.manager.root_bucket(&mut fixture.cell.borrow_mut()),
             None
         );
-        assert_eq!(fixture.platform.gets.get(), 1);
+        assert_eq!(fixture.restoration.gets.get(), 1);
     }
 
     #[test]
@@ -1466,12 +1436,12 @@ mod tests {
     fn scheduled_serialization_reaches_the_host_at_the_end_of_the_frame() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
         root.write(&mut fixture.cell.borrow_mut(), "value1", 22i64);
-        assert!(fixture.platform.puts.borrow().is_empty());
+        assert!(fixture.restoration.puts.borrow().is_empty());
 
         fixture.pump();
 
         let puts = fixture
-            .platform
+            .restoration
             .puts
             .borrow_mut()
             .drain(..)
@@ -1488,12 +1458,12 @@ mod tests {
 
         fixture.manager.flush_data(&mut fixture.cell.borrow_mut());
         assert!(
-            fixture.platform.puts.borrow().is_empty(),
+            fixture.restoration.puts.borrow().is_empty(),
             "the scheduled frame will flush it"
         );
 
         fixture.pump();
-        assert_eq!(fixture.platform.puts.borrow_mut().drain(..).count(), 1);
+        assert_eq!(fixture.restoration.puts.borrow_mut().drain(..).count(), 1);
 
         root.write(&mut fixture.cell.borrow_mut(), "foo", 2i64);
         let data = fixture

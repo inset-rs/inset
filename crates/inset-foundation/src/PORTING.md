@@ -40,6 +40,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — there is no isolate-global dispatcher to assign a handler onto.
   Affect: a host reports the change through its client and never calls a binding.
 
+- Change: `App::run_in_background` hands a closure to the host's dispatcher and answers its result as a `Task`: dart:isolate's `Isolate.run`.
+  Reason: language — there are no isolates; the host's threads and a task are the Rust shape, and the work's panic resumes in the awaiting task as the isolate's error would rethrow.
+  Affect: blocking work — a request, a file read — leaves the main thread for the system's queue and comes back through the ordinary checkpoint.
+
 ## key.rs → key.dart
 
 - Change: `Key` equality and hashing go through `eq_key` / `hash_key`, so `dyn Key` can be `PartialEq` and `Hash`; a `UniqueKey`'s identity is a monotonic id, not object identity.

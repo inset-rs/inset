@@ -108,51 +108,19 @@ mod tests {
     use inset_foundation::AppCell;
     use std::cell::RefCell;
     use std::rc::Rc;
-    use std::time::Instant;
 
-    use inset_embedder::{
-        Brightness, Color, Platform, PlatformRef, SystemChrome as SystemChromeHost, TargetPlatform,
-        ViewId, ViewRef,
-    };
+    use inset_embedder::{Brightness, Color, SystemChrome as SystemChromeHost, TargetPlatform};
+    use inset_test::TestPlatform;
 
     use super::*;
 
+    /// A host that records the overlay styles it is handed.
     #[derive(Default)]
-    struct RecordingPlatform {
+    struct RecordingChrome {
         styles: RefCell<Vec<SystemUiOverlayStyle>>,
     }
 
-    impl Platform for RecordingPlatform {
-        fn target_platform(&self) -> TargetPlatform {
-            TargetPlatform::IOS
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> Instant {
-            Instant::now()
-        }
-
-        fn wake_at(&self, _deadline: Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            Vec::new()
-        }
-
-        fn view(&self, _id: ViewId) -> Option<ViewRef> {
-            None
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            None
-        }
-
-        fn system_chrome(&self) -> Option<&dyn SystemChromeHost> {
-            Some(self)
-        }
-    }
-
-    impl SystemChromeHost for RecordingPlatform {
+    impl SystemChromeHost for RecordingChrome {
         fn set_overlay_style(&self, style: &SystemUiOverlayStyle) {
             self.styles.borrow_mut().push(*style);
         }
@@ -164,10 +132,12 @@ mod tests {
         }
     }
 
-    fn recording_app() -> (Rc<RecordingPlatform>, Rc<AppCell>) {
-        let platform = Rc::new(RecordingPlatform::default());
-        let cell = AppCell::with_platform(Rc::clone(&platform) as PlatformRef);
-        (platform, cell)
+    fn recording_app() -> (Rc<RecordingChrome>, Rc<AppCell>) {
+        let chrome = Rc::new(RecordingChrome::default());
+        let platform = TestPlatform::new()
+            .on(TargetPlatform::IOS)
+            .with_system_chrome(chrome.clone());
+        (chrome, AppCell::with_platform(Rc::new(platform)))
     }
 
     #[test]
@@ -211,19 +181,19 @@ mod tests {
     /// `system_chrome_test.dart`: `SystemChrome overlay style test`.
     #[test]
     fn only_the_last_style_of_a_turn_reaches_the_host() {
-        let (platform, cell) = recording_app();
+        let (chrome, cell) = recording_app();
         let mut app = cell.borrow_mut();
         SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::LIGHT);
         SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::DARK);
         assert!(
-            platform.styles.borrow().is_empty(),
+            chrome.styles.borrow().is_empty(),
             "nothing is sent before the microtask runs"
         );
         assert_eq!(SystemChrome::latest_style(&mut app), None);
 
         app.drain_microtasks();
         assert_eq!(
-            platform.styles.borrow().as_slice(),
+            chrome.styles.borrow().as_slice(),
             [SystemUiOverlayStyle::DARK]
         );
         assert_eq!(
@@ -234,7 +204,7 @@ mod tests {
 
     #[test]
     fn a_style_already_in_effect_queues_nothing() {
-        let (platform, cell) = recording_app();
+        let (chrome, cell) = recording_app();
         let mut app = cell.borrow_mut();
         SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::LIGHT);
         app.drain_microtasks();
@@ -242,7 +212,7 @@ mod tests {
         SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::LIGHT);
         app.drain_microtasks();
         assert_eq!(
-            platform.styles.borrow().as_slice(),
+            chrome.styles.borrow().as_slice(),
             [SystemUiOverlayStyle::LIGHT],
             "an unchanged style does not reach the host again"
         );
@@ -250,23 +220,23 @@ mod tests {
         SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::DARK);
         app.drain_microtasks();
         assert_eq!(
-            platform.styles.borrow().as_slice(),
+            chrome.styles.borrow().as_slice(),
             [SystemUiOverlayStyle::LIGHT, SystemUiOverlayStyle::DARK]
         );
     }
 
     #[test]
     fn a_style_that_returns_to_the_latest_within_the_turn_sends_nothing() {
-        let (platform, cell) = recording_app();
+        let (chrome, cell) = recording_app();
         let mut app = cell.borrow_mut();
         SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::LIGHT);
         app.drain_microtasks();
-        platform.styles.borrow_mut().clear();
+        chrome.styles.borrow_mut().clear();
 
         SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::DARK);
         SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::LIGHT);
         app.drain_microtasks();
-        assert!(platform.styles.borrow().is_empty());
+        assert!(chrome.styles.borrow().is_empty());
         assert_eq!(
             SystemChrome::latest_style(&mut app),
             Some(SystemUiOverlayStyle::LIGHT)

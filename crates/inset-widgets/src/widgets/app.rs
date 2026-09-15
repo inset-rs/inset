@@ -1789,13 +1789,11 @@ mod tests {
     use std::cell::Cell;
     use std::time::Duration;
 
-    use inset_embedder::{
-        Picture, Platform, PlatformRef, TextDirection, View as EmbedderView, ViewConstraints,
-        ViewId, ViewMetrics, ViewRef,
-    };
+    use inset_embedder::TextDirection;
     use inset_painting::PaintingBinding;
     use inset_scheduler::SchedulerBinding;
     use inset_services::LogicalKeyboardKey;
+    use inset_test::{TestPlatform, TestView};
 
     use crate::framework::{AnyElement, StatelessWidget, downcast_widget};
     use crate::widgets::actions::IntentRef;
@@ -1821,92 +1819,19 @@ mod tests {
         }
     }
 
-    /// A platform with no views, for the tables that only read the target platform.
-    struct PlatformOf(TargetPlatform);
-
-    impl Platform for PlatformOf {
-        fn target_platform(&self) -> TargetPlatform {
-            self.0
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> std::time::Instant {
-            std::time::Instant::now()
-        }
-
-        fn wake_at(&self, _deadline: std::time::Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            Vec::new()
-        }
-
-        fn view(&self, _id: ViewId) -> Option<ViewRef> {
-            None
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            None
-        }
-    }
-
+    /// An [`App`] on a host with no views, for the tables that only read the target platform.
     fn app_of(platform: TargetPlatform) -> Rc<AppCell> {
-        AppCell::with_platform(Rc::new(PlatformOf(platform)) as PlatformRef)
+        AppCell::with_platform(Rc::new(TestPlatform::new().on(platform)))
     }
 
-    /// A view whose host answers a deep link as its default route.
-    struct DeepLinkView;
-
-    impl EmbedderView for DeepLinkView {
-        fn id(&self) -> ViewId {
-            ViewId(0)
-        }
-
-        fn metrics(&self) -> ViewMetrics {
-            ViewMetrics {
-                physical_size: [800.0, 600.0],
-                physical_constraints: ViewConstraints::tight(800.0, 600.0),
-                device_pixel_ratio: 1.0,
-                ..ViewMetrics::default()
-            }
-        }
-
-        fn present(&self, _picture: std::sync::Arc<Picture>) {}
-    }
-
-    struct DeepLinkPlatform {
-        view: ViewRef,
-        default_route_name: String,
-    }
-
-    impl Platform for DeepLinkPlatform {
-        fn target_platform(&self) -> TargetPlatform {
-            TargetPlatform::MacOS
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> std::time::Instant {
-            std::time::Instant::now()
-        }
-
-        fn wake_at(&self, _deadline: std::time::Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            vec![Rc::clone(&self.view)]
-        }
-
-        fn view(&self, id: ViewId) -> Option<ViewRef> {
-            (self.view.id() == id).then(|| Rc::clone(&self.view))
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            Some(Rc::clone(&self.view))
-        }
-
-        fn default_route_name(&self) -> String {
-            self.default_route_name.clone()
-        }
+    /// A platform with one 800x600 view whose host answers `route` as its default, the way a
+    /// deep link reaches an app.
+    fn app_opening_at(route: &str) -> Rc<AppCell> {
+        let platform = TestPlatform::new()
+            .on(TargetPlatform::MacOS)
+            .with_view(Rc::new(TestView::new(800.0, 600.0)))
+            .with_default_route(route);
+        AppCell::with_platform(Rc::new(platform))
     }
 
     /// What the shell does at start-up: the app-wide fonts, here the OS fonts, which the
@@ -2243,10 +2168,7 @@ mod tests {
 
     #[test]
     fn the_platforms_default_route_name_overrides_the_initial_route() {
-        let cell = AppCell::with_platform(Rc::new(DeepLinkPlatform {
-            view: Rc::new(DeepLinkView),
-            default_route_name: String::from("/deep"),
-        }) as PlatformRef);
+        let cell = app_opening_at("/deep");
         let mut app = cell.borrow_mut();
         install_fonts(&mut app);
         let deep: WidgetBuilder = Rc::new(|_app, _context| Marker.into_widget());

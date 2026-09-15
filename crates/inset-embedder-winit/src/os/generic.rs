@@ -53,3 +53,11 @@ impl Vsync {
 
     pub(crate) fn set_paused(&self, _paused: bool) {}
 }
+
+/// Runs `work` on a thread of its own: what a system without a work queue of its own gets.
+pub(crate) fn run_off_main(work: Box<dyn FnOnce() + Send>) {
+    std::thread::Builder::new()
+        .name("inset-worker".into())
+        .spawn(work)
+        .expect("a thread for work off the main thread");
+}

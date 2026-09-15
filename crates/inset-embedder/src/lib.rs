@@ -48,9 +48,9 @@ pub use painting::*;
 pub use paragraph::*;
 pub use platform::{
     AppExitResponse, AppLifecycleState, ApplicationSwitcherDescription, Brightness, Clipboard,
-    Frame, HapticFeedbackType, Haptics, InertPlatform, MouseCursor, Platform, PlatformRef,
-    PopupMenuEntry, PopupMenus, Restoration, SystemChrome, SystemContextMenu, SystemUiOverlayStyle,
-    TargetPlatform, TextServices, ViewRef,
+    Frame, HapticFeedbackType, Haptics, Dispatcher, InertDispatcher, InertPlatform, MouseCursor, Platform,
+    PlatformRef, PopupMenuEntry, PopupMenus, Restoration, SystemChrome, SystemContextMenu,
+    SystemUiOverlayStyle, TargetPlatform, TextServices, ViewRef,
 };
 pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,

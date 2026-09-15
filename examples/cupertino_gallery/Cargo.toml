@@ -34,6 +34,7 @@ name = "cupertino-gallery"
 path = "src/main.rs"
 
 [dev-dependencies]
+inset-test.workspace = true
 inset-gestures.workspace = true
 inset-scheduler.workspace = true
 valo-system-fonts.workspace = true

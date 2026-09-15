@@ -5952,12 +5952,10 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
 
-    use inset_embedder::{
-        Picture, Platform, PlatformRef, Restoration, TargetPlatform, TextDirection,
-        View as EmbedderView, ViewConstraints, ViewId, ViewMetrics, ViewRef,
-    };
+    use inset_embedder::{Restoration, TargetPlatform, TextDirection};
     use inset_scheduler::SchedulerBinding;
     use inset_services::{RestorationMap, RestorationUpdate};
+    use inset_test::{TestPlatform, TestView};
 
     use super::*;
     use crate::binding::run_app;
@@ -5972,62 +5970,14 @@ mod tests {
     const VIEW_WIDTH: f64 = 300.0;
     const VIEW_HEIGHT: f64 = 200.0;
 
-    struct TestView;
-
-    impl EmbedderView for TestView {
-        fn id(&self) -> ViewId {
-            ViewId(0)
-        }
-
-        fn metrics(&self) -> ViewMetrics {
-            ViewMetrics {
-                physical_size: [VIEW_WIDTH, VIEW_HEIGHT],
-                physical_constraints: ViewConstraints::tight(VIEW_WIDTH, VIEW_HEIGHT),
-                device_pixel_ratio: 1.0,
-                ..ViewMetrics::default()
-            }
-        }
-
-        fn present(&self, _picture: std::sync::Arc<Picture>) {}
-    }
-
-    struct TestPlatform {
-        view: ViewRef,
+    /// A host that answers `Restoration::get` with what it was handed and records every
+    /// `Restoration::put`.
+    struct RecordingRestoration {
         stored: RefCell<Option<RestorationUpdate>>,
         puts: RefCell<Vec<RestorationMap>>,
     }
 
-    impl Platform for TestPlatform {
-        fn target_platform(&self) -> TargetPlatform {
-            TargetPlatform::MacOS
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> std::time::Instant {
-            std::time::Instant::now()
-        }
-
-        fn wake_at(&self, _deadline: std::time::Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            vec![Rc::clone(&self.view)]
-        }
-
-        fn view(&self, id: ViewId) -> Option<ViewRef> {
-            (self.view.id() == id).then(|| Rc::clone(&self.view))
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            Some(Rc::clone(&self.view))
-        }
-
-        fn restoration(&self) -> Option<&dyn Restoration> {
-            Some(self)
-        }
-    }
-
-    impl Restoration for TestPlatform {
+    impl Restoration for RecordingRestoration {
         fn get(&self) -> Option<RestorationUpdate> {
             self.stored.borrow().clone()
         }
@@ -6037,17 +5987,22 @@ mod tests {
         }
     }
 
-    fn app_with_view(restoration_data: Option<RestorationMap>) -> (Rc<AppCell>, Rc<TestPlatform>) {
-        let platform = Rc::new(TestPlatform {
-            view: Rc::new(TestView),
+    /// An [`App`] with a single view, whose host restores `restoration_data`.
+    fn app_with_view(
+        restoration_data: Option<RestorationMap>,
+    ) -> (Rc<AppCell>, Rc<RecordingRestoration>) {
+        let restoration = Rc::new(RecordingRestoration {
             stored: RefCell::new(Some(RestorationUpdate {
                 enabled: true,
                 data: restoration_data,
             })),
             puts: RefCell::new(Vec::new()),
         });
-        let erased: PlatformRef = Rc::clone(&platform) as PlatformRef;
-        (AppCell::with_platform(erased), platform)
+        let platform = TestPlatform::new()
+            .on(TargetPlatform::MacOS)
+            .with_view(Rc::new(TestView::new(VIEW_WIDTH, VIEW_HEIGHT)))
+            .with_restoration(restoration.clone());
+        (AppCell::with_platform(Rc::new(platform)), restoration)
     }
 
     fn pump_frame(app: &mut App, at: Duration) {
@@ -6174,7 +6129,7 @@ mod tests {
 
     #[test]
     fn the_pages_api_inserts_removes_and_reorders_routes_through_the_transition_delegate() {
-        let (cell, _platform) = app_with_view(None);
+        let (cell, _restoration) = app_with_view(None);
         let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
         let binding = crate::binding::WidgetsBinding::instance(&mut app);
@@ -6305,7 +6260,7 @@ mod tests {
             }
         }
 
-        let (cell, _platform) = app_with_view(None);
+        let (cell, _restoration) = app_with_view(None);
         let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
         let observer = app.create(Recorder::default());
@@ -6357,7 +6312,7 @@ mod tests {
     #[test]
     fn the_history_is_restored_from_the_restoration_data_of_a_previous_run() {
         // Run once, pushing a restorable named route on top of a restorable page.
-        let (cell, platform) = app_with_view(None);
+        let (cell, restoration) = app_with_view(None);
         let key = GlobalKey::new();
         mount(
             &cell,
@@ -6390,7 +6345,7 @@ mod tests {
         assert_eq!(history_names(navigator_state, &app), vec!["a", "second"]);
         app.drain_microtasks();
 
-        let saved = platform
+        let saved = restoration
             .puts
             .borrow()
             .last()
@@ -6398,7 +6353,7 @@ mod tests {
             .expect("the manager wrote the restoration data");
 
         // Run again from the saved data: the pageless route comes back.
-        let (cell, _platform) = app_with_view(Some(saved));
+        let (cell, _restoration) = app_with_view(Some(saved));
         let key = GlobalKey::new();
         mount(
             &cell,
@@ -6431,7 +6386,7 @@ mod tests {
 
     #[test]
     fn a_route_reports_its_position_in_the_history() {
-        let (cell, _platform) = app_with_view(None);
+        let (cell, _restoration) = app_with_view(None);
         let key = GlobalKey::new();
         let pushed: Rc<Cell<Option<AnyRoute>>> = Rc::new(Cell::new(None));
         mount(
@@ -6487,7 +6442,7 @@ mod tests {
     /// pop's result, and a `.then` on it runs at the microtask drain — never inline.
     #[test]
     fn push_returns_a_future_that_completes_with_the_pop_result() {
-        let (cell, _platform) = app_with_view(None);
+        let (cell, _restoration) = app_with_view(None);
         let key = GlobalKey::new();
         mount(&cell, pageless_navigator(&key));
         let mut app = cell.borrow_mut();
@@ -6521,7 +6476,7 @@ mod tests {
     /// future the push returned, and the continuation awaiting it resumes at the checkpoint.
     #[test]
     fn remove_route_completes_the_awaited_value() {
-        let (cell, _platform) = app_with_view(None);
+        let (cell, _restoration) = app_with_view(None);
         let key = GlobalKey::new();
         mount(&cell, pageless_navigator(&key));
         let mut app = cell.borrow_mut();

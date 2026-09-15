@@ -2331,12 +2331,11 @@ mod tests {
     use inset_foundation::AppCell;
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
-    use inset_embedder::{
-        Picture, Platform, PlatformRef, TargetPlatform, ViewConstraints, ViewId, ViewMetrics,
-    };
+    use inset_embedder::{Picture, TargetPlatform, ViewConstraints, ViewId, ViewMetrics};
     use inset_scheduler::SchedulerBinding;
+    use inset_test::TestPlatform;
 
     use super::*;
     use crate::binding::run_widget;
@@ -2376,41 +2375,6 @@ mod tests {
         }
 
         fn present(&self, _picture: std::sync::Arc<Picture>) {}
-    }
-
-    /// A dark-themed platform with one view, for the binding's frame pipeline.
-    struct TestPlatform {
-        view: ViewRef,
-    }
-
-    impl Platform for TestPlatform {
-        fn target_platform(&self) -> TargetPlatform {
-            TargetPlatform::IOS
-        }
-
-        fn platform_brightness(&self) -> Brightness {
-            Brightness::Dark
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> Instant {
-            Instant::now()
-        }
-
-        fn wake_at(&self, _deadline: Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            vec![Rc::clone(&self.view)]
-        }
-
-        fn view(&self, id: ViewId) -> Option<ViewRef> {
-            (self.view.id() == id).then(|| Rc::clone(&self.view))
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            Some(Rc::clone(&self.view))
-        }
     }
 
     /// What a [`Reader`] does with its context on every build.
@@ -2743,10 +2707,12 @@ mod tests {
     #[test]
     fn from_view_under_a_view_yields_the_views_metrics() {
         let view: ViewRef = Rc::new(TestView);
-        let platform: PlatformRef = Rc::new(TestPlatform {
-            view: Rc::clone(&view),
-        });
-        let cell = AppCell::with_platform(platform);
+        // A dark-themed host, so the view's own data and the platform's can be told apart.
+        let platform = TestPlatform::new()
+            .on(TargetPlatform::IOS)
+            .with_brightness(Brightness::Dark)
+            .with_view(Rc::clone(&view));
+        let cell = AppCell::with_platform(Rc::new(platform));
         let mut app = cell.borrow_mut();
         let (reader, seen) = data_reader();
         let from_view = MediaQuery::from_view(None, Rc::clone(&view), reader);

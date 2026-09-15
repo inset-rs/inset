@@ -22,6 +22,7 @@ inset-scheduler.workspace = true
 inset-services.workspace = true
 
 [dev-dependencies]
+inset-test.workspace = true
 inset-embedder = { workspace = true, features = ["test-support"] }
 valo-system-fonts.workspace = true
 

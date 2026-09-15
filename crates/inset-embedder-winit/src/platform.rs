@@ -13,14 +13,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use inset_embedder::{
-    Brightness, Clipboard, FontSource, ImageCodec, ImageCodecFuture, ImageDecodeError, ImageFrame,
-    ImageFrameFuture, ImageRepetition, MouseCursor, Platform, PopupMenuEntry, PopupMenus,
-    SystemFontSource, SystemMouseCursorKind, TargetPlatform, ViewFocusDirection, ViewFocusEvent,
-    ViewFocusState, ViewId, ViewRef, WindowingOwner,
+    Brightness, Clipboard, Dispatcher, FontSource, ImageCodec, ImageCodecFuture, ImageDecodeError,
+    ImageFrame, ImageFrameFuture, ImageRepetition, MouseCursor, Platform, PopupMenuEntry,
+    PopupMenus, SystemFontSource, SystemMouseCursorKind, TargetPlatform, ViewFocusDirection,
+    ViewFocusEvent, ViewFocusState, ViewId, ViewRef, WindowingOwner,
 };
 use winit::event_loop::EventLoopProxy;
 
-use crate::images::with_event_loop_wake;
 use crate::os;
 use crate::window::HostEvent;
 use crate::windows::WinitWindowing;
@@ -37,7 +36,7 @@ use crate::windows::WinitWindowing;
 /// [`image_context`]: WinitPlatform::image_context
 pub struct WinitPlatform {
     /// When the framework asked to be woken, for its earliest timer (`Platform::wake_at`);
-    /// `None` once the wake has been delivered.
+    /// The earliest turn asked for through the loop handle; `None` once it has been given.
     pub(crate) wake_due: Cell<Option<Instant>>,
     pub(crate) frame_requested: Cell<bool>,
     views: RefCell<HashMap<ViewId, ViewRef>>,
@@ -99,7 +98,7 @@ impl WinitPlatform {
     }
 
     fn wake_event_loop(&self) {
-        let _ = self.proxy.send_event(HostEvent::Requests);
+        let _ = self.proxy.send_event(HostEvent::Request);
     }
 
     pub(crate) fn elapsed(&self) -> Duration {
@@ -156,9 +155,8 @@ impl Platform for WinitPlatform {
         Instant::now()
     }
 
-    fn wake_at(&self, deadline: Instant) {
-        self.wake_due.set(Some(deadline));
-        self.wake_event_loop();
+    fn dispatcher(&self) -> Arc<dyn Dispatcher> {
+        Arc::new(WinitDispatcher(self.proxy.clone()))
     }
 
     fn views(&self) -> Vec<ViewRef> {
@@ -171,36 +169,26 @@ impl Platform for WinitPlatform {
 
     fn open_image_codec(&self, bytes: Arc<[u8]>) -> ImageCodecFuture {
         let loader = self.image_loader.borrow().clone();
-        let proxy = self.proxy.clone();
-        let codec_proxy = proxy.clone();
-        with_event_loop_wake(
-            async move {
-                if bytes.is_empty() {
-                    return Err(ImageDecodeError::Empty);
-                }
-                let loader = loader.ok_or(ImageDecodeError::NoDecoder)?;
-                let codec = loader
-                    .open(
-                        bytes,
-                        valo_codec::DecodeOptions {
-                            // Pictures are routinely drawn smaller than they decode, and mip
-                            // levels are the difference between a smooth downscale and a
-                            // shimmering one.
-                            mipmaps: true,
-                            ..Default::default()
-                        },
-                    )
-                    .await
-                    .map_err(as_decode_error)?;
-                Ok(Box::new(WinitImageCodec {
-                    codec,
-                    proxy: codec_proxy,
-                }) as Box<dyn ImageCodec>)
-            },
-            move || {
-                let _ = proxy.send_event(HostEvent::Wake);
-            },
-        )
+        Box::pin(async move {
+            if bytes.is_empty() {
+                return Err(ImageDecodeError::Empty);
+            }
+            let loader = loader.ok_or(ImageDecodeError::NoDecoder)?;
+            let codec = loader
+                .open(
+                    bytes,
+                    valo_codec::DecodeOptions {
+                        // Pictures are routinely drawn smaller than they decode, and mip
+                        // levels are the difference between a smooth downscale and a
+                        // shimmering one.
+                        mipmaps: true,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(as_decode_error)?;
+            Ok(Box::new(WinitImageCodec { codec }) as Box<dyn ImageCodec>)
+        })
     }
 
     fn request_view_focus_change(
@@ -267,7 +255,7 @@ impl PopupMenus for WinitPlatform {
         let chosen = os::popup_menu(entries);
         // The menu ran its own event loop and kept the release of the button that opened
         // it; the next turn reconciles the buttons.
-        let _ = self.proxy.send_event(HostEvent::Wake);
+        let _ = self.proxy.send_event(HostEvent::MenuClosed);
         chosen
     }
 }
@@ -281,10 +269,24 @@ impl MouseCursor for WinitPlatform {
     }
 }
 
+/// The host's threads as any thread reaches them: a turn is a `WakeAt` event through winit's
+/// proxy, which the loop keeps as its earliest due wake and serves when the time comes; work
+/// goes to the system's queue, or a thread where the system has none.
+struct WinitDispatcher(EventLoopProxy<HostEvent>);
+
+impl Dispatcher for WinitDispatcher {
+    fn wake_at(&self, deadline: Instant) {
+        let _ = self.0.send_event(HostEvent::WakeAt(deadline));
+    }
+
+    fn dispatch(&self, work: Box<dyn FnOnce() + Send>) {
+        os::run_off_main(work);
+    }
+}
+
 /// Adapts Valo's drawable frames to the framework's codec contract.
 struct WinitImageCodec {
     codec: valo_codec::Codec,
-    proxy: EventLoopProxy<HostEvent>,
 }
 
 impl ImageCodec for WinitImageCodec {
@@ -302,19 +304,13 @@ impl ImageCodec for WinitImageCodec {
 
     fn next_frame(&mut self) -> ImageFrameFuture<'_> {
         let frame = self.codec.next_frame();
-        let proxy = self.proxy.clone();
-        with_event_loop_wake(
-            async move {
-                let frame = frame.await.map_err(as_decode_error)?;
-                Ok(ImageFrame {
-                    image: frame.image,
-                    duration: frame.duration,
-                })
-            },
-            move || {
-                let _ = proxy.send_event(HostEvent::Wake);
-            },
-        )
+        Box::pin(async move {
+            let frame = frame.await.map_err(as_decode_error)?;
+            Ok(ImageFrame {
+                image: frame.image,
+                duration: frame.duration,
+            })
+        })
     }
 }
 

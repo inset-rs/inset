@@ -23,6 +23,7 @@ inset-services.workspace = true
 inset-widgets.workspace = true
 
 [dev-dependencies]
+inset-test.workspace = true
 valo-system-fonts.workspace = true
 
 [lints]

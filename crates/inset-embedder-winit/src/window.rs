@@ -34,11 +34,19 @@ use crate::{DecodeExecution, ImplicitViewConfig, WinitEmbedder, create_image_loa
 
 const IMPLICIT_VIEW: ViewId = ViewId(0);
 
-/// Work requests and asynchronous completions both enter through winit's proxy.
+/// What reaches the loop through winit's proxy: the framework's requests, and turns asked
+/// for from other threads.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum HostEvent {
-    Requests,
-    Wake,
+    /// The framework left a request with the platform — a frame, a window, a cursor, a focus
+    /// change — for the loop to serve on this turn.
+    Request,
+    /// A native menu ran its own loop and closed: the buttons it kept are reconciled and the
+    /// client given a turn.
+    MenuClosed,
+    /// A turn asked for at a time through the platform's loop handle; served by
+    /// `about_to_wait` when the time comes.
+    WakeAt(Instant),
     /// A created window's `close`: dropped when the loop next turns.
     CloseWindow(WindowId),
     /// A refresh of the display, from its display link.
@@ -456,7 +464,16 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
             }
             return;
         }
-        if matches!(event, HostEvent::Wake) {
+        if let HostEvent::WakeAt(deadline) = event {
+            let due = self
+                .platform
+                .wake_due
+                .get()
+                .map_or(deadline, |due| due.min(deadline));
+            self.platform.wake_due.set(Some(due));
+            return;
+        }
+        if matches!(event, HostEvent::MenuClosed) {
             if let Some(window_id) = self.pointer.window {
                 self.reconcile_buttons(window_id);
             }

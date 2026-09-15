@@ -57,7 +57,7 @@ impl WindowingOwner for WinitWindowing {
         self.requests
             .borrow_mut()
             .push(WindowRequest { config, reply });
-        let _ = self.proxy.send_event(HostEvent::Requests);
+        let _ = self.proxy.send_event(HostEvent::Request);
         Box::pin(future)
     }
 }

@@ -496,15 +496,15 @@ mod image_widget_tests {
     use inset_painting::ImageProvider;
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     use inset_embedder::test_support::solid_image;
     use inset_embedder::{
-        ImageCodec, ImageCodecFuture, ImageFrame, ImageFrameFuture, ImageRepetition, Platform,
-        PlatformRef, TargetPlatform, ViewId, ViewRef,
+        ImageCodec, ImageCodecFuture, ImageFrame, ImageFrameFuture, ImageRepetition, TargetPlatform,
     };
     use inset_foundation::AppCell;
     use inset_rendering::RenderImage;
+    use inset_test::TestPlatform;
 
     use super::*;
     use crate::framework::IntoWidget;
@@ -593,14 +593,9 @@ mod image_widget_tests {
                 frame_gate: None,
             }
         }
-    }
 
-    impl Platform for TestHost {
-        fn target_platform(&self) -> TargetPlatform {
-            TargetPlatform::MacOS
-        }
-
-        fn open_image_codec(&self, _bytes: std::sync::Arc<[u8]>) -> ImageCodecFuture {
+        /// What the host answers `Platform::open_image_codec` with.
+        fn open(&self) -> ImageCodecFuture {
             *self.opens.borrow_mut() += 1;
             let codec = Box::new(TestCodec {
                 colours: self.colours.clone(),
@@ -619,55 +614,20 @@ mod image_widget_tests {
                 Ok(codec)
             })
         }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> Instant {
-            Instant::now()
-        }
-
-        fn wake_at(&self, _deadline: Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            Vec::new()
-        }
-
-        fn view(&self, _id: ViewId) -> Option<ViewRef> {
-            None
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            None
-        }
     }
 
-    /// A host with no decoder at all, which is the trait's default.
-    struct SilentHost;
+    /// An [`App`] whose host decodes with `host`.
+    fn app_decoding_with(host: &Rc<TestHost>) -> Rc<AppCell> {
+        let host = Rc::clone(host);
+        let platform = TestPlatform::new()
+            .on(TargetPlatform::MacOS)
+            .with_image_codec(move |_bytes| host.open());
+        AppCell::with_platform(Rc::new(platform))
+    }
 
-    impl Platform for SilentHost {
-        fn target_platform(&self) -> TargetPlatform {
-            TargetPlatform::MacOS
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> Instant {
-            Instant::now()
-        }
-
-        fn wake_at(&self, _deadline: Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            Vec::new()
-        }
-
-        fn view(&self, _id: ViewId) -> Option<ViewRef> {
-            None
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            None
-        }
+    /// An [`App`] whose host has no decoder at all, which is the trait's default.
+    fn app_without_a_decoder() -> Rc<AppCell> {
+        AppCell::with_platform(Rc::new(TestPlatform::new().on(TargetPlatform::MacOS)))
     }
 
     /// The one image render object in the mounted tree.
@@ -693,7 +653,7 @@ mod image_widget_tests {
     #[test]
     fn an_image_appears_once_the_host_answers_and_takes_the_size_it_decoded() {
         let host = Rc::new(TestHost::still());
-        let cell = AppCell::with_platform(Rc::clone(&host) as PlatformRef);
+        let cell = app_decoding_with(&host);
         let harness = mount_image(&cell, Image::memory_static(&b"a picture"[..]).into_widget());
         {
             let app = cell.borrow();
@@ -719,7 +679,7 @@ mod image_widget_tests {
 
     #[test]
     fn a_host_with_no_decoder_leaves_the_box_empty() {
-        let cell = AppCell::with_platform(Rc::new(SilentHost) as PlatformRef);
+        let cell = app_without_a_decoder();
         let harness = mount_image(&cell, Image::memory_static(&b"a picture"[..]).into_widget());
         cell.checkpoint();
 
@@ -733,7 +693,7 @@ mod image_widget_tests {
     #[test]
     fn two_widgets_showing_the_same_bytes_share_one_decode() {
         let host = Rc::new(TestHost::still());
-        let cell = AppCell::with_platform(Rc::clone(&host) as PlatformRef);
+        let cell = app_decoding_with(&host);
         let bytes: std::sync::Arc<[u8]> = std::sync::Arc::from(&b"one picture"[..]);
         let provider: ImageProviderRef = Rc::new(MemoryImage::new(bytes));
         mount_image(
@@ -756,7 +716,7 @@ mod image_widget_tests {
     #[test]
     fn an_animation_shows_a_new_frame_when_the_last_ones_time_is_up() {
         let host = Rc::new(TestHost::animation());
-        let cell = AppCell::with_platform(Rc::clone(&host) as PlatformRef);
+        let cell = app_decoding_with(&host);
         let harness = mount_image(
             &cell,
             Image::memory_static(&b"an animation"[..]).into_widget(),
@@ -790,7 +750,7 @@ mod image_widget_tests {
     #[test]
     fn the_frame_after_the_one_on_screen_is_asked_for_while_it_is_still_up() {
         let host = Rc::new(TestHost::animation());
-        let cell = AppCell::with_platform(Rc::clone(&host) as PlatformRef);
+        let cell = app_decoding_with(&host);
         let harness = mount_image(
             &cell,
             Image::memory_static(&b"an animation"[..]).into_widget(),
@@ -813,7 +773,7 @@ mod image_widget_tests {
     #[test]
     fn an_animation_nobody_is_watching_stops_between_frames() {
         let host = Rc::new(TestHost::animation());
-        let cell = AppCell::with_platform(Rc::clone(&host) as PlatformRef);
+        let cell = app_decoding_with(&host);
         let bytes: std::sync::Arc<[u8]> = std::sync::Arc::from(&b"an animation"[..]);
         let provider: ImageProviderRef = Rc::new(MemoryImage::new(bytes));
 
@@ -867,7 +827,7 @@ mod image_widget_tests {
                 host.frame_gate = Some(gate.future());
             }
             let host = Rc::new(host);
-            let cell = AppCell::with_platform(host.clone() as PlatformRef);
+            let cell = app_decoding_with(&host);
             let provider = MemoryImage::from_static(b"late");
             let stream = {
                 let mut app = cell.borrow_mut();
@@ -904,7 +864,7 @@ mod image_widget_tests {
     #[test]
     fn cached_animation_disposes_its_codec_after_the_final_cache_hold_leaves() {
         let host = Rc::new(TestHost::animation());
-        let cell = AppCell::with_platform(host.clone() as PlatformRef);
+        let cell = app_decoding_with(&host);
         let stream = {
             let mut app = cell.borrow_mut();
             MemoryImage::from_static(b"animation").resolve(&mut app, &ImageConfiguration::EMPTY)
@@ -940,7 +900,7 @@ mod image_widget_tests {
     #[test]
     fn rebuilding_static_images_reuses_the_decode_and_disposes_replaced_streams() {
         let host = Rc::new(TestHost::animation());
-        let cell = AppCell::with_platform(host.clone() as PlatformRef);
+        let cell = app_decoding_with(&host);
         static DATA: [u8; 4] = *b"same";
         let harness = mount_image(&cell, Image::memory_static(&DATA).into_widget());
         cell.checkpoint();

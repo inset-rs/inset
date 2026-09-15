@@ -109,52 +109,21 @@ mod tests {
     use inset_foundation::AppCell;
     use std::cell::RefCell;
     use std::rc::Rc;
-    use std::time::Instant;
 
-    use inset_embedder::{
-        Platform, PlatformRef, SystemChrome, SystemUiOverlayStyle, TargetPlatform, ViewId, ViewRef,
-    };
+    use inset_embedder::{SystemChrome, SystemUiOverlayStyle};
+    use inset_test::TestPlatform;
 
     use super::*;
     use crate::test_harness::Harness;
     use crate::widgets::basic::SizedBox;
 
+    /// A host that records the descriptions the app gives of itself.
     #[derive(Default)]
-    struct RecordingPlatform {
+    struct RecordingChrome {
         descriptions: RefCell<Vec<ApplicationSwitcherDescription>>,
     }
 
-    impl Platform for RecordingPlatform {
-        fn target_platform(&self) -> TargetPlatform {
-            TargetPlatform::Android
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> Instant {
-            Instant::now()
-        }
-
-        fn wake_at(&self, _deadline: Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            Vec::new()
-        }
-
-        fn view(&self, _id: ViewId) -> Option<ViewRef> {
-            None
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            None
-        }
-
-        fn system_chrome(&self) -> Option<&dyn SystemChrome> {
-            Some(self)
-        }
-    }
-
-    impl SystemChrome for RecordingPlatform {
+    impl SystemChrome for RecordingChrome {
         fn set_overlay_style(&self, _style: &SystemUiOverlayStyle) {}
 
         fn set_application_switcher_description(
@@ -167,9 +136,9 @@ mod tests {
 
     #[test]
     fn a_title_describes_the_app_to_the_platform_and_again_when_it_changes() {
-        let platform = Rc::new(RecordingPlatform::default());
-        let platform_ref: PlatformRef = Rc::clone(&platform) as PlatformRef;
-        let cell = AppCell::with_platform(platform_ref);
+        let chrome = Rc::new(RecordingChrome::default());
+        let platform = TestPlatform::new().with_system_chrome(chrome.clone());
+        let cell = AppCell::with_platform(Rc::new(platform));
         let mut app = cell.borrow_mut();
         let titled = |title: &str| {
             Title::new(Color::new(0xFF112233), SizedBox::shrink())
@@ -182,7 +151,7 @@ mod tests {
         harness.pump(&mut app);
         harness.set_child(&mut app, titled("Two"));
         harness.pump(&mut app);
-        let descriptions = platform.descriptions.borrow();
+        let descriptions = chrome.descriptions.borrow();
         assert_eq!(
             descriptions.as_slice(),
             [

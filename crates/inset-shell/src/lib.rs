@@ -186,84 +186,37 @@ impl EmbedderClient for Shell {
 mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     use inset_embedder::{
-        EmbedderClient, Frame, KeyData, KeyEventType, Picture, Platform, PointerChange,
-        PointerData, PointerDataPacket, PointerDeviceKind, View, ViewId, ViewMetrics, ViewRef,
+        EmbedderClient, Frame, KeyData, KeyEventType, PointerChange, PointerData,
+        PointerDataPacket, PointerDeviceKind, ViewId,
     };
     use inset_foundation::App;
     use inset_gestures::{GestureBinding, PointerRoute};
     use inset_scheduler::SchedulerBinding;
     use inset_services::{HardwareKeyboard, KeyEvent, LogicalKeyboardKey, PhysicalKeyboardKey};
+    use inset_test::{TestPlatform, TestView};
 
     use super::Shell;
 
-    struct RecordingPlatform {
-        frames: Arc<AtomicUsize>,
-        view: Option<ViewRef>,
-    }
-
-    impl Platform for RecordingPlatform {
-        fn target_platform(&self) -> inset_embedder::TargetPlatform {
-            inset_embedder::TargetPlatform::Android
-        }
-
-        fn request_frame(&self) {
-            self.frames.fetch_add(1, Ordering::SeqCst);
-        }
-
-        fn now(&self) -> std::time::Instant {
-            std::time::Instant::now()
-        }
-
-        fn wake_at(&self, _deadline: std::time::Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            self.view.iter().cloned().collect()
-        }
-
-        fn view(&self, id: ViewId) -> Option<ViewRef> {
-            self.view.as_ref().filter(|view| view.id() == id).cloned()
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            self.view.clone()
-        }
-    }
-
-    struct TestView;
-
-    impl View for TestView {
-        fn id(&self) -> ViewId {
-            ViewId(0)
-        }
-
-        fn metrics(&self) -> ViewMetrics {
-            ViewMetrics::default()
-        }
-
-        fn present(&self, _picture: std::sync::Arc<Picture>) {}
+    /// A platform with the one view a pointer packet or a focus event is addressed to.
+    fn platform_with_a_view() -> TestPlatform {
+        TestPlatform::new().with_view(Rc::new(TestView::new(0.0, 0.0)))
     }
 
     #[test]
     fn new_runs_setup_and_frame_runs_both_scheduler_phases() {
-        let frames = Arc::new(AtomicUsize::new(0));
-        let platform = std::rc::Rc::new(RecordingPlatform {
-            frames: Arc::clone(&frames),
-            view: None,
-        });
+        let platform = Rc::new(TestPlatform::new());
         let mut setup_ran = false;
-        let mut shell = Shell::new(platform, |_app: &mut App| {
+        let mut shell = Shell::new(platform.clone(), |_app: &mut App| {
             setup_ran = true;
         });
         assert!(setup_ran);
-        assert_eq!(frames.load(Ordering::SeqCst), 0);
+        assert_eq!(platform.frames_requested(), 0);
 
         SchedulerBinding::schedule_frame(&mut shell.app());
-        assert_eq!(frames.load(Ordering::SeqCst), 1);
+        assert_eq!(platform.frames_requested(), 1);
         shell.frame(Frame {
             elapsed: Duration::from_millis(16),
         });
@@ -273,10 +226,7 @@ mod tests {
     fn pointer_data_packet_reaches_gesture_binding() {
         let ran = Rc::new(Cell::new(false));
         let ran_flag = Rc::clone(&ran);
-        let platform = std::rc::Rc::new(RecordingPlatform {
-            frames: Arc::new(AtomicUsize::new(0)),
-            view: Some(Rc::new(TestView)),
-        });
+        let platform = Rc::new(platform_with_a_view());
         let mut shell = Shell::new(platform, |app| {
             let binding = GestureBinding::instance(app);
             binding.pointer_router(app).add_route(
@@ -303,10 +253,7 @@ mod tests {
     fn key_data_reaches_the_hardware_keyboard() {
         let seen = Rc::new(Cell::new(0));
         let seen_flag = Rc::clone(&seen);
-        let platform = std::rc::Rc::new(RecordingPlatform {
-            frames: Arc::new(AtomicUsize::new(0)),
-            view: None,
-        });
+        let platform = Rc::new(TestPlatform::new());
         let mut shell = Shell::new(platform, |app| {
             HardwareKeyboard::instance(app).add_handler(
                 app,
@@ -333,10 +280,7 @@ mod tests {
 
     #[test]
     fn wake_and_frame_advance_the_app_clock_and_fire_due_timers() {
-        let platform: inset_embedder::PlatformRef = Rc::new(RecordingPlatform {
-            frames: Arc::new(AtomicUsize::new(0)),
-            view: None,
-        });
+        let platform = Rc::new(TestPlatform::new());
         let fired = Rc::new(Cell::new(Vec::new()));
         let mut shell = Shell::new(platform, |app| {
             for (name, delay) in [("early", 10), ("late", 30)] {
@@ -368,10 +312,7 @@ mod tests {
         use inset_embedder::{ViewFocusDirection, ViewFocusEvent, ViewFocusState};
         let received = Rc::new(Cell::new(None));
         let sink = received.clone();
-        let platform = Rc::new(RecordingPlatform {
-            frames: Arc::default(),
-            view: Some(Rc::new(TestView)),
-        });
+        let platform = Rc::new(platform_with_a_view());
         let mut shell = Shell::new(platform, move |app| {
             app.platform_callbacks_mut().on_view_focus_change = Some(Rc::new(move |app, event| {
                 let sink = sink.clone();

@@ -6,11 +6,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::task::{Poll, Waker};
 
-use js_sys::{Array, Uint8Array};
 use inset_embedder::{
     Image, ImageCodec, ImageCodecFuture, ImageDecodeError, ImageFrame, ImageFrameFuture,
     ImageRepetition,
 };
+use js_sys::{Array, Uint8Array};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Blob, ImageBitmap};

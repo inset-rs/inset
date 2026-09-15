@@ -18,5 +18,8 @@ inset-rendering.workspace = true
 inset-scheduler.workspace = true
 inset-services.workspace = true
 
+[dev-dependencies]
+inset-test.workspace = true
+
 [lints]
 workspace = true

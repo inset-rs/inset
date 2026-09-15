@@ -11,15 +11,14 @@ use std::time::Duration;
 use cupertino_gallery::{Entry, entry_route, gallery, sub_route};
 use inset_cupertino::{CupertinoNavigationBarBackButton, install_cupertino_icon_font};
 use inset_embedder::{
-    Offset, Picture, Platform, PlatformRef, PointerChange, PointerData, PointerDataPacket,
-    PointerDeviceKind, TargetPlatform, View as EmbedderView, ViewConstraints, ViewId, ViewMetrics,
-    ViewRef,
+    Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, TargetPlatform,
 };
 use inset_foundation::AppCell;
 use inset_gestures::GestureBinding;
 use inset_painting::PaintingBinding;
 use inset_rendering::{AnyRenderObject, RenderParagraph};
 use inset_scheduler::SchedulerBinding;
+use inset_test::{TestPlatform, TestView};
 use inset_widgets::{
     AnyElement, AnyRoute, GlobalKey, IntoWidget, NavigatorState, Text, WidgetsBinding,
     downcast_widget, run_app,
@@ -27,57 +26,6 @@ use inset_widgets::{
 
 /// The window `main.rs` opens, in logical points.
 const VIEW: [f64; 2] = [420.0, 720.0];
-
-/// A 420x720 view at 1x that presents nowhere.
-struct TestView;
-
-impl EmbedderView for TestView {
-    fn id(&self) -> ViewId {
-        ViewId(0)
-    }
-
-    fn metrics(&self) -> ViewMetrics {
-        ViewMetrics {
-            physical_size: VIEW,
-            physical_constraints: ViewConstraints::tight(VIEW[0], VIEW[1]),
-            device_pixel_ratio: 1.0,
-            ..ViewMetrics::default()
-        }
-    }
-
-    fn present(&self, _picture: std::sync::Arc<Picture>) {}
-}
-
-/// A platform whose implicit view is [`TestView`], so `run_app` finds one to attach to.
-struct TestPlatform {
-    view: ViewRef,
-}
-
-impl Platform for TestPlatform {
-    fn target_platform(&self) -> TargetPlatform {
-        TargetPlatform::IOS
-    }
-
-    fn request_frame(&self) {}
-
-    fn now(&self) -> std::time::Instant {
-        std::time::Instant::now()
-    }
-
-    fn wake_at(&self, _deadline: std::time::Instant) {}
-
-    fn views(&self) -> Vec<ViewRef> {
-        vec![Rc::clone(&self.view)]
-    }
-
-    fn view(&self, id: ViewId) -> Option<ViewRef> {
-        (self.view.id() == id).then(|| Rc::clone(&self.view))
-    }
-
-    fn implicit_view(&self) -> Option<ViewRef> {
-        Some(Rc::clone(&self.view))
-    }
-}
 
 /// Which of several paragraphs reading the same text a tap should aim at.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -97,10 +45,11 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Fixture {
-        let platform: PlatformRef = Rc::new(TestPlatform {
-            view: Rc::new(TestView),
-        });
-        let cell = AppCell::with_platform(platform);
+        // A 420x720 view at 1x, so `run_app` finds one to attach to.
+        let platform = TestPlatform::new()
+            .on(TargetPlatform::IOS)
+            .with_view(Rc::new(TestView::new(VIEW[0], VIEW[1])));
+        let cell = AppCell::with_platform(Rc::new(platform));
         let mut app = cell.borrow_mut();
         // What the shell does at start-up: the app-wide fonts every paragraph shapes against.
         PaintingBinding::instance(&mut app).install_fonts(&mut app, |fonts| {

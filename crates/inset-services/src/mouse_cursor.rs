@@ -668,56 +668,29 @@ impl SystemMouseCursors {
 mod tests {
     use std::cell::RefCell;
 
-    use inset_embedder::{InertPlatform, MouseCursor as MouseCursorHost};
+    use inset_embedder::MouseCursor as MouseCursorHost;
     use inset_gestures::{PointerHoverEvent, PointerRemovedEvent};
+    use inset_test::TestPlatform;
 
     use super::*;
 
     /// A host that records the cursor requests it receives.
-    struct RecordingPlatform {
+    #[derive(Default)]
+    struct RecordingCursor {
         activated: RefCell<Vec<(i64, SystemMouseCursorKind)>>,
     }
 
-    impl Platform for RecordingPlatform {
-        fn target_platform(&self) -> inset_embedder::TargetPlatform {
-            InertPlatform.target_platform()
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> std::time::Instant {
-            InertPlatform.now()
-        }
-
-        fn wake_at(&self, _deadline: std::time::Instant) {}
-
-        fn views(&self) -> Vec<inset_embedder::ViewRef> {
-            Vec::new()
-        }
-
-        fn view(&self, _id: inset_embedder::ViewId) -> Option<inset_embedder::ViewRef> {
-            None
-        }
-
-        fn implicit_view(&self) -> Option<inset_embedder::ViewRef> {
-            None
-        }
-
-        fn mouse_cursor(&self) -> Option<&dyn MouseCursorHost> {
-            Some(self)
-        }
-    }
-
-    impl MouseCursorHost for RecordingPlatform {
+    impl MouseCursorHost for RecordingCursor {
         fn activate_system_cursor(&self, device: i64, kind: SystemMouseCursorKind) {
             self.activated.borrow_mut().push((device, kind));
         }
     }
 
-    fn recording_platform() -> RecordingPlatform {
-        RecordingPlatform {
-            activated: RefCell::new(Vec::new()),
-        }
+    /// A platform whose cursor host records, and that host.
+    fn recording_platform() -> (TestPlatform, Rc<RecordingCursor>) {
+        let cursor = Rc::new(RecordingCursor::default());
+        let platform = TestPlatform::new().with_mouse_cursor(cursor.clone());
+        (platform, cursor)
     }
 
     fn hover() -> PointerEvent {
@@ -741,7 +714,7 @@ mod tests {
 
     #[test]
     fn manager_activates_the_first_non_deferred_candidate() {
-        let platform = recording_platform();
+        let (platform, cursor) = recording_platform();
         let mut manager = MouseCursorManager::new(SystemMouseCursors::BASIC.into());
         manager.handle_device_cursor_update(
             &platform,
@@ -750,7 +723,7 @@ mod tests {
             [<dyn MouseCursor>::defer(), SystemMouseCursors::TEXT.into()],
         );
         assert_eq!(
-            *platform.activated.borrow(),
+            *cursor.activated.borrow(),
             [(1, SystemMouseCursorKind::Text)],
             "the deferring region lets the text region behind it decide"
         );
@@ -760,7 +733,7 @@ mod tests {
 
     #[test]
     fn manager_falls_back_when_every_candidate_defers() {
-        let platform = recording_platform();
+        let (platform, cursor) = recording_platform();
         let mut manager = MouseCursorManager::new(SystemMouseCursors::BASIC.into());
         manager.handle_device_cursor_update(
             &platform,
@@ -769,14 +742,14 @@ mod tests {
             [<dyn MouseCursor>::defer()],
         );
         assert_eq!(
-            *platform.activated.borrow(),
+            *cursor.activated.borrow(),
             [(1, SystemMouseCursorKind::Basic)]
         );
     }
 
     #[test]
     fn manager_does_not_reactivate_the_same_cursor() {
-        let platform = recording_platform();
+        let (platform, cursor) = recording_platform();
         let mut manager = MouseCursorManager::new(SystemMouseCursors::BASIC.into());
         manager.handle_device_cursor_update(
             &platform,
@@ -785,15 +758,15 @@ mod tests {
             [SystemMouseCursors::CLICK.into()],
         );
         manager.handle_device_cursor_update(&platform, 1, None, [SystemMouseCursors::CLICK.into()]);
-        assert_eq!(platform.activated.borrow().len(), 1);
+        assert_eq!(cursor.activated.borrow().len(), 1);
 
         manager.handle_device_cursor_update(&platform, 1, None, [SystemMouseCursors::GRAB.into()]);
-        assert_eq!(platform.activated.borrow().len(), 2);
+        assert_eq!(cursor.activated.borrow().len(), 2);
     }
 
     #[test]
     fn an_uncontrolled_region_keeps_the_previous_system_request() {
-        let platform = recording_platform();
+        let (platform, cursor) = recording_platform();
         let mut manager = MouseCursorManager::new(SystemMouseCursors::BASIC.into());
         manager.handle_device_cursor_update(
             &platform,
@@ -808,7 +781,7 @@ mod tests {
             [<dyn MouseCursor>::uncontrolled()],
         );
         assert_eq!(
-            *platform.activated.borrow(),
+            *cursor.activated.borrow(),
             [(1, SystemMouseCursorKind::Click)],
             "the no-op session makes no request; the host keeps whatever it shows"
         );
@@ -819,7 +792,7 @@ mod tests {
 
     #[test]
     fn a_removed_device_forgets_its_session() {
-        let platform = recording_platform();
+        let (platform, _cursor) = recording_platform();
         let mut manager = MouseCursorManager::new(SystemMouseCursors::BASIC.into());
         manager.handle_device_cursor_update(
             &platform,

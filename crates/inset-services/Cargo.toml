@@ -17,5 +17,8 @@ inset-gestures.workspace = true
 inset-scheduler.workspace = true
 unicode-segmentation.workspace = true
 
+[dev-dependencies]
+inset-test.workspace = true
+
 [lints]
 workspace = true

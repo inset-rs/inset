@@ -21,6 +21,7 @@ inset-services.workspace = true
 unicode-general-category.workspace = true
 
 [dev-dependencies]
+inset-test.workspace = true
 inset-embedder = { workspace = true, features = ["test-support"] }
 valo.workspace = true
 valo-system-fonts.workspace = true

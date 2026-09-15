@@ -133,6 +133,8 @@ pub struct App {
     timers: Timers,
     executor: ForegroundExecutor,
     platform: PlatformRef,
+    /// The host's threads, asked for a turn at each timer's deadline.
+    dispatcher: std::sync::Arc<dyn inset_embedder::Dispatcher>,
     platform_callbacks: PlatformCallbacks,
 }
 
@@ -165,25 +167,23 @@ impl App {
             microtasks: VecDeque::new(),
             timers: Timers::default(),
             executor,
+            dispatcher: platform.dispatcher(),
             platform,
             platform_callbacks: PlatformCallbacks::default(),
         }
     }
 
-    /// This App as a task sees it: the handle an `async` body captures across its `await`s.
-    pub fn to_async(&self) -> AsyncApp {
-        AsyncApp::new(
-            self.this.clone(),
-            self.executor.handle(),
-            Rc::clone(&self.platform),
-        )
-    }
-
-    /// The polling side of this App's executor, for the cell's checkpoint.
+    /// The executor's polling side, for the cell's checkpoint.
     pub(crate) fn executor_handle(&self) -> ExecutorHandle {
         self.executor.handle()
     }
 
+    /// This App as a task sees it: the handle an `async` body captures across its `await`s.
+    pub fn to_async(&self) -> AsyncApp {
+        AsyncApp::new(self.this.clone(), self.executor.handle())
+    }
+
+    /// The polling side of this App's executor, for the cell's checkpoint.
     /// Queues `f` as a task on this App: the continuation of a Dart `async` body.
     ///
     /// Dart runs an `async` body synchronously up to its first `await`; port that prefix
@@ -196,6 +196,17 @@ impl App {
     pub fn spawn<R: 'static>(&self, f: impl AsyncFnOnce(&mut AsyncApp) -> R + 'static) -> Task<R> {
         let mut cx = self.to_async();
         self.executor.spawn(async move { f(&mut cx).await })
+    }
+
+    /// Runs `work` off the main thread, on the host's dispatcher, and answers its result as a
+    /// task: dart:isolate's `Isolate.run`. The task resolves at a checkpoint after the work is
+    /// done, since the executor wakes the host for it, and a panic in `work` resumes in
+    /// whoever awaits the task, as `Isolate.run` rethrows the isolate's error.
+    pub fn run_in_background<T: Send + 'static>(
+        &self,
+        work: impl FnOnce() -> T + Send + 'static,
+    ) -> Task<T> {
+        self.executor.run_in_background(work)
     }
 
     pub fn platform(&self) -> PlatformRef {
@@ -269,7 +280,7 @@ impl App {
     pub fn schedule_timer(&mut self, duration: Duration, callback: Listener) -> Timer {
         let (timer, wake) = self.timers.schedule(duration, callback);
         if let Some(delay) = wake {
-            self.platform.wake_at(self.platform.now() + delay);
+            self.dispatcher.wake_at(self.platform.now() + delay);
         }
         timer
     }
@@ -307,7 +318,7 @@ impl App {
     /// (scheduled while an earlier timer was pending, or by the callbacks that just ran) need one.
     pub(crate) fn request_wake_for_next_timer(&mut self) {
         if let Some(delay) = self.timers.next_wake() {
-            self.platform.wake_at(self.platform.now() + delay);
+            self.dispatcher.wake_at(self.platform.now() + delay);
         }
     }
 

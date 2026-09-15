@@ -643,6 +643,8 @@ mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::rc::Rc;
 
+    use inset_test::TestPlatform;
+
     use super::*;
 
     type Log = Rc<RefCell<Vec<String>>>;
@@ -811,51 +813,15 @@ mod tests {
         );
     }
 
-    struct RecordingPlatform {
-        frames: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-    }
-
-    impl inset_embedder::Platform for RecordingPlatform {
-        fn target_platform(&self) -> inset_embedder::TargetPlatform {
-            inset_embedder::TargetPlatform::Android
-        }
-
-        fn request_frame(&self) {
-            self.frames
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        }
-
-        fn now(&self) -> std::time::Instant {
-            std::time::Instant::now()
-        }
-
-        fn wake_at(&self, _deadline: std::time::Instant) {}
-
-        fn views(&self) -> Vec<inset_embedder::ViewRef> {
-            Vec::new()
-        }
-
-        fn view(&self, _id: inset_embedder::ViewId) -> Option<inset_embedder::ViewRef> {
-            None
-        }
-
-        fn implicit_view(&self) -> Option<inset_embedder::ViewRef> {
-            None
-        }
-    }
-
     #[test]
     fn schedule_frame_pokes_the_platform_once() {
-        let frames = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let platform = std::rc::Rc::new(RecordingPlatform {
-            frames: std::sync::Arc::clone(&frames),
-        });
-        let cell = AppCell::with_platform(platform);
+        let platform = Rc::new(TestPlatform::new());
+        let cell = AppCell::with_platform(platform.clone());
         let mut app = cell.borrow_mut();
 
         SchedulerBinding::schedule_frame(&mut app);
         SchedulerBinding::schedule_frame(&mut app);
-        assert_eq!(frames.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(platform.frames_requested(), 1);
         assert!(SchedulerBinding::has_scheduled_frame(&mut app));
     }
 

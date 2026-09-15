@@ -139,48 +139,19 @@ mod tests {
     use inset_foundation::AppCell;
     use std::cell::RefCell;
     use std::rc::Rc;
-    use std::time::Instant;
 
-    use inset_embedder::{Haptics, Platform, PlatformRef, TargetPlatform, ViewId, ViewRef};
+    use inset_embedder::{Haptics, TargetPlatform};
+    use inset_test::TestPlatform;
 
     use super::*;
 
+    /// A host that records the feedback kinds it is asked for.
     #[derive(Default)]
-    struct RecordingPlatform {
+    struct RecordingHaptics {
         kinds: RefCell<Vec<HapticFeedbackType>>,
     }
 
-    impl Platform for RecordingPlatform {
-        fn target_platform(&self) -> TargetPlatform {
-            TargetPlatform::IOS
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> Instant {
-            Instant::now()
-        }
-
-        fn wake_at(&self, _deadline: Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            Vec::new()
-        }
-
-        fn view(&self, _id: ViewId) -> Option<ViewRef> {
-            None
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            None
-        }
-
-        fn haptics(&self) -> Option<&dyn Haptics> {
-            Some(self)
-        }
-    }
-
-    impl Haptics for RecordingPlatform {
+    impl Haptics for RecordingHaptics {
         fn feedback(&self, kind: HapticFeedbackType) {
             self.kinds.borrow_mut().push(kind);
         }
@@ -188,8 +159,11 @@ mod tests {
 
     #[test]
     fn each_call_sends_its_own_feedback_kind_to_the_platform() {
-        let platform = Rc::new(RecordingPlatform::default());
-        let cell = AppCell::with_platform(Rc::clone(&platform) as PlatformRef);
+        let haptics = Rc::new(RecordingHaptics::default());
+        let platform = TestPlatform::new()
+            .on(TargetPlatform::IOS)
+            .with_haptics(haptics.clone());
+        let cell = AppCell::with_platform(Rc::new(platform));
         let app = cell.borrow();
 
         HapticFeedback::vibrate(&app);
@@ -202,7 +176,7 @@ mod tests {
         HapticFeedback::error_notification(&app);
 
         assert_eq!(
-            platform.kinds.borrow().as_slice(),
+            haptics.kinds.borrow().as_slice(),
             [
                 HapticFeedbackType::Vibrate,
                 HapticFeedbackType::LightImpact,

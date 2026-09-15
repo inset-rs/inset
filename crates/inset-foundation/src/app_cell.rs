@@ -13,7 +13,7 @@ use std::time::Duration;
 use inset_embedder::{InertPlatform, PlatformRef};
 
 use crate::app::App;
-use crate::executor::{ExecutorHandle, ForegroundExecutor};
+use crate::executor::{ExecutorHandle, ForegroundExecutor, Task};
 use crate::timers::Timers;
 
 /// Round budget for one checkpoint: a microtask and a task feeding each other forever must
@@ -33,12 +33,9 @@ impl AppCell {
 
     /// The `App` of a running program, on the host's platform.
     pub fn with_platform(platform: PlatformRef) -> Rc<AppCell> {
+        let executor = ForegroundExecutor::new(platform.dispatcher());
         Rc::new_cyclic(|this| AppCell {
-            app: RefCell::new(App::build(
-                this.clone(),
-                platform,
-                ForegroundExecutor::new(),
-            )),
+            app: RefCell::new(App::build(this.clone(), platform, executor)),
         })
     }
 
@@ -76,6 +73,8 @@ impl AppCell {
             "AppCell::checkpoint while the App is borrowed: release it first; each task \
              borrows the App for its own steps"
         );
+        // Taken for a moment and let go: nothing may hold the `App` while tasks run, since
+        // each task borrows it through its own `AsyncApp`.
         let executor = self.borrow().executor_handle();
         let mut rounds = 0usize;
         loop {
@@ -85,7 +84,7 @@ impl AppCell {
             if had_microtasks {
                 self.borrow_mut().drain_microtasks();
             }
-            let polled = executor.drain();
+            let polled = executor.poll_ready_tasks();
             if !had_microtasks && polled == 0 {
                 break;
             }
@@ -99,9 +98,10 @@ impl AppCell {
         rounds
     }
 
-    /// A host wake that carried no time: runs the checkpoint, for whatever a native callback
-    /// posted, and re-arms the host for the next timer, since the post's own wake took the
-    /// host's deadline.
+    /// The turn the host gives for a [`Dispatcher::wake_at`](inset_embedder::Dispatcher::wake_at)
+    /// that carried no time: a post, a task woken on another thread. Nothing to handle, so
+    /// straight to the checkpoint, then the host is asked again for the next timer, in case
+    /// that turn was its deadline.
     ///
     /// # Panics
     ///
@@ -141,26 +141,17 @@ impl AppCell {
 
 /// A task's handle on the [`App`]: what an `async` continuation captures across its `await`s.
 ///
-/// Carries the executor's queue and the host besides the cell, as gpui's `AsyncApp` carries
-/// its executors: a [`post`](Self::post) reaches both without the `App`.
+/// Carries the executor's queue besides the cell, as gpui's `AsyncApp` carries its
+/// executors: a [`post`](Self::post) reaches it without the `App`.
 #[derive(Clone)]
 pub struct AsyncApp {
     app: Weak<AppCell>,
     executor: ExecutorHandle,
-    platform: PlatformRef,
 }
 
 impl AsyncApp {
-    pub(crate) fn new(
-        app: Weak<AppCell>,
-        executor: ExecutorHandle,
-        platform: PlatformRef,
-    ) -> AsyncApp {
-        AsyncApp {
-            app,
-            executor,
-            platform,
-        }
+    pub(crate) fn new(app: Weak<AppCell>, executor: ExecutorHandle) -> AsyncApp {
+        AsyncApp { app, executor }
     }
 
     /// Runs `f` on the `App`, borrowing the cell for just that closure.
@@ -183,7 +174,8 @@ impl AsyncApp {
         f(&mut app)
     }
 
-    /// Queues `f` to run on the `App` at the next checkpoint and wakes the host so one comes.
+    /// Queues `f` to run on the `App` at the next checkpoint; the executor wakes the host so
+    /// one comes.
     ///
     /// The door for a native callback — a notification, an observer — that the host delivers
     /// outside any event it drives, possibly while the `App` is borrowed: nothing here touches
@@ -197,7 +189,14 @@ impl AsyncApp {
         let cx = self.clone();
         // Dropping the handle detaches the task; it runs to completion regardless.
         drop(self.executor.spawn(async move { cx.update(f) }));
-        self.platform.wake_at(self.platform.now());
+    }
+
+    /// [`App::run_in_background`], from a task.
+    pub fn run_in_background<T: Send + 'static>(
+        &self,
+        work: impl FnOnce() -> T + Send + 'static,
+    ) -> Task<T> {
+        self.executor.run_in_background(work)
     }
 }
 

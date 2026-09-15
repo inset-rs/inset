@@ -589,13 +589,11 @@ mod tests {
     use inset_foundation::AppCell;
     use std::cell::{Cell, RefCell};
 
-    use inset_embedder::{
-        InertPlatform, MouseCursor, Platform, PlatformRef, Size, SystemMouseCursorKind,
-        TargetPlatform, ViewRef,
-    };
+    use inset_embedder::{MouseCursor, Size, SystemMouseCursorKind};
     use inset_gestures::{
         PointerAddedEvent, PointerHoverEvent, PointerRemovedEvent, PointerScrollEvent,
     };
+    use inset_test::TestPlatform;
 
     use inset_foundation::{Listenable, Listener};
 
@@ -608,52 +606,21 @@ mod tests {
     use crate::shifted_box::RenderPadding;
 
     /// A host that records the cursor requests it receives.
-    struct CursorRecordingPlatform {
+    #[derive(Default)]
+    struct RecordingCursor {
         activated: RefCell<Vec<(i64, SystemMouseCursorKind)>>,
     }
 
-    impl Platform for CursorRecordingPlatform {
-        fn target_platform(&self) -> TargetPlatform {
-            InertPlatform.target_platform()
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> std::time::Instant {
-            InertPlatform.now()
-        }
-
-        fn wake_at(&self, _deadline: std::time::Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            Vec::new()
-        }
-
-        fn view(&self, _id: ViewId) -> Option<ViewRef> {
-            None
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            None
-        }
-
-        fn mouse_cursor(&self) -> Option<&dyn MouseCursor> {
-            Some(self)
-        }
-    }
-
-    impl MouseCursor for CursorRecordingPlatform {
+    impl MouseCursor for RecordingCursor {
         fn activate_system_cursor(&self, device: i64, kind: SystemMouseCursorKind) {
             self.activated.borrow_mut().push((device, kind));
         }
     }
 
-    fn app_with_cursor_host() -> (Rc<AppCell>, Rc<CursorRecordingPlatform>) {
-        let platform = Rc::new(CursorRecordingPlatform {
-            activated: RefCell::new(Vec::new()),
-        });
-        let platform_ref: PlatformRef = Rc::clone(&platform) as PlatformRef;
-        (AppCell::with_platform(platform_ref), platform)
+    fn app_with_cursor_host() -> (Rc<AppCell>, Rc<RecordingCursor>) {
+        let cursor = Rc::new(RecordingCursor::default());
+        let platform = TestPlatform::new().with_mouse_cursor(cursor.clone());
+        (AppCell::with_platform(Rc::new(platform)), cursor)
     }
 
     /// A laid-out tree: a 200×200 root holding a mouse region padded 50 on each side, so the
@@ -915,7 +882,7 @@ mod tests {
 
     #[test]
     fn the_front_regions_cursor_wins_and_deferring_regions_let_the_one_behind_decide() {
-        let (cell, platform) = app_with_cursor_host();
+        let (cell, cursor) = app_with_cursor_host();
         let mut app = cell.borrow_mut();
         let RegionTree {
             owner,
@@ -932,14 +899,14 @@ mod tests {
 
         tracker.update_with_event(&mut app, &mouse_added(Offset::new(100.0, 100.0)), None);
         assert_eq!(
-            *platform.activated.borrow(),
+            *cursor.activated.borrow(),
             [(0, SystemMouseCursorKind::Text)]
         );
 
         front.set_cursor(&mut app, SystemMouseCursors::CLICK.into());
         tracker.update_all_devices(&mut app);
         assert_eq!(
-            *platform.activated.borrow(),
+            *cursor.activated.borrow(),
             [
                 (0, SystemMouseCursorKind::Text),
                 (0, SystemMouseCursorKind::Click)
@@ -950,7 +917,7 @@ mod tests {
 
         tracker.update_with_event(&mut app, &mouse_hover(Offset::new(10.0, 10.0)), None);
         assert_eq!(
-            platform.activated.borrow().last().unwrap().1,
+            cursor.activated.borrow().last().unwrap().1,
             SystemMouseCursorKind::Basic,
             "over nothing, the fallback cursor"
         );
@@ -1033,7 +1000,7 @@ mod tests {
 
     #[test]
     fn a_region_with_no_annotation_neighbours_still_uses_the_fallback_cursor() {
-        let (cell, platform) = app_with_cursor_host();
+        let (cell, cursor) = app_with_cursor_host();
         let mut app = cell.borrow_mut();
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(10.0, 10.0)), None);
@@ -1049,7 +1016,7 @@ mod tests {
         let tracker = tracker_for(&mut app, root);
         tracker.update_with_event(&mut app, &mouse_added(Offset::new(5.0, 5.0)), None);
         assert_eq!(
-            *platform.activated.borrow(),
+            *cursor.activated.borrow(),
             [(0, SystemMouseCursorKind::Basic)]
         );
     }

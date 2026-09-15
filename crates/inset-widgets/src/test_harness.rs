@@ -10,6 +10,7 @@ use inset_foundation::{App, AppCell, Handle};
 use inset_rendering::{
     AnyRenderObject, PipelineOwner, RenderHandle, RenderView, ViewConfiguration,
 };
+use inset_test::TestPlatform;
 
 use crate::*;
 
@@ -433,44 +434,13 @@ pub(crate) fn mount_scroll_harness(app: &mut App) -> ScrollHarness {
 
 // ---- the binding harness: a real `WidgetsBinding`, for trees that use a `GlobalKey` ----
 
-/// A [`TestView`] behind a `PlatformRef`, so `run_widget` finds an implicit view.
-struct BindingPlatform {
-    view: inset_embedder::ViewRef,
-}
-
-impl inset_embedder::Platform for BindingPlatform {
-    fn target_platform(&self) -> inset_embedder::TargetPlatform {
-        inset_embedder::TargetPlatform::MacOS
-    }
-
-    fn request_frame(&self) {}
-
-    fn now(&self) -> std::time::Instant {
-        std::time::Instant::now()
-    }
-
-    fn wake_at(&self, _deadline: std::time::Instant) {}
-
-    fn views(&self) -> Vec<inset_embedder::ViewRef> {
-        vec![Rc::clone(&self.view)]
-    }
-
-    fn view(&self, id: ViewId) -> Option<inset_embedder::ViewRef> {
-        (self.view.id() == id).then(|| Rc::clone(&self.view))
-    }
-
-    fn implicit_view(&self) -> Option<inset_embedder::ViewRef> {
-        Some(Rc::clone(&self.view))
-    }
-}
-
 /// An [`App`] whose platform has one [`VIEW_WIDTH`] x [`VIEW_HEIGHT`] view, for a tree that
 /// needs the `WidgetsBinding` (a `GlobalKey` lookup, a post-frame callback, a timer).
 pub(crate) fn binding_cell() -> Rc<AppCell> {
-    let platform: inset_embedder::PlatformRef = Rc::new(BindingPlatform {
-        view: Rc::new(TestView),
-    });
-    AppCell::with_platform(platform)
+    let platform = TestPlatform::new()
+        .on(inset_embedder::TargetPlatform::MacOS)
+        .with_view(Rc::new(TestView));
+    AppCell::with_platform(Rc::new(platform))
 }
 
 /// Mounts `child` under the platform's view and runs the first frame.

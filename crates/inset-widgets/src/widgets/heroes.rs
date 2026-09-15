@@ -1762,13 +1762,11 @@ mod tests {
     use inset_foundation::AppCell;
     use std::time::Duration;
 
-    use inset_embedder::{
-        Picture, Platform, PlatformRef, TargetPlatform, TextDirection, View as EmbedderView,
-        ViewConstraints, ViewId, ViewMetrics, ViewRef,
-    };
+    use inset_embedder::{TargetPlatform, TextDirection};
     use inset_painting::{AlignmentGeometry, EdgeInsets, EdgeInsetsGeometry};
     use inset_rendering::AnyRenderBox;
     use inset_scheduler::SchedulerBinding;
+    use inset_test::{TestPlatform, TestView};
 
     use super::*;
     use crate::binding::run_app;
@@ -1780,61 +1778,12 @@ mod tests {
     const VIEW_WIDTH: f64 = 300.0;
     const VIEW_HEIGHT: f64 = 200.0;
 
-    struct TestView;
-
-    impl EmbedderView for TestView {
-        fn id(&self) -> ViewId {
-            ViewId(0)
-        }
-
-        fn metrics(&self) -> ViewMetrics {
-            ViewMetrics {
-                physical_size: [VIEW_WIDTH, VIEW_HEIGHT],
-                physical_constraints: ViewConstraints::tight(VIEW_WIDTH, VIEW_HEIGHT),
-                device_pixel_ratio: 1.0,
-                ..ViewMetrics::default()
-            }
-        }
-
-        fn present(&self, _picture: std::sync::Arc<Picture>) {}
-    }
-
-    struct TestPlatform {
-        view: ViewRef,
-    }
-
-    impl Platform for TestPlatform {
-        fn target_platform(&self) -> TargetPlatform {
-            TargetPlatform::MacOS
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> std::time::Instant {
-            std::time::Instant::now()
-        }
-
-        fn wake_at(&self, _deadline: std::time::Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            vec![Rc::clone(&self.view)]
-        }
-
-        fn view(&self, id: ViewId) -> Option<ViewRef> {
-            (self.view.id() == id).then(|| Rc::clone(&self.view))
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            Some(Rc::clone(&self.view))
-        }
-    }
-
     /// An [`App`] with a single view; the navigator needs a binding for its global keys.
     fn app_with_view() -> Rc<AppCell> {
-        let platform: PlatformRef = Rc::new(TestPlatform {
-            view: Rc::new(TestView),
-        });
-        AppCell::with_platform(platform)
+        let platform = TestPlatform::new()
+            .on(TargetPlatform::MacOS)
+            .with_view(Rc::new(TestView::new(VIEW_WIDTH, VIEW_HEIGHT)));
+        AppCell::with_platform(Rc::new(platform))
     }
 
     fn pump_frame(app: &mut App, at: Duration) {

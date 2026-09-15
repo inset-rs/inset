@@ -22,6 +22,8 @@ mod gpu;
 #[cfg(target_arch = "wasm32")]
 mod host;
 #[cfg(target_arch = "wasm32")]
+mod dispatcher;
+#[cfg(target_arch = "wasm32")]
 mod images;
 #[cfg(target_arch = "wasm32")]
 mod platform;

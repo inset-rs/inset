@@ -3,6 +3,7 @@
 
 mod app;
 mod app_cell;
+mod background;
 mod basic_types;
 mod change_notifier;
 mod completer;

@@ -2561,12 +2561,13 @@ pub(crate) mod tests {
     use std::time::Duration;
 
     use inset_embedder::{
-        Matrix4, Picture, Platform, PlatformRef, Rect, Size, TextEditingValue,
-        TextInputConfiguration, TextInputHost, View as EmbedderView, ViewId, ViewMetrics, ViewRef,
+        Matrix4, Picture, Rect, Size, TextEditingValue, TextInputConfiguration, TextInputHost,
+        View as EmbedderView, ViewId, ViewMetrics,
     };
     use inset_gestures::{PointerDownEvent, PointerEvent};
     use inset_scheduler::SchedulerBinding;
     use inset_services::{KeyDownEvent, LogicalKeyboardKey, PhysicalKeyboardKey};
+    use inset_test::TestPlatform;
 
     use super::*;
     use crate::binding::run_app;
@@ -2617,37 +2618,6 @@ pub(crate) mod tests {
         }
     }
 
-    struct TestPlatform {
-        view: ViewRef,
-        target: TargetPlatform,
-    }
-
-    impl Platform for TestPlatform {
-        fn target_platform(&self) -> TargetPlatform {
-            self.target
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> std::time::Instant {
-            std::time::Instant::now()
-        }
-
-        fn wake_at(&self, _deadline: std::time::Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            vec![Rc::clone(&self.view)]
-        }
-
-        fn view(&self, id: ViewId) -> Option<ViewRef> {
-            (self.view.id() == id).then(|| Rc::clone(&self.view))
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            Some(Rc::clone(&self.view))
-        }
-    }
-
     /// An [`App`] with a single view, ready for [`run_app`].
     ///
     /// Its host reports plain key presses, so a text field keeps its own key bindings.
@@ -2667,13 +2637,10 @@ pub(crate) mod tests {
         target: TargetPlatform,
         handles_editing_keys: bool,
     ) -> Rc<AppCell> {
-        let platform: PlatformRef = Rc::new(TestPlatform {
-            view: Rc::new(TestView {
-                handles_editing_keys,
-            }),
-            target,
-        });
-        AppCell::with_platform(platform)
+        let platform = TestPlatform::new().on(target).with_view(Rc::new(TestView {
+            handles_editing_keys,
+        }));
+        AppCell::with_platform(Rc::new(platform))
     }
 
     /// A frame: begin, draw, and the microtasks in between.

@@ -2,16 +2,18 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    Brightness, Clipboard, ImageCodecFuture, Matrix4, MouseCursor, Picture, Platform, Rect, Size,
-    SystemMouseCursorKind, TargetPlatform, TextEditingValue, TextInputConfiguration, TextInputHost,
-    View, ViewId, ViewMetrics, ViewRef,
+    Brightness, Clipboard, Dispatcher, ImageCodecFuture, Matrix4, MouseCursor, Picture, Platform,
+    Rect, Size, SystemMouseCursorKind, TargetPlatform, TextEditingValue, TextInputConfiguration,
+    TextInputHost, View, ViewId, ViewMetrics, ViewRef,
 };
 use web_sys::HtmlCanvasElement;
 use web_time::Instant;
 
+use crate::dispatcher;
 use crate::gpu::Gpu;
 use crate::text_input::{TextInputListener, WebTextInput};
 
@@ -24,7 +26,7 @@ pub struct WebPlatform {
     pub origin: Instant,
     frame_requested: Rc<Cell<bool>>,
     fonts_changed: Rc<Cell<bool>>,
-    deadline: Cell<Option<Instant>>,
+    deadline: Rc<Cell<Option<Instant>>>,
     view: RefCell<Option<ViewRef>>,
     brightness: Cell<Brightness>,
     /// Set by the host so `request_frame` / `wake_at` can ask for a turn.
@@ -35,17 +37,22 @@ pub struct WebPlatform {
 
 impl WebPlatform {
     pub fn new(canvas: HtmlCanvasElement, brightness: Brightness) -> WebPlatform {
-        WebPlatform {
+        let platform = WebPlatform {
             canvas,
             origin: Instant::now(),
             frame_requested: Rc::new(Cell::new(false)),
             fonts_changed: Rc::new(Cell::new(false)),
-            deadline: Cell::new(None),
+            deadline: Rc::new(Cell::new(None)),
             view: RefCell::new(None),
             brightness: Cell::new(brightness),
             on_schedule: Rc::new(RefCell::new(None)),
             images: RefCell::new(None),
-        }
+        };
+        dispatcher::install(
+            Rc::clone(&platform.deadline),
+            Rc::clone(&platform.on_schedule),
+        );
+        platform
     }
 
     pub fn set_view(&self, view: ViewRef) {
@@ -129,9 +136,8 @@ impl Platform for WebPlatform {
         Instant::now()
     }
 
-    fn wake_at(&self, deadline: Instant) {
-        self.deadline.set(Some(deadline));
-        self.schedule();
+    fn dispatcher(&self) -> Arc<dyn Dispatcher> {
+        Arc::new(dispatcher::WebDispatcher)
     }
 
     fn views(&self) -> Vec<ViewRef> {

@@ -325,8 +325,7 @@ impl CupertinoApp {
     /// Dart `CupertinoApp(onUnknownRoute:)`.
     pub fn on_unknown_route(
         mut self,
-        on_unknown_route: impl Fn(&mut App, &inset_widgets::RouteSettings) -> Option<AnyRoute>
-        + 'static,
+        on_unknown_route: impl Fn(&mut App, &inset_widgets::RouteSettings) -> Option<AnyRoute> + 'static,
     ) -> CupertinoApp {
         self.on_unknown_route = Some(Rc::new(on_unknown_route));
         self
@@ -814,8 +813,9 @@ mod tests {
     use std::cell::Cell;
     use std::time::Duration;
 
-    use inset_embedder::{Color, Platform, PlatformRef, ViewId, ViewRef};
+    use inset_embedder::Color;
     use inset_painting::PaintingBinding;
+    use inset_test::TestPlatform;
     use inset_widgets::{
         AnyElement, AnyModalRoute, Localizations, Navigator, ScrollController,
         ScrollControllerLeaf, SizedBox, StatelessWidget, WidgetsBinding, WidgetsLocalizations,
@@ -824,46 +824,14 @@ mod tests {
 
     use super::*;
     use crate::localizations::CupertinoLocalizations;
-    use crate::test_support::{TestView, build};
+    use crate::test_support::{build, test_view};
 
-    /// A platform whose implicit view is the shared [`TestView`], on the given target.
-    struct TestPlatform {
-        target_platform: TargetPlatform,
-        view: ViewRef,
-    }
-
-    impl Platform for TestPlatform {
-        fn target_platform(&self) -> TargetPlatform {
-            self.target_platform
-        }
-
-        fn request_frame(&self) {}
-
-        fn now(&self) -> std::time::Instant {
-            std::time::Instant::now()
-        }
-
-        fn wake_at(&self, _deadline: std::time::Instant) {}
-
-        fn views(&self) -> Vec<ViewRef> {
-            vec![Rc::clone(&self.view)]
-        }
-
-        fn view(&self, id: ViewId) -> Option<ViewRef> {
-            (self.view.id() == id).then(|| Rc::clone(&self.view))
-        }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            Some(Rc::clone(&self.view))
-        }
-    }
-
+    /// An app on `target_platform`, over the shared test view.
     fn app_of(target_platform: TargetPlatform) -> Rc<AppCell> {
-        let platform: PlatformRef = Rc::new(TestPlatform {
-            target_platform,
-            view: Rc::new(TestView),
-        });
-        let cell = AppCell::with_platform(platform);
+        let platform = TestPlatform::new()
+            .on(target_platform)
+            .with_view(test_view());
+        let cell = AppCell::with_platform(Rc::new(platform));
         let mut app = cell.borrow_mut();
         install_fonts(&mut app);
         drop(app);
