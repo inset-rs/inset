@@ -1,8 +1,14 @@
-//! The stock host: winit on native, the canvas WebGPU host on wasm.
+//! The host an application gets without choosing one: winit on native, the
+//! canvas WebGPU host in the browser.
 //!
 //! An application depends on this crate instead of picking an embedder and
 //! repeating target-cfg dependencies. `DefaultEmbedder::run` is the same
 //! closure on both.
+//!
+//! A `wasm32-wasi` build, a component for a WASI host, has no default host: the
+//! host's own embedder crate exports the guest's start and runs the app, and
+//! this crate is empty there.
+#![cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
 
 use inset_embedder::EmbedderClient;
 

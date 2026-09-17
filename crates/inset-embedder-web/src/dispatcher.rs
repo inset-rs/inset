@@ -20,9 +20,12 @@ use web_time::Instant;
 
 use crate::platform::OnSchedule;
 
+/// The platform's wake: the earliest deadline kept and a turn scheduled for it.
+type WakeAt = Rc<dyn Fn(Instant)>;
+
 thread_local! {
     /// The platform's wake, installed once the platform exists.
-    static WAKE_AT: RefCell<Option<Rc<dyn Fn(Instant)>>> = const { RefCell::new(None) };
+    static WAKE_AT: RefCell<Option<WakeAt>> = const { RefCell::new(None) };
 }
 
 /// The handle the platform hands out: empty, since the wake it reaches lives in this thread.

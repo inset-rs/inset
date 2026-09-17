@@ -5,6 +5,7 @@
 // wgpu's handle registry nests auto-trait obligations past the default depth.
 #![recursion_limit = "256"]
 
+mod drag_drop;
 mod frames;
 mod gpu;
 mod images;

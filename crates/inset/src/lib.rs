@@ -24,9 +24,10 @@ pub use inset_embedder::{
     WindowLevel, WindowRef, WindowingOwner,
 };
 pub use inset_embedder::{
-    Brightness, Color, FontFeature, FontWeight, Offset, Radius, Rect, Size, TextAlign,
-    TextDirection,
+    Brightness, Color, DropChange, DropData, FontFeature, FontWeight, Offset, Radius, Rect, Size,
+    TextAlign, TextDirection,
 };
+#[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
 pub use inset_embedder_default::DefaultEmbedder;
 #[cfg(not(target_arch = "wasm32"))]
 pub use inset_embedder_default::ImplicitViewConfig;
@@ -46,10 +47,3 @@ pub use inset_scheduler::{
 };
 pub use inset_shell::Shell;
 pub use inset_widgets::*;
-
-/// Paths the `#[inset::main]` expansion names. Not an API.
-#[doc(hidden)]
-pub mod __private {
-    #[cfg(target_arch = "wasm32")]
-    pub use wasm_bindgen;
-}

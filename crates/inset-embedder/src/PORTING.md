@@ -123,6 +123,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — there are no method channels; the host trait is the channel.
   Affect: IME edits reach `TextInput` only through these calls, in the host's own order relative to key data.
 
+- Change: `EmbedderClient::drop_data` reports files dragged from outside the application over a view as a `DropData` — the entered, moved, dropped and exited phases, a batch of paths, a physical position when the host has one — where Flutter has no drop hook and leaves it to plugins.
+  Reason: platform — every desktop toolkit reports this shape at the window, and a host is the only place it can come from.
+  Affect: an app hears external drops through the widgets binding's observers; a host that reports no position, as winit does, leaves the app to treat the whole view as the target.
+
 ## scene_builder.rs → dart:ui `SceneBuilder`
 
 - Change: a push records into a display list of its own, which `pop` returns as the engine layer; there is no `oldLayer`, `addTexture`, `addPlatformView` or the shader-mask, colour-filter and image-filter pushes, and `push_backdrop_filter` is blur-only.

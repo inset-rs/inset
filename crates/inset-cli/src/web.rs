@@ -110,7 +110,9 @@ fn compress(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The page an app gets when it ships no `index.html` of its own.
+/// The page an app gets when it ships no `index.html` of its own: it instantiates the module
+/// and calls the `main` that `#[inset::main]` exports. A page of the app's own must do the
+/// same.
 pub fn index_html(title: &str) -> String {
     let title = title
         .replace('&', "&amp;")
@@ -143,7 +145,8 @@ pub fn index_html(title: &str) -> String {
     <canvas id="inset"></canvas>
     <script type="module">
       import init from "./app.js";
-      await init();
+      const wasm = await init();
+      wasm.main();
     </script>
   </body>
 </html>
@@ -160,6 +163,7 @@ mod tests {
         let page = index_html("A & B");
         assert!(page.contains("<title>A &amp; B</title>"));
         assert!(page.contains(r#"import init from "./app.js""#));
+        assert!(page.contains("wasm.main();"));
         assert!(page.contains(r#"<canvas id="inset">"#));
     }
 }

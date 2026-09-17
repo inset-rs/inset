@@ -1,9 +1,9 @@
-//! `cargo inset`: run and package an Inset app for desktop, iOS, and the web.
+//! `cargo inset`: run and package an Inset app for desktop, iOS, the web, and WASI hosts.
 //!
 //! One project shape serves every host: the app lives in the library target,
 //! `#[inset::main]` emits each host's entry point, and this tool turns cargo's
 //! output into what the platform installs: an `.app`, an installer, a static
-//! web folder.
+//! web folder, a wasm component.
 
 mod cargo;
 mod desktop;
@@ -15,6 +15,7 @@ mod new;
 mod project;
 mod serve;
 mod tools;
+mod wasm;
 mod web;
 
 use std::ffi::OsString;
@@ -102,6 +103,8 @@ enum BuildTarget {
     Ipa,
     /// Static folder: `index.html`, `app.js`, `app_bg.wasm`.
     Web,
+    /// A `wasm32-wasip2` component for a WASI host such as wapk: `<package>.wasm`.
+    Wasm,
 }
 
 fn main() {
@@ -220,6 +223,7 @@ fn build(
             vec![ios::ipa(&app, &project.out_dir("ipa", profile))?]
         }
         BuildTarget::Web => vec![web::build(&project, profile)?],
+        BuildTarget::Wasm => vec![wasm::build(&project, profile)?],
     };
     for path in outputs {
         println!("{}", path.display());

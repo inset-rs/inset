@@ -8,7 +8,7 @@ use std::ops::Receiver;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
-use inset_embedder::{PlatformRef, ViewFocusEvent};
+use inset_embedder::{DropData, PlatformRef, ViewFocusEvent};
 use slotmap::new_key_type;
 
 use crate::app_cell::{AppCell, AsyncApp};
@@ -148,10 +148,15 @@ pub struct PlatformCallbacks {
     pub on_locale_changed: Option<Listener>,
     /// Flutter `PlatformDispatcher.onViewFocusChange`.
     pub on_view_focus_change: Option<ViewFocusChangeCallback>,
+    /// Files dragged from outside the application over a view; no Flutter counterpart.
+    pub on_drop: Option<DropCallback>,
 }
 
 /// Flutter `PlatformDispatcher.onViewFocusChange`.
 pub type ViewFocusChangeCallback = Rc<dyn Fn(&mut App, ViewFocusEvent)>;
+
+/// The framework's handler for `EmbedderClient::drop_data`.
+pub type DropCallback = Rc<dyn Fn(&mut App, DropData)>;
 
 impl App {
     pub(crate) fn build(

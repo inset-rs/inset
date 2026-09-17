@@ -70,6 +70,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the route, memory-pressure and back-gesture events have no host surface yet.
   Affect: an observer hears metrics and locale changes; a lifecycle change reaches it only when something calls the method directly.
 
+- Change: `WidgetsBindingObserver::did_change_drop` and the `DropListener` in `widgets/drop_listener.rs` hear files dragged from outside the application, from `EmbedderClient::drop_data`; Flutter has no drop in its framework and leaves it to plugins.
+  Reason: platform — the host reports the drag at the window, and the binding's observers are where window-level events reach the tree.
+  Affect: any observer hears every drag over any view; with a host that reports no position, the whole view is the target.
+
 ## widgets/banner.rs → banner.dart
 
 - Change: `BannerPainter` answers no `repaint` listenable, where Dart repaints on `PaintingBinding.systemFonts`.

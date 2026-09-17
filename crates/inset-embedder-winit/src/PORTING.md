@@ -66,6 +66,12 @@ Host implementation references: Flutter's C++ engine under `flutter/engine/src/f
   Reason: platform — winit reports window focus without a traversal direction.
   Affect: native focus events always carry `ViewFocusDirection::Undefined`, and a focus-loss request is ignored while a focus-gain request is honoured, as Flutter's macOS host does.
 
+## drag_drop.rs → the macOS embedder's `draggingEntered:`/`performDragOperation:`
+
+- Change: files dragged over a window reach the client as one `DropData` per phase, gathered over a turn of the loop from winit's one-event-per-file `HoveredFile`/`DroppedFile`/`HoveredFileCancelled`, with no position; Flutter's embedders have no drop at all.
+  Reason: platform — winit 0.30 reports each file on its own and never where the drag is, and a turn's end is the only batch boundary it gives.
+  Affect: an app hears an entered, a dropped and an exited report per drag, never a move, and must treat the whole window as the target.
+
 ## Deferred
 
 - The layout keymap for character keys: a shifted symbol reports the symbol's own logical key (`!`) where Flutter consults the layout and reports `digit1`. Trigger: a shortcut that matches a shifted symbol by logical key.

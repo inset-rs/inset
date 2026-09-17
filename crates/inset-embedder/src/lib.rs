@@ -11,6 +11,7 @@
 #![recursion_limit = "256"]
 
 mod client;
+mod drag_drop;
 mod fonts;
 mod geometry;
 mod image;
@@ -33,6 +34,7 @@ mod views;
 mod window;
 
 pub use client::EmbedderClient;
+pub use drag_drop::{DropChange, DropData};
 pub use fonts::{
     FontCollection, FontDemand, FontId, FontManager, FontSource, SystemFontSource, Typeface,
     default_font_families, set_default_font_manager,
@@ -48,9 +50,9 @@ pub use painting::*;
 pub use paragraph::*;
 pub use platform::{
     AppExitResponse, AppLifecycleState, ApplicationSwitcherDescription, Brightness, Clipboard,
-    Frame, HapticFeedbackType, Haptics, Dispatcher, InertDispatcher, InertPlatform, MouseCursor, Platform,
-    PlatformRef, PopupMenuEntry, PopupMenus, Restoration, SystemChrome, SystemContextMenu,
-    SystemUiOverlayStyle, TargetPlatform, TextServices, ViewRef,
+    Dispatcher, Frame, HapticFeedbackType, Haptics, InertDispatcher, InertPlatform, MouseCursor,
+    Platform, PlatformRef, PopupMenuEntry, PopupMenus, Restoration, SystemChrome,
+    SystemContextMenu, SystemUiOverlayStyle, TargetPlatform, TextServices, ViewRef,
 };
 pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,

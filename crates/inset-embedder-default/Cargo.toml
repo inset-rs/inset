@@ -12,7 +12,7 @@ categories.workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 inset-embedder-winit.workspace = true
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 inset-embedder-web.workspace = true
 
 [dependencies]

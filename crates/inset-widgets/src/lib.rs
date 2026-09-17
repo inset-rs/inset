@@ -48,6 +48,7 @@ pub use widgets::animated_size::*;
 pub use widgets::annotated_region::*;
 pub use widgets::app::*;
 pub use widgets::app_lifecycle_listener::*;
+pub use widgets::drop_listener::*;
 pub use widgets::autofill::*;
 pub use widgets::automatic_keep_alive::*;
 pub use widgets::banner::*;

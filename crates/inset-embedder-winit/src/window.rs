@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use inset_embedder::{
-    EmbedderClient, PlatformRef, PointerChange, TextEditingValue, View, ViewFocusDirection,
-    ViewFocusEvent, ViewFocusState, ViewId, WindowError, WindowRef,
+    DropData, EmbedderClient, PlatformRef, PointerChange, TextEditingValue, View,
+    ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId, WindowError, WindowRef,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalPosition;
@@ -21,6 +21,7 @@ use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
+use crate::drag_drop::Drags;
 use crate::gpu::Gpu;
 use crate::input::Keyboard;
 use crate::os;
@@ -72,6 +73,8 @@ pub(crate) struct WinitApp<C> {
     /// The mouse, as Flutter's pointer.
     pub(crate) pointer: Pointer,
     pub(crate) keyboard: Keyboard,
+    /// Files dragged over a window this turn, reported when the loop is about to wait.
+    pub(crate) drags: Drags,
 }
 
 pub(crate) fn run<C: EmbedderClient + 'static>(
@@ -98,6 +101,7 @@ pub(crate) fn run<C: EmbedderClient + 'static>(
         started: false,
         pointer: Pointer::new(),
         keyboard: Keyboard::new(),
+        drags: Drags::default(),
     };
     event_loop.run_app(&mut host).expect("run winit event loop");
 }
@@ -354,6 +358,28 @@ impl<C: EmbedderClient> WinitApp<C> {
         }
     }
 
+    /// Reports the turn's drags to the client, one report per phase, with no position: winit
+    /// gives none.
+    fn report_drags(&mut self) {
+        for report in self.drags.take_reports() {
+            let Some(view_id) = self
+                .views
+                .get(&report.window)
+                .map(|hosted| hosted.view.id())
+            else {
+                continue;
+            };
+            if let Some(client) = &mut self.client {
+                client.drop_data(DropData {
+                    view_id,
+                    change: report.change,
+                    physical_position: None,
+                    paths: report.paths,
+                });
+            }
+        }
+    }
+
     fn on_cursor_entered(&mut self, id: WindowId) {
         self.pointer.window = Some(id);
         // The entry carries no position, and the last one seen may be from
@@ -419,6 +445,7 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.report_drags();
         // A wake already due is delivered before the loop waits: a task the framework posted
         // to itself, a zero-duration timer, runs ahead of whatever the system delivers next,
         // as Dart's event queue orders them.
@@ -514,6 +541,9 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
             WindowEvent::Ime(ime) => self.send_ime(id, ime),
             WindowEvent::MouseWheel { delta, .. } => self.send_scroll(id, delta),
             WindowEvent::MouseInput { state, button, .. } => self.on_mouse_input(id, state, button),
+            WindowEvent::HoveredFile(path) => self.drags.hovered(id, path),
+            WindowEvent::DroppedFile(path) => self.drags.dropped(id, path),
+            WindowEvent::HoveredFileCancelled => self.drags.cancelled(id),
             _ => {}
         }
     }

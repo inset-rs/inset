@@ -24,7 +24,8 @@
     <canvas id="inset"></canvas>
     <script type="module">
       import init from "./app.js";
-      await init();
+      const wasm = await init();
+      wasm.main();
     </script>
   </body>
 </html>

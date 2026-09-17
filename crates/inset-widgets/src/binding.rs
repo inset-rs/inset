@@ -9,7 +9,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use inset_embedder::{AppExitResponse, AppLifecycleState, Locale, ViewFocusEvent};
+use inset_embedder::{AppExitResponse, AppLifecycleState, DropData, Locale, ViewFocusEvent};
 use inset_foundation::{App, Handle, Listener, Timer};
 use inset_rendering::{RendererBinding, RendererBindingOverridesObject};
 use inset_scheduler::SchedulerBinding;
@@ -64,6 +64,12 @@ pub trait WidgetsBindingObserver {
     /// Called when the platform reports a change in the focus state of a view.
     fn did_change_view_focus(&self, app: &mut App, event: ViewFocusEvent) {
         let _ = (app, event);
+    }
+
+    /// Called when files dragged from outside the application enter, move over, are dropped
+    /// on or leave a view. Flutter has no counterpart: external drops are a plugin there.
+    fn did_change_drop(&self, app: &mut App, data: &DropData) {
+        let _ = (app, data);
     }
 
     /// Called when the platform's text scale factor changes.
@@ -127,6 +133,11 @@ pub trait WidgetsBindingObserverObject: Sized + 'static {
         let _ = (app, event);
     }
 
+    /// See [`WidgetsBindingObserver::did_change_drop`].
+    fn did_change_drop(self: Handle<Self>, app: &mut App, data: &DropData) {
+        let _ = (app, data);
+    }
+
     /// See [`WidgetsBindingObserver::did_change_text_scale_factor`].
     fn did_change_text_scale_factor(self: Handle<Self>, app: &mut App) {
         let _ = app;
@@ -165,6 +176,10 @@ impl<T: WidgetsBindingObserverObject> WidgetsBindingObserver for Handle<T> {
 
     fn did_change_view_focus(&self, app: &mut App, event: ViewFocusEvent) {
         T::did_change_view_focus(*self, app, event);
+    }
+
+    fn did_change_drop(&self, app: &mut App, data: &DropData) {
+        T::did_change_drop(*self, app, data);
     }
 
     fn did_change_text_scale_factor(&self, app: &mut App) {
@@ -215,6 +230,9 @@ impl WidgetsBinding {
             }));
             callbacks.on_view_focus_change = Some(Rc::new(|app, event| {
                 WidgetsBinding::instance(app).handle_view_focus_changed(app, event)
+            }));
+            callbacks.on_drop = Some(Rc::new(|app, data| {
+                WidgetsBinding::instance(app).handle_drop(app, &data)
             }));
             callbacks.on_locale_changed = Some(Listener::new(|app| {
                 WidgetsBinding::instance(app).handle_locale_changed(app)
@@ -371,6 +389,13 @@ impl WidgetsBinding {
     pub fn handle_view_focus_changed(self: Handle<Self>, app: &mut App, event: ViewFocusEvent) {
         for observer in app.get(self).observers.clone() {
             observer.did_change_view_focus(app, event);
+        }
+    }
+
+    /// Tells the observers of an external drag over a view.
+    pub fn handle_drop(self: Handle<Self>, app: &mut App, data: &DropData) {
+        for observer in app.get(self).observers.clone() {
+            observer.did_change_drop(app, data);
         }
     }
 

@@ -6,7 +6,8 @@
 use std::time::Duration;
 
 use crate::{
-    Frame, KeyData, PointerDataPacket, TextEditingValue, TextInputAction, ViewFocusEvent, ViewId,
+    DropData, Frame, KeyData, PointerDataPacket, TextEditingValue, TextInputAction, ViewFocusEvent,
+    ViewId,
 };
 
 /// Complete frames and typed view lifecycle notifications.
@@ -26,6 +27,12 @@ pub trait EmbedderClient {
 
     /// Flutter `PlatformDispatcher.onPointerDataPacket`.
     fn pointer_data_packet(&mut self, packet: PointerDataPacket);
+
+    /// Files dragged from outside the application entered, moved over, were dropped on or
+    /// left a view. No dart:ui hook; the default drops it.
+    fn drop_data(&mut self, data: DropData) {
+        let _ = data;
+    }
 
     /// Flutter `PlatformDispatcher.onKeyData`.
     ///

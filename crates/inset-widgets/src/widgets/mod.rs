@@ -5,6 +5,7 @@ pub mod animated_size;
 pub mod annotated_region;
 pub mod app;
 pub mod app_lifecycle_listener;
+pub mod drop_listener;
 pub mod autofill;
 pub mod automatic_keep_alive;
 pub mod banner;

@@ -1866,7 +1866,6 @@ dependencies = [
  "inset-scheduler",
  "inset-shell",
  "inset-widgets",
- "wasm-bindgen",
 ]
 
 [[package]]
