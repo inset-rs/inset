@@ -652,7 +652,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
                         Some(hopping) => app.get(hopping).current_train().expect("a running train"),
                         None => current,
                     };
-                    let next_train = next.animation(app).expect("an installed route");
+                    let next_train = next.underlying_animation(app).expect("an installed route");
                     if current_train.value(app) == next_train.value(app)
                         || !next_train.is_animating(app)
                     {
@@ -720,7 +720,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
                                         == Some(new_animation.as_animation())
                                 );
                                 let current = app.get(new_animation).current_train();
-                                debug_assert!(current == next.animation(app));
+                                debug_assert!(current == next.underlying_animation(app));
                                 // We can hop on the next train, so we don't need to listen to
                                 // whether the next train has stopped.
                                 TransitionRoute::set_secondary_animation(
@@ -753,7 +753,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
                     }
                 }
                 None => {
-                    let animation = next.animation(app);
+                    let animation = next.underlying_animation(app);
                     TransitionRoute::set_secondary_animation(
                         self,
                         app,
@@ -959,6 +959,7 @@ struct TransitionRouteVTable {
     type_name: fn() -> &'static str,
     route: fn(HandleId) -> AnyRoute,
     animation: fn(&App, HandleId) -> Option<AnyAnimation<f64>>,
+    underlying_animation: fn(&App, HandleId) -> Option<AnyAnimation<f64>>,
     controller_value: fn(&App, HandleId) -> f64,
     opaque: fn(&App, HandleId) -> bool,
     allow_snapshotting: fn(&App, HandleId) -> bool,
@@ -981,6 +982,7 @@ impl TransitionRouteVTable {
             type_name: std::any::type_name::<R>,
             route: |id| Route::as_route(resolve::<R>(id)),
             animation: |app, id| R::animation(resolve(id), app),
+            underlying_animation: |app, id| R::transition_route_data(resolve::<R>(id), app).animation,
             controller_value: |app, id| {
                 let controller = R::transition_route_data(resolve::<R>(id), app)
                     .controller
@@ -1047,6 +1049,17 @@ impl AnyTransitionRoute {
     /// See [`TransitionRoute::animation`].
     pub fn animation(self, app: &App) -> Option<AnyAnimation<f64>> {
         (self.vtable.animation)(app, self.id)
+    }
+
+    /// Dart's `_animation`: the animation a route runs on, under whatever
+    /// [`animation`](Self::animation) answers with.
+    ///
+    /// A [`ModalRoute`] answers with a proxy that reads complete while the route is
+    /// offstage, which is exactly when the route ahead is put offstage to be measured. A
+    /// route behind follows this one instead, so it stays where it is until the transition
+    /// really runs.
+    pub fn underlying_animation(self, app: &App) -> Option<AnyAnimation<f64>> {
+        (self.vtable.underlying_animation)(app, self.id)
     }
 
     /// The value of Dart's `_controller`, which `didReplace` copies.

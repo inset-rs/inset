@@ -93,6 +93,39 @@ impl Fixture {
         }
     }
 
+    /// One frame, rather than the forty `settle` pumps, for watching a transition start.
+    fn frame(&mut self) {
+        self.at += Duration::from_millis(16);
+        SchedulerBinding::handle_begin_frame(&mut self.cell.borrow_mut(), Some(self.at));
+        self.cell.checkpoint();
+        SchedulerBinding::handle_draw_frame(&mut self.cell.borrow_mut());
+        self.cell.checkpoint();
+    }
+
+    /// Where the topmost thing reading `text` sits, or `None` when nothing does.
+    fn position_of(&mut self, text: &str) -> Option<Offset> {
+        let mut elements = self.elements();
+        elements.reverse();
+        for element in elements {
+            let Some(object) = element.render_object(&self.cell.borrow()) else {
+                continue;
+            };
+            let Some(paragraph) = object.downcast::<RenderParagraph>(&self.cell.borrow()) else {
+                continue;
+            };
+            if !paragraph
+                .text(&self.cell.borrow())
+                .to_plain_text(true, true)
+                .contains(text)
+            {
+                continue;
+            }
+            let object = object.as_box().expect("a paragraph is a box");
+            return Some(object.local_to_global(&self.cell.borrow(), Offset::ZERO, None));
+        }
+        None
+    }
+
     fn navigator(&mut self) -> inset_foundation::Handle<NavigatorState> {
         self.navigator
             .current_state::<NavigatorState>(&mut self.cell.borrow_mut())
@@ -547,5 +580,35 @@ fn a_cart_tap_rebuilds_from_the_entity_and_the_cart_route_sees_it() {
         fixture.shows("Espresso"),
         "the cart route shares the Entity; saw {:?}",
         fixture.texts()
+    );
+}
+
+/// A push measures the route ahead by putting it offstage, which reads its animation as
+/// complete. `_updateSecondaryAnimation` follows the next route's own animation rather than
+/// that reading, so the page behind must sit still on that frame instead of jumping to where
+/// the transition ends and starting over.
+#[test]
+fn the_page_behind_sits_still_on_the_frame_a_push_is_measured() {
+    let mut fixture = Fixture::new();
+    let resting = fixture.position_of("Widgets").expect("the index is up");
+
+    let route = entry_route(&mut fixture.cell.borrow_mut(), Entry::Segments);
+    let navigator = fixture.navigator();
+    navigator.push(&mut fixture.cell.borrow_mut(), route);
+
+    fixture.frame();
+    assert_eq!(
+        fixture.position_of("Widgets"),
+        Some(resting),
+        "the index moved on the frame the pushed route was measured"
+    );
+
+    fixture.frame();
+    let sliding = fixture
+        .position_of("Widgets")
+        .expect("the index is still up");
+    assert!(
+        sliding.dx() < resting.dx(),
+        "the index should slide left once the transition runs, from {resting:?} to {sliding:?}"
     );
 }

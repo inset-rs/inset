@@ -345,6 +345,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the `Semantics` and `DisplayFeatureSubScreen` wrappers Dart adds are deferred, and `anchorPoint` exists only to feed the latter.
   Affect: a dialog is not confined to the display-feature sub-screen closest to an anchor point.
 
+- Change: `AnyTransitionRoute` carries `underlying_animation` beside `animation`, for the animation a route runs on rather than whatever a subclass answers with.
+  Reason: language — Dart keeps the animation in a private field and offers a getter over it, and a `ModalRoute` overrides that getter with a proxy that reads complete while the route is offstage. Where the route behind measures the one ahead, Dart reaches past the override to the field, which library privacy lets it do; an erased route here is reached through a vtable, so the field needs an edge of its own, as `controller_value` already has.
+  Affect: a route behind follows the next route's own animation and stays where it is while that route is offstage to be measured, instead of flashing the end of the transition before it plays.
+
 ## widgets/implicit_animations.rs → implicit_animations.dart
 
 - Change: this file's tweens are value tweens in transitions.rs's shape, and the ones over a nullable Dart value animate an `Option` whose endpoints flatten, so an unset endpoint and one set to `None` are the same thing.
