@@ -35,19 +35,22 @@ use crate::{DecodeExecution, ImplicitViewConfig, WinitEmbedder, create_image_loa
 
 const IMPLICIT_VIEW: ViewId = ViewId(0);
 
-/// What reaches the loop through winit's proxy: the framework's requests, and turns asked
+/// What reaches the loop through winit's proxy: the framework's requests, and wakes asked
 /// for from other threads.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum HostEvent {
     /// The framework left a request with the platform — a frame, a window, a cursor, a focus
-    /// change — for the loop to serve on this turn.
+    /// change — for the loop to serve on this pass.
     Request,
     /// A native menu ran its own loop and closed: the buttons it kept are reconciled and the
-    /// client given a turn.
+    /// client woken.
     MenuClosed,
-    /// A turn asked for at a time through the platform's loop handle; served by
-    /// `about_to_wait` when the time comes.
-    WakeAt(Instant),
+    /// When to wake the framework for its earliest waiting timer, or `None` when no timer
+    /// is waiting; served by `about_to_wait` when that time comes.
+    TimerWakeup(Option<Instant>),
+    /// A ready task asking for the framework to be woken; served by the next wake, and it
+    /// never changes the timer wakeup above.
+    WakeNow,
     /// A created window's `close`: dropped when the loop next turns.
     CloseWindow(WindowId),
     /// A refresh of the display, from its display link.
@@ -107,6 +110,21 @@ pub(crate) fn run<C: EmbedderClient + 'static>(
 }
 
 impl<C: EmbedderClient> WinitApp<C> {
+    /// Whether the framework should be woken by `now`: a ready task asked for it, or its
+    /// timer wakeup has arrived. A timer wakeup that has arrived is cleared here, and the
+    /// framework sets the next one before the wake ends.
+    fn should_wake(&mut self, now: Instant) -> bool {
+        let asked = self.platform.wake_now_requested.replace(false);
+        let timer_came = self
+            .platform
+            .timer_wakeup
+            .get()
+            .is_some_and(|wakeup| wakeup <= now);
+        if timer_came {
+            self.platform.timer_wakeup.set(None);
+        }
+        asked || timer_came
+    }
     /// Flutter's macOS host honors requests to focus a view; native focus events report the result.
     fn apply_focus_requests(&mut self) {
         for request in self.platform.focus_requests.take() {
@@ -430,13 +448,7 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
         if self.pacing.tick_is_due(requested_resume) {
             self.tick();
         }
-        if self
-            .platform
-            .wake_due
-            .get()
-            .is_some_and(|due| due <= requested_resume)
-        {
-            self.platform.wake_due.set(None);
+        if self.should_wake(requested_resume) {
             if let Some(client) = &mut self.client {
                 client.wake(self.platform.elapsed());
             }
@@ -449,19 +461,17 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
         // A wake already due is delivered before the loop waits: a task the framework posted
         // to itself, a zero-duration timer, runs ahead of whatever the system delivers next,
         // as Dart's event queue orders them.
-        if self
-            .platform
-            .wake_due
-            .get()
-            .is_some_and(|due| due <= Instant::now())
-        {
-            self.platform.wake_due.set(None);
+        if self.should_wake(Instant::now()) {
             if let Some(client) = &mut self.client {
                 client.wake(self.platform.elapsed());
             }
             self.pace();
         }
-        let resume_at = match (self.platform.wake_due.get(), self.pacing.tick_due()) {
+        if self.platform.wake_now_requested.get() {
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+            return;
+        }
+        let resume_at = match (self.platform.timer_wakeup.get(), self.pacing.tick_due()) {
             (Some(wake), Some(tick)) => Some(wake.min(tick)),
             (wake, tick) => wake.or(tick),
         };
@@ -491,13 +501,10 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
             }
             return;
         }
-        if let HostEvent::WakeAt(deadline) = event {
-            let due = self
-                .platform
-                .wake_due
-                .get()
-                .map_or(deadline, |due| due.min(deadline));
-            self.platform.wake_due.set(Some(due));
+        if let HostEvent::TimerWakeup(wakeup) = event {
+            // The framework sets this whole, so it replaces what was held: the new time can
+            // be later than the old one, and `None` means no timer is waiting.
+            self.platform.timer_wakeup.set(wakeup);
             return;
         }
         if matches!(event, HostEvent::MenuClosed) {
@@ -507,6 +514,9 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
             if let Some(client) = &mut self.client {
                 client.wake(self.platform.elapsed());
             }
+        }
+        if matches!(event, HostEvent::WakeNow) {
+            self.platform.wake_now_requested.set(true);
         }
         if matches!(event, HostEvent::Vsync) {
             self.tick();

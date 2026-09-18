@@ -133,7 +133,7 @@ pub struct App {
     timers: Timers,
     executor: ForegroundExecutor,
     platform: PlatformRef,
-    /// The host's threads, asked for a turn at each timer's deadline.
+    /// The host's threads, told when to wake this application for its next timer.
     dispatcher: std::sync::Arc<dyn inset_embedder::Dispatcher>,
     platform_callbacks: PlatformCallbacks,
 }
@@ -283,16 +283,16 @@ impl App {
     /// Dart's `Timer(duration, callback)`. Fires when the clock reaches
     /// `now + duration` via [`AppCell::elapse`].
     pub fn schedule_timer(&mut self, duration: Duration, callback: Listener) -> Timer {
-        let (timer, wake) = self.timers.schedule(duration, callback);
-        if let Some(delay) = wake {
-            self.dispatcher.wake_at(self.platform.now() + delay);
-        }
+        let timer = self.timers.schedule(duration, callback);
+        self.update_timer_wakeup();
         timer
     }
 
     /// Dart's `Timer.cancel()`. Idempotent.
     pub fn cancel_timer(&mut self, timer: Timer) {
         self.timers.cancel(timer);
+        // Cancelling the earliest timer moves the wakeup later, or leaves no timer at all.
+        self.update_timer_wakeup();
     }
 
     /// Dart's `Timer.isActive`.
@@ -318,12 +318,13 @@ impl App {
         self.timers.advance_to(target);
     }
 
-    /// Asks the platform to wake for the earliest pending timer. Called once the timers due by
-    /// now have fired: the deadline the platform held was theirs, and the ones still queued
-    /// (scheduled while an earlier timer was pending, or by the callbacks that just ran) need one.
-    pub(crate) fn request_wake_for_next_timer(&mut self) {
-        if let Some(delay) = self.timers.next_wake() {
-            self.dispatcher.wake_at(self.platform.now() + delay);
+    /// Tells the host when to next wake this application for a timer, unless that is
+    /// already what it was told. Every path that can change the earliest waiting timer ends
+    /// here, and the call does nothing when that timer has not changed.
+    pub(crate) fn update_timer_wakeup(&mut self) {
+        if let Some(delay) = self.timers.timer_wakeup_if_changed() {
+            let wakeup = delay.map(|delay| self.platform.now() + delay);
+            self.dispatcher.wake_at(wakeup);
         }
     }
 

@@ -184,7 +184,7 @@ fn fit_canvas(window: &Window, canvas: &HtmlCanvasElement) -> (ViewMetrics, [u32
 
 fn on_turn<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
     let now = Instant::now();
-    if host.platform.take_due_wake(now) {
+    if host.platform.should_wake(now) {
         host.client.borrow_mut().wake(host.platform.elapsed());
     }
     if host.platform.take_fonts_changed() {
@@ -199,18 +199,18 @@ fn on_turn<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
 }
 
 fn schedule_next<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
-    if host.platform.has_frame_request() {
+    if host.platform.has_frame_request() || host.platform.wake_now_requested() {
         schedule_raf(host);
         return;
     }
-    let Some(deadline) = host.platform.next_deadline() else {
+    let Some(wakeup) = host.platform.next_timer_wakeup() else {
         return;
     };
     let now = Instant::now();
-    if deadline <= now {
+    if wakeup <= now {
         schedule_raf(host);
     } else {
-        schedule_timeout(host, deadline.saturating_duration_since(now));
+        schedule_timeout(host, wakeup.saturating_duration_since(now));
     }
 }
 

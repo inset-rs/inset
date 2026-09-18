@@ -26,10 +26,14 @@ pub struct WebPlatform {
     pub origin: Instant,
     frame_requested: Rc<Cell<bool>>,
     fonts_changed: Rc<Cell<bool>>,
-    deadline: Rc<Cell<Option<Instant>>>,
+    /// When to wake for the earliest waiting timer, or `None` when no timer is waiting.
+    timer_wakeup: Rc<Cell<Option<Instant>>>,
+    /// A ready task asking to be woken. Cleared by the next wake, and kept separate from
+    /// the timer wakeup, which belongs to a timer that has not run yet.
+    wake_now_requested: Rc<Cell<bool>>,
     view: RefCell<Option<ViewRef>>,
     brightness: Cell<Brightness>,
-    /// Set by the host so `request_frame` / `wake_at` can ask for a turn.
+    /// Set by the host so `request_frame` and `wake_at` can arrange a wake.
     /// Shared with the font source, which is created before the host installs the callback.
     on_schedule: OnSchedule,
     images: RefCell<Option<valo::ImageContext>>,
@@ -42,14 +46,16 @@ impl WebPlatform {
             origin: Instant::now(),
             frame_requested: Rc::new(Cell::new(false)),
             fonts_changed: Rc::new(Cell::new(false)),
-            deadline: Rc::new(Cell::new(None)),
+            timer_wakeup: Rc::new(Cell::new(None)),
+            wake_now_requested: Rc::new(Cell::new(false)),
             view: RefCell::new(None),
             brightness: Cell::new(brightness),
             on_schedule: Rc::new(RefCell::new(None)),
             images: RefCell::new(None),
         };
         dispatcher::install(
-            Rc::clone(&platform.deadline),
+            Rc::clone(&platform.timer_wakeup),
+            Rc::clone(&platform.wake_now_requested),
             Rc::clone(&platform.on_schedule),
         );
         platform
@@ -79,19 +85,28 @@ impl WebPlatform {
         self.frame_requested.get()
     }
 
-    pub fn next_deadline(&self) -> Option<Instant> {
-        self.deadline.get()
+    pub fn next_timer_wakeup(&self) -> Option<Instant> {
+        self.timer_wakeup.get()
     }
 
-    pub fn take_due_wake(&self, now: Instant) -> bool {
-        let Some(deadline) = self.deadline.get() else {
-            return false;
-        };
-        if now < deadline {
-            return false;
+    /// Whether a ready task is waiting to be woken, without clearing the request.
+    pub fn wake_now_requested(&self) -> bool {
+        self.wake_now_requested.get()
+    }
+
+    /// Whether the app should be woken now: a ready task asked for it, the timer wakeup has
+    /// arrived, or both. A timer wakeup that has arrived is cleared here, and the framework
+    /// sets the next one before the wake ends.
+    pub fn should_wake(&self, now: Instant) -> bool {
+        let asked = self.wake_now_requested.replace(false);
+        let timer_came = self
+            .timer_wakeup
+            .get()
+            .is_some_and(|wakeup| now >= wakeup);
+        if timer_came {
+            self.timer_wakeup.set(None);
         }
-        self.deadline.set(None);
-        true
+        asked || timer_came
     }
 
     pub fn elapsed(&self) -> Duration {

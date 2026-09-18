@@ -23,8 +23,9 @@ use inset_services::{KeyEventManager, TextInput};
 
 /// Host-facing isolate: the [`AppCell`] plus the methods the embedder pushes.
 ///
-/// Every push is one turn: the `App` is borrowed for the binding call and released before the
-/// cell's checkpoint, where the microtasks and futures the event queued run.
+/// Every push is one call into the app: the `App` is borrowed for the binding call and
+/// released before the cell's checkpoint, where the microtasks and futures the event queued
+/// run.
 pub struct Shell {
     app: Rc<AppCell>,
     platform: PlatformRef,
@@ -46,7 +47,7 @@ impl Shell {
             clock: Duration::ZERO,
             origin: None,
         };
-        shell.turn(|app| {
+        shell.handle_event(|app| {
             // Flutter's engine collects the platform's fonts before the framework runs.
             PaintingBinding::instance(app).install_platform_fonts(app);
             setup(app);
@@ -54,8 +55,8 @@ impl Shell {
         shell
     }
 
-    /// The `App`, borrowed until the guard drops. A host that needs a full turn — a borrow, then
-    /// the checkpoint — takes [`cell`](Self::cell).
+    /// The `App`, borrowed until the guard drops. A host that needs the whole thing, a borrow
+    /// and then the checkpoint, takes [`cell`](Self::cell).
     pub fn app(&self) -> RefMut<'_, App> {
         self.app.borrow_mut()
     }
@@ -65,20 +66,20 @@ impl Shell {
     }
 
     /// One platform event: `f` on the borrowed `App`, then the checkpoint.
-    fn turn<R>(&self, f: impl FnOnce(&mut App) -> R) -> R {
+    fn handle_event<R>(&self, f: impl FnOnce(&mut App) -> R) -> R {
         let result = f(&mut self.app.borrow_mut());
         self.app.checkpoint();
         result
     }
 
     /// An input or platform push: the app clock catches up with the platform's first, as Dart's
-    /// timers measure real time from the moment they are created, then the turn runs.
+    /// timers measure real time from the moment they are created, then `f` runs.
     fn push<R>(&mut self, f: impl FnOnce(&mut App) -> R) -> R {
         if let Some(origin) = self.origin {
             let elapsed = self.platform.now().saturating_duration_since(origin);
             self.advance_clock(elapsed);
         }
-        self.turn(f)
+        self.handle_event(f)
     }
 
     /// Moves the app clock up to the platform's `elapsed`, firing the timers that came due.
@@ -95,9 +96,9 @@ impl EmbedderClient for Shell {
     fn frame(&mut self, frame: Frame) {
         self.origin = Some(self.platform.now() - frame.elapsed);
         self.advance_clock(frame.elapsed);
-        // The engine runs `_beginFrame` and `_drawFrame` as two native tasks: two turns.
-        self.turn(|app| SchedulerBinding::on_begin_frame(app, Some(frame.elapsed)));
-        self.turn(SchedulerBinding::on_draw_frame);
+        // The engine runs `_beginFrame` and `_drawFrame` as two native tasks: two calls.
+        self.handle_event(|app| SchedulerBinding::on_begin_frame(app, Some(frame.elapsed)));
+        self.handle_event(SchedulerBinding::on_draw_frame);
     }
 
     fn view_added(&mut self, _id: ViewId) {}

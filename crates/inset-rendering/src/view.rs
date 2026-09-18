@@ -1,13 +1,18 @@
 //! Flutter counterpart: `rendering/view.dart` (`ViewConfiguration`, `RenderView`).
 //!
-//! `applyPaintTransform`, `updateSystemChrome`, and semantics wait.
+//! `applyPaintTransform` and semantics wait.
 
-use inset_embedder::{Matrix4, Offset, Rect, SceneBuilder, Size, View, ViewRef};
+use std::rc::Rc;
+
+use inset_embedder::{
+    Matrix4, Offset, Rect, SceneBuilder, Size, SystemUiOverlayStyle, TargetPlatform, View, ViewRef,
+};
 use inset_foundation::{App, Handle};
 use inset_gestures::{HitTestEntry, HitTestResult, HitTestTarget, PointerEvent};
+use inset_services::SystemChrome;
 
 use crate::box_::{AnyRenderBox, BoxConstraints, BoxHitTestResult};
-use crate::layer::{ContainerLayer, OffsetLayerMixin, TransformLayer};
+use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayerMixin, TransformLayer};
 use crate::object::{
     AnyRenderObject, Constraints, RenderHandle, RenderObject, RenderObjectData, RenderObjectVTable,
     resolve,
@@ -101,6 +106,12 @@ pub struct RenderView {
     configuration: Option<ViewConfiguration>,
     view: ViewRef,
     root_transform: Option<Matrix4>,
+    /// Whether the system overlays are styled from the layer tree at every frame.
+    ///
+    /// An application that would rather drive them itself, through
+    /// [`SystemChrome::set_system_ui_overlay_style`], turns this off so its own style is
+    /// not overwritten by whatever happens to be annotated under the bars.
+    pub automatic_system_ui_adjustment: bool,
 }
 
 impl RenderView {
@@ -123,6 +134,7 @@ impl RenderView {
             configuration: None,
             view,
             root_transform: None,
+            automatic_system_ui_adjustment: true,
         }));
         let data = this.render_object_data_mut(app);
         data.object_vtable = Some(&VTABLE);
@@ -302,6 +314,9 @@ impl RenderView {
             .layer(app)
             .expect("call prepare_initial_frame before calling composite_frame");
         let scene = layer.build_scene(app, SceneBuilder::new());
+        if self.get(app).automatic_system_ui_adjustment {
+            self.update_system_chrome(app);
+        }
         debug_assert!(
             self.configuration(app)
                 .logical_constraints
@@ -310,11 +325,114 @@ impl RenderView {
         self.get(app).view.present(std::sync::Arc::new(scene));
     }
 
+    /// Styles the system overlays from whatever the layer tree annotates beneath them.
+    ///
+    /// Takes the overlay style from the place where a system status bar and system
+    /// navigation bar are placed to update system style overlay. The center of the system
+    /// navigation bar and the center of the status bar are used to get
+    /// `SystemUiOverlayStyle`'s to update system overlay appearance.
+    ///
+    /// ```text
+    ///         Horizontal center of the screen
+    ///                 V
+    ///    ++++++++++++++++++++++++++
+    ///    |                        |
+    ///    |    System status bar   |  <- Vertical center of the status bar
+    ///    |                        |
+    ///    ++++++++++++++++++++++++++
+    ///    |                        |
+    ///    |        Content         |
+    ///    ~                        ~
+    ///    |                        |
+    ///    ++++++++++++++++++++++++++
+    ///    |                        |
+    ///    |  System navigation bar | <- Vertical center of the navigation bar
+    ///    |                        |
+    ///    ++++++++++++++++++++++++++ <- bounds.bottom
+    /// ```
+    fn update_system_chrome(self: RenderHandle<Self>, app: &mut App) {
+        let Some(layer) = self.as_object().layer(app) else {
+            return;
+        };
+        let bounds = self.paint_bounds(app);
+        let padding = self.get(app).view.metrics().padding;
+        // Center of the status bar
+        let top = Offset::new(
+            // Horizontal center of the screen
+            bounds.center().dx(),
+            // The vertical center of the system status bar. The system status bar height
+            // is kept as top window padding.
+            padding.top / 2.0,
+        );
+        // Center of the navigation bar
+        let bottom = Offset::new(
+            // Horizontal center of the screen
+            bounds.center().dx(),
+            // Vertical center of the system navigation bar. The system navigation bar
+            // height is kept as bottom window padding. The "1" needs to be subtracted from
+            // the bottom because available pixels are in (0..bottom) range. I.e. for a
+            // device with 1920 height, bound.bottom is 1920, but the most bottom drawn
+            // pixel is at 1919 position.
+            bounds.bottom - 1.0 - padding.bottom / 2.0,
+        );
+        let layer = layer.as_layer();
+        let upper = layer.find::<SystemUiOverlayStyle>(app, top);
+        // Only Android has a customizable system navigation bar.
+        let is_android = app.platform().target_platform() == TargetPlatform::Android;
+        let lower = is_android
+            .then(|| layer.find::<SystemUiOverlayStyle>(app, bottom))
+            .flatten();
+        // If there are no overlay style in the UI don't bother updating.
+        let Some(style) = merged_overlay_style(upper, lower, is_android) else {
+            return;
+        };
+        SystemChrome::set_system_ui_overlay_style(app, &style);
+    }
+
     /// An estimate of the bounds within which this render object will paint, in physical
     /// pixels.
     pub fn paint_bounds(self: RenderHandle<Self>, app: &App) -> Rect {
         Offset::ZERO & (self.size(app) * self.configuration(app).device_pixel_ratio)
     }
+}
+
+/// The style the two sampled points make between them, and `None` where the tree annotates
+/// neither: nothing was said about the overlays, so nothing is said to the host.
+///
+/// When both are annotated the upper provides the status bar properties and the lower
+/// provides the system navigation bar properties. This is for the case where a widget at
+/// the top, an app bar say, annotates the status bar's style while another at the bottom
+/// annotates the navigation bar's. When only one of them is, it provides every property,
+/// which lets one annotated region set both.
+fn merged_overlay_style(
+    upper: Option<Rc<SystemUiOverlayStyle>>,
+    lower: Option<Rc<SystemUiOverlayStyle>>,
+    is_android: bool,
+) -> Option<SystemUiOverlayStyle> {
+    if let (Some(upper), Some(lower)) = (&upper, &lower) {
+        return Some(SystemUiOverlayStyle {
+            status_bar_brightness: upper.status_bar_brightness,
+            status_bar_icon_brightness: upper.status_bar_icon_brightness,
+            status_bar_color: upper.status_bar_color,
+            system_status_bar_contrast_enforced: upper.system_status_bar_contrast_enforced,
+            system_navigation_bar_color: lower.system_navigation_bar_color,
+            system_navigation_bar_divider_color: lower.system_navigation_bar_divider_color,
+            system_navigation_bar_icon_brightness: lower.system_navigation_bar_icon_brightness,
+            system_navigation_bar_contrast_enforced: lower.system_navigation_bar_contrast_enforced,
+        });
+    }
+    let defined = upper.or(lower)?;
+    if !is_android {
+        // Only Android has a system navigation bar to style.
+        return Some(SystemUiOverlayStyle {
+            status_bar_brightness: defined.status_bar_brightness,
+            status_bar_icon_brightness: defined.status_bar_icon_brightness,
+            status_bar_color: defined.status_bar_color,
+            system_status_bar_contrast_enforced: defined.system_status_bar_contrast_enforced,
+            ..SystemUiOverlayStyle::new()
+        });
+    }
+    Some(*defined)
 }
 
 impl RenderObject for RenderView {

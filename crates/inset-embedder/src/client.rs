@@ -52,8 +52,8 @@ pub trait EmbedderClient {
     /// framework did not have when text last laid out.
     fn system_fonts_changed(&mut self) {}
 
-    /// The turn asked for through [`Dispatcher::wake_at`](crate::Dispatcher::wake_at): its
-    /// deadline has passed.
+    /// The wake asked for through [`Dispatcher::wake_at`](crate::Dispatcher::wake_at) or
+    /// [`Dispatcher::wake_now`](crate::Dispatcher::wake_now).
     ///
     /// `elapsed` is the platform clock, the same one `Frame::elapsed` reports. Dart's
     /// event loop runs due `Timer`s itself; here the client advances its own clock.

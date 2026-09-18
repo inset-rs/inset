@@ -2,6 +2,7 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use inset_embedder::{
@@ -16,7 +17,7 @@ type ImageCodecOpener = Rc<dyn Fn(Arc<[u8]>) -> ImageCodecFuture>;
 /// A platform a test builds: which host it claims to be, the views it offers, and each
 /// capability as the test's own implementation or absent. It counts the frames the framework
 /// asks for and keeps the deadlines it asks to be woken at, so a test can assert on them; the
-/// test itself pumps the app, since the loop never turns.
+/// test itself pumps the app, since there is no loop to run it.
 pub struct TestPlatform {
     target: Cell<TargetPlatform>,
     brightness: Cell<Brightness>,
@@ -164,9 +165,15 @@ impl TestPlatform {
         self.frames_requested.get()
     }
 
-    /// The deadlines the framework has asked to be woken at, in the order asked.
-    pub fn wakes(&self) -> Vec<Instant> {
-        self.dispatcher.deadlines()
+    /// The timer wakeups the framework has set, in order. A `None` is the framework
+    /// saying no timer is waiting.
+    pub fn wakes(&self) -> Vec<Option<Instant>> {
+        self.dispatcher.timer_wakeups()
+    }
+
+    /// How often a ready task has asked the host to wake the app.
+    pub fn wake_now_requests(&self) -> usize {
+        self.dispatcher.wake_now_requests()
     }
 }
 
@@ -261,30 +268,41 @@ impl Platform for TestPlatform {
     }
 }
 
-/// A host that keeps the turns asked of it and never gives one — the test pumps the app
-/// instead, where a host would answer with `EmbedderClient::wake` — and runs work at once on
-/// the calling thread, so a test needs only a checkpoint to see its result.
+/// A host that records what it was asked for and never wakes the app. The test pumps the app
+/// instead, where a host would call `EmbedderClient::wake`, and work runs at once on the
+/// calling thread, so a test needs only a checkpoint to see its result.
 #[derive(Default)]
 pub struct TestDispatcher {
-    deadlines: Mutex<Vec<Instant>>,
+    timer_wakeups: Mutex<Vec<Option<Instant>>>,
+    wake_now_requests: AtomicUsize,
 }
 
 impl TestDispatcher {
-    /// The deadlines asked for, in the order asked.
-    pub fn deadlines(&self) -> Vec<Instant> {
-        self.deadlines
+    /// The timer wakeups set, in order. A `None` is the application saying no timer is
+    /// waiting.
+    pub fn timer_wakeups(&self) -> Vec<Option<Instant>> {
+        self.timer_wakeups
             .lock()
-            .expect("the deadlines are never poisoned: nothing runs under their lock")
+            .expect("the wakeups are never poisoned: nothing runs under their lock")
             .clone()
+    }
+
+    /// How often a ready task has asked the host to wake the app.
+    pub fn wake_now_requests(&self) -> usize {
+        self.wake_now_requests.load(Ordering::Acquire)
     }
 }
 
 impl Dispatcher for TestDispatcher {
-    fn wake_at(&self, deadline: Instant) {
-        self.deadlines
+    fn wake_at(&self, timer_wakeup: Option<Instant>) {
+        self.timer_wakeups
             .lock()
-            .expect("the deadlines are never poisoned: nothing runs under their lock")
-            .push(deadline);
+            .expect("the wakeups are never poisoned: nothing runs under their lock")
+            .push(timer_wakeup);
+    }
+
+    fn wake_now(&self) {
+        self.wake_now_requests.fetch_add(1, Ordering::AcqRel);
     }
 
     fn dispatch(&self, work: Box<dyn FnOnce() + Send>) {

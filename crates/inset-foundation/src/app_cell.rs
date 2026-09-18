@@ -98,17 +98,18 @@ impl AppCell {
         rounds
     }
 
-    /// The turn the host gives for a [`Dispatcher::wake_at`](inset_embedder::Dispatcher::wake_at)
-    /// that carried no time: a post, a task woken on another thread. Nothing to handle, so
-    /// straight to the checkpoint, then the host is asked again for the next timer, in case
-    /// that turn was its deadline.
+    /// The wake the host gives for a
+    /// [`Dispatcher::wake_now`](inset_embedder::Dispatcher::wake_now): a post, or a task
+    /// woken on another thread. Nothing to handle, so straight to the checkpoint, and then
+    /// the host is told the new timer wakeup if anything queued during it changed the
+    /// earliest waiting timer.
     ///
     /// # Panics
     ///
     /// While the `App` is borrowed.
     pub fn wake(&self) {
         self.checkpoint();
-        self.borrow_mut().request_wake_for_next_timer();
+        self.borrow_mut().update_timer_wakeup();
     }
 
     /// Advances the App clock by `duration`, firing the timers that come due.
@@ -135,7 +136,7 @@ impl AppCell {
             self.checkpoint();
         }
         self.borrow_mut().advance_clock_to(target);
-        self.borrow_mut().request_wake_for_next_timer();
+        self.borrow_mut().update_timer_wakeup();
     }
 }
 
@@ -204,12 +205,82 @@ impl AsyncApp {
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
-    use std::time::Duration;
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    use inset_embedder::{Dispatcher, Platform, TargetPlatform, ViewId, ViewRef};
 
     use super::*;
     use crate::change_notifier::Listener;
     use crate::completer::{Completer, CompleterFuture};
     use crate::timers::Timer;
+
+    /// A host that keeps every timer wakeup it is given and never wakes the app itself, so
+    /// a test can read what the app told it and when.
+    #[derive(Default)]
+    struct RecordingHost {
+        timer_wakeups: Mutex<Vec<Option<Instant>>>,
+    }
+
+    impl RecordingHost {
+        fn timer_wakeups(&self) -> Vec<Option<Instant>> {
+            self.timer_wakeups
+                .lock()
+                .expect("the wakeups are never poisoned: nothing runs under their lock")
+                .clone()
+        }
+    }
+
+    impl Dispatcher for RecordingHost {
+        fn wake_at(&self, timer_wakeup: Option<Instant>) {
+            self.timer_wakeups
+                .lock()
+                .expect("the wakeups are never poisoned: nothing runs under their lock")
+                .push(timer_wakeup);
+        }
+
+        fn wake_now(&self) {}
+
+        fn dispatch(&self, work: Box<dyn FnOnce() + Send>) {
+            work();
+        }
+    }
+
+    struct RecordingPlatform(Arc<RecordingHost>);
+
+    impl Platform for RecordingPlatform {
+        fn target_platform(&self) -> TargetPlatform {
+            TargetPlatform::Android
+        }
+
+        fn request_frame(&self) {}
+
+        fn now(&self) -> Instant {
+            Instant::now()
+        }
+
+        fn dispatcher(&self) -> Arc<dyn Dispatcher> {
+            Arc::clone(&self.0) as Arc<dyn Dispatcher>
+        }
+
+        fn views(&self) -> Vec<ViewRef> {
+            Vec::new()
+        }
+
+        fn view(&self, _id: ViewId) -> Option<ViewRef> {
+            None
+        }
+
+        fn implicit_view(&self) -> Option<ViewRef> {
+            None
+        }
+    }
+
+    fn app_on_a_recording_host() -> (Rc<AppCell>, Arc<RecordingHost>) {
+        let host = Arc::new(RecordingHost::default());
+        let cell = AppCell::with_platform(Rc::new(RecordingPlatform(Arc::clone(&host))));
+        (cell, host)
+    }
 
     fn counter() -> Rc<Cell<u32>> {
         Rc::new(Cell::new(0))
@@ -240,6 +311,52 @@ mod tests {
     fn a_post_after_the_app_is_gone_is_dropped() {
         let cx = AppCell::new().borrow().to_async();
         cx.post(|_app| panic!("the App is gone"));
+    }
+
+    /// A wake asked for by a task woken on another thread is not a timer wakeup, and the
+    /// wake it is given must leave the waiting timer's wakeup exactly where it is. Mixing
+    /// the two is what once stopped an animated image as soon as nothing else touched the
+    /// loop.
+    #[test]
+    fn waking_for_a_ready_task_leaves_the_timer_wakeup_alone() {
+        let (cell, host) = app_on_a_recording_host();
+        Timer::new(
+            &mut cell.borrow_mut(),
+            Duration::from_millis(50),
+            Listener::new(|_app| {}),
+        );
+        let wakeups = host.timer_wakeups();
+        assert_eq!(wakeups.len(), 1, "the timer sets its wakeup");
+        assert!(wakeups[0].is_some_and(|wakeup| wakeup > Instant::now()));
+
+        // What a task woken off the main thread does, and the wake the host gives for it.
+        host.wake_now();
+        cell.wake();
+
+        assert_eq!(
+            host.timer_wakeups(),
+            wakeups,
+            "the wake neither cleared the timer wakeup nor made the app set it again"
+        );
+    }
+
+    /// The timer wakeup is the earliest waiting timer and nothing else, so losing that
+    /// timer has to change it: to the next one, or to no timer at all.
+    #[test]
+    fn cancelling_the_last_timer_tells_the_host_no_timer_is_waiting() {
+        let (cell, host) = app_on_a_recording_host();
+        let timer = Timer::new(
+            &mut cell.borrow_mut(),
+            Duration::from_millis(50),
+            Listener::new(|_app| {}),
+        );
+        timer.cancel(&mut cell.borrow_mut());
+        let wakeups = host.timer_wakeups();
+        assert_eq!(wakeups.len(), 2, "the cancel changes the timer wakeup");
+        assert_eq!(
+            wakeups[1], None,
+            "with no timer left the host is told to stop waiting for one"
+        );
     }
 
     #[test]

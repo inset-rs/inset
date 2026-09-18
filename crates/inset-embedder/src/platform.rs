@@ -416,22 +416,38 @@ impl PopupMenuEntry {
 /// gpui's `PlatformDispatcher`. Flutter's embedder API has the first as `post_task_callback`,
 /// with its target time, and keeps the second — the engine's own worker threads — to itself.
 pub trait Dispatcher: Send + Sync {
-    /// Asks for a turn of the application at `deadline`, answered on the main thread with
-    /// [`EmbedderClient::wake`](crate::EmbedderClient::wake) once that time has come. A timer
-    /// asks for its deadline; a task woken on another thread asks for now.
-    fn wake_at(&self, deadline: Instant);
+    /// Sets when the host should next wake the application for a timer.
+    ///
+    /// The host keeps one such time. When it arrives, the host calls
+    /// [`EmbedderClient::wake`](crate::EmbedderClient::wake) on the main thread.
+    ///
+    /// `None` means no timer is waiting, so the host should not wake for one.
+    ///
+    /// Each call replaces the previous one. The new time can be later than the old one, not
+    /// only earlier. Call this only from the thread the application runs on.
+    fn wake_at(&self, timer_wakeup: Option<Instant>);
 
-    /// Runs `work` off the main thread, on whatever the host has for that — a system queue, a
-    /// worker thread. The framework's `run_in_background` hands its work here.
+    /// Asks the host to wake the application as soon as it can, because a task became ready
+    /// to run.
+    ///
+    /// The next wake clears this request. It does not change the timer wakeup set by
+    /// [`wake_at`](Self::wake_at), which is still waiting for its own time. Call this from
+    /// any thread.
+    fn wake_now(&self);
+
+    /// Runs `work` off the main thread, on whatever the host has for that, such as a system
+    /// queue or a worker thread. The framework's `run_in_background` sends its work here.
     fn dispatch(&self, work: Box<dyn FnOnce() + Send>);
 }
 
-/// A dispatcher for tests, which pump the application by hand: no turn is ever given, and work
-/// runs at once on the calling thread, so its result is there at the next checkpoint.
+/// A dispatcher for tests, which pump the application by hand: it never wakes the application,
+/// and work runs at once on the calling thread, so its result is there at the next checkpoint.
 pub struct InertDispatcher;
 
 impl Dispatcher for InertDispatcher {
-    fn wake_at(&self, _deadline: Instant) {}
+    fn wake_at(&self, _timer_wakeup: Option<Instant>) {}
+
+    fn wake_now(&self) {}
 
     fn dispatch(&self, work: Box<dyn FnOnce() + Send>) {
         work();
@@ -461,7 +477,7 @@ pub trait Platform: Any {
     /// The host clock used for frame and timer timestamps.
     fn now(&self) -> Instant;
 
-    /// The host's threads, for a turn of the application or work off the main thread: see
+    /// The host's threads, for waking the application or running work off the main thread: see
     /// [`Dispatcher`].
     fn dispatcher(&self) -> Arc<dyn Dispatcher>;
 

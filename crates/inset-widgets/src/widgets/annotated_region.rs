@@ -92,13 +92,99 @@ impl<T: PartialEq + Debug + 'static> SingleChildRenderObjectWidget for Annotated
 
 #[cfg(test)]
 mod tests {
-    use inset_embedder::Offset;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use inset_embedder::{
+        ApplicationSwitcherDescription, Brightness, Offset, SystemChrome, SystemUiOverlayStyle,
+    };
     use inset_foundation::AppCell;
     use inset_rendering::{AnnotationResult, AnyContainerLayer, ErasedLayer};
+    use inset_test::TestPlatform;
 
     use super::*;
     use crate::test_harness::Harness;
-    use crate::widgets::basic::{Center, SizedBox};
+    use crate::widgets::basic::{Center, Column, SizedBox};
+
+    /// A host that records how it was asked to draw the system's bars.
+    #[derive(Default)]
+    struct RecordingChrome {
+        styles: RefCell<Vec<SystemUiOverlayStyle>>,
+    }
+
+    impl RecordingChrome {
+        fn styles(&self) -> Vec<SystemUiOverlayStyle> {
+            self.styles.borrow().clone()
+        }
+    }
+
+    impl SystemChrome for RecordingChrome {
+        fn set_overlay_style(&self, style: &SystemUiOverlayStyle) {
+            self.styles.borrow_mut().push(*style);
+        }
+
+        fn set_application_switcher_description(
+            &self,
+            _description: &ApplicationSwitcherDescription,
+        ) {
+        }
+    }
+
+    /// Mounts `child`, lays it out and composites one frame, which is where the system's
+    /// bars are styled from the tree. Answers what the host was told.
+    fn styles_of_one_frame(child: WidgetRef) -> Vec<SystemUiOverlayStyle> {
+        let chrome = Rc::new(RecordingChrome::default());
+        let platform = TestPlatform::new().with_system_chrome(chrome.clone());
+        let cell = AppCell::with_platform(Rc::new(platform));
+        let harness = Harness::mount(&mut cell.borrow_mut(), child);
+        harness.pump(&mut cell.borrow_mut());
+        let root = harness.render_root(&cell.borrow());
+        root.composite_frame(&mut cell.borrow_mut());
+        // The style is sent from a microtask, as Dart's `SystemChrome` sends it.
+        cell.checkpoint();
+        chrome.styles()
+    }
+
+    /// The whole view annotated with one style, so both the status bar and the navigation
+    /// bar are sampled from it.
+    fn the_whole_view(style: SystemUiOverlayStyle) -> WidgetRef {
+        AnnotatedRegion::new(SizedBox::expand(), style).into_widget()
+    }
+
+    #[test]
+    fn one_region_over_the_whole_view_styles_both_of_the_system_bars() {
+        let style = SystemUiOverlayStyle::new()
+            .status_bar_icon_brightness(Brightness::Dark)
+            .system_navigation_bar_icon_brightness(Brightness::Dark);
+        assert_eq!(styles_of_one_frame(the_whole_view(style)), vec![style]);
+    }
+
+    #[test]
+    fn a_view_that_annotates_nothing_leaves_the_system_bars_alone() {
+        assert_eq!(styles_of_one_frame(SizedBox::expand().into_widget()), vec![]);
+    }
+
+    #[test]
+    fn the_region_under_each_bar_styles_that_bar_and_not_the_other() {
+        let half = |style: SystemUiOverlayStyle| {
+            AnnotatedRegion::new(sized(300.0, 100.0), style).into_widget()
+        };
+        let upper = SystemUiOverlayStyle::new().status_bar_icon_brightness(Brightness::Dark);
+        let lower =
+            SystemUiOverlayStyle::new().system_navigation_bar_icon_brightness(Brightness::Light);
+        let view = Column::new()
+            .children(vec![half(upper), half(lower)])
+            .into_widget();
+        assert_eq!(
+            styles_of_one_frame(view),
+            vec![
+                SystemUiOverlayStyle::new()
+                    .status_bar_icon_brightness(Brightness::Dark)
+                    .system_navigation_bar_icon_brightness(Brightness::Light)
+            ],
+            "the upper region speaks for the status bar and the lower for the navigation bar"
+        );
+    }
 
     /// The annotated value; two markers of the same type so one search finds both.
     #[derive(Debug, PartialEq)]

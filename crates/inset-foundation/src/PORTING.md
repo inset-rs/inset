@@ -22,7 +22,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 - Change: `dart:async`'s `Timer` runs on a logical clock that `AppCell::elapse` advances (microtasks first, then due order, microtasks after each); `Timer.periodic` is absent.
   Reason: language — there is no isolate event loop; tests play FakeAsync through `elapse`.
-  Affect: no timer fires until the host or a test elapses the clock, and a repeating timer has to re-arm itself.
+  Affect: no timer fires until the host or a test elapses the clock, and a repeating timer has to re-arm itself. The host is told when to wake the app for its earliest waiting timer, and told again whenever that changes, including when no timer is left. That is kept separate from a ready task asking to be woken, which is what Dart's isolate gets for free by owning both queues: holding the two in one field would let a task that became ready overwrite a timer that has not run yet.
 
 - Change: a Dart `async` method is a `Task`: the part before its first `await` runs inline, the rest at the next checkpoint.
   Reason: language — a Rust future cannot hold the `App` across an `await`; it borrows the cell per step, as gpui does.

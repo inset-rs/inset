@@ -7,15 +7,16 @@ use std::rc::Rc;
 
 use inset_cupertino::{
     CupertinoColors, CupertinoDynamicColor, CupertinoListSection, CupertinoNavigationBar,
-    CupertinoPageScaffold, CupertinoTheme, ObstructingPreferredSizeWidgetRef,
+    CupertinoPageScaffold, CupertinoSliverNavigationBar, CupertinoTheme,
+    ObstructingPreferredSizeWidgetRef,
 };
 use inset_foundation::App;
 use inset_painting::{
     AlignmentGeometry, AnyColor, BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry, TextStyle,
 };
 use inset_widgets::{
-    Align, BuildContext, Container, Icon, IconData, IntoWidget, ListView, MediaQuery, Padding,
-    SizedBox, Text, WidgetRef,
+    Align, BuildContext, Container, CustomScrollView, Icon, IconData, IntoWidget, ListView,
+    MediaQuery, Padding, SizedBox, SliverList, SliverSafeArea, Text, WidgetRef,
 };
 
 /// The shell every gallery screen wears: a standard navigation bar whose middle and back label
@@ -28,6 +29,24 @@ pub fn screen<K>(body: impl IntoWidget<K>) -> WidgetRef {
 pub fn screen_with_bar<K>(bar: CupertinoNavigationBar, body: impl IntoWidget<K>) -> WidgetRef {
     CupertinoPageScaffold::new(body)
         .navigation_bar(ObstructingPreferredSizeWidgetRef::new(bar))
+        .background_color(CupertinoColors::SYSTEM_GROUPED_BACKGROUND)
+        .into_widget()
+}
+
+/// A screen whose bar is a sliver, for a large title that collapses as the content rises past
+/// it. A fixed bar's large title keeps its row however far the list is scrolled, and only
+/// fades its background in, so a screen that wants the iOS Settings behaviour wears this one.
+///
+/// The bar takes the top inset itself, which is why the safe area below it guards the bottom
+/// only.
+pub fn sliver_screen(bar: CupertinoSliverNavigationBar, children: Vec<WidgetRef>) -> WidgetRef {
+    let slivers = vec![
+        bar.into_widget(),
+        SliverSafeArea::new(SliverList::list(children).build())
+            .top(false)
+            .into_widget(),
+    ];
+    CupertinoPageScaffold::new(CustomScrollView::new().slivers(slivers))
         .background_color(CupertinoColors::SYSTEM_GROUPED_BACKGROUND)
         .into_widget()
 }

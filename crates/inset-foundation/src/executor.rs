@@ -5,7 +5,7 @@
 //! The shape is gpui's `ForegroundExecutor` over `async-task`: a woken task's runnable lands on
 //! the ready queue, and [`AppCell::checkpoint`](crate::AppCell::checkpoint) polls the queue
 //! with no borrow of the [`App`](crate::App) held, so each poll can borrow it through its own
-//! [`AsyncApp`](crate::AsyncApp). Waking also asks the host for a turn, since the task may
+//! [`AsyncApp`](crate::AsyncApp). Waking also asks the host to wake the app, since the task may
 //! have been woken on another thread while the main thread sleeps in the host's wait — what
 //! gpui's dispatch to the main queue does for every runnable. Work for another thread goes
 //! to the same host dispatcher and comes back as a task.
@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Context, Poll};
 
 use async_task::Runnable;
-use inset_embedder::{Dispatcher, Instant};
+use inset_embedder::Dispatcher;
 
 use crate::background;
 
@@ -37,7 +37,7 @@ pub(crate) struct ForegroundExecutor {
 }
 
 impl ForegroundExecutor {
-    /// An executor whose woken tasks ask `dispatcher` for a turn, and whose background work
+    /// An executor whose woken tasks ask `dispatcher` to wake the app, and whose background work
     /// runs on it.
     pub(crate) fn new(dispatcher: Arc<dyn Dispatcher>) -> ForegroundExecutor {
         ForegroundExecutor {
@@ -138,13 +138,13 @@ fn spawn_on<R: 'static>(
 ) -> Task<R> {
     let ready = Arc::clone(ready);
     let host = Arc::clone(dispatcher);
-    // Runs on whichever thread woke the task: the task joins the queue, and the host is asked
-    // for a turn now, in case the main thread is asleep. A host keeps the earliest deadline
-    // asked for and serves a burst of asks with one turn, so a task woken during a checkpoint
-    // costs at most one turn with nothing to poll.
+    // Runs on whichever thread woke the task: the task joins the queue, and the host is
+    // asked to wake the app, in case the main thread is asleep. The ask is not a timer
+    // wakeup and never changes the one a timer is waiting on. One wake covers a burst of
+    // them, so a task woken during a checkpoint costs at most one wake with nothing to poll.
     let schedule = move |runnable| {
         lock(&ready).push_back(runnable);
-        host.wake_at(Instant::now());
+        host.wake_now();
     };
     let (runnable, task) = async_task::spawn_local(future, schedule);
     runnable.schedule();
@@ -229,13 +229,17 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::task::Waker;
 
+    use inset_embedder::Instant;
+
     use super::*;
 
-    /// A host that counts the turns asked of it and runs work at once.
+    /// A host that counts how often it was asked to wake the app, and runs work at once.
     struct CountingDispatcher(AtomicUsize);
 
     impl Dispatcher for CountingDispatcher {
-        fn wake_at(&self, _deadline: Instant) {
+        fn wake_at(&self, _timer_wakeup: Option<Instant>) {}
+
+        fn wake_now(&self) {
             self.0.fetch_add(1, Ordering::AcqRel);
         }
 
@@ -286,22 +290,22 @@ mod tests {
         assert_eq!(
             turns_asked(&host),
             1,
-            "the spawn asked for a turn, which parked the task"
+            "the spawn asked for a wake, which parked the task"
         );
 
         std::thread::spawn(move || {
             done.store(true, Ordering::Release);
             let waker = parked.lock().unwrap().take();
-            waker.expect("the turn parked the waker").wake();
+            waker.expect("the wake parked the waker").wake();
         })
         .join()
         .unwrap();
         assert_eq!(
             turns_asked(&host),
             2,
-            "the worker's wake asks for another turn"
+            "the worker's wake asks the host for another wake"
         );
-        assert!(!ran.get(), "nothing runs outside the main thread's turn");
+        assert!(!ran.get(), "nothing runs outside the main thread's wake");
         handle.poll_ready_tasks();
         assert!(ran.get());
     }

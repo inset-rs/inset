@@ -2,7 +2,7 @@
 //!
 //! A future's listeners run on the microtask queue, as Dart's do: [`CompleterFuture::then`]
 //! queues its callback through the [`App`] and [`Completer::complete`] queues the pending ones.
-//! An `await` resumes its task at the checkpoint instead; the shell's turn runs both.
+//! An `await` resumes its task at the checkpoint instead; the shell runs both.
 
 use std::cell::{Cell, OnceCell};
 use std::future::Future;

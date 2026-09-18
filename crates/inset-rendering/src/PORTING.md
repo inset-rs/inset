@@ -191,14 +191,14 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `RenderImage`'s `centerSlice`. Trigger: an image drawn as a resizable frame.
 - `RenderImage`'s `filterQuality` and `isAntiAlias`. Trigger: a caller that needs to choose how an image is sampled.
 - `RenderImage`'s semantics label. Trigger: accessibility.
-- `TextureLayer`, `PlatformViewLayer`, `PerformanceOverlayLayer`, `ClipRSuperellipseLayer`, `ColorFilterLayer`, `ImageFilterLayer`, `ShaderMaskLayer`, `OffsetLayer.toImage` / `toImageSync`, `PaintingContext.pushColorFilter`, `RenderView._updateSystemChrome`. Trigger: a texture or platform view, a superellipse clip, a colour/image/shader filter widget, `RepaintBoundary.toImage`, system chrome.
+- `TextureLayer`, `PlatformViewLayer`, `PerformanceOverlayLayer`, `ClipRSuperellipseLayer`, `ColorFilterLayer`, `ImageFilterLayer`, `ShaderMaskLayer`, `OffsetLayer.toImage` / `toImageSync`, `PaintingContext.pushColorFilter`. Trigger: a texture or platform view, a superellipse clip, a colour/image/shader filter widget, `RepaintBoundary.toImage`.
 - `PaintingContext.addCompositionCallback`. Trigger: a caller that needs composition callbacks on the painting context (layers already have them).
 - Debug paint overlays on boxes, slivers and the viewport, and the overflow indicators of `RenderFlex` and `RenderConstraintsTransformBox` (an overflowing box clips but paints no striped hint); with them, `paintsChild` as a virtual. Trigger: inspector.
 - Semantics on `PipelineOwner`, `RenderObject`, `RenderCustomPaint`, the ignore- and absorb-pointer boxes, `RenderOffstage`, the viewport and the slivers. Trigger: a11y; do not stub.
 - The semantics half of `PipelineManifold`; the frame-request half is ported, and `RendererBinding::init_render_view` stays for render-tree-only hosts and must never be called in an app that runs `run_app`. Trigger: semantics.
 - The layout-contract asserts: `_DebugSize` and `debugAssertDoesMeetConstraints` on box, sliver and the fixed-extent adaptor; `SliverGeometry::debug_assert_is_valid` is ported and the viewport calls it. Trigger: the first layout bug one of them would have caught.
 - `layout` and `constraints` as override points; `markNeedsLayout` is one on the box protocol only. Trigger: OverlayPortal, `RenderView`. Ask before adding.
-- `RenderView.applyPaintTransform` / `updateSystemChrome`; `performReassemble`. Trigger: `getTransformTo`, hot reload.
+- `RenderView.applyPaintTransform`; `performReassemble`. Trigger: `getTransformTo`, hot reload.
 - `RenderParagraph.applyPaintTransform`. Trigger: a caller that needs the paragraph's paint transform.
 - `RenderEditable` inline children, the custom-paint child boxes and the internal tap / long-press recognizers. Trigger: `WidgetSpan`; a field that does not set `ignorePointer`.
 - `SliverConstraints.debugAssertIsValid` extra numeric checks. Trigger: a caller that relies on those messages.

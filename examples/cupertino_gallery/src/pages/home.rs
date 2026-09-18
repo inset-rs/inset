@@ -7,8 +7,8 @@
 use std::rc::Rc;
 
 use inset_cupertino::{
-    CupertinoDynamicColor, CupertinoListTile, CupertinoListTileChevron, CupertinoNavigationBar,
-    CupertinoTheme,
+    CupertinoDynamicColor, CupertinoListTile, CupertinoListTileChevron,
+    CupertinoSliverNavigationBar,
 };
 use inset_foundation::{App, Task};
 use inset_painting::EdgeInsetsGeometry;
@@ -17,7 +17,7 @@ use inset_widgets::{BuildContext, IntoWidget, Padding, Row, StatelessWidget, Tex
 
 use crate::app::{INDEX_TITLE, open_entry};
 use crate::catalog::Entry;
-use crate::support::{badge, screen_with_bar, scrolling_body, secondary, section};
+use crate::support::{badge, secondary, section, sliver_screen};
 
 /// The leading badge's side. `CupertinoListTile::notched` constrains `leading` to 30 points,
 /// so the badge is built to that size rather than being squeezed into it.
@@ -33,16 +33,13 @@ impl StatelessWidget for Home {
             .iter()
             .map(|entry| row(*entry, app, context))
             .collect();
-        let title = CupertinoTheme::of(app, context)
-            .text_theme()
-            .nav_large_title_text_style();
 
-        screen_with_bar(
-            // The index uses the LARGE bar and most entries use the standard one, so a push
-            // shows the large title fly into a centred middle — the two constructors, one
-            // gesture apart.
-            CupertinoNavigationBar::large().large_title(Text::new(INDEX_TITLE).style(title)),
-            scrolling_body(vec![section("Widgets", rows)]),
+        sliver_screen(
+            // The index's bar is a SLIVER, so its large title collapses into the middle slot
+            // as the rows rise past it. Most entries wear the standard fixed bar, so a push
+            // shows that title fly into a centred middle — two bars, one gesture apart.
+            CupertinoSliverNavigationBar::new().large_title(Text::new(INDEX_TITLE)),
+            vec![section("Widgets", rows)],
         )
     }
 }

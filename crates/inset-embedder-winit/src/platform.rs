@@ -35,9 +35,11 @@ use crate::windows::WinitWindowing;
 ///
 /// [`image_context`]: WinitPlatform::image_context
 pub struct WinitPlatform {
-    /// When the framework asked to be woken, for its earliest timer (`Platform::wake_at`);
-    /// The earliest turn asked for through the loop handle; `None` once it has been given.
-    pub(crate) wake_due: Cell<Option<Instant>>,
+    /// When to wake the framework for its earliest waiting timer, as it last set it;
+    /// `None` when no timer is waiting, or once that wake has been given.
+    pub(crate) timer_wakeup: Cell<Option<Instant>>,
+    /// A ready task asking for the framework to be woken, cleared by the next wake.
+    pub(crate) wake_now_requested: Cell<bool>,
     pub(crate) frame_requested: Cell<bool>,
     views: RefCell<HashMap<ViewId, ViewRef>>,
     implicit_view: Option<ViewId>,
@@ -65,7 +67,8 @@ impl WinitPlatform {
         implicit_view: Option<ViewId>,
     ) -> WinitPlatform {
         WinitPlatform {
-            wake_due: Cell::new(None),
+            timer_wakeup: Cell::new(None),
+            wake_now_requested: Cell::new(false),
             frame_requested: Cell::new(false),
             views: RefCell::new(HashMap::new()),
             implicit_view,
@@ -254,7 +257,7 @@ impl PopupMenus for WinitPlatform {
     fn show(&self, entries: &[PopupMenuEntry]) -> Option<usize> {
         let chosen = os::popup_menu(entries);
         // The menu ran its own event loop and kept the release of the button that opened
-        // it; the next turn reconciles the buttons.
+        // it; the next pass reconciles the buttons.
         let _ = self.proxy.send_event(HostEvent::MenuClosed);
         chosen
     }
@@ -269,14 +272,18 @@ impl MouseCursor for WinitPlatform {
     }
 }
 
-/// The host's threads as any thread reaches them: a turn is a `WakeAt` event through winit's
+/// The host's threads as any thread reaches them: a wake is an event through winit's
 /// proxy, which the loop keeps as its earliest due wake and serves when the time comes; work
 /// goes to the system's queue, or a thread where the system has none.
 struct WinitDispatcher(EventLoopProxy<HostEvent>);
 
 impl Dispatcher for WinitDispatcher {
-    fn wake_at(&self, deadline: Instant) {
-        let _ = self.0.send_event(HostEvent::WakeAt(deadline));
+    fn wake_at(&self, timer_wakeup: Option<Instant>) {
+        let _ = self.0.send_event(HostEvent::TimerWakeup(timer_wakeup));
+    }
+
+    fn wake_now(&self) {
+        let _ = self.0.send_event(HostEvent::WakeNow);
     }
 
     fn dispatch(&self, work: Box<dyn FnOnce() + Send>) {

@@ -85,7 +85,9 @@ mod tests {
     struct ThreadDispatcher;
 
     impl Dispatcher for ThreadDispatcher {
-        fn wake_at(&self, _deadline: Instant) {}
+        fn wake_at(&self, _timer_wakeup: Option<Instant>) {}
+
+        fn wake_now(&self) {}
 
         fn dispatch(&self, work: Box<dyn FnOnce() + Send>) {
             std::thread::spawn(work);
