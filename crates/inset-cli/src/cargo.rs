@@ -9,28 +9,49 @@ use cargo_metadata::Message;
 
 use crate::project::{Profile, Project};
 
-pub enum Kind {
-    Bin,
-    Lib,
+/// What a build is for: the target cargo is asked to build, and the one file taken back.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Artifact {
+    /// The binary the desktops and iOS run.
+    Executable,
+    /// The `cdylib` as the target's loader takes it: `.so`, `.dylib` or `.dll`.
+    Library,
+    /// The `.wasm` a `cdylib` compiles to on a wasm target.
+    Wasm,
+}
+
+impl Artifact {
+    /// The extensions this artifact's file can have, empty for the binary, which cargo
+    /// names outright.
+    fn extensions(self) -> &'static [&'static str] {
+        match self {
+            Artifact::Executable => &[],
+            Artifact::Library => &["so", "dylib", "dll"],
+            Artifact::Wasm => &["wasm"],
+        }
+    }
+
+    fn describe(self) -> &'static str {
+        match self {
+            Artifact::Executable => "an executable",
+            Artifact::Library => "a library",
+            Artifact::Wasm => "a .wasm",
+        }
+    }
 }
 
 pub struct Build<'a> {
     pub project: &'a Project,
     pub profile: Profile,
     pub triple: Option<&'a str>,
-    pub kind: Kind,
+    pub artifact: Artifact,
     /// Environment for rustc and the linker, such as a deployment target.
     pub env: Vec<(&'a str, String)>,
 }
 
-pub struct Artifacts {
-    pub executable: Option<PathBuf>,
-    pub wasm: Option<PathBuf>,
-}
-
-/// `cargo build` with JSON messages, so the artifact paths come from cargo
-/// instead of being guessed from the target directory layout.
-pub fn build(build: &Build) -> Result<Artifacts> {
+/// `cargo build` with JSON messages, so the artifact's path comes from cargo instead of
+/// being guessed from the target directory layout.
+pub fn build(build: &Build) -> Result<PathBuf> {
     let mut command = Command::new("cargo");
     command
         .current_dir(&build.project.root)
@@ -43,11 +64,11 @@ pub fn build(build: &Build) -> Result<Artifacts> {
     if let Some(triple) = build.triple {
         command.args(["--target", triple]);
     }
-    match build.kind {
-        Kind::Bin => {
+    match build.artifact {
+        Artifact::Executable => {
             command.args(["--bin", &build.project.bin]);
         }
-        Kind::Lib => {
+        Artifact::Library | Artifact::Wasm => {
             command.arg("--lib");
         }
     }
@@ -60,23 +81,11 @@ pub fn build(build: &Build) -> Result<Artifacts> {
         .spawn()
         .context("cargo is not on PATH")?;
     let stdout = child.stdout.take().expect("piped stdout");
-    let mut artifacts = Artifacts {
-        executable: None,
-        wasm: None,
-    };
+    let mut found = None;
     for message in Message::parse_stream(BufReader::new(stdout)) {
         if let Message::CompilerArtifact(artifact) = message? {
-            if let Some(executable) = artifact.executable
-                && artifact.target.name == build.project.bin
-            {
-                artifacts.executable = Some(executable.into_std_path_buf());
-            }
-            if let Some(wasm) = artifact
-                .filenames
-                .iter()
-                .find(|f| f.extension() == Some("wasm"))
-            {
-                artifacts.wasm = Some(wasm.clone().into_std_path_buf());
+            if let Some(path) = wanted_file(build, &artifact) {
+                found = Some(path);
             }
         }
     }
@@ -84,7 +93,35 @@ pub fn build(build: &Build) -> Result<Artifacts> {
     if !status.success() {
         bail!("cargo build failed");
     }
-    Ok(artifacts)
+    found.with_context(|| format!("cargo produced {}", build.artifact.describe()))
+}
+
+/// The file this build asked for, out of what cargo says one compilation produced.
+///
+/// The target's name is checked as well as the extension: a dependency that is a proc
+/// macro compiles to a `.dylib` or `.so` of its own, and cargo reports it the same way.
+fn wanted_file(build: &Build, artifact: &cargo_metadata::Artifact) -> Option<PathBuf> {
+    let wanted_name = match build.artifact {
+        Artifact::Executable => &build.project.bin,
+        Artifact::Library | Artifact::Wasm => build.project.library.as_ref()?,
+    };
+    if &artifact.target.name != wanted_name {
+        return None;
+    }
+    if build.artifact == Artifact::Executable {
+        return artifact
+            .executable
+            .as_ref()
+            .map(|path| path.clone().into_std_path_buf());
+    }
+    artifact
+        .filenames
+        .iter()
+        .find(|file| {
+            file.extension()
+                .is_some_and(|extension| build.artifact.extensions().contains(&extension))
+        })
+        .map(|file| file.clone().into_std_path_buf())
 }
 
 /// `cargo run` for the host desktop; the app's stdio is the terminal.

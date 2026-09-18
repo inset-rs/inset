@@ -425,9 +425,7 @@ macro_rules! cupertino_route_transition_mixin_route_overrides {
         fn as_transition_route(
             self: ::inset_foundation::Handle<Self>,
         ) -> ::std::option::Option<::inset_widgets::AnyTransitionRoute> {
-            ::std::option::Option::Some(::inset_widgets::TransitionRoute::as_transition_route(
-                self,
-            ))
+            ::std::option::Option::Some(::inset_widgets::TransitionRoute::as_transition_route(self))
         }
 
         fn as_modal_route(

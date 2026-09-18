@@ -14,6 +14,10 @@
 //! frame and lets its display link draw the next. This host keeps the framework's last
 //! picture instead, since the framework draws only when asked, and pays it when the
 //! system says the window can take it.
+//!
+//! A phone takes the window's surface away while the app is in the background and gives
+//! it back on return, winit's `Suspended` and `Resumed`: the view's surface goes and is
+//! made again on the same window, and the latest picture is owed until it is.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -26,6 +30,8 @@ use inset_embedder::{
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::window::{ImePurpose, Window};
 
+use crate::gpu::Gpu;
+use crate::os;
 use crate::surface::WinitSurface;
 use crate::text_input::ActiveTextInput;
 use crate::windows::WinitWindow;
@@ -35,8 +41,11 @@ pub(crate) struct WinitView {
     pub(crate) id: ViewId,
     pub(crate) metrics: Cell<ViewMetrics>,
     pub(crate) surface: Arc<Mutex<WinitSurface>>,
-    /// The window this view draws into, for retrying a present the surface refused.
+    /// The window this view draws into, for retrying a present the surface refused, and
+    /// for making the surface again once the system gives the window back.
     pub(crate) window: Arc<Window>,
+    /// Whether the surface's alpha is honoured by the compositor, for making it again.
+    sees_through: bool,
     pub(crate) editing_state: RefCell<TextEditingValue>,
     /// Set from `TextInputHost::start` to `TextInputHost::stop`; an unhandled key types into it.
     pub(crate) text_input: Cell<Option<ActiveTextInput>>,
@@ -65,6 +74,56 @@ pub(crate) struct WinitView {
 const TIMEOUT_RETRIES: u8 = 8;
 
 impl WinitView {
+    /// A view on `window`, with a surface on `gpu`'s device. A window that sees through gets
+    /// a surface whose alpha the compositor honours, cleared to nothing, so what the app
+    /// leaves unpainted shows what is behind the window.
+    pub(crate) fn new(
+        id: ViewId,
+        window: Arc<Window>,
+        gpu: &Gpu,
+        sees_through: bool,
+    ) -> Result<WinitView, String> {
+        let surface = make_surface(gpu, &window, sees_through)?;
+        let mut context = valo::Context::new(gpu.device.clone(), gpu.queue.clone());
+        context.set_hide_missing_glyphs(true);
+        let clear = if sees_through {
+            valo::Color::TRANSPARENT
+        } else {
+            valo::Color::WHITE
+        };
+        let view = WinitView {
+            id,
+            metrics: Cell::new(ViewMetrics::default()),
+            surface: Arc::new(Mutex::new(WinitSurface {
+                surface: Some(surface),
+                context,
+                in_transaction: false,
+            })),
+            window,
+            sees_through,
+            editing_state: RefCell::new(TextEditingValue::EMPTY),
+            text_input: Cell::new(None),
+            transform: RefCell::new(None),
+            clear,
+            latest: RefCell::new(None),
+            on_screen: Cell::new(false),
+            refused: Cell::new(None),
+            retries: Cell::new(0),
+            resizing: Cell::new(false),
+        };
+        view.refresh_metrics();
+        Ok(view)
+    }
+
+    /// The renderer's image context, for the images decoded on this device.
+    pub(crate) fn image_context(&self) -> valo::ImageContext {
+        self.surface
+            .lock()
+            .expect("surface lock")
+            .context
+            .image_context()
+    }
+
     /// Renders and presents `picture`, or records why the surface refused it, so that the
     /// picture is presented when the refusal ends.
     fn draw(&self, picture: &Picture) {
@@ -122,15 +181,82 @@ impl WinitView {
     /// The surface was reconfigured: whatever it showed is gone, and whatever it refused
     /// is forgotten with it.
     pub(crate) fn resized(&self, size: [u32; 2]) {
-        self.surface
-            .lock()
-            .expect("surface lock")
-            .surface
-            .resize(size);
+        if let Some(surface) = &mut self.surface.lock().expect("surface lock").surface {
+            surface.resize(size);
+        }
+        self.forget_surface_state();
+    }
+
+    /// The system took the window's surface away: the view keeps its picture and owes it
+    /// until the surface is made again.
+    pub(crate) fn surface_lost(&self) {
+        self.surface.lock().expect("surface lock").surface = None;
+        self.forget_surface_state();
+        self.refused.set(Some(valo::Refused::Lost));
+    }
+
+    /// The system gave the window back: a surface on it again, owed the latest picture.
+    pub(crate) fn remake_surface(&self, gpu: &Gpu) -> Result<(), String> {
+        let surface = make_surface(gpu, &self.window, self.sees_through)?;
+        self.surface.lock().expect("surface lock").surface = Some(surface);
+        self.forget_surface_state();
+        Ok(())
+    }
+
+    fn forget_surface_state(&self) {
         self.on_screen.set(false);
         self.refused.set(None);
         self.retries.set(0);
     }
+
+    /// Reads the window's metrics again and answers whether they changed. winit reports a
+    /// resize for more than one of the system's notices, and some systems report none for
+    /// a change of the safe area; the same geometry again is nothing to lay out for.
+    pub(crate) fn refresh_metrics(&self) -> bool {
+        let metrics = self.read_metrics();
+        if self.metrics.get() == metrics {
+            return false;
+        }
+        self.metrics.set(metrics);
+        true
+    }
+
+    fn read_metrics(&self) -> ViewMetrics {
+        let [width, height] = os::surface_size(&self.window).map(f64::from);
+        let padding = os::view_padding(&self.window, [width, height]);
+        ViewMetrics {
+            physical_size: [width, height],
+            physical_constraints: ViewConstraints::tight(width, height),
+            device_pixel_ratio: self.window.scale_factor(),
+            // No system winit serves reports a keyboard, so the safe area is the whole of
+            // the padding and nothing covers it.
+            padding,
+            view_padding: padding,
+            view_insets: ViewPadding::ZERO,
+        }
+    }
+}
+
+/// A surface on `gpu`'s device for `window`, as it is presented to.
+fn make_surface(
+    gpu: &Gpu,
+    window: &Arc<Window>,
+    sees_through: bool,
+) -> Result<valo::Surface, String> {
+    let alpha = if sees_through {
+        valo::SurfaceAlpha::Transparent
+    } else {
+        valo::SurfaceAlpha::Opaque
+    };
+    valo::Surface::new_with_options(
+        &gpu.instance,
+        &gpu.adapter,
+        &gpu.device,
+        Arc::clone(window),
+        os::surface_size(window),
+        valo::SurfaceOptions::default().with_alpha(alpha),
+    )
+    .map_err(|error| error.to_string())
 }
 
 impl View for WinitView {
@@ -214,46 +340,4 @@ pub(crate) struct HostedView {
     pub(crate) view: Rc<WinitView>,
     /// The app's handle on a window it created; the implicit window has none.
     pub(crate) handle: Option<Rc<WinitWindow>>,
-}
-
-pub(crate) fn window_metrics(window: &Window) -> ViewMetrics {
-    let [width, height] = surface_size(window).map(f64::from);
-    let padding = safe_area_padding(window, width, height);
-    ViewMetrics {
-        physical_size: [width, height],
-        physical_constraints: ViewConstraints::tight(width, height),
-        device_pixel_ratio: window.scale_factor(),
-        padding,
-        view_padding: padding,
-        view_insets: ViewPadding::ZERO,
-    }
-}
-
-/// The pixels valo presents into. On iOS winit's `inner_size` is the safe
-/// area while the layer covers the whole window, which `outer_size` reports.
-pub(crate) fn surface_size(window: &Window) -> [u32; 2] {
-    let size = if cfg!(target_os = "ios") {
-        window.outer_size()
-    } else {
-        window.inner_size()
-    };
-    [size.width, size.height]
-}
-
-/// The safe area as Flutter reports it: the whole view is the size, the status
-/// bar and home indicator are padding. Zero on desktops.
-fn safe_area_padding(window: &Window, width: f64, height: f64) -> ViewPadding {
-    if !cfg!(target_os = "ios") {
-        return ViewPadding::ZERO;
-    }
-    let safe = window.inner_size();
-    let origin = window.inner_position().unwrap_or_default();
-    let left = f64::from(origin.x);
-    let top = f64::from(origin.y);
-    ViewPadding {
-        left,
-        top,
-        right: (width - f64::from(safe.width) - left).max(0.0),
-        bottom: (height - f64::from(safe.height) - top).max(0.0),
-    }
 }

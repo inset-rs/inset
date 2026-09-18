@@ -5,6 +5,7 @@ use std::process::Command;
 
 use anyhow::Result;
 
+use crate::android;
 use crate::tools;
 
 pub fn report() -> Result<()> {
@@ -88,7 +89,50 @@ pub fn report() -> Result<()> {
     );
 
     section("Android");
-    note("not supported yet");
+    match android::sdk() {
+        Ok(sdk) => {
+            ok(&format!("SDK: {}", sdk.root.display()));
+            ok(&format!(
+                "build-tools {}",
+                sdk.build_tools
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            ));
+            ok(&format!("platform API {}", sdk.platform.level));
+            match &sdk.ndk {
+                Some(ndk) => ok(&format!("NDK: {}", ndk.display())),
+                None => gap(
+                    "NDK: links the app for the device",
+                    "Android Studio > Settings > SDK Manager > SDK Tools > NDK, or set ANDROID_NDK_HOME",
+                ),
+            }
+            match &sdk.java {
+                Some(java) => ok(&format!("Java: {}", java.home.display())),
+                None => gap(
+                    "Java: runs apksigner",
+                    "install Android Studio, whose runtime is used, or set JAVA_HOME",
+                ),
+            }
+            target(&targets, "aarch64-linux-android");
+            if sdk.emulator.is_some() {
+                let avds = android::emulators().unwrap_or_default();
+                if avds.is_empty() {
+                    note(
+                        "emulator installed, no virtual device: create one in Android Studio > Device Manager",
+                    );
+                } else {
+                    ok(&format!("emulator: {}", avds.join(", ")));
+                }
+            } else {
+                note("no emulator: `run -d android` needs a connected device");
+            }
+        }
+        Err(error) => gap(
+            &format!("{error:#}"),
+            "https://developer.android.com/studio",
+        ),
+    }
     Ok(())
 }
 

@@ -4,9 +4,7 @@ use std::rc::Rc;
 
 use inset_embedder::Locale;
 use inset_foundation::{App, CompleterFuture, DateTime};
-use inset_widgets::{
-    BuildContext, Localizations, LocalizationsDelegate, LocalizationsDelegateRef,
-};
+use inset_widgets::{BuildContext, Localizations, LocalizationsDelegate, LocalizationsDelegateRef};
 
 use crate::debug::debug_check_has_cupertino_localizations;
 

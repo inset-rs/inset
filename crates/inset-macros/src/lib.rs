@@ -1,12 +1,14 @@
 //! `#[inset::main]`: one setup function, every host's entry point.
 //!
-//! The attribute keeps the annotated function as the app's setup and adds a
-//! `main` beside it that starts the default embedder and the shell, for whoever
-//! calls it: the binary's `src/main.rs` on native, the page after it has
-//! instantiated the module in the browser, where `main` is an exported symbol.
-//! A component for a WASI host, such as wapk, is not a host Inset ships: there
-//! the macro emits no entry and leaves the function as written, for the entry
-//! the app writes itself with that host's embedder crate.
+//! The attribute keeps your function as the app's setup and adds the entry point beside it,
+//! which starts the default embedder and the shell. Which entry depends on the target:
+//!
+//! - desktop and iOS: `main`
+//! - web: an exported `main`, called once the page has the module
+//! - Android: `android_main`, called by the activity's glue with its `AndroidApp`
+//!
+//! A WASI component, such as one for wapk, gets no entry: Inset ships no host for it, so
+//! the app writes its own with that host's embedder crate.
 
 use proc_macro::TokenStream;
 use proc_macro2::Span;
@@ -26,9 +28,11 @@ use syn::{Expr, ExprLit, Ident, ItemFn, Lit, LitStr, Meta, Token, Visibility};
 ///
 /// `title` and `size` configure the native window and default to the package
 /// name and the embedder's default size. The browser host ignores both; its
-/// page calls the exported `main` once the module is instantiated. For a WASI
-/// host no `main` is emitted and the function keeps its name, for the app's
-/// own entry to call through that host's embedder crate.
+/// page calls the exported `main` once the module is instantiated. Android's
+/// window is the screen and ignores both too; its entry is `android_main`, and
+/// there is no `main`. For a WASI host no `main` is emitted and the function
+/// keeps its name, for the app's own entry to call through that host's embedder
+/// crate.
 #[proc_macro_attribute]
 pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
     let options = syn::parse_macro_input!(attr as Options);
@@ -66,10 +70,21 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
         #[allow(dead_code)]
         #as_written
 
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
         pub fn main() {
             ::inset::DefaultEmbedder::default()
                 .implicit_view(::core::option::Option::Some(#view))
+                .run(|platform| ::inset::Shell::new(platform, #setup_name));
+        }
+
+        // The activity's glue looks this symbol up in the app's library and calls it on a
+        // thread of its own with the `AndroidApp` the loop runs on. The window is the
+        // screen, which the system sizes and titles, so neither option reaches the host.
+        #[cfg(target_os = "android")]
+        #[unsafe(no_mangle)]
+        fn android_main(app: ::inset::AndroidApp) {
+            ::inset::DefaultEmbedder::default()
+                .android_app(app)
                 .run(|platform| ::inset::Shell::new(platform, #setup_name));
         }
 

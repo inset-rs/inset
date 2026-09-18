@@ -27,9 +27,11 @@ pub use inset_embedder::{
     Brightness, Color, DropChange, DropData, FontFeature, FontWeight, Offset, Radius, Rect, Size,
     TextAlign, TextDirection,
 };
+#[cfg(target_os = "android")]
+pub use inset_embedder_default::AndroidApp;
 #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
 pub use inset_embedder_default::DefaultEmbedder;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
 pub use inset_embedder_default::ImplicitViewConfig;
 /// Change-notifier callback used by buttons. The pointer widget is [`inset_widgets::Listener`].
 pub use inset_foundation::Listener;

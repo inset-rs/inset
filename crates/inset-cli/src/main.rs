@@ -1,10 +1,12 @@
-//! `cargo inset`: run and package an Inset app for desktop, iOS, the web, and WASI hosts.
+//! `cargo inset`: run and package an Inset app for desktop, iOS, Android, the web, and
+//! WASI hosts.
 //!
 //! One project shape serves every host: the app lives in the library target,
 //! `#[inset::main]` emits each host's entry point, and this tool turns cargo's
-//! output into what the platform installs: an `.app`, an installer, a static
-//! web folder, a wasm component.
+//! output into what the platform installs: an `.app`, an `.apk`, an installer, a
+//! static web folder, a wasm component.
 
+mod android;
 mod cargo;
 mod desktop;
 mod devices;
@@ -55,7 +57,7 @@ enum Command {
     Devices,
     /// Build and launch on a device. Defaults to this desktop.
     Run {
-        /// A device from `cargo inset devices`: `macos`, `web`, `chrome`, `ios`, a simulator name, or an id.
+        /// A device from `cargo inset devices`: `macos`, `web`, `chrome`, `ios`, `android`, a simulator or emulator name, or an id.
         #[arg(short, long)]
         device: Option<String>,
         /// Optimized build.
@@ -101,6 +103,8 @@ enum BuildTarget {
     Ios,
     /// `.ipa` around a device-signed `.app`.
     Ipa,
+    /// `.apk` for 64-bit ARM devices and emulators, signed with the debug key.
+    Apk,
     /// Static folder: `index.html`, `app.js`, `app_bg.wasm`.
     Web,
     /// A `wasm32-wasip2` component for a WASI host such as wapk: `<package>.wasm`.
@@ -182,15 +186,27 @@ fn run_on(
             let out = web::build(&project, profile)?;
             serve::serve_and_open(out, browser)
         }
-        Target::Simulator(simulator) => {
+        Target::IosSimulator(simulator) => {
             let app = ios::build(&project, profile, Destination::Simulator)?;
             ios::run_simulator(&app, &simulator)
         }
-        Target::Device(id) => {
+        Target::IosDevice(id) => {
             let app = ios::build(&project, profile, Destination::Device)?;
             ios::run_device(&app, &id)
         }
+        Target::AndroidEmulator(avd) => {
+            let device = android::boot_emulator(&avd)?;
+            run_android(&project, profile, &device)
+        }
+        Target::AndroidDevice(device) => run_android(&project, profile, &device),
     }
+}
+
+/// The library for the device's own processor, packaged, installed and launched.
+fn run_android(project: &Project, profile: Profile, device: &android::Device) -> Result<()> {
+    let abi = android::device_abi(&device.serial)?;
+    let apk = android::build(project, profile, abi)?;
+    android::run(&apk, device)
 }
 
 fn build(
@@ -222,6 +238,7 @@ fn build(
             let app = ios::build(&project, profile, Destination::Device)?;
             vec![ios::ipa(&app, &project.out_dir("ipa", profile))?]
         }
+        BuildTarget::Apk => vec![android::build(&project, profile, android::Abi::Arm64)?.path],
         BuildTarget::Web => vec![web::build(&project, profile)?],
         BuildTarget::Wasm => vec![wasm::build(&project, profile)?],
     };

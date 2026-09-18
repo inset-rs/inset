@@ -62,6 +62,7 @@ pub fn create(name: &str, template: Template, parent: Option<&Path>) -> Result<(
     println!("  cd {name}");
     println!("  cargo inset run              # this desktop");
     println!("  cargo inset run -d ios       # a simulator");
+    println!("  cargo inset run -d android   # an emulator");
     println!("  cargo inset run -d web       # a browser");
     Ok(())
 }

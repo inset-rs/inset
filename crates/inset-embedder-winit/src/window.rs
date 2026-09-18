@@ -5,20 +5,19 @@
 //! windows are created and dropped, and where the requests the framework left on the
 //! platform are served — one turn of the loop drains all of them.
 
-use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 
 use inset_embedder::{
-    DropData, EmbedderClient, PlatformRef, PointerChange, TextEditingValue, View,
-    ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId, WindowError, WindowRef,
+    DropData, EmbedderClient, PlatformRef, PointerChange, View, ViewFocusDirection, ViewFocusEvent,
+    ViewFocusState, ViewId, WindowError, WindowRef,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, MouseButton, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
 use crate::drag_drop::Drags;
@@ -27,9 +26,9 @@ use crate::input::Keyboard;
 use crate::os;
 use crate::pacing::Pacing;
 use crate::platform::{WinitPlatform, brightness_of};
-use crate::pointer::Pointer;
-use crate::surface::WinitSurface;
-use crate::view::{HostedView, WinitView, surface_size, window_metrics};
+use crate::pointer::{Pointer, PointerIds};
+use crate::touch::Touches;
+use crate::view::{HostedView, WinitView};
 use crate::windows::{self, WinitWindow};
 use crate::{DecodeExecution, ImplicitViewConfig, WinitEmbedder, create_image_loader};
 
@@ -75,6 +74,10 @@ pub(crate) struct WinitApp<C> {
     started: bool,
     /// The mouse, as Flutter's pointer.
     pub(crate) pointer: Pointer,
+    /// The fingers on the screen, each as a pointer of its own.
+    pub(crate) touches: Touches,
+    /// The numbers every pointer's data carries, shared so no two devices' presses collide.
+    pub(crate) ids: PointerIds,
     pub(crate) keyboard: Keyboard,
     /// Files dragged over a window this turn, reported when the loop is about to wait.
     pub(crate) drags: Drags,
@@ -85,7 +88,7 @@ pub(crate) fn run<C: EmbedderClient + 'static>(
     start: impl FnOnce(PlatformRef) -> C + 'static,
     image_loader_setup: Option<CreateImageLoader>,
 ) {
-    let event_loop = EventLoop::<HostEvent>::with_user_event()
+    let event_loop = winit::event_loop::EventLoop::<HostEvent>::with_user_event()
         .build()
         .expect("create winit event loop");
     let implicit_view = config.implicit_view.is_some().then_some(IMPLICIT_VIEW);
@@ -103,6 +106,8 @@ pub(crate) fn run<C: EmbedderClient + 'static>(
         frame_source: None,
         started: false,
         pointer: Pointer::new(),
+        touches: Touches::default(),
+        ids: PointerIds::default(),
         keyboard: Keyboard::new(),
         drags: Drags::default(),
     };
@@ -125,6 +130,7 @@ impl<C: EmbedderClient> WinitApp<C> {
         }
         asked || timer_came
     }
+
     /// Flutter's macOS host honors requests to focus a view; native focus events report the result.
     fn apply_focus_requests(&mut self) {
         for request in self.platform.focus_requests.take() {
@@ -148,9 +154,7 @@ impl<C: EmbedderClient> WinitApp<C> {
 
     fn create_implicit_view(&mut self, event_loop: &ActiveEventLoop, config: ImplicitViewConfig) {
         let mut attributes = Window::default_attributes().with_title(config.title);
-        // A phone's window is the screen; winit on iOS would size the window to
-        // the request instead.
-        if !cfg!(any(target_os = "ios", target_os = "android")) {
+        if !os::WINDOW_IS_THE_SCREEN {
             attributes = attributes.with_inner_size(winit::dpi::LogicalSize::new(
                 config.logical_size[0],
                 config.logical_size[1],
@@ -178,52 +182,22 @@ impl<C: EmbedderClient> WinitApp<C> {
         let window = Arc::new(window);
         let window_id = window.id();
         let gpu = self.gpu.get_or_insert_with(Gpu::acquire).clone();
-        let (alpha, clear) = if sees_through {
-            (valo::SurfaceAlpha::Transparent, valo::Color::TRANSPARENT)
-        } else {
-            (valo::SurfaceAlpha::Opaque, valo::Color::WHITE)
-        };
-        let surface = valo::Surface::new_with_options(
-            &gpu.instance,
-            &gpu.adapter,
-            &gpu.device,
-            window.clone(),
-            surface_size(&window),
-            valo::SurfaceOptions::default().with_alpha(alpha),
-        )
-        .map_err(|error| error.to_string())?;
-        let mut context = valo::Context::new(gpu.device.clone(), gpu.queue.clone());
-        context.set_hide_missing_glyphs(true);
+        let view = Rc::new(WinitView::new(
+            view_id,
+            Arc::clone(&window),
+            &gpu,
+            sees_through,
+        )?);
         if self.platform.image_loader.borrow().is_none() {
-            let images = context.image_context();
+            let images = view.image_context();
             let loader = match self.image_loader_setup.take() {
-                Some(make_loader) => make_loader(images),
-                None => create_image_loader(images, DecodeExecution::default())
+                Some(make_loader) => make_loader(images.clone()),
+                None => create_image_loader(images.clone(), DecodeExecution::default())
                     .expect("start the image decode worker"),
             };
             *self.platform.image_loader.borrow_mut() = Some(loader);
-            *self.platform.images.borrow_mut() = Some(context.image_context());
+            *self.platform.images.borrow_mut() = Some(images);
         }
-        let surface = Arc::new(Mutex::new(WinitSurface {
-            surface,
-            context,
-            in_transaction: false,
-        }));
-        let view = Rc::new(WinitView {
-            id: view_id,
-            metrics: Cell::new(window_metrics(&window)),
-            surface,
-            window: Arc::clone(&window),
-            editing_state: RefCell::new(TextEditingValue::EMPTY),
-            text_input: Cell::new(None),
-            transform: RefCell::new(None),
-            clear,
-            latest: RefCell::new(None),
-            on_screen: Cell::new(false),
-            refused: Cell::new(None),
-            retries: Cell::new(0),
-            resizing: Cell::new(false),
-        });
         if let Some(theme) = window.theme() {
             self.platform.brightness.set(brightness_of(theme));
         }
@@ -331,17 +305,67 @@ impl<C: EmbedderClient> WinitApp<C> {
         }
     }
 
+    /// The system's appearance, read again with the window: a system whose configuration
+    /// carries it reports the change as a resize.
+    fn sync_theme(&mut self, id: WindowId) {
+        let Some(theme) = self.views.get(&id).and_then(|hosted| hosted.window.theme()) else {
+            return;
+        };
+        if self.platform.brightness.get() != brightness_of(theme) {
+            self.on_theme_changed(theme);
+        }
+    }
+
+    /// Reads every view's metrics again, for a system that reports no event for a change
+    /// of the safe area, and tells the client of the views whose metrics moved.
+    fn sync_metrics(&mut self) {
+        let changed: Vec<ViewId> = self
+            .views
+            .values()
+            .filter(|hosted| hosted.view.refresh_metrics())
+            .map(|hosted| hosted.view.id())
+            .collect();
+        if let Some(client) = &mut self.client {
+            for view_id in changed {
+                client.view_metrics_changed(view_id);
+            }
+        }
+    }
+
+    /// The system took every window's surface: the views keep their pictures and owe them.
+    fn surfaces_lost(&mut self) {
+        for hosted in self.views.values() {
+            hosted.view.surface_lost();
+        }
+    }
+
+    /// The system gave the windows back: a surface on each again, and the picture it is
+    /// owed presented, at the metrics the window has now.
+    fn surfaces_remade(&mut self) {
+        let Some(gpu) = self.gpu.clone() else {
+            return;
+        };
+        for hosted in self.views.values() {
+            if let Err(reason) = hosted.view.remake_surface(&gpu) {
+                eprintln!("inset: no surface on the window given back: {reason}");
+            }
+        }
+        self.sync_metrics();
+        for hosted in self.views.values() {
+            hosted.view.represent();
+        }
+    }
+
     fn on_resized(&mut self, id: WindowId) {
+        self.sync_theme(id);
         if let Some(hosted_view) = self.views.get(&id) {
-            let metrics = window_metrics(&hosted_view.window);
-            if hosted_view.view.metrics.get() == metrics {
+            if !hosted_view.view.refresh_metrics() {
                 // winit reports a resize for more than one of the system's
                 // notices; the same geometry again is nothing to draw for.
                 return;
             }
-            let size = surface_size(&hosted_view.window);
+            let size = os::surface_size(&hosted_view.window);
             hosted_view.view.resized(size);
-            hosted_view.view.metrics.set(metrics);
             if let Some(client) = &mut self.client {
                 client.view_metrics_changed(hosted_view.view.id());
             }
@@ -481,8 +505,12 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
         });
     }
 
+    /// The first resume is the start; a later one is the system giving the windows back
+    /// after a `suspended`, on a phone.
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.started {
+            self.surfaces_remade();
+            self.pace();
             return;
         }
         self.started = true;
@@ -491,6 +519,10 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
             self.create_implicit_view(event_loop, config);
         }
         self.start_client();
+    }
+
+    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        self.surfaces_lost();
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: HostEvent) {
@@ -551,6 +583,7 @@ impl<C: EmbedderClient> ApplicationHandler<HostEvent> for WinitApp<C> {
             WindowEvent::Ime(ime) => self.send_ime(id, ime),
             WindowEvent::MouseWheel { delta, .. } => self.send_scroll(id, delta),
             WindowEvent::MouseInput { state, button, .. } => self.on_mouse_input(id, state, button),
+            WindowEvent::Touch(touch) => self.on_touch(id, &touch),
             WindowEvent::HoveredFile(path) => self.drags.hovered(id, path),
             WindowEvent::DroppedFile(path) => self.drags.dropped(id, path),
             WindowEvent::HoveredFileCancelled => self.drags.cancelled(id),

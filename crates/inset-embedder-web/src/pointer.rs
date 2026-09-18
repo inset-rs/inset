@@ -33,8 +33,10 @@ pub fn flutter_buttons(dom_buttons: u16) -> i64 {
 }
 
 /// DOM `WheelEvent.deltaMode` `DOM_DELTA_LINE`.
+#[cfg(any(target_arch = "wasm32", test))]
 const DELTA_LINE: u32 = 1;
 /// Line-based wheels are not pixels. 40 logical px/line is Chromium's convention.
+#[cfg(any(target_arch = "wasm32", test))]
 const LOGICAL_PIXELS_PER_LINE: f64 = 40.0;
 
 /// DOM `deltaX` / `deltaY` to dart:ui physical `scrollDelta`.
@@ -42,6 +44,8 @@ const LOGICAL_PIXELS_PER_LINE: f64 = 40.0;
 /// Browser wheel deltas are already Flutter's content-forward sign: positive
 /// `deltaY` scrolls down. Winit is up-positive and flips; copying that flip
 /// here reverses trackpad scrolling on macOS.
+/// Only the browser host calls this, so off wasm it is built for its tests alone.
+#[cfg(any(target_arch = "wasm32", test))]
 pub fn wheel_to_physical(delta_x: f64, delta_y: f64, delta_mode: u32, scale: f64) -> (f64, f64) {
     let (dx, dy) = if delta_mode == DELTA_LINE {
         (

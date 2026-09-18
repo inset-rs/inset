@@ -8,6 +8,14 @@ Host implementation references: Flutter's C++ engine under `flutter/engine/src/f
   Reason: platform — Flutter's native embedding does not name the framework, and winit cannot create a window before `resumed`.
   Affect: no framework code runs until the event loop resumes, so anything the start closure sets up sees a window that already exists.
 
+- Change: when the system gives a window's surface back, each view makes its surface again on that window and presents the picture it still owes. The view, its id and the framework's tree are left alone.
+  Reason: platform — winit reports the surface going and coming back as its loop suspending and resuming, and Flutter's iOS embedder keeps its view across the same thing.
+  Affect: an app sent to the background and reopened keeps its state and shows its last frame at once. A frame drawn while the surface was gone is held for the return rather than lost.
+
+- Change: every finger is its own pointer, numbered by the system's touch id. It is added before its down and removed after its up or cancel, all in one packet.
+  Reason: platform — winit reports touches beside the mouse's events, and Flutter's iOS embedder sends that same add and remove around a touch.
+  Affect: taps, drags and pinches work on iOS. A finger joins and leaves the framework's set of devices with its contact, and its press carries an identifier no mouse press shares.
+
 - Change: the scheduler's one frame request for the whole app is mapped onto native redraws, with windows and their `View` handles in a host-side registry.
   Reason: platform — winit redraw is per window and the window must stay on the event-loop thread.
   Affect: one frame request redraws every window, and closing the last window ends `run`.
@@ -34,7 +42,7 @@ Host implementation references: Flutter's C++ engine under `flutter/engine/src/f
 
 - Change: the clipboard methods talk to the OS pasteboard through arboard, where Flutter's `Clipboard` messages go to the engine.
   Reason: platform — winit does not own the pasteboard, so the host implements the channel.
-  Affect: copy and paste work with other apps; a host that cannot open the pasteboard reads an empty clipboard rather than failing.
+  Affect: copy and paste work with other apps on the desktops, and a host that cannot open the pasteboard reads an empty clipboard rather than failing.
 
 - Change: the host offers neither the `Haptics` nor the `SystemChrome` capability, so both answer `None`.
   Reason: platform — a desktop machine has no haptic engine and no status bar, and Flutter's own Linux and Windows embedders answer both with not-implemented.
@@ -53,7 +61,7 @@ Host implementation references: Flutter's C++ engine under `flutter/engine/src/f
   Affect: a character with no face occupies layout space and draws nothing.
 
 - Change: where the system has no display link for a view (macOS before 14, and the other desktops), the framework's frames are paced by a timer at the display's nominal refresh rate.
-  Reason: platform — Flutter's embedders each take a vsync signal from their system; winit offers none, and only AppKit's `CADisplayLink` is reachable through the view.
+  Reason: platform — Flutter's embedders each take a vsync signal from their system; winit offers none, and only AppKit's `CADisplayLink` is reachable, through the view.
   Affect: on those hosts an animation's frames land at the display's rate but not on its refresh, so a step can arrive a little early or late.
 
 - Change: the host's text input leaves `handles_editing_keys` at no, and does not forward the editing commands macOS names for a key.

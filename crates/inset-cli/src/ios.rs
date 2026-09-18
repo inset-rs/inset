@@ -10,9 +10,11 @@ use std::process::Command;
 use std::time::SystemTime;
 
 use anyhow::{Context, Result, bail};
+
+use crate::devices::Device;
 use plist::{Dictionary, Value};
 
-use crate::cargo::{self, Build, Kind};
+use crate::cargo::{self, Artifact, Build};
 use crate::icons;
 use crate::project::{Profile, Project};
 use crate::tools;
@@ -71,16 +73,13 @@ pub fn build(project: &Project, profile: Profile, destination: Destination) -> R
         .clone()
         .unwrap_or_else(|| DEFAULT_MINIMUM_VERSION.to_owned());
     tools::ensure_rust_target(&project.root, destination.triple())?;
-    let artifacts = cargo::build(&Build {
+    let executable = cargo::build(&Build {
         project,
         profile,
         triple: Some(destination.triple()),
-        kind: Kind::Bin,
+        artifact: Artifact::Executable,
         env: vec![("IPHONEOS_DEPLOYMENT_TARGET", minimum_version.clone())],
     })?;
-    let executable = artifacts
-        .executable
-        .context("cargo produced no executable")?;
 
     let out = project.out_dir(destination.dir_name(), profile);
     let app = out.join(format!("{}.app", project.name));
@@ -585,6 +584,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn devicectl_listing_keeps_ios_devices() {
+        let json = r#"{"result":{"devices":[
+            {"identifier":"ID1","hardwareProperties":{"platform":"iOS"},"deviceProperties":{"name":"Jane's iPhone"},"connectionProperties":{"tunnelState":"connected"}},
+            {"identifier":"ID2","hardwareProperties":{"platform":"macOS"},"deviceProperties":{"name":"Mac"}}]}}"#;
+        let devices = parse_devicectl(json);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].id, "ID1");
+        assert_eq!(devices[0].state, "connected");
+    }
+
+    #[test]
     fn identity_line_yields_hash_name_and_team() {
         let identity =
             parse_identity(r#"  1) ABCDEF0123456789ABCDEF0123456789ABCDEF01 "Apple Development: Jane Doe (TEAM12345)""#)
@@ -653,7 +663,7 @@ mod tests {
             target_dir: PathBuf::from("/tmp/x/target"),
             package: "myapp".into(),
             bin: "myapp".into(),
-            has_cdylib: true,
+            library: Some("myapp".into()),
             version: "0.1.0".into(),
             description: None,
             homepage: None,
@@ -664,6 +674,77 @@ mod tests {
             resources: Vec::new(),
             macos: Default::default(),
             ios: Default::default(),
+            android: Default::default(),
         }
     }
+}
+
+/// Everything iOS that `run -d` can name: the simulators, and the devices attached now.
+pub fn listed_devices() -> Result<Vec<Device>> {
+    let mut devices: Vec<Device> = simulators()?
+        .into_iter()
+        .map(|simulator| Device {
+            id: simulator.udid,
+            name: format!("{} ({})", simulator.name, simulator.runtime),
+            platform: "ios simulator",
+            state: simulator.state,
+        })
+        .collect();
+    devices.extend(connected_iphones());
+    Ok(devices)
+}
+
+/// iPhones and iPads `devicectl` can reach. Empty when Xcode 15+ is absent.
+pub fn connected_iphones() -> Vec<Device> {
+    if !cfg!(target_os = "macos") || tools::which("xcrun").is_none() {
+        return Vec::new();
+    }
+    let json_path: PathBuf =
+        std::env::temp_dir().join(format!("inset-devices-{}.json", std::process::id()));
+    let listed = Command::new("xcrun")
+        .args(["devicectl", "list", "devices", "--json-output"])
+        .arg(&json_path)
+        .output();
+    let Ok(listed) = listed else {
+        return Vec::new();
+    };
+    if !listed.status.success() {
+        return Vec::new();
+    }
+    let Ok(json) = std::fs::read_to_string(&json_path) else {
+        return Vec::new();
+    };
+    let _ = std::fs::remove_file(&json_path);
+    parse_devicectl(&json)
+}
+
+fn parse_devicectl(json: &str) -> Vec<Device> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    value
+        .pointer("/result/devices")
+        .and_then(|d| d.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|device| {
+            let platform = device.pointer("/hardwareProperties/platform")?.as_str()?;
+            if platform != "iOS" {
+                return None;
+            }
+            Some(Device {
+                id: device.get("identifier")?.as_str()?.to_owned(),
+                name: device
+                    .pointer("/deviceProperties/name")?
+                    .as_str()?
+                    .to_owned(),
+                platform: "ios device",
+                state: device
+                    .pointer("/connectionProperties/tunnelState")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_owned(),
+            })
+        })
+        .collect()
 }

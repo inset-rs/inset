@@ -1,5 +1,5 @@
-/// The wgpu handles the embedder owns: valo requires the host to bring the
-/// device.
+//! The wgpu handles the embedder owns: valo requires the host to bring the device.
+
 #[derive(Clone)]
 pub struct Gpu {
     pub instance: wgpu::Instance,
@@ -26,6 +26,8 @@ impl Gpu {
                 .request_device(&wgpu::DeviceDescriptor {
                     label: Some("inset.winit"),
                     required_features,
+                    // WebGPU's defaults, so a valo pass that outgrows the portable
+                    // baseline fails here rather than on someone's phone.
                     required_limits: limits_within(&adapter.limits()),
                     ..Default::default()
                 })
@@ -41,9 +43,9 @@ impl Gpu {
     }
 }
 
-/// wgpu's default limits, lowered where this adapter offers less. The iOS
-/// simulator's Metal allows 15 inter-stage shader variables against the
-/// default request of 16; valo's shaders use two.
+/// wgpu's default limits, lowered where this adapter offers less. The iOS simulator's
+/// Metal allows 15 inter-stage shader variables against the default 16; valo's shaders use
+/// two.
 fn limits_within(supported: &wgpu::Limits) -> wgpu::Limits {
     let mut limits = wgpu::Limits::default();
     limits.max_inter_stage_shader_variables = limits

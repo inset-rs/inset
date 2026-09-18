@@ -9,8 +9,11 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "android")))'.dependencies]
 inset-embedder-winit.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+inset-embedder-android.workspace = true
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 inset-embedder-web.workspace = true

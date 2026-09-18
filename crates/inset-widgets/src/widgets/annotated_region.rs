@@ -161,7 +161,10 @@ mod tests {
 
     #[test]
     fn a_view_that_annotates_nothing_leaves_the_system_bars_alone() {
-        assert_eq!(styles_of_one_frame(SizedBox::expand().into_widget()), vec![]);
+        assert_eq!(
+            styles_of_one_frame(SizedBox::expand().into_widget()),
+            vec![]
+        );
     }
 
     #[test]

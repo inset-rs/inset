@@ -5,29 +5,28 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 
-use crate::cargo::{self, Build, Kind};
+use crate::cargo::{self, Artifact, Build};
 use crate::project::{Profile, Project};
 use crate::tools;
 
 const WASM_TARGET: &str = "wasm32-unknown-unknown";
 
 pub fn build(project: &Project, profile: Profile) -> Result<PathBuf> {
-    if !project.has_cdylib {
+    if project.library.is_none() {
         bail!(
             "the web host loads a library: add `crate-type = [\"cdylib\", \"rlib\"]` under [lib] in Cargo.toml"
         );
     }
     tools::ensure_rust_target(&project.root, WASM_TARGET)?;
-    let artifacts = cargo::build(&Build {
+    let wasm = cargo::build(&Build {
         project,
         profile,
         triple: Some(WASM_TARGET),
-        kind: Kind::Lib,
+        artifact: Artifact::Wasm,
         env: Vec::new(),
     })?;
-    let wasm = artifacts.wasm.context("cargo produced no .wasm")?;
 
     let out = project.out_dir("web", profile);
     if out.exists() {

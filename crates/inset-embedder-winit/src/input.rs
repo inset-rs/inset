@@ -11,10 +11,10 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use inset_embedder::{
-    EmbedderClient, KeyData, KeyEventDeviceType, KeyEventType, PointerChange,
+    EmbedderClient, KeyData, KeyEventDeviceType, KeyEventType, PointerChange, PointerDataPacket,
     SystemMouseCursorKind, View,
 };
-use winit::event::{ElementState, Ime, KeyEvent, MouseScrollDelta};
+use winit::event::{ElementState, Ime, KeyEvent, MouseScrollDelta, Touch};
 use winit::keyboard::ModifiersState;
 use winit::window::{CursorIcon, WindowId};
 
@@ -102,11 +102,38 @@ impl<C: EmbedderClient> WinitApp<C> {
         let Some(view_id) = self.views.get(&window_id).map(|hosted| hosted.view.id()) else {
             return;
         };
-        let packet = self
-            .pointer
-            .packet(view_id, change, scroll, self.platform.elapsed());
+        let packet = self.pointer.packet(
+            &mut self.ids,
+            view_id,
+            change,
+            scroll,
+            self.platform.elapsed(),
+        );
         if let Some(client) = &mut self.client {
             client.pointer_data_packet(packet);
+        }
+    }
+
+    /// One finger's change, as the pointer that finger is: its arrival and departure go
+    /// with its down and its up, in one packet.
+    pub(crate) fn on_touch(&mut self, window_id: WindowId, touch: &Touch) {
+        let Some(view_id) = self.views.get(&window_id).map(|hosted| hosted.view.id()) else {
+            return;
+        };
+        let position = [touch.location.x, touch.location.y];
+        let pressure = touch.force.map_or(1.0, |force| force.normalized());
+        let time_stamp = self.platform.elapsed();
+        let data: Vec<_> = self
+            .touches
+            .apply(touch.id, touch.phase, position, &mut self.ids)
+            .into_iter()
+            .map(|change| change.data(view_id, pressure, time_stamp, &mut self.ids))
+            .collect();
+        if data.is_empty() {
+            return;
+        }
+        if let Some(client) = &mut self.client {
+            client.pointer_data_packet(PointerDataPacket::new(data));
         }
     }
 

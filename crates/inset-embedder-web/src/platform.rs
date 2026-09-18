@@ -99,10 +99,7 @@ impl WebPlatform {
     /// sets the next one before the wake ends.
     pub fn should_wake(&self, now: Instant) -> bool {
         let asked = self.wake_now_requested.replace(false);
-        let timer_came = self
-            .timer_wakeup
-            .get()
-            .is_some_and(|wakeup| now >= wakeup);
+        let timer_came = self.timer_wakeup.get().is_some_and(|wakeup| now >= wakeup);
         if timer_came {
             self.timer_wakeup.set(None);
         }

@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use cargo_packager::config::{Binary, MacOsConfig, Resource};
 use cargo_packager::{Config, PackageFormat};
 
-use crate::cargo::{self, Build, Kind};
+use crate::cargo::{self, Artifact, Build};
 use crate::icons;
 use crate::ios;
 use crate::project::{Profile, Project};
@@ -51,16 +51,13 @@ impl Format {
 }
 
 pub fn build(project: &Project, profile: Profile, format: Format) -> Result<Vec<PathBuf>> {
-    let artifacts = cargo::build(&Build {
+    let executable = cargo::build(&Build {
         project,
         profile,
         triple: None,
-        kind: Kind::Bin,
+        artifact: Artifact::Executable,
         env: Vec::new(),
     })?;
-    let executable = artifacts
-        .executable
-        .context("cargo produced no executable")?;
     let out = project.out_dir(format.dir_name(), profile);
     fs::create_dir_all(&out)?;
     match format.package_format() {

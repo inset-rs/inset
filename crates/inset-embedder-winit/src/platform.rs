@@ -129,9 +129,7 @@ impl Platform for WinitPlatform {
     /// host detection belongs, exactly as Flutter's `defaultTargetPlatform`
     /// bottoms out in `dart:io`'s `Platform.isAndroid` chain.
     fn target_platform(&self) -> TargetPlatform {
-        if cfg!(target_os = "android") {
-            TargetPlatform::Android
-        } else if cfg!(target_os = "ios") {
+        if cfg!(target_os = "ios") {
             TargetPlatform::IOS
         } else if cfg!(target_os = "macos") {
             TargetPlatform::MacOS
@@ -225,6 +223,7 @@ impl Platform for WinitPlatform {
         self.image_context()?.upload_pixels(pixels, false).ok()
     }
 
+    /// The system pasteboard, where the host can reach one.
     fn clipboard(&self) -> Option<&dyn Clipboard> {
         Some(self)
     }
@@ -240,7 +239,9 @@ impl Platform for WinitPlatform {
 
 impl Clipboard for WinitPlatform {
     fn set_text(&self, text: &str) {
-        let _ = self.with_clipboard(|clipboard| clipboard.set_text(text));
+        self.with_clipboard(|clipboard| {
+            let _ = clipboard.set_text(text);
+        });
     }
 
     fn text(&self) -> Option<String> {

@@ -14,28 +14,27 @@ use inset_scheduler::{FrameCallback, SchedulerBinding};
 use inset_shell::Shell;
 
 fn main() {
-    WinitEmbedder {
-        implicit_view: Some(ImplicitViewConfig {
+    WinitEmbedder::default()
+        .implicit_view(Some(ImplicitViewConfig {
             title: "Inset — paint".to_owned(),
             logical_size: [900.0, 600.0],
-        }),
-    }
-    .run(|platform| {
-        Shell::new(platform, |app| {
-            SchedulerBinding::add_persistent_frame_callback(
-                app,
-                FrameCallback::new(|app, elapsed| {
-                    let Some(view) = app.platform().implicit_view() else {
-                        return;
-                    };
-                    let picture = record(view.metrics(), elapsed);
-                    view.present(std::sync::Arc::new(picture));
-                    SchedulerBinding::schedule_frame(app);
-                }),
-            );
-            SchedulerBinding::schedule_frame(app);
-        })
-    });
+        }))
+        .run(|platform| {
+            Shell::new(platform, |app| {
+                SchedulerBinding::add_persistent_frame_callback(
+                    app,
+                    FrameCallback::new(|app, elapsed| {
+                        let Some(view) = app.platform().implicit_view() else {
+                            return;
+                        };
+                        let picture = record(view.metrics(), elapsed);
+                        view.present(std::sync::Arc::new(picture));
+                        SchedulerBinding::schedule_frame(app);
+                    }),
+                );
+                SchedulerBinding::schedule_frame(app);
+            })
+        });
 }
 
 fn record(metrics: ViewMetrics, elapsed: Duration) -> Picture {

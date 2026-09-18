@@ -2042,9 +2042,11 @@ mod tests {
 
         let context = captured.get().expect("the home built");
         let settings = RouteSettings::new().name("second");
-        let route = page_route(&mut app, &settings, Rc::new(|_app, _context| {
-            SizedBox::shrink().into_widget()
-        }));
+        let route = page_route(
+            &mut app,
+            &settings,
+            Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
+        );
         Navigator::of(&mut app, context, false).push(&mut app, route.as_route());
         settle(&mut app);
 

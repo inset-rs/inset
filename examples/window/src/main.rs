@@ -27,13 +27,12 @@ const CARD: Color = Color::from_argb(255, 51, 51, 64);
 const LABEL: Color = Color::from_argb(255, 245, 245, 240);
 
 fn main() {
-    WinitEmbedder {
-        implicit_view: Some(ImplicitViewConfig {
+    WinitEmbedder::default()
+        .implicit_view(Some(ImplicitViewConfig {
             title: "Inset — widgets".to_owned(),
             logical_size: [600.0, 400.0],
-        }),
-    }
-    .run(|platform| Shell::new(platform, |app| run_app(app, home())));
+        }))
+        .run(|platform| Shell::new(platform, |app| run_app(app, home())));
 }
 
 /// What `WidgetsApp` would supply: the ambient reading direction the text needs.

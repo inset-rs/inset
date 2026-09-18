@@ -12,7 +12,7 @@ mod vsync;
 use std::time::Duration;
 
 use dispatch2::{DispatchQueue, DispatchQueueGlobalPriority, GlobalQueueIdentifier};
-use inset_embedder::{Rect, WindowBackground, WindowConfig};
+use inset_embedder::{Rect, ViewPadding, WindowBackground, WindowConfig};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject};
 use objc2::{AnyThread, MainThreadMarker};
@@ -35,6 +35,28 @@ pub(crate) use vsync::Vsync;
 /// new layout before it returns, through the window's own transaction so the frame and
 /// the geometry it was laid out for are committed together.
 pub(crate) const FRAME_ON_RESIZE: bool = true;
+
+/// A desktop's windows are sized by the app.
+pub(crate) const WINDOW_IS_THE_SCREEN: bool = false;
+
+/// The pixels valo presents into: the window's content.
+pub(crate) fn surface_size(window: &Window) -> [u32; 2] {
+    let size = window.inner_size();
+    [size.width, size.height]
+}
+
+/// A window's content is all the app's; no safe area.
+pub(crate) fn view_padding(_window: &Window, _size: [f64; 2]) -> ViewPadding {
+    ViewPadding::ZERO
+}
+
+/// Whether the surface presents through the window's Core Animation transaction: on for
+/// the frame drawn inside a resize, so the frame and the geometry it was laid out for are
+/// committed together, as gpui does for its synchronous draws; off otherwise, since it
+/// makes every present wait to be scheduled.
+pub(crate) fn present_in_transaction(surface: &mut valo::Surface, wanted: bool) {
+    surface.set_presents_with_transaction(wanted);
+}
 
 fn ns_view(window: &Window) -> Option<Retained<NSView>> {
     let handle = window.window_handle().ok()?;

@@ -18,6 +18,7 @@ mod platform;
 mod pointer;
 mod surface;
 mod text_input;
+mod touch;
 mod view;
 mod window;
 mod windows;
@@ -58,6 +59,12 @@ impl Default for WinitEmbedder {
 }
 
 impl WinitEmbedder {
+    /// The implicit window, or `None` to start without one.
+    pub fn implicit_view(mut self, config: Option<ImplicitViewConfig>) -> WinitEmbedder {
+        self.implicit_view = config;
+        self
+    }
+
     /// Starts the native loop. `start` runs on the first `resumed`, after the
     /// configured implicit view is created, and returns the client.
     pub fn run<C: EmbedderClient + 'static>(self, start: impl FnOnce(PlatformRef) -> C + 'static) {

@@ -39,6 +39,7 @@ pub struct Metadata {
     pub resources: Vec<String>,
     pub macos: MacosMetadata,
     pub ios: IosMetadata,
+    pub android: AndroidMetadata,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -60,6 +61,21 @@ pub struct IosMetadata {
     pub minimum_version: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct AndroidMetadata {
+    /// `minSdkVersion`. Defaults to 24.
+    pub min_sdk: Option<u32>,
+    /// `targetSdkVersion`. Defaults to 34, the last level before the system stops fitting the
+    /// window to its bars, which is how the host learns the safe area.
+    pub target_sdk: Option<u32>,
+    /// `versionCode`. Defaults to one derived from the package version.
+    pub version_code: Option<u32>,
+    /// `android:appCategory`: `accessibility`, `audio`, `game`, `image`, `maps`, `news`,
+    /// `productivity`, `social` or `video`. Defaults to `productivity`.
+    pub category: Option<String>,
+}
+
 pub struct Project {
     /// Directory holding the package's Cargo.toml.
     pub root: PathBuf,
@@ -69,7 +85,9 @@ pub struct Project {
     pub package: String,
     /// Name of the binary target.
     pub bin: String,
-    pub has_cdylib: bool,
+    /// Name of the `cdylib` target, which the browser and Android load; `None` when the
+    /// package has none.
+    pub library: Option<String>,
     pub version: String,
     pub description: Option<String>,
     pub homepage: Option<String>,
@@ -80,6 +98,7 @@ pub struct Project {
     pub resources: Vec<String>,
     pub macos: MacosMetadata,
     pub ios: IosMetadata,
+    pub android: AndroidMetadata,
 }
 
 impl Project {
@@ -108,10 +127,11 @@ impl Project {
             .find(|t| t.kind.contains(&TargetKind::Bin))
             .map(|t| t.name.clone())
             .with_context(|| format!("package `{}` has no binary target", package.name))?;
-        let has_cdylib = package
+        let library = package
             .targets
             .iter()
-            .any(|t| t.kind.contains(&TargetKind::CDyLib));
+            .find(|t| t.kind.contains(&TargetKind::CDyLib))
+            .map(|t| t.name.clone());
         let root = manifest_dir(package).to_path_buf();
         let identifier = match inset.identifier {
             Some(identifier) => identifier,
@@ -137,7 +157,7 @@ impl Project {
             target_dir: metadata.target_directory.clone().into_std_path_buf(),
             package: package.name.to_string(),
             bin,
-            has_cdylib,
+            library,
             version: package.version.to_string(),
             description: package.description.clone(),
             homepage: package.homepage.clone(),
@@ -148,8 +168,16 @@ impl Project {
             resources: inset.resources,
             macos: inset.macos,
             ios: inset.ios,
+            android: inset.android,
             root,
         })
+    }
+
+    /// The identifier as an Android package name, which is a Java package name: the
+    /// reverse-DNS segments with what Java does not allow in a name replaced by `_`, and a
+    /// segment that starts with a digit led by one.
+    pub fn android_package(&self) -> String {
+        android_package(&self.identifier)
     }
 
     /// `target/inset/<target>/<profile>`.
@@ -187,6 +215,28 @@ fn manifest_dir(package: &Package) -> &Path {
         .unwrap_or_else(|| Path::new("."))
 }
 
+fn android_package(identifier: &str) -> String {
+    let segments: Vec<String> = identifier
+        .split('.')
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| {
+            let mut name: String = segment
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                .collect();
+            if name.starts_with(|c: char| c.is_ascii_digit()) {
+                name.insert(0, '_');
+            }
+            name
+        })
+        .collect();
+    match segments.len() {
+        0 => "app.main".to_owned(),
+        1 => format!("app.{}", segments[0]),
+        _ => segments.join("."),
+    }
+}
+
 /// `my-app` → `My app`.
 pub fn display_name(package: &str) -> String {
     let spaced = package.replace(['-', '_'], " ");
@@ -205,6 +255,17 @@ mod tests {
     fn display_name_spaces_and_capitalizes() {
         assert_eq!(display_name("my-app"), "My app");
         assert_eq!(display_name("counter"), "Counter");
+    }
+
+    #[test]
+    fn android_package_is_a_java_package_name() {
+        assert_eq!(android_package("com.example.my-app"), "com.example.my_app");
+        assert_eq!(
+            android_package("rs.inset.cupertino-gallery"),
+            "rs.inset.cupertino_gallery"
+        );
+        assert_eq!(android_package("io.3d.viewer"), "io._3d.viewer");
+        assert_eq!(android_package("myapp"), "app.myapp");
     }
 
     #[test]

@@ -1,13 +1,11 @@
-//! What `run -d` can name: this desktop, a browser, a simulator, a connected iPhone.
-
-use std::path::PathBuf;
-use std::process::Command;
+//! What `run -d` can name: this desktop, a browser, a simulator, a connected iPhone, an
+//! Android emulator, a connected Android device.
 
 use anyhow::{Result, bail};
 
+use crate::android;
 use crate::ios::{self, Simulator};
 use crate::serve::Browser;
-use crate::tools;
 
 pub struct Device {
     pub id: String,
@@ -18,13 +16,28 @@ pub struct Device {
 
 pub enum Target {
     Desktop,
-    Web { browser: Browser },
-    Simulator(Simulator),
-    Device(String),
+    Web {
+        browser: Browser,
+    },
+    IosSimulator(Simulator),
+    /// An iPhone or iPad `devicectl` reaches, by identifier.
+    IosDevice(String),
+    /// An Android emulator to boot, by AVD name.
+    AndroidEmulator(String),
+    /// An Android device or emulator `adb` already reaches.
+    AndroidDevice(android::Device),
 }
 
 pub fn list() -> Result<Vec<Device>> {
-    let mut devices = vec![
+    let mut devices = this_desktop_and_browsers();
+    devices.extend(ios::listed_devices()?);
+    devices.extend(android::listed_devices()?);
+    Ok(devices)
+}
+
+/// The targets that need nothing attached: the machine this runs on, and its browsers.
+fn this_desktop_and_browsers() -> Vec<Device> {
+    vec![
         Device {
             id: std::env::consts::OS.to_owned(),
             name: "this desktop".to_owned(),
@@ -43,17 +56,7 @@ pub fn list() -> Result<Vec<Device>> {
             platform: "web",
             state: String::new(),
         },
-    ];
-    for simulator in ios::simulators()? {
-        devices.push(Device {
-            id: simulator.udid,
-            name: format!("{} ({})", simulator.name, simulator.runtime),
-            platform: "ios simulator",
-            state: simulator.state,
-        });
-    }
-    devices.extend(connected_iphones());
-    Ok(devices)
+    ]
 }
 
 pub fn print(devices: &[Device]) {
@@ -90,84 +93,16 @@ pub fn resolve(wanted: Option<&str>) -> Result<Target> {
         other => ios::pick_simulator(&simulators, Some(other)),
     };
     if let Some(simulator) = simulator {
-        return Ok(Target::Simulator(simulator.clone()));
+        return Ok(Target::IosSimulator(simulator.clone()));
     }
-    if let Some(iphone) = connected_iphones()
+    if let Some(iphone) = ios::connected_iphones()
         .into_iter()
         .find(|d| d.id.eq_ignore_ascii_case(wanted) || d.name.eq_ignore_ascii_case(wanted))
     {
-        return Ok(Target::Device(iphone.id));
+        return Ok(Target::IosDevice(iphone.id));
+    }
+    if let Some(target) = android::target_for(wanted)? {
+        return Ok(target);
     }
     bail!("no device matches `{wanted}`; see `cargo inset devices`")
-}
-
-/// iPhones and iPads `devicectl` can reach. Empty when Xcode 15+ is absent.
-fn connected_iphones() -> Vec<Device> {
-    if !cfg!(target_os = "macos") || tools::which("xcrun").is_none() {
-        return Vec::new();
-    }
-    let json_path: PathBuf =
-        std::env::temp_dir().join(format!("inset-devices-{}.json", std::process::id()));
-    let listed = Command::new("xcrun")
-        .args(["devicectl", "list", "devices", "--json-output"])
-        .arg(&json_path)
-        .output();
-    let Ok(listed) = listed else {
-        return Vec::new();
-    };
-    if !listed.status.success() {
-        return Vec::new();
-    }
-    let Ok(json) = std::fs::read_to_string(&json_path) else {
-        return Vec::new();
-    };
-    let _ = std::fs::remove_file(&json_path);
-    parse_devicectl(&json)
-}
-
-fn parse_devicectl(json: &str) -> Vec<Device> {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
-        return Vec::new();
-    };
-    value
-        .pointer("/result/devices")
-        .and_then(|d| d.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|device| {
-            let platform = device.pointer("/hardwareProperties/platform")?.as_str()?;
-            if platform != "iOS" {
-                return None;
-            }
-            Some(Device {
-                id: device.get("identifier")?.as_str()?.to_owned(),
-                name: device
-                    .pointer("/deviceProperties/name")?
-                    .as_str()?
-                    .to_owned(),
-                platform: "ios device",
-                state: device
-                    .pointer("/connectionProperties/tunnelState")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("")
-                    .to_owned(),
-            })
-        })
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn devicectl_listing_keeps_ios_devices() {
-        let json = r#"{"result":{"devices":[
-            {"identifier":"ID1","hardwareProperties":{"platform":"iOS"},"deviceProperties":{"name":"Jane's iPhone"},"connectionProperties":{"tunnelState":"connected"}},
-            {"identifier":"ID2","hardwareProperties":{"platform":"macOS"},"deviceProperties":{"name":"Mac"}}]}}"#;
-        let devices = parse_devicectl(json);
-        assert_eq!(devices.len(), 1);
-        assert_eq!(devices[0].id, "ID1");
-        assert_eq!(devices[0].state, "connected");
-    }
 }

@@ -982,7 +982,9 @@ impl TransitionRouteVTable {
             type_name: std::any::type_name::<R>,
             route: |id| Route::as_route(resolve::<R>(id)),
             animation: |app, id| R::animation(resolve(id), app),
-            underlying_animation: |app, id| R::transition_route_data(resolve::<R>(id), app).animation,
+            underlying_animation: |app, id| {
+                R::transition_route_data(resolve::<R>(id), app).animation
+            },
             controller_value: |app, id| {
                 let controller = R::transition_route_data(resolve::<R>(id), app)
                     .controller

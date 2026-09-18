@@ -28,6 +28,27 @@ const KNOWN_BUTTONS: [i64; 5] = [
     FORWARD_MOUSE_BUTTON,
 ];
 
+/// The numbers Flutter's engine gives pointer data as it passes through: an `embedder_id`
+/// per datum, and a `pointerIdentifier` per press, each unique across every device the host
+/// reports, mouse and fingers alike.
+#[derive(Default)]
+pub(crate) struct PointerIds {
+    pointer: i64,
+    embedder: i64,
+}
+
+impl PointerIds {
+    pub(crate) fn next_pointer(&mut self) -> i64 {
+        self.pointer += 1;
+        self.pointer
+    }
+
+    pub(crate) fn next_embedder(&mut self) -> i64 {
+        self.embedder += 1;
+        self.embedder
+    }
+}
+
 pub(crate) struct Pointer {
     /// The window the mouse was last seen in; system cursor requests go there.
     pub(crate) window: Option<WindowId>,
@@ -40,9 +61,8 @@ pub(crate) struct Pointer {
     /// Whether the framework has been told the mouse is present. Flutter's embedders add
     /// the device before its first hover and remove it when it leaves the view.
     added: bool,
-    /// Flutter's `pointerIdentifier`: a new one for each press.
+    /// Flutter's `pointerIdentifier` of the current press.
     pointer_id: i64,
-    embedder_id: i64,
 }
 
 impl Pointer {
@@ -54,7 +74,6 @@ impl Pointer {
             buttons: 0,
             added: false,
             pointer_id: 0,
-            embedder_id: 0,
         }
     }
 
@@ -129,15 +148,15 @@ impl Pointer {
     /// physical pixels when the change is one.
     pub(crate) fn packet(
         &mut self,
+        ids: &mut PointerIds,
         view_id: ViewId,
         change: PointerChange,
         scroll: Option<[f64; 2]>,
         time_stamp: Duration,
     ) -> PointerDataPacket {
         if change == PointerChange::Down {
-            self.pointer_id += 1;
+            self.pointer_id = ids.next_pointer();
         }
-        self.embedder_id += 1;
         let [x, y] = self.position;
         let [last_x, last_y] = self.last_position;
         let pointer_identifier = if self.buttons == 0
@@ -155,7 +174,7 @@ impl Pointer {
         };
         let data = PointerData {
             view_id,
-            embedder_id: self.embedder_id,
+            embedder_id: ids.next_embedder(),
             time_stamp,
             change,
             kind: PointerDeviceKind::Mouse,

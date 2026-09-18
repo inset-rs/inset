@@ -1,0 +1,35 @@
+[package]
+name = "inset-embedder-android"
+description = "Android host for Inset"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = ["image-software", "image-worker"]
+image-software = ["dep:valo-codec-software"]
+image-worker = ["valo-codec/worker"]
+
+[dependencies]
+inset-embedder.workspace = true
+raw-window-handle.workspace = true
+pollster.workspace = true
+valo.workspace = true
+valo-codec.workspace = true
+valo-codec-software = { version = "0.6.0", optional = true }
+wgpu.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity = { version = "0.6", features = ["native-activity"] }
+jni = "0.22.4"
+ndk = { version = "0.9", features = ["rwh_06"] }
+ndk-sys = "0.6"
+
+# The NDK's C APIs — the choreographer, the native window, JNI — need `unsafe`, which the
+# workspace forbids; here it is denied instead, and the modules that call them allow it.
+[lints.rust]
+unsafe_code = "deny"

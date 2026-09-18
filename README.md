@@ -72,11 +72,14 @@ cargo inset new myapp                  # --template winui for a desktop app
 cd myapp
 cargo inset run                        # this desktop
 cargo inset run -d ios                 # an iOS simulator
+cargo inset run -d android             # an Android emulator
 cargo inset run -d web                 # a browser
-cargo inset build dmg                  # and macos, ios, ipa, msi, nsis, deb, appimage, web
+cargo inset build dmg                  # and macos, ios, ipa, apk, msi, nsis, deb, appimage, web
 ```
 
 > For more details, see [`inset-cli`](crates/inset-cli/README.md).
+
+> Support of mobile platforms is experimental.
 
 ## Building an app with Inset
 

@@ -11,9 +11,7 @@ use std::time::Duration;
 
 use indexmap::IndexMap;
 use inset_animation::{Animatable, Animation, AnimationBehavior, AnimationController, ColorTween};
-use inset_embedder::{
-    Color, Offset, Paint, PaintStyle, RSuperellipse, Radius, Rect, Size, Stroke,
-};
+use inset_embedder::{Color, Offset, Paint, PaintStyle, RSuperellipse, Radius, Rect, Size, Stroke};
 use inset_embedder::{TextBaseline, TextDirection};
 use inset_foundation::{App, Handle, K_IS_WEB, Listener, ValueChanged};
 use inset_painting::{AnyColor, Axis, ClipContext, EdgeInsetsGeometry, draw_rsuperellipse};
