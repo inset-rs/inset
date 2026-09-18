@@ -40,6 +40,20 @@ pub trait EmbedderClient {
     /// keyboard with other native components should not propagate a handled one.
     fn key_data(&mut self, data: KeyData) -> bool;
 
+    /// The user asked to go back: Android's back button or back gesture, and whatever a
+    /// later host maps onto the same idea.
+    ///
+    /// Answers whether the application went back. `false` means there was nothing left to
+    /// go back to, and the host should then do what the platform does without the
+    /// application, which on Android is to close the activity.
+    ///
+    /// Flutter sends this as `popRoute` on `SystemChannels.navigation`, and has to ask the
+    /// framework in advance whether it handles back at all, because the answer cannot
+    /// cross its channel in time. This call answers on the spot instead.
+    fn pop_route(&mut self) -> bool {
+        false
+    }
+
     /// Flutter `PlatformDispatcher.onPlatformBrightnessChanged`: the host's light or dark
     /// preference changed, and `Platform::platform_brightness` already answers the new one.
     fn platform_brightness_changed(&mut self);

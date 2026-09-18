@@ -43,10 +43,10 @@ pub struct WidgetsBinding {
 /// accessibility settings. It is used to implement features such as `MediaQuery`.
 ///
 /// A `State` registers itself through the object twin
-/// [`WidgetsBindingObserverObject`], whose handle is the observer. The route,
+/// [`WidgetsBindingObserverObject`], whose handle is the observer. The push-route,
 /// memory-pressure and back-gesture callbacks wait with their platform
-/// events; only the ones the renderer raises, the locale list, and the lifecycle
-/// observer methods are here. `handleAppLifecycleStateChanged` waits.
+/// events; only the ones the renderer raises, the locale list, going back, and the
+/// lifecycle observer methods are here. `handleAppLifecycleStateChanged` waits.
 pub trait WidgetsBindingObserver {
     /// Called when the application's dimensions change. For example, when a phone is rotated.
     fn did_change_metrics(&self, app: &mut App) {
@@ -113,6 +113,16 @@ pub trait WidgetsBindingObserver {
     fn did_change_accessibility_features(&self, app: &mut App) {
         let _ = app;
     }
+
+    /// Called when the user asks to go back, which on Android is the back button or the
+    /// back gesture.
+    ///
+    /// Answers whether this observer went back. The first one that answers `true` stops
+    /// the others from being asked.
+    fn did_pop_route(&self, app: &mut App) -> bool {
+        let _ = app;
+        false
+    }
 }
 
 /// The object side of [`WidgetsBindingObserver`]: implement it on an arena object (a
@@ -163,6 +173,12 @@ pub trait WidgetsBindingObserverObject: Sized + 'static {
     fn did_change_accessibility_features(self: Handle<Self>, app: &mut App) {
         let _ = app;
     }
+
+    /// See [`WidgetsBindingObserver::did_pop_route`].
+    fn did_pop_route(self: Handle<Self>, app: &mut App) -> bool {
+        let _ = app;
+        false
+    }
 }
 
 impl<T: WidgetsBindingObserverObject> WidgetsBindingObserver for Handle<T> {
@@ -201,6 +217,10 @@ impl<T: WidgetsBindingObserverObject> WidgetsBindingObserver for Handle<T> {
     fn did_change_accessibility_features(&self, app: &mut App) {
         T::did_change_accessibility_features(*self, app);
     }
+
+    fn did_pop_route(&self, app: &mut App) -> bool {
+        T::did_pop_route(*self, app)
+    }
 }
 
 /// A registered observer; removed again by identity of the `Rc`.
@@ -236,6 +256,9 @@ impl WidgetsBinding {
             }));
             callbacks.on_locale_changed = Some(Listener::new(|app| {
                 WidgetsBinding::instance(app).handle_locale_changed(app)
+            }));
+            callbacks.on_pop_route = Some(Rc::new(|app| {
+                WidgetsBinding::instance(app).handle_pop_route(app)
             }));
         }
         this
@@ -433,6 +456,20 @@ impl WidgetsBinding {
         for observer in app.get(self).observers.clone() {
             observer.did_change_accessibility_features(app);
         }
+    }
+
+    /// Called when the user asks to go back: asks each observer in turn and stops at the
+    /// first that says it went back.
+    ///
+    /// Answers whether any of them did. When none did there was nothing left to go back
+    /// to, and the host does whatever the platform does without the application.
+    pub fn handle_pop_route(self: Handle<Self>, app: &mut App) -> bool {
+        for observer in app.get(self).observers.clone() {
+            if observer.did_pop_route(app) {
+                return true;
+            }
+        }
+        false
     }
 
     /// Whether the [`root_element`](Self::root_element) has been initialized.

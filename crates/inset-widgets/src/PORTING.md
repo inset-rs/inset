@@ -210,7 +210,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: modifying the returned map changes only the app it is passed to, where Dart's global map is shared by every `WidgetsApp`.
 
 - Change: the default navigation-notification handler stops the notification without telling the host.
-  Reason: platform — there is no `SystemNavigator.setFrameworkHandlesBack` on the host surface.
+  Reason: platform — the host is never told in advance whether the framework handles back, because it does not need to be: `EmbedderClient::pop_route` answers on the spot, where Dart's `popRoute` crosses a channel and cannot.
   Affect: the host is never told whether the framework can handle a back gesture; an `on_navigation_notification` of your own still runs in place of the default.
 
 ## widgets/scroll_context.rs → scroll_context.dart
@@ -479,7 +479,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - framework/: `ErrorWidget` with its exception reporting, and the build-time diagnostics and duplicate-key checks. Trigger: diagnostics.
 - framework/: `reassemble`. Trigger: hot reload.
 - framework/: `ObjectKey`, `GlobalObjectKey`. Trigger: a widget keyed by object identity.
-- binding.rs: the observer callbacks with no host event (memory pressure, back gestures, lifecycle), the platform menu delegate and windowing owner, `scheduleWarmUpFrame`, `framesEnabled`. Trigger: the shell forwarding those platform events.
+- binding.rs: the observer callbacks with no host event (memory pressure, the predictive-back gesture, push-route and route information, lifecycle), the platform menu delegate and windowing owner, `scheduleWarmUpFrame`, `framesEnabled`. Trigger: the shell forwarding those platform events; predictive back also needs a Java activity that registers with the system.
 - binding.rs: first-frame-rasterized reporting and the push/pop route handlers. Trigger: `SchedulerBinding.addTimingsCallback`; navigation.
 - view.rs: `LookupBoundary` around a `ViewAnchor`'s view, and the view's semantics owner callbacks. Trigger: `LookupBoundary`; accessibility.
 - `LookupBoundary` in the `View`, `Overlay` and theater-marker lookups, which look straight up the tree. Trigger: `LookupBoundary` in framework.

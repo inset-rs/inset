@@ -135,6 +135,13 @@ impl EmbedderClient for Shell {
         self.push(|app| KeyEventManager::instance(app).handle_key_data(app, data))
     }
 
+    fn pop_route(&mut self) -> bool {
+        self.push(|app| {
+            let callback = app.platform_callbacks().on_pop_route.clone();
+            callback.is_some_and(|callback| callback(app))
+        })
+    }
+
     fn platform_brightness_changed(&mut self) {
         self.push(|app| {
             let callback = app

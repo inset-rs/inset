@@ -133,6 +133,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — valo composites display lists, and a list closes at its restore.
   Affect: the engine layer is known at `pop`, not at the push.
 
+- Change: `EmbedderClient::pop_route` answers whether the application went back, and there is nothing going the other way.
+  Reason: platform — Dart sends `popRoute` over a channel and cannot have the answer in time, so it tells the platform in advance through `SystemNavigator.setFrameworkHandlesBack` whether it handles back at all. This call is direct and answers at once.
+  Affect: a host reads the answer and, when it is no, does what the platform does without the application, which on Android is to close the activity. Neither the advance notice nor a host call for closing the app exists.
+
 ## Deferred
 
 - Decoding at any size but the file's own, which in Dart is `instantiateImageCodec`'s target width and height and the `getTargetSize` callback of `instantiateImageCodecWithSize`. Trigger: `ResizeImage`, which is what the image widget's `cacheWidth` and `cacheHeight` become.

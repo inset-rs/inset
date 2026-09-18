@@ -150,6 +150,9 @@ pub struct PlatformCallbacks {
     pub on_view_focus_change: Option<ViewFocusChangeCallback>,
     /// Files dragged from outside the application over a view; no Flutter counterpart.
     pub on_drop: Option<DropCallback>,
+    /// The user asked to go back. Answers whether the application went back. Flutter's
+    /// `popRoute` on `SystemChannels.navigation`.
+    pub on_pop_route: Option<PopRouteCallback>,
 }
 
 /// Flutter `PlatformDispatcher.onViewFocusChange`.
@@ -157,6 +160,9 @@ pub type ViewFocusChangeCallback = Rc<dyn Fn(&mut App, ViewFocusEvent)>;
 
 /// The framework's handler for `EmbedderClient::drop_data`.
 pub type DropCallback = Rc<dyn Fn(&mut App, DropData)>;
+
+/// The framework's handler for `EmbedderClient::pop_route`.
+pub type PopRouteCallback = Rc<dyn Fn(&mut App) -> bool>;
 
 impl App {
     pub(crate) fn build(

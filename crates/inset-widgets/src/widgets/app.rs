@@ -38,7 +38,8 @@ use crate::widgets::localizations::{
     Localizations, LocalizationsDelegateRef, LocalizationsResolver,
 };
 use crate::widgets::navigator::{
-    AnyNavigatorObserver, AnyRoute, NavigationNotification, Navigator, RouteFactory, RouteSettings,
+    AnyNavigatorObserver, AnyRoute, NavigationNotification, Navigator, NavigatorState,
+    RouteFactory, RouteSettings,
 };
 use crate::widgets::notification_listener::{NotificationListener, NotificationListenerCallback};
 use crate::widgets::pages::AnyPageRoute;
@@ -1535,7 +1536,19 @@ fn same_delegates(
     }
 }
 
-impl WidgetsBindingObserverObject for WidgetsAppState {}
+impl WidgetsBindingObserverObject for WidgetsAppState {
+    /// Dart's `WidgetsApp.didPopRoute`: the app's own navigator goes back, if it has one
+    /// and it has something to go back to.
+    fn did_pop_route(self: Handle<Self>, app: &mut App) -> bool {
+        let Some(key) = app.get(self).navigator.clone() else {
+            return false;
+        };
+        let Some(navigator) = key.current_state::<NavigatorState>(app) else {
+            return false;
+        };
+        navigator.maybe_pop(app, None)
+    }
+}
 
 impl State for WidgetsAppState {
     type Widget = WidgetsApp;
@@ -1997,6 +2010,53 @@ mod tests {
         let root = root_element(&mut app);
         assert!(had_child.get());
         assert!(has_widget::<Navigator>(&app, root));
+    }
+
+    /// Android's back button and back gesture both arrive here. The app goes back while it
+    /// has somewhere to go, and says it did not once it is at the first route, which is how
+    /// the host knows to close the activity instead.
+    #[test]
+    fn a_back_press_pops_the_app_navigator_until_it_is_at_the_first_route() {
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
+        install_fonts(&mut app);
+        let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
+        let sink = Rc::clone(&captured);
+        drop(app);
+        mount(
+            &cell,
+            widgets_app()
+                .home(Builder::new(move |_app, context| {
+                    sink.set(Some(context));
+                    Marker.into_widget()
+                }))
+                .into_widget(),
+        );
+        let mut app = cell.borrow_mut();
+        settle(&mut app);
+        let binding = WidgetsBinding::instance(&mut app);
+        assert!(
+            !binding.handle_pop_route(&mut app),
+            "at the first route there is nowhere to go back to"
+        );
+
+        let context = captured.get().expect("the home built");
+        let settings = RouteSettings::new().name("second");
+        let route = page_route(&mut app, &settings, Rc::new(|_app, _context| {
+            SizedBox::shrink().into_widget()
+        }));
+        Navigator::of(&mut app, context, false).push(&mut app, route.as_route());
+        settle(&mut app);
+
+        assert!(
+            binding.handle_pop_route(&mut app),
+            "the pushed route is popped"
+        );
+        settle(&mut app);
+        assert!(
+            !binding.handle_pop_route(&mut app),
+            "back at the first route it answers that it did not go back"
+        );
     }
 
     #[test]
