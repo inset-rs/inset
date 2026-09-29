@@ -2561,7 +2561,7 @@ pub(crate) mod tests {
     use std::time::Duration;
 
     use inset_embedder::{
-        Matrix4, Picture, Rect, Size, TextEditingValue, TextInputConfiguration, TextInputHost,
+        Matrix4, Rect, Size, TextEditingValue, TextInputConfiguration, TextInputHost,
         View as EmbedderView, ViewId, ViewMetrics,
     };
     use inset_gestures::{PointerDownEvent, PointerEvent};
@@ -2611,7 +2611,7 @@ pub(crate) mod tests {
             }
         }
 
-        fn present(&self, _picture: std::sync::Arc<Picture>) {}
+        fn present(&self, _scene: std::sync::Arc<inset_embedder::Scene>) {}
 
         fn text_input(&self) -> Option<&dyn TextInputHost> {
             Some(self)

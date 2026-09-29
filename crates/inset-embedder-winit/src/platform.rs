@@ -13,14 +13,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use inset_embedder::{
-    Brightness, Clipboard, Dispatcher, FontSource, ImageCodec, ImageCodecFuture, ImageDecodeError,
-    ImageFrame, ImageFrameFuture, ImageRepetition, MouseCursor, Platform, PopupMenuEntry,
-    PopupMenus, SystemFontSource, SystemMouseCursorKind, TargetPlatform, ViewFocusDirection,
-    ViewFocusEvent, ViewFocusState, ViewId, ViewRef, WindowingOwner,
+    Brightness, Clipboard, Compositor, Dispatcher, FontSource, ImageCodec, ImageCodecFuture,
+    ImageDecodeError, ImageFrame, ImageFrameFuture, ImageRepetition, MouseCursor, Platform,
+    PopupMenuEntry, PopupMenus, SystemFontSource, SystemMouseCursorKind, TargetPlatform,
+    ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId, ViewRef, WindowingOwner,
 };
 use winit::event_loop::EventLoopProxy;
 
-use crate::os;
+use crate::os::{NativeComposition, NativeMenus, ThisOs, WorkQueue};
 use crate::window::HostEvent;
 use crate::windows::WinitWindowing;
 
@@ -46,6 +46,8 @@ pub struct WinitPlatform {
     pub(crate) proxy: EventLoopProxy<HostEvent>,
     /// The window maker handed to the app; its requests are served by the event loop.
     pub(crate) windowing: Rc<WinitWindowing>,
+    /// The system's compositor for native surfaces, where it has one.
+    compositor: Option<Arc<dyn Compositor>>,
     origin: Instant,
     pub(crate) brightness: Cell<Brightness>,
     /// The latest system cursor request, applied by the event loop.
@@ -73,6 +75,7 @@ impl WinitPlatform {
             views: RefCell::new(HashMap::new()),
             implicit_view,
             windowing: Rc::new(WinitWindowing::new(proxy.clone())),
+            compositor: ThisOs::compositor(),
             proxy,
             origin: Instant::now(),
             brightness: Cell::new(Brightness::Light),
@@ -215,6 +218,10 @@ impl Platform for WinitPlatform {
         Some(Box::new(SystemFontSource::platform()))
     }
 
+    fn compositor(&self) -> Option<Arc<dyn Compositor>> {
+        self.compositor.clone()
+    }
+
     fn windowing_owner(&self) -> Option<Rc<dyn WindowingOwner>> {
         Some(Rc::clone(&self.windowing) as Rc<dyn WindowingOwner>)
     }
@@ -256,7 +263,7 @@ impl Clipboard for WinitPlatform {
 
 impl PopupMenus for WinitPlatform {
     fn show(&self, entries: &[PopupMenuEntry]) -> Option<usize> {
-        let chosen = os::popup_menu(entries);
+        let chosen = ThisOs::popup_menu(entries);
         // The menu ran its own event loop and kept the release of the button that opened
         // it; the next pass reconciles the buttons.
         let _ = self.proxy.send_event(HostEvent::MenuClosed);
@@ -265,9 +272,9 @@ impl PopupMenus for WinitPlatform {
 }
 
 impl MouseCursor for WinitPlatform {
-    /// One mouse: the device is not needed to pick the window; the window the pointer was
-    /// last seen in shows the cursor.
-    fn activate_system_cursor(&self, _device: i64, kind: SystemMouseCursorKind) {
+    /// One mouse: the window the pointer was last seen in shows the cursor, and the loop
+    /// already knows that window, so neither the view nor the device is needed to pick it.
+    fn activate_system_cursor(&self, _view: ViewId, _device: i64, kind: SystemMouseCursorKind) {
         self.cursor_request.set(Some(kind));
         self.wake_event_loop();
     }
@@ -288,7 +295,7 @@ impl Dispatcher for WinitDispatcher {
     }
 
     fn dispatch(&self, work: Box<dyn FnOnce() + Send>) {
-        os::run_off_main(work);
+        ThisOs::run_off_main(work);
     }
 }
 

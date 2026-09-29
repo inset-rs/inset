@@ -212,7 +212,8 @@ impl Clipboard for WebPlatform {
 }
 
 impl MouseCursor for WebPlatform {
-    fn activate_system_cursor(&self, _device: i64, kind: SystemMouseCursorKind) {
+    /// One canvas, one cursor: the view and the device do not pick anything.
+    fn activate_system_cursor(&self, _view: ViewId, _device: i64, kind: SystemMouseCursorKind) {
         let css = cursor_css(kind);
         let _ = self.canvas.style().set_property("cursor", css);
     }
@@ -261,8 +262,8 @@ impl View for WebView {
         self.metrics.get()
     }
 
-    fn present(&self, picture: std::sync::Arc<Picture>) {
-        self.gpu.borrow_mut().present(&picture);
+    fn present(&self, scene: std::sync::Arc<inset_embedder::Scene>) {
+        self.gpu.borrow_mut().present(&scene.picture);
     }
 
     fn text_input(&self) -> Option<&dyn TextInputHost> {

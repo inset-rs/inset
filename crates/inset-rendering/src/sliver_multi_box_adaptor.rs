@@ -1209,7 +1209,7 @@ pub(crate) mod test_support {
 pub(crate) mod viewport_test_support {
     use std::rc::Rc;
 
-    use inset_embedder::{Picture, Size, View, ViewId, ViewMetrics, ViewRef};
+    use inset_embedder::{Size, View, ViewId, ViewMetrics, ViewRef};
     use inset_foundation::Handle;
 
     use super::*;
@@ -1231,7 +1231,7 @@ pub(crate) mod viewport_test_support {
             ViewMetrics::default()
         }
 
-        fn present(&self, _picture: std::sync::Arc<Picture>) {}
+        fn present(&self, _scene: std::sync::Arc<inset_embedder::Scene>) {}
     }
 
     /// The scrolling machinery a lazy sliver needs: a viewport inside a [`RenderView`] rooted in

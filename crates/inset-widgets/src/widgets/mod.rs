@@ -29,6 +29,7 @@ pub mod icon_data;
 pub mod icon_theme;
 pub mod icon_theme_data;
 pub mod image;
+pub mod surface_view;
 pub mod implicit_animations;
 pub mod inherited_notifier;
 pub mod layout_builder;

@@ -23,6 +23,7 @@ use inset_embedder::{
     BlendMode, Clip, EngineLayer, FillRule, ImageFilter, Matrix4, Offset, Picture, RRect, Rect,
     Scene, SceneBuilder, Size,
 };
+use inset_embedder::Surface;
 use inset_foundation::{App, Handle, HandleId, RetainedHandle};
 use inset_scheduler::{FrameCallback, SchedulerBinding};
 
@@ -1138,6 +1139,59 @@ impl Layer for PictureLayer {
             this.is_complex_hint,
             this.will_change_hint,
         );
+    }
+
+    fn find_annotations(
+        self: Handle<Self>,
+        _app: &App,
+        _result: &mut AnnotationSearch,
+        _local_position: Offset,
+        _only_first: bool,
+    ) -> bool {
+        false
+    }
+}
+
+/// A layer that places a native surface the host composites: Flutter's `PlatformViewLayer`.
+///
+/// A leaf, like a picture layer. It is added to the scene on every frame: a scene's list of
+/// surfaces is built afresh each time, and a retained display list carries no surface.
+pub struct SurfaceLayer {
+    layer: LayerData,
+    surface: Arc<dyn Surface>,
+    /// Where the surface goes, in this layer's coordinates.
+    rect: Rect,
+}
+
+impl SurfaceLayer {
+    /// A layer placing `surface` at `rect`.
+    pub fn new(app: &mut App, surface: Arc<dyn Surface>, rect: Rect) -> Handle<SurfaceLayer> {
+        app.create(SurfaceLayer {
+            layer: LayerData::new(),
+            surface,
+            rect,
+        })
+    }
+
+    pub fn surface(self: Handle<Self>, app: &App) -> &Arc<dyn Surface> {
+        &app.get(self).surface
+    }
+
+    pub fn rect(self: Handle<Self>, app: &App) -> Rect {
+        app.get(self).rect
+    }
+}
+
+impl Layer for SurfaceLayer {
+    crate::layer_accessors!();
+
+    fn always_needs_add_to_scene(self: Handle<Self>, _app: &App) -> bool {
+        true
+    }
+
+    fn add_to_scene(self: Handle<Self>, app: &mut App, builder: &mut SceneBuilder) {
+        let this = app.get(self);
+        builder.add_surface(Arc::clone(&this.surface), this.rect);
     }
 
     fn find_annotations(
@@ -4015,6 +4069,33 @@ mod tests {
     }
 
     #[test]
+    fn a_surface_layer_places_its_surface_under_its_offset_every_frame() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let root = OffsetLayer::new(&mut app, Offset::new(10.0, 5.0));
+        let surface = inset_embedder::test_support::idle_surface();
+        let layer = SurfaceLayer::new(
+            &mut app,
+            Arc::clone(&surface),
+            Rect::from_ltwh(1.0, 2.0, 30.0, 20.0),
+        );
+        root.as_container_layer().append(&mut app, layer.as_layer());
+        for _frame in 0..2 {
+            let scene = root
+                .as_container_layer()
+                .build_scene(&mut app, SceneBuilder::new());
+            assert_eq!(
+                scene.surfaces,
+                [inset_embedder::SurfacePlacement {
+                    surface: Arc::clone(&surface),
+                    rect: Rect::from_ltwh(11.0, 7.0, 30.0, 20.0),
+                }]
+            );
+        }
+        assert!(layer.as_layer().always_needs_add_to_scene(&app));
+    }
+
+    #[test]
     fn an_unchanged_subtree_is_retained_across_scenes() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
@@ -4043,7 +4124,7 @@ mod tests {
             root_list.ops()
         );
         assert_eq!(
-            inset_embedder::flattened_ops(&scene)
+            inset_embedder::flattened_ops(&scene.picture)
                 .iter()
                 .filter(|op| matches!(op, inset_embedder::valo::Op::SaveLayer { .. }))
                 .count(),

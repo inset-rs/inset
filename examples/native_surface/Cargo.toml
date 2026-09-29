@@ -1,0 +1,25 @@
+[package]
+name = "native_surface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+inset-embedder.workspace = true
+inset-embedder-winit.workspace = true
+inset-painting.workspace = true
+inset-shell.workspace = true
+inset-widgets.workspace = true
+
+# What a producer draws into: IOSurfaces, allocated and filled on the CPU.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-foundation = { version = "0.3", features = ["CFBase", "CFDictionary", "CFNumber", "CFString"] }
+objc2-io-surface = { version = "0.3", features = ["libc"] }
+
+# Allocating and filling an IOSurface needs `unsafe`, which the workspace forbids; here it is
+# denied instead, and `iosurface.rs` alone allows it.
+[lints.rust]
+unsafe_code = "deny"

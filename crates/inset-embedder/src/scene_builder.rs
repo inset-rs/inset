@@ -4,18 +4,55 @@
 //! every push opens a nested recording that `pop` closes into a list of its own: that list is
 //! the engine layer, embedded in the enclosing recording and handed back for the layer to keep,
 //! and `add_retained` embeds it again while the subtree has not changed (see the rendering
-//! crate's `PORTING.md`).
+//! crate's `PORTING.md`). A native surface the host composites is not in the list: the
+//! builder keeps the transform of its open scopes so that `add_surface` can place it in the
+//! view's coordinates, and the scene carries those placements beside the picture.
 
 use std::fmt;
 use std::sync::Arc;
 
-use crate::geometry::{Clip, Color, Matrix4, Offset, RRect, Rect, rrect_radii_elliptical};
+use crate::composition::Surface;
+use crate::geometry::{
+    Clip, Color, Matrix4, Offset, RRect, Rect, rrect_radii_elliptical, transform3,
+};
 use crate::painting::{
     Backdrop, BlendMode, Canvas, ClipOp, FillRule, ImageFilter, Paint, Path, Picture, valo,
 };
 
-/// Flutter `Scene` — what [`SceneBuilder::build`] produces and [`crate::View::present`] takes.
-pub type Scene = Picture;
+/// Flutter `Scene` — what [`SceneBuilder::build`] produces and [`crate::View::present`] takes:
+/// the framework's picture, and the native surfaces this frame places, bottom-most first.
+/// A host without a compositor uses the picture alone.
+#[derive(Debug, PartialEq)]
+pub struct Scene {
+    pub picture: Arc<Picture>,
+    pub surfaces: Vec<SurfacePlacement>,
+}
+
+/// Where one frame puts one native surface. The surface is its producer's own handle, so a
+/// host reaches the native object behind it directly and moves it.
+#[derive(Clone)]
+pub struct SurfacePlacement {
+    pub surface: Arc<dyn Surface>,
+    /// In the view's logical coordinates, with the transforms above the surface applied.
+    pub rect: Rect,
+}
+
+/// Two placements are equal when they put the same surface in the same place: what a host
+/// compares to tell a frame worth presenting from one it already shows.
+impl PartialEq for SurfacePlacement {
+    fn eq(&self, other: &SurfacePlacement) -> bool {
+        Arc::ptr_eq(&self.surface, &other.surface) && self.rect == other.rect
+    }
+}
+
+impl fmt::Debug for SurfacePlacement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SurfacePlacement")
+            .field("surface", &Arc::as_ptr(&self.surface).cast::<()>())
+            .field("rect", &self.rect)
+            .finish()
+    }
+}
 
 /// Flutter `EngineLayer` — the display list a layer's subtree recorded when it was last added to
 /// a scene, which [`SceneBuilder::add_retained`] embeds again while nothing in it changed. The
@@ -33,9 +70,19 @@ pub type EngineLayer = Arc<Picture>;
 pub struct SceneBuilder {
     /// The recording of the innermost open scope, or of the scene itself outside any.
     canvas: Canvas,
-    /// The recordings of the scopes enclosing the open one, outermost first; every `push_*`
-    /// adds one and every `pop` takes one back. dart:ui asserts the same balance.
-    enclosing: Vec<Canvas>,
+    /// What the open scope's coordinates are in the view's: the transforms pushed so far.
+    transform: Matrix4,
+    /// The scopes enclosing the open one, outermost first; every `push_*` adds one and every
+    /// `pop` takes one back. dart:ui asserts the same balance.
+    enclosing: Vec<EnclosingScope>,
+    /// The native surfaces placed so far, in paint order.
+    surfaces: Vec<SurfacePlacement>,
+}
+
+/// A scope as it was when a `push_*` opened the next one inside it.
+struct EnclosingScope {
+    canvas: Canvas,
+    transform: Matrix4,
 }
 
 impl fmt::Debug for SceneBuilder {
@@ -57,7 +104,9 @@ impl SceneBuilder {
     pub fn new() -> SceneBuilder {
         SceneBuilder {
             canvas: Canvas::new(),
+            transform: Matrix4::IDENTITY,
             enclosing: Vec::new(),
+            surfaces: Vec::new(),
         }
     }
 
@@ -69,6 +118,7 @@ impl SceneBuilder {
             canvas.save();
             canvas.concat(matrix4);
         });
+        self.transformed_by(matrix4);
     }
 
     /// Pushes an offset operation onto the operation stack.
@@ -80,6 +130,7 @@ impl SceneBuilder {
             canvas.save();
             canvas.translate(dx as f32, dy as f32);
         });
+        self.transformed_by(&Matrix4::translation(dx as f32, dy as f32));
     }
 
     /// Pushes a rectangular clip operation onto the operation stack.
@@ -130,6 +181,7 @@ impl SceneBuilder {
             canvas.save_layer(None, &paint);
             canvas.translate(offset.dx() as f32, offset.dy() as f32);
         });
+        self.transformed_by(&Matrix4::translation(offset.dx() as f32, offset.dy() as f32));
     }
 
     /// Pushes a backdrop filter operation onto the operation stack.
@@ -177,10 +229,22 @@ impl SceneBuilder {
             .pop()
             .expect("SceneBuilder::pop without a push");
         self.canvas.restore();
-        let scope = std::mem::replace(&mut self.canvas, enclosing);
+        let scope = std::mem::replace(&mut self.canvas, enclosing.canvas);
+        self.transform = enclosing.transform;
         let layer = Arc::new(scope.build());
         self.canvas.draw_display_list(&layer);
         layer
+    }
+
+    /// Places a native surface the host composites, at `rect` in the open scope's
+    /// coordinates: Flutter's `addPlatformView`. Nothing is recorded in the picture; the
+    /// caller paints the rectangle clear itself, at the place in paint order it wants the
+    /// surface to show through.
+    pub fn add_surface(&mut self, surface: Arc<dyn Surface>, rect: Rect) {
+        self.surfaces.push(SurfacePlacement {
+            surface,
+            rect: self.in_view_coordinates(rect),
+        });
     }
 
     /// Adds a retained [`EngineLayer`] subtree from a previous frame.
@@ -220,15 +284,47 @@ impl SceneBuilder {
             self.enclosing.is_empty(),
             "SceneBuilder::build with an open push"
         );
-        self.canvas.build()
+        Scene {
+            picture: Arc::new(self.canvas.build()),
+            surfaces: self.surfaces,
+        }
     }
 
     /// Opens a scope: a recording of its own, so that `pop` can hand the scope back as one
     /// list, with `push` recording the scope's own effect at its start.
     fn open(&mut self, push: impl FnOnce(&mut Canvas)) {
         let enclosing = std::mem::replace(&mut self.canvas, Canvas::new());
-        self.enclosing.push(enclosing);
+        self.enclosing.push(EnclosingScope {
+            canvas: enclosing,
+            transform: self.transform,
+        });
         push(&mut self.canvas);
+    }
+
+    /// The open scope's coordinates are now `matrix` inside what they were: a point is
+    /// taken through `matrix` first, then through the transforms pushed before it.
+    fn transformed_by(&mut self, matrix: &Matrix4) {
+        self.transform = self.transform.then(matrix);
+    }
+
+    /// `rect` in the view's coordinates: the box around its corners under the open scope's
+    /// transform.
+    fn in_view_coordinates(&self, rect: Rect) -> Rect {
+        let corners = [
+            Offset::new(rect.left, rect.top),
+            Offset::new(rect.right, rect.top),
+            Offset::new(rect.left, rect.bottom),
+            Offset::new(rect.right, rect.bottom),
+        ]
+        .map(|corner| transform3(self.transform, corner));
+        let xs = corners.iter().map(|corner| corner.dx());
+        let ys = corners.iter().map(|corner| corner.dy());
+        Rect::from_ltrb(
+            xs.clone().fold(f64::INFINITY, f64::min),
+            ys.clone().fold(f64::INFINITY, f64::min),
+            xs.fold(f64::NEG_INFINITY, f64::max),
+            ys.fold(f64::NEG_INFINITY, f64::max),
+        )
     }
 }
 
@@ -281,6 +377,7 @@ mod tests {
         builder.add_retained(&layer);
         let scene = builder.build();
         let embedded = scene
+            .picture
             .ops()
             .iter()
             .filter(|op| matches!(op, valo::Op::DrawDisplayList { list, .. } if Arc::ptr_eq(list, &layer)))
@@ -289,8 +386,79 @@ mod tests {
             embedded,
             2,
             "once from the pop, once retained: {:?}",
-            scene.ops()
+            scene.picture.ops()
         );
+    }
+
+    /// A surface no producer feeds. The crates above the embedder use `test_support`'s,
+    /// which this crate's own tests are built without.
+    struct IdleSurface;
+
+    impl Surface for IdleSurface {
+        fn present(&self, buffer: crate::Buffer, _released: Box<dyn FnOnce() + Send + Sync>) {
+            drop(buffer);
+        }
+
+        fn next_vsync(&self, _observer: std::sync::Weak<dyn crate::VsyncObserver>) {}
+    }
+
+    fn idle_surface() -> Arc<dyn Surface> {
+        Arc::new(IdleSurface)
+    }
+
+    #[test]
+    fn a_surface_is_placed_under_the_open_transforms() {
+        let (inner, outer) = (idle_surface(), idle_surface());
+        let mut builder = SceneBuilder::new();
+        builder.push_transform(&Matrix4::scale(2.0, 2.0));
+        builder.push_offset(1.0, 1.0);
+        builder.add_surface(Arc::clone(&inner), Rect::from_ltwh(0.0, 0.0, 1.0, 1.0));
+        builder.pop();
+        builder.pop();
+        // Outside every scope: the view's own coordinates.
+        builder.add_surface(Arc::clone(&outer), Rect::from_ltwh(10.0, 20.0, 5.0, 5.0));
+        let scene = builder.build();
+        assert_eq!(
+            scene.surfaces,
+            [
+                SurfacePlacement {
+                    surface: inner,
+                    rect: Rect::from_ltrb(2.0, 2.0, 4.0, 4.0),
+                },
+                SurfacePlacement {
+                    surface: outer,
+                    rect: Rect::from_ltwh(10.0, 20.0, 5.0, 5.0),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_placement_is_its_surface_and_its_rectangle() {
+        let surface = idle_surface();
+        let rect = Rect::from_ltwh(0.0, 0.0, 4.0, 4.0);
+        let placement = SurfacePlacement {
+            surface: Arc::clone(&surface),
+            rect,
+        };
+        assert_eq!(placement.clone(), placement);
+        let elsewhere = SurfacePlacement {
+            surface: Arc::clone(&surface),
+            rect: Rect::from_ltwh(1.0, 0.0, 4.0, 4.0),
+        };
+        assert_ne!(elsewhere, placement);
+        let another_surface = SurfacePlacement {
+            surface: idle_surface(),
+            rect,
+        };
+        assert_ne!(another_surface, placement, "the same rectangle is not the same surface");
+    }
+
+    #[test]
+    fn a_scene_without_surfaces_places_none() {
+        let scene = SceneBuilder::new().build();
+        assert!(scene.surfaces.is_empty());
+        assert!(scene.picture.ops().is_empty());
     }
 
     #[test]

@@ -721,6 +721,7 @@ mod tests {
             .debug_layer(&app)
             .expect("painted")
             .build_scene(&mut app, SceneBuilder::new())
+            .picture
             .ops()
             .to_vec();
         assert!(

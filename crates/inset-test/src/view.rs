@@ -3,7 +3,7 @@
 use std::cell::Cell;
 use std::sync::Arc;
 
-use inset_embedder::{Picture, View, ViewConstraints, ViewId, ViewMetrics};
+use inset_embedder::{Scene, View, ViewConstraints, ViewId, ViewMetrics};
 
 /// A view of a fixed physical size and pixel ratio that counts the pictures presented to it
 /// and shows none. `flutter_test`'s `TestFlutterView` in its two settable dimensions.
@@ -62,7 +62,7 @@ impl View for TestView {
         }
     }
 
-    fn present(&self, _picture: Arc<Picture>) {
+    fn present(&self, _scene: Arc<Scene>) {
         self.presented.set(self.presented.get() + 1);
     }
 }

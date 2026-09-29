@@ -24,14 +24,14 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use inset_embedder::{
-    Matrix4, Offset, Picture, Rect, Size, TextEditingValue, TextInputConfiguration, TextInputHost,
-    View, ViewConstraints, ViewId, ViewMetrics, ViewPadding, transform3,
+    Matrix4, Offset, Picture, Rect, Scene, Size, TextEditingValue, TextInputConfiguration,
+    TextInputHost, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding, transform3,
 };
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::window::{ImePurpose, Window};
 
 use crate::gpu::Gpu;
-use crate::os;
+use crate::os::{ThisOs, ThisOsWindowSurfaces, WindowGeometry, WindowSurfaces};
 use crate::surface::WinitSurface;
 use crate::text_input::ActiveTextInput;
 use crate::windows::WinitWindow;
@@ -44,17 +44,19 @@ pub(crate) struct WinitView {
     /// The window this view draws into, for retrying a present the surface refused, and
     /// for making the surface again once the system gives the window back.
     pub(crate) window: Arc<Window>,
-    /// Whether the surface's alpha is honoured by the compositor, for making it again.
-    sees_through: bool,
+    /// Whether the compositor honours the content's alpha: from the start for a window that
+    /// sees through, and from the first scene that places a native surface for any other.
+    /// Kept for making the surface again.
+    content_alpha: Cell<valo::SurfaceAlpha>,
     pub(crate) editing_state: RefCell<TextEditingValue>,
     /// Set from `TextInputHost::start` to `TextInputHost::stop`; an unhandled key types into it.
     pub(crate) text_input: Cell<Option<ActiveTextInput>>,
     pub(crate) transform: RefCell<Option<Matrix4>>,
     /// What a frame starts from: white, or nothing for a window that shows what is behind it.
     pub(crate) clear: valo::Color,
-    /// The last picture the framework handed over, kept to present again when the window
-    /// is seen again, and to tell a picture equal to it from one worth drawing.
-    pub(crate) latest: RefCell<Option<Arc<Picture>>>,
+    /// The last scene the framework handed over, kept to present again when the window
+    /// is seen again, and to tell a scene equal to it from one worth drawing.
+    pub(crate) latest: RefCell<Option<Arc<Scene>>>,
     /// Whether the latest picture is on the surface: not while the window is hidden or
     /// occluded, when the surface gives no texture, nor after the surface was resized.
     pub(crate) on_screen: Cell<bool>,
@@ -68,6 +70,8 @@ pub(crate) struct WinitView {
     /// Set around the frame a resize draws inline: that one presents through the window's
     /// transaction.
     pub(crate) resizing: Cell<bool>,
+    /// The native surfaces the window's scenes place beneath its content.
+    pub(crate) surfaces: ThisOsWindowSurfaces,
 }
 
 /// How many refreshes a picture is retried after the surface timed out.
@@ -83,7 +87,12 @@ impl WinitView {
         gpu: &Gpu,
         sees_through: bool,
     ) -> Result<WinitView, String> {
-        let surface = make_surface(gpu, &window, sees_through)?;
+        let content_alpha = if sees_through {
+            valo::SurfaceAlpha::Transparent
+        } else {
+            valo::SurfaceAlpha::Opaque
+        };
+        let surface = make_surface(gpu, &window, content_alpha)?;
         let mut context = valo::Context::new(gpu.device.clone(), gpu.queue.clone());
         context.set_hide_missing_glyphs(true);
         let clear = if sees_through {
@@ -94,13 +103,14 @@ impl WinitView {
         let view = WinitView {
             id,
             metrics: Cell::new(ViewMetrics::default()),
+            surfaces: ThisOsWindowSurfaces::new(Arc::clone(&window)),
             surface: Arc::new(Mutex::new(WinitSurface {
                 surface: Some(surface),
                 context,
                 in_transaction: false,
             })),
             window,
-            sees_through,
+            content_alpha: Cell::new(content_alpha),
             editing_state: RefCell::new(TextEditingValue::EMPTY),
             text_input: Cell::new(None),
             transform: RefCell::new(None),
@@ -153,7 +163,7 @@ impl WinitView {
         }
         let latest = self.latest.borrow().clone();
         if let Some(latest) = latest {
-            self.draw(&latest);
+            self.draw(&latest.picture);
         }
     }
 
@@ -195,9 +205,26 @@ impl WinitView {
         self.refused.set(Some(valo::Refused::Lost));
     }
 
+    /// The first scene that places a native surface in the window makes its content keep its
+    /// alpha from then on, so the surfaces beneath show through the rectangles the framework
+    /// leaves clear. The window itself stays opaque, and a window that never shows a surface
+    /// keeps an opaque content layer the compositor need not blend. It does not switch back
+    /// when the surfaces go: a launcher's tabs come and go, and each switch reconfigures the
+    /// surface.
+    fn keep_alpha_once_surfaces_are_placed(&self, scene: &Scene) {
+        if scene.surfaces.is_empty() || self.content_alpha.get() == valo::SurfaceAlpha::Transparent
+        {
+            return;
+        }
+        self.content_alpha.set(valo::SurfaceAlpha::Transparent);
+        if let Some(surface) = &mut self.surface.lock().expect("surface lock").surface {
+            surface.set_alpha(valo::SurfaceAlpha::Transparent);
+        }
+    }
+
     /// The system gave the window back: a surface on it again, owed the latest picture.
     pub(crate) fn remake_surface(&self, gpu: &Gpu) -> Result<(), String> {
-        let surface = make_surface(gpu, &self.window, self.sees_through)?;
+        let surface = make_surface(gpu, &self.window, self.content_alpha.get())?;
         self.surface.lock().expect("surface lock").surface = Some(surface);
         self.forget_surface_state();
         Ok(())
@@ -222,8 +249,8 @@ impl WinitView {
     }
 
     fn read_metrics(&self) -> ViewMetrics {
-        let [width, height] = os::surface_size(&self.window).map(f64::from);
-        let padding = os::view_padding(&self.window, [width, height]);
+        let [width, height] = ThisOs::surface_size(&self.window).map(f64::from);
+        let padding = ThisOs::view_padding(&self.window, [width, height]);
         ViewMetrics {
             physical_size: [width, height],
             physical_constraints: ViewConstraints::tight(width, height),
@@ -237,23 +264,19 @@ impl WinitView {
     }
 }
 
-/// A surface on `gpu`'s device for `window`, as it is presented to.
+/// A surface on `gpu`'s device for `window`, as it is presented to, with the compositor
+/// honouring its alpha or not.
 fn make_surface(
     gpu: &Gpu,
     window: &Arc<Window>,
-    sees_through: bool,
+    alpha: valo::SurfaceAlpha,
 ) -> Result<valo::Surface, String> {
-    let alpha = if sees_through {
-        valo::SurfaceAlpha::Transparent
-    } else {
-        valo::SurfaceAlpha::Opaque
-    };
     valo::Surface::new_with_options(
         &gpu.instance,
         &gpu.adapter,
         &gpu.device,
         Arc::clone(window),
-        os::surface_size(window),
+        ThisOs::surface_size(window),
         valo::SurfaceOptions::default().with_alpha(alpha),
     )
     .map_err(|error| error.to_string())
@@ -268,18 +291,20 @@ impl View for WinitView {
         self.metrics.get()
     }
 
-    fn present(&self, picture: Arc<Picture>) {
+    fn present(&self, scene: Arc<Scene>) {
         let unchanged = self.on_screen.get()
             && self
                 .latest
                 .borrow()
                 .as_ref()
-                .is_some_and(|latest| **latest == *picture);
+                .is_some_and(|latest| **latest == *scene);
         if unchanged {
             return;
         }
-        *self.latest.borrow_mut() = Some(Arc::clone(&picture));
-        self.draw(&picture);
+        *self.latest.borrow_mut() = Some(Arc::clone(&scene));
+        self.surfaces.place(&scene.surfaces, self.id);
+        self.keep_alpha_once_surfaces_are_placed(&scene);
+        self.draw(&scene.picture);
     }
 
     fn text_input(&self) -> Option<&dyn TextInputHost> {

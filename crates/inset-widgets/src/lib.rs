@@ -72,6 +72,7 @@ pub use widgets::icon_data::*;
 pub use widgets::icon_theme::*;
 pub use widgets::icon_theme_data::*;
 pub use widgets::image::*;
+pub use widgets::surface_view::*;
 pub use widgets::implicit_animations::*;
 pub use widgets::inherited_notifier::*;
 pub use widgets::layout_builder::*;

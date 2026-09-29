@@ -23,6 +23,7 @@ mod paragraph;
 mod platform;
 mod pointer;
 mod restoration;
+mod composition;
 mod scene_builder;
 mod system_context_menu;
 #[cfg(feature = "test-support")]
@@ -58,7 +59,8 @@ pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
 };
 pub use restoration::{RestorationData, RestorationMap, RestorationUpdate};
-pub use scene_builder::{EngineLayer, Scene, SceneBuilder};
+pub use composition::{Buffer, Compositor, Surface, VsyncObserver};
+pub use scene_builder::{EngineLayer, Scene, SceneBuilder, SurfacePlacement};
 pub use system_context_menu::SystemContextMenuItem;
 pub use text::*;
 pub use text_editing::*;

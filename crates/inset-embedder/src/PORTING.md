@@ -54,6 +54,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the common configuration and the raw handle cover what a Rust app configures itself, as winit and wgpu expose theirs, and adoption is Flutter's own macOS shape, where the app's window hosts the view.
   Affect: an app names its windows' properties directly rather than choosing an archetype; a property the config lacks is set through the native handle; hosts without windows answer no owner and the implicit view stays the only one.
 
+- Change: `MouseCursor::activate_system_cursor` also takes the view the pointer is over. Flutter's `activateSystemCursor` carries only the device and the cursor kind, and each embedder works out the window itself.
+  Reason: platform — where each window has its own cursor, the host must know which window to change, and the framework already knows it from the pointer events it received.
+  Affect: in an app with several windows, a `MouseRegion` changes the cursor of the window under the pointer and leaves the others alone. A host with one cursor for the whole process ignores the view.
+
 - Change: a host's `PopupMenus` capability shows the host's own popup menu at the pointer and answers the chosen entry; Flutter has no such call, only in-view context menus and the macOS menu bar.
   Reason: platform — a desktop window narrower than its menu, such as a panel at a screen's edge, cannot hold a menu drawn inside its view.
   Affect: a menu shown this way is the system's, drawn outside the window and styled by the OS; the app waits inside the call while it is open, and hosts without menus answer `None`.
@@ -73,6 +77,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - Change: `Platform::dispatcher` hands out the host's threads as one `Send + Sync` object: any thread asks it for a turn at a time, answered by `EmbedderClient::wake`, and the framework hands it work to run off the main thread; Dart's isolate is woken by its message port and `Isolate.run` uses the VM's own threads.
   Reason: platform — the host owns the event loop and knows its system's work queues, and a task completed on another thread has no other way to give the app a turn.
   Affect: a spawned task can await a future completed on any thread and runs at the next checkpoint instead of at the next input, and `run_in_background` work lands on the system's queue where there is one.
+
+- Change: `Platform::compositor` returns the host's compositor, where it has one. A producer opens a `Surface` from it and feeds it buffers of the platform's own type from any thread. Each buffer comes with a callback the host runs once the buffer is free again, and a surface can ask for the next vsync of its window's display. Flutter's platform views go through a texture registry, the embedder's backing-store and mutation callbacks, and on some platforms a raster thread merged into the platform thread.
+  Reason: platform — the framework, the host and every producer share one process, so a producer hands its buffer to the host directly; nothing is registered, uploaded or replayed.
+  Affect: a host without a compositor returns `None`, and every scene still presents, with a clear rectangle where a surface would be. A host with one shows the surface beneath the framework's content wherever a scene places it. `docs/composition.md` has the design.
 
 ## image.rs → dart:ui `instantiateImageCodec` / `Codec` / `FrameInfo`
 
@@ -127,15 +135,19 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — every desktop toolkit reports this shape at the window, and a host is the only place it can come from.
   Affect: an app hears external drops through the widgets binding's observers; a host that reports no position, as winit does, leaves the app to treat the whole view as the target.
 
-## scene_builder.rs → dart:ui `SceneBuilder`
-
-- Change: a push records into a display list of its own, which `pop` returns as the engine layer; there is no `oldLayer`, `addTexture`, `addPlatformView` or the shader-mask, colour-filter and image-filter pushes, and `push_backdrop_filter` is blur-only.
-  Reason: platform — valo composites display lists, and a list closes at its restore.
-  Affect: the engine layer is known at `pop`, not at the push.
-
 - Change: `EmbedderClient::pop_route` answers whether the application went back, and there is nothing going the other way.
   Reason: platform — Dart sends `popRoute` over a channel and cannot have the answer in time, so it tells the platform in advance through `SystemNavigator.setFrameworkHandlesBack` whether it handles back at all. This call is direct and answers at once.
   Affect: a host reads the answer and, when it is no, does what the platform does without the application, which on Android is to close the activity. Neither the advance notice nor a host call for closing the app exists.
+
+## scene_builder.rs → dart:ui `SceneBuilder` / `Scene`
+
+- Change: a push records into a display list of its own, which `pop` returns as the engine layer; there is no `oldLayer`, `addTexture` or the shader-mask, colour-filter and image-filter pushes, and `push_backdrop_filter` is blur-only.
+  Reason: platform — valo composites display lists, and a list closes at its restore.
+  Affect: the engine layer is known at `pop`, not at the push.
+
+- Change: `Scene` holds the framework's picture and the native surfaces the frame places. `SceneBuilder::add_surface` is Flutter's `addPlatformView`: it records nothing in the picture, and it places the surface in the view's coordinates using the transforms of the open scopes, which the builder tracks for this.
+  Reason: platform — valo composites one display list and a native surface cannot be a node in it, so the placement travels beside the picture. The render object that places a surface paints its rectangle clear itself.
+  Affect: a host reads `scene.picture` where it used to read the picture, and a host with a compositor places `scene.surfaces` in the same transaction. A surface under a rotation is placed by its bounding box.
 
 ## Deferred
 

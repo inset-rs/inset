@@ -20,7 +20,7 @@ use winit::window::{CursorIcon, WindowId};
 
 use crate::ime::{ImeOutcome, apply_ime};
 use crate::keys;
-use crate::os;
+use crate::os::{PointerState, ThisOs};
 use crate::pointer::wheel_to_physical;
 use crate::text_input::TextInputKeyEffect;
 use crate::window::WinitApp;
@@ -144,7 +144,7 @@ impl<C: EmbedderClient> WinitApp<C> {
     /// Sends the presses and releases the host missed while a native menu ran its own
     /// event loop, by what the system says is held down now.
     pub(crate) fn reconcile_buttons(&mut self, window_id: WindowId) {
-        let Some(actual) = os::pressed_buttons() else {
+        let Some(actual) = ThisOs::pressed_buttons() else {
             return;
         };
         for change in self.pointer.reconcile(actual) {

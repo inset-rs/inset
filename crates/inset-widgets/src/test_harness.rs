@@ -5,7 +5,7 @@
 
 use std::rc::Rc;
 
-use inset_embedder::{Picture, View as EmbedderView, ViewConstraints, ViewId, ViewMetrics};
+use inset_embedder::{View as EmbedderView, ViewConstraints, ViewId, ViewMetrics};
 use inset_foundation::{App, AppCell, Handle};
 use inset_rendering::{
     AnyRenderObject, PipelineOwner, RenderHandle, RenderView, ViewConfiguration,
@@ -37,7 +37,7 @@ impl EmbedderView for TestView {
         }
     }
 
-    fn present(&self, _picture: std::sync::Arc<Picture>) {}
+    fn present(&self, _scene: std::sync::Arc<inset_embedder::Scene>) {}
 }
 
 #[derive(Debug)]

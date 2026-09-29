@@ -6,7 +6,7 @@
 
 use inset_embedder::Picture;
 
-use crate::os;
+use crate::os::{FramePresentation, ThisOs};
 
 pub(crate) struct WinitSurface {
     /// `None` while the system holds the window's surface, between winit's `Suspended`
@@ -45,7 +45,7 @@ impl WinitSurface {
         if self.in_transaction != wanted
             && let Some(surface) = &mut self.surface
         {
-            os::present_in_transaction(surface, wanted);
+            ThisOs::present_in_transaction(surface, wanted);
             self.in_transaction = wanted;
         }
     }

@@ -177,10 +177,12 @@ pub trait View: 'static {
         GestureSettings::default()
     }
 
-    /// Renders and presents one picture, shared so the host may keep it: to present it
-    /// again when the window is seen again, and to tell a picture equal to the last from
-    /// one worth drawing. Physical pixels; the presenter applies no extra scaling.
-    fn present(&self, picture: std::sync::Arc<crate::Picture>);
+    /// Renders and presents one scene, shared so the host may keep it: to present it
+    /// again when the window is seen again, and to tell a scene equal to the last from one
+    /// worth drawing. Physical pixels; the presenter applies no extra scaling. A host with
+    /// a compositor places the scene's surfaces in the same native transaction as the
+    /// picture; a host without renders the picture alone.
+    fn present(&self, scene: std::sync::Arc<crate::Scene>);
 
     /// The view's text input, where the host has one.
     fn text_input(&self) -> Option<&dyn TextInputHost> {

@@ -23,7 +23,7 @@ use winit::window::{Window, WindowId};
 use crate::drag_drop::Drags;
 use crate::gpu::Gpu;
 use crate::input::Keyboard;
-use crate::os;
+use crate::os::{FramePresentation, PointerState, ThisOs, WindowChrome, WindowGeometry};
 use crate::pacing::Pacing;
 use crate::platform::{WinitPlatform, brightness_of};
 use crate::pointer::{Pointer, PointerIds};
@@ -154,7 +154,7 @@ impl<C: EmbedderClient> WinitApp<C> {
 
     fn create_implicit_view(&mut self, event_loop: &ActiveEventLoop, config: ImplicitViewConfig) {
         let mut attributes = Window::default_attributes().with_title(config.title);
-        if !os::WINDOW_IS_THE_SCREEN {
+        if !ThisOs::WINDOW_IS_THE_SCREEN {
             attributes = attributes.with_inner_size(winit::dpi::LogicalSize::new(
                 config.logical_size[0],
                 config.logical_size[1],
@@ -227,7 +227,7 @@ impl<C: EmbedderClient> WinitApp<C> {
             let opened = self.open_window(event_loop, attributes, view_id, sees_through);
             let result = match opened {
                 Ok((window_id, window, view)) => {
-                    os::configure(&window, &request.config);
+                    ThisOs::configure(&window, &request.config);
                     let handle = Rc::new(WinitWindow::new(
                         window_id,
                         Arc::downgrade(&window),
@@ -364,14 +364,14 @@ impl<C: EmbedderClient> WinitApp<C> {
                 // notices; the same geometry again is nothing to draw for.
                 return;
             }
-            let size = os::surface_size(&hosted_view.window);
+            let size = ThisOs::surface_size(&hosted_view.window);
             hosted_view.view.resized(size);
             if let Some(client) = &mut self.client {
                 client.view_metrics_changed(hosted_view.view.id());
             }
             // Present the resized layout before the system commits the
             // window geometry, rather than stretching the old frame.
-            if os::FRAME_ON_RESIZE && size[0] > 0 && size[1] > 0 {
+            if ThisOs::FRAME_ON_RESIZE && size[0] > 0 && size[1] > 0 {
                 let view = Rc::clone(&hosted_view.view);
                 self.platform.frame_requested.set(false);
                 view.resizing.set(true);
@@ -429,7 +429,7 @@ impl<C: EmbedderClient> WinitApp<C> {
         if let Some(position) = self
             .views
             .get(&id)
-            .and_then(|hosted| os::pointer_position(&hosted.window))
+            .and_then(|hosted| ThisOs::pointer_position(&hosted.window))
         {
             self.pointer.move_to(position);
         }

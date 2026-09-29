@@ -321,6 +321,7 @@ impl MouseTracker {
             .mouse_cursor_mixin
             .handle_device_cursor_update(
                 &*platform,
+                details.latest_event().view_id(),
                 details.device(),
                 details.triggering_event.as_ref(),
                 cursors,
@@ -608,12 +609,12 @@ mod tests {
     /// A host that records the cursor requests it receives.
     #[derive(Default)]
     struct RecordingCursor {
-        activated: RefCell<Vec<(i64, SystemMouseCursorKind)>>,
+        activated: RefCell<Vec<(ViewId, i64, SystemMouseCursorKind)>>,
     }
 
     impl MouseCursor for RecordingCursor {
-        fn activate_system_cursor(&self, device: i64, kind: SystemMouseCursorKind) {
-            self.activated.borrow_mut().push((device, kind));
+        fn activate_system_cursor(&self, view: ViewId, device: i64, kind: SystemMouseCursorKind) {
+            self.activated.borrow_mut().push((view, device, kind));
         }
     }
 
@@ -900,7 +901,7 @@ mod tests {
         tracker.update_with_event(&mut app, &mouse_added(Offset::new(100.0, 100.0)), None);
         assert_eq!(
             *cursor.activated.borrow(),
-            [(0, SystemMouseCursorKind::Text)]
+            [(ViewId(0), 0, SystemMouseCursorKind::Text)]
         );
 
         front.set_cursor(&mut app, SystemMouseCursors::CLICK.into());
@@ -908,8 +909,8 @@ mod tests {
         assert_eq!(
             *cursor.activated.borrow(),
             [
-                (0, SystemMouseCursorKind::Text),
-                (0, SystemMouseCursorKind::Click)
+                (ViewId(0), 0, SystemMouseCursorKind::Text),
+                (ViewId(0), 0, SystemMouseCursorKind::Click)
             ]
         );
         let click: MouseCursorRef = SystemMouseCursors::CLICK.into();
@@ -917,9 +918,38 @@ mod tests {
 
         tracker.update_with_event(&mut app, &mouse_hover(Offset::new(10.0, 10.0)), None);
         assert_eq!(
-            cursor.activated.borrow().last().unwrap().1,
+            cursor.activated.borrow().last().unwrap().2,
             SystemMouseCursorKind::Basic,
             "over nothing, the fallback cursor"
+        );
+    }
+
+    #[test]
+    fn the_cursor_goes_to_the_view_the_pointer_was_last_seen_on() {
+        let (cell, cursor) = app_with_cursor_host();
+        let mut app = cell.borrow_mut();
+        let RegionTree { root, region, .. } = tree_with_region(&mut app);
+        region.set_cursor(&mut app, SystemMouseCursors::TEXT.into());
+        let tracker = tracker_for(&mut app, root);
+
+        let added = PointerEvent::Added(PointerAddedEvent {
+            kind: PointerDeviceKind::Mouse,
+            position: Offset::new(100.0, 100.0),
+            view_id: ViewId(2),
+            ..PointerAddedEvent::default()
+        });
+        tracker.update_with_event(&mut app, &added, None);
+        assert_eq!(
+            *cursor.activated.borrow(),
+            [(ViewId(2), 0, SystemMouseCursorKind::Text)]
+        );
+
+        region.set_cursor(&mut app, SystemMouseCursors::CLICK.into());
+        tracker.update_all_devices(&mut app);
+        assert_eq!(
+            cursor.activated.borrow().last(),
+            Some(&(ViewId(2), 0, SystemMouseCursorKind::Click)),
+            "a frame-triggered update has no event of its own; the device's last one names the view"
         );
     }
 
@@ -1017,7 +1047,7 @@ mod tests {
         tracker.update_with_event(&mut app, &mouse_added(Offset::new(5.0, 5.0)), None);
         assert_eq!(
             *cursor.activated.borrow(),
-            [(0, SystemMouseCursorKind::Basic)]
+            [(ViewId(0), 0, SystemMouseCursorKind::Basic)]
         );
     }
 }

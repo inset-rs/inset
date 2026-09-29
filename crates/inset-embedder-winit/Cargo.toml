@@ -34,7 +34,9 @@ dispatch2 = "0.3"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSMenu", "NSMenuItem", "NSEvent", "NSView", "NSCell", "NSResponder", "NSWindow", "NSScreen", "NSAnimation", "NSAnimationContext", "NSVisualEffectView", "NSGlassEffectView", "NSGraphics", "NSTrackingArea", "objc2-quartz-core"] }
 objc2-foundation = { version = "0.3", features = ["NSString", "NSObject", "NSGeometry", "NSArray", "NSRunLoop"] }
-objc2-quartz-core = { version = "0.3", features = ["CAMediaTimingFunction", "CADisplayLink"] }
+objc2-quartz-core = { version = "0.3", features = ["CAMediaTimingFunction", "CADisplayLink", "CALayer", "CATransaction"] }
+# The buffer a native surface shows, and whether the compositor still reads it.
+objc2-io-surface = "0.3"
 
 # AppKit's selectors and view hierarchy need `unsafe`, which the workspace forbids; here it
 # is denied instead, and `os/macos` alone allows it.

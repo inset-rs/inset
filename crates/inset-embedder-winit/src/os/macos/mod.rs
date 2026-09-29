@@ -1,18 +1,19 @@
 //! What AppKit adds to a winit window: presence on every Space, the glass or blur behind
-//! a see-through window, a frame that animates, the popup menu, and, for a window that
-//! never becomes key, the pointer's moves.
+//! a see-through window, a frame that animates, the popup menu, a display link, native
+//! surfaces, and, for a window that never becomes key, the pointer's moves.
 
 // AppKit's selectors and view hierarchy need `unsafe`; this module and its children are
 // the one place in the host that writes it.
 #![allow(unsafe_code)]
 
+mod composition;
 mod menu;
 mod vsync;
 
 use std::time::Duration;
 
 use dispatch2::{DispatchQueue, DispatchQueueGlobalPriority, GlobalQueueIdentifier};
-use inset_embedder::{Rect, ViewPadding, WindowBackground, WindowConfig};
+use inset_embedder::{Rect, WindowBackground, WindowConfig};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject};
 use objc2::{AnyThread, MainThreadMarker};
@@ -28,34 +29,146 @@ use winit::platform::macos::WindowAttributesExtMacOS;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Window, WindowAttributes};
 
-pub(crate) use menu::popup_menu;
-pub(crate) use vsync::Vsync;
+use super::{
+    FramePresentation, OperatingSystem, PointerState, WindowChrome, WindowGeometry, WorkQueue,
+};
+use vsync::ViewDisplayLink;
 
-/// AppKit commits window geometry before winit's next redraw, so a resize presents the
-/// new layout before it returns, through the window's own transaction so the frame and
-/// the geometry it was laid out for are committed together.
-pub(crate) const FRAME_ON_RESIZE: bool = true;
+/// macOS. A type only: never made, its answers are associated functions.
+pub(crate) enum MacOs {}
 
-/// A desktop's windows are sized by the app.
-pub(crate) const WINDOW_IS_THE_SCREEN: bool = false;
+impl OperatingSystem for MacOs {}
 
-/// The pixels valo presents into: the window's content.
-pub(crate) fn surface_size(window: &Window) -> [u32; 2] {
-    let size = window.inner_size();
-    [size.width, size.height]
+impl WindowGeometry for MacOs {
+    fn set_frame(window: &Window, frame: Rect) -> bool {
+        let Some(ns_window) = ns_window(window) else {
+            return false;
+        };
+        let Some(rect) = appkit_rect(frame) else {
+            return false;
+        };
+        ns_window.setFrame_display(rect, true);
+        true
+    }
+
+    /// With AppKit's own animation, easing in and out, as a window a person drags settles.
+    fn animate_frame(window: &Window, frame: Rect, duration: Duration) -> bool {
+        let Some(ns_window) = ns_window(window) else {
+            return false;
+        };
+        let Some(rect) = appkit_rect(frame) else {
+            return false;
+        };
+        NSAnimationContext::beginGrouping();
+        let context = NSAnimationContext::currentContext();
+        context.setDuration(duration.as_secs_f64());
+        // SAFETY: a constant name Core Animation exports for the life of the process.
+        let ease =
+            CAMediaTimingFunction::functionWithName(unsafe { kCAMediaTimingFunctionEaseInEaseOut });
+        context.setTimingFunction(Some(&ease));
+        ns_window.animator().setFrame_display(rect, true);
+        NSAnimationContext::endGrouping();
+        true
+    }
 }
 
-/// A window's content is all the app's; no safe area.
-pub(crate) fn view_padding(_window: &Window, _size: [f64; 2]) -> ViewPadding {
-    ViewPadding::ZERO
+impl WindowChrome for MacOs {
+    /// What winit has an AppKit attribute for: the shadow.
+    fn extend_attributes(attributes: WindowAttributes, config: &WindowConfig) -> WindowAttributes {
+        attributes.with_has_shadow(config.shadow)
+    }
+
+    /// Pointer tracking for a window that never activates, presence on every Space, and the
+    /// blur or glass behind a see-through window.
+    fn configure(window: &Window, config: &WindowConfig) {
+        if !config.activating
+            && let Some(view) = ns_view(window)
+        {
+            track_pointer_always(&view);
+        }
+        let Some(ns_window) = ns_window(window) else {
+            return;
+        };
+        if config.all_desktops {
+            ns_window.setCollectionBehavior(
+                NSWindowCollectionBehavior::CanJoinAllSpaces
+                    | NSWindowCollectionBehavior::Stationary
+                    | NSWindowCollectionBehavior::FullScreenAuxiliary,
+            );
+        }
+        // The effect view goes behind winit's view, as a sibling in the window's frame view:
+        // a subview of winit's view would draw over its Metal layer. Liquid Glass renders as
+        // its flat material there rather than as glass, which needs the view inside the
+        // content view, where winit's Metal layer did not stay above it.
+        if matches!(
+            config.background,
+            WindowBackground::Blurred | WindowBackground::Glass
+        ) && let Some(mtm) = MainThreadMarker::new()
+            && let Some(content) = ns_window.contentView()
+            // SAFETY: the view hierarchy of a live window, read on the main thread.
+            && let Some(frame_view) = unsafe { content.superview() }
+        {
+            let effect = background_view(mtm, config.background, content.frame());
+            effect.setAutoresizingMask(
+                NSAutoresizingMaskOptions::ViewWidthSizable
+                    | NSAutoresizingMaskOptions::ViewHeightSizable,
+            );
+            frame_view.addSubview_positioned_relativeTo(
+                &effect,
+                NSWindowOrderingMode::Below,
+                Some(&content),
+            );
+        }
+    }
 }
 
-/// Whether the surface presents through the window's Core Animation transaction: on for
-/// the frame drawn inside a resize, so the frame and the geometry it was laid out for are
-/// committed together, as gpui does for its synchronous draws; off otherwise, since it
-/// makes every present wait to be scheduled.
-pub(crate) fn present_in_transaction(surface: &mut valo::Surface, wanted: bool) {
-    surface.set_presents_with_transaction(wanted);
+impl FramePresentation for MacOs {
+    type DisplayLink = ViewDisplayLink;
+
+    /// AppKit commits window geometry before winit's next redraw, so a resize presents the
+    /// new layout before it returns, through the window's own transaction so the frame and
+    /// the geometry it was laid out for are committed together.
+    const FRAME_ON_RESIZE: bool = true;
+
+    /// On for the frame drawn inside a resize, as gpui does for its synchronous draws; off
+    /// otherwise, since it makes every present wait to be scheduled.
+    fn present_in_transaction(surface: &mut valo::Surface, wanted: bool) {
+        surface.set_presents_with_transaction(wanted);
+    }
+}
+
+impl PointerState for MacOs {
+    /// The same bits AppKit reports. A native menu swallows the release of the button that
+    /// opened it, so the host reconciles its own record with this once the menu is gone.
+    fn pressed_buttons() -> Option<i64> {
+        Some(NSEvent::pressedMouseButtons() as i64)
+    }
+
+    /// winit's entry event carries no position; AppKit's answer is current.
+    fn pointer_position(window: &Window) -> Option<[f64; 2]> {
+        let view = ns_view(window)?;
+        let ns_window = view.window()?;
+        let in_window = ns_window.convertPointFromScreen(NSEvent::mouseLocation());
+        let in_view = view.convertPoint_fromView(in_window, None);
+        let y = if view.isFlipped() {
+            in_view.y
+        } else {
+            view.bounds().size.height - in_view.y
+        };
+        let scale = ns_window.backingScaleFactor();
+        Some([in_view.x * scale, y * scale])
+    }
+}
+
+impl WorkQueue for MacOs {
+    /// On the system's default-priority global queue: Grand Central Dispatch's worker pool,
+    /// which the system sizes and schedules with everything else on the machine.
+    fn run_off_main(work: Box<dyn FnOnce() + Send>) {
+        let queue = DispatchQueue::global_queue(GlobalQueueIdentifier::Priority(
+            DispatchQueueGlobalPriority::Default,
+        ));
+        queue.exec_async(work);
+    }
 }
 
 fn ns_view(window: &Window) -> Option<Retained<NSView>> {
@@ -69,63 +182,6 @@ fn ns_view(window: &Window) -> Option<Retained<NSView>> {
 
 fn ns_window(window: &Window) -> Option<Retained<NSWindow>> {
     ns_view(window)?.window()
-}
-
-/// What winit has an AppKit attribute for: the shadow.
-pub(crate) fn extend_attributes(
-    attributes: WindowAttributes,
-    config: &WindowConfig,
-) -> WindowAttributes {
-    attributes.with_has_shadow(config.shadow)
-}
-
-/// Applies what the configuration asks for and winit has no attribute for.
-pub(crate) fn configure(window: &Window, config: &WindowConfig) {
-    if !config.activating
-        && let Some(view) = ns_view(window)
-    {
-        track_pointer_always(&view);
-    }
-    let Some(ns_window) = ns_window(window) else {
-        return;
-    };
-    if config.all_desktops {
-        ns_window.setCollectionBehavior(
-            NSWindowCollectionBehavior::CanJoinAllSpaces
-                | NSWindowCollectionBehavior::Stationary
-                | NSWindowCollectionBehavior::FullScreenAuxiliary,
-        );
-    }
-    // The effect view goes behind winit's view, as a sibling in the window's frame view:
-    // a subview of winit's view would draw over its Metal layer. Liquid Glass renders as
-    // its flat material there rather than as glass, which needs the view inside the
-    // content view, where winit's Metal layer did not stay above it.
-    if matches!(
-        config.background,
-        WindowBackground::Blurred | WindowBackground::Glass
-    ) && let Some(mtm) = MainThreadMarker::new()
-        && let Some(content) = ns_window.contentView()
-        // SAFETY: the view hierarchy of a live window, read on the main thread.
-        && let Some(frame_view) = unsafe { content.superview() }
-    {
-        let effect = background_view(mtm, config.background, content.frame());
-        effect.setAutoresizingMask(
-            NSAutoresizingMaskOptions::ViewWidthSizable
-                | NSAutoresizingMaskOptions::ViewHeightSizable,
-        );
-        frame_view.addSubview_positioned_relativeTo(
-            &effect,
-            NSWindowOrderingMode::Below,
-            Some(&content),
-        );
-    }
-}
-
-/// The buttons the mouse holds down now, as Flutter numbers them: the same bits AppKit
-/// reports. A native menu swallows the release of the button that opened it, so the
-/// host reconciles its own record with this once the menu is gone.
-pub(crate) fn pressed_buttons() -> Option<i64> {
-    Some(NSEvent::pressedMouseButtons() as i64)
 }
 
 /// Has AppKit report the pointer's moves to the view whether or not its window is key.
@@ -154,22 +210,6 @@ fn track_pointer_always(view: &NSView) {
     view.addTrackingArea(&area);
 }
 
-/// Where the pointer is now, in the window's physical pixels from its top-left corner.
-/// winit's entry event carries no position; AppKit's answer is current.
-pub(crate) fn pointer_position(window: &Window) -> Option<[f64; 2]> {
-    let view = ns_view(window)?;
-    let ns_window = view.window()?;
-    let in_window = ns_window.convertPointFromScreen(NSEvent::mouseLocation());
-    let in_view = view.convertPoint_fromView(in_window, None);
-    let y = if view.isFlipped() {
-        in_view.y
-    } else {
-        view.bounds().size.height - in_view.y
-    };
-    let scale = ns_window.backingScaleFactor();
-    Some([in_view.x * scale, y * scale])
-}
-
 /// Liquid Glass where the system has it (macOS 26), else the vibrancy blur.
 fn background_view(
     mtm: MainThreadMarker,
@@ -188,40 +228,6 @@ fn background_view(
     Retained::into_super(blur)
 }
 
-/// Moves and sizes the window over `duration` with AppKit's own animation, easing in and
-/// out, as a window a person drags settles. `false` when the window cannot be reached, so
-/// the caller sets the frame at once instead.
-/// Puts `window` at `frame` in one step, position and size together.
-pub(crate) fn set_frame(window: &Window, frame: Rect) -> bool {
-    let Some(ns_window) = ns_window(window) else {
-        return false;
-    };
-    let Some(rect) = appkit_rect(frame) else {
-        return false;
-    };
-    ns_window.setFrame_display(rect, true);
-    true
-}
-
-pub(crate) fn animate_frame(window: &Window, frame: Rect, duration: Duration) -> bool {
-    let Some(ns_window) = ns_window(window) else {
-        return false;
-    };
-    let Some(rect) = appkit_rect(frame) else {
-        return false;
-    };
-    NSAnimationContext::beginGrouping();
-    let context = NSAnimationContext::currentContext();
-    context.setDuration(duration.as_secs_f64());
-    // SAFETY: a constant name Core Animation exports for the life of the process.
-    let ease =
-        CAMediaTimingFunction::functionWithName(unsafe { kCAMediaTimingFunctionEaseInEaseOut });
-    context.setTimingFunction(Some(&ease));
-    ns_window.animator().setFrame_display(rect, true);
-    NSAnimationContext::endGrouping();
-    true
-}
-
 /// `frame`, given in winit's top-left points, as AppKit measures it: from the bottom left
 /// of the primary screen.
 fn appkit_rect(frame: Rect) -> Option<NSRect> {
@@ -232,13 +238,4 @@ fn appkit_rect(frame: Rect) -> Option<NSRect> {
         NSPoint::new(frame.left, screen_height - frame.top - frame.height()),
         NSSize::new(frame.width(), frame.height()),
     ))
-}
-
-/// Runs `work` on the system's default-priority global queue: Grand Central Dispatch's worker
-/// pool, which the system sizes and schedules with everything else on the machine.
-pub(crate) fn run_off_main(work: Box<dyn FnOnce() + Send>) {
-    let queue = DispatchQueue::global_queue(GlobalQueueIdentifier::Priority(
-        DispatchQueueGlobalPriority::Default,
-    ));
-    queue.exec_async(work);
 }

@@ -147,8 +147,8 @@ pub trait HostWindow: 'static {
     fn set_close_requested(&self, handler: Option<Rc<dyn Fn()>>);
 }
 
-/// The host's window maker. `None` from [`crate::Platform::windowing_owner`] where the
-/// implicit view is the only one there can be.
+/// The host's window maker. [`crate::Platform::windowing_owner`] answers `None` where the
+/// implicit view is the only one there can be, so an owner that exists makes windows.
 pub trait WindowingOwner: 'static {
     /// Makes a window. The host finishes it on its own loop, so the window arrives through
     /// the future.

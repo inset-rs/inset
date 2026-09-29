@@ -558,8 +558,18 @@ pub trait Platform: Any {
         None
     }
 
+    /// The host's compositor, where it has one: native surfaces shown beside the
+    /// framework's picture. `None` on the web, on X11, on the inert host, and on an
+    /// embedder that chose not to have one.
+    fn compositor(&self) -> Option<Arc<dyn crate::Compositor>> {
+        None
+    }
+
     /// The host's window maker, for an app that opens windows of its own. `None`, the
     /// default, where the implicit view is the only one there can be: mobile and the web.
+    /// The answer is the host's at the time of asking, so a host that learns only at run
+    /// time whether its platform has windows answers `None` there, and an app asks before
+    /// it offers a window.
     fn windowing_owner(&self) -> Option<Rc<dyn crate::WindowingOwner>> {
         None
     }
@@ -682,9 +692,11 @@ pub trait TextServices {
 
 /// Flutter's mouse cursor channel.
 pub trait MouseCursor {
-    /// Shows a system cursor for a pointing device (Flutter's `activateSystemCursor`
-    /// message on `SystemChannels.mouseCursor`).
-    fn activate_system_cursor(&self, device: i64, kind: SystemMouseCursorKind);
+    /// Shows a system cursor for a pointing device on `view`, the one the device is over
+    /// (Flutter's `activateSystemCursor` message on `SystemChannels.mouseCursor`, which
+    /// carries no view: its embedders map the device to one themselves). A host with one
+    /// cursor for the whole process ignores the view.
+    fn activate_system_cursor(&self, view: ViewId, device: i64, kind: SystemMouseCursorKind);
 }
 
 /// Flutter's restoration channel: state kept across relaunches.

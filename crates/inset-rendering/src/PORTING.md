@@ -71,6 +71,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Dart's GC keeps a link alive while a detached layer still names it.
   Affect: the link's entry lingers until those layers are disposed, past the `dispose` of the state that owns it.
 
+## surface_view.rs, layer.rs (`SurfaceLayer`) → platform views (`PlatformViewLayer`, `RenderAndroidView` and kin)
+
+- Change: `RenderSurfaceView` fills its box, paints it clear and adds a `SurfaceLayer`, which places the surface through `SceneBuilder::add_surface` on every frame; Flutter's platform view render objects are per platform and its `PlatformViewLayer` is retained by the engine.
+  Reason: platform — one render object serves every host, since a surface is a rectangle and a buffer everywhere; and a retained display list carries no surface, so the layer always adds itself to the scene.
+  Affect: a surface shows beneath the framework's content through the clear rectangle, and framework content painted above it stays; the producer is told the size by the widget's owner, not by the compositor.
+
 ## view.rs → view.dart, binding.rs → binding.dart
 
 - Change: `RendererBinding` calls the hooks `will_draw_frame`, `did_draw_frame` and `did_handle_metrics_changed` on a registered `RendererBindingOverrides` instead of being overridden.

@@ -3,7 +3,7 @@
 //! The framework asks for a frame; the host draws it at the display's next refresh and
 //! no sooner, so an animation that asks again from each frame runs at the display's rate
 //! rather than the loop's. The refresh comes from the system's signal where it has one
-//! ([`os::Vsync`]), and from a timer at the display's nominal rate elsewhere. A frame
+//! ([`ThisOsDisplayLink`]), and from a timer at the display's nominal rate elsewhere. A frame
 //! drawn for another reason inside an interval, a resize's, counts as that refresh's. The
 //! ticks stop after a few refreshes with nothing to draw, so an idle app makes no wakes.
 
@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use winit::window::Window;
 
-use crate::os;
+use crate::os::{DisplayLink, ThisOsDisplayLink};
 
 /// The refresh interval assumed until a window says what its display's is.
 const DEFAULT_REFRESH: Duration = Duration::from_micros(16_667);
@@ -21,7 +21,7 @@ const IDLE_TICKS: u8 = 2;
 pub(crate) struct Pacing {
     /// The system's signal, on the display of the window it was started with, while
     /// frames are wanted.
-    vsync: Option<os::Vsync>,
+    vsync: Option<ThisOsDisplayLink>,
     /// The display's refresh interval, for the timer where the system has no signal.
     refresh: Duration,
     /// When the timer's next tick is due; `None` while the ticks are stopped.
@@ -49,7 +49,7 @@ impl Pacing {
     pub(crate) fn keep_ticking(&mut self, window: &Window, on_tick: impl Fn() + 'static) {
         self.idle_ticks = 0;
         if self.vsync.is_none() {
-            self.vsync = os::Vsync::start(window, Box::new(on_tick));
+            self.vsync = ThisOsDisplayLink::start(window, Box::new(on_tick));
             self.refresh = refresh_interval(window);
         }
         match &self.vsync {

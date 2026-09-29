@@ -10,17 +10,18 @@ use objc2_quartz_core::CADisplayLink;
 use winit::window::Window;
 
 use super::ns_view;
+use crate::os::DisplayLink;
 
-/// A display link ticking for a window; invalidated when dropped.
-pub(crate) struct Vsync {
+/// The display link of a window's view: it follows the display the window is on, and is
+/// invalidated when dropped.
+pub(crate) struct ViewDisplayLink {
     link: Retained<CADisplayLink>,
     _target: Retained<Ticker>,
 }
 
-impl Vsync {
-    /// Starts calling `on_tick` at each refresh of the display `window` is on. `None` where
-    /// the system has no display link for a view, before macOS 14.
-    pub(crate) fn start(window: &Window, on_tick: Box<dyn Fn()>) -> Option<Vsync> {
+impl DisplayLink for ViewDisplayLink {
+    /// `None` before macOS 14, where a view has no display link.
+    fn start(window: &Window, on_tick: Box<dyn Fn()>) -> Option<ViewDisplayLink> {
         let mtm = MainThreadMarker::new()?;
         let view = ns_view(window)?;
         if !view.respondsToSelector(sel!(displayLinkWithTarget:selector:)) {
@@ -33,19 +34,18 @@ impl Vsync {
         // SAFETY: the main run loop, added to on the main thread; the mode is a constant
         // Foundation exports for the life of the process.
         unsafe { link.addToRunLoop_forMode(&NSRunLoop::mainRunLoop(), NSRunLoopCommonModes) };
-        Some(Vsync {
+        Some(ViewDisplayLink {
             link,
             _target: target,
         })
     }
 
-    /// Stops the ticks, or starts them again.
-    pub(crate) fn set_paused(&self, paused: bool) {
+    fn set_paused(&self, paused: bool) {
         self.link.setPaused(paused);
     }
 }
 
-impl Drop for Vsync {
+impl Drop for ViewDisplayLink {
     fn drop(&mut self) {
         self.link.invalidate();
     }

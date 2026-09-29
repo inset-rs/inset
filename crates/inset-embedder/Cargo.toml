@@ -23,6 +23,11 @@ valo-geometry.workspace = true
 valo-system-fonts.workspace = true
 web-time.workspace = true
 
+# The buffer a producer hands a composited surface is the platform's own type.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+objc2-core-foundation = "0.3"
+objc2-io-surface = "0.3"
+
 [dev-dependencies]
 
 [lints]

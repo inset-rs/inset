@@ -2333,7 +2333,7 @@ mod tests {
     use std::rc::Rc;
     use std::time::Duration;
 
-    use inset_embedder::{Picture, TargetPlatform, ViewConstraints, ViewId, ViewMetrics};
+    use inset_embedder::{TargetPlatform, ViewConstraints, ViewId, ViewMetrics};
     use inset_scheduler::SchedulerBinding;
     use inset_test::TestPlatform;
 
@@ -2374,7 +2374,7 @@ mod tests {
             }
         }
 
-        fn present(&self, _picture: std::sync::Arc<Picture>) {}
+        fn present(&self, _scene: std::sync::Arc<inset_embedder::Scene>) {}
     }
 
     /// What a [`Reader`] does with its context on every build.

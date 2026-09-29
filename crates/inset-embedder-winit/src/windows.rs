@@ -22,7 +22,7 @@ use winit::event_loop::EventLoopProxy;
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::{Window, WindowAttributes, WindowId};
 
-use crate::os;
+use crate::os::{ThisOs, WindowChrome, WindowGeometry};
 use crate::view::WinitView;
 use crate::window::HostEvent;
 
@@ -82,7 +82,7 @@ pub(crate) fn attributes_for(config: &WindowConfig) -> WindowAttributes {
     if let Some([x, y]) = config.position {
         attributes = attributes.with_position(LogicalPosition::new(x, y));
     }
-    os::extend_attributes(attributes, config)
+    ThisOs::extend_attributes(attributes, config)
 }
 
 /// A created window as the app holds it. Holds the window weakly: the host owns it, and
@@ -140,11 +140,11 @@ impl HostWindow for WinitWindow {
             return;
         };
         if let Some(duration) = animate
-            && os::animate_frame(&window, frame, duration)
+            && ThisOs::animate_frame(&window, frame, duration)
         {
             return;
         }
-        if os::set_frame(&window, frame) {
+        if ThisOs::set_frame(&window, frame) {
             return;
         }
         // Size before position: a system that anchors a window at its bottom-left, as

@@ -530,7 +530,7 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
-    use inset_embedder::{Picture, ViewId, ViewMetrics};
+    use inset_embedder::{ViewId, ViewMetrics};
 
     use super::*;
     use crate::box_::RenderBox;
@@ -554,7 +554,7 @@ mod tests {
             self.metrics
         }
 
-        fn present(&self, _picture: std::sync::Arc<Picture>) {
+        fn present(&self, _scene: std::sync::Arc<inset_embedder::Scene>) {
             self.presented.set(self.presented.get() + 1);
         }
     }

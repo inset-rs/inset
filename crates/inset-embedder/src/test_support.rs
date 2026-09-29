@@ -1,8 +1,10 @@
-//! Images for tests, without a host.
+//! Images and surfaces for tests, without a host.
 //!
 //! An [`Image`](crate::Image) only exists once pixels have been uploaded to a GPU, so a test of
 //! anything above the host — a cache, a layout, a widget — would otherwise have no image to work
-//! with. This makes one directly, on a device of its own that no window is attached to.
+//! with. This makes one directly, on a device of its own that no window is attached to. A
+//! [`Surface`](crate::Surface) only exists where a host composites, so this makes one nobody
+//! feeds.
 //!
 //! Behind the `test-support` feature, so an application never builds it. A test crate asks for
 //! it as a dev-dependency:
@@ -12,11 +14,11 @@
 //! inset-embedder = { workspace = true, features = ["test-support"] }
 //! ```
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use valo::{Context, ImageDesc};
 
-use crate::Image;
+use crate::{Buffer, Image, Surface, VsyncObserver};
 
 /// One device for the whole test process, created on first use.
 ///
@@ -81,4 +83,21 @@ fn headless_context() -> Context {
     let mut context = Context::new(device, queue);
     context.set_hide_missing_glyphs(true);
     context
+}
+
+/// A surface no producer feeds, as the handle a compositor hands out. Enough to place one in
+/// a scene and compare the placement.
+pub fn idle_surface() -> Arc<dyn Surface> {
+    Arc::new(IdleSurface)
+}
+
+/// What [`idle_surface`] hands out: presents and vsync requests go nowhere.
+struct IdleSurface;
+
+impl Surface for IdleSurface {
+    fn present(&self, buffer: Buffer, _released: Box<dyn FnOnce() + Send + Sync>) {
+        drop(buffer);
+    }
+
+    fn next_vsync(&self, _observer: Weak<dyn VsyncObserver>) {}
 }

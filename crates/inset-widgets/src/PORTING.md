@@ -74,6 +74,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the host reports the drag at the window, and the binding's observers are where window-level events reach the tree.
   Affect: any observer hears every drag over any view; with a host that reports no position, the whole view is the target.
 
+## widgets/surface_view.rs → platform views (`AndroidView`, `UiKitView`, `Texture`)
+
+- Change: one `SurfaceView` widget over a `Surface` the host's compositor opened, on every platform that has one; Flutter has a widget per platform and a `Texture` widget for the sampled case.
+  Reason: platform — a surface is a rectangle and a buffer on every compositor, so one widget places it; what differs per platform is the buffer type, which the surface carries.
+  Affect: an app that shows a program, a video or a camera puts a `SurfaceView` where it goes and a `Listener` around it for input; it tells the producer the size from its own layout.
+
 ## widgets/banner.rs → banner.dart
 
 - Change: `BannerPainter` answers no `repaint` listenable, where Dart repaints on `PaintingBinding.systemFonts`.

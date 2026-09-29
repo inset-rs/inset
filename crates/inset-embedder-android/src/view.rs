@@ -7,7 +7,7 @@
 use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Mutex};
 
-use inset_embedder::{Picture, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding};
+use inset_embedder::{Picture, Scene, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding};
 use ndk::native_window::NativeWindow;
 
 use crate::gpu::Gpu;
@@ -23,7 +23,7 @@ pub(crate) struct AndroidView {
     clear: valo::Color,
     /// The last picture the framework handed over, kept to present again on the window the
     /// system gives back, and to tell a picture equal to it from one worth drawing.
-    latest: RefCell<Option<Arc<Picture>>>,
+    latest: RefCell<Option<Arc<Scene>>>,
     /// Whether the latest picture is on the surface: not while there is no window, and not
     /// when the surface refused it.
     on_screen: Cell<bool>,
@@ -98,7 +98,7 @@ impl AndroidView {
         }
         let latest = self.latest.borrow().clone();
         if let Some(latest) = latest {
-            self.draw(&latest);
+            self.draw(&latest.picture);
         }
     }
 
@@ -149,18 +149,18 @@ impl View for AndroidView {
         self.metrics.get()
     }
 
-    fn present(&self, picture: Arc<Picture>) {
+    fn present(&self, scene: Arc<Scene>) {
         let unchanged = self.on_screen.get()
             && self
                 .latest
                 .borrow()
                 .as_ref()
-                .is_some_and(|latest| **latest == *picture);
+                .is_some_and(|latest| **latest == *scene);
         if unchanged {
             return;
         }
-        *self.latest.borrow_mut() = Some(Arc::clone(&picture));
-        self.draw(&picture);
+        *self.latest.borrow_mut() = Some(Arc::clone(&scene));
+        self.draw(&scene.picture);
     }
 }
 

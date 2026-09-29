@@ -916,7 +916,7 @@ mod tests {
 
         let layer = tree.parent.as_object().layer(&app).expect("painted");
         let scene = layer.build_scene(&mut app, SceneBuilder::new());
-        let ops = inset_embedder::flattened_ops(&scene);
+        let ops = inset_embedder::flattened_ops(&scene.picture);
         let pictures = ops
             .iter()
             .filter(|op| matches!(op, Op::DrawDisplayList { .. }))

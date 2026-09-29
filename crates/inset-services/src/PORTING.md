@@ -108,6 +108,10 @@ The key constants and the four tables are machine-written from the Dart, as Flut
   Reason: platform — the host trait is the channel; there is no channel reply to await and nothing needs the string encoding.
   Affect: the cursor changes without waiting a frame, and a host with no such capability leaves the cursor as it was.
 
+- Change: `MouseCursorManager::handle_device_cursor_update` and `MouseCursorSession::activate` also take the view the pointer is over. `MouseTracker` reads it from the device's last pointer event, and the session passes it to the host with the device. Dart's session knows only its device.
+  Reason: platform — where each window has its own cursor, the host must know which window to change; see `activate_system_cursor` in `inset-embedder`'s `PORTING.md`.
+  Affect: a custom session receives the view in `activate` and must keep it for any cursor change it makes later.
+
 ## restoration.rs → restoration.dart
 
 - Change: restoration data is `RestorationData`, an enum over the kinds the codec can carry, and a bucket's `read` / `write` / `remove` lose Dart's type parameter.

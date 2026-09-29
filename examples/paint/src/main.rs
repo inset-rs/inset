@@ -28,7 +28,10 @@ fn main() {
                             return;
                         };
                         let picture = record(view.metrics(), elapsed);
-                        view.present(std::sync::Arc::new(picture));
+                        view.present(std::sync::Arc::new(inset_embedder::Scene {
+                            picture: std::sync::Arc::new(picture),
+                            surfaces: Vec::new(),
+                        }));
                         SchedulerBinding::schedule_frame(app);
                     }),
                 );
