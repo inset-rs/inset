@@ -4,6 +4,10 @@
 //! Clone and refcounted; [`App::update`] leases `T` out of the map so the store can
 //! [`notify`](Context::notify) and [`emit`](Context::emit) without naming itself. Re-entering the
 //! same entity panics. Other entities and every Handle stay visible.
+//!
+//! An observer or listener lives in the list of the entity it watches, so it never holds that
+//! entity strongly: the entity would keep itself alive. Releasing an entity drops its observers
+//! and listeners.
 
 use std::any::{Any, TypeId, type_name};
 use std::cell::{Cell, RefCell};
@@ -51,7 +55,8 @@ impl TrackedSet {
 pub trait EventEmitter<E: 'static>: 'static {}
 
 /// A handle to an [`observe`](App::observe) or [`subscribe`](App::subscribe). Drop cancels it.
-/// [`detach`](Self::detach) keeps the callback until the emitter is gone.
+/// [`detach`](Self::detach) keeps the callback until the emitter is gone, or, for one made through
+/// a [`Context`], the subscriber.
 #[must_use]
 pub struct Subscription {
     cancel: Option<Rc<Cell<bool>>>,
@@ -303,6 +308,7 @@ impl<T> Context<'_, T> {
         self.app.queue_entity_emit(id, event);
     }
 
+    /// Holds neither entity: the callback ends when either goes.
     pub fn observe<W: 'static>(
         &mut self,
         entity: &Entity<W>,
@@ -312,16 +318,17 @@ impl<T> Context<'_, T> {
         T: 'static,
     {
         let this = self.weak_entity();
-        let watched = entity.clone();
+        let watched = entity.downgrade();
         self.app.observe_entity_id(entity.entity_id(), move |app| {
-            let Some(this) = this.upgrade() else {
+            let (Some(this), Some(watched)) = (this.upgrade(), watched.upgrade()) else {
                 return false;
             };
-            this.update(app, |this, cx| on_notify(this, watched.clone(), cx));
+            this.update(app, |this, cx| on_notify(this, watched, cx));
             true
         })
     }
 
+    /// Holds neither entity: the callback ends when either goes.
     pub fn subscribe<W, E>(
         &mut self,
         entity: &Entity<W>,
@@ -333,16 +340,16 @@ impl<T> Context<'_, T> {
         E: 'static,
     {
         let this = self.weak_entity();
-        let watched = entity.clone();
+        let watched = entity.downgrade();
         self.app
             .subscribe_entity_id(entity.entity_id(), TypeId::of::<E>(), move |app, event| {
-                let Some(this) = this.upgrade() else {
+                let (Some(this), Some(watched)) = (this.upgrade(), watched.upgrade()) else {
                     return false;
                 };
                 let event = event
                     .downcast_ref::<E>()
                     .expect("subscriber event type matches the emitter");
-                this.update(app, |this, cx| on_event(this, watched.clone(), event, cx));
+                this.update(app, |this, cx| on_event(this, watched, event, cx));
                 true
             })
     }
@@ -639,21 +646,34 @@ impl App {
         }
     }
 
+    /// Releases every entity whose last handle dropped, again until none is left: a released
+    /// value or callback can hold the last handle of another.
     fn release_dropped_entities(&mut self) {
-        for id in self.entities.dropped.take() {
-            if self
-                .entities
-                .slots
-                .get(id)
-                .is_some_and(|slot| slot.keep.upgrade().is_some())
-            {
-                continue;
+        loop {
+            let dropped = self.entities.dropped.take();
+            if dropped.is_empty() {
+                break;
             }
-            self.entities.slots.remove(id);
-            self.entities.observers.remove(&id);
-            self.entities.event_listeners.remove(&id);
-            self.entities.pending_notifications.remove(&id);
+            for id in dropped {
+                self.release_entity(id);
+            }
         }
+    }
+
+    /// Drops the entity with every observer and listener registered on it.
+    fn release_entity(&mut self, id: EntityId) {
+        if self
+            .entities
+            .slots
+            .get(id)
+            .is_some_and(|slot| slot.keep.upgrade().is_some())
+        {
+            return;
+        }
+        self.entities.slots.remove(id);
+        self.entities.observers.remove(&id);
+        self.entities.event_listeners.remove(&id);
+        self.entities.pending_notifications.remove(&id);
     }
 
     fn reserve_entity<T: 'static>(&mut self) -> Entity<T> {
@@ -894,5 +914,79 @@ mod tests {
         drop(sub);
         counter.update(&mut app, |_c, cx| cx.notify());
         assert_eq!(seen.get(), 1);
+    }
+
+    #[test]
+    fn an_observed_entity_goes_with_its_last_handle() {
+        assert_a_watched_counter_goes_with_its_last_handle(observe_counter, Subscription::detach);
+        assert_a_watched_counter_goes_with_its_last_handle(observe_counter, drop);
+    }
+
+    #[test]
+    fn a_subscribed_entity_goes_with_its_last_handle() {
+        assert_a_watched_counter_goes_with_its_last_handle(
+            subscribe_to_counter,
+            Subscription::detach,
+        );
+        assert_a_watched_counter_goes_with_its_last_handle(subscribe_to_counter, drop);
+    }
+
+    #[test]
+    fn an_entity_only_a_released_one_held_goes_in_the_same_flush() {
+        struct Holder {
+            _counter: Entity<Counter>,
+        }
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let counter = app.new_entity(|_cx| Counter { count: 0 });
+        let _doubler = app.new_entity(|cx| {
+            observe_counter(cx, &counter).detach();
+            Doubler { count: 0 }
+        });
+        let counter_id = counter.entity_id();
+        assert!(registered_on(&app, counter_id));
+        let holder = app.new_entity(|_cx| Holder { _counter: counter });
+        drop(holder);
+        app.flush_entity_effects();
+        assert!(is_released(&app, counter_id));
+    }
+
+    fn observe_counter(cx: &mut Context<Doubler>, counter: &Entity<Counter>) -> Subscription {
+        cx.observe(counter, |_doubler, _counter, _cx| {})
+    }
+
+    fn subscribe_to_counter(cx: &mut Context<Doubler>, counter: &Entity<Counter>) -> Subscription {
+        cx.subscribe(counter, |_doubler, _counter, _event: &Changed, _cx| {})
+    }
+
+    /// A doubler watches a counter through `watch` and ends the subscription with `end`; letting
+    /// go of the counter releases it with what was registered on it, while the doubler lives.
+    fn assert_a_watched_counter_goes_with_its_last_handle(
+        watch: fn(&mut Context<Doubler>, &Entity<Counter>) -> Subscription,
+        end: fn(Subscription),
+    ) {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let counter = app.new_entity(|_cx| Counter { count: 0 });
+        let _doubler = app.new_entity(|cx| {
+            end(watch(cx, &counter));
+            Doubler { count: 0 }
+        });
+        let counter_id = counter.entity_id();
+        assert!(registered_on(&app, counter_id));
+        let weak_counter = counter.downgrade();
+        drop(counter);
+        app.flush_entity_effects();
+        assert!(weak_counter.upgrade().is_none());
+        assert!(is_released(&app, counter_id));
+    }
+
+    /// Whether nothing of the entity is left: neither its slot nor what was registered on it.
+    fn is_released(app: &App, id: EntityId) -> bool {
+        !app.entities.slots.contains_key(id) && !registered_on(app, id)
+    }
+
+    fn registered_on(app: &App, id: EntityId) -> bool {
+        app.entities.observers.contains_key(&id) || app.entities.event_listeners.contains_key(&id)
     }
 }
