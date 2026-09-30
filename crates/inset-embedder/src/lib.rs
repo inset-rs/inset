@@ -50,10 +50,11 @@ pub use mouse_cursor::SystemMouseCursorKind;
 pub use painting::*;
 pub use paragraph::*;
 pub use platform::{
-    AppExitResponse, AppLifecycleState, ApplicationSwitcherDescription, Brightness, Clipboard,
-    Dispatcher, Frame, HapticFeedbackType, Haptics, InertDispatcher, InertPlatform, MouseCursor,
-    Platform, PlatformRef, PopupMenuEntry, PopupMenus, Restoration, SystemChrome,
-    SystemContextMenu, SystemUiOverlayStyle, TargetPlatform, TextServices, ViewRef,
+    AppExit, AppExitFuture, AppExitResponse, AppExitType, AppLifecycleState,
+    ApplicationSwitcherDescription, Brightness, Clipboard, ClipboardHasStringsFuture,
+    ClipboardTextFuture, Dispatcher, Frame, HapticFeedbackType, Haptics, InertDispatcher,
+    InertPlatform, MouseCursor, Platform, PlatformRef, PopupMenuEntry, PopupMenus, Restoration,
+    SystemChrome, SystemContextMenu, SystemUiOverlayStyle, TargetPlatform, TextServices, ViewRef,
 };
 pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,

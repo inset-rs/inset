@@ -1734,6 +1734,7 @@ impl StatefulWidget for EditableText {
             has_focus: false,
             next_focus_change_is_internal: false,
             selection_overlay: None,
+            render_editable: Cell::new(None),
         }
     }
 }
@@ -1887,6 +1888,10 @@ pub struct EditableTextState {
     has_focus: bool,
     next_focus_change_is_internal: bool,
     selection_overlay: Option<Handle<TextSelectionOverlay>>,
+    /// Dart's `late final renderEditable`, found on its first read and kept, so a composition
+    /// callback of the detaching layer, which runs while the element is inactive, finds it
+    /// detached rather than looking for it through an inactive element.
+    render_editable: Cell<Option<RenderHandle<RenderEditable>>>,
 }
 
 impl Debug for EditableTextState {
@@ -1908,11 +1913,17 @@ impl EditableTextState {
 
     /// The [`RenderEditable`] this state created.
     pub fn render_editable(self: Handle<Self>, app: &App) -> RenderHandle<RenderEditable> {
+        if let Some(render_editable) = app.get(self).render_editable.get() {
+            return render_editable;
+        }
         let object = self
             .context(app)
             .find_render_object(app)
             .expect("EditableText has a render object");
-        find_render_editable(app, object).expect("EditableText should mount a RenderEditable")
+        let render_editable =
+            find_render_editable(app, object).expect("EditableText should mount a RenderEditable");
+        app.get(self).render_editable.set(Some(render_editable));
+        render_editable
     }
 
     /// Gets the line heights at the start and end of the selection.
@@ -3969,7 +3980,9 @@ impl EditableTextState {
         app: &mut App,
         _duration: Duration,
     ) {
-        if !self.has_input_connection(app) {
+        // Not in Dart: a disposed state's handle is gone, where Dart's disposed state has no
+        // input connection and stops below.
+        if !app.contains(self) || !self.has_input_connection(app) {
             return;
         }
         // `_updateSelectionRects` waits with scribble (PORTING.md).
@@ -5034,13 +5047,17 @@ impl TextSelectionDelegate for EditableTextState {
         if !self.allow_paste(app) {
             return;
         }
-        let Some(data) = Clipboard::get_data(app, Clipboard::K_TEXT_PLAIN) else {
-            return;
-        };
-        let Some(text) = data.text else {
-            return;
-        };
-        self.paste_text_content(app, cause, &text);
+        let data = Clipboard::get_data(app, Clipboard::K_TEXT_PLAIN);
+        app.spawn(async move |cx| {
+            let Some(text) = data.await.and_then(|data| data.text) else {
+                return;
+            };
+            cx.update(|app| {
+                if self.mounted(app) {
+                    self.paste_text_content(app, cause, &text);
+                }
+            });
+        });
     }
 
     fn select_all(self: Handle<Self>, app: &mut App, cause: SelectionChangedCause) {
@@ -6054,5 +6071,63 @@ mod tests {
             size.width() > 0.0 && size.height() > 0.0,
             "RenderEditable should have a size, got {size:?}"
         );
+    }
+
+    #[test]
+    fn a_focused_field_leaves_the_tree_without_its_callbacks_outliving_it() {
+        use crate::{ListenableBuilder, SizedBox, primary_focus, run_app};
+        use inset_embedder::TargetPlatform;
+        use inset_foundation::ValueNotifier;
+        use inset_test::{TestPlatform, TestView};
+
+        let platform = TestPlatform::new()
+            .on(TargetPlatform::MacOS)
+            .with_view(Rc::new(TestView::new(300.0, 200.0)));
+        let cell = AppCell::with_platform(Rc::new(platform));
+        let shown = {
+            let mut app = cell.borrow_mut();
+            install_fonts(&mut app);
+            let shown = app.create(ValueNotifier::new(true));
+            let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
+            let focus_node = FocusNode::new(&mut app);
+            let field = ListenableBuilder::new(Rc::new(shown), move |app, _, _| {
+                if !*app.get(shown).value() {
+                    return SizedBox::shrink().into_widget();
+                }
+                EditableText::new(
+                    controller,
+                    focus_node,
+                    TextStyle::new(),
+                    Color::from_argb(255, 0, 0, 0),
+                    Color::from_argb(255, 128, 128, 128),
+                )
+                .autofocus(true)
+                .into_widget()
+            });
+            run_app(
+                &mut app,
+                Directionality::new(TextDirection::Ltr, field).into_widget(),
+            );
+            shown
+        };
+        cell.elapse(Duration::ZERO);
+        let mut at = Duration::ZERO;
+        let mut pump = |cell: &AppCell| {
+            for _ in 0..5 {
+                at += Duration::from_millis(20);
+                let mut app = cell.borrow_mut();
+                SchedulerBinding::handle_begin_frame(&mut app, Some(at));
+                app.drain_microtasks();
+                SchedulerBinding::handle_draw_frame(&mut app);
+                app.drain_microtasks();
+            }
+        };
+        pump(&cell);
+        assert!(
+            primary_focus(&mut cell.borrow_mut()).is_some(),
+            "the field took the focus and opened its input connection"
+        );
+        shown.set_value(&mut cell.borrow_mut(), false);
+        pump(&cell);
     }
 }

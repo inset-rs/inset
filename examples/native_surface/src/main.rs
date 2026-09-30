@@ -2,11 +2,14 @@
 //! into three IOSurfaces in turn, one frame at each vsync of the window's display, and
 //! presents them to a `SurfaceView`; a label the framework paints above the surface shows that
 //! its own content stays on top. Once a second the producer prints what it counted, so the
-//! compositor can be checked without looking.
+//! compositor can be checked without looking. `--scale` draws the surface and its label through
+//! a transform that scales them about their middle: at 0.5 the whole buffer shows, at half its
+//! size, inside a frame half as big.
 //!
 //! ```text
 //! cargo run -p native_surface
 //! cargo run -p native_surface -- --exit-after 5
+//! cargo run -p native_surface -- --scale 0.5
 //! ```
 
 #[cfg(target_os = "macos")]
@@ -18,7 +21,7 @@ mod producer;
 
 #[cfg(target_os = "macos")]
 fn main() {
-    app::run(exit_after());
+    app::run(exit_after(), scale());
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -29,12 +32,22 @@ fn main() {
 /// `--exit-after SECONDS`, for a smoke run nobody closes.
 #[cfg(target_os = "macos")]
 fn exit_after() -> Option<std::time::Duration> {
-    let mut args = std::env::args()
-        .skip_while(|arg| arg != "--exit-after")
-        .skip(1);
-    let seconds = args
-        .next()?
+    let seconds = argument_after("--exit-after")?
         .parse()
         .expect("--exit-after takes a number of seconds");
     Some(std::time::Duration::from_secs(seconds))
+}
+
+/// `--scale FACTOR`, what the surface and its label are scaled by; 1 without it.
+#[cfg(target_os = "macos")]
+fn scale() -> f64 {
+    argument_after("--scale").map_or(1.0, |factor| {
+        factor.parse().expect("--scale takes a number, such as 0.5")
+    })
+}
+
+/// The command line's argument after `flag`, where it has one.
+#[cfg(target_os = "macos")]
+fn argument_after(flag: &str) -> Option<String> {
+    std::env::args().skip_while(|arg| arg != flag).nth(1)
 }

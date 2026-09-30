@@ -1,7 +1,8 @@
 //! Flutter counterpart: `widgets/gesture_detector.dart`.
 //!
 //! The recognizer factories, [`RawGestureDetector`] with its state, and [`GestureDetector`]
-//! over the recognizers ported so far (tap, long press, horizontal drag). The semantics half
+//! over the recognizers ported so far (tap, long press, vertical and horizontal drag, pan, scale).
+//! The semantics half
 //! (`excludeFromSemantics`, `semantics`, `SemanticsGestureDelegate`, `_GestureSemantics`) is
 //! accessibility and waits.
 
@@ -11,7 +12,7 @@ use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::rc::Rc;
 
-use inset_embedder::PointerDeviceKind;
+use inset_embedder::{Offset, PointerDeviceKind};
 use inset_foundation::{App, Handle};
 use inset_gestures::{
     AnyGestureRecognizer, DeviceGestureSettings, DragGestureRecognizer, DragStartBehavior,
@@ -19,9 +20,13 @@ use inset_gestures::{
     GestureDragStartCallback, GestureDragUpdateCallback, GestureLongPressCallback,
     GestureLongPressCancelCallback, GestureLongPressDownCallback, GestureLongPressEndCallback,
     GestureLongPressMoveUpdateCallback, GestureLongPressStartCallback, GestureLongPressUpCallback,
-    GestureRecognizerLeaf, GestureTapCallback, GestureTapCancelCallback, GestureTapDownCallback,
-    GestureTapMoveCallback, GestureTapUpCallback, HorizontalDragGestureRecognizer,
-    LongPressGestureRecognizer, PointerDownEvent, PointerPanZoomStartEvent, TapGestureRecognizer,
+    GestureRecognizerLeaf, GestureScaleEndCallback, GestureScaleStartCallback,
+    GestureScaleUpdateCallback, GestureTapCallback, GestureTapCancelCallback,
+    GestureTapDownCallback, GestureTapMoveCallback, GestureTapUpCallback,
+    HorizontalDragGestureRecognizer, K_DEFAULT_TRACKPAD_SCROLL_TO_SCALE_FACTOR,
+    LongPressGestureRecognizer, MultitouchDragStrategy, PanGestureRecognizer, PointerDownEvent,
+    PointerPanZoomStartEvent, ScaleGestureRecognizer, TapGestureRecognizer,
+    VerticalDragGestureRecognizer,
 };
 use inset_rendering::HitTestBehavior;
 
@@ -30,6 +35,7 @@ use crate::framework::{
 };
 use crate::widgets::basic::Listener;
 use crate::widgets::media_query::MediaQuery;
+use crate::widgets::scroll_configuration::ScrollConfiguration;
 
 /// Factory for creating gesture recognizers.
 ///
@@ -204,7 +210,7 @@ impl<T, F> Debug for TypedGestureRecognizerFactory<T, F> {
 ///  * `MouseRegion`, a widget that tracks the movement of mice, even when no
 ///    button is pressed.
 ///  * [`RawGestureDetector`], a widget that is used to detect custom gestures.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct GestureDetector {
     pub key: Option<KeyRef>,
 
@@ -705,6 +711,47 @@ pub struct GestureDetector {
     pub on_tertiary_long_press_end: Option<GestureLongPressEndCallback>,
 
     /// A pointer has contacted the screen with a primary button and might begin
+    /// to move vertically.
+    ///
+    /// See also:
+    ///
+    ///  * `K_PRIMARY_BUTTON`, the button this callback responds to.
+    pub on_vertical_drag_down: Option<GestureDragDownCallback>,
+
+    /// A pointer has contacted the screen with a primary button and has begun to
+    /// move vertically.
+    ///
+    /// See also:
+    ///
+    ///  * `K_PRIMARY_BUTTON`, the button this callback responds to.
+    pub on_vertical_drag_start: Option<GestureDragStartCallback>,
+
+    /// A pointer that is in contact with the screen with a primary button and
+    /// moving vertically has moved in the vertical direction.
+    ///
+    /// See also:
+    ///
+    ///  * `K_PRIMARY_BUTTON`, the button this callback responds to.
+    pub on_vertical_drag_update: Option<GestureDragUpdateCallback>,
+
+    /// A pointer that was previously in contact with the screen with a primary
+    /// button and moving vertically is no longer in contact with the screen and
+    /// was moving at a specific velocity when it stopped contacting the screen.
+    ///
+    /// See also:
+    ///
+    ///  * `K_PRIMARY_BUTTON`, the button this callback responds to.
+    pub on_vertical_drag_end: Option<GestureDragEndCallback>,
+
+    /// The pointer that previously triggered [`on_vertical_drag_down`](Self::on_vertical_drag_down)
+    /// did not complete.
+    ///
+    /// See also:
+    ///
+    ///  * `K_PRIMARY_BUTTON`, the button this callback responds to.
+    pub on_vertical_drag_cancel: Option<GestureDragCancelCallback>,
+
+    /// A pointer has contacted the screen with a primary button and might begin
     /// to move horizontally.
     pub on_horizontal_drag_down: Option<GestureDragDownCallback>,
 
@@ -724,6 +771,57 @@ pub struct GestureDetector {
     /// The pointer that previously triggered [`on_horizontal_drag_down`](Self::on_horizontal_drag_down)
     /// did not complete.
     pub on_horizontal_drag_cancel: Option<GestureDragCancelCallback>,
+
+    /// A pointer has contacted the screen with a primary button and might begin
+    /// to move.
+    ///
+    /// See also:
+    ///
+    ///  * `K_PRIMARY_BUTTON`, the button this callback responds to.
+    pub on_pan_down: Option<GestureDragDownCallback>,
+
+    /// A pointer has contacted the screen with a primary button and has begun to
+    /// move.
+    ///
+    /// See also:
+    ///
+    ///  * `K_PRIMARY_BUTTON`, the button this callback responds to.
+    pub on_pan_start: Option<GestureDragStartCallback>,
+
+    /// A pointer that is in contact with the screen with a primary button and
+    /// moving has moved again.
+    ///
+    /// See also:
+    ///
+    ///  * `K_PRIMARY_BUTTON`, the button this callback responds to.
+    pub on_pan_update: Option<GestureDragUpdateCallback>,
+
+    /// A pointer that was previously in contact with the screen with a primary
+    /// button and moving is no longer in contact with the screen and was moving
+    /// at a specific velocity when it stopped contacting the screen.
+    ///
+    /// See also:
+    ///
+    ///  * `K_PRIMARY_BUTTON`, the button this callback responds to.
+    pub on_pan_end: Option<GestureDragEndCallback>,
+
+    /// The pointer that previously triggered [`on_pan_down`](Self::on_pan_down) did not complete.
+    ///
+    /// See also:
+    ///
+    ///  * `K_PRIMARY_BUTTON`, the button this callback responds to.
+    pub on_pan_cancel: Option<GestureDragCancelCallback>,
+
+    /// The pointers in contact with the screen have established a focal point and
+    /// initial scale of 1.0.
+    pub on_scale_start: Option<GestureScaleStartCallback>,
+
+    /// The pointers in contact with the screen have indicated a new focal point
+    /// and/or scale.
+    pub on_scale_update: Option<GestureScaleUpdateCallback>,
+
+    /// The pointers are no longer in contact with the screen.
+    pub on_scale_end: Option<GestureScaleEndCallback>,
 
     /// Determines the way that drag start behavior is handled.
     ///
@@ -753,6 +851,87 @@ pub struct GestureDetector {
     /// If set to `None`, events from all device types will be recognized. Defaults to
     /// `None`.
     pub supported_devices: Option<HashSet<PointerDeviceKind>>,
+
+    /// Whether scrolling up/down on a trackpad should cause scaling instead of
+    /// panning.
+    ///
+    /// Defaults to false.
+    pub trackpad_scroll_causes_scale: bool,
+
+    /// A factor to control the direction and magnitude of scale when converting
+    /// trackpad scrolling.
+    ///
+    /// Incoming trackpad pan offsets will be divided by this factor to get scale
+    /// values. Increasing this offset will reduce the amount of scaling caused by
+    /// a fixed amount of trackpad scrolling.
+    ///
+    /// Defaults to [`K_DEFAULT_TRACKPAD_SCROLL_TO_SCALE_FACTOR`].
+    pub trackpad_scroll_to_scale_factor: Offset,
+}
+
+impl Default for GestureDetector {
+    fn default() -> GestureDetector {
+        GestureDetector {
+            key: None,
+            child: None,
+            on_tap_down: None,
+            on_tap_up: None,
+            on_tap: None,
+            on_tap_move: None,
+            on_tap_cancel: None,
+            on_secondary_tap: None,
+            on_secondary_tap_down: None,
+            on_secondary_tap_up: None,
+            on_secondary_tap_cancel: None,
+            on_tertiary_tap_down: None,
+            on_tertiary_tap_up: None,
+            on_tertiary_tap_cancel: None,
+            on_long_press_down: None,
+            on_long_press_cancel: None,
+            on_long_press: None,
+            on_long_press_start: None,
+            on_long_press_move_update: None,
+            on_long_press_up: None,
+            on_long_press_end: None,
+            on_secondary_long_press_down: None,
+            on_secondary_long_press_cancel: None,
+            on_secondary_long_press: None,
+            on_secondary_long_press_start: None,
+            on_secondary_long_press_move_update: None,
+            on_secondary_long_press_up: None,
+            on_secondary_long_press_end: None,
+            on_tertiary_long_press_down: None,
+            on_tertiary_long_press_cancel: None,
+            on_tertiary_long_press: None,
+            on_tertiary_long_press_start: None,
+            on_tertiary_long_press_move_update: None,
+            on_tertiary_long_press_up: None,
+            on_tertiary_long_press_end: None,
+            on_vertical_drag_down: None,
+            on_vertical_drag_start: None,
+            on_vertical_drag_update: None,
+            on_vertical_drag_end: None,
+            on_vertical_drag_cancel: None,
+            on_horizontal_drag_down: None,
+            on_horizontal_drag_start: None,
+            on_horizontal_drag_update: None,
+            on_horizontal_drag_end: None,
+            on_horizontal_drag_cancel: None,
+            on_pan_down: None,
+            on_pan_start: None,
+            on_pan_update: None,
+            on_pan_end: None,
+            on_pan_cancel: None,
+            on_scale_start: None,
+            on_scale_update: None,
+            on_scale_end: None,
+            drag_start_behavior: DragStartBehavior::Start,
+            behavior: None,
+            supported_devices: None,
+            trackpad_scroll_causes_scale: false,
+            trackpad_scroll_to_scale_factor: K_DEFAULT_TRACKPAD_SCROLL_TO_SCALE_FACTOR,
+        }
+    }
 }
 
 impl GestureDetector {
@@ -1049,6 +1228,54 @@ impl GestureDetector {
         self
     }
 
+    /// Dart `GestureDetector(on_vertical_drag_down:)`.
+    pub fn on_vertical_drag_down(
+        mut self,
+        on_vertical_drag_down: GestureDragDownCallback,
+    ) -> GestureDetector {
+        self.on_vertical_drag_down = Some(on_vertical_drag_down);
+        self
+    }
+
+    /// Dart `GestureDetector(on_vertical_drag_start:)`.
+    pub fn on_vertical_drag_start(
+        mut self,
+        on_vertical_drag_start: GestureDragStartCallback,
+    ) -> GestureDetector {
+        self.on_vertical_drag_start = Some(on_vertical_drag_start);
+        self.debug_assert_gestures_are_consistent();
+        self
+    }
+
+    /// Dart `GestureDetector(on_vertical_drag_update:)`.
+    pub fn on_vertical_drag_update(
+        mut self,
+        on_vertical_drag_update: GestureDragUpdateCallback,
+    ) -> GestureDetector {
+        self.on_vertical_drag_update = Some(on_vertical_drag_update);
+        self.debug_assert_gestures_are_consistent();
+        self
+    }
+
+    /// Dart `GestureDetector(on_vertical_drag_end:)`.
+    pub fn on_vertical_drag_end(
+        mut self,
+        on_vertical_drag_end: GestureDragEndCallback,
+    ) -> GestureDetector {
+        self.on_vertical_drag_end = Some(on_vertical_drag_end);
+        self.debug_assert_gestures_are_consistent();
+        self
+    }
+
+    /// Dart `GestureDetector(on_vertical_drag_cancel:)`.
+    pub fn on_vertical_drag_cancel(
+        mut self,
+        on_vertical_drag_cancel: GestureDragCancelCallback,
+    ) -> GestureDetector {
+        self.on_vertical_drag_cancel = Some(on_vertical_drag_cancel);
+        self
+    }
+
     /// Dart `GestureDetector(on_horizontal_drag_down:)`.
     pub fn on_horizontal_drag_down(
         mut self,
@@ -1064,6 +1291,7 @@ impl GestureDetector {
         on_horizontal_drag_start: GestureDragStartCallback,
     ) -> GestureDetector {
         self.on_horizontal_drag_start = Some(on_horizontal_drag_start);
+        self.debug_assert_gestures_are_consistent();
         self
     }
 
@@ -1073,6 +1301,7 @@ impl GestureDetector {
         on_horizontal_drag_update: GestureDragUpdateCallback,
     ) -> GestureDetector {
         self.on_horizontal_drag_update = Some(on_horizontal_drag_update);
+        self.debug_assert_gestures_are_consistent();
         self
     }
 
@@ -1082,6 +1311,7 @@ impl GestureDetector {
         on_horizontal_drag_end: GestureDragEndCallback,
     ) -> GestureDetector {
         self.on_horizontal_drag_end = Some(on_horizontal_drag_end);
+        self.debug_assert_gestures_are_consistent();
         self
     }
 
@@ -1091,6 +1321,63 @@ impl GestureDetector {
         on_horizontal_drag_cancel: GestureDragCancelCallback,
     ) -> GestureDetector {
         self.on_horizontal_drag_cancel = Some(on_horizontal_drag_cancel);
+        self
+    }
+
+    /// Dart `GestureDetector(on_pan_down:)`.
+    pub fn on_pan_down(mut self, on_pan_down: GestureDragDownCallback) -> GestureDetector {
+        self.on_pan_down = Some(on_pan_down);
+        self
+    }
+
+    /// Dart `GestureDetector(on_pan_start:)`.
+    pub fn on_pan_start(mut self, on_pan_start: GestureDragStartCallback) -> GestureDetector {
+        self.on_pan_start = Some(on_pan_start);
+        self.debug_assert_gestures_are_consistent();
+        self
+    }
+
+    /// Dart `GestureDetector(on_pan_update:)`.
+    pub fn on_pan_update(mut self, on_pan_update: GestureDragUpdateCallback) -> GestureDetector {
+        self.on_pan_update = Some(on_pan_update);
+        self.debug_assert_gestures_are_consistent();
+        self
+    }
+
+    /// Dart `GestureDetector(on_pan_end:)`.
+    pub fn on_pan_end(mut self, on_pan_end: GestureDragEndCallback) -> GestureDetector {
+        self.on_pan_end = Some(on_pan_end);
+        self.debug_assert_gestures_are_consistent();
+        self
+    }
+
+    /// Dart `GestureDetector(on_pan_cancel:)`.
+    pub fn on_pan_cancel(mut self, on_pan_cancel: GestureDragCancelCallback) -> GestureDetector {
+        self.on_pan_cancel = Some(on_pan_cancel);
+        self
+    }
+
+    /// Dart `GestureDetector(on_scale_start:)`.
+    pub fn on_scale_start(mut self, on_scale_start: GestureScaleStartCallback) -> GestureDetector {
+        self.on_scale_start = Some(on_scale_start);
+        self.debug_assert_gestures_are_consistent();
+        self
+    }
+
+    /// Dart `GestureDetector(on_scale_update:)`.
+    pub fn on_scale_update(
+        mut self,
+        on_scale_update: GestureScaleUpdateCallback,
+    ) -> GestureDetector {
+        self.on_scale_update = Some(on_scale_update);
+        self.debug_assert_gestures_are_consistent();
+        self
+    }
+
+    /// Dart `GestureDetector(on_scale_end:)`.
+    pub fn on_scale_end(mut self, on_scale_end: GestureScaleEndCallback) -> GestureDetector {
+        self.on_scale_end = Some(on_scale_end);
+        self.debug_assert_gestures_are_consistent();
         self
     }
 
@@ -1116,6 +1403,60 @@ impl GestureDetector {
     ) -> GestureDetector {
         self.supported_devices = Some(supported_devices);
         self
+    }
+
+    /// Dart `GestureDetector(trackpad_scroll_causes_scale:)`.
+    pub fn trackpad_scroll_causes_scale(
+        mut self,
+        trackpad_scroll_causes_scale: bool,
+    ) -> GestureDetector {
+        self.trackpad_scroll_causes_scale = trackpad_scroll_causes_scale;
+        self
+    }
+
+    /// Dart `GestureDetector(trackpad_scroll_to_scale_factor:)`.
+    pub fn trackpad_scroll_to_scale_factor(
+        mut self,
+        trackpad_scroll_to_scale_factor: Offset,
+    ) -> GestureDetector {
+        self.trackpad_scroll_to_scale_factor = trackpad_scroll_to_scale_factor;
+        self
+    }
+
+    /// Dart's constructor assert: a pan or scale recognizer is redundant with a scale one,
+    /// and ignored beside both drag axes.
+    fn debug_assert_gestures_are_consistent(&self) {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+        let have_vertical_drag = self.on_vertical_drag_start.is_some()
+            || self.on_vertical_drag_update.is_some()
+            || self.on_vertical_drag_end.is_some();
+        let have_horizontal_drag = self.on_horizontal_drag_start.is_some()
+            || self.on_horizontal_drag_update.is_some()
+            || self.on_horizontal_drag_end.is_some();
+        let have_pan = self.on_pan_start.is_some()
+            || self.on_pan_update.is_some()
+            || self.on_pan_end.is_some();
+        let have_scale = self.on_scale_start.is_some()
+            || self.on_scale_update.is_some()
+            || self.on_scale_end.is_some();
+        if have_pan || have_scale {
+            assert!(
+                !(have_pan && have_scale),
+                "Incorrect GestureDetector arguments.\nHaving both a pan gesture recognizer and a \
+                 scale gesture recognizer is redundant; scale is a superset of pan.\nJust use the \
+                 scale gesture recognizer."
+            );
+            let recognizer = if have_pan { "pan" } else { "scale" };
+            assert!(
+                !(have_vertical_drag && have_horizontal_drag),
+                "Incorrect GestureDetector arguments.\nSimultaneously having a vertical drag \
+                 gesture recognizer, a horizontal drag gesture recognizer, and a {recognizer} \
+                 gesture recognizer will result in the {recognizer} gesture recognizer being \
+                 ignored, since the other two will catch all drags."
+            );
+        }
     }
 
     fn has_tap_callback(&self) -> bool {
@@ -1156,12 +1497,34 @@ impl GestureDetector {
             || self.on_tertiary_long_press_end.is_some()
     }
 
+    fn has_vertical_drag_callback(&self) -> bool {
+        self.on_vertical_drag_down.is_some()
+            || self.on_vertical_drag_start.is_some()
+            || self.on_vertical_drag_update.is_some()
+            || self.on_vertical_drag_end.is_some()
+            || self.on_vertical_drag_cancel.is_some()
+    }
+
     fn has_horizontal_drag_callback(&self) -> bool {
         self.on_horizontal_drag_down.is_some()
             || self.on_horizontal_drag_start.is_some()
             || self.on_horizontal_drag_update.is_some()
             || self.on_horizontal_drag_end.is_some()
             || self.on_horizontal_drag_cancel.is_some()
+    }
+
+    fn has_pan_callback(&self) -> bool {
+        self.on_pan_down.is_some()
+            || self.on_pan_start.is_some()
+            || self.on_pan_update.is_some()
+            || self.on_pan_end.is_some()
+            || self.on_pan_cancel.is_some()
+    }
+
+    fn has_scale_callback(&self) -> bool {
+        self.on_scale_start.is_some()
+            || self.on_scale_update.is_some()
+            || self.on_scale_end.is_some()
     }
 
     /// The `TapGestureRecognizer` factory of Dart's `build`; the closures capture the
@@ -1264,10 +1627,40 @@ impl GestureDetector {
         .into_factory()
     }
 
+    /// The `VerticalDragGestureRecognizer` factory of Dart's `build`.
+    fn vertical_drag_factory(
+        &self,
+        gesture_settings: Option<DeviceGestureSettings>,
+        multitouch_drag_strategy: MultitouchDragStrategy,
+    ) -> GestureRecognizerFactoryRef {
+        let this = self.clone();
+        let constructed = self.clone();
+        GestureRecognizerFactoryWithHandlers::<VerticalDragGestureRecognizer>::new(
+            move |app| {
+                let instance = VerticalDragGestureRecognizer::new(app);
+                instance.set_supported_devices(app, constructed.supported_devices.clone());
+                instance
+            },
+            move |app, instance| {
+                instance.set_on_down(app, this.on_vertical_drag_down.clone());
+                instance.set_on_start(app, this.on_vertical_drag_start.clone());
+                instance.set_on_update(app, this.on_vertical_drag_update.clone());
+                instance.set_on_end(app, this.on_vertical_drag_end.clone());
+                instance.set_on_cancel(app, this.on_vertical_drag_cancel.clone());
+                instance.set_drag_start_behavior(app, this.drag_start_behavior);
+                instance.set_multitouch_drag_strategy(app, multitouch_drag_strategy);
+                instance.set_gesture_settings(app, gesture_settings);
+                instance.set_supported_devices(app, this.supported_devices.clone());
+            },
+        )
+        .into_factory()
+    }
+
     /// The `HorizontalDragGestureRecognizer` factory of Dart's `build`.
     fn horizontal_drag_factory(
         &self,
         gesture_settings: Option<DeviceGestureSettings>,
+        multitouch_drag_strategy: MultitouchDragStrategy,
     ) -> GestureRecognizerFactoryRef {
         let this = self.clone();
         let constructed = self.clone();
@@ -1284,7 +1677,65 @@ impl GestureDetector {
                 instance.set_on_end(app, this.on_horizontal_drag_end.clone());
                 instance.set_on_cancel(app, this.on_horizontal_drag_cancel.clone());
                 instance.set_drag_start_behavior(app, this.drag_start_behavior);
+                instance.set_multitouch_drag_strategy(app, multitouch_drag_strategy);
                 instance.set_gesture_settings(app, gesture_settings);
+                instance.set_supported_devices(app, this.supported_devices.clone());
+            },
+        )
+        .into_factory()
+    }
+
+    /// The `PanGestureRecognizer` factory of Dart's `build`.
+    fn pan_factory(
+        &self,
+        gesture_settings: Option<DeviceGestureSettings>,
+        multitouch_drag_strategy: MultitouchDragStrategy,
+    ) -> GestureRecognizerFactoryRef {
+        let this = self.clone();
+        let constructed = self.clone();
+        GestureRecognizerFactoryWithHandlers::<PanGestureRecognizer>::new(
+            move |app| {
+                let instance = PanGestureRecognizer::new(app);
+                instance.set_supported_devices(app, constructed.supported_devices.clone());
+                instance
+            },
+            move |app, instance| {
+                instance.set_on_down(app, this.on_pan_down.clone());
+                instance.set_on_start(app, this.on_pan_start.clone());
+                instance.set_on_update(app, this.on_pan_update.clone());
+                instance.set_on_end(app, this.on_pan_end.clone());
+                instance.set_on_cancel(app, this.on_pan_cancel.clone());
+                instance.set_drag_start_behavior(app, this.drag_start_behavior);
+                instance.set_multitouch_drag_strategy(app, multitouch_drag_strategy);
+                instance.set_gesture_settings(app, gesture_settings);
+                instance.set_supported_devices(app, this.supported_devices.clone());
+            },
+        )
+        .into_factory()
+    }
+
+    /// The `ScaleGestureRecognizer` factory of Dart's `build`.
+    fn scale_factory(
+        &self,
+        gesture_settings: Option<DeviceGestureSettings>,
+    ) -> GestureRecognizerFactoryRef {
+        let this = self.clone();
+        let constructed = self.clone();
+        GestureRecognizerFactoryWithHandlers::<ScaleGestureRecognizer>::new(
+            move |app| {
+                let instance = ScaleGestureRecognizer::new(app);
+                instance.set_supported_devices(app, constructed.supported_devices.clone());
+                instance
+            },
+            move |app, instance| {
+                instance.set_on_start(app, this.on_scale_start.clone());
+                instance.set_on_update(app, this.on_scale_update.clone());
+                instance.set_on_end(app, this.on_scale_end.clone());
+                instance.set_drag_start_behavior(app, this.drag_start_behavior);
+                instance.set_gesture_settings(app, gesture_settings);
+                instance.set_trackpad_scroll_causes_scale(app, this.trackpad_scroll_causes_scale);
+                instance
+                    .set_trackpad_scroll_to_scale_factor(app, this.trackpad_scroll_to_scale_factor);
                 instance.set_supported_devices(app, this.supported_devices.clone());
             },
         )
@@ -1300,6 +1751,8 @@ impl StatelessWidget for GestureDetector {
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
         let mut gestures: GestureRecognizerFactories = Vec::new();
         let gesture_settings = MediaQuery::maybe_gesture_settings_of(app, context);
+        let configuration = ScrollConfiguration::of(app, context);
+        let multitouch_drag_strategy = configuration.get_multitouch_drag_strategy(app, context);
 
         if self.has_tap_callback() {
             gestures.push((
@@ -1315,10 +1768,31 @@ impl StatelessWidget for GestureDetector {
             ));
         }
 
+        if self.has_vertical_drag_callback() {
+            gestures.push((
+                TypeId::of::<VerticalDragGestureRecognizer>(),
+                self.vertical_drag_factory(gesture_settings, multitouch_drag_strategy),
+            ));
+        }
+
         if self.has_horizontal_drag_callback() {
             gestures.push((
                 TypeId::of::<HorizontalDragGestureRecognizer>(),
-                self.horizontal_drag_factory(gesture_settings),
+                self.horizontal_drag_factory(gesture_settings, multitouch_drag_strategy),
+            ));
+        }
+
+        if self.has_pan_callback() {
+            gestures.push((
+                TypeId::of::<PanGestureRecognizer>(),
+                self.pan_factory(gesture_settings, multitouch_drag_strategy),
+            ));
+        }
+
+        if self.has_scale_callback() {
+            gestures.push((
+                TypeId::of::<ScaleGestureRecognizer>(),
+                self.scale_factory(gesture_settings),
             ));
         }
 
@@ -1644,8 +2118,10 @@ mod tests {
     use inset_embedder::{Matrix4, Offset, SceneBuilder, Size, TextDirection, ViewId};
     use inset_foundation::{App, AppCell, Handle, HandleId, Listener};
     use inset_gestures::{
-        GestureBinding, GestureBindingOverridesObject, HitTestResult, K_LONG_PRESS_TIMEOUT,
-        PointerDownEvent, PointerEvent, PointerUpEvent, TapDownDetails, TapUpDetails,
+        DragEndDetails, DragStartDetails, DragUpdateDetails, GestureBinding,
+        GestureBindingOverridesObject, HitTestResult, K_LONG_PRESS_TIMEOUT, K_PRIMARY_BUTTON,
+        PointerDownEvent, PointerEvent, PointerMoveEvent, PointerUpEvent, ScaleEndDetails,
+        ScaleUpdateDetails, TapDownDetails, TapUpDetails,
     };
     use inset_rendering::{
         AnyRenderObject, BoxConstraints, RenderBox, RenderBoxData, RenderConstrainedBox,
@@ -2431,5 +2907,237 @@ mod tests {
             !app.contains(state),
             "the state slot is freed after dispose"
         );
+    }
+
+    // ---- the vertical drag, pan and scale callbacks ----
+
+    fn move_pointer(app: &mut App, pointer: i64, from: Offset, to: Offset) {
+        GestureBinding::instance(app).handle_pointer_event(
+            app,
+            PointerEvent::Move(PointerMoveEvent {
+                pointer,
+                position: to,
+                delta: to - from,
+                kind: PointerDeviceKind::Touch,
+                down: true,
+                buttons: K_PRIMARY_BUTTON,
+                ..PointerMoveEvent::default()
+            }),
+        );
+        app.drain_microtasks();
+    }
+
+    /// Dart's `Container(color: Color(0xFF00FF00))`. That one is hit by itself and this
+    /// box is not, so the detectors over it take the hit themselves, as `Opaque`.
+    fn green_box() -> Sized {
+        Sized {
+            size: Size::new(800.0, 600.0),
+        }
+    }
+
+    #[test]
+    fn uncontested_scrolls_start_immediately() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let did_start_drag = Rc::new(Cell::new(false));
+        let updated_drag_delta = Rc::new(Cell::new(None));
+        let did_end_drag = Rc::new(Cell::new(false));
+        let (started, updated, ended) = (
+            Rc::clone(&did_start_drag),
+            Rc::clone(&updated_drag_delta),
+            Rc::clone(&did_end_drag),
+        );
+        mount(
+            &mut app,
+            GestureDetector::new()
+                .on_vertical_drag_start(Rc::new(move |_app, _details: DragStartDetails| {
+                    started.set(true)
+                }))
+                .on_vertical_drag_update(Rc::new(move |_app, details: DragUpdateDetails| {
+                    updated.set(details.primary_delta)
+                }))
+                .on_vertical_drag_end(Rc::new(move |_app, _details: DragEndDetails| {
+                    ended.set(true)
+                }))
+                .behavior(HitTestBehavior::Opaque)
+                .child(green_box())
+                .into_widget(),
+        );
+        assert!(!did_start_drag.get());
+        assert_eq!(updated_drag_delta.get(), None);
+        assert!(!did_end_drag.get());
+
+        let first_location = Offset::new(10.0, 10.0);
+        press(&mut app, 7, first_location, PointerDeviceKind::Touch);
+        assert!(did_start_drag.replace(false));
+        assert_eq!(updated_drag_delta.get(), None);
+        assert!(!did_end_drag.get());
+
+        let second_location = Offset::new(10.0, 9.0);
+        move_pointer(&mut app, 7, first_location, second_location);
+        assert!(!did_start_drag.get());
+        assert_eq!(updated_drag_delta.take(), Some(-1.0));
+        assert!(!did_end_drag.get());
+
+        release(&mut app, 7, second_location, PointerDeviceKind::Touch);
+        assert!(!did_start_drag.get());
+        assert_eq!(updated_drag_delta.get(), None);
+        assert!(did_end_drag.replace(false));
+    }
+
+    #[test]
+    fn match_two_scroll_gestures_in_succession() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let gesture_count = Rc::new(Cell::new(0));
+        let drag_distance = Rc::new(Cell::new(0.0));
+
+        let down_location = Offset::new(10.0, 10.0);
+        // must be far enough to be more than kTouchSlop
+        let up_location = Offset::new(10.0, 50.0);
+
+        let (distance, count) = (Rc::clone(&drag_distance), Rc::clone(&gesture_count));
+        mount(
+            &mut app,
+            GestureDetector::new()
+                .drag_start_behavior(DragStartBehavior::Down)
+                .on_vertical_drag_update(Rc::new(move |_app, details: DragUpdateDetails| {
+                    distance.set(distance.get() + details.primary_delta.unwrap_or(0.0));
+                }))
+                .on_vertical_drag_end(Rc::new(move |_app, _details: DragEndDetails| {
+                    count.set(count.get() + 1);
+                }))
+                .on_horizontal_drag_update(Rc::new(|_app, _details: DragUpdateDetails| {
+                    panic!("gesture should not match");
+                }))
+                .on_horizontal_drag_end(Rc::new(|_app, _details: DragEndDetails| {
+                    panic!("gesture should not match");
+                }))
+                .behavior(HitTestBehavior::Opaque)
+                .child(green_box())
+                .into_widget(),
+        );
+
+        for _ in 0..2 {
+            press(&mut app, 7, down_location, PointerDeviceKind::Touch);
+            move_pointer(&mut app, 7, down_location, up_location);
+            release(&mut app, 7, up_location, PointerDeviceKind::Touch);
+        }
+
+        assert_eq!(gesture_count.get(), 2);
+        // delta between down and up, twice
+        assert_eq!(drag_distance.get(), 40.0 * 2.0);
+    }
+
+    #[test]
+    fn pan_does_not_crash() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let did_start_pan = Rc::new(Cell::new(false));
+        let pan_delta: Rc<Cell<Option<Offset>>> = Rc::new(Cell::new(None));
+        let did_end_pan = Rc::new(Cell::new(false));
+        let (started, delta, ended) = (
+            Rc::clone(&did_start_pan),
+            Rc::clone(&pan_delta),
+            Rc::clone(&did_end_pan),
+        );
+        mount(
+            &mut app,
+            GestureDetector::new()
+                .on_pan_start(Rc::new(move |_app, _details: DragStartDetails| {
+                    started.set(true)
+                }))
+                .on_pan_update(Rc::new(move |_app, details: DragUpdateDetails| {
+                    delta.set(Some(delta.get().unwrap_or(Offset::ZERO) + details.delta));
+                }))
+                .on_pan_end(Rc::new(move |_app, _details: DragEndDetails| {
+                    ended.set(true)
+                }))
+                .behavior(HitTestBehavior::Opaque)
+                .child(green_box())
+                .into_widget(),
+        );
+
+        assert!(!did_start_pan.get());
+        assert_eq!(pan_delta.get(), None);
+        assert!(!did_end_pan.get());
+
+        // `WidgetTester.dragFrom(Offset(10, 10), Offset(20, 30))`: through the top edge of
+        // the drag slop box, then the rest of the way.
+        let start = Offset::new(10.0, 10.0);
+        let through_slop = start + Offset::new(20.0 / 1.5, 20.0);
+        let end = start + Offset::new(20.0, 30.0);
+        press(&mut app, 1, start, PointerDeviceKind::Touch);
+        move_pointer(&mut app, 1, start, through_slop);
+        move_pointer(&mut app, 1, through_slop, end);
+        release(&mut app, 1, end, PointerDeviceKind::Touch);
+
+        assert!(did_start_pan.get());
+        let pan_delta = pan_delta.get().expect("the pan updated");
+        assert!((pan_delta.dx() - 20.0).abs() < 1e-9);
+        assert!((pan_delta.dy() - 30.0).abs() < 1e-9);
+        assert!(did_end_pan.get());
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Having both a pan gesture recognizer and a scale gesture recognizer is \
+                    redundant; scale is a superset of pan."
+    )]
+    fn constructor_redundant_pan_and_scale() {
+        let _ = GestureDetector::new()
+            .on_scale_start(Rc::new(|_app, _details| {}))
+            .on_pan_start(Rc::new(|_app, _details| {}));
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Simultaneously having a vertical drag gesture recognizer, a horizontal drag \
+                    gesture recognizer, and a pan gesture recognizer will result in the pan \
+                    gesture recognizer being ignored, since the other two will catch all drags."
+    )]
+    fn constructor_duplicate_drag_recognizer() {
+        let _ = GestureDetector::new()
+            .on_vertical_drag_start(Rc::new(|_app, _details| {}))
+            .on_horizontal_drag_start(Rc::new(|_app, _details| {}))
+            .on_pan_start(Rc::new(|_app, _details| {}));
+    }
+
+    #[test]
+    fn a_gesture_detector_reports_a_pinch_end_to_end() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let scales = Rc::new(RefCell::new(Vec::new()));
+        let ended = Rc::new(Cell::new(false));
+        let (sink, end_flag) = (Rc::clone(&scales), Rc::clone(&ended));
+        mount(
+            &mut app,
+            GestureDetector::new()
+                .on_scale_update(Rc::new(move |_app, details: ScaleUpdateDetails| {
+                    sink.borrow_mut().push(details.scale);
+                }))
+                .on_scale_end(Rc::new(move |_app, _details: ScaleEndDetails| {
+                    end_flag.set(true)
+                }))
+                .behavior(HitTestBehavior::Opaque)
+                .child(green_box())
+                .into_widget(),
+        );
+
+        let first = Offset::new(100.0, 100.0);
+        let second = Offset::new(200.0, 100.0);
+        press(&mut app, 1, first, PointerDeviceKind::Touch);
+        press(&mut app, 2, second, PointerDeviceKind::Touch);
+        let pinched = Offset::new(250.0, 100.0);
+        move_pointer(&mut app, 2, second, pinched);
+        let spread = Offset::new(50.0, 100.0);
+        move_pointer(&mut app, 1, first, spread);
+        release(&mut app, 1, spread, PointerDeviceKind::Touch);
+        release(&mut app, 2, pinched, PointerDeviceKind::Touch);
+
+        let reported = scales.borrow();
+        let last = *reported.last().expect("the pinch updated");
+        assert!((last - 2.0).abs() < 1e-9, "{reported:?}");
+        assert!(ended.get());
     }
 }

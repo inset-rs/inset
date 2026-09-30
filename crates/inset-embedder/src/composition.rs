@@ -35,8 +35,10 @@ pub trait Surface: Any + Send + Sync {
     fn present(&self, buffer: Buffer, released: Box<dyn FnOnce() + Send + Sync>);
 
     /// Calls `observer` once, on the main thread, at the next vsync of the display the
-    /// surface's window is on. A producer that draws on demand asks before each frame; a
-    /// video, paced by its own clock, never does.
+    /// surface's window is on. While nobody can see that window, hidden, minimized, in a
+    /// hidden application or covered all over, the call waits for the first vsync after part
+    /// of it shows again. A producer that draws on demand asks before each frame; a video,
+    /// paced by its own clock, never does.
     fn next_vsync(&self, observer: Weak<dyn VsyncObserver>);
 }
 

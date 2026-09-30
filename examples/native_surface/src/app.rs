@@ -9,7 +9,7 @@ use inset_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
 use inset_shell::Shell;
 use inset_widgets::{
     Center, DecoratedBox, Directionality, IntoWidget, Padding, Positioned, SizedBox, Stack,
-    StackFit, SurfaceView, Text, WidgetRef, run_app,
+    StackFit, SurfaceView, Text, Transform, WidgetRef, run_app,
 };
 
 use crate::producer;
@@ -20,7 +20,8 @@ const BACKGROUND: Color = Color::from_argb(255, 245, 245, 240);
 const LABEL_BACKGROUND: Color = Color::from_argb(160, 0, 0, 0);
 const LABEL: Color = Color::from_argb(255, 255, 255, 255);
 
-pub(crate) fn run(exit_after: Option<Duration>) {
+/// Runs the window, the surface and its label scaled by `scale` about their middle.
+pub(crate) fn run(exit_after: Option<Duration>, scale: f64) {
     WinitEmbedder::default()
         .implicit_view(Some(ImplicitViewConfig {
             title: "Inset — a native surface".to_owned(),
@@ -29,7 +30,7 @@ pub(crate) fn run(exit_after: Option<Duration>) {
         .run(move |platform| {
             let surface = open_surface(&platform);
             producer::start(Arc::clone(&surface), pixel_size(&platform), exit_after);
-            Shell::new(platform, move |app| run_app(app, home(surface)))
+            Shell::new(platform, move |app| run_app(app, home(surface, scale)))
         });
 }
 
@@ -50,11 +51,12 @@ fn pixel_size(platform: &PlatformRef) -> [usize; 2] {
     SURFACE_SIZE.map(|side| (side * ratio).round() as usize)
 }
 
-fn home(surface: Arc<dyn Surface>) -> WidgetRef {
+fn home(surface: Arc<dyn Surface>, scale: f64) -> WidgetRef {
+    let scaled = Transform::scale(Some(scale), None, None).child(framed_surface(surface));
     Directionality::new(
         TextDirection::Ltr,
         DecoratedBox::new(BoxDecoration::new().color(BACKGROUND))
-            .child(Center::new().child(framed_surface(surface))),
+            .child(Center::new().child(scaled)),
     )
     .into_widget()
 }

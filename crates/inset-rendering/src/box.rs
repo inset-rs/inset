@@ -15,7 +15,9 @@ use inset_embedder::{
     Matrix4, Offset, Rect, Size, TextBaseline, ViewConstraints, clamp_double, lerp_double,
 };
 use inset_foundation::{App, Handle, HandleId};
-use inset_gestures::{HitTestEntry, HitTestResult, HitTestTarget, PointerEvent};
+use inset_gestures::{
+    HitTestEntry, HitTestResult, HitTestTarget, PointerEvent, remove_perspective_transform,
+};
 use inset_painting::EdgeInsetsGeometry;
 use inset_painting::transform_point;
 
@@ -699,7 +701,7 @@ impl<'a> BoxHitTestResult<'a> {
     /// callback, which is invoked with the transformed `position` as argument.
     ///
     /// The provided paint `transform` (which describes the transform from the child to the
-    /// parent in 3D) is processed by `PointerEvent.removePerspectiveTransform` to remove the
+    /// parent in 3D) is processed by [`remove_perspective_transform`] to remove the
     /// perspective component and inverted before it is used to transform `position` from the
     /// coordinate system of the parent to the system of the child.
     ///
@@ -713,8 +715,9 @@ impl<'a> BoxHitTestResult<'a> {
         hit_test: impl FnOnce(&mut BoxHitTestResult<'_>, Offset) -> bool,
     ) -> bool {
         let transform = match transform {
-            Some(transform) => match transform.invert() {
+            Some(transform) => match remove_perspective_transform(transform).invert() {
                 Some(inverted) => Some(inverted),
+                // Objects are not visible on screen and cannot be hit-tested.
                 None => return false,
             },
             None => None,
@@ -2729,6 +2732,15 @@ mod hit_test_tests {
         assert_eq!(positions, [position]);
         positions.clear();
 
+        let is_hit =
+            result.add_with_paint_transform(Some(Matrix4::IDENTITY), position, |_, position| {
+                positions.push(position);
+                true
+            });
+        assert!(is_hit);
+        assert_eq!(positions, [position]);
+        positions.clear();
+
         let is_hit = result.add_with_paint_transform(
             Some(Matrix4::translation(20.0, 30.0)),
             position,
@@ -2741,9 +2753,8 @@ mod hit_test_tests {
         assert_eq!(positions, [position - Offset::new(20.0, 30.0)]);
         positions.clear();
 
-        // A transform that cannot be inverted.
         let is_hit = result.add_with_paint_transform(
-            Some(Matrix4::scale(0.0, 0.0)),
+            Some(force_to_point(position)), // cannot be inverted
             position,
             |_, position| {
                 positions.push(position);
@@ -2752,6 +2763,58 @@ mod hit_test_tests {
         );
         assert!(!is_hit);
         assert!(positions.is_empty());
+    }
+
+    /// Dart's `MatrixUtils.forceToPoint`: every point maps to `offset`.
+    fn force_to_point(offset: Offset) -> Matrix4 {
+        let mut storage = [0.0; 16];
+        storage[10] = 1.0;
+        storage[12] = offset.dx() as f32;
+        storage[13] = offset.dy() as f32;
+        storage[15] = 1.0;
+        Matrix4::from_flutter_array(&storage)
+    }
+
+    /// A child under a perspective transform, as Flutter's docs build one:
+    /// `Matrix4.identity()..setEntry(3, 2, 0.001)..rotateY(0.5)`. Inverting it whole left
+    /// its third row and column away from `(0, 0, 1, 0)`, and `push_transform`'s check
+    /// panicked; with the perspective removed first the pointer lands where Flutter's does.
+    #[test]
+    fn a_hit_test_through_a_perspective_transform_lands_where_flutters_does() {
+        let angle = 0.5_f64;
+        let (cos, sin) = (angle.cos(), angle.sin());
+        let perspective = 0.001;
+        let mut storage = Matrix4::IDENTITY.to_flutter_array();
+        storage[0] = cos as f32;
+        storage[2] = -sin as f32;
+        storage[8] = sin as f32;
+        storage[10] = cos as f32;
+        // Row 3 of `setEntry(3, 2, p)` times the rotation: (-p sin, 0, p cos, 1).
+        storage[3] = (-perspective * sin) as f32;
+        storage[11] = (perspective * cos) as f32;
+        let transform = Matrix4::from_flutter_array(&storage);
+
+        let mut base = HitTestResult::new();
+        let mut result = BoxHitTestResult::wrap(&mut base);
+        let position = Offset::new(100.0, 50.0);
+        let mut landed = None;
+        let is_hit = result.add_with_paint_transform(Some(transform), position, |result, local| {
+            result.add(HitTestEntry::new(DummyHitTestTarget));
+            landed = Some(local);
+            true
+        });
+        assert!(is_hit);
+
+        // Flutter's arithmetic in f64: without its third row and column the transform is
+        // x' = x cos, y' = y, w' = 1 - p sin x, and its inverse divides the other way.
+        let w = 1.0 + perspective * sin * position.dx() / cos;
+        let expected = Offset::new(position.dx() / cos / w, position.dy() / w);
+        let landed = landed.expect("the child was hit-tested");
+        assert!(
+            (landed.dx() - expected.dx()).abs() < 1e-3
+                && (landed.dy() - expected.dy()).abs() < 1e-3,
+            "{landed:?} != {expected:?}"
+        );
     }
 
     /// `box_test.dart`: `addWithPaintOffset`.

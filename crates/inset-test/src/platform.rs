@@ -6,9 +6,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use inset_embedder::{
-    Brightness, Clipboard, Dispatcher, FontSource, Haptics, ImageCodecFuture, ImageDecodeError,
-    Instant, MouseCursor, Platform, PopupMenus, Restoration, SystemChrome, SystemContextMenu,
-    TargetPlatform, TextServices, ViewId, ViewRef, WindowingOwner,
+    AppExit, AppLifecycleState, Brightness, Clipboard, Dispatcher, FontSource, Haptics,
+    ImageCodecFuture, ImageDecodeError, Instant, MouseCursor, Platform, PopupMenus, Restoration,
+    SystemChrome, SystemContextMenu, TargetPlatform, TextServices, ViewId, ViewRef, WindowingOwner,
 };
 
 type FontSourceMaker = Rc<dyn Fn() -> Box<dyn FontSource>>;
@@ -36,6 +36,8 @@ pub struct TestPlatform {
     text_services: Option<Rc<dyn TextServices>>,
     mouse_cursor: Option<Rc<dyn MouseCursor>>,
     restoration: Option<Rc<dyn Restoration>>,
+    app_exit: Option<Rc<dyn AppExit>>,
+    initial_lifecycle_state: Option<AppLifecycleState>,
 }
 
 impl TestPlatform {
@@ -60,6 +62,8 @@ impl TestPlatform {
             text_services: None,
             mouse_cursor: None,
             restoration: None,
+            app_exit: None,
+            initial_lifecycle_state: None,
         }
     }
 
@@ -84,6 +88,12 @@ impl TestPlatform {
     /// The route the host would open the app at; `/` unless set.
     pub fn with_default_route(mut self, route: impl Into<String>) -> TestPlatform {
         self.default_route = route.into();
+        self
+    }
+
+    /// The lifecycle state the host would start the app in; none unless set.
+    pub fn with_initial_lifecycle_state(mut self, state: AppLifecycleState) -> TestPlatform {
+        self.initial_lifecycle_state = Some(state);
         self
     }
 
@@ -147,6 +157,11 @@ impl TestPlatform {
 
     pub fn with_restoration(mut self, restoration: Rc<dyn Restoration>) -> TestPlatform {
         self.restoration = Some(restoration);
+        self
+    }
+
+    pub fn with_app_exit(mut self, app_exit: Rc<dyn AppExit>) -> TestPlatform {
+        self.app_exit = Some(app_exit);
         self
     }
 
@@ -220,6 +235,10 @@ impl Platform for TestPlatform {
         self.default_route.clone()
     }
 
+    fn initial_lifecycle_state(&self) -> Option<AppLifecycleState> {
+        self.initial_lifecycle_state
+    }
+
     fn font_source(&self) -> Option<Box<dyn FontSource>> {
         self.font_source.as_ref().map(|make| make())
     }
@@ -265,6 +284,10 @@ impl Platform for TestPlatform {
 
     fn restoration(&self) -> Option<&dyn Restoration> {
         self.restoration.as_deref()
+    }
+
+    fn app_exit(&self) -> Option<&dyn AppExit> {
+        self.app_exit.as_deref()
     }
 }
 

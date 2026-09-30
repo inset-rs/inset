@@ -7,6 +7,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use indexmap::IndexMap;
+use inset_embedder::AppLifecycleState;
 use inset_foundation::{App, Handle, Listener, Timer};
 
 /// Signature for frame-related callbacks from the scheduler.
@@ -122,6 +123,7 @@ pub struct SchedulerBinding {
     // Detached from the arena so the frame handlers' `finally` guards can
     // reach them without the App.
     scheduler_phase: Rc<Cell<SchedulerPhase>>,
+    lifecycle_state: Option<AppLifecycleState>,
     frames_enabled: bool,
     time_dilation: f64,
     first_raw_time_stamp_in_epoch: Option<Duration>,
@@ -160,6 +162,7 @@ impl Default for SchedulerBinding {
             warm_up_frame: false,
             reschedule_after_warm_up_frame: false,
             scheduler_phase: Rc::new(Cell::new(SchedulerPhase::Idle)),
+            lifecycle_state: None,
             frames_enabled: true,
             time_dilation: 1.0,
             first_raw_time_stamp_in_epoch: None,
@@ -176,6 +179,43 @@ impl SchedulerBinding {
     /// Dart's `SchedulerBinding.instance`.
     pub fn instance(app: &mut App) -> Handle<SchedulerBinding> {
         app.singleton::<SchedulerBinding>()
+    }
+
+    /// Whether the application is visible, and if so, whether it is currently
+    /// interactive.
+    ///
+    /// This is set by [`handle_app_lifecycle_state_changed`](SchedulerBinding::handle_app_lifecycle_state_changed)
+    /// when the host reports a lifecycle change through `EmbedderClient`.
+    ///
+    /// The preferred ways to watch for changes to this value are using
+    /// `WidgetsBindingObserver::did_change_app_lifecycle_state`, or through an
+    /// `AppLifecycleListener` object.
+    pub fn lifecycle_state(app: &mut App) -> Option<AppLifecycleState> {
+        let this = SchedulerBinding::instance(app);
+        app.get(this).lifecycle_state
+    }
+
+    /// Called when the application lifecycle state changes.
+    ///
+    /// Notifies all the observers using
+    /// `WidgetsBindingObserver::did_change_app_lifecycle_state`.
+    ///
+    /// This method exposes notifications from `SystemChannels.lifecycle`, which the host
+    /// sends through `EmbedderClient::app_lifecycle_state_changed`.
+    pub fn handle_app_lifecycle_state_changed(app: &mut App, state: AppLifecycleState) {
+        let this = SchedulerBinding::instance(app);
+        if app.get(this).lifecycle_state == Some(state) {
+            return;
+        }
+        app.get_mut(this).lifecycle_state = Some(state);
+        match state {
+            AppLifecycleState::Resumed | AppLifecycleState::Inactive => {
+                SchedulerBinding::set_frames_enabled_state(app, true);
+            }
+            AppLifecycleState::Hidden | AppLifecycleState::Paused | AppLifecycleState::Detached => {
+                SchedulerBinding::set_frames_enabled_state(app, false);
+            }
+        }
     }
 
     /// The current number of transient frame callbacks scheduled.
@@ -296,11 +336,22 @@ impl SchedulerBinding {
     /// Whether frames are currently being scheduled when
     /// [`schedule_frame`](SchedulerBinding::schedule_frame) is called.
     ///
-    /// This value depends on the value of the lifecycle state. The lifecycle
-    /// is not ported, so this stays true.
+    /// This value depends on the value of the
+    /// [`lifecycle_state`](SchedulerBinding::lifecycle_state).
     pub fn frames_enabled(app: &mut App) -> bool {
         let this = SchedulerBinding::instance(app);
         app.get(this).frames_enabled
+    }
+
+    fn set_frames_enabled_state(app: &mut App, enabled: bool) {
+        let this = SchedulerBinding::instance(app);
+        if app.get(this).frames_enabled == enabled {
+            return;
+        }
+        app.get_mut(this).frames_enabled = enabled;
+        if enabled {
+            SchedulerBinding::schedule_frame(app);
+        }
     }
 
     /// Schedules a new frame using [`schedule_frame`](SchedulerBinding::schedule_frame)
@@ -822,6 +873,40 @@ mod tests {
         SchedulerBinding::schedule_frame(&mut app);
         SchedulerBinding::schedule_frame(&mut app);
         assert_eq!(platform.frames_requested(), 1);
+        assert!(SchedulerBinding::has_scheduled_frame(&mut app));
+    }
+
+    // binding_test.dart 'Application lifecycle affects frame scheduling', without the forced
+    // and warm-up frames.
+    #[test]
+    fn the_application_lifecycle_affects_frame_scheduling() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        assert!(!SchedulerBinding::has_scheduled_frame(&mut app));
+
+        SchedulerBinding::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Paused);
+        assert!(!SchedulerBinding::has_scheduled_frame(&mut app));
+
+        SchedulerBinding::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Resumed);
+        assert!(SchedulerBinding::has_scheduled_frame(&mut app));
+        pump(&mut app, Duration::from_millis(10));
+        assert!(!SchedulerBinding::has_scheduled_frame(&mut app));
+
+        SchedulerBinding::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Inactive);
+        assert!(!SchedulerBinding::has_scheduled_frame(&mut app));
+
+        SchedulerBinding::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Hidden);
+        SchedulerBinding::schedule_frame(&mut app);
+        assert!(
+            !SchedulerBinding::has_scheduled_frame(&mut app),
+            "frames are disabled while hidden"
+        );
+        assert_eq!(
+            SchedulerBinding::lifecycle_state(&mut app),
+            Some(AppLifecycleState::Hidden)
+        );
+
+        SchedulerBinding::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Inactive);
         assert!(SchedulerBinding::has_scheduled_frame(&mut app));
     }
 

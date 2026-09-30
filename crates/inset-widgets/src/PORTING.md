@@ -40,16 +40,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - widgets/text_selection_toolbar_layout_delegate.rs → text_selection_toolbar_layout_delegate.dart
 - widgets/animated_size.rs → animated_size.dart
 
-## widgets/app_lifecycle_listener.rs → app_lifecycle_listener.dart
-
-- Change: a listener starts with no known lifecycle state, and the binding has none to report.
-  Reason: platform — `SchedulerBinding.lifecycleState` waits (scheduler's PORTING.md).
-  Affect: the first transition a listener sees is treated as the "no previous state" case, and a state the host reached before the listener existed is never read.
-
-- Change: `did_request_app_exit` and `on_exit_requested` answer within the call, where Dart returns a `Future`.
-  Reason: language — the default has nothing to await.
-  Affect: an exit handler must decide before it returns; it cannot hold the request open.
-
 ## framework/ → framework.dart
 
 - Change: a `State` is destroyed with its element at unmount, and `mounted` is the only safe call on a retained handle afterwards.
@@ -66,9 +56,13 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## binding.rs → binding.dart
 
-- Change: `WidgetsBindingObserver` carries the metrics, locale and lifecycle callbacks only, and nothing raises the lifecycle ones.
-  Reason: platform — the route, memory-pressure and back-gesture events have no host surface yet.
-  Affect: an observer hears metrics and locale changes; a lifecycle change reaches it only when something calls the method directly.
+- Change: `WidgetsBindingObserver` has no memory-pressure, push-route or predictive-back callbacks, and nothing calls `did_change_text_scale_factor` or `did_change_accessibility_features`.
+  Reason: platform — `EmbedderClient` has no method through which a host reports memory pressure, a pushed route, a back gesture in progress, the text scale or accessibility features.
+  Affect: an observer hears metrics, locale, brightness, view focus, drops, going back, lifecycle changes and exit requests, and the other changes only when something calls the method directly.
+
+- Change: `WidgetsBinding` overrides `SchedulerBinding::handle_app_lifecycle_state_changed` and `ServicesBinding::handle_request_app_exit` by registering with `ServicesBinding::set_overrides`, and neither override catches a panicking observer.
+  Reason: language — a crate above cannot override a method below it, and there is no `FlutterError.reportError` hook to catch and continue.
+  Affect: one failing observer unwinds the lifecycle change or the exit request, and the observers after it are not told or asked, where Flutter reports the error and goes on to the rest.
 
 - Change: `WidgetsBindingObserver::did_change_drop` and the `DropListener` in `widgets/drop_listener.rs` hear files dragged from outside the application, from `EmbedderClient::drop_data`; Flutter has no drop in its framework and leaves it to plugins.
   Reason: platform — the host reports the drag at the window, and the binding's observers are where window-level events reach the tree.
@@ -406,6 +400,10 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: language — there is no `characters` package.
   Affect: a selection that starts or ends inside a multi-scalar cluster (an emoji ZWJ sequence) sizes from that scalar's box, or falls back to `preferredLineHeight`.
 
+- Change: a paste whose clipboard read completes after the field left the tree is dropped; Dart's `pasteText` goes on into `_pasteText` whether or not the state is still mounted.
+  Reason: language — a disposed state's handle cannot be read.
+  Affect: text copied to a field that closed while the clipboard was being read is not pasted anywhere.
+
 ## widgets/system_context_menu.rs → system_context_menu.dart
 
 - Change: custom item callback ids are a process-wide counter string, not Dart's `hashCode`.
@@ -414,9 +412,9 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 
 ## widgets/text_selection.rs → text_selection.dart
 
-- Change: `ClipboardStatusNotifier::update` and `TextSelectionControls::handle_paste` finish within the call.
-  Reason: platform — `Clipboard::has_strings` and `paste_text` are synchronous.
-  Affect: a paste lands in the same turn as the gesture that asked for it, where Dart's completes a frame or more later.
+- Change: `ClipboardStatusNotifier::update` and `TextSelectionControls::handle_paste` return nothing to await; the status and the paste land when the clipboard answers, as Dart's do.
+  Reason: language — a returned future would be a `Task` every caller drops, and Flutter's framework awaits neither.
+  Affect: none within the framework; a caller outside it cannot wait for the new status or the paste.
 
 - Change: `show_toolbar` uses `context_menu_builder` whenever it is set, and only otherwise the deprecated `build_toolbar` path.
   Reason: language — an erased `TextSelectionControls` cannot be asked whether it is handle-controls.
@@ -485,7 +483,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - framework/: `ErrorWidget` with its exception reporting, and the build-time diagnostics and duplicate-key checks. Trigger: diagnostics.
 - framework/: `reassemble`. Trigger: hot reload.
 - framework/: `ObjectKey`, `GlobalObjectKey`. Trigger: a widget keyed by object identity.
-- binding.rs: the observer callbacks with no host event (memory pressure, the predictive-back gesture, push-route and route information, lifecycle), the platform menu delegate and windowing owner, `scheduleWarmUpFrame`, `framesEnabled`. Trigger: the shell forwarding those platform events; predictive back also needs a Java activity that registers with the system.
+- binding.rs: the observer callbacks with no host event (memory pressure, the predictive-back gesture, push-route and route information), the platform menu delegate and windowing owner, `scheduleWarmUpFrame`. Trigger: the shell forwarding those platform events; predictive back also needs a Java activity that registers with the system.
 - binding.rs: first-frame-rasterized reporting and the push/pop route handlers. Trigger: `SchedulerBinding.addTimingsCallback`; navigation.
 - view.rs: `LookupBoundary` around a `ViewAnchor`'s view, and the view's semantics owner callbacks. Trigger: `LookupBoundary`; accessibility.
 - `LookupBoundary` in the `View`, `Overlay` and theater-marker lookups, which look straight up the tree. Trigger: `LookupBoundary` in framework.
@@ -507,7 +505,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - transitions.rs: `SliverFadeTransition`, and with it implicit_animations.rs's `SliverAnimatedOpacity`. Trigger: slivers.
 - transitions.rs, implicit_animations.rs: diagnostics. Trigger: diagnostics.
 - icon_theme: `IconThemeData.hashCode` (no `Hash` over `f64`). Trigger: a map keyed by `IconThemeData`.
-- gesture_detector.rs: the semantics gesture handling, and the double-tap, vertical and pan drag, scale and force-press callbacks with their trackpad settings. Trigger: accessibility (do not stub); the remaining drag, scale and force-press recognizers.
+- gesture_detector.rs: the semantics gesture handling, and the double-tap and force-press callbacks. Trigger: accessibility (do not stub); `DoubleTapGestureRecognizer`; a caller of the force-press callbacks.
 - media_query.rs: `DisplayFeature`, `SystemTextScaler`, the platform sources for the accessibility flags, 24-hour format, text style overrides, corner radii and gesture insets, and the media-query debug checks. Trigger: observers in binding.rs; those members on `Platform` / `ViewMetrics`; diagnostics.
 - widget_state.rs: `WidgetStateBorderSide`, `WidgetStateOutlinedBorder`, `WidgetStateTextStyle`, `WidgetStatePropertyAll`, `WidgetStatesController` as a `ValueListenable`, and hashing. Trigger: the first theme or input decoration that needs them; theme-data hashing.
 - localizations.rs: the semantics wrapper `_LocalizationsState.build` adds, and the localization debug checks. Trigger: semantics; diagnostics.

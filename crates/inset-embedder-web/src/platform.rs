@@ -6,10 +6,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    Brightness, Clipboard, Dispatcher, ImageCodecFuture, Matrix4, MouseCursor, Picture, Platform,
-    Rect, Size, SystemMouseCursorKind, TargetPlatform, TextEditingValue, TextInputConfiguration,
-    TextInputHost, View, ViewId, ViewMetrics, ViewRef,
+    Brightness, Clipboard, ClipboardHasStringsFuture, ClipboardTextFuture, Dispatcher,
+    ImageCodecFuture, Matrix4, MouseCursor, Picture, Platform, Rect, Size, SystemMouseCursorKind,
+    TargetPlatform, TextEditingValue, TextInputConfiguration, TextInputHost, View, ViewId,
+    ViewMetrics, ViewRef,
 };
+use wasm_bindgen_futures::JsFuture;
 use web_sys::HtmlCanvasElement;
 use web_time::Instant;
 
@@ -200,14 +202,20 @@ impl Clipboard for WebPlatform {
         let _ = clipboard.write_text(text);
     }
 
-    /// Reading the browser clipboard resolves a promise and needs the user's permission,
-    /// which this synchronous call cannot wait for; a paste arrives as a paste event instead.
-    fn text(&self) -> Option<String> {
-        None
+    /// The browser's `readText`, which may ask the user first; a read it refuses answers `None`.
+    fn text(&self) -> ClipboardTextFuture {
+        let Some(window) = web_sys::window() else {
+            return Box::pin(std::future::ready(None));
+        };
+        let read = window.navigator().clipboard().read_text();
+        Box::pin(async move { JsFuture::from(read).await.ok()?.as_string() })
     }
 
-    fn has_strings(&self) -> bool {
-        false
+    /// Found by reading the text, as Flutter's web engine does. The framework's clipboard status
+    /// on the web never asks, since a read may ask the user.
+    fn has_strings(&self) -> ClipboardHasStringsFuture {
+        let text = self.text();
+        Box::pin(async move { text.await.is_some_and(|text| !text.is_empty()) })
     }
 }
 

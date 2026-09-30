@@ -5,6 +5,8 @@
 //! `EmbedderClient`, so this interface contains requests and state only.
 
 use std::any::Any;
+use std::future::Future;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -346,6 +348,28 @@ pub enum AppExitResponse {
     Cancel,
 }
 
+/// The type of application exit to perform when calling `ServicesBinding::exit_application`.
+///
+/// Flutter counterpart: `AppExitType` (`dart:ui` `platform_dispatcher.dart`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AppExitType {
+    /// Requests that the application start an orderly exit, sending a request back to the
+    /// framework through the `WidgetsBinding`. If that responds with [`AppExitResponse::Exit`],
+    /// then proceed with the same steps as a [`Required`](AppExitType::Required) exit. If that
+    /// responds with [`AppExitResponse::Cancel`], then the exit request is canceled and the
+    /// application continues executing normally.
+    Cancelable,
+
+    /// A non-cancelable orderly exit request. The engine will shut down the engine and call
+    /// the native UI toolkit's exit API.
+    ///
+    /// If you need an even faster and more dangerous exit, then call
+    /// [`std::process::exit`] directly, and even the native toolkit's exit API won't be
+    /// called. This is quite dangerous, though, since it's possible that the engine will
+    /// crash because it hasn't been properly shut down, causing the app to crash on exit.
+    Required,
+}
+
 /// The platform that user interaction should adapt to target.
 ///
 /// Flutter counterpart: `TargetPlatform` (`foundation/platform.dart`). Flutter
@@ -532,6 +556,18 @@ pub trait Platform: Any {
         String::from("/")
     }
 
+    /// The lifecycle state immediately after the application started (Flutter
+    /// `PlatformDispatcher.initialLifecycleState`).
+    ///
+    /// This property will not be updated as the lifecycle changes: a host reports each change
+    /// through `EmbedderClient::app_lifecycle_state_changed`.
+    ///
+    /// It is used to initialize `SchedulerBinding::lifecycle_state` at startup. Defaults to
+    /// `None`, Flutter's empty string: a host that has no state to report yet.
+    fn initial_lifecycle_state(&self) -> Option<AppLifecycleState> {
+        None
+    }
+
     /// The platform's own font lookup: faces by family name and by codepoint, the way
     /// Flutter's engine asks the OS. `None` for a host without one; text then shapes only
     /// against fonts the application registers.
@@ -613,6 +649,12 @@ pub trait Platform: Any {
     fn restoration(&self) -> Option<&dyn Restoration> {
         None
     }
+
+    /// Quitting at the application's own request, or `None` where the host cannot quit
+    /// itself: a phone, a browser tab.
+    fn app_exit(&self) -> Option<&dyn AppExit> {
+        None
+    }
 }
 
 impl dyn Platform {
@@ -622,17 +664,26 @@ impl dyn Platform {
     }
 }
 
-/// The system clipboard: Flutter's `Clipboard` over the platform channel.
+/// The system clipboard: Flutter's `Clipboard` over the platform channel. A read answers later,
+/// as Flutter's does: a host may have to ask its user, or another process, first.
 pub trait Clipboard {
-    /// Stores plain text on the system clipboard (Flutter's `Clipboard.setData`).
+    /// Stores plain text on the system clipboard (Flutter's `Clipboard.setData`), which the
+    /// framework does not wait for.
     fn set_text(&self, text: &str);
 
-    /// Retrieves plain text from the system clipboard (Flutter's `Clipboard.getData`).
-    fn text(&self) -> Option<String>;
+    /// Retrieves plain text from the system clipboard (Flutter's `Clipboard.getData`); `None`
+    /// when it holds none, or the host could not read it.
+    fn text(&self) -> ClipboardTextFuture;
 
     /// Whether the clipboard contains string data (Flutter's `Clipboard.hasStrings`).
-    fn has_strings(&self) -> bool;
+    fn has_strings(&self) -> ClipboardHasStringsFuture;
 }
+
+/// The clipboard's text on its way. Flutter's `Future<ClipboardData?>`.
+pub type ClipboardTextFuture = Pin<Box<dyn Future<Output = Option<String>>>>;
+
+/// Whether the clipboard holds text, on its way. Flutter's `Future<bool>`.
+pub type ClipboardHasStringsFuture = Pin<Box<dyn Future<Output = bool>>>;
 
 /// Flutter's `SystemChrome`: the system UI around the app.
 pub trait SystemChrome {
@@ -709,6 +760,30 @@ pub trait Restoration {
     /// `SystemChannels.restoration`), which keeps it until the operating system asks for it.
     fn put(&self, data: RestorationMap);
 }
+
+/// The application asking to quit: the `System.exitApplication` message of Flutter's
+/// `SystemChannels.platform`.
+pub trait AppExit {
+    /// Quits the application the way the system quits one, as Flutter's embedders do.
+    ///
+    /// For [`AppExitType::Cancelable`] the host first asks the framework through
+    /// [`EmbedderClient::request_app_exit`](crate::EmbedderClient::request_app_exit), on a later
+    /// turn of its loop, never inside this call, and quits only once the answer is
+    /// [`AppExitResponse::Exit`]. For [`AppExitType::Required`] it quits without asking.
+    ///
+    /// The future answers what the framework said, or `Exit` for a required exit. A host that
+    /// has already quit may never answer.
+    ///
+    /// `exit_code` is the process's exit status where the system takes one; Flutter's macOS
+    /// and Linux embedders ignore it, and a host may too.
+    fn exit_application(&self, exit_type: AppExitType, exit_code: i32) -> AppExitFuture;
+}
+
+/// An answer to a request to exit, on its way: the host's to the application's
+/// [`AppExit::exit_application`], and the framework's to the host's
+/// [`EmbedderClient::request_app_exit`](crate::EmbedderClient::request_app_exit). Flutter's
+/// `Future<AppExitResponse>`.
+pub type AppExitFuture = Pin<Box<dyn Future<Output = AppExitResponse>>>;
 
 /// Platform for hand-pumped tests.
 pub struct InertPlatform;

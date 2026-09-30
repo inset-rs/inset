@@ -1,7 +1,8 @@
-//! Flutter `services/system_chrome.dart`: the application switcher description and the system
-//! overlay style. The rest of `SystemChrome` waits for the host capabilities it would talk to.
+//! Flutter `services/system_chrome.dart`: the application switcher description, the system
+//! overlay style, and what a lifecycle change does to it. The rest of `SystemChrome` waits for
+//! the host capabilities it would talk to.
 
-use inset_embedder::{ApplicationSwitcherDescription, SystemUiOverlayStyle};
+use inset_embedder::{AppLifecycleState, ApplicationSwitcherDescription, SystemUiOverlayStyle};
 use inset_foundation::{App, Handle, Listener};
 
 /// Specifies a set of mutually exclusive system UI overlays.
@@ -93,6 +94,18 @@ impl SystemChrome {
             app.get_mut(styles).latest_style = pending;
         }
         app.get_mut(styles).pending_style = None;
+    }
+
+    /// Called by the binding during a transition to a new app lifecycle state.
+    pub fn handle_app_lifecycle_state_changed(app: &mut App, state: AppLifecycleState) {
+        // When the app is detached, clear the record of the style sent to the host
+        // so that it will be sent again when the app is reattached.
+        if state == AppLifecycleState::Detached {
+            let styles = app.singleton::<SystemChromeStyles>();
+            app.schedule_microtask(Listener::new(move |app| {
+                app.get_mut(styles).latest_style = None;
+            }));
+        }
     }
 
     /// The last style that was set using
@@ -223,6 +236,24 @@ mod tests {
             chrome.styles.borrow().as_slice(),
             [SystemUiOverlayStyle::LIGHT, SystemUiOverlayStyle::DARK]
         );
+    }
+
+    /// `system_chrome_test.dart`: the end of `SystemChrome overlay style test`.
+    #[test]
+    fn the_style_is_sent_again_after_the_app_was_detached() {
+        let (chrome, cell) = recording_app();
+        let mut app = cell.borrow_mut();
+        SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::LIGHT);
+        app.drain_microtasks();
+        assert_eq!(chrome.styles.borrow().len(), 1);
+
+        // The state should be sent again if the app was detached.
+        SystemChrome::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Detached);
+        app.drain_microtasks();
+        SystemChrome::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Resumed);
+        SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::LIGHT);
+        app.drain_microtasks();
+        assert_eq!(chrome.styles.borrow().len(), 2);
     }
 
     #[test]

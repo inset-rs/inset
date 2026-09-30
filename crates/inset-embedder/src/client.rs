@@ -6,8 +6,8 @@
 use std::time::Duration;
 
 use crate::{
-    DropData, Frame, KeyData, PointerDataPacket, TextEditingValue, TextInputAction, ViewFocusEvent,
-    ViewId,
+    AppExitFuture, AppExitResponse, AppLifecycleState, DropData, Frame, KeyData, PointerDataPacket,
+    TextEditingValue, TextInputAction, ViewFocusEvent, ViewId,
 };
 
 /// Complete frames and typed view lifecycle notifications.
@@ -52,6 +52,35 @@ pub trait EmbedderClient {
     /// cross its channel in time. This call answers on the spot instead.
     fn pop_route(&mut self) -> bool {
         false
+    }
+
+    /// The system asked the application to quit, and the application may refuse: the user
+    /// chose Quit, or is logging out. The host also sends this for a cancelable exit the
+    /// application asked for itself through
+    /// [`AppExit::exit_application`](crate::AppExit::exit_application). The future answers
+    /// whether to quit; the host quits or keeps running once it resolves.
+    ///
+    /// The answer may take as long as the application needs, such as asking its user whether
+    /// to save first. The future resolves inside a call into this client: this one, when every
+    /// observer answered at once, or a later one. A host polls it once this call returns, and
+    /// again each time its waker is woken. The waker is woken from inside a call into the
+    /// client, so it may only post a note to the host's own loop, never call the client.
+    ///
+    /// Flutter sends this as `System.requestAppExit` on `SystemChannels.platform` and hands
+    /// the reply to a callback once `ServicesBinding.handleRequestAppExit`'s `Future` has
+    /// completed. The default answers `Exit` at once, as `ServicesBinding`'s own answer does.
+    fn request_app_exit(&mut self) -> AppExitFuture {
+        Box::pin(std::future::ready(AppExitResponse::Exit))
+    }
+
+    /// The application entered `state`: its views were shown, hidden, focused or unfocused, or
+    /// the system put it in the background or brought it back. The host sends the state it is
+    /// in, and the framework fills in the states between, as Flutter's `ServicesBinding` does.
+    ///
+    /// Flutter sends this as the state's name on `SystemChannels.lifecycle`. The default drops
+    /// it.
+    fn app_lifecycle_state_changed(&mut self, state: AppLifecycleState) {
+        let _ = state;
     }
 
     /// Flutter `PlatformDispatcher.onPlatformBrightnessChanged`: the host's light or dark

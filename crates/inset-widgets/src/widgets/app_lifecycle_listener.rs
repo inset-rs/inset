@@ -3,7 +3,8 @@
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
-use inset_foundation::{App, Handle};
+use inset_foundation::{App, Handle, Task};
+use inset_scheduler::SchedulerBinding;
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 
@@ -11,7 +12,7 @@ pub use inset_embedder::{AppExitResponse, AppLifecycleState};
 
 /// A callback type that is used by [`AppLifecycleListener::on_exit_requested`] to ask the
 /// application if it wants to cancel application termination or not.
-pub type AppExitRequestCallback = Rc<dyn Fn(&mut App) -> AppExitResponse>;
+pub type AppExitRequestCallback = Rc<dyn Fn(&mut App) -> Task<AppExitResponse>>;
 
 /// A listener that can be used to listen to changes in the application lifecycle.
 ///
@@ -36,8 +37,8 @@ pub type AppExitRequestCallback = Rc<dyn Fn(&mut App) -> AppExitResponse>;
 ///
 /// See also:
 ///
-/// * `ServicesBinding::exit_application` for a function to call that will request that the
-///   application exits.
+/// * [`ServicesBinding::exit_application`](inset_services::ServicesBinding::exit_application)
+///   for a function to call that will request that the application exits.
 /// * [`WidgetsBindingObserver::did_request_app_exit`](crate::WidgetsBindingObserver::did_request_app_exit)
 ///   for the handler which this class uses to receive exit requests.
 /// * [`WidgetsBindingObserver::did_change_app_lifecycle_state`](crate::WidgetsBindingObserver::did_change_app_lifecycle_state)
@@ -131,8 +132,9 @@ impl AppLifecycleListener {
     /// Creates an [`AppLifecycleListener`].
     pub fn new(app: &mut App) -> Handle<AppLifecycleListener> {
         let binding = WidgetsBinding::instance(app);
+        let lifecycle_state = SchedulerBinding::lifecycle_state(app);
         let this = app.create(AppLifecycleListener {
-            lifecycle_state: None,
+            lifecycle_state,
             binding,
             on_state_change: None,
             on_inactive: None,
@@ -268,11 +270,11 @@ impl AppLifecycleListener {
 }
 
 impl WidgetsBindingObserverObject for AppLifecycleListener {
-    fn did_request_app_exit(self: Handle<Self>, app: &mut App) -> AppExitResponse {
+    fn did_request_app_exit(self: Handle<Self>, app: &mut App) -> Task<AppExitResponse> {
         debug_assert!(self.debug_assert_not_disposed(app));
         let on_exit_requested = app.get(self).on_exit_requested.clone();
         match on_exit_requested {
-            None => AppExitResponse::Exit,
+            None => Task::ready(AppExitResponse::Exit),
             Some(on_exit_requested) => on_exit_requested(app),
         }
     }
@@ -375,7 +377,7 @@ impl WidgetsBindingObserverObject for AppLifecycleListener {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use inset_foundation::AppCell;
+    use inset_foundation::{AppCell, Completer};
     use std::cell::Cell;
 
     #[test]
@@ -392,5 +394,182 @@ mod tests {
         assert!(fired.get());
         listener.dispose(&mut app);
         assert_eq!(binding.observer_count(&app), 0);
+    }
+
+    /// The host reports `state`, as Dart's test sends it on `flutter/lifecycle`.
+    fn set_app_lifecycle_state(app: &mut App, state: AppLifecycleState) {
+        inset_services::ServicesBinding::instance(app).handle_lifecycle_message(app, state);
+    }
+
+    /// Dart's `setUp`: the binding made, and the state reset to detached. Going to paused first
+    /// makes it a valid transition from any state, since the intermediate transitions will be
+    /// generated.
+    fn detached_app() -> Rc<AppCell> {
+        let cell = AppCell::new();
+        {
+            let mut app = cell.borrow_mut();
+            WidgetsBinding::instance(&mut app);
+            set_app_lifecycle_state(&mut app, AppLifecycleState::Paused);
+            set_app_lifecycle_state(&mut app, AppLifecycleState::Detached);
+        }
+        cell
+    }
+
+    #[test]
+    fn listens_to_app_lifecycle_state() {
+        let cell = detached_app();
+        let mut app = cell.borrow_mut();
+        let states = Rc::new(std::cell::RefCell::new(vec![
+            SchedulerBinding::lifecycle_state(&mut app).unwrap(),
+        ]));
+        let seen = Rc::clone(&states);
+        let listener = AppLifecycleListener::new(&mut app).on_state_change(
+            &mut app,
+            Rc::new(move |_app, state| seen.borrow_mut().push(state)),
+        );
+        assert_eq!(*states.borrow(), [AppLifecycleState::Detached]);
+        set_app_lifecycle_state(&mut app, AppLifecycleState::Inactive);
+        // "resumed" is generated.
+        assert_eq!(
+            *states.borrow(),
+            [
+                AppLifecycleState::Detached,
+                AppLifecycleState::Resumed,
+                AppLifecycleState::Inactive,
+            ]
+        );
+        set_app_lifecycle_state(&mut app, AppLifecycleState::Resumed);
+        assert_eq!(
+            *states.borrow(),
+            [
+                AppLifecycleState::Detached,
+                AppLifecycleState::Resumed,
+                AppLifecycleState::Inactive,
+                AppLifecycleState::Resumed,
+            ]
+        );
+        listener.dispose(&mut app);
+    }
+
+    #[test]
+    fn triggers_correct_state_transition_callbacks() {
+        let cell = detached_app();
+        let mut app = cell.borrow_mut();
+        let transitions = Rc::new(std::cell::RefCell::new(Vec::<&'static str>::new()));
+        let adding = |name: &'static str| -> Rc<dyn Fn(&mut App)> {
+            let transitions = Rc::clone(&transitions);
+            Rc::new(move |_app| transitions.borrow_mut().push(name))
+        };
+        let listener = AppLifecycleListener::new(&mut app)
+            .on_detach(&mut app, adding("detach"))
+            .on_hide(&mut app, adding("hide"))
+            .on_inactive(&mut app, adding("inactive"))
+            .on_pause(&mut app, adding("pause"))
+            .on_restart(&mut app, adding("restart"))
+            .on_resume(&mut app, adding("resume"))
+            .on_show(&mut app, adding("show"));
+        let mut set_and_take = |state| {
+            set_app_lifecycle_state(&mut app, state);
+            std::mem::take(&mut *transitions.borrow_mut())
+        };
+
+        // Try "standard" sequence
+        assert_eq!(set_and_take(AppLifecycleState::Resumed), ["resume"]);
+        assert_eq!(set_and_take(AppLifecycleState::Inactive), ["inactive"]);
+        assert_eq!(set_and_take(AppLifecycleState::Hidden), ["hide"]);
+        assert_eq!(set_and_take(AppLifecycleState::Paused), ["pause"]);
+
+        // Go back to resume
+        assert_eq!(set_and_take(AppLifecycleState::Hidden), ["restart"]);
+        assert_eq!(set_and_take(AppLifecycleState::Inactive), ["show"]);
+        assert_eq!(set_and_take(AppLifecycleState::Resumed), ["resume"]);
+
+        // Generates intermediate states from lower to higher lifecycle states.
+        assert_eq!(
+            set_and_take(AppLifecycleState::Paused),
+            ["inactive", "hide", "pause"]
+        );
+
+        // Wraps around from pause to detach.
+        assert_eq!(set_and_take(AppLifecycleState::Detached), ["detach"]);
+        assert_eq!(set_and_take(AppLifecycleState::Resumed), ["resume"]);
+        assert_eq!(
+            set_and_take(AppLifecycleState::Paused),
+            ["inactive", "hide", "pause"]
+        );
+
+        // Generates intermediate states from higher to lower lifecycle states.
+        assert_eq!(
+            set_and_take(AppLifecycleState::Resumed),
+            ["restart", "show", "resume"]
+        );
+
+        // Go to detached
+        assert_eq!(
+            set_and_take(AppLifecycleState::Detached),
+            ["inactive", "hide", "pause", "detach"]
+        );
+        drop(set_and_take);
+        listener.dispose(&mut app);
+    }
+
+    /// Asks the app to exit as the host does, and awaits the answer in a task; `None` while
+    /// it is still on its way.
+    fn request_app_exit(cell: &Rc<AppCell>) -> Rc<Cell<Option<AppExitResponse>>> {
+        let response = {
+            let mut app = cell.borrow_mut();
+            inset_services::ServicesBinding::instance(&mut app).handle_request_app_exit(&mut app)
+        };
+        let answer = Rc::new(Cell::new(None));
+        let out = Rc::clone(&answer);
+        cell.borrow()
+            .spawn(async move |_cx| out.set(Some(response.await)));
+        cell.checkpoint();
+        answer
+    }
+
+    #[test]
+    fn receives_exit_requests() {
+        let cell = AppCell::new();
+        let exit_requested = Rc::new(Cell::new(false));
+        let seen = Rc::clone(&exit_requested);
+        let listener = {
+            let mut app = cell.borrow_mut();
+            AppLifecycleListener::new(&mut app).on_exit_requested(
+                &mut app,
+                Rc::new(move |_app| {
+                    seen.set(true);
+                    Task::ready(AppExitResponse::Cancel)
+                }),
+            )
+        };
+        let response = request_app_exit(&cell);
+        assert!(exit_requested.get());
+        assert_eq!(response.get(), Some(AppExitResponse::Cancel));
+        listener.dispose(&mut cell.borrow_mut());
+    }
+
+    #[test]
+    fn an_exit_request_waits_for_the_callback_to_decide() {
+        let cell = AppCell::new();
+        let decision: Completer<AppExitResponse> = Completer::new();
+        let listener = {
+            let mut app = cell.borrow_mut();
+            let decided = decision.future();
+            AppLifecycleListener::new(&mut app).on_exit_requested(
+                &mut app,
+                Rc::new(move |app| {
+                    let decided = decided.clone();
+                    app.spawn(async move |_cx| decided.await)
+                }),
+            )
+        };
+        let response = request_app_exit(&cell);
+        assert_eq!(response.get(), None, "the callback is still deciding");
+
+        decision.complete(&mut cell.borrow_mut(), AppExitResponse::Exit);
+        cell.checkpoint();
+        assert_eq!(response.get(), Some(AppExitResponse::Exit));
+        listener.dispose(&mut cell.borrow_mut());
     }
 }

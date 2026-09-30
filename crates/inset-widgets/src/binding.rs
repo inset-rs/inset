@@ -1,18 +1,19 @@
 //! Flutter counterpart: `widgets/binding.dart` (`WidgetsBinding`, `RootWidget`,
 //! `RootElement`, `runApp`).
 //!
-//! `WidgetsBindingObserver` and the observer callbacks (locale, metrics, lifecycle, memory,
-//! back gestures), `performReassemble`, and the platform menu / windowing owners
-//! wait. Lifecycle observer methods exist so a listener can override them;
-//! `handleAppLifecycleStateChanged` waits.
+//! The memory-pressure, push-route and back-gesture observer callbacks, `performReassemble`,
+//! and the platform menu / windowing owners wait. `handleAppLifecycleStateChanged` tells the
+//! observers each lifecycle state the host reports, and `handleRequestAppExit` asks them
+//! whenever the host asks the app to quit.
 
 use std::rc::Rc;
 use std::time::Duration;
 
 use inset_embedder::{AppExitResponse, AppLifecycleState, DropData, Locale, ViewFocusEvent};
-use inset_foundation::{App, Handle, Listener, Timer};
+use inset_foundation::{App, Handle, Listener, Task, Timer};
 use inset_rendering::{RendererBinding, RendererBindingOverridesObject};
 use inset_scheduler::SchedulerBinding;
+use inset_services::{ServicesBinding, ServicesBindingOverridesObject};
 
 use crate::framework::{
     AnyElement, BuildOwner, Element, ElementBase, ElementData, IntoWidget, KeyRef, Slot, Widget,
@@ -45,8 +46,8 @@ pub struct WidgetsBinding {
 /// A `State` registers itself through the object twin
 /// [`WidgetsBindingObserverObject`], whose handle is the observer. The push-route,
 /// memory-pressure and back-gesture callbacks wait with their platform
-/// events; only the ones the renderer raises, the locale list, going back, and the
-/// lifecycle observer methods are here. `handleAppLifecycleStateChanged` waits.
+/// events; only the ones the renderer raises, the locale list, going back, the app's lifecycle
+/// states and exit requests are here.
 pub trait WidgetsBindingObserver {
     /// Called when the application's dimensions change. For example, when a phone is rotated.
     fn did_change_metrics(&self, app: &mut App) {
@@ -100,13 +101,21 @@ pub trait WidgetsBindingObserver {
     /// If any observer responds with [`AppExitResponse::Cancel`], it will cancel the exit.
     /// All observers will be asked before exiting.
     ///
+    /// Not all exits are cancelable, so not all exits will call this function. Do not rely on
+    /// this function as a place to save critical data, because you will be disappointed. There
+    /// are a number of ways that the application can exit without letting the application know
+    /// first: power can be unplugged, the battery removed, the application can be killed in a
+    /// task manager or command line, or the device could have a rapid unplanned disassembly
+    /// (i.e. it could explode). In all of those cases (and probably others), no notification
+    /// will be given to the application that it is about to exit.
+    ///
     /// See also:
     ///
-    ///  * `ServicesBinding::exit_application` for a function to call that will request
+    ///  * [`ServicesBinding::exit_application`] for a function to call that will request
     ///    that the application exits.
-    fn did_request_app_exit(&self, app: &mut App) -> AppExitResponse {
+    fn did_request_app_exit(&self, app: &mut App) -> Task<AppExitResponse> {
         let _ = app;
-        AppExitResponse::Exit
+        Task::ready(AppExitResponse::Exit)
     }
 
     /// Called when the system changes the set of currently active accessibility features.
@@ -164,9 +173,9 @@ pub trait WidgetsBindingObserverObject: Sized + 'static {
     }
 
     /// See [`WidgetsBindingObserver::did_request_app_exit`].
-    fn did_request_app_exit(self: Handle<Self>, app: &mut App) -> AppExitResponse {
+    fn did_request_app_exit(self: Handle<Self>, app: &mut App) -> Task<AppExitResponse> {
         let _ = app;
-        AppExitResponse::Exit
+        Task::ready(AppExitResponse::Exit)
     }
 
     /// See [`WidgetsBindingObserver::did_change_accessibility_features`].
@@ -210,7 +219,7 @@ impl<T: WidgetsBindingObserverObject> WidgetsBindingObserver for Handle<T> {
         T::did_change_app_lifecycle_state(*self, app, state);
     }
 
-    fn did_request_app_exit(&self, app: &mut App) -> AppExitResponse {
+    fn did_request_app_exit(&self, app: &mut App) -> Task<AppExitResponse> {
         T::did_request_app_exit(*self, app)
     }
 
@@ -243,6 +252,8 @@ impl WidgetsBinding {
             app.get_mut(this).build_owner = Some(build_owner);
             // Flutter's `WidgetsBinding` overrides `RendererBinding.drawFrame`.
             RendererBinding::instance(app).set_overrides(app, Rc::new(this));
+            // And `ServicesBinding.handleRequestAppExit`.
+            ServicesBinding::instance(app).set_overrides(app, Rc::new(this));
             // Flutter's `initInstances` assigns the dispatcher callbacks the binding handles.
             let callbacks = app.platform_callbacks_mut();
             callbacks.on_platform_brightness_changed = Some(Listener::new(|app| {
@@ -478,6 +489,52 @@ impl WidgetsBinding {
     /// called in the context of a `TestWidgetsFlutterBinding`).
     pub fn is_root_widget_attached(self: Handle<Self>, app: &App) -> bool {
         app.get(self).root_element.is_some()
+    }
+}
+
+/// Flutter's `WidgetsBinding` overrides of `handleAppLifecycleStateChanged`, which tells every
+/// observer, and of `handleRequestAppExit`, which asks every observer, each once the one before
+/// it has answered.
+impl ServicesBindingOverridesObject for WidgetsBinding {
+    fn handle_app_lifecycle_state_changed(
+        self: Handle<Self>,
+        app: &mut App,
+        state: AppLifecycleState,
+    ) {
+        SchedulerBinding::handle_app_lifecycle_state_changed(app, state);
+        for observer in app.get(self).observers.clone() {
+            observer.did_change_app_lifecycle_state(app, state);
+        }
+    }
+
+    fn handle_request_app_exit(self: Handle<Self>, app: &mut App) -> Task<AppExitResponse> {
+        let mut observers = app.get(self).observers.clone().into_iter();
+        // Dart's `async` body runs up to its first `await` within the call, which asks the
+        // first observer; the others are asked as the answers before theirs arrive.
+        let Some(first) = observers.next() else {
+            return Task::ready(AppExitResponse::Exit);
+        };
+        let mut response = first.did_request_app_exit(app);
+        app.spawn(async move |cx| {
+            let mut did_cancel = false;
+            loop {
+                if response.await == AppExitResponse::Cancel {
+                    did_cancel = true;
+                    // Don't early return. For the case where someone is just using the
+                    // observer to know when exit happens, we want to call all the
+                    // observers, even if we already know we're going to cancel.
+                }
+                let Some(observer) = observers.next() else {
+                    break;
+                };
+                response = cx.update(|app| observer.did_request_app_exit(app));
+            }
+            if did_cancel {
+                AppExitResponse::Cancel
+            } else {
+                AppExitResponse::Exit
+            }
+        })
     }
 }
 
@@ -755,7 +812,7 @@ mod tests {
     use std::time::Duration;
 
     use inset_embedder::{Size, TargetPlatform};
-    use inset_foundation::{App, AppCell, Handle};
+    use inset_foundation::{App, AppCell, Completer, Handle};
     use inset_rendering::{
         AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderHandle,
         RendererBinding,
@@ -969,6 +1026,163 @@ mod tests {
             RendererBinding::instance(&mut app).render_views(&app).len(),
             1
         );
+    }
+
+    /// An observer that logs each exit request it is asked, and answers once `answer`
+    /// completes.
+    struct ExitObserver {
+        name: &'static str,
+        log: Rc<std::cell::RefCell<Vec<&'static str>>>,
+        answer: Completer<AppExitResponse>,
+    }
+
+    impl ExitObserver {
+        fn answering(
+            name: &'static str,
+            log: &Rc<std::cell::RefCell<Vec<&'static str>>>,
+            response: AppExitResponse,
+        ) -> ExitObserver {
+            ExitObserver::deciding(name, log, Completer::completed(response))
+        }
+
+        fn deciding(
+            name: &'static str,
+            log: &Rc<std::cell::RefCell<Vec<&'static str>>>,
+            answer: Completer<AppExitResponse>,
+        ) -> ExitObserver {
+            ExitObserver {
+                name,
+                log: Rc::clone(log),
+                answer,
+            }
+        }
+    }
+
+    impl WidgetsBindingObserver for ExitObserver {
+        fn did_request_app_exit(&self, app: &mut App) -> Task<AppExitResponse> {
+            self.log.borrow_mut().push(self.name);
+            let answer = self.answer.future();
+            app.spawn(async move |_cx| answer.await)
+        }
+    }
+
+    /// Adds `added` to the binding's observers the first time it is asked to exit.
+    struct AddingObserver {
+        added: std::cell::RefCell<Option<WidgetsBindingObserverRef>>,
+    }
+
+    impl WidgetsBindingObserver for AddingObserver {
+        fn did_request_app_exit(&self, app: &mut App) -> Task<AppExitResponse> {
+            if let Some(added) = self.added.take() {
+                WidgetsBinding::instance(app).add_observer(app, added);
+            }
+            Task::ready(AppExitResponse::Exit)
+        }
+    }
+
+    fn add_observers(cell: &Rc<AppCell>, observers: impl IntoIterator<Item = ExitObserver>) {
+        let mut app = cell.borrow_mut();
+        let binding = WidgetsBinding::instance(&mut app);
+        for observer in observers {
+            binding.add_observer(&mut app, Rc::new(observer));
+        }
+    }
+
+    /// Asks the app to exit as the host does, through the services binding, and awaits the
+    /// answer in a task; `None` while it is still on its way.
+    fn request_app_exit(cell: &Rc<AppCell>) -> Rc<Cell<Option<AppExitResponse>>> {
+        let response = {
+            let mut app = cell.borrow_mut();
+            ServicesBinding::instance(&mut app).handle_request_app_exit(&mut app)
+        };
+        let answer = Rc::new(Cell::new(None));
+        let out = Rc::clone(&answer);
+        cell.borrow()
+            .spawn(async move |_cx| out.set(Some(response.await)));
+        cell.checkpoint();
+        answer
+    }
+
+    #[test]
+    fn an_exit_request_asks_every_observer_even_after_one_cancels() {
+        let cell = AppCell::new();
+        let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+        add_observers(
+            &cell,
+            [
+                ExitObserver::answering("refusing", &log, AppExitResponse::Cancel),
+                ExitObserver::answering("agreeing", &log, AppExitResponse::Exit),
+            ],
+        );
+        let response = request_app_exit(&cell);
+        assert_eq!(*log.borrow(), ["refusing", "agreeing"]);
+        assert_eq!(response.get(), Some(AppExitResponse::Cancel));
+    }
+
+    #[test]
+    fn an_exit_request_exits_when_every_observer_agrees() {
+        let cell = AppCell::new();
+        let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+        add_observers(
+            &cell,
+            [ExitObserver::answering(
+                "agreeing",
+                &log,
+                AppExitResponse::Exit,
+            )],
+        );
+        let response = request_app_exit(&cell);
+        assert_eq!(*log.borrow(), ["agreeing"]);
+        assert_eq!(response.get(), Some(AppExitResponse::Exit));
+    }
+
+    #[test]
+    fn an_exit_request_asks_each_observer_once_the_one_before_has_answered() {
+        let cell = AppCell::new();
+        let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let decision = Completer::new();
+        add_observers(
+            &cell,
+            [
+                ExitObserver::deciding("deciding", &log, decision.clone()),
+                ExitObserver::answering("agreeing", &log, AppExitResponse::Exit),
+            ],
+        );
+        let response = request_app_exit(&cell);
+        assert_eq!(*log.borrow(), ["deciding"], "the first answer is awaited");
+        assert_eq!(response.get(), None);
+
+        decision.complete(&mut cell.borrow_mut(), AppExitResponse::Exit);
+        cell.checkpoint();
+        assert_eq!(*log.borrow(), ["deciding", "agreeing"]);
+        assert_eq!(response.get(), Some(AppExitResponse::Exit));
+    }
+
+    /// The exit part of Flutter's "Rentrant observer callbacks do not result in exceptions":
+    /// the request asks the observers there were when it arrived.
+    #[test]
+    fn an_observer_added_during_an_exit_request_is_asked_from_the_next_one_on() {
+        let cell = AppCell::new();
+        let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let added: WidgetsBindingObserverRef = Rc::new(ExitObserver::answering(
+            "added",
+            &log,
+            AppExitResponse::Cancel,
+        ));
+        {
+            let mut app = cell.borrow_mut();
+            let adding = AddingObserver {
+                added: std::cell::RefCell::new(Some(added)),
+            };
+            WidgetsBinding::instance(&mut app).add_observer(&mut app, Rc::new(adding));
+        }
+        let first = request_app_exit(&cell);
+        assert!(log.borrow().is_empty(), "the added observer was not asked");
+        assert_eq!(first.get(), Some(AppExitResponse::Exit));
+
+        let second = request_app_exit(&cell);
+        assert_eq!(*log.borrow(), ["added"]);
+        assert_eq!(second.get(), Some(AppExitResponse::Cancel));
     }
 
     #[test]

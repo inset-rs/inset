@@ -11,15 +11,15 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use inset_embedder::{
-    DropData, EmbedderClient, Frame, Instant, KeyData, PlatformRef, PointerDataPacket,
-    TextEditingValue, TextInputAction, ViewFocusEvent, ViewId,
+    AppExitFuture, AppLifecycleState, DropData, EmbedderClient, Frame, Instant, KeyData,
+    PlatformRef, PointerDataPacket, TextEditingValue, TextInputAction, ViewFocusEvent, ViewId,
 };
 use inset_foundation::{App, AppCell};
 use inset_gestures::GestureBinding;
 use inset_painting::PaintingBinding;
 use inset_rendering::RendererBinding;
 use inset_scheduler::SchedulerBinding;
-use inset_services::{KeyEventManager, TextInput};
+use inset_services::{KeyEventManager, ServicesBinding, TextInput};
 
 /// Host-facing isolate: the [`AppCell`] plus the methods the embedder pushes.
 ///
@@ -142,6 +142,16 @@ impl EmbedderClient for Shell {
         })
     }
 
+    /// The binding's task, whose checkpoint is this push's own: an answer the observers gave
+    /// at once is ready when the call returns.
+    fn request_app_exit(&mut self) -> AppExitFuture {
+        Box::pin(self.push(|app| ServicesBinding::instance(app).handle_request_app_exit(app)))
+    }
+
+    fn app_lifecycle_state_changed(&mut self, state: AppLifecycleState) {
+        self.push(|app| ServicesBinding::instance(app).handle_lifecycle_message(app, state));
+    }
+
     fn platform_brightness_changed(&mut self) {
         self.push(|app| {
             let callback = app
@@ -203,11 +213,14 @@ impl EmbedderClient for Shell {
 mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Poll, Wake, Waker};
     use std::time::Duration;
 
     use inset_embedder::{
-        EmbedderClient, Frame, KeyData, KeyEventType, PointerChange, PointerData,
-        PointerDataPacket, PointerDeviceKind, ViewId,
+        AppLifecycleState, EmbedderClient, Frame, KeyData, KeyEventType, PointerChange,
+        PointerData, PointerDataPacket, PointerDeviceKind, ViewId,
     };
     use inset_foundation::App;
     use inset_gestures::{GestureBinding, PointerRoute};
@@ -247,6 +260,123 @@ mod tests {
         let seen = seen.as_ref().expect("the callback ran");
         assert_eq!(seen.change, DropChange::Dropped);
         assert_eq!(seen.paths, [PathBuf::from("/a.wasm")]);
+    }
+
+    /// The answer to `shell.request_app_exit()` so far, polled as a host polls it; `woken`
+    /// counts the wakes of its waker.
+    fn poll_exit_answer(
+        answer: &mut inset_embedder::AppExitFuture,
+        woken: &Arc<WakeCounter>,
+    ) -> Option<inset_embedder::AppExitResponse> {
+        let waker = Waker::from(Arc::clone(woken));
+        match answer.as_mut().poll(&mut Context::from_waker(&waker)) {
+            Poll::Ready(response) => Some(response),
+            Poll::Pending => None,
+        }
+    }
+
+    #[derive(Default)]
+    struct WakeCounter(AtomicUsize);
+
+    impl WakeCounter {
+        fn wakes(&self) -> usize {
+            self.0.load(Ordering::Acquire)
+        }
+    }
+
+    impl Wake for WakeCounter {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    #[test]
+    fn a_lifecycle_state_the_host_reports_reaches_the_scheduler_with_the_states_between() {
+        let mut shell = Shell::new(Rc::new(TestPlatform::new()), |_app| {});
+        shell.app_lifecycle_state_changed(AppLifecycleState::Resumed);
+        shell.app_lifecycle_state_changed(AppLifecycleState::Hidden);
+        let mut app = shell.app();
+        assert_eq!(
+            SchedulerBinding::lifecycle_state(&mut app),
+            Some(AppLifecycleState::Hidden)
+        );
+        assert!(!SchedulerBinding::frames_enabled(&mut app));
+    }
+
+    #[test]
+    fn request_app_exit_is_answered_by_the_services_binding() {
+        use inset_embedder::AppExitResponse;
+        use inset_foundation::{Handle, Task};
+        use inset_services::{ServicesBinding, ServicesBindingOverridesObject};
+
+        #[derive(Default)]
+        struct Refusing;
+
+        impl ServicesBindingOverridesObject for Refusing {
+            fn handle_request_app_exit(
+                self: Handle<Self>,
+                _app: &mut App,
+            ) -> Task<AppExitResponse> {
+                Task::ready(AppExitResponse::Cancel)
+            }
+        }
+
+        let woken = Arc::default();
+        let mut shell = Shell::new(Rc::new(TestPlatform::new()), |_app| {});
+        let mut answer = shell.request_app_exit();
+        assert_eq!(
+            poll_exit_answer(&mut answer, &woken),
+            Some(AppExitResponse::Exit)
+        );
+
+        let refusing = shell.app().create(Refusing);
+        let binding = ServicesBinding::instance(&mut shell.app());
+        binding.set_overrides(&mut shell.app(), Rc::new(refusing));
+        let mut answer = shell.request_app_exit();
+        assert_eq!(
+            poll_exit_answer(&mut answer, &woken),
+            Some(AppExitResponse::Cancel)
+        );
+    }
+
+    /// The host's waker is woken inside the call that decides, and the answer is ready then.
+    #[test]
+    fn request_app_exit_answers_during_the_call_in_which_the_framework_decides() {
+        use inset_embedder::AppExitResponse;
+        use inset_foundation::{Completer, Handle, Task};
+        use inset_services::{ServicesBinding, ServicesBindingOverridesObject};
+
+        struct Deciding {
+            decision: Completer<AppExitResponse>,
+        }
+
+        impl ServicesBindingOverridesObject for Deciding {
+            fn handle_request_app_exit(self: Handle<Self>, app: &mut App) -> Task<AppExitResponse> {
+                let decision = app.get(self).decision.future();
+                app.spawn(async move |_cx| decision.await)
+            }
+        }
+
+        let decision = Completer::new();
+        let mut shell = Shell::new(Rc::new(TestPlatform::new()), |_app| {});
+        let deciding = shell.app().create(Deciding {
+            decision: decision.clone(),
+        });
+        let binding = ServicesBinding::instance(&mut shell.app());
+        binding.set_overrides(&mut shell.app(), Rc::new(deciding));
+
+        let woken: Arc<WakeCounter> = Arc::default();
+        let mut answer = shell.request_app_exit();
+        assert_eq!(poll_exit_answer(&mut answer, &woken), None);
+
+        decision.complete(&mut shell.app(), AppExitResponse::Exit);
+        assert_eq!(woken.wakes(), 0, "the task resumes at a checkpoint");
+        shell.wake(Duration::ZERO);
+        assert_eq!(woken.wakes(), 1, "the wake ran the checkpoint that decided");
+        assert_eq!(
+            poll_exit_answer(&mut answer, &woken),
+            Some(AppExitResponse::Exit)
+        );
     }
 
     #[test]

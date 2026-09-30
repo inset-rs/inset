@@ -218,8 +218,7 @@ impl Ticker {
     /// not be ticking. In that case, the ticker will not call its callback,
     /// and `is_ticking` will be false, but time will still be progressing.
     ///
-    /// This will return false if frames are not currently enabled. The
-    /// lifecycle is not ported, so frames stay enabled.
+    /// This will return false if frames are not currently enabled.
     #[allow(clippy::wrong_self_convention)]
     pub fn is_ticking(self: Handle<Self>, app: &mut App) -> bool {
         if app.get(self).future.is_none() {

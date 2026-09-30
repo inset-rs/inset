@@ -4,9 +4,19 @@ use std::any::Any;
 use std::fmt::{self, Debug};
 
 use inset_embedder::{Matrix4, Offset, ViewId};
-use inset_foundation::{App, HandleId, PRECISION_ERROR_TOLERANCE, RetainedHandleId};
+use inset_foundation::{App, HandleId, RetainedHandleId};
 
 use crate::events::PointerEvent;
+
+/// How far an entry of [`HitTestResult::push_transform`]'s third row or column may be from
+/// `(0, 0, 1, 0)`.
+///
+/// Dart checks against `precisionErrorTolerance` (1e-10), which suits vector_math's f64
+/// matrices. [`Matrix4`] is f32, and a single f32 inverse already leaves the diagonal entry
+/// one ulp below 1 (6e-8). Eight f32 epsilons (about 1e-6) is sixteen times the worst a
+/// million inverted scale, rotation, skew and translation chains produced, and still catches
+/// any perspective a transform could carry.
+const MATRIX_PRECISION_ERROR_TOLERANCE: f64 = 8.0 * f32::EPSILON as f64;
 
 /// An object that can hit-test pointers.
 pub trait HitTestable {
@@ -215,7 +225,7 @@ impl HitTestResult {
     /// [`PointerEvent`]s from the coordinate space of the method caller to the
     /// coordinate space of its children. In most cases `transform` is derived
     /// from running the inverted result of `RenderObject.applyPaintTransform`
-    /// through `PointerEvent.removePerspectiveTransform` to remove
+    /// through [`remove_perspective_transform`](crate::remove_perspective_transform) to remove
     /// the perspective component.
     ///
     /// If the provided `transform` is a translation matrix, it is much faster
@@ -238,13 +248,20 @@ impl HitTestResult {
                 let values = transform.to_flutter_array();
                 let row2 = [values[2], values[6], values[10], values[14]];
                 let col2 = [values[8], values[9], values[10], values[11]];
-                debug_vector_more_or_less_equals(row2, [0.0, 0.0, 1.0, 0.0])
-                    && debug_vector_more_or_less_equals(col2, [0.0, 0.0, 1.0, 0.0])
+                debug_vector_more_or_less_equals(
+                    row2,
+                    [0.0, 0.0, 1.0, 0.0],
+                    MATRIX_PRECISION_ERROR_TOLERANCE,
+                ) && debug_vector_more_or_less_equals(
+                    col2,
+                    [0.0, 0.0, 1.0, 0.0],
+                    MATRIX_PRECISION_ERROR_TOLERANCE,
+                )
             },
             "The third row and third column of a transform matrix for pointer \
              events must be Vector4(0, 0, 1, 0) to ensure that a transformed \
              point is directly under the pointing device. Did you forget to run the paint \
-             matrix through PointerEvent.removePerspectiveTransform? \
+             matrix through remove_perspective_transform? \
              The provided matrix is:\n{transform:?}"
         );
         self.local_transforms.push(TransformPart::Matrix(transform));
@@ -324,12 +341,13 @@ impl Debug for HitTestResult {
     }
 }
 
-fn debug_vector_more_or_less_equals(a: [f32; 4], b: [f32; 4]) -> bool {
+fn debug_vector_more_or_less_equals(a: [f32; 4], b: [f32; 4], epsilon: f64) -> bool {
     let mut result = true;
     if cfg!(debug_assertions) {
-        result = a.iter().zip(b).all(|(component, expected)| {
-            (*component as f64 - expected as f64).abs() < PRECISION_ERROR_TOLERANCE
-        });
+        result = a
+            .iter()
+            .zip(b)
+            .all(|(component, expected)| (*component as f64 - expected as f64).abs() < epsilon);
     }
     result
 }
@@ -430,5 +448,31 @@ mod tests {
 
         result.pop_transform();
         assert_eq!(current_transform(&mut result), m3.then(&m2));
+    }
+
+    /// The inverse of the card scale the tab prototype hit-tested through. f32 rounding puts
+    /// its third-row diagonal at 0.99999994, which Dart's 1e-10 tolerance rejected.
+    #[test]
+    fn an_inverted_f32_scale_is_accepted() {
+        let inverse = Matrix4::scale(0.432_428_2, 0.432_428_2)
+            .invert()
+            .expect("a scale is invertible");
+        let values = inverse.to_flutter_array();
+        assert_eq!(values[0], 2.312_522_6);
+        assert_eq!(values[10], 0.999_999_94, "the rounding this test is about");
+
+        let mut result = HitTestResult::new();
+        result.push_transform(inverse);
+        assert_eq!(current_transform(&mut result), inverse);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "The third row and third column of a transform matrix")]
+    fn a_perspective_transform_is_still_rejected() {
+        let mut values = Matrix4::IDENTITY.to_flutter_array();
+        // vector_math's `setEntry(3, 2, 0.001)`, the usual perspective.
+        values[11] = 0.001;
+        HitTestResult::new().push_transform(Matrix4::from_flutter_array(&values));
     }
 }

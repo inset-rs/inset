@@ -6,11 +6,8 @@
 //! one `View`, the same events.
 
 use std::cell::RefCell;
-use std::future::Future;
-use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Weak;
-use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use inset_embedder::{
@@ -23,6 +20,7 @@ use winit::raw_window_handle::HasWindowHandle;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use crate::os::{ThisOs, WindowChrome, WindowGeometry};
+use crate::reply::{Reply, reply};
 use crate::view::WinitView;
 use crate::window::HostEvent;
 
@@ -162,12 +160,14 @@ impl HostWindow for WinitWindow {
     fn show(&self) {
         if let Some(window) = self.window.upgrade() {
             window.set_visible(true);
+            self.view.follow_window();
         }
     }
 
     fn hide(&self) {
         if let Some(window) = self.window.upgrade() {
             window.set_visible(false);
+            self.view.follow_window();
         }
     }
 
@@ -187,65 +187,5 @@ impl HostWindow for WinitWindow {
 
     fn set_close_requested(&self, handler: Option<Rc<dyn Fn()>>) {
         *self.close_requested.borrow_mut() = handler;
-    }
-}
-
-/// One answer, delivered once, to a future polled at the app's checkpoints.
-struct Shared<T> {
-    value: Option<T>,
-    waker: Option<Waker>,
-}
-
-pub(crate) struct Reply<T>(Rc<RefCell<Shared<T>>>);
-
-impl<T> Reply<T> {
-    pub(crate) fn complete(self, value: T) {
-        let waker = {
-            let mut shared = self.0.borrow_mut();
-            shared.value = Some(value);
-            shared.waker.take()
-        };
-        if let Some(waker) = waker {
-            waker.wake();
-        }
-    }
-}
-
-struct ReplyFuture<T>(Rc<RefCell<Shared<T>>>);
-
-impl<T> Future for ReplyFuture<T> {
-    type Output = T;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T> {
-        let mut shared = self.0.borrow_mut();
-        match shared.value.take() {
-            Some(value) => Poll::Ready(value),
-            None => {
-                shared.waker = Some(cx.waker().clone());
-                Poll::Pending
-            }
-        }
-    }
-}
-
-fn reply<T>() -> (Reply<T>, ReplyFuture<T>) {
-    let shared = Rc::new(RefCell::new(Shared {
-        value: None,
-        waker: None,
-    }));
-    (Reply(Rc::clone(&shared)), ReplyFuture(shared))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_reply_resolves_its_future_once_completed() {
-        let (reply, mut future) = reply::<u32>();
-        let mut cx = Context::from_waker(Waker::noop());
-        assert!(Pin::new(&mut future).poll(&mut cx).is_pending());
-        reply.complete(7);
-        assert_eq!(Pin::new(&mut future).poll(&mut cx), Poll::Ready(7));
     }
 }

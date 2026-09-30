@@ -211,6 +211,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "app-events"
+version = "0.5.0"
+dependencies = [
+ "inset-embedder",
+ "inset-embedder-winit",
+ "inset-foundation",
+ "inset-painting",
+ "inset-shell",
+ "inset-widgets",
+]
+
+[[package]]
 name = "ar"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2000,6 +2012,7 @@ dependencies = [
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
+ "objc2-io-surface",
  "objc2-quartz-core 0.3.2",
  "pollster",
  "valo",
@@ -2516,6 +2529,19 @@ dependencies = [
  "indexmap",
  "rustc-hash 1.1.0",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "native_surface"
+version = "0.5.0"
+dependencies = [
+ "inset-embedder",
+ "inset-embedder-winit",
+ "inset-painting",
+ "inset-shell",
+ "inset-widgets",
+ "objc2-core-foundation",
+ "objc2-io-surface",
 ]
 
 [[package]]
@@ -4698,8 +4724,6 @@ dependencies = [
 [[package]]
 name = "valo"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "699e743502a97dcb803bc35e7784680ab0305271c1b7c75831afc50373ea06df"
 dependencies = [
  "objc2 0.6.4",
  "objc2-metal 0.3.2",
@@ -4714,8 +4738,6 @@ dependencies = [
 [[package]]
 name = "valo-codec"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cbbaf9637bf557156dfa161f7d359451930990712b613c112e39ec52061840a"
 dependencies = [
  "valo",
  "wgpu",
@@ -4724,8 +4746,6 @@ dependencies = [
 [[package]]
 name = "valo-codec-apple"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66d3fa8bcee44f77962142ebfdb4ad298356fe0e2390e5cad01e6b734dd3bf37"
 dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
@@ -4743,8 +4763,6 @@ dependencies = [
 [[package]]
 name = "valo-codec-software"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4ed0156e854b88bb8e84262b550653d7ebc55cd68173f3bdcd3e029b0b0da50"
 dependencies = [
  "gif",
  "image",
@@ -4758,8 +4776,6 @@ dependencies = [
 [[package]]
 name = "valo-dl"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da8eb267dc578c998723358348f4bc4063adaa0516653d8924b52bdfffec37ad"
 dependencies = [
  "valo-geometry",
  "valo-text",
@@ -4769,8 +4785,6 @@ dependencies = [
 [[package]]
 name = "valo-fontmgr"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d18e35a1fbe4a9c2d85e7bb5d95f22f1dbee9efc3217617f000bcf5f025da2dc"
 dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
@@ -4783,8 +4797,6 @@ dependencies = [
 [[package]]
 name = "valo-geometry"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f1267f0e618af2702293d9b25492cdcf318af4cb736c62f873150c47e1a1d2f"
 dependencies = [
  "glam",
 ]
@@ -4792,8 +4804,6 @@ dependencies = [
 [[package]]
 name = "valo-renderer"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16ea1147c54238c68a41ac9207850663bb5521c7fabc6f109074f3369913fd72"
 dependencies = [
  "bytemuck",
  "etagere",
@@ -4809,8 +4819,6 @@ dependencies = [
 [[package]]
 name = "valo-system-fonts"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0ae9fee8d30646470a6e7f28f75a5cf0a41a565919d8e7834cefabcc1a91de6"
 dependencies = [
  "valo-fontmgr",
  "valo-text",
@@ -4819,8 +4827,6 @@ dependencies = [
 [[package]]
 name = "valo-text"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f36dd93e1189f300f673d2225aa5105b6b8356a3bb747a38ac759499a1c27bce"
 dependencies = [
  "allsorts",
  "harfrust",

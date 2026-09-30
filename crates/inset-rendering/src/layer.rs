@@ -19,12 +19,13 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use inset_embedder::Surface;
 use inset_embedder::{
     BlendMode, Clip, EngineLayer, FillRule, ImageFilter, Matrix4, Offset, Picture, RRect, Rect,
     Scene, SceneBuilder, Size,
 };
-use inset_embedder::Surface;
 use inset_foundation::{App, Handle, HandleId, RetainedHandle};
+use inset_gestures::remove_perspective_transform;
 use inset_scheduler::{FrameCallback, SchedulerBinding};
 
 /// Information collected for an annotation that is found in the layer tree.
@@ -2496,21 +2497,6 @@ impl ContainerLayer for ClipPathLayer {
     crate::container_layer_accessors!();
 }
 
-/// Dart's `PointerEvent.removePerspectiveTransform`: the third row and column become
-/// `(0, 0, 1, 0)` so a transformed point stays under the pointer.
-fn remove_perspective_transform(transform: Matrix4) -> Matrix4 {
-    let mut storage = transform.to_flutter_array();
-    storage[8] = 0.0;
-    storage[9] = 0.0;
-    storage[10] = 1.0;
-    storage[11] = 0.0;
-    storage[2] = 0.0;
-    storage[6] = 0.0;
-    storage[10] = 1.0;
-    storage[14] = 0.0;
-    Matrix4::from_flutter_array(&storage)
-}
-
 /// Dart's `MatrixUtils.transformPoint`.
 fn transform_point(transform: &Matrix4, point: Offset) -> Offset {
     let storage = transform.to_flutter_array();
@@ -4089,6 +4075,8 @@ mod tests {
                 [inset_embedder::SurfacePlacement {
                     surface: Arc::clone(&surface),
                     rect: Rect::from_ltwh(11.0, 7.0, 30.0, 20.0),
+                    scale: 1.0,
+                    clip: Rect::from_ltwh(11.0, 7.0, 30.0, 20.0),
                 }]
             );
         }

@@ -8,7 +8,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - gesture_settings.rs → gesture_settings.dart
 - gesture_details.rs → gesture_details.dart
 - drag_details.rs → drag_details.dart
-- events.rs → computeHitSlop / computePanSlop
+- events.rs → computeHitSlop / computePanSlop / computeScaleSlop / PointerEvent.removePerspectiveTransform
 - recognizer.rs → OffsetPair, DragStartBehavior, MultitouchDragStrategy, GestureRecognizerState
 - tap.rs → TapDownDetails / TapUpDetails / TapMoveDetails
 - velocity.rs → Velocity / VelocityEstimate
@@ -17,6 +17,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - debug.rs → debug.dart
 - tap_and_drag.rs → TapDragDownDetails / TapDragUpDetails / TapDragStartDetails / TapDragUpdateDetails / TapDragEndDetails
 - force_press.rs → ForcePressDetails
+- scale.rs → ScaleStartDetails / ScaleUpdateDetails / ScaleEndDetails, kDefaultMouseScrollToScaleFactor / kDefaultTrackpadScrollToScaleFactor
 
 ## events.rs → events.dart
 
@@ -44,6 +45,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Dart writes it on the same object the caller still holds.
   Affect: a caller cannot read the transform back off the entry it added; read `result.path().last().transform()`.
 
+- Change: `push_transform`'s debug check lets each entry of the third row and column be up to eight f32 epsilons (about 1e-6) from `(0, 0, 1, 0)`, where Dart allows `precisionErrorTolerance` (1e-10).
+  Reason: platform — `Matrix4` is valo's f32 matrix (see inset-embedder's `geometry/PORTING.md`), and one f32 inverse already leaves that diagonal entry an ulp below 1, 6e-8.
+  Affect: an inverted scale or rotation no longer panics a debug build on the first pointer over it; a third row or column off by less than 1e-6 passes where Dart would assert.
+
 ## pointer_signal_resolver.rs → pointer_signal_resolver.dart
 
 - Change: `register` keeps the event it was handed and `resolve` reads that one back; Dart's `_isSameEvent` assertions are gone.
@@ -66,7 +71,7 @@ Pattern: same leaf-inheritance as [monodrag.rs](#monodragrs--monodragdart). `Bas
 
 Pattern: same leaf-inheritance. Each per-pointer state is an arena object, and a custom recognizer implements `MultiDragGestureRecognizer` and a `MultiDragPointerState` leaf.
 
-## recognizer.rs / tap.rs / long_press.rs / monodrag.rs / tap_and_drag.rs / force_press.rs — GestureRecognizer hierarchy
+## recognizer.rs / tap.rs / long_press.rs / monodrag.rs / tap_and_drag.rs / force_press.rs / scale.rs — GestureRecognizer hierarchy
 
 Pattern: [leaf-inheritance](../../../.agents/skills/porting-flutter/patterns/leaf-inheritance.md). The field bags, leaf traits and `super` namespaces of every level are public, since a leaf written in another crate has to name each piece it would have inherited; `AnyGestureRecognizer` is the erased form Dart uses `GestureRecognizer` as a type for.
 

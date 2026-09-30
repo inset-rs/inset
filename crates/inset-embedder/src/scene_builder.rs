@@ -5,8 +5,9 @@
 //! the engine layer, embedded in the enclosing recording and handed back for the layer to keep,
 //! and `add_retained` embeds it again while the subtree has not changed (see the rendering
 //! crate's `PORTING.md`). A native surface the host composites is not in the list: the
-//! builder keeps the transform of its open scopes so that `add_surface` can place it in the
-//! view's coordinates, and the scene carries those placements beside the picture.
+//! builder keeps the transform and the clip of its open scopes so that `add_surface` can place
+//! it in the view's coordinates, at the scale it is drawn and cut to what shows, and the scene
+//! carries those placements beside the picture.
 
 use std::fmt;
 use std::sync::Arc;
@@ -33,15 +34,29 @@ pub struct Scene {
 #[derive(Clone)]
 pub struct SurfacePlacement {
     pub surface: Arc<dyn Surface>,
-    /// In the view's logical coordinates, with the transforms above the surface applied.
+    /// In the view's physical pixels, with the transforms above the surface applied: the
+    /// scene's own space, whose root transform scales logical pixels by the device pixel ratio.
     pub rect: Rect,
+    /// How many of the view's physical pixels one unit of the surface's own coordinates spans:
+    /// the scale of the transforms above it, the root's device pixel ratio among them. A
+    /// producer draws its buffers at the device pixel ratio, so a host shows a buffer at
+    /// `scale / device_pixel_ratio` of its size. Under a scale that differs between the axes,
+    /// or a rotation, it is the scale along the surface's own horizontal.
+    pub scale: f64,
+    /// The part of `rect` that shows, in the same pixels: `rect` cut down to the bounds of
+    /// every clip above the surface. A host shows nothing of the surface outside it. Where a
+    /// clip is not a rectangle, what lies between it and its bounds is the picture's to cover.
+    pub clip: Rect,
 }
 
 /// Two placements are equal when they put the same surface in the same place: what a host
 /// compares to tell a frame worth presenting from one it already shows.
 impl PartialEq for SurfacePlacement {
     fn eq(&self, other: &SurfacePlacement) -> bool {
-        Arc::ptr_eq(&self.surface, &other.surface) && self.rect == other.rect
+        Arc::ptr_eq(&self.surface, &other.surface)
+            && self.rect == other.rect
+            && self.scale == other.scale
+            && self.clip == other.clip
     }
 }
 
@@ -50,6 +65,8 @@ impl fmt::Debug for SurfacePlacement {
         f.debug_struct("SurfacePlacement")
             .field("surface", &Arc::as_ptr(&self.surface).cast::<()>())
             .field("rect", &self.rect)
+            .field("scale", &self.scale)
+            .field("clip", &self.clip)
             .finish()
     }
 }
@@ -72,6 +89,9 @@ pub struct SceneBuilder {
     canvas: Canvas,
     /// What the open scope's coordinates are in the view's: the transforms pushed so far.
     transform: Matrix4,
+    /// The bounds of the clips pushed so far, in the view's coordinates; `None` while nothing
+    /// clips.
+    clip: Option<Rect>,
     /// The scopes enclosing the open one, outermost first; every `push_*` adds one and every
     /// `pop` takes one back. dart:ui asserts the same balance.
     enclosing: Vec<EnclosingScope>,
@@ -83,6 +103,7 @@ pub struct SceneBuilder {
 struct EnclosingScope {
     canvas: Canvas,
     transform: Matrix4,
+    clip: Option<Rect>,
 }
 
 impl fmt::Debug for SceneBuilder {
@@ -105,6 +126,7 @@ impl SceneBuilder {
         SceneBuilder {
             canvas: Canvas::new(),
             transform: Matrix4::IDENTITY,
+            clip: None,
             enclosing: Vec::new(),
             surfaces: Vec::new(),
         }
@@ -141,6 +163,7 @@ impl SceneBuilder {
             open_clip(canvas, clip_behavior, rect.into());
             canvas.clip_rect(rect, ClipOp::Intersect);
         });
+        self.clipped_to(rect);
     }
 
     /// Pushes a rounded-rectangular clip operation onto the operation stack.
@@ -155,6 +178,7 @@ impl SceneBuilder {
                 ClipOp::Intersect,
             );
         });
+        self.clipped_to(rrect.outer_rect());
     }
 
     /// Pushes a path clip operation onto the operation stack.
@@ -165,6 +189,7 @@ impl SceneBuilder {
             open_clip(canvas, clip_behavior, path.bounds());
             canvas.clip_path(path, FillRule::NonZero, ClipOp::Intersect);
         });
+        self.clipped_to(bounds_of(path));
     }
 
     /// Pushes an opacity operation onto the operation stack.
@@ -181,7 +206,10 @@ impl SceneBuilder {
             canvas.save_layer(None, &paint);
             canvas.translate(offset.dx() as f32, offset.dy() as f32);
         });
-        self.transformed_by(&Matrix4::translation(offset.dx() as f32, offset.dy() as f32));
+        self.transformed_by(&Matrix4::translation(
+            offset.dx() as f32,
+            offset.dy() as f32,
+        ));
     }
 
     /// Pushes a backdrop filter operation onto the operation stack.
@@ -231,6 +259,7 @@ impl SceneBuilder {
         self.canvas.restore();
         let scope = std::mem::replace(&mut self.canvas, enclosing.canvas);
         self.transform = enclosing.transform;
+        self.clip = enclosing.clip;
         let layer = Arc::new(scope.build());
         self.canvas.draw_display_list(&layer);
         layer
@@ -241,9 +270,16 @@ impl SceneBuilder {
     /// caller paints the rectangle clear itself, at the place in paint order it wants the
     /// surface to show through.
     pub fn add_surface(&mut self, surface: Arc<dyn Surface>, rect: Rect) {
+        let rect = self.in_view_coordinates(rect);
+        let clip = match self.clip {
+            Some(clip) => visible_part_of(rect, clip),
+            None => rect,
+        };
         self.surfaces.push(SurfacePlacement {
             surface,
-            rect: self.in_view_coordinates(rect),
+            rect,
+            scale: horizontal_scale_of(self.transform),
+            clip,
         });
     }
 
@@ -297,6 +333,7 @@ impl SceneBuilder {
         self.enclosing.push(EnclosingScope {
             canvas: enclosing,
             transform: self.transform,
+            clip: self.clip,
         });
         push(&mut self.canvas);
     }
@@ -305,6 +342,16 @@ impl SceneBuilder {
     /// taken through `matrix` first, then through the transforms pushed before it.
     fn transformed_by(&mut self, matrix: &Matrix4) {
         self.transform = self.transform.then(matrix);
+    }
+
+    /// The open scope shows nothing outside `bounds`, in its own coordinates, besides what the
+    /// scopes around it already cut.
+    fn clipped_to(&mut self, bounds: Rect) {
+        let bounds = self.in_view_coordinates(bounds);
+        self.clip = Some(match self.clip {
+            Some(clip) => visible_part_of(bounds, clip),
+            None => bounds,
+        });
     }
 
     /// `rect` in the view's coordinates: the box around its corners under the open scope's
@@ -335,6 +382,35 @@ fn open_clip(canvas: &mut Canvas, clip_behavior: Clip, bounds: valo::Rect) {
         Clip::None | Clip::HardEdge | Clip::AntiAlias => canvas.save(),
         Clip::AntiAliasWithSaveLayer => canvas.save_layer(Some(bounds), &Paint::default()),
     }
+}
+
+/// The rectangle `path` lies in.
+fn bounds_of(path: &Path) -> Rect {
+    let bounds = path.bounds();
+    Rect::from_ltwh(
+        f64::from(bounds.x),
+        f64::from(bounds.y),
+        f64::from(bounds.width),
+        f64::from(bounds.height),
+    )
+}
+
+/// What of `rect` lies inside `clip`; an empty rectangle on `clip`'s nearest edge when
+/// nothing does.
+fn visible_part_of(rect: Rect, clip: Rect) -> Rect {
+    let overlap = rect.intersect(clip);
+    Rect::from_ltrb(
+        overlap.left,
+        overlap.top,
+        overlap.right.max(overlap.left),
+        overlap.bottom.max(overlap.top),
+    )
+}
+
+/// How long one unit along the horizontal becomes under `transform`.
+fn horizontal_scale_of(transform: Matrix4) -> f64 {
+    let m = transform.to_flutter_array();
+    f64::from(m[0]).hypot(f64::from(m[1]))
 }
 
 /// The blur a valo [`Backdrop`] can sample the scene with, out of an arbitrary filter tree: its
@@ -421,37 +497,119 @@ mod tests {
         assert_eq!(
             scene.surfaces,
             [
-                SurfacePlacement {
-                    surface: inner,
-                    rect: Rect::from_ltrb(2.0, 2.0, 4.0, 4.0),
-                },
-                SurfacePlacement {
-                    surface: outer,
-                    rect: Rect::from_ltwh(10.0, 20.0, 5.0, 5.0),
-                },
+                unclipped(inner, Rect::from_ltrb(2.0, 2.0, 4.0, 4.0), 2.0),
+                unclipped(outer, Rect::from_ltwh(10.0, 20.0, 5.0, 5.0), 1.0),
             ]
         );
     }
 
+    /// A page at half its size on a display of two pixels a point: each unit of the page's
+    /// own spans one of the view's pixels, so a buffer drawn at two pixels a point shows at
+    /// half its size.
     #[test]
-    fn a_placement_is_its_surface_and_its_rectangle() {
+    fn a_surface_carries_the_scale_of_the_transforms_above_it() {
+        let surface = idle_surface();
+        let mut builder = SceneBuilder::new();
+        builder.push_transform(&Matrix4::scale(2.0, 2.0));
+        builder.push_offset(10.0, 20.0);
+        builder.push_transform(&Matrix4::scale(0.5, 0.5));
+        builder.add_surface(
+            Arc::clone(&surface),
+            Rect::from_ltwh(0.0, 0.0, 390.0, 844.0),
+        );
+        builder.pop();
+        builder.pop();
+        builder.pop();
+        let placement = &builder.build().surfaces[0];
+        assert_eq!(placement.scale, 1.0);
+        assert_eq!(placement.rect, Rect::from_ltwh(20.0, 40.0, 390.0, 844.0));
+    }
+
+    #[test]
+    fn a_surface_shows_only_what_the_clips_above_it_leave() {
+        let (clipped, beside) = (idle_surface(), idle_surface());
+        let mut builder = SceneBuilder::new();
+        builder.push_transform(&Matrix4::scale(2.0, 2.0));
+        builder.push_clip_rect(Rect::from_ltwh(0.0, 0.0, 100.0, 50.0), Clip::HardEdge);
+        builder.push_offset(10.0, 10.0);
+        let path = {
+            let mut path = crate::painting::PathBuilder::new();
+            path.rrect(Rect::from_ltwh(0.0, 0.0, 200.0, 20.0).into(), 4.0);
+            path.build()
+        };
+        builder.push_clip_path(&path, Clip::AntiAlias);
+        builder.add_surface(
+            Arc::clone(&clipped),
+            Rect::from_ltwh(-5.0, -5.0, 300.0, 300.0),
+        );
+        builder.pop();
+        builder.pop();
+        builder.add_surface(Arc::clone(&beside), Rect::from_ltwh(0.0, 0.0, 300.0, 300.0));
+        builder.pop();
+        builder.pop();
+        let scene = builder.build();
+        // The path's bounds, (10, 10) to (210, 30), cut by the rectangle's, (0, 0) to (100, 50),
+        // at two pixels to a unit.
+        assert_eq!(
+            scene.surfaces[0].clip,
+            Rect::from_ltrb(20.0, 20.0, 200.0, 60.0)
+        );
+        assert_eq!(
+            scene.surfaces[0].rect,
+            Rect::from_ltwh(10.0, 10.0, 600.0, 600.0)
+        );
+        assert_eq!(
+            scene.surfaces[1].clip,
+            Rect::from_ltwh(0.0, 0.0, 200.0, 100.0),
+            "the rectangle's clip alone, once the path's scope is closed"
+        );
+    }
+
+    #[test]
+    fn a_surface_outside_its_clip_shows_nothing() {
+        let surface = idle_surface();
+        let mut builder = SceneBuilder::new();
+        builder.push_clip_rect(Rect::from_ltwh(0.0, 0.0, 100.0, 100.0), Clip::HardEdge);
+        builder.add_surface(surface, Rect::from_ltwh(200.0, 0.0, 50.0, 50.0));
+        builder.pop();
+        let clip = builder.build().surfaces[0].clip;
+        assert!(clip.is_empty(), "{clip:?}");
+    }
+
+    #[test]
+    fn a_placement_is_its_surface_its_rectangle_its_scale_and_what_shows() {
         let surface = idle_surface();
         let rect = Rect::from_ltwh(0.0, 0.0, 4.0, 4.0);
-        let placement = SurfacePlacement {
-            surface: Arc::clone(&surface),
-            rect,
-        };
+        let placement = unclipped(Arc::clone(&surface), rect, 1.0);
         assert_eq!(placement.clone(), placement);
-        let elsewhere = SurfacePlacement {
-            surface: Arc::clone(&surface),
-            rect: Rect::from_ltwh(1.0, 0.0, 4.0, 4.0),
-        };
+        let elsewhere = unclipped(
+            Arc::clone(&surface),
+            Rect::from_ltwh(1.0, 0.0, 4.0, 4.0),
+            1.0,
+        );
         assert_ne!(elsewhere, placement);
-        let another_surface = SurfacePlacement {
-            surface: idle_surface(),
-            rect,
+        let smaller = unclipped(Arc::clone(&surface), rect, 0.5);
+        assert_ne!(smaller, placement);
+        let cut = SurfacePlacement {
+            clip: Rect::from_ltwh(0.0, 0.0, 2.0, 4.0),
+            ..placement.clone()
         };
-        assert_ne!(another_surface, placement, "the same rectangle is not the same surface");
+        assert_ne!(cut, placement);
+        let another_surface = unclipped(idle_surface(), rect, 1.0);
+        assert_ne!(
+            another_surface, placement,
+            "the same rectangle is not the same surface"
+        );
+    }
+
+    /// `surface` at `rect`, all of it showing, at `scale`.
+    fn unclipped(surface: Arc<dyn Surface>, rect: Rect, scale: f64) -> SurfacePlacement {
+        SurfacePlacement {
+            surface,
+            rect,
+            scale,
+            clip: rect,
+        }
     }
 
     #[test]

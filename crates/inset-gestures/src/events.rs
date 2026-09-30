@@ -6,7 +6,8 @@ use inset_embedder::{Matrix4, Offset, PointerDeviceKind, ViewId};
 use inset_foundation::ValueChanged;
 
 use crate::constants::{
-    K_PAN_SLOP, K_PRECISE_POINTER_HIT_SLOP, K_PRECISE_POINTER_PAN_SLOP, K_TOUCH_SLOP,
+    K_PAN_SLOP, K_PRECISE_POINTER_HIT_SLOP, K_PRECISE_POINTER_PAN_SLOP,
+    K_PRECISE_POINTER_SCALE_SLOP, K_SCALE_SLOP, K_TOUCH_SLOP,
 };
 use crate::gesture_settings::DeviceGestureSettings;
 
@@ -723,6 +724,26 @@ pub fn transform_delta_via_positions(
     transformed_end_position - transformed_start_position
 }
 
+/// Removes the "perspective" component from `transform`.
+///
+/// When applying the resulting transform matrix to a point with a
+/// z-coordinate of zero (which is generally assumed for all points
+/// represented by an [`Offset`]), the other coordinates will get transformed as
+/// before, but the new z-coordinate is going to be zero again. This is
+/// achieved by setting the third column and third row of the matrix to
+/// "0, 0, 1, 0".
+pub fn remove_perspective_transform(transform: Matrix4) -> Matrix4 {
+    let vector = [0.0, 0.0, 1.0, 0.0];
+    let mut storage = transform.to_flutter_array();
+    // `setColumn(2, vector)`
+    storage[8..12].copy_from_slice(&vector);
+    // `setRow(2, vector)`
+    for (column, value) in vector.into_iter().enumerate() {
+        storage[column * 4 + 2] = value;
+    }
+    Matrix4::from_flutter_array(&storage)
+}
+
 /// Determine the appropriate hit slop pixels based on the `kind` of pointer.
 pub fn compute_hit_slop(kind: PointerDeviceKind, settings: Option<DeviceGestureSettings>) -> f64 {
     match kind {
@@ -748,6 +769,18 @@ pub fn compute_pan_slop(kind: PointerDeviceKind, settings: Option<DeviceGestureS
         | PointerDeviceKind::Trackpad => settings
             .and_then(|settings| settings.pan_slop())
             .unwrap_or(K_PAN_SLOP),
+    }
+}
+
+/// Determine the appropriate scale slop pixels based on the `kind` of pointer.
+pub fn compute_scale_slop(kind: PointerDeviceKind) -> f64 {
+    match kind {
+        PointerDeviceKind::Mouse => K_PRECISE_POINTER_SCALE_SLOP,
+        PointerDeviceKind::Stylus
+        | PointerDeviceKind::InvertedStylus
+        | PointerDeviceKind::Unknown
+        | PointerDeviceKind::Touch
+        | PointerDeviceKind::Trackpad => K_SCALE_SLOP,
     }
 }
 
@@ -814,5 +847,29 @@ mod tests {
         assert_eq!(transformed.position, Offset::new(10.0, 20.0));
         assert_eq!(transformed.local_position(), Offset::new(15.0, 27.0));
         assert!(transformed.original.is_some());
+    }
+
+    /// `events_test.dart`: `paintTransformToPointerEventTransform`.
+    #[test]
+    fn paint_transform_to_pointer_event_transform() {
+        let original = Matrix4::IDENTITY;
+        let changed = remove_perspective_transform(original);
+        assert_eq!(changed, original);
+
+        // `Matrix4.identity()..scale(3.0)`, which scales z as well.
+        let mut storage = Matrix4::IDENTITY.to_flutter_array();
+        storage[0] = 3.0;
+        storage[5] = 3.0;
+        storage[10] = 3.0;
+        let original = Matrix4::from_flutter_array(&storage);
+        let changed = remove_perspective_transform(original);
+        assert_ne!(changed, original);
+        // `..setColumn(2, Vector4(0, 0, 1, 0))..setRow(2, Vector4(0, 0, 1, 0))`
+        storage[8..12].copy_from_slice(&[0.0, 0.0, 1.0, 0.0]);
+        storage[2] = 0.0;
+        storage[6] = 0.0;
+        storage[10] = 1.0;
+        storage[14] = 0.0;
+        assert_eq!(changed, Matrix4::from_flutter_array(&storage));
     }
 }

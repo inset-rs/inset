@@ -1,5 +1,7 @@
 //! Flutter counterpart: `services/clipboard.dart`.
 
+use std::future::Future;
+
 use inset_foundation::App;
 
 /// Data stored on the system clipboard.
@@ -34,7 +36,7 @@ impl Clipboard {
     /// Used with [`get_data`](Self::get_data).
     pub const K_TEXT_PLAIN: &'static str = "text/plain";
 
-    /// Stores the given clipboard data on the clipboard.
+    /// Stores the given clipboard data on the clipboard, without waiting for it to be stored.
     pub fn set_data(app: &App, data: ClipboardData) {
         let Some(text) = data.text.as_deref() else {
             return;
@@ -49,21 +51,30 @@ impl Clipboard {
     /// The `format` argument specifies the media type, such as `text/plain`, of
     /// the data to obtain.
     ///
-    /// Returns [`None`] if the data could not be obtained.
-    pub fn get_data(app: &App, format: &str) -> Option<ClipboardData> {
-        if format != Self::K_TEXT_PLAIN {
-            return None;
-        }
-        app.platform()
+    /// Completes with [`None`] if the data could not be obtained.
+    pub fn get_data(
+        app: &App,
+        format: &str,
+    ) -> impl Future<Output = Option<ClipboardData>> + use<> {
+        let text = app
+            .platform()
             .clipboard()
-            .and_then(|clipboard| clipboard.text())
-            .map(ClipboardData::new)
+            .filter(|_| format == Self::K_TEXT_PLAIN)
+            .map(|clipboard| clipboard.text());
+        async move { text?.await.map(ClipboardData::new) }
     }
 
-    /// Returns true if (and only if) the clipboard contains string data.
-    pub fn has_strings(app: &App) -> bool {
-        app.platform()
+    /// Completes with true if (and only if) the clipboard contains string data.
+    pub fn has_strings(app: &App) -> impl Future<Output = bool> + use<> {
+        let has_strings = app
+            .platform()
             .clipboard()
-            .is_some_and(|clipboard| clipboard.has_strings())
+            .map(|clipboard| clipboard.has_strings());
+        async move {
+            match has_strings {
+                Some(has_strings) => has_strings.await,
+                None => false,
+            }
+        }
     }
 }

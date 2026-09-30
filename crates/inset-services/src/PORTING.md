@@ -2,13 +2,27 @@
 Flutter home: packages/flutter/lib/src/services
 Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
-Only the hardware keyboard, haptic feedback, mouse cursors, the mouse tracking annotation, state restoration, the application switcher description, the system overlay style, `TextInput` / `TextInputConnection` / `TextInputClient` / `TextSelectionDelegate`, text layout metric statics, the text boundaries, the clipboard, text input formatters, `SelectionChangedCause`, autofill (`AutofillHints` / `AutofillClient` / `AutofillScope`), keyboard-inserted content, spell check, live text, process text, `UndoManager` / `UndoManagerClient`, and re-exports of the text-input value types are here; the rest of the package waits.
+Only the app life cycle and the application exit of `ServicesBinding`, the hardware keyboard, haptic feedback, mouse cursors, the mouse tracking annotation, state restoration, the application switcher description, the system overlay style, `TextInput` / `TextInputConnection` / `TextInputClient` / `TextSelectionDelegate`, text layout metric statics, the text boundaries, the clipboard, text input formatters, `SelectionChangedCause`, autofill (`AutofillHints` / `AutofillClient` / `AutofillScope`), keyboard-inserted content, spell check, live text, process text, `UndoManager` / `UndoManagerClient`, and re-exports of the text-input value types are here; the rest of the package waits.
 
 ## Identical
 
 - text_editing.rs → text_editing.dart (re-export of embedder `TextSelection`)
 - text_layout_metrics.rs → text_layout_metrics.dart (`isWhitespace` / `isLineTerminator`)
 - text_boundary.rs → text_boundary.dart (`LineBoundary` needs layout, so it sits in rendering)
+
+## binding.rs → binding.dart
+
+- Change: `ServicesBinding` holds only the app life cycle, `handle_request_app_exit` and `exit_application`, and it calls `handleAppLifecycleStateChanged` and `handle_request_app_exit` through a registered `ServicesBindingOverrides` where Flutter's `WidgetsBinding` overrides them through mixin order; the lifecycle one defaults to `SchedulerBinding`'s.
+  Reason: language — a crate above cannot override a method below it.
+  Affect: the widgets binding registers with `set_overrides` to tell and ask its observers; an app without it answers every exit request with `Exit`, and its lifecycle changes reach only the scheduler.
+
+- Change: the host's lifecycle messages arrive as `AppLifecycleState` values, the initial one from `Platform::initial_lifecycle_state` and each change through `EmbedderClient::app_lifecycle_state_changed`, which the shell hands to the public `handle_lifecycle_message`; Dart's private `_handleLifecycleMessage` parses a state's name from `SystemChannels.lifecycle`.
+  Reason: platform — there are no method channels; the host trait is the channel.
+  Affect: a host or a test reports a state by calling the client or the binding, and cannot send a name the framework does not know.
+
+- Change: `exit_application` calls the host's `AppExit` capability, and completes with `Cancel` at once where the host has none; Dart sends `System.exitApplication`, which fails with a `MissingPluginException` on a host that does not implement it.
+  Reason: platform — the host trait is the channel, and a host without the capability answers `None`.
+  Affect: on a phone or in a browser the call completes with `Cancel` and the app keeps running, where Dart's future fails.
 
 ## text_input.rs → text_input.dart
 
@@ -28,9 +42,9 @@ Only the hardware keyboard, haptic feedback, mouse cursors, the mouse tracking a
   Reason: platform — there is no host autofill API.
   Affect: `AutofillGroup` disposal still calls them, but the platform is never asked to fill a group or to commit a saved autofill context.
 
-- Change: `TextSelectionDelegate::paste_text` completes within the call, and the toolbar and view methods default to no-ops.
-  Reason: platform — `Clipboard` answers in place, so there is no `Future` to await.
-  Affect: pasted text is in the field before the call returns; a delegate that only drives selection silently does nothing where Dart would not compile without the member.
+- Change: `TextSelectionDelegate::paste_text` returns nothing to await, and the toolbar and view methods default to no-ops.
+  Reason: language — the delegate's methods are plain functions in a table, and Flutter's framework never awaits `pasteText`.
+  Affect: pasted text lands when the clipboard answers, after the call returns, as in Dart; a delegate that only drives selection silently does nothing where Dart would not compile without the member.
 
 ## system_context_menu.rs → `SystemContextMenuController` / `IOSSystemContextMenuItemData*` in text_input.dart
 
@@ -40,9 +54,9 @@ Only the hardware keyboard, haptic feedback, mouse cursors, the mouse tracking a
 
 ## clipboard.rs → clipboard.dart
 
-- Change: `Clipboard::set_data` / `get_data` / `has_strings` answer within the call rather than returning a `Future`.
-  Reason: platform — there are no method channels; the host trait is the channel and answers in place.
-  Affect: paste happens in the same frame that asks for it; a host without a clipboard answers `None`.
+- Change: `Clipboard::set_data` stores without returning a `Future`; `get_data` and `has_strings` return one, as Flutter's do.
+  Reason: platform — there are no method channels; the host trait is the channel, and a host has nothing to report of a write that the framework uses.
+  Affect: code that awaited `setData` has nothing to await, and a paste lands when the host has read the clipboard; a host without a clipboard completes with `None` and `false`.
 
 ## spell_check.rs → spell_check.dart
 
@@ -152,7 +166,7 @@ The key constants and the four tables are machine-written from the Dart, as Flut
 - `MouseCursor` diagnostics (`debugFillProperties`, `toString(minLevel)`). Trigger: diagnostics.
 - An `EmbedderClient` hook for restoration data that arrives while the app runs. Trigger: an embedder whose OS hands it new data after start; until then the host calls `RestorationManager::handle_restoration_update_from_engine`.
 - The rest of text input: `ScribbleClient`, `DeltaTextInputClient`, `TextInputControl` / `setInputControl`, `setSelectionRects` and `updateStyle` reaching the host, asset bundles. Trigger: scribble, a custom input control, or a host that implements autofill.
-- The rest of `SystemChrome`: `setPreferredOrientations`, `setEnabledSystemUIMode`, `restoreSystemUIOverlays`, `setSystemUIChangeCallback`, `handleAppLifecycleStateChanged`, `DeviceOrientation`, `SystemUiMode`. Trigger: an orientation-aware or fullscreen-capable host, and the app lifecycle.
+- The rest of `SystemChrome`: `setPreferredOrientations`, `setEnabledSystemUIMode`, `restoreSystemUIOverlays`, `setSystemUIChangeCallback`, `DeviceOrientation`, `SystemUiMode`. Trigger: an orientation-aware or fullscreen-capable host.
 - The raw key path (`RawKeyboard`, `RawKeyEvent`, `KeyMessage`, `KeyDataTransitMode`, `KeyEventManager.handleRawKeyMessage`), which Flutter has deprecated. Trigger: an embedder that can only send raw key data.
 - `debugPrintKeyboardEvents` and `HardwareKeyboard._logEventIfIrregular`. Trigger: `services/debug.dart`.
 - The host side of `sync_keyboard_state`. Trigger: a `Platform` that can report the keys held at start or on regaining focus.

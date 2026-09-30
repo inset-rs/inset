@@ -270,23 +270,27 @@ impl ClipboardStatusNotifier {
         self.notify_listeners(app);
     }
 
-    /// Check the [`Clipboard`] and update [`value`](Self::value) if needed.
+    /// Check the [`Clipboard`] and update [`value`](Self::value) if needed, once the clipboard
+    /// answers.
     pub fn update(self: Handle<Self>, app: &mut App) {
         if app.get(self).disposed || app.get(self).web {
             return;
         }
 
         let has_strings = Clipboard::has_strings(app);
-        let next_status = if has_strings {
-            ClipboardStatus::Pasteable
-        } else {
-            ClipboardStatus::NotPasteable
-        };
-
-        if app.get(self).disposed {
-            return;
-        }
-        self.set_value(app, next_status);
+        app.spawn(async move |cx| {
+            let next_status = if has_strings.await {
+                ClipboardStatus::Pasteable
+            } else {
+                ClipboardStatus::NotPasteable
+            };
+            cx.update(|app| {
+                if !app.contains(self) || app.get(self).disposed {
+                    return;
+                }
+                self.set_value(app, next_status);
+            });
+        });
     }
 
     /// Discards any resources used by the object.
@@ -1198,16 +1202,20 @@ impl TextSelectionOverlay {
         let overlay = app.get(self).selection_overlay;
         overlay.dispose(app);
         let render_object = app.get(self).render_object;
-        let start_in_viewport = render_object.selection_start_in_viewport(app);
-        let end_in_viewport = render_object.selection_end_in_viewport(app);
-        start_in_viewport.remove_listener(
-            app,
-            &Listener::handle_method(self, Self::update_text_selection_overlay_visibilities),
-        );
-        end_in_viewport.remove_listener(
-            app,
-            &Listener::handle_method(self, Self::update_text_selection_overlay_visibilities),
-        );
+        // A field unmounted with its subtree loses its render object, and the notifiers on it,
+        // before its state disposes this overlay.
+        if app.contains(render_object.handle()) {
+            let start_in_viewport = render_object.selection_start_in_viewport(app);
+            let end_in_viewport = render_object.selection_end_in_viewport(app);
+            start_in_viewport.remove_listener(
+                app,
+                &Listener::handle_method(self, Self::update_text_selection_overlay_visibilities),
+            );
+            end_in_viewport.remove_listener(
+                app,
+                &Listener::handle_method(self, Self::update_text_selection_overlay_visibilities),
+            );
+        }
         app.get_mut(app.get(self).effective_toolbar_visibility)
             .dispose();
         app.get_mut(app.get(self).effective_start_handle_visibility)
@@ -4963,7 +4971,12 @@ mod tests {
         let notifier = ClipboardStatusNotifier::new(&mut app);
         assert_eq!(notifier.value(&app), ClipboardStatus::Unknown);
         notifier.update(&mut app);
-        assert_eq!(notifier.value(&app), ClipboardStatus::NotPasteable);
+        drop(app);
+        cell.checkpoint();
+        assert_eq!(
+            notifier.value(&cell.borrow()),
+            ClipboardStatus::NotPasteable
+        );
     }
 
     fn log_tap_down(log: Rc<RefCell<Vec<&'static str>>>) -> GestureTapDragDownCallback {
@@ -5068,5 +5081,113 @@ mod tests {
         );
         assert!(events.contains(&"onDragSelectionUpdate"), "{events:?}");
         assert_eq!(events.last(), Some(&"onDragSelectionEnd"));
+    }
+
+    /// Selection controls that draw nothing, for a field that must have an overlay.
+    struct NoSelectionControls;
+
+    #[allow(deprecated)]
+    impl TextSelectionControls for NoSelectionControls {
+        fn build_handle(
+            &self,
+            _app: &mut App,
+            _context: BuildContext,
+            _handle_type: TextSelectionHandleType,
+            _text_line_height: f64,
+            _on_tap: Option<Listener>,
+        ) -> WidgetRef {
+            SizedBox::shrink().into_widget()
+        }
+
+        fn get_handle_anchor(
+            &self,
+            _handle_type: TextSelectionHandleType,
+            _text_line_height: f64,
+        ) -> Offset {
+            Offset::ZERO
+        }
+
+        fn build_toolbar(
+            &self,
+            _app: &mut App,
+            _context: BuildContext,
+            _global_editable_region: Rect,
+            _text_line_height: f64,
+            _selection_midpoint: Offset,
+            _endpoints: &[TextSelectionPoint],
+            _delegate: AnyTextSelectionDelegate,
+            _clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
+            _last_secondary_tap_down_position: Option<Offset>,
+        ) -> WidgetRef {
+            SizedBox::shrink().into_widget()
+        }
+
+        fn get_handle_size(&self, _text_line_height: f64) -> Size {
+            Size::ZERO
+        }
+    }
+
+    #[test]
+    fn a_focused_field_with_selection_controls_leaves_the_tree_with_its_overlay() {
+        use std::time::Duration;
+
+        use crate::{
+            Directionality, EditableText, FocusNode, ListenableBuilder, Overlay,
+            TextEditingController, run_app,
+        };
+        use inset_embedder::{TargetPlatform, TextDirection};
+        use inset_foundation::ValueNotifier;
+        use inset_painting::{PaintingBinding, TextStyle};
+        use inset_scheduler::SchedulerBinding;
+        use inset_test::{TestPlatform, TestView};
+
+        let platform = TestPlatform::new()
+            .on(TargetPlatform::MacOS)
+            .with_view(Rc::new(TestView::new(300.0, 200.0)));
+        let cell = AppCell::with_platform(Rc::new(platform));
+        let shown = {
+            let mut app = cell.borrow_mut();
+            PaintingBinding::instance(&mut app).install_fonts(&mut app, |fonts| {
+                fonts.add_source(valo_system_fonts::SystemFonts::load());
+            });
+            let shown = app.create(ValueNotifier::new(true));
+            let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
+            let focus_node = FocusNode::new(&mut app);
+            let field = ListenableBuilder::new(Rc::new(shown), move |app, _, _| {
+                if !*app.get(shown).value() {
+                    return SizedBox::shrink().into_widget();
+                }
+                EditableText::new(
+                    controller,
+                    focus_node,
+                    TextStyle::new(),
+                    Color::from_argb(255, 0, 0, 0),
+                    Color::from_argb(255, 128, 128, 128),
+                )
+                .selection_controls(Rc::new(NoSelectionControls))
+                .autofocus(true)
+                .into_widget()
+            });
+            run_app(
+                &mut app,
+                Directionality::new(TextDirection::Ltr, Overlay::wrap(field)).into_widget(),
+            );
+            shown
+        };
+        cell.elapse(Duration::ZERO);
+        let mut at = Duration::ZERO;
+        let mut pump = |cell: &AppCell| {
+            for _ in 0..5 {
+                at += Duration::from_millis(20);
+                let mut app = cell.borrow_mut();
+                SchedulerBinding::handle_begin_frame(&mut app, Some(at));
+                app.drain_microtasks();
+                SchedulerBinding::handle_draw_frame(&mut app);
+                app.drain_microtasks();
+            }
+        };
+        pump(&cell);
+        shown.set_value(&mut cell.borrow_mut(), false);
+        pump(&cell);
     }
 }
