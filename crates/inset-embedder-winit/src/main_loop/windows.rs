@@ -1,0 +1,209 @@
+//! The main loop's windows and views: opening one the app asks for and the implicit view's,
+//! closing, focus, resizing, moving, and the surfaces the system gives and takes.
+
+use std::rc::Rc;
+use std::sync::Arc;
+
+use inset_embedder::{
+    EmbedderClient, View, ViewFocusEvent, ViewId, WindowConfig, WindowError, WindowRef,
+};
+use winit::event_loop::ActiveEventLoop;
+use winit::window::{Window, WindowId};
+
+use crate::os::{FramePresentation, ThisOs};
+use crate::view::WinitView;
+use crate::view_focus;
+use crate::windows::{OpenWindow, ViewAfterClose, WindowRequest, open_implicit_window};
+
+use super::MainLoop;
+
+impl<C: EmbedderClient> MainLoop<C> {
+    /// Opens the window the app asked for, and answers its future.
+    pub(super) fn open_window(&mut self, event_loop: &ActiveEventLoop, request: WindowRequest) {
+        let answer = self
+            .make_requested_window(event_loop, &request.config)
+            .map_err(WindowError::Failed);
+        request.reply.complete(answer);
+        // The future resolves at the app's next checkpoint, and a client may look at its
+        // windows' futures at each wake rather than through their wakers: a wake brings both.
+        self.wake_client();
+    }
+
+    /// The window the app asked for, with a surface if the system gives the windows theirs now,
+    /// and its view added.
+    pub(super) fn make_requested_window(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        config: &WindowConfig,
+    ) -> Result<WindowRef, String> {
+        let (open, window) =
+            self.view_maker
+                .make_requested(event_loop, config, Rc::clone(self.state.requests()))?;
+        if self.surfaces_given {
+            open.view.give_surface(&open.window)?;
+        }
+        self.add_view(open);
+        Ok(window)
+    }
+
+    /// A view the app asked for, with its window: it joins the platform's views, and then the
+    /// app hears of it.
+    pub(super) fn add_view(&mut self, open: OpenWindow) {
+        let view_id = open.view.id();
+        let window = Arc::clone(&open.window);
+        self.state.add_view_with_window(open);
+        self.client.view_added(view_id);
+        self.read_theme_of(&window);
+    }
+
+    /// Opens the implicit view's window, at winit's first call: the first moment winit lets a
+    /// window be made. The app, started with the view at no size, hears its new metrics.
+    pub(super) fn open_implicit_window(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(config) = self.implicit_window.take() else {
+            return;
+        };
+        let view = self
+            .views()
+            .implicit()
+            .expect("the implicit view was made with the app");
+        let window = open_implicit_window(event_loop, &config, &view)
+            .expect("open the implicit view's window");
+        if self.surfaces_given {
+            give_surface(&view, &window);
+        }
+        self.views().attach_implicit_window(Arc::clone(&window));
+        self.client.view_metrics_changed(view.id());
+        self.read_theme_of(&window);
+    }
+
+    /// Closes a window: it is freed, and its view goes with it, but for the implicit view,
+    /// which outlives its window. Where the embedder is set to, the last one's closing asks the
+    /// app whether it quits.
+    pub(super) fn close_window(&mut self, id: WindowId) {
+        let Some(after_close) = self.views().close(id) else {
+            return;
+        };
+        if let ViewAfterClose::Removed(view) = after_close {
+            self.client.view_removed(view);
+        }
+        if self.views().no_window_open() && self.quit_when_last_window_closes {
+            self.on_last_window_closed();
+        }
+    }
+
+    pub(super) fn on_close_requested(&mut self, id: WindowId) {
+        let handler = self
+            .views()
+            .by_window(id)
+            .and_then(|open| open.handle)
+            .and_then(|handle| handle.close_handler());
+        match handler {
+            // The app answers a created window's close request itself.
+            Some(handler) => handler(),
+            None => self.close_window(id),
+        }
+    }
+
+    pub(super) fn on_focused(&mut self, id: WindowId, focused: bool) {
+        if let Some(view) = self.view_id_of(id) {
+            self.client
+                .view_focus_changed(view_focus::focus_changed(view, focused));
+        }
+    }
+
+    /// Honours the framework's request to focus a view, or to give up its focus.
+    pub(super) fn change_view_focus(&mut self, change: ViewFocusEvent) {
+        if let Some(open) = self.views().by_view(change.view_id) {
+            view_focus::focus_window_if_asked(&change, &open.window, &open.view);
+        }
+    }
+
+    pub(super) fn on_resized(&mut self, id: WindowId) {
+        let Some(open) = self.views().by_window(id) else {
+            return;
+        };
+        self.read_theme_of(&open.window);
+        let Some(size) = open.view.window_resized(&open.window) else {
+            return;
+        };
+        self.client.view_metrics_changed(open.view.id());
+        // Present the resized layout before the system commits the window geometry, rather
+        // than stretching the old frame.
+        if ThisOs::FRAME_ON_RESIZE && has_area(size) {
+            self.draw_resize_frame(&open.view);
+        }
+    }
+
+    /// Reads every view's metrics again, for a system that reports no event for a change
+    /// of the safe area, and tells the client of the views whose metrics moved.
+    pub(super) fn sync_metrics(&mut self) {
+        let changed: Vec<ViewId> = self
+            .views()
+            .open_windows()
+            .into_iter()
+            .filter(|open| open.view.refresh_metrics(&open.window))
+            .map(|open| open.view.id())
+            .collect();
+        for view_id in changed {
+            self.client.view_metrics_changed(view_id);
+        }
+    }
+
+    /// The system gives the windows surfaces, at launch and each time it gives them back: every
+    /// view gets one, at the metrics its window has now, and the framework is asked for a frame
+    /// to draw on them, as Flutter's shell asks when a view's surface is made.
+    pub(super) fn give_surfaces(&mut self) {
+        self.surfaces_given = true;
+        for open in self.views().open_windows() {
+            give_surface(&open.view, &open.window);
+        }
+        self.sync_metrics();
+        self.request_frame();
+    }
+
+    /// The system takes every window's surface away: the app and its views stay, and each view
+    /// keeps its last scene, owed until it is given a surface again.
+    pub(super) fn take_surfaces(&mut self) {
+        self.surfaces_given = false;
+        for view in self.views().views() {
+            view.take_surface();
+        }
+    }
+
+    /// Only the system asks winit for redraws; the framework's frames come at the display's
+    /// vsyncs. A window seen again, which is the system's word that its surface
+    /// takes frames now, or one the system wants repainted, gets its latest picture
+    /// presented again if it is not on the surface; otherwise the content is current and
+    /// nothing is drawn.
+    pub(super) fn on_redraw_requested(&mut self, id: WindowId) {
+        if let Some(open) = self.views().by_window(id) {
+            open.view.draw_last_scene();
+        }
+        self.request_vsync_for_owed_scenes();
+    }
+
+    /// A window moved, and may be on another screen now: its native surfaces follow it, and
+    /// so do the framework's vsyncs if it is the first window. AppKit moves the windows off a
+    /// screen that goes away, so this is also how their vsyncs leave it.
+    pub(super) fn on_moved(&mut self, id: WindowId) {
+        if let Some(open) = self.views().by_window(id) {
+            open.view.follow_window();
+        }
+        if let Some(display) = self.first_window_display() {
+            self.frame_scheduler.follow_display(&display);
+        }
+    }
+}
+
+/// Gives `view` a surface on `window`, its own; a view that gets none is reported and draws
+/// nothing. A window the app asks for answers the app with the error instead
+/// (`make_requested_window`).
+fn give_surface(view: &WinitView, window: &Arc<Window>) {
+    if let Err(reason) = view.give_surface(window) {
+        eprintln!("inset: no surface on view {:?}: {reason}", view.id());
+    }
+}
+
+fn has_area([width, height]: [u32; 2]) -> bool {
+    width > 0 && height > 0
+}

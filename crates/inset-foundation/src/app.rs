@@ -194,7 +194,6 @@ impl App {
         AsyncApp::new(self.this.clone(), self.executor.handle())
     }
 
-    /// The polling side of this App's executor, for the cell's checkpoint.
     /// Queues `f` as a task on this App: the continuation of a Dart `async` body.
     ///
     /// Dart runs an `async` body synchronously up to its first `await`; port that prefix

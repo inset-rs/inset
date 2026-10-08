@@ -12,7 +12,7 @@ use std::time::Duration;
 use inset_embedder::{AppExitResponse, AppLifecycleState, DropData, Locale, ViewFocusEvent};
 use inset_foundation::{App, Handle, Listener, Task, Timer};
 use inset_rendering::{RendererBinding, RendererBindingOverridesObject};
-use inset_scheduler::SchedulerBinding;
+use inset_scheduler::{SchedulerBinding, SchedulerBindingOverridesObject};
 use inset_services::{ServicesBinding, ServicesBindingOverridesObject};
 
 use crate::framework::{
@@ -30,6 +30,9 @@ use crate::view::View;
 /// finalized after.
 #[derive(Default)]
 pub struct WidgetsBinding {
+    /// Whether the binding is set up: Dart's `_instance` being assigned, which comes before
+    /// the parts `init_instances` builds, since they ask for the binding.
+    initialized: bool,
     build_owner: Option<Handle<BuildOwner>>,
     root_element: Option<AnyElement>,
     ready_to_produce_frames: bool,
@@ -242,37 +245,61 @@ impl WidgetsBinding {
     /// Creating it creates the renderer, gesture, and scheduler bindings below it.
     pub fn instance(app: &mut App) -> Handle<WidgetsBinding> {
         let this: Handle<WidgetsBinding> = app.singleton();
-        if app.get(this).build_owner.is_none() {
-            let build_owner = BuildOwner::new(
-                app,
-                Some(Listener::new(|app| {
-                    WidgetsBinding::instance(app).handle_build_scheduled(app)
-                })),
-            );
-            app.get_mut(this).build_owner = Some(build_owner);
-            // Flutter's `WidgetsBinding` overrides `RendererBinding.drawFrame`.
-            RendererBinding::instance(app).set_overrides(app, Rc::new(this));
-            // And `ServicesBinding.handleRequestAppExit`.
-            ServicesBinding::instance(app).set_overrides(app, Rc::new(this));
-            // Flutter's `initInstances` assigns the dispatcher callbacks the binding handles.
-            let callbacks = app.platform_callbacks_mut();
-            callbacks.on_platform_brightness_changed = Some(Listener::new(|app| {
-                WidgetsBinding::instance(app).handle_platform_brightness_changed(app)
-            }));
-            callbacks.on_view_focus_change = Some(Rc::new(|app, event| {
-                WidgetsBinding::instance(app).handle_view_focus_changed(app, event)
-            }));
-            callbacks.on_drop = Some(Rc::new(|app, data| {
-                WidgetsBinding::instance(app).handle_drop(app, &data)
-            }));
-            callbacks.on_locale_changed = Some(Listener::new(|app| {
-                WidgetsBinding::instance(app).handle_locale_changed(app)
-            }));
-            callbacks.on_pop_route = Some(Rc::new(|app| {
-                WidgetsBinding::instance(app).handle_pop_route(app)
-            }));
+        if !app.get(this).initialized {
+            app.get_mut(this).initialized = true;
+            this.init_instances(app);
         }
         this
+    }
+
+    /// Flutter's `initInstances`: the bindings below first, as Dart's `super.initInstances()`
+    /// runs first, then the [`BuildOwner`], whose focus manager registers with this binding,
+    /// then the dispatcher callbacks.
+    ///
+    /// The bindings below come before the build owner so that the focus manager does not hear
+    /// the lifecycle state the host started in, which the services binding reads when it is
+    /// set up.
+    fn init_instances(self: Handle<Self>, app: &mut App) {
+        self.override_the_bindings_below(app);
+        let build_owner = BuildOwner::new(
+            app,
+            Some(Listener::new(|app| {
+                WidgetsBinding::instance(app).handle_build_scheduled(app)
+            })),
+        );
+        app.get_mut(self).build_owner = Some(build_owner);
+        WidgetsBinding::assign_dispatcher_callbacks(app);
+    }
+
+    /// Registers this binding's overrides with the bindings below it, setting each of them up
+    /// on first use.
+    fn override_the_bindings_below(self: Handle<Self>, app: &mut App) {
+        // Flutter's `WidgetsBinding` overrides `RendererBinding.drawFrame`.
+        RendererBinding::instance(app).set_overrides(app, Rc::new(self));
+        // And `SchedulerBinding.handleAppLifecycleStateChanged`.
+        SchedulerBinding::set_overrides(app, Rc::new(self));
+        // And `ServicesBinding.handleRequestAppExit`.
+        ServicesBinding::instance(app).set_overrides(app, Rc::new(self));
+    }
+
+    /// The dispatcher callbacks Flutter's `initInstances` assigns to the binding's handlers.
+    fn assign_dispatcher_callbacks(app: &mut App) {
+        let callbacks = app.platform_callbacks_mut();
+        callbacks.on_platform_brightness_changed = Some(Listener::new(|app| {
+            WidgetsBinding::instance(app).handle_platform_brightness_changed(app)
+        }));
+        callbacks.on_view_focus_change = Some(Rc::new(|app, event| {
+            WidgetsBinding::instance(app).handle_view_focus_changed(app, event)
+        }));
+        callbacks.on_drop = Some(Rc::new(|app, data| {
+            WidgetsBinding::instance(app).handle_drop(app, &data)
+        }));
+        callbacks.on_locale_changed = Some(Listener::new(|app| {
+            WidgetsBinding::instance(app).handle_locale_changed(app)
+        }));
+        callbacks.on_pop_route = Some(Rc::new(|app| {
+            WidgetsBinding::instance(app).handle_pop_route(app)
+        }));
     }
 
     /// The object in charge of the focus tree.
@@ -492,21 +519,23 @@ impl WidgetsBinding {
     }
 }
 
-/// Flutter's `WidgetsBinding` overrides of `handleAppLifecycleStateChanged`, which tells every
-/// observer, and of `handleRequestAppExit`, which asks every observer, each once the one before
-/// it has answered.
-impl ServicesBindingOverridesObject for WidgetsBinding {
+/// Flutter's `WidgetsBinding` override of `handleAppLifecycleStateChanged`, which tells every
+/// observer after the scheduler's own body has run.
+impl SchedulerBindingOverridesObject for WidgetsBinding {
     fn handle_app_lifecycle_state_changed(
         self: Handle<Self>,
         app: &mut App,
         state: AppLifecycleState,
     ) {
-        SchedulerBinding::handle_app_lifecycle_state_changed(app, state);
         for observer in app.get(self).observers.clone() {
             observer.did_change_app_lifecycle_state(app, state);
         }
     }
+}
 
+/// Flutter's `WidgetsBinding` override of `handleRequestAppExit`, which asks every observer,
+/// each once the one before it has answered.
+impl ServicesBindingOverridesObject for WidgetsBinding {
     fn handle_request_app_exit(self: Handle<Self>, app: &mut App) -> Task<AppExitResponse> {
         let mut observers = app.get(self).observers.clone().into_iter();
         // Dart's `async` body runs up to its first `await` within the call, which asks the
@@ -1183,6 +1212,35 @@ mod tests {
         let second = request_app_exit(&cell);
         assert_eq!(*log.borrow(), ["added"]);
         assert_eq!(second.get(), Some(AppExitResponse::Cancel));
+    }
+
+    /// Records every lifecycle state it is told of.
+    #[derive(Default)]
+    struct LifecycleObserver {
+        states: std::cell::RefCell<Vec<AppLifecycleState>>,
+    }
+
+    impl WidgetsBindingObserver for LifecycleObserver {
+        fn did_change_app_lifecycle_state(&self, _app: &mut App, state: AppLifecycleState) {
+            self.states.borrow_mut().push(state);
+        }
+    }
+
+    #[test]
+    fn the_scheduler_s_lifecycle_handler_tells_the_observers() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let observer = Rc::new(LifecycleObserver::default());
+        WidgetsBinding::instance(&mut app).add_observer(&mut app, observer.clone());
+
+        SchedulerBinding::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Paused);
+
+        assert_eq!(*observer.states.borrow(), [AppLifecycleState::Paused]);
+        assert_eq!(
+            SchedulerBinding::lifecycle_state(&mut app),
+            Some(AppLifecycleState::Paused)
+        );
+        assert!(!SchedulerBinding::frames_enabled(&mut app));
     }
 
     #[test]

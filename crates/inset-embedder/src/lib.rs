@@ -52,9 +52,10 @@ pub use paragraph::*;
 pub use platform::{
     AppExit, AppExitFuture, AppExitResponse, AppExitType, AppLifecycleState,
     ApplicationSwitcherDescription, Brightness, Clipboard, ClipboardHasStringsFuture,
-    ClipboardTextFuture, Dispatcher, Frame, HapticFeedbackType, Haptics, InertDispatcher,
-    InertPlatform, MouseCursor, Platform, PlatformRef, PopupMenuEntry, PopupMenus, Restoration,
-    SystemChrome, SystemContextMenu, SystemUiOverlayStyle, TargetPlatform, TextServices, ViewRef,
+    ClipboardSetTextFuture, ClipboardTextFuture, Dispatcher, FileOpening, Frame,
+    HapticFeedbackType, Haptics, InertDispatcher, InertPlatform, MouseCursor, OpenFilesHandler,
+    Platform, PlatformRef, PopupMenuEntry, PopupMenus, Restoration, Screen, Screens, SystemChrome,
+    SystemContextMenu, SystemUiOverlayStyle, TargetPlatform, TextServices, ViewRef,
 };
 pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,

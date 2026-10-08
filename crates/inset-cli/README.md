@@ -68,6 +68,7 @@ resources = ["assets/**"]          # globs copied into the bundle at the same re
 minimum_system_version = "11.0"
 background_app = true              # LSUIElement: no Dock tile or menu bar
 team = "ABCDE12345"                # narrows the signing identity when a machine has several
+entitlements = "macos/app.entitlements"  # signed into the bundle: what the hardened runtime otherwise denies
 
 [package.metadata.inset.ios]
 team = "ABCDE12345"                # narrows the signing identity when a machine has several
@@ -77,11 +78,34 @@ minimum_version = "15.0"
 min_sdk = 24
 target_sdk = 34                    # 35 and up draw edge to edge: the safe area goes, until the host reads insets
 version_code = 100                 # defaults to one derived from the version: 1.2.3 is 10203
+
+[[package.metadata.inset.file_associations]]  # a kind of file this app defines
+extensions = ["mydoc"]
+name = "My document"
+owner = true
+role = "editor"                    # viewer (the default), editor, shell or none
+
+[[package.metadata.inset.file_associations]]  # another app's kind of file this app opens
+extensions = ["md", "markdown"]
+name = "Markdown document"
+identifier = "net.daringfireball.markdown"  # its macOS type identifier, when it has one
+mime_type = "text/markdown"
 ```
 
 The Android package name is the identifier as a Java package name: `com.example.my-app` becomes `com.example.my_app`.
 
 Version comes from `[package]`. A project-root `index.html` replaces the generated web page; keep a `<canvas id="inset">` and import `./app.js`.
+
+### File associations
+
+Each `file_associations` table lets the system open the app for files with those extensions.
+
+- macOS: a document type; a type the app owns opens in it on double-click, another app's type is offered under Open With. `role` applies here only.
+- Windows: the installer registers the extensions; the app gets the file as its first argument.
+- Linux: the desktop entry lists each `mime_type`; a type without one isn't associated.
+- iOS, Android and the web: not declared.
+
+On macOS a running app receives opened files through `Platform::file_opening` (see `examples/app_events`).
 
 ## Signing
 
@@ -127,6 +151,8 @@ You need:
 
 Still missing, because `NativeActivity` alone cannot reach them: the keyboard, the clipboard, and haptics. Text fields draw and scroll, but nothing can be typed into them yet. Each of these needs an activity written in Java.
 
+File associations are not declared either: the host does not read the intent the activity starts with, so an intent filter would list the app under Open with and then drop the file.
+
 ## Not here yet
 
-An `ipa` upload step, a release key for Android, and rebuild-on-change for `run -d web`.
+An `ipa` upload step, a release key for Android, rebuild-on-change for `run -d web`, and a MIME type definition for a Linux app's own file associations.

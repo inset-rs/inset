@@ -19,7 +19,7 @@ image-worker = ["valo-codec/worker"]
 inset-embedder.workspace = true
 valo.workspace = true
 valo-codec.workspace = true
-valo-codec-software = { version = "0.6.0", optional = true }
+valo-codec-software = { version = "0.7.0", optional = true }
 wgpu.workspace = true
 pollster.workspace = true
 winit.workspace = true
@@ -27,16 +27,76 @@ arboard.workspace = true
 
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
-valo-codec-apple = { version = "0.6.0", optional = true }
+valo-codec-apple = { version = "0.7.0", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 dispatch2 = "0.3"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSMenu", "NSMenuItem", "NSEvent", "NSView", "NSCell", "NSResponder", "NSWindow", "NSScreen", "NSAnimation", "NSAnimationContext", "NSVisualEffectView", "NSGlassEffectView", "NSGraphics", "NSTrackingArea", "objc2-quartz-core"] }
-objc2-foundation = { version = "0.3", features = ["NSString", "NSObject", "NSGeometry", "NSArray", "NSRunLoop"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSMenu", "NSMenuItem", "NSEvent", "NSGraphicsContext", "NSView", "NSCell", "NSResponder", "NSWindow", "NSScreen", "NSAnimation", "NSAnimationContext", "NSVisualEffectView", "NSGlassEffectView", "NSGraphics", "NSTrackingArea", "objc2-quartz-core"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSObject", "NSGeometry", "NSArray", "NSDictionary", "NSNotification", "NSRunLoop", "NSURL", "NSValue"] }
 objc2-quartz-core = { version = "0.3", features = ["CAMediaTimingFunction", "CADisplayLink", "CALayer", "CATransaction"] }
 # The buffer a native surface shows, and whether the compositor still reads it.
 objc2-io-surface = "0.3"
+
+# Each test is a program of its own, without the test harness, which runs every test on a thread
+# it spawns: winit makes AppKit's event loop on the main thread only, once per process, and a
+# test may end by quitting the process. A test file without an entry here runs under the
+# harness, whose `main` replaces the test's, and passes having run nothing.
+[[test]]
+name = "frames_while_the_first_window_is_hidden"
+harness = false
+
+[[test]]
+name = "surface_vsyncs_follow_visibility"
+harness = false
+
+[[test]]
+name = "a_late_answer_to_an_exit_quits"
+harness = false
+
+[[test]]
+name = "closed_windows_are_released"
+harness = false
+
+[[test]]
+name = "the_lifecycle_follows_the_application"
+harness = false
+
+[[test]]
+name = "commands_are_served_in_order"
+harness = false
+
+[[test]]
+name = "an_app_without_an_implicit_view_opens_a_view_and_draws_in_it"
+harness = false
+
+[[test]]
+name = "an_app_that_agrees_quits_with_its_last_window"
+harness = false
+
+[[test]]
+name = "an_app_that_cancels_outlives_its_last_window"
+harness = false
+
+[[test]]
+name = "the_implicit_view_outlives_its_window"
+harness = false
+
+[[test]]
+name = "the_implicit_view_is_there_before_its_window"
+harness = false
+
+[[test]]
+name = "an_app_set_to_run_on_outlives_its_last_window"
+harness = false
+
+# What the tests ask of AppKit that the host offers no call for: minimizing, hiding the
+# application, and whether a window's content has the layer a surface draws into.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "NSWindow", "NSView", "objc2-quartz-core"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSGeometry"] }
+objc2-quartz-core = { version = "0.3", features = ["CALayer", "CAMetalLayer"] }
 
 # AppKit's selectors and view hierarchy need `unsafe`, which the workspace forbids; here it
 # is denied instead, and `os/macos` alone allows it.

@@ -8,7 +8,7 @@ use std::rc::Rc;
 use inset_embedder::{
     Canvas, Color, FillRule, Matrix4, Offset, Paint, PathBuilder, Rect, Size, clamp_double,
 };
-use inset_foundation::{App, Handle, Listenable, Listener};
+use inset_foundation::{App, Handle, Listenable, Listener, Task};
 use inset_rendering::{CustomPainter, TextSelectionPoint};
 use inset_services::AnyTextSelectionDelegate;
 use inset_widgets::{
@@ -302,8 +302,8 @@ impl TextSelectionControls for CupertinoTextSelectionHandleControls {
     }
 
     #[allow(deprecated)]
-    fn handle_paste(&self, app: &mut App, delegate: AnyTextSelectionDelegate) {
-        TextSelectionHandleControls::handle_paste(self, app, delegate);
+    fn handle_paste(&self, app: &mut App, delegate: AnyTextSelectionDelegate) -> Task<()> {
+        TextSelectionHandleControls::handle_paste(self, app, delegate)
     }
 
     #[allow(deprecated)]

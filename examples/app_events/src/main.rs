@@ -1,4 +1,4 @@
-//! What macOS asks of an application as a whole, through the winit host: the files it is
+//! What macOS asks of an application as a whole, through the winit embedder: the files it is
 //! asked to open, the Dock icon clicked, and quitting. The window lists them, and each is
 //! printed as it comes.
 //!
@@ -29,8 +29,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
-use inset_embedder::{AppExitResponse, Color, TextDirection};
-use inset_embedder_winit::{ImplicitViewConfig, Reopen, WinitEmbedder, WinitPlatform};
+use inset_embedder::{AppExitResponse, Color, TextDirection, WindowConfig};
+use inset_embedder_winit::{Reopen, WinitEmbedder, WinitPlatform};
 use inset_foundation::{App, Completer, Entity, Listener, Task, Timer};
 use inset_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
 use inset_shell::Shell;
@@ -47,9 +47,10 @@ const SAVE_TIME: Duration = Duration::from_secs(3);
 
 fn main() {
     WinitEmbedder::default()
-        .implicit_view(Some(ImplicitViewConfig {
+        .implicit_view(Some(WindowConfig {
             title: "App events".to_owned(),
-            logical_size: [560.0, 360.0],
+            size: [560.0, 360.0],
+            ..WindowConfig::default()
         }))
         .run(|platform| {
             Shell::new(platform, |app| {
@@ -78,40 +79,53 @@ enum Save {
     Saved,
 }
 
-/// Sets the host's handlers, which the host calls from its event loop; each posts its request
-/// to the app.
+/// Sets the handlers for what the system asks of the app, which the embedder calls from its event
+/// loop; each posts its request to the app.
 fn listen(app: &mut App, requests: &Entity<Requests>) {
+    listen_for_files(app, requests);
+    listen_for_reopens(app, requests);
+}
+
+/// Files the system asks the app to open, where it asks: on macOS.
+fn listen_for_files(app: &mut App, requests: &Entity<Requests>) {
     let platform = app.platform();
-    let Some(host) = platform.downcast_ref::<WinitPlatform>() else {
+    let Some(file_opening) = platform.file_opening() else {
         return;
     };
     let cx = app.to_async();
-    host.set_open_files_requested(Some(Rc::new({
-        let cx = cx.clone();
+    let requests = requests.clone();
+    file_opening.set_open_files_handler(Some(Rc::new(move |files: Vec<PathBuf>| {
+        println!("open files: {files:?}");
         let requests = requests.clone();
-        move |files: Vec<PathBuf>| {
-            println!("open files: {files:?}");
-            let requests = requests.clone();
-            cx.post(move |app| {
-                requests.update(app, |requests, cx| {
-                    requests.files.extend(files);
-                    cx.notify();
-                });
+        cx.post(move |app| {
+            requests.update(app, |requests, cx| {
+                requests.files.extend(files);
+                cx.notify();
             });
-        }
+        });
     })));
-    host.set_reopen_requested(Some(Rc::new({
+}
+
+/// The system asking the app to show itself again, which only macOS does.
+fn listen_for_reopens(app: &mut App, requests: &Entity<Requests>) {
+    let platform = app.platform();
+    let Some(macos) = platform
+        .downcast_ref::<WinitPlatform>()
+        .and_then(WinitPlatform::macos)
+    else {
+        return;
+    };
+    let cx = app.to_async();
+    let requests = requests.clone();
+    macos.set_reopen_handler(Some(Rc::new(move |reopen: Reopen| {
+        println!("reopen: {reopen:?}");
         let requests = requests.clone();
-        move |reopen: Reopen| {
-            println!("reopen: {reopen:?}");
-            let requests = requests.clone();
-            cx.post(move |app| {
-                requests.update(app, |requests, cx| {
-                    requests.reopens += 1;
-                    cx.notify();
-                });
+        cx.post(move |app| {
+            requests.update(app, |requests, cx| {
+                requests.reopens += 1;
+                cx.notify();
             });
-        }
+        });
     })));
 }
 

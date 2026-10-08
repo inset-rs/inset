@@ -72,4 +72,5 @@ A Flutter-shaped name on a different mechanism is a bug.
 
 - Do not commit unless asked.
 - Do not add a rule to this file or to the porting skill without asking.
+- Aim for a sensible design, not one that fits the existing code. When existing code would force an ugly design, don't follow it: raise it with the lead.
 - Ask rather than invent when a special case appears. The rules may be wrong too.

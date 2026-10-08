@@ -9,20 +9,21 @@ Only the app life cycle and the application exit of `ServicesBinding`, the hardw
 - text_editing.rs → text_editing.dart (re-export of embedder `TextSelection`)
 - text_layout_metrics.rs → text_layout_metrics.dart (`isWhitespace` / `isLineTerminator`)
 - text_boundary.rs → text_boundary.dart (`LineBoundary` needs layout, so it sits in rendering)
+- clipboard.rs → clipboard.dart
 
 ## binding.rs → binding.dart
 
-- Change: `ServicesBinding` holds only the app life cycle, `handle_request_app_exit` and `exit_application`, and it calls `handleAppLifecycleStateChanged` and `handle_request_app_exit` through a registered `ServicesBindingOverrides` where Flutter's `WidgetsBinding` overrides them through mixin order; the lifecycle one defaults to `SchedulerBinding`'s.
+- Change: `ServicesBinding` reaches the widgets binding's exit handler through a registered `ServicesBindingOverrides`, where Dart's `WidgetsBinding` overrides it.
   Reason: language — a crate above cannot override a method below it.
-  Affect: the widgets binding registers with `set_overrides` to tell and ask its observers; an app without it answers every exit request with `Exit`, and its lifecycle changes reach only the scheduler.
+  Affect: without the widgets binding, every exit request is answered `Exit`.
 
-- Change: the host's lifecycle messages arrive as `AppLifecycleState` values, the initial one from `Platform::initial_lifecycle_state` and each change through `EmbedderClient::app_lifecycle_state_changed`, which the shell hands to the public `handle_lifecycle_message`; Dart's private `_handleLifecycleMessage` parses a state's name from `SystemChannels.lifecycle`.
+- Change: `ServicesBinding::handle_lifecycle_message` is public and takes an `AppLifecycleState`, where Dart's private handler parses a state's name from a channel.
   Reason: platform — there are no method channels; the host trait is the channel.
-  Affect: a host or a test reports a state by calling the client or the binding, and cannot send a name the framework does not know.
+  Affect: a test reports a lifecycle state by calling the binding.
 
-- Change: `exit_application` calls the host's `AppExit` capability, and completes with `Cancel` at once where the host has none; Dart sends `System.exitApplication`, which fails with a `MissingPluginException` on a host that does not implement it.
+- Change: `ServicesBinding::exit_application` answers `Cancel` at once on a host with no `AppExit` capability, where Dart's call fails.
   Reason: platform — the host trait is the channel, and a host without the capability answers `None`.
-  Affect: on a phone or in a browser the call completes with `Cancel` and the app keeps running, where Dart's future fails.
+  Affect: on a phone or in a browser the app keeps running and the caller sees `Cancel`, not an error.
 
 ## text_input.rs → text_input.dart
 
@@ -42,21 +43,11 @@ Only the app life cycle and the application exit of `ServicesBinding`, the hardw
   Reason: platform — there is no host autofill API.
   Affect: `AutofillGroup` disposal still calls them, but the platform is never asked to fill a group or to commit a saved autofill context.
 
-- Change: `TextSelectionDelegate::paste_text` returns nothing to await, and the toolbar and view methods default to no-ops.
-  Reason: language — the delegate's methods are plain functions in a table, and Flutter's framework never awaits `pasteText`.
-  Affect: pasted text lands when the clipboard answers, after the call returns, as in Dart; a delegate that only drives selection silently does nothing where Dart would not compile without the member.
-
 ## system_context_menu.rs → `SystemContextMenuController` / `IOSSystemContextMenuItemData*` in text_input.dart
 
 - Change: the last-shown controller is registered per `App` rather than in a Dart static, menu items cross to the host as `SystemContextMenuItem` values instead of JSON maps, and a custom item's callback id is assigned on the item rather than derived from `hashCode`.
   Reason: language — there is no isolate-wide static; platform — the host trait is the channel and carries no JSON.
   Affect: two `App`s can each show a system menu at once, and two custom items with equal contents keep separate callbacks.
-
-## clipboard.rs → clipboard.dart
-
-- Change: `Clipboard::set_data` stores without returning a `Future`; `get_data` and `has_strings` return one, as Flutter's do.
-  Reason: platform — there are no method channels; the host trait is the channel, and a host has nothing to report of a write that the framework uses.
-  Affect: code that awaited `setData` has nothing to await, and a paste lands when the host has read the clipboard; a host without a clipboard completes with `None` and `false`.
 
 ## spell_check.rs → spell_check.dart
 
@@ -122,9 +113,9 @@ The key constants and the four tables are machine-written from the Dart, as Flut
   Reason: platform — the host trait is the channel; there is no channel reply to await and nothing needs the string encoding.
   Affect: the cursor changes without waiting a frame, and a host with no such capability leaves the cursor as it was.
 
-- Change: `MouseCursorManager::handle_device_cursor_update` and `MouseCursorSession::activate` also take the view the pointer is over. `MouseTracker` reads it from the device's last pointer event, and the session passes it to the host with the device. Dart's session knows only its device.
-  Reason: platform — where each window has its own cursor, the host must know which window to change; see `activate_system_cursor` in `inset-embedder`'s `PORTING.md`.
-  Affect: a custom session receives the view in `activate` and must keep it for any cursor change it makes later.
+- Change: `MouseCursorSession::activate` and `MouseCursorManager::handle_device_cursor_update` also take the view the pointer is over.
+  Reason: platform — where each window has its own cursor, the host must know which window to change.
+  Affect: a custom session must keep the view it was activated with for any later cursor change.
 
 ## restoration.rs → restoration.dart
 

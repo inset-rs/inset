@@ -11,6 +11,7 @@ mod cargo;
 mod desktop;
 mod devices;
 mod doctor;
+mod file_associations;
 mod icons;
 mod ios;
 mod new;

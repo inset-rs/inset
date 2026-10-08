@@ -46,19 +46,16 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
         Some(title) => quote!(#title),
         None => quote!(::core::env!("CARGO_PKG_NAME")),
     };
-    let view = match options.size {
-        Some(size) => quote! {
-            ::inset::ImplicitViewConfig {
-                title: ::std::string::ToString::to_string(#title),
-                logical_size: #size,
-            }
-        },
-        None => quote! {
-            ::inset::ImplicitViewConfig {
-                title: ::std::string::ToString::to_string(#title),
-                ..::core::default::Default::default()
-            }
-        },
+    let size = match options.size {
+        Some(size) => quote!(#size),
+        None => quote!([900.0, 600.0]),
+    };
+    let view = quote! {
+        ::inset::WindowConfig {
+            title: ::std::string::ToString::to_string(#title),
+            size: #size,
+            ..::core::default::Default::default()
+        }
     };
 
     quote! {

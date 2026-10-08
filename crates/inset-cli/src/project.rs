@@ -6,6 +6,8 @@ use anyhow::{Context, Result, bail};
 use cargo_metadata::{MetadataCommand, Package, TargetKind};
 use serde::Deserialize;
 
+use crate::file_associations;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Profile {
     Debug,
@@ -37,9 +39,50 @@ pub struct Metadata {
     pub icon: Option<PathBuf>,
     /// Globs relative to the package root, copied into the bundle at the same relative path.
     pub resources: Vec<String>,
+    /// The kinds of file the app opens, which the system then offers it for.
+    pub file_associations: Vec<FileAssociation>,
     pub macos: MacosMetadata,
     pub ios: IosMetadata,
     pub android: AndroidMetadata,
+}
+
+/// A kind of file the app opens: one `[[package.metadata.inset.file_associations]]` table.
+#[derive(Clone, Debug, Deserialize)]
+pub struct FileAssociation {
+    /// File name extensions, without the dot.
+    pub extensions: Vec<String>,
+    /// What the system calls a file of this type: the Finder's Kind, Explorer's Type.
+    pub name: String,
+    /// Whether the app defines this type. An owner declares the type to the system and is
+    /// the app the system opens such a file with first; otherwise the type is someone
+    /// else's, and the app is one of those that open it.
+    #[serde(default)]
+    pub owner: bool,
+    /// What the app does with such a file.
+    #[serde(default)]
+    pub role: FileRole,
+    /// The type's identifier on macOS, `org.webassembly.wasm`. An owner's defaults to the
+    /// app's identifier and the first extension; a type the app only opens has none unless
+    /// given, and is then matched by its extensions.
+    pub identifier: Option<String>,
+    /// The type's MIME type, `application/wasm`. Linux associates files by it, so there a
+    /// type without one is not associated; macOS adds it to the type's declaration.
+    pub mime_type: Option<String>,
+}
+
+/// What an app does with a file of a type it opens: macOS's `CFBundleTypeRole`.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FileRole {
+    /// Reads and saves it.
+    Editor,
+    /// Reads it only.
+    #[default]
+    Viewer,
+    /// Runs it, as a shell runs a script.
+    Shell,
+    /// Claims no use of it, for a type declared only so the system knows it.
+    None,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -50,6 +93,9 @@ pub struct MacosMetadata {
     pub background_app: bool,
     /// Apple team id. Narrows the signing identity when a machine has several.
     pub team: Option<String>,
+    /// An `.entitlements` plist, relative to the package root, that the bundle is signed with:
+    /// what the hardened runtime otherwise denies, such as memory a JIT makes executable.
+    pub entitlements: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -96,6 +142,7 @@ pub struct Project {
     pub identifier: String,
     pub icon: Option<PathBuf>,
     pub resources: Vec<String>,
+    pub file_associations: Vec<FileAssociation>,
     pub macos: MacosMetadata,
     pub ios: IosMetadata,
     pub android: AndroidMetadata,
@@ -143,15 +190,16 @@ impl Project {
                 identifier
             }
         };
-        let icon = inset
-            .icon
-            .map(|icon| root.join(icon))
-            .or_else(|| Some(root.join("assets/icon.png")).filter(|p| p.exists()));
-        if let Some(icon) = &icon
-            && !icon.exists()
-        {
-            bail!("icon {} does not exist", icon.display());
-        }
+        let icon = match inset.icon {
+            Some(icon) => Some(existing_file(&root, icon, "icon")?),
+            None => Some(root.join("assets/icon.png")).filter(|p| p.exists()),
+        };
+        file_associations::check(&inset.file_associations)?;
+        let mut macos = inset.macos;
+        macos.entitlements = macos
+            .entitlements
+            .map(|entitlements| existing_file(&root, entitlements, "entitlements"))
+            .transpose()?;
         Ok(Project {
             workspace_root: metadata.workspace_root.clone().into_std_path_buf(),
             target_dir: metadata.target_directory.clone().into_std_path_buf(),
@@ -166,7 +214,8 @@ impl Project {
             identifier,
             icon,
             resources: inset.resources,
-            macos: inset.macos,
+            file_associations: inset.file_associations,
+            macos,
             ios: inset.ios,
             android: inset.android,
             root,
@@ -213,6 +262,15 @@ fn manifest_dir(package: &Package) -> &Path {
         .parent()
         .map(|p| p.as_std_path())
         .unwrap_or_else(|| Path::new("."))
+}
+
+/// `relative` under the package `root`, which must exist; `key` names it in the error.
+fn existing_file(root: &Path, relative: PathBuf, key: &str) -> Result<PathBuf> {
+    let path = root.join(relative);
+    if !path.exists() {
+        bail!("{key} {} does not exist", path.display());
+    }
+    Ok(path)
 }
 
 fn android_package(identifier: &str) -> String {

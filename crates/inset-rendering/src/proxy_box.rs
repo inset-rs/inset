@@ -8609,7 +8609,7 @@ mod tests {
                 matches!(
                     op,
                     Op::SaveLayer {
-                        backdrop_filter: Some(_),
+                        backdrop: Some(_),
                         ..
                     }
                 )
@@ -8621,16 +8621,15 @@ mod tests {
             .expect("the child's paint");
         assert!(blur < draw, "the blur precedes the child: {ops:?}");
         if let Op::SaveLayer {
-            backdrop_filter,
-            backdrop_key,
+            backdrop: Some(backdrop),
             ..
         } = &ops[blur]
         {
             assert_eq!(
-                *backdrop_filter,
-                Some(inset_embedder::valo::ImageFilter::blur(6.0, 6.0))
+                backdrop.filter,
+                inset_embedder::valo::ImageFilter::blur(6.0, 6.0)
             );
-            assert_eq!(*backdrop_key, None);
+            assert_eq!(backdrop.shared_key, None);
         }
 
         let key = BackdropKey::new();
@@ -8641,7 +8640,10 @@ mod tests {
             ops.iter().any(|op| matches!(
                 op,
                 Op::SaveLayer {
-                    backdrop_key: Some(_),
+                    backdrop: Some(valo::Backdrop {
+                        shared_key: Some(_),
+                        ..
+                    }),
                     ..
                 }
             )),
@@ -8655,7 +8657,7 @@ mod tests {
             !ops.iter().any(|op| matches!(
                 op,
                 Op::SaveLayer {
-                    backdrop_filter: Some(_),
+                    backdrop: Some(_),
                     ..
                 }
             )),
@@ -8664,14 +8666,17 @@ mod tests {
     }
 
     #[test]
-    fn a_composed_backdrop_filter_replays_the_blur_it_composes() {
+    fn a_composed_backdrop_filter_reaches_the_backdrop_whole() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let child = RenderColoredBox::new(&mut app, Color::new(0xFF00FF00), true, None);
-        let saturation = ImageFilterConfig::new(ImageFilter::Color(ColorFilter::saturation(1.8)));
+        let saturation = ColorFilter::saturation(1.8);
         let filter = RenderBackdropFilter::new(
             &mut app,
-            ImageFilterConfig::compose(saturation, ImageFilterConfig::blur().sigma_x(4.0)),
+            ImageFilterConfig::compose(
+                ImageFilterConfig::new(ImageFilter::Color(saturation)),
+                ImageFilterConfig::blur().sigma_x(4.0),
+            ),
             BlendMode::SrcOver,
             true,
             None,
@@ -8680,16 +8685,19 @@ mod tests {
         let root = RenderRepaintBoundary::new(&mut app, Some(filter.as_box()));
         first_frame(&mut app, root.as_box());
         let ops = scene_ops(&mut app, root.as_object());
-        // The current Inset adapter extracts only blur (see the host's PORTING.md).
+        let composed = valo::ImageFilter::compose(
+            valo::ImageFilter::Color(saturation.to_valo()),
+            valo::ImageFilter::blur(4.0, 0.0),
+        );
         assert!(
             ops.iter().any(|op| matches!(
                 op,
                 Op::SaveLayer {
-                    backdrop_filter: Some(inset_embedder::valo::ImageFilter::Blur { sigma_x, sigma_y }),
+                    backdrop: Some(backdrop),
                     ..
-                } if *sigma_x == 4.0 && *sigma_y == 4.0
+                } if backdrop.filter == composed
             )),
-            "the composed blur reaches the backdrop: {ops:?}"
+            "the saturation and the blur reach the backdrop in their order: {ops:?}"
         );
     }
 

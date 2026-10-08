@@ -12,7 +12,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 
 - Change: `ImageFilter` is an enum over what this host can replay — a blur, a colour filter and a composition of two.
   Reason: platform — valo's display list has no other image filter.
-  Affect: the tile-mode blur and the dilate, erode, matrix and shader filters cannot be built at all; what a backdrop shows of a composition is recorded in `inset-embedder-winit`'s `PORTING.md`.
+  Affect: the tile-mode blur and the dilate, erode, matrix and shader filters cannot be built at all.
 
 ## paragraph.rs → text.dart (`TextStyle`, `ParagraphStyle`, `ParagraphBuilder`, `Paragraph`), fonts.rs
 
@@ -54,13 +54,21 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the common configuration and the raw handle cover what a Rust app configures itself, as winit and wgpu expose theirs, and adoption is Flutter's own macOS shape, where the app's window hosts the view.
   Affect: an app names its windows' properties directly rather than choosing an archetype; a property the config lacks is set through the native handle; hosts without windows answer no owner and the implicit view stays the only one.
 
-- Change: `MouseCursor::activate_system_cursor` also takes the view the pointer is over. Flutter's `activateSystemCursor` carries only the device and the cursor kind, and each embedder works out the window itself.
-  Reason: platform — where each window has its own cursor, the host must know which window to change, and the framework already knows it from the pointer events it received.
-  Affect: in an app with several windows, a `MouseRegion` changes the cursor of the window under the pointer and leaves the others alone. A host with one cursor for the whole process ignores the view.
+- Change: `MouseCursor::activate_system_cursor` also takes the view the pointer is over.
+  Reason: platform — where each window has its own cursor, the host must know which window to change.
+  Affect: in an app with several windows, a cursor change reaches only the window under the pointer.
 
 - Change: a host's `PopupMenus` capability shows the host's own popup menu at the pointer and answers the chosen entry; Flutter has no such call, only in-view context menus and the macOS menu bar.
   Reason: platform — a desktop window narrower than its menu, such as a panel at a screen's edge, cannot hold a menu drawn inside its view.
   Affect: a menu shown this way is the system's, drawn outside the window and styled by the OS; the app waits inside the call while it is open, and hosts without menus answer `None`.
+
+- Change: a host's `Screens` capability lists the screens, with what the system's bars leave free, and where the pointer is on them; Flutter's `Display` has a size but no place.
+  Reason: platform — a desktop app that places a window against a screen's edge or its own icon needs to know where the screens are.
+  Affect: an app can place a window in screen coordinates, and hosts with no screens to place against answer `None`.
+
+- Change: a host's `FileOpening` capability takes one handler for the files the system asks the app to open; Flutter's macOS embedder hands them to its plugins through `FlutterAppLifecycleDelegate.handleOpenURLs:`.
+  Reason: platform — there are no plugins, and the app is the only listener on the host's side.
+  Affect: an app sets the handler once, files asked for before then wait for it, and hosts whose system never asks answer `None`.
 
 - Change: `default_target_platform` and `platform_brightness` are queries on `Platform`, with no library global and no `debugDefaultTargetPlatformOverride`; the inert platform answers Android and light, as Flutter's test binding does.
   Reason: platform — the host-supplied `Platform` is the only source of truth.
@@ -70,10 +78,6 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — there are no method channels; the host trait is the channel, so payloads cross as values rather than Dart's `_toMap` encodings.
   Affect: a caller sees an unsupported capability as a `None` it can act on, where Dart's missing-channel failure and a defaulted method are both invisible to it.
 
-- Change: `Clipboard::text` and `has_strings` answer futures, as Flutter's `getData` and `hasStrings` do, and `set_text` stores without one. They answered within the call until a host needed to wait.
-  Reason: platform — a read may wait on the user or on another process: a browser may ask its user, and a wasdk component's host asks its user before the program's first read and answers across the component boundary, which no call can wait on in place.
-  Affect: a paste lands at a checkpoint after the key or tap that asked for it; a host that reads at once answers a ready future, and the web host reads the browser's clipboard, which it could not before.
-
 - Change: `Platform` asks the host whether its own text input turns editing keys into edits — backspace, delete, caret movement — and the default answer is no.
   Reason: platform — Flutter writes one embedder per host and settles this per target platform, where one framework here meets hosts that differ on the same platform.
   Affect: on a host that reports plain key presses, a text field's editing keys work whichever platform the host claims to be.
@@ -82,9 +86,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the host owns the event loop and knows its system's work queues, and a task completed on another thread has no other way to give the app a turn.
   Affect: a spawned task can await a future completed on any thread and runs at the next checkpoint instead of at the next input, and `run_in_background` work lands on the system's queue where there is one.
 
-- Change: `Platform::compositor` returns the host's compositor, where it has one. A producer opens a `Surface` from it and feeds it buffers of the platform's own type from any thread. Each buffer comes with a callback the host runs once the buffer is free again, and a surface can ask for the next vsync of its window's display. Flutter's platform views go through a texture registry, the embedder's backing-store and mutation callbacks, and on some platforms a raster thread merged into the platform thread.
-  Reason: platform — the framework, the host and every producer share one process, so a producer hands its buffer to the host directly; nothing is registered, uploaded or replayed.
-  Affect: a host without a compositor returns `None`, and every scene still presents, with a clear rectangle where a surface would be. A host with one shows the surface beneath the framework's content wherever a scene places it. `docs/composition.md` has the design.
+- Change: `Platform::compositor` hands out native surfaces that a producer feeds with the platform's own buffers from any thread, in place of Flutter's texture registry and platform-view plumbing.
+  Reason: platform — the framework, the host and every producer share one process, so a buffer can go to the host's compositor directly.
+  Affect: a host without a compositor answers `None`, and a surface placed there leaves only a clear rectangle.
 
 ## image.rs → dart:ui `instantiateImageCodec` / `Codec` / `FrameInfo`
 
@@ -105,7 +109,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the native window is the source of truth; a framework-side copy would go stale.
   Affect: metrics read after a view-lifecycle notification are the window's current ones, never a cached frame behind.
 
-- Change: `View::present` takes a valo `Picture`, shared, where `FlutterView.render` takes a `Scene` the engine consumes.
+- Change: `View::present` takes a shared `Scene`, a valo `Picture` with the surfaces it places, where `FlutterView.render` takes a `Scene` the engine consumes.
   Reason: platform — the host paints a valo display list, not an engine `Scene`, and keeps it: a window seen again is repainted from it without a frame, and a picture equal to the last, which valo can tell from its retained nested lists, is not drawn again.
   Affect: what reaches the host is a recorded display list it replays itself and may hold past the call; a frame whose windows all show what they showed before draws nothing.
 
@@ -139,27 +143,27 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — every desktop toolkit reports this shape at the window, and a host is the only place it can come from.
   Affect: an app hears external drops through the widgets binding's observers; a host that reports no position, as winit does, leaves the app to treat the whole view as the target.
 
-- Change: `EmbedderClient::pop_route` answers whether the application went back, and there is nothing going the other way.
-  Reason: platform — Dart sends `popRoute` over a channel and cannot have the answer in time, so it tells the platform in advance through `SystemNavigator.setFrameworkHandlesBack` whether it handles back at all. This call is direct and answers at once.
-  Affect: a host reads the answer and, when it is no, does what the platform does without the application, which on Android is to close the activity. Neither the advance notice nor a host call for closing the app exists.
+- Change: `EmbedderClient::pop_route` answers at once whether the application went back, and the framework never tells the host in advance whether it handles back.
+  Reason: platform — Dart's `popRoute` crosses a channel and cannot answer in time, which is why Flutter tells the host in advance; this call is direct.
+  Affect: when the answer is no, the host does what its platform does without the app, which on Android is to close the activity.
 
-- Change: `EmbedderClient::request_app_exit` returns the framework's answer as a future, where the engine sends `System.requestAppExit` over a channel and passes the framework's reply to a callback.
-  Reason: platform — there are no method channels, so the host trait is the channel, and a trait method whose answer comes after it returns hands back a future.
-  Affect: the host polls the future, which is ready when `request_app_exit` returns if every observer answered at once; otherwise it wakes the host's waker from inside a later call into the client, so that waker may only post a note to the host's own loop, never call the client.
-
-- Change: `EmbedderClient::app_lifecycle_state_changed` carries the state the application entered as an `AppLifecycleState`, where the engine sends its name on `SystemChannels.lifecycle`, and `Platform::initial_lifecycle_state` answers `None` where Dart's `initialLifecycleState` is an empty string.
+- Change: `EmbedderClient::request_app_exit` returns the framework's answer as a future rather than replying on a channel.
   Reason: platform — there are no method channels; the host trait is the channel.
-  Affect: a host reports a state as a value and has none to report until it knows one; the framework fills in the states between, as Dart's does.
+  Affect: a host polls for the answer, which may come long after the call, such as once the user has chosen whether to save.
+
+- Change: a host reports the lifecycle as `AppLifecycleState` values through `EmbedderClient::app_lifecycle_state_changed`, and `Platform::initial_lifecycle_state` answers `None` where Dart has an empty string.
+  Reason: platform — there are no method channels; the host trait is the channel.
+  Affect: a host cannot report a state the framework does not know.
 
 ## scene_builder.rs → dart:ui `SceneBuilder` / `Scene`
 
-- Change: a push records into a display list of its own, which `pop` returns as the engine layer; there is no `oldLayer`, `addTexture` or the shader-mask, colour-filter and image-filter pushes, and `push_backdrop_filter` is blur-only.
+- Change: a push records into a display list of its own, which `pop` returns as the engine layer; there is no `oldLayer`, `addTexture` or the shader-mask, colour-filter and image-filter pushes.
   Reason: platform — valo composites display lists, and a list closes at its restore.
   Affect: the engine layer is known at `pop`, not at the push.
 
-- Change: `Scene` holds the framework's picture and the native surfaces the frame places. `SceneBuilder::add_surface` is Flutter's `addPlatformView`: it records nothing in the picture, and it places the surface in the view's coordinates using the transforms and clips of the open scopes, which the builder tracks for this. A placement carries the rectangle, the scale of the transforms above the surface, and the part of the rectangle inside the bounds of the clips above it, where Flutter's embedder API hands a platform view the whole stack of mutations.
-  Reason: platform — valo composites one display list and a native surface cannot be a node in it, so the placement travels beside the picture. The render object that places a surface paints its rectangle clear itself. A rectangle, a scale and a rectangular clip are what every compositor Inset targets can apply to a layer.
-  Affect: a host reads `scene.picture` where it used to read the picture, and a host with a compositor places `scene.surfaces` in the same transaction, showing each buffer at its placement's scale and nothing of it outside its clip. A surface under a rotation is placed by its bounding box, the corners of a rounded or shaped clip are left to the picture to cover, and an opacity above a surface is not carried.
+- Change: `SceneBuilder::add_surface` places a native surface beside the picture as a rectangle, a scale and a rectangular clip, where Flutter's `addPlatformView` hands the embedder the whole stack of transforms and clips.
+  Reason: platform — a native surface cannot be part of valo's display list, and a rectangle, a scale and a rectangular clip are what every compositor Inset targets can apply to a layer.
+  Affect: a rotated surface is placed by its bounding box, a rounded clip's corners show the surface unless the picture paints over them, and an opacity above it is ignored.
 
 ## Deferred
 

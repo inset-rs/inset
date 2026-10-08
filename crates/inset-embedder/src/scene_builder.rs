@@ -219,26 +219,19 @@ impl SceneBuilder {
     /// rasterizing the child layers.
     ///
     /// Filters sharing a `backdrop_id` sample one backdrop, as Flutter's `BackdropKey` groups
-    /// them. valo's backdrop is a blur: a colour filter in `filter` contributes nothing (see the
-    /// host's `PORTING.md`).
+    /// them.
     pub fn push_backdrop_filter(
         &mut self,
         filter: &ImageFilter,
         blend_mode: BlendMode,
         backdrop_id: Option<u64>,
     ) {
-        let (sigma, bounds) = backdrop_blur(filter).unwrap_or((0.0, None));
-        let mut backdrop = Backdrop::blur(sigma as f32);
-        if let Some(id) = backdrop_id {
-            backdrop = backdrop.shared(id);
-        }
+        let backdrop = valo_backdrop(filter, backdrop_id);
         let paint = Paint {
             blend_mode,
             ..Paint::default()
         };
-        self.open(|canvas| {
-            canvas.save_layer_backdrop(bounds.map(Into::into), &paint, backdrop);
-        });
+        self.open(|canvas| canvas.save_layer_backdrop(None, &paint, backdrop));
     }
 
     /// Ends the effect of the most recently pushed operation.
@@ -413,23 +406,20 @@ fn horizontal_scale_of(transform: Matrix4) -> f64 {
     f64::from(m[0]).hypot(f64::from(m[1]))
 }
 
-/// The blur a valo [`Backdrop`] can sample the scene with, out of an arbitrary filter tree: its
-/// sigma and the bounds it is confined to.
-fn backdrop_blur(filter: &ImageFilter) -> Option<(f64, Option<Rect>)> {
-    match filter {
-        ImageFilter::Blur {
-            sigma_x, bounds, ..
-        } => Some((*sigma_x, *bounds)),
-        ImageFilter::Color(_) => None,
-        ImageFilter::Compose { outer, inner } => {
-            backdrop_blur(inner).or_else(|| backdrop_blur(outer))
-        }
+/// The valo [`Backdrop`] that samples the scene through `filter`, shared by every backdrop with
+/// the same `backdrop_id`.
+fn valo_backdrop(filter: &ImageFilter, backdrop_id: Option<u64>) -> Backdrop {
+    let backdrop = Backdrop::new(filter.to_valo());
+    match backdrop_id {
+        Some(id) => backdrop.shared(id),
+        None => backdrop,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::painting::{ColorFilter, flattened_ops};
 
     #[test]
     fn pushes_and_pops_balance() {
@@ -609,6 +599,143 @@ mod tests {
             rect,
             scale,
             clip: rect,
+        }
+    }
+
+    #[test]
+    fn a_colour_filter_composed_over_a_blur_reaches_the_backdrop_in_its_order() {
+        let saturation = ColorFilter::saturation(1.8);
+        let filter =
+            ImageFilter::compose(ImageFilter::Color(saturation), ImageFilter::blur(4.0, 4.0));
+        let backdrop = recorded_backdrop(&filter, Some(7));
+        assert_eq!(
+            backdrop.filter,
+            Some(valo::ImageFilter::compose(
+                valo::ImageFilter::Color(saturation.to_valo()),
+                valo::ImageFilter::blur(4.0, 4.0),
+            ))
+        );
+        assert_eq!(backdrop.key, Some(7), "the backdrop is still shared");
+    }
+
+    #[test]
+    fn an_uneven_blur_reaches_the_backdrop_with_both_sigmas() {
+        let backdrop = recorded_backdrop(&ImageFilter::blur(2.0, 6.0), None);
+        assert_eq!(backdrop.filter, Some(valo::ImageFilter::blur(2.0, 6.0)));
+        assert_eq!(backdrop.key, None);
+    }
+
+    #[test]
+    fn a_bounded_blur_reaches_the_backdrop_with_its_bounds_and_leaves_the_layer_unconfined() {
+        let glass = Rect::from_ltwh(8.0, 8.0, 16.0, 16.0);
+        let bounded = recorded_backdrop(&ImageFilter::blur(2.0, 3.0).bounds(glass), None);
+        assert_eq!(
+            bounded.filter,
+            Some(valo::ImageFilter::bounded_blur(2.0, 3.0, glass.into()))
+        );
+        let unbounded = recorded_backdrop(&ImageFilter::blur(2.0, 3.0), None);
+        assert_eq!(
+            bounded.bounds, unbounded.bounds,
+            "the bounds limit what the blur reads, not the layer"
+        );
+    }
+
+    /// What a scene records of the one backdrop a push opened.
+    struct RecordedBackdrop {
+        filter: Option<valo::ImageFilter>,
+        /// What the backdrop's snapshot is shared under.
+        key: Option<u64>,
+        /// The bounds of the backdrop's layer.
+        bounds: valo::Bounds,
+    }
+
+    fn recorded_backdrop(filter: &ImageFilter, backdrop_id: Option<u64>) -> RecordedBackdrop {
+        let mut builder = SceneBuilder::new();
+        builder.push_backdrop_filter(filter, BlendMode::SrcOver, backdrop_id);
+        builder.pop();
+        flattened_ops(&builder.build().picture)
+            .into_iter()
+            .find_map(|op| match op {
+                valo::Op::SaveLayer {
+                    backdrop,
+                    scope_bounds,
+                    ..
+                } => Some(RecordedBackdrop {
+                    key: backdrop.as_ref().and_then(|backdrop| backdrop.shared_key),
+                    filter: backdrop.map(|backdrop| backdrop.filter),
+                    bounds: scope_bounds,
+                }),
+                _ => None,
+            })
+            .expect("a backdrop filter opens a layer")
+    }
+
+    /// Checks of what a scene shows once drawn. They need `test_support`'s GPU device, so they
+    /// run where the `test-support` feature is on, as it is in a test run of the workspace.
+    #[cfg(feature = "test-support")]
+    mod drawn {
+        use super::*;
+        use crate::test_support::drawn_pixels;
+
+        const SIZE: u32 = 32;
+
+        #[test]
+        fn a_colour_filter_composed_over_a_blur_recolours_the_backdrop() {
+            let swap_red_and_green = ColorFilter::matrix([
+                0.0, 1.0, 0.0, 0.0, 0.0, //
+                1.0, 0.0, 0.0, 0.0, 0.0, //
+                0.0, 0.0, 1.0, 0.0, 0.0, //
+                0.0, 0.0, 0.0, 1.0, 0.0, //
+            ]);
+            let glass = Rect::from_ltwh(8.0, 8.0, 16.0, 16.0);
+            let filter = ImageFilter::compose(
+                ImageFilter::Color(swap_red_and_green),
+                ImageFilter::blur(2.0, 2.0).bounds(glass),
+            );
+            let mut builder = SceneBuilder::new();
+            builder.add_picture(Offset::ZERO, &filled(Color::new(0xFFFF0000)), false, false);
+            builder.push_clip_rect(glass, Clip::HardEdge);
+            builder.push_backdrop_filter(&filter, BlendMode::SrcOver, None);
+            builder.pop();
+            builder.pop();
+            let pixels = drawn_pixels(&builder.build().picture, [SIZE, SIZE]);
+            assert_near(
+                pixel_at(&pixels, 16, 16),
+                [0, 255, 0, 255],
+                "inside the glass",
+            );
+            assert_near(
+                pixel_at(&pixels, 2, 2),
+                [255, 0, 0, 255],
+                "outside the glass",
+            );
+        }
+
+        /// A picture that covers the whole scene in `color`.
+        fn filled(color: Color) -> Arc<Picture> {
+            let mut canvas = Canvas::new();
+            let paint = Paint {
+                color: color.into(),
+                ..Paint::default()
+            };
+            canvas.draw_rect(Rect::from_ltwh(0.0, 0.0, SIZE.into(), SIZE.into()), &paint);
+            Arc::new(canvas.build())
+        }
+
+        fn pixel_at(pixels: &[u8], x: usize, y: usize) -> [u8; 4] {
+            let start = (y * SIZE as usize + x) * 4;
+            pixels[start..start + 4]
+                .try_into()
+                .expect("four bytes a pixel")
+        }
+
+        /// Within a step or two of rounding in each channel.
+        fn assert_near(actual: [u8; 4], expected: [u8; 4], place: &str) {
+            let near = actual
+                .iter()
+                .zip(expected)
+                .all(|(actual, expected)| actual.abs_diff(expected) <= 2);
+            assert!(near, "{place}: {actual:?}, expected {expected:?}");
         }
     }
 

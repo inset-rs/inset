@@ -1319,15 +1319,14 @@ impl WidgetsAppState {
 
     /// The default value for [`WidgetsApp::on_navigation_notification`].
     ///
-    /// Does nothing and stops bubbling while the app is not ready — which, until the binding
-    /// raises the lifecycle callbacks, it never is; see PORTING.md.
+    /// Stops bubbling without telling the host, which learns whether the app went back from
+    /// `EmbedderClient::pop_route` instead; see PORTING.md.
     fn default_on_navigation_notification(
         self: Handle<Self>,
         app: &mut App,
         notification: &NavigationNotification,
     ) -> bool {
         let _ = (app, notification);
-        // Avoid updating the engine when the app isn't ready.
         true
     }
 

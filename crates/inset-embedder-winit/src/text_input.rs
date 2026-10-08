@@ -1,31 +1,165 @@
-//! The key half of Flutter's macOS `FlutterTextInputPlugin.handleKeyEvent`: a key the framework
-//! did not handle reaches the active text input, which inserts its text or acts on Enter.
+//! A view's text input, as the framework drives it through `TextInputHost`: the input it
+//! opened, the editing value it last set, and where the system's IME shows its candidates.
+//! winit's IME events (`ime.rs`) change that value, and a key the framework did not handle
+//! reaches the active input, which inserts its text or acts on Enter: the key half of
+//! Flutter's macOS `FlutterTextInputPlugin.handleKeyEvent`.
 //!
 //! winit reports `Ime::Commit` only for text an input method composed (`hasMarkedText`); plain
-//! typing arrives as `KeyEvent::text`, so the host commits it here.
+//! typing arrives as `KeyEvent::text`, which the text input commits itself (`type_key`).
 
-use inset_embedder::{TextInputAction, TextInputConfiguration, TextInputType};
+use std::cell::{Cell, RefCell};
+use std::sync::{Arc, Weak};
+
+use inset_embedder::{
+    Matrix4, Offset, Rect, Size, TextEditingValue, TextInputAction, TextInputConfiguration,
+    TextInputHost, TextInputType, transform3,
+};
+use winit::dpi::{PhysicalPosition, PhysicalSize};
+use winit::event::{Ime, KeyEvent};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
+use winit::window::{ImePurpose, Window};
 
+use crate::ime::{ImeOutcome, apply_commit, apply_ime};
 use crate::keys;
+
+/// One view's text input: winit's IME on the view's window, and the editing value both sides
+/// change.
+pub(crate) struct TextInput {
+    /// The view's window, held weakly: the text input of a view with no window, before its
+    /// window opens or once it closed, does nothing.
+    window: RefCell<Weak<Window>>,
+    /// Set from `TextInputHost::start` to `TextInputHost::stop`; an unhandled key types into it.
+    active: Cell<Option<ActiveTextInput>>,
+    /// The editing value as the framework last set it, and as the IME's events changed it since.
+    editing_value: RefCell<TextEditingValue>,
+    /// Where the input is in the view, for placing the IME's candidates.
+    transform: RefCell<Option<Matrix4>>,
+}
+
+impl TextInput {
+    /// The text input of a view with no window yet.
+    pub(crate) fn new() -> TextInput {
+        TextInput {
+            window: RefCell::new(Weak::new()),
+            active: Cell::new(None),
+            editing_value: RefCell::new(TextEditingValue::EMPTY),
+            transform: RefCell::new(None),
+        }
+    }
+
+    /// The view's window from now on.
+    pub(crate) fn attach(&self, window: &Arc<Window>) {
+        *self.window.borrow_mut() = Arc::downgrade(window);
+    }
+
+    /// What an IME event makes of the editing value; a new value is the last one from now on.
+    pub(crate) fn take_ime(&self, ime: &Ime) -> ImeOutcome {
+        let outcome = apply_ime(&self.editing_value.borrow(), ime);
+        if let ImeOutcome::Value(value) = &outcome {
+            *self.editing_value.borrow_mut() = value.clone();
+        }
+        outcome
+    }
+
+    /// What a key the framework did not handle does to the active input, with `modifiers` held:
+    /// its text goes in as an input method's commit would; nothing while no input is active.
+    pub(crate) fn type_key(&self, event: &KeyEvent, modifiers: ModifiersState) -> Typed {
+        let Some(active) = self.active.get() else {
+            return Typed::Nothing;
+        };
+        match active.key_effect(&event.logical_key, event.text.as_deref(), modifiers) {
+            TextInputKeyEffect::None => Typed::Nothing,
+            TextInputKeyEffect::Insert(text) => Typed::Edited(self.commit(&text)),
+            TextInputKeyEffect::Enter { insert, action } => Typed::Entered {
+                edited: insert.map(|text| self.commit(&text)),
+                action,
+            },
+        }
+    }
+
+    /// The editing value with `text` committed in place of what was composing or selected,
+    /// which is the last one from now on.
+    fn commit(&self, text: &str) -> TextEditingValue {
+        let value = apply_commit(&self.editing_value.borrow(), text);
+        *self.editing_value.borrow_mut() = value.clone();
+        value
+    }
+
+    /// Shows the IME's candidates at `rect`, in the input's coordinates, which its transform
+    /// takes to the view's.
+    fn set_ime_area(&self, rect: Rect) {
+        let origin = match *self.transform.borrow() {
+            Some(transform) => transform3(transform, Offset::new(rect.left, rect.top)),
+            None => Offset::new(rect.left, rect.top),
+        };
+        let Some(window) = self.window.borrow().upgrade() else {
+            return;
+        };
+        let scale = window.scale_factor();
+        window.set_ime_cursor_area(
+            PhysicalPosition::new(origin.dx() * scale, origin.dy() * scale),
+            PhysicalSize::new(rect.width() * scale, rect.height() * scale),
+        );
+    }
+}
+
+impl TextInputHost for TextInput {
+    fn start(&self, configuration: &TextInputConfiguration) {
+        self.active.set(Some(ActiveTextInput::new(configuration)));
+        let Some(window) = self.window.borrow().upgrade() else {
+            return;
+        };
+        window.set_ime_allowed(true);
+        window.set_ime_purpose(if configuration.obscure_text {
+            ImePurpose::Password
+        } else {
+            ImePurpose::Normal
+        });
+    }
+
+    fn stop(&self) {
+        self.active.set(None);
+        if let Some(window) = self.window.borrow().upgrade() {
+            window.set_ime_allowed(false);
+        }
+    }
+
+    fn set_editing_state(&self, value: &TextEditingValue) {
+        *self.editing_value.borrow_mut() = value.clone();
+    }
+
+    fn set_composing_rect(&self, rect: Rect) {
+        self.set_ime_area(rect);
+    }
+
+    fn set_caret_rect(&self, rect: Rect) {
+        self.set_ime_area(rect);
+    }
+
+    fn set_client_geometry(&self, _size: Size, transform: &Matrix4) {
+        *self.transform.borrow_mut() = Some(*transform);
+    }
+}
 
 /// The text input a view opened with `TextInputHost::start`, kept until `TextInputHost::stop`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ActiveTextInput {
+struct ActiveTextInput {
     multiline: bool,
     input_action: TextInputAction,
 }
 
 impl ActiveTextInput {
-    pub(crate) fn new(configuration: &TextInputConfiguration) -> Self {
+    fn new(configuration: &TextInputConfiguration) -> Self {
         ActiveTextInput {
+            // By kind alone, as Flutter's plugin compares the type's name: a number type's
+            // flags do not make it a multiline one.
             multiline: configuration.input_type.index == TextInputType::MULTILINE.index,
             input_action: configuration.input_action,
         }
     }
 
     /// What `FlutterTextInputPlugin` does for an unhandled key with this input active.
-    pub(crate) fn key_effect(
+    fn key_effect(
         &self,
         key: &Key,
         text: Option<&str>,
@@ -56,8 +190,23 @@ impl ActiveTextInput {
     }
 }
 
+/// What a key did to the text being edited.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Typed {
+    Nothing,
+    /// The editing value with the key's text in.
+    Edited(TextEditingValue),
+    /// Enter: the value with its newline, in a multiline field that takes one, and the field's
+    /// action.
+    Entered {
+        edited: Option<TextEditingValue>,
+        action: TextInputAction,
+    },
+}
+
+/// What `FlutterTextInputPlugin` does with a key, before it touches the editing value.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum TextInputKeyEffect {
+enum TextInputKeyEffect {
     None,
     Insert(String),
     Enter {

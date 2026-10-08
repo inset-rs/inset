@@ -73,9 +73,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## surface_view.rs, layer.rs (`SurfaceLayer`) → platform views (`PlatformViewLayer`, `RenderAndroidView` and kin)
 
-- Change: `RenderSurfaceView` fills its box, paints it clear and adds a `SurfaceLayer`, which places the surface through `SceneBuilder::add_surface` on every frame; Flutter's platform view render objects are per platform and its `PlatformViewLayer` is retained by the engine. It always needs compositing, as Flutter's do, but is not a repaint boundary of its own.
-  Reason: platform — one render object serves every host, since a surface is a rectangle and a buffer everywhere; and a retained display list carries no surface, so the layer always adds itself to the scene.
-  Affect: a surface shows beneath the framework's content through the clear rectangle, and framework content painted above it stays; a transform or a clip above it moves, scales and cuts the surface with its rectangle; the producer is told the size by the widget's owner, not by the compositor.
+- Change: one `RenderSurfaceView` serves every platform: it paints its box clear and has the host show the surface beneath, where Flutter has a platform view render object per platform.
+  Reason: platform — a surface is a rectangle and a buffer on every compositor, and the host composites it beneath the framework's picture.
+  Affect: what the framework paints above the surface covers it, and nothing painted beneath it shows.
 
 ## view.rs → view.dart, binding.rs → binding.dart
 

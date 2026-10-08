@@ -212,7 +212,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app-events"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "inset-embedder",
  "inset-embedder-winit",
@@ -977,7 +977,7 @@ dependencies = [
 
 [[package]]
 name = "cupertino-gallery"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "indexmap",
  "inset",
@@ -1882,7 +1882,7 @@ dependencies = [
 
 [[package]]
 name = "inset"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "inset-embedder",
  "inset-embedder-default",
@@ -1896,7 +1896,7 @@ dependencies = [
 
 [[package]]
 name = "inset-animation"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "inset-embedder",
  "inset-foundation",
@@ -1906,7 +1906,7 @@ dependencies = [
 
 [[package]]
 name = "inset-cli"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "brotli",
@@ -1926,7 +1926,7 @@ dependencies = [
 
 [[package]]
 name = "inset-cupertino"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "indexmap",
  "inset-animation",
@@ -1945,7 +1945,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "indexmap",
  "objc2-core-foundation",
@@ -1961,7 +1961,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder-android"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "android-activity",
  "inset-embedder",
@@ -1978,7 +1978,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder-default"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "inset-embedder",
  "inset-embedder-android",
@@ -1988,7 +1988,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder-web"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.3.4",
@@ -2004,7 +2004,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder-winit"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "arboard",
  "dispatch2",
@@ -2025,7 +2025,7 @@ dependencies = [
 
 [[package]]
 name = "inset-foundation"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-task",
  "indexmap",
@@ -2035,7 +2035,7 @@ dependencies = [
 
 [[package]]
 name = "inset-gestures"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "indexmap",
  "inset-embedder",
@@ -2046,7 +2046,7 @@ dependencies = [
 
 [[package]]
 name = "inset-macros"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2055,7 +2055,7 @@ dependencies = [
 
 [[package]]
 name = "inset-painting"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "indexmap",
  "inset-embedder",
@@ -2066,14 +2066,14 @@ dependencies = [
 
 [[package]]
 name = "inset-physics"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "inset-embedder",
 ]
 
 [[package]]
 name = "inset-rendering"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "indexmap",
  "inset-animation",
@@ -2091,7 +2091,7 @@ dependencies = [
 
 [[package]]
 name = "inset-scheduler"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "indexmap",
  "inset-embedder",
@@ -2101,7 +2101,7 @@ dependencies = [
 
 [[package]]
 name = "inset-services"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "indexmap",
  "inset-embedder",
@@ -2114,7 +2114,7 @@ dependencies = [
 
 [[package]]
 name = "inset-shell"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "inset-embedder",
  "inset-foundation",
@@ -2128,14 +2128,14 @@ dependencies = [
 
 [[package]]
 name = "inset-test"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "inset-embedder",
 ]
 
 [[package]]
 name = "inset-widgets"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "indexmap",
  "inset-animation",
@@ -2281,7 +2281,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "layout"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "inset-embedder",
  "inset-foundation",
@@ -2533,11 +2533,13 @@ dependencies = [
 
 [[package]]
 name = "native_surface"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "inset-embedder",
  "inset-embedder-winit",
+ "inset-foundation",
  "inset-painting",
+ "inset-scheduler",
  "inset-shell",
  "inset-widgets",
  "objc2-core-foundation",
@@ -3165,7 +3167,7 @@ dependencies = [
 
 [[package]]
 name = "paint"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "inset-embedder",
  "inset-embedder-winit",
@@ -4723,7 +4725,9 @@ dependencies = [
 
 [[package]]
 name = "valo"
-version = "0.6.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85dffec8431368dd6d977257953ef7cbf0e34679a7fa2f61ba741aea28441698"
 dependencies = [
  "objc2 0.6.4",
  "objc2-metal 0.3.2",
@@ -4737,7 +4741,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec"
-version = "0.6.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "685541648138f43c439899491cf1c96d1794131540dad0d3d518c0adc5d3b537"
 dependencies = [
  "valo",
  "wgpu",
@@ -4745,7 +4751,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec-apple"
-version = "0.6.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a696b2978a6981390c4b3fbf26029b0ea128346495330439c93d4324806ff531"
 dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
@@ -4762,7 +4770,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec-software"
-version = "0.6.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ff9a4bd583ea8630612c749906ef96d36d0ba0b9ac647d8e96887dc234c2f31"
 dependencies = [
  "gif",
  "image",
@@ -4775,7 +4785,9 @@ dependencies = [
 
 [[package]]
 name = "valo-dl"
-version = "0.6.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "072012e45bad6c1165f625238d39d552e902f33bb7a5af433ab502d2ca2f6e7b"
 dependencies = [
  "valo-geometry",
  "valo-text",
@@ -4784,7 +4796,9 @@ dependencies = [
 
 [[package]]
 name = "valo-fontmgr"
-version = "0.6.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d80f5801481598f6f4471f85decc009aef420cc5e7107b976138b03ff1027076"
 dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
@@ -4796,14 +4810,18 @@ dependencies = [
 
 [[package]]
 name = "valo-geometry"
-version = "0.6.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6e47d1858c320525a833f4e6411021598992f86db10202973b247bff2a63d5f"
 dependencies = [
  "glam",
 ]
 
 [[package]]
 name = "valo-renderer"
-version = "0.6.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc2b7846ae6754df9a5eff1e808b04063c38052c24db18acc8aaece666ad264d"
 dependencies = [
  "bytemuck",
  "etagere",
@@ -4818,7 +4836,9 @@ dependencies = [
 
 [[package]]
 name = "valo-system-fonts"
-version = "0.6.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1987f12015e56e62d38f9a9befb09d7837951f3229494cd7399d08c8a81f91ce"
 dependencies = [
  "valo-fontmgr",
  "valo-text",
@@ -4826,7 +4846,9 @@ dependencies = [
 
 [[package]]
 name = "valo-text"
-version = "0.6.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89047cba56094778959404b9deff5301fd0abb60e1a4957884d9d140f562b0ce"
 dependencies = [
  "allsorts",
  "harfrust",
@@ -5262,7 +5284,7 @@ dependencies = [
 
 [[package]]
 name = "window"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "inset-cupertino",
  "inset-embedder",

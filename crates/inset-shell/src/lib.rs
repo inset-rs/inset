@@ -90,6 +90,13 @@ impl Shell {
         self.app.elapse(elapsed - self.clock);
         self.clock = elapsed;
     }
+
+    /// dart:ui's `onMetricsChanged`, which the framework sets to
+    /// `RendererBinding.handleMetricsChanged`. `_addView` and `_removeView` invoke it as
+    /// `_updateWindowMetrics` does: a view coming or going reaches the app only this way.
+    fn metrics_changed(&mut self) {
+        self.push(|app| RendererBinding::instance(app).handle_metrics_changed(app));
+    }
 }
 
 impl EmbedderClient for Shell {
@@ -101,13 +108,17 @@ impl EmbedderClient for Shell {
         self.handle_event(SchedulerBinding::on_draw_frame);
     }
 
-    fn view_added(&mut self, _id: ViewId) {}
-
-    fn view_metrics_changed(&mut self, _id: ViewId) {
-        self.push(|app| RendererBinding::instance(app).handle_metrics_changed(app));
+    fn view_added(&mut self, _id: ViewId) {
+        self.metrics_changed();
     }
 
-    fn view_removed(&mut self, _id: ViewId) {}
+    fn view_metrics_changed(&mut self, _id: ViewId) {
+        self.metrics_changed();
+    }
+
+    fn view_removed(&mut self, _id: ViewId) {
+        self.metrics_changed();
+    }
 
     fn view_focus_changed(&mut self, event: ViewFocusEvent) {
         self.push(|app| {
@@ -479,6 +490,40 @@ mod tests {
             elapsed: Duration::from_millis(32),
         });
         assert_eq!(fired.take(), vec!["late"]);
+    }
+
+    #[test]
+    fn a_view_coming_or_going_is_a_metrics_change() {
+        use inset_foundation::Handle;
+        use inset_rendering::{RendererBinding, RendererBindingOverridesObject};
+
+        struct CountingMetricsChanges {
+            count: Rc<Cell<usize>>,
+        }
+
+        impl RendererBindingOverridesObject for CountingMetricsChanges {
+            fn will_draw_frame(self: Handle<Self>, _app: &mut App) {}
+
+            fn did_draw_frame(self: Handle<Self>, _app: &mut App) {}
+
+            fn did_handle_metrics_changed(self: Handle<Self>, app: &mut App) {
+                let count = &app.get(self).count;
+                count.set(count.get() + 1);
+            }
+        }
+
+        let count = Rc::new(Cell::new(0));
+        let mut shell = Shell::new(Rc::new(platform_with_a_view()), |_app| {});
+        let counting = shell.app().create(CountingMetricsChanges {
+            count: Rc::clone(&count),
+        });
+        let binding = RendererBinding::instance(&mut shell.app());
+        binding.set_overrides(&mut shell.app(), Rc::new(counting));
+
+        shell.view_added(ViewId(1));
+        assert_eq!(count.get(), 1, "a view added");
+        shell.view_removed(ViewId(1));
+        assert_eq!(count.get(), 2, "a view removed");
     }
 
     #[test]

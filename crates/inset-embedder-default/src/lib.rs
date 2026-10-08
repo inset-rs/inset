@@ -14,8 +14,6 @@ use inset_embedder::EmbedderClient;
 
 #[cfg(target_os = "android")]
 pub use inset_embedder_android::AndroidApp;
-#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
-pub use inset_embedder_winit::ImplicitViewConfig;
 
 /// Runs the application on this target's host.
 #[derive(Default)]
@@ -29,10 +27,22 @@ pub struct DefaultEmbedder {
 }
 
 impl DefaultEmbedder {
-    /// Native implicit window. Ignored on wasm, where the page supplies the canvas.
+    /// The implicit view's window, or `None` to start without an implicit view. Ignored on wasm,
+    /// where the page supplies the canvas.
     #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
-    pub fn implicit_view(mut self, config: Option<ImplicitViewConfig>) -> DefaultEmbedder {
+    pub fn implicit_view(
+        mut self,
+        config: Option<inset_embedder::WindowConfig>,
+    ) -> DefaultEmbedder {
         self.inner.implicit_view = config;
+        self
+    }
+
+    /// Whether closing the last window quits the app; `true` by default. With `false` the app
+    /// runs on with no window, as one that lives in the Dock does.
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+    pub fn quit_when_last_window_closes(mut self, quit: bool) -> DefaultEmbedder {
+        self.inner.quit_when_last_window_closes = quit;
         self
     }
 
@@ -51,8 +61,8 @@ impl DefaultEmbedder {
         self
     }
 
-    /// Starts the host loop. `start` runs once the host has a window to draw into, and
-    /// returns the client the host drives.
+    /// Starts the host loop. `start` runs once, at launch, with the views the host has then,
+    /// and returns the client the host drives.
     pub fn run<C: EmbedderClient + 'static>(
         self,
         start: impl FnOnce(inset_embedder::PlatformRef) -> C + 'static,

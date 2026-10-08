@@ -1,15 +1,15 @@
-//! The wgpu handles the embedder owns: valo requires the host to bring the device.
+//! The wgpu handles the embedder owns: valo requires the embedder to bring the device.
 
 #[derive(Clone)]
-pub struct Gpu {
-    pub instance: wgpu::Instance,
-    pub adapter: wgpu::Adapter,
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
+pub(crate) struct Gpu {
+    pub(crate) instance: wgpu::Instance,
+    pub(crate) adapter: wgpu::Adapter,
+    pub(crate) device: wgpu::Device,
+    pub(crate) queue: wgpu::Queue,
 }
 
 impl Gpu {
-    pub fn acquire() -> Gpu {
+    pub(crate) fn acquire() -> Gpu {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         pollster::block_on(async {
             let adapter = instance
@@ -19,7 +19,7 @@ impl Gpu {
                 })
                 .await
                 .expect("request wgpu adapter");
-            // Primary buffers that the host can write to directly, where memory is
+            // Primary buffers that the embedder can write to directly, where memory is
             // unified: valo then uploads its draws without a copy.
             let required_features = adapter.features() & wgpu::Features::MAPPABLE_PRIMARY_BUFFERS;
             let (device, queue) = adapter

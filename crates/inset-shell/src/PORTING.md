@@ -27,7 +27,3 @@ No Flutter counterpart. Dart has no type — the engine owns the isolate.
 - Change: `Shell` keeps the app clock — `frame` and `wake` advance it to the platform's `elapsed` first, so due `Timer`s fire before the frame's scheduler phases.
   Reason: platform — Dart's event loop runs timers between engine events; here the clock only moves when the host says so.
   Affect: a `Timer` (and so `run_app`'s root attach) fires at the next wake or frame, never during `setup`.
-
-## Deferred
-
-- `view_added` / `view_removed`. Trigger: the widget layer's `View`; `view_metrics_changed` already reaches `RendererBinding::handle_metrics_changed`.

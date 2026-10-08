@@ -2063,7 +2063,7 @@ mod tests {
     use std::rc::Rc;
 
     use inset_embedder::{FontSource, TextAffinity};
-    use inset_foundation::{AppCell, ValueListenable};
+    use inset_foundation::{AppCell, Task, ValueListenable};
     use inset_painting::{PaintingBinding, TextSpan, TextStyle};
     use inset_scheduler::SchedulerBinding;
     use inset_services::{TextEditingValue, TextSelectionDelegate};
@@ -2093,6 +2093,24 @@ mod tests {
         ) {
             app.get_mut(self).value = value;
         }
+
+        fn hide_toolbar(self: Handle<Self>, _app: &mut App, _hide_handles: bool) {}
+
+        fn bring_into_view(self: Handle<Self>, _app: &mut App, _position: TextPosition) {}
+
+        fn cut_selection(self: Handle<Self>, _app: &mut App, _cause: SelectionChangedCause) {}
+
+        fn paste_text(
+            self: Handle<Self>,
+            _app: &mut App,
+            _cause: SelectionChangedCause,
+        ) -> Task<()> {
+            Task::ready(())
+        }
+
+        fn select_all(self: Handle<Self>, _app: &mut App, _cause: SelectionChangedCause) {}
+
+        fn copy_selection(self: Handle<Self>, _app: &mut App, _cause: SelectionChangedCause) {}
     }
 
     fn install_fonts(app: &mut App) {

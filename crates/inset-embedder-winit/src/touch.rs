@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use inset_embedder::{PointerChange, PointerData, PointerDeviceKind, ViewId};
-use winit::event::TouchPhase;
+use inset_embedder::{PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, ViewId};
+use winit::event::{Touch, TouchPhase};
 
 use crate::pointer::PointerIds;
 
@@ -25,19 +25,39 @@ struct Finger {
 
 /// One change of one finger, as the framework takes it.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct TouchChange {
-    pub(crate) device: i64,
-    pub(crate) change: PointerChange,
-    pub(crate) position: [f64; 2],
-    pub(crate) delta: [f64; 2],
-    pub(crate) pointer_identifier: i64,
+struct TouchChange {
+    device: i64,
+    change: PointerChange,
+    position: [f64; 2],
+    delta: [f64; 2],
+    pointer_identifier: i64,
 }
 
 impl Touches {
+    /// One finger's change in `view`, as the pointer that finger is: its arrival and departure
+    /// go with its down and its up, in one packet. `None` for a change the framework is not
+    /// told of.
+    pub(crate) fn packet(
+        &mut self,
+        touch: &Touch,
+        view: ViewId,
+        time_stamp: Duration,
+        ids: &mut PointerIds,
+    ) -> Option<PointerDataPacket> {
+        let position = [touch.location.x, touch.location.y];
+        let pressure = touch.force.map_or(1.0, |force| force.normalized());
+        let data: Vec<_> = self
+            .apply(touch.id, touch.phase, position, ids)
+            .into_iter()
+            .map(|change| change.data(view, pressure, time_stamp, ids))
+            .collect();
+        (!data.is_empty()).then(|| PointerDataPacket::new(data))
+    }
+
     /// The changes one touch event makes, in the order the framework takes them: a finger
     /// arriving is an add then a down, a finger leaving an up (or a cancel) then a remove.
-    /// A move of a finger the host never saw arrive is dropped, as is a second down of one.
-    pub(crate) fn apply(
+    /// A move of a finger the embedder never saw arrive is dropped, as is a second down of one.
+    fn apply(
         &mut self,
         id: u64,
         phase: TouchPhase,
@@ -59,20 +79,8 @@ impl Touches {
                     },
                 );
                 vec![
-                    TouchChange {
-                        device,
-                        change: PointerChange::Add,
-                        position,
-                        delta: [0.0, 0.0],
-                        pointer_identifier: 0,
-                    },
-                    TouchChange {
-                        device,
-                        change: PointerChange::Down,
-                        position,
-                        delta: [0.0, 0.0],
-                        pointer_identifier,
-                    },
+                    TouchChange::arrival(device, position),
+                    TouchChange::press(device, position, pointer_identifier),
                 ]
             }
             TouchPhase::Moved => {
@@ -81,13 +89,12 @@ impl Touches {
                 };
                 let delta = delta_from(finger.last_position, position);
                 finger.last_position = position;
-                vec![TouchChange {
+                vec![TouchChange::motion(
                     device,
-                    change: PointerChange::Move,
                     position,
                     delta,
-                    pointer_identifier: finger.pointer_identifier,
-                }]
+                    finger.pointer_identifier,
+                )]
             }
             TouchPhase::Ended | TouchPhase::Cancelled => {
                 let Some(finger) = self.fingers.remove(&id) else {
@@ -100,20 +107,14 @@ impl Touches {
                 };
                 let delta = delta_from(finger.last_position, position);
                 vec![
-                    TouchChange {
+                    TouchChange::release(
                         device,
                         change,
                         position,
                         delta,
-                        pointer_identifier: finger.pointer_identifier,
-                    },
-                    TouchChange {
-                        device,
-                        change: PointerChange::Remove,
-                        position,
-                        delta: [0.0, 0.0],
-                        pointer_identifier: 0,
-                    },
+                        finger.pointer_identifier,
+                    ),
+                    TouchChange::departure(device, position),
                 ]
             }
         }
@@ -125,10 +126,58 @@ fn delta_from([last_x, last_y]: [f64; 2], [x, y]: [f64; 2]) -> [f64; 2] {
 }
 
 impl TouchChange {
+    /// The finger arrived at `at`: the framework adds it as a device, before its press.
+    fn arrival(device: i64, at: [f64; 2]) -> TouchChange {
+        TouchChange::new(device, PointerChange::Add, at, [0.0, 0.0], 0)
+    }
+
+    /// The finger went down at `at`, starting the press numbered `pointer`.
+    fn press(device: i64, at: [f64; 2], pointer: i64) -> TouchChange {
+        TouchChange::new(device, PointerChange::Down, at, [0.0, 0.0], pointer)
+    }
+
+    /// The finger moved to `at`, by `delta`, during the press numbered `pointer`.
+    fn motion(device: i64, at: [f64; 2], delta: [f64; 2], pointer: i64) -> TouchChange {
+        TouchChange::new(device, PointerChange::Move, at, delta, pointer)
+    }
+
+    /// The press numbered `pointer` ended at `at`, by `delta` since the last move: `change` is
+    /// an Up, or a Cancel.
+    fn release(
+        device: i64,
+        change: PointerChange,
+        at: [f64; 2],
+        delta: [f64; 2],
+        pointer: i64,
+    ) -> TouchChange {
+        TouchChange::new(device, change, at, delta, pointer)
+    }
+
+    /// The finger left at `at`: the framework removes it as a device, after its release.
+    fn departure(device: i64, at: [f64; 2]) -> TouchChange {
+        TouchChange::new(device, PointerChange::Remove, at, [0.0, 0.0], 0)
+    }
+
+    fn new(
+        device: i64,
+        change: PointerChange,
+        position: [f64; 2],
+        delta: [f64; 2],
+        pointer_identifier: i64,
+    ) -> TouchChange {
+        TouchChange {
+            device,
+            change,
+            position,
+            delta,
+            pointer_identifier,
+        }
+    }
+
     /// The datum for this change in `view`, with `pressure` as the screen reports it, from
     /// none to full. Buttons are left at none, as Flutter's Android embedder leaves them:
     /// the framework's converter supplies the primary button a touch in contact means.
-    pub(crate) fn data(
+    fn data(
         self,
         view_id: ViewId,
         pressure: f64,

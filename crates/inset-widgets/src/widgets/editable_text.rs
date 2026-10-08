@@ -18,7 +18,7 @@ use inset_embedder::{
     TextInputType, TextPosition, TextRange, TextSelection, clamp_double,
 };
 use inset_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB, Listenable, Listener, Timer,
+    App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB, Listenable, Listener, Task, Timer,
     ValueNotifier,
 };
 use inset_gestures::{DragStartBehavior, PointerDownEvent, PointerUpEvent};
@@ -5043,9 +5043,9 @@ impl TextSelectionDelegate for EditableTextState {
         self.clipboard_status(app).update(app);
     }
 
-    fn paste_text(self: Handle<Self>, app: &mut App, cause: SelectionChangedCause) {
+    fn paste_text(self: Handle<Self>, app: &mut App, cause: SelectionChangedCause) -> Task<()> {
         if !self.allow_paste(app) {
-            return;
+            return Task::ready(());
         }
         let data = Clipboard::get_data(app, Clipboard::K_TEXT_PLAIN);
         app.spawn(async move |cx| {
@@ -5057,7 +5057,7 @@ impl TextSelectionDelegate for EditableTextState {
                     self.paste_text_content(app, cause, &text);
                 }
             });
-        });
+        })
     }
 
     fn select_all(self: Handle<Self>, app: &mut App, cause: SelectionChangedCause) {
@@ -6017,7 +6017,10 @@ mod tests {
 
     use inset_painting::PaintingBinding;
 
+    use std::cell::RefCell;
+
     use crate::test_harness::Harness;
+    use crate::widgets::basic::{Center, SizedBox};
     use crate::widgets::media_query::MediaQueryData;
 
     fn install_fonts(app: &mut App) {
@@ -6040,6 +6043,160 @@ mod tests {
             }
         });
         found
+    }
+
+    /// An app whose host's clipboard is `clipboard`, with the fonts text needs.
+    fn app_with_clipboard(clipboard: &Rc<inset_test::MockClipboard>) -> Rc<AppCell> {
+        let clipboard: Rc<dyn inset_embedder::Clipboard> = Rc::clone(clipboard) as _;
+        let platform = inset_test::TestPlatform::new().with_clipboard(clipboard);
+        let cell = AppCell::with_platform(Rc::new(platform));
+        install_fonts(&mut cell.borrow_mut());
+        cell
+    }
+
+    /// Runs the checkpoint `task` needs; its answer, or `None` while it is still on its way.
+    fn awaited<T: 'static>(cell: &Rc<AppCell>, task: Task<T>) -> Option<T> {
+        let answer = Rc::new(RefCell::new(None));
+        let out = Rc::clone(&answer);
+        cell.borrow()
+            .spawn(async move |_cx| *out.borrow_mut() = Some(task.await));
+        cell.checkpoint();
+        answer.take()
+    }
+
+    /// The text on the clipboard, as `Clipboard.getData('text/plain')` reads it.
+    fn clipboard_text(cell: &Rc<AppCell>) -> Option<String> {
+        let data = Clipboard::get_data(&cell.borrow(), Clipboard::K_TEXT_PLAIN);
+        awaited(cell, data)
+            .expect("the clipboard answered")
+            .and_then(|data| data.text)
+    }
+
+    // editable_text_test.dart 'cut and copy do nothing in obscured mode even if explicitly
+    // called'.
+    #[test]
+    fn cut_and_copy_do_nothing_in_obscured_mode_even_if_explicitly_called() {
+        let mock_clipboard = Rc::new(inset_test::MockClipboard::new());
+        let cell = app_with_clipboard(&mock_clipboard);
+        let key = crate::framework::GlobalKey::new();
+        let (harness, state) = {
+            let mut app = cell.borrow_mut();
+            let controller = TextEditingController::new(&mut app).text(&mut app, "blah blah");
+            let focus_node = FocusNode::new(&mut app);
+            let editable = EditableText::new(
+                controller,
+                focus_node,
+                TextStyle::new(),
+                Color::from_argb(255, 255, 0, 0),
+                Color::from_argb(255, 128, 128, 128),
+            )
+            .obscure_text(true)
+            .key(Rc::new(key.clone()));
+            let tree = MediaQuery::new(
+                MediaQueryData::new(),
+                Directionality::new(TextDirection::Ltr, editable),
+            )
+            .into_widget();
+            let harness = Harness::mount(&mut app, tree);
+            harness.pump(&mut app);
+            let state = key
+                .current_state::<EditableTextState>(&mut app)
+                .expect("the field is mounted");
+            (harness, state)
+        };
+        {
+            let app = cell.borrow();
+            assert!(state.select_all_enabled(&app));
+            assert!(state.paste_enabled(&app));
+            assert!(!state.cut_enabled(&app));
+            assert!(!state.copy_enabled(&app));
+        }
+
+        // Select all.
+        {
+            let mut app = cell.borrow_mut();
+            state.select_all(&mut app, SelectionChangedCause::Toolbar);
+            harness.pump(&mut app);
+        }
+        let written = Clipboard::set_data(&cell.borrow(), ClipboardData::new(""));
+        awaited(&cell, written).expect("the clipboard was written");
+        state.cut_selection(&mut cell.borrow_mut(), SelectionChangedCause::Toolbar);
+        assert_eq!(clipboard_text(&cell).as_deref(), Some(""));
+
+        {
+            let mut app = cell.borrow_mut();
+            state.select_all(&mut app, SelectionChangedCause::Toolbar);
+            harness.pump(&mut app);
+        }
+        let written = Clipboard::set_data(&cell.borrow(), ClipboardData::new(""));
+        awaited(&cell, written).expect("the clipboard was written");
+        state.copy_selection(&mut cell.borrow_mut(), SelectionChangedCause::Toolbar);
+        assert_eq!(clipboard_text(&cell).as_deref(), Some(""));
+    }
+
+    // editable_text_test.dart 'Should not scroll on paste if caret already visible'.
+    #[test]
+    fn should_not_scroll_on_paste_if_caret_already_visible() {
+        let mock_clipboard = Rc::new(inset_test::MockClipboard::new());
+        let cell = app_with_clipboard(&mock_clipboard);
+        let key = crate::framework::GlobalKey::new();
+        let (harness, state, controller, focus_node, scroll_controller) = {
+            let mut app = cell.borrow_mut();
+            let scroll_controller = ScrollController::default(&mut app);
+            let controller = TextEditingController::new(&mut app).text(
+                &mut app,
+                format!("Lorem ipsum please paste here: \n{}", ".\n".repeat(50)),
+            );
+            let focus_node = FocusNode::new(&mut app);
+            let editable = EditableText::new(
+                controller,
+                focus_node,
+                TextStyle::new().font_size(36.0),
+                Color::from_argb(255, 255, 0, 0),
+                Color::from_argb(255, 128, 128, 128),
+            )
+            .scroll_controller(scroll_controller)
+            .max_lines(None)
+            .key(Rc::new(key.clone()));
+            let tree = MediaQuery::new(
+                MediaQueryData::new(),
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Center::new().child(SizedBox::square(Some(600.0)).child(editable)),
+                ),
+            )
+            .into_widget();
+            let harness = Harness::mount(&mut app, tree);
+            harness.pump(&mut app);
+            let state = key
+                .current_state::<EditableTextState>(&mut app)
+                .expect("the field is mounted");
+            (harness, state, controller, focus_node, scroll_controller)
+        };
+
+        let written = Clipboard::set_data(
+            &cell.borrow(),
+            ClipboardData::new("Fairly long text to be pasted"),
+        );
+        awaited(&cell, written).expect("the clipboard was written");
+        {
+            let mut app = cell.borrow_mut();
+            focus_node.request_focus(&mut app, None);
+            assert_eq!(scroll_controller.as_controller().offset(&app), 0.0);
+            controller.set_selection(
+                &mut app,
+                TextSelection::collapsed(31, TextAffinity::Downstream),
+            );
+        }
+        let pasted = state.paste_text(&mut cell.borrow_mut(), SelectionChangedCause::Toolbar);
+        awaited(&cell, pasted).expect("the paste completed");
+        harness.pump(&mut cell.borrow_mut());
+
+        // No scroll should happen as the caret is in the viewport all the time.
+        assert_eq!(
+            scroll_controller.as_controller().offset(&cell.borrow()),
+            0.0
+        );
     }
 
     #[test]

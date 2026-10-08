@@ -45,9 +45,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Dart writes it on the same object the caller still holds.
   Affect: a caller cannot read the transform back off the entry it added; read `result.path().last().transform()`.
 
-- Change: `push_transform`'s debug check lets each entry of the third row and column be up to eight f32 epsilons (about 1e-6) from `(0, 0, 1, 0)`, where Dart allows `precisionErrorTolerance` (1e-10).
-  Reason: platform — `Matrix4` is valo's f32 matrix (see inset-embedder's `geometry/PORTING.md`), and one f32 inverse already leaves that diagonal entry an ulp below 1, 6e-8.
-  Affect: an inverted scale or rotation no longer panics a debug build on the first pointer over it; a third row or column off by less than 1e-6 passes where Dart would assert.
+- Change: `HitTestResult::push_transform`'s debug check allows the transform's third row and column a wider rounding error than Dart's.
+  Reason: platform — `Matrix4` is valo's f32 matrix, and inverting one already leaves more error than Dart's f64 tolerance.
+  Affect: a debug build accepts an inverted scale or rotation, and lets through a slight perspective Dart would assert on.
 
 ## pointer_signal_resolver.rs → pointer_signal_resolver.dart
 

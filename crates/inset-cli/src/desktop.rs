@@ -1,4 +1,7 @@
 //! Desktop bundles and installers, through cargo-packager.
+//!
+//! The app's file associations go to cargo-packager for every format, and the macOS
+//! bundle's `Info.plist` also gets what `file_associations` writes beyond them.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,6 +11,7 @@ use cargo_packager::config::{Binary, MacOsConfig, Resource};
 use cargo_packager::{Config, PackageFormat};
 
 use crate::cargo::{self, Artifact, Build};
+use crate::file_associations;
 use crate::icons;
 use crate::ios;
 use crate::project::{Profile, Project};
@@ -107,6 +111,14 @@ fn package(
     macos.minimum_system_version = project.macos.minimum_system_version.clone();
     macos.background_app = project.macos.background_app;
     macos.signing_identity = macos_signing_identity(project);
+    macos.entitlements = project
+        .macos
+        .entitlements
+        .as_ref()
+        .map(|entitlements| entitlements.to_string_lossy().into_owned());
+    if matches!(format, PackageFormat::App | PackageFormat::Dmg) {
+        macos.info_plist_path = macos_file_associations_plist(project, out)?;
+    }
     let mut config = Config::default();
     config.product_name = project.name.clone();
     config.version = project.version.clone();
@@ -116,6 +128,8 @@ fn package(
     config.formats = Some(vec![format]);
     config.icons = (!icons.is_empty()).then_some(icons);
     config.resources = Some(resources);
+    config.file_associations = (!project.file_associations.is_empty())
+        .then(|| file_associations::packager_associations(&project.file_associations));
     config.description = project.description.clone();
     config.homepage = project.homepage.clone();
     config.authors = (!project.authors.is_empty()).then(|| project.authors.clone());
@@ -125,6 +139,19 @@ fn package(
         .into_iter()
         .flat_map(|output| output.paths)
         .collect())
+}
+
+/// The `Info.plist` keys of the app's file associations that cargo-packager does not write,
+/// in a file beside the bundle that it merges over its own; `None` when the app has none.
+fn macos_file_associations_plist(project: &Project, out: &Path) -> Result<Option<PathBuf>> {
+    if project.file_associations.is_empty() {
+        return Ok(None);
+    }
+    let path = out.join("file-types.plist");
+    let info = file_associations::macos_info_plist(&project.file_associations, &project.identifier);
+    plist::to_file_xml(&path, &info)
+        .context("could not write the file associations' Info.plist keys")?;
+    Ok(Some(path))
 }
 
 /// `APPLE_SIGNING_IDENTITY` for distribution, else the keychain's development

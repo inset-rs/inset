@@ -13,12 +13,12 @@ use std::time::Duration;
 
 use inset_animation::{AnimationBehavior, AnimationController};
 use inset_embedder::{
-    Offset, PointerDeviceKind, Rect, Size, TargetPlatform, TextAffinity, TextDirection,
-    TextEditingValue, TextPosition, TextRange, TextSelection,
+    AppLifecycleState, Offset, PointerDeviceKind, Rect, Size, TargetPlatform, TextAffinity,
+    TextDirection, TextEditingValue, TextPosition, TextRange, TextSelection,
 };
 use inset_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, K_IS_WEB, Listenable, Listener,
-    ValueChanged, ValueListenable, ValueNotifier,
+    Task, ValueChanged, ValueListenable, ValueNotifier,
 };
 use inset_gestures::{
     BaseTapAndDragGestureRecognizer, DragEndDetails, DragStartBehavior, DragStartDetails,
@@ -199,7 +199,7 @@ pub enum LiveTextInputStatus {
 ///
 /// Dart's `ValueNotifier<ClipboardStatus>` superclass is the `change_notifier` and `value`
 /// fields here. Call [`update`](Self::update) to refresh [`value`](Self::value) from the
-/// clipboard; [`Clipboard::has_strings`] is synchronous, so this is too.
+/// clipboard.
 pub struct ClipboardStatusNotifier {
     change_notifier: ChangeNotifierData,
     value: ClipboardStatus,
@@ -270,11 +270,10 @@ impl ClipboardStatusNotifier {
         self.notify_listeners(app);
     }
 
-    /// Check the [`Clipboard`] and update [`value`](Self::value) if needed, once the clipboard
-    /// answers.
-    pub fn update(self: Handle<Self>, app: &mut App) {
+    /// Check the [`Clipboard`] and update [`value`](Self::value) if needed.
+    pub fn update(self: Handle<Self>, app: &mut App) -> Task<()> {
         if app.get(self).disposed || app.get(self).web {
-            return;
+            return Task::ready(());
         }
 
         let has_strings = Clipboard::has_strings(app);
@@ -290,7 +289,7 @@ impl ClipboardStatusNotifier {
                 }
                 self.set_value(app, next_status);
             });
-        });
+        })
     }
 
     /// Discards any resources used by the object.
@@ -332,7 +331,21 @@ impl ChangeNotifier for ClipboardStatusNotifier {
     }
 }
 
-impl WidgetsBindingObserverObject for ClipboardStatusNotifier {}
+impl WidgetsBindingObserverObject for ClipboardStatusNotifier {
+    fn did_change_app_lifecycle_state(self: Handle<Self>, app: &mut App, state: AppLifecycleState) {
+        match state {
+            AppLifecycleState::Resumed => {
+                self.update(app);
+            }
+            AppLifecycleState::Detached
+            | AppLifecycleState::Inactive
+            | AppLifecycleState::Hidden
+            | AppLifecycleState::Paused => {
+                // Nothing to do.
+            }
+        }
+    }
+}
 
 /// A [`ChangeNotifier`] whose value indicates whether the current device supports the Live Text
 /// (OCR) function.
@@ -457,7 +470,19 @@ impl ChangeNotifier for LiveTextInputStatusNotifier {
     }
 }
 
-impl WidgetsBindingObserverObject for LiveTextInputStatusNotifier {}
+impl WidgetsBindingObserverObject for LiveTextInputStatusNotifier {
+    fn did_change_app_lifecycle_state(self: Handle<Self>, app: &mut App, state: AppLifecycleState) {
+        match state {
+            AppLifecycleState::Resumed => self.update(app),
+            AppLifecycleState::Detached
+            | AppLifecycleState::Inactive
+            | AppLifecycleState::Paused
+            | AppLifecycleState::Hidden => {
+                // Nothing to do.
+            }
+        }
+    }
+}
 
 /// An interface for building the selection UI, to be provided by the
 /// implementer of the toolbar widget.
@@ -631,8 +656,8 @@ pub trait TextSelectionControls {
     /// the user.
     #[deprecated(note = "Use `contextMenuBuilder` instead. \
                 This feature was deprecated after v3.3.0-0.5.pre.")]
-    fn handle_paste(&self, app: &mut App, delegate: AnyTextSelectionDelegate) {
-        delegate.paste_text(app, SelectionChangedCause::Toolbar);
+    fn handle_paste(&self, app: &mut App, delegate: AnyTextSelectionDelegate) -> Task<()> {
+        delegate.paste_text(app, SelectionChangedCause::Toolbar)
     }
 
     /// Call [`AnyTextSelectionDelegate::select_all`] to set the current selection to
@@ -740,8 +765,9 @@ pub trait TextSelectionHandleControls: TextSelectionControls {
 
     #[deprecated(note = "Use `contextMenuBuilder` instead. \
                 This feature was deprecated after v3.3.0-0.5.pre.")]
-    fn handle_paste(&self, app: &mut App, delegate: AnyTextSelectionDelegate) {
+    fn handle_paste(&self, app: &mut App, delegate: AnyTextSelectionDelegate) -> Task<()> {
         let _ = (app, delegate);
+        Task::ready(())
     }
 
     #[deprecated(note = "Use `contextMenuBuilder` instead. \
@@ -4964,15 +4990,75 @@ mod tests {
         let _ = std::any::type_name::<SelectionOverlay>();
     }
 
+    /// Whether `task` completed, once a checkpoint has run a task awaiting it.
+    fn completes(cell: &Rc<AppCell>, task: Task<()>) -> bool {
+        let completed = Rc::new(std::cell::Cell::new(false));
+        let out = Rc::clone(&completed);
+        cell.borrow().spawn(async move |_cx| {
+            task.await;
+            out.set(true);
+        });
+        cell.checkpoint();
+        completed.get()
+    }
+
+    // text_selection_test.dart 'ClipboardStatusNotifier when Clipboard succeeds update sets value
+    // based on clipboard contents'.
+    #[test]
+    fn clipboard_status_notifier_update_sets_value_based_on_clipboard_contents() {
+        use inset_test::{MockClipboard, TestPlatform};
+
+        let mock_clipboard = Rc::new(MockClipboard::new());
+        let clipboard: Rc<dyn inset_embedder::Clipboard> = Rc::clone(&mock_clipboard) as _;
+        let cell = AppCell::with_platform(Rc::new(TestPlatform::new().with_clipboard(clipboard)));
+        let notifier = ClipboardStatusNotifier::new(&mut cell.borrow_mut());
+        assert_eq!(notifier.value(&cell.borrow()), ClipboardStatus::Unknown);
+
+        let update = notifier.update(&mut cell.borrow_mut());
+        assert!(completes(&cell, update));
+        assert_eq!(
+            notifier.value(&cell.borrow()),
+            ClipboardStatus::NotPasteable
+        );
+
+        mock_clipboard.set_clipboard_data(Some("pasteablestring".to_owned()));
+        let update = notifier.update(&mut cell.borrow_mut());
+        assert!(completes(&cell, update));
+        assert_eq!(notifier.value(&cell.borrow()), ClipboardStatus::Pasteable);
+    }
+
+    #[test]
+    fn a_listened_clipboard_status_notifier_updates_when_the_app_resumes() {
+        use inset_scheduler::SchedulerBinding;
+        use inset_test::{MockClipboard, TestPlatform};
+
+        let mock_clipboard = Rc::new(MockClipboard::new());
+        let clipboard: Rc<dyn inset_embedder::Clipboard> = Rc::clone(&mock_clipboard) as _;
+        let cell = AppCell::with_platform(Rc::new(TestPlatform::new().with_clipboard(clipboard)));
+        let notifier = ClipboardStatusNotifier::new(&mut cell.borrow_mut());
+        notifier.add_listener(&mut cell.borrow_mut(), Listener::new(|_app| {}));
+        cell.checkpoint();
+        assert_eq!(
+            notifier.value(&cell.borrow()),
+            ClipboardStatus::NotPasteable
+        );
+
+        mock_clipboard.set_clipboard_data(Some("pasteablestring".to_owned()));
+        SchedulerBinding::handle_app_lifecycle_state_changed(
+            &mut cell.borrow_mut(),
+            AppLifecycleState::Resumed,
+        );
+        cell.checkpoint();
+        assert_eq!(notifier.value(&cell.borrow()), ClipboardStatus::Pasteable);
+    }
+
     #[test]
     fn clipboard_status_notifier_update_default_platform_is_not_pasteable() {
         let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let notifier = ClipboardStatusNotifier::new(&mut app);
-        assert_eq!(notifier.value(&app), ClipboardStatus::Unknown);
-        notifier.update(&mut app);
-        drop(app);
-        cell.checkpoint();
+        let notifier = ClipboardStatusNotifier::new(&mut cell.borrow_mut());
+        assert_eq!(notifier.value(&cell.borrow()), ClipboardStatus::Unknown);
+        let update = notifier.update(&mut cell.borrow_mut());
+        assert!(completes(&cell, update));
         assert_eq!(
             notifier.value(&cell.borrow()),
             ClipboardStatus::NotPasteable

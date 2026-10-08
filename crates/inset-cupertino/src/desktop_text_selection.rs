@@ -4,7 +4,7 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use inset_embedder::{Offset, Rect, Size, clamp_double};
-use inset_foundation::{App, Handle, Listenable, Listener};
+use inset_foundation::{App, Handle, Listenable, Listener, Task};
 use inset_rendering::TextSelectionPoint;
 use inset_services::{AnyTextSelectionDelegate, SelectionChangedCause};
 use inset_widgets::{
@@ -210,8 +210,8 @@ impl TextSelectionControls for CupertinoDesktopTextSelectionHandleControls {
     }
 
     #[allow(deprecated)]
-    fn handle_paste(&self, app: &mut App, delegate: AnyTextSelectionDelegate) {
-        TextSelectionHandleControls::handle_paste(self, app, delegate);
+    fn handle_paste(&self, app: &mut App, delegate: AnyTextSelectionDelegate) -> Task<()> {
+        TextSelectionHandleControls::handle_paste(self, app, delegate)
     }
 
     #[allow(deprecated)]

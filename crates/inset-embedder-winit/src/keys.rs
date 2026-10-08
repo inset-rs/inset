@@ -4,7 +4,8 @@
 //! `key` values, which is what Flutter's engine keys its own tables by: the
 //! tables below are transcribed from `dev/tools/gen_keycodes/data/physical_key_data.g.json`
 //! and from the web engine's `key_map.g.dart`, and the lookup order follows that
-//! engine's `KeyboardConverter._handleEvent`. Machine-written; edit the generator.
+//! engine's `KeyboardConverter._handleEvent`. No generator writes them here: a change to
+//! Flutter's tables is copied in by hand.
 
 use winit::keyboard::{Key, KeyCode, KeyLocation, NamedKey, PhysicalKey};
 
@@ -236,7 +237,7 @@ pub(crate) fn character_of(text: Option<&str>) -> Option<String> {
 
 /// Flutter's `LogicalKeyboardKey.isControlCharacter`, which its embedders use to
 /// keep a control character out of `KeyEvent.character`. The framework's copy is
-/// in `inset-services`; a host crate does not depend on the framework.
+/// in `inset-services`; an embedder crate does not depend on the framework.
 fn is_control_character(label: &str) -> bool {
     let mut characters = label.chars();
     let (Some(code_unit), None) = (characters.next(), characters.next()) else {

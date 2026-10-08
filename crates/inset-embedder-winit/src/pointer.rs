@@ -1,5 +1,7 @@
 //! The mouse as Flutter's pointer: where it is, which buttons it holds, and the
-//! `PointerData` each change becomes, numbered as Flutter's embedders number them.
+//! `PointerData` each of winit's mouse events becomes, numbered as Flutter's embedders number
+//! them. Flutter's macOS embedder sends `kAdd` on `mouseEntered` and `kRemove` on
+//! `mouseExited`; a `MouseRegion` exits on the remove.
 
 use std::time::Duration;
 
@@ -29,7 +31,7 @@ const KNOWN_BUTTONS: [i64; 5] = [
 ];
 
 /// The numbers Flutter's engine gives pointer data as it passes through: an `embedder_id`
-/// per datum, and a `pointerIdentifier` per press, each unique across every device the host
+/// per datum, and a `pointerIdentifier` per press, each unique across every device the embedder
 /// reports, mouse and fingers alike.
 #[derive(Default)]
 pub(crate) struct PointerIds {
@@ -49,9 +51,18 @@ impl PointerIds {
     }
 }
 
+/// Where and when a pointer event happened: the view whose window it happened in, `None` for a
+/// window the embedder no longer has, whose events change the pointer but reach no view; and the
+/// time since the embedder started.
+#[derive(Clone, Copy)]
+pub(crate) struct PointerStamp {
+    pub(crate) view: Option<ViewId>,
+    pub(crate) time_stamp: Duration,
+}
+
 pub(crate) struct Pointer {
     /// The window the mouse was last seen in; system cursor requests go there.
-    pub(crate) window: Option<WindowId>,
+    window: Option<WindowId>,
     /// Where it is, in the window's physical pixels.
     position: [f64; 2],
     /// Where the last packet said it was, for the delta of the next.
@@ -77,12 +88,109 @@ impl Pointer {
         }
     }
 
-    pub(crate) fn move_to(&mut self, position: [f64; 2]) {
+    /// The window the mouse was last seen in.
+    pub(crate) fn window(&self) -> Option<WindowId> {
+        self.window
+    }
+
+    /// The mouse came into `window`, at `position` where the system can say where it is now:
+    /// the framework is told it is present, before anything else about it.
+    pub(crate) fn entered(
+        &mut self,
+        window: WindowId,
+        position: Option<[f64; 2]>,
+        stamp: PointerStamp,
+        ids: &mut PointerIds,
+    ) -> Option<PointerDataPacket> {
+        self.window = Some(window);
+        if let Some(position) = position {
+            self.position = position;
+        }
+        self.added_packet(stamp, ids)
+    }
+
+    /// The mouse left its window: the framework is told it is gone, unless a button is held,
+    /// since a drag that leaves the window goes on as moves.
+    pub(crate) fn left(
+        &mut self,
+        stamp: PointerStamp,
+        ids: &mut PointerIds,
+    ) -> Option<PointerDataPacket> {
+        if self.added && self.buttons == 0 {
+            self.added = false;
+            return self.record(PointerChange::Remove, None, stamp, ids);
+        }
+        None
+    }
+
+    /// The mouse moved in `window` to `position`: a hover, or a drag while a button is held,
+    /// after the presses and releases `pressed_now`, what the system says is held down now,
+    /// shows were missed.
+    pub(crate) fn moved(
+        &mut self,
+        window: WindowId,
+        position: [f64; 2],
+        pressed_now: Option<i64>,
+        stamp: PointerStamp,
+        ids: &mut PointerIds,
+    ) -> Vec<PointerDataPacket> {
+        self.window = Some(window);
         self.position = position;
+        let mut packets: Vec<_> = self.added_packet(stamp, ids).into_iter().collect();
+        packets.extend(self.reconciled(pressed_now, stamp, ids));
+        let motion = self.motion();
+        packets.extend(self.record(motion, None, stamp, ids));
+        packets
+    }
+
+    /// A button pressed or released: Down when the first goes down, Move while any remain,
+    /// Up when the last is released, as Flutter's macOS `dispatchMouseEvent:` splits them.
+    pub(crate) fn button(
+        &mut self,
+        button: MouseButton,
+        pressed: bool,
+        stamp: PointerStamp,
+        ids: &mut PointerIds,
+    ) -> Option<PointerDataPacket> {
+        let change = self.set_button_bit(flutter_mouse_button(button)?, pressed)?;
+        self.record(change, None, stamp, ids)
+    }
+
+    /// The wheel or the trackpad scrolled by `delta`, in a view `scale` physical pixels to the
+    /// logical one.
+    pub(crate) fn scrolled(
+        &mut self,
+        delta: MouseScrollDelta,
+        scale: f64,
+        stamp: PointerStamp,
+        ids: &mut PointerIds,
+    ) -> Option<PointerDataPacket> {
+        let scroll = wheel_to_physical(delta, scale);
+        self.record(PointerChange::Hover, Some(scroll), stamp, ids)
+    }
+
+    /// Brings the record of the buttons in line with `pressed_now`, as the system reports
+    /// them, where it can be asked: the presses and releases the embedder missed while a native
+    /// menu ran its own event loop. The menu swallows the release of the button that opened
+    /// it, which would leave the app holding a button forever: no hovers, no taps.
+    pub(crate) fn reconciled(
+        &mut self,
+        pressed_now: Option<i64>,
+        stamp: PointerStamp,
+        ids: &mut PointerIds,
+    ) -> Vec<PointerDataPacket> {
+        let Some(actual) = pressed_now else {
+            return Vec::new();
+        };
+        let changes = self.missed_button_changes(actual);
+        changes
+            .into_iter()
+            .filter_map(|change| self.record(change, None, stamp, ids))
+            .collect()
     }
 
     /// The change a move is: a drag while a button is held, a hover otherwise.
-    pub(crate) fn motion(&self) -> PointerChange {
+    fn motion(&self) -> PointerChange {
         if self.buttons != 0 {
             PointerChange::Move
         } else {
@@ -90,31 +198,16 @@ impl Pointer {
         }
     }
 
-    /// The mouse arriving: whether the framework is still to be told, once, before
-    /// anything else about it.
-    pub(crate) fn add(&mut self) -> bool {
-        !std::mem::replace(&mut self.added, true)
-    }
-
-    /// The mouse leaving a window: whether the framework is to be told, which it is not
-    /// while a button is held, since a drag that leaves the window goes on as moves.
-    pub(crate) fn remove(&mut self) -> bool {
-        if self.added && self.buttons == 0 {
-            self.added = false;
-            return true;
-        }
-        false
-    }
-
-    /// A button pressed or released, and the change it makes: Down when the first goes
-    /// down, Move while any remain, Up when the last is released, as Flutter's macOS
-    /// `dispatchMouseEvent:` splits them.
-    pub(crate) fn set_button(
+    /// The Add the framework is told once, before anything else about the mouse.
+    fn added_packet(
         &mut self,
-        button: MouseButton,
-        pressed: bool,
-    ) -> Option<PointerChange> {
-        self.set_button_bit(flutter_mouse_button(button)?, pressed)
+        stamp: PointerStamp,
+        ids: &mut PointerIds,
+    ) -> Option<PointerDataPacket> {
+        if std::mem::replace(&mut self.added, true) {
+            return None;
+        }
+        self.record(PointerChange::Add, None, stamp, ids)
     }
 
     fn set_button_bit(&mut self, bit: i64, pressed: bool) -> Option<PointerChange> {
@@ -127,11 +220,9 @@ impl Pointer {
         pointer_change_for_buttons(previous, self.buttons)
     }
 
-    /// Brings the record of the buttons in line with `actual`, as the system reports
-    /// them, answering the changes that makes. A native menu opened from a press runs
-    /// its own event loop and swallows the release, which would leave the app holding a
-    /// button forever: no hovers, no taps.
-    pub(crate) fn reconcile(&mut self, actual: i64) -> Vec<PointerChange> {
+    /// The presses and releases missed, which bring the record of the buttons in line with
+    /// `actual`; the record takes them as it answers them.
+    fn missed_button_changes(&mut self, actual: i64) -> Vec<PointerChange> {
         let mut changes = Vec::new();
         for bit in KNOWN_BUTTONS {
             let held = actual & bit != 0;
@@ -144,16 +235,18 @@ impl Pointer {
         changes
     }
 
-    /// The packet for one change of the pointer in `view`, with a scroll's deltas in
-    /// physical pixels when the change is one.
-    pub(crate) fn packet(
+    /// Records one change of the pointer in the view `stamp` names, and answers its packet, with
+    /// a scroll's deltas in physical pixels when the change is one: a Down starts a press, and
+    /// the position becomes the one the next delta is from. `None`, recording nothing, for a
+    /// window the embedder no longer has.
+    fn record(
         &mut self,
-        ids: &mut PointerIds,
-        view_id: ViewId,
         change: PointerChange,
         scroll: Option<[f64; 2]>,
-        time_stamp: Duration,
-    ) -> PointerDataPacket {
+        stamp: PointerStamp,
+        ids: &mut PointerIds,
+    ) -> Option<PointerDataPacket> {
+        let view_id = stamp.view?;
         if change == PointerChange::Down {
             self.pointer_id = ids.next_pointer();
         }
@@ -175,7 +268,7 @@ impl Pointer {
         let data = PointerData {
             view_id,
             embedder_id: ids.next_embedder(),
-            time_stamp,
+            time_stamp: stamp.time_stamp,
             change,
             kind: PointerDeviceKind::Mouse,
             signal_kind,
@@ -193,7 +286,7 @@ impl Pointer {
             ..PointerData::default()
         };
         self.last_position = self.position;
-        PointerDataPacket::new(vec![data])
+        Some(PointerDataPacket::new(vec![data]))
     }
 }
 
@@ -231,11 +324,11 @@ fn pointer_change_for_buttons(previous: i64, next: i64) -> Option<PointerChange>
 }
 
 /// Line-based wheels are not pixels. 40 logical px/line is Chromium's
-/// convention (shaft-rs-next); convert to physical by the view scale so
+/// convention; convert to physical by the view scale so
 /// [`PointerData::scroll_delta_x`] / [`PointerData::scroll_delta_y`] stay
 /// physical, matching dart:ui. winit's up-positive deltas are sign-flipped
 /// to Flutter's content-forward sign.
-pub(crate) fn wheel_to_physical(delta: MouseScrollDelta, scale: f64) -> [f64; 2] {
+fn wheel_to_physical(delta: MouseScrollDelta, scale: f64) -> [f64; 2] {
     const LOGICAL_PIXELS_PER_LINE: f64 = 40.0;
     match delta {
         MouseScrollDelta::LineDelta(dx, dy) => [

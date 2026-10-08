@@ -11,8 +11,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use inset_cupertino::{CupertinoButton, CupertinoTheme, CupertinoThemeData};
-use inset_embedder::{Brightness, Color, TextDirection};
-use inset_embedder_winit::{ImplicitViewConfig, WinitEmbedder};
+use inset_embedder::{Brightness, Color, TextDirection, WindowConfig};
+use inset_embedder_winit::WinitEmbedder;
 use inset_foundation::Listener;
 use inset_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
 use inset_services::SystemMouseCursors;
@@ -28,9 +28,10 @@ const LABEL: Color = Color::from_argb(255, 245, 245, 240);
 
 fn main() {
     WinitEmbedder::default()
-        .implicit_view(Some(ImplicitViewConfig {
+        .implicit_view(Some(WindowConfig {
             title: "Inset — widgets".to_owned(),
-            logical_size: [600.0, 400.0],
+            size: [600.0, 400.0],
+            ..WindowConfig::default()
         }))
         .run(|platform| Shell::new(platform, |app| run_app(app, home())));
 }

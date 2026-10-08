@@ -1,6 +1,10 @@
 # inset-test/src
 No Flutter crate in this shape. Closest analogue: `flutter_test`'s `TestPlatformDispatcher` and `TestFlutterView`.
 
+## Identical
+
+- clipboard.rs → `MockClipboard` in Flutter's `test/widgets/clipboard_utils.dart`
+
 ## platform.rs → flutter_test `TestPlatformDispatcher`
 
 - Change: `TestPlatform` is built by a test — which host it claims to be, its views, and each capability as the test's own implementation or absent — and counts frame requests and wake deadlines; `TestPlatformDispatcher` wraps the real dispatcher and overrides fields one at a time.

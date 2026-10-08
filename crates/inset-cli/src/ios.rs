@@ -672,6 +672,7 @@ mod tests {
             identifier: "com.example.myapp".into(),
             icon: None,
             resources: Vec::new(),
+            file_associations: Vec::new(),
             macos: Default::default(),
             ios: Default::default(),
             android: Default::default(),

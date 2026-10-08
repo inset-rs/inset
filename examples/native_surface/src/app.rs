@@ -1,11 +1,14 @@
 //! The window: a surface in the middle, the framework's label above its bottom edge.
 
+use std::cell::Cell;
 use std::sync::Arc;
 use std::time::Duration;
 
-use inset_embedder::{Color, PlatformRef, Surface, TextDirection};
-use inset_embedder_winit::{ImplicitViewConfig, WinitEmbedder};
+use inset_embedder::{Color, PlatformRef, Surface, TextDirection, WindowConfig};
+use inset_embedder_winit::WinitEmbedder;
+use inset_foundation::App;
 use inset_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
+use inset_scheduler::{FrameCallback, SchedulerBinding};
 use inset_shell::Shell;
 use inset_widgets::{
     Center, DecoratedBox, Directionality, IntoWidget, Padding, Positioned, SizedBox, Stack,
@@ -23,15 +26,43 @@ const LABEL: Color = Color::from_argb(255, 255, 255, 255);
 /// Runs the window, the surface and its label scaled by `scale` about their middle.
 pub(crate) fn run(exit_after: Option<Duration>, scale: f64) {
     WinitEmbedder::default()
-        .implicit_view(Some(ImplicitViewConfig {
+        .implicit_view(Some(WindowConfig {
             title: "Inset — a native surface".to_owned(),
-            logical_size: [640.0, 480.0],
+            size: [640.0, 480.0],
+            ..WindowConfig::default()
         }))
         .run(move |platform| {
             let surface = open_surface(&platform);
-            producer::start(Arc::clone(&surface), pixel_size(&platform), exit_after);
-            Shell::new(platform, move |app| run_app(app, home(surface, scale)))
+            Shell::new(platform, move |app| {
+                start_producer_once_sized(app, Arc::clone(&surface), exit_after);
+                run_app(app, home(surface, scale))
+            })
         });
+}
+
+/// Starts the producer at the first frame in which the implicit view has a size: only then does
+/// the view have its window, and with it the display's pixel ratio the producer draws at.
+fn start_producer_once_sized(
+    app: &mut App,
+    surface: Arc<dyn Surface>,
+    exit_after: Option<Duration>,
+) {
+    let waiting = Cell::new(Some(surface));
+    SchedulerBinding::add_persistent_frame_callback(
+        app,
+        FrameCallback::new(move |app, _elapsed| {
+            let Some(view) = app.platform().implicit_view() else {
+                return;
+            };
+            let metrics = view.metrics();
+            if metrics.physical_size == [0.0, 0.0] {
+                return;
+            }
+            if let Some(surface) = waiting.take() {
+                producer::start(surface, pixel_size(metrics.device_pixel_ratio), exit_after);
+            }
+        }),
+    );
 }
 
 /// A surface of the implicit view's, from the host's compositor.
@@ -44,11 +75,8 @@ fn open_surface(platform: &PlatformRef) -> Arc<dyn Surface> {
 }
 
 /// The surface's size in the display's pixels, which is what the producer draws.
-fn pixel_size(platform: &PlatformRef) -> [usize; 2] {
-    let ratio = platform
-        .implicit_view()
-        .map_or(1.0, |view| view.metrics().device_pixel_ratio);
-    SURFACE_SIZE.map(|side| (side * ratio).round() as usize)
+fn pixel_size(device_pixel_ratio: f64) -> [usize; 2] {
+    SURFACE_SIZE.map(|side| (side * device_pixel_ratio).round() as usize)
 }
 
 fn home(surface: Arc<dyn Surface>, scale: f64) -> WidgetRef {

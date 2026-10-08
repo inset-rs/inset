@@ -4,8 +4,8 @@
 //! over the engine's views, and on macOS its `FlutterViewController` is a view the app places
 //! in a window it owns. Here a window is a view the host puts on screen: the configuration
 //! every window wants up front, the native handle for anything beyond it, and adoption for
-//! a window only the app could make. Mobile and web hosts have no owner; the implicit view
-//! is all there is.
+//! a window only the app could make. Where the app cannot ask for another view, on iPhone and
+//! when embedded, there is no owner, and the implicit view is all there is.
 
 use std::fmt;
 use std::future::Future;
@@ -147,8 +147,8 @@ pub trait HostWindow: 'static {
     fn set_close_requested(&self, handler: Option<Rc<dyn Fn()>>);
 }
 
-/// The host's window maker. [`crate::Platform::windowing_owner`] answers `None` where the
-/// implicit view is the only one there can be, so an owner that exists makes windows.
+/// The host's window maker. [`crate::Platform::windowing_owner`] answers `None` where the app
+/// cannot ask for another view, so an owner that exists makes windows.
 pub trait WindowingOwner: 'static {
     /// Makes a window. The host finishes it on its own loop, so the window arrives through
     /// the future.

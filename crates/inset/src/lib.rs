@@ -31,8 +31,6 @@ pub use inset_embedder::{
 pub use inset_embedder_default::AndroidApp;
 #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
 pub use inset_embedder_default::DefaultEmbedder;
-#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
-pub use inset_embedder_default::ImplicitViewConfig;
 /// Change-notifier callback used by buttons. The pointer widget is [`inset_widgets::Listener`].
 pub use inset_foundation::Listener;
 pub use inset_foundation::*;

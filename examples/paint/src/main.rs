@@ -7,17 +7,18 @@ use std::f32::consts::TAU;
 use std::time::Duration;
 
 use inset_embedder::ViewMetrics;
-use inset_embedder::{Color, ColorSpace, RRect, Radius, Rect};
-use inset_embedder_winit::{ImplicitViewConfig, WinitEmbedder};
+use inset_embedder::{Color, ColorSpace, RRect, Radius, Rect, WindowConfig};
+use inset_embedder_winit::WinitEmbedder;
 use inset_painting::{Canvas, Paint, Picture, draw_rrect};
 use inset_scheduler::{FrameCallback, SchedulerBinding};
 use inset_shell::Shell;
 
 fn main() {
     WinitEmbedder::default()
-        .implicit_view(Some(ImplicitViewConfig {
+        .implicit_view(Some(WindowConfig {
             title: "Inset — paint".to_owned(),
-            logical_size: [900.0, 600.0],
+            size: [900.0, 600.0],
+            ..WindowConfig::default()
         }))
         .run(|platform| {
             Shell::new(platform, |app| {

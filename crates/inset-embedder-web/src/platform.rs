@@ -6,10 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    Brightness, Clipboard, ClipboardHasStringsFuture, ClipboardTextFuture, Dispatcher,
-    ImageCodecFuture, Matrix4, MouseCursor, Picture, Platform, Rect, Size, SystemMouseCursorKind,
-    TargetPlatform, TextEditingValue, TextInputConfiguration, TextInputHost, View, ViewId,
-    ViewMetrics, ViewRef,
+    Brightness, Clipboard, ClipboardHasStringsFuture, ClipboardSetTextFuture, ClipboardTextFuture,
+    Dispatcher, ImageCodecFuture, Matrix4, MouseCursor, Picture, Platform, Rect, Size,
+    SystemMouseCursorKind, TargetPlatform, TextEditingValue, TextInputConfiguration, TextInputHost,
+    View, ViewId, ViewMetrics, ViewRef,
 };
 use wasm_bindgen_futures::JsFuture;
 use web_sys::HtmlCanvasElement;
@@ -194,12 +194,15 @@ impl Platform for WebPlatform {
 }
 
 impl Clipboard for WebPlatform {
-    fn set_text(&self, text: &str) {
+    /// The browser's `writeText`, started in the call; a write it refuses completes all the same.
+    fn set_text(&self, text: &str) -> ClipboardSetTextFuture {
         let Some(window) = web_sys::window() else {
-            return;
+            return Box::pin(std::future::ready(()));
         };
-        let clipboard = window.navigator().clipboard();
-        let _ = clipboard.write_text(text);
+        let written = window.navigator().clipboard().write_text(text);
+        Box::pin(async move {
+            let _refused = JsFuture::from(written).await;
+        })
     }
 
     /// The browser's `readText`, which may ask the user first; a read it refuses answers `None`.

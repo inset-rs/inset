@@ -8,7 +8,7 @@ use inset_embedder::{
     FontWeight, Matrix4, Offset, Rect, Size, TargetPlatform, TextAlign, TextDirection, ViewId,
     ViewRef,
 };
-use inset_foundation::{App, Handle, HandleId, Listener};
+use inset_foundation::{App, Handle, HandleId, Listener, Task};
 
 pub use inset_embedder::{
     AutofillConfiguration, FloatingCursorDragState, RawFloatingCursorPoint, SmartDashesType,
@@ -341,15 +341,11 @@ pub trait TextSelectionDelegate: Sized + 'static {
     /// By default, `hide_handles` is true, and the toolbar is hidden along with its
     /// handles. If `hide_handles` is set to false, then the toolbar will be hidden
     /// but the handles will remain.
-    fn hide_toolbar(self: Handle<Self>, app: &mut App, hide_handles: bool) {
-        let _ = (self, app, hide_handles);
-    }
+    fn hide_toolbar(self: Handle<Self>, app: &mut App, hide_handles: bool);
 
     /// Brings the provided [`TextPosition`] into the visible area of the text
     /// input.
-    fn bring_into_view(self: Handle<Self>, app: &mut App, position: inset_embedder::TextPosition) {
-        let _ = (self, app, position);
-    }
+    fn bring_into_view(self: Handle<Self>, app: &mut App, position: inset_embedder::TextPosition);
 
     /// Whether cut is enabled.
     fn cut_enabled(self: Handle<Self>, _app: &App) -> bool {
@@ -392,24 +388,16 @@ pub trait TextSelectionDelegate: Sized + 'static {
     }
 
     /// Cut current selection to [`crate::Clipboard`].
-    fn cut_selection(self: Handle<Self>, app: &mut App, cause: SelectionChangedCause) {
-        let _ = (self, app, cause);
-    }
+    fn cut_selection(self: Handle<Self>, app: &mut App, cause: SelectionChangedCause);
 
     /// Paste text from [`crate::Clipboard`].
-    fn paste_text(self: Handle<Self>, app: &mut App, cause: SelectionChangedCause) {
-        let _ = (self, app, cause);
-    }
+    fn paste_text(self: Handle<Self>, app: &mut App, cause: SelectionChangedCause) -> Task<()>;
 
     /// Set the current selection to contain the entire text value.
-    fn select_all(self: Handle<Self>, app: &mut App, cause: SelectionChangedCause) {
-        let _ = (self, app, cause);
-    }
+    fn select_all(self: Handle<Self>, app: &mut App, cause: SelectionChangedCause);
 
     /// Copy current selection to [`crate::Clipboard`].
-    fn copy_selection(self: Handle<Self>, app: &mut App, cause: SelectionChangedCause) {
-        let _ = (self, app, cause);
-    }
+    fn copy_selection(self: Handle<Self>, app: &mut App, cause: SelectionChangedCause);
 
     /// This delegate as the erased [`AnyTextSelectionDelegate`].
     fn as_text_selection_delegate(self: Handle<Self>) -> AnyTextSelectionDelegate {
@@ -434,7 +422,7 @@ struct TextSelectionDelegateVTable {
     share_enabled: fn(&App, HandleId) -> bool,
     live_text_input_enabled: fn(&App, HandleId) -> bool,
     cut_selection: fn(&mut App, HandleId, SelectionChangedCause),
-    paste_text: fn(&mut App, HandleId, SelectionChangedCause),
+    paste_text: fn(&mut App, HandleId, SelectionChangedCause) -> Task<()>,
     select_all: fn(&mut App, HandleId, SelectionChangedCause),
     copy_selection: fn(&mut App, HandleId, SelectionChangedCause),
 }
@@ -529,8 +517,8 @@ impl AnyTextSelectionDelegate {
         (self.vtable.cut_selection)(app, self.id, cause);
     }
 
-    pub fn paste_text(self, app: &mut App, cause: SelectionChangedCause) {
-        (self.vtable.paste_text)(app, self.id, cause);
+    pub fn paste_text(self, app: &mut App, cause: SelectionChangedCause) -> Task<()> {
+        (self.vtable.paste_text)(app, self.id, cause)
     }
 
     pub fn select_all(self, app: &mut App, cause: SelectionChangedCause) {

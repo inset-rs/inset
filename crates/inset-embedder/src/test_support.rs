@@ -1,8 +1,9 @@
-//! Images and surfaces for tests, without a host.
+//! Images, surfaces and drawn pixels for tests, without a host.
 //!
 //! An [`Image`](crate::Image) only exists once pixels have been uploaded to a GPU, so a test of
 //! anything above the host — a cache, a layout, a widget — would otherwise have no image to work
-//! with. This makes one directly, on a device of its own that no window is attached to. A
+//! with. This makes one directly, on a device of its own that no window is attached to, and
+//! draws a [`Picture`](crate::Picture) there to read back what it shows. A
 //! [`Surface`](crate::Surface) only exists where a host composites, so this makes one nobody
 //! feeds.
 //!
@@ -14,11 +15,11 @@
 //! inset-embedder = { workspace = true, features = ["test-support"] }
 //! ```
 
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 
 use valo::{Context, ImageDesc};
 
-use crate::{Buffer, Image, Surface, VsyncObserver};
+use crate::{Buffer, Image, Picture, Surface, VsyncObserver};
 
 /// One device for the whole test process, created on first use.
 ///
@@ -56,11 +57,7 @@ pub fn image_from_pixels(size: [u32; 2], pixels: &[u8]) -> Image {
         width as usize * height as usize * 4,
         "an image needs four bytes a pixel"
     );
-    let mut context = GPU
-        .get_or_init(|| Mutex::new(headless_context()))
-        .lock()
-        .expect("the test GPU device");
-    context.upload_image(
+    gpu().upload_image(
         ImageDesc {
             size,
             premultiplied: false,
@@ -70,6 +67,22 @@ pub fn image_from_pixels(size: [u32; 2], pixels: &[u8]) -> Image {
         },
         pixels,
     )
+}
+
+/// What `picture` shows drawn over a transparent area of `size`, as straight-alpha RGBA
+/// samples, four bytes a pixel and row after row.
+///
+/// # Panics
+///
+/// Panics if no GPU adapter is available.
+pub fn drawn_pixels(picture: &Picture, size: [u32; 2]) -> Vec<u8> {
+    gpu().render_to_rgba(picture, size, Some(valo::Color::TRANSPARENT))
+}
+
+fn gpu() -> MutexGuard<'static, Context> {
+    GPU.get_or_init(|| Mutex::new(headless_context()))
+        .lock()
+        .expect("the test GPU device")
 }
 
 fn headless_context() -> Context {

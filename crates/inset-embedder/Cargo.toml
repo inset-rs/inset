@@ -10,7 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
-# Images for tests above the host, which need a GPU device to exist at all.
+# Images and drawn pixels for tests, which need a GPU device to exist at all.
 test-support = ["dep:pollster", "dep:wgpu"]
 
 [dependencies]

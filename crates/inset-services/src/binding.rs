@@ -1,12 +1,11 @@
 //! Flutter counterpart: `services/binding.dart` (`ServicesBinding`).
 //!
 //! Only the app life cycle and the application exit are here: the lifecycle messages the host
-//! sends, which reach `SchedulerBinding::handle_app_lifecycle_state_changed` through the widgets
-//! binding's override, `handleRequestAppExit`, which the widgets binding overrides, and
-//! `exitApplication`. The keyboard and the restoration manager are singletons of their own
-//! (`KeyEventManager`, `RestorationManager`); the rest waits with platform channels.
+//! sends, which reach `SchedulerBinding::handle_app_lifecycle_state_changed`,
+//! `handleRequestAppExit`, which the widgets binding overrides, and `exitApplication`. The
+//! keyboard and the restoration manager are singletons of their own (`KeyEventManager`,
+//! `RestorationManager`); the rest waits with platform channels.
 
-use std::future::Future;
 use std::rc::Rc;
 
 use inset_embedder::{AppExitResponse, AppExitType, AppLifecycleState};
@@ -15,41 +14,22 @@ use inset_scheduler::SchedulerBinding;
 
 use crate::SystemChrome;
 
-/// The object side of Flutter's `WidgetsBinding` overrides of
-/// `SchedulerBinding.handleAppLifecycleStateChanged`, which tells the widget layer's observers,
-/// and of `ServicesBinding.handleRequestAppExit`, which asks them. Implement it on the binding
-/// above and register `Rc::new(handle)` with [`ServicesBinding::set_overrides`]; `Handle<T>` is
-/// then [`ServicesBindingOverrides`].
+/// The object side of Flutter's `WidgetsBinding` override of
+/// `ServicesBinding.handleRequestAppExit`, which asks the widget layer's observers. Implement it
+/// on the binding above and register `Rc::new(handle)` with [`ServicesBinding::set_overrides`];
+/// `Handle<T>` is then [`ServicesBindingOverrides`].
 pub trait ServicesBindingOverridesObject: Sized + 'static {
-    /// Handles each lifecycle state the services binding generates, in place of
-    /// [`SchedulerBinding::handle_app_lifecycle_state_changed`], which an override calls first,
-    /// as Dart's calls `super`. The default is the scheduler's alone.
-    fn handle_app_lifecycle_state_changed(
-        self: Handle<Self>,
-        app: &mut App,
-        state: AppLifecycleState,
-    ) {
-        SchedulerBinding::handle_app_lifecycle_state_changed(app, state);
-    }
-
     /// Answers in place of [`ServicesBinding::handle_request_app_exit`]'s own answer.
     fn handle_request_app_exit(self: Handle<Self>, app: &mut App) -> Task<AppExitResponse>;
 }
 
 /// What the binding above this one overrides; kept erased.
 pub trait ServicesBindingOverrides {
-    /// See [`ServicesBindingOverridesObject::handle_app_lifecycle_state_changed`].
-    fn handle_app_lifecycle_state_changed(&self, app: &mut App, state: AppLifecycleState);
-
     /// See [`ServicesBindingOverridesObject::handle_request_app_exit`].
     fn handle_request_app_exit(&self, app: &mut App) -> Task<AppExitResponse>;
 }
 
 impl<T: ServicesBindingOverridesObject> ServicesBindingOverrides for Handle<T> {
-    fn handle_app_lifecycle_state_changed(&self, app: &mut App, state: AppLifecycleState) {
-        T::handle_app_lifecycle_state_changed(*self, app, state);
-    }
-
     fn handle_request_app_exit(&self, app: &mut App) -> Task<AppExitResponse> {
         T::handle_request_app_exit(*self, app)
     }
@@ -118,22 +98,8 @@ impl ServicesBinding {
     pub fn handle_lifecycle_message(self: Handle<Self>, app: &mut App, state: AppLifecycleState) {
         let generated = generate_state_transitions(SchedulerBinding::lifecycle_state(app), state);
         for state_change in generated {
-            self.handle_app_lifecycle_state_changed(app, state_change);
+            SchedulerBinding::handle_app_lifecycle_state_changed(app, state_change);
             SystemChrome::handle_app_lifecycle_state_changed(app, state_change);
-        }
-    }
-
-    /// Dart's `handleAppLifecycleStateChanged` as the services binding calls it: the widgets
-    /// binding's override where there is one, the scheduler's otherwise.
-    fn handle_app_lifecycle_state_changed(
-        self: Handle<Self>,
-        app: &mut App,
-        state: AppLifecycleState,
-    ) {
-        let overrides = app.get(self).overrides.clone();
-        match overrides {
-            Some(overrides) => overrides.handle_app_lifecycle_state_changed(app, state),
-            None => SchedulerBinding::handle_app_lifecycle_state_changed(app, state),
         }
     }
 
@@ -197,16 +163,14 @@ impl ServicesBinding {
         app: &App,
         exit_type: AppExitType,
         exit_code: i32,
-    ) -> impl Future<Output = AppExitResponse> + use<> {
+    ) -> Task<AppExitResponse> {
         let result = app
             .platform()
             .app_exit()
             .map(|app_exit| app_exit.exit_application(exit_type, exit_code));
-        async move {
-            match result {
-                Some(result) => result.await,
-                None => AppExitResponse::Cancel,
-            }
+        match result {
+            Some(result) => app.spawn(async move |_cx| result.await),
+            None => Task::ready(AppExitResponse::Cancel),
         }
     }
 }
@@ -301,6 +265,8 @@ fn debug_verify_lifecycle_change(
 mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
+
+    use std::future::Future;
 
     use inset_embedder::{AppExit, AppExitFuture};
     use inset_foundation::{AppCell, Completer};

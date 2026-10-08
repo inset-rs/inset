@@ -185,6 +185,36 @@ impl std::fmt::Display for ColorFilter {
     }
 }
 
+impl ColorFilter {
+    /// The valo filter that replays this one.
+    pub fn to_valo(&self) -> valo::ColorFilter {
+        match *self {
+            ColorFilter::Mode { color, blend_mode } => {
+                valo::ColorFilter::Blend(color.into(), blend_mode)
+            }
+            ColorFilter::Matrix(matrix) => valo::ColorFilter::Matrix(valo_matrix(matrix)),
+            ColorFilter::LinearToSrgbGamma => valo::ColorFilter::LinearToSrgbGamma,
+            ColorFilter::SrgbToLinearGamma => valo::ColorFilter::SrgbToLinearGamma,
+        }
+    }
+}
+
+/// A colour matrix in valo's terms: the translation column, which Flutter gives in 0...255,
+/// in the 0...1 its colour channels are in.
+fn valo_matrix(matrix: [f64; 20]) -> [f32; 20] {
+    const ROW_LENGTH: usize = 5;
+    const TRANSLATION_COLUMN: usize = 4;
+    std::array::from_fn(|index| {
+        let entry = matrix[index];
+        let entry = if index % ROW_LENGTH == TRANSLATION_COLUMN {
+            entry / 255.0
+        } else {
+            entry
+        };
+        entry as f32
+    })
+}
+
 /// A filter operation to apply to a raster image.
 ///
 /// See also:
@@ -294,9 +324,34 @@ impl std::fmt::Display for ImageFilter {
     }
 }
 
+impl ImageFilter {
+    /// The valo filter that replays this one, step for step and in the same order.
+    pub fn to_valo(&self) -> valo::ImageFilter {
+        match self {
+            ImageFilter::Blur {
+                sigma_x,
+                sigma_y,
+                bounds,
+            } => {
+                let (sigma_x, sigma_y) = (*sigma_x as f32, *sigma_y as f32);
+                match bounds {
+                    Some(bounds) => {
+                        valo::ImageFilter::bounded_blur(sigma_x, sigma_y, (*bounds).into())
+                    }
+                    None => valo::ImageFilter::blur(sigma_x, sigma_y),
+                }
+            }
+            ImageFilter::Color(filter) => valo::ImageFilter::Color(filter.to_valo()),
+            ImageFilter::Compose { outer, inner } => {
+                valo::ImageFilter::compose(outer.to_valo(), inner.to_valo())
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ColorFilter, ImageFilter};
+    use super::{ColorFilter, ImageFilter, valo};
     use crate::{BlendMode, Color, Rect};
 
     #[test]
@@ -333,6 +388,74 @@ mod tests {
             "ImageFilter.compose(source -> blur(2, 3, unspecified) -> \
              ColorFilter.mode(Color(alpha: 1.0000, red: 0.0000, green: 0.0000, blue: 0.0000, \
              colorSpace: ColorSpace.sRGB), SrcOver) -> result)"
+        );
+    }
+
+    #[test]
+    fn a_colour_matrix_reaches_valo_with_its_translation_in_the_channels_range() {
+        let mut matrix = [0.0; 20];
+        matrix[0] = 2.0;
+        matrix[4] = 51.0;
+        matrix[18] = 1.0;
+        matrix[19] = 255.0;
+        let valo::ColorFilter::Matrix(replayed) = ColorFilter::matrix(matrix).to_valo() else {
+            panic!("a matrix reaches valo as a matrix");
+        };
+        assert_eq!(
+            [replayed[0], replayed[4], replayed[18], replayed[19]],
+            [2.0, 0.2, 1.0, 1.0]
+        );
+    }
+
+    #[test]
+    fn a_mode_filter_reaches_valo_as_a_blend_and_a_gamma_curve_as_the_same_curve() {
+        let green = Color::new(0x8C00FF00);
+        assert_eq!(
+            ColorFilter::mode(green, BlendMode::Darken).to_valo(),
+            valo::ColorFilter::Blend(green.into(), BlendMode::Darken)
+        );
+        assert_eq!(
+            ColorFilter::linear_to_srgb_gamma().to_valo(),
+            valo::ColorFilter::LinearToSrgbGamma
+        );
+        assert_eq!(
+            ColorFilter::srgb_to_linear_gamma().to_valo(),
+            valo::ColorFilter::SrgbToLinearGamma
+        );
+    }
+
+    #[test]
+    fn a_composition_reaches_valo_in_its_order_with_both_sigmas_and_the_bounds() {
+        let tint = ColorFilter::mode(Color::new(0xFF0000FF), BlendMode::Multiply);
+        let bounds = Rect::from_ltwh(0.0, 0.0, 4.0, 4.0);
+        let filter = ImageFilter::compose(
+            ImageFilter::Color(tint),
+            ImageFilter::blur(2.0, 5.0).bounds(bounds),
+        );
+        assert_eq!(
+            filter.to_valo(),
+            valo::ImageFilter::compose(
+                valo::ImageFilter::Color(valo::ColorFilter::Blend(
+                    Color::new(0xFF0000FF).into(),
+                    BlendMode::Multiply
+                )),
+                valo::ImageFilter::bounded_blur(2.0, 5.0, bounds.into()),
+            )
+        );
+    }
+
+    #[test]
+    fn a_gamma_curve_reaches_valo_in_its_place_in_a_composition() {
+        let filter = ImageFilter::compose(
+            ImageFilter::Color(ColorFilter::linear_to_srgb_gamma()),
+            ImageFilter::blur(3.0, 3.0),
+        );
+        assert_eq!(
+            filter.to_valo(),
+            valo::ImageFilter::compose(
+                valo::ImageFilter::Color(valo::ColorFilter::LinearToSrgbGamma),
+                valo::ImageFilter::blur(3.0, 3.0),
+            )
         );
     }
 }

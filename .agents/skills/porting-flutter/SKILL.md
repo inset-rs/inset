@@ -23,6 +23,7 @@ A pattern earns a file under `patterns/` on its second instance. Until then, the
 - Leaf inheritance: [patterns/leaf-inheritance.md](patterns/leaf-inheritance.md)
 - Many optional fields: [patterns/many-optional-fields.md](patterns/many-optional-fields.md)
 - Callback identity: [patterns/callback-identity.md](patterns/callback-identity.md)
+- Futures: [patterns/futures.md](patterns/futures.md)
 
 ## Rust traps
 

@@ -157,7 +157,8 @@ fn lock(ready: &ReadyQueue) -> MutexGuard<'_, VecDeque<Runnable>> {
         .expect("the ready queue is never poisoned: nothing runs under its lock")
 }
 
-/// A spawned continuation's result, a `Future` itself.
+/// A Dart `Future` as the framework ports it: a spawned task's result, or a value known now,
+/// and a `Future` itself.
 ///
 /// Dart's futures always run to completion; dropping this handle likewise lets the task
 /// finish unobserved, where gpui's `Task` would cancel it.

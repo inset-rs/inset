@@ -7,14 +7,16 @@
 use std::fmt;
 use std::rc::Rc;
 
-use inset_embedder::{Offset, PointerDeviceKind, Rect, Size, TargetPlatform};
-use inset_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, Listener};
+use inset_embedder::{AppLifecycleState, Offset, PointerDeviceKind, Rect, Size, TargetPlatform};
+use inset_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, K_IS_WEB, Listener, ValueChanged,
+};
 use inset_gestures::{GestureBinding, PointerEvent, PointerRoute};
 use inset_rendering::RendererBinding;
 use inset_scheduler::{SchedulerBinding, SchedulerPhase};
 use inset_services::{HardwareKeyboard, KeyEvent, KeyEventCallback};
 
-use crate::binding::WidgetsBinding;
+use crate::binding::{WidgetsBinding, WidgetsBindingObserver, WidgetsBindingObserverRef};
 use crate::framework::BuildContext;
 use crate::widgets::focus_traversal::{FocusTraversalGroup, TraversalDirection};
 
@@ -1846,6 +1848,18 @@ pub enum FocusHighlightStrategy {
 // ---------------------------------------------------------------------------------------------
 // FocusManager
 
+/// Dart's `_AppLifecycleListener`: the observer through which a [`FocusManager`] hears the
+/// app's lifecycle, so that the manager itself is no binding observer.
+struct AppLifecycleListener {
+    on_lifecycle_state_changed: ValueChanged<AppLifecycleState>,
+}
+
+impl WidgetsBindingObserver for AppLifecycleListener {
+    fn did_change_app_lifecycle_state(&self, app: &mut App, state: AppLifecycleState) {
+        (self.on_lifecycle_state_changed)(app, state);
+    }
+}
+
 /// Manages the focus tree.
 ///
 /// The focus tree is a separate, sparser, tree from the widget tree that maintains the
@@ -1885,6 +1899,12 @@ pub struct FocusManager {
     pending_autofocuses: Vec<Autofocus>,
     /// True indicates that there is an update pending.
     have_scheduled_update: bool,
+    /// Allows the manager to respond to app lifecycle state changes, temporarily suspending
+    /// the primary focus when the app is inactive.
+    app_lifecycle_listener: Option<WidgetsBindingObserverRef>,
+    /// The node that was focused before the app lifecycle changed. Will be restored as the
+    /// primary focus once the app is resumed.
+    suspended_node: Option<AnyFocusNode>,
 }
 
 impl FocusManager {
@@ -1901,8 +1921,6 @@ impl FocusManager {
         let root_scope = FocusScopeNode::new(app);
         root_scope.set_debug_label(app, Some("Root Focus Scope".to_string()));
         let highlight_manager = HighlightModeManager::new(app);
-        // Dart also subscribes to the application lifecycle here; that waits (see the crate's
-        // PORTING.md).
         let this = app.create(FocusManager {
             change_notifier: ChangeNotifierData::new(),
             highlight_manager,
@@ -1912,9 +1930,55 @@ impl FocusManager {
             marked_for_focus: None,
             pending_autofocuses: Vec::new(),
             have_scheduled_update: false,
+            app_lifecycle_listener: None,
+            suspended_node: None,
         });
+        this.listen_to_application_lifecycle_changes_if_supported(app);
         root_scope.focus_node_data_mut(app).manager = Some(this);
         this
+    }
+
+    /// It appears that some Android keyboard implementations can cause app lifecycle state
+    /// changes: adding the app lifecycle listener would cause the text field to unfocus as the
+    /// user is trying to type.
+    ///
+    /// Additionally, on iOS, input fields aren't automatically populated with relevant data
+    /// when using autofill.
+    ///
+    /// Until these are resolved, we won't be adding the listener to mobile platforms.
+    /// <https://github.com/flutter/flutter/issues/148475#issuecomment-2118407411>
+    /// <https://github.com/flutter/flutter/pull/142930#issuecomment-1981750069>
+    fn respond_to_lifecycle_change(app: &App) -> bool {
+        K_IS_WEB
+            || match app.platform().target_platform() {
+                TargetPlatform::Android | TargetPlatform::IOS => false,
+                TargetPlatform::Fuchsia | TargetPlatform::Linux => true,
+                TargetPlatform::Windows | TargetPlatform::MacOS => true,
+            }
+    }
+
+    /// Enables this [`FocusManager`] to listen to changes of the application lifecycle if it
+    /// does not already have an application lifecycle listener active, and the app isn't
+    /// running on a native mobile platform.
+    ///
+    /// Typically, the application lifecycle listener for this [`FocusManager`] is set up at
+    /// construction, but sometimes it is necessary to manually initialize it when the platform
+    /// did not name the relevant target at the time of construction. This can happen in a test
+    /// that changes the platform's target after the binding has built its [`FocusManager`]; the
+    /// test then calls this method, so the [`FocusManager`] can accurately listen to
+    /// application lifecycle changes, if supported.
+    pub fn listen_to_application_lifecycle_changes_if_supported(self: Handle<Self>, app: &mut App) {
+        if app.get(self).app_lifecycle_listener.is_none()
+            && FocusManager::respond_to_lifecycle_change(app)
+        {
+            let listener: WidgetsBindingObserverRef = Rc::new(AppLifecycleListener {
+                on_lifecycle_state_changed: Rc::new(move |app, state| {
+                    self.app_lifecycle_change(app, state)
+                }),
+            });
+            app.get_mut(self).app_lifecycle_listener = Some(Rc::clone(&listener));
+            WidgetsBinding::instance(app).add_observer(app, listener);
+        }
     }
 
     /// Registers global input event handlers that are needed to manage focus.
@@ -1933,6 +1997,9 @@ impl FocusManager {
 
     /// Discards any resources used by this object.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
+        if let Some(listener) = app.get(self).app_lifecycle_listener.clone() {
+            WidgetsBinding::instance(app).remove_observer(app, &listener);
+        }
         app.get(self).highlight_manager.dispose(app);
         app.get(self).root_scope.dispose(app);
         app.get_mut(self).change_notifier.dispose();
@@ -2075,12 +2142,41 @@ impl FocusManager {
         app.get(self).primary_focus
     }
 
+    fn app_lifecycle_change(self: Handle<Self>, app: &mut App, state: AppLifecycleState) {
+        let root_scope = Some(app.get(self).root_scope.as_node());
+        if state == AppLifecycleState::Resumed {
+            if app.get(self).primary_focus != root_scope {
+                // The focus changed while the app was paused: the suspended node is ignored.
+                app.get_mut(self).suspended_node = None;
+            } else if let Some(suspended_node) = app.get(self).suspended_node {
+                // Only restore the focus that was suspended when the app went inactive if
+                // nothing else has requested focus in the meantime. For example, activating a
+                // different window will cause its view to request focus.
+                if app.get(self).marked_for_focus.is_none() {
+                    suspended_node.request_focus(app, None);
+                    app.get_mut(self).suspended_node = None;
+                } else {
+                    debug_assert!(app.get(self).have_scheduled_update);
+                    app.get_mut(self).suspended_node = None;
+                }
+            }
+        } else if app.get(self).primary_focus != root_scope {
+            let manager = app.get_mut(self);
+            manager.marked_for_focus = root_scope;
+            manager.suspended_node = manager.primary_focus;
+            self.apply_focus_changes_if_needed(app);
+        }
+    }
+
     fn mark_detached(self: Handle<Self>, app: &mut App, node: AnyFocusNode) {
         // The node has been removed from the tree, so it no longer needs to be notified of
         // changes.
         let manager = app.get_mut(self);
         if manager.primary_focus == Some(node) {
             manager.primary_focus = None;
+        }
+        if manager.suspended_node == Some(node) {
+            manager.suspended_node = None;
         }
         manager.dirty_nodes.retain(|dirty| *dirty != node);
     }
@@ -2566,7 +2662,7 @@ pub(crate) mod tests {
     };
     use inset_gestures::{PointerDownEvent, PointerEvent};
     use inset_scheduler::SchedulerBinding;
-    use inset_services::{KeyDownEvent, LogicalKeyboardKey, PhysicalKeyboardKey};
+    use inset_services::{KeyDownEvent, LogicalKeyboardKey, PhysicalKeyboardKey, ServicesBinding};
     use inset_test::TestPlatform;
 
     use super::*;
@@ -2660,7 +2756,12 @@ pub(crate) mod tests {
 
     /// A mounted app whose tree is one `Builder`, plus that builder's context.
     fn mounted_context() -> (Rc<AppCell>, BuildContext) {
-        let cell = app_with_view();
+        mounted_context_on(TargetPlatform::MacOS)
+    }
+
+    /// The same, over a host of `target`.
+    fn mounted_context_on(target: TargetPlatform) -> (Rc<AppCell>, BuildContext) {
+        let cell = app_with_view_of_host(target, false);
         let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
         let sink = Rc::clone(&captured);
         mount(
@@ -2872,6 +2973,121 @@ pub(crate) mod tests {
         result.set(KeyEventResult::Handled);
         assert!(keyboard.handle_key_event(&mut app, &key_a_down()));
         assert_eq!(*log.borrow(), vec!["node"]);
+    }
+
+    /// The host reports `state`, as Dart's test sends it on `flutter/lifecycle`.
+    fn set_app_lifecycle_state(app: &mut App, state: AppLifecycleState) {
+        ServicesBinding::instance(app).handle_lifecycle_message(app, state);
+    }
+
+    /// The set-up the lifecycle tests share: a node in a scope under the root scope, on a host
+    /// of `target`, with the primary focus.
+    fn focused_node_on(
+        target: TargetPlatform,
+    ) -> (Rc<AppCell>, Handle<FocusNode>, Handle<FocusAttachment>) {
+        let (cell, context) = mounted_context_on(target);
+        let (node, attachment) = {
+            let mut app = cell.borrow_mut();
+            let root = FocusManager::instance(&mut app).root_scope(&app);
+            let scope = FocusScopeNode::new(&mut app);
+            attach_under(&mut app, scope.as_node(), context, root.as_node());
+            let node = FocusNode::new(&mut app);
+            let attachment = attach_under(&mut app, node.as_node(), context, scope.as_node());
+            node.request_focus(&mut app, None);
+            app.drain_microtasks();
+            assert!(node.has_primary_focus(&app));
+            (node, attachment)
+        };
+        (cell, node, attachment)
+    }
+
+    #[test]
+    fn focus_manager_ignores_app_lifecycle_changes_on_android_and_ios() {
+        for target in [TargetPlatform::Android, TargetPlatform::IOS] {
+            let (cell, node, _attachment) = focused_node_on(target);
+            let mut app = cell.borrow_mut();
+
+            set_app_lifecycle_state(&mut app, AppLifecycleState::Paused);
+            app.drain_microtasks();
+            assert!(node.has_primary_focus(&app));
+
+            set_app_lifecycle_state(&mut app, AppLifecycleState::Resumed);
+            app.drain_microtasks();
+            assert!(node.has_primary_focus(&app));
+        }
+    }
+
+    #[test]
+    fn focus_manager_responds_to_app_lifecycle_changes() {
+        for target in [
+            TargetPlatform::Linux,
+            TargetPlatform::MacOS,
+            TargetPlatform::Windows,
+        ] {
+            let (cell, node, _attachment) = focused_node_on(target);
+            let mut app = cell.borrow_mut();
+
+            set_app_lifecycle_state(&mut app, AppLifecycleState::Paused);
+            app.drain_microtasks();
+            assert!(!node.has_primary_focus(&app));
+
+            set_app_lifecycle_state(&mut app, AppLifecycleState::Resumed);
+            app.drain_microtasks();
+            assert!(node.has_primary_focus(&app));
+        }
+    }
+
+    #[test]
+    fn node_is_removed_completely_even_if_app_is_paused() {
+        let (cell, node, attachment) = focused_node_on(TargetPlatform::MacOS);
+        let mut app = cell.borrow_mut();
+
+        set_app_lifecycle_state(&mut app, AppLifecycleState::Paused);
+        app.drain_microtasks();
+        attachment.detach(&mut app);
+        assert!(!node.has_primary_focus(&app));
+
+        set_app_lifecycle_state(&mut app, AppLifecycleState::Resumed);
+        app.drain_microtasks();
+        assert!(!node.has_primary_focus(&app));
+    }
+
+    #[test]
+    fn suspended_focus_is_not_restored_on_resume_when_another_node_claimed_focus() {
+        for target in [
+            TargetPlatform::Linux,
+            TargetPlatform::MacOS,
+            TargetPlatform::Windows,
+        ] {
+            let (cell, context) = mounted_context_on(target);
+            let mut app = cell.borrow_mut();
+            let root = FocusManager::instance(&mut app).root_scope(&app);
+            let scope = FocusScopeNode::new(&mut app);
+            attach_under(&mut app, scope.as_node(), context, root.as_node());
+            let node_a = FocusNode::new(&mut app);
+            attach_under(&mut app, node_a.as_node(), context, scope.as_node());
+            let node_b = FocusNode::new(&mut app);
+            attach_under(&mut app, node_b.as_node(), context, scope.as_node());
+
+            node_a.request_focus(&mut app, None);
+            app.drain_microtasks();
+            assert!(node_a.has_primary_focus(&app));
+
+            // App goes inactive: node A's focus is suspended and parked.
+            set_app_lifecycle_state(&mut app, AppLifecycleState::Inactive);
+            app.drain_microtasks();
+            assert!(!node_a.has_primary_focus(&app));
+
+            // Another node requests focus before the app resumes (e.g. a different
+            // window/view was activated).
+            node_b.request_focus(&mut app, None);
+
+            // On resume, the suspended node A must not steal focus back from node B.
+            set_app_lifecycle_state(&mut app, AppLifecycleState::Resumed);
+            app.drain_microtasks();
+            assert!(node_b.has_primary_focus(&app));
+            assert!(!node_a.has_primary_focus(&app));
+        }
     }
 
     #[test]

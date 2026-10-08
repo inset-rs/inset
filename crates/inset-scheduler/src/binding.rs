@@ -52,6 +52,32 @@ impl Debug for FrameCallback {
     }
 }
 
+/// The object side of Flutter's `WidgetsBinding` override of
+/// `SchedulerBinding.handleAppLifecycleStateChanged`, which tells the widget layer's observers.
+/// Implement it on the binding above and register `Rc::new(handle)` with
+/// [`SchedulerBinding::set_overrides`]; `Handle<T>` is then [`SchedulerBindingOverrides`].
+pub trait SchedulerBindingOverridesObject: Sized + 'static {
+    /// The override's part of [`SchedulerBinding::handle_app_lifecycle_state_changed`], which
+    /// runs after the scheduler's own, as Dart's calls `super` first.
+    fn handle_app_lifecycle_state_changed(
+        self: Handle<Self>,
+        app: &mut App,
+        state: AppLifecycleState,
+    );
+}
+
+/// What the binding above this one overrides; kept erased.
+pub trait SchedulerBindingOverrides {
+    /// See [`SchedulerBindingOverridesObject::handle_app_lifecycle_state_changed`].
+    fn handle_app_lifecycle_state_changed(&self, app: &mut App, state: AppLifecycleState);
+}
+
+impl<T: SchedulerBindingOverridesObject> SchedulerBindingOverrides for Handle<T> {
+    fn handle_app_lifecycle_state_changed(&self, app: &mut App, state: AppLifecycleState) {
+        T::handle_app_lifecycle_state_changed(*self, app, state);
+    }
+}
+
 /// The various phases that a [`SchedulerBinding`] goes through during
 /// [`SchedulerBinding::handle_begin_frame`].
 ///
@@ -130,6 +156,7 @@ pub struct SchedulerBinding {
     epoch_start: Duration,
     last_raw_time_stamp: Duration,
     current_frame_time_stamp: Rc<Cell<Option<Duration>>>,
+    overrides: Option<Rc<dyn SchedulerBindingOverrides>>,
 }
 
 /// Dart's `finally` blocks in `handleBeginFrame` and `handleDrawFrame`: the
@@ -169,6 +196,7 @@ impl Default for SchedulerBinding {
             epoch_start: Duration::ZERO,
             last_raw_time_stamp: Duration::ZERO,
             current_frame_time_stamp: Rc::new(Cell::new(None)),
+            overrides: None,
         }
     }
 }
@@ -179,6 +207,13 @@ impl SchedulerBinding {
     /// Dart's `SchedulerBinding.instance`.
     pub fn instance(app: &mut App) -> Handle<SchedulerBinding> {
         app.singleton::<SchedulerBinding>()
+    }
+
+    /// Registers the binding layered above this one, as Flutter's `WidgetsBinding` does by
+    /// overriding [`handle_app_lifecycle_state_changed`](Self::handle_app_lifecycle_state_changed).
+    pub fn set_overrides(app: &mut App, overrides: Rc<dyn SchedulerBindingOverrides>) {
+        let this = SchedulerBinding::instance(app);
+        app.get_mut(this).overrides = Some(overrides);
     }
 
     /// Whether the application is visible, and if so, whether it is currently
@@ -202,7 +237,21 @@ impl SchedulerBinding {
     ///
     /// This method exposes notifications from `SystemChannels.lifecycle`, which the host
     /// sends through `EmbedderClient::app_lifecycle_state_changed`.
+    ///
+    /// It records the state and turns frames on or off, then runs the override the widgets
+    /// binding registered, which tells the observers, as Dart's does after its `super` call.
     pub fn handle_app_lifecycle_state_changed(app: &mut App, state: AppLifecycleState) {
+        let this = SchedulerBinding::instance(app);
+        SchedulerBinding::record_app_lifecycle_state(app, state);
+        let overrides = app.get(this).overrides.clone();
+        if let Some(overrides) = overrides {
+            overrides.handle_app_lifecycle_state_changed(app, state);
+        }
+    }
+
+    /// The scheduler's own body of `handleAppLifecycleStateChanged`, which the override's
+    /// `super` call reaches.
+    fn record_app_lifecycle_state(app: &mut App, state: AppLifecycleState) {
         let this = SchedulerBinding::instance(app);
         if app.get(this).lifecycle_state == Some(state) {
             return;

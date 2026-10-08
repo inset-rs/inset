@@ -1,22 +1,23 @@
-//! What a system without a display link or a compositor answers: nothing ticks, and no
-//! surface is ever placed.
+//! What a system without a display link or a compositor answers: no display link is made, and
+//! no surface is ever placed.
 
 use std::sync::Arc;
 
 use inset_embedder::{SurfacePlacement, ViewId};
+use winit::monitor::MonitorHandle;
 use winit::window::Window;
 
 use super::{DisplayLink, WindowSurfaces};
 
-/// No refresh signal: the host paces frames by a timer at the display's rate. Never made.
+/// No display link: the embedder takes its vsyncs from a timer at the display's rate. Never made.
 pub(crate) enum NoDisplayLink {}
 
 impl DisplayLink for NoDisplayLink {
-    fn start(_window: &Window, _on_tick: Box<dyn Fn()>) -> Option<NoDisplayLink> {
+    fn start(_display: &MonitorHandle, _on_vsync: Box<dyn Fn()>) -> Option<NoDisplayLink> {
         None
     }
 
-    fn set_paused(&self, _paused: bool) {
+    fn set_wanted(&self, _wanted: bool) {
         match *self {}
     }
 }

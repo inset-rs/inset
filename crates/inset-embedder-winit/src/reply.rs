@@ -1,4 +1,4 @@
-//! The host's answer to a framework request that the event loop serves on a later turn: a
+//! The embedder's answer to a framework request that the event loop serves on a later turn: a
 //! window, an exit. The framework awaits the future; the loop completes the reply.
 
 use std::cell::RefCell;
@@ -8,12 +8,12 @@ use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
 /// One answer, delivered once, to a future polled at the app's checkpoints.
-struct Shared<T> {
+struct ReplySlot<T> {
     value: Option<T>,
     waker: Option<Waker>,
 }
 
-pub(crate) struct Reply<T>(Rc<RefCell<Shared<T>>>);
+pub(crate) struct Reply<T>(Rc<RefCell<ReplySlot<T>>>);
 
 impl<T> Reply<T> {
     pub(crate) fn complete(self, value: T) {
@@ -28,7 +28,7 @@ impl<T> Reply<T> {
     }
 }
 
-pub(crate) struct ReplyFuture<T>(Rc<RefCell<Shared<T>>>);
+pub(crate) struct ReplyFuture<T>(Rc<RefCell<ReplySlot<T>>>);
 
 impl<T> Future for ReplyFuture<T> {
     type Output = T;
@@ -46,7 +46,7 @@ impl<T> Future for ReplyFuture<T> {
 }
 
 pub(crate) fn reply<T>() -> (Reply<T>, ReplyFuture<T>) {
-    let shared = Rc::new(RefCell::new(Shared {
+    let shared = Rc::new(RefCell::new(ReplySlot {
         value: None,
         waker: None,
     }));

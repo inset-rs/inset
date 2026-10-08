@@ -6,7 +6,7 @@
 use inset_embedder::{TextAffinity, TextEditingValue, TextRange, TextSelection};
 use winit::event::Ime;
 
-/// What the host should do with one winit IME event.
+/// What the embedder should do with one winit IME event.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ImeOutcome {
     None,
@@ -51,7 +51,7 @@ fn apply_preedit(
 
 /// Inserts `text` in place of the composing region (or the selection) and
 /// clears composing. The caret sits after the inserted text.
-fn apply_commit(value: &TextEditingValue, text: &str) -> TextEditingValue {
+pub(crate) fn apply_commit(value: &TextEditingValue, text: &str) -> TextEditingValue {
     let range = insertion_range(value);
     let start = range.start;
     value

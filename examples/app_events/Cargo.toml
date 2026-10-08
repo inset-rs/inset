@@ -12,14 +12,14 @@ identifier = "rs.inset.app-events"
 name = "App events"
 
 # A type of this app's own, which the bundle declares and ranks it the owner of.
-[[package.metadata.inset.file_types]]
+[[package.metadata.inset.file_associations]]
 extensions = ["insetnote"]
 name = "Inset note"
 owner = true
 role = "editor"
 
 # Another app's type, which the bundle only imports and opens.
-[[package.metadata.inset.file_types]]
+[[package.metadata.inset.file_associations]]
 extensions = ["insetpeer"]
 name = "Peer document"
 identifier = "org.example.peer-document"

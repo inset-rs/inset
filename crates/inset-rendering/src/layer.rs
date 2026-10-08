@@ -4041,11 +4041,22 @@ mod tests {
 
     /// An opacity layer over one leaf under a root, with a frame's scene built: the shape
     /// retained rendering acts on.
+    /// A picture layer that draws a square: content a scene keeps, where it
+    /// drops a subtree that draws nothing.
+    fn drawn_layer(app: &mut App) -> AnyLayer {
+        let square = Rect::from_ltwh(0.0, 0.0, 10.0, 10.0);
+        let mut canvas = inset_embedder::Canvas::new();
+        canvas.draw_rect(square, &inset_embedder::Paint::default());
+        let layer = PictureLayer::new(app, square);
+        layer.set_picture(app, Some(Arc::new(canvas.build())));
+        layer.as_layer()
+    }
+
     fn retained_tree(app: &mut App) -> (Handle<OffsetLayer>, Handle<OpacityLayer>) {
         let root = OffsetLayer::new(app, Offset::ZERO);
         let opacity = OpacityLayer::new(app);
         opacity.set_alpha(app, 128);
-        let leaf = offset_layer(app);
+        let leaf = drawn_layer(app);
         opacity.as_container_layer().append(app, leaf);
         root.as_container_layer().append(app, opacity.as_layer());
         let _scene = root

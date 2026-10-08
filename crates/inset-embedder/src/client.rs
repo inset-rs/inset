@@ -16,8 +16,15 @@ use crate::{
 /// so the client can immediately query the affected view.
 pub trait EmbedderClient {
     fn frame(&mut self, frame: Frame);
+
+    /// A view arrived after launch: opened by the app, or given by the system. The views that
+    /// exist at launch are in `Platform::views` when the app starts, and none of them is
+    /// reported here.
     fn view_added(&mut self, id: ViewId);
+
     fn view_metrics_changed(&mut self, id: ViewId);
+
+    /// A view is gone; the app keeps running.
     fn view_removed(&mut self, id: ViewId);
 
     /// Flutter `PlatformDispatcher.onViewFocusChange`.

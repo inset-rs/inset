@@ -1,158 +1,120 @@
-//! The host capability the framework holds: [`Platform`] and the capabilities it hands
-//! out — the clipboard, native popup menus, the mouse cursor — with the image codec
-//! behind `open_image_codec`.
+//! The embedder capability the framework holds: [`Platform`], whose answers are each handed to
+//! the module that owns them — the clipboard (`clipboard.rs`), native popup menus
+//! (`popup_menus.rs`), the mouse cursor (`mouse_cursor.rs`), quitting (`app_exit.rs`), images
+//! (`images.rs`), files the system asks the app to open (`system_requests.rs`), the screens
+//! (the system's own, `os/`) — and what only macOS offers beyond `Platform` (`macos.rs`).
 //!
-//! A request from the framework only writes state here and wakes the event loop, which
-//! serves it on its next turn: winit hands out windows, cursors and its `ActiveEventLoop`
-//! only inside its own callbacks, and the framework's callbacks are not one of them.
+//! No call here calls the client. What needs the event loop is sent to it as a request, and the
+//! rest acts at once: `main_loop/` says which is which.
 
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use inset_embedder::{
-    Brightness, Clipboard, Compositor, Dispatcher, FontSource, ImageCodec, ImageCodecFuture,
-    ImageDecodeError, ImageFrame, ImageFrameFuture, ImageRepetition, MouseCursor, Platform,
-    PopupMenuEntry, PopupMenus, SystemFontSource, SystemMouseCursorKind, TargetPlatform,
+    AppExit, Brightness, Clipboard, Compositor, Dispatcher, FileOpening, FontSource,
+    ImageCodecFuture, MouseCursor, Platform, PopupMenus, Screens, SystemFontSource, TargetPlatform,
     ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId, ViewRef, WindowingOwner,
 };
 use winit::event_loop::EventLoopProxy;
 
-use crate::os::{NativeComposition, NativeMenus, ThisOs, WorkQueue};
-use crate::window::HostEvent;
+use crate::app_requests::AppRequest;
+use crate::clipboard::Pasteboard;
+use crate::dispatcher::WinitDispatcher;
+use crate::macos::MacOs;
+use crate::main_loop::MainLoopEvent;
+use crate::os::{NativeComposition, OperatingSystem, Screens as _, SystemRequests, ThisOs};
+use crate::popup_menus::NativePopupMenus;
+use crate::state::EmbedderState;
 use crate::windows::WinitWindowing;
 
-/// The long-lived host capability held by `App`.
+/// The long-lived embedder capability held by `App`.
 ///
-/// Requests only write state and wake the event loop; they never re-enter the
-/// client synchronously.
+/// No call on it calls the client: it answers from what the embedder knows (`state.rs`), and
+/// what needs the main loop is sent to it as a request (`main_loop/` says which calls those
+/// are).
 ///
-/// Beyond [`Platform`], the host hands out its renderer's [`image_context`], for an image
-/// from a texture the app makes itself; an app reaches that with
-/// `platform.downcast_ref::<WinitPlatform>()`.
+/// Beyond [`Platform`], the embedder hands out its renderer's [`image_context`], for an image
+/// from a texture the app makes itself, and what only macOS offers, through [`macos`]. An app
+/// reaches these with `platform.downcast_ref::<WinitPlatform>()`.
 ///
 /// [`image_context`]: WinitPlatform::image_context
+/// [`macos`]: WinitPlatform::macos
 pub struct WinitPlatform {
-    /// When to wake the framework for its earliest waiting timer, as it last set it;
-    /// `None` when no timer is waiting, or once that wake has been given.
-    pub(crate) timer_wakeup: Cell<Option<Instant>>,
-    /// A ready task asking for the framework to be woken, cleared by the next wake.
-    pub(crate) wake_now_requested: Cell<bool>,
-    pub(crate) frame_requested: Cell<bool>,
-    views: RefCell<HashMap<ViewId, ViewRef>>,
-    implicit_view: Option<ViewId>,
-    pub(crate) proxy: EventLoopProxy<HostEvent>,
-    /// The window maker handed to the app; its requests are served by the event loop.
-    pub(crate) windowing: Rc<WinitWindowing>,
+    /// What the embedder knows, shared with the main loop, which changes it.
+    state: Rc<EmbedderState>,
+    /// Where the dispatcher's wakes and a closed menu's word go, from any thread.
+    proxy: EventLoopProxy<MainLoopEvent>,
+    /// The window maker handed to the app; its requests are served by the main loop.
+    windowing: Rc<WinitWindowing>,
     /// The system's compositor for native surfaces, where it has one.
     compositor: Option<Arc<dyn Compositor>>,
     origin: Instant,
-    pub(crate) brightness: Cell<Brightness>,
-    /// The latest system cursor request, applied by the event loop.
-    pub(crate) cursor_request: Cell<Option<SystemMouseCursorKind>>,
-    /// Requests from the framework, drained by the native event loop.
-    pub(crate) focus_requests: RefCell<Vec<ViewFocusEvent>>,
-    /// The OS pasteboard; created on first use so a missing clipboard host is not fatal.
-    clipboard: RefCell<Option<arboard::Clipboard>>,
-    /// Decoded images belong to the device and do not retain a window surface.
-    pub(crate) image_loader: RefCell<Option<valo_codec::ImageLoader>>,
-    /// The renderer's image store, for images the app brings its own pixels or textures
-    /// for; set with the loader, once the first window has a device.
-    pub(crate) images: RefCell<Option<valo::ImageContext>>,
+    pasteboard: Pasteboard,
+    popup_menus: NativePopupMenus,
+    /// What only macOS offers; `None` elsewhere.
+    macos: Option<MacOs>,
 }
 
 impl WinitPlatform {
     pub(crate) fn new(
-        proxy: EventLoopProxy<HostEvent>,
-        implicit_view: Option<ViewId>,
+        state: Rc<EmbedderState>,
+        proxy: EventLoopProxy<MainLoopEvent>,
     ) -> WinitPlatform {
         WinitPlatform {
-            timer_wakeup: Cell::new(None),
-            wake_now_requested: Cell::new(false),
-            frame_requested: Cell::new(false),
-            views: RefCell::new(HashMap::new()),
-            implicit_view,
-            windowing: Rc::new(WinitWindowing::new(proxy.clone())),
+            windowing: Rc::new(WinitWindowing::new(Rc::clone(state.requests()))),
+            macos: cfg!(target_os = "macos").then(|| MacOs::new(Rc::clone(&state))),
+            state,
             compositor: ThisOs::compositor(),
-            proxy,
             origin: Instant::now(),
-            brightness: Cell::new(Brightness::Light),
-            cursor_request: Cell::new(None),
-            focus_requests: RefCell::new(Vec::new()),
-            image_loader: RefCell::new(None),
-            images: RefCell::new(None),
-            clipboard: RefCell::new(None),
+            pasteboard: Pasteboard::default(),
+            popup_menus: NativePopupMenus::new(proxy.clone()),
+            proxy,
         }
     }
 
     /// The renderer's image context, on the device every window draws with: an image made
     /// through it, from pixels or from a texture imported from a buffer only this system
-    /// has, is one `RawImage` shows. `None` until the first window has given the host a
+    /// has, is one `RawImage` shows. `None` until the first view has given the embedder a
     /// device.
     pub fn image_context(&self) -> Option<valo::ImageContext> {
-        self.images.borrow().clone()
+        self.state.images().store()
     }
 
-    fn with_clipboard<T>(&self, f: impl FnOnce(&mut arboard::Clipboard) -> T) -> Option<T> {
-        let mut slot = self.clipboard.borrow_mut();
-        if slot.is_none() {
-            *slot = arboard::Clipboard::new().ok();
-        }
-        slot.as_mut().map(f)
+    /// What only macOS offers an app: hearing a reopen, a window that slides in, and hiding the
+    /// app. `None` on every other system.
+    pub fn macos(&self) -> Option<&MacOs> {
+        self.macos.as_ref()
     }
 
-    fn wake_event_loop(&self) {
-        let _ = self.proxy.send_event(HostEvent::Request);
+    /// Sends the main loop a request, which it serves after those sent before.
+    pub(crate) fn send(&self, request: AppRequest) {
+        self.state.requests().send(request);
     }
 
     pub(crate) fn elapsed(&self) -> Duration {
         self.now().saturating_duration_since(self.origin)
     }
 
-    pub(crate) fn add_view(&self, view: ViewRef) {
-        let id = view.id();
-        assert!(
-            self.views.borrow_mut().insert(id, view).is_none(),
-            "duplicate view id {id:?}"
-        );
-    }
-
-    pub(crate) fn remove_view(&self, id: ViewId) {
-        assert!(
-            self.views.borrow_mut().remove(&id).is_some(),
-            "unknown view id {id:?}"
-        );
+    /// What the embedder knows, for the parts of the platform in other files.
+    pub(crate) fn state(&self) -> &EmbedderState {
+        &self.state
     }
 }
 
 impl Platform for WinitPlatform {
-    /// The host this binary was built for — the platform adapter is where
-    /// host detection belongs, exactly as Flutter's `defaultTargetPlatform`
-    /// bottoms out in `dart:io`'s `Platform.isAndroid` chain.
+    /// The embedder this binary was built for — the platform adapter is where embedder detection
+    /// belongs, as Flutter's `defaultTargetPlatform` bottoms out in `dart:io`.
     fn target_platform(&self) -> TargetPlatform {
-        if cfg!(target_os = "ios") {
-            TargetPlatform::IOS
-        } else if cfg!(target_os = "macos") {
-            TargetPlatform::MacOS
-        } else if cfg!(target_os = "windows") {
-            TargetPlatform::Windows
-        } else if cfg!(target_os = "fuchsia") {
-            TargetPlatform::Fuchsia
-        } else {
-            TargetPlatform::Linux
-        }
+        ThisOs::TARGET_PLATFORM
     }
 
     fn platform_brightness(&self) -> Brightness {
-        self.brightness.get()
+        self.state.appearance().brightness()
     }
 
     fn request_frame(&self) {
-        if !self.frame_requested.replace(true) {
-            self.wake_event_loop();
-        }
+        self.send(AppRequest::RequestFrame);
     }
 
     fn now(&self) -> Instant {
@@ -163,36 +125,22 @@ impl Platform for WinitPlatform {
         Arc::new(WinitDispatcher(self.proxy.clone()))
     }
 
+    /// Every view, with a window or not, in the order they came: the implicit view first.
     fn views(&self) -> Vec<ViewRef> {
-        self.views.borrow().values().cloned().collect()
+        self.state
+            .views()
+            .views()
+            .into_iter()
+            .map(|view| view as ViewRef)
+            .collect()
     }
 
     fn view(&self, id: ViewId) -> Option<ViewRef> {
-        self.views.borrow().get(&id).cloned()
+        self.state.views().get(id).map(|view| view as ViewRef)
     }
 
     fn open_image_codec(&self, bytes: Arc<[u8]>) -> ImageCodecFuture {
-        let loader = self.image_loader.borrow().clone();
-        Box::pin(async move {
-            if bytes.is_empty() {
-                return Err(ImageDecodeError::Empty);
-            }
-            let loader = loader.ok_or(ImageDecodeError::NoDecoder)?;
-            let codec = loader
-                .open(
-                    bytes,
-                    valo_codec::DecodeOptions {
-                        // Pictures are routinely drawn smaller than they decode, and mip
-                        // levels are the difference between a smooth downscale and a
-                        // shimmering one.
-                        mipmaps: true,
-                        ..Default::default()
-                    },
-                )
-                .await
-                .map_err(as_decode_error)?;
-            Ok(Box::new(WinitImageCodec { codec }) as Box<dyn ImageCodec>)
-        })
+        self.state.images().open_codec(bytes)
     }
 
     fn request_view_focus_change(
@@ -201,16 +149,17 @@ impl Platform for WinitPlatform {
         state: ViewFocusState,
         direction: ViewFocusDirection,
     ) {
-        self.focus_requests.borrow_mut().push(ViewFocusEvent {
+        self.send(AppRequest::ChangeViewFocus(ViewFocusEvent {
             view_id,
             state,
             direction,
-        });
-        self.wake_event_loop();
+        }));
     }
 
+    /// The same view for the app's whole life: there before its window opens, and still there,
+    /// drawing nowhere, once its window closes.
     fn implicit_view(&self) -> Option<ViewRef> {
-        self.implicit_view.and_then(|id| self.view(id))
+        self.state.views().implicit().map(|view| view as ViewRef)
     }
 
     /// The OS font database, scanned on request; the shell asks once at start-up.
@@ -222,126 +171,38 @@ impl Platform for WinitPlatform {
         self.compositor.clone()
     }
 
+    /// The embedder's window maker where the app may open windows: none on iOS.
     fn windowing_owner(&self) -> Option<Rc<dyn WindowingOwner>> {
-        Some(Rc::clone(&self.windowing) as Rc<dyn WindowingOwner>)
+        ThisOs::APP_MAY_OPEN_WINDOWS.then(|| Rc::clone(&self.windowing) as Rc<dyn WindowingOwner>)
+    }
+
+    /// The system's own answers, where it is asked outside winit's callbacks: on macOS.
+    fn screens(&self) -> Option<&dyn Screens> {
+        ThisOs::screens()
     }
 
     fn import_pixels(&self, pixels: valo::PixelBuffer) -> Option<valo::Image> {
         self.image_context()?.upload_pixels(pixels, false).ok()
     }
 
-    /// The system pasteboard, where the host can reach one.
+    /// The system pasteboard, where the embedder can reach one.
     fn clipboard(&self) -> Option<&dyn Clipboard> {
-        Some(self)
+        Some(&self.pasteboard)
     }
 
     fn popup_menus(&self) -> Option<&dyn PopupMenus> {
-        Some(self)
+        Some(&self.popup_menus)
     }
 
     fn mouse_cursor(&self) -> Option<&dyn MouseCursor> {
         Some(self)
     }
-}
 
-impl Clipboard for WinitPlatform {
-    fn set_text(&self, text: &str) {
-        self.with_clipboard(|clipboard| {
-            let _ = clipboard.set_text(text);
-        });
+    fn app_exit(&self) -> Option<&dyn AppExit> {
+        ThisOs::APP_MAY_QUIT.then_some(self)
     }
 
-    fn text(&self) -> Option<String> {
-        self.with_clipboard(|clipboard| clipboard.get_text().ok())
-            .flatten()
-    }
-
-    fn has_strings(&self) -> bool {
-        self.text().is_some()
-    }
-}
-
-impl PopupMenus for WinitPlatform {
-    fn show(&self, entries: &[PopupMenuEntry]) -> Option<usize> {
-        let chosen = ThisOs::popup_menu(entries);
-        // The menu ran its own event loop and kept the release of the button that opened
-        // it; the next pass reconciles the buttons.
-        let _ = self.proxy.send_event(HostEvent::MenuClosed);
-        chosen
-    }
-}
-
-impl MouseCursor for WinitPlatform {
-    /// One mouse: the window the pointer was last seen in shows the cursor, and the loop
-    /// already knows that window, so neither the view nor the device is needed to pick it.
-    fn activate_system_cursor(&self, _view: ViewId, _device: i64, kind: SystemMouseCursorKind) {
-        self.cursor_request.set(Some(kind));
-        self.wake_event_loop();
-    }
-}
-
-/// The host's threads as any thread reaches them: a wake is an event through winit's
-/// proxy, which the loop keeps as its earliest due wake and serves when the time comes; work
-/// goes to the system's queue, or a thread where the system has none.
-struct WinitDispatcher(EventLoopProxy<HostEvent>);
-
-impl Dispatcher for WinitDispatcher {
-    fn wake_at(&self, timer_wakeup: Option<Instant>) {
-        let _ = self.0.send_event(HostEvent::TimerWakeup(timer_wakeup));
-    }
-
-    fn wake_now(&self) {
-        let _ = self.0.send_event(HostEvent::WakeNow);
-    }
-
-    fn dispatch(&self, work: Box<dyn FnOnce() + Send>) {
-        ThisOs::run_off_main(work);
-    }
-}
-
-/// Adapts Valo's drawable frames to the framework's codec contract.
-struct WinitImageCodec {
-    codec: valo_codec::Codec,
-}
-
-impl ImageCodec for WinitImageCodec {
-    fn frame_count(&self) -> u32 {
-        self.codec.info().frame_count
-    }
-
-    fn repetition(&self) -> ImageRepetition {
-        match self.codec.info().repetition {
-            valo_codec::Repetition::Once => ImageRepetition::Once,
-            valo_codec::Repetition::Times(times) => ImageRepetition::Times(times),
-            valo_codec::Repetition::Forever => ImageRepetition::Forever,
-        }
-    }
-
-    fn next_frame(&mut self) -> ImageFrameFuture<'_> {
-        let frame = self.codec.next_frame();
-        Box::pin(async move {
-            let frame = frame.await.map_err(as_decode_error)?;
-            Ok(ImageFrame {
-                image: frame.image,
-                duration: frame.duration,
-            })
-        })
-    }
-}
-
-/// Preserves decoder diagnostics at the framework's existing error boundary.
-fn as_decode_error(error: valo_codec::DecodeError) -> ImageDecodeError {
-    match error {
-        valo_codec::DecodeError::NoDecoder => ImageDecodeError::NoDecoder,
-        valo_codec::DecodeError::Unsupported(_) => ImageDecodeError::UnknownFormat,
-        valo_codec::DecodeError::InvalidData(reason) => ImageDecodeError::Damaged(reason),
-        other => ImageDecodeError::Failed(other.to_string()),
-    }
-}
-
-pub(crate) fn brightness_of(theme: winit::window::Theme) -> Brightness {
-    match theme {
-        winit::window::Theme::Light => Brightness::Light,
-        winit::window::Theme::Dark => Brightness::Dark,
+    fn file_opening(&self) -> Option<&dyn FileOpening> {
+        ThisOs::ASKS_TO_OPEN_FILES.then_some(self)
     }
 }

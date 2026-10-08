@@ -6,6 +6,7 @@
 
 use std::any::Any;
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use std::time::Duration;
 use web_time::Instant;
 
 use crate::fonts::FontSource;
-use crate::geometry::{Color, Rect};
+use crate::geometry::{Color, Offset, Rect};
 use crate::mouse_cursor::SystemMouseCursorKind;
 use crate::restoration::{RestorationMap, RestorationUpdate};
 use crate::system_context_menu::SystemContextMenuItem;
@@ -505,13 +506,16 @@ pub trait Platform: Any {
     /// [`Dispatcher`].
     fn dispatcher(&self) -> Arc<dyn Dispatcher>;
 
-    /// Current host-provided views.
+    /// Every view the app has now. An app may run with none.
     fn views(&self) -> Vec<ViewRef>;
 
     /// Looks up a current host-provided view.
     fn view(&self, id: ViewId) -> Option<ViewRef>;
 
-    /// The stable implicit view, when this embedding provides one.
+    /// The view the platform gave the app at launch, if any. It stays the same view for the
+    /// app's whole life, while its window and its surface may come and go: it may be there,
+    /// with no size, before its window, and on a desktop it stays, drawing nowhere, once its
+    /// window closes. `None` on a desktop configured without one, and when embedded.
     fn implicit_view(&self) -> Option<ViewRef>;
 
     /// Flutter `PlatformDispatcher.requestViewFocusChange`: asks the host to move view focus.
@@ -601,12 +605,19 @@ pub trait Platform: Any {
         None
     }
 
-    /// The host's window maker, for an app that opens windows of its own. `None`, the
-    /// default, where the implicit view is the only one there can be: mobile and the web.
-    /// The answer is the host's at the time of asking, so a host that learns only at run
-    /// time whether its platform has windows answers `None` there, and an app asks before
-    /// it offers a window.
+    /// Asking for another view, where the platform allows it: at once on a desktop, through
+    /// the system on iPad and Android. `None`, the default, on iPhone and when embedded. The
+    /// answer is the host's at the time of asking, so a host that learns only at run time
+    /// whether its platform has windows answers `None` there, and an app asks before it offers
+    /// a window.
     fn windowing_owner(&self) -> Option<Rc<dyn crate::WindowingOwner>> {
+        None
+    }
+
+    /// The screens a window is placed on, and where the pointer is on them, or `None` where the
+    /// host has no screens to place a window against: a phone, a browser tab, and a desktop
+    /// whose system will not say.
+    fn screens(&self) -> Option<&dyn Screens> {
         None
     }
 
@@ -655,6 +666,12 @@ pub trait Platform: Any {
     fn app_exit(&self) -> Option<&dyn AppExit> {
         None
     }
+
+    /// The files the system asks the app to open, or `None` where the system never asks: it
+    /// starts the app with them on its command line instead, or has no files to open.
+    fn file_opening(&self) -> Option<&dyn FileOpening> {
+        None
+    }
 }
 
 impl dyn Platform {
@@ -664,12 +681,12 @@ impl dyn Platform {
     }
 }
 
-/// The system clipboard: Flutter's `Clipboard` over the platform channel. A read answers later,
-/// as Flutter's does: a host may have to ask its user, or another process, first.
+/// The system clipboard: Flutter's `Clipboard` over the platform channel. Every call answers
+/// later, as Flutter's does: a host may have to ask its user, or another process, first.
 pub trait Clipboard {
-    /// Stores plain text on the system clipboard (Flutter's `Clipboard.setData`), which the
-    /// framework does not wait for.
-    fn set_text(&self, text: &str);
+    /// Stores plain text on the system clipboard (Flutter's `Clipboard.setData`), and completes
+    /// once it is stored.
+    fn set_text(&self, text: &str) -> ClipboardSetTextFuture;
 
     /// Retrieves plain text from the system clipboard (Flutter's `Clipboard.getData`); `None`
     /// when it holds none, or the host could not read it.
@@ -678,6 +695,9 @@ pub trait Clipboard {
     /// Whether the clipboard contains string data (Flutter's `Clipboard.hasStrings`).
     fn has_strings(&self) -> ClipboardHasStringsFuture;
 }
+
+/// The clipboard's text being stored. Flutter's `Future<void>` from `Clipboard.setData`.
+pub type ClipboardSetTextFuture = Pin<Box<dyn Future<Output = ()>>>;
 
 /// The clipboard's text on its way. Flutter's `Future<ClipboardData?>`.
 pub type ClipboardTextFuture = Pin<Box<dyn Future<Output = Option<String>>>>;
@@ -726,6 +746,28 @@ pub trait PopupMenus {
     /// The host runs the menu's event loop inside this call, so nothing else of the app runs
     /// meanwhile and a native callback that arrives then must post, not borrow.
     fn show(&self, entries: &[PopupMenuEntry]) -> Option<usize>;
+}
+
+/// The screens a window is placed on, for an app that places a window against something on them,
+/// such as an edge or its own icon. Positions are in the coordinates of
+/// [`HostWindow::frame`](crate::HostWindow::frame): logical points from the top-left corner of the
+/// main screen, y growing down. Not a Flutter API: Flutter's `Display` has a size, not a place.
+pub trait Screens {
+    /// The screens, the main one first: the one positions start from.
+    fn screens(&self) -> Vec<Screen>;
+
+    /// Where the pointer is now, over a window of the app or not. `None` when the host cannot
+    /// say.
+    fn pointer_location(&self) -> Option<Offset>;
+}
+
+/// A screen, in the coordinates of a window's frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Screen {
+    /// All of the screen.
+    pub frame: Rect,
+    /// What the system's own bars leave free: the menu bar and the Dock, or the taskbar.
+    pub visible_frame: Rect,
 }
 
 /// The text services a selection toolbar offers: Flutter's LookUp, SearchWeb and Share
@@ -784,6 +826,20 @@ pub trait AppExit {
 /// [`EmbedderClient::request_app_exit`](crate::EmbedderClient::request_app_exit). Flutter's
 /// `Future<AppExitResponse>`.
 pub type AppExitFuture = Pin<Box<dyn Future<Output = AppExitResponse>>>;
+
+/// The files the system asks the app to open: documents opened from the system's file browser, or
+/// dropped on the app's icon, at launch or while it runs. Flutter's macOS embedder hands them to
+/// its plugins (`FlutterAppLifecycleDelegate.handleOpenURLs:`), outside the framework.
+pub trait FileOpening {
+    /// What happens with the files the system asks the app to open. The host calls `handler`
+    /// with each request's files on the main thread, outside every framework call, so it may
+    /// post to the app. Files asked for before a handler is set wait for one: a launch asks for
+    /// its files before the app has started.
+    fn set_open_files_handler(&self, handler: Option<OpenFilesHandler>);
+}
+
+/// A handler for the files the system asks the app to open.
+pub type OpenFilesHandler = Rc<dyn Fn(Vec<PathBuf>)>;
 
 /// Platform for hand-pumped tests.
 pub struct InertPlatform;
