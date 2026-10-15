@@ -1,44 +1,76 @@
-//! Records a display list each frame and presents it on the implicit view.
+//! Records a display list each frame and presents it on its window's view. Below the widgets,
+//! it asks the host for its window, draws once the view has arrived, and quits when the
+//! window's close button is pressed.
 // Proving a shared display list `Send` walks its nesting past the default limit.
 #![recursion_limit = "256"]
 #![feature(arbitrary_self_types)]
 
 use std::f32::consts::TAU;
+use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
-use inset_embedder::ViewMetrics;
-use inset_embedder::{Color, ColorSpace, RRect, Radius, Rect, WindowConfig};
+use inset_embedder::{
+    Color, ColorSpace, RRect, Radius, Rect, RequestId, Scene, ViewMetrics, ViewRef, ViewRequest,
+    WindowConfig,
+};
 use inset_embedder_winit::WinitEmbedder;
+use inset_foundation::App;
 use inset_painting::{Canvas, Paint, Picture, draw_rrect};
 use inset_scheduler::{FrameCallback, SchedulerBinding};
 use inset_shell::Shell;
 
 fn main() {
-    WinitEmbedder::default()
-        .implicit_view(Some(WindowConfig {
-            title: "Inset — paint".to_owned(),
-            size: [900.0, 600.0],
-            ..WindowConfig::default()
-        }))
-        .run(|platform| {
-            Shell::new(platform, |app| {
-                SchedulerBinding::add_persistent_frame_callback(
-                    app,
-                    FrameCallback::new(|app, elapsed| {
-                        let Some(view) = app.platform().implicit_view() else {
-                            return;
-                        };
-                        let picture = record(view.metrics(), elapsed);
-                        view.present(std::sync::Arc::new(inset_embedder::Scene {
-                            picture: std::sync::Arc::new(picture),
-                            surfaces: Vec::new(),
-                        }));
-                        SchedulerBinding::schedule_frame(app);
-                    }),
-                );
-                SchedulerBinding::schedule_frame(app);
-            })
-        });
+    WinitEmbedder.run(|platform| Shell::new(platform, open_window));
+}
+
+/// Asks the host for the window, and draws into its view at every frame once it has arrived.
+fn open_window(app: &mut App) {
+    let request_id = app
+        .platform()
+        .request_view(ViewRequest {
+            config: WindowConfig {
+                title: "Inset — paint".to_owned(),
+                size: [900.0, 600.0],
+                ..WindowConfig::default()
+            },
+            initial_data: None,
+        })
+        .expect("a desktop host makes windows");
+    app.platform_callbacks_mut().on_view_close_requested = Some(Rc::new(|app, _view| quit(app)));
+    SchedulerBinding::add_persistent_frame_callback(
+        app,
+        FrameCallback::new(move |app, elapsed| {
+            if let Some(view) = view_for(app, request_id) {
+                present(&view, elapsed);
+            }
+            SchedulerBinding::schedule_frame(app);
+        }),
+    );
+    SchedulerBinding::schedule_frame(app);
+}
+
+/// The view that arrived for `request_id`, once it has.
+fn view_for(app: &App, request_id: RequestId) -> Option<ViewRef> {
+    app.platform()
+        .views()
+        .into_iter()
+        .find(|view| view.request_id() == Some(request_id))
+}
+
+fn present(view: &ViewRef, elapsed: Duration) {
+    let picture = record(view.metrics(), elapsed);
+    view.present(Arc::new(Scene {
+        picture: Arc::new(picture),
+        surfaces: Vec::new(),
+    }));
+}
+
+/// The only window's close button quits.
+fn quit(app: &mut App) {
+    if let Some(app_exit) = app.platform().app_exit() {
+        app_exit.quit(0);
+    }
 }
 
 fn record(metrics: ViewMetrics, elapsed: Duration) -> Picture {

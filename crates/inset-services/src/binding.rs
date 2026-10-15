@@ -154,6 +154,11 @@ impl ServicesBinding {
     /// an exit code is supported. On other platforms it may be ignored. Dart's default is
     /// zero.
     ///
+    /// Flutter's engine asks the framework back for a cancelable exit. Here the framework asks
+    /// itself, on a later turn as the engine's request would come, and only a decided exit
+    /// reaches the host, as [`AppExit::quit`](inset_embedder::AppExit::quit); a host that cannot
+    /// quit cancels every exit.
+    ///
     /// See also:
     ///
     /// * `WidgetsBindingObserver::did_request_app_exit` for a handler you can override on a
@@ -164,14 +169,30 @@ impl ServicesBinding {
         exit_type: AppExitType,
         exit_code: i32,
     ) -> Task<AppExitResponse> {
-        let result = app
-            .platform()
-            .app_exit()
-            .map(|app_exit| app_exit.exit_application(exit_type, exit_code));
-        match result {
-            Some(result) => app.spawn(async move |_cx| result.await),
-            None => Task::ready(AppExitResponse::Cancel),
+        let platform = app.platform();
+        let Some(app_exit) = platform.app_exit() else {
+            return Task::ready(AppExitResponse::Cancel);
+        };
+        match exit_type {
+            AppExitType::Required => {
+                app_exit.quit(exit_code);
+                Task::ready(AppExitResponse::Exit)
+            }
+            AppExitType::Cancelable => app.spawn(async move |cx| {
+                let response = cx.update(|app| self.handle_request_app_exit(app)).await;
+                if response == AppExitResponse::Exit {
+                    cx.update(|app| quit(app, exit_code));
+                }
+                response
+            }),
         }
+    }
+}
+
+/// Quits through the host, where it can quit.
+fn quit(app: &App, exit_code: i32) {
+    if let Some(app_exit) = app.platform().app_exit() {
+        app_exit.quit(exit_code);
     }
 }
 
@@ -268,23 +289,36 @@ mod tests {
 
     use std::future::Future;
 
-    use inset_embedder::{AppExit, AppExitFuture};
+    use inset_embedder::AppExit;
     use inset_foundation::{AppCell, Completer};
     use inset_test::TestPlatform;
 
     use super::*;
 
-    /// A host that records the exit it was asked for and answers `response`.
+    /// A host that records the exit code it was told to quit with.
+    #[derive(Default)]
     struct RecordingAppExit {
-        asked: Cell<Option<(AppExitType, i32)>>,
-        response: AppExitResponse,
+        quit_with: Cell<Option<i32>>,
     }
 
     impl AppExit for RecordingAppExit {
-        fn exit_application(&self, exit_type: AppExitType, exit_code: i32) -> AppExitFuture {
-            self.asked.set(Some((exit_type, exit_code)));
-            Box::pin(std::future::ready(self.response))
+        fn quit(&self, exit_code: i32) {
+            self.quit_with.set(Some(exit_code));
         }
+    }
+
+    /// An app whose host quits through `host`.
+    fn quitting_through(host: &Rc<RecordingAppExit>) -> Rc<AppCell> {
+        AppCell::with_platform(Rc::new(
+            TestPlatform::new().with_app_exit(Rc::clone(host) as Rc<dyn AppExit>),
+        ))
+    }
+
+    /// Makes `binding` the one above the services binding's own answer.
+    fn answer_with<T: ServicesBindingOverridesObject + 'static>(cell: &Rc<AppCell>, binding: T) {
+        let mut app = cell.borrow_mut();
+        let binding = app.create(binding);
+        ServicesBinding::instance(&mut app).set_overrides(&mut app, Rc::new(binding));
     }
 
     /// Awaits `answer` in a task, and runs the checkpoint that task needs; `None` while the
@@ -370,16 +404,31 @@ mod tests {
     }
 
     #[test]
-    fn calling_exit_application_asks_the_host() {
-        let host = Rc::new(RecordingAppExit {
-            asked: Cell::new(None),
-            response: AppExitResponse::Cancel,
-        });
-        let cell = AppCell::with_platform(Rc::new(
-            TestPlatform::new().with_app_exit(Rc::clone(&host) as Rc<dyn AppExit>),
-        ));
+    fn a_required_exit_quits_without_asking() {
+        let host = Rc::default();
+        let cell = quitting_through(&host);
+        answer_with(&cell, Refusing);
         let response = exit_application(&cell, AppExitType::Required);
-        assert_eq!(host.asked.get(), Some((AppExitType::Required, 0)));
+        assert_eq!(host.quit_with.get(), Some(0));
+        assert_eq!(response, AppExitResponse::Exit);
+    }
+
+    #[test]
+    fn a_cancelable_exit_quits_once_the_app_agrees() {
+        let host = Rc::default();
+        let cell = quitting_through(&host);
+        let response = exit_application(&cell, AppExitType::Cancelable);
+        assert_eq!(host.quit_with.get(), Some(0));
+        assert_eq!(response, AppExitResponse::Exit);
+    }
+
+    #[test]
+    fn a_cancelable_exit_the_app_refuses_does_not_quit() {
+        let host = Rc::default();
+        let cell = quitting_through(&host);
+        answer_with(&cell, Refusing);
+        let response = exit_application(&cell, AppExitType::Cancelable);
+        assert_eq!(host.quit_with.get(), None);
         assert_eq!(response, AppExitResponse::Cancel);
     }
 
@@ -395,6 +444,15 @@ mod tests {
         let cell = AppCell::new();
         let response = handle_request_app_exit(&cell);
         assert_eq!(response.get(), Some(AppExitResponse::Exit));
+    }
+
+    /// Refuses every exit, as a binding whose observer cancels.
+    struct Refusing;
+
+    impl ServicesBindingOverridesObject for Refusing {
+        fn handle_request_app_exit(self: Handle<Self>, _app: &mut App) -> Task<AppExitResponse> {
+            Task::ready(AppExitResponse::Cancel)
+        }
     }
 
     /// Answers once `decision` completes, as a binding whose observers ask the user.
@@ -413,13 +471,12 @@ mod tests {
     fn the_binding_above_answers_in_place_of_the_default_once_it_has_decided() {
         let cell = AppCell::new();
         let decision = Completer::new();
-        {
-            let mut app = cell.borrow_mut();
-            let deciding = app.create(Deciding {
+        answer_with(
+            &cell,
+            Deciding {
                 decision: decision.clone(),
-            });
-            ServicesBinding::instance(&mut app).set_overrides(&mut app, Rc::new(deciding));
-        }
+            },
+        );
         let response = handle_request_app_exit(&cell);
         assert_eq!(response.get(), None, "still deciding");
 

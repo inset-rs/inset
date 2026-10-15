@@ -1,4 +1,4 @@
-//! Opens the implicit window and runs a small widget tree in it through `run_app`: a padded,
+//! Runs a small widget tree through `run_app`, in the window it asks for: a padded,
 //! centered, decorated card holding a `CupertinoButton` that fades while pressed and counts
 //! its presses on stdout. The card is a mouse region that shows the pointing-hand cursor
 //! while hovered.
@@ -19,7 +19,7 @@ use inset_services::SystemMouseCursors;
 use inset_shell::Shell;
 use inset_widgets::{
     Center, DecoratedBox, Directionality, IntoWidget, MouseRegion, Padding, SizedBox, Text,
-    WidgetRef, run_app,
+    WidgetRef, run_app_with,
 };
 
 const BACKGROUND: Color = Color::from_argb(255, 245, 245, 240);
@@ -27,13 +27,16 @@ const CARD: Color = Color::from_argb(255, 51, 51, 64);
 const LABEL: Color = Color::from_argb(255, 245, 245, 240);
 
 fn main() {
-    WinitEmbedder::default()
-        .implicit_view(Some(WindowConfig {
-            title: "Inset — widgets".to_owned(),
-            size: [600.0, 400.0],
-            ..WindowConfig::default()
-        }))
-        .run(|platform| Shell::new(platform, |app| run_app(app, home())));
+    WinitEmbedder.run(|platform| {
+        Shell::new(platform, |app| {
+            let window = WindowConfig {
+                title: "Inset — widgets".to_owned(),
+                size: [600.0, 400.0],
+                ..WindowConfig::default()
+            };
+            run_app_with(app, home(), window)
+        })
+    });
 }
 
 /// What `WidgetsApp` would supply: the ambient reading direction the text needs.

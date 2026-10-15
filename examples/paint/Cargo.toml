@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 inset-embedder-winit.workspace = true
 inset-embedder.workspace = true
+inset-foundation.workspace = true
 inset-painting.workspace = true
 inset-scheduler.workspace = true
 inset-shell.workspace = true

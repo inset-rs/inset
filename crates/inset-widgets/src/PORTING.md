@@ -64,6 +64,30 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the host reports the drag at the window, and the binding's observers are where window-level events reach the tree.
   Affect: any observer hears every drag over any view; with a host that reports no position, the whole view is the target.
 
+- Change: `run_app` builds its content in every view the platform gives the app, and where it gives none at start, as on a desktop, asks for a window through a `WindowController` configured as `run_app_with` says and panics if the platform refuses, where Flutter's `runApp` draws into the implicit view.
+  Reason: platform — there is no implicit view: the platform gives the app its views or makes them on request.
+  Affect: an app given several views shows its content in each, with its own state; a request to close the app's last view asks to quit, as Cmd-Q does; an app embedded where views come later starts with `run_widget` over a `MultiViewApp`, as Flutter's web multi-view apps start with `runWidget`.
+
+- Change: `WidgetsBindingObserver` hears a view added or removed by its id (`did_add_view`, `did_remove_view`) and a request to close one (`did_request_view_close`), where Flutter tells only `didChangeMetrics` and a listener compares `platformDispatcher.views` with what it had.
+  Reason: platform — the host reports each view's arrival, departure and close request by view, and every view the app has arrives this way.
+  Affect: the observers hear only the views no `WindowController` asked for, and a close request stops at the first observer that answers `true`.
+
+## multi_view_app.rs → `MultiViewApp` of Flutter web's embedding guide
+
+- Change: `MultiViewApp` is a framework widget, where Flutter shows it as a sample in its web embedding guide, and it answers close requests on its views.
+  Reason: platform — there is no implicit view, so every app that is given views builds them this way.
+  Affect: it builds only the views the platform gave, never one a `WindowController` asked for; an app's root is a `MultiViewApp`, its own `Window`s, or both in a `ViewCollection`.
+
+## windowing.rs → _window.dart (`WindowController`, `WindowControllerDelegate`)
+
+- Change: `WindowController::new` asks the platform for a window and gets its view when the view arrives, where Flutter's controller makes the window within its constructor; a close request goes to its handler, or closes it, as Flutter's delegate does by default.
+  Reason: platform — the host makes a window on its own loop, and the view arrives later, carrying the request's id.
+  Affect: a controller has no view at first, and its listeners hear the view arrive and go; one closed before its view arrives closes the window as it arrives, unseen.
+
+- Change: `WidgetsBinding::windowing_owner` is one `WindowingOwner` that keeps the controllers by their requests and hears every view event first, claiming the views they asked for, where Flutter's is an abstract factory with an implementation per platform, which `createWindowingOwner` and a setter replace.
+  Reason: platform — the host makes the windows behind `Platform::request_view`, so what differs between platforms is the host's, and the owner only matches arriving views to requests.
+  Affect: no app or test installs a windowing owner of its own; a test stands in for windows through its platform's `request_view`.
+
 ## widgets/surface_view.rs → platform views (`AndroidView`, `UiKitView`, `Texture`)
 
 - Change: one `SurfaceView` widget shows a host surface on every platform, where Flutter has a widget per platform and `Texture`.
@@ -217,9 +241,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## widgets/scroll_physics.rs → scroll_physics.dart
 
-- Change: the deprecated `tolerance` getter reads the implicit view's device pixel ratio from `App::platform`, not an isolate-global window.
-  Reason: platform — the host owns the views.
-  Affect: `physics.tolerance(app)` panics without an implicit view; call `tolerance_for(metrics)`.
+- Change: the deprecated `tolerance` getter is not ported.
+  Reason: platform — it reads the implicit view's device pixel ratio, and there is no implicit view.
+  Affect: call `tolerance_for(metrics)`, as Flutter asks.
 
 ## widgets/scroll_notification.rs → scroll_notification.dart
 
@@ -454,9 +478,9 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 
 ## window.rs → _window.dart
 
-- Change: `Window` and `WindowScope` carry the host's `HostWindow`, a view with a frame, visibility and a native handle, where Flutter's `Window` carries a `WindowController` and its siblings each carry one archetype's controller; there is no `WindowManager` or registry, and a `Window` does not rebuild on its own when the window's size changes.
-  Reason: platform — the host makes windows from one configuration and hands back a view, and a size change reaches the tree through the view's metrics, as it does for the implicit view.
-  Affect: an app lists its `Window`s in a `ViewCollection` itself and reads the window from `WindowScope::of`; size and position come from `HostWindow::frame`, not a listenable.
+- Change: `Window` and `WindowScope` carry a `WindowController` of one kind, a regular window made from a configuration, where Flutter has a controller for each archetype; there is no `WindowManager` or registry, and a `Window` does not rebuild on its own when the window's size changes.
+  Reason: platform — the host makes windows from one configuration, and a size change reaches the tree through the view's metrics.
+  Affect: an app lists its `Window`s in a `ViewCollection` itself and reads the controller from `WindowScope::of`; size and position come from the controller's window's frame, not a listenable.
 
 ## Deferred
 
@@ -474,7 +498,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - framework/: `ErrorWidget` with its exception reporting, and the build-time diagnostics and duplicate-key checks. Trigger: diagnostics.
 - framework/: `reassemble`. Trigger: hot reload.
 - framework/: `ObjectKey`, `GlobalObjectKey`. Trigger: a widget keyed by object identity.
-- binding.rs: the observer callbacks no host reports (memory pressure, predictive back, pushed routes and route information, the text scale, accessibility features), the platform menu delegate and windowing owner, `scheduleWarmUpFrame`. Trigger: a host that reports those events.
+- binding.rs: the observer callbacks no host reports (memory pressure, predictive back, pushed routes and route information, the text scale, accessibility features), the platform menu delegate, `scheduleWarmUpFrame`. Trigger: a host that reports those events.
 - binding.rs: first-frame-rasterized reporting and the push/pop route handlers. Trigger: `SchedulerBinding.addTimingsCallback`; navigation.
 - view.rs: `LookupBoundary` around a `ViewAnchor`'s view, and the view's semantics owner callbacks. Trigger: `LookupBoundary`; accessibility.
 - `LookupBoundary` in the `View`, `Overlay` and theater-marker lookups, which look straight up the tree. Trigger: `LookupBoundary` in framework.

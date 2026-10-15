@@ -15,7 +15,7 @@ use inset_embedder::{
     Locale, Matrix4, Offset, PointerDeviceKind, Radius, Rect, Size, SmartDashesType,
     SmartQuotesType, TargetPlatform, TextAffinity, TextAlign, TextBaseline, TextCapitalization,
     TextDecoration, TextDirection, TextHeightBehavior, TextInputAction, TextInputConfiguration,
-    TextInputType, TextPosition, TextRange, TextSelection, clamp_double,
+    TextInputType, TextPosition, TextRange, TextSelection, ViewId, clamp_double,
 };
 use inset_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB, Listenable, Listener, Task, Timer,
@@ -52,6 +52,7 @@ use crate::framework::{
     SingleChildRenderObjectWidget, State, StateData, StatefulWidget, WidgetRef,
 };
 use crate::state_accessors;
+use crate::view::View;
 use crate::widgets::actions::{
     Action, ActionData, Actions, AnyAction, CallbackAction, ContextAction, DismissIntent,
     DoNothingAction, Intent, OnInvokeCallback,
@@ -1702,6 +1703,7 @@ impl StatefulWidget for EditableText {
             clipboard_status: None,
             live_text_input_status: None,
             text_input_connection: None,
+            view_id: None,
             composite_callback: None,
             last_known_remote_text_editing_value: None,
             internal_scroll_controller: None,
@@ -1853,6 +1855,9 @@ pub struct EditableTextState {
     clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
     live_text_input_status: Option<Handle<LiveTextInputStatusNotifier>>,
     text_input_connection: Option<Handle<TextInputConnection>>,
+    /// Dart's `_viewId`: the view the field is in, which the platform's text input is attached
+    /// to.
+    view_id: Option<ViewId>,
     /// Dart's `_compositeCallback` tear-off; one `Rc` so the widget can assert identity.
     composite_callback: Option<CompositionCallback>,
     last_known_remote_text_editing_value: Option<TextEditingValue>,
@@ -4248,7 +4253,20 @@ impl State for EditableTextState {
                 self.stop_cursor_blink(app, true);
             }
         }
-        if self.has_input_connection(app) {
+        // Dart reads `View.of(context).viewId` in `textInputConfiguration`, which has no
+        // `&mut App` here, so the id is read here, where Dart checks it for changes.
+        let view_id = View::maybe_of(app, context).map(|view| view.id());
+        let view_changed = app.get(self).view_id != view_id;
+        app.get_mut(self).view_id = view_id;
+        if let Some(connection) = app.get(self).text_input_connection
+            && self.has_input_connection(app)
+        {
+            if view_changed {
+                let config = self
+                    .effective_autofill_client(app)
+                    .text_input_configuration(app);
+                connection.update_config(app, config);
+            }
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::handle_method(self, Self::post_frame_update_style),
@@ -4838,9 +4856,7 @@ impl AutofillClient for EditableTextState {
     }
 
     fn text_input_configuration(self: Handle<Self>, app: &App) -> TextInputConfiguration {
-        let context = self.mounted(app).then(|| self.context(app));
-        // Configuration reads only widget + value; view id is omitted without `&mut App`.
-        let _ = context;
+        let view_id = app.get(self).view_id;
         let widget = self.widget(app);
         let input_action = widget
             .text_input_action
@@ -4875,6 +4891,7 @@ impl AutofillClient for EditableTextState {
             .unwrap_or_default();
         config.hint_locales = widget.hint_locales.clone().unwrap_or_default();
         config.enable_inline_prediction = widget.enable_inline_prediction;
+        config.view_id = view_id.map(|view| view.0 as i32);
         config
     }
 

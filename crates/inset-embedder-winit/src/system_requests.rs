@@ -30,9 +30,9 @@ pub(crate) enum SystemRequest {
     /// again while it runs.
     Reopen(Reopen),
     /// Quit if the application agrees: the user chose Quit, or is logging out. The framework is
-    /// asked, and its answer carried out with
-    /// [`ApplicationControl::quit`](crate::os::ApplicationControl::quit) or
-    /// [`keep_running`](crate::os::ApplicationControl::keep_running).
+    /// asked, and an exit is carried out with
+    /// [`ApplicationControl::quit`](crate::os::ApplicationControl::quit); a cancel changes
+    /// nothing.
     Quit,
 }
 

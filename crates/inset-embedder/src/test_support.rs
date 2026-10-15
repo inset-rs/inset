@@ -108,9 +108,7 @@ pub fn idle_surface() -> Arc<dyn Surface> {
 struct IdleSurface;
 
 impl Surface for IdleSurface {
-    fn present(&self, buffer: Buffer, _released: Box<dyn FnOnce() + Send + Sync>) {
-        drop(buffer);
-    }
+    fn present(&self, _buffer: Buffer, _released: Box<dyn FnOnce() + Send + Sync>) {}
 
     fn next_vsync(&self, _observer: Weak<dyn VsyncObserver>) {}
 }

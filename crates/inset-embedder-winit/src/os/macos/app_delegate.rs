@@ -17,8 +17,9 @@
 //!
 //! A quit is two calls of `terminate:`, since `applicationShouldTerminate:` must answer at once and
 //! the framework may answer much later: the first cancels and asks the framework, and once it
-//! agrees the embedder calls `terminate:` again, which goes through. A quit the embedder starts,
-//! for the application or its last window, goes through the same second call.
+//! agrees the embedder calls `terminate:` again, which goes through. Every `terminate:` before
+//! then asks the framework again, so a second Cmd-Q is the application's to decide. A quit the
+//! application asks for itself goes through the same second call.
 
 use std::cell::{Cell, RefCell};
 use std::ffi::CString;
@@ -56,12 +57,6 @@ impl SystemRequests for AppKit {
 }
 
 impl ApplicationControl for AppKit {
-    /// Flutter's `requestApplicationTermination:`, which notes the quit before it asks, so a
-    /// `terminate:` meanwhile goes through at once.
-    fn quit_being_decided() {
-        with_termination(Termination::under_way);
-    }
-
     /// Quits through `terminate:`, as Flutter's macOS embedder does once the framework agrees:
     /// AppKit asks the delegate again, which answers at once, and winit hears
     /// `applicationWillTerminate:`. Where there was no delegate to add the methods to, AppKit
@@ -69,17 +64,12 @@ impl ApplicationControl for AppKit {
     /// `FlutterAppDelegate`. Run from the main queue, since winit's handler would be entered
     /// again from inside the callback that asked.
     fn quit(_event_loop: &ActiveEventLoop) {
-        with_termination(Termination::under_way);
+        with_termination(Termination::allow);
         DispatchQueue::main().exec_async(|| {
             if let Some(mtm) = MainThreadMarker::new() {
                 NSApplication::sharedApplication(mtm).terminate(None);
             }
         });
-    }
-
-    /// The next `terminate:` asks the framework again.
-    fn keep_running() {
-        with_termination(Termination::cancelled);
     }
 
     /// `hide:`, as the application menu's Hide does: AppKit orders every window out and
@@ -118,32 +108,27 @@ fn send(request: SystemRequest) {
     with_delegate(|delegate| (delegate.send)(request));
 }
 
-/// Whether a quit is under way, being decided or agreed to, so that `terminate:` goes through at
-/// once: Flutter's `FlutterEngineTerminationHandler`, whose `shouldTerminate` is set when a quit
-/// is asked for and cleared when the application keeps running.
+/// Whether AppKit may terminate the application, so that the `terminate:` the embedder calls goes
+/// through: Flutter's `FlutterEngineTerminationHandler`'s `shouldTerminate`, but allowed only once
+/// the application has decided to quit. Flutter sets it already when it asks, which lets a second
+/// Cmd-Q through without asking.
 #[derive(Default)]
 struct Termination {
-    should_terminate: Cell<bool>,
+    allowed: Cell<bool>,
 }
 
 impl Termination {
-    fn under_way(&self) {
-        self.should_terminate.set(true);
+    fn allow(&self) {
+        self.allowed.set(true);
     }
 
-    fn cancelled(&self) {
-        self.should_terminate.set(false);
-    }
-
-    /// `applicationShouldTerminate:`, as `FlutterAppDelegate` answers it: at once while a quit
-    /// is under way; otherwise the quit is under way from now, `ask` asks the framework, and this
-    /// `terminate:` is cancelled. A second quit while the first is being decided goes through at
-    /// once, as Flutter's.
+    /// `applicationShouldTerminate:`, as `FlutterAppDelegate` answers it: now once termination
+    /// is allowed; otherwise `ask` asks the framework, and this `terminate:` is
+    /// cancelled.
     fn should_terminate(&self, ask: impl FnOnce()) -> NSApplicationTerminateReply {
-        if self.should_terminate.get() {
+        if self.allowed.get() {
             return NSApplicationTerminateReply::TerminateNow;
         }
-        self.under_way();
         ask();
         NSApplicationTerminateReply::TerminateCancel
     }
@@ -275,30 +260,21 @@ mod tests {
     }
 
     #[test]
-    fn a_quit_while_the_first_is_decided_goes_through() {
+    fn a_quit_while_the_first_is_decided_asks_again() {
         let termination = Termination::default();
         termination.should_terminate(|| {});
-        let reply = termination.should_terminate(|| panic!("asked twice"));
-        assert_eq!(reply, NSApplicationTerminateReply::TerminateNow);
+        let asked = Cell::new(false);
+        let reply = termination.should_terminate(|| asked.set(true));
+        assert_eq!(reply, NSApplicationTerminateReply::TerminateCancel);
+        assert!(asked.get());
     }
 
     #[test]
     fn a_quit_the_host_carries_out_goes_through_when_appkit_asks() {
         let termination = Termination::default();
-        termination.under_way();
+        termination.allow();
         let reply = termination.should_terminate(|| panic!("asked again"));
         assert_eq!(reply, NSApplicationTerminateReply::TerminateNow);
-    }
-
-    #[test]
-    fn once_the_application_keeps_running_the_next_quit_asks_again() {
-        let termination = Termination::default();
-        termination.should_terminate(|| {});
-        termination.cancelled();
-        let asked = Cell::new(false);
-        let reply = termination.should_terminate(|| asked.set(true));
-        assert_eq!(reply, NSApplicationTerminateReply::TerminateCancel);
-        assert!(asked.get());
     }
 
     #[test]

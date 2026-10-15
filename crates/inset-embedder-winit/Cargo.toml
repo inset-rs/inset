@@ -19,7 +19,7 @@ image-worker = ["valo-codec/worker"]
 inset-embedder.workspace = true
 valo.workspace = true
 valo-codec.workspace = true
-valo-codec-software = { version = "0.7.0", optional = true }
+valo-codec-software = { version = "0.7.2", optional = true }
 wgpu.workspace = true
 pollster.workspace = true
 winit.workspace = true
@@ -27,7 +27,7 @@ arboard.workspace = true
 
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
-valo-codec-apple = { version = "0.7.0", optional = true }
+valo-codec-apple = { version = "0.7.2", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 dispatch2 = "0.3"
@@ -67,27 +67,11 @@ name = "commands_are_served_in_order"
 harness = false
 
 [[test]]
-name = "an_app_without_an_implicit_view_opens_a_view_and_draws_in_it"
+name = "an_app_asks_for_a_view_and_draws_in_it"
 harness = false
 
 [[test]]
-name = "an_app_that_agrees_quits_with_its_last_window"
-harness = false
-
-[[test]]
-name = "an_app_that_cancels_outlives_its_last_window"
-harness = false
-
-[[test]]
-name = "the_implicit_view_outlives_its_window"
-harness = false
-
-[[test]]
-name = "the_implicit_view_is_there_before_its_window"
-harness = false
-
-[[test]]
-name = "an_app_set_to_run_on_outlives_its_last_window"
+name = "a_window_stays_open_until_the_app_closes_it"
 harness = false
 
 # What the tests ask of AppKit that the host offers no call for: minimizing, hiding the

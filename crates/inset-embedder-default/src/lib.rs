@@ -27,25 +27,6 @@ pub struct DefaultEmbedder {
 }
 
 impl DefaultEmbedder {
-    /// The implicit view's window, or `None` to start without an implicit view. Ignored on wasm,
-    /// where the page supplies the canvas.
-    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
-    pub fn implicit_view(
-        mut self,
-        config: Option<inset_embedder::WindowConfig>,
-    ) -> DefaultEmbedder {
-        self.inner.implicit_view = config;
-        self
-    }
-
-    /// Whether closing the last window quits the app; `true` by default. With `false` the app
-    /// runs on with no window, as one that lives in the Dock does.
-    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
-    pub fn quit_when_last_window_closes(mut self, quit: bool) -> DefaultEmbedder {
-        self.inner.quit_when_last_window_closes = quit;
-        self
-    }
-
     /// Canvas element id. Ignored on native.
     #[cfg(target_arch = "wasm32")]
     pub fn canvas_id(mut self, id: impl Into<String>) -> DefaultEmbedder {

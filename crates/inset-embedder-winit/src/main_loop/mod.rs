@@ -33,9 +33,8 @@
 //! run loop's common modes, keep running, so native surfaces' producers get their vsyncs there,
 //! and the main dispatch queue is served.
 //!
-//! The loop runs three of the app's own handlers directly, from a turn of its own and outside
-//! every framework call, so a handler may post to the app or close a window: a created window's
-//! close request (`HostWindow::set_close_requested`), and the files to open and the reopen
+//! The loop runs two of the app's own handlers directly, from a turn of its own and outside every
+//! framework call, so a handler may post to the app: the files to open and the reopen
 //! (`system_requests.rs`).
 //!
 //! What AppKit calls on its own, from its dispatch and possibly inside a winit callback, never
@@ -47,15 +46,15 @@
 //! # The app, its views and their surfaces
 //!
 //! The embedder starts the app before winit's loop runs, as Flutter's engine runs Dart's `main`
-//! before its window is ready: the implicit view is made first, with no window and no size,
-//! then the app, whose `run_app` binds its root to that view (`launch.rs`). The view's window
-//! opens at winit's first call, the first moment winit lets one be made, and the app hears its
-//! new metrics. Other views come and go while the app runs, each with its window: one the app
-//! opens reaches it through `view_added`, and one that closes through `view_removed`. The
-//! implicit view alone outlives its window, as in Flutter's macOS embedder: it stays among the
-//! views, drawing nowhere. Where the
-//! embedder is set to, the last window's closing asks the app whether it quits, as Cmd-Q does,
-//! and the app quits only if it answers exit.
+//! before its window is ready (`launch.rs`). On a desktop the app opens its windows itself, its
+//! first one included, which `run_app` asks for. Where the system's window is the screen, the
+//! screen view is made first, with no window and no size, then the app, whose `run_app` builds
+//! in that view; the view's window opens at winit's first call, the first moment winit
+//! lets one be made, and the app hears its new metrics. Views come and go while the app runs,
+//! each with its window: one the app opens reaches it through `view_added`, and one that closes
+//! through `view_removed`. The screen view alone outlives its window, as in Flutter's
+//! embedders. A window closes only when the app closes it: the user's asking only reports it
+//! (`view_close_requested`), and what the last window's closing means is the app's to decide.
 //!
 //! A view draws on a surface the system gives and takes away: winit's `resumed` gives every view
 //! one and asks for a frame, at launch and each time after, and `suspended` takes them all while
@@ -76,8 +75,6 @@ use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::window::WindowId;
 
-use crate::WinitEmbedder;
-use crate::app_exit::QuitQuestions;
 use crate::app_requests::AppRequest;
 use crate::dispatcher::Wakeups;
 use crate::drag_drop::DragReports;
@@ -91,7 +88,7 @@ use crate::pointer::{Pointer, PointerIds};
 use crate::state::EmbedderState;
 use crate::system_requests::SystemRequest;
 use crate::touch::Touches;
-use crate::windows::{ViewMaker, Views};
+use crate::windows::{ViewMaker, Views, screen_window_config};
 
 /// What reaches the loop through winit's proxy: the framework's requests, wakes asked for
 /// from other threads, and the system's requests of the application.
@@ -130,9 +127,9 @@ pub(crate) struct MainLoop<C> {
     state: Rc<EmbedderState>,
     /// Makes the views, on the one device they all draw with, and their windows.
     view_maker: ViewMaker,
-    /// The implicit view's window, opened at winit's first call; `None` once it is open, and
-    /// for an app without an implicit view.
-    implicit_window: Option<WindowConfig>,
+    /// The screen view's window, opened at winit's first call; `None` once it is open, and on
+    /// a desktop, which has no screen view.
+    screen_window: Option<WindowConfig>,
     /// The mouse, as Flutter's pointer.
     pointer: Pointer,
     /// The fingers on the screen, each as a pointer of its own.
@@ -142,21 +139,18 @@ pub(crate) struct MainLoop<C> {
     keyboard: Keyboard,
     /// Files dragged over the views this turn, reported when the loop is about to wait.
     drag_reports: DragReports,
-    /// The framework's answers to whether the application quits, asked and not yet in.
-    quit_questions: QuitQuestions,
     /// Whether the application is active and visible, for its lifecycle state.
     lifecycle: AppLifecycle,
     /// Whether the system gives the windows surfaces now: from winit's `resumed` until its
     /// `suspended`.
     surfaces_given: bool,
-    quit_when_last_window_closes: bool,
 }
 
 impl<C: EmbedderClient> MainLoop<C> {
-    /// Starts the app: the implicit view is made, with no window yet, and then the app, with that
-    /// view among its views. The view's window opens at winit's first call.
+    /// Starts the app: the screen view is made, where the system's window is the screen, with
+    /// no window yet, and then the app, with that view among its views. The view's window opens
+    /// at winit's first call.
     pub(crate) fn start(
-        config: WinitEmbedder,
         start: StartApp<C>,
         create_image_loader: Option<CreateImageLoader>,
         proxy: EventLoopProxy<MainLoopEvent>,
@@ -164,8 +158,9 @@ impl<C: EmbedderClient> MainLoop<C> {
         let state = Rc::new(EmbedderState::new(proxy.clone(), create_image_loader));
         let platform = Rc::new(WinitPlatform::new(Rc::clone(&state), proxy.clone()));
         let mut view_maker = ViewMaker::new();
-        if let Some(window) = &config.implicit_view {
-            state.add_implicit_view(view_maker.make_implicit(window));
+        let screen_window = screen_window_config();
+        if let Some(window) = &screen_window {
+            state.add_screen_view(view_maker.make_screen_view(window));
         }
         let client = start(platform.clone());
         MainLoop {
@@ -177,16 +172,14 @@ impl<C: EmbedderClient> MainLoop<C> {
             }),
             wakeups: Wakeups::default(),
             view_maker,
-            implicit_window: config.implicit_view,
+            screen_window,
             pointer: Pointer::new(),
             touches: Touches::default(),
             ids: PointerIds::default(),
             keyboard: Keyboard::new(),
             drag_reports: DragReports::default(),
-            quit_questions: QuitQuestions::default(),
             lifecycle: AppLifecycle::default(),
             surfaces_given: false,
-            quit_when_last_window_closes: config.quit_when_last_window_closes,
         }
     }
 
@@ -213,7 +206,8 @@ impl<C: EmbedderClient> MainLoop<C> {
             AppRequest::RequestFrame => self.request_frame(),
             AppRequest::OpenWindow(request) => self.open_window(event_loop, request),
             AppRequest::CloseWindow(id) => self.close_window(id),
-            AppRequest::Exit(request) => self.serve_exit(event_loop, request),
+            AppRequest::Quit => self.quit(event_loop),
+            AppRequest::AnswerExit(response) => self.on_exit_answered(event_loop, response),
             AppRequest::ShowCursor(kind) => self.show_cursor(kind),
             AppRequest::ChangeViewFocus(change) => self.change_view_focus(change),
             AppRequest::HandOverFiles => self.hand_over_files(),
@@ -230,7 +224,7 @@ impl<C: EmbedderClient> ApplicationHandler<MainLoopEvent> for MainLoop<C> {
     fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
         match cause {
             // winit's first call, on every system.
-            StartCause::Init => self.open_implicit_window(event_loop),
+            StartCause::Init => self.open_screen_window(event_loop),
             StartCause::ResumeTimeReached {
                 requested_resume, ..
             } => self.on_wait_ended(requested_resume),
@@ -244,7 +238,6 @@ impl<C: EmbedderClient> ApplicationHandler<MainLoopEvent> for MainLoop<C> {
         // to itself, a zero-duration timer, runs ahead of whatever the system delivers next,
         // as Dart's event queue orders them.
         self.wake_if_due(Instant::now());
-        self.act_on_quit_answers(event_loop);
         event_loop.set_control_flow(
             self.wakeups
                 .control_flow(self.frame_scheduler.vsync_timer_due()),

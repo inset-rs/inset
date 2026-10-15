@@ -17,7 +17,7 @@ use web_time::Instant;
 
 use crate::gpu::Gpu;
 use crate::keys;
-use crate::platform::{IMPLICIT_VIEW, WebPlatform, WebView};
+use crate::platform::{CANVAS_VIEW, WebPlatform, WebView};
 use crate::pointer;
 use crate::text_input::TextInputNotify;
 
@@ -129,12 +129,12 @@ async fn run_async<C: EmbedderClient + 'static>(
             TextInputNotify::Value(value) => {
                 host.client
                     .borrow_mut()
-                    .text_input_editing_value(IMPLICIT_VIEW, value);
+                    .text_input_editing_value(CANVAS_VIEW, value);
             }
             TextInputNotify::Action(action) => {
                 host.client
                     .borrow_mut()
-                    .text_input_action(IMPLICIT_VIEW, action);
+                    .text_input_action(CANVAS_VIEW, action);
             }
         }
     }));
@@ -443,7 +443,7 @@ fn bind_resize<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
         listener
             .client
             .borrow_mut()
-            .view_metrics_changed(IMPLICIT_VIEW);
+            .view_metrics_changed(CANVAS_VIEW);
         listener.platform.request_frame();
         schedule_next(&listener);
     });
@@ -491,7 +491,7 @@ fn send_pointer<C: EmbedderClient + 'static>(
         None => (None, 0.0, 0.0),
     };
     let data = PointerData {
-        view_id: IMPLICIT_VIEW,
+        view_id: CANVAS_VIEW,
         embedder_id: host.embedder_id.get(),
         time_stamp: host.platform.elapsed(),
         change,

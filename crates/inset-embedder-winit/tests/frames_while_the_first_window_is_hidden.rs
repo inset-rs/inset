@@ -17,9 +17,7 @@ fn main() {
     use inset_embedder_winit::WinitEmbedder;
 
     support::fail_after(TEST, frames::GIVE_UP_AFTER, frames::counted);
-    WinitEmbedder::default()
-        .implicit_view(None)
-        .run(client::CountingClient::new);
+    WinitEmbedder.run(client::CountingClient::new);
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -30,8 +28,8 @@ mod client {
     use std::time::{Duration, Instant};
 
     use inset_embedder::{
-        EmbedderClient, Frame, KeyData, PlatformRef, PointerDataPacket, ViewId, WindowConfig,
-        WindowFuture, WindowRef,
+        EmbedderClient, Frame, KeyData, PlatformRef, PointerDataPacket, RequestId, ViewId,
+        WindowConfig, WindowRef,
     };
 
     use crate::{TEST, frames, support};
@@ -46,28 +44,28 @@ mod client {
     /// second after the hide.
     pub(crate) struct CountingClient {
         platform: PlatformRef,
-        opening: Vec<WindowFuture>,
+        requested: Vec<RequestId>,
         windows: Vec<WindowRef>,
         hidden_at: Option<Instant>,
     }
 
     impl CountingClient {
         pub(crate) fn new(platform: PlatformRef) -> CountingClient {
-            let owner = platform
-                .windowing_owner()
-                .expect("a desktop host makes windows");
-            let opening = ["first, then hidden", "shown"]
+            let requested = ["first, then hidden", "shown"]
                 .into_iter()
                 .map(|title| {
-                    owner.create(WindowConfig {
-                        title: title.into(),
-                        ..WindowConfig::default()
-                    })
+                    support::request_window(
+                        &platform,
+                        WindowConfig {
+                            title: title.into(),
+                            ..WindowConfig::default()
+                        },
+                    )
                 })
                 .collect();
             CountingClient {
                 platform,
-                opening,
+                requested,
                 windows: Vec::new(),
                 hidden_at: None,
             }
@@ -102,11 +100,14 @@ mod client {
         }
 
         fn wake(&mut self, _elapsed: Duration) {
-            support::take_opened_windows(&mut self.opening, &mut self.windows);
+            support::take_opened_windows(&self.platform, &mut self.requested, &mut self.windows);
             self.hide_the_first_window_once_both_are_made();
         }
 
-        fn view_added(&mut self, _id: ViewId) {}
+        fn view_added(&mut self, _id: ViewId) {
+            support::take_opened_windows(&self.platform, &mut self.requested, &mut self.windows);
+            self.hide_the_first_window_once_both_are_made();
+        }
         fn view_metrics_changed(&mut self, _id: ViewId) {}
         fn view_removed(&mut self, _id: ViewId) {}
         fn pointer_data_packet(&mut self, _packet: PointerDataPacket) {}

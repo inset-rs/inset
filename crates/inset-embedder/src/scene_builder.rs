@@ -461,9 +461,7 @@ mod tests {
     struct IdleSurface;
 
     impl Surface for IdleSurface {
-        fn present(&self, buffer: crate::Buffer, _released: Box<dyn FnOnce() + Send + Sync>) {
-            drop(buffer);
-        }
+        fn present(&self, _buffer: crate::Buffer, _released: Box<dyn FnOnce() + Send + Sync>) {}
 
         fn next_vsync(&self, _observer: std::sync::Weak<dyn crate::VsyncObserver>) {}
     }

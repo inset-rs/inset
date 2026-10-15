@@ -1,15 +1,18 @@
 //! A platform a test configures and reads back.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use inset_embedder::{
     AppExit, AppLifecycleState, Brightness, Clipboard, Dispatcher, FontSource, Haptics,
-    ImageCodecFuture, ImageDecodeError, Instant, MouseCursor, Platform, PopupMenus, Restoration,
-    SystemChrome, SystemContextMenu, TargetPlatform, TextServices, ViewId, ViewRef, WindowingOwner,
+    ImageCodecFuture, ImageDecodeError, Instant, MouseCursor, Platform, PopupMenus, RequestId,
+    Restoration, SystemChrome, SystemContextMenu, TargetPlatform, TextServices, ViewError, ViewId,
+    ViewRef, ViewRequest,
 };
+
+use crate::TestWindows;
 
 type FontSourceMaker = Rc<dyn Fn() -> Box<dyn FontSource>>;
 type ImageCodecOpener = Rc<dyn Fn(Arc<[u8]>) -> ImageCodecFuture>;
@@ -22,12 +25,13 @@ pub struct TestPlatform {
     target: Cell<TargetPlatform>,
     brightness: Cell<Brightness>,
     default_route: String,
-    views: Vec<ViewRef>,
+    /// The views the platform gave the app, as a phone gives its screen.
+    views: RefCell<Vec<ViewRef>>,
     frames_requested: Cell<u32>,
     dispatcher: Arc<TestDispatcher>,
     font_source: Option<FontSourceMaker>,
     image_codec: Option<ImageCodecOpener>,
-    windowing: Option<Rc<dyn WindowingOwner>>,
+    windows: Option<Rc<TestWindows>>,
     clipboard: Option<Rc<dyn Clipboard>>,
     system_chrome: Option<Rc<dyn SystemChrome>>,
     haptics: Option<Rc<dyn Haptics>>,
@@ -48,12 +52,12 @@ impl TestPlatform {
             target: Cell::new(TargetPlatform::Android),
             brightness: Cell::new(Brightness::Light),
             default_route: "/".into(),
-            views: Vec::new(),
+            views: RefCell::default(),
             frames_requested: Cell::new(0),
             dispatcher: Arc::new(TestDispatcher::default()),
             font_source: None,
             image_codec: None,
-            windowing: None,
+            windows: None,
             clipboard: None,
             system_chrome: None,
             haptics: None,
@@ -73,11 +77,21 @@ impl TestPlatform {
         self
     }
 
-    /// The same platform with `view` among its views; the first one added is the implicit
-    /// view.
-    pub fn with_view(mut self, view: ViewRef) -> TestPlatform {
-        self.views.push(view);
+    /// The same platform giving the app `view`, as a phone gives its screen.
+    pub fn with_view(self, view: ViewRef) -> TestPlatform {
+        self.views.borrow_mut().push(view);
         self
+    }
+
+    /// Gives the app `view` while it runs, as an embedder adds one; the test tells the
+    /// framework of it itself, as a host would through `EmbedderClient::view_added`.
+    pub fn give_view(&self, view: ViewRef) {
+        self.views.borrow_mut().push(view);
+    }
+
+    /// Takes the view numbered `id` back while the app runs.
+    pub fn take_view(&self, id: ViewId) {
+        self.views.borrow_mut().retain(|view| view.id() != id);
     }
 
     pub fn with_brightness(self, brightness: Brightness) -> TestPlatform {
@@ -115,8 +129,10 @@ impl TestPlatform {
         self
     }
 
-    pub fn with_windowing(mut self, owner: Rc<dyn WindowingOwner>) -> TestPlatform {
-        self.windowing = Some(owner);
+    /// The same platform answering requests for views with `windows`, as a desktop makes a
+    /// window for each.
+    pub fn with_windows(mut self, windows: Rc<TestWindows>) -> TestPlatform {
+        self.windows = Some(windows);
         self
     }
 
@@ -216,15 +232,20 @@ impl Platform for TestPlatform {
     }
 
     fn views(&self) -> Vec<ViewRef> {
-        self.views.clone()
+        let requested = self.windows.iter().flat_map(|windows| windows.open_views());
+        let given = self.views.borrow().clone();
+        given.into_iter().chain(requested).collect()
     }
 
     fn view(&self, id: ViewId) -> Option<ViewRef> {
-        self.views.iter().find(|view| view.id() == id).cloned()
+        self.views().into_iter().find(|view| view.id() == id)
     }
 
-    fn implicit_view(&self) -> Option<ViewRef> {
-        self.views.first().cloned()
+    fn request_view(&self, request: ViewRequest) -> Result<RequestId, ViewError> {
+        match &self.windows {
+            Some(windows) => Ok(windows.request(request)),
+            None => Err(ViewError::Unsupported),
+        }
     }
 
     fn platform_brightness(&self) -> Brightness {
@@ -248,10 +269,6 @@ impl Platform for TestPlatform {
             Some(open) => open(bytes),
             None => Box::pin(std::future::ready(Err(ImageDecodeError::NoDecoder))),
         }
-    }
-
-    fn windowing_owner(&self) -> Option<Rc<dyn WindowingOwner>> {
-        self.windowing.clone()
     }
 
     fn clipboard(&self) -> Option<&dyn Clipboard> {

@@ -6020,8 +6020,8 @@ mod tests {
 
     /// Rebuilds the root with a new widget, the way `run_app` first attached it.
     fn attach(binding: Handle<crate::binding::WidgetsBinding>, app: &mut App, child: WidgetRef) {
-        let wrapped = binding.wrap_with_default_view(app, child);
-        binding.attach_root_widget(app, wrapped);
+        let root = crate::MultiViewApp::new(move |_app, _view| child.clone());
+        binding.attach_root_widget(app, root.into_widget());
     }
 
     /// Runs frames until every route transition has settled.

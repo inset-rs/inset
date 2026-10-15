@@ -49,6 +49,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — `Matrix4` is valo's f32 matrix, and inverting one already leaves more error than Dart's f64 tolerance.
   Affect: a debug build accepts an inverted scale or rotation, and lets through a slight perspective Dart would assert on.
 
+- Change: the deprecated `HitTestable.hitTest` is not ported; `hit_test_in_view` names the view.
+  Reason: platform — it hit-tests the implicit view, and there is no implicit view.
+  Affect: every hit test names the view it is in.
+
 ## pointer_signal_resolver.rs → pointer_signal_resolver.dart
 
 - Change: `register` keeps the event it was handed and `resolve` reads that one back; Dart's `_isSameEvent` assertions are gone.

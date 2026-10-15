@@ -1,0 +1,136 @@
+//! Requests for views that a desktop answers at once, with a window each.
+
+use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
+use std::time::Duration;
+
+use inset_embedder::{
+    HostWindow, RawWindowHandle, Rect, RequestId, ViewId, ViewRef, ViewRequest, WindowConfig,
+};
+
+use crate::TestView;
+
+/// The number of the first view made on request, out of the way of the views a test gives.
+const FIRST_VIEW_ID: u64 = 1000;
+
+/// A desktop's answer to requests for views: each request makes a window at once, over a view
+/// that carries the request's id and initial data. A test hands it to a platform
+/// ([`TestPlatform::with_windows`](crate::TestPlatform::with_windows)), which lists the views
+/// of the windows still open; the test tells the framework of each new view itself, as a host
+/// would through `EmbedderClient::view_added`.
+pub struct TestWindows {
+    next_request: Cell<u64>,
+    made: RefCell<Vec<Rc<TestWindow>>>,
+}
+
+impl TestWindows {
+    pub fn new() -> TestWindows {
+        TestWindows {
+            next_request: Cell::new(1),
+            made: RefCell::default(),
+        }
+    }
+
+    /// The windows made so far, in the order they were asked for, closed ones included.
+    pub fn made(&self) -> Vec<Rc<TestWindow>> {
+        self.made.borrow().clone()
+    }
+
+    /// Makes the window `request` asks for, and answers the request's id.
+    pub(crate) fn request(&self, request: ViewRequest) -> RequestId {
+        let id = RequestId(self.next_request.get());
+        self.next_request.set(id.0 + 1);
+        let [width, height] = request.config.size;
+        let view = TestView::new(width, height)
+            .with_id(ViewId(FIRST_VIEW_ID + id.0))
+            .with_request(id, request.initial_data);
+        self.made
+            .borrow_mut()
+            .push(TestWindow::around(view, request.config));
+        id
+    }
+
+    /// The views of the windows still open.
+    pub(crate) fn open_views(&self) -> Vec<ViewRef> {
+        self.made
+            .borrow()
+            .iter()
+            .filter(|window| window.closes() == 0)
+            .map(|window| Rc::clone(&window.view) as ViewRef)
+            .collect()
+    }
+}
+
+impl Default for TestWindows {
+    fn default() -> TestWindows {
+        TestWindows::new()
+    }
+}
+
+/// A window that shows nothing, and counts how often it was closed: one of [`TestWindows`], or
+/// one a test gives the app a view in. A closed window's view is in no window any more, and is no
+/// longer among the views of [`TestWindows`].
+pub struct TestWindow {
+    view: Rc<TestView>,
+    config: WindowConfig,
+    closes: Cell<u32>,
+}
+
+impl TestWindow {
+    /// A window configured as `config` around `view`, which is in it from now on: as a desktop
+    /// makes for a request, or as WaOS shows a program's view it gives.
+    pub fn around(view: TestView, config: WindowConfig) -> Rc<TestWindow> {
+        Rc::new_cyclic(|window: &Weak<TestWindow>| {
+            let window: Weak<dyn HostWindow> = window.clone();
+            view.set_window(Some(window));
+            TestWindow {
+                view: Rc::new(view),
+                config,
+                closes: Cell::new(0),
+            }
+        })
+    }
+
+    /// The view the window shows, which counts the pictures presented to it.
+    pub fn test_view(&self) -> &Rc<TestView> {
+        &self.view
+    }
+
+    /// The configuration the window was asked for with.
+    pub fn config(&self) -> &WindowConfig {
+        &self.config
+    }
+
+    /// How many times the window was closed.
+    pub fn closes(&self) -> u32 {
+        self.closes.get()
+    }
+}
+
+impl HostWindow for TestWindow {
+    fn view(&self) -> ViewRef {
+        Rc::clone(&self.view) as ViewRef
+    }
+
+    fn frame(&self) -> Rect {
+        let [width, height] = self.config.size;
+        Rect::from_ltwh(0.0, 0.0, width, height)
+    }
+
+    fn set_frame(&self, _frame: Rect, _animate: Option<Duration>) {}
+
+    fn set_title(&self, _title: &str) {}
+
+    fn show(&self) {}
+
+    fn hide(&self) {}
+
+    fn close(&self) {
+        self.closes.set(self.closes.get() + 1);
+        self.view.set_window(None);
+    }
+
+    fn native_handle(&self) -> Option<RawWindowHandle> {
+        None
+    }
+}

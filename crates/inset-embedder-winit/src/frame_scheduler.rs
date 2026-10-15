@@ -3,7 +3,7 @@
 //! draws at it. Asked for again before that vsync, the frame is still drawn once.
 //!
 //! The vsyncs are those of the display the first window is on, the first opened of the windows
-//! still open, the implicit view's while it is, asked for anew with each frame so that they
+//! still open, the screen view's while it is, asked for anew with each frame so that they
 //! follow that window to another display. A display's vsyncs do not stop for its windows: hiding
 //! a window stops its presents, not the vsyncs every window's frames wait on
 //! (`2026-09-29-view-display-link-unseen` in the `experiments` folder beside this repository).

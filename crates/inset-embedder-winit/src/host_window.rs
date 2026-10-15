@@ -1,6 +1,5 @@
 //! A window the app created, as it holds it (`HostWindow`).
 
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Weak;
 use std::time::Duration;
@@ -21,7 +20,6 @@ pub(crate) struct WinitWindow {
     window: Weak<Window>,
     view: Rc<WinitView>,
     requests: Rc<AppRequests>,
-    close_requested: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
 impl WinitWindow {
@@ -36,12 +34,7 @@ impl WinitWindow {
             window,
             view,
             requests,
-            close_requested: RefCell::new(None),
         }
-    }
-
-    pub(crate) fn close_handler(&self) -> Option<Rc<dyn Fn()>> {
-        self.close_requested.borrow().clone()
     }
 }
 
@@ -114,9 +107,5 @@ impl HostWindow for WinitWindow {
     fn native_handle(&self) -> Option<RawWindowHandle> {
         let window = self.window.upgrade()?;
         window.window_handle().ok().map(|handle| handle.as_raw())
-    }
-
-    fn set_close_requested(&self, handler: Option<Rc<dyn Fn()>>) {
-        *self.close_requested.borrow_mut() = handler;
     }
 }

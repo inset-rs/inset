@@ -11,7 +11,7 @@ use inset_embedder::AppLifecycleState;
 /// through its application delegate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(
-    not(target_os = "macos"),
+    not(any(target_os = "macos", test)),
     expect(dead_code, reason = "only macOS says these")
 )]
 pub(crate) enum LifecycleNotice {

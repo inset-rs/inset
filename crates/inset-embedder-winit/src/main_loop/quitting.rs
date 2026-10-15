@@ -1,63 +1,40 @@
-//! The main loop's quitting (`app_exit.rs`): the three ways a quit starts, and acting on the
-//! framework's answers.
+//! The main loop's quitting (`app_exit.rs`): asking the framework when the system asks the
+//! application to quit, and quitting on its answer or on the application's own quit.
 
-use inset_embedder::{AppExitResponse, AppExitType, EmbedderClient};
+use std::rc::Rc;
+
+use inset_embedder::{AppExitResponse, EmbedderClient};
 use winit::event_loop::ActiveEventLoop;
 
-use crate::app_exit::{ExitRequest, QuitDecision};
+use crate::app_exit::exit_reply;
 use crate::os::{ApplicationControl, ThisOs};
-use crate::reply::Reply;
 
 use super::MainLoop;
 
 impl<C: EmbedderClient> MainLoop<C> {
-    /// The system asks the application to quit: Cmd-Q, Quit from the Dock, logging out.
+    /// The system asks the application to quit: Cmd-Q, Quit from the Dock, logging out. Every
+    /// request reaches the framework, a second one while the first is being decided included, so
+    /// the application decides each, such as quitting only at a second Cmd-Q.
     pub(super) fn on_quit_requested(&mut self) {
-        self.ask_whether_to_quit(None);
+        let reply = exit_reply(Rc::clone(self.state.requests()));
+        self.client.request_app_exit(reply);
     }
 
-    /// The application asks to quit: a required exit quits now, a cancelable one asks the
-    /// framework first, as Flutter's embedders serve `System.exitApplication`.
-    pub(super) fn serve_exit(&mut self, event_loop: &ActiveEventLoop, request: ExitRequest) {
-        match request.exit_type {
-            AppExitType::Required => {
-                request.reply.complete(AppExitResponse::Exit);
-                ThisOs::quit(event_loop);
-            }
-            AppExitType::Cancelable => self.ask_whether_to_quit(Some(request.reply)),
+    /// The framework answered a request to exit: the application quits on exit, and runs on
+    /// otherwise, with nothing to undo.
+    pub(super) fn on_exit_answered(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        response: AppExitResponse,
+    ) {
+        if response == AppExitResponse::Exit {
+            self.quit(event_loop);
         }
     }
 
-    /// The last window closed, where the embedder is set to quit then: the app is asked, as
-    /// AppKit asks it once Flutter's macOS template answers that the last window's closing quits,
-    /// and it runs on with no window if it cancels.
-    pub(super) fn on_last_window_closed(&mut self) {
-        self.ask_whether_to_quit(None);
-    }
-
-    /// Asks the framework whether the application quits; `app_reply` hears the answer when the
-    /// application asked.
-    pub(super) fn ask_whether_to_quit(&mut self, app_reply: Option<Reply<AppExitResponse>>) {
-        ThisOs::quit_being_decided();
-        let answer = self.client.request_app_exit();
-        self.quit_questions.ask(answer, app_reply);
-    }
-
-    /// Quits or keeps running once the framework's answers decide it. Called at the end of every
-    /// turn, since the framework answers only inside a call into the client.
-    pub(super) fn act_on_quit_answers(&mut self, event_loop: &ActiveEventLoop) {
-        let answers = self.quit_questions.take_answers();
-        if !answers.to_the_app.is_empty() {
-            for (reply, response) in answers.to_the_app {
-                reply.complete(response);
-            }
-            // As with a window the app asked for, a wake brings the app's checkpoint.
-            self.wake_client();
-        }
-        match answers.decision {
-            Some(QuitDecision::Quit) => ThisOs::quit(event_loop),
-            Some(QuitDecision::KeepRunning) => ThisOs::keep_running(),
-            None => {}
-        }
+    /// Quits the way the system quits an application: on the framework's answer, or for the
+    /// application's own required exit.
+    pub(super) fn quit(&mut self, event_loop: &ActiveEventLoop) {
+        ThisOs::quit(event_loop);
     }
 }

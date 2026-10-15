@@ -36,9 +36,6 @@ pub trait GestureBindingOverrides: HitTestable {
 /// Those two take `&self` so [`GestureBinding`] can hold them erased; a crate above cannot
 /// implement them for `Handle<ItsType>`, so it implements this one on the type instead.
 pub trait GestureBindingOverridesObject: Sized + 'static {
-    /// See [`HitTestable::hit_test`].
-    fn hit_test(self: Handle<Self>, app: &mut App, result: &mut HitTestResult, position: Offset);
-
     /// See [`HitTestable::hit_test_in_view`].
     fn hit_test_in_view(
         self: Handle<Self>,
@@ -58,10 +55,6 @@ pub trait GestureBindingOverridesObject: Sized + 'static {
 }
 
 impl<T: GestureBindingOverridesObject> HitTestable for Handle<T> {
-    fn hit_test(&self, app: &mut App, result: &mut HitTestResult, position: Offset) {
-        T::hit_test(*self, app, result, position);
-    }
-
     fn hit_test_in_view(
         &self,
         app: &mut App,

@@ -8,7 +8,7 @@ use std::ops::Receiver;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
-use inset_embedder::{DropData, PlatformRef, ViewFocusEvent};
+use inset_embedder::{DropData, PlatformRef, RequestId, ViewError, ViewFocusEvent, ViewId};
 use slotmap::new_key_type;
 
 use crate::app_cell::{AppCell, AsyncApp};
@@ -153,6 +153,15 @@ pub struct PlatformCallbacks {
     /// The user asked to go back. Answers whether the application went back. Flutter's
     /// `popRoute` on `SystemChannels.navigation`.
     pub on_pop_route: Option<PopRouteCallback>,
+    /// The platform added a view: one the platform gave, or one the app asked for. Flutter's
+    /// `_addView` tells it only as `onMetricsChanged`.
+    pub on_view_added: Option<ViewChangeCallback>,
+    /// A view went.
+    pub on_view_removed: Option<ViewChangeCallback>,
+    /// The user asked to close a view. Flutter's engine reports it to the window's controller.
+    pub on_view_close_requested: Option<ViewCloseRequestedCallback>,
+    /// A request for a view got no view.
+    pub on_view_request_failed: Option<ViewRequestFailedCallback>,
 }
 
 /// Flutter `PlatformDispatcher.onViewFocusChange`.
@@ -163,6 +172,15 @@ pub type DropCallback = Rc<dyn Fn(&mut App, DropData)>;
 
 /// The framework's handler for `EmbedderClient::pop_route`.
 pub type PopRouteCallback = Rc<dyn Fn(&mut App) -> bool>;
+
+/// The framework's handler for `EmbedderClient::view_added` and `view_removed`.
+pub type ViewChangeCallback = Rc<dyn Fn(&mut App, ViewId)>;
+
+/// The framework's handler for `EmbedderClient::view_close_requested`.
+pub type ViewCloseRequestedCallback = Rc<dyn Fn(&mut App, ViewId)>;
+
+/// The framework's handler for `EmbedderClient::view_request_failed`.
+pub type ViewRequestFailedCallback = Rc<dyn Fn(&mut App, RequestId, ViewError)>;
 
 impl App {
     pub(crate) fn build(

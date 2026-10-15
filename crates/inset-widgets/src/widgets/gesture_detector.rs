@@ -2145,16 +2145,6 @@ mod tests {
     }
 
     impl GestureBindingOverridesObject for RootHitTester {
-        fn hit_test(
-            self: Handle<Self>,
-            app: &mut App,
-            result: &mut HitTestResult,
-            position: Offset,
-        ) {
-            let root = app.get(self).root;
-            root.hit_test(app, result, position);
-        }
-
         fn hit_test_in_view(
             self: Handle<Self>,
             app: &mut App,
@@ -2162,7 +2152,8 @@ mod tests {
             position: Offset,
             _view_id: ViewId,
         ) {
-            GestureBindingOverridesObject::hit_test(self, app, result, position);
+            let root = app.get(self).root;
+            root.hit_test(app, result, position);
         }
 
         fn will_dispatch_event(

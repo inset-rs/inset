@@ -6,5 +6,5 @@
 //! ```
 
 fn main() {
-    cupertino_gallery::main();
+    cupertino_gallery_lib::main();
 }

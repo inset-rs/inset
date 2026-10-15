@@ -1,15 +1,18 @@
-//! Windows the app creates, beyond the implicit view. Not a Flutter file.
+//! Asking for views, and the windows around them. Not a Flutter file.
+//!
+//! An app asks for a view with a [`ViewRequest`] (`Platform::request_view`), and the view
+//! arrives later, as every view does, carrying the request's [`RequestId`], as iOS hands back
+//! the activity of `requestSceneSessionActivation` with the connecting scene. On a desktop the
+//! host makes a window for it; where the platform gives the app views and makes none, on a
+//! phone and when embedded, a request is refused. A view in a window the app may manage, one it
+//! asked for or one the platform gave, has a [`HostWindow`] (`View::window`): the configuration
+//! every window wants up front, the native handle for anything beyond it, and the window's
+//! closing, which is how a view closes.
 //!
 //! Flutter's windowing API (`widgets/_window.dart`, experimental) builds window archetypes
-//! over the engine's views, and on macOS its `FlutterViewController` is a view the app places
-//! in a window it owns. Here a window is a view the host puts on screen: the configuration
-//! every window wants up front, the native handle for anything beyond it, and adoption for
-//! a window only the app could make. Where the app cannot ask for another view, on iPhone and
-//! when embedded, there is no owner, and the implicit view is all there is.
+//! over the engine's views, each controller making its window within its constructor.
 
 use std::fmt;
-use std::future::Future;
-use std::pin::Pin;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -35,7 +38,7 @@ pub struct WindowConfig {
     pub resizable: bool,
     pub level: WindowLevel,
     /// Whether showing or clicking the window makes it the focused one. A host may not be
-    /// able to refuse activation; a window that must never take focus is one to `adopt`.
+    /// able to refuse activation.
     pub activating: bool,
     /// Whether the window is on every virtual desktop: macOS Spaces, X11 workspaces.
     pub all_desktops: bool,
@@ -49,7 +52,7 @@ impl Default for WindowConfig {
     fn default() -> WindowConfig {
         WindowConfig {
             title: String::new(),
-            size: [400.0, 300.0],
+            size: [900.0, 600.0],
             position: None,
             decorations: true,
             resizable: true,
@@ -94,33 +97,45 @@ impl WindowBackground {
     }
 }
 
+/// What an app asks for when it asks for a view.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ViewRequest {
+    /// The window a desktop makes for the view.
+    pub config: WindowConfig,
+    /// What the view carries when it arrives ([`View::initial_data`](crate::View::initial_data)),
+    /// such as which screen to show.
+    pub initial_data: Option<String>,
+}
+
+/// The number of a request for a view, which the view carries when it arrives
+/// ([`View::request_id`](crate::View::request_id)).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct RequestId(pub u64);
+
+/// Why a request for a view got no view.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WindowError {
-    /// This host makes no windows, or cannot adopt one.
+pub enum ViewError {
+    /// This platform gives the app its views and makes none on request.
     Unsupported,
     Failed(String),
 }
 
-impl fmt::Display for WindowError {
+impl fmt::Display for ViewError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            WindowError::Unsupported => f.write_str("the host does not support this window"),
-            WindowError::Failed(reason) => {
-                write!(f, "the host could not make the window: {reason}")
+            ViewError::Unsupported => f.write_str("the platform makes no views on request"),
+            ViewError::Failed(reason) => {
+                write!(f, "the platform could not make the view: {reason}")
             }
         }
     }
 }
 
-impl std::error::Error for WindowError {}
-
-/// A window being made: the host finishes it on its own loop.
-pub type WindowFuture = Pin<Box<dyn Future<Output = Result<WindowRef, WindowError>>>>;
+impl std::error::Error for ViewError {}
 
 pub type WindowRef = Rc<dyn HostWindow>;
 
-/// A window the host has on screen. Its [`view`](Self::view) is what the framework draws
-/// into and receives input from, like the implicit view.
+/// The window around a view the host puts on screen in a window the app may manage.
 pub trait HostWindow: 'static {
     fn view(&self) -> ViewRef;
 
@@ -136,31 +151,13 @@ pub trait HostWindow: 'static {
 
     fn hide(&self);
 
-    /// Closes the window; its view goes away with it.
+    /// Closes the window; its view goes away with it. The user's asking to close it only reports
+    /// it ([`EmbedderClient::view_close_requested`](crate::EmbedderClient::view_close_requested));
+    /// this closes it.
     fn close(&self);
 
     /// The native window, for configuration this interface does not carry.
     fn native_handle(&self) -> Option<RawWindowHandle>;
-
-    /// What happens when the user asks to close the window. With no handler the host
-    /// closes it.
-    fn set_close_requested(&self, handler: Option<Rc<dyn Fn()>>);
-}
-
-/// The host's window maker. [`crate::Platform::windowing_owner`] answers `None` where the app
-/// cannot ask for another view, so an owner that exists makes windows.
-pub trait WindowingOwner: 'static {
-    /// Makes a window. The host finishes it on its own loop, so the window arrives through
-    /// the future.
-    fn create(&self, config: WindowConfig) -> WindowFuture;
-
-    /// Takes over a native window the app made, for what no configuration can express:
-    /// on macOS an `NSPanel` that never activates. The host installs its view in it and
-    /// drives rendering and input for it. Hosts that cannot answer `Unsupported`.
-    fn adopt(&self, handle: RawWindowHandle) -> WindowFuture {
-        let _ = handle;
-        Box::pin(async { Err(WindowError::Unsupported) })
-    }
 }
 
 #[cfg(test)]
@@ -181,30 +178,5 @@ mod tests {
         assert!(WindowBackground::Transparent.sees_through());
         assert!(WindowBackground::Blurred.sees_through());
         assert!(WindowBackground::Glass.sees_through());
-    }
-
-    struct NoWindows;
-
-    impl WindowingOwner for NoWindows {
-        fn create(&self, _config: WindowConfig) -> WindowFuture {
-            Box::pin(async { Err(WindowError::Unsupported) })
-        }
-    }
-
-    #[test]
-    fn adoption_is_unsupported_unless_a_host_says_otherwise() {
-        let owner = NoWindows;
-        let mut future = owner.adopt(RawWindowHandle::Web(
-            raw_window_handle::WebWindowHandle::new(1),
-        ));
-        let waker = std::task::Waker::noop();
-        let mut cx = std::task::Context::from_waker(waker);
-        match future.as_mut().poll(&mut cx) {
-            std::task::Poll::Ready(Err(WindowError::Unsupported)) => {}
-            other => panic!(
-                "expected Unsupported, got {:?}",
-                other.map(|r| r.map(|_| ()))
-            ),
-        }
     }
 }

@@ -572,4 +572,42 @@ mod tests {
         assert_eq!(response.get(), Some(AppExitResponse::Exit));
         listener.dispose(&mut cell.borrow_mut());
     }
+
+    /// The first listener is asked within the request, so it has started answering when the
+    /// second is disposed.
+    #[test]
+    fn does_not_notify_listeners_disposed_while_handling_an_exit_request() {
+        let cell = AppCell::new();
+        let finish_first_request: Completer<AppExitResponse> = Completer::new();
+        let disposed_listener_called = Rc::new(Cell::new(false));
+        let (first_listener, listener) = {
+            let mut app = cell.borrow_mut();
+            let finished = finish_first_request.future();
+            let first_listener = AppLifecycleListener::new(&mut app).on_exit_requested(
+                &mut app,
+                Rc::new(move |app| {
+                    let finished = finished.clone();
+                    app.spawn(async move |_cx| finished.await)
+                }),
+            );
+            let called = Rc::clone(&disposed_listener_called);
+            let listener = AppLifecycleListener::new(&mut app).on_exit_requested(
+                &mut app,
+                Rc::new(move |_app| {
+                    called.set(true);
+                    Task::ready(AppExitResponse::Exit)
+                }),
+            );
+            (first_listener, listener)
+        };
+
+        let response = request_app_exit(&cell);
+        listener.dispose(&mut cell.borrow_mut());
+        finish_first_request.complete(&mut cell.borrow_mut(), AppExitResponse::Exit);
+        cell.checkpoint();
+
+        assert_eq!(response.get(), Some(AppExitResponse::Exit));
+        assert!(!disposed_listener_called.get());
+        first_listener.dispose(&mut cell.borrow_mut());
+    }
 }

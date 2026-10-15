@@ -7,12 +7,11 @@ use std::rc::Rc;
 use inset_embedder::clamp_double;
 use inset_foundation::App;
 use inset_gestures::{K_MAX_FLING_VELOCITY, K_MIN_FLING_VELOCITY, K_TOUCH_SLOP};
-use inset_painting::AxisDirection;
 use inset_physics::{ScrollSpringSimulation, Simulation, SpringDescription, Tolerance};
 
 use crate::framework::BuildContext;
 use crate::view::View;
-use crate::widgets::scroll_metrics::{FixedScrollMetrics, ScrollMetrics};
+use crate::widgets::scroll_metrics::ScrollMetrics;
 use crate::widgets::scroll_simulation::{BouncingScrollSimulation, ClampingScrollSimulation};
 
 /// A [`ScrollPhysics`] held by value: what a Dart field or parameter typed `ScrollPhysics`
@@ -318,27 +317,6 @@ pub trait ScrollPhysics: Debug {
     /// The spring to use for ballistic simulations.
     fn spring(&self) -> SpringDescription {
         ScrollPhysicsBase::spring(self)
-    }
-
-    /// Deprecated. Call [`tolerance_for`](Self::tolerance_for) instead.
-    #[deprecated(
-        note = "Call tolerance_for instead. This feature was deprecated after v3.7.0-13.0.pre."
-    )]
-    fn tolerance(&self, app: &App) -> Tolerance {
-        let device_pixel_ratio = app
-            .platform()
-            .implicit_view()
-            .expect("ScrollPhysics.tolerance reads the implicit view's device pixel ratio")
-            .metrics()
-            .device_pixel_ratio;
-        self.tolerance_for(&FixedScrollMetrics::new(
-            None,
-            None,
-            None,
-            None,
-            AxisDirection::Down,
-            device_pixel_ratio,
-        ))
     }
 
     /// The tolerance to use for ballistic simulations.
@@ -1308,6 +1286,7 @@ mod tests {
     use inset_painting::AxisDirection;
 
     use super::*;
+    use crate::widgets::scroll_metrics::FixedScrollMetrics;
 
     /// `scroll_physics_test.dart`'s `TestScrollPhysics`: physics that name themselves so a
     /// chain of parents can be read back.

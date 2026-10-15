@@ -1,9 +1,12 @@
 //! A view that draws nowhere.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::rc::Weak;
 use std::sync::Arc;
 
-use inset_embedder::{Scene, View, ViewConstraints, ViewId, ViewMetrics};
+use inset_embedder::{
+    HostWindow, RequestId, Scene, View, ViewConstraints, ViewId, ViewMetrics, WindowRef,
+};
 
 /// A view of a fixed physical size and pixel ratio that counts the pictures presented to it
 /// and shows none. `flutter_test`'s `TestFlutterView` in its two settable dimensions.
@@ -12,6 +15,10 @@ pub struct TestView {
     size: Cell<[f64; 2]>,
     device_pixel_ratio: f64,
     presented: Cell<u32>,
+    request_id: Option<RequestId>,
+    initial_data: Option<String>,
+    /// The window the view is in, until it closes; held weakly, since the window holds the view.
+    window: RefCell<Option<Weak<dyn HostWindow>>>,
 }
 
 impl TestView {
@@ -27,12 +34,28 @@ impl TestView {
             size: Cell::new([width, height]),
             device_pixel_ratio,
             presented: Cell::new(0),
+            request_id: None,
+            initial_data: None,
+            window: RefCell::new(None),
         }
     }
 
     /// The same view under another id, for a platform with several.
     pub fn with_id(mut self, id: ViewId) -> TestView {
         self.id = id;
+        self
+    }
+
+    /// The same view as one that arrived for request `id`, carrying `initial_data`.
+    pub fn with_request(mut self, id: RequestId, initial_data: Option<String>) -> TestView {
+        self.request_id = Some(id);
+        self.initial_data = initial_data;
+        self
+    }
+
+    /// The same view as one an embedder gave with `initial_data`.
+    pub fn with_initial_data(mut self, initial_data: impl Into<String>) -> TestView {
+        self.initial_data = Some(initial_data.into());
         self
     }
 
@@ -44,6 +67,11 @@ impl TestView {
     /// How many pictures have been presented.
     pub fn presented(&self) -> u32 {
         self.presented.get()
+    }
+
+    /// The view is in `window` from now on, or in none.
+    pub(crate) fn set_window(&self, window: Option<Weak<dyn HostWindow>>) {
+        *self.window.borrow_mut() = window;
     }
 }
 
@@ -64,5 +92,17 @@ impl View for TestView {
 
     fn present(&self, _scene: Arc<Scene>) {
         self.presented.set(self.presented.get() + 1);
+    }
+
+    fn initial_data(&self) -> Option<String> {
+        self.initial_data.clone()
+    }
+
+    fn request_id(&self) -> Option<RequestId> {
+        self.request_id
+    }
+
+    fn window(&self) -> Option<WindowRef> {
+        self.window.borrow().as_ref()?.upgrade()
     }
 }

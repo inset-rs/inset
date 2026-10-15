@@ -11,6 +11,7 @@
 #![recursion_limit = "256"]
 
 mod client;
+mod composition;
 mod drag_drop;
 mod fonts;
 mod geometry;
@@ -23,7 +24,6 @@ mod paragraph;
 mod platform;
 mod pointer;
 mod restoration;
-mod composition;
 mod scene_builder;
 mod system_context_menu;
 #[cfg(feature = "test-support")]
@@ -35,6 +35,7 @@ mod views;
 mod window;
 
 pub use client::EmbedderClient;
+pub use composition::{Buffer, Compositor, Surface, VsyncObserver};
 pub use drag_drop::{DropChange, DropData};
 pub use fonts::{
     FontCollection, FontDemand, FontId, FontManager, FontSource, SystemFontSource, Typeface,
@@ -50,7 +51,7 @@ pub use mouse_cursor::SystemMouseCursorKind;
 pub use painting::*;
 pub use paragraph::*;
 pub use platform::{
-    AppExit, AppExitFuture, AppExitResponse, AppExitType, AppLifecycleState,
+    AppExit, AppExitReply, AppExitResponse, AppExitType, AppLifecycleState,
     ApplicationSwitcherDescription, Brightness, Clipboard, ClipboardHasStringsFuture,
     ClipboardSetTextFuture, ClipboardTextFuture, Dispatcher, FileOpening, Frame,
     HapticFeedbackType, Haptics, InertDispatcher, InertPlatform, MouseCursor, OpenFilesHandler,
@@ -61,7 +62,6 @@ pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
 };
 pub use restoration::{RestorationData, RestorationMap, RestorationUpdate};
-pub use composition::{Buffer, Compositor, Surface, VsyncObserver};
 pub use scene_builder::{EngineLayer, Scene, SceneBuilder, SurfacePlacement};
 pub use system_context_menu::SystemContextMenuItem;
 pub use text::*;
@@ -73,6 +73,6 @@ pub use views::{
 };
 pub use web_time::Instant;
 pub use window::{
-    HostWindow, RawWindowHandle, WindowBackground, WindowConfig, WindowError, WindowFuture,
-    WindowLevel, WindowRef, WindowingOwner,
+    HostWindow, RawWindowHandle, RequestId, ViewError, ViewRequest, WindowBackground, WindowConfig,
+    WindowLevel, WindowRef,
 };

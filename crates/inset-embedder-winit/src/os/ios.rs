@@ -22,7 +22,7 @@ impl OperatingSystem for Ios {
     /// The system sizes a phone's window; winit on iOS would size it to a request instead.
     const WINDOW_IS_THE_SCREEN: bool = true;
 
-    /// The implicit view's window is the only one, as on an iPhone.
+    /// The screen view's window is the only one, as on an iPhone.
     const APP_MAY_OPEN_WINDOWS: bool = false;
 
     const APP_MAY_QUIT: bool = false;

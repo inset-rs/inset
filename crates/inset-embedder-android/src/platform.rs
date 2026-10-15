@@ -150,17 +150,13 @@ impl Platform for AndroidPlatform {
         })
     }
 
+    /// The activity's window, the one view the system gives the app.
     fn views(&self) -> Vec<ViewRef> {
         vec![Rc::clone(&self.view) as ViewRef]
     }
 
     fn view(&self, id: inset_embedder::ViewId) -> Option<ViewRef> {
         (id == VIEW).then(|| Rc::clone(&self.view) as ViewRef)
-    }
-
-    /// The activity has one window, and it is the implicit view.
-    fn implicit_view(&self) -> Option<ViewRef> {
-        Some(Rc::clone(&self.view) as ViewRef)
     }
 
     fn system_chrome(&self) -> Option<&dyn SystemChrome> {

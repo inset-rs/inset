@@ -13,50 +13,38 @@
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::quote;
-use syn::parse::{Parse, ParseStream};
-use syn::punctuated::Punctuated;
-use syn::{Expr, ExprLit, Ident, ItemFn, Lit, LitStr, Meta, Token, Visibility};
+use syn::{Ident, ItemFn, Visibility};
 
 /// Marks the app's setup function.
 ///
 /// ```ignore
-/// #[inset::main(title = "Counter", size = [420.0, 720.0])]
+/// #[inset::main]
 /// fn main(app: &mut App) {
 ///     run_app(app, CupertinoApp::new().home(Home).into_widget());
 /// }
 /// ```
 ///
-/// `title` and `size` configure the native window and default to the package
-/// name and the embedder's default size. The browser host ignores both; its
-/// page calls the exported `main` once the module is instantiated. Android's
-/// window is the screen and ignores both too; its entry is `android_main`, and
-/// there is no `main`. For a WASI host no `main` is emitted and the function
-/// keeps its name, for the app's own entry to call through that host's embedder
-/// crate.
+/// The attribute takes no options: the window a desktop makes for the app is
+/// the setup's to say, through `run_app_with`. The browser host's page calls
+/// the exported `main` once the module is instantiated. Android's entry is
+/// `android_main`, and there is no `main`. For a WASI host no `main` is
+/// emitted and the function keeps its name, for the app's own entry to call
+/// through that host's embedder crate.
 #[proc_macro_attribute]
 pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let options = syn::parse_macro_input!(attr as Options);
+    if !attr.is_empty() {
+        return syn::Error::new(
+            Span::call_site(),
+            "`#[inset::main]` takes no options; pass the window's title and size to `run_app_with`",
+        )
+        .to_compile_error()
+        .into();
+    }
     let mut setup = syn::parse_macro_input!(item as ItemFn);
     let as_written = setup.clone();
     let setup_name = Ident::new("__inset_setup", Span::call_site());
     setup.sig.ident = setup_name.clone();
     setup.vis = Visibility::Inherited;
-
-    let title = match options.title {
-        Some(title) => quote!(#title),
-        None => quote!(::core::env!("CARGO_PKG_NAME")),
-    };
-    let size = match options.size {
-        Some(size) => quote!(#size),
-        None => quote!([900.0, 600.0]),
-    };
-    let view = quote! {
-        ::inset::WindowConfig {
-            title: ::std::string::ToString::to_string(#title),
-            size: #size,
-            ..::core::default::Default::default()
-        }
-    };
 
     quote! {
         #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
@@ -70,13 +58,12 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
         #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
         pub fn main() {
             ::inset::DefaultEmbedder::default()
-                .implicit_view(::core::option::Option::Some(#view))
                 .run(|platform| ::inset::Shell::new(platform, #setup_name));
         }
 
         // The activity's glue looks this symbol up in the app's library and calls it on a
         // thread of its own with the `AndroidApp` the loop runs on. The window is the
-        // screen, which the system sizes and titles, so neither option reaches the host.
+        // screen, which the system sizes and titles.
         #[cfg(target_os = "android")]
         #[unsafe(no_mangle)]
         fn android_main(app: ::inset::AndroidApp) {
@@ -93,48 +80,4 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
     .into()
-}
-
-struct Options {
-    title: Option<LitStr>,
-    size: Option<Expr>,
-}
-
-impl Parse for Options {
-    fn parse(input: ParseStream) -> syn::Result<Options> {
-        let mut options = Options {
-            title: None,
-            size: None,
-        };
-        for meta in Punctuated::<Meta, Token![,]>::parse_terminated(input)? {
-            let Meta::NameValue(pair) = meta else {
-                return Err(syn::Error::new_spanned(
-                    meta,
-                    "expected `title = \"…\"` or `size = [width, height]`",
-                ));
-            };
-            if pair.path.is_ident("title") {
-                match pair.value {
-                    Expr::Lit(ExprLit {
-                        lit: Lit::Str(title),
-                        ..
-                    }) => options.title = Some(title),
-                    other => {
-                        return Err(syn::Error::new_spanned(
-                            other,
-                            "`title` takes a string literal",
-                        ));
-                    }
-                }
-            } else if pair.path.is_ident("size") {
-                options.size = Some(pair.value);
-            } else {
-                return Err(syn::Error::new_spanned(
-                    pair.path,
-                    "unknown option; expected `title` or `size`",
-                ));
-            }
-        }
-        Ok(options)
-    }
 }

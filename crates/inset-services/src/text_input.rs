@@ -940,14 +940,11 @@ impl TextInput {
     }
 }
 
+/// The view the field is in, which names it in its configuration, as Flutter's engine finds
+/// the view by `viewId`.
 fn target_view(app: &App, configuration: &TextInputConfiguration) -> Option<ViewRef> {
-    let platform = app.platform();
-    if let Some(id) = configuration.view_id
-        && let Some(view) = platform.view(ViewId(id as u64))
-    {
-        return Some(view);
-    }
-    platform.implicit_view()
+    let id = configuration.view_id?;
+    app.platform().view(ViewId(id as u64))
 }
 
 fn platform_attach(app: &App, configuration: &TextInputConfiguration) {

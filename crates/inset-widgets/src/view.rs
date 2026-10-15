@@ -1147,7 +1147,7 @@ mod tests {
         );
         let event = |state, direction| {
             let mut app = cell.borrow_mut();
-            let view_id = app.platform().implicit_view().unwrap().id();
+            let view_id = crate::test_harness::platform_view(&app).id();
             WidgetsBinding::instance(&mut app).handle_view_focus_changed(
                 &mut app,
                 ViewFocusEvent {
@@ -1264,63 +1264,5 @@ mod tests {
         assert_eq!(binding.render_views(&app).len(), 2);
         assert_eq!(enclosing_presented.get(), 1);
         assert_eq!(side_presented.get(), 1);
-    }
-
-    struct FakeWindow {
-        view: inset_embedder::ViewRef,
-    }
-
-    impl inset_embedder::HostWindow for FakeWindow {
-        fn view(&self) -> inset_embedder::ViewRef {
-            Rc::clone(&self.view)
-        }
-
-        fn frame(&self) -> inset_embedder::Rect {
-            inset_embedder::Rect::from_ltwh(1.0, 2.0, 3.0, 4.0)
-        }
-
-        fn set_frame(&self, _frame: inset_embedder::Rect, _animate: Option<std::time::Duration>) {}
-
-        fn set_title(&self, _title: &str) {}
-
-        fn show(&self) {}
-
-        fn hide(&self) {}
-
-        fn close(&self) {}
-
-        fn native_handle(&self) -> Option<inset_embedder::RawWindowHandle> {
-            None
-        }
-
-        fn set_close_requested(&self, _handler: Option<Rc<dyn Fn()>>) {}
-    }
-
-    #[test]
-    fn a_window_hands_itself_to_its_subtree() {
-        use crate::widgets::basic::Builder;
-        use crate::window::{Window, WindowScope};
-
-        let cell = binding_cell();
-        let (view, presented) = counting_view(7);
-        let window: inset_embedder::WindowRef = Rc::new(FakeWindow { view });
-        let seen = Rc::new(std::cell::Cell::new(None));
-        let probe = {
-            let seen = Rc::clone(&seen);
-            Builder::new(move |app, context| {
-                seen.set(Some(WindowScope::of(app, context).frame()));
-                SizedBox::new().into_widget()
-            })
-        };
-        mount_root(
-            &cell,
-            super::ViewCollection::new(vec![Window::new(window, probe).into_widget()])
-                .into_widget(),
-        );
-        assert_eq!(
-            seen.get(),
-            Some(inset_embedder::Rect::from_ltwh(1.0, 2.0, 3.0, 4.0))
-        );
-        assert_eq!(presented.get(), 1);
     }
 }

@@ -9,10 +9,11 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use inset_cupertino::{CupertinoApp, CupertinoPageRoute, install_cupertino_icon_font};
+use inset_embedder::WindowConfig;
 use inset_foundation::{App, Handle, Listener, Timer};
 use inset_widgets::{
     AnyRoute, BuildContext, GlobalKey, IntoWidget, Navigator, NavigatorState, Route,
-    RouteSettingsRef, WidgetBuilder, run_app,
+    RouteSettingsRef, WidgetBuilder, run_app_with,
 };
 
 use crate::catalog::Entry;
@@ -47,9 +48,15 @@ pub fn gallery() -> CupertinoApp {
 /// screen a user would tap to, reached without input, for a bench or a smoke run.
 pub fn run_gallery(app: &mut App, opening: Option<Entry>) {
     let navigator = GlobalKey::new();
-    run_app(
+    let window = WindowConfig {
+        title: "Inset — cupertino gallery".to_owned(),
+        size: [420.0, 720.0],
+        ..WindowConfig::default()
+    };
+    run_app_with(
         app,
         gallery().navigator_key(navigator.clone()).into_widget(),
+        window,
     );
     // AFTER `run_app`, which is what installs the default font collection this registers
     // into. Without the icon face every glyph in the gallery — the back chevron, the row

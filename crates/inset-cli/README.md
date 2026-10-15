@@ -47,13 +47,13 @@ myapp/
 The app is the library because the browser and Android load a library, not an executable. `#[inset::main]` emits the entry point for the compile target:
 
 ```rust
-#[inset::main(title = "My App", size = [420.0, 720.0])]
+#[inset::main]
 fn main(app: &mut App) {
     run_app(app, CupertinoApp::new().home(Home).into_widget());
 }
 ```
 
-`title` and `size` set the native window; both are optional.
+On a desktop `run_app` asks for a window with the default configuration; `run_app_with` takes the window's title, size and the rest.
 
 ## Metadata
 

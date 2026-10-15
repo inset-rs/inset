@@ -23,9 +23,7 @@ fn main() {
     support::fail_after(TEST, GIVE_UP_AFTER, || {
         format!("the steps did not end in {GIVE_UP_AFTER:?}")
     });
-    WinitEmbedder::default()
-        .implicit_view(None)
-        .run(client::LifecycleClient::new);
+    WinitEmbedder.run(client::LifecycleClient::new);
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -36,8 +34,8 @@ mod client {
     use std::time::{Duration, Instant};
 
     use inset_embedder::{
-        AppLifecycleState, EmbedderClient, Frame, KeyData, PlatformRef, PointerDataPacket, ViewId,
-        WindowConfig, WindowFuture, WindowRef,
+        AppLifecycleState, EmbedderClient, Frame, KeyData, PlatformRef, PointerDataPacket,
+        RequestId, ViewId, WindowConfig, WindowRef,
     };
 
     use crate::TEST;
@@ -90,7 +88,7 @@ mod client {
     /// settled and the framework has heard the state it puts the application in.
     pub(crate) struct LifecycleClient {
         platform: PlatformRef,
-        opening: Vec<WindowFuture>,
+        requested: Vec<RequestId>,
         windows: Vec<WindowRef>,
         heard: Option<AppLifecycleState>,
         step: usize,
@@ -99,17 +97,17 @@ mod client {
 
     impl LifecycleClient {
         pub(crate) fn new(platform: PlatformRef) -> LifecycleClient {
-            let owner = platform
-                .windowing_owner()
-                .expect("a desktop host makes windows");
-            let opening = vec![owner.create(WindowConfig {
-                title: WINDOW_TITLE.into(),
-                size: [300.0, 200.0],
-                ..WindowConfig::default()
-            })];
+            let requested = vec![support::request_window(
+                &platform,
+                WindowConfig {
+                    title: WINDOW_TITLE.into(),
+                    size: [300.0, 200.0],
+                    ..WindowConfig::default()
+                },
+            )];
             let client = LifecycleClient {
                 platform,
-                opening,
+                requested,
                 windows: Vec::new(),
                 heard: None,
                 step: 0,
@@ -150,7 +148,7 @@ mod client {
         }
 
         fn wake(&mut self, _elapsed: Duration) {
-            support::take_opened_windows(&mut self.opening, &mut self.windows);
+            support::take_opened_windows(&self.platform, &mut self.requested, &mut self.windows);
             if !self.windows.is_empty() {
                 self.go_on();
             }
@@ -158,7 +156,12 @@ mod client {
         }
 
         fn frame(&mut self, _frame: Frame) {}
-        fn view_added(&mut self, _id: ViewId) {}
+        fn view_added(&mut self, _id: ViewId) {
+            support::take_opened_windows(&self.platform, &mut self.requested, &mut self.windows);
+            if !self.windows.is_empty() {
+                self.go_on();
+            }
+        }
         fn view_metrics_changed(&mut self, _id: ViewId) {}
         fn view_removed(&mut self, _id: ViewId) {}
         fn pointer_data_packet(&mut self, _packet: PointerDataPacket) {}

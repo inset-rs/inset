@@ -7,14 +7,16 @@
 //! No call here calls the client. What needs the event loop is sent to it as a request, and the
 //! rest acts at once: `main_loop/` says which is which.
 
+use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use inset_embedder::{
     AppExit, Brightness, Clipboard, Compositor, Dispatcher, FileOpening, FontSource,
-    ImageCodecFuture, MouseCursor, Platform, PopupMenus, Screens, SystemFontSource, TargetPlatform,
-    ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId, ViewRef, WindowingOwner,
+    ImageCodecFuture, MouseCursor, Platform, PopupMenus, RequestId, Screens, SystemFontSource,
+    TargetPlatform, ViewError, ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId, ViewRef,
+    ViewRequest,
 };
 use winit::event_loop::EventLoopProxy;
 
@@ -26,7 +28,7 @@ use crate::main_loop::MainLoopEvent;
 use crate::os::{NativeComposition, OperatingSystem, Screens as _, SystemRequests, ThisOs};
 use crate::popup_menus::NativePopupMenus;
 use crate::state::EmbedderState;
-use crate::windows::WinitWindowing;
+use crate::windows::WindowRequest;
 
 /// The long-lived embedder capability held by `App`.
 ///
@@ -45,8 +47,8 @@ pub struct WinitPlatform {
     state: Rc<EmbedderState>,
     /// Where the dispatcher's wakes and a closed menu's word go, from any thread.
     proxy: EventLoopProxy<MainLoopEvent>,
-    /// The window maker handed to the app; its requests are served by the main loop.
-    windowing: Rc<WinitWindowing>,
+    /// The id of the next request for a view.
+    next_request_id: Cell<u64>,
     /// The system's compositor for native surfaces, where it has one.
     compositor: Option<Arc<dyn Compositor>>,
     origin: Instant,
@@ -62,7 +64,7 @@ impl WinitPlatform {
         proxy: EventLoopProxy<MainLoopEvent>,
     ) -> WinitPlatform {
         WinitPlatform {
-            windowing: Rc::new(WinitWindowing::new(Rc::clone(state.requests()))),
+            next_request_id: Cell::new(1),
             macos: cfg!(target_os = "macos").then(|| MacOs::new(Rc::clone(&state))),
             state,
             compositor: ThisOs::compositor(),
@@ -125,7 +127,8 @@ impl Platform for WinitPlatform {
         Arc::new(WinitDispatcher(self.proxy.clone()))
     }
 
-    /// Every view, with a window or not, in the order they came: the implicit view first.
+    /// Every view, with a window or not, in the order they came: the screen view first, where
+    /// there is one.
     fn views(&self) -> Vec<ViewRef> {
         self.state
             .views()
@@ -156,12 +159,6 @@ impl Platform for WinitPlatform {
         }));
     }
 
-    /// The same view for the app's whole life: there before its window opens, and still there,
-    /// drawing nowhere, once its window closes.
-    fn implicit_view(&self) -> Option<ViewRef> {
-        self.state.views().implicit().map(|view| view as ViewRef)
-    }
-
     /// The OS font database, scanned on request; the shell asks once at start-up.
     fn font_source(&self) -> Option<Box<dyn FontSource>> {
         Some(Box::new(SystemFontSource::platform()))
@@ -171,9 +168,19 @@ impl Platform for WinitPlatform {
         self.compositor.clone()
     }
 
-    /// The embedder's window maker where the app may open windows: none on iOS.
-    fn windowing_owner(&self) -> Option<Rc<dyn WindowingOwner>> {
-        ThisOs::APP_MAY_OPEN_WINDOWS.then(|| Rc::clone(&self.windowing) as Rc<dyn WindowingOwner>)
+    /// A window for the view, made on a turn of the main loop, where the app may open windows:
+    /// none on iOS.
+    fn request_view(&self, request: ViewRequest) -> Result<RequestId, ViewError> {
+        if !ThisOs::APP_MAY_OPEN_WINDOWS {
+            return Err(ViewError::Unsupported);
+        }
+        let request_id = RequestId(self.next_request_id.get());
+        self.next_request_id.set(request_id.0 + 1);
+        self.send(AppRequest::OpenWindow(WindowRequest {
+            request_id,
+            request,
+        }));
+        Ok(request_id)
     }
 
     /// The system's own answers, where it is asked outside winit's callbacks: on macOS.

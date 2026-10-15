@@ -24,9 +24,7 @@ fn main() {
     support::fail_after(TEST, GIVE_UP_AFTER, || {
         format!("the steps did not end in {GIVE_UP_AFTER:?}")
     });
-    WinitEmbedder::default()
-        .implicit_view(None)
-        .run(client::VisibilityClient::new);
+    WinitEmbedder.run(client::VisibilityClient::new);
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -39,8 +37,8 @@ mod client {
     use std::time::{Duration, Instant};
 
     use inset_embedder::{
-        EmbedderClient, Frame, KeyData, PlatformRef, PointerDataPacket, Rect, SceneBuilder,
-        Surface, ViewId, VsyncObserver, WindowConfig, WindowFuture, WindowRef,
+        EmbedderClient, Frame, KeyData, PlatformRef, PointerDataPacket, Rect, RequestId,
+        SceneBuilder, Surface, ViewId, VsyncObserver, WindowConfig, WindowRef,
     };
 
     use crate::TEST;
@@ -122,7 +120,7 @@ mod client {
     /// frames, which come whether a window is visible or not, time the steps.
     pub(crate) struct VisibilityClient {
         platform: PlatformRef,
-        opening: Vec<WindowFuture>,
+        requested: Vec<RequestId>,
         windows: Vec<WindowRef>,
         producer: Option<Arc<CountingProducer>>,
         step: usize,
@@ -133,27 +131,30 @@ mod client {
 
     impl VisibilityClient {
         pub(crate) fn new(platform: PlatformRef) -> VisibilityClient {
-            let owner = platform
-                .windowing_owner()
-                .expect("a desktop host makes windows");
-            let opening = vec![
-                owner.create(WindowConfig {
-                    title: SURFACE_WINDOW.into(),
-                    size: [400.0, 300.0],
-                    position: Some([300.0, 300.0]),
-                    ..WindowConfig::default()
-                }),
-                owner.create(WindowConfig {
-                    title: "a window covering it".into(),
-                    size: [800.0, 700.0],
-                    position: Some([100.0, 100.0]),
-                    visible: false,
-                    ..WindowConfig::default()
-                }),
+            let requested = vec![
+                support::request_window(
+                    &platform,
+                    WindowConfig {
+                        title: SURFACE_WINDOW.into(),
+                        size: [400.0, 300.0],
+                        position: Some([300.0, 300.0]),
+                        ..WindowConfig::default()
+                    },
+                ),
+                support::request_window(
+                    &platform,
+                    WindowConfig {
+                        title: "a window covering it".into(),
+                        size: [800.0, 700.0],
+                        position: Some([100.0, 100.0]),
+                        visible: false,
+                        ..WindowConfig::default()
+                    },
+                ),
             ];
             VisibilityClient {
                 platform,
-                opening,
+                requested,
                 windows: Vec::new(),
                 producer: None,
                 step: 0,
@@ -249,11 +250,14 @@ mod client {
         }
 
         fn wake(&mut self, _elapsed: Duration) {
-            support::take_opened_windows(&mut self.opening, &mut self.windows);
+            support::take_opened_windows(&self.platform, &mut self.requested, &mut self.windows);
             self.place_a_surface_once_both_windows_are_made();
         }
 
-        fn view_added(&mut self, _id: ViewId) {}
+        fn view_added(&mut self, _id: ViewId) {
+            support::take_opened_windows(&self.platform, &mut self.requested, &mut self.windows);
+            self.place_a_surface_once_both_windows_are_made();
+        }
         fn view_metrics_changed(&mut self, _id: ViewId) {}
         fn view_removed(&mut self, _id: ViewId) {}
         fn pointer_data_packet(&mut self, _packet: PointerDataPacket) {}

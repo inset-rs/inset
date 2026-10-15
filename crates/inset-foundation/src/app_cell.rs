@@ -270,10 +270,6 @@ mod tests {
         fn view(&self, _id: ViewId) -> Option<ViewRef> {
             None
         }
-
-        fn implicit_view(&self) -> Option<ViewRef> {
-            None
-        }
     }
 
     fn app_on_a_recording_host() -> (Rc<AppCell>, Arc<RecordingHost>) {

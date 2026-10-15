@@ -1,13 +1,12 @@
 //! What the window tests share: a watchdog for a test that would otherwise wait for ever, the
-//! windows whose making has finished, a window closed once it is made, and what they ask of
-//! AppKit that the embedder offers no call for.
+//! windows asked for whose views have arrived, and what they ask of AppKit that the embedder
+//! offers no call for.
 
 #![allow(dead_code, reason = "each test binary uses a part of it")]
 
-use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
-use inset_embedder::{PlatformRef, WindowConfig, WindowFuture, WindowRef};
+use inset_embedder::{PlatformRef, RequestId, ViewRequest, WindowConfig, WindowRef};
 
 /// Ends the process as a failure of `test` after `after`, from a thread of its own, with
 /// what `reason` says then.
@@ -34,48 +33,45 @@ pub fn pass(test: &str) -> ! {
     std::process::exit(0);
 }
 
-/// Moves the windows whose making has finished from `opening` to `windows`, in the order they
-/// were asked for.
-pub fn take_opened_windows(opening: &mut Vec<WindowFuture>, windows: &mut Vec<WindowRef>) {
-    let mut context = Context::from_waker(Waker::noop());
-    let mut still_opening = Vec::new();
-    for mut window in opening.drain(..) {
-        match window.as_mut().poll(&mut context) {
-            Poll::Ready(window) => windows.push(window.expect("a window")),
-            Poll::Pending => still_opening.push(window),
-        }
-    }
-    *opening = still_opening;
+/// Asks for a window configured as `config`; its view arrives through `view_added`.
+pub fn request_window(platform: &PlatformRef, config: WindowConfig) -> RequestId {
+    platform
+        .request_view(ViewRequest {
+            config,
+            initial_data: None,
+        })
+        .expect("a desktop host makes windows")
 }
 
-/// One window, asked for at the start and closed through its `WindowRef` once it is made.
-pub struct WindowClosedOnceMade {
-    opening: Vec<WindowFuture>,
-    windows: Vec<WindowRef>,
+/// A window of `title` at 300 by 200.
+pub fn titled(title: &str) -> WindowConfig {
+    WindowConfig {
+        title: title.into(),
+        size: [300.0, 200.0],
+        ..WindowConfig::default()
+    }
 }
 
-impl WindowClosedOnceMade {
-    pub fn open(platform: &PlatformRef, title: &str) -> WindowClosedOnceMade {
-        let owner = platform
-            .windowing_owner()
-            .expect("a desktop host makes windows");
-        WindowClosedOnceMade {
-            opening: vec![owner.create(WindowConfig {
-                title: title.into(),
-                size: [300.0, 200.0],
-                ..WindowConfig::default()
-            })],
-            windows: Vec::new(),
+/// Moves the requests whose views have arrived from `requested` to `windows`, as the views'
+/// windows, in the order they were asked for.
+pub fn take_opened_windows(
+    platform: &PlatformRef,
+    requested: &mut Vec<RequestId>,
+    windows: &mut Vec<WindowRef>,
+) {
+    let views = platform.views();
+    requested.retain(|request_id| {
+        let arrived = views
+            .iter()
+            .find(|view| view.request_id() == Some(*request_id));
+        match arrived.and_then(|view| view.window()) {
+            Some(window) => {
+                windows.push(window);
+                false
+            }
+            None => true,
         }
-    }
-
-    /// Closes the window if it was made since the last call; called at each wake.
-    pub fn close_once_made(&mut self) {
-        take_opened_windows(&mut self.opening, &mut self.windows);
-        if let Some(window) = self.windows.pop() {
-            window.close();
-        }
-    }
+    });
 }
 
 /// What the tests ask of AppKit that the embedder offers no call for.
@@ -126,6 +122,11 @@ pub mod appkit {
     /// Clicks the close button of the window titled `title`, as a person would.
     pub fn press_close_button(title: &str) {
         window_titled(title).expect("the window").performClose(None);
+    }
+
+    /// Asks the application to quit as Cmd-Q does: `terminate:`, which asks its delegate first.
+    pub fn press_quit() {
+        application().terminate(None);
     }
 
     pub fn minimize(title: &str) {

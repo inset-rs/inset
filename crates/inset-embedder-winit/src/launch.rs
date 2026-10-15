@@ -1,11 +1,11 @@
 //! The app's start, as Flutter's embedders start an app: the embedder and the app are made before
-//! winit's loop runs, with the implicit view and no window yet, and the embedder then handles every
-//! one of winit's calls, the first of which opens that view's window (`main_loop/`).
+//! winit's loop runs, with no window yet, and the embedder then handles every one of winit's
+//! calls; where the system's window is the screen, the first opens the screen view's
+//! (`main_loop/`).
 
 use inset_embedder::{EmbedderClient, PlatformRef};
 use winit::event_loop::{EventLoop, EventLoopProxy};
 
-use crate::WinitEmbedder;
 use crate::images::CreateImageLoader;
 use crate::main_loop::{MainLoop, MainLoopEvent};
 use crate::os::{ApplicationLifecycle, SystemRequests, ThisOs};
@@ -15,7 +15,6 @@ pub(crate) type StartApp<C> = Box<dyn FnOnce(PlatformRef) -> C>;
 
 /// Runs the app on winit's loop until it quits.
 pub(crate) fn run<C: EmbedderClient + 'static>(
-    config: WinitEmbedder,
     start: StartApp<C>,
     create_image_loader: Option<CreateImageLoader>,
 ) {
@@ -25,7 +24,7 @@ pub(crate) fn run<C: EmbedderClient + 'static>(
     let proxy = event_loop.create_proxy();
     // Before the loop runs: AppKit hands over the files a launch opens before winit's first call.
     forward_system_messages(&proxy);
-    let mut main_loop = MainLoop::start(config, start, create_image_loader, proxy);
+    let mut main_loop = MainLoop::start(start, create_image_loader, proxy);
     event_loop
         .run_app(&mut main_loop)
         .expect("run winit event loop");

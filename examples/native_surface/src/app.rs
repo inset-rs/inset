@@ -1,18 +1,19 @@
 //! The window: a surface in the middle, the framework's label above its bottom edge.
 
 use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use inset_embedder::{Color, PlatformRef, Surface, TextDirection, WindowConfig};
+use inset_embedder::{Color, PlatformRef, Surface, TextDirection, ViewId, ViewRef, WindowConfig};
 use inset_embedder_winit::WinitEmbedder;
-use inset_foundation::App;
+use inset_foundation::{App, Handle, Listenable, Listener};
 use inset_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
 use inset_scheduler::{FrameCallback, SchedulerBinding};
 use inset_shell::Shell;
 use inset_widgets::{
     Center, DecoratedBox, Directionality, IntoWidget, Padding, Positioned, SizedBox, Stack,
-    StackFit, SurfaceView, Text, Transform, WidgetRef, run_app,
+    StackFit, SurfaceView, Text, Transform, WidgetRef, Window, WindowController, run_widget,
 };
 
 use crate::producer;
@@ -25,35 +26,67 @@ const LABEL: Color = Color::from_argb(255, 255, 255, 255);
 
 /// Runs the window, the surface and its label scaled by `scale` about their middle.
 pub(crate) fn run(exit_after: Option<Duration>, scale: f64) {
-    WinitEmbedder::default()
-        .implicit_view(Some(WindowConfig {
-            title: "Inset — a native surface".to_owned(),
-            size: [640.0, 480.0],
-            ..WindowConfig::default()
-        }))
-        .run(move |platform| {
-            let surface = open_surface(&platform);
-            Shell::new(platform, move |app| {
-                start_producer_once_sized(app, Arc::clone(&surface), exit_after);
-                run_app(app, home(surface, scale))
-            })
-        });
+    WinitEmbedder
+        .run(move |platform| Shell::new(platform, move |app| open_window(app, exit_after, scale)));
 }
 
-/// Starts the producer at the first frame in which the implicit view has a size: only then does
-/// the view have its window, and with it the display's pixel ratio the producer draws at.
+/// Asks for the window, and once its view has arrived opens the surface on it and shows both;
+/// closing the window quits.
+fn open_window(app: &mut App, exit_after: Option<Duration>, scale: f64) {
+    let config = WindowConfig {
+        title: "Inset — a native surface".to_owned(),
+        size: [640.0, 480.0],
+        ..WindowConfig::default()
+    };
+    let controller = WindowController::new(app, config);
+    WindowController::on_close_requested(controller, app, Rc::new(quit));
+    let shown = Cell::new(false);
+    let listenable: Rc<dyn Listenable> = Rc::new(controller);
+    listenable.add_listener(
+        app,
+        Listener::new(move |app| {
+            if let Some(view) = WindowController::view(controller, app)
+                && !shown.replace(true)
+            {
+                show(app, controller, view, exit_after, scale);
+            }
+        }),
+    );
+}
+
+fn show(
+    app: &mut App,
+    controller: Handle<WindowController>,
+    view: ViewRef,
+    exit_after: Option<Duration>,
+    scale: f64,
+) {
+    let surface = open_surface(&app.platform(), view.id());
+    start_producer_once_sized(app, view, Arc::clone(&surface), exit_after);
+    run_widget(
+        app,
+        Window::new(controller, home(surface, scale)).into_widget(),
+    );
+}
+
+fn quit(app: &mut App, _view: ViewId) {
+    if let Some(app_exit) = app.platform().app_exit() {
+        app_exit.quit(0);
+    }
+}
+
+/// Starts the producer at the first frame in which `view` has a size: only then does the view
+/// have the display's pixel ratio the producer draws at.
 fn start_producer_once_sized(
     app: &mut App,
+    view: ViewRef,
     surface: Arc<dyn Surface>,
     exit_after: Option<Duration>,
 ) {
     let waiting = Cell::new(Some(surface));
     SchedulerBinding::add_persistent_frame_callback(
         app,
-        FrameCallback::new(move |app, _elapsed| {
-            let Some(view) = app.platform().implicit_view() else {
-                return;
-            };
+        FrameCallback::new(move |_app, _elapsed| {
             let metrics = view.metrics();
             if metrics.physical_size == [0.0, 0.0] {
                 return;
@@ -65,12 +98,11 @@ fn start_producer_once_sized(
     );
 }
 
-/// A surface of the implicit view's, from the host's compositor.
-fn open_surface(platform: &PlatformRef) -> Arc<dyn Surface> {
+/// A surface of `view`'s, from the host's compositor.
+fn open_surface(platform: &PlatformRef, view: ViewId) -> Arc<dyn Surface> {
     let compositor = platform
         .compositor()
         .expect("the macOS host has a compositor");
-    let view = platform.implicit_view().expect("an implicit view").id();
     compositor.open_surface(view, true)
 }
 

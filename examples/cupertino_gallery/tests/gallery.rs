@@ -8,7 +8,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use cupertino_gallery::{Entry, entry_route, gallery, sub_route};
+use cupertino_gallery_lib::{Entry, entry_route, gallery, sub_route};
 use inset_cupertino::{CupertinoNavigationBarBackButton, install_cupertino_icon_font};
 use inset_embedder::{
     Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, TargetPlatform,
@@ -16,7 +16,7 @@ use inset_embedder::{
 use inset_foundation::AppCell;
 use inset_gestures::GestureBinding;
 use inset_painting::PaintingBinding;
-use inset_rendering::{AnyRenderObject, RenderParagraph};
+use inset_rendering::{AnyRenderObject, RenderParagraph, RendererBinding};
 use inset_scheduler::SchedulerBinding;
 use inset_test::{TestPlatform, TestView};
 use inset_widgets::{
@@ -160,15 +160,16 @@ impl Fixture {
         navigator.can_pop(&self.cell.borrow())
     }
 
-    /// Every render object of the mounted tree, parents before children.
+    /// Every render object of the mounted tree, parents before children: the render tree of
+    /// the one view the app shows.
     fn render_objects(&mut self) -> Vec<AnyRenderObject> {
         let root = {
             let mut app = self.cell.borrow_mut();
-            WidgetsBinding::instance(&mut app)
-                .root_element(&app)
-                .expect("a mounted app")
-                .find_render_object(&app)
-                .expect("a mounted view has a render object")
+            let render_views = RendererBinding::instance(&mut app).render_views(&app);
+            let [render_view] = render_views[..] else {
+                panic!("the app shows one view, not {}", render_views.len());
+            };
+            render_view.as_object()
         };
         let mut all = vec![root];
         let mut visited = 0;

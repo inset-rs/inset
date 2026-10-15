@@ -11,8 +11,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use inset_embedder::{
-    AppExitFuture, AppLifecycleState, DropData, EmbedderClient, Frame, Instant, KeyData,
-    PlatformRef, PointerDataPacket, TextEditingValue, TextInputAction, ViewFocusEvent, ViewId,
+    AppExitReply, AppLifecycleState, DropData, EmbedderClient, Frame, Instant, KeyData,
+    PlatformRef, PointerDataPacket, RequestId, TextEditingValue, TextInputAction, ViewError,
+    ViewFocusEvent, ViewId,
 };
 use inset_foundation::{App, AppCell};
 use inset_gestures::GestureBinding;
@@ -108,7 +109,14 @@ impl EmbedderClient for Shell {
         self.handle_event(SchedulerBinding::on_draw_frame);
     }
 
-    fn view_added(&mut self, _id: ViewId) {
+    /// The framework hears which view came, then "metrics changed", as `_addView` invokes it.
+    fn view_added(&mut self, id: ViewId) {
+        self.push(|app| {
+            let callback = app.platform_callbacks().on_view_added.clone();
+            if let Some(callback) = callback {
+                callback(app, id);
+            }
+        });
         self.metrics_changed();
     }
 
@@ -116,7 +124,15 @@ impl EmbedderClient for Shell {
         self.metrics_changed();
     }
 
-    fn view_removed(&mut self, _id: ViewId) {
+    /// The framework hears which view went, then "metrics changed", as `_removeView` invokes
+    /// it.
+    fn view_removed(&mut self, id: ViewId) {
+        self.push(|app| {
+            let callback = app.platform_callbacks().on_view_removed.clone();
+            if let Some(callback) = callback {
+                callback(app, id);
+            }
+        });
         self.metrics_changed();
     }
 
@@ -153,10 +169,31 @@ impl EmbedderClient for Shell {
         })
     }
 
-    /// The binding's task, whose checkpoint is this push's own: an answer the observers gave
-    /// at once is ready when the call returns.
-    fn request_app_exit(&mut self) -> AppExitFuture {
-        Box::pin(self.push(|app| ServicesBinding::instance(app).handle_request_app_exit(app)))
+    fn view_close_requested(&mut self, view: ViewId) {
+        self.push(|app| {
+            let callback = app.platform_callbacks().on_view_close_requested.clone();
+            if let Some(callback) = callback {
+                callback(app, view);
+            }
+        });
+    }
+
+    fn view_request_failed(&mut self, request: RequestId, error: ViewError) {
+        self.push(|app| {
+            let callback = app.platform_callbacks().on_view_request_failed.clone();
+            if let Some(callback) = callback {
+                callback(app, request, error);
+            }
+        });
+    }
+
+    /// The binding's answer goes to `reply` at the checkpoint of the call in which the
+    /// observers decide: this push's own when they answer at once.
+    fn request_app_exit(&mut self, reply: AppExitReply) {
+        self.push(|app| {
+            let answer = ServicesBinding::instance(app).handle_request_app_exit(app);
+            app.spawn(async move |_cx| reply.answer(answer.await));
+        });
     }
 
     fn app_lifecycle_state_changed(&mut self, state: AppLifecycleState) {
@@ -224,9 +261,6 @@ impl EmbedderClient for Shell {
 mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::task::{Context, Poll, Wake, Waker};
     use std::time::Duration;
 
     use inset_embedder::{
@@ -273,32 +307,48 @@ mod tests {
         assert_eq!(seen.paths, [PathBuf::from("/a.wasm")]);
     }
 
-    /// The answer to `shell.request_app_exit()` so far, polled as a host polls it; `woken`
-    /// counts the wakes of its waker.
-    fn poll_exit_answer(
-        answer: &mut inset_embedder::AppExitFuture,
-        woken: &Arc<WakeCounter>,
-    ) -> Option<inset_embedder::AppExitResponse> {
-        let waker = Waker::from(Arc::clone(woken));
-        match answer.as_mut().poll(&mut Context::from_waker(&waker)) {
-            Poll::Ready(response) => Some(response),
-            Poll::Pending => None,
-        }
+    /// A reply to `shell.request_app_exit`, and the answer it was given so far.
+    fn recorded_reply() -> (
+        inset_embedder::AppExitReply,
+        Rc<Cell<Option<inset_embedder::AppExitResponse>>>,
+    ) {
+        let answer = Rc::new(Cell::new(None));
+        let given = Rc::clone(&answer);
+        let reply = inset_embedder::AppExitReply::new(move |response| given.set(Some(response)));
+        (reply, answer)
     }
 
-    #[derive(Default)]
-    struct WakeCounter(AtomicUsize);
-
-    impl WakeCounter {
-        fn wakes(&self) -> usize {
-            self.0.load(Ordering::Acquire)
-        }
+    #[test]
+    fn a_view_added_or_removed_reaches_the_framework_with_its_id() {
+        let heard = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let (added, removed) = (Rc::clone(&heard), Rc::clone(&heard));
+        let mut shell = Shell::new(Rc::new(TestPlatform::new()), move |app: &mut App| {
+            let callbacks = app.platform_callbacks_mut();
+            callbacks.on_view_added = Some(Rc::new(move |_app, view| {
+                added.borrow_mut().push(("added", view))
+            }));
+            callbacks.on_view_removed = Some(Rc::new(move |_app, view| {
+                removed.borrow_mut().push(("removed", view))
+            }));
+        });
+        shell.view_added(ViewId(4));
+        shell.view_removed(ViewId(4));
+        assert_eq!(
+            *heard.borrow(),
+            [("added", ViewId(4)), ("removed", ViewId(4))]
+        );
     }
 
-    impl Wake for WakeCounter {
-        fn wake(self: Arc<Self>) {
-            self.0.fetch_add(1, Ordering::AcqRel);
-        }
+    #[test]
+    fn a_view_close_request_reaches_the_framework() {
+        let heard = Rc::new(Cell::new(None));
+        let heard_slot = Rc::clone(&heard);
+        let mut shell = Shell::new(Rc::new(TestPlatform::new()), move |app: &mut App| {
+            app.platform_callbacks_mut().on_view_close_requested =
+                Some(Rc::new(move |_app, view| heard_slot.set(Some(view))));
+        });
+        shell.view_close_requested(ViewId(3));
+        assert_eq!(heard.get(), Some(ViewId(3)));
     }
 
     #[test]
@@ -332,25 +382,20 @@ mod tests {
             }
         }
 
-        let woken = Arc::default();
         let mut shell = Shell::new(Rc::new(TestPlatform::new()), |_app| {});
-        let mut answer = shell.request_app_exit();
-        assert_eq!(
-            poll_exit_answer(&mut answer, &woken),
-            Some(AppExitResponse::Exit)
-        );
+        let (reply, answer) = recorded_reply();
+        shell.request_app_exit(reply);
+        assert_eq!(answer.get(), Some(AppExitResponse::Exit));
 
         let refusing = shell.app().create(Refusing);
         let binding = ServicesBinding::instance(&mut shell.app());
         binding.set_overrides(&mut shell.app(), Rc::new(refusing));
-        let mut answer = shell.request_app_exit();
-        assert_eq!(
-            poll_exit_answer(&mut answer, &woken),
-            Some(AppExitResponse::Cancel)
-        );
+        let (reply, answer) = recorded_reply();
+        shell.request_app_exit(reply);
+        assert_eq!(answer.get(), Some(AppExitResponse::Cancel));
     }
 
-    /// The host's waker is woken inside the call that decides, and the answer is ready then.
+    /// The reply is answered inside the call that decides.
     #[test]
     fn request_app_exit_answers_during_the_call_in_which_the_framework_decides() {
         use inset_embedder::AppExitResponse;
@@ -376,18 +421,14 @@ mod tests {
         let binding = ServicesBinding::instance(&mut shell.app());
         binding.set_overrides(&mut shell.app(), Rc::new(deciding));
 
-        let woken: Arc<WakeCounter> = Arc::default();
-        let mut answer = shell.request_app_exit();
-        assert_eq!(poll_exit_answer(&mut answer, &woken), None);
+        let (reply, answer) = recorded_reply();
+        shell.request_app_exit(reply);
+        assert_eq!(answer.get(), None);
 
         decision.complete(&mut shell.app(), AppExitResponse::Exit);
-        assert_eq!(woken.wakes(), 0, "the task resumes at a checkpoint");
+        assert_eq!(answer.get(), None, "the task resumes at a checkpoint");
         shell.wake(Duration::ZERO);
-        assert_eq!(woken.wakes(), 1, "the wake ran the checkpoint that decided");
-        assert_eq!(
-            poll_exit_answer(&mut answer, &woken),
-            Some(AppExitResponse::Exit)
-        );
+        assert_eq!(answer.get(), Some(AppExitResponse::Exit));
     }
 
     #[test]

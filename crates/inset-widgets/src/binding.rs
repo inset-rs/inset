@@ -2,15 +2,21 @@
 //! `RootElement`, `runApp`).
 //!
 //! The memory-pressure, push-route and back-gesture observer callbacks, `performReassemble`,
-//! and the platform menu / windowing owners wait. `handleAppLifecycleStateChanged` tells the
-//! observers each lifecycle state the host reports, and `handleRequestAppExit` asks them
-//! whenever the host asks the app to quit.
+//! and the platform menu owner wait. `handleAppLifecycleStateChanged` tells the observers each
+//! lifecycle state the host reports, and `handleRequestAppExit` asks them whenever the host asks
+//! the app to quit. The windowing owner, which keeps the window controllers and hears every view
+//! event first, is here (`windowing.rs`); a view it does not claim goes to the observers.
+//! `run_app` builds its content in every view the app is given (`multi_view_app.rs`), and asks
+//! for a window where it is given none.
 
 use std::rc::Rc;
 use std::time::Duration;
 
-use inset_embedder::{AppExitResponse, AppLifecycleState, DropData, Locale, ViewFocusEvent};
-use inset_foundation::{App, Handle, Listener, Task, Timer};
+use inset_embedder::{
+    AppExitResponse, AppExitType, AppLifecycleState, DropData, Locale, RequestId, ViewError,
+    ViewFocusEvent, ViewId, ViewRef, WindowConfig,
+};
+use inset_foundation::{App, Handle, Listenable, Listener, Task, Timer};
 use inset_rendering::{RendererBinding, RendererBindingOverridesObject};
 use inset_scheduler::{SchedulerBinding, SchedulerBindingOverridesObject};
 use inset_services::{ServicesBinding, ServicesBindingOverridesObject};
@@ -19,7 +25,10 @@ use crate::framework::{
     AnyElement, BuildOwner, Element, ElementBase, ElementData, IntoWidget, KeyRef, Slot, Widget,
     WidgetKind, WidgetRef, downcast_widget,
 };
-use crate::view::View;
+use crate::multi_view_app::MultiViewApp;
+use crate::view::ViewCollection;
+use crate::window::Window;
+use crate::windowing::{WindowController, WindowingOwner};
 
 /// The glue between the widgets layer and the Flutter engine.
 ///
@@ -37,6 +46,8 @@ pub struct WidgetsBinding {
     root_element: Option<AnyElement>,
     ready_to_produce_frames: bool,
     observers: Vec<WidgetsBindingObserverRef>,
+    /// Flutter's `windowingOwner`: the window controllers, and every view event first.
+    windowing_owner: Option<Handle<WindowingOwner>>,
 }
 
 /// Interface for classes that register with the Widgets layer binding.
@@ -135,6 +146,28 @@ pub trait WidgetsBindingObserver {
         let _ = app;
         false
     }
+
+    /// Called when the platform gives the app a view no window controller asked for: a
+    /// phone's screen, a web page's element, a host app's view. Flutter tells this only as
+    /// [`did_change_metrics`](Self::did_change_metrics), and a listener compares
+    /// `platformDispatcher.views` with what it had.
+    fn did_add_view(&self, app: &mut App, view: &ViewRef) {
+        let _ = (app, view);
+    }
+
+    /// Called when such a view goes.
+    fn did_remove_view(&self, app: &mut App, view: ViewId) {
+        let _ = (app, view);
+    }
+
+    /// Called when the user asks to close such a view.
+    ///
+    /// Answers whether this observer handled it. The first one that answers `true` stops the
+    /// others from being asked, as with [`did_pop_route`](Self::did_pop_route).
+    fn did_request_view_close(&self, app: &mut App, view: ViewId) -> bool {
+        let _ = (app, view);
+        false
+    }
 }
 
 /// The object side of [`WidgetsBindingObserver`]: implement it on an arena object (a
@@ -191,6 +224,22 @@ pub trait WidgetsBindingObserverObject: Sized + 'static {
         let _ = app;
         false
     }
+
+    /// See [`WidgetsBindingObserver::did_add_view`].
+    fn did_add_view(self: Handle<Self>, app: &mut App, view: &ViewRef) {
+        let _ = (app, view);
+    }
+
+    /// See [`WidgetsBindingObserver::did_remove_view`].
+    fn did_remove_view(self: Handle<Self>, app: &mut App, view: ViewId) {
+        let _ = (app, view);
+    }
+
+    /// See [`WidgetsBindingObserver::did_request_view_close`].
+    fn did_request_view_close(self: Handle<Self>, app: &mut App, view: ViewId) -> bool {
+        let _ = (app, view);
+        false
+    }
 }
 
 impl<T: WidgetsBindingObserverObject> WidgetsBindingObserver for Handle<T> {
@@ -233,6 +282,18 @@ impl<T: WidgetsBindingObserverObject> WidgetsBindingObserver for Handle<T> {
     fn did_pop_route(&self, app: &mut App) -> bool {
         T::did_pop_route(*self, app)
     }
+
+    fn did_add_view(&self, app: &mut App, view: &ViewRef) {
+        T::did_add_view(*self, app, view);
+    }
+
+    fn did_remove_view(&self, app: &mut App, view: ViewId) {
+        T::did_remove_view(*self, app, view);
+    }
+
+    fn did_request_view_close(&self, app: &mut App, view: ViewId) -> bool {
+        T::did_request_view_close(*self, app, view)
+    }
 }
 
 /// A registered observer; removed again by identity of the `Rc`.
@@ -268,6 +329,8 @@ impl WidgetsBinding {
             })),
         );
         app.get_mut(self).build_owner = Some(build_owner);
+        let windowing_owner = WindowingOwner::new(app);
+        app.get_mut(self).windowing_owner = Some(windowing_owner);
         WidgetsBinding::assign_dispatcher_callbacks(app);
     }
 
@@ -299,6 +362,18 @@ impl WidgetsBinding {
         }));
         callbacks.on_pop_route = Some(Rc::new(|app| {
             WidgetsBinding::instance(app).handle_pop_route(app)
+        }));
+        callbacks.on_view_added = Some(Rc::new(|app, view| {
+            WidgetsBinding::instance(app).handle_view_added(app, view)
+        }));
+        callbacks.on_view_removed = Some(Rc::new(|app, view| {
+            WidgetsBinding::instance(app).handle_view_removed(app, view)
+        }));
+        callbacks.on_view_close_requested = Some(Rc::new(|app, view| {
+            WidgetsBinding::instance(app).handle_view_close_requested(app, view)
+        }));
+        callbacks.on_view_request_failed = Some(Rc::new(|app, request_id, error| {
+            WidgetsBinding::instance(app).handle_view_request_failed(app, request_id, error)
         }));
     }
 
@@ -337,24 +412,58 @@ impl WidgetsBinding {
         app.get(self).ready_to_produce_frames
     }
 
-    /// Wraps the `root_widget` in a [`View`] widget for the implicit view, the way [`run_app`]
-    /// does.
-    ///
-    /// # Panics
-    ///
-    /// If the platform has no implicit view.
-    pub fn wrap_with_default_view(
+    /// Flutter's `windowingOwner`: the window controllers the app made, which hear every event
+    /// about the views they asked for.
+    pub fn windowing_owner(self: Handle<Self>, app: &App) -> Handle<WindowingOwner> {
+        app.get(self)
+            .windowing_owner
+            .expect("WidgetsBinding::instance must run first")
+    }
+
+    /// A view came: the window controller that asked for it takes it, or the observers hear it.
+    fn handle_view_added(self: Handle<Self>, app: &mut App, view: ViewId) {
+        let Some(view) = app.platform().view(view) else {
+            return;
+        };
+        if self.windowing_owner(app).view_added(app, &view) {
+            return;
+        }
+        for observer in app.get(self).observers.clone() {
+            observer.did_add_view(app, &view);
+        }
+    }
+
+    /// A view went: the window controller whose it was hears it, or the observers do.
+    fn handle_view_removed(self: Handle<Self>, app: &mut App, view: ViewId) {
+        if self.windowing_owner(app).view_removed(app, view) {
+            return;
+        }
+        for observer in app.get(self).observers.clone() {
+            observer.did_remove_view(app, view);
+        }
+    }
+
+    /// The user asked to close `view`: the window controller whose it is decides, or else the
+    /// first observer that handles it.
+    fn handle_view_close_requested(self: Handle<Self>, app: &mut App, view: ViewId) {
+        if self.windowing_owner(app).view_close_requested(app, view) {
+            return;
+        }
+        for observer in app.get(self).observers.clone() {
+            if observer.did_request_view_close(app, view) {
+                return;
+            }
+        }
+    }
+
+    fn handle_view_request_failed(
         self: Handle<Self>,
         app: &mut App,
-        root_widget: WidgetRef,
-    ) -> WidgetRef {
-        let view = app.platform().implicit_view().expect(
-            "The app requested a view, but the platform did not provide one. This is likely \
-             because the app called `run_app` to render its root widget, which expects the \
-             platform to provide a default view to render into (the \"implicit\" view). Try \
-             using `run_widget` instead of `run_app` to start your app.",
-        );
-        View::new(view, root_widget).into_widget()
+        request_id: RequestId,
+        error: ViewError,
+    ) {
+        self.windowing_owner(app)
+            .view_request_failed(app, request_id, error);
     }
 
     /// Schedules a `Timer` for attaching the root widget.
@@ -432,6 +541,13 @@ impl WidgetsBinding {
         let before = observers.len();
         observers.retain(|registered| !Rc::ptr_eq(registered, observer));
         observers.len() < before
+    }
+
+    fn is_observing(self: Handle<Self>, app: &App, observer: &WidgetsBindingObserverRef) -> bool {
+        app.get(self)
+            .observers
+            .iter()
+            .any(|registered| Rc::ptr_eq(registered, observer))
     }
 
     #[cfg(test)]
@@ -553,7 +669,11 @@ impl ServicesBindingOverridesObject for WidgetsBinding {
                     // observer to know when exit happens, we want to call all the
                     // observers, even if we already know we're going to cancel.
                 }
-                let Some(observer) = observers.next() else {
+                // One removed while an earlier one was answering is not asked (Flutter #190343).
+                let Some(observer) = observers
+                    .by_ref()
+                    .find(|observer| cx.update(|app| self.is_observing(app, observer)))
+                else {
                     break;
                 };
                 response = cx.update(|app| observer.did_request_app_exit(app));
@@ -605,10 +725,82 @@ impl RendererBindingOverridesObject for WidgetsBinding {
 ///
 /// The root widget is attached on the next timer turn, as Dart's `Timer.run` does, and the
 /// first frame is scheduled.
-pub fn run_app(app: &mut App, widget: WidgetRef) {
-    let binding = WidgetsBinding::instance(app);
-    let wrapped = binding.wrap_with_default_view(app, widget);
-    run_widget_internal(app, binding, wrapped);
+///
+/// `content` is built in every view the app is given, each with its own state
+/// ([`MultiViewApp`]). Where the platform gives the app no view at start, as on a desktop, it
+/// asks for a window with the default configuration ([`run_app_with`] takes one); a platform that
+/// gives the app its own view, as a phone does, has it there at start. A request to close the
+/// app's last view asks to quit, as Cmd-Q does. Flutter's `runApp` needs the implicit view,
+/// which Inset has no more.
+///
+/// # Panics
+///
+/// Where the platform gives the app no view at start and makes no window for it: an app
+/// embedded where views come later starts with [`MultiViewApp`] instead, as Flutter's web
+/// multi-view apps start with `runWidget`.
+pub fn run_app(app: &mut App, content: WidgetRef) {
+    run_app_with(app, content, WindowConfig::default());
+}
+
+/// [`run_app`], asking for a window configured as `window` where the platform gives the app no
+/// view at start, as on a desktop. Where it gives one, as a phone does, `window` goes unused.
+pub fn run_app_with(app: &mut App, content: WidgetRef, window: WindowConfig) {
+    let given_views = {
+        let content = content.clone();
+        MultiViewApp::new(move |_app, _view| content.clone()).into_widget()
+    };
+    if !app.platform().views().is_empty() {
+        run_widget(app, given_views);
+        return;
+    }
+    let main_window = request_main_window(app, window);
+    let main_window = Window::new(main_window, content).into_widget();
+    run_widget(
+        app,
+        ViewCollection::new(vec![given_views, main_window]).into_widget(),
+    );
+}
+
+/// The app's own window, where the platform gave it no view: a request to close it is the close
+/// rule's, and a platform that refuses or fails to make it leaves the app nothing to show.
+fn request_main_window(app: &mut App, config: WindowConfig) -> Handle<WindowController> {
+    let controller = WindowController::new(app, config);
+    if let Some(error) = controller.error(app) {
+        no_window_for_the_app(error);
+    }
+    controller.on_close_requested(app, Rc::new(close_or_ask_to_quit));
+    let listenable: Rc<dyn Listenable> = Rc::new(controller);
+    listenable.add_listener(
+        app,
+        Listener::new(move |app| {
+            if let Some(error) = controller.error(app) {
+                no_window_for_the_app(error);
+            }
+        }),
+    );
+    controller
+}
+
+fn no_window_for_the_app(error: ViewError) -> ! {
+    panic!(
+        "run_app: the platform gave the app no view and made no window for it ({error}); an app \
+         embedded where views come later starts with MultiViewApp"
+    )
+}
+
+/// The close rule of `run_app` and [`MultiViewApp`]: a request to close the app's last view asks
+/// to quit, as Cmd-Q does, so the exit listeners may refuse, and any other view closes with its
+/// window. A view in no window is not the app's to close, and no platform asks to close one.
+pub(crate) fn close_or_ask_to_quit(app: &mut App, view: ViewId) {
+    let platform = app.platform();
+    if platform.views().len() <= 1 {
+        let _answer =
+            ServicesBinding::instance(app).exit_application(app, AppExitType::Cancelable, 0);
+        return;
+    }
+    if let Some(window) = platform.view(view).and_then(|view| view.window()) {
+        window.close();
+    }
 }
 
 /// Inflate the given widget and bootstrap the widget tree.

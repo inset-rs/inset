@@ -1,49 +1,47 @@
-//! The main loop's windows and views: opening one the app asks for and the implicit view's,
+//! The main loop's windows and views: opening one the app asks for and the screen view's,
 //! closing, focus, resizing, moving, and the surfaces the system gives and takes.
 
 use std::rc::Rc;
 use std::sync::Arc;
 
-use inset_embedder::{
-    EmbedderClient, View, ViewFocusEvent, ViewId, WindowConfig, WindowError, WindowRef,
-};
+use inset_embedder::{EmbedderClient, View, ViewError, ViewFocusEvent, ViewId};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
 use crate::os::{FramePresentation, ThisOs};
 use crate::view::WinitView;
 use crate::view_focus;
-use crate::windows::{OpenWindow, ViewAfterClose, WindowRequest, open_implicit_window};
+use crate::windows::{OpenWindow, ViewAfterClose, WindowRequest, open_screen_window};
 
 use super::MainLoop;
 
 impl<C: EmbedderClient> MainLoop<C> {
-    /// Opens the window the app asked for, and answers its future.
+    /// Opens a window for the view the app asked for. The app hears of the view through
+    /// `view_added`, which it tells by its request's id, or of the failure.
     pub(super) fn open_window(&mut self, event_loop: &ActiveEventLoop, request: WindowRequest) {
-        let answer = self
-            .make_requested_window(event_loop, &request.config)
-            .map_err(WindowError::Failed);
-        request.reply.complete(answer);
-        // The future resolves at the app's next checkpoint, and a client may look at its
-        // windows' futures at each wake rather than through their wakers: a wake brings both.
-        self.wake_client();
+        if let Err(reason) = self.make_requested_window(event_loop, &request) {
+            self.client
+                .view_request_failed(request.request_id, ViewError::Failed(reason));
+        }
     }
 
-    /// The window the app asked for, with a surface if the system gives the windows theirs now,
-    /// and its view added.
+    /// The window `request` asked for, with a surface if the system gives the windows theirs
+    /// now, and its view added.
     pub(super) fn make_requested_window(
         &mut self,
         event_loop: &ActiveEventLoop,
-        config: &WindowConfig,
-    ) -> Result<WindowRef, String> {
-        let (open, window) =
-            self.view_maker
-                .make_requested(event_loop, config, Rc::clone(self.state.requests()))?;
+        request: &WindowRequest,
+    ) -> Result<(), String> {
+        let open = self.view_maker.make_requested(
+            event_loop,
+            request,
+            Rc::clone(self.state.requests()),
+        )?;
         if self.surfaces_given {
             open.view.give_surface(&open.window)?;
         }
         self.add_view(open);
-        Ok(window)
+        Ok(())
     }
 
     /// A view the app asked for, with its window: it joins the platform's views, and then the
@@ -56,29 +54,28 @@ impl<C: EmbedderClient> MainLoop<C> {
         self.read_theme_of(&window);
     }
 
-    /// Opens the implicit view's window, at winit's first call: the first moment winit lets a
+    /// Opens the screen view's window, at winit's first call: the first moment winit lets a
     /// window be made. The app, started with the view at no size, hears its new metrics.
-    pub(super) fn open_implicit_window(&mut self, event_loop: &ActiveEventLoop) {
-        let Some(config) = self.implicit_window.take() else {
+    pub(super) fn open_screen_window(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(config) = self.screen_window.take() else {
             return;
         };
         let view = self
             .views()
-            .implicit()
-            .expect("the implicit view was made with the app");
-        let window = open_implicit_window(event_loop, &config, &view)
-            .expect("open the implicit view's window");
+            .screen_view()
+            .expect("the screen view was made with the app");
+        let window =
+            open_screen_window(event_loop, &config, &view).expect("open the screen view's window");
         if self.surfaces_given {
             give_surface(&view, &window);
         }
-        self.views().attach_implicit_window(Arc::clone(&window));
+        self.views().attach_screen_window(Arc::clone(&window));
         self.client.view_metrics_changed(view.id());
         self.read_theme_of(&window);
     }
 
-    /// Closes a window: it is freed, and its view goes with it, but for the implicit view,
-    /// which outlives its window. Where the embedder is set to, the last one's closing asks the
-    /// app whether it quits.
+    /// Closes a window: it is freed, and its view goes with it, but for the screen view,
+    /// which outlives its window.
     pub(super) fn close_window(&mut self, id: WindowId) {
         let Some(after_close) = self.views().close(id) else {
             return;
@@ -86,21 +83,12 @@ impl<C: EmbedderClient> MainLoop<C> {
         if let ViewAfterClose::Removed(view) = after_close {
             self.client.view_removed(view);
         }
-        if self.views().no_window_open() && self.quit_when_last_window_closes {
-            self.on_last_window_closed();
-        }
     }
 
+    /// The user asked to close a window: the app decides, and closes it or not.
     pub(super) fn on_close_requested(&mut self, id: WindowId) {
-        let handler = self
-            .views()
-            .by_window(id)
-            .and_then(|open| open.handle)
-            .and_then(|handle| handle.close_handler());
-        match handler {
-            // The app answers a created window's close request itself.
-            Some(handler) => handler(),
-            None => self.close_window(id),
+        if let Some(view) = self.view_id_of(id) {
+            self.client.view_close_requested(view);
         }
     }
 

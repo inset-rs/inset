@@ -188,6 +188,28 @@ pub trait View: 'static {
     fn text_input(&self) -> Option<&dyn TextInputHost> {
         None
     }
+
+    /// What whoever gave or asked for this view attached to it, such as which screen to show:
+    /// a request's [`ViewRequest::initial_data`](crate::ViewRequest::initial_data), or what an
+    /// embedder said, as Flutter web's `initialData` does. `None` for a view with none.
+    fn initial_data(&self) -> Option<String> {
+        None
+    }
+
+    /// The request this view arrived for ([`crate::Platform::request_view`]); `None` for a view
+    /// the platform gave the app unasked.
+    fn request_id(&self) -> Option<crate::RequestId> {
+        None
+    }
+
+    /// The window this view is in, where the platform lets the app manage it, as `NSView.window`
+    /// answers: every window on a desktop, whether the app asked for it or the platform gave it,
+    /// such as WaOS's window around a program's view. `None` for a view in nothing the app may
+    /// manage: a phone's screen, a web page's element, a host app's view. Closing a view is its
+    /// window's: a view with none is not the app's to close, and its way out is to quit.
+    fn window(&self) -> Option<crate::WindowRef> {
+        None
+    }
 }
 
 /// The host side of Flutter's text input connection for one view.

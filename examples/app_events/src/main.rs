@@ -2,11 +2,11 @@
 //! asked to open, the Dock icon clicked, and quitting. The window lists them, and each is
 //! printed as it comes.
 //!
-//! A quit asks the app first: Cmd-Q, Quit in the app menu, or Quit in the Dock icon's menu.
-//! The app answers only once it has saved, which takes three seconds here, and then agrees, so a
-//! single Cmd-Q quits it. A second Cmd-Q during the save quits at once, as it does a Flutter app
-//! on macOS. Only a Quit asks, and only macOS has one: closing the window ends the app without
-//! asking, on every system.
+//! A quit asks the app first: Cmd-Q, Quit in the app menu, or Quit in the Dock icon's menu on
+//! macOS, and closing the window on every system, since closing `run_app`'s only window asks to
+//! quit. The app answers only once it has saved, which takes three seconds here, and then agrees,
+//! so a single Cmd-Q or close quits it. A second Cmd-Q during the save reaches the app too, which
+//! answers it once the same save is done.
 //!
 //! ```text
 //! cargo run -p app-events
@@ -36,7 +36,7 @@ use inset_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
 use inset_shell::Shell;
 use inset_widgets::{
     AppLifecycleListener, BuildContext, Column, DecoratedBox, Directionality, IntoWidget, Padding,
-    StatelessWidget, Text, WidgetRef, run_app,
+    StatelessWidget, Text, WidgetRef, run_app_with,
 };
 
 const BACKGROUND: Color = Color::from_argb(255, 245, 245, 240);
@@ -46,20 +46,19 @@ const INK: Color = Color::from_argb(255, 51, 51, 64);
 const SAVE_TIME: Duration = Duration::from_secs(3);
 
 fn main() {
-    WinitEmbedder::default()
-        .implicit_view(Some(WindowConfig {
-            title: "App events".to_owned(),
-            size: [560.0, 360.0],
-            ..WindowConfig::default()
-        }))
-        .run(|platform| {
-            Shell::new(platform, |app| {
-                let requests = app.new_entity(|_cx| Requests::default());
-                listen(app, &requests);
-                answer_quits(app, &requests);
-                run_app(app, home(requests));
-            })
-        });
+    WinitEmbedder.run(|platform| {
+        Shell::new(platform, |app| {
+            let requests = app.new_entity(|_cx| Requests::default());
+            listen(app, &requests);
+            answer_quits(app, &requests);
+            let window = WindowConfig {
+                title: "App events".to_owned(),
+                size: [560.0, 360.0],
+                ..WindowConfig::default()
+            };
+            run_app_with(app, home(requests), window);
+        })
+    });
 }
 
 /// What the system has asked of the app so far.
@@ -214,7 +213,7 @@ impl StatelessWidget for RequestList {
 
 fn save_line(save: Save) -> &'static str {
     match save {
-        Save::NotStarted => "Cmd-Q: the app saves first, then quits",
+        Save::NotStarted => "Cmd-Q or closing the window: the app saves first, then quits",
         Save::Saving => "Quitting once saved: saving for three seconds",
         Save::Saved => "Saved: quitting",
     }

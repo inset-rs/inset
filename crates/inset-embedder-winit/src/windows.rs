@@ -1,9 +1,9 @@
 //! The app's views and their windows: the one registry of them, which the event loop and the
 //! platform share, and how they are made.
 //!
-//! The implicit view is made when the app starts, before it has a window, as Flutter's engine
-//! adds it with empty metrics; its window opens at winit's first call, the first moment winit
-//! lets one be made. A view the app asks for is made with its window, on a turn of the loop:
+//! Where the system's window is the screen, the screen view is made when the app starts, before
+//! it has a window, as Flutter's engine adds it with empty metrics; its window opens at winit's
+//! first call, the first moment winit lets one be made. A desktop has no screen view. A view the app asks for is made with its window, on a turn of the loop:
 //! winit hands out its `ActiveEventLoop` only inside its calls, so the request goes to the loop
 //! as a command, and the window arrives through the future the request returned.
 //!
@@ -15,37 +15,34 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use inset_embedder::{
-    View, ViewId, WindowConfig, WindowError, WindowFuture, WindowLevel, WindowRef, WindowingOwner,
-};
+use inset_embedder::{RequestId, View, ViewId, ViewRequest, WindowConfig, WindowLevel};
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowAttributes, WindowId};
 
-use crate::app_requests::{AppRequest, AppRequests};
+use crate::app_requests::AppRequests;
 use crate::gpu::Gpu;
 use crate::host_window::WinitWindow;
 use crate::os::{OperatingSystem, ThisOs, WindowChrome};
-use crate::reply::{Reply, reply};
 use crate::view::WinitView;
 
-/// The implicit view's id, as in Flutter: the views the app asks for are numbered after it.
-pub(crate) const IMPLICIT_VIEW: ViewId = ViewId(0);
+/// The screen view's id, as in Flutter: the views the app asks for are numbered after it.
+pub(crate) const SCREEN_VIEW: ViewId = ViewId(0);
 
 /// A view with its window, as the registry answers it.
 #[derive(Clone)]
 pub(crate) struct OpenWindow {
     pub(crate) window: Arc<Window>,
     pub(crate) view: Rc<WinitView>,
-    /// The app's handle on a window it asked for; the implicit view's window has none.
+    /// The app's handle on a window it asked for; the screen view's window has none.
     pub(crate) handle: Option<Rc<WinitWindow>>,
 }
 
 /// What a window's closing did to its view.
 pub(crate) enum ViewAfterClose {
-    /// The view went with its window, as every view but the implicit one does.
+    /// The view went with its window, as every view but the screen view does.
     Removed(ViewId),
-    /// The implicit view stays, with no window, as in Flutter's embedders.
+    /// The screen view stays, with no window, as in Flutter's embedders.
     Stays,
 }
 
@@ -66,8 +63,8 @@ pub(crate) struct Views {
 struct ViewEntry {
     view: Rc<WinitView>,
     window: Option<ViewWindow>,
-    /// Whether the view stays once its window closes: the implicit view.
-    implicit: bool,
+    /// Whether the view stays once its window closes: the screen view.
+    screen: bool,
 }
 
 struct ViewWindow {
@@ -76,12 +73,12 @@ struct ViewWindow {
 }
 
 impl Views {
-    /// The implicit view, with no window yet.
-    pub(crate) fn add_implicit(&self, view: Rc<WinitView>) {
+    /// The screen view, with no window yet.
+    pub(crate) fn add_screen_view(&self, view: Rc<WinitView>) {
         self.insert(ViewEntry {
             view,
             window: None,
-            implicit: true,
+            screen: true,
         });
     }
 
@@ -95,19 +92,19 @@ impl Views {
                 window: open.window,
                 handle: open.handle,
             }),
-            implicit: false,
+            screen: false,
         });
         self.view_of_window.borrow_mut().insert(window, view);
     }
 
-    /// `window` is the implicit view's from now on.
-    pub(crate) fn attach_implicit_window(&self, window: Arc<Window>) {
+    /// `window` is the screen view's from now on.
+    pub(crate) fn attach_screen_window(&self, window: Arc<Window>) {
         let id = window.id();
         let mut entries = self.entries.borrow_mut();
         let entry = entries
             .values_mut()
-            .find(|entry| entry.implicit)
-            .expect("the implicit view was added");
+            .find(|entry| entry.screen)
+            .expect("the screen view was added");
         entry.window = Some(ViewWindow {
             window,
             handle: None,
@@ -116,7 +113,7 @@ impl Views {
     }
 
     /// Closes `window`: its view lets go of it, and the window is freed once the caller's copies
-    /// of it are dropped. The view goes with it, but for the implicit view, which stays.
+    /// of it are dropped. The view goes with it, but for the screen view, which stays.
     pub(crate) fn close(&self, window: WindowId) -> Option<ViewAfterClose> {
         let view_id = self.view_of_window.borrow_mut().remove(&window)?;
         let (view, after_close) = self.detach_window(view_id)?;
@@ -124,14 +121,14 @@ impl Views {
         Some(after_close)
     }
 
-    /// Takes `view_id`'s window from its entry, and the entry too unless it is the implicit
+    /// Takes `view_id`'s window from its entry, and the entry too unless it is the screen
     /// view's; answers the view, for the caller to tell once the registry is let go of.
     fn detach_window(&self, view_id: ViewId) -> Option<(Rc<WinitView>, ViewAfterClose)> {
         let mut entries = self.entries.borrow_mut();
         let entry = entries.get_mut(&view_id)?;
         entry.window = None;
         let view = Rc::clone(&entry.view);
-        if entry.implicit {
+        if entry.screen {
             return Some((view, ViewAfterClose::Stays));
         }
         entries.remove(&view_id);
@@ -166,10 +163,6 @@ impl Views {
         self.entries.borrow().values().find_map(ViewEntry::open)
     }
 
-    pub(crate) fn no_window_open(&self) -> bool {
-        self.view_of_window.borrow().is_empty()
-    }
-
     /// Every view, with a window or not, in the order they came.
     pub(crate) fn views(&self) -> Vec<Rc<WinitView>> {
         self.entries
@@ -187,11 +180,11 @@ impl Views {
             .map(|entry| Rc::clone(&entry.view))
     }
 
-    pub(crate) fn implicit(&self) -> Option<Rc<WinitView>> {
+    pub(crate) fn screen_view(&self) -> Option<Rc<WinitView>> {
         self.entries
             .borrow()
             .values()
-            .find(|entry| entry.implicit)
+            .find(|entry| entry.screen)
             .map(|entry| Rc::clone(&entry.view))
     }
 
@@ -215,37 +208,17 @@ impl ViewEntry {
     }
 }
 
-/// A window the app asked for, on its way to the loop.
+/// A request for a view, on its way to the loop, which makes a window for it.
 pub(crate) struct WindowRequest {
-    pub config: WindowConfig,
-    pub reply: Reply<Result<WindowRef, WindowError>>,
-}
-
-/// The platform's window maker: sends each request to the loop, which makes the window.
-pub(crate) struct WinitWindowing {
-    requests: Rc<AppRequests>,
-}
-
-impl WinitWindowing {
-    pub(crate) fn new(requests: Rc<AppRequests>) -> WinitWindowing {
-        WinitWindowing { requests }
-    }
-}
-
-impl WindowingOwner for WinitWindowing {
-    fn create(&self, config: WindowConfig) -> WindowFuture {
-        let (reply, answer) = reply();
-        self.requests
-            .send(AppRequest::OpenWindow(WindowRequest { config, reply }));
-        Box::pin(answer)
-    }
+    pub request_id: RequestId,
+    pub request: ViewRequest,
 }
 
 /// Makes the views, on the one device every view draws with, and their windows.
 pub(crate) struct ViewMaker {
     /// One device for every view: decoded images belong to it. A device needs no window.
     gpu: Option<Gpu>,
-    /// The number of the next view the app asks for; the implicit view is the first.
+    /// The number of the next view the app asks for; the screen view is the first.
     next_view_id: u64,
 }
 
@@ -253,25 +226,31 @@ impl ViewMaker {
     pub(crate) fn new() -> ViewMaker {
         ViewMaker {
             gpu: None,
-            next_view_id: IMPLICIT_VIEW.0 + 1,
+            next_view_id: SCREEN_VIEW.0 + 1,
         }
     }
 
-    /// The implicit view, with no window yet, for a window configured as `config`.
-    pub(crate) fn make_implicit(&mut self, config: &WindowConfig) -> Rc<WinitView> {
-        self.view(IMPLICIT_VIEW, config)
+    /// The screen view, with no window yet, for a window configured as `config`.
+    pub(crate) fn make_screen_view(&mut self, config: &WindowConfig) -> Rc<WinitView> {
+        Rc::new(self.view(SCREEN_VIEW, config))
     }
 
-    /// A view the app asked for, with its window configured as `config`, and the handle the app
-    /// holds it by, which sends its `close` to the loop through `requests`.
+    /// The view `window_request` asked for, carrying its request's id and initial data, with
+    /// its window and the window's handle, which sends its `close` to the loop through
+    /// `requests`.
     pub(crate) fn make_requested(
         &mut self,
         event_loop: &ActiveEventLoop,
-        config: &WindowConfig,
+        window_request: &WindowRequest,
         requests: Rc<AppRequests>,
-    ) -> Result<(OpenWindow, WindowRef), String> {
+    ) -> Result<OpenWindow, String> {
+        let config = &window_request.request.config;
         let window = open_window(event_loop, config)?;
-        let view = self.view(ViewId(self.next_view_id), config);
+        let view = self.view(ViewId(self.next_view_id), config).with_request(
+            window_request.request_id,
+            window_request.request.initial_data.clone(),
+        );
+        let view = Rc::new(view);
         self.next_view_id += 1;
         view.attach_window(&window);
         let handle = Rc::new(WinitWindow::new(
@@ -280,24 +259,30 @@ impl ViewMaker {
             Rc::clone(&view),
             requests,
         ));
-        let open = OpenWindow {
+        view.set_window_handle(&handle);
+        Ok(OpenWindow {
             window,
             view,
-            handle: Some(Rc::clone(&handle)),
-        };
-        Ok((open, handle))
+            handle: Some(handle),
+        })
     }
 
     /// The view numbered `id`, on the device every view draws with, for a window configured as
     /// `config`.
-    fn view(&mut self, id: ViewId, config: &WindowConfig) -> Rc<WinitView> {
+    fn view(&mut self, id: ViewId, config: &WindowConfig) -> WinitView {
         let gpu = self.gpu.get_or_insert_with(Gpu::acquire);
-        Rc::new(WinitView::new(id, gpu, config.background.sees_through()))
+        WinitView::new(id, gpu, config.background.sees_through())
     }
 }
 
-/// The implicit view's window, configured as `config`, attached to `view`.
-pub(crate) fn open_implicit_window(
+/// The screen view's window, where the system's window is the screen, as on iOS. A desktop
+/// has none: the app opens every window it has, as Flutter's multi-window apps do.
+pub(crate) fn screen_window_config() -> Option<WindowConfig> {
+    ThisOs::WINDOW_IS_THE_SCREEN.then(WindowConfig::default)
+}
+
+/// The screen view's window, configured as `config`, attached to `view`.
+pub(crate) fn open_screen_window(
     event_loop: &ActiveEventLoop,
     config: &WindowConfig,
     view: &WinitView,

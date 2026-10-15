@@ -16,7 +16,7 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 
 **Starting**
 - the host's own `run`, whose start closure takes a `PlatformRef` and returns the `EmbedderClient`; `Platform::target_platform`
-- Call the start closure once, at launch, as soon as the views that exist then are in `Platform::views`, whether or not they have their windows yet, and keep the client it returns. A view with no window has no size, as Flutter's implicit view has empty metrics until its window reports them.
+- Call the start closure once, at launch, as soon as the views the platform gives then are in `Platform::views`, whether or not they have their windows yet, and keep the client it returns. A view with no window has no size, as Flutter's implicit view has empty metrics until its window reports them. A desktop gives none.
 
 **Waking**
 - `Dispatcher::wake_at`, `wake_now`
@@ -27,8 +27,8 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - Run dispatched work on the system's thread pool or the host's own threads, and on the web as a later task of the browser's loop.
 
 **Quitting**
-- `EmbedderClient::request_app_exit`, `AppExit::exit_application`
-- Ask the app first, and quit only when it answers exit.
+- `EmbedderClient::request_app_exit`, `AppExitReply`, `AppExit::quit`
+- Ask the app at every request the system makes, a second one while the first is being decided included, quit when its reply is exit, and quit at once when it calls `quit`. Act on both on a turn of the loop, never inside the call that answered.
 
 **Lifecycle states**
 - `EmbedderClient::app_lifecycle_state_changed`, `Platform::initial_lifecycle_state`
@@ -41,16 +41,16 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 ## Windows and views
 
 **Views**
-- `View`, `Platform::views`, `implicit_view`, `EmbedderClient::view_added`, `view_removed`
-- Update `Platform::views` before each `view_added` and `view_removed`, report with them only the views that come and go after launch, keep `implicit_view` the same view, among `Platform::views`, for the app's whole life, even once its window closes, and release a view's native window as soon as the window closes.
+- `View`, `View::initial_data`, `Platform::views`, `EmbedderClient::view_added`, `view_removed`
+- List every view the app has, given or asked for, update `Platform::views` before each `view_added` and `view_removed`, report with them only the views that come and go after launch, and release a view's native window as soon as the window closes. Hand on what an embedder attached to a view it gives as its initial data.
 
 **Surfaces**
 - none: a view's surface is the host's own; `EmbedderClient::frame`
 - Give every view a surface whenever the system gives them and ask for a frame to draw on them, take every surface when the system takes them, and keep the app and its views throughout.
 
-**Windows the app opens**
-- `Platform::windowing_owner`, `WindowingOwner::create`, `adopt`, `HostWindow`
-- Make each window on a turn of the loop, deliver it through the future, and give each `WindowConfig` option the system's nearest equivalent.
+**Views the app asks for**
+- `Platform::request_view`, `View::request_id`, `View::window`, `HostWindow`, `EmbedderClient::view_close_requested`, `view_request_failed`
+- Make a window for each request on a turn of the loop, add its view carrying the request's id and initial data, or report the failure, and give each `WindowConfig` option the system's nearest equivalent. Refuse requests where the platform gives the app its views. Report the user's request to close a view and close nothing until the app does.
 
 **Size and scale**
 - `ViewMetrics::physical_size`, `device_pixel_ratio`, `EmbedderClient::view_metrics_changed`
@@ -177,7 +177,7 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - Call the client only on the main thread, and reach each native window on the thread that owns it.
 
 **Re-entrancy**
-- `Platform`, `View`, `HostWindow`, `WindowingOwner` and each capability
+- `Platform`, `View`, `HostWindow` and each capability
 - Whatever a framework call or a system callback needs of the loop or the client becomes a request, served in order on a later turn.
 
 **Nested loops**

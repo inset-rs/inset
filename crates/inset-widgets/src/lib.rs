@@ -6,11 +6,13 @@
 
 mod binding;
 mod framework;
+mod multi_view_app;
 #[cfg(test)]
 mod test_harness;
 mod view;
 mod widgets;
 mod window;
+mod windowing;
 
 pub use binding::*;
 pub use framework::*;
@@ -42,6 +44,7 @@ pub use widgets::image::Image;
 pub mod __private {
     pub use inset_foundation as foundation;
 }
+pub use multi_view_app::{MultiViewApp, MultiViewAppState, ViewBuilder};
 pub use view::*;
 pub use widgets::actions::*;
 pub use widgets::animated_size::*;
@@ -135,3 +138,4 @@ pub use widgets::viewport::*;
 pub use widgets::visibility::*;
 pub use widgets::widget_state::*;
 pub use window::*;
+pub use windowing::{ViewCloseHandler, WindowController, WindowingOwner};

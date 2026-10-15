@@ -3,7 +3,7 @@
 use super::Kit;
 
 pub const KIT: Kit = Kit {
-    dependencies: "inset-winui = \"0.1\"\n",
+    dependencies: "inset-winui = \"0.4\"\n",
     lib_rs: r#"// StatefulWidget::State takes `self: Handle<Self>`.
 #![feature(arbitrary_self_types)]
 
@@ -11,15 +11,19 @@ use std::rc::Rc;
 
 use inset::{
     App, BuildContext, Center, ColoredBox, IntoWidget, Listener, PageRoute, PageRouteBuilder,
-    RouteSettingsRef, StatelessWidget, WidgetRef, WidgetsApp, run_app,
+    RouteSettingsRef, StatelessWidget, WidgetRef, WidgetsApp, WindowConfig, run_app_with,
 };
 use inset_winui::{AccentPalette, Button, Theme, ThemeResources, ThemeScope, install_icon_font};
 
-#[inset::main(size = [1080.0, 780.0])]
+#[inset::main]
 fn main(app: &mut App) {
     // The kit's icon glyphs, registered once before the first frame.
     install_icon_font(app);
-    run_app(
+    let window = WindowConfig {
+        size: [1080.0, 780.0],
+        ..WindowConfig::default()
+    };
+    run_app_with(
         app,
         WidgetsApp::new(AccentPalette::default().base)
             .page_route_builder(|app, settings, builder| {
@@ -32,6 +36,7 @@ fn main(app: &mut App) {
             })
             .home(Home)
             .into_widget(),
+        window,
     );
 }
 

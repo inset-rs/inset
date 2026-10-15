@@ -68,11 +68,11 @@ impl EmbedderState {
         &self.handlers
     }
 
-    /// The implicit view, made as the app starts: among the views from now on, for the app's whole
+    /// The screen view, made as the app starts: among the views from now on, for the app's whole
     /// life, and the image loader starts on its device.
-    pub(crate) fn add_implicit_view(&self, view: Rc<WinitView>) {
+    pub(crate) fn add_screen_view(&self, view: Rc<WinitView>) {
         self.images.start_once(view.image_context());
-        self.views.add_implicit(view);
+        self.views.add_screen_view(view);
     }
 
     /// A view the app asked for, with its window: among the views from now on, and the image

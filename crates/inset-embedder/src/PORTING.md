@@ -50,9 +50,17 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the host supplies `Platform`, and there is no isolate-global dispatcher.
   Affect: nothing can install a dispatcher callback behind the host's back, and two Apps in one process answer independently.
 
-- Change: `Platform::windowing_owner` hands the app a `WindowingOwner` that makes further windows from a `WindowConfig` (size, position, decorations, level, activation, every desktop, background, shadow) and answers a `HostWindow` — a view plus its frame, visibility, native handle and close request — or adopts a native window the app made; Flutter's experimental windowing API builds regular, dialog, popup, tooltip and satellite controllers over the engine's views instead.
-  Reason: platform — the common configuration and the raw handle cover what a Rust app configures itself, as winit and wgpu expose theirs, and adoption is Flutter's own macOS shape, where the app's window hosts the view.
-  Affect: an app names its windows' properties directly rather than choosing an archetype; a property the config lacks is set through the native handle; hosts without windows answer no owner and the implicit view stays the only one.
+- Change: there is no implicit view: `Platform::views` lists the views the platform gives, such as a phone's screen, and those the app asked for with `Platform::request_view`, each of which arrives carrying its request's id, where Flutter's engine gives an implicit view and its experimental windowing API builds window controllers over further views.
+  Reason: platform — on every platform that can make a view for the app, asking is a request whose view arrives later, as iOS scenes and Android activities do, so one set of views and a request cover a phone, a desktop and an embedder alike.
+  Affect: an app on a desktop has no view until it asks; the framework tells the views it asked for from those it was given by their request ids.
+
+- Change: a requested view's window is made from a `WindowConfig` (size, position, decorations, level, activation, every desktop, background, shadow) and reached through `View::window` as a `HostWindow`, its frame, visibility, closing and native handle, as `NSView.window` is, where Flutter builds regular, dialog, popup, tooltip and satellite controllers and its `FlutterView` names no window.
+  Reason: platform — the common configuration and the raw handle cover what a Rust app configures itself, as winit and wgpu expose theirs.
+  Affect: an app names its windows' properties directly rather than choosing an archetype; a property the config lacks is set through the native handle; a host without windows refuses requests.
+
+- Change: a view the platform gave may be in a window the app manages (`View::window`), and a view closes only through its window, where Flutter's implicit view has no window and its windows close through their controllers.
+  Reason: platform — a host such as WaOS shows a given view in a window the app may move, title and close, as an iPad scene and an Android desktop window are, while a phone's screen, a web page's element and a host app's view are in nothing the app may close.
+  Affect: closing a given view in a window closes the window; a view with no window is not the app's to close, and its way out is to quit.
 
 - Change: `MouseCursor::activate_system_cursor` also takes the view the pointer is over.
   Reason: platform — where each window has its own cursor, the host must know which window to change.
@@ -147,9 +155,17 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — Dart's `popRoute` crosses a channel and cannot answer in time, which is why Flutter tells the host in advance; this call is direct.
   Affect: when the answer is no, the host does what its platform does without the app, which on Android is to close the activity.
 
-- Change: `EmbedderClient::request_app_exit` returns the framework's answer as a future rather than replying on a channel.
+- Change: `EmbedderClient::request_app_exit` takes an `AppExitReply` the framework answers, rather than replying on a channel.
   Reason: platform — there are no method channels; the host trait is the channel.
-  Affect: a host polls for the answer, which may come long after the call, such as once the user has chosen whether to save.
+  Affect: the answer may come long after the call, such as once the user has chosen whether to save, and its reply posts it to the host's own loop; dropped unanswered, it answers exit.
+
+- Change: `AppExit::quit` is `System.exitApplication` for a required exit only: a cancelable exit stays in the framework, which asks its own listeners and then quits, where Flutter's engine asks the framework back.
+  Reason: platform — only the framework's answer decides, so the host has nothing to add between the question and the answer.
+  Affect: a host implements quitting alone, and an app sees the same answers as in Flutter.
+
+- Change: `EmbedderClient::view_close_requested` reports the user's request to close a view, and the host closes nothing itself, where Flutter's engine calls the window controller's delegate, whose `onWindowCloseRequested` closes it by default.
+  Reason: platform — the host trait is the channel, and the framework decides each view's close.
+  Affect: a window stays open until the app closes it.
 
 - Change: a host reports the lifecycle as `AppLifecycleState` values through `EmbedderClient::app_lifecycle_state_changed`, and `Platform::initial_lifecycle_state` answers `None` where Dart has an empty string.
   Reason: platform — there are no method channels; the host trait is the channel.

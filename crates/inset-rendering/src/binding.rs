@@ -4,7 +4,7 @@
 
 use std::rc::Rc;
 
-use inset_embedder::{Offset, ViewId};
+use inset_embedder::{Offset, ViewId, ViewRef};
 use inset_foundation::{App, Handle, Listener};
 use inset_gestures::{GestureBinding, GestureBindingOverridesObject, HitTestResult, PointerEvent};
 use inset_scheduler::{FrameCallback, SchedulerBinding};
@@ -72,11 +72,8 @@ impl PipelineManifold for BindingPipelineManifold {
 pub struct RendererBinding {
     overrides: Option<Rc<dyn RendererBindingOverrides>>,
     root_pipeline_owner: Option<Handle<PipelineOwner>>,
-    /// Flutter's deprecated `pipelineOwner`, created on first use.
-    pipeline_owner: Option<Handle<PipelineOwner>>,
-    /// Flutter's deprecated `renderView` for the implicit view, created on first use.
-    render_view: Option<RenderHandle<RenderView>>,
-    render_view_initial_frame_prepared: bool,
+    /// The render view [`init_render_view`](Self::init_render_view) made, which it answers again.
+    test_render_view: Option<RenderHandle<RenderView>>,
     render_views: Vec<(ViewId, RenderHandle<RenderView>)>,
     mouse_tracker: Option<Handle<MouseTracker>>,
     debug_mouse_tracker_update_scheduled: bool,
@@ -142,8 +139,8 @@ impl RendererBinding {
     /// The [`PipelineOwner`] that is the root of the pipeline owner tree.
     ///
     /// Typically, this owner has no root render object (a `RenderView` is attached to the
-    /// owners the widget layer adds as children). Until then, [`init_render_view`](Self::init_render_view)
-    /// attaches the implicit view here.
+    /// owners the widget layer adds as children). A test that renders without widgets attaches
+    /// its view's here, through [`init_render_view`](Self::init_render_view).
     pub fn root_pipeline_owner(self: Handle<Self>, app: &App) -> Handle<PipelineOwner> {
         app.get(self)
             .root_pipeline_owner
@@ -158,34 +155,6 @@ impl RendererBinding {
                 SchedulerBinding::ensure_visual_update(app);
             })),
         )
-    }
-
-    /// The [`PipelineOwner`] Flutter's binding keeps for the implicit view.
-    pub fn pipeline_owner(self: Handle<Self>, app: &mut App) -> Handle<PipelineOwner> {
-        if let Some(owner) = app.get(self).pipeline_owner {
-            return owner;
-        }
-        let owner = PipelineOwner::new(app, None);
-        app.get_mut(self).pipeline_owner = Some(owner);
-        owner
-    }
-
-    /// The [`RenderView`] for the platform's implicit view, created on first access.
-    ///
-    /// # Panics
-    ///
-    /// If the platform has no implicit view.
-    pub fn render_view(self: Handle<Self>, app: &mut App) -> RenderHandle<RenderView> {
-        if let Some(view) = app.get(self).render_view {
-            return view;
-        }
-        let implicit_view = app
-            .platform()
-            .implicit_view()
-            .expect("the platform has no implicit view");
-        let view = RenderView::new(app, None, None, implicit_view);
-        app.get_mut(self).render_view = Some(view);
-        view
     }
 
     /// The [`RenderView`]s managed by this binding.
@@ -345,19 +314,24 @@ impl RendererBinding {
         }
     }
 
-    /// Flutter's `TestRenderingFlutterBinding.initRenderView`: makes the implicit view's
-    /// [`RenderView`] the root of [`root_pipeline_owner`](Self::root_pipeline_owner), registers
-    /// it, and prepares its first frame. Idempotent, as `_ReusableRenderView` is.
-    pub fn init_render_view(self: Handle<Self>, app: &mut App) -> RenderHandle<RenderView> {
-        let render_view = self.render_view(app);
-        if app.get(self).render_view_initial_frame_prepared {
+    /// Flutter's `TestRenderingFlutterBinding.initRenderView`: makes a [`RenderView`] for `view`
+    /// the root of [`root_pipeline_owner`](Self::root_pipeline_owner), registers it, and
+    /// prepares its first frame. Idempotent, as `_ReusableRenderView` is: a later call answers
+    /// the first call's render view.
+    pub fn init_render_view(
+        self: Handle<Self>,
+        app: &mut App,
+        view: ViewRef,
+    ) -> RenderHandle<RenderView> {
+        if let Some(render_view) = app.get(self).test_render_view {
             return render_view;
         }
+        let render_view = RenderView::new(app, None, None, view);
+        app.get_mut(self).test_render_view = Some(render_view);
         self.root_pipeline_owner(app)
             .set_root_node(app, Some(render_view.as_object()));
         self.add_render_view(app, render_view);
         render_view.prepare_initial_frame(app);
-        app.get_mut(self).render_view_initial_frame_prepared = true;
         render_view
     }
 }
@@ -367,13 +341,6 @@ impl RendererBinding {
 /// Flutter's `RendererBinding` overrides of `GestureBinding`: `hitTestInView` walks the render
 /// trees, `dispatchEvent` updates the mouse tracker before routing.
 impl GestureBindingOverridesObject for RendererBinding {
-    fn hit_test(self: Handle<Self>, app: &mut App, result: &mut HitTestResult, position: Offset) {
-        let Some(view) = app.platform().implicit_view() else {
-            return;
-        };
-        self.hit_test_in_view(app, result, position, view.id());
-    }
-
     fn hit_test_in_view(
         self: Handle<Self>,
         app: &mut App,
@@ -434,11 +401,11 @@ mod tests {
     }
 
     #[test]
-    fn a_frame_lays_out_paints_and_presents_the_implicit_view() {
+    fn a_frame_lays_out_paints_and_presents_the_view() {
         let (cell, view, _platform) = app_with_view();
         let mut app = cell.borrow_mut();
         let binding = RendererBinding::instance(&mut app);
-        let render_view = binding.init_render_view(&mut app);
+        let render_view = binding.init_render_view(&mut app, view.clone());
         assert_eq!(
             render_view.configuration(&app).logical_constraints,
             BoxConstraints::tight(Size::new(400.0, 300.0))
@@ -459,10 +426,10 @@ mod tests {
 
     #[test]
     fn a_dirty_node_requests_a_visual_update() {
-        let (cell, _view, platform) = app_with_view();
+        let (cell, view, platform) = app_with_view();
         let mut app = cell.borrow_mut();
         let binding = RendererBinding::instance(&mut app);
-        let render_view = binding.init_render_view(&mut app);
+        let render_view = binding.init_render_view(&mut app, view.clone());
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(10.0, 10.0)), None);
         render_view.set_child(&mut app, Some(child.as_box()));
@@ -483,10 +450,10 @@ mod tests {
 
         use crate::proxy_box::{HitTestBehavior, RenderPointerListener};
 
-        let (cell, _view, _platform) = app_with_view();
+        let (cell, view, _platform) = app_with_view();
         let mut app = cell.borrow_mut();
         let binding = RendererBinding::instance(&mut app);
-        let render_view = binding.init_render_view(&mut app);
+        let render_view = binding.init_render_view(&mut app, view.clone());
         let listener = RenderPointerListener::new(&mut app, HitTestBehavior::Opaque, None);
         let positions = Rc::new(std::cell::RefCell::new(Vec::new()));
         let recorded = Rc::clone(&positions);
@@ -521,10 +488,10 @@ mod tests {
         use crate::proxy_box::RenderMouseRegion;
         use crate::shifted_box::RenderPadding;
 
-        let (cell, _view, _platform) = app_with_view();
+        let (cell, view, _platform) = app_with_view();
         let mut app = cell.borrow_mut();
         let binding = RendererBinding::instance(&mut app);
-        let render_view = binding.init_render_view(&mut app);
+        let render_view = binding.init_render_view(&mut app, view.clone());
         let region = RenderMouseRegion::new(&mut app, true, None);
         let log = Rc::new(std::cell::RefCell::new(Vec::new()));
         let entered = Rc::clone(&log);
@@ -582,7 +549,7 @@ mod tests {
         let (cell, view, _platform) = app_with_view();
         let mut app = cell.borrow_mut();
         let binding = RendererBinding::instance(&mut app);
-        binding.init_render_view(&mut app);
+        binding.init_render_view(&mut app, view.clone());
         binding.defer_first_frame(&mut app);
         SchedulerBinding::handle_begin_frame(&mut app, Some(Duration::ZERO));
         SchedulerBinding::handle_draw_frame(&mut app);

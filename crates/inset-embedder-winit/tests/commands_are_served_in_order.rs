@@ -1,7 +1,7 @@
 //! What the application asks through the platform is served in the order it asked, each on a turn
-//! of the loop of its own: a window asked for before an exit opens before the framework is asked
-//! whether the application may quit, and one asked for after the exit opens after. Served by kind,
-//! windows before exits, as they once were, both windows came first.
+//! of the loop of its own: a window's close asked for before another window's opening is served
+//! first, so the first view goes before the second comes. Served by kind, openings before closes,
+//! the second view would come first.
 //!
 //! Its own binary, without the test harness: AppKit's event loop runs on the main thread only. It
 //! opens two windows for a moment, and needs a login session's window server.
@@ -12,7 +12,7 @@ mod support;
 #[cfg(target_os = "macos")]
 const TEST: &str = "commands_are_served_in_order";
 
-/// Long enough for the windows to open and the exit to be asked, many times over.
+/// Long enough for the windows to open and close, many times over.
 #[cfg(target_os = "macos")]
 const GIVE_UP_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
 
@@ -23,9 +23,7 @@ fn main() {
     support::fail_after(TEST, GIVE_UP_AFTER, || {
         format!("not everything asked for was served in {GIVE_UP_AFTER:?}")
     });
-    WinitEmbedder::default()
-        .implicit_view(None)
-        .run(client::RecordingClient::new);
+    WinitEmbedder.run(client::RecordingClient::new);
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -36,8 +34,8 @@ mod client {
     use std::time::Duration;
 
     use inset_embedder::{
-        AppExitFuture, AppExitResponse, AppExitType, EmbedderClient, Frame, KeyData, PlatformRef,
-        PointerDataPacket, ViewId, WindowConfig, WindowFuture,
+        EmbedderClient, Frame, KeyData, PlatformRef, PointerDataPacket, RequestId, ViewId,
+        WindowConfig, WindowRef,
     };
 
     use crate::{TEST, support};
@@ -46,48 +44,53 @@ mod client {
     #[derive(Debug, PartialEq)]
     enum Heard {
         ViewAdded(ViewId),
-        AskedWhetherToQuit,
+        ViewRemoved(ViewId),
     }
 
-    /// Served in the order asked: the first window, the exit, the second window. The windows'
-    /// views are numbered as they open, after the implicit view's number, which goes unused here.
+    /// Served in the order asked: the first window opens, then closes, then the second opens.
+    /// The windows' views are numbered as they open, after the screen view's number, which a
+    /// desktop leaves unused.
     const IN_THE_ORDER_ASKED: [Heard; 3] = [
         Heard::ViewAdded(ViewId(1)),
-        Heard::AskedWhetherToQuit,
+        Heard::ViewRemoved(ViewId(1)),
         Heard::ViewAdded(ViewId(2)),
     ];
 
-    /// Asks for a window, an exit and another window at its start, and records what it hears.
+    /// Asks for a window at its start; once it is made, asks for its close and then another
+    /// window in one go, and records what it hears.
     pub(crate) struct RecordingClient {
-        _opening: Vec<WindowFuture>,
-        /// The application's exit request, held so its answer is heard.
-        _exit: AppExitFuture,
+        platform: PlatformRef,
+        requested: Vec<RequestId>,
+        first: Vec<WindowRef>,
+        asked_close_then_open: bool,
         heard: Vec<Heard>,
     }
 
     impl RecordingClient {
         pub(crate) fn new(platform: PlatformRef) -> RecordingClient {
-            let owner = platform
-                .windowing_owner()
-                .expect("a desktop host makes windows");
-            let window = |title: &str| {
-                owner.create(WindowConfig {
-                    title: title.into(),
-                    size: [200.0, 100.0],
-                    ..WindowConfig::default()
-                })
-            };
-            let first = window("asked before the exit");
-            let exit = platform
-                .app_exit()
-                .expect("a macOS host quits itself")
-                .exit_application(AppExitType::Cancelable, 0);
-            let second = window("asked after the exit");
+            let first = open_window(&platform, "closed before the second opens");
             RecordingClient {
-                _opening: vec![first, second],
-                _exit: exit,
+                platform,
+                requested: vec![first],
+                first: Vec::new(),
+                asked_close_then_open: false,
                 heard: Vec::new(),
             }
+        }
+
+        /// Once the first window is made, closes it and asks for the second in the same call.
+        fn ask_close_then_open(&mut self) {
+            support::take_opened_windows(&self.platform, &mut self.requested, &mut self.first);
+            let Some(first) = self.first.pop() else {
+                return;
+            };
+            if self.asked_close_then_open {
+                return;
+            }
+            self.asked_close_then_open = true;
+            first.close();
+            self.requested
+                .push(open_window(&self.platform, "opened after the first closes"));
         }
 
         /// Records `heard`, and judges the order once everything asked for was served.
@@ -103,21 +106,33 @@ mod client {
         }
     }
 
+    fn open_window(platform: &PlatformRef, title: &str) -> RequestId {
+        support::request_window(
+            platform,
+            WindowConfig {
+                title: title.into(),
+                size: [200.0, 100.0],
+                ..WindowConfig::default()
+            },
+        )
+    }
+
     impl EmbedderClient for RecordingClient {
         fn view_added(&mut self, id: ViewId) {
             self.hear(Heard::ViewAdded(id));
+            self.ask_close_then_open();
         }
 
-        /// No, so the application keeps running until the test ends it.
-        fn request_app_exit(&mut self) -> AppExitFuture {
-            self.hear(Heard::AskedWhetherToQuit);
-            Box::pin(std::future::ready(AppExitResponse::Cancel))
+        fn view_removed(&mut self, id: ViewId) {
+            self.hear(Heard::ViewRemoved(id));
+        }
+
+        fn wake(&mut self, _elapsed: Duration) {
+            self.ask_close_then_open();
         }
 
         fn frame(&mut self, _frame: Frame) {}
-        fn wake(&mut self, _elapsed: Duration) {}
         fn view_metrics_changed(&mut self, _id: ViewId) {}
-        fn view_removed(&mut self, _id: ViewId) {}
         fn pointer_data_packet(&mut self, _packet: PointerDataPacket) {}
         fn key_data(&mut self, _data: KeyData) -> bool {
             false

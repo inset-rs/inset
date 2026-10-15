@@ -4,22 +4,26 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 ## Identical
 
-- app_exit.rs → how Flutter's desktop embedders answer `System.exitApplication`
+- app_exit.rs → how Flutter's desktop embedders quit for a required `System.exitApplication`, and hear the framework's reply to `System.requestAppExit`
 - lifecycle.rs, os/macos/app_lifecycle.rs → the macOS embedder's lifecycle states (`FlutterEngine`)
 - os/macos/app_delegate.rs, quitting → the macOS embedder's `FlutterAppDelegate`, which asks the framework before the app quits
 - windows.rs, frame_scheduler.rs → the embedders' frame, in which the framework draws every view
 - frame_scheduler.rs, vsync_source.rs, os/macos/display_links.rs → the macOS embedder's vsync, from the display the first view is on
-- launch.rs, main_loop/ → the engine's start (`Shell` adds the implicit view with empty metrics): the app starts with the implicit view at no size, and its window and surface come after
-- platform.rs, main_loop/windows.rs → the macOS embedder's implicit view, which the framework never hears removed: it outlives its window and draws nowhere once the window closes
-- main_loop/quitting.rs, os/macos/app_delegate.rs → the macOS template's last window, whose closing asks the framework whether the app quits, as Cmd-Q does
+- launch.rs, main_loop/ → the engine's start (`Shell` adds the implicit view with empty metrics): where the system's window is the screen, the app starts with the screen view at no size, and its window and surface come after
+- platform.rs, main_loop/windows.rs → the embedders' implicit view, here the screen view, which the framework never hears removed: it outlives its window and draws nowhere once the window closes
+- main_loop/windows.rs → the engine's window close request, which goes to the framework and closes nothing until the framework closes the window
 - main_loop/windows.rs, view.rs, rasterizer.rs → the shell's surfaces (`Shell::OnPlatformViewCreated`, `OnPlatformViewDestroyed`): the view stays while the system has taken its surface, and each surface given gets a frame
 - touch.rs → the iOS embedder's touches, one pointer per finger, added before its down and removed after its up
 
 ## lib.rs / main_loop/
 
-- Change: whether closing the last window quits the app is a setting of `WinitEmbedder`, on by default, where a Flutter macOS app answers AppKit's question in its own application delegate.
-  Reason: platform — winit owns the application delegate, so an app cannot answer it there.
-  Affect: an app that lives in the Dock turns the setting off and runs on with no window, without being asked whether to quit.
+- Change: a desktop app has no view until it asks for one: the host makes a window for each request and adds its view carrying the request's id, where Flutter's runners make the implicit view's window and only its multi-window apps make their own (`[win32] Multi-window should never have implicit view`).
+  Reason: platform — the app owns its windows and decides every window's close, the last one's included, so the host makes no window the app did not ask for and has no rule for the last one.
+  Affect: `WinitEmbedder` has no settings; `run_app` asks for the app's window, and what the last window's closing means is the app's to decide.
+
+- Change: on macOS every `terminate:` asks the framework until the app has decided to quit, where Flutter's termination handler marks the quit as under way when it asks, which lets a second Cmd-Q through.
+  Reason: platform — the host reports every request to quit to the framework, which decides each, such as quitting only at a second Cmd-Q.
+  Affect: an app whose exit listeners never answer is not quit by pressing Cmd-Q again.
 
 - Change: on macOS a panic inside a call from AppKit aborts the process once the panic hook has printed it.
   Reason: platform — a panic cannot unwind through AppKit's frames.
@@ -124,7 +128,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 ## Deferred
 
 - The lifecycle state on iOS, Windows and Linux, where the framework hears none. Trigger: an app there that must pause in the background.
-- Asking the framework before the last window closes, on Windows and Linux. Trigger: an app there that must refuse to close.
+- Letting a logout or shutdown go on once the app agrees, through `NSTerminateLater`: the delegate cancels it at once, as Flutter's does, so an Inset app stops every logout. Trigger: an app that must not stop a logout it agrees to; AppKit's loop while it waits needs an experiment first.
 - Files opened from the system on Windows and Linux. Trigger: an app that wants them through `Platform::file_opening` there too.
 - The layout keymap for character keys, so a shifted symbol reports `!` where Flutter reports `digit1`. Trigger: a shortcut that matches a shifted symbol by logical key.
 - Dead keys and `Key::Unidentified`. Trigger: composing input, or a key of the system's that winit cannot name.

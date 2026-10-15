@@ -5,7 +5,7 @@
 //!
 //! winit's proxy carries only what may cross threads, since the dispatcher's wakes and the display
 //! links' vsyncs send through it from other threads, while a request may carry the framework's
-//! `Rc`s: a window's reply, an exit's. So a request waits in [`AppRequests`], on the main thread,
+//! `Rc`s: a window's reply. So a request waits in [`AppRequests`], on the main thread,
 //! and the proxy carries a [`MainLoopEvent::AppRequest`] for it, which the loop answers by serving
 //! the oldest request waiting. The invariant a later editor must keep: a request is queued only
 //! together with its event, and taken only for one, so that the requests are served in the order
@@ -14,10 +14,9 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 
-use inset_embedder::{SystemMouseCursorKind, ViewFocusEvent};
+use inset_embedder::{AppExitResponse, SystemMouseCursorKind, ViewFocusEvent};
 use winit::window::WindowId;
 
-use crate::app_exit::ExitRequest;
 use crate::main_loop::MainLoopEvent;
 use crate::windows::WindowRequest;
 
@@ -25,12 +24,14 @@ use crate::windows::WindowRequest;
 pub(crate) enum AppRequest {
     /// Draw a frame at the next vsync.
     RequestFrame,
-    /// Open a window; its future answers once it is open.
+    /// Open a window for a view the app asked for; the view arrives through `view_added`.
     OpenWindow(WindowRequest),
     /// A created window's `close`: the window is freed, and its view goes.
     CloseWindow(WindowId),
-    /// Quit, asking the framework first unless the exit is required.
-    Exit(ExitRequest),
+    /// Quit: the app's required exit.
+    Quit,
+    /// The framework's answer to a request to exit: quit on exit.
+    AnswerExit(AppExitResponse),
     /// Show this cursor on the window the pointer is in.
     ShowCursor(SystemMouseCursorKind),
     /// Focus a view's window, or give up its focus.

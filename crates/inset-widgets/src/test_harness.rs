@@ -443,14 +443,20 @@ pub(crate) fn binding_cell() -> Rc<AppCell> {
     AppCell::with_platform(Rc::new(platform))
 }
 
+/// The one view [`binding_cell`]'s platform gives the app.
+pub(crate) fn platform_view(app: &App) -> inset_embedder::ViewRef {
+    app.platform()
+        .views()
+        .into_iter()
+        .next()
+        .expect("an app from binding_cell")
+}
+
 /// Mounts `child` under the platform's view and runs the first frame.
 pub(crate) fn binding_mount(cell: &AppCell, child: WidgetRef) {
     {
         let mut app = cell.borrow_mut();
-        let view = app
-            .platform()
-            .implicit_view()
-            .expect("an app from binding_cell");
+        let view = platform_view(&app);
         crate::binding::run_widget(&mut app, View::new(view, child).into_widget());
     }
     // `run_app` attaches the root widget on the next timer turn, as Dart's `Timer.run` does.
@@ -464,4 +470,97 @@ pub(crate) fn binding_pump(app: &mut App, at: std::time::Duration) {
     app.drain_microtasks();
     inset_scheduler::SchedulerBinding::handle_draw_frame(app);
     app.drain_microtasks();
+}
+
+// ---- views and windows: a platform that gives views, or one that makes windows on request ----
+
+/// A host that counts how often it was told to quit.
+#[derive(Default)]
+pub(crate) struct Quits(std::cell::Cell<u32>);
+
+impl Quits {
+    pub(crate) fn count(&self) -> u32 {
+        self.0.get()
+    }
+}
+
+impl inset_embedder::AppExit for Quits {
+    fn quit(&self, _exit_code: i32) {
+        self.0.set(self.0.get() + 1);
+    }
+}
+
+/// An app whose platform gives it `views` and makes windows on request through `windows`,
+/// quitting through `quits`, with the widgets binding set up.
+pub(crate) fn views_cell(
+    views: &[Rc<inset_test::TestView>],
+    windows: &Rc<inset_test::TestWindows>,
+    quits: &Rc<Quits>,
+) -> Rc<AppCell> {
+    let mut platform = TestPlatform::new()
+        .with_windows(Rc::clone(windows))
+        .with_app_exit(Rc::clone(quits) as Rc<dyn inset_embedder::AppExit>);
+    for view in views {
+        platform = platform.with_view(Rc::clone(view) as inset_embedder::ViewRef);
+    }
+    let cell = AppCell::with_platform(Rc::new(platform));
+    crate::binding::WidgetsBinding::instance(&mut cell.borrow_mut());
+    cell
+}
+
+/// What the shell does when the host adds `view`, then the frame that follows.
+pub(crate) fn report_view_added(cell: &AppCell, view: ViewId, at: std::time::Duration) {
+    report_view_change(cell, view, at, |callbacks| callbacks.on_view_added.clone());
+}
+
+/// What the shell does when the host removes `view`, then the frame that follows.
+pub(crate) fn report_view_removed(cell: &AppCell, view: ViewId, at: std::time::Duration) {
+    report_view_change(cell, view, at, |callbacks| {
+        callbacks.on_view_removed.clone()
+    });
+}
+
+fn report_view_change(
+    cell: &AppCell,
+    view: ViewId,
+    at: std::time::Duration,
+    callback_of: impl FnOnce(
+        &inset_foundation::PlatformCallbacks,
+    ) -> Option<inset_foundation::ViewChangeCallback>,
+) {
+    let mut app = cell.borrow_mut();
+    if let Some(callback) = callback_of(app.platform_callbacks()) {
+        callback(&mut app, view);
+    }
+    inset_rendering::RendererBinding::instance(&mut app).handle_metrics_changed(&mut app);
+    binding_pump(&mut app, at);
+}
+
+/// What the shell does when the user asks to close `view`.
+pub(crate) fn request_view_close(cell: &AppCell, view: ViewId) {
+    {
+        let mut app = cell.borrow_mut();
+        let callback = app
+            .platform_callbacks()
+            .on_view_close_requested
+            .clone()
+            .expect("the binding hears close requests");
+        callback(&mut app, view);
+    }
+    cell.checkpoint();
+}
+
+/// What the shell does as the host adds the views of the windows `windows` made, once each is
+/// made; a view reported twice is heard twice, as a host would not, and the framework ignores
+/// the second.
+pub(crate) fn report_windows_made(
+    cell: &AppCell,
+    windows: &inset_test::TestWindows,
+    at: std::time::Duration,
+) {
+    for window in windows.made() {
+        if window.closes() == 0 {
+            report_view_added(cell, EmbedderView::id(&**window.test_view()), at);
+        }
+    }
 }

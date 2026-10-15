@@ -29,7 +29,9 @@ pub(crate) fn build(cell: &AppCell, child: WidgetRef) {
         let mut app = cell.borrow_mut();
         let view = app
             .platform()
-            .implicit_view()
+            .views()
+            .into_iter()
+            .next()
             .expect("an app from test_support::test_cell");
         run_widget(&mut app, View::new(view, child).into_widget());
     }

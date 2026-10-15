@@ -83,6 +83,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Flutter's `WidgetsBinding` overrides `drawFrame` and `handleMetricsChanged` through mixin order, and a crate above cannot override a method below it.
   Affect: a binding layered above registers with `set_overrides` to get its build phase; a render-tree-only host runs the plain frame.
 
+- Change: the deprecated `renderView` and `pipelineOwner` are not ported, and `init_render_view` (`TestRenderingFlutterBinding.initRenderView`) takes the view it renders into.
+  Reason: platform — they serve the implicit view, and there is no implicit view.
+  Affect: a test that renders without widgets passes its view.
+
 ## mouse_tracker.rs → mouse_tracker.dart
 
 - Change: Dart's `target is MouseTrackerAnnotation` is the virtual `RenderObject::mouse_tracker_annotation`, which the tracker re-reads from the render object on every dispatch.

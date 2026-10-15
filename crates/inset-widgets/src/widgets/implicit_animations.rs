@@ -3568,10 +3568,7 @@ mod tests {
 
     /// Rebuilds the mounted tree with a new root child and runs the frame that updates it.
     fn rebuild(app: &mut App, child: WidgetRef, at: Duration) {
-        let view = app
-            .platform()
-            .implicit_view()
-            .expect("an app from binding_cell");
+        let view = crate::test_harness::platform_view(app);
         let root = View::new(view, child).into_widget();
         WidgetsBinding::instance(app).attach_root_widget(app, root);
         binding_pump(app, at);

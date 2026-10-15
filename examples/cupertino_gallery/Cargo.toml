@@ -11,7 +11,10 @@ publish = false
 identifier = "rs.inset.cupertino-gallery"
 name = "Cupertino gallery"
 
+# Named apart from the binary: on Windows a cdylib and a binary of one name write the same
+# `.pdb`.
 [lib]
+name = "cupertino_gallery_lib"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]

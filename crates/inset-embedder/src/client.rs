@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use crate::{
-    AppExitFuture, AppExitResponse, AppLifecycleState, DropData, Frame, KeyData, PointerDataPacket,
+    AppExitReply, AppExitResponse, AppLifecycleState, DropData, Frame, KeyData, PointerDataPacket,
     TextEditingValue, TextInputAction, ViewFocusEvent, ViewId,
 };
 
@@ -61,23 +61,36 @@ pub trait EmbedderClient {
         false
     }
 
+    /// The user asked to close `view`: its window's close button, or the system's Close
+    /// command. The host closes nothing itself; the application closes the window, through
+    /// [`HostWindow::close`](crate::HostWindow::close), or keeps it open, such as until its user
+    /// has chosen whether to save. Nothing waits for an answer.
+    ///
+    /// Flutter's engine reports this to the window's controller, whose delegate's
+    /// `onWindowCloseRequested` closes it by default. The default here keeps the view open.
+    fn view_close_requested(&mut self, view: ViewId) {
+        let _ = view;
+    }
+
+    /// A request for a view ([`crate::Platform::request_view`]) got no view: the host could not
+    /// make its window. The default drops it.
+    fn view_request_failed(&mut self, request: crate::RequestId, error: crate::ViewError) {
+        let _ = (request, error);
+    }
+
     /// The system asked the application to quit, and the application may refuse: the user
-    /// chose Quit, or is logging out. The host also sends this for a cancelable exit the
-    /// application asked for itself through
-    /// [`AppExit::exit_application`](crate::AppExit::exit_application). The future answers
-    /// whether to quit; the host quits or keeps running once it resolves.
+    /// chose Quit, or is logging out. Every request comes here, a second one while the first is
+    /// still being decided included, so that the application decides each; `reply` takes its
+    /// answer, and the host quits on [`AppExitResponse::Exit`].
     ///
     /// The answer may take as long as the application needs, such as asking its user whether
-    /// to save first. The future resolves inside a call into this client: this one, when every
-    /// observer answered at once, or a later one. A host polls it once this call returns, and
-    /// again each time its waker is woken. The waker is woken from inside a call into the
-    /// client, so it may only post a note to the host's own loop, never call the client.
+    /// to save first, and is given inside a call into this client: this one, or a later one.
     ///
-    /// Flutter sends this as `System.requestAppExit` on `SystemChannels.platform` and hands
-    /// the reply to a callback once `ServicesBinding.handleRequestAppExit`'s `Future` has
-    /// completed. The default answers `Exit` at once, as `ServicesBinding`'s own answer does.
-    fn request_app_exit(&mut self) -> AppExitFuture {
-        Box::pin(std::future::ready(AppExitResponse::Exit))
+    /// Flutter sends this as `System.requestAppExit` on `SystemChannels.platform` and replies
+    /// once `ServicesBinding.handleRequestAppExit`'s `Future` has completed. The default
+    /// answers `Exit` at once, as `ServicesBinding`'s own answer does.
+    fn request_app_exit(&mut self, reply: AppExitReply) {
+        reply.answer(AppExitResponse::Exit);
     }
 
     /// The application entered `state`: its views were shown, hidden, focused or unfocused, or

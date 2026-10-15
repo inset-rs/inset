@@ -20,9 +20,6 @@ const MATRIX_PRECISION_ERROR_TOLERANCE: f64 = 8.0 * f32::EPSILON as f64;
 
 /// An object that can hit-test pointers.
 pub trait HitTestable {
-    /// Deprecated. Use [`hit_test_in_view`](Self::hit_test_in_view) instead.
-    fn hit_test(&self, app: &mut App, result: &mut HitTestResult, position: Offset);
-
     /// Fills the provided [`HitTestResult`] with [`HitTestEntry`]s for objects that
     /// are hit at the given `position` in the view identified by `view_id`.
     fn hit_test_in_view(

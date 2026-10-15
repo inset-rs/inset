@@ -1,5 +1,5 @@
-//! An app started with no implicit view has no views; it opens one through the windowing owner,
-//! hears it added, and draws in it. The view gets its surface as its window opens, since the
+//! An app on a desktop starts with no views; it asks for one, hears it added carrying its
+//! request's id, and draws in it. The view gets its surface as its window opens, since the
 //! system gave the windows theirs at launch, and the frames the app asks for are presented
 //! into it.
 //!
@@ -13,7 +13,7 @@
 mod support;
 
 #[cfg(target_os = "macos")]
-const TEST: &str = "an_app_without_an_implicit_view_opens_a_view_and_draws_in_it";
+const TEST: &str = "an_app_asks_for_a_view_and_draws_in_it";
 
 /// Long enough for the window to open and the frames to be drawn, many times over.
 #[cfg(target_os = "macos")]
@@ -26,9 +26,7 @@ fn main() {
     support::fail_after(TEST, GIVE_UP_AFTER, || {
         format!("the view was not drawn in within {GIVE_UP_AFTER:?}")
     });
-    WinitEmbedder::default()
-        .implicit_view(None)
-        .run(client::OpeningClient::new);
+    WinitEmbedder.run(client::OpeningClient::new);
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -41,7 +39,7 @@ mod client {
 
     use inset_embedder::{
         Canvas, EmbedderClient, Frame, KeyData, Offset, Paint, PlatformRef, PointerDataPacket,
-        Rect, Scene, SceneBuilder, ViewId, WindowConfig, WindowFuture, WindowRef,
+        Rect, RequestId, Scene, SceneBuilder, ViewId, WindowRef,
     };
 
     use crate::TEST;
@@ -51,12 +49,13 @@ mod client {
     /// The frames presented into the view before what it shows is looked at.
     const FRAMES_PRESENTED: u32 = 10;
 
-    /// Checks that it starts with no view, opens one, and presents a square into it from each
+    /// Checks that it starts with no view, asks for one, and presents a square into it from each
     /// frame it asks for; once enough frames are presented, checks that the view was added and
     /// draws on a surface.
     pub(crate) struct OpeningClient {
         platform: PlatformRef,
-        opening: Vec<WindowFuture>,
+        request_id: RequestId,
+        requested: Vec<RequestId>,
         windows: Vec<WindowRef>,
         added: Vec<ViewId>,
         presented: u32,
@@ -64,20 +63,14 @@ mod client {
 
     impl OpeningClient {
         pub(crate) fn new(platform: PlatformRef) -> OpeningClient {
-            if !platform.views().is_empty() || platform.implicit_view().is_some() {
+            if !platform.views().is_empty() {
                 support::fail(TEST, "the app started with a view");
             }
-            let owner = platform
-                .windowing_owner()
-                .expect("a desktop host makes windows");
-            let opening = vec![owner.create(WindowConfig {
-                title: TITLE.into(),
-                size: [300.0, 200.0],
-                ..WindowConfig::default()
-            })];
+            let request_id = support::request_window(&platform, support::titled(TITLE));
             OpeningClient {
                 platform,
-                opening,
+                request_id,
+                requested: vec![request_id],
                 windows: Vec::new(),
                 added: Vec::new(),
                 presented: 0,
@@ -87,7 +80,7 @@ mod client {
         /// Asks for the first frame once the window is made.
         fn draw_once_the_window_is_made(&mut self) {
             let was_made = !self.windows.is_empty();
-            support::take_opened_windows(&mut self.opening, &mut self.windows);
+            support::take_opened_windows(&self.platform, &mut self.requested, &mut self.windows);
             if !was_made && !self.windows.is_empty() {
                 self.platform.request_frame();
             }
@@ -103,8 +96,8 @@ mod client {
             if !self.platform.views().iter().any(|view| view.id() == id) {
                 wrong.push("the platform does not list the view");
             }
-            if self.platform.implicit_view().is_some() {
-                wrong.push("the view opened became the implicit view");
+            if window.view().request_id() != Some(self.request_id) {
+                wrong.push("the view does not carry its request's id");
             }
             if !appkit::has_a_metal_layer(TITLE) {
                 wrong.push("the view has no surface");
@@ -146,6 +139,7 @@ mod client {
 
         fn view_added(&mut self, id: ViewId) {
             self.added.push(id);
+            self.draw_once_the_window_is_made();
         }
 
         fn view_metrics_changed(&mut self, _id: ViewId) {}

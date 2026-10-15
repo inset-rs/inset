@@ -1,10 +1,11 @@
-//! An exit the application asks for quits once the framework answers yes, even when the answer
-//! comes on a later wake and nothing else happens after it: the answer reaches the event loop
-//! through the waker the pending quit was polled with, which asks the loop for a turn.
+//! The system's request to quit is answered long after it was asked, from a wake of its own with
+//! nothing else happening after it, and the answer still quits: the reply reaches the event loop
+//! as a request of its own, served on a turn of its own.
 //!
 //! Its own binary, without the test harness: AppKit's event loop runs on the main thread only. It
-//! opens no window. On macOS the quit is AppKit's `terminate:`, which ends the process with status
-//! 0; the watchdog ends it with status 1 if the quit never comes.
+//! opens no window. The request is AppKit's, made as Cmd-Q makes it, and the quit is AppKit's
+//! `terminate:`, which ends the process with status 0; the watchdog ends it with status 1 if the
+//! quit never comes.
 
 #[cfg(target_os = "macos")]
 mod support;
@@ -12,7 +13,7 @@ mod support;
 #[cfg(target_os = "macos")]
 const TEST: &str = "a_late_answer_to_an_exit_quits";
 
-/// Long enough for the answer and the quit, many times over.
+/// Long enough for the request, the answer and the quit, many times over.
 #[cfg(target_os = "macos")]
 const GIVE_UP_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
 
@@ -23,9 +24,7 @@ fn main() {
     support::fail_after(TEST, GIVE_UP_AFTER, || {
         format!("no quit in {GIVE_UP_AFTER:?}")
     });
-    WinitEmbedder::default()
-        .implicit_view(None)
-        .run(client::LateAnsweringClient::new);
+    WinitEmbedder.run(client::LateAnsweringClient::new);
     support::fail(TEST, "the loop returned without quitting the process");
 }
 
@@ -34,88 +33,68 @@ fn main() {}
 
 #[cfg(target_os = "macos")]
 mod client {
-    use std::cell::RefCell;
-    use std::rc::Rc;
-    use std::task::{Context, Poll, Waker};
     use std::time::{Duration, Instant};
 
     use inset_embedder::{
-        AppExitFuture, AppExitResponse, AppExitType, EmbedderClient, Frame, KeyData, PlatformRef,
+        AppExitReply, AppExitResponse, EmbedderClient, Frame, KeyData, PlatformRef,
         PointerDataPacket, ViewId,
     };
 
-    use crate::TEST;
+    use crate::{TEST, support};
 
-    /// How long the framework takes to answer: long enough for every turn the start asked for
-    /// to have passed, so that only the answer's own waker can bring the loop round again.
+    /// How long the framework takes to answer: long enough for every turn the request brought
+    /// to have passed, so that only the answer can bring the loop round again.
     const ANSWER_AFTER: Duration = Duration::from_millis(300);
 
-    /// Asks to quit at its start, and answers the embedder's question of whether it may quit only
-    /// from a wake a while later, as the framework answers once its observers have.
+    /// Presses Cmd-Q at its first wake, and answers the request to quit only from a wake a while
+    /// later, as the framework answers once its observers have.
     pub(crate) struct LateAnsweringClient {
-        /// The application's own exit request, held so its answer is heard.
-        _exit: AppExitFuture,
-        answer_at: Instant,
-        answer: Rc<RefCell<Answer>>,
-    }
-
-    /// The framework's answer to the embedder, once it is given, and the waker to call then.
-    #[derive(Default)]
-    struct Answer {
-        response: Option<AppExitResponse>,
-        waker: Option<Waker>,
+        platform: PlatformRef,
+        pressed_quit: bool,
+        /// The request to quit, once asked, and when to answer it.
+        request: Option<(AppExitReply, Instant)>,
     }
 
     impl LateAnsweringClient {
         pub(crate) fn new(platform: PlatformRef) -> LateAnsweringClient {
-            let exit = platform
-                .app_exit()
-                .expect("a macOS host quits itself")
-                .exit_application(AppExitType::Cancelable, 0);
-            let answer_at = Instant::now() + ANSWER_AFTER;
-            platform.dispatcher().wake_at(Some(answer_at));
+            platform.dispatcher().wake_at(Some(Instant::now()));
             LateAnsweringClient {
-                _exit: exit,
-                answer_at,
-                answer: Rc::default(),
+                platform,
+                pressed_quit: false,
+                request: None,
             }
         }
 
-        /// Answers yes once the embedder has asked and the time has come; answers whether it did.
-        fn answer_yes_when_due(&self) -> bool {
-            let waker = {
-                let mut answer = self.answer.borrow_mut();
-                if Instant::now() < self.answer_at || answer.response.is_some() {
-                    return false;
-                }
-                answer.response = Some(AppExitResponse::Exit);
-                answer.waker.take()
+        fn press_quit_once(&mut self) {
+            if !self.pressed_quit {
+                self.pressed_quit = true;
+                support::appkit::press_quit();
+            }
+        }
+
+        fn answer_exit_when_due(&mut self) {
+            let Some((_, answer_at)) = &self.request else {
+                return;
             };
-            let waker = waker.expect("the host asked before the answer was due");
-            waker.wake();
-            true
+            if Instant::now() < *answer_at {
+                return;
+            }
+            let (reply, _) = self.request.take().expect("the request");
+            println!("test {TEST} ... answered; the quit ends the process");
+            reply.answer(AppExitResponse::Exit);
         }
     }
 
     impl EmbedderClient for LateAnsweringClient {
-        fn request_app_exit(&mut self) -> AppExitFuture {
-            let answer = Rc::clone(&self.answer);
-            Box::pin(std::future::poll_fn(move |context: &mut Context<'_>| {
-                let mut answer = answer.borrow_mut();
-                match answer.response {
-                    Some(response) => Poll::Ready(response),
-                    None => {
-                        answer.waker = Some(context.waker().clone());
-                        Poll::Pending
-                    }
-                }
-            }))
+        fn request_app_exit(&mut self, reply: AppExitReply) {
+            let answer_at = Instant::now() + ANSWER_AFTER;
+            self.platform.dispatcher().wake_at(Some(answer_at));
+            self.request = Some((reply, answer_at));
         }
 
         fn wake(&mut self, _elapsed: Duration) {
-            if self.answer_yes_when_due() {
-                println!("test {TEST} ... answered; the quit ends the process");
-            }
+            self.press_quit_once();
+            self.answer_exit_when_due();
         }
 
         fn frame(&mut self, _frame: Frame) {}

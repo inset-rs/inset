@@ -79,7 +79,7 @@ pub(crate) trait OperatingSystem:
     /// windows are sized by the app.
     const WINDOW_IS_THE_SCREEN: bool = false;
 
-    /// Whether the app may open windows of its own beside the implicit view's: a desktop's may
+    /// Whether the app may open windows of its own beside the screen view's: a desktop's may
     /// at once, an iPhone's may not, and an iPad's would ask the system, which this embedder does
     /// not.
     const APP_MAY_OPEN_WINDOWS: bool = true;
@@ -268,18 +268,11 @@ pub(crate) trait SystemRequests {
 /// What the embedder tells the system of the application as a whole: how it quits, and how it
 /// steps aside.
 pub(crate) trait ApplicationControl {
-    /// The framework is deciding whether the application quits. Nothing to note where the system
-    /// never asks the application on its own.
-    fn quit_being_decided() {}
-
     /// Quits the way the system quits an application; the event loop ends where the system has
     /// no quit of its own.
     fn quit(event_loop: &ActiveEventLoop) {
         event_loop.exit();
     }
-
-    /// The framework decided that the application keeps running.
-    fn keep_running() {}
 
     /// Hides the application's windows and hands the focus to the application that had it
     /// before, as the system's Hide command does. Nothing where the system has no such command.

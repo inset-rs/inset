@@ -2,7 +2,7 @@
 //! its text input, and the scenes it presents: drawn by its rasterizer (`rasterizer.rs`), with the
 //! native surfaces they place beneath the drawing (`os`'s `WindowSurfaces`).
 //!
-//! A view is made without a window, at no size, and is given one: the implicit view at winit's
+//! A view is made without a window, at no size, and is given one: the screen view at winit's
 //! first call, after the app has started, as Flutter's engine has it before its window; any
 //! other view as soon as it is made. A view without a window, and one whose window has no
 //! surface, draws nothing; the system gives a window its surface and takes it away
@@ -11,20 +11,23 @@
 //! The registry of views owns each window (`windows.rs`); the framework and the app may hold
 //! a view for a while after its window closes. The invariant a later editor must keep: a view
 //! holds its window only through its rasterizer's surface and its native surfaces, and weakly
-//! for its text input, and lets go of both when the window closes (`window_closed`), so that
-//! closing a window frees it.
+//! for its text input and the app's handle on the window, and lets go of them when the window
+//! closes (`window_closed`), so that closing a window frees it.
 
 use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use inset_embedder::{
-    Scene, TextInputHost, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding,
+    RequestId, Scene, TextInputHost, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding,
+    WindowRef,
 };
 use winit::event::{Ime, KeyEvent};
 use winit::keyboard::ModifiersState;
 use winit::window::Window;
 
 use crate::gpu::Gpu;
+use crate::host_window::WinitWindow;
 use crate::ime::ImeOutcome;
 use crate::os::{ThisOs, ThisOsWindowSurfaces, WindowGeometry, WindowSurfaces};
 use crate::rasterizer::{PresentingInTransaction, Rasterizer};
@@ -39,6 +42,12 @@ pub(crate) struct WinitView {
     /// has no window.
     native_surfaces: RefCell<Option<ThisOsWindowSurfaces>>,
     text_input: TextInput,
+    /// The request the view arrived for; `None` for the screen view, which the system gave.
+    request_id: Option<RequestId>,
+    initial_data: Option<String>,
+    /// The app's handle on the view's window, while it is open; none for the screen view, whose
+    /// window the app may not manage.
+    window_handle: RefCell<Weak<WinitWindow>>,
 }
 
 impl WinitView {
@@ -53,7 +62,21 @@ impl WinitView {
             native_surfaces: RefCell::new(None),
             rasterizer: RefCell::new(Rasterizer::new(gpu, sees_through)),
             text_input: TextInput::new(),
+            request_id: None,
+            initial_data: None,
+            window_handle: RefCell::new(Weak::new()),
         }
+    }
+
+    /// The same view as the one request `request_id` asked for, carrying `initial_data`.
+    pub(crate) fn with_request(
+        mut self,
+        request_id: RequestId,
+        initial_data: Option<String>,
+    ) -> WinitView {
+        self.request_id = Some(request_id);
+        self.initial_data = initial_data;
+        self
     }
 
     /// `window` is the view's from now on: its native surfaces and text input are on it, and
@@ -99,12 +122,19 @@ impl WinitView {
         }
     }
 
+    /// `handle` is the app's handle on the view's window from now on: the view answers it as its
+    /// window until the window closes.
+    pub(crate) fn set_window_handle(&self, handle: &Rc<WinitWindow>) {
+        *self.window_handle.borrow_mut() = Rc::downgrade(handle);
+    }
+
     /// The window closed: its surface and its native surfaces go, and with them the last hold
-    /// on the window, while the framework may still hold the view. A scene presented from now
-    /// on is drawn nowhere.
+    /// on the window, while the framework may still hold the view, which is in no window from
+    /// now on. A scene presented from now on is drawn nowhere.
     pub(crate) fn window_closed(&self) {
         self.native_surfaces.take();
         self.rasterizer.borrow_mut().window_closed();
+        *self.window_handle.borrow_mut() = Weak::new();
     }
 
     /// Reads the window's metrics again; when they changed, fits the surface to the new size and
@@ -192,5 +222,18 @@ impl View for WinitView {
 
     fn text_input(&self) -> Option<&dyn TextInputHost> {
         Some(&self.text_input)
+    }
+
+    fn initial_data(&self) -> Option<String> {
+        self.initial_data.clone()
+    }
+
+    fn request_id(&self) -> Option<RequestId> {
+        self.request_id
+    }
+
+    fn window(&self) -> Option<WindowRef> {
+        let handle = self.window_handle.borrow().upgrade()?;
+        Some(handle as WindowRef)
     }
 }

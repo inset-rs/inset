@@ -39,6 +39,10 @@ Only the app life cycle and the application exit of `ServicesBinding`, the hardw
   Reason: platform — those payloads were method-channel maps, and no host sends them.
   Affect: a private command's `data` is dropped, and a client is never handed inserted content nor asked for its autofill scope.
 
+- Change: text input finds the view a field is in only by its configuration's `view_id`, where Flutter's engine falls back to the implicit view when there is none.
+  Reason: platform — there is no implicit view; `EditableText` names its view, as Flutter's does.
+  Affect: a configuration that names no view reaches no host text input.
+
 - Change: `TextInput::request_autofill` and `TextInput::finish_autofill_context` exist but do nothing.
   Reason: platform — there is no host autofill API.
   Affect: `AutofillGroup` disposal still calls them, but the platform is never asked to fill a group or to commit a saved autofill context.

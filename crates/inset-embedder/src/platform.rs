@@ -349,6 +349,45 @@ pub enum AppExitResponse {
     Cancel,
 }
 
+/// The answer to one request to exit, which the host made through
+/// [`EmbedderClient::request_app_exit`](crate::EmbedderClient::request_app_exit): Flutter's reply
+/// to `System.requestAppExit`. It is answered once; dropped unanswered, it answers
+/// [`AppExitResponse::Exit`], since an application that lets go of the question has nothing to
+/// keep.
+pub struct AppExitReply(Option<Box<dyn FnOnce(AppExitResponse)>>);
+
+impl AppExitReply {
+    /// A reply that hands its answer to `send`. The answer is given inside a call into the
+    /// client, so `send` may only post it to the host's own loop, never call the client.
+    pub fn new(send: impl FnOnce(AppExitResponse) + 'static) -> AppExitReply {
+        AppExitReply(Some(Box::new(send)))
+    }
+
+    pub fn answer(mut self, response: AppExitResponse) {
+        self.send(response);
+    }
+
+    fn send(&mut self, response: AppExitResponse) {
+        if let Some(send) = self.0.take() {
+            send(response);
+        }
+    }
+}
+
+impl Drop for AppExitReply {
+    fn drop(&mut self) {
+        self.send(AppExitResponse::Exit);
+    }
+}
+
+impl std::fmt::Debug for AppExitReply {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppExitReply")
+            .field("answered", &self.0.is_none())
+            .finish()
+    }
+}
+
 /// The type of application exit to perform when calling `ServicesBinding::exit_application`.
 ///
 /// Flutter counterpart: `AppExitType` (`dart:ui` `platform_dispatcher.dart`).
@@ -506,17 +545,26 @@ pub trait Platform: Any {
     /// [`Dispatcher`].
     fn dispatcher(&self) -> Arc<dyn Dispatcher>;
 
-    /// Every view the app has now. An app may run with none.
+    /// Every view the app has now: those the platform gave it, such as a phone's screen or an
+    /// embedder's views, and those it asked for. An app may run with none, as one on a desktop
+    /// does until it asks.
     fn views(&self) -> Vec<ViewRef>;
 
-    /// Looks up a current host-provided view.
+    /// Looks up one of the app's views.
     fn view(&self, id: ViewId) -> Option<ViewRef>;
 
-    /// The view the platform gave the app at launch, if any. It stays the same view for the
-    /// app's whole life, while its window and its surface may come and go: it may be there,
-    /// with no size, before its window, and on a desktop it stays, drawing nowhere, once its
-    /// window closes. `None` on a desktop configured without one, and when embedded.
-    fn implicit_view(&self) -> Option<ViewRef>;
+    /// Asks for a view. A desktop makes a window for it; a platform that gives the app its
+    /// views and makes none, a phone or an embedder, answers [`ViewError::Unsupported`](crate::ViewError::Unsupported).
+    /// The view arrives later, through `EmbedderClient::view_added`, carrying the id answered
+    /// here; a request that fails on the way is reported through
+    /// `EmbedderClient::view_request_failed`.
+    fn request_view(
+        &self,
+        request: crate::ViewRequest,
+    ) -> Result<crate::RequestId, crate::ViewError> {
+        let _ = request;
+        Err(crate::ViewError::Unsupported)
+    }
 
     /// Flutter `PlatformDispatcher.requestViewFocusChange`: asks the host to move view focus.
     /// A host without native focus support ignores the request.
@@ -602,15 +650,6 @@ pub trait Platform: Any {
     /// framework's picture. `None` on the web, on X11, on the inert host, and on an
     /// embedder that chose not to have one.
     fn compositor(&self) -> Option<Arc<dyn crate::Compositor>> {
-        None
-    }
-
-    /// Asking for another view, where the platform allows it: at once on a desktop, through
-    /// the system on iPad and Android. `None`, the default, on iPhone and when embedded. The
-    /// answer is the host's at the time of asking, so a host that learns only at run time
-    /// whether its platform has windows answers `None` there, and an app asks before it offers
-    /// a window.
-    fn windowing_owner(&self) -> Option<Rc<dyn crate::WindowingOwner>> {
         None
     }
 
@@ -803,29 +842,18 @@ pub trait Restoration {
     fn put(&self, data: RestorationMap);
 }
 
-/// The application asking to quit: the `System.exitApplication` message of Flutter's
-/// `SystemChannels.platform`.
+/// The application quitting itself: the `System.exitApplication` message of Flutter's
+/// `SystemChannels.platform`, for a required exit. A cancelable exit never reaches the host: the
+/// framework asks its own listeners first (`ServicesBinding::exit_application`), and quits here
+/// once they agree.
 pub trait AppExit {
-    /// Quits the application the way the system quits one, as Flutter's embedders do.
-    ///
-    /// For [`AppExitType::Cancelable`] the host first asks the framework through
-    /// [`EmbedderClient::request_app_exit`](crate::EmbedderClient::request_app_exit), on a later
-    /// turn of its loop, never inside this call, and quits only once the answer is
-    /// [`AppExitResponse::Exit`]. For [`AppExitType::Required`] it quits without asking.
-    ///
-    /// The future answers what the framework said, or `Exit` for a required exit. A host that
-    /// has already quit may never answer.
+    /// Quits the application the way the system quits one, as Flutter's embedders do, on a
+    /// later turn of the host's loop, never inside this call.
     ///
     /// `exit_code` is the process's exit status where the system takes one; Flutter's macOS
     /// and Linux embedders ignore it, and a host may too.
-    fn exit_application(&self, exit_type: AppExitType, exit_code: i32) -> AppExitFuture;
+    fn quit(&self, exit_code: i32);
 }
-
-/// An answer to a request to exit, on its way: the host's to the application's
-/// [`AppExit::exit_application`], and the framework's to the host's
-/// [`EmbedderClient::request_app_exit`](crate::EmbedderClient::request_app_exit). Flutter's
-/// `Future<AppExitResponse>`.
-pub type AppExitFuture = Pin<Box<dyn Future<Output = AppExitResponse>>>;
 
 /// The files the system asks the app to open: documents opened from the system's file browser, or
 /// dropped on the app's icon, at launch or while it runs. Flutter's macOS embedder hands them to
@@ -869,10 +897,6 @@ impl Platform for InertPlatform {
     fn view(&self, _id: ViewId) -> Option<ViewRef> {
         None
     }
-
-    fn implicit_view(&self) -> Option<ViewRef> {
-        None
-    }
 }
 
 /// One complete engine frame delivered to the client.
@@ -913,9 +937,6 @@ mod tests {
                 Vec::new()
             }
             fn view(&self, _id: super::ViewId) -> Option<super::ViewRef> {
-                None
-            }
-            fn implicit_view(&self) -> Option<super::ViewRef> {
                 None
             }
         }

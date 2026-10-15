@@ -18,7 +18,7 @@ pub use app::{entry_route, gallery, open_entry, open_sub_page, run_gallery, sub_
 pub use catalog::Entry;
 
 /// Every host's entry point; `src/main.rs` calls the generated `main`.
-#[inset::main(title = "Inset — cupertino gallery", size = [420.0, 720.0])]
+#[inset::main]
 fn main(app: &mut inset::App) {
     // `GALLERY_ENTRY=indicators` opens that screen over the index without a tap.
     let opening = std::env::var("GALLERY_ENTRY")

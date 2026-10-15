@@ -20,8 +20,8 @@
 /// picture the `Image` widget shows, as `dart:ui`'s `Image` is to Flutter's.
 pub use inset_embedder as ui;
 pub use inset_embedder::{
-    BlurStyle, HostWindow, Platform, PopupMenuEntry, WindowBackground, WindowConfig, WindowError,
-    WindowLevel, WindowRef, WindowingOwner,
+    BlurStyle, HostWindow, Platform, PopupMenuEntry, RequestId, ViewError, ViewRequest,
+    WindowBackground, WindowConfig, WindowLevel, WindowRef,
 };
 pub use inset_embedder::{
     Brightness, Color, DropChange, DropData, FontFeature, FontWeight, Offset, Radius, Rect, Size,

@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use inset_embedder::{
     Brightness, Clipboard, ClipboardHasStringsFuture, ClipboardSetTextFuture, ClipboardTextFuture,
-    Dispatcher, ImageCodecFuture, Matrix4, MouseCursor, Picture, Platform, Rect, Size,
+    Dispatcher, ImageCodecFuture, Matrix4, MouseCursor, Platform, Rect, Size,
     SystemMouseCursorKind, TargetPlatform, TextEditingValue, TextInputConfiguration, TextInputHost,
     View, ViewId, ViewMetrics, ViewRef,
 };
@@ -19,7 +19,8 @@ use crate::dispatcher;
 use crate::gpu::Gpu;
 use crate::text_input::{TextInputListener, WebTextInput};
 
-pub const IMPLICIT_VIEW: ViewId = ViewId(0);
+/// The page's canvas's view, the one view the page gives the app.
+pub const CANVAS_VIEW: ViewId = ViewId(0);
 
 pub(crate) type OnSchedule = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
 
@@ -154,6 +155,7 @@ impl Platform for WebPlatform {
         Arc::new(dispatcher::WebDispatcher)
     }
 
+    /// The page's canvas, the one view the page gives the app, once it is there.
     fn views(&self) -> Vec<ViewRef> {
         self.view.borrow().iter().cloned().collect()
     }
@@ -164,10 +166,6 @@ impl Platform for WebPlatform {
             .as_ref()
             .filter(|view| view.id() == id)
             .cloned()
-    }
-
-    fn implicit_view(&self) -> Option<ViewRef> {
-        self.view.borrow().clone()
     }
 
     fn clipboard(&self) -> Option<&dyn Clipboard> {
@@ -266,7 +264,7 @@ impl WebView {
 
 impl View for WebView {
     fn id(&self) -> ViewId {
-        IMPLICIT_VIEW
+        CANVAS_VIEW
     }
 
     fn metrics(&self) -> ViewMetrics {
