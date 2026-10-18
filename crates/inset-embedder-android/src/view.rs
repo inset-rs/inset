@@ -7,7 +7,9 @@
 use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Mutex};
 
-use inset_embedder::{Picture, Scene, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding};
+use inset_embedder::{
+    Picture, Scene, ScreenId, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding,
+};
 use ndk::native_window::NativeWindow;
 
 use crate::gpu::Gpu;
@@ -136,6 +138,7 @@ impl AndroidView {
             padding,
             view_padding,
             view_insets,
+            screen: geometry.screen,
         }
     }
 }
@@ -173,6 +176,8 @@ pub(crate) struct Geometry {
     pub(crate) density: f64,
     /// The rectangle the activity's content was laid out in, within the window.
     pub(crate) content: [i32; 4],
+    /// The screen the window is on, once the system has described it.
+    pub(crate) screen: Option<ScreenId>,
 }
 
 impl Geometry {

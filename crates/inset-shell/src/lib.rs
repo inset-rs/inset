@@ -93,8 +93,9 @@ impl Shell {
     }
 
     /// dart:ui's `onMetricsChanged`, which the framework sets to
-    /// `RendererBinding.handleMetricsChanged`. `_addView` and `_removeView` invoke it as
-    /// `_updateWindowMetrics` does: a view coming or going reaches the app only this way.
+    /// `RendererBinding.handleMetricsChanged`. `_addView`, `_removeView` and `_updateDisplays`
+    /// invoke it as `_updateWindowMetrics` does: a view coming or going, and a change to the
+    /// screens, reach the app only this way.
     fn metrics_changed(&mut self) {
         self.push(|app| RendererBinding::instance(app).handle_metrics_changed(app));
     }
@@ -133,6 +134,11 @@ impl EmbedderClient for Shell {
                 callback(app, id);
             }
         });
+        self.metrics_changed();
+    }
+
+    /// "Metrics changed", as `_updateDisplays` invokes it.
+    fn screens_changed(&mut self) {
         self.metrics_changed();
     }
 
@@ -534,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    fn a_view_coming_or_going_is_a_metrics_change() {
+    fn a_view_coming_or_going_and_a_change_to_the_screens_are_metrics_changes() {
         use inset_foundation::Handle;
         use inset_rendering::{RendererBinding, RendererBindingOverridesObject};
 
@@ -565,6 +571,8 @@ mod tests {
         assert_eq!(count.get(), 1, "a view added");
         shell.view_removed(ViewId(1));
         assert_eq!(count.get(), 2, "a view removed");
+        shell.screens_changed();
+        assert_eq!(count.get(), 3, "the screens changed");
     }
 
     #[test]

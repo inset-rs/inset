@@ -653,9 +653,11 @@ pub trait Platform: Any {
         None
     }
 
-    /// The screens a window is placed on, and where the pointer is on them, or `None` where the
-    /// host has no screens to place a window against: a phone, a browser tab, and a desktop
-    /// whose system will not say.
+    /// The screens the app's views are on, and where the pointer is on them (Flutter
+    /// `PlatformDispatcher.displays`), or `None` where the host has none to report. Every host
+    /// with screens answers, a phone with its one included; a view's metrics name the screen it
+    /// is on, and a host that hears the screens change says so through
+    /// `EmbedderClient::screens_changed`.
     fn screens(&self) -> Option<&dyn Screens> {
         None
     }
@@ -787,10 +789,11 @@ pub trait PopupMenus {
     fn show(&self, entries: &[PopupMenuEntry]) -> Option<usize>;
 }
 
-/// The screens a window is placed on, for an app that places a window against something on them,
-/// such as an edge or its own icon. Positions are in the coordinates of
-/// [`HostWindow::frame`](crate::HostWindow::frame): logical points from the top-left corner of the
-/// main screen, y growing down. Not a Flutter API: Flutter's `Display` has a size, not a place.
+/// The screens the app's views are on: what drawing on each needs, as Flutter's
+/// `PlatformDispatcher.displays` lists them, and where each is, for an app that places a window
+/// against something on them, such as an edge or its own icon, which Flutter's `Display` has no
+/// place for. Positions are in the coordinates of [`HostWindow::frame`](crate::HostWindow::frame):
+/// logical points from the top-left corner of the main screen, y growing down.
 pub trait Screens {
     /// The screens, the main one first: the one positions start from.
     fn screens(&self) -> Vec<Screen>;
@@ -800,13 +803,32 @@ pub trait Screens {
     fn pointer_location(&self) -> Option<Offset>;
 }
 
-/// A screen, in the coordinates of a window's frame.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Names a screen: Flutter's `Display.id`, which the embedder API calls a
+/// `FlutterEngineDisplayId`. Each host numbers its screens its own way; a screen keeps its
+/// number while it stays connected.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ScreenId(pub u64);
+
+/// A monitor: where it is (the frames, for placing windows) and what drawing on it needs
+/// (Flutter's `Display`: `id`, `devicePixelRatio`, `refreshRate`; `Display.size` is the frame's
+/// size at `scale`).
+#[derive(Clone, Debug, PartialEq)]
 pub struct Screen {
-    /// All of the screen.
+    /// Flutter `Display.id`; stable while the screen stays connected.
+    pub id: ScreenId,
+    /// What the system calls it: "Built-in Retina Display". Empty where the host has no name
+    /// for it.
+    pub name: String,
+    /// All of it, in points, placed on the desktop.
     pub frame: Rect,
-    /// What the system's own bars leave free: the menu bar and the Dock, or the taskbar.
+    /// What the system's own bars leave free: the menu bar and the Dock, or the taskbar. The
+    /// whole frame where the host cannot say.
     pub visible_frame: Rect,
+    /// Flutter `Display.devicePixelRatio`: physical pixels per point, as on every view on the
+    /// screen.
+    pub scale: f64,
+    /// Flutter `Display.refreshRate`, in hertz; none where the host cannot say.
+    pub refresh_rate: Option<f64>,
 }
 
 /// The text services a selection toolbar offers: Flutter's LookUp, SearchWeb and Share

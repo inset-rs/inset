@@ -7,9 +7,9 @@ use std::time::Duration;
 
 use inset_embedder::{
     Brightness, Clipboard, ClipboardHasStringsFuture, ClipboardSetTextFuture, ClipboardTextFuture,
-    Dispatcher, ImageCodecFuture, Matrix4, MouseCursor, Platform, Rect, Size,
-    SystemMouseCursorKind, TargetPlatform, TextEditingValue, TextInputConfiguration, TextInputHost,
-    View, ViewId, ViewMetrics, ViewRef,
+    Dispatcher, ImageCodecFuture, Matrix4, MouseCursor, Offset, Platform, Rect, Screen, Screens,
+    Size, SystemMouseCursorKind, TargetPlatform, TextEditingValue, TextInputConfiguration,
+    TextInputHost, View, ViewId, ViewMetrics, ViewRef,
 };
 use wasm_bindgen_futures::JsFuture;
 use web_sys::HtmlCanvasElement;
@@ -36,6 +36,8 @@ pub struct WebPlatform {
     wake_now_requested: Rc<Cell<bool>>,
     view: RefCell<Option<ViewRef>>,
     brightness: Cell<Brightness>,
+    /// The page's screen, as the app was last told it (`screen.rs`).
+    screen: RefCell<Option<Screen>>,
     /// Set by the host so `request_frame` and `wake_at` can arrange a wake.
     /// Shared with the font source, which is created before the host installs the callback.
     on_schedule: OnSchedule,
@@ -43,7 +45,11 @@ pub struct WebPlatform {
 }
 
 impl WebPlatform {
-    pub fn new(canvas: HtmlCanvasElement, brightness: Brightness) -> WebPlatform {
+    pub fn new(
+        canvas: HtmlCanvasElement,
+        brightness: Brightness,
+        screen: Option<Screen>,
+    ) -> WebPlatform {
         let platform = WebPlatform {
             canvas,
             origin: Instant::now(),
@@ -53,6 +59,7 @@ impl WebPlatform {
             wake_now_requested: Rc::new(Cell::new(false)),
             view: RefCell::new(None),
             brightness: Cell::new(brightness),
+            screen: RefCell::new(screen),
             on_schedule: Rc::new(RefCell::new(None)),
             images: RefCell::new(None),
         };
@@ -122,6 +129,16 @@ impl WebPlatform {
     pub fn set_brightness(&self, brightness: Brightness) {
         self.brightness.set(brightness);
     }
+
+    /// Takes the page's screen as it is now; answers whether it differs from what the app was
+    /// told, which the app is then to hear.
+    pub fn set_screen(&self, screen: Option<Screen>) -> bool {
+        if *self.screen.borrow() == screen {
+            return false;
+        }
+        *self.screen.borrow_mut() = screen;
+        true
+    }
 }
 
 impl Platform for WebPlatform {
@@ -172,6 +189,11 @@ impl Platform for WebPlatform {
         Some(self)
     }
 
+    /// The page's one screen (`screen.rs`).
+    fn screens(&self) -> Option<&dyn Screens> {
+        Some(self)
+    }
+
     fn mouse_cursor(&self) -> Option<&dyn MouseCursor> {
         Some(self)
     }
@@ -217,6 +239,18 @@ impl Clipboard for WebPlatform {
     fn has_strings(&self) -> ClipboardHasStringsFuture {
         let text = self.text();
         Box::pin(async move { text.await.is_some_and(|text| !text.is_empty()) })
+    }
+}
+
+/// The page's screen, and no pointer: the page sees the pointer only over itself, in its own
+/// coordinates.
+impl Screens for WebPlatform {
+    fn screens(&self) -> Vec<Screen> {
+        self.screen.borrow().iter().cloned().collect()
+    }
+
+    fn pointer_location(&self) -> Option<Offset> {
+        None
     }
 }
 

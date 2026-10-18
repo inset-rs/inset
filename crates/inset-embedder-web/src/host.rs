@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use inset_embedder::{
     Brightness, EmbedderClient, Frame, KeyData, KeyEventType, Platform, PlatformRef, PointerChange,
-    PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind, View, ViewConstraints,
-    ViewMetrics, ViewPadding, ViewRef,
+    PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind, ScreenId, View,
+    ViewConstraints, ViewMetrics, ViewPadding, ViewRef,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::Closure;
@@ -19,6 +19,7 @@ use crate::gpu::Gpu;
 use crate::keys;
 use crate::platform::{CANVAS_VIEW, WebPlatform, WebView};
 use crate::pointer;
+use crate::screen::read_screen;
 use crate::text_input::TextInputNotify;
 
 type RafCallback = Closure<dyn FnMut(f64)>;
@@ -88,10 +89,11 @@ async fn run_async<C: EmbedderClient + 'static>(
     } else {
         Brightness::Light
     };
-    let (metrics, size) = fit_canvas(&window, &canvas);
+    let screen = read_screen(&window);
+    let (metrics, size) = fit_canvas(&window, &canvas, screen.as_ref().map(|screen| screen.id));
     let gpu = Gpu::attach(canvas.clone(), size).await;
     let images = gpu.context.image_context();
-    let platform = Rc::new(WebPlatform::new(canvas.clone(), brightness));
+    let platform = Rc::new(WebPlatform::new(canvas.clone(), brightness, screen));
     platform.set_images(images);
     let view = Rc::new(WebView::new(metrics, gpu));
     platform.set_view(Rc::clone(&view) as ViewRef);
@@ -163,7 +165,13 @@ fn prefers_dark(window: &Window) -> bool {
         .is_some_and(|query| query.matches())
 }
 
-fn fit_canvas(window: &Window, canvas: &HtmlCanvasElement) -> (ViewMetrics, [u32; 2]) {
+/// The canvas sized to its element at the page's pixel ratio, and the metrics of its view, on
+/// `screen`.
+fn fit_canvas(
+    window: &Window,
+    canvas: &HtmlCanvasElement,
+    screen: Option<ScreenId>,
+) -> (ViewMetrics, [u32; 2]) {
     let dpr = window.device_pixel_ratio();
     let logical_w = f64::from(canvas.client_width()).max(1.0);
     let logical_h = f64::from(canvas.client_height()).max(1.0);
@@ -178,6 +186,7 @@ fn fit_canvas(window: &Window, canvas: &HtmlCanvasElement) -> (ViewMetrics, [u32
         padding: ViewPadding::ZERO,
         view_padding: ViewPadding::ZERO,
         view_insets: ViewPadding::ZERO,
+        screen,
     };
     (metrics, [width as u32, height as u32])
 }
@@ -434,12 +443,21 @@ fn dispatch_key<C: EmbedderClient + 'static>(
     })
 }
 
+/// A resize, which a zoom also is, changing the screen's size in CSS pixels and its pixel ratio:
+/// the screen is read again, and the app hears of it when it changed, then of the canvas's
+/// metrics.
 fn bind_resize<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
     let listener = Rc::clone(host);
     let closure = Closure::<dyn FnMut()>::new(move || {
-        let (metrics, size) = fit_canvas(&listener.window, &listener.canvas);
+        let screen = read_screen(&listener.window);
+        let screen_id = screen.as_ref().map(|screen| screen.id);
+        let screen_changed = listener.platform.set_screen(screen);
+        let (metrics, size) = fit_canvas(&listener.window, &listener.canvas, screen_id);
         listener.view.resize_surface(size);
         listener.view.set_metrics(metrics);
+        if screen_changed {
+            listener.client.borrow_mut().screens_changed();
+        }
         listener
             .client
             .borrow_mut()

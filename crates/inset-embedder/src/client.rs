@@ -22,10 +22,17 @@ pub trait EmbedderClient {
     /// reported here.
     fn view_added(&mut self, id: ViewId);
 
+    /// Flutter's window metrics event: something of `id`'s metrics changed, the screen it is on
+    /// included.
     fn view_metrics_changed(&mut self, id: ViewId);
 
     /// A view is gone; the app keeps running.
     fn view_removed(&mut self, id: ViewId);
+
+    /// Flutter `FlutterEngineNotifyDisplayUpdate`: a screen was added, removed or changed, and
+    /// `Platform::screens` already answers the new list. A view that is on another screen now
+    /// is reported through `view_metrics_changed`. The default drops it.
+    fn screens_changed(&mut self) {}
 
     /// Flutter `PlatformDispatcher.onViewFocusChange`.
     fn view_focus_changed(&mut self, event: ViewFocusEvent) {

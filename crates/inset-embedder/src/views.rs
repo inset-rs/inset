@@ -1,7 +1,7 @@
 //! Flutter counterpart: dart:ui `FlutterView`. The host owns the native
 //! window; this stable handle exposes its identity and current configuration.
 
-use crate::{Matrix4, Rect, Size, TextEditingValue, TextInputConfiguration};
+use crate::{Matrix4, Rect, ScreenId, Size, TextEditingValue, TextInputConfiguration};
 
 /// Opaque id for one [`View`] (`FlutterView.viewId`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -113,6 +113,10 @@ pub struct ViewMetrics {
     pub padding: ViewPadding,
     pub view_padding: ViewPadding,
     pub view_insets: ViewPadding,
+    /// The screen the view is on, one of `Platform::screens`: `_ViewConfiguration.displayId`,
+    /// which `FlutterView.display` looks up. `None` while it is on none the host can name, as a
+    /// view without a window is.
+    pub screen: Option<ScreenId>,
 }
 
 impl Default for ViewMetrics {
@@ -124,6 +128,7 @@ impl Default for ViewMetrics {
             padding: ViewPadding::ZERO,
             view_padding: ViewPadding::ZERO,
             view_insets: ViewPadding::ZERO,
+            screen: None,
         }
     }
 }

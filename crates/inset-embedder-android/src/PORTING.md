@@ -19,6 +19,12 @@ Host implementation. Flutter analogue: the engine's Android embedder under
   Reason: platform — both are Java APIs that need an activity of the app's own.
   Affect: copy and paste do nothing, and a widget that would buzz stays silent. The framework's own fallbacks run, rather than a capability that silently does nothing.
 
+## display.rs / host.rs
+
+- Change: the one screen is the activity's display, numbered by its own id, read when a window arrives and at each configuration change, and the app hears it changed only then; Flutter's embedder numbers it 0 and hears its refresh rate through a display listener.
+  Reason: platform — a display listener is a Java interface, which `NativeActivity` gives the app no class to implement.
+  Affect: the screen reads 0 on a phone as Flutter's does; a rate the panel changes on its own, with nothing else, is not heard until the next configuration change, and before API 30 the visible frame is the whole screen.
+
 ## input.rs
 
 - Change: the pressure range reported with every touch is zero to one, rather than the range the device declares.

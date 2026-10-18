@@ -70,9 +70,13 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — a desktop window narrower than its menu, such as a panel at a screen's edge, cannot hold a menu drawn inside its view.
   Affect: a menu shown this way is the system's, drawn outside the window and styled by the OS; the app waits inside the call while it is open, and hosts without menus answer `None`.
 
-- Change: a host's `Screens` capability lists the screens, with what the system's bars leave free, and where the pointer is on them; Flutter's `Display` has a size but no place.
-  Reason: platform — a desktop app that places a window against a screen's edge or its own icon needs to know where the screens are.
-  Affect: an app can place a window in screen coordinates, and hosts with no screens to place against answer `None`.
+- Change: `PlatformDispatcher.displays` is a host's `Screens` capability, whose `Screen` is Flutter's `Display` with a name, a frame placed on the desktop in points in place of a size in pixels, and what the system's bars leave free, and which also says where the pointer is.
+  Reason: platform — a desktop app that places a window against a screen's edge or its own icon needs to know where the screens are, in the points its window frames are in.
+  Affect: an app can place a window in screen coordinates, `Display.size` is the frame's size at `scale`, and a host with no screens to report answers `None`.
+
+- Change: `FlutterView.display` is the screen id in the view's metrics, looked up in `Platform::screens`, and `None` while the view is on no screen the host can name; a refresh rate the host cannot say is `None` where Flutter's is 0.
+  Reason: platform — a view holds no reference to the platform, and a host has no screen for a view without a window.
+  Affect: a view's screen comes from the platform's list, and a view moved to another screen is reported as a metrics change, as Flutter's window metrics event carries its `display_id`.
 
 - Change: a host's `FileOpening` capability takes one handler for the files the system asks the app to open; Flutter's macOS embedder hands them to its plugins through `FlutterAppLifecycleDelegate.handleOpenURLs:`.
   Reason: platform — there are no plugins, and the app is the only listener on the host's side.
@@ -135,7 +139,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the `App` owns its timers and has no event loop firing them.
   Affect: a `Timer` fires only when the host calls `wake` or delivers a frame, so a host that never wakes never runs one.
 
-- Change: `platform_brightness_changed` and `locales_changed` carry no value; the new one is read back from `Platform`.
+- Change: `platform_brightness_changed`, `locales_changed` and `screens_changed` carry no value; the new one is read back from `Platform`.
   Reason: platform — the host pushes a notification and the framework reads the dispatcher, as with `frame`.
   Affect: a host must update what its `Platform` answers before calling the hook, or observers rebuild against the old value.
 

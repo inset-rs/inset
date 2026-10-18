@@ -86,6 +86,7 @@ use crate::lifecycle::{AppLifecycle, LifecycleNotice};
 use crate::platform::WinitPlatform;
 use crate::pointer::{Pointer, PointerIds};
 use crate::state::EmbedderState;
+use crate::system_changes::SystemChange;
 use crate::system_requests::SystemRequest;
 use crate::touch::Touches;
 use crate::windows::{ViewMaker, Views, screen_window_config};
@@ -112,6 +113,9 @@ pub(crate) enum MainLoopEvent {
     /// Something the system said of the application as a whole: whether it is active, or
     /// visible.
     Lifecycle(LifecycleNotice),
+    /// Something the system said changed about the machine: its screens, or the user's
+    /// languages.
+    SystemChange(SystemChange),
 }
 
 /// The embedder of the running app.
@@ -261,6 +265,7 @@ impl<C: EmbedderClient> ApplicationHandler<MainLoopEvent> for MainLoop<C> {
             MainLoopEvent::Vsync => self.on_vsync(),
             MainLoopEvent::SystemRequest(request) => self.on_system_request(request),
             MainLoopEvent::Lifecycle(notice) => self.on_lifecycle_notice(notice),
+            MainLoopEvent::SystemChange(change) => self.on_system_change(change),
         }
     }
 

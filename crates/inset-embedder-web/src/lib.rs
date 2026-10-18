@@ -28,6 +28,8 @@ mod images;
 #[cfg(target_arch = "wasm32")]
 mod platform;
 #[cfg(target_arch = "wasm32")]
+mod screen;
+#[cfg(target_arch = "wasm32")]
 mod text_input;
 
 #[cfg(target_arch = "wasm32")]

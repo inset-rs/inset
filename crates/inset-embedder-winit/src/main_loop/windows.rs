@@ -122,6 +122,21 @@ impl<C: EmbedderClient> MainLoop<C> {
         }
     }
 
+    /// Reads again which screen each window is on, and tells the client of the views whose
+    /// screen changed.
+    pub(super) fn sync_screens(&mut self) {
+        let changed: Vec<ViewId> = self
+            .views()
+            .open_windows()
+            .into_iter()
+            .filter(|open| open.view.refresh_screen(&open.window))
+            .map(|open| open.view.id())
+            .collect();
+        for view_id in changed {
+            self.client.view_metrics_changed(view_id);
+        }
+    }
+
     /// Reads every view's metrics again, for a system that reports no event for a change
     /// of the safe area, and tells the client of the views whose metrics moved.
     pub(super) fn sync_metrics(&mut self) {
@@ -170,11 +185,16 @@ impl<C: EmbedderClient> MainLoop<C> {
         self.request_vsync_for_owed_scenes();
     }
 
-    /// A window moved, and may be on another screen now: its native surfaces follow it, and
-    /// so do the framework's vsyncs if it is the first window. AppKit moves the windows off a
-    /// screen that goes away, so this is also how their vsyncs leave it.
+    /// A window moved, and may be on another screen now: the app hears of its view's new
+    /// screen, as Flutter's macOS embedder sends a window's metrics again when its screen changes,
+    /// its native surfaces follow it, and so do the framework's vsyncs if it is the first window.
+    /// AppKit moves the windows off a screen that goes away, so this is also how their vsyncs
+    /// leave it.
     pub(super) fn on_moved(&mut self, id: WindowId) {
         if let Some(open) = self.views().by_window(id) {
+            if open.view.refresh_screen(&open.window) {
+                self.client.view_metrics_changed(open.view.id());
+            }
             open.view.follow_window();
         }
         if let Some(display) = self.first_window_display() {

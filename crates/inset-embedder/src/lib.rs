@@ -55,8 +55,8 @@ pub use platform::{
     ApplicationSwitcherDescription, Brightness, Clipboard, ClipboardHasStringsFuture,
     ClipboardSetTextFuture, ClipboardTextFuture, Dispatcher, FileOpening, Frame,
     HapticFeedbackType, Haptics, InertDispatcher, InertPlatform, MouseCursor, OpenFilesHandler,
-    Platform, PlatformRef, PopupMenuEntry, PopupMenus, Restoration, Screen, Screens, SystemChrome,
-    SystemContextMenu, SystemUiOverlayStyle, TargetPlatform, TextServices, ViewRef,
+    Platform, PlatformRef, PopupMenuEntry, PopupMenus, Restoration, Screen, ScreenId, Screens,
+    SystemChrome, SystemContextMenu, SystemUiOverlayStyle, TargetPlatform, TextServices, ViewRef,
 };
 pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,

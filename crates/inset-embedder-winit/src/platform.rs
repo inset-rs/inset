@@ -2,7 +2,8 @@
 //! the module that owns them — the clipboard (`clipboard.rs`), native popup menus
 //! (`popup_menus.rs`), the mouse cursor (`mouse_cursor.rs`), quitting (`app_exit.rs`), images
 //! (`images.rs`), files the system asks the app to open (`system_requests.rs`), the screens
-//! (the system's own, `os/`) — and what only macOS offers beyond `Platform` (`macos.rs`).
+//! (`screens.rs`), the user's languages (`locales.rs`) — and what only macOS offers beyond
+//! `Platform` (`macos.rs`).
 //!
 //! No call here calls the client. What needs the event loop is sent to it as a request, and the
 //! rest acts at once: `main_loop/` says which is which.
@@ -14,9 +15,9 @@ use std::time::{Duration, Instant};
 
 use inset_embedder::{
     AppExit, Brightness, Clipboard, Compositor, Dispatcher, FileOpening, FontSource,
-    ImageCodecFuture, MouseCursor, Platform, PopupMenus, RequestId, Screens, SystemFontSource,
-    TargetPlatform, ViewError, ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId, ViewRef,
-    ViewRequest,
+    ImageCodecFuture, Locale, MouseCursor, Platform, PopupMenus, RequestId, Screens,
+    SystemFontSource, TargetPlatform, ViewError, ViewFocusDirection, ViewFocusEvent,
+    ViewFocusState, ViewId, ViewRef, ViewRequest,
 };
 use winit::event_loop::EventLoopProxy;
 
@@ -25,7 +26,7 @@ use crate::clipboard::Pasteboard;
 use crate::dispatcher::WinitDispatcher;
 use crate::macos::MacOs;
 use crate::main_loop::MainLoopEvent;
-use crate::os::{NativeComposition, OperatingSystem, Screens as _, SystemRequests, ThisOs};
+use crate::os::{NativeComposition, OperatingSystem, SystemRequests, ThisOs};
 use crate::popup_menus::NativePopupMenus;
 use crate::state::EmbedderState;
 use crate::windows::WindowRequest;
@@ -115,6 +116,11 @@ impl Platform for WinitPlatform {
         self.state.appearance().brightness()
     }
 
+    /// The system's list, as the app was last told it (`locales.rs`).
+    fn locales(&self) -> Vec<Locale> {
+        self.state.locales().locales()
+    }
+
     fn request_frame(&self) {
         self.send(AppRequest::RequestFrame);
     }
@@ -183,9 +189,10 @@ impl Platform for WinitPlatform {
         Ok(request_id)
     }
 
-    /// The system's own answers, where it is asked outside winit's callbacks: on macOS.
+    /// On every system: the system's own answers where it has them, and otherwise winit's
+    /// monitors, while the app has a window to list them through (`screens.rs`).
     fn screens(&self) -> Option<&dyn Screens> {
-        ThisOs::screens()
+        Some(self)
     }
 
     fn import_pixels(&self, pixels: valo::PixelBuffer) -> Option<valo::Image> {

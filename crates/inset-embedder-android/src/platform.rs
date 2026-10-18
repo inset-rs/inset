@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use android_activity::AndroidAppWaker;
 use inset_embedder::{
     Brightness, Dispatcher, FontSource, ImageCodec, ImageCodecFuture, ImageDecodeError, ImageFrame,
-    ImageFrameFuture, ImageRepetition, Locale, Platform, SystemChrome, SystemFontSource,
-    TargetPlatform, ViewRef,
+    ImageFrameFuture, ImageRepetition, Locale, Offset, Platform, Screen, Screens, SystemChrome,
+    SystemFontSource, TargetPlatform, ViewRef,
 };
 
 use crate::chrome::AndroidChrome;
@@ -29,6 +29,9 @@ pub struct AndroidPlatform {
     origin: Instant,
     pub(crate) brightness: Cell<Brightness>,
     pub(crate) locales: RefCell<Vec<Locale>>,
+    /// The screen the activity is on, as the app was last told it; `None` until the system first
+    /// describes it.
+    pub(crate) screen: RefCell<Option<Screen>>,
     pub(crate) image_loader: RefCell<Option<valo_codec::ImageLoader>>,
     pub(crate) images: RefCell<Option<valo::ImageContext>>,
     chrome: AndroidChrome,
@@ -51,6 +54,7 @@ impl AndroidPlatform {
             origin: Instant::now(),
             brightness: Cell::new(Brightness::Light),
             locales: RefCell::new(Vec::new()),
+            screen: RefCell::new(None),
             image_loader: RefCell::new(None),
             images: RefCell::new(None),
             chrome: AndroidChrome::new(app.clone()),
@@ -163,6 +167,11 @@ impl Platform for AndroidPlatform {
         Some(&self.chrome)
     }
 
+    /// The one screen the activity is on (`display.rs`).
+    fn screens(&self) -> Option<&dyn Screens> {
+        Some(self)
+    }
+
     fn platform_brightness(&self) -> Brightness {
         self.brightness.get()
     }
@@ -202,6 +211,17 @@ impl Platform for AndroidPlatform {
 
     fn import_pixels(&self, pixels: valo::PixelBuffer) -> Option<inset_embedder::Image> {
         self.image_context()?.upload_pixels(pixels, false).ok()
+    }
+}
+
+/// A phone's one screen, which a finger points at only while it touches it.
+impl Screens for AndroidPlatform {
+    fn screens(&self) -> Vec<Screen> {
+        self.screen.borrow().iter().cloned().collect()
+    }
+
+    fn pointer_location(&self) -> Option<Offset> {
+        None
     }
 }
 

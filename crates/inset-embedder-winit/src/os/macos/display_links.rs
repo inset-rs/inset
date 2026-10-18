@@ -20,12 +20,13 @@ use objc2::{
     ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, sel,
 };
 use objc2_app_kit::NSScreen;
-use objc2_foundation::{NSNumber, NSRunLoop, NSRunLoopCommonModes, ns_string};
+use objc2_foundation::{NSRunLoop, NSRunLoopCommonModes};
 use objc2_quartz_core::CADisplayLink;
 use winit::monitor::MonitorHandle;
 use winit::platform::macos::MonitorHandleExtMacOS;
 
 use super::abort_on_panic;
+use super::screens::display_id_of;
 use crate::os::DisplayLink;
 
 /// A display as Core Graphics numbers it, its `CGDirectDisplayID`: a screen's `NSScreenNumber`
@@ -306,15 +307,6 @@ fn screen_numbered(
     NSScreen::screens(main_thread)
         .iter()
         .find(|screen| display_id_of(screen) == Some(display))
-}
-
-/// A screen's display, which AppKit keeps as `NSScreenNumber` in its device description;
-/// `NSScreen.CGDirectDisplayID` answers it from macOS 26 only.
-fn display_id_of(screen: &NSScreen) -> Option<DisplayId> {
-    let number = screen
-        .deviceDescription()
-        .objectForKey(ns_string!("NSScreenNumber"))?;
-    Some(number.downcast::<NSNumber>().ok()?.unsignedIntValue())
 }
 
 struct Tick {

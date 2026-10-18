@@ -26,6 +26,12 @@ Host implementation. Flutter analogue: the web engine under `engine/lib/web_ui`.
   Reason: with slice lists read per family, only the family needs choosing; which slice carries a character is in the family's own list.
   Affect: a character its script's family lacks stays blank where Flutter would try further fonts; scripts other than Roboto's come in one weight, so bold text in them renders regular, as on Flutter web.
 
+## screen.rs / host.rs
+
+- Change: the page's one screen is `window.screen`, numbered 0 as Flutter web's display is, read again at each resize, with no refresh rate where Flutter web says 60, and a frame in CSS pixels placed where the browser says.
+  Reason: platform — the browser reports no refresh rate, and gives no screen's place but through the non-standard `screen.left` and `screen.top`.
+  Affect: the screen's rate reads `None`, a zoom is heard as the screens changing, and a browser without `screen.left` places the screen at the origin.
+
 ## images.rs / platform.rs
 
 - Change: `Platform::open_image_codec` decodes with `createImageBitmap` and uploads through valo's `ImageContext` (`copyExternalImageToTexture`), then answers a one-frame codec.
@@ -40,5 +46,6 @@ Host implementation. Flutter analogue: the web engine under `engine/lib/web_ui`.
 
 ## Deferred
 
+- Hearing the pixel ratio change without a resize, as on a move to a screen at another ratio, which Flutter web hears through a `(resolution)` media query, and the screen's own `change` event. Trigger: an app that must follow its page across screens.
 - Animated image frames after the first. Trigger: a GIF or APNG that must play.
 - Flutter web autofill form, delta model, and putting the editing element inside a view's `textEditingHost`. Trigger: AutofillGroup; `enableDeltaModel`.

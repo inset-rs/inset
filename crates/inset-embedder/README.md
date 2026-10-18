@@ -61,12 +61,8 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - Report what the system may cover as `view_padding`, what the keyboard hides as `view_insets`, and `padding` as `max(0, view_padding - view_insets)` on each side.
 
 **Screens**
-- `Platform::screens`, `Screens::screens`, `pointer_location`
-- Give every position in the coordinates of a window's frame, from the main screen's top-left corner, the main screen first.
-
-**Displays**
-- none yet
-- Follow the system's notices as displays change and windows move between them, because a window's display sets its scale and its vsync.
+- `Platform::screens`, `Screens::screens`, `pointer_location`, `Screen`, `ScreenId`, `ViewMetrics::screen`, `EmbedderClient::screens_changed`
+- List every screen the system has, a phone's one included, the main one first, and give every position in the coordinates of a window's frame, from the main screen's top-left corner. Give each screen an id it keeps while it stays connected, and every view the id of the screen it is on. Follow the system's notices as screens change, calling `screens_changed` once `Platform::screens` answers the new list, and as windows move between screens, reporting a view whose screen changed through `view_metrics_changed`: a window's screen sets its scale and its vsync.
 
 **Visibility**
 - `EmbedderClient::app_lifecycle_state_changed`, `Surface::next_vsync`

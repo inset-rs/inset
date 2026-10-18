@@ -21,6 +21,8 @@ pub use pointer::{buttons_of, device_id, kind_of_tool, scroll_delta};
 #[cfg(target_os = "android")]
 mod chrome;
 #[cfg(target_os = "android")]
+mod display;
+#[cfg(target_os = "android")]
 mod gpu;
 #[cfg(target_os = "android")]
 mod host;

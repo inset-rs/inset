@@ -123,10 +123,12 @@ impl<C: EmbedderClient> Host<C> {
                 self.vsync = None;
                 self.view.window_gone();
             }
-            // The configuration carries the appearance and the languages, and a change of
-            // it arrives as its own event rather than through the window.
+            // The configuration carries the appearance and the languages, and the screen's
+            // size, orientation and density, and a change of it arrives as its own event rather
+            // than through the window.
             Recorded::ConfigChanged => {
                 self.sync_configuration();
+                self.sync_screen();
                 self.sync_metrics();
             }
             Recorded::GeometryChanged => self.sync_metrics(),
@@ -144,6 +146,7 @@ impl<C: EmbedderClient> Host<C> {
         let size = [window.width() as u32, window.height() as u32];
         self.view.window_arrived(&self.gpu, &window, size);
         self.sync_configuration();
+        self.sync_screen();
         self.view.refresh_metrics(self.geometry());
         if self.client.is_none() {
             let start = self.start.take().expect("start runs once");
@@ -175,13 +178,23 @@ impl<C: EmbedderClient> Host<C> {
         let rect = self.app.content_rect();
         Geometry {
             size,
-            density: self
-                .app
-                .config()
-                .density()
-                .map_or(1.0, |dpi| f64::from(dpi) / 160.0),
+            density: self.density(),
             content: [rect.left, rect.top, rect.right, rect.bottom],
+            screen: self
+                .platform
+                .screen
+                .borrow()
+                .as_ref()
+                .map(|screen| screen.id),
         }
+    }
+
+    /// Pixels per logical pixel, from the configuration's density.
+    fn density(&self) -> f64 {
+        self.app
+            .config()
+            .density()
+            .map_or(1.0, |dpi| f64::from(dpi) / 160.0)
     }
 
     fn sync_metrics(&mut self) {
@@ -194,6 +207,20 @@ impl<C: EmbedderClient> Host<C> {
             && let Some(client) = &mut self.client
         {
             client.view_metrics_changed(VIEW);
+        }
+    }
+
+    /// The screen the activity is on, read again: the app hears of it when it differs from what
+    /// the app was told. The system says nothing of a change of the refresh rate alone, which only
+    /// a display listener would hear.
+    fn sync_screen(&mut self) {
+        let screen = crate::display::read_screen(&self.app, self.density());
+        if *self.platform.screen.borrow() == screen {
+            return;
+        }
+        *self.platform.screen.borrow_mut() = screen;
+        if let Some(client) = &mut self.client {
+            client.screens_changed();
         }
     }
 

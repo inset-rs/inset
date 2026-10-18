@@ -6,9 +6,10 @@
 //! window's native surfaces, which `absent` answers for a system that has neither. What a system
 //! lets the app do is answered in one place, on [`OperatingSystem`].
 //! Three systems: macOS adds a window frame that animates, the popup menu, a display link,
-//! native surfaces and the requests it makes of the application, among others (`macos`); iOS
-//! reports its window's size and safe area differently (`ios`); every other system winit
-//! covers by itself (`winit_only`). What macOS and iOS share is in `apple`.
+//! native surfaces, its own answers about its screens, and the requests it makes of the
+//! application and what it says changed, among others (`macos`); iOS reports its window's size
+//! and safe area differently (`ios`); every other system winit covers by itself (`winit_only`).
+//! What macOS and iOS share is in `apple`.
 //!
 //! A system's module is compiled for its own target only, so a change to a trait is checked
 //! against that system's answers only when building for it: build every target a change
@@ -29,8 +30,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    Compositor, Offset, PopupMenuEntry, Rect, SurfacePlacement, TargetPlatform, ViewId,
-    ViewPadding, WindowConfig,
+    Compositor, Offset, PopupMenuEntry, Rect, Screen, ScreenId, SurfacePlacement, TargetPlatform,
+    ViewId, ViewPadding, WindowConfig,
 };
 use valo_codec::Decoder;
 use winit::event_loop::ActiveEventLoop;
@@ -38,6 +39,8 @@ use winit::monitor::MonitorHandle;
 use winit::window::{Window, WindowAttributes};
 
 use crate::lifecycle::LifecycleNotice;
+use crate::screens::{monitor_number, monitor_screens};
+use crate::system_changes::SystemChange;
 use crate::system_requests::SystemRequest;
 
 /// The system this build targets.
@@ -68,6 +71,7 @@ pub(crate) trait OperatingSystem:
     + ImageDecoding
     + WorkQueue
     + SystemRequests
+    + SystemChanges
     + ApplicationControl
     + ApplicationLifecycle
 {
@@ -142,12 +146,24 @@ pub(crate) trait WindowChrome {
     fn configure(_window: &Window, _config: &WindowConfig) {}
 }
 
-/// The screens and where the pointer is on them, for an app that places a window against the
-/// screen.
+/// The screens the views are on, and where the pointer is on them (`screens.rs`).
 pub(crate) trait Screens {
-    /// The system's answers about its screens, which the platform hands the app. `None` where
-    /// the system is not asked outside winit's callbacks.
-    fn screens() -> Option<&'static dyn inset_embedder::Screens> {
+    /// The screens, the main one first, in the coordinates of a window's frame. winit's monitors
+    /// by default, which winit lists only through a window or inside its own calls: `window` is
+    /// one of the app's, and with none no screen is known.
+    fn screens(window: Option<&Window>) -> Vec<Screen> {
+        window.map(monitor_screens).unwrap_or_default()
+    }
+
+    /// The id `screens` gives the screen `monitor` is. By default the number winit's monitor
+    /// keeps for the app's life (`screens.rs`).
+    fn screen_id(monitor: &MonitorHandle) -> ScreenId {
+        monitor_number(monitor)
+    }
+
+    /// Where the pointer is now, in the coordinates of a window's frame, over a window of the app
+    /// or not. `None` where the system cannot be asked.
+    fn pointer_location() -> Option<Offset> {
         None
     }
 }
@@ -263,6 +279,15 @@ pub(crate) trait SystemRequests {
     /// system makes them, so `send` must only queue. Nothing is sent where the system makes
     /// none of these requests of an application.
     fn send_system_requests(_send: Box<dyn Fn(SystemRequest)>) {}
+}
+
+/// What the system says changed about the machine beyond what winit reports: its screens and the
+/// user's languages (`system_changes.rs`).
+pub(crate) trait SystemChanges {
+    /// Starts sending what the system says changed to `send`, on the main thread, from wherever
+    /// the system posts it, so `send` must only queue. Nothing is sent where the embedder hears
+    /// none of it.
+    fn send_system_changes(_send: Box<dyn Fn(SystemChange)>) {}
 }
 
 /// What the embedder tells the system of the application as a whole: how it quits, and how it

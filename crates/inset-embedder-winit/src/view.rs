@@ -31,6 +31,7 @@ use crate::host_window::WinitWindow;
 use crate::ime::ImeOutcome;
 use crate::os::{ThisOs, ThisOsWindowSurfaces, WindowGeometry, WindowSurfaces};
 use crate::rasterizer::{PresentingInTransaction, Rasterizer};
+use crate::screens::screen_of;
 use crate::text_input::{TextInput, Typed};
 
 /// Stable view identity, current winit geometry, and what presents its scenes.
@@ -182,6 +183,19 @@ impl WinitView {
         self.metrics.set(metrics);
         true
     }
+
+    /// Reads again which screen the window is on, and answers whether that changed: a window
+    /// that moved to another screen has new metrics, though its surface stays as it is.
+    pub(crate) fn refresh_screen(&self, window: &Window) -> bool {
+        let screen = screen_of(window);
+        let mut metrics = self.metrics.get();
+        if metrics.screen == screen {
+            return false;
+        }
+        metrics.screen = screen;
+        self.metrics.set(metrics);
+        true
+    }
 }
 
 /// The metrics of `window` as the framework takes them.
@@ -197,6 +211,7 @@ fn read_metrics(window: &Window) -> ViewMetrics {
         padding,
         view_padding: padding,
         view_insets: ViewPadding::ZERO,
+        screen: screen_of(window),
     }
 }
 

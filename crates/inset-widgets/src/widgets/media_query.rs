@@ -2371,6 +2371,7 @@ mod tests {
                     right: 0.0,
                     bottom: 20.0,
                 },
+                screen: None,
             }
         }
 

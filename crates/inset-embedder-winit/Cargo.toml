@@ -24,6 +24,8 @@ wgpu.workspace = true
 pollster.workspace = true
 winit.workspace = true
 arboard.workspace = true
+# The user's languages, as each system lists them.
+sys-locale = "0.3"
 
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
@@ -72,6 +74,10 @@ harness = false
 
 [[test]]
 name = "a_window_stays_open_until_the_app_closes_it"
+harness = false
+
+[[test]]
+name = "a_view_is_on_a_screen_the_platform_lists"
 harness = false
 
 # What the tests ask of AppKit that the host offers no call for: minimizing, hiding the

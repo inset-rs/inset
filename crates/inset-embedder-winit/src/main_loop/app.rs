@@ -1,10 +1,12 @@
 //! What the system says of the application as a whole and asks of it: its lifecycle, its
-//! appearance, the files it is asked to open and the reopen.
+//! appearance, the files it is asked to open and the reopen; and what it says changed about the
+//! machine: the screens and the user's languages.
 
 use inset_embedder::EmbedderClient;
 use winit::window::{Theme, Window};
 
 use crate::lifecycle::LifecycleNotice;
+use crate::system_changes::SystemChange;
 use crate::system_requests::SystemRequest;
 
 use super::MainLoop;
@@ -45,6 +47,30 @@ impl<C: EmbedderClient> MainLoop<C> {
     pub(super) fn on_theme_changed(&mut self, theme: Theme) {
         if self.state.appearance().take(theme) {
             self.client.platform_brightness_changed();
+        }
+    }
+
+    /// The system said the screens or the user's languages changed: the app hears of it, as
+    /// Flutter's macOS embedder tells the engine's displays and locales.
+    pub(super) fn on_system_change(&mut self, change: SystemChange) {
+        match change {
+            SystemChange::Screens => self.on_screens_changed(),
+            SystemChange::Locales => self.on_locales_changed(),
+        }
+    }
+
+    /// The app hears the screens changed, and then of each view whose window is on another
+    /// screen now, as a screen it was on can be gone, or have become the mirror of another.
+    fn on_screens_changed(&mut self) {
+        self.client.screens_changed();
+        self.sync_screens();
+    }
+
+    /// The user's languages, read again: the app hears of them when they differ from what it
+    /// was told.
+    fn on_locales_changed(&mut self) {
+        if self.state.locales().read_again() {
+            self.client.locales_changed();
         }
     }
 }

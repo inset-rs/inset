@@ -1,16 +1,20 @@
 //! Where AppKit puts a window: its frame, set at once or animated, a window that slides in, the
-//! screens it can be on and the pointer's place on them, and AppKit's points, measured from the
-//! bottom left of the primary screen, as winit's, measured from its top left.
+//! screens it can be on, as Flutter's macOS embedder describes them to the engine, and the
+//! pointer's place on them, and AppKit's points, measured from the bottom left of the primary
+//! screen, as winit's, measured from its top left.
 
 use std::time::Duration;
 
-use inset_embedder::{Offset, Rect, Screen};
-use objc2::MainThreadMarker;
+use inset_embedder::{Offset, Rect, Screen, ScreenId};
+use objc2::{ClassType, MainThreadMarker, sel};
 use objc2_app_kit::{NSAnimatablePropertyContainer, NSAnimationContext, NSEvent, NSScreen};
-use objc2_foundation::{NSPoint, NSRect, NSSize};
+use objc2_foundation::{NSNumber, NSPoint, NSRect, NSSize, ns_string};
 use objc2_quartz_core::{CAMediaTimingFunction, kCAMediaTimingFunctionEaseInEaseOut};
+use winit::monitor::MonitorHandle;
+use winit::platform::macos::MonitorHandleExtMacOS;
 use winit::window::Window;
 
+use super::display_links::DisplayId;
 use super::{AppKit, ns_window};
 use crate::os::{Screens, WindowMotion};
 
@@ -67,19 +71,11 @@ impl WindowMotion for AppKit {
     }
 }
 
+/// AppKit is asked on the main thread at any time, so it answers with or without a window.
 impl Screens for AppKit {
-    fn screens() -> Option<&'static dyn inset_embedder::Screens> {
-        Some(&AppKitScreens)
-    }
-}
-
-/// The screens as AppKit knows them.
-struct AppKitScreens;
-
-impl inset_embedder::Screens for AppKitScreens {
-    /// Every screen AppKit knows, the one with the menu bar first. A visible frame leaves the
-    /// Dock's band out only while the Dock keeps its space, and not while it hides itself.
-    fn screens(&self) -> Vec<Screen> {
+    /// Every screen AppKit knows, the one with the menu bar first, as Flutter's macOS embedder
+    /// lists them: none off the main thread, where AppKit may not be asked.
+    fn screens(_window: Option<&Window>) -> Vec<Screen> {
         let Some(mtm) = MainThreadMarker::new() else {
             return Vec::new();
         };
@@ -88,16 +84,59 @@ impl inset_embedder::Screens for AppKitScreens {
         };
         NSScreen::screens(mtm)
             .iter()
-            .map(|screen| Screen {
-                frame: window_rect(screen.frame(), primary_height),
-                visible_frame: window_rect(screen.visibleFrame(), primary_height),
-            })
+            .filter_map(|screen| screen_of(&screen, primary_height))
             .collect()
     }
 
-    fn pointer_location(&self) -> Option<Offset> {
+    /// The display Core Graphics numbers the monitor with, which is its screen's
+    /// `NSScreenNumber`, the id Flutter's macOS embedder gives a display.
+    fn screen_id(monitor: &MonitorHandle) -> ScreenId {
+        ScreenId(u64::from(monitor.native_id()))
+    }
+
+    fn pointer_location() -> Option<Offset> {
         pointer_location()
     }
+}
+
+/// `screen` as the app reads it; `None` for one AppKit gives no display number. A visible frame
+/// leaves the Dock's band out only while the Dock keeps its space, and not while it hides itself.
+fn screen_of(screen: &NSScreen, primary_height: f64) -> Option<Screen> {
+    Some(Screen {
+        id: ScreenId(u64::from(display_id_of(screen)?)),
+        name: localized_name(screen),
+        frame: window_rect(screen.frame(), primary_height),
+        visible_frame: window_rect(screen.visibleFrame(), primary_height),
+        scale: screen.backingScaleFactor(),
+        refresh_rate: maximum_refresh_rate(screen),
+    })
+}
+
+/// A screen's display, which AppKit keeps as `NSScreenNumber` in its device description;
+/// `NSScreen.CGDirectDisplayID` answers it from macOS 26 only.
+pub(super) fn display_id_of(screen: &NSScreen) -> Option<DisplayId> {
+    let number = screen
+        .deviceDescription()
+        .objectForKey(ns_string!("NSScreenNumber"))?;
+    Some(number.downcast::<NSNumber>().ok()?.unsignedIntValue())
+}
+
+/// The name the system shows for `screen`, from macOS 10.15; empty before.
+fn localized_name(screen: &NSScreen) -> String {
+    if !NSScreen::class().responds_to(sel!(localizedName)) {
+        return String::new();
+    }
+    screen.localizedName().to_string()
+}
+
+/// How often `screen` refreshes at most, in hertz, from macOS 12; `None` before. A display that
+/// varies its rate, as ProMotion does, refreshes slower while little moves.
+fn maximum_refresh_rate(screen: &NSScreen) -> Option<f64> {
+    if !NSScreen::class().responds_to(sel!(maximumFramesPerSecond)) {
+        return None;
+    }
+    let rate = screen.maximumFramesPerSecond();
+    (rate > 0).then_some(rate as f64)
 }
 
 /// Where the pointer is now on the screens: AppKit's answer, which is where the pointer was at

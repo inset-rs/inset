@@ -14,6 +14,8 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - main_loop/windows.rs → the engine's window close request, which goes to the framework and closes nothing until the framework closes the window
 - main_loop/windows.rs, view.rs, rasterizer.rs → the shell's surfaces (`Shell::OnPlatformViewCreated`, `OnPlatformViewDestroyed`): the view stays while the system has taken its surface, and each surface given gets a frame
 - touch.rs → the iOS embedder's touches, one pointer per finger, added before its down and removed after its up
+- screens.rs, os/macos/screens.rs, os/macos/system_changes.rs, main_loop/app.rs → the macOS embedder's displays (`updateDisplayConfig`), every `NSScreen` numbered by its `NSScreenNumber`, sent again at `NSApplicationDidChangeScreenParametersNotification`, and a window's `display_id`, its screen's number, sent again when the window changes screen
+- locales.rs, os/macos/system_changes.rs → the macOS embedder's locales (`sendUserLocales`), its preferred languages, sent again at `NSCurrentLocaleDidChangeNotification`; the Windows and Linux embedders', the user's languages, sent at start only
 
 ## lib.rs / main_loop/
 
@@ -34,6 +36,16 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - Change: without a screen's display link, on macOS before 14 and on the other desktops, frames follow a timer at the display's refresh rate.
   Reason: platform — winit offers no vsync, and only macOS 14 and later gives a screen's display link.
   Affect: an animation's frames come at the display's rate but not in step with its refresh.
+
+## screens.rs / os/macos/screens.rs
+
+- Change: on macOS a screen's refresh rate is its `NSScreen.maximumFramesPerSecond`, where Flutter's macOS embedder rounds the nominal rate of a display link it makes for the screen.
+  Reason: platform — `NSScreen` answers the rate itself from macOS 12, with no display link to make.
+  Affect: a screen that varies its rate reports the fastest, and before macOS 12 a screen reports none.
+
+- Change: on Windows, Linux and iOS the screens are winit's monitors, listed through the app's first window, numbered in the order first seen, with no visible frame of their own and no notice when they change, where Flutter's Windows embedder lists `HMONITOR`s again at `WM_DISPLAYCHANGE` and its iOS embedder reports the main screen alone.
+  Reason: platform — winit lists monitors only through a window or inside its own calls, gives them no number, knows no taskbar, and reports no monitor coming or going.
+  Affect: an app there has no screens until its first window opens, which it hears as that view coming; a visible frame includes the taskbar; a monitor plugged in shows in the list the next time it is read, and a window moved onto it is reported as a metrics change.
 
 ## view.rs / rasterizer.rs
 
@@ -123,11 +135,13 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 - Change: `WinitPlatform::macos` slides a window in and hides the app, neither of which Flutter's framework offers.
   Reason: platform — an app that places a window against the screen, such as a panel above its Dock icon, needs them, and `Platform` stays Flutter's.
-  Affect: an app reaches them only on macOS; on other systems `macos()` is `None`, as `Platform::screens` is.
+  Affect: an app reaches them only on macOS; on other systems `macos()` is `None`.
 
 ## Deferred
 
 - The lifecycle state on iOS, Windows and Linux, where the framework hears none. Trigger: an app there that must pause in the background.
+- The fallback languages Flutter's Windows and Linux embedders add after the user's: Windows's own (`MUI_UI_FALLBACK`), and GLib's, such as `en` after `en_US`, and `C`. Trigger: an app whose locale resolution needs a fallback the user did not set.
+- Hearing the user's languages change on Windows (`WM_SETTINGCHANGE`), which winit does not report and Flutter's Windows embedder does not hear either. Trigger: an app there that must follow a change without a restart.
 - Letting a logout or shutdown go on once the app agrees, through `NSTerminateLater`: the delegate cancels it at once, as Flutter's does, so an Inset app stops every logout. Trigger: an app that must not stop a logout it agrees to; AppKit's loop while it waits needs an experiment first.
 - Files opened from the system on Windows and Linux. Trigger: an app that wants them through `Platform::file_opening` there too.
 - The layout keymap for character keys, so a shifted symbol reports `!` where Flutter reports `digit1`. Trigger: a shortcut that matches a shifted symbol by logical key.

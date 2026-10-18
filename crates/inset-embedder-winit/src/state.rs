@@ -10,6 +10,7 @@ use winit::event_loop::EventLoopProxy;
 use crate::app_requests::AppRequests;
 use crate::appearance::Appearance;
 use crate::images::{CreateImageLoader, Images};
+use crate::locales::Locales;
 use crate::main_loop::MainLoopEvent;
 use crate::system_requests::SystemRequestHandlers;
 use crate::view::WinitView;
@@ -21,6 +22,8 @@ pub(crate) struct EmbedderState {
     views: Views,
     /// Light or dark, as the app was last told.
     appearance: Appearance,
+    /// The user's languages, as the app was last told.
+    locales: Locales,
     /// The image loader and the renderer's image store, once the first view has a device.
     images: Images,
     /// What the app asked of the main loop and it has not served yet. Shared with the window
@@ -31,8 +34,8 @@ pub(crate) struct EmbedderState {
 }
 
 impl EmbedderState {
-    /// The state of an app about to start: no view yet. Requests reach the main loop through
-    /// `proxy`.
+    /// The state of an app about to start: no view yet, and the user's languages as the system
+    /// lists them now. Requests reach the main loop through `proxy`.
     pub(crate) fn new(
         proxy: EventLoopProxy<MainLoopEvent>,
         create_image_loader: Option<CreateImageLoader>,
@@ -40,6 +43,7 @@ impl EmbedderState {
         EmbedderState {
             views: Views::default(),
             appearance: Appearance::default(),
+            locales: Locales::read(),
             images: Images::new(create_image_loader),
             requests: Rc::new(AppRequests::new(move |event| {
                 let _ = proxy.send_event(event);
@@ -54,6 +58,10 @@ impl EmbedderState {
 
     pub(crate) fn appearance(&self) -> &Appearance {
         &self.appearance
+    }
+
+    pub(crate) fn locales(&self) -> &Locales {
+        &self.locales
     }
 
     pub(crate) fn images(&self) -> &Images {
