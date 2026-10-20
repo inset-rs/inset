@@ -16,7 +16,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use inset_embedder::FontSource;
-use valo::{Font, FontAttrs};
+use valo::{Font, FontAttrs, match_style};
 use wasm_bindgen::JsCast;
 
 use crate::font_fallback::{ROBOTO, fallback_family};
@@ -181,17 +181,17 @@ impl Inner {
     }
 }
 
-/// The instance of a file nearest `attrs`, so a bold span pulling a fallback
-/// gets that font's bold instance rather than its default one.
+/// The instance of a file nearest `attrs`, by valo's [`match_style`], so a bold
+/// span pulling a fallback gets that font's bold instance rather than its default one.
 fn nearest_instance(file: &Arc<Vec<u8>>, attrs: FontAttrs) -> Option<Font> {
-    Font::instances_from_data(file.clone(), 0)
-        .into_iter()
-        .min_by_key(|font| {
-            (
-                font.attrs().italic != attrs.italic,
-                font.attrs().weight.abs_diff(attrs.weight),
-            )
-        })
+    let mut instances = Font::instances_from_data(file.clone(), 0);
+    let nearest = {
+        let matched = match_style(&instances, attrs)?;
+        instances
+            .iter()
+            .position(|font| std::ptr::eq(font, matched))?
+    };
+    Some(instances.swap_remove(nearest))
 }
 
 /// Batches the demands raised during one layout: a pass asks for a character
