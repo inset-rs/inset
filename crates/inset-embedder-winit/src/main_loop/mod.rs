@@ -38,10 +38,19 @@
 //! (`system_requests.rs`).
 //!
 //! What AppKit calls on its own, from its dispatch and possibly inside a winit callback, never
-//! reaches the loop's state or the client: the application delegate's methods and the
-//! application's lifecycle notices only queue for the loop (`os/macos/app_delegate.rs`,
-//! `os/macos/app_lifecycle.rs`), and a window's visibility notices and its screen's display
-//! link serve only its native surfaces (`os/macos/composition`).
+//! reaches the loop's state or the client: the application delegate's methods, the
+//! application's lifecycle notices and the loop's own notices of a window's visibility only queue
+//! for the loop (`os/macos/app_delegate.rs`, `os/macos/app_lifecycle.rs`,
+//! `os/macos/visibility.rs`), and a window's native surfaces hear the same notices, and their
+//! screen's display link, for themselves alone (`os/macos/composition`).
+//!
+//! # A window minimized, occluded or moved
+//!
+//! The app hears of a window's every move, and of its being minimized or restored, occluded or
+//! shown once the window answers so (`host_window.rs`): winit reports a change of occlusion but
+//! not a minimize, which Windows reports as a resize and AppKit with a notice of its own, and X11
+//! with nothing winit hears but the focus the window may lose or gain with it. So the loop reads
+//! the window's state again at each of those events, and the app hears of a change once.
 //!
 //! # The app, its views and their surfaces
 //!
@@ -116,6 +125,9 @@ pub(crate) enum MainLoopEvent {
     /// Something the system said changed about the machine: its screens, or the user's
     /// languages.
     SystemChange(SystemChange),
+    /// The system said a window may have been minimized or restored, occluded or shown, beyond
+    /// winit's events.
+    WindowVisibility(WindowId),
 }
 
 /// The embedder of the running app.
@@ -148,6 +160,8 @@ pub(crate) struct MainLoop<C> {
     /// Whether the system gives the windows surfaces now: from winit's `resumed` until its
     /// `suspended`.
     surfaces_given: bool,
+    /// Where a window's visibility notices send the loop their events.
+    proxy: EventLoopProxy<MainLoopEvent>,
 }
 
 impl<C: EmbedderClient> MainLoop<C> {
@@ -171,8 +185,11 @@ impl<C: EmbedderClient> MainLoop<C> {
             client,
             state,
             platform,
-            frame_scheduler: FrameScheduler::new(move || {
-                let _ = proxy.send_event(MainLoopEvent::Vsync);
+            frame_scheduler: FrameScheduler::new({
+                let proxy = proxy.clone();
+                move || {
+                    let _ = proxy.send_event(MainLoopEvent::Vsync);
+                }
             }),
             wakeups: Wakeups::default(),
             view_maker,
@@ -184,6 +201,7 @@ impl<C: EmbedderClient> MainLoop<C> {
             drag_reports: DragReports::default(),
             lifecycle: AppLifecycle::default(),
             surfaces_given: false,
+            proxy,
         }
     }
 
@@ -266,6 +284,7 @@ impl<C: EmbedderClient> ApplicationHandler<MainLoopEvent> for MainLoop<C> {
             MainLoopEvent::SystemRequest(request) => self.on_system_request(request),
             MainLoopEvent::Lifecycle(notice) => self.on_lifecycle_notice(notice),
             MainLoopEvent::SystemChange(change) => self.on_system_change(change),
+            MainLoopEvent::WindowVisibility(id) => self.sync_window_state(id),
         }
     }
 
@@ -275,11 +294,8 @@ impl<C: EmbedderClient> ApplicationHandler<MainLoopEvent> for MainLoop<C> {
             WindowEvent::CloseRequested => self.on_close_requested(id),
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => self.on_resized(id),
             WindowEvent::Moved(_) => self.on_moved(id),
-            // A window seen again is when a picture its surface refused while occluded is
-            // presented (wgpu issue 8309, `view.rs`).
-            WindowEvent::RedrawRequested | WindowEvent::Occluded(false) => {
-                self.on_redraw_requested(id)
-            }
+            WindowEvent::Occluded(occluded) => self.on_occluded(id, occluded),
+            WindowEvent::RedrawRequested => self.on_redraw_requested(id),
             WindowEvent::ThemeChanged(theme) => self.on_theme_changed(theme),
             WindowEvent::CursorEntered { .. } => self.on_cursor_entered(id),
             WindowEvent::CursorLeft { .. } => self.on_cursor_left(id),

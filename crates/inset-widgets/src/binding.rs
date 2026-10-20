@@ -372,6 +372,9 @@ impl WidgetsBinding {
         callbacks.on_view_close_requested = Some(Rc::new(|app, view| {
             WidgetsBinding::instance(app).handle_view_close_requested(app, view)
         }));
+        callbacks.on_window_changed = Some(Rc::new(|app, view| {
+            WidgetsBinding::instance(app).handle_window_changed(app, view)
+        }));
         callbacks.on_view_request_failed = Some(Rc::new(|app, request_id, error| {
             WidgetsBinding::instance(app).handle_view_request_failed(app, request_id, error)
         }));
@@ -454,6 +457,12 @@ impl WidgetsBinding {
                 return;
             }
         }
+    }
+
+    /// The window of `view` was minimized or restored, became occluded or shown, or moved: the
+    /// window controller whose window it is tells its listeners.
+    fn handle_window_changed(self: Handle<Self>, app: &mut App, view: ViewId) {
+        self.windowing_owner(app).window_changed(app, view);
     }
 
     fn handle_view_request_failed(

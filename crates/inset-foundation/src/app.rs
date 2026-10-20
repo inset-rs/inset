@@ -160,6 +160,9 @@ pub struct PlatformCallbacks {
     pub on_view_removed: Option<ViewChangeCallback>,
     /// The user asked to close a view. Flutter's engine reports it to the window's controller.
     pub on_view_close_requested: Option<ViewCloseRequestedCallback>,
+    /// A view's window was minimized or restored, became occluded or shown, or moved. Flutter's
+    /// engine reports it to the window's controller.
+    pub on_window_changed: Option<WindowChangedCallback>,
     /// A request for a view got no view.
     pub on_view_request_failed: Option<ViewRequestFailedCallback>,
 }
@@ -178,6 +181,9 @@ pub type ViewChangeCallback = Rc<dyn Fn(&mut App, ViewId)>;
 
 /// The framework's handler for `EmbedderClient::view_close_requested`.
 pub type ViewCloseRequestedCallback = Rc<dyn Fn(&mut App, ViewId)>;
+
+/// The framework's handler for `EmbedderClient::window_changed`.
+pub type WindowChangedCallback = Rc<dyn Fn(&mut App, ViewId)>;
 
 /// The framework's handler for `EmbedderClient::view_request_failed`.
 pub type ViewRequestFailedCallback = Rc<dyn Fn(&mut App, RequestId, ViewError)>;

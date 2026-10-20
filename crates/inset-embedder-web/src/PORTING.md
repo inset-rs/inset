@@ -49,3 +49,4 @@ Host implementation. Flutter analogue: the web engine under `engine/lib/web_ui`.
 - Hearing the pixel ratio change without a resize, as on a move to a screen at another ratio, which Flutter web hears through a `(resolution)` media query, and the screen's own `change` event. Trigger: an app that must follow its page across screens.
 - Animated image frames after the first. Trigger: a GIF or APNG that must play.
 - Flutter web autofill form, delta model, and putting the editing element inside a view's `textEditingHost`. Trigger: AutofillGroup; `enableDeltaModel`.
+- A window the app manages around the page's view, with whether it is occluded, which the page's visibility state and an intersection observer on the canvas would tell, as winit's web backend reads it. Trigger: an app that must stop drawing while its page is hidden.

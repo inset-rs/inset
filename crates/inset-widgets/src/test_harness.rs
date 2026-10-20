@@ -550,6 +550,21 @@ pub(crate) fn request_view_close(cell: &AppCell, view: ViewId) {
     cell.checkpoint();
 }
 
+/// What the shell does when the host says `view`'s window was minimized or restored, became
+/// occluded or shown, or moved.
+pub(crate) fn report_window_changed(cell: &AppCell, view: ViewId) {
+    {
+        let mut app = cell.borrow_mut();
+        let callback = app
+            .platform_callbacks()
+            .on_window_changed
+            .clone()
+            .expect("the binding hears window changes");
+        callback(&mut app, view);
+    }
+    cell.checkpoint();
+}
+
 /// What the shell does as the host adds the views of the windows `windows` made, once each is
 /// made; a view reported twice is heard twice, as a host would not, and the framework ignores
 /// the second.

@@ -3,11 +3,11 @@
 
 use inset_embedder::TargetPlatform;
 
-use super::absent::{NoDisplayLink, NoWindowSurfaces};
+use super::absent::{NoDisplayLink, NoVisibilityNotices, NoWindowSurfaces};
 use super::{
     ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeComposition,
     NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemRequests,
-    WindowChrome, WindowGeometry, WindowMotion, WorkQueue,
+    WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
 };
 
 /// Any system without a module of its own. A type only: never made, its answers are
@@ -31,6 +31,10 @@ impl FramePresentation for WinitOnly {
 
 impl NativeComposition for WinitOnly {
     type WindowSurfaces = NoWindowSurfaces;
+}
+
+impl WindowVisibility for WinitOnly {
+    type Notices = NoVisibilityNotices;
 }
 
 impl WindowGeometry for WinitOnly {}

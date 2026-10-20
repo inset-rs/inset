@@ -80,6 +80,10 @@ harness = false
 name = "a_view_is_on_a_screen_the_platform_lists"
 harness = false
 
+[[test]]
+name = "a_window_tells_the_app_it_was_minimized_occluded_or_moved"
+harness = false
+
 # What the tests ask of AppKit that the host offers no call for: minimizing, hiding the
 # application, and whether a window's content has the layer a surface draws into.
 [target.'cfg(target_os = "macos")'.dev-dependencies]

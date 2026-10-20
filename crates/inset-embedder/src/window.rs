@@ -6,8 +6,9 @@
 //! host makes a window for it; where the platform gives the app views and makes none, on a
 //! phone and when embedded, a request is refused. A view in a window the app may manage, one it
 //! asked for or one the platform gave, has a [`HostWindow`] (`View::window`): the configuration
-//! every window wants up front, the native handle for anything beyond it, and the window's
-//! closing, which is how a view closes.
+//! every window wants up front, whether the window is minimized or occluded, which the host
+//! reports with the window's moves (`EmbedderClient::window_changed`), the native handle for
+//! anything beyond it, and the window's closing, which is how a view closes.
 //!
 //! Flutter's windowing API (`widgets/_window.dart`, experimental) builds window archetypes
 //! over the engine's views, each controller making its window within its constructor.
@@ -150,6 +151,15 @@ pub trait HostWindow: 'static {
     fn show(&self);
 
     fn hide(&self);
+
+    /// Flutter `WindowController.isMinimized`; macOS `isMiniaturized`, Windows `IsIconic`.
+    /// `false` where the system does not tell a client, as Wayland does not.
+    fn is_minimized(&self) -> bool;
+
+    /// Covered all over, or otherwise not shown: macOS's occlusion state without its visible bit,
+    /// winit's `Occluded`. Not in Flutter's controller; Inset's, after the platforms. `false`
+    /// where the system does not tell a window, as Windows and Wayland do not.
+    fn is_occluded(&self) -> bool;
 
     /// Closes the window; its view goes away with it. The user's asking to close it only reports
     /// it ([`EmbedderClient::view_close_requested`](crate::EmbedderClient::view_close_requested));

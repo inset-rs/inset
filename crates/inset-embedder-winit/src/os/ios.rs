@@ -5,12 +5,12 @@ use inset_embedder::{TargetPlatform, ViewPadding};
 use valo_codec::Decoder;
 use winit::window::Window;
 
-use super::absent::{NoDisplayLink, NoWindowSurfaces};
+use super::absent::{NoDisplayLink, NoVisibilityNotices, NoWindowSurfaces};
 use super::apple::image_io_decoders;
 use super::{
     ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeComposition,
     NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemRequests,
-    WindowChrome, WindowGeometry, WindowMotion, WorkQueue,
+    WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
 };
 
 /// iOS. A type only: never made, its answers are associated functions.
@@ -58,6 +58,10 @@ impl FramePresentation for Ios {
 
 impl NativeComposition for Ios {
     type WindowSurfaces = NoWindowSurfaces;
+}
+
+impl WindowVisibility for Ios {
+    type Notices = NoVisibilityNotices;
 }
 
 impl ImageDecoding for Ios {

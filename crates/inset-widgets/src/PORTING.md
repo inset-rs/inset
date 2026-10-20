@@ -84,6 +84,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the host makes a window on its own loop, and the view arrives later, carrying the request's id.
   Affect: a controller has no view at first, and its listeners hear the view arrive and go; one closed before its view arrives closes the window as it arrives, unseen.
 
+- Change: a window controller answers whether its window is minimized and whether it is occluded, and its listeners hear each time the host says either changed or the window moved, where Flutter's controller asks the platform whether its window is minimized, has no answer for a covered one, and is notified by each platform's own windowing, on Windows at every resize and activation too.
+  Reason: platform — the host hears a window's changes and reports them by view, and a resize already reaches the app as the view's metrics.
+  Affect: a controller with no window answers no to both, its listeners hear the window minimized, covered, shown again or moved but not resized, and the window of a view no controller asked for changes unheard.
+
 - Change: `WidgetsBinding::windowing_owner` is one `WindowingOwner` that keeps the controllers by their requests and hears every view event first, claiming the views they asked for, where Flutter's is an abstract factory with an implementation per platform, which `createWindowingOwner` and a setter replace.
   Reason: platform — the host makes the windows behind `Platform::request_view`, so what differs between platforms is the host's, and the owner only matches arriving views to requests.
   Affect: no app or test installs a windowing owner of its own; a test stands in for windows through its platform's `request_view`.

@@ -28,6 +28,6 @@ No Flutter counterpart. Dart has no type — the engine owns the isolate.
   Reason: platform — Dart's event loop runs timers between engine events; here the clock only moves when the host says so.
   Affect: a `Timer` (and so `run_app`'s root attach) fires at the next wake or frame, never during `setup`.
 
-- Change: `view_added` and `view_removed` invoke the callbacks `WidgetsBinding` assigned with the view's id and then report the metrics changed, and `view_close_requested` and `view_request_failed` invoke theirs, where dart:ui's `_addView` and `_removeView` invoke only `onMetricsChanged` and Flutter's windowing hears a window's close request through a callback each controller registers with its runner.
+- Change: `view_added` and `view_removed` invoke the callbacks `WidgetsBinding` assigned with the view's id and then report the metrics changed, and `view_close_requested`, `window_changed` and `view_request_failed` invoke theirs, where dart:ui's `_addView` and `_removeView` invoke only `onMetricsChanged` and Flutter's windowing hears a window's close request and its changes through a callback each controller registers with its runner.
   Reason: platform — the shell cannot name `WidgetsBinding`, and the host reports every view, given or asked for, through the one client.
-  Affect: the binding hears which view came, went or is asked to close, and the metrics observers still hear a view come and go as Flutter's do.
+  Affect: the binding hears which view came, went, is asked to close or had its window change, and the metrics observers still hear a view come and go as Flutter's do.

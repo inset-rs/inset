@@ -62,6 +62,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — a host such as WaOS shows a given view in a window the app may move, title and close, as an iPad scene and an Android desktop window are, while a phone's screen, a web page's element and a host app's view are in nothing the app may close.
   Affect: closing a given view in a window closes the window; a view with no window is not the app's to close, and its way out is to quit.
 
+- Change: a window says whether it is minimized and whether it is occluded, and the host tells the app each time either changes or the window moves, where Flutter's controllers ask each platform whether a window is minimized, hear its changes from that platform's own windowing, and have no word for a covered window.
+  Reason: platform — the host is what hears a window minimized, covered or moved, and an app that stops drawing what nobody sees must know it of each window rather than of the whole application.
+  Affect: an app tells a minimized or covered window from a shown one while its other windows show, and where the system does not say, as Windows does not say a window is covered and Wayland says neither, the window answers no.
+
 - Change: `MouseCursor::activate_system_cursor` also takes the view the pointer is over.
   Reason: platform — where each window has its own cursor, the host must know which window to change.
   Affect: in an app with several windows, a cursor change reaches only the window under the pointer.

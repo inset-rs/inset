@@ -113,6 +113,12 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — vsync belongs to a display, and macOS tells a window's visibility only through notices.
   Affect: a program in a hidden or fully covered window draws nothing until part of it shows.
 
+## host_window.rs / main_loop/windows.rs / os/macos/visibility.rs → Flutter's desktop window controllers (`_window_macos.dart`, `_window_win32.dart`, `_window_linux.dart`)
+
+- Change: a window answers whether it is minimized and whether it is occluded, and the app hears each time either changes or the window moves, read on macOS from the window and its notices and elsewhere from winit's events, where Flutter's desktop embedders notify a window's controller at every resize and activation on Windows and at every configure and state change on Linux.
+  Reason: platform — winit says whether a window is covered on macOS and X11 alone and reports no minimize, which Windows tells as a resize, macOS with a notice of its own and X11 with nothing winit hears, and Wayland tells a client neither its minimize nor its position.
+  Affect: on Wayland a window never reads minimized and its moves go unheard, on Windows it never reads occluded, and under X11 a minimize is heard only when the window's focus changes with it.
+
 ## view_focus.rs → native view focus
 
 - Change: a window's focus change reaches the framework with no traversal direction.

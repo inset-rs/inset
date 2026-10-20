@@ -184,6 +184,15 @@ impl EmbedderClient for Shell {
         });
     }
 
+    fn window_changed(&mut self, view: ViewId) {
+        self.push(|app| {
+            let callback = app.platform_callbacks().on_window_changed.clone();
+            if let Some(callback) = callback {
+                callback(app, view);
+            }
+        });
+    }
+
     fn view_request_failed(&mut self, request: RequestId, error: ViewError) {
         self.push(|app| {
             let callback = app.platform_callbacks().on_view_request_failed.clone();
@@ -355,6 +364,18 @@ mod tests {
         });
         shell.view_close_requested(ViewId(3));
         assert_eq!(heard.get(), Some(ViewId(3)));
+    }
+
+    #[test]
+    fn a_window_change_reaches_the_framework() {
+        let heard = Rc::new(Cell::new(None));
+        let heard_slot = Rc::clone(&heard);
+        let mut shell = Shell::new(Rc::new(TestPlatform::new()), move |app: &mut App| {
+            app.platform_callbacks_mut().on_window_changed =
+                Some(Rc::new(move |_app, view| heard_slot.set(Some(view))));
+        });
+        shell.window_changed(ViewId(5));
+        assert_eq!(heard.get(), Some(ViewId(5)));
     }
 
     #[test]

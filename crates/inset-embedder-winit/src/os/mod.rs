@@ -6,8 +6,9 @@
 //! window's native surfaces, which `absent` answers for a system that has neither. What a system
 //! lets the app do is answered in one place, on [`OperatingSystem`].
 //! Three systems: macOS adds a window frame that animates, the popup menu, a display link,
-//! native surfaces, its own answers about its screens, and the requests it makes of the
-//! application and what it says changed, among others (`macos`); iOS reports its window's size
+//! native surfaces, its own answers about its screens, whether a window is occluded and its
+//! notices that a window was minimized, and the requests it makes of the application and what
+//! it says changed, among others (`macos`); iOS reports its window's size
 //! and safe area differently (`ios`); every other system winit covers by itself (`winit_only`).
 //! What macOS and iOS share is in `apple`.
 //!
@@ -57,12 +58,16 @@ pub(crate) type ThisOsDisplayLink = <ThisOs as FramePresentation>::DisplayLink;
 /// This system's share of its compositor for one window.
 pub(crate) type ThisOsWindowSurfaces = <ThisOs as NativeComposition>::WindowSurfaces;
 
+/// This system's notices that a window may have been minimized or occluded, for one window.
+pub(crate) type ThisOsVisibilityNotices = <ThisOs as WindowVisibility>::Notices;
+
 /// Everything the embedder asks of a system, as one bound: which system it is, what it lets the
 /// app do, and the concerns it answers.
 pub(crate) trait OperatingSystem:
     WindowGeometry
     + WindowMotion
     + WindowChrome
+    + WindowVisibility
     + Screens
     + PointerQueries
     + FramePresentation
@@ -144,6 +149,27 @@ pub(crate) trait WindowChrome {
 
     /// Applies, once the window exists, what `config` asks for and no attribute carries.
     fn configure(_window: &Window, _config: &WindowConfig) {}
+}
+
+/// Whether a window is occluded, and the system's notices that a window may have been minimized
+/// or restored, occluded or shown: what winit neither answers nor reports. Whether a window is
+/// minimized winit answers itself.
+pub(crate) trait WindowVisibility {
+    /// The notices for one window; they end when this is dropped.
+    type Notices;
+
+    /// Whether `window` is occluded now: covered all over, or otherwise not shown. `None` where the
+    /// system cannot be asked, and the embedder answers with winit's last `Occluded` event instead.
+    fn is_occluded(_window: &Window) -> Option<bool> {
+        None
+    }
+
+    /// Calls `on_notice`, on the main thread and from wherever the system posts, so it must only
+    /// queue, whenever the system says `window` may have been minimized or restored, occluded or
+    /// shown, until the answer is dropped. `None` where winit's events are all the system says.
+    fn observe_visibility(_window: &Window, _on_notice: Box<dyn Fn()>) -> Option<Self::Notices> {
+        None
+    }
 }
 
 /// The screens the views are on, and where the pointer is on them (`screens.rs`).

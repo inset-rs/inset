@@ -36,3 +36,4 @@ Host implementation. Flutter analogue: the engine's Android embedder under
 - The keyboard, the clipboard, haptics, and the bars and keyboard as the system reports them. Trigger: any of them, which is a Java activity of the app's own, as Flutter's is.
 - The predictive back gesture, with its peek animation. Trigger: a Java activity that registers with the system's back callback; the plain back button already pops.
 - Deep links, which Flutter carries beside the back button. Trigger: an app that opens on a route the system names.
+- A window the app manages around the activity's view, with whether it is minimized and whether it is occluded, which the activity's stop and start would tell. Trigger: an app that manages its window on Android, as in desktop windowing.

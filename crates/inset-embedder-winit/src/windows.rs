@@ -23,7 +23,7 @@ use winit::window::{Window, WindowAttributes, WindowId};
 use crate::app_requests::AppRequests;
 use crate::gpu::Gpu;
 use crate::host_window::WinitWindow;
-use crate::os::{OperatingSystem, ThisOs, WindowChrome};
+use crate::os::{OperatingSystem, ThisOs, ThisOsVisibilityNotices, WindowChrome};
 use crate::view::WinitView;
 
 /// The screen view's id, as in Flutter: the views the app asks for are numbered after it.
@@ -70,6 +70,9 @@ struct ViewEntry {
 struct ViewWindow {
     window: Arc<Window>,
     handle: Option<Rc<WinitWindow>>,
+    /// The system's notices that the window may have been minimized or occluded, for the app;
+    /// `None` where winit's events are all the system says, and for the screen view's window.
+    _visibility_notices: Option<ThisOsVisibilityNotices>,
 }
 
 impl Views {
@@ -82,8 +85,13 @@ impl Views {
         });
     }
 
-    /// A view the app asked for, with its window.
-    pub(crate) fn add_with_window(&self, open: OpenWindow) {
+    /// A view the app asked for, with its window and the system's notices about the window,
+    /// which end as the window closes.
+    pub(crate) fn add_with_window(
+        &self,
+        open: OpenWindow,
+        visibility_notices: Option<ThisOsVisibilityNotices>,
+    ) {
         let window = open.window.id();
         let view = open.view.id();
         self.insert(ViewEntry {
@@ -91,6 +99,7 @@ impl Views {
             window: Some(ViewWindow {
                 window: open.window,
                 handle: open.handle,
+                _visibility_notices: visibility_notices,
             }),
             screen: false,
         });
@@ -108,6 +117,7 @@ impl Views {
         entry.window = Some(ViewWindow {
             window,
             handle: None,
+            _visibility_notices: None,
         });
         self.view_of_window.borrow_mut().insert(id, entry.view.id());
     }

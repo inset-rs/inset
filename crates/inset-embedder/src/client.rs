@@ -79,6 +79,14 @@ pub trait EmbedderClient {
         let _ = view;
     }
 
+    /// The window of `view` was minimized or restored, became occluded or shown, or moved, and
+    /// its [`HostWindow`](crate::HostWindow) already answers how it is now: as Flutter's window
+    /// controllers notify their listeners at the platform's word. A resize is reported as a
+    /// metrics change alone (`view_metrics_changed`). The default drops it.
+    fn window_changed(&mut self, view: ViewId) {
+        let _ = view;
+    }
+
     /// A request for a view ([`crate::Platform::request_view`]) got no view: the host could not
     /// make its window. The default drops it.
     fn view_request_failed(&mut self, request: crate::RequestId, error: crate::ViewError) {

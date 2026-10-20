@@ -52,6 +52,10 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - `Platform::request_view`, `View::request_id`, `View::window`, `HostWindow`, `EmbedderClient::view_close_requested`, `view_request_failed`
 - Make a window for each request on a turn of the loop, add its view carrying the request's id and initial data, or report the failure, and give each `WindowConfig` option the system's nearest equivalent. Refuse requests where the platform gives the app its views. Report the user's request to close a view and close nothing until the app does.
 
+**Minimized, occluded and moved**
+- `HostWindow::is_minimized`, `is_occluded`, `frame`, `EmbedderClient::window_changed`
+- Answer whether each window is minimized and whether it is occluded as the system says, `false` where it does not say, and call `window_changed` once the window answers the new state, each time either changes or the window moves. A resize is reported as a metrics change alone.
+
 **Size and scale**
 - `ViewMetrics::physical_size`, `device_pixel_ratio`, `EmbedderClient::view_metrics_changed`
 - Give every size and position in physical pixels from the view's top-left corner, and update `View::metrics` before calling `view_metrics_changed`.

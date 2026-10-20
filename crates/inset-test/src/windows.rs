@@ -69,11 +69,15 @@ impl Default for TestWindows {
 
 /// A window that shows nothing, and counts how often it was closed: one of [`TestWindows`], or
 /// one a test gives the app a view in. A closed window's view is in no window any more, and is no
-/// longer among the views of [`TestWindows`].
+/// longer among the views of [`TestWindows`]. It is neither minimized nor occluded until a test
+/// says so, and the test then reports the change itself, as a host would through
+/// `EmbedderClient::window_changed`.
 pub struct TestWindow {
     view: Rc<TestView>,
     config: WindowConfig,
     closes: Cell<u32>,
+    minimized: Cell<bool>,
+    occluded: Cell<bool>,
 }
 
 impl TestWindow {
@@ -87,6 +91,8 @@ impl TestWindow {
                 view: Rc::new(view),
                 config,
                 closes: Cell::new(0),
+                minimized: Cell::new(false),
+                occluded: Cell::new(false),
             }
         })
     }
@@ -104,6 +110,16 @@ impl TestWindow {
     /// How many times the window was closed.
     pub fn closes(&self) -> u32 {
         self.closes.get()
+    }
+
+    /// The window is minimized, or restored, from now on.
+    pub fn set_minimized(&self, minimized: bool) {
+        self.minimized.set(minimized);
+    }
+
+    /// The window is occluded, or shown, from now on.
+    pub fn set_occluded(&self, occluded: bool) {
+        self.occluded.set(occluded);
     }
 }
 
@@ -124,6 +140,14 @@ impl HostWindow for TestWindow {
     fn show(&self) {}
 
     fn hide(&self) {}
+
+    fn is_minimized(&self) -> bool {
+        self.minimized.get()
+    }
+
+    fn is_occluded(&self) -> bool {
+        self.occluded.get()
+    }
 
     fn close(&self) {
         self.closes.set(self.closes.get() + 1);

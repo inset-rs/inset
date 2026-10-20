@@ -1,5 +1,8 @@
-//! A window the app created, as it holds it (`HostWindow`).
+//! A window the app created, as it holds it (`HostWindow`), and how it was when the app last heard
+//! of it: whether it was minimized and whether it was occluded, so that the embedder reports a
+//! change once, whichever of the system's events it comes with.
 
+use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Weak;
 use std::time::Duration;
@@ -10,7 +13,7 @@ use winit::raw_window_handle::HasWindowHandle;
 use winit::window::{Window, WindowId};
 
 use crate::app_requests::{AppRequest, AppRequests};
-use crate::os::{ThisOs, WindowMotion};
+use crate::os::{ThisOs, WindowMotion, WindowVisibility};
 use crate::view::WinitView;
 
 /// A created window as the app holds it. Holds the window weakly: the embedder's registry owns it,
@@ -20,6 +23,18 @@ pub(crate) struct WinitWindow {
     window: Weak<Window>,
     view: Rc<WinitView>,
     requests: Rc<AppRequests>,
+    /// winit's last `Occluded` event: whether the window is occluded where the system cannot be
+    /// asked.
+    occluded: Cell<bool>,
+    /// How the window was when the app last heard of it.
+    reported: Cell<WindowState>,
+}
+
+/// Whether a window is minimized and whether it is occluded.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct WindowState {
+    minimized: bool,
+    occluded: bool,
 }
 
 impl WinitWindow {
@@ -29,11 +44,35 @@ impl WinitWindow {
         view: Rc<WinitView>,
         requests: Rc<AppRequests>,
     ) -> WinitWindow {
-        WinitWindow {
+        let window = WinitWindow {
             id,
             window,
             view,
             requests,
+            occluded: Cell::new(false),
+            reported: Cell::default(),
+        };
+        window.reported.set(window.state());
+        window
+    }
+
+    /// winit says the window is occluded, or shown: what it answers where the system cannot be
+    /// asked.
+    pub(crate) fn set_occluded(&self, occluded: bool) {
+        self.occluded.set(occluded);
+    }
+
+    /// Reads again whether the window is minimized and whether it is occluded, and answers whether
+    /// either changed since the app last heard of the window, which it is to hear of now.
+    pub(crate) fn refresh_state(&self) -> bool {
+        let state = self.state();
+        self.reported.replace(state) != state
+    }
+
+    fn state(&self) -> WindowState {
+        WindowState {
+            minimized: self.is_minimized(),
+            occluded: self.is_occluded(),
         }
     }
 }
@@ -93,6 +132,23 @@ impl HostWindow for WinitWindow {
             window.set_visible(false);
             self.view.follow_window();
         }
+    }
+
+    /// winit's answer, the system's: never on Wayland, which does not tell a client.
+    fn is_minimized(&self) -> bool {
+        self.window
+            .upgrade()
+            .and_then(|window| window.is_minimized())
+            .unwrap_or(false)
+    }
+
+    /// The system's answer where it can be asked, as AppKit can; winit's last word otherwise,
+    /// which Windows and Wayland never give.
+    fn is_occluded(&self) -> bool {
+        let Some(window) = self.window.upgrade() else {
+            return false;
+        };
+        ThisOs::is_occluded(&window).unwrap_or(self.occluded.get())
     }
 
     fn close(&self) {

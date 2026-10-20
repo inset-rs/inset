@@ -1,5 +1,6 @@
 //! Whether a window is visible, and AppKit's notices that its visibility may have changed: what
-//! decides whether the producers of the window's native surfaces get vsyncs.
+//! decides whether the producers of the window's native surfaces get vsyncs, and what the app
+//! hears of its window being minimized or restored, occluded or shown (`WindowVisibility`).
 //!
 //! A window is visible while it is ordered in and its occlusion state has the visible bit: not
 //! while it is hidden or minimized, nor while its application is hidden, nor while other
@@ -15,29 +16,48 @@
 //! showing, hiding and ordering front of a window, and its moves, which Chromium hears by
 //! overriding `-orderWindow:relativeTo:`, the embedder reports itself
 //! (`WindowSurfaces::follow_window`).
+//!
+//! A window is occluded while its occlusion state has no visible bit, whatever the reason: covered
+//! all over, hidden, minimized, or in a hidden application. winit reports a change of it as
+//! `Occluded`, but not a window's minimizing, which the app hears through the same notices.
 
 use objc2::rc::Retained;
 use objc2::runtime::NSObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSApplicationDidHideNotification, NSApplicationDidUnhideNotification,
+    NSApplicationDidHideNotification, NSApplicationDidUnhideNotification, NSWindow,
     NSWindowDidChangeOcclusionStateNotification, NSWindowDidDeminiaturizeNotification,
     NSWindowDidMiniaturizeNotification, NSWindowOcclusionState,
 };
 use objc2_foundation::{NSNotification, NSNotificationCenter};
 use winit::window::Window;
 
-use super::{abort_on_panic, ns_window};
+use super::{AppKit, abort_on_panic, ns_window};
+use crate::os::WindowVisibility;
+
+impl WindowVisibility for AppKit {
+    type Notices = VisibilityNotices;
+
+    fn is_occluded(window: &Window) -> Option<bool> {
+        ns_window(window).map(|window| !has_visible_bit(&window))
+    }
+
+    fn observe_visibility(window: &Window, on_notice: Box<dyn Fn()>) -> Option<VisibilityNotices> {
+        VisibilityNotices::observe(window, on_notice)
+    }
+}
 
 /// Whether `window` is visible: ordered in, and not covered all over. Hidden, minimized and in a
 /// hidden application, a window is out of sight.
 pub(crate) fn is_visible(window: &Window) -> bool {
-    ns_window(window).is_some_and(|window| {
-        window.isVisible()
-            && window
-                .occlusionState()
-                .contains(NSWindowOcclusionState::Visible)
-    })
+    ns_window(window).is_some_and(|window| window.isVisible() && has_visible_bit(&window))
+}
+
+/// Whether some of `window` shows, as its occlusion state says.
+fn has_visible_bit(window: &NSWindow) -> bool {
+    window
+        .occlusionState()
+        .contains(NSWindowOcclusionState::Visible)
 }
 
 /// Calls its `on_notice`, on the main thread, whenever AppKit says a window's visibility may

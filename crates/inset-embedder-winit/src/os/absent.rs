@@ -1,5 +1,5 @@
-//! What a system without a display link or a compositor answers: no display link is made, and
-//! no surface is ever placed.
+//! What a system without a display link, a compositor or notices of a window's visibility
+//! answers: no display link is made, no surface is ever placed, and no notice is observed.
 
 use std::sync::Arc;
 
@@ -32,3 +32,6 @@ impl WindowSurfaces for NoWindowSurfaces {
 
     fn place(&self, _placements: &[SurfacePlacement], _view: ViewId) {}
 }
+
+/// No notices of a window's visibility beyond winit's events. Never made.
+pub(crate) enum NoVisibilityNotices {}

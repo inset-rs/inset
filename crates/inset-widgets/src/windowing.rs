@@ -10,7 +10,9 @@
 //!
 //! Flutter's `WindowController` makes its window within its constructor. Here the host makes
 //! it on its own loop, so a controller exists at once and its view arrives a moment later,
-//! which its listeners hear, as they hear the view go (Flutter's `onWindowDestroyed`).
+//! which its listeners hear, as they hear the view go (Flutter's `onWindowDestroyed`). They also
+//! hear the window minimized or restored, occluded or shown, or moved, at the host's word, as
+//! Flutter's controllers notify theirs at the platform's.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -25,7 +27,8 @@ use crate::binding::WidgetsBinding;
 /// `WindowControllerDelegate.onWindowCloseRequested`. It closes the view, or keeps it open.
 pub type ViewCloseHandler = Rc<dyn Fn(&mut App, ViewId)>;
 
-/// A window the app asks for itself. Its listeners hear when its view arrives and when it goes.
+/// A window the app asks for itself. Its listeners hear when its view arrives and when it goes,
+/// and when the window is minimized or restored, becomes occluded or shown, or moves.
 pub struct WindowController {
     change_notifier: ChangeNotifierData,
     /// The request the window was asked for with; `None` when the platform refused it.
@@ -84,6 +87,19 @@ impl WindowController {
         self.view(app)?.window()
     }
 
+    /// Whether the window is minimized, as its host says: Flutter's `isMinimized`. `false` while
+    /// there is no window, before its view arrives and after it goes.
+    pub fn is_minimized(self: Handle<Self>, app: &App) -> bool {
+        self.window(app).is_some_and(|window| window.is_minimized())
+    }
+
+    /// Whether the window is occluded, covered all over or otherwise not shown, as its host says;
+    /// `false` while there is no window, before its view arrives and after it goes. Not in
+    /// Flutter's controller.
+    pub fn is_occluded(self: Handle<Self>, app: &App) -> bool {
+        self.window(app).is_some_and(|window| window.is_occluded())
+    }
+
     /// Closes the window; its view goes with it. A window whose view has not arrived yet closes
     /// as it arrives, unseen.
     pub fn close(self: Handle<Self>, app: &mut App) {
@@ -109,6 +125,11 @@ impl WindowController {
 
     pub(crate) fn request_failed(self: Handle<Self>, app: &mut App, error: ViewError) {
         app.get_mut(self).error = Some(error);
+        self.notify_listeners(app);
+    }
+
+    /// The window was minimized or restored, became occluded or shown, or moved.
+    pub(crate) fn window_changed(self: Handle<Self>, app: &mut App) {
         self.notify_listeners(app);
     }
 
@@ -197,6 +218,14 @@ impl WindowingOwner {
         true
     }
 
+    /// Tells the controller whose window shows `view` that the window was minimized or restored,
+    /// became occluded or shown, or moved. A view no controller asked for has nobody to tell.
+    pub(crate) fn window_changed(self: Handle<Self>, app: &mut App, view: ViewId) {
+        if let Some((_, controller)) = self.controller_of_view(app, view) {
+            controller.window_changed(app);
+        }
+    }
+
     /// Tells the controller that asked with `request_id` why it gets no window.
     pub(crate) fn view_request_failed(
         self: Handle<Self>,
@@ -242,7 +271,8 @@ mod tests {
 
     use super::*;
     use crate::test_harness::{
-        Quits, report_view_removed, report_windows_made, request_view_close, views_cell,
+        Quits, report_view_removed, report_window_changed, report_windows_made, request_view_close,
+        views_cell,
     };
     use crate::{IntoWidget, SizedBox, ViewCollection, Window};
 
@@ -269,17 +299,23 @@ mod tests {
         WindowController::new(&mut cell.borrow_mut(), titled(title))
     }
 
-    #[test]
-    fn a_controller_gets_its_view_when_it_arrives() {
-        let desktop = desktop();
-        let controller = new_controller(&desktop.cell, "Inspector");
+    /// How many times `controller`'s listeners are told something, from now on.
+    fn notifications_of(cell: &AppCell, controller: Handle<WindowController>) -> Rc<Cell<u32>> {
         let heard = Rc::new(Cell::new(0));
         let counted = Rc::clone(&heard);
         let listenable: Rc<dyn Listenable> = Rc::new(controller);
         listenable.add_listener(
-            &mut desktop.cell.borrow_mut(),
+            &mut cell.borrow_mut(),
             Listener::new(move |_app| counted.set(counted.get() + 1)),
         );
+        heard
+    }
+
+    #[test]
+    fn a_controller_gets_its_view_when_it_arrives() {
+        let desktop = desktop();
+        let controller = new_controller(&desktop.cell, "Inspector");
+        let heard = notifications_of(&desktop.cell, controller);
         assert!(
             controller.view(&desktop.cell.borrow()).is_none(),
             "not yet arrived"
@@ -310,18 +346,53 @@ mod tests {
     fn a_window_closed_before_its_view_arrives_closes_unseen_as_it_arrives() {
         let desktop = desktop();
         let controller = new_controller(&desktop.cell, "Inspector");
-        let heard = Rc::new(Cell::new(0));
-        let counted = Rc::clone(&heard);
-        let listenable: Rc<dyn Listenable> = Rc::new(controller);
-        listenable.add_listener(
-            &mut desktop.cell.borrow_mut(),
-            Listener::new(move |_app| counted.set(counted.get() + 1)),
-        );
+        let heard = notifications_of(&desktop.cell, controller);
         controller.close(&mut desktop.cell.borrow_mut());
 
         report_windows_made(&desktop.cell, &desktop.windows, Duration::ZERO);
         assert_eq!(desktop.windows.made()[0].closes(), 1);
         assert_eq!(heard.get(), 0, "its listeners never hear it arrive");
+    }
+
+    #[test]
+    fn a_controllers_listeners_hear_its_window_change_and_it_answers_how_the_window_is() {
+        let desktop = desktop();
+        let controller = new_controller(&desktop.cell, "Inspector");
+        let not_minimized_nor_occluded = |cell: &AppCell| {
+            !controller.is_minimized(&cell.borrow()) && !controller.is_occluded(&cell.borrow())
+        };
+        assert!(not_minimized_nor_occluded(&desktop.cell), "no window yet");
+        report_windows_made(&desktop.cell, &desktop.windows, Duration::ZERO);
+        let heard = notifications_of(&desktop.cell, controller);
+        let window = Rc::clone(&desktop.windows.made()[0]);
+        let view = window.test_view().id();
+        assert!(not_minimized_nor_occluded(&desktop.cell));
+
+        window.set_minimized(true);
+        report_window_changed(&desktop.cell, view);
+        assert_eq!(heard.get(), 1);
+        assert!(controller.is_minimized(&desktop.cell.borrow()));
+
+        window.set_minimized(false);
+        window.set_occluded(true);
+        report_window_changed(&desktop.cell, view);
+        assert_eq!(heard.get(), 2);
+        assert!(!controller.is_minimized(&desktop.cell.borrow()));
+        assert!(controller.is_occluded(&desktop.cell.borrow()));
+
+        report_window_changed(&desktop.cell, view);
+        assert_eq!(heard.get(), 3, "a move is heard as a change too");
+    }
+
+    #[test]
+    fn a_window_change_of_a_view_no_controller_asked_for_reaches_no_controller() {
+        let desktop = desktop();
+        let controller = new_controller(&desktop.cell, "Inspector");
+        report_windows_made(&desktop.cell, &desktop.windows, Duration::ZERO);
+        let heard = notifications_of(&desktop.cell, controller);
+
+        report_window_changed(&desktop.cell, ViewId(7));
+        assert_eq!(heard.get(), 0);
     }
 
     #[test]

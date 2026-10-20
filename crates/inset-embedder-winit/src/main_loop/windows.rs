@@ -1,5 +1,6 @@
 //! The main loop's windows and views: opening one the app asks for and the screen view's,
-//! closing, focus, resizing, moving, and the surfaces the system gives and takes.
+//! closing, focus, resizing, moving, being minimized or occluded, and the surfaces the system
+//! gives and takes.
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -8,12 +9,12 @@ use inset_embedder::{EmbedderClient, View, ViewError, ViewFocusEvent, ViewId};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
-use crate::os::{FramePresentation, ThisOs};
+use crate::os::{FramePresentation, ThisOs, WindowVisibility};
 use crate::view::WinitView;
 use crate::view_focus;
 use crate::windows::{OpenWindow, ViewAfterClose, WindowRequest, open_screen_window};
 
-use super::MainLoop;
+use super::{MainLoop, MainLoopEvent};
 
 impl<C: EmbedderClient> MainLoop<C> {
     /// Opens a window for the view the app asked for. The app hears of the view through
@@ -44,14 +45,25 @@ impl<C: EmbedderClient> MainLoop<C> {
         Ok(())
     }
 
-    /// A view the app asked for, with its window: it joins the platform's views, and then the
-    /// app hears of it.
+    /// A view the app asked for, with its window: it joins the platform's views, with the system's
+    /// notices that its window may have been minimized or occluded, and then the app hears of it.
     pub(super) fn add_view(&mut self, open: OpenWindow) {
         let view_id = open.view.id();
         let window = Arc::clone(&open.window);
-        self.state.add_view_with_window(open);
+        let visibility_notices =
+            ThisOs::observe_visibility(&window, self.send_visibility_notice(window.id()));
+        self.state.add_view_with_window(open, visibility_notices);
         self.client.view_added(view_id);
         self.read_theme_of(&window);
+    }
+
+    /// What a notice that the window `id` may have been minimized or occluded does: it queues for
+    /// the loop, which reads the window's state again on a turn of its own.
+    fn send_visibility_notice(&self, id: WindowId) -> Box<dyn Fn()> {
+        let proxy = self.proxy.clone();
+        Box::new(move || {
+            let _ = proxy.send_event(MainLoopEvent::WindowVisibility(id));
+        })
     }
 
     /// Opens the screen view's window, at winit's first call: the first moment winit lets a
@@ -92,11 +104,13 @@ impl<C: EmbedderClient> MainLoop<C> {
         }
     }
 
+    /// A window gained or lost the focus, which may come with its being minimized or restored.
     pub(super) fn on_focused(&mut self, id: WindowId, focused: bool) {
         if let Some(view) = self.view_id_of(id) {
             self.client
                 .view_focus_changed(view_focus::focus_changed(view, focused));
         }
+        self.sync_window_state(id);
     }
 
     /// Honours the framework's request to focus a view, or to give up its focus.
@@ -106,7 +120,17 @@ impl<C: EmbedderClient> MainLoop<C> {
         }
     }
 
+    /// A window was resized, which may come with its being minimized or restored: its view takes
+    /// the new size.
     pub(super) fn on_resized(&mut self, id: WindowId) {
+        self.resize_view(id);
+        self.sync_window_state(id);
+    }
+
+    /// The view of window `id` takes the window's new size: the app hears of its new metrics, and
+    /// of the system's theme, which some systems report as a resize, and where the system needs
+    /// it the resized layout is drawn at once.
+    fn resize_view(&mut self, id: WindowId) {
         let Some(open) = self.views().by_window(id) else {
             return;
         };
@@ -187,18 +211,55 @@ impl<C: EmbedderClient> MainLoop<C> {
 
     /// A window moved, and may be on another screen now: the app hears of its view's new
     /// screen, as Flutter's macOS embedder sends a window's metrics again when its screen changes,
-    /// its native surfaces follow it, and so do the framework's vsyncs if it is the first window.
-    /// AppKit moves the windows off a screen that goes away, so this is also how their vsyncs
-    /// leave it.
+    /// and of the move, its native surfaces follow it, and so do the framework's vsyncs if it is
+    /// the first window. AppKit moves the windows off a screen that goes away, so this is also how
+    /// their vsyncs leave it.
     pub(super) fn on_moved(&mut self, id: WindowId) {
         if let Some(open) = self.views().by_window(id) {
             if open.view.refresh_screen(&open.window) {
                 self.client.view_metrics_changed(open.view.id());
             }
+            self.report_window_changed(&open);
             open.view.follow_window();
         }
         if let Some(display) = self.first_window_display() {
             self.frame_scheduler.follow_display(&display);
+        }
+    }
+
+    /// winit says a window is occluded, or shown: the app hears of it once the window answers so,
+    /// and a window seen again is when a picture its surface refused while occluded is presented
+    /// (wgpu issue 8309, `view.rs`).
+    pub(super) fn on_occluded(&mut self, id: WindowId, occluded: bool) {
+        if let Some(handle) = self.views().by_window(id).and_then(|open| open.handle) {
+            handle.set_occluded(occluded);
+        }
+        self.sync_window_state(id);
+        if !occluded {
+            self.on_redraw_requested(id);
+        }
+    }
+
+    /// Reads again whether window `id` is minimized and whether it is occluded, and tells the app
+    /// if either changed since it last heard.
+    pub(super) fn sync_window_state(&mut self, id: WindowId) {
+        let Some(open) = self.views().by_window(id) else {
+            return;
+        };
+        let Some(handle) = &open.handle else {
+            return;
+        };
+        if handle.refresh_state() {
+            self.client.window_changed(open.view.id());
+        }
+    }
+
+    /// Tells the app that the window of `open` changed, once it answers its state as it is now;
+    /// nothing for the screen view's window, which the app may not manage.
+    fn report_window_changed(&mut self, open: &OpenWindow) {
+        if let Some(handle) = &open.handle {
+            handle.refresh_state();
+            self.client.window_changed(open.view.id());
         }
     }
 }
