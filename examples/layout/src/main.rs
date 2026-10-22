@@ -17,7 +17,7 @@ use inset_rendering::{
 fn main() {
     let cell = AppCell::new();
     let mut app = cell.borrow_mut();
-    let owner = PipelineOwner::new(&mut app, None);
+    let owner = PipelineOwner::new(&mut app, None, None);
 
     let child =
         RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(80.0, 40.0)), None);

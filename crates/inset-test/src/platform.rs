@@ -8,26 +8,30 @@ use std::sync::{Arc, Mutex};
 use inset_embedder::{
     AppExit, AppLifecycleState, Brightness, Clipboard, Dispatcher, FontSource, Haptics,
     ImageCodecFuture, ImageDecodeError, Instant, MouseCursor, Platform, PopupMenus, RequestId,
-    Restoration, SystemChrome, SystemContextMenu, TargetPlatform, TextServices, ViewError, ViewId,
-    ViewRef, ViewRequest,
+    Restoration, SystemChrome, SystemContextMenu, TargetPlatform, TextServices, View, ViewError,
+    ViewId, ViewRef, ViewRequest,
 };
 
-use crate::TestWindows;
+use crate::{TestView, TestWindows};
 
 type FontSourceMaker = Rc<dyn Fn() -> Box<dyn FontSource>>;
 type ImageCodecOpener = Rc<dyn Fn(Arc<[u8]>) -> ImageCodecFuture>;
 
 /// A platform a test builds: which host it claims to be, the views it offers, and each
-/// capability as the test's own implementation or absent. It counts the frames the framework
-/// asks for and keeps the deadlines it asks to be woken at, so a test can assert on them; the
-/// test itself pumps the app, since there is no loop to run it.
+/// capability as the test's own implementation or absent. It keeps the frames the framework asks
+/// for and the deadlines it asks to be woken at, so a test can assert on them; the test itself
+/// pumps the app, since there is no loop to run it.
 pub struct TestPlatform {
     target: Cell<TargetPlatform>,
     brightness: Cell<Brightness>,
     default_route: String,
     /// The views the platform gave the app, as a phone gives its screen.
     views: RefCell<Vec<ViewRef>>,
-    frames_requested: Cell<u32>,
+    /// The [`TestView`]s among them that [`with_views`](Self::with_views) made, which
+    /// [`test_view`](Self::test_view) answers.
+    test_views: Vec<Rc<TestView>>,
+    /// The view of each frame asked for since the test last took them, in the order asked.
+    frame_requests: RefCell<Vec<ViewId>>,
     dispatcher: Arc<TestDispatcher>,
     font_source: Option<FontSourceMaker>,
     image_codec: Option<ImageCodecOpener>,
@@ -53,7 +57,8 @@ impl TestPlatform {
             brightness: Cell::new(Brightness::Light),
             default_route: "/".into(),
             views: RefCell::default(),
-            frames_requested: Cell::new(0),
+            test_views: Vec::new(),
+            frame_requests: RefCell::default(),
             dispatcher: Arc::new(TestDispatcher::default()),
             font_source: None,
             image_codec: None,
@@ -81,6 +86,28 @@ impl TestPlatform {
     pub fn with_view(self, view: ViewRef) -> TestPlatform {
         self.views.borrow_mut().push(view);
         self
+    }
+
+    /// The same platform giving the app an 800 x 600 [`TestView`] numbered by each of `ids`, in
+    /// that order, as a desktop gives one window to each.
+    pub fn with_views(mut self, ids: &[ViewId]) -> TestPlatform {
+        for &id in ids {
+            let view = Rc::new(TestView::new(800.0, 600.0).with_id(id));
+            self.views.borrow_mut().push(Rc::clone(&view) as ViewRef);
+            self.test_views.push(view);
+        }
+        self
+    }
+
+    /// The view numbered `id` that [`with_views`](Self::with_views) gave, to read what was
+    /// presented to it.
+    ///
+    /// # Panics
+    ///
+    /// If `with_views` gave none numbered `id`.
+    pub fn test_view(&self, id: ViewId) -> Rc<TestView> {
+        let view = self.test_views.iter().find(|view| view.id() == id);
+        Rc::clone(view.expect("a view with_views gave"))
     }
 
     /// Gives the app `view` while it runs, as an embedder adds one; the test tells the
@@ -191,9 +218,36 @@ impl TestPlatform {
         self.brightness.set(brightness);
     }
 
-    /// How many frames the framework has asked for.
-    pub fn frames_requested(&self) -> u32 {
-        self.frames_requested.get()
+    /// The view of each frame the framework asked for since the test last took them, in the
+    /// order asked, a view asked again included.
+    pub fn frame_requests(&self) -> Vec<ViewId> {
+        self.frame_requests.borrow().clone()
+    }
+
+    /// Whether `view` asked for a frame since the test last took the requests.
+    pub fn has_frame_request(&self, view: ViewId) -> bool {
+        self.frame_requests.borrow().contains(&view)
+    }
+
+    /// Takes the request `view` made for a frame, for the test to give it its frame; answers
+    /// whether it had made one since the last take.
+    pub fn take_frame_request(&self, view: ViewId) -> bool {
+        let mut requests = self.frame_requests.borrow_mut();
+        let asked = requests.contains(&view);
+        requests.retain(|&asking| asking != view);
+        asked
+    }
+
+    /// The views that asked for a frame since the last take, each once, in the order the platform
+    /// gained them, for the test to give them a refresh, as a host does. A request of a view the
+    /// platform does not have is dropped, as a host drops it.
+    pub fn take_frame_requests(&self) -> Vec<ViewId> {
+        let requests = std::mem::take(&mut *self.frame_requests.borrow_mut());
+        self.views()
+            .iter()
+            .map(|view| view.id())
+            .filter(|id| requests.contains(id))
+            .collect()
     }
 
     /// The timer wakeups the framework has set, in order. A `None` is the framework
@@ -219,8 +273,8 @@ impl Platform for TestPlatform {
         self.target.get()
     }
 
-    fn request_frame(&self) {
-        self.frames_requested.set(self.frames_requested.get() + 1);
+    fn request_frame(&self, view: ViewId) {
+        self.frame_requests.borrow_mut().push(view);
     }
 
     fn now(&self) -> Instant {

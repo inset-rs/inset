@@ -1565,6 +1565,8 @@ impl ShortcutRegistry {
                         self.notify_listeners(app);
                     }
                 }),
+                // The registry knows no element, so no view.
+                None,
             );
             app.get_mut(self).notification_scheduled = true;
         }
@@ -2043,7 +2045,7 @@ mod tests {
             )],
         );
         // The registry notifies its listeners after the frame the entry was added in.
-        crate::widgets::focus_manager::tests::pump_frame(&mut app);
+        crate::test_harness::pump_every_view(&mut app, std::time::Duration::ZERO);
 
         let keyboard = HardwareKeyboard::instance(&mut app);
         assert!(keyboard.handle_key_event(
@@ -2053,7 +2055,7 @@ mod tests {
         assert_eq!(*log.borrow(), ["saved"]);
 
         entry.dispose(&mut app);
-        crate::widgets::focus_manager::tests::pump_frame(&mut app);
+        crate::test_harness::pump_every_view(&mut app, std::time::Duration::ZERO);
         log.borrow_mut().clear();
         keyboard.handle_key_event(
             &mut app,

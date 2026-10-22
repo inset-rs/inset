@@ -718,7 +718,7 @@ mod tests {
     }
 
     fn tree(app: &mut App, leaf_is_boundary: bool) -> Tree {
-        let owner = PipelineOwner::new(app, None);
+        let owner = PipelineOwner::new(app, None, None);
         let leaf_paints = Rc::new(Cell::new(0));
         let parent_paints = Rc::new(Cell::new(0));
         let leaf = RenderHandle::new_box(
@@ -784,7 +784,7 @@ mod tests {
     fn nodes_needing_paint_updated_with_paint_changes() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         let node = RenderHandle::new_box(
             &mut app,
             Leaf {

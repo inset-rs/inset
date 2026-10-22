@@ -535,8 +535,12 @@ pub trait Platform: Any {
     /// default would let one silently claim the wrong conventions.
     fn target_platform(&self) -> TargetPlatform;
 
-    /// Requests one isolate frame at the host's next appropriate opportunity.
-    fn request_frame(&self);
+    /// Asks for a frame of `view`: Flutter's `PlatformDispatcher.scheduleFrame`, for one view.
+    ///
+    /// `view` is in the next [`EmbedderClient::frame`](crate::EmbedderClient::frame) of the
+    /// screen it is on once its window is in sight; the host holds the request while the window
+    /// is minimized or occluded. Asked again before then, it is in that refresh once.
+    fn request_frame(&self, view: ViewId);
 
     /// The host clock used for frame and timer timestamps.
     fn now(&self) -> Instant;
@@ -902,7 +906,7 @@ impl Platform for InertPlatform {
         TargetPlatform::Android
     }
 
-    fn request_frame(&self) {}
+    fn request_frame(&self, _view: ViewId) {}
 
     fn now(&self) -> Instant {
         Instant::now()
@@ -921,7 +925,7 @@ impl Platform for InertPlatform {
     }
 }
 
-/// One complete engine frame delivered to the client.
+/// A refresh of a screen, as the host delivers it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Frame {
     pub elapsed: Duration,
@@ -948,7 +952,7 @@ mod tests {
             fn target_platform(&self) -> TargetPlatform {
                 TargetPlatform::Linux
             }
-            fn request_frame(&self) {}
+            fn request_frame(&self, _view: super::ViewId) {}
             fn now(&self) -> super::Instant {
                 super::Instant::now()
             }

@@ -18,7 +18,7 @@ use inset_embedder::{
 };
 use inset_foundation::{App, Handle, Listenable, Listener, Task, Timer};
 use inset_rendering::{RendererBinding, RendererBindingOverridesObject};
-use inset_scheduler::{SchedulerBinding, SchedulerBindingOverridesObject};
+use inset_scheduler::{FrameTarget, SchedulerBinding, SchedulerBindingOverridesObject};
 use inset_services::{ServicesBinding, ServicesBindingOverridesObject};
 
 use crate::framework::{
@@ -26,7 +26,7 @@ use crate::framework::{
     WidgetKind, WidgetRef, downcast_widget,
 };
 use crate::multi_view_app::MultiViewApp;
-use crate::view::ViewCollection;
+use crate::view::{View, ViewCollection};
 use crate::window::Window;
 use crate::windowing::{WindowController, WindowingOwner};
 
@@ -324,8 +324,8 @@ impl WidgetsBinding {
         self.override_the_bindings_below(app);
         let build_owner = BuildOwner::new(
             app,
-            Some(Listener::new(|app| {
-                WidgetsBinding::instance(app).handle_build_scheduled(app)
+            Some(Rc::new(|app: &mut App, element: AnyElement| {
+                WidgetsBinding::instance(app).handle_build_scheduled(app, element)
             })),
         );
         app.get_mut(self).build_owner = Some(build_owner);
@@ -396,10 +396,16 @@ impl WidgetsBinding {
             .expect("WidgetsBinding::instance must run first")
     }
 
-    fn handle_build_scheduled(self: Handle<Self>, app: &mut App) {
+    /// `element` was marked dirty: a frame of its view is asked for, or of every view for an
+    /// element above every view, and the first of them builds it.
+    fn handle_build_scheduled(self: Handle<Self>, app: &mut App, element: AnyElement) {
         // Flutter's debug checks against building during `drawFrame`'s locked phases wait
         // with diagnostics.
-        SchedulerBinding::ensure_visual_update(app);
+        let target = match View::maybe_id_of(app, element) {
+            Some(view) => FrameTarget::View(view),
+            None => FrameTarget::EveryView,
+        };
+        SchedulerBinding::ensure_visual_update(app, target);
     }
 
     /// The [`Element`] that is at the root of the element tree hierarchy.
@@ -525,7 +531,7 @@ impl WidgetsBinding {
         let root = widget.attach(app, owner, current);
         app.get_mut(self).root_element = Some(root.as_element());
         if is_bootstrap_frame {
-            SchedulerBinding::ensure_visual_update(app);
+            SchedulerBinding::ensure_visual_update(app, FrameTarget::EveryView);
         }
     }
 
@@ -1048,12 +1054,13 @@ mod tests {
         RendererBinding,
     };
     use inset_scheduler::SchedulerBinding;
-    use inset_test::{TestPlatform, TestView};
+    use inset_test::{IMPLICIT_VIEW_ID, TestPlatform, TestView};
 
     use super::*;
     use crate::framework::{
         BuildContext, LeafRenderObjectWidget, RenderObjectWidget, State, StateData, StatefulWidget,
     };
+    use crate::test_harness::pump_every_view;
 
     /// An [`App`] over one 800x600 view at 2x, with the view and the platform to read back.
     fn app_with_view() -> (Rc<AppCell>, Rc<TestView>, Rc<TestPlatform>) {
@@ -1064,13 +1071,6 @@ mod tests {
                 .with_view(view.clone()),
         );
         (AppCell::with_platform(platform.clone()), view, platform)
-    }
-
-    fn pump_frame(app: &mut App, at: Duration) {
-        SchedulerBinding::handle_begin_frame(app, Some(at));
-        app.drain_microtasks();
-        SchedulerBinding::handle_draw_frame(app);
-        app.drain_microtasks();
     }
 
     #[derive(Debug)]
@@ -1193,14 +1193,14 @@ mod tests {
         cell.elapse(Duration::ZERO);
         let mut app = cell.borrow_mut();
         assert_eq!(view.presented(), 1, "the warm-up frame");
-        let frames_before = platform.frames_requested();
+        platform.take_frame_requests();
 
         size.set(Size::new(50.0, 60.0));
         let state = state.get().expect("the state registered itself");
         state.set_state(&mut app, |_| {});
-        assert_eq!(platform.frames_requested(), frames_before + 1);
+        assert_eq!(platform.frame_requests(), [IMPLICIT_VIEW_ID]);
 
-        pump_frame(&mut app, Duration::from_millis(16));
+        pump_every_view(&mut app, Duration::from_millis(16));
         assert_eq!(view.presented(), 2);
         assert_eq!(root_child_size(&mut app), Size::new(400.0, 300.0));
         let root = WidgetsBinding::instance(&mut app)
@@ -1236,7 +1236,7 @@ mod tests {
         drop(app);
         cell.elapse(Duration::ZERO);
         let mut app = cell.borrow_mut();
-        pump_frame(&mut app, Duration::ZERO);
+        pump_every_view(&mut app, Duration::ZERO);
         let binding = WidgetsBinding::instance(&mut app);
         let first_root = binding.root_element(&app);
 
@@ -1251,7 +1251,7 @@ mod tests {
         cell.elapse(Duration::ZERO);
         let mut app = cell.borrow_mut();
         assert_eq!(binding.root_element(&app), first_root);
-        pump_frame(&mut app, Duration::from_millis(16));
+        pump_every_view(&mut app, Duration::from_millis(16));
         assert_eq!(
             RendererBinding::instance(&mut app).render_views(&app).len(),
             1
@@ -1465,12 +1465,12 @@ mod tests {
         drop(app);
         cell.elapse(Duration::ZERO);
         let mut app = cell.borrow_mut();
-        pump_frame(&mut app, Duration::ZERO);
+        pump_every_view(&mut app, Duration::ZERO);
         assert_eq!(*sizes.borrow(), vec![Size::new(400.0, 300.0)]);
 
         view.resize(1000.0, 400.0);
         RendererBinding::instance(&mut app).handle_metrics_changed(&mut app);
-        pump_frame(&mut app, Duration::from_millis(16));
+        pump_every_view(&mut app, Duration::from_millis(16));
         assert_eq!(
             *sizes.borrow(),
             vec![Size::new(400.0, 300.0), Size::new(500.0, 200.0)]

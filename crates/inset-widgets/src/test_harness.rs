@@ -10,7 +10,7 @@ use inset_foundation::{App, AppCell, Handle};
 use inset_rendering::{
     AnyRenderObject, PipelineOwner, RenderHandle, RenderView, ViewConfiguration,
 };
-use inset_test::TestPlatform;
+use inset_test::{IMPLICIT_VIEW_ID, TestPlatform};
 
 use crate::*;
 
@@ -25,7 +25,7 @@ struct TestView;
 
 impl EmbedderView for TestView {
     fn id(&self) -> ViewId {
-        ViewId(0)
+        IMPLICIT_VIEW_ID
     }
 
     fn metrics(&self) -> ViewMetrics {
@@ -137,7 +137,7 @@ impl Element for TestRootElement {
     ) {
         debug_assert!(parent.is_none());
         RenderObjectElement::mount(self, app, parent, new_slot);
-        let owner = PipelineOwner::new(app, None);
+        let owner = PipelineOwner::new(app, None, None);
         let render_view: RenderHandle<RenderView> = self.typed_render_object(app);
         owner.set_root_node(app, Some(render_view.as_object()));
         render_view.prepare_initial_frame(app);
@@ -331,7 +331,7 @@ impl inset_scheduler::TickerProviderObject for TestScrollContext {
         app: &mut App,
         on_tick: inset_scheduler::TickerCallback,
     ) -> Handle<inset_scheduler::Ticker> {
-        inset_scheduler::Ticker::new(app, on_tick)
+        inset_scheduler::Ticker::new(app, on_tick, None)
     }
 }
 
@@ -464,11 +464,47 @@ pub(crate) fn binding_mount(cell: &AppCell, child: WidgetRef) {
     binding_pump(&mut cell.borrow_mut(), std::time::Duration::ZERO);
 }
 
-/// Runs one frame at `at`, then drains the microtasks it queued.
+/// Flutter's `WidgetTester.pump`, as a host refreshes the screen every view is on: one frame at
+/// `at` of the views that asked for one; none when none asked.
 pub(crate) fn binding_pump(app: &mut App, at: std::time::Duration) {
-    inset_scheduler::SchedulerBinding::handle_begin_frame(app, Some(at));
+    let views = app
+        .platform()
+        .downcast_ref::<TestPlatform>()
+        .expect("an app on a TestPlatform")
+        .take_frame_requests();
+    if !views.is_empty() {
+        pump_frame(app, &views, at);
+    }
+}
+
+/// A frame of `view` alone at `at`, whether or not it asked for one, as a host refreshes a
+/// screen it is alone on.
+pub(crate) fn binding_pump_view(app: &mut App, view: ViewId, at: std::time::Duration) {
+    app.platform()
+        .downcast_ref::<TestPlatform>()
+        .expect("an app on a TestPlatform")
+        .take_frame_request(view);
+    pump_frame(app, &[view], at);
+}
+
+/// A frame at `at` of every view the platform has, asked for or not, as Flutter's tests pump
+/// one; a frame of none on a platform with none.
+pub(crate) fn pump_every_view(app: &mut App, at: std::time::Duration) {
+    let views: Vec<ViewId> = app
+        .platform()
+        .views()
+        .iter()
+        .map(|view| view.id())
+        .collect();
+    pump_frame(app, &views, at);
+}
+
+/// A frame of `views` at `at` as the shell runs one: its begin-frame half, the microtasks it
+/// queued, then its draw-frame half and the microtasks that queued.
+fn pump_frame(app: &mut App, views: &[ViewId], at: std::time::Duration) {
+    inset_scheduler::SchedulerBinding::handle_begin_frame(app, views, Some(at));
     app.drain_microtasks();
-    inset_scheduler::SchedulerBinding::handle_draw_frame(app);
+    inset_scheduler::SchedulerBinding::handle_draw_frame(app, views);
     app.drain_microtasks();
 }
 

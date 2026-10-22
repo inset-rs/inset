@@ -4,7 +4,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use inset_embedder::{TargetPlatform, ViewRef};
+use inset_embedder::{TargetPlatform, ViewId, ViewRef};
 use inset_foundation::{App, AppCell};
 use inset_scheduler::SchedulerBinding;
 use inset_test::{TestPlatform, TestView};
@@ -40,10 +40,16 @@ pub(crate) fn build(cell: &AppCell, child: WidgetRef) {
     pump(&mut cell.borrow_mut(), Duration::ZERO);
 }
 
-/// Runs one frame at `at`.
+/// Runs one frame at `at`, of every view the platform has.
 pub(crate) fn pump(app: &mut App, at: Duration) {
-    SchedulerBinding::handle_begin_frame(app, Some(at));
+    let views: Vec<ViewId> = app
+        .platform()
+        .views()
+        .iter()
+        .map(|view| view.id())
+        .collect();
+    SchedulerBinding::handle_begin_frame(app, &views, Some(at));
     app.drain_microtasks();
-    SchedulerBinding::handle_draw_frame(app);
+    SchedulerBinding::handle_draw_frame(app, &views);
     app.drain_microtasks();
 }

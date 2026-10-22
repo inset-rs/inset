@@ -3,6 +3,8 @@
 
 mod binding;
 mod priority;
+#[cfg(test)]
+mod test_support;
 mod ticker;
 
 pub use binding::*;

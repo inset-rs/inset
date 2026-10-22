@@ -1506,12 +1506,12 @@ mod tests {
     use crate::test_harness::Harness;
     use crate::widgets::basic::{Builder, Directionality, SizedBox, Stack};
 
-    /// flutter_test's `TestVSync`: vends ordinary tickers.
+    /// flutter_test's `TestVSync`: vends ordinary tickers, in no view.
     struct TestVSync;
 
     impl TickerProvider for TestVSync {
         fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
-            Ticker::new(app, on_tick)
+            Ticker::new(app, on_tick, None)
         }
     }
 

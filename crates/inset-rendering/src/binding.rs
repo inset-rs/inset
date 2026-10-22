@@ -7,7 +7,7 @@ use std::rc::Rc;
 use inset_embedder::{Offset, ViewId, ViewRef};
 use inset_foundation::{App, Handle, Listener};
 use inset_gestures::{GestureBinding, GestureBindingOverridesObject, HitTestResult, PointerEvent};
-use inset_scheduler::{FrameCallback, SchedulerBinding};
+use inset_scheduler::{FrameCallback, FrameTarget, PersistentFrameCallback, SchedulerBinding};
 
 use crate::mouse_tracker::MouseTracker;
 use crate::object::RenderHandle;
@@ -63,8 +63,9 @@ impl<T: RendererBindingOverridesObject> RendererBindingOverrides for Handle<T> {
 struct BindingPipelineManifold;
 
 impl PipelineManifold for BindingPipelineManifold {
+    /// A frame of every view, for an owner that renders no view of its own.
     fn request_visual_update(&self, app: &mut App) {
-        SchedulerBinding::ensure_visual_update(app);
+        SchedulerBinding::ensure_visual_update(app, FrameTarget::EveryView);
     }
 }
 
@@ -91,8 +92,8 @@ impl RendererBinding {
             root_pipeline_owner.attach(app, Rc::new(BindingPipelineManifold));
             SchedulerBinding::add_persistent_frame_callback(
                 app,
-                FrameCallback::new(|app, _time_stamp| {
-                    RendererBinding::instance(app).handle_persistent_frame_callback(app)
+                PersistentFrameCallback::new(|app, views, _time_stamp| {
+                    RendererBinding::instance(app).handle_persistent_frame_callback(app, views)
                 }),
             );
             this.init_mouse_tracker(app, None);
@@ -148,11 +149,24 @@ impl RendererBinding {
     }
 
     /// Creates the [`PipelineOwner`] that serves as the root of the pipeline owner tree.
+    ///
+    /// When a test's render view is its root node ([`init_render_view`](Self::init_render_view)),
+    /// that view is marked to be composited after a paint that had work.
     fn create_root_pipeline_owner(self: Handle<Self>, app: &mut App) -> Handle<PipelineOwner> {
         PipelineOwner::new(
             app,
             Some(Listener::new(|app| {
-                SchedulerBinding::ensure_visual_update(app);
+                SchedulerBinding::ensure_visual_update(app, FrameTarget::EveryView);
+            })),
+            Some(Rc::new(move |app: &mut App, is_dirty: bool| {
+                if is_dirty {
+                    let root_node = self.root_pipeline_owner(app).root_node(app);
+                    if let Some(render_view) =
+                        root_node.and_then(|root_node| root_node.downcast::<RenderView>(app))
+                    {
+                        render_view.mark_needs_composite_frame(app);
+                    }
+                }
             })),
         )
     }
@@ -183,6 +197,9 @@ impl RendererBinding {
         app.get_mut(self).render_views.push((view_id, view));
         let configuration = self.create_view_configuration_for(app, view);
         view.set_configuration(app, configuration);
+        // Ensure the view composites at least once in a non-warm-up frame after
+        // being added, so its contents appear even if no descendants are dirty.
+        view.mark_needs_composite_frame(app);
     }
 
     /// Removes a [`RenderView`] previously added with [`add_render_view`](Self::add_render_view).
@@ -207,26 +224,34 @@ impl RendererBinding {
         ViewConfiguration::from_view(&*render_view.flutter_view(app))
     }
 
+    /// Marks all views to require compositing, which will force them to re-render
+    /// on their next frame.
+    pub fn handle_mark_all_views_need_render(self: Handle<Self>, app: &mut App) {
+        for view in self.render_views(app) {
+            view.mark_needs_composite_frame(app);
+        }
+    }
+
     /// Called when the system metrics change.
     ///
     /// See `View::metrics`.
     pub fn handle_metrics_changed(self: Handle<Self>, app: &mut App) {
-        let mut force_frame = false;
         for view in self.render_views(app) {
-            force_frame = force_frame || view.child(app).is_some();
+            let force_frame = view.child(app).is_some();
             let configuration = self.create_view_configuration_for(app, view);
             view.set_configuration(app, configuration);
-        }
-        if force_frame {
-            SchedulerBinding::schedule_forced_frame(app);
+            if force_frame {
+                let view_id = view.flutter_view(app).id();
+                SchedulerBinding::schedule_forced_frame(app, FrameTarget::View(view_id));
+            }
         }
         if let Some(overrides) = app.get(self).overrides.clone() {
             overrides.did_handle_metrics_changed(app);
         }
     }
 
-    fn handle_persistent_frame_callback(self: Handle<Self>, app: &mut App) {
-        self.draw_frame(app);
+    fn handle_persistent_frame_callback(self: Handle<Self>, app: &mut App, views: &[ViewId]) {
+        self.draw_frame(app, views);
         self.schedule_mouse_tracker_update(app);
     }
 
@@ -244,6 +269,7 @@ impl RendererBinding {
                 }
                 self.mouse_tracker(app).update_all_devices(app);
             }),
+            None,
         );
     }
 
@@ -268,7 +294,7 @@ impl RendererBinding {
         debug_assert!(app.get(self).first_frame_deferred_count > 0);
         app.get_mut(self).first_frame_deferred_count -= 1;
         if !app.get(self).first_frame_sent {
-            SchedulerBinding::schedule_forced_frame(app);
+            SchedulerBinding::schedule_forced_frame(app, FrameTarget::EveryView);
         }
     }
 
@@ -277,13 +303,6 @@ impl RendererBinding {
         app.get_mut(self).first_frame_sent = false;
     }
 
-    /// Pump the rendering pipeline to generate a frame.
-    ///
-    /// This method is called by `handle_draw_frame`, which itself is called automatically by
-    /// the host when it is time to lay out and paint a frame.
-    ///
-    /// Each frame consists of the following phases: layout, paint, then compositing (for each
-    /// registered [`RenderView`]).
     /// Registers the binding layered above this one, as Flutter's `WidgetsBinding` does by
     /// overriding `drawFrame`.
     pub fn set_overrides(
@@ -294,7 +313,17 @@ impl RendererBinding {
         app.get_mut(self).overrides = Some(overrides);
     }
 
-    pub fn draw_frame(self: Handle<Self>, app: &mut App) {
+    /// Pump the rendering pipeline to generate a frame of `views`.
+    ///
+    /// This method is called by `handle_draw_frame`, which itself is called automatically by
+    /// the host when it is time to lay out and paint a frame.
+    ///
+    /// Each frame consists of the following phases: layout and compositing bits for every
+    /// render tree, then paint and compositing for the [`RenderView`] of each of `views`. A view
+    /// paints its own render tree alone, not the views anchored in it, which paint at frames of
+    /// their own; it is composited only when it [needs it](RenderView::needs_composite_frame),
+    /// and otherwise keeps showing its last frame.
+    pub fn draw_frame(self: Handle<Self>, app: &mut App, views: &[ViewId]) {
         let overrides = app.get(self).overrides.clone();
         if let Some(overrides) = &overrides {
             overrides.will_draw_frame(app);
@@ -302,16 +331,45 @@ impl RendererBinding {
         let root_pipeline_owner = self.root_pipeline_owner(app);
         root_pipeline_owner.flush_layout(app);
         root_pipeline_owner.flush_compositing_bits(app);
-        root_pipeline_owner.flush_paint(app);
+        let render_views: Vec<RenderHandle<RenderView>> = views
+            .iter()
+            .filter_map(|&view| self.render_view_of(app, view))
+            .collect();
+        for render_view in &render_views {
+            if let Some(owner) = render_view.as_object().owner(app) {
+                owner.flush_paint_without_children(app);
+            }
+        }
         if self.send_frames_to_engine(app) {
-            for render_view in self.render_views(app) {
-                render_view.composite_frame(app); // this sends the bits to the GPU
+            for render_view in render_views {
+                if render_view.needs_composite_frame(app) {
+                    render_view.composite_frame(app); // this sends the bits to the GPU
+                }
+                if SchedulerBinding::is_warm_up_frame(app) {
+                    // Warm-up frame does not guarantee that the content is actually
+                    // painted (see [SchedulerBinding::schedule_warm_up_frame]). This is to
+                    // ensure that on the subsequent real frame the view is recomposited.
+                    render_view.mark_needs_composite_frame(app);
+                }
             }
             app.get_mut(self).first_frame_sent = true;
         }
         if let Some(overrides) = &overrides {
             overrides.did_draw_frame(app);
         }
+    }
+
+    /// The [`RenderView`] of `view`, if this binding has one.
+    fn render_view_of(
+        self: Handle<Self>,
+        app: &App,
+        view: ViewId,
+    ) -> Option<RenderHandle<RenderView>> {
+        app.get(self)
+            .render_views
+            .iter()
+            .find(|(id, _)| *id == view)
+            .map(|(_, render_view)| *render_view)
     }
 
     /// Flutter's `TestRenderingFlutterBinding.initRenderView`: makes a [`RenderView`] for `view`
@@ -348,13 +406,7 @@ impl GestureBindingOverridesObject for RendererBinding {
         position: Offset,
         view_id: ViewId,
     ) {
-        let render_view = app
-            .get(self)
-            .render_views
-            .iter()
-            .find(|(id, _)| *id == view_id)
-            .map(|(_, view)| *view);
-        if let Some(render_view) = render_view {
+        if let Some(render_view) = self.render_view_of(app, view_id) {
             render_view.hit_test(app, result, position);
         }
     }
@@ -379,11 +431,11 @@ impl GestureBindingOverridesObject for RendererBinding {
 
 #[cfg(test)]
 mod tests {
-    use inset_foundation::AppCell;
     use std::time::Duration;
 
     use inset_embedder::{Size, TargetPlatform};
-    use inset_test::{TestPlatform, TestView};
+    use inset_foundation::AppCell;
+    use inset_test::{IMPLICIT_VIEW_ID, TestPlatform, TestView};
 
     use super::*;
     use crate::box_::{BoxConstraints, RenderBox};
@@ -400,6 +452,14 @@ mod tests {
         (AppCell::with_platform(platform.clone()), view, platform)
     }
 
+    /// A frame of `views` at `at`, with the microtasks drained after each half.
+    fn pump(app: &mut App, views: &[ViewId], at: Duration) {
+        SchedulerBinding::handle_begin_frame(app, views, Some(at));
+        app.drain_microtasks();
+        SchedulerBinding::handle_draw_frame(app, views);
+        app.drain_microtasks();
+    }
+
     #[test]
     fn a_frame_lays_out_paints_and_presents_the_view() {
         let (cell, view, _platform) = app_with_view();
@@ -414,8 +474,7 @@ mod tests {
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(10.0, 10.0)), None);
         render_view.set_child(&mut app, Some(child.as_box()));
 
-        SchedulerBinding::handle_begin_frame(&mut app, Some(Duration::ZERO));
-        SchedulerBinding::handle_draw_frame(&mut app);
+        pump(&mut app, &[IMPLICIT_VIEW_ID], Duration::ZERO);
 
         assert_eq!(render_view.size(&app), Size::new(400.0, 300.0));
         assert_eq!(child.size(&app), Size::new(400.0, 300.0));
@@ -433,13 +492,13 @@ mod tests {
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(10.0, 10.0)), None);
         render_view.set_child(&mut app, Some(child.as_box()));
-        SchedulerBinding::handle_begin_frame(&mut app, Some(Duration::ZERO));
-        SchedulerBinding::handle_draw_frame(&mut app);
-        let before = platform.frames_requested();
+        pump(&mut app, &[IMPLICIT_VIEW_ID], Duration::ZERO);
+        platform.take_frame_requests();
 
         child.mark_needs_layout(&mut app);
-        assert!(
-            platform.frames_requested() > before,
+        assert_eq!(
+            platform.take_frame_requests(),
+            [IMPLICIT_VIEW_ID],
             "the root owner's visual update reaches the host"
         );
     }
@@ -464,8 +523,7 @@ mod tests {
             })),
         );
         render_view.set_child(&mut app, Some(listener.as_box()));
-        SchedulerBinding::handle_begin_frame(&mut app, Some(Duration::ZERO));
-        SchedulerBinding::handle_draw_frame(&mut app);
+        pump(&mut app, &[IMPLICIT_VIEW_ID], Duration::ZERO);
 
         GestureBinding::instance(&mut app).handle_pointer_event(
             &mut app,
@@ -519,8 +577,7 @@ mod tests {
             Some(region.as_box()),
         );
         render_view.set_child(&mut app, Some(padding.as_box()));
-        SchedulerBinding::handle_begin_frame(&mut app, Some(Duration::ZERO));
-        SchedulerBinding::handle_draw_frame(&mut app);
+        pump(&mut app, &[IMPLICIT_VIEW_ID], Duration::ZERO);
 
         GestureBinding::instance(&mut app).handle_pointer_event(
             &mut app,
@@ -535,8 +592,7 @@ mod tests {
 
         // The tree moves under the still mouse; the post-frame update sends the exit.
         padding.set_padding(&mut app, EdgeInsetsGeometry::only(300.0, 0.0, 0.0, 0.0));
-        SchedulerBinding::handle_begin_frame(&mut app, Some(Duration::from_millis(16)));
-        SchedulerBinding::handle_draw_frame(&mut app);
+        pump(&mut app, &[IMPLICIT_VIEW_ID], Duration::from_millis(16));
         assert_eq!(
             *log.borrow(),
             ["enter Offset(50.0, 50.0)", "exit Offset(50.0, 50.0)"],
@@ -551,13 +607,148 @@ mod tests {
         let binding = RendererBinding::instance(&mut app);
         binding.init_render_view(&mut app, view.clone());
         binding.defer_first_frame(&mut app);
-        SchedulerBinding::handle_begin_frame(&mut app, Some(Duration::ZERO));
-        SchedulerBinding::handle_draw_frame(&mut app);
+        pump(&mut app, &[IMPLICIT_VIEW_ID], Duration::ZERO);
         assert_eq!(view.presented(), 0);
 
         binding.allow_first_frame(&mut app);
-        SchedulerBinding::handle_begin_frame(&mut app, Some(Duration::ZERO));
-        SchedulerBinding::handle_draw_frame(&mut app);
+        pump(&mut app, &[IMPLICIT_VIEW_ID], Duration::ZERO);
         assert_eq!(view.presented(), 1);
+    }
+
+    const FIRST: ViewId = ViewId(1);
+    const SECOND: ViewId = ViewId(2);
+
+    /// An app whose platform has views [`FIRST`] and [`SECOND`], each with a render view under a
+    /// pipeline owner the root owner adopted, which marks its view to be composited after a
+    /// paint that had work, as `RawView`'s does.
+    fn app_with_render_views() -> (Rc<AppCell>, Rc<TestPlatform>, [RenderHandle<RenderView>; 2]) {
+        let platform = Rc::new(
+            TestPlatform::new()
+                .on(TargetPlatform::MacOS)
+                .with_views(&[FIRST, SECOND]),
+        );
+        let cell = AppCell::with_platform(platform.clone());
+        let render_views = {
+            let mut app = cell.borrow_mut();
+            [FIRST, SECOND].map(|view| add_render_view(&mut app, platform.test_view(view)))
+        };
+        (cell, platform, render_views)
+    }
+
+    /// A render view of `view` under a pipeline owner of its own, registered with the binding.
+    fn add_render_view(app: &mut App, view: Rc<TestView>) -> RenderHandle<RenderView> {
+        let binding = RendererBinding::instance(app);
+        let render_view = RenderView::new(app, None, None, view);
+        let owner = PipelineOwner::new(
+            app,
+            None,
+            Some(Rc::new(move |app: &mut App, is_dirty: bool| {
+                if is_dirty {
+                    render_view.mark_needs_composite_frame(app);
+                }
+            })),
+        );
+        owner.set_root_node(app, Some(render_view.as_object()));
+        binding.root_pipeline_owner(app).adopt_child(app, owner);
+        binding.add_render_view(app, render_view);
+        render_view.prepare_initial_frame(app);
+        render_view
+    }
+
+    /// How many frames each of [`FIRST`] and [`SECOND`] was presented.
+    fn presented(platform: &TestPlatform) -> [u32; 2] {
+        [FIRST, SECOND].map(|view| platform.test_view(view).presented())
+    }
+
+    // multi_view_binding_test.dart 'all registered renderviews are asked to composite frame',
+    // with a frame of each view's own where Flutter's one frame is of every view.
+    #[test]
+    fn every_registered_render_view_is_composited_at_its_frame() {
+        let (cell, platform, [first, second]) = app_with_render_views();
+        let mut app = cell.borrow_mut();
+        let binding = RendererBinding::instance(&mut app);
+        assert_eq!(presented(&platform), [0, 0]);
+
+        pump(&mut app, &[FIRST, SECOND], Duration::ZERO);
+        assert_eq!(presented(&platform), [1, 1]);
+
+        binding.remove_render_view(&mut app, first);
+        second.as_object().mark_needs_paint(&mut app);
+        pump(&mut app, &[FIRST, SECOND], Duration::ZERO);
+        assert_eq!(presented(&platform), [1, 2]);
+
+        binding.remove_render_view(&mut app, second);
+        pump(&mut app, &[FIRST, SECOND], Duration::ZERO);
+        assert_eq!(presented(&platform), [1, 2]);
+    }
+
+    // multi_view_binding_test.dart 'render views that are not dirty are not composited'.
+    #[test]
+    fn a_render_view_that_is_not_dirty_is_not_composited() {
+        let (cell, platform, [first, second]) = app_with_render_views();
+        let mut app = cell.borrow_mut();
+        let binding = RendererBinding::instance(&mut app);
+
+        // First frame: both views are composited (they are newly added).
+        pump(&mut app, &[FIRST, SECOND], Duration::ZERO);
+        assert_eq!(presented(&platform), [1, 1]);
+
+        // Second frame: neither view is dirty, so neither is composited.
+        pump(&mut app, &[FIRST, SECOND], Duration::ZERO);
+        assert_eq!(presented(&platform), [1, 1]);
+
+        // Only the second is marked dirty: only the second is composited.
+        second.as_object().mark_needs_paint(&mut app);
+        pump(&mut app, &[FIRST, SECOND], Duration::ZERO);
+        assert_eq!(presented(&platform), [1, 2]);
+
+        binding.remove_render_view(&mut app, first);
+        binding.remove_render_view(&mut app, second);
+    }
+
+    #[test]
+    fn a_frame_paints_and_composites_only_its_own_views() {
+        let (cell, platform, [first, second]) = app_with_render_views();
+        let mut app = cell.borrow_mut();
+        pump(&mut app, &[FIRST, SECOND], Duration::ZERO);
+
+        first.as_object().mark_needs_paint(&mut app);
+        second.as_object().mark_needs_paint(&mut app);
+        pump(&mut app, &[SECOND], Duration::ZERO);
+        assert_eq!(presented(&platform), [1, 2]);
+        assert!(
+            first.as_object().debug_needs_paint(&app),
+            "left for its own frame"
+        );
+    }
+
+    #[test]
+    fn a_view_drawn_in_the_warm_up_frame_is_composited_again_at_its_next_frame() {
+        let (cell, platform, _render_views) = app_with_render_views();
+        SchedulerBinding::schedule_warm_up_frame(&mut cell.borrow_mut());
+        cell.elapse(Duration::ZERO);
+        assert_eq!(presented(&platform), [1, 1]);
+
+        let mut app = cell.borrow_mut();
+        pump(&mut app, &[FIRST], Duration::ZERO);
+        assert_eq!(
+            presented(&platform),
+            [2, 1],
+            "a warm-up frame may not reach the screen: the next real frame composites again"
+        );
+        pump(&mut app, &[FIRST], Duration::ZERO);
+        assert_eq!(presented(&platform), [2, 1]);
+    }
+
+    #[test]
+    fn marking_every_view_to_be_rendered_composites_each_at_its_next_frame() {
+        let (cell, platform, _render_views) = app_with_render_views();
+        let mut app = cell.borrow_mut();
+        let binding = RendererBinding::instance(&mut app);
+        pump(&mut app, &[FIRST, SECOND], Duration::ZERO);
+
+        binding.handle_mark_all_views_need_render(&mut app);
+        pump(&mut app, &[FIRST, SECOND], Duration::ZERO);
+        assert_eq!(presented(&platform), [2, 2]);
     }
 }

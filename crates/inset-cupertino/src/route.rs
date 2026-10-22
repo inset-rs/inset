@@ -1738,6 +1738,7 @@ impl State for CupertinoBackGestureDetectorState {
                     }
                     app.get_mut(self).back_gesture_controller = None;
                 }),
+                None,
             );
         }
     }

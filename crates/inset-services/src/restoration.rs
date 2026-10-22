@@ -219,6 +219,7 @@ impl RestorationManager {
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::new(move |app, _| app.get_mut(self).is_replacing = false),
+                None,
             );
         }
 
@@ -269,6 +270,7 @@ impl RestorationManager {
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::new(move |app, _| self.do_serialization(app)),
+                None,
             );
         }
     }
@@ -1118,7 +1120,8 @@ mod tests {
 
     use inset_embedder::Restoration;
     use inset_foundation::{ListenableObject, Listener};
-    use inset_test::TestPlatform;
+    use inset_scheduler::FrameTarget;
+    use inset_test::{IMPLICIT_VIEW_ID, TestPlatform};
 
     use super::*;
 
@@ -1151,7 +1154,10 @@ mod tests {
     impl Fixture {
         fn new() -> Fixture {
             let restoration = Rc::new(RecordingRestoration::default());
-            let platform = TestPlatform::new().with_restoration(restoration.clone());
+            // A view, for a test that schedules a frame.
+            let platform = TestPlatform::new()
+                .with_restoration(restoration.clone())
+                .with_views(&[IMPLICIT_VIEW_ID]);
             let cell = AppCell::with_platform(Rc::new(platform));
             let mut app = cell.borrow_mut();
             let manager = RestorationManager::instance(&mut app);
@@ -1197,9 +1203,14 @@ mod tests {
         }
 
         fn pump(&mut self) {
-            SchedulerBinding::handle_begin_frame(&mut self.cell.borrow_mut(), Some(Duration::ZERO));
+            let views = [IMPLICIT_VIEW_ID];
+            SchedulerBinding::handle_begin_frame(
+                &mut self.cell.borrow_mut(),
+                &views,
+                Some(Duration::ZERO),
+            );
             self.cell.borrow_mut().drain_microtasks();
-            SchedulerBinding::handle_draw_frame(&mut self.cell.borrow_mut());
+            SchedulerBinding::handle_draw_frame(&mut self.cell.borrow_mut(), &views);
             self.cell.borrow_mut().drain_microtasks();
         }
     }
@@ -1453,7 +1464,7 @@ mod tests {
     #[test]
     fn flush_data_waits_for_a_scheduled_frame_and_otherwise_sends_at_once() {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
-        SchedulerBinding::schedule_frame(&mut fixture.cell.borrow_mut());
+        SchedulerBinding::schedule_frame(&mut fixture.cell.borrow_mut(), FrameTarget::EveryView);
         root.write(&mut fixture.cell.borrow_mut(), "foo", 1i64);
 
         fixture.manager.flush_data(&mut fixture.cell.borrow_mut());

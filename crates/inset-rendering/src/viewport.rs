@@ -2514,7 +2514,7 @@ mod tests {
         root: crate::box_::AnyRenderBox,
         constraints: BoxConstraints,
     ) -> Handle<PipelineOwner> {
-        let owner = PipelineOwner::new(app, None);
+        let owner = PipelineOwner::new(app, None, None);
         owner.set_root_node(app, Some(root.as_object()));
         root.layout(app, constraints, false);
         let paint_root = OffsetLayer::new(app, Offset::ZERO);

@@ -22,6 +22,7 @@ use inset_rendering::{
 use inset_scheduler::{FrameCallback, SchedulerBinding, SchedulerPhase};
 
 use crate::framework::{BuildContext, Notification};
+use crate::view::View;
 use crate::widgets::page_storage::PageStorage;
 use crate::widgets::scroll_activity::{AnyScrollActivity, ScrollHoldController};
 use crate::widgets::scroll_context::ScrollContext;
@@ -886,6 +887,7 @@ impl ScrollPositionBase {
         SchedulerBinding::add_post_frame_callback(
             app,
             FrameCallback::handle_method(this, reset_implied_velocity::<P>),
+            View::maybe_id_of(app, this.context(app).storage_context(app)),
         );
     }
 

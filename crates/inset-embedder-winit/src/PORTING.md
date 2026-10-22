@@ -7,12 +7,10 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - app_exit.rs → how Flutter's desktop embedders quit for a required `System.exitApplication`, and hear the framework's reply to `System.requestAppExit`
 - lifecycle.rs, os/macos/app_lifecycle.rs → the macOS embedder's lifecycle states (`FlutterEngine`)
 - os/macos/app_delegate.rs, quitting → the macOS embedder's `FlutterAppDelegate`, which asks the framework before the app quits
-- windows.rs, frame_scheduler.rs → the embedders' frame, in which the framework draws every view
-- frame_scheduler.rs, vsync_source.rs, os/macos/display_links.rs → the macOS embedder's vsync, from the display the first view is on
 - launch.rs, main_loop/ → the engine's start (`Shell` adds the implicit view with empty metrics): where the system's window is the screen, the app starts with the screen view at no size, and its window and surface come after
 - platform.rs, main_loop/windows.rs → the embedders' implicit view, here the screen view, which the framework never hears removed: it outlives its window and draws nowhere once the window closes
 - main_loop/windows.rs → the engine's window close request, which goes to the framework and closes nothing until the framework closes the window
-- main_loop/windows.rs, view.rs, rasterizer.rs → the shell's surfaces (`Shell::OnPlatformViewCreated`, `OnPlatformViewDestroyed`): the view stays while the system has taken its surface, and each surface given gets a frame
+- main_loop/windows.rs, view.rs, rasterizer.rs → the shell's surfaces (`Shell::OnPlatformViewCreated`, `OnPlatformViewDestroyed`): the view stays while the system has taken its surface, and each surface given gets the view's last scene, as Flutter's rasterizer keeps each view's last layer tree, and a frame
 - touch.rs → the iOS embedder's touches, one pointer per finger, added before its down and removed after its up
 - screens.rs, os/macos/screens.rs, os/macos/system_changes.rs, main_loop/app.rs → the macOS embedder's displays (`updateDisplayConfig`), every `NSScreen` numbered by its `NSScreenNumber`, sent again at `NSApplicationDidChangeScreenParametersNotification`, and a window's `display_id`, its screen's number, sent again when the window changes screen
 - locales.rs, os/macos/system_changes.rs → the macOS embedder's locales (`sendUserLocales`), its preferred languages, sent again at `NSCurrentLocaleDidChangeNotification`; the Windows and Linux embedders', the user's languages, sent at start only
@@ -111,7 +109,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 - Change: a surface's vsync comes from its window's screen, and stops while nobody can see the window.
   Reason: platform — vsync belongs to a display, and macOS tells a window's visibility only through notices.
-  Affect: a program in a hidden or fully covered window draws nothing until part of it shows.
+  Affect: a program in a hidden or occluded window draws nothing until part of it shows.
 
 ## host_window.rs / main_loop/windows.rs / os/macos/visibility.rs → Flutter's desktop window controllers (`_window_macos.dart`, `_window_win32.dart`, `_window_linux.dart`)
 

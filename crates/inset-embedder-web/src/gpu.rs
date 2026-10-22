@@ -53,7 +53,12 @@ impl Gpu {
         }
     }
 
+    /// Configures the surface for `size` where it has another: configuring the canvas's context
+    /// replaces what it shows, and its frame presents nothing when nothing changed.
     pub fn resize(&mut self, size: [u32; 2]) {
+        if self.surface.size() == size {
+            return;
+        }
         self.surface.resize(size);
         self.backing = None;
     }

@@ -17,14 +17,15 @@ use inset_embedder::{
 use inset_embedder_winit::WinitEmbedder;
 use inset_foundation::App;
 use inset_painting::{Canvas, Paint, Picture, draw_rrect};
-use inset_scheduler::{FrameCallback, SchedulerBinding};
+use inset_scheduler::{FrameTarget, PersistentFrameCallback, SchedulerBinding};
 use inset_shell::Shell;
 
 fn main() {
     WinitEmbedder.run(|platform| Shell::new(platform, open_window));
 }
 
-/// Asks the host for the window, and draws into its view at every frame once it has arrived.
+/// Asks the host for the window, and draws into its view at each of the view's frames, the first
+/// of which it asks for as the view arrives.
 fn open_window(app: &mut App) {
     let request_id = app
         .platform()
@@ -38,16 +39,21 @@ fn open_window(app: &mut App) {
         })
         .expect("a desktop host makes windows");
     app.platform_callbacks_mut().on_view_close_requested = Some(Rc::new(|app, _view| quit(app)));
+    app.platform_callbacks_mut().on_view_added = Some(Rc::new(|app, view| {
+        SchedulerBinding::schedule_frame(app, FrameTarget::View(view));
+    }));
     SchedulerBinding::add_persistent_frame_callback(
         app,
-        FrameCallback::new(move |app, elapsed| {
-            if let Some(view) = view_for(app, request_id) {
+        PersistentFrameCallback::new(move |app, views, elapsed| {
+            let Some(view) = view_for(app, request_id) else {
+                return;
+            };
+            if views.contains(&view.id()) {
                 present(&view, elapsed);
             }
-            SchedulerBinding::schedule_frame(app);
+            SchedulerBinding::schedule_frame(app, FrameTarget::View(view.id()));
         }),
     );
-    SchedulerBinding::schedule_frame(app);
 }
 
 /// The view that arrived for `request_id`, once it has.

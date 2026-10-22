@@ -18,7 +18,7 @@ use inset_gestures::GestureBinding;
 use inset_painting::PaintingBinding;
 use inset_rendering::{AnyRenderObject, RenderParagraph, RendererBinding};
 use inset_scheduler::SchedulerBinding;
-use inset_test::{TestPlatform, TestView};
+use inset_test::{IMPLICIT_VIEW_ID, TestPlatform, TestView};
 use inset_widgets::{
     AnyElement, AnyRoute, GlobalKey, IntoWidget, NavigatorState, Text, WidgetsBinding,
     downcast_widget, run_app,
@@ -85,20 +85,22 @@ impl Fixture {
     /// a continuation awaiting a route's result resumes as it would in the app.
     fn settle(&mut self) {
         for _ in 0..40 {
-            self.at += Duration::from_millis(20);
-            SchedulerBinding::handle_begin_frame(&mut self.cell.borrow_mut(), Some(self.at));
-            self.cell.checkpoint();
-            SchedulerBinding::handle_draw_frame(&mut self.cell.borrow_mut());
-            self.cell.checkpoint();
+            self.pump(Duration::from_millis(20));
         }
     }
 
     /// One frame, rather than the forty `settle` pumps, for watching a transition start.
     fn frame(&mut self) {
-        self.at += Duration::from_millis(16);
-        SchedulerBinding::handle_begin_frame(&mut self.cell.borrow_mut(), Some(self.at));
+        self.pump(Duration::from_millis(16));
+    }
+
+    /// A frame of the app's view `step` after the last.
+    fn pump(&mut self, step: Duration) {
+        self.at += step;
+        let views = [IMPLICIT_VIEW_ID];
+        SchedulerBinding::handle_begin_frame(&mut self.cell.borrow_mut(), &views, Some(self.at));
         self.cell.checkpoint();
-        SchedulerBinding::handle_draw_frame(&mut self.cell.borrow_mut());
+        SchedulerBinding::handle_draw_frame(&mut self.cell.borrow_mut(), &views);
         self.cell.checkpoint();
     }
 

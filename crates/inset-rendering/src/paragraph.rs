@@ -667,7 +667,7 @@ mod tests {
         install_fonts(app);
         let paragraph = RenderParagraph::new(app, span(text), TextDirection::Ltr, None);
         let root = RenderRepaintBoundary::new(app, Some(paragraph.as_box()));
-        let owner = PipelineOwner::new(app, None);
+        let owner = PipelineOwner::new(app, None, None);
         owner.set_root_node(app, Some(root.as_object()));
         root.schedule_initial_layout(app);
         root.layout(app, constraints, false);
@@ -775,7 +775,7 @@ mod tests {
         );
         paragraph.set_soft_wrap(&mut app, false);
         let root = RenderRepaintBoundary::new(&mut app, Some(paragraph.as_box()));
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         owner.set_root_node(&mut app, Some(root.as_object()));
         root.schedule_initial_layout(&mut app);
         let narrow = BoxConstraints::new()
@@ -812,7 +812,7 @@ mod tests {
         paragraph.set_max_lines(&mut app, Some(1));
         paragraph.set_overflow(&mut app, TextOverflow::Ellipsis);
         let root = RenderRepaintBoundary::new(&mut app, Some(paragraph.as_box()));
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         owner.set_root_node(&mut app, Some(root.as_object()));
         root.schedule_initial_layout(&mut app);
         root.layout(

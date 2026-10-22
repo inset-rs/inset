@@ -4879,6 +4879,7 @@ mod tests {
     use inset_gestures::GestureBinding;
     use inset_painting::EdgeInsets;
     use inset_rendering::{AnyRenderObject, RenderDecoratedBox, RenderParagraph};
+    use inset_scheduler::SchedulerBinding;
     use inset_widgets::{
         AnyElement, CustomScrollView, DefaultWidgetsLocalizations, FixedScrollMetrics,
         Localizations, MediaQueryData, NavigatorState, Notification, PreferredSize, Route,
@@ -4988,9 +4989,9 @@ mod tests {
         object.local_to_global(app, Offset::ZERO, None) & object.size(app)
     }
 
-    /// Runs frames until every route transition has settled.
+    /// Runs frames until every route transition has settled, on from the last frame's time.
     fn settle(app: &mut App) -> Duration {
-        let mut at = Duration::ZERO;
+        let mut at = SchedulerBinding::current_system_frame_time_stamp(app);
         for _ in 0..60 {
             at += Duration::from_millis(20);
             pump(app, at);

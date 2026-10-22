@@ -18,5 +18,5 @@ mod windows;
 
 pub use clipboard::MockClipboard;
 pub use platform::{TestDispatcher, TestPlatform};
-pub use view::TestView;
+pub use view::{IMPLICIT_VIEW_ID, TestView};
 pub use windows::{TestWindow, TestWindows};

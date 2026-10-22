@@ -85,8 +85,8 @@ mod client {
             }
         }
 
-        /// Closes the first two windows once all three are made, and starts asking for frames,
-        /// which time the look that follows.
+        /// Closes the first two windows once all three are made, and starts asking for frames of
+        /// the third, which time the look that follows.
         fn close_two_once_all_are_made(&mut self) {
             if self.closed.is_some() || self.windows.len() < 3 {
                 return;
@@ -97,7 +97,11 @@ mod client {
             self.windows[1].close();
             self.closed = Some(closed.into());
             self.closed_at = Instant::now();
-            self.platform.request_frame();
+            self.request_frame_of_the_window_kept_open();
+        }
+
+        fn request_frame_of_the_window_kept_open(&self) {
+            self.platform.request_frame(self.windows[2].view().id());
         }
 
         /// What is left of the closed windows: each still in AppKit's list of the application's
@@ -127,12 +131,12 @@ mod client {
             }
         }
 
-        fn frame(&mut self, _frame: Frame) {
+        fn frame(&mut self, _views: &[ViewId], _frame: Frame) {
             if self.closed.is_none() {
                 return;
             }
             if self.closed_at.elapsed() < SETTLE {
-                self.platform.request_frame();
+                self.request_frame_of_the_window_kept_open();
                 return;
             }
             let left = self.what_is_left();

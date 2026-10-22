@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use inset_foundation::{App, Handle, Listener};
+use inset_foundation::{App, Handle, Listener, ValueChanged};
 
 use super::element::{AnyElement, ElementLifecycle};
 use super::widget::GlobalKeyId;
@@ -202,6 +202,9 @@ struct InactiveElements {
 /// The callback `BuildOwner::build_scope` runs before building the dirty elements.
 pub type BuildScopeCallback = Box<dyn FnOnce(&mut App)>;
 
+/// Dart's `onBuildScheduled`, given the element marked dirty.
+pub type BuildScheduledCallback = ValueChanged<AnyElement>;
+
 /// Manager class for the widgets framework.
 ///
 /// This class tracks which widgets need rebuilding, and handles other tasks that apply to
@@ -216,11 +219,13 @@ pub type BuildScopeCallback = Box<dyn FnOnce(&mut App)>;
 /// To assign a build owner to a tree, use the `RootElementMixin::assign_owner` method on the
 /// root element of the widget tree.
 pub struct BuildOwner {
-    /// Called on each build pass when the first buildable element is marked dirty.
-    on_build_scheduled: Option<Listener>,
+    /// Called for each element marked dirty outside a build pass.
+    on_build_scheduled: Option<BuildScheduledCallback>,
     focus_manager: Handle<FocusManager>,
     inactive_elements: InactiveElements,
-    scheduled_flush_dirty_elements: bool,
+    /// [`build_scope`](Self::build_scope) is running: it builds the elements marked dirty
+    /// meanwhile, so none is scheduled.
+    in_build_scope: bool,
     global_key_registry: HashMap<GlobalKeyId, AnyElement>,
     debug_state_lock_level: i32,
     debug_building: bool,
@@ -234,7 +239,10 @@ impl BuildOwner {
     /// [`FocusManager::register_global_handlers`], which will modify static state. Callers
     /// wishing to avoid altering this state can explicitly pass a focus manager to
     /// [`with_focus_manager`](Self::with_focus_manager), Dart's `focusManager` argument.
-    pub fn new(app: &mut App, on_build_scheduled: Option<Listener>) -> Handle<BuildOwner> {
+    pub fn new(
+        app: &mut App,
+        on_build_scheduled: Option<BuildScheduledCallback>,
+    ) -> Handle<BuildOwner> {
         let focus_manager = FocusManager::new(app);
         focus_manager.register_global_handlers(app);
         BuildOwner::with_focus_manager(app, on_build_scheduled, focus_manager)
@@ -244,14 +252,14 @@ impl BuildOwner {
     /// argument supplies; its global input handlers are not registered.
     pub fn with_focus_manager(
         app: &mut App,
-        on_build_scheduled: Option<Listener>,
+        on_build_scheduled: Option<BuildScheduledCallback>,
         focus_manager: Handle<FocusManager>,
     ) -> Handle<BuildOwner> {
         app.create(BuildOwner {
             on_build_scheduled,
             focus_manager,
             inactive_elements: InactiveElements::default(),
-            scheduled_flush_dirty_elements: false,
+            in_build_scope: false,
             global_key_registry: HashMap::new(),
             debug_state_lock_level: 0,
             debug_building: false,
@@ -277,7 +285,11 @@ impl BuildOwner {
     }
 
     /// Replaces the `on_build_scheduled` callback.
-    pub fn set_on_build_scheduled(self: Handle<Self>, app: &mut App, callback: Option<Listener>) {
+    pub fn set_on_build_scheduled(
+        self: Handle<Self>,
+        app: &mut App,
+        callback: Option<BuildScheduledCallback>,
+    ) {
         app.get_mut(self).on_build_scheduled = callback;
     }
 
@@ -296,11 +308,10 @@ impl BuildOwner {
             "BuildOwner.scheduleBuildFor() called on an Element that is already in the dirty \
              list."
         );
-        if !app.get(self).scheduled_flush_dirty_elements
+        if !app.get(self).in_build_scope
             && let Some(on_build_scheduled) = app.get(self).on_build_scheduled.clone()
         {
-            app.get_mut(self).scheduled_flush_dirty_elements = true;
-            on_build_scheduled.call(app);
+            on_build_scheduled(app, element);
         }
         build_scope.schedule_build_for(app, element);
     }
@@ -383,7 +394,7 @@ impl BuildOwner {
             owner.debug_state_lock_level += 1;
             owner.debug_building = true;
         }
-        app.get_mut(self).scheduled_flush_dirty_elements = true;
+        app.get_mut(self).in_build_scope = true;
         build_scope.set_building(app, true);
         if let Some(callback) = callback {
             debug_assert!(self.debug_state_locked(app));
@@ -399,7 +410,7 @@ impl BuildOwner {
         }
         build_scope.flush_dirty_elements(app, context);
         build_scope.set_building(app, false);
-        app.get_mut(self).scheduled_flush_dirty_elements = false;
+        app.get_mut(self).in_build_scope = false;
         debug_assert!(app.get(self).debug_building);
         if cfg!(debug_assertions) {
             let owner = app.get_mut(self);

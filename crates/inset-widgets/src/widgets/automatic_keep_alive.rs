@@ -11,6 +11,7 @@ use crate::framework::{
     BuildContext, IntoWidget, KeyRef, Notification, ParentDataElement, State, StateData,
     StatefulWidget, StatelessWidget, WidgetRef, downcast_widget,
 };
+use crate::view::View;
 use crate::widgets::notification_listener::NotificationListener;
 use crate::widgets::sliver::KeepAlive;
 
@@ -132,6 +133,7 @@ impl AutomaticKeepAliveState {
                                 .expect("the KeepAlive child exists after the first build"),
                         );
                     }),
+                    View::maybe_id_of(app, self.context(app)),
                 );
             }
         }

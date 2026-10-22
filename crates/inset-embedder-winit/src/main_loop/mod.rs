@@ -7,9 +7,10 @@
 //! winit hands out its `ActiveEventLoop` only inside these callbacks, so this is where
 //! windows are created and dropped, and where what the framework asks through the platform is
 //! served: each request (`app_requests.rs`) is served on a turn of its own in the order
-//! asked. A frame it asks for goes to the frame scheduler, which the loop owns and which says
-//! whether it is drawn now or at the next vsync (`frame_scheduler.rs`); the loop draws it
-//! then.
+//! asked. A frame it asks of a view goes to the frame scheduler, which the loop owns and which
+//! says at which vsync of the view's screen it is drawn, holding it while the view's window is
+//! minimized or occluded (`frame_scheduler.rs`); the loop draws it then, in one refresh with the
+//! other views of that screen that are due.
 //!
 //! # Who calls whom
 //!
@@ -78,7 +79,7 @@ mod windows;
 use std::rc::Rc;
 use std::time::Instant;
 
-use inset_embedder::{DropChange, EmbedderClient, ViewId, WindowConfig};
+use inset_embedder::{DropChange, EmbedderClient, ScreenId, ViewId, WindowConfig};
 use winit::application::ApplicationHandler;
 use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
@@ -115,8 +116,8 @@ pub(crate) enum MainLoopEvent {
     /// A ready task asking for the framework to be woken; served by the next wake, and it
     /// never changes the timer wakeup above.
     WakeNow,
-    /// A vsync of the first window's display, from its display link.
-    Vsync,
+    /// A vsync of a screen a view's window is on, from its display link.
+    Vsync(ScreenId),
     /// Something the system asked of the application as a whole.
     SystemRequest(SystemRequest),
     /// Something the system said of the application as a whole: whether it is active, or
@@ -135,7 +136,8 @@ pub(crate) struct MainLoop<C> {
     /// The app, as the embedder drives it.
     client: C,
     platform: Rc<WinitPlatform>,
-    /// When the framework's frames are drawn: at the vsync after it asks for one.
+    /// When each view's frames are drawn: at the vsync of its window's screen after the framework
+    /// asks for one.
     frame_scheduler: FrameScheduler,
     /// When the framework is to be woken, as it asked.
     wakeups: Wakeups,
@@ -187,8 +189,8 @@ impl<C: EmbedderClient> MainLoop<C> {
             platform,
             frame_scheduler: FrameScheduler::new({
                 let proxy = proxy.clone();
-                move || {
-                    let _ = proxy.send_event(MainLoopEvent::Vsync);
+                move |screen| {
+                    let _ = proxy.send_event(MainLoopEvent::Vsync(screen));
                 }
             }),
             wakeups: Wakeups::default(),
@@ -225,7 +227,7 @@ impl<C: EmbedderClient> MainLoop<C> {
     /// Serves one request the framework or the app made.
     fn on_app_request(&mut self, event_loop: &ActiveEventLoop, request: AppRequest) {
         match request {
-            AppRequest::RequestFrame => self.request_frame(),
+            AppRequest::RequestFrame(view) => self.request_frame(view),
             AppRequest::OpenWindow(request) => self.open_window(event_loop, request),
             AppRequest::CloseWindow(id) => self.close_window(id),
             AppRequest::Quit => self.quit(event_loop),
@@ -280,7 +282,7 @@ impl<C: EmbedderClient> ApplicationHandler<MainLoopEvent> for MainLoop<C> {
             MainLoopEvent::MenuClosed => self.on_menu_closed(),
             MainLoopEvent::TimerWakeup(wakeup) => self.on_wake_at(wakeup),
             MainLoopEvent::WakeNow => self.on_wake_now(),
-            MainLoopEvent::Vsync => self.on_vsync(),
+            MainLoopEvent::Vsync(screen) => self.on_vsync(screen),
             MainLoopEvent::SystemRequest(request) => self.on_system_request(request),
             MainLoopEvent::Lifecycle(notice) => self.on_lifecycle_notice(notice),
             MainLoopEvent::SystemChange(change) => self.on_system_change(change),

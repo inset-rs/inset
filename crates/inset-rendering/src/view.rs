@@ -106,6 +106,7 @@ pub struct RenderView {
     configuration: Option<ViewConfiguration>,
     view: ViewRef,
     root_transform: Option<Matrix4>,
+    needs_composite_frame: bool,
     /// Whether the system overlays are styled from the layer tree at every frame.
     ///
     /// An application that would rather drive them itself, through
@@ -134,6 +135,7 @@ impl RenderView {
             configuration: None,
             view,
             root_transform: None,
+            needs_composite_frame: false,
             automatic_system_ui_adjustment: true,
         }));
         let data = this.render_object_data_mut(app);
@@ -262,6 +264,23 @@ impl RenderView {
         debug_assert!(self.get(app).root_transform.is_some());
     }
 
+    /// Whether this view must be composited on the next frame.
+    ///
+    /// This flag is cleared once the view gets successfully composited.
+    pub fn needs_composite_frame(self: RenderHandle<Self>, app: &App) -> bool {
+        self.get(app).needs_composite_frame
+    }
+
+    /// Marks this view required to be composited on the next frame.
+    ///
+    /// This happens by the [`PipelineOwner`](crate::PipelineOwner) during
+    /// [`flush_paint`](crate::PipelineOwner::flush_paint) if there are any render objects that
+    /// need to be painted. It is also set for a new view, for the warm-up frame, and when the
+    /// app is resumed from the background.
+    pub fn mark_needs_composite_frame(self: RenderHandle<Self>, app: &mut App) {
+        self.get_mut(app).needs_composite_frame = true;
+    }
+
     fn update_matrices_and_create_new_root_layer(
         self: RenderHandle<Self>,
         app: &mut App,
@@ -323,6 +342,7 @@ impl RenderView {
                 .is_satisfied_by(self.size(app))
         );
         self.get(app).view.present(std::sync::Arc::new(scene));
+        self.get_mut(app).needs_composite_frame = false;
     }
 
     /// Styles the system overlays from whatever the layer tree annotates beneath them.
@@ -622,7 +642,7 @@ mod tests {
             &mut app,
             create_view_configuration(Size::new(200.0, 300.0), 2.0),
         );
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         owner.set_root_node(&mut app, Some(view.as_object()));
         view.prepare_initial_frame(&mut app);
     }
@@ -640,7 +660,7 @@ mod tests {
             Some(create_view_configuration(Size::new(100.0, 100.0), 1.0)),
             test_view(&presented),
         );
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         owner.set_root_node(&mut app, Some(view.as_object()));
         view.prepare_initial_frame(&mut app);
         owner.flush_layout(&mut app);
@@ -687,7 +707,7 @@ mod tests {
             Some(create_view_configuration(Size::new(800.0, 600.0), 2.0)),
             test_view(&presented),
         );
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         owner.set_root_node(&mut app, Some(view.as_object()));
         view.prepare_initial_frame(&mut app);
         owner.flush_layout(&mut app);
@@ -722,7 +742,7 @@ mod tests {
             Some(create_view_configuration(Size::new(800.0, 600.0), 2.0)),
             test_view(&presented),
         );
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         owner.set_root_node(&mut app, Some(view.as_object()));
         view.prepare_initial_frame(&mut app);
         owner.flush_layout(&mut app);
@@ -779,7 +799,7 @@ mod tests {
             Some(create_view_configuration(Size::new(800.0, 600.0), 2.0)),
             test_view(&presented),
         );
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         owner.set_root_node(&mut app, Some(view.as_object()));
         view.prepare_initial_frame(&mut app);
         owner.flush_layout(&mut app);

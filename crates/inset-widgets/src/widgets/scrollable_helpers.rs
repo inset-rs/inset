@@ -627,12 +627,12 @@ mod tests {
         AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderHandle,
         RenderSliver, RenderSliverToBoxAdapter, RenderViewport, RenderViewportBase,
     };
-    use inset_scheduler::SchedulerBinding;
 
     use super::*;
     use crate::framework::{
         Element, IntoWidget, LeafRenderObjectWidget, RenderObjectWidget, WidgetRef,
     };
+    use crate::test_harness::pump_every_view;
     use crate::test_harness::{Harness, VIEW_HEIGHT};
     use crate::widgets::actions::{Actions, AnyAction};
     use crate::widgets::basic::Builder;
@@ -716,16 +716,9 @@ mod tests {
         (harness, state, context)
     }
 
-    fn pump_frame(app: &mut App, at: Duration) {
-        SchedulerBinding::handle_begin_frame(app, Some(at));
-        app.drain_microtasks();
-        SchedulerBinding::handle_draw_frame(app);
-        app.drain_microtasks();
-    }
-
     /// A frame at `at`, then the checkpoint where an auto scroller's continuation runs.
     fn pump_frame_and_checkpoint(cell: &AppCell, at: Duration) {
-        pump_frame(&mut cell.borrow_mut(), at);
+        pump_every_view(&mut cell.borrow_mut(), at);
         cell.checkpoint();
     }
 
@@ -896,7 +889,7 @@ mod tests {
         );
         // The animation has not ticked yet, so the target is only reached after the frames.
         for frame in 0..20 {
-            pump_frame(&mut app, Duration::from_millis(16 * frame));
+            pump_every_view(&mut app, Duration::from_millis(16 * frame));
         }
         assert_eq!(state.position(&app).pixels(&app), 50.0);
 
@@ -907,7 +900,7 @@ mod tests {
             &ScrollIntent::new(AxisDirection::Down).r#type(ScrollIncrementType::Page),
         );
         for frame in 20..40 {
-            pump_frame(&mut app, Duration::from_millis(16 * frame));
+            pump_every_view(&mut app, Duration::from_millis(16 * frame));
         }
         assert_eq!(state.position(&app).pixels(&app), 50.0 + 0.8 * VIEW_HEIGHT);
 
@@ -918,7 +911,7 @@ mod tests {
             &ScrollIntent::new(AxisDirection::Up).r#type(ScrollIncrementType::Line),
         );
         for frame in 40..60 {
-            pump_frame(&mut app, Duration::from_millis(16 * frame));
+            pump_every_view(&mut app, Duration::from_millis(16 * frame));
         }
         assert_eq!(state.position(&app).pixels(&app), 0.8 * VIEW_HEIGHT);
     }
@@ -939,7 +932,7 @@ mod tests {
         );
         Actions::invoke(&mut app, context, &ScrollIntent::new(AxisDirection::Right));
         for frame in 0..20 {
-            pump_frame(&mut app, Duration::from_millis(16 * frame));
+            pump_every_view(&mut app, Duration::from_millis(16 * frame));
         }
         assert_eq!(state.position(&app).pixels(&app), 0.0);
     }
@@ -974,7 +967,7 @@ mod tests {
         });
         Actions::invoke(&mut app, context, &ScrollIntent::new(AxisDirection::Down));
         for frame in 0..20 {
-            pump_frame(&mut app, Duration::from_millis(16 * frame));
+            pump_every_view(&mut app, Duration::from_millis(16 * frame));
         }
         assert_eq!(state.position(&app).pixels(&app), 0.0);
     }

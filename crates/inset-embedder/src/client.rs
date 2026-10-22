@@ -15,7 +15,12 @@ use crate::{
 /// The platform updates its view registry before sending a lifecycle method,
 /// so the client can immediately query the affected view.
 pub trait EmbedderClient {
-    fn frame(&mut self, frame: Frame);
+    /// A screen refreshed at `frame.elapsed`: `views` are the views on it, in sight, that asked
+    /// for a frame ([`Platform::request_frame`](crate::Platform::request_frame)) before the
+    /// refresh began; one that asks during it is in the next.
+    ///
+    /// The host never calls it from inside another call into the client.
+    fn frame(&mut self, views: &[ViewId], frame: Frame);
 
     /// A view arrived after launch: opened by the app, or given by the system. The views that
     /// exist at launch are in `Platform::views` when the app starts, and none of them is

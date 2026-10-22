@@ -2478,7 +2478,7 @@ mod tests {
         );
         unconstrained.set_clip_behavior(&mut app, Clip::HardEdge);
         let root = RenderRepaintBoundary::new(&mut app, Some(unconstrained.as_box()));
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         owner.set_root_node(&mut app, Some(root.as_object()));
         root.layout(
             &mut app,

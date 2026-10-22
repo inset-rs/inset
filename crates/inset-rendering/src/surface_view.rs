@@ -205,7 +205,7 @@ mod tests {
         surface: Arc<dyn Surface>,
         painting: ChildPainting,
     ) -> (inset_embedder::Scene, Handle<PipelineOwner>) {
-        let owner = PipelineOwner::new(app, None);
+        let owner = PipelineOwner::new(app, None, None);
         let child = RenderSurfaceView::new(app, surface);
         let parent = RenderHandle::new_box(
             app,

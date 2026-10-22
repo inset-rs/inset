@@ -19,7 +19,7 @@ use inset_foundation::{App, AppCell};
 use inset_gestures::GestureBinding;
 use inset_painting::PaintingBinding;
 use inset_rendering::RendererBinding;
-use inset_scheduler::SchedulerBinding;
+use inset_scheduler::{FrameTarget, SchedulerBinding};
 use inset_services::{KeyEventManager, ServicesBinding, TextInput};
 
 /// Host-facing isolate: the [`AppCell`] plus the methods the embedder pushes.
@@ -102,12 +102,12 @@ impl Shell {
 }
 
 impl EmbedderClient for Shell {
-    fn frame(&mut self, frame: Frame) {
+    fn frame(&mut self, views: &[ViewId], frame: Frame) {
         self.origin = Some(self.platform.now() - frame.elapsed);
         self.advance_clock(frame.elapsed);
         // The engine runs `_beginFrame` and `_drawFrame` as two native tasks: two calls.
-        self.handle_event(|app| SchedulerBinding::on_begin_frame(app, Some(frame.elapsed)));
-        self.handle_event(SchedulerBinding::on_draw_frame);
+        self.handle_event(|app| SchedulerBinding::on_begin_frame(app, views, Some(frame.elapsed)));
+        self.handle_event(|app| SchedulerBinding::on_draw_frame(app, views));
     }
 
     /// The framework hears which view came, then "metrics changed", as `_addView` invokes it.
@@ -211,8 +211,20 @@ impl EmbedderClient for Shell {
         });
     }
 
+    /// On `resumed` or `inactive`, every view is marked to present and asked for a frame before
+    /// the bindings hear the state: a view that did not change while the app was away would
+    /// otherwise present nothing.
     fn app_lifecycle_state_changed(&mut self, state: AppLifecycleState) {
-        self.push(|app| ServicesBinding::instance(app).handle_lifecycle_message(app, state));
+        self.push(|app| {
+            if matches!(
+                state,
+                AppLifecycleState::Resumed | AppLifecycleState::Inactive
+            ) {
+                RendererBinding::instance(app).handle_mark_all_views_need_render(app);
+                SchedulerBinding::schedule_forced_frame(app, FrameTarget::EveryView);
+            }
+            ServicesBinding::instance(app).handle_lifecycle_message(app, state);
+        });
     }
 
     fn platform_brightness_changed(&mut self) {
@@ -284,15 +296,15 @@ mod tests {
     };
     use inset_foundation::App;
     use inset_gestures::{GestureBinding, PointerRoute};
-    use inset_scheduler::SchedulerBinding;
+    use inset_scheduler::{FrameTarget, SchedulerBinding};
     use inset_services::{HardwareKeyboard, KeyEvent, LogicalKeyboardKey, PhysicalKeyboardKey};
-    use inset_test::{TestPlatform, TestView};
+    use inset_test::{IMPLICIT_VIEW_ID, TestPlatform};
 
     use super::Shell;
 
-    /// A platform with the one view a pointer packet or a focus event is addressed to.
+    /// A platform with the one view a pointer packet, a focus event or a frame is addressed to.
     fn platform_with_a_view() -> TestPlatform {
-        TestPlatform::new().with_view(Rc::new(TestView::new(0.0, 0.0)))
+        TestPlatform::new().with_views(&[IMPLICIT_VIEW_ID])
     }
 
     #[test]
@@ -300,7 +312,7 @@ mod tests {
         use std::cell::RefCell;
         use std::path::PathBuf;
 
-        use inset_embedder::{DropChange, DropData, ViewId};
+        use inset_embedder::{DropChange, DropData};
 
         let seen = Rc::new(RefCell::new(None));
         let seen_slot = Rc::clone(&seen);
@@ -311,7 +323,7 @@ mod tests {
             }));
         });
         shell.drop_data(DropData {
-            view_id: ViewId(0),
+            view_id: IMPLICIT_VIEW_ID,
             change: DropChange::Dropped,
             physical_position: None,
             paths: vec![PathBuf::from("/a.wasm")],
@@ -392,6 +404,41 @@ mod tests {
     }
 
     #[test]
+    fn resuming_marks_every_view_to_be_rendered_and_asks_each_for_a_frame() {
+        use inset_rendering::RendererBinding;
+
+        let platform = Rc::new(TestPlatform::new().with_views(&[IMPLICIT_VIEW_ID, ViewId(1)]));
+        let first = platform.test_view(IMPLICIT_VIEW_ID);
+        let mut shell = Shell::new(platform.clone(), |_app| {});
+        let render_view = {
+            let mut app = shell.app();
+            let binding = RendererBinding::instance(&mut app);
+            binding.init_render_view(&mut app, first.clone())
+        };
+        let at = |ms| Frame {
+            elapsed: Duration::from_millis(ms),
+        };
+        shell.frame(&[IMPLICIT_VIEW_ID], at(16));
+        shell.frame(&[IMPLICIT_VIEW_ID], at(32));
+        assert_eq!(
+            first.presented(),
+            1,
+            "nothing changed after the first frame"
+        );
+
+        shell.app_lifecycle_state_changed(AppLifecycleState::Hidden);
+        platform.take_frame_requests();
+        shell.app_lifecycle_state_changed(AppLifecycleState::Resumed);
+        assert_eq!(
+            platform.take_frame_requests(),
+            [IMPLICIT_VIEW_ID, ViewId(1)]
+        );
+        assert!(render_view.needs_composite_frame(&shell.app()));
+        shell.frame(&[IMPLICIT_VIEW_ID], at(48));
+        assert_eq!(first.presented(), 2, "drawn again though nothing changed");
+    }
+
+    #[test]
     fn request_app_exit_is_answered_by_the_services_binding() {
         use inset_embedder::AppExitResponse;
         use inset_foundation::{Handle, Task};
@@ -460,19 +507,22 @@ mod tests {
 
     #[test]
     fn new_runs_setup_and_frame_runs_both_scheduler_phases() {
-        let platform = Rc::new(TestPlatform::new());
+        let platform = Rc::new(platform_with_a_view());
         let mut setup_ran = false;
         let mut shell = Shell::new(platform.clone(), |_app: &mut App| {
             setup_ran = true;
         });
         assert!(setup_ran);
-        assert_eq!(platform.frames_requested(), 0);
+        assert!(platform.frame_requests().is_empty());
 
-        SchedulerBinding::schedule_frame(&mut shell.app());
-        assert_eq!(platform.frames_requested(), 1);
-        shell.frame(Frame {
-            elapsed: Duration::from_millis(16),
-        });
+        SchedulerBinding::schedule_frame(&mut shell.app(), FrameTarget::View(IMPLICIT_VIEW_ID));
+        assert_eq!(platform.frame_requests(), [IMPLICIT_VIEW_ID]);
+        shell.frame(
+            &[IMPLICIT_VIEW_ID],
+            Frame {
+                elapsed: Duration::from_millis(16),
+            },
+        );
     }
 
     #[test]
@@ -554,9 +604,12 @@ mod tests {
         shell.wake(Duration::from_millis(15));
         assert_eq!(fired.take(), vec!["early"]);
 
-        shell.frame(Frame {
-            elapsed: Duration::from_millis(32),
-        });
+        shell.frame(
+            &[IMPLICIT_VIEW_ID],
+            Frame {
+                elapsed: Duration::from_millis(32),
+            },
+        );
         assert_eq!(fired.take(), vec!["late"]);
     }
 
@@ -611,14 +664,14 @@ mod tests {
             }));
         });
         shell.view_focus_changed(ViewFocusEvent {
-            view_id: ViewId(0),
+            view_id: IMPLICIT_VIEW_ID,
             state: ViewFocusState::Focused,
             direction: ViewFocusDirection::Backward,
         });
         let event = received
             .get()
             .expect("the shell checkpoints the callback's microtask");
-        assert_eq!(event.view_id, ViewId(0));
+        assert_eq!(event.view_id, IMPLICIT_VIEW_ID);
         assert_eq!(event.state, ViewFocusState::Focused);
         assert_eq!(event.direction, ViewFocusDirection::Backward);
     }

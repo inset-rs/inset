@@ -14,7 +14,7 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 
-use inset_embedder::{AppExitResponse, SystemMouseCursorKind, ViewFocusEvent};
+use inset_embedder::{AppExitResponse, SystemMouseCursorKind, ViewFocusEvent, ViewId};
 use winit::window::WindowId;
 
 use crate::main_loop::MainLoopEvent;
@@ -22,8 +22,8 @@ use crate::windows::WindowRequest;
 
 /// A request the framework or the app makes of the embedder, for the main loop to serve.
 pub(crate) enum AppRequest {
-    /// Draw a frame at the next vsync.
-    RequestFrame,
+    /// Draw a frame of this view at the next vsync of its window's screen.
+    RequestFrame(ViewId),
     /// Open a window for a view the app asked for; the view arrives through `view_added`.
     OpenWindow(WindowRequest),
     /// A created window's `close`: the window is freed, and its view goes.
@@ -73,7 +73,7 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
-    use inset_embedder::{ViewFocusDirection, ViewFocusState, ViewId};
+    use inset_embedder::{ViewFocusDirection, ViewFocusState};
 
     use super::*;
 

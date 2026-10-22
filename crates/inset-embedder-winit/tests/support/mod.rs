@@ -1,12 +1,21 @@
-//! What the window tests share: a watchdog for a test that would otherwise wait for ever, the
-//! windows asked for whose views have arrived, and what they ask of AppKit that the embedder
-//! offers no call for.
+//! What the window tests share: a watchdog for a test that would otherwise wait for ever, a clock
+//! that ticks whether or not a window is in sight, the windows asked for whose views have arrived,
+//! and what they ask of AppKit that the embedder offers no call for.
 
 #![allow(dead_code, reason = "each test binary uses a part of it")]
 
 use std::time::Duration;
 
-use inset_embedder::{PlatformRef, RequestId, ViewRequest, WindowConfig, WindowRef};
+use inset_embedder::{Instant, PlatformRef, RequestId, ViewRequest, WindowConfig, WindowRef};
+
+/// How long a test that steps through time waits between its steps' checks.
+pub const TICK: Duration = Duration::from_millis(16);
+
+/// Asks the host to wake the app once `TICK` has passed, for a test that steps through time
+/// whether or not any window is in sight: a frame of a window out of sight waits until it shows.
+pub fn wake_after_a_tick(platform: &PlatformRef) {
+    platform.dispatcher().wake_at(Some(Instant::now() + TICK));
+}
 
 /// Ends the process as a failure of `test` after `after`, from a thread of its own, with
 /// what `reason` says then.

@@ -2150,7 +2150,7 @@ mod tests {
         editable.set_text(app, Some(span(text)));
         editable.set_cursor_color(app, Some(Color::from_argb(255, 0, 0, 0)));
         let root = RenderRepaintBoundary::new(app, Some(editable.as_box()));
-        let owner = PipelineOwner::new(app, None);
+        let owner = PipelineOwner::new(app, None, None);
         owner.set_root_node(app, Some(root.as_object()));
         root.schedule_initial_layout(app);
         root.layout(
@@ -2310,7 +2310,7 @@ mod tests {
         let editable = laid_out(&mut app, "hello");
         assert!(!editable.as_object().debug_needs_layout(&app));
         PaintingBinding::instance(&mut app).handle_system_fonts_did_change(&mut app);
-        SchedulerBinding::handle_begin_frame(&mut app, None);
+        SchedulerBinding::handle_begin_frame(&mut app, &[], None);
         assert!(
             editable.as_object().debug_needs_layout(&app),
             "RenderEditable listens to PaintingBinding.system_fonts"
@@ -2373,7 +2373,7 @@ mod tests {
         );
         editable.set_text(&mut app, Some(span(text)));
         let root = RenderRepaintBoundary::new(&mut app, Some(editable.as_box()));
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         owner.set_root_node(&mut app, Some(root.as_object()));
         root.schedule_initial_layout(&mut app);
         let constraints = BoxConstraints::tight_for(Some(200.0), Some(40.0));
@@ -2386,7 +2386,7 @@ mod tests {
 
         allow_non_ascii.set(true);
         PaintingBinding::instance(&mut app).handle_system_fonts_did_change(&mut app);
-        SchedulerBinding::handle_begin_frame(&mut app, None);
+        SchedulerBinding::handle_begin_frame(&mut app, &[], None);
         root.layout(&mut app, constraints, false);
 
         let after = editable

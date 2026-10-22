@@ -131,7 +131,7 @@ mod client {
             self.ask_close_then_open();
         }
 
-        fn frame(&mut self, _frame: Frame) {}
+        fn frame(&mut self, _views: &[ViewId], _frame: Frame) {}
         fn view_metrics_changed(&mut self, _id: ViewId) {}
         fn pointer_data_packet(&mut self, _packet: PointerDataPacket) {}
         fn key_data(&mut self, _data: KeyData) -> bool {

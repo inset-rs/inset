@@ -19,6 +19,7 @@ use inset_scheduler::{FrameCallback, SchedulerBinding};
 use crate::framework::{
     BuildContext, IntoWidget, KeyRef, Notification, State, StateData, StatefulWidget, WidgetRef,
 };
+use crate::view::View;
 use crate::widgets::basic::{FractionallySizedBox, SizedBox};
 use crate::widgets::inherited_notifier::{InheritedNotifier, InheritedNotifierKind};
 use crate::widgets::layout_builder::LayoutBuilder;
@@ -1032,6 +1033,7 @@ impl DraggableScrollableSheetState {
                         ScrollActivityDelegate::go_ballistic(position, app, 0.0);
                     }
                 }),
+                View::maybe_id_of(app, self.context(app)),
             );
         }
     }

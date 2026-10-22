@@ -155,7 +155,7 @@ mod client {
             self.look_again_soon();
         }
 
-        fn frame(&mut self, _frame: Frame) {}
+        fn frame(&mut self, _views: &[ViewId], _frame: Frame) {}
         fn view_added(&mut self, _id: ViewId) {
             support::take_opened_windows(&self.platform, &mut self.requested, &mut self.windows);
             if !self.windows.is_empty() {

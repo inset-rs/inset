@@ -416,7 +416,6 @@ mod tests {
         AnyRenderObject, CrossAxisAlignment, RenderAnimatedOpacity, RenderAnimatedOpacityMixin,
         RenderBox, RenderFlex, RenderHandle, RenderObject, RenderOpacity,
     };
-    use inset_scheduler::SchedulerBinding;
     use inset_widgets::{Directionality, GlobalKey, SizedBox};
 
     use super::*;
@@ -450,10 +449,7 @@ mod tests {
         let mut at = from;
         for _ in 0..20 {
             at += Duration::from_millis(25);
-            SchedulerBinding::handle_begin_frame(app, Some(at));
-            app.drain_microtasks();
-            SchedulerBinding::handle_draw_frame(app);
-            app.drain_microtasks();
+            crate::test_support::pump(app, at);
         }
         at
     }
@@ -647,13 +643,6 @@ mod tests {
         find_in_subtree::<RenderAnimatedOpacity>(&mounted.cell.borrow(), theater)
     }
 
-    fn one_frame(app: &mut App, at: Duration) {
-        SchedulerBinding::handle_begin_frame(app, Some(at));
-        app.drain_microtasks();
-        SchedulerBinding::handle_draw_frame(app);
-        app.drain_microtasks();
-    }
-
     #[test]
     fn a_fading_tile_hides_its_in_place_body_while_it_animates() {
         let mounted = mount(|tile| tile);
@@ -668,8 +657,8 @@ mod tests {
             let mut app = mounted.cell.borrow_mut();
             mounted.state.tile_controller(&app).expand(&mut app);
         }
-        one_frame(&mut mounted.cell.borrow_mut(), Duration::from_millis(25));
-        one_frame(&mut mounted.cell.borrow_mut(), Duration::from_millis(50));
+        crate::test_support::pump(&mut mounted.cell.borrow_mut(), Duration::from_millis(25));
+        crate::test_support::pump(&mut mounted.cell.borrow_mut(), Duration::from_millis(50));
         let hidden = body(&mounted)
             .downcast::<RenderOpacity>(&mounted.cell.borrow())
             .expect("an Opacity while a fading tile animates");
@@ -693,8 +682,8 @@ mod tests {
         );
 
         tap(&mut mounted.cell.borrow_mut(), 20.0, 20.0, Duration::ZERO);
-        one_frame(&mut mounted.cell.borrow_mut(), Duration::from_millis(25));
-        one_frame(&mut mounted.cell.borrow_mut(), Duration::from_millis(50));
+        crate::test_support::pump(&mut mounted.cell.borrow_mut(), Duration::from_millis(25));
+        crate::test_support::pump(&mut mounted.cell.borrow_mut(), Duration::from_millis(50));
         let copy = fading_copy(&mut mounted).expect("the overlay child fades the copy in");
         let opacity = copy
             .opacity(&mounted.cell.borrow())
@@ -733,8 +722,8 @@ mod tests {
             let mut app = mounted.cell.borrow_mut();
             mounted.state.tile_controller(&app).expand(&mut app);
         }
-        one_frame(&mut mounted.cell.borrow_mut(), Duration::from_millis(25));
-        one_frame(&mut mounted.cell.borrow_mut(), Duration::from_millis(50));
+        crate::test_support::pump(&mut mounted.cell.borrow_mut(), Duration::from_millis(25));
+        crate::test_support::pump(&mut mounted.cell.borrow_mut(), Duration::from_millis(50));
         assert!(
             body(&mounted)
                 .downcast::<RenderOpacity>(&mounted.cell.borrow())

@@ -703,7 +703,6 @@ mod tests {
         AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderHandle,
         RenderOffstage,
     };
-    use inset_scheduler::SchedulerBinding;
 
     use super::*;
     use crate::framework::{LeafRenderObjectWidget, RenderObjectWidget};
@@ -815,10 +814,7 @@ mod tests {
         let mut at = from;
         for _ in 0..20 {
             at += Duration::from_millis(20);
-            SchedulerBinding::handle_begin_frame(app, Some(at));
-            app.drain_microtasks();
-            SchedulerBinding::handle_draw_frame(app);
-            app.drain_microtasks();
+            crate::test_harness::pump_every_view(app, at);
             harness.pump(app);
         }
         at

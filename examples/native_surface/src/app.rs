@@ -9,7 +9,7 @@ use inset_embedder::{Color, PlatformRef, Surface, TextDirection, ViewId, ViewRef
 use inset_embedder_winit::WinitEmbedder;
 use inset_foundation::{App, Handle, Listenable, Listener};
 use inset_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
-use inset_scheduler::{FrameCallback, SchedulerBinding};
+use inset_scheduler::{PersistentFrameCallback, SchedulerBinding};
 use inset_shell::Shell;
 use inset_widgets::{
     Center, DecoratedBox, Directionality, IntoWidget, Padding, Positioned, SizedBox, Stack,
@@ -86,7 +86,7 @@ fn start_producer_once_sized(
     let waiting = Cell::new(Some(surface));
     SchedulerBinding::add_persistent_frame_callback(
         app,
-        FrameCallback::new(move |_app, _elapsed| {
+        PersistentFrameCallback::new(move |_app, _views, _elapsed| {
             let metrics = view.metrics();
             if metrics.physical_size == [0.0, 0.0] {
                 return;

@@ -1,6 +1,6 @@
 //! The screens' refreshes as signals: one `CADisplayLink` per screen, `NSScreen`'s (macOS 14),
-//! shared by everyone who paces by that screen, the framework's frames and every window's native
-//! surfaces. A screen's link ticks whether or not any window is shown
+//! shared by everyone who paces by that screen, the frames of the views on it and every window's
+//! native surfaces. A screen's link ticks whether or not any window is shown
 //! (`2026-09-29-view-display-link-unseen` in the `experiments` folder beside this repository),
 //! and is delivered on the main run loop in
 //! the common modes, so it keeps ticking through a window's own frame animations.
@@ -33,8 +33,8 @@ use crate::os::DisplayLink;
 /// in AppKit, and a monitor's native id in winit.
 pub(crate) type DisplayId = u32;
 
-/// A subscription to the display link of one screen, as the framework's frames and a window's
-/// surfaces hold it.
+/// A subscription to the display link of one screen, as the frames of the views on it and a
+/// window's surfaces hold it.
 pub(crate) type ScreenDisplayLink = ScreenSubscription<CoreAnimationLink>;
 
 thread_local! {

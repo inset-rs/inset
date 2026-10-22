@@ -379,7 +379,7 @@ impl<C: EmbedderClient> Host<C> {
     fn draw_frame(&mut self) {
         let elapsed = self.platform.elapsed();
         if let Some(client) = &mut self.client {
-            client.frame(Frame { elapsed });
+            client.frame(&[VIEW], Frame { elapsed });
         }
     }
 }

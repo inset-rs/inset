@@ -9,14 +9,15 @@ use std::collections::HashSet;
 use std::fmt;
 use std::rc::Rc;
 
-use inset_embedder::{ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewRef};
+use inset_embedder::{ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId, ViewRef};
 use inset_foundation::{App, Handle, ListenableObject, Listener, ValueKey};
 use inset_rendering::{AnyRenderObject, PipelineOwner, RenderHandle, RenderView, RendererBinding};
+use inset_scheduler::{FrameTarget, SchedulerBinding};
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 use crate::framework::{
-    AnyElement, BuildContext, Element, ElementBase, ElementData, InheritedWidget, IntoWidget,
-    KeyRef, RenderObjectElement, RenderObjectElementData, RenderObjectElementWidget,
+    AnyElement, BuildContext, Element, ElementBase, ElementData, ElementLifecycle, InheritedWidget,
+    IntoWidget, KeyRef, RenderObjectElement, RenderObjectElementData, RenderObjectElementWidget,
     RenderObjectWidget, RenderTreeRootElement, Slot, State, StateData, StatefulWidget,
     StatelessWidget, Widget, WidgetKind, WidgetRef, downcast_widget,
 };
@@ -111,6 +112,20 @@ impl View {
              View.of(). This usually means that the provided context is not associated with a \
              View.",
         )
+    }
+
+    /// The id of the view `context` renders into, or `None` for a context in no view: above
+    /// every `View`, in a test's tree without one, or no longer in the tree.
+    ///
+    /// Unlike [`View::maybe_of`], this creates no dependency, so it may be asked outside a build,
+    /// as when a ticker is created or its state activated.
+    pub fn maybe_id_of(app: &App, context: BuildContext) -> Option<ViewId> {
+        if context.lifecycle(app) != ElementLifecycle::Active {
+            return None;
+        }
+        context
+            .get_inherited_widget_of_exact_type::<ViewScope>(app)
+            .map(|scope| scope.view.id())
     }
 
     /// Returns the `PipelineOwner` parent to which a child `View` should attach its
@@ -403,11 +418,14 @@ impl Widget for RawViewInternal {
     }
 }
 
-/// Dart's `_RawViewElement`: the root of a render tree, with its own `PipelineOwner`.
+/// Dart's `_RawViewElement`: the root of a render tree, with its own `PipelineOwner`, which asks
+/// for a frame of the element's view when a render object in it needs layout or paint.
 pub struct RawViewElement {
     element: ElementData,
     render_object_element: RenderObjectElementData,
-    pipeline_owner: Handle<PipelineOwner>,
+    /// Dart's `late final _pipelineOwner`, made when the element mounts, where Dart first reads
+    /// it: its callbacks reach this element.
+    pipeline_owner: Option<Handle<PipelineOwner>>,
     child: Option<AnyElement>,
     /// Is `None` if the view is currently not attached.
     parent_pipeline_owner: Option<Handle<PipelineOwner>>,
@@ -415,15 +433,39 @@ pub struct RawViewElement {
 
 impl RawViewElement {
     fn create(app: &mut App, widget: WidgetRef) -> Handle<RawViewElement> {
-        // Semantics callbacks wait with accessibility.
-        let pipeline_owner = PipelineOwner::new(app, None);
         app.create(RawViewElement {
             element: ElementData::new(widget),
             render_object_element: RenderObjectElementData::default(),
-            pipeline_owner,
+            pipeline_owner: None,
             child: None,
             parent_pipeline_owner: None,
         })
+    }
+
+    /// Dart's initializer of `_pipelineOwner`. Semantics callbacks wait with accessibility.
+    fn create_pipeline_owner(self: Handle<Self>, app: &mut App) -> Handle<PipelineOwner> {
+        // The view is the widget's key, so it is this element's for its whole life.
+        let view = Self::widget_of(self.as_element().widget(app)).view.id();
+        PipelineOwner::new(
+            app,
+            Some(Listener::new(move |app| {
+                SchedulerBinding::ensure_visual_update(app, FrameTarget::View(view));
+            })),
+            Some(Rc::new(move |app: &mut App, is_dirty: bool| {
+                self.handle_flush_paint(app, is_dirty);
+            })),
+        )
+    }
+
+    fn handle_flush_paint(self: Handle<Self>, app: &mut App, is_dirty: bool) {
+        if is_dirty {
+            let root_node = self.pipeline_owner(app).root_node(app);
+            if let Some(render_view) =
+                root_node.and_then(|root_node| root_node.downcast::<RenderView>(app))
+            {
+                render_view.mark_needs_composite_frame(app);
+            }
+        }
     }
 
     /// The `RenderView` at the root of this view's render tree.
@@ -432,8 +474,14 @@ impl RawViewElement {
     }
 
     /// The pipeline owner that lays out and paints this view's render tree.
+    ///
+    /// # Panics
+    ///
+    /// Before the element mounts.
     pub fn pipeline_owner(self: Handle<Self>, app: &App) -> Handle<PipelineOwner> {
-        app.get(self).pipeline_owner
+        app.get(self)
+            .pipeline_owner
+            .expect("a RawViewElement makes its pipeline owner when it mounts")
     }
 
     fn update_child(self: Handle<Self>, app: &mut App) {
@@ -534,7 +582,8 @@ impl Element for RawViewElement {
         new_slot: Option<Slot>,
     ) {
         RenderObjectElement::mount(self, app, parent, new_slot);
-        let owner = self.pipeline_owner(app);
+        let owner = self.create_pipeline_owner(app);
+        app.get_mut(self).pipeline_owner = Some(owner);
         debug_assert!(owner.root_node(app).is_none());
         let render_view = self.render_view(app);
         owner.set_root_node(app, Some(render_view.as_object()));
@@ -1070,17 +1119,29 @@ impl Element for MultiChildComponentElement {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
     use std::rc::Rc;
+    use std::time::Duration;
 
-    use inset_scheduler::SchedulerBinding;
+    use inset_embedder::ViewId;
+    use inset_foundation::{App, AppCell, Handle};
+    use inset_scheduler::{FrameCallback, SchedulerBinding, Ticker};
+    use inset_test::TestPlatform;
 
     use crate::binding::WidgetsBinding;
-    use crate::framework::{GlobalKey, IntoWidget};
-    use crate::test_harness::{binding_cell, binding_mount, binding_pump};
+    use crate::framework::{
+        BuildContext, GlobalKey, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
+    };
+    use crate::test_harness::{
+        binding_cell, binding_mount, binding_pump, binding_pump_view, pump_every_view,
+    };
     use crate::widgets::basic::SizedBox;
+    use crate::widgets::ticker_provider::{
+        SingleTickerProviderStateMixin, SingleTickerProviderStateMixinData,
+    };
 
-    /// A view's render tree lives under the view's own `PipelineOwner`, which has no visual
-    /// update callback: its requests must reach the binding through the manifold.
+    /// A view's render tree lives under the view's own `PipelineOwner`, which asks for a frame of
+    /// its view when a render object in it needs layout or paint.
     #[test]
     fn a_dirty_render_object_under_a_view_schedules_a_frame() {
         let cell = binding_cell();
@@ -1180,89 +1241,592 @@ mod tests {
         assert!(last.has_primary_focus(&cell.borrow()));
     }
 
-    /// A host view that counts its presents, for trees with more than one view.
-    struct CountingView {
-        id: inset_embedder::ViewId,
-        presented: Rc<std::cell::Cell<u32>>,
+    const FIRST: ViewId = ViewId(1);
+    const SECOND: ViewId = ViewId(2);
+
+    /// An app with the widgets binding, on a platform that gives it views [`FIRST`] and
+    /// [`SECOND`].
+    fn app_with_two_views() -> (Rc<AppCell>, Rc<TestPlatform>) {
+        let platform = Rc::new(
+            TestPlatform::new()
+                .on(inset_embedder::TargetPlatform::MacOS)
+                .with_views(&[FIRST, SECOND]),
+        );
+        let cell = AppCell::with_platform(platform.clone());
+        WidgetsBinding::instance(&mut cell.borrow_mut());
+        (cell, platform)
     }
 
-    impl inset_embedder::View for CountingView {
-        fn id(&self) -> inset_embedder::ViewId {
-            self.id
-        }
-
-        fn metrics(&self) -> inset_embedder::ViewMetrics {
-            inset_embedder::ViewMetrics {
-                physical_size: [400.0, 300.0],
-                physical_constraints: inset_embedder::ViewConstraints::tight(400.0, 300.0),
-                device_pixel_ratio: 2.0,
-                ..inset_embedder::ViewMetrics::default()
-            }
-        }
-
-        fn present(&self, _scene: std::sync::Arc<inset_embedder::Scene>) {
-            self.presented.set(self.presented.get() + 1);
-        }
-    }
-
-    fn counting_view(id: u64) -> (inset_embedder::ViewRef, Rc<std::cell::Cell<u32>>) {
-        let presented = Rc::new(std::cell::Cell::new(0));
-        let view: inset_embedder::ViewRef = Rc::new(CountingView {
-            id: inset_embedder::ViewId(id),
-            presented: Rc::clone(&presented),
-        });
-        (view, presented)
+    /// How many frames each of [`FIRST`] and [`SECOND`] was presented.
+    fn presented(platform: &TestPlatform) -> [u32; 2] {
+        [FIRST, SECOND].map(|view| platform.test_view(view).presented())
     }
 
     /// Attaches `root` as the whole tree and runs the first frame.
     /// `run_widget` and the timer turn that attaches the root and draws the warm-up frame.
-    fn mount_root(cell: &inset_foundation::AppCell, root: crate::WidgetRef) {
+    fn mount_root(cell: &AppCell, root: WidgetRef) {
         crate::binding::run_widget(&mut cell.borrow_mut(), root);
-        cell.elapse(std::time::Duration::ZERO);
+        cell.elapse(Duration::ZERO);
+    }
+
+    /// The elapsed times a `Ticking` widget's ticker ticked at.
+    type Ticks = Rc<RefCell<Vec<Duration>>>;
+
+    /// A widget whose ticker runs from its first build, recording the elapsed time of each tick.
+    /// It builds its child, or a small box.
+    #[derive(Debug)]
+    struct Ticking {
+        key: Option<KeyRef>,
+        ticks: Ticks,
+        child: Option<WidgetRef>,
+    }
+
+    impl Ticking {
+        fn new(ticks: &Ticks) -> Ticking {
+            Ticking {
+                key: None,
+                ticks: Rc::clone(ticks),
+                child: None,
+            }
+        }
+
+        fn key(mut self, key: KeyRef) -> Ticking {
+            self.key = Some(key);
+            self
+        }
+
+        fn child(mut self, child: WidgetRef) -> Ticking {
+            self.child = Some(child);
+            self
+        }
+    }
+
+    impl StatefulWidget for Ticking {
+        type State = TickingState;
+
+        fn key(&self) -> Option<&KeyRef> {
+            self.key.as_ref()
+        }
+
+        fn create_state(&self) -> TickingState {
+            TickingState {
+                state: StateData::new(),
+                single_ticker_provider: SingleTickerProviderStateMixinData::new(),
+                ticker: None,
+            }
+        }
+    }
+
+    struct TickingState {
+        state: StateData<Ticking>,
+        single_ticker_provider: SingleTickerProviderStateMixinData,
+        ticker: Option<Handle<Ticker>>,
+    }
+
+    impl SingleTickerProviderStateMixin for TickingState {
+        fn single_ticker_provider_data(
+            self: Handle<Self>,
+            app: &App,
+        ) -> &SingleTickerProviderStateMixinData {
+            &app.get(self).single_ticker_provider
+        }
+
+        fn single_ticker_provider_data_mut(
+            self: Handle<Self>,
+            app: &mut App,
+        ) -> &mut SingleTickerProviderStateMixinData {
+            &mut app.get_mut(self).single_ticker_provider
+        }
+    }
+
+    impl State for TickingState {
+        type Widget = Ticking;
+        crate::state_accessors!();
+
+        fn init_state(self: Handle<Self>, app: &mut App) {
+            let ticks = Rc::clone(&self.widget(app).ticks);
+            let ticker = SingleTickerProviderStateMixin::create_ticker(
+                self,
+                app,
+                FrameCallback::new(move |_app, elapsed| ticks.borrow_mut().push(elapsed)),
+            );
+            let _ticking = ticker.start(app);
+            app.get_mut(self).ticker = Some(ticker);
+        }
+
+        fn activate(self: Handle<Self>, app: &mut App) {
+            SingleTickerProviderStateMixin::activate(self, app);
+        }
+
+        fn dispose(self: Handle<Self>, app: &mut App) {
+            if let Some(ticker) = app.get_mut(self).ticker.take() {
+                ticker.dispose(app);
+            }
+            SingleTickerProviderStateMixin::dispose(self, app);
+        }
+
+        fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+            self.widget(app)
+                .child
+                .clone()
+                .unwrap_or_else(|| SizedBox::new().width(10.0).height(10.0).into_widget())
+        }
+    }
+
+    fn millis(ms: u64) -> Duration {
+        Duration::from_millis(ms)
     }
 
     #[test]
     fn a_view_collection_bootstraps_one_render_tree_per_view() {
         use inset_rendering::RendererBinding;
 
-        let cell = binding_cell();
-        let (first, first_presented) = counting_view(1);
-        let (second, second_presented) = counting_view(2);
+        let (cell, platform) = app_with_two_views();
         mount_root(
             &cell,
             super::ViewCollection::new(vec![
-                super::View::new(first, SizedBox::new()).into_widget(),
-                super::View::new(second, SizedBox::new()).into_widget(),
+                super::View::new(platform.test_view(FIRST), SizedBox::new()).into_widget(),
+                super::View::new(platform.test_view(SECOND), SizedBox::new()).into_widget(),
             ])
             .into_widget(),
         );
         let mut app = cell.borrow_mut();
         let binding = RendererBinding::instance(&mut app);
         assert_eq!(binding.render_views(&app).len(), 2);
-        assert_eq!(first_presented.get(), 1);
-        assert_eq!(second_presented.get(), 1);
+        assert_eq!(platform.test_view(FIRST).presented(), 1);
+        assert_eq!(platform.test_view(SECOND).presented(), 1);
     }
 
     #[test]
     fn a_view_anchor_renders_its_child_in_place_and_its_view_beside_it() {
         use inset_rendering::RendererBinding;
 
-        let cell = binding_cell();
-        let (enclosing, enclosing_presented) = counting_view(1);
-        let (side, side_presented) = counting_view(2);
+        let (cell, platform) = app_with_two_views();
         mount_root(
             &cell,
             super::View::new(
-                enclosing,
-                super::ViewAnchor::new(SizedBox::new().width(10.0).height(10.0))
-                    .view(super::View::new(side, SizedBox::new())),
+                platform.test_view(FIRST),
+                super::ViewAnchor::new(SizedBox::new().width(10.0).height(10.0)).view(
+                    super::View::new(platform.test_view(SECOND), SizedBox::new()),
+                ),
             )
             .into_widget(),
         );
         let mut app = cell.borrow_mut();
         let binding = RendererBinding::instance(&mut app);
         assert_eq!(binding.render_views(&app).len(), 2);
-        assert_eq!(enclosing_presented.get(), 1);
-        assert_eq!(side_presented.get(), 1);
+        assert_eq!(platform.test_view(FIRST).presented(), 1);
+        assert_eq!(platform.test_view(SECOND).presented(), 1);
+    }
+
+    #[test]
+    fn a_view_whose_frames_are_held_stays_idle_while_another_animates() {
+        let (cell, platform) = app_with_two_views();
+        let (shown, hidden) = (Ticks::default(), Ticks::default());
+        mount_root(
+            &cell,
+            super::ViewCollection::new(vec![
+                super::View::new(platform.test_view(FIRST), Ticking::new(&shown)).into_widget(),
+                super::View::new(platform.test_view(SECOND), Ticking::new(&hidden)).into_widget(),
+            ])
+            .into_widget(),
+        );
+        let (hidden_ticks, hidden_presented) = (
+            hidden.borrow().len(),
+            platform.test_view(SECOND).presented(),
+        );
+
+        // The host holds the frames asked of a hidden window: only the shown view's come.
+        for frame in 1..=5 {
+            binding_pump_view(&mut cell.borrow_mut(), FIRST, millis(16 * frame));
+        }
+        assert_eq!(shown.borrow().len(), 1 + 5, "the shown view animates");
+        assert_eq!(
+            hidden.borrow().len(),
+            hidden_ticks,
+            "the hidden view's ticker waits"
+        );
+        assert_eq!(
+            platform.test_view(SECOND).presented(),
+            hidden_presented,
+            "the hidden view draws nothing"
+        );
+        assert!(
+            platform.has_frame_request(SECOND),
+            "its ticker's request is held, not lost"
+        );
+
+        // Shown again, it is given the frame it asked for.
+        binding_pump(&mut cell.borrow_mut(), millis(96));
+        assert_eq!(hidden.borrow().len(), hidden_ticks + 1);
+    }
+
+    #[test]
+    fn two_views_at_different_rates_each_animate_at_their_own() {
+        let (cell, platform) = app_with_two_views();
+        let (slow, fast) = (Ticks::default(), Ticks::default());
+        mount_root(
+            &cell,
+            super::ViewCollection::new(vec![
+                super::View::new(platform.test_view(FIRST), Ticking::new(&slow)).into_widget(),
+                super::View::new(platform.test_view(SECOND), Ticking::new(&fast)).into_widget(),
+            ])
+            .into_widget(),
+        );
+        slow.borrow_mut().clear();
+        fast.borrow_mut().clear();
+
+        // The first view is on a 60 Hz screen, the second on a 120 Hz one. Both tickers started
+        // in the warm-up frame, at the time the epoch then starts again from: the first frame
+        // after it, the second view's at 8 ms. So each ticks at its own view's frames with the
+        // time since 8 ms.
+        for ms in (8..=48).step_by(8) {
+            if ms % 16 == 0 {
+                binding_pump_view(&mut cell.borrow_mut(), FIRST, millis(ms));
+            }
+            binding_pump_view(&mut cell.borrow_mut(), SECOND, millis(ms));
+        }
+        assert_eq!(*slow.borrow(), [millis(8), millis(24), millis(40)]);
+        assert_eq!(
+            *fast.borrow(),
+            [0, 8, 16, 24, 32, 40].map(millis),
+            "each ticks at its own view's frames"
+        );
+    }
+
+    #[test]
+    fn a_global_key_subtree_moved_to_another_view_keeps_its_state_and_ticks_there() {
+        let (cell, platform) = app_with_two_views();
+        let key = GlobalKey::new();
+        let ticks = Ticks::default();
+        let tree = |in_first: bool| -> WidgetRef {
+            let ticking =
+                || -> WidgetRef { Ticking::new(&ticks).key(Rc::new(key.clone())).into_widget() };
+            let (first, second): (WidgetRef, WidgetRef) = if in_first {
+                (ticking(), SizedBox::new().into_widget())
+            } else {
+                (SizedBox::new().into_widget(), ticking())
+            };
+            super::ViewCollection::new(vec![
+                super::View::new(platform.test_view(FIRST), first).into_widget(),
+                super::View::new(platform.test_view(SECOND), second).into_widget(),
+            ])
+            .into_widget()
+        };
+        mount_root(&cell, tree(true));
+        let state = key
+            .current_state::<TickingState>(&mut cell.borrow_mut())
+            .expect("mounted in the first view");
+
+        mount_root(&cell, tree(false));
+        assert_eq!(
+            key.current_state::<TickingState>(&mut cell.borrow_mut()),
+            Some(state),
+            "the same state, now in the second view"
+        );
+
+        let before = ticks.borrow().len();
+        binding_pump_view(&mut cell.borrow_mut(), FIRST, millis(16));
+        assert_eq!(
+            ticks.borrow().len(),
+            before,
+            "no tick at the old view's frame"
+        );
+        binding_pump_view(&mut cell.borrow_mut(), SECOND, millis(16));
+        assert_eq!(
+            ticks.borrow().len(),
+            before + 1,
+            "it ticks at its new view's"
+        );
+    }
+
+    #[test]
+    fn an_anchored_view_paints_only_at_its_own_frame() {
+        let (cell, platform) = app_with_two_views();
+        let key = GlobalKey::new();
+        mount_root(
+            &cell,
+            super::View::new(
+                platform.test_view(FIRST),
+                super::ViewAnchor::new(SizedBox::new().width(10.0).height(10.0)).view(
+                    super::View::new(
+                        platform.test_view(SECOND),
+                        SizedBox::new().key(Rc::new(key.clone())),
+                    ),
+                ),
+            )
+            .into_widget(),
+        );
+        let mut app = cell.borrow_mut();
+        let in_anchored = key
+            .current_context(&mut app)
+            .and_then(|context| context.find_render_object(&app))
+            .expect("the anchored view's render object");
+        // The frame after the warm-up frame presents each view again.
+        pump_every_view(&mut app, millis(8));
+        assert_eq!(presented(&platform), [2, 2]);
+        platform.take_frame_requests();
+
+        in_anchored.mark_needs_paint(&mut app);
+        assert_eq!(
+            platform.take_frame_requests(),
+            [SECOND],
+            "asked of the anchored view alone"
+        );
+        binding_pump_view(&mut app, FIRST, millis(16));
+        assert_eq!(
+            presented(&platform),
+            [2, 2],
+            "the enclosing view had nothing to paint, and left the anchored view alone"
+        );
+        assert!(in_anchored.debug_needs_paint(&app));
+
+        binding_pump_view(&mut app, SECOND, millis(16));
+        assert_eq!(presented(&platform), [2, 3]);
+        assert!(!in_anchored.debug_needs_paint(&app));
+    }
+
+    #[test]
+    fn a_request_for_another_view_made_during_a_frame_is_not_lost() {
+        let (cell, platform) = app_with_two_views();
+        let key = GlobalKey::new();
+        mount_root(
+            &cell,
+            super::ViewCollection::new(vec![
+                super::View::new(platform.test_view(FIRST), SizedBox::new()).into_widget(),
+                super::View::new(
+                    platform.test_view(SECOND),
+                    SizedBox::new().key(Rc::new(key.clone())),
+                )
+                .into_widget(),
+            ])
+            .into_widget(),
+        );
+        let mut app = cell.borrow_mut();
+        let in_second = key
+            .current_context(&mut app)
+            .and_then(|context| context.find_render_object(&app))
+            .expect("the second view's render object");
+        platform.take_frame_requests();
+
+        SchedulerBinding::schedule_frame_callback(
+            &mut app,
+            FrameCallback::new(move |app, _time_stamp| in_second.mark_needs_paint(app)),
+            Some(FIRST),
+            false,
+            true,
+        );
+        binding_pump(&mut app, millis(16));
+        assert_eq!(
+            platform.take_frame_requests(),
+            [SECOND],
+            "asked during the first view's frame"
+        );
+        binding_pump_view(&mut app, SECOND, millis(32));
+        assert_eq!(platform.test_view(SECOND).presented(), 2);
+    }
+
+    /// Two views, each holding a keyed subtree, under a keyed subtree above both; answers the
+    /// keys: above, in the first view, in the second.
+    fn mount_keyed_views(cell: &AppCell, platform: &TestPlatform) -> [GlobalKey; 3] {
+        let keys = [GlobalKey::new(), GlobalKey::new(), GlobalKey::new()];
+        let keyed = |key: &GlobalKey, child: WidgetRef| -> WidgetRef {
+            crate::KeyedSubtree::new(child)
+                .key(Rc::new(key.clone()))
+                .into_widget()
+        };
+        mount_root(
+            cell,
+            keyed(
+                &keys[0],
+                super::ViewCollection::new(vec![
+                    super::View::new(
+                        platform.test_view(FIRST),
+                        keyed(&keys[1], SizedBox::new().into_widget()),
+                    )
+                    .into_widget(),
+                    super::View::new(
+                        platform.test_view(SECOND),
+                        keyed(&keys[2], SizedBox::new().into_widget()),
+                    )
+                    .into_widget(),
+                ])
+                .into_widget(),
+            ),
+        );
+        keys
+    }
+
+    /// Marks the element `key` is on dirty.
+    fn mark_needs_build(app: &mut App, key: &GlobalKey) {
+        key.current_context(app)
+            .expect("mounted")
+            .mark_needs_build(app);
+    }
+
+    #[test]
+    fn a_dirty_element_asks_for_a_frame_of_its_own_view_alone() {
+        let (cell, platform) = app_with_two_views();
+        let [_, in_first, in_second] = mount_keyed_views(&cell, &platform);
+        let mut app = cell.borrow_mut();
+        platform.take_frame_requests();
+
+        mark_needs_build(&mut app, &in_second);
+        assert_eq!(platform.take_frame_requests(), [SECOND]);
+        mark_needs_build(&mut app, &in_first);
+        assert_eq!(
+            platform.take_frame_requests(),
+            [FIRST],
+            "another view is asked too before the build pass, though one view was asked already"
+        );
+
+        binding_pump_view(&mut app, FIRST, millis(16));
+        assert!(
+            !in_second
+                .current_context(&mut app)
+                .expect("mounted")
+                .dirty(&app),
+            "the first view's frame built the second view's dirty element"
+        );
+    }
+
+    #[test]
+    fn a_dirty_element_above_every_view_asks_for_a_frame_of_each() {
+        let (cell, platform) = app_with_two_views();
+        let [above, _, _] = mount_keyed_views(&cell, &platform);
+        let mut app = cell.borrow_mut();
+        platform.take_frame_requests();
+
+        mark_needs_build(&mut app, &above);
+        assert_eq!(platform.take_frame_requests(), [FIRST, SECOND]);
+    }
+
+    #[test]
+    fn a_post_frame_callback_for_no_view_runs_while_another_view_is_hidden() {
+        let (cell, platform) = app_with_two_views();
+        mount_keyed_views(&cell, &platform);
+        let mut app = cell.borrow_mut();
+        let ran = Rc::new(RefCell::new(Vec::new()));
+        for (name, view) in [("no view", None), ("second view", Some(SECOND))] {
+            let ran = Rc::clone(&ran);
+            SchedulerBinding::add_post_frame_callback(
+                &mut app,
+                FrameCallback::new(move |_app, _time_stamp| ran.borrow_mut().push(name)),
+                view,
+            );
+        }
+
+        // The second view is hidden: the host gives frames to the first alone.
+        binding_pump_view(&mut app, FIRST, millis(16));
+        assert_eq!(*ran.borrow(), ["no view"]);
+        binding_pump_view(&mut app, SECOND, millis(16));
+        assert_eq!(*ran.borrow(), ["no view", "second view"]);
+    }
+
+    #[test]
+    fn a_view_that_painted_nothing_presents_nothing() {
+        let (cell, platform) = app_with_two_views();
+        let [_, _, in_second] = mount_keyed_views(&cell, &platform);
+        let mut app = cell.borrow_mut();
+        // The frame after the warm-up frame presents each view again.
+        pump_every_view(&mut app, millis(8));
+        assert_eq!(presented(&platform), [2, 2]);
+
+        in_second
+            .current_context(&mut app)
+            .and_then(|context| context.find_render_object(&app))
+            .expect("the second view's render object")
+            .mark_needs_paint(&mut app);
+        pump_every_view(&mut app, millis(16));
+        assert_eq!(
+            presented(&platform),
+            [2, 3],
+            "the first view keeps showing its last frame"
+        );
+    }
+
+    #[test]
+    fn a_ticker_whose_widget_moves_to_another_view_while_its_view_is_hidden_ticks_there() {
+        let (cell, platform) = app_with_two_views();
+        let ticks = Ticks::default();
+        let key = GlobalKey::new();
+        let above = GlobalKey::new();
+        let in_first = Rc::new(std::cell::Cell::new(true));
+        let tree = {
+            let (ticks, key, in_first) = (Rc::clone(&ticks), key.clone(), Rc::clone(&in_first));
+            let platform = Rc::clone(&platform);
+            crate::Builder::new(move |_app, _context| {
+                let ticking = Ticking::new(&ticks).key(Rc::new(key.clone())).into_widget();
+                let empty = || SizedBox::new().into_widget();
+                let (first, second) = if in_first.get() {
+                    (ticking, empty())
+                } else {
+                    (empty(), ticking)
+                };
+                super::ViewCollection::new(vec![
+                    super::View::new(platform.test_view(FIRST), first).into_widget(),
+                    super::View::new(platform.test_view(SECOND), second).into_widget(),
+                ])
+                .into_widget()
+            })
+            .key(Rc::new(above.clone()))
+            .into_widget()
+        };
+        mount_root(&cell, tree);
+        let mut app = cell.borrow_mut();
+        binding_pump_view(&mut app, FIRST, millis(16));
+        let state = key.current_state::<TickingState>(&mut app);
+
+        // The first view is hidden from now on: the host gives the second view the frames it
+        // asks for, and the first none. The second view's frame moves the widget, whose tick was
+        // due at the first view's frame.
+        in_first.set(false);
+        mark_needs_build(&mut app, &above);
+        let before = ticks.borrow().len();
+        let mut second_view_frames = 0;
+        for frame in 2..=5 {
+            if platform.take_frame_request(SECOND) {
+                second_view_frames += 1;
+                binding_pump_view(&mut app, SECOND, millis(16 * frame));
+            }
+        }
+        assert_eq!(
+            key.current_state::<TickingState>(&mut app),
+            state,
+            "the same state"
+        );
+        assert_eq!(second_view_frames, 4, "the second view asks for each frame");
+        assert_eq!(
+            ticks.borrow().len(),
+            before + 3,
+            "it ticks at each of the second view's frames after the one that moved it"
+        );
+    }
+
+    #[test]
+    fn a_ticker_above_every_view_ticks_at_every_frame() {
+        let (cell, platform) = app_with_two_views();
+        let ticks = Ticks::default();
+        mount_root(
+            &cell,
+            Ticking::new(&ticks)
+                .child(
+                    super::ViewCollection::new(vec![
+                        super::View::new(platform.test_view(FIRST), SizedBox::new()).into_widget(),
+                        super::View::new(platform.test_view(SECOND), SizedBox::new()).into_widget(),
+                    ])
+                    .into_widget(),
+                )
+                .into_widget(),
+        );
+        let mut app = cell.borrow_mut();
+        ticks.borrow_mut().clear();
+
+        // Both views are on one screen, then the second is on a screen of its own. The epoch
+        // starts again at the first frame after the warm-up frame.
+        pump_every_view(&mut app, millis(16));
+        pump_every_view(&mut app, millis(32));
+        binding_pump_view(&mut app, SECOND, millis(40));
+        assert_eq!(*ticks.borrow(), [0, 16, 24].map(millis));
     }
 }

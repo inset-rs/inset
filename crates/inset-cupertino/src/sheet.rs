@@ -812,6 +812,10 @@ impl State for CupertinoSheetTransitionState {
         self.setup_animation(app);
     }
 
+    fn activate(self: Handle<Self>, app: &mut App) {
+        SingleTickerProviderStateMixin::activate(self, app);
+    }
+
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &CupertinoSheetTransition) {
         let widget = self.widget(app);
         let changed = old_widget.primary_route_animation != widget.primary_route_animation
@@ -1651,6 +1655,7 @@ impl State for CupertinoDragGestureDetectorState {
                     }
                     app.get_mut(self).drag_gesture_controller = None;
                 }),
+                None,
             );
         }
     }
@@ -2198,6 +2203,7 @@ impl State for CupertinoDraggableScrollableSheetState {
                     }
                     app.get_mut(self).drag_gesture_controller = None;
                 }),
+                None,
             );
         }
         self.scroll_controller(app).dispose(app);

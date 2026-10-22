@@ -22,6 +22,7 @@ use crate::framework::{
     BuildContext, GlobalKey, InheritedModel, InheritedWidget, IntoWidget, KeyRef, Notification,
     State, StateData, StatefulWidget, WidgetRef,
 };
+use crate::view::View;
 use crate::widgets::actions::{Action, ActionData, Actions, DismissAction, DismissIntent};
 use crate::widgets::basic::{Builder, IgnorePointer, Offstage, RepaintBoundary};
 use crate::widgets::focus_manager::{FocusNodeLeaf, FocusScopeNode, TraversalEdgeBehavior};
@@ -1352,6 +1353,9 @@ pub trait LocalHistoryRoute: TransitionRoute {
                             Route::changed_internal_state(self, app);
                         }
                     }),
+                    self.as_route()
+                        .navigator(app)
+                        .and_then(|navigator| View::maybe_id_of(app, navigator.context(app))),
                 );
             } else {
                 Route::changed_internal_state(self, app);
@@ -2322,6 +2326,7 @@ pub trait ModalRoute: LocalHistoryRoute {
             | SchedulerPhase::MidFrameMicrotasks
             | SchedulerPhase::PersistentCallbacks
             | SchedulerPhase::TransientCallbacks => {
+                let context = ModalRoute::subtree_context(self, app);
                 SchedulerBinding::add_post_frame_callback(
                     app,
                     FrameCallback::new(move |app, _time_stamp| {
@@ -2331,6 +2336,7 @@ pub trait ModalRoute: LocalHistoryRoute {
                         }
                         notification.dispatch(app, context);
                     }),
+                    context.and_then(|context| View::maybe_id_of(app, context)),
                 );
             }
         }
@@ -4100,6 +4106,7 @@ mod tests {
     use super::*;
     use crate::binding::run_app;
     use crate::framework::{IntoWidget, StatelessWidget};
+    use crate::test_harness::pump_every_view;
     use crate::widgets::basic::{Align, Directionality, SizedBox};
     use crate::widgets::navigator::{NavigatorState, RouteSettings};
     use crate::widgets::pages::PageRouteBuilder;
@@ -4116,17 +4123,10 @@ mod tests {
         AppCell::with_platform(Rc::new(platform))
     }
 
-    fn pump_frame(app: &mut App, at: Duration) {
-        SchedulerBinding::handle_begin_frame(app, Some(at));
-        app.drain_microtasks();
-        SchedulerBinding::handle_draw_frame(app);
-        app.drain_microtasks();
-    }
-
     fn mount(cell: &AppCell, child: WidgetRef) {
         run_app(&mut cell.borrow_mut(), child);
         cell.elapse(Duration::ZERO);
-        pump_frame(&mut cell.borrow_mut(), Duration::ZERO);
+        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
     }
 
     /// Runs frames until every route transition has settled.
@@ -4134,7 +4134,7 @@ mod tests {
         let mut at = from;
         for _ in 0..40 {
             at += Duration::from_millis(20);
-            pump_frame(app, at);
+            pump_every_view(app, at);
         }
         at
     }
@@ -4247,7 +4247,7 @@ mod tests {
 
         let pushed = page_route(&mut app, None, "second").as_route();
         navigator_state.push(&mut app, pushed);
-        pump_frame(&mut app, at);
+        pump_every_view(&mut app, at);
         let animation = pushed
             .as_transition_route(&app)
             .expect("a page route is a transition route")
@@ -4371,7 +4371,7 @@ mod tests {
         // The dialog's own content is the 10x10 box in the corner, so the middle of the view
         // is the barrier.
         tap_at(&mut app, Offset::new(150.0, 100.0));
-        pump_frame(&mut app, at);
+        pump_every_view(&mut app, at);
         settle(&mut app, at);
         assert!(!dialog.is_active(&app), "the barrier popped the dialog");
     }
@@ -4397,7 +4397,7 @@ mod tests {
         let at = settle(&mut app, at);
 
         tap_at(&mut app, Offset::new(150.0, 100.0));
-        pump_frame(&mut app, at);
+        pump_every_view(&mut app, at);
         settle(&mut app, at);
         assert!(dialog.is_current(&app), "the tap did nothing");
     }
@@ -4429,7 +4429,7 @@ mod tests {
         assert!(Route::will_handle_pop_internally(second, &app));
 
         navigator_state.pop(&mut app, None);
-        pump_frame(&mut app, at);
+        pump_every_view(&mut app, at);
         assert!(removed.get(), "the local history entry was removed");
         assert!(
             second.as_route().is_current(&app),

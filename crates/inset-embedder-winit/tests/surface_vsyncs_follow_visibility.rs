@@ -116,8 +116,8 @@ mod client {
     ];
 
     /// Opens a window with a native surface in it and a larger one to cover it, then brings the
-    /// first through each step, counting its producer's vsyncs in each. The framework's own
-    /// frames, which come whether a window is visible or not, time the steps.
+    /// first through each step, counting its producer's vsyncs in each. Wakes, which come whether
+    /// a window is visible or not, time the steps.
     pub(crate) struct VisibilityClient {
         platform: PlatformRef,
         requested: Vec<RequestId>,
@@ -184,7 +184,7 @@ mod client {
             view.present(Arc::from(scene.build()));
             self.producer = Some(CountingProducer::start(surface));
             self.step_began = Instant::now();
-            self.platform.request_frame();
+            support::wake_after_a_tick(&self.platform);
         }
 
         /// Counts the current step's vsyncs once it has settled, and brings the next step when
@@ -236,9 +236,16 @@ mod client {
     }
 
     impl EmbedderClient for VisibilityClient {
-        fn frame(&mut self, _frame: Frame) {
+        fn frame(&mut self, _views: &[ViewId], _frame: Frame) {}
+
+        fn wake(&mut self, _elapsed: Duration) {
+            support::take_opened_windows(&self.platform, &mut self.requested, &mut self.windows);
+            self.place_a_surface_once_both_windows_are_made();
+            if self.producer.is_none() {
+                return;
+            }
             if !self.go_on() {
-                self.platform.request_frame();
+                support::wake_after_a_tick(&self.platform);
                 return;
             }
             assert!(
@@ -247,11 +254,6 @@ mod client {
                 self.failures
             );
             support::pass(TEST);
-        }
-
-        fn wake(&mut self, _elapsed: Duration) {
-            support::take_opened_windows(&self.platform, &mut self.requested, &mut self.windows);
-            self.place_a_surface_once_both_windows_are_made();
         }
 
         fn view_added(&mut self, _id: ViewId) {

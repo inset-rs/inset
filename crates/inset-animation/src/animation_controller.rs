@@ -1043,19 +1043,20 @@ mod tests {
         assert!(either.get(), "when_complete_or_cancel observes cancel");
     }
 
-    /// flutter_test's `TestVSync`: vends ordinary tickers.
+    /// flutter_test's `TestVSync`: vends ordinary tickers, in no view.
     struct TestVSync;
 
     impl TickerProvider for TestVSync {
         fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
-            Ticker::new(app, on_tick)
+            Ticker::new(app, on_tick, None)
         }
     }
 
+    /// A frame at `at`, of no view: the tickers here are in none.
     fn pump(app: &mut App, at: Duration) {
-        SchedulerBinding::handle_begin_frame(app, Some(at));
+        SchedulerBinding::handle_begin_frame(app, &[], Some(at));
         app.drain_microtasks();
-        SchedulerBinding::handle_draw_frame(app);
+        SchedulerBinding::handle_draw_frame(app, &[]);
         app.drain_microtasks();
     }
 

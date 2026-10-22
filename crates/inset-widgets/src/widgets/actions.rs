@@ -18,6 +18,7 @@ use crate::framework::{
     BuildContext, GlobalKey, InheritedWidget, IntoWidget, KeyRef, State, StateData, StatefulWidget,
     WidgetRef,
 };
+use crate::view::View;
 use crate::widgets::basic::MouseRegion;
 use crate::widgets::focus_manager::{
     AnyFocusNode, FocusHighlightMode, FocusManager, HighlightModeListener, KeyEventResult,
@@ -1862,6 +1863,7 @@ impl State for FocusableActionDetectorState {
                 let mode = FocusManager::instance(app).highlight_mode(app);
                 self.update_highlight_mode(app, mode);
             }),
+            View::maybe_id_of(app, self.context(app)),
         );
         let listener: HighlightModeListener =
             Rc::new(move |app: &mut App, mode| self.handle_focus_highlight_mode_change(app, mode));
@@ -1883,6 +1885,7 @@ impl State for FocusableActionDetectorState {
                 FrameCallback::new(move |app, _duration| {
                     self.may_trigger_callback(app, Some(old_enabled), None);
                 }),
+                View::maybe_id_of(app, self.context(app)),
             );
         }
     }
@@ -2879,8 +2882,9 @@ mod tests {
     use inset_gestures::{GestureBinding, PointerEvent, PointerHoverEvent};
 
     use super::*;
+    use crate::test_harness::pump_every_view;
     use crate::widgets::basic::{Builder, SizedBox};
-    use crate::widgets::focus_manager::tests::{app_with_view, mount, pump_frame};
+    use crate::widgets::focus_manager::tests::{app_with_view, mount};
     use crate::widgets::focus_manager::{FocusHighlightStrategy, FocusNodeLeaf};
 
     #[derive(Debug)]
@@ -3140,7 +3144,7 @@ mod tests {
         );
         let mut app = cell.borrow_mut();
         // The post-frame callback `init_state` registered decides whether a highlight may show.
-        pump_frame(&mut app);
+        pump_every_view(&mut app, std::time::Duration::ZERO);
 
         assert_eq!(*focused.borrow(), [true]);
         assert_eq!(*focus_highlights.borrow(), [true]);
@@ -3162,7 +3166,7 @@ mod tests {
                 .into_widget(),
         );
         let mut app = cell.borrow_mut();
-        pump_frame(&mut app);
+        pump_every_view(&mut app, std::time::Duration::ZERO);
 
         let hover = |position: Offset| {
             PointerEvent::Hover(PointerHoverEvent {
@@ -3199,7 +3203,7 @@ mod tests {
         drop(app);
         mount(&cell, detector(false, Rc::clone(&sink)));
         let mut app = cell.borrow_mut();
-        pump_frame(&mut app);
+        pump_every_view(&mut app, std::time::Duration::ZERO);
         // A disabled detector sets `Focus.canRequestFocus` to false, so nothing is focused.
         node.request_focus(&mut app, None);
         app.drain_microtasks();
@@ -3209,7 +3213,7 @@ mod tests {
         drop(app);
         mount(&cell, detector(true, Rc::clone(&sink)));
         let mut app = cell.borrow_mut();
-        pump_frame(&mut app);
+        pump_every_view(&mut app, std::time::Duration::ZERO);
         node.request_focus(&mut app, None);
         app.drain_microtasks();
         assert!(node.has_primary_focus(&app));

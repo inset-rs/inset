@@ -150,8 +150,9 @@ impl Platform for WebPlatform {
         self.brightness.get()
     }
 
-    fn request_frame(&self) {
-        if !self.frame_requested.replace(true) {
+    /// The page's canvas is its one view: a frame of any other is no frame of the page's.
+    fn request_frame(&self, view: ViewId) {
+        if view == CANVAS_VIEW && !self.frame_requested.replace(true) {
             self.schedule();
         }
     }

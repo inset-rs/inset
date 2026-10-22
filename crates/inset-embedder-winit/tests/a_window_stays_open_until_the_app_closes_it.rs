@@ -134,7 +134,7 @@ mod client {
             }
         }
 
-        fn frame(&mut self, _frame: Frame) {}
+        fn frame(&mut self, _views: &[ViewId], _frame: Frame) {}
         fn view_added(&mut self, _id: ViewId) {
             if matches!(self.step, Step::Opening) {
                 self.press_close_once_open();

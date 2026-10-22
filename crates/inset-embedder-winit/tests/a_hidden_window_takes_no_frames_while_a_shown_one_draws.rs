@@ -1,7 +1,6 @@
-//! The framework's frames keep coming while the first window, whose display's vsyncs they are
-//! drawn at, is hidden and another is shown, as a launcher's panel is hidden once a program opens
-//! from it. Drawn at the vsyncs of the hidden window's own display link, as they once were, they
-//! stopped: that link gives none while its window is hidden.
+//! A hidden window takes no frames while a shown one keeps taking its own, as a launcher's panel
+//! is hidden once a program opens from it: a refresh of a screen brings the frames of the windows
+//! on it that are in sight, and a frame asked of a hidden window waits until it shows.
 //!
 //! Its own binary, without the test harness: AppKit's event loop runs on the main thread only. It
 //! opens two windows for about a second, and needs a login session's window server.
@@ -10,7 +9,7 @@
 mod support;
 
 #[cfg(target_os = "macos")]
-const TEST: &str = "the_frames_keep_coming_while_the_first_window_is_hidden";
+const TEST: &str = "a_hidden_window_takes_no_frames_while_a_shown_one_draws";
 
 #[cfg(target_os = "macos")]
 fn main() {
@@ -36,17 +35,23 @@ mod client {
 
     /// How long the frames are counted once the first window is hidden.
     const COUNTED_FOR: Duration = Duration::from_millis(500);
-    /// The fewest frames that half second may bring: a 60 Hz display brings about 30.
+    /// The fewest frames of the shown window that half second may bring: a 60 Hz display brings
+    /// about 30.
     const FEWEST_FRAMES: u32 = 10;
+    /// How long AppKit may take to tell the hidden window out of sight, during which a frame
+    /// asked of it may still come.
+    const HIDING: Duration = Duration::from_millis(250);
 
-    /// Opens two windows, the first of which the frames take their vsyncs from, hides that one
-    /// once both are made, asks for a frame from each frame, and counts the frames of the half
-    /// second after the hide.
+    /// Opens two windows, hides the first once both are made, asks for a frame of each from
+    /// every frame of the shown one, and counts the frames of each in the half second after the
+    /// hide.
     pub(crate) struct CountingClient {
         platform: PlatformRef,
         requested: Vec<RequestId>,
         windows: Vec<WindowRef>,
         hidden_at: Option<Instant>,
+        /// The frames of the hidden window once AppKit has had time to tell it out of sight.
+        hidden_frames: u32,
     }
 
     impl CountingClient {
@@ -68,6 +73,7 @@ mod client {
                 requested,
                 windows: Vec::new(),
                 hidden_at: None,
+                hidden_frames: 0,
             }
         }
 
@@ -78,23 +84,47 @@ mod client {
             }
             self.windows[0].hide();
             self.hidden_at = Some(Instant::now());
-            self.platform.request_frame();
+            self.request_a_frame_of_each_window();
+        }
+
+        fn request_a_frame_of_each_window(&self) {
+            for window in &self.windows {
+                self.platform.request_frame(window.view().id());
+            }
+        }
+
+        fn hidden_view(&self) -> ViewId {
+            self.windows[0].view().id()
+        }
+
+        fn shown_view(&self) -> ViewId {
+            self.windows[1].view().id()
         }
     }
 
     impl EmbedderClient for CountingClient {
-        fn frame(&mut self, _frame: Frame) {
+        fn frame(&mut self, views: &[ViewId], _frame: Frame) {
             let Some(hidden_at) = self.hidden_at else {
                 return;
             };
+            if views.contains(&self.hidden_view()) && hidden_at.elapsed() >= HIDING {
+                self.hidden_frames += 1;
+            }
+            if !views.contains(&self.shown_view()) {
+                return;
+            }
             let frames = frames::count_one();
             if hidden_at.elapsed() < COUNTED_FOR {
-                self.platform.request_frame();
+                self.request_a_frame_of_each_window();
                 return;
             }
             assert!(
                 frames >= FEWEST_FRAMES,
-                "{frames} frames in {COUNTED_FOR:?} with the first window hidden"
+                "{frames} frames of the shown window in {COUNTED_FOR:?} with the first hidden"
+            );
+            assert_eq!(
+                self.hidden_frames, 0,
+                "frames of the hidden window once it was out of sight"
             );
             support::pass(TEST);
         }
@@ -119,7 +149,8 @@ mod client {
     }
 }
 
-/// The frames counted since the first window was hidden, and how long the test waits for them.
+/// The frames of the shown window counted since the first was hidden, and how long the test waits
+/// for them.
 #[cfg(target_os = "macos")]
 mod frames {
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -130,7 +161,8 @@ mod frames {
 
     static FRAMES: AtomicU32 = AtomicU32::new(0);
 
-    /// One more frame since the first window was hidden; answers how many there have been.
+    /// One more frame of the shown window since the first was hidden; answers how many there have
+    /// been.
     pub(crate) fn count_one() -> u32 {
         FRAMES.fetch_add(1, Ordering::SeqCst) + 1
     }

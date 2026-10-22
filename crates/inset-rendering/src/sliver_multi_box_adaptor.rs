@@ -1261,7 +1261,7 @@ pub(crate) mod viewport_test_support {
                 Some(configuration),
                 Rc::new(TestView) as ViewRef,
             );
-            let owner = PipelineOwner::new(app, None);
+            let owner = PipelineOwner::new(app, None, None);
             owner.set_root_node(app, Some(view.as_object()));
             view.prepare_initial_frame(app);
             owner.flush_layout(app);

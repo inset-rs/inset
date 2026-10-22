@@ -81,8 +81,10 @@ mod client {
         fn draw_once_the_window_is_made(&mut self) {
             let was_made = !self.windows.is_empty();
             support::take_opened_windows(&self.platform, &mut self.requested, &mut self.windows);
-            if !was_made && !self.windows.is_empty() {
-                self.platform.request_frame();
+            if let Some(window) = self.windows.first()
+                && !was_made
+            {
+                self.platform.request_frame(window.view().id());
             }
         }
 
@@ -116,14 +118,14 @@ mod client {
     }
 
     impl EmbedderClient for OpeningClient {
-        fn frame(&mut self, _frame: Frame) {
+        fn frame(&mut self, _views: &[ViewId], _frame: Frame) {
             let Some(window) = self.windows.first() else {
                 return;
             };
             window.view().present(a_square());
             self.presented += 1;
             if self.presented < FRAMES_PRESENTED {
-                self.platform.request_frame();
+                self.platform.request_frame(window.view().id());
                 return;
             }
             let wrong = self.what_is_wrong(window);

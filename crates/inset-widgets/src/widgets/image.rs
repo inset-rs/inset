@@ -509,6 +509,7 @@ mod image_widget_tests {
     use super::*;
     use crate::framework::IntoWidget;
     use crate::test_harness::Harness;
+    use crate::test_harness::pump_every_view;
 
     /// A codec over pictures the test wrote out in advance.
     struct TestCodec {
@@ -809,12 +810,6 @@ mod image_widget_tests {
             "nothing decoded once nobody was listening"
         );
     }
-    fn finish_frame(app: &mut App) {
-        inset_scheduler::SchedulerBinding::handle_begin_frame(app, Some(Duration::ZERO));
-        app.drain_microtasks();
-        inset_scheduler::SchedulerBinding::handle_draw_frame(app);
-        app.drain_microtasks();
-    }
 
     #[test]
     fn late_open_and_frame_results_release_their_codec_after_stream_disposal() {
@@ -841,7 +836,7 @@ mod image_widget_tests {
                 let cache = inset_painting::ImageCache::instance(&mut app);
                 cache.clear(&mut app);
                 stream.dispose(&mut app);
-                finish_frame(&mut app);
+                pump_every_view(&mut app, Duration::ZERO);
             }
             cell.checkpoint();
             assert!(!cell.borrow().contains(stream));
@@ -874,7 +869,7 @@ mod image_widget_tests {
         {
             let mut app = cell.borrow_mut();
             completer = stream.completer(&app).unwrap();
-            finish_frame(&mut app);
+            pump_every_view(&mut app, Duration::ZERO);
             stream.dispose(&mut app);
             assert_eq!(
                 host.dropped.get(),
@@ -883,7 +878,7 @@ mod image_widget_tests {
             );
             let cache = inset_painting::ImageCache::instance(&mut app);
             cache.clear(&mut app);
-            finish_frame(&mut app);
+            pump_every_view(&mut app, Duration::ZERO);
         }
         cell.checkpoint();
         assert_eq!(host.dropped.get(), 1);
@@ -908,7 +903,7 @@ mod image_widget_tests {
             let mut app = cell.borrow_mut();
             harness.set_child(&mut app, Image::memory_static(&DATA).into_widget());
             harness.pump(&mut app);
-            finish_frame(&mut app);
+            pump_every_view(&mut app, Duration::ZERO);
             drop(app);
             cell.checkpoint();
         }
@@ -923,7 +918,7 @@ mod image_widget_tests {
             let cache = inset_painting::ImageCache::instance(&mut app);
             assert_eq!(cache.live_image_count(&app), 0);
             cache.clear(&mut app);
-            finish_frame(&mut app);
+            pump_every_view(&mut app, Duration::ZERO);
         }
         cell.checkpoint();
         assert_eq!(host.dropped.get(), 1);

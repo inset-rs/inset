@@ -2661,13 +2661,13 @@ pub(crate) mod tests {
         View as EmbedderView, ViewId, ViewMetrics,
     };
     use inset_gestures::{PointerDownEvent, PointerEvent};
-    use inset_scheduler::SchedulerBinding;
     use inset_services::{KeyDownEvent, LogicalKeyboardKey, PhysicalKeyboardKey, ServicesBinding};
     use inset_test::TestPlatform;
 
     use super::*;
     use crate::binding::run_app;
     use crate::framework::{IntoWidget, WidgetRef};
+    use crate::test_harness::pump_every_view;
     use crate::widgets::basic::{Builder, SizedBox};
 
     /// A view whose text input answers whether its host edits keys itself.
@@ -2739,19 +2739,11 @@ pub(crate) mod tests {
         AppCell::with_platform(Rc::new(platform))
     }
 
-    /// A frame: begin, draw, and the microtasks in between.
-    pub(crate) fn pump_frame(app: &mut App) {
-        SchedulerBinding::handle_begin_frame(app, Some(Duration::ZERO));
-        app.drain_microtasks();
-        SchedulerBinding::handle_draw_frame(app);
-        app.drain_microtasks();
-    }
-
     /// Mounts `widget` through [`run_app`] and draws the first frame.
     pub(crate) fn mount(cell: &AppCell, widget: WidgetRef) {
         run_app(&mut cell.borrow_mut(), widget);
         cell.elapse(Duration::ZERO);
-        pump_frame(&mut cell.borrow_mut());
+        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
     }
 
     /// A mounted app whose tree is one `Builder`, plus that builder's context.

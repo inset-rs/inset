@@ -4,7 +4,7 @@
 
 use std::rc::Rc;
 
-use inset_foundation::{App, Handle, Listener};
+use inset_foundation::{App, Handle, Listener, ValueChanged};
 
 use crate::layer::ErasedLayer;
 use crate::object::AnyRenderObject;
@@ -48,11 +48,23 @@ pub trait PipelineManifold {
     fn request_visual_update(&self, app: &mut App);
 }
 
+/// Signature for a function that is called when the pipeline owner and child owner
+/// finished the paint phase.
+///
+/// The `bool` is `is_dirty`: whether the pipeline owner had dirty render objects that needed to
+/// be painted.
+pub type FlushedPaintCallback = ValueChanged<bool>;
+
 /// The pipeline owner manages the rendering pipeline.
 ///
 /// Flutter's counterpart is `PipelineOwner`.
 pub struct PipelineOwner {
     on_need_visual_update: Option<Listener>,
+    /// Called when this pipeline owner and child owner have finished the paint phase.
+    ///
+    /// The `is_dirty` parameter is true if the pipeline owner has dirty render objects that
+    /// needed to be painted.
+    on_flushed_paint: Option<FlushedPaintCallback>,
     manifold: Option<Rc<dyn PipelineManifold>>,
     root_node: Option<AnyRenderObject>,
     nodes_needing_layout: Vec<AnyRenderObject>,
@@ -73,9 +85,14 @@ impl PipelineOwner {
     ///
     /// Typically created by the binding, but can be created separately to drive
     /// off-screen render objects through the rendering pipeline.
-    pub fn new(app: &mut App, on_need_visual_update: Option<Listener>) -> Handle<PipelineOwner> {
+    pub fn new(
+        app: &mut App,
+        on_need_visual_update: Option<Listener>,
+        on_flushed_paint: Option<FlushedPaintCallback>,
+    ) -> Handle<PipelineOwner> {
         app.create(PipelineOwner {
             on_need_visual_update,
+            on_flushed_paint,
             manifold: None,
             root_node: None,
             nodes_needing_layout: Vec::new(),
@@ -281,11 +298,53 @@ impl PipelineOwner {
     /// This function is one of the core stages of the rendering pipeline. Painting occurs after
     /// layout and before the scene is recomposited so that scene is composited with up-to-date
     /// display lists for every render object.
+    ///
+    /// A frame paints each of its views by
+    /// [`flush_paint_without_children`](Self::flush_paint_without_children) instead.
     pub fn flush_paint(self: Handle<Self>, app: &mut App) {
         if cfg!(debug_assertions) {
             app.get_mut(self).debug_doing_paint = true;
         }
+        let is_dirty = self.paint_dirty_nodes(app);
+        let children = app.get(self).children.clone();
+        for child in children {
+            child.flush_paint(app);
+        }
+        self.did_flush_paint(app, is_dirty);
+        debug_assert!(
+            app.get(self).nodes_needing_paint.is_empty(),
+            "Child PipelineOwners must not dirty nodes in their parent."
+        );
+        if cfg!(debug_assertions) {
+            app.get_mut(self).debug_doing_paint = false;
+        }
+    }
+
+    /// [`flush_paint`](Self::flush_paint) for this owner's render objects alone: the views
+    /// anchored in a view, whose owners are its owner's children, paint at frames of their own.
+    pub fn flush_paint_without_children(self: Handle<Self>, app: &mut App) {
+        if cfg!(debug_assertions) {
+            app.get_mut(self).debug_doing_paint = true;
+        }
+        let is_dirty = self.paint_dirty_nodes(app);
+        self.did_flush_paint(app, is_dirty);
+        if cfg!(debug_assertions) {
+            app.get_mut(self).debug_doing_paint = false;
+        }
+    }
+
+    /// Calls the `on_flushed_paint` callback given to [`new`](Self::new), if there is one.
+    fn did_flush_paint(self: Handle<Self>, app: &mut App, is_dirty: bool) {
+        if let Some(on_flushed_paint) = app.get(self).on_flushed_paint.clone() {
+            on_flushed_paint(app, is_dirty);
+        }
+    }
+
+    /// The paint pass over this owner's dirty render objects, deepest first; answers whether
+    /// there were any.
+    fn paint_dirty_nodes(self: Handle<Self>, app: &mut App) -> bool {
         let mut dirty_nodes = std::mem::take(&mut app.get_mut(self).nodes_needing_paint);
+        let is_dirty = !dirty_nodes.is_empty();
         dirty_nodes.sort_by_key(|node| std::cmp::Reverse(node.depth(app)));
         for node in dirty_nodes {
             debug_assert!(node.layer(app).is_some() || !cfg!(debug_assertions));
@@ -307,17 +366,7 @@ impl PipelineOwner {
                 }
             }
         }
-        let children = app.get(self).children.clone();
-        for child in children {
-            child.flush_paint(app);
-        }
-        debug_assert!(
-            app.get(self).nodes_needing_paint.is_empty(),
-            "Child PipelineOwners must not dirty nodes in their parent."
-        );
-        if cfg!(debug_assertions) {
-            app.get_mut(self).debug_doing_paint = false;
-        }
+        is_dirty
     }
 
     /// Mark this [`PipelineOwner`] as attached to the given [`PipelineManifold`].
@@ -461,7 +510,7 @@ mod tests {
                 root_log.borrow_mut().push("layout parent")
             }))),
         );
-        let root = PipelineOwner::new(&mut app, None);
+        let root = PipelineOwner::new(&mut app, None, None);
         root.set_root_node(&mut app, Some(root_node.as_object()));
         root_node.schedule_initial_layout(&mut app);
 
@@ -472,7 +521,7 @@ mod tests {
                 child_log.borrow_mut().push("layout child")
             }))),
         );
-        let child = PipelineOwner::new(&mut app, None);
+        let child = PipelineOwner::new(&mut app, None, None);
         child.set_root_node(&mut app, Some(child_node.as_object()));
         child_node.schedule_initial_layout(&mut app);
 
@@ -485,7 +534,7 @@ mod tests {
     fn set_root_node_attaches_and_replacing_detaches() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         let first = RenderHandle::new_box(&mut app, leaf(None));
         let second = RenderHandle::new_box(&mut app, leaf(None));
         owner.set_root_node(&mut app, Some(first.as_object()));
@@ -501,7 +550,7 @@ mod tests {
     fn schedule_initial_layout_then_flush() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         let node = RenderHandle::new_box(&mut app, leaf(None));
         owner.set_root_node(&mut app, Some(node.as_object()));
         node.schedule_initial_layout(&mut app);
@@ -529,8 +578,8 @@ mod tests {
         let manifold = Rc::new(CountingManifold {
             requests: Cell::new(0),
         });
-        let root = PipelineOwner::new(&mut app, None);
-        let adopted_before = PipelineOwner::new(&mut app, None);
+        let root = PipelineOwner::new(&mut app, None, None);
+        let adopted_before = PipelineOwner::new(&mut app, None, None);
         root.adopt_child(&mut app, adopted_before);
 
         adopted_before.request_visual_update(&mut app);
@@ -549,7 +598,7 @@ mod tests {
             "attach reaches existing children"
         );
 
-        let adopted_after = PipelineOwner::new(&mut app, None);
+        let adopted_after = PipelineOwner::new(&mut app, None, None);
         root.adopt_child(&mut app, adopted_after);
         adopted_after.request_visual_update(&mut app);
         assert_eq!(manifold.requests.get(), 3, "adopt_child attaches the child");
@@ -577,6 +626,7 @@ mod tests {
                 let callbacks = callbacks.clone();
                 move |_app| callbacks.set(callbacks.get() + 1)
             })),
+            None,
         );
         owner.attach(&mut app, manifold.clone());
         owner.request_visual_update(&mut app);

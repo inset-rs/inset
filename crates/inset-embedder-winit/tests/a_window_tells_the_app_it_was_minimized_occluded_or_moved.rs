@@ -155,8 +155,7 @@ mod client {
 
     /// Opens a window to watch and a larger one to cover it, then brings the first through each
     /// step, asking it how it is once the step has settled and counting the changes the app hears
-    /// of it. The framework's own frames, which come whether a window is visible or not, time the
-    /// steps.
+    /// of it. Wakes, which come whether a window is visible or not, time the steps.
     pub(crate) struct WindowChangesClient {
         platform: PlatformRef,
         requested: Vec<RequestId>,
@@ -226,7 +225,7 @@ mod client {
             self.step = Some(0);
             self.step_began = Instant::now();
             self.changes_heard = 0;
-            self.platform.request_frame();
+            support::wake_after_a_tick(&self.platform);
         }
 
         /// Judges the current step once it has settled, and brings the next. Answers whether every
@@ -280,9 +279,15 @@ mod client {
     }
 
     impl EmbedderClient for WindowChangesClient {
-        fn frame(&mut self, _frame: Frame) {
+        fn frame(&mut self, _views: &[ViewId], _frame: Frame) {}
+
+        fn wake(&mut self, _elapsed: Duration) {
+            self.begin_once_both_windows_are_made();
+            if self.step.is_none() {
+                return;
+            }
             if !self.go_on() {
-                self.platform.request_frame();
+                support::wake_after_a_tick(&self.platform);
                 return;
             }
             assert!(
@@ -291,10 +296,6 @@ mod client {
                 self.failures
             );
             support::pass(TEST);
-        }
-
-        fn wake(&mut self, _elapsed: Duration) {
-            self.begin_once_both_windows_are_made();
         }
 
         fn view_added(&mut self, _id: ViewId) {

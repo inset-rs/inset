@@ -29,6 +29,7 @@ use crate::framework::{
     SingleChildRenderObjectWidget, Slot, State, StateData, StatefulWidget, Widget, WidgetKind,
     WidgetRef, downcast_widget,
 };
+use crate::view::View;
 use crate::widgets::basic::{Builder, Directionality, WidgetBuilder};
 use crate::widgets::media_query::MediaQuery;
 use crate::widgets::ticker_provider::{
@@ -240,6 +241,7 @@ impl OverlayEntry {
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::handle_method(overlay, OverlayState::mark_dirty_after_frame),
+                View::maybe_id_of(app, overlay.context(app)),
             );
         } else {
             overlay.mark_dirty(app);
@@ -3893,6 +3895,7 @@ impl OverlayChildLayoutBuilderElement {
         SchedulerBinding::schedule_frame_callback(
             app,
             FrameCallback::new(move |app, _time_stamp| self.frame_callback(app)),
+            View::maybe_id_of(app, self.as_element()),
             false,
             true,
         );
@@ -4260,6 +4263,7 @@ impl RenderObject for RenderOverlayChildLayoutBuilder {
             let callback_id = SchedulerBinding::schedule_frame_callback(
                 app,
                 FrameCallback::new(move |app, _time_stamp| self.frame_callback(app)),
+                None,
                 false,
                 false,
             );

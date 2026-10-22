@@ -882,15 +882,9 @@ mod tests {
     use inset_scheduler::SchedulerBinding;
 
     use super::*;
+    use crate::test_harness::pump_every_view;
     use crate::test_harness::{ScrollHarness, mount_scroll_harness};
     use crate::widgets::scroll_physics::{BouncingScrollPhysics, ClampingScrollPhysics};
-
-    fn pump(app: &mut App, at: Duration) {
-        SchedulerBinding::handle_begin_frame(app, Some(at));
-        app.drain_microtasks();
-        SchedulerBinding::handle_draw_frame(app);
-        app.drain_microtasks();
-    }
 
     fn position(
         app: &mut App,
@@ -1002,13 +996,13 @@ mod tests {
         );
         assert!(is_scrolling(&app, position));
 
-        pump(&mut app, Duration::ZERO);
+        pump_every_view(&mut app, Duration::ZERO);
         assert_eq!(ViewportOffset::pixels(position, &app), 0.0);
 
-        pump(&mut app, Duration::from_millis(50));
+        pump_every_view(&mut app, Duration::from_millis(50));
         assert!((ViewportOffset::pixels(position, &app) - 100.0).abs() < 0.001);
 
-        pump(&mut app, Duration::from_millis(100));
+        pump_every_view(&mut app, Duration::from_millis(100));
         assert_eq!(ViewportOffset::pixels(position, &app), 200.0);
     }
 
@@ -1034,10 +1028,10 @@ mod tests {
         let flag = Rc::clone(&heard);
         done.clone().then(&mut app, move |_app, ()| flag.set(true));
 
-        pump(&mut app, Duration::ZERO);
-        pump(&mut app, Duration::from_millis(50));
+        pump_every_view(&mut app, Duration::ZERO);
+        pump_every_view(&mut app, Duration::from_millis(50));
         assert!(!done.is_completed(), "still animating");
-        pump(&mut app, Duration::from_millis(100));
+        pump_every_view(&mut app, Duration::from_millis(100));
         assert_eq!(ViewportOffset::pixels(position, &app), 200.0);
         assert!(
             !done.is_completed(),
@@ -1045,7 +1039,7 @@ mod tests {
         );
 
         // The frame past the duration stops the ticker, whose completion queues the end.
-        SchedulerBinding::handle_begin_frame(&mut app, Some(Duration::from_millis(150)));
+        SchedulerBinding::handle_begin_frame(&mut app, &[], Some(Duration::from_millis(150)));
         assert!(
             !done.is_completed(),
             "the activity ends on the microtask queue, after the frame"
@@ -1078,13 +1072,13 @@ mod tests {
             done.await;
             flag.set(true);
         });
-        pump(&mut app, Duration::ZERO);
+        pump_every_view(&mut app, Duration::ZERO);
         drop(app);
         cell.checkpoint();
         assert!(!resumed.get(), "pending: the animation is still running");
 
-        pump(&mut cell.borrow_mut(), Duration::from_millis(100));
-        pump(&mut cell.borrow_mut(), Duration::from_millis(150));
+        pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(100));
+        pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(150));
         assert!(!resumed.get(), "a task resumes only at the checkpoint");
         cell.checkpoint();
         assert!(resumed.get());
@@ -1107,14 +1101,14 @@ mod tests {
             Duration::from_millis(100),
             Curves::linear(),
         );
-        pump(&mut app, Duration::ZERO);
-        pump(&mut app, Duration::from_millis(50));
+        pump_every_view(&mut app, Duration::ZERO);
+        pump_every_view(&mut app, Duration::from_millis(50));
         assert!(!done.is_completed());
 
         ViewportOffset::jump_to(position, &mut app, 0.0);
         assert!(done.is_completed(), "the driven activity was disposed");
         assert_eq!(ViewportOffset::pixels(position, &app), 0.0);
-        pump(&mut app, Duration::from_millis(100));
+        pump_every_view(&mut app, Duration::from_millis(100));
         assert_eq!(
             ViewportOffset::pixels(position, &app),
             0.0,
@@ -1214,7 +1208,7 @@ mod tests {
         assert!(is_scrolling(&app, position));
 
         for frame in 0..200 {
-            pump(&mut app, Duration::from_millis(16 * frame));
+            pump_every_view(&mut app, Duration::from_millis(16 * frame));
             if !is_scrolling(&app, position) {
                 break;
             }

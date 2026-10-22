@@ -1618,13 +1618,13 @@ mod tests {
     use std::time::Duration;
 
     use inset_embedder::Restoration;
-    use inset_scheduler::SchedulerBinding;
     use inset_services::{RestorationMap, RestorationUpdate};
     use inset_test::TestPlatform;
 
     use super::*;
     use crate::framework::{Element, GlobalKey, StatelessWidget};
     use crate::test_harness::Harness;
+    use crate::test_harness::pump_every_view;
     use crate::widgets::restoration_properties::{RestorableInt, RestorableValue};
 
     /// A host that answers `Restoration::get` with what it was handed and records every
@@ -1800,14 +1800,6 @@ mod tests {
         harness
     }
 
-    /// A frame, so the manager's post-frame serialization runs.
-    fn pump_frame(app: &mut App) {
-        SchedulerBinding::handle_begin_frame(app, Some(Duration::ZERO));
-        app.drain_microtasks();
-        SchedulerBinding::handle_draw_frame(app);
-        app.drain_microtasks();
-    }
-
     fn counter_state(harness: &Harness, app: &App, key: &GlobalKey) -> Handle<CounterState> {
         harness
             .owner
@@ -1928,7 +1920,7 @@ mod tests {
         let count = counter_state(&harness, &app, &key).count(&app);
         assert_eq!(*count.value(&app), 0);
 
-        pump_frame(&mut app);
+        pump_every_view(&mut app, Duration::ZERO);
         let sent = restoration
             .puts
             .borrow()
@@ -1960,7 +1952,7 @@ mod tests {
             )
             .into_widget(),
         );
-        pump_frame(&mut app);
+        pump_every_view(&mut app, Duration::ZERO);
         restoration.puts.borrow_mut().clear();
 
         let count = counter_state(&harness, &app, &key).count(&app);
@@ -1970,7 +1962,7 @@ mod tests {
             "the write waits for the end of the frame"
         );
 
-        pump_frame(&mut app);
+        pump_every_view(&mut app, Duration::ZERO);
         let sent = restoration
             .puts
             .borrow()
@@ -2018,7 +2010,7 @@ mod tests {
         assert_eq!(bucket.restoration_id(&app), "renamed");
         assert_eq!(*state.count(&app).value(&app), 7);
 
-        pump_frame(&mut app);
+        pump_every_view(&mut app, Duration::ZERO);
         let sent = restoration
             .puts
             .borrow()

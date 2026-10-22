@@ -1,6 +1,7 @@
-//! Desktop embedder: winit event loop and native windows. The framework's frames are drawn one per
-//! vsync of the display the first window is on: from its display link on macOS, from a timer at
-//! the display's rate elsewhere. Presents through valo.
+//! Desktop embedder: winit event loop and native windows. Each view's frames are drawn at the
+//! vsyncs of the screen its window is on, and held while the window is minimized or occluded:
+//! from the screen's display link on macOS, from a timer at the screen's rate elsewhere. Presents
+//! through valo.
 //!
 //! Flutter's multi-view model, three things with lifetimes of their own: the app, started at
 //! launch and running until it quits; its views, each with a window here, zero or more, opened

@@ -1,7 +1,7 @@
-//! One display's vsyncs, one call for each vsync asked for: those of the display the first window
-//! is on, from the system's display link for it where it has one ([`ThisOsDisplayLink`]), which
-//! comes whether or not a window on the display is shown, and from a timer at the display's rate
-//! elsewhere.
+//! One display's vsyncs, one call for each vsync asked for: from the system's display link for
+//! it where it has one ([`ThisOsDisplayLink`]), which comes whether or not a window on the display
+//! is shown, and from a timer at the display's rate elsewhere. Every view whose window is on the
+//! display shares its source (`frame_scheduler.rs`).
 //!
 //! A vsync is asked for one at a time, as Flutter's `VsyncWaiter` is. The source runs on for one
 //! vsync after the one asked for, so an animation that asks again from each frame finds it
@@ -9,7 +9,6 @@
 //! rule a later editor could break: the source runs whenever a vsync is asked for and has not
 //! come, so none waits for ever; it may run one vsync longer than asked, never shorter.
 
-use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use winit::monitor::MonitorHandle;
@@ -21,11 +20,7 @@ use crate::os::{DisplayLink, ThisOsDisplayLink};
 const DEFAULT_INTERVAL: Duration = Duration::from_micros(16_667);
 
 pub(crate) struct VsyncSource {
-    /// What a display link calls at each vsync: sends the loop its `Vsync`.
-    on_vsync: Rc<dyn Fn()>,
-    /// The display whose vsyncs these are; `None` before one was first asked for.
-    display: Option<MonitorHandle>,
-    /// The system's display link for `display`; `None` where it has none.
+    /// The system's display link for the display; `None` where it has none.
     display_link: Option<ThisOsDisplayLink>,
     /// The vsyncs where there is no display link.
     timer: VsyncTimer,
@@ -34,45 +29,23 @@ pub(crate) struct VsyncSource {
 }
 
 impl VsyncSource {
-    /// A source whose display link calls `on_vsync` at each vsync; a timer's vsyncs are the
-    /// loop's to notice, by [`timer_due`](Self::timer_due).
-    pub(crate) fn new(on_vsync: impl Fn() + 'static) -> VsyncSource {
-        VsyncSource {
-            on_vsync: Rc::new(on_vsync),
-            display: None,
-            display_link: None,
-            timer: VsyncTimer::new(DEFAULT_INTERVAL),
+    /// The vsyncs of `display`, paused: its display link calls `on_vsync` at each vsync asked for,
+    /// and a timer's vsyncs are the loop's to notice, by [`timer_due`](Self::timer_due).
+    pub(crate) fn on(display: &MonitorHandle, on_vsync: impl Fn() + 'static) -> VsyncSource {
+        let mut source = VsyncSource {
+            display_link: ThisOsDisplayLink::start(display, Box::new(on_vsync)),
+            timer: VsyncTimer::new(interval_of(display)),
             requested: false,
-        }
+        };
+        source.pause();
+        source
     }
 
-    /// Asks for one call at the next vsync of `display`; asking again before it comes does
-    /// nothing. It pauses after a vsync nobody asked for.
-    pub(crate) fn request_vsync(&mut self, display: &MonitorHandle) {
-        self.follow_display(display);
-        self.request_next_vsync();
-    }
-
-    /// Asks for one call at the next vsync of the display the last request named; nothing
-    /// before a request has named one.
-    pub(crate) fn request_next_vsync(&mut self) {
-        if self.display.is_none() {
-            return;
-        }
+    /// Asks for one call at the display's next vsync; asking again before it comes does nothing.
+    /// It pauses after a vsync nobody asked for.
+    pub(crate) fn request_vsync(&mut self) {
         self.requested = true;
         self.resume();
-    }
-
-    /// The vsyncs come from `display` from now on: one asked for and not come yet comes at its
-    /// next vsync.
-    pub(crate) fn follow_display(&mut self, display: &MonitorHandle) {
-        if self.display.as_ref() == Some(display) {
-            return;
-        }
-        self.start_on(display.clone());
-        if self.requested {
-            self.resume();
-        }
     }
 
     /// A vsync came: the source runs on to the next if this one was asked for, and pauses if
@@ -88,16 +61,6 @@ impl VsyncSource {
     /// When the timer's next vsync is due, for the loop to wait until; `None` on a display link.
     pub(crate) fn timer_due(&self) -> Option<Instant> {
         self.timer.due
-    }
-
-    /// Takes the vsyncs of `display` from now on, paused: from its display link where the
-    /// system has one, from a timer at its rate otherwise.
-    fn start_on(&mut self, display: MonitorHandle) {
-        let on_vsync = Rc::clone(&self.on_vsync);
-        self.display_link = ThisOsDisplayLink::start(&display, Box::new(move || on_vsync()));
-        self.timer = VsyncTimer::new(interval_of(&display));
-        self.display = Some(display);
-        self.pause();
     }
 
     fn resume(&mut self) {
@@ -163,11 +126,11 @@ impl VsyncTimer {
     }
 }
 
-/// The display `window` is on, whose vsyncs its frames take: on macOS, for a hidden or minimized
-/// window, the one it was last shown on. The primary display for a window the system names none
-/// for, and any display where it names no primary one; `None` where the system knows no display
-/// at all.
-pub(crate) fn display_of(window: &Window) -> Option<MonitorHandle> {
+/// The monitor `window` is on, whose vsyncs its view's frames take: on macOS, for a hidden or
+/// minimized window, the one it was last shown on. The primary monitor for a window the system
+/// names none for, and any monitor where it names no primary one; `None` where the system knows
+/// no monitor at all.
+pub(crate) fn monitor_of(window: &Window) -> Option<MonitorHandle> {
     window
         .current_monitor()
         .or_else(|| window.primary_monitor())
@@ -234,14 +197,5 @@ mod tests {
         timer.resume(Instant::now());
         timer.pause();
         assert_eq!(timer.due, None);
-    }
-
-    #[test]
-    fn nothing_is_asked_of_a_source_before_a_display_is_named() {
-        let mut source = VsyncSource::new(|| {});
-        source.request_next_vsync();
-        assert_eq!(source.timer_due(), None);
-        source.vsync_came();
-        assert_eq!(source.timer_due(), None);
     }
 }

@@ -11,6 +11,7 @@ use inset_scheduler::{Ticker, TickerCallback};
 use crate::framework::{
     BuildContext, InheritedWidget, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
 };
+use crate::view::View;
 
 /// Enables or disables tickers (and thus animation controllers) in the widget
 /// subtree.
@@ -395,6 +396,9 @@ impl SingleTickerProviderStateMixinData {
 /// [`State::dispose`] call [`activate`](Self::activate) and [`dispose`](Self::dispose)
 /// here, where Dart's mixin body would run; `vsync: this` is
 /// [`create_ticker`](Self::create_ticker) on the state handle.
+///
+/// The ticker ticks at the frames of the view the state's element is in, and
+/// [`activate`](Self::activate), which a `GlobalKey` move to another view runs, moves it there.
 pub trait SingleTickerProviderStateMixin: State {
     /// Mixin field access.
     fn single_ticker_provider_data(
@@ -419,7 +423,7 @@ pub trait SingleTickerProviderStateMixin: State {
              mixing in a SingleTickerProviderStateMixin, use a regular TickerProviderStateMixin.",
             type_name::<Self>()
         );
-        let ticker = Ticker::new(app, on_tick);
+        let ticker = Ticker::new(app, on_tick, View::maybe_id_of(app, self.context(app)));
         self.single_ticker_provider_data_mut(app).ticker = Some(ticker);
         self.update_ticker_mode_notifier(app);
         self.update_ticker(app); // Sets _ticker.mute correctly.
@@ -450,11 +454,15 @@ pub trait SingleTickerProviderStateMixin: State {
     }
 
     /// The mixin's part of [`State::activate`]; the state calls it where Dart's
-    /// `super.activate()` would reach the mixin.
+    /// `super.activate()` would reach the mixin. A `GlobalKey` that moves the element to another
+    /// view deactivates and activates it, so this is where the ticker follows it.
     fn activate(self: Handle<Self>, app: &mut App) {
         // We may have a new TickerMode ancestor.
         self.update_ticker_mode_notifier(app);
         self.update_ticker(app);
+        if let Some(ticker) = self.single_ticker_provider_data(app).ticker {
+            ticker.set_view(app, View::maybe_id_of(app, self.context(app)));
+        }
     }
 }
 
@@ -527,7 +535,8 @@ impl TickerProviderStateMixinData {
 ///
 /// The state holds a [`TickerProviderStateMixinData`] under the field `ticker_provider`
 /// and wires [`activate`](Self::activate) / [`dispose`](Self::dispose) as
-/// [`SingleTickerProviderStateMixin`] describes.
+/// [`SingleTickerProviderStateMixin`] describes, and its tickers follow the element's view as
+/// that one's does.
 ///
 /// A vended ticker stays in the state's set after it is disposed: Dart's `_WidgetTicker`
 /// overrides `Ticker.dispose` to unregister itself, and [`Ticker::dispose`] is not a
@@ -567,7 +576,7 @@ pub trait TickerProviderStateMixin: State {
             .as_ref()
             .expect("set above")
             .value(app);
-        let result = Ticker::new(app, on_tick);
+        let result = Ticker::new(app, on_tick, View::maybe_id_of(app, self.context(app)));
         result.set_muted(app, !values.enabled);
         app.get_mut(result).force_frames = values.force_frames;
         self.ticker_provider_data_mut(app)
@@ -579,11 +588,23 @@ pub trait TickerProviderStateMixin: State {
     }
 
     /// The mixin's part of [`State::activate`]; the state calls it where Dart's
-    /// `super.activate()` would reach the mixin.
+    /// `super.activate()` would reach the mixin. A `GlobalKey` that moves the element to another
+    /// view deactivates and activates it, so this is where the tickers follow it.
     fn activate(self: Handle<Self>, app: &mut App) {
         // We may have a new TickerMode ancestor, get its Notifier.
         self.update_ticker_mode_notifier(app);
         self.update_tickers(app);
+        let view = View::maybe_id_of(app, self.context(app));
+        let tickers: Vec<Handle<Ticker>> = self
+            .ticker_provider_data(app)
+            .tickers
+            .iter()
+            .flatten()
+            .copied()
+            .collect();
+        for ticker in tickers {
+            ticker.set_view(app, view);
+        }
     }
 
     /// The mixin's part of [`State::dispose`]; the state calls it where Dart's

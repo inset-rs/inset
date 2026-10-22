@@ -97,7 +97,7 @@ mod client {
             self.answer_exit_when_due();
         }
 
-        fn frame(&mut self, _frame: Frame) {}
+        fn frame(&mut self, _views: &[ViewId], _frame: Frame) {}
         fn view_added(&mut self, _id: ViewId) {}
         fn view_metrics_changed(&mut self, _id: ViewId) {}
         fn view_removed(&mut self, _id: ViewId) {}

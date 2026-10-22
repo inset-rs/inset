@@ -177,8 +177,7 @@ fn fit_canvas(
     let logical_h = f64::from(canvas.client_height()).max(1.0);
     let width = (logical_w * dpr).round().max(1.0);
     let height = (logical_h * dpr).round().max(1.0);
-    canvas.set_width(width as u32);
-    canvas.set_height(height as u32);
+    resize_canvas(canvas, [width as u32, height as u32]);
     let metrics = ViewMetrics {
         physical_size: [width, height],
         physical_constraints: ViewConstraints::tight(width, height),
@@ -191,6 +190,17 @@ fn fit_canvas(
     (metrics, [width as u32, height as u32])
 }
 
+/// Gives `canvas` `width` x `height` pixels where it has another size: assigning a canvas's size,
+/// even the one it has, clears what it shows, and its frame presents nothing when nothing changed.
+fn resize_canvas(canvas: &HtmlCanvasElement, [width, height]: [u32; 2]) {
+    if canvas.width() != width {
+        canvas.set_width(width);
+    }
+    if canvas.height() != height {
+        canvas.set_height(height);
+    }
+}
+
 fn on_turn<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
     let now = Instant::now();
     if host.platform.should_wake(now) {
@@ -200,9 +210,12 @@ fn on_turn<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
         host.client.borrow_mut().system_fonts_changed();
     }
     if host.platform.take_frame_request() {
-        host.client.borrow_mut().frame(Frame {
-            elapsed: host.platform.elapsed(),
-        });
+        host.client.borrow_mut().frame(
+            &[CANVAS_VIEW],
+            Frame {
+                elapsed: host.platform.elapsed(),
+            },
+        );
     }
     schedule_next(host);
 }
@@ -462,7 +475,7 @@ fn bind_resize<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
             .client
             .borrow_mut()
             .view_metrics_changed(CANVAS_VIEW);
-        listener.platform.request_frame();
+        listener.platform.request_frame(CANVAS_VIEW);
         schedule_next(&listener);
     });
     let _ = host

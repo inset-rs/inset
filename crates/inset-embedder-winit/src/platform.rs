@@ -121,8 +121,10 @@ impl Platform for WinitPlatform {
         self.state.locales().locales()
     }
 
-    fn request_frame(&self) {
-        self.send(AppRequest::RequestFrame);
+    /// Drawn at the next vsync of the screen the view's window is on, and held while the window
+    /// is minimized or occluded (`frame_scheduler.rs`).
+    fn request_frame(&self, view: ViewId) {
+        self.send(AppRequest::RequestFrame(view));
     }
 
     fn now(&self) -> Instant {

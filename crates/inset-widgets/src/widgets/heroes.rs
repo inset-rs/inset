@@ -25,6 +25,7 @@ use crate::framework::{
     AnyElement, BuildContext, GlobalKey, IntoWidget, KeyRef, State, StateData, StatefulWidget,
     StatelessWidget, WidgetRef, downcast_widget,
 };
+use crate::view::View;
 use crate::widgets::basic::{IgnorePointer, KeyedSubtree, Offstage, Positioned, SizedBox};
 use crate::widgets::implicit_animations::EdgeInsetsTween;
 use crate::widgets::media_query::MediaQuery;
@@ -1456,6 +1457,8 @@ impl HeroController {
                         is_user_gesture_transition,
                     );
                 }),
+                self.navigator(app)
+                    .and_then(|navigator| View::maybe_id_of(app, navigator.context(app))),
             );
         }
     }
@@ -1765,11 +1768,11 @@ mod tests {
     use inset_embedder::{TargetPlatform, TextDirection};
     use inset_painting::{AlignmentGeometry, EdgeInsets, EdgeInsetsGeometry};
     use inset_rendering::AnyRenderBox;
-    use inset_scheduler::SchedulerBinding;
     use inset_test::{TestPlatform, TestView};
 
     use super::*;
     use crate::binding::run_app;
+    use crate::test_harness::pump_every_view;
     use crate::widgets::basic::{Align, Directionality, Padding};
     use crate::widgets::navigator::{HeroControllerScope, Route, RouteSettings};
     use crate::widgets::pages::PageRouteBuilder;
@@ -1786,17 +1789,10 @@ mod tests {
         AppCell::with_platform(Rc::new(platform))
     }
 
-    fn pump_frame(app: &mut App, at: Duration) {
-        SchedulerBinding::handle_begin_frame(app, Some(at));
-        app.drain_microtasks();
-        SchedulerBinding::handle_draw_frame(app);
-        app.drain_microtasks();
-    }
-
     fn mount(cell: &AppCell, child: WidgetRef) {
         run_app(&mut cell.borrow_mut(), child);
         cell.elapse(Duration::ZERO);
-        pump_frame(&mut cell.borrow_mut(), Duration::ZERO);
+        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
     }
 
     /// Runs frames until every route transition has settled.
@@ -1804,7 +1800,7 @@ mod tests {
         let mut at = from;
         for _ in 0..40 {
             at += Duration::from_millis(20);
-            pump_frame(app, at);
+            pump_every_view(app, at);
         }
         at
     }
@@ -1922,7 +1918,7 @@ mod tests {
 
         // The observer's post-frame callback measures the destination and starts the flight.
         let mut at = at + Duration::from_millis(20);
-        pump_frame(&mut app, at);
+        pump_every_view(&mut app, at);
         let flight = only_flight(&app, controller);
         let manifest = flight.manifest(&app);
         let (from_hero, to_hero) = (app.get(manifest).from_hero, app.get(manifest).to_hero);
@@ -1961,7 +1957,7 @@ mod tests {
 
         // The shuttle is the entry the flight inserted on top of the navigator's overlay.
         at += Duration::from_millis(20);
-        pump_frame(&mut app, at);
+        pump_every_view(&mut app, at);
         let children = overlay_children(&mut app, navigator);
         assert!(
             children.len() > entries_before,
@@ -1976,7 +1972,7 @@ mod tests {
         // ... and it moves towards the destination as the route transition runs.
         for _ in 0..4 {
             at += Duration::from_millis(40);
-            pump_frame(&mut app, at);
+            pump_every_view(&mut app, at);
             let moved = top_overlay_rect(&mut app, navigator);
             assert!(
                 moved.left > rect.left && moved.width() > rect.width(),
@@ -2034,7 +2030,7 @@ mod tests {
 
         navigator.pop(&mut app, None);
         let mut at = at + Duration::from_millis(20);
-        pump_frame(&mut app, at);
+        pump_every_view(&mut app, at);
         let flight = only_flight(&app, controller);
         let manifest = flight.manifest(&app);
         assert_eq!(
@@ -2045,7 +2041,7 @@ mod tests {
         let to_hero = app.get(manifest).to_hero;
 
         at += Duration::from_millis(20);
-        pump_frame(&mut app, at);
+        pump_every_view(&mut app, at);
         let mut rect = top_overlay_rect(&mut app, navigator);
         assert!(
             rect.left > 80.0,
@@ -2053,7 +2049,7 @@ mod tests {
         );
         for _ in 0..4 {
             at += Duration::from_millis(40);
-            pump_frame(&mut app, at);
+            pump_every_view(&mut app, at);
             let moved = top_overlay_rect(&mut app, navigator);
             assert!(
                 moved.left < rect.left,
@@ -2093,7 +2089,7 @@ mod tests {
         );
         navigator.push(&mut app, second.as_route());
         let at = at + Duration::from_millis(20);
-        pump_frame(&mut app, at);
+        pump_every_view(&mut app, at);
         assert!(
             app.get(controller).flights.is_empty(),
             "the source hero is behind a disabled HeroMode, so no pair matches"
@@ -2145,9 +2141,9 @@ mod tests {
         let second = hero_route(&mut app, "second", page);
         navigator.push(&mut app, second.as_route());
         let mut at = at + Duration::from_millis(20);
-        pump_frame(&mut app, at);
+        pump_every_view(&mut app, at);
         at += Duration::from_millis(20);
-        pump_frame(&mut app, at);
+        pump_every_view(&mut app, at);
 
         assert_eq!(built.get(), 1, "the shuttle is built once and then reused");
         // `Positioned` sizes the shuttle to the flight's rect, so the shuttle's own 11x13 only

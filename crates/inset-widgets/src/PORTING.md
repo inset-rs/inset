@@ -72,6 +72,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the host reports each view's arrival, departure and close request by view, and every view the app has arrives this way.
   Affect: the observers hear only the views no `WindowController` asked for, and a close request stops at the first observer that answers `true`.
 
+- Change: each element marked dirty outside a build pass asks for a frame of its own view, or of every view for one above every `View`, where Flutter asks once for the first.
+  Reason: platform — another view may be hidden and get no frames, while each frame builds every dirty element.
+  Affect: a `setState` in one window gives that window a frame and is built at the first frame of any window.
+
 ## multi_view_app.rs → `MultiViewApp` of Flutter web's embedding guide
 
 - Change: `MultiViewApp` is a framework widget, where Flutter shows it as a sample in its web embedding guide, and it answers close requests on its views.

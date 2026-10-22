@@ -7651,7 +7651,7 @@ mod tests {
 
     /// The test binding's first frame: attach, lay the root out, schedule and flush paint.
     fn first_frame(app: &mut App, root: AnyRenderBox) -> Handle<PipelineOwner> {
-        let owner = PipelineOwner::new(app, None);
+        let owner = PipelineOwner::new(app, None, None);
         owner.set_root_node(app, Some(root.as_object()));
         root.layout(app, BoxConstraints::tight(Size::new(100.0, 100.0)), false);
         schedule_root_paint(app, root.as_object());

@@ -96,6 +96,7 @@ pub trait RelayoutWhenSystemFontsChangeMixin: RenderObject {
         SchedulerBinding::schedule_frame_callback(
             app,
             FrameCallback::handle_method(self.handle(), run_system_fonts_update::<Self>),
+            None,
             false,
             true,
         );

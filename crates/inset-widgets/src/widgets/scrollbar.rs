@@ -47,6 +47,7 @@ use crate::framework::{
     BuildContext, BuildOwner, GlobalKey, IntoWidget, KeyRef, State, StateData, StatefulWidget,
     WidgetRef, downcast_widget,
 };
+use crate::view::View;
 use crate::widgets::basic::{
     CustomPaint, Listener as PointerListener, MouseRegion, RepaintBoundary,
 };
@@ -1995,6 +1996,7 @@ impl RawScrollbarState {
             FrameCallback::new(move |app: &mut App, _duration| {
                 RawScrollbarState::debug_check_has_valid_scroll_position(this, app);
             }),
+            View::maybe_id_of(app, this.context(app)),
         );
     }
 

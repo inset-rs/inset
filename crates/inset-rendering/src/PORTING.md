@@ -79,6 +79,14 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## view.rs → view.dart, binding.rs → binding.dart
 
+- Change: a frame lays out every view's render tree, then paints and composites only its own views, each without the views a `ViewAnchor` places in it.
+  Reason: platform — each view has frames of its own, a view placed in another included.
+  Affect: drawing one window repaints no other.
+
+- Change: a view is composited at a frame only when its paint had work or it was marked, as when it was added, after the warm-up frame or when the app comes back from the background, which is Flutter's #192128 that Flutter has since reverted.
+  Reason: platform — many of a view's frames change nothing in it, and every host keeps a window's last frame on screen.
+  Affect: a window whose content did not change is not drawn again, so a host that clears or rebuilds its surface draws the last frame on it itself.
+
 - Change: `RendererBinding` calls the hooks `will_draw_frame`, `did_draw_frame` and `did_handle_metrics_changed` on a registered `RendererBindingOverrides` instead of being overridden.
   Reason: language — Flutter's `WidgetsBinding` overrides `drawFrame` and `handleMetricsChanged` through mixin order, and a crate above cannot override a method below it.
   Affect: a binding layered above registers with `set_overrides` to get its build phase; a render-tree-only host runs the plain frame.

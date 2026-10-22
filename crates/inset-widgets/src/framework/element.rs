@@ -1422,12 +1422,22 @@ impl AnyElement {
     }
 
     pub(crate) fn ensure_deactivated(self, app: &mut App) {
-        let dependencies = self.data_mut(app).dependencies.take();
-        if let Some(dependencies) = dependencies {
-            for dependency in dependencies {
-                dependency.remove_dependent(app, self);
-            }
+        let dependencies: Vec<AnyElement> = self
+            .data(app)
+            .dependencies
+            .iter()
+            .flatten()
+            .copied()
+            .collect();
+        for dependency in dependencies {
+            dependency.remove_dependent(app, self);
         }
+        // For expediency, we don't actually clear the list here, even though it's
+        // no longer representative of what we are registered with. If we never
+        // get re-used, it doesn't matter. If we do, then we'll clear the list in
+        // activate(). The benefit of this is that it allows Element's activate()
+        // implementation to decide whether to rebuild based on whether we had
+        // dependencies here.
         let data = self.data_mut(app);
         data.inherited_elements = None;
         data.lifecycle = ElementLifecycle::Inactive;

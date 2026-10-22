@@ -869,18 +869,11 @@ mod tests {
 
     use inset_animation::Curves;
     use inset_foundation::ListenableObject;
-    use inset_scheduler::SchedulerBinding;
 
     use super::*;
+    use crate::test_harness::pump_every_view;
     use crate::test_harness::{ScrollHarness, mount_scroll_harness};
     use crate::widgets::scroll_physics::ClampingScrollPhysics;
-
-    fn pump(app: &mut App, at: Duration) {
-        SchedulerBinding::handle_begin_frame(app, Some(at));
-        app.drain_microtasks();
-        SchedulerBinding::handle_draw_frame(app);
-        app.drain_microtasks();
-    }
 
     fn attached(
         app: &mut App,
@@ -968,17 +961,17 @@ mod tests {
             Duration::from_millis(100),
             Curves::linear(),
         );
-        pump(&mut app, Duration::ZERO);
-        pump(&mut app, Duration::from_millis(50));
+        pump_every_view(&mut app, Duration::ZERO);
+        pump_every_view(&mut app, Duration::from_millis(50));
         assert!((first.pixels(&app) - 100.0).abs() < 0.001);
         assert!((second.pixels(&app) - 100.0).abs() < 0.001);
         assert!(!done.is_completed());
 
-        pump(&mut app, Duration::from_millis(100));
+        pump_every_view(&mut app, Duration::from_millis(100));
         assert_eq!(first.pixels(&app), 200.0);
         assert_eq!(second.pixels(&app), 200.0);
         // The frame past the duration ends both activities.
-        pump(&mut app, Duration::from_millis(150));
+        pump_every_view(&mut app, Duration::from_millis(150));
         assert!(
             !done.is_completed(),
             "the wait over the positions resolves at the checkpoint"

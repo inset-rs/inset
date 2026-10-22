@@ -80,7 +80,7 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 
 **Frames**
 - `Platform::request_frame` → `EmbedderClient::frame`
-- Draw one frame per vsync while the framework asks for one; a resize draws its frame at once.
+- At each vsync of a screen, give one frame of the views on it that asked for one before it came. Hold a frame asked of a window that is minimized or occluded until the window shows. Draw a resized view's frame inside the resize, as a frame of that view alone, as below.
 
 **Vsync**
 - `Surface::next_vsync`, `VsyncObserver::vsync`
@@ -88,7 +88,7 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 
 **Presenting**
 - `View::present`
-- Keep the last scene, and present it again as soon as the system can take it after a refused frame.
+- Keep the last scene, and present it again as soon as the system can take it after a refused frame, and on a surface the system gives anew: a frame presents only the views that changed.
 
 **Resizing**
 - `EmbedderClient::view_metrics_changed`, then `EmbedderClient::frame`

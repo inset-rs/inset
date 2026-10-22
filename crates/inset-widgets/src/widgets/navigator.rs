@@ -26,6 +26,7 @@ use crate::framework::{
     BuildContext, GlobalKey, InheritedWidget, IntoWidget, KeyRef, Notification, State, StateData,
     StatefulWidget, WidgetRef, keys_equal,
 };
+use crate::view::View;
 use crate::widgets::basic::AbsorbPointer;
 use crate::widgets::focus_manager::{FocusNode, FocusNodeLeaf, TraversalEdgeBehavior};
 use crate::widgets::focus_scope::Focus;
@@ -3365,6 +3366,7 @@ impl NavigatorState {
                 SchedulerBinding::add_post_frame_callback(
                     app,
                     FrameCallback::handle_method(self, NavigatorState::dispatch_navigation_state),
+                    View::maybe_id_of(app, self.context(app)),
                 );
             }
         }
@@ -5953,12 +5955,12 @@ mod tests {
     use std::time::Duration;
 
     use inset_embedder::{Restoration, TargetPlatform, TextDirection};
-    use inset_scheduler::SchedulerBinding;
     use inset_services::{RestorationMap, RestorationUpdate};
     use inset_test::{TestPlatform, TestView};
 
     use super::*;
     use crate::binding::run_app;
+    use crate::test_harness::pump_every_view;
     use inset_foundation::ValueKey;
 
     use crate::framework::IntoWidget;
@@ -6005,17 +6007,10 @@ mod tests {
         (AppCell::with_platform(Rc::new(platform)), restoration)
     }
 
-    fn pump_frame(app: &mut App, at: Duration) {
-        SchedulerBinding::handle_begin_frame(app, Some(at));
-        app.drain_microtasks();
-        SchedulerBinding::handle_draw_frame(app);
-        app.drain_microtasks();
-    }
-
     fn mount(cell: &AppCell, child: WidgetRef) {
         run_app(&mut cell.borrow_mut(), child);
         cell.elapse(Duration::ZERO);
-        pump_frame(&mut cell.borrow_mut(), Duration::ZERO);
+        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
     }
 
     /// Rebuilds the root with a new widget, the way `run_app` first attached it.
@@ -6029,7 +6024,7 @@ mod tests {
         let mut at = from;
         for _ in 0..40 {
             at += Duration::from_millis(20);
-            pump_frame(app, at);
+            pump_every_view(app, at);
         }
         at
     }

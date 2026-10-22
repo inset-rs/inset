@@ -570,7 +570,7 @@ mod tests {
             Some(vec![sliver]),
             None,
         );
-        let owner = PipelineOwner::new(app, None);
+        let owner = PipelineOwner::new(app, None, None);
         owner.set_root_node(app, Some(viewport.as_object()));
         viewport
             .as_box()

@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use indexmap::IndexMap;
-use inset_embedder::AppLifecycleState;
+use inset_embedder::{AppLifecycleState, ViewId};
 use inset_foundation::{App, Handle, Listener, Timer};
 
 /// Signature for frame-related callbacks from the scheduler.
@@ -117,6 +117,54 @@ pub enum SchedulerPhase {
     PostFrameCallbacks,
 }
 
+/// Signature for the callbacks [`SchedulerBinding::add_persistent_frame_callback`] registers: they
+/// draw a refresh's frame of the views given, at the time stamp given.
+///
+/// Receives [`App`] because a Rust callback cannot own what it mutates.
+#[derive(Clone)]
+pub struct PersistentFrameCallback(Rc<DrawingCallback>);
+
+type DrawingCallback = dyn Fn(&mut App, &[ViewId], Duration);
+
+impl PersistentFrameCallback {
+    /// Wraps a closure as a persistent frame callback.
+    pub fn new(callback: impl Fn(&mut App, &[ViewId], Duration) + 'static) -> Self {
+        PersistentFrameCallback(Rc::new(callback))
+    }
+
+    /// Calls the callback.
+    pub fn call(&self, app: &mut App, views: &[ViewId], time_stamp: Duration) {
+        (self.0)(app, views, time_stamp);
+    }
+}
+
+impl Debug for PersistentFrameCallback {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("PersistentFrameCallback")
+    }
+}
+
+/// The views a request for a frame is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameTarget {
+    /// One view; a view the platform no longer has counts as none, so as every view.
+    View(ViewId),
+    /// Every view the platform has, each at its own screen's next refresh.
+    EveryView,
+}
+
+/// Dart's `_FrameCallbackEntry`, with the view whose frame runs the callback; `None` for no view.
+struct FrameCallbackEntry {
+    callback: FrameCallback,
+    view: Option<ViewId>,
+}
+
+/// A post-frame callback and the view whose frame runs it; `None` for no view.
+struct PostFrameCallbackEntry {
+    callback: FrameCallback,
+    view: Option<ViewId>,
+}
+
 /// Scheduler for running the following:
 ///
 /// * _Transient callbacks_, triggered by the system's begin-frame callback,
@@ -131,24 +179,33 @@ pub enum SchedulerPhase {
 /// * _Post-frame callbacks_, which are run after persistent callbacks, just
 ///   before returning from the draw-frame callback.
 ///
+/// A frame is a screen's refresh, of the views on that screen that asked for one: a transient or
+/// post-frame callback runs at the first frame of its view, and one of no view at the next frame
+/// of any. Frames never overlap.
+///
 /// Dart's `SchedulerBinding.instance` is [`SchedulerBinding::instance`], the
 /// App's singleton; members take `&mut App`.
 pub struct SchedulerBinding {
     next_frame_callback_id: i64,
     // Insertion-ordered, as Dart's `Map` is: the relative order of two
     // tickers' callbacks is dispatch order.
-    transient_callbacks: IndexMap<i64, FrameCallback>,
+    transient_callbacks: IndexMap<i64, FrameCallbackEntry>,
     removed_ids: HashSet<i64>,
-    persistent_callbacks: Vec<FrameCallback>,
-    post_frame_callbacks: Vec<FrameCallback>,
-    has_scheduled_frame: bool,
+    persistent_callbacks: Vec<PersistentFrameCallback>,
+    post_frame_callbacks: Vec<PostFrameCallbackEntry>,
+    /// Dart's `_hasScheduledFrame`, for each view: the views a frame was asked of whose refresh
+    /// has not begun.
+    views_with_scheduled_frame: Vec<ViewId>,
     /// A warm-up frame is scheduled or running: the host's frames wait for it.
     warm_up_frame: bool,
-    /// The host asked for a frame while the warm-up frame ran; it is rescheduled after.
-    reschedule_after_warm_up_frame: bool,
+    /// The views of the refresh the host gave while the warm-up frame ran, whose frames are asked
+    /// for again after it.
+    reschedule_after_warm_up_frame: Option<Vec<ViewId>>,
     // Detached from the arena so the frame handlers' `finally` guards can
     // reach them without the App.
     scheduler_phase: Rc<Cell<SchedulerPhase>>,
+    /// The views of the frame under way; read only while one is.
+    current_frame_views: Vec<ViewId>,
     lifecycle_state: Option<AppLifecycleState>,
     frames_enabled: bool,
     time_dilation: f64,
@@ -185,10 +242,11 @@ impl Default for SchedulerBinding {
             removed_ids: HashSet::new(),
             persistent_callbacks: Vec::new(),
             post_frame_callbacks: Vec::new(),
-            has_scheduled_frame: false,
+            views_with_scheduled_frame: Vec::new(),
             warm_up_frame: false,
-            reschedule_after_warm_up_frame: false,
+            reschedule_after_warm_up_frame: None,
             scheduler_phase: Rc::new(Cell::new(SchedulerPhase::Idle)),
+            current_frame_views: Vec::new(),
             lifecycle_state: None,
             frames_enabled: true,
             time_dilation: 1.0,
@@ -285,22 +343,31 @@ impl SchedulerBinding {
     /// frame callbacks are still being invoked), `callback` will be called in
     /// the next frame, not in the current frame.
     ///
+    /// The callback runs at the first frame of `view`, or of any view for `None`.
+    ///
     /// Callbacks registered with this method can be canceled using
     /// [`cancel_frame_callback_with_id`](SchedulerBinding::cancel_frame_callback_with_id).
     pub fn schedule_frame_callback(
         app: &mut App,
         callback: FrameCallback,
+        view: Option<ViewId>,
         _rescheduling: bool,
         schedule_new_frame: bool,
     ) -> i64 {
         if schedule_new_frame {
-            SchedulerBinding::schedule_frame(app);
+            let target = match view {
+                Some(view) => FrameTarget::View(view),
+                None => FrameTarget::EveryView,
+            };
+            SchedulerBinding::schedule_frame(app, target);
         }
         let this = SchedulerBinding::instance(app);
         let binding = app.get_mut(this);
         binding.next_frame_callback_id += 1;
         let id = binding.next_frame_callback_id;
-        binding.transient_callbacks.insert(id, callback);
+        binding
+            .transient_callbacks
+            .insert(id, FrameCallbackEntry { callback, view });
         id
     }
 
@@ -343,37 +410,43 @@ impl SchedulerBinding {
     /// Does *not* request a new frame. Persistent frame callbacks cannot be
     /// unregistered. Once registered, they are called for every frame for the
     /// lifetime of the application.
-    pub fn add_persistent_frame_callback(app: &mut App, callback: FrameCallback) {
+    pub fn add_persistent_frame_callback(app: &mut App, callback: PersistentFrameCallback) {
         let this = SchedulerBinding::instance(app);
         app.get_mut(this).persistent_callbacks.push(callback);
     }
 
-    /// Schedule a callback for the end of this frame.
+    /// Schedule a callback for the end of a frame of `view`, or of any view for `None`.
     ///
     /// The provided callback is run immediately after a frame, just after the
     /// persistent frame callbacks (which is when the main rendering pipeline
     /// has been flushed).
     ///
-    /// This method does *not* request a new frame. If a frame is already in
+    /// This method does *not* request a new frame. If a frame of `view` is already in
     /// progress and the execution of post-frame callbacks has not yet begun,
     /// then the registered callback is executed at the end of the current
     /// frame. Otherwise, the registered callback is executed after the next
     /// frame (whenever that may be, if ever).
     ///
-    /// The callbacks are executed in the order in which they have been added.
-    /// Post-frame callbacks cannot be unregistered. They are called exactly
-    /// once.
-    pub fn add_post_frame_callback(app: &mut App, callback: FrameCallback) {
+    /// A frame runs the callbacks of its views, then those of no view, each in the order in
+    /// which they have been added. Post-frame callbacks cannot be unregistered. They are called
+    /// exactly once.
+    pub fn add_post_frame_callback(app: &mut App, callback: FrameCallback, view: Option<ViewId>) {
         let this = SchedulerBinding::instance(app);
-        app.get_mut(this).post_frame_callbacks.push(callback);
+        app.get_mut(this)
+            .post_frame_callbacks
+            .push(PostFrameCallbackEntry { callback, view });
     }
 
     /// Whether this scheduler has requested that
     /// [`handle_begin_frame`](SchedulerBinding::handle_begin_frame) be called
-    /// soon.
+    /// soon, for a view the platform has.
     pub fn has_scheduled_frame(app: &mut App) -> bool {
         let this = SchedulerBinding::instance(app);
-        app.get(this).has_scheduled_frame
+        let app = &*app;
+        app.get(this)
+            .views_with_scheduled_frame
+            .iter()
+            .any(|&view| SchedulerBinding::existing_view(app, Some(view)).is_some())
     }
 
     /// The phase that the scheduler is currently operating under.
@@ -399,39 +472,90 @@ impl SchedulerBinding {
         }
         app.get_mut(this).frames_enabled = enabled;
         if enabled {
-            SchedulerBinding::schedule_frame(app);
+            SchedulerBinding::schedule_frame(app, FrameTarget::EveryView);
         }
     }
 
-    /// Schedules a new frame using [`schedule_frame`](SchedulerBinding::schedule_frame)
-    /// if this object is not currently producing a frame.
+    /// Schedules a new frame of `target` using
+    /// [`schedule_frame`](SchedulerBinding::schedule_frame) for each of its views whose frame is
+    /// not currently being produced.
     ///
-    /// This has no effect if [`scheduler_phase`](SchedulerBinding::scheduler_phase)
-    /// is [`SchedulerPhase::TransientCallbacks`] or
-    /// [`SchedulerPhase::MidFrameMicrotasks`] (because a frame is already being
-    /// prepared in that case), or [`SchedulerPhase::PersistentCallbacks`]
-    /// (because a frame is actively being rendered in that case). It will
-    /// schedule a frame if the phase is [`SchedulerPhase::Idle`] (in between
-    /// frames) or [`SchedulerPhase::PostFrameCallbacks`] (after a frame).
-    pub fn ensure_visual_update(app: &mut App) {
-        match SchedulerBinding::scheduler_phase(app) {
-            SchedulerPhase::Idle | SchedulerPhase::PostFrameCallbacks => {
-                SchedulerBinding::schedule_frame(app);
-            }
+    /// A view's frame is being produced while
+    /// [`scheduler_phase`](SchedulerBinding::scheduler_phase) is
+    /// [`SchedulerPhase::TransientCallbacks`] or [`SchedulerPhase::MidFrameMicrotasks`]
+    /// (because the frame is already being prepared in that case), or
+    /// [`SchedulerPhase::PersistentCallbacks`] (because the frame is actively being rendered in
+    /// that case), and the frame is of that view. A frame of other views does not stand for one
+    /// of it.
+    pub fn ensure_visual_update(app: &mut App, target: FrameTarget) {
+        let this = SchedulerBinding::instance(app);
+        let in_frame = match app.get(this).scheduler_phase.get() {
+            SchedulerPhase::Idle | SchedulerPhase::PostFrameCallbacks => Vec::new(),
             SchedulerPhase::TransientCallbacks
             | SchedulerPhase::MidFrameMicrotasks
-            | SchedulerPhase::PersistentCallbacks => {}
+            | SchedulerPhase::PersistentCallbacks => app.get(this).current_frame_views.clone(),
+        };
+        let views: Vec<ViewId> = SchedulerBinding::views_of(app, target)
+            .into_iter()
+            .filter(|view| !in_frame.contains(view))
+            .collect();
+        if SchedulerBinding::frames_enabled(app) {
+            SchedulerBinding::request_frames(app, &views);
         }
     }
 
-    /// If necessary, schedules a new frame.
-    pub fn schedule_frame(app: &mut App) {
-        let this = SchedulerBinding::instance(app);
-        if app.get(this).has_scheduled_frame || !app.get(this).frames_enabled {
+    /// If necessary, schedules a new frame of each view `target` names.
+    pub fn schedule_frame(app: &mut App, target: FrameTarget) {
+        if !SchedulerBinding::frames_enabled(app) {
             return;
         }
-        app.platform().request_frame();
-        app.get_mut(this).has_scheduled_frame = true;
+        let views = SchedulerBinding::views_of(app, target);
+        SchedulerBinding::request_frames(app, &views);
+    }
+
+    /// Asks the host for a frame of each of `views` that has none asked for.
+    fn request_frames(app: &mut App, views: &[ViewId]) {
+        let this = SchedulerBinding::instance(app);
+        for &view in views {
+            if app.get(this).views_with_scheduled_frame.contains(&view) {
+                continue;
+            }
+            app.platform().request_frame(view);
+            app.get_mut(this).views_with_scheduled_frame.push(view);
+        }
+    }
+
+    /// The views of the platform's that `target` names.
+    fn views_of(app: &App, target: FrameTarget) -> Vec<ViewId> {
+        let view = match target {
+            FrameTarget::View(view) => SchedulerBinding::existing_view(app, Some(view)),
+            FrameTarget::EveryView => None,
+        };
+        match view {
+            Some(view) => vec![view],
+            None => app
+                .platform()
+                .views()
+                .iter()
+                .map(|view| view.id())
+                .collect(),
+        }
+    }
+
+    /// `view`, where the platform has it: a view it no longer has gets no frames, so its work
+    /// counts as that of no view.
+    fn existing_view(app: &App, view: Option<ViewId>) -> Option<ViewId> {
+        view.filter(|&view| app.platform().view(view).is_some())
+    }
+
+    /// Whether the scheduler is currently producing a warm-up frame.
+    ///
+    /// A warm-up frame is scheduled by
+    /// [`schedule_warm_up_frame`](SchedulerBinding::schedule_warm_up_frame) and might not
+    /// produce visible output on screen (e.g., if the rendering surface is not yet available).
+    pub fn is_warm_up_frame(app: &mut App) -> bool {
+        let this = SchedulerBinding::instance(app);
+        app.get(this).warm_up_frame
     }
 
     /// Schedule a frame to run as soon as possible, rather than waiting for the
@@ -453,10 +577,10 @@ impl SchedulerBinding {
     /// Prefer [`schedule_frame`](SchedulerBinding::schedule_frame) to update the
     /// display in normal operation.
     ///
-    /// The frame runs on two zero-duration timers, "begin" and "draw", with the
-    /// microtasks drained between them; the host runs the timers it owes before
-    /// it takes new events, so nothing reaches the framework in between. Dart
-    /// locks events for the same reason.
+    /// The warm-up frame is a frame of every view the platform has. It runs on two zero-duration
+    /// timers, "begin" and "draw", with the microtasks drained between them; the host runs the
+    /// timers it owes before it takes new events, so nothing reaches the framework in between.
+    /// Dart locks events for the same reason.
     pub fn schedule_warm_up_frame(app: &mut App) {
         let this = SchedulerBinding::instance(app);
         if app.get(this).warm_up_frame
@@ -465,17 +589,21 @@ impl SchedulerBinding {
             return;
         }
         app.get_mut(this).warm_up_frame = true;
-        let had_scheduled_frame = app.get(this).has_scheduled_frame;
+        let had_scheduled_frames = app.get(this).views_with_scheduled_frame.clone();
+        let views = SchedulerBinding::views_of(app, FrameTarget::EveryView);
         Timer::new(
             app,
             Duration::ZERO,
-            Listener::new(|app| SchedulerBinding::handle_begin_frame(app, None)),
+            Listener::new({
+                let views = views.clone();
+                move |app| SchedulerBinding::handle_begin_frame(app, &views, None)
+            }),
         );
         Timer::new(
             app,
             Duration::ZERO,
             Listener::new(move |app| {
-                SchedulerBinding::handle_draw_frame(app);
+                SchedulerBinding::handle_draw_frame(app, &views);
                 // `reset_epoch` after this frame so that, in the hot reload case,
                 // the very next frame pretends to have occurred immediately after
                 // this warm-up frame. The warm-up frame's timestamp will typically
@@ -487,68 +615,69 @@ impl SchedulerBinding {
                 SchedulerBinding::reset_epoch(app);
                 let this = SchedulerBinding::instance(app);
                 app.get_mut(this).warm_up_frame = false;
-                if had_scheduled_frame {
-                    SchedulerBinding::schedule_frame(app);
+                for &view in &had_scheduled_frames {
+                    SchedulerBinding::schedule_frame(app, FrameTarget::View(view));
                 }
             }),
         );
     }
 
     /// Dart's `_handleBeginFrame`, what `PlatformDispatcher.onBeginFrame` is
-    /// set to: the host's signal that a frame begins. A warm-up frame in
+    /// set to: the host's signal that a frame of `views` begins. A warm-up frame in
     /// progress takes the frame's place, and the frame is scheduled again
     /// once it is done.
-    pub fn on_begin_frame(app: &mut App, raw_time_stamp: Option<Duration>) {
+    pub fn on_begin_frame(app: &mut App, views: &[ViewId], raw_time_stamp: Option<Duration>) {
         let this = SchedulerBinding::instance(app);
         if app.get(this).warm_up_frame {
             // "begin frame" and "draw frame" must strictly alternate. Therefore
-            // reschedule_after_warm_up_frame cannot possibly be true here as it
+            // reschedule_after_warm_up_frame cannot possibly be set here as it
             // is reset by on_draw_frame.
-            debug_assert!(!app.get(this).reschedule_after_warm_up_frame);
-            app.get_mut(this).reschedule_after_warm_up_frame = true;
+            debug_assert!(app.get(this).reschedule_after_warm_up_frame.is_none());
+            app.get_mut(this).reschedule_after_warm_up_frame = Some(views.to_vec());
             return;
         }
-        SchedulerBinding::handle_begin_frame(app, raw_time_stamp);
+        SchedulerBinding::handle_begin_frame(app, views, raw_time_stamp);
     }
 
     /// Dart's `_handleDrawFrame`, what `PlatformDispatcher.onDrawFrame` is set
-    /// to: the host's signal to draw the frame, after the microtasks that
+    /// to: the host's signal to draw the frame of `views`, after the microtasks that
     /// followed [`on_begin_frame`](SchedulerBinding::on_begin_frame).
-    pub fn on_draw_frame(app: &mut App) {
+    pub fn on_draw_frame(app: &mut App, views: &[ViewId]) {
         let this = SchedulerBinding::instance(app);
-        if app.get(this).reschedule_after_warm_up_frame {
-            app.get_mut(this).reschedule_after_warm_up_frame = false;
+        if let Some(rescheduled) = app.get_mut(this).reschedule_after_warm_up_frame.take() {
             // Reschedule in a post-frame callback to allow the draw-frame phase
             // of the warm-up frame to finish.
             SchedulerBinding::add_post_frame_callback(
                 app,
-                FrameCallback::new(|app, _time_stamp| {
-                    // Force a host frame. `has_scheduled_frame` is reset here
-                    // because the original host frame was cancelled, and
-                    // therefore `handle_begin_frame`, which is responsible for
-                    // resetting it, did not run. So if a frame callback set it
-                    // in the "so far" part of the frame, the flag would be wrong
-                    // and any later frame request would be dropped.
+                FrameCallback::new(move |app, _time_stamp| {
+                    // Force a host frame. The views' scheduled frames are cleared here
+                    // because the original host frame was cancelled, and therefore
+                    // `handle_begin_frame`, which is responsible for clearing them, did
+                    // not run. So if a frame callback asked for one in the "so far"
+                    // part of the frame, the record would be wrong and any later
+                    // frame request would be dropped.
                     let this = SchedulerBinding::instance(app);
-                    app.get_mut(this).has_scheduled_frame = false;
-                    SchedulerBinding::schedule_frame(app);
+                    app.get_mut(this)
+                        .views_with_scheduled_frame
+                        .retain(|view| !rescheduled.contains(view));
+                    for &view in &rescheduled {
+                        SchedulerBinding::schedule_frame(app, FrameTarget::View(view));
+                    }
                 }),
+                // The rescheduled views get no frame until this asks for one.
+                None,
             );
             return;
         }
-        SchedulerBinding::handle_draw_frame(app);
+        SchedulerBinding::handle_draw_frame(app, views);
     }
 
-    /// Schedules a new frame even when frames would normally not be scheduled
-    /// by [`schedule_frame`](SchedulerBinding::schedule_frame) (e.g. when the
+    /// Schedules a new frame of each view `target` names even when frames would normally not be
+    /// scheduled by [`schedule_frame`](SchedulerBinding::schedule_frame) (e.g. when the
     /// device's screen is turned off).
-    pub fn schedule_forced_frame(app: &mut App) {
-        let this = SchedulerBinding::instance(app);
-        if app.get(this).has_scheduled_frame {
-            return;
-        }
-        app.platform().request_frame();
-        app.get_mut(this).has_scheduled_frame = true;
+    pub fn schedule_forced_frame(app: &mut App, target: FrameTarget) {
+        let views = SchedulerBinding::views_of(app, target);
+        SchedulerBinding::request_frames(app, &views);
     }
 
     /// Slows down animations by this factor to help in development.
@@ -639,24 +768,26 @@ impl SchedulerBinding {
         app.get(this).last_raw_time_stamp
     }
 
-    /// Called by the embedder to prepare the framework to produce a new frame.
+    /// Called by the embedder to prepare the framework to produce a new frame, of `views`.
     ///
-    /// This function calls all the transient frame callbacks registered by
-    /// [`schedule_frame_callback`](SchedulerBinding::schedule_frame_callback).
+    /// This function calls the transient frame callbacks registered by
+    /// [`schedule_frame_callback`](SchedulerBinding::schedule_frame_callback) whose view is one
+    /// of `views`, then those of no view.
     /// It then returns; any scheduled microtasks are run (the embedder must
     /// [`App::drain_microtasks`]), and
     /// [`handle_draw_frame`](SchedulerBinding::handle_draw_frame) is called to
     /// continue the frame.
     ///
     /// If the given time stamp is `None`, the time stamp from the last frame
-    /// is reused.
-    pub fn handle_begin_frame(app: &mut App, raw_time_stamp: Option<Duration>) {
+    /// is reused. A time stamp before the last frame's, which another screen's refresh can bring,
+    /// is taken as the last frame's: frame time never goes back.
+    pub fn handle_begin_frame(app: &mut App, views: &[ViewId], raw_time_stamp: Option<Duration>) {
         let this = SchedulerBinding::instance(app);
         let time_stamp;
-        let callbacks;
         let phase;
         {
             let binding = app.get_mut(this);
+            let raw_time_stamp = raw_time_stamp.map(|raw| raw.max(binding.last_raw_time_stamp));
             if binding.first_raw_time_stamp_in_epoch.is_none() {
                 binding.first_raw_time_stamp_in_epoch = raw_time_stamp;
             }
@@ -668,16 +799,19 @@ impl SchedulerBinding {
             }
 
             debug_assert!(binding.scheduler_phase.get() == SchedulerPhase::Idle);
-            binding.has_scheduled_frame = false;
+            binding
+                .views_with_scheduled_frame
+                .retain(|view| !views.contains(view));
+            binding.current_frame_views = views.to_vec();
 
             // TRANSIENT FRAME CALLBACKS
             binding
                 .scheduler_phase
                 .set(SchedulerPhase::TransientCallbacks);
-            callbacks = std::mem::take(&mut binding.transient_callbacks);
             time_stamp = binding.current_frame_time_stamp.get().unwrap();
             phase = Rc::clone(&binding.scheduler_phase);
         }
+        let callbacks = SchedulerBinding::take_transient_callbacks_due(app, views);
         let _finally = FrameFinally {
             phase,
             on_drop: SchedulerPhase::MidFrameMicrotasks,
@@ -691,7 +825,7 @@ impl SchedulerBinding {
         app.get_mut(this).removed_ids.clear();
     }
 
-    /// Called by the embedder to produce a new frame.
+    /// Called by the embedder to produce a new frame, of `views`.
     ///
     /// This method is called immediately after
     /// [`handle_begin_frame`](SchedulerBinding::handle_begin_frame) and the
@@ -699,10 +833,12 @@ impl SchedulerBinding {
     /// [`add_persistent_frame_callback`](SchedulerBinding::add_persistent_frame_callback),
     /// which typically drive the rendering pipeline, and then calls the
     /// callbacks registered by
-    /// [`add_post_frame_callback`](SchedulerBinding::add_post_frame_callback).
-    pub fn handle_draw_frame(app: &mut App) {
+    /// [`add_post_frame_callback`](SchedulerBinding::add_post_frame_callback) for `views`, then
+    /// those of no view.
+    pub fn handle_draw_frame(app: &mut App, views: &[ViewId]) {
         let this = SchedulerBinding::instance(app);
         debug_assert!(app.get(this).scheduler_phase.get() == SchedulerPhase::MidFrameMicrotasks);
+        debug_assert!(app.get(this).current_frame_views == views);
         debug_assert!(
             !app.has_pending_microtasks(),
             "drain microtasks between handle_begin_frame and handle_draw_frame"
@@ -721,33 +857,76 @@ impl SchedulerBinding {
             time_stamp: Some(Rc::clone(&binding.current_frame_time_stamp)),
         };
         for callback in persistent {
-            callback.call(app, time_stamp);
+            callback.call(app, views, time_stamp);
         }
 
         // POST-FRAME CALLBACKS
-        let binding = app.get_mut(this);
-        binding
+        app.get_mut(this)
             .scheduler_phase
             .set(SchedulerPhase::PostFrameCallbacks);
-        let post = std::mem::take(&mut binding.post_frame_callbacks);
-        for callback in post {
+        for callback in SchedulerBinding::take_post_frame_callbacks_due(app, views) {
             callback.call(app, time_stamp);
         }
+    }
+
+    /// Takes the transient callbacks a frame of `views` runs: those whose view is one of them,
+    /// then those of no view, each in the order they were scheduled. The others stay.
+    fn take_transient_callbacks_due(app: &mut App, views: &[ViewId]) -> Vec<(i64, FrameCallback)> {
+        let this = SchedulerBinding::instance(app);
+        let scheduled = std::mem::take(&mut app.get_mut(this).transient_callbacks);
+        let mut of_views = Vec::new();
+        let mut of_no_view = Vec::new();
+        let mut staying = IndexMap::new();
+        for (id, entry) in scheduled {
+            match SchedulerBinding::existing_view(app, entry.view) {
+                Some(view) if views.contains(&view) => of_views.push((id, entry.callback)),
+                Some(_) => {
+                    staying.insert(id, entry);
+                }
+                None => of_no_view.push((id, entry.callback)),
+            }
+        }
+        app.get_mut(this).transient_callbacks = staying;
+        of_views.extend(of_no_view);
+        of_views
+    }
+
+    /// Takes the post-frame callbacks a frame of `views` runs: those of one of them, then those
+    /// of no view, each in the order they were added. The others stay, ahead of any added while
+    /// these run.
+    fn take_post_frame_callbacks_due(app: &mut App, views: &[ViewId]) -> Vec<FrameCallback> {
+        let this = SchedulerBinding::instance(app);
+        let added = std::mem::take(&mut app.get_mut(this).post_frame_callbacks);
+        let mut of_views = Vec::new();
+        let mut of_no_view = Vec::new();
+        let mut staying = Vec::new();
+        for entry in added {
+            match SchedulerBinding::existing_view(app, entry.view) {
+                Some(view) if views.contains(&view) => of_views.push(entry.callback),
+                Some(_) => staying.push(entry),
+                None => of_no_view.push(entry.callback),
+            }
+        }
+        app.get_mut(this).post_frame_callbacks = staying;
+        of_views.extend(of_no_view);
+        of_views
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use inset_foundation::AppCell;
     use std::cell::{Cell, RefCell};
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::rc::Rc;
 
-    use inset_test::TestPlatform;
+    use inset_test::IMPLICIT_VIEW_ID;
 
     use super::*;
+    use crate::test_support::{app_with_views, pump};
 
     type Log = Rc<RefCell<Vec<String>>>;
+
+    const SECOND_VIEW: ViewId = ViewId(1);
 
     fn logging(log: &Log, name: &'static str) -> FrameCallback {
         let log = Rc::clone(log);
@@ -757,31 +936,34 @@ mod tests {
         })
     }
 
-    fn pump(app: &mut App, at: Duration) {
-        SchedulerBinding::handle_begin_frame(app, Some(at));
-        app.drain_microtasks();
-        SchedulerBinding::handle_draw_frame(app);
-        app.drain_microtasks();
+    fn millis(ms: u64) -> Duration {
+        Duration::from_millis(ms)
     }
 
     #[test]
     fn a_transient_callback_runs_once_per_registration() {
-        let cell = AppCell::new();
+        let (cell, _platform) = app_with_views(&[IMPLICIT_VIEW_ID]);
         let mut app = cell.borrow_mut();
         let log = Log::default();
 
-        SchedulerBinding::schedule_frame_callback(&mut app, logging(&log, "a"), false, true);
+        SchedulerBinding::schedule_frame_callback(
+            &mut app,
+            logging(&log, "a"),
+            Some(IMPLICIT_VIEW_ID),
+            false,
+            true,
+        );
         assert!(SchedulerBinding::has_scheduled_frame(&mut app));
 
         // The epoch starts at the first frame, so its adjusted stamp is 0.
-        pump(&mut app, Duration::from_millis(10));
-        pump(&mut app, Duration::from_millis(20));
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(10));
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(20));
         assert_eq!(*log.borrow(), vec!["a@0ms"], "not re-registered");
     }
 
     #[test]
     fn canceling_by_id_prevents_the_call_even_mid_frame() {
-        let cell = AppCell::new();
+        let (cell, _platform) = app_with_views(&[IMPLICIT_VIEW_ID]);
         let mut app = cell.borrow_mut();
         let log = Log::default();
 
@@ -794,38 +976,63 @@ mod tests {
                 SchedulerBinding::cancel_frame_callback_with_id(app, second.borrow().unwrap());
             })
         };
-        SchedulerBinding::schedule_frame_callback(&mut app, canceler, false, true);
-        let id =
-            SchedulerBinding::schedule_frame_callback(&mut app, logging(&log, "b"), false, true);
+        SchedulerBinding::schedule_frame_callback(
+            &mut app,
+            canceler,
+            Some(IMPLICIT_VIEW_ID),
+            false,
+            true,
+        );
+        let id = SchedulerBinding::schedule_frame_callback(
+            &mut app,
+            logging(&log, "b"),
+            Some(IMPLICIT_VIEW_ID),
+            false,
+            true,
+        );
         *second.borrow_mut() = Some(id);
 
-        pump(&mut app, Duration::from_millis(10));
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(10));
         assert!(log.borrow().is_empty(), "canceled before its turn came");
     }
 
     #[test]
     fn the_frame_runs_phases_in_order_and_post_frame_runs_once() {
-        let cell = AppCell::new();
+        let (cell, _platform) = app_with_views(&[IMPLICIT_VIEW_ID]);
         let mut app = cell.borrow_mut();
         let log = Log::default();
 
-        SchedulerBinding::add_persistent_frame_callback(&mut app, logging(&log, "persistent"));
-        SchedulerBinding::add_post_frame_callback(&mut app, logging(&log, "post"));
+        SchedulerBinding::add_persistent_frame_callback(
+            &mut app,
+            PersistentFrameCallback::new({
+                let log = Rc::clone(&log);
+                move |_app, _views, time_stamp| {
+                    log.borrow_mut()
+                        .push(format!("persistent@{}ms", time_stamp.as_millis()));
+                }
+            }),
+        );
+        SchedulerBinding::add_post_frame_callback(
+            &mut app,
+            logging(&log, "post"),
+            Some(IMPLICIT_VIEW_ID),
+        );
         SchedulerBinding::schedule_frame_callback(
             &mut app,
             logging(&log, "transient"),
+            Some(IMPLICIT_VIEW_ID),
             false,
             true,
         );
 
-        pump(&mut app, Duration::from_millis(5));
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(5));
         assert_eq!(
             *log.borrow(),
             vec!["transient@0ms", "persistent@0ms", "post@0ms"]
         );
 
         log.borrow_mut().clear();
-        pump(&mut app, Duration::from_millis(6));
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(6));
         assert_eq!(
             *log.borrow(),
             vec!["persistent@1ms"],
@@ -836,20 +1043,20 @@ mod tests {
     // binding_test.dart 'Adding a persistent frame callback during a persistent frame callback'
     #[test]
     fn a_persistent_callback_added_during_a_frame_runs_on_the_next() {
-        let cell = AppCell::new();
+        let (cell, _platform) = app_with_views(&[IMPLICIT_VIEW_ID]);
         let mut app = cell.borrow_mut();
         let called_back = Rc::new(Cell::new(false));
         SchedulerBinding::add_persistent_frame_callback(
             &mut app,
-            FrameCallback::new({
+            PersistentFrameCallback::new({
                 let called_back = Rc::clone(&called_back);
-                move |app, _t| {
+                move |app, _views, _t| {
                     if !called_back.get() {
                         SchedulerBinding::add_persistent_frame_callback(
                             app,
-                            FrameCallback::new({
+                            PersistentFrameCallback::new({
                                 let called_back = Rc::clone(&called_back);
-                                move |_app, _t| called_back.set(true)
+                                move |_app, _views, _t| called_back.set(true)
                             }),
                         );
                     }
@@ -857,9 +1064,9 @@ mod tests {
             }),
         );
 
-        pump(&mut app, Duration::from_millis(0));
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(0));
         assert!(!called_back.get());
-        pump(&mut app, Duration::from_millis(1));
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(1));
         assert!(called_back.get());
     }
 
@@ -867,17 +1074,18 @@ mod tests {
     // callback throws and the error is caught above the framework.
     #[test]
     fn a_panicking_transient_callback_still_advances_the_phase() {
-        let cell = AppCell::new();
+        let (cell, _platform) = app_with_views(&[IMPLICIT_VIEW_ID]);
         let mut app = cell.borrow_mut();
         SchedulerBinding::schedule_frame_callback(
             &mut app,
             FrameCallback::new(|_app, _t| panic!("a failing tick")),
+            Some(IMPLICIT_VIEW_ID),
             false,
             true,
         );
 
         let caught = catch_unwind(AssertUnwindSafe(|| {
-            SchedulerBinding::handle_begin_frame(&mut app, Some(Duration::from_millis(1)));
+            SchedulerBinding::handle_begin_frame(&mut app, &[IMPLICIT_VIEW_ID], Some(millis(1)));
         }));
         assert!(caught.is_err());
         assert_eq!(
@@ -889,39 +1097,48 @@ mod tests {
 
     #[test]
     fn time_dilation_slows_the_adjusted_clock() {
-        let cell = AppCell::new();
+        let (cell, _platform) = app_with_views(&[IMPLICIT_VIEW_ID]);
         let mut app = cell.borrow_mut();
         let seen = Rc::new(RefCell::new(Vec::new()));
 
-        pump(&mut app, Duration::from_millis(0));
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(0));
         SchedulerBinding::set_time_dilation(&mut app, 2.0);
 
         let recorder = {
             let seen = Rc::clone(&seen);
             FrameCallback::new(move |_app, t| seen.borrow_mut().push(t))
         };
-        SchedulerBinding::schedule_frame_callback(&mut app, recorder.clone(), false, true);
-        pump(&mut app, Duration::from_millis(100));
-        SchedulerBinding::schedule_frame_callback(&mut app, recorder, false, true);
-        pump(&mut app, Duration::from_millis(200));
+        SchedulerBinding::schedule_frame_callback(
+            &mut app,
+            recorder.clone(),
+            Some(IMPLICIT_VIEW_ID),
+            false,
+            true,
+        );
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(100));
+        SchedulerBinding::schedule_frame_callback(
+            &mut app,
+            recorder,
+            Some(IMPLICIT_VIEW_ID),
+            false,
+            true,
+        );
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(200));
 
         // resetEpoch re-bases at the next frame (100ms -> 0); the following
         // 100 raw ms are halved by dilation 2.
-        assert_eq!(
-            *seen.borrow(),
-            vec![Duration::ZERO, Duration::from_millis(50)]
-        );
+        assert_eq!(*seen.borrow(), vec![Duration::ZERO, millis(50)]);
     }
 
     #[test]
     fn schedule_frame_pokes_the_platform_once() {
-        let platform = Rc::new(TestPlatform::new());
-        let cell = AppCell::with_platform(platform.clone());
+        let (cell, platform) = app_with_views(&[IMPLICIT_VIEW_ID]);
         let mut app = cell.borrow_mut();
 
-        SchedulerBinding::schedule_frame(&mut app);
-        SchedulerBinding::schedule_frame(&mut app);
-        assert_eq!(platform.frames_requested(), 1);
+        let target = FrameTarget::View(IMPLICIT_VIEW_ID);
+        SchedulerBinding::schedule_frame(&mut app, target);
+        SchedulerBinding::schedule_frame(&mut app, target);
+        assert_eq!(platform.frame_requests(), [IMPLICIT_VIEW_ID]);
         assert!(SchedulerBinding::has_scheduled_frame(&mut app));
     }
 
@@ -929,7 +1146,7 @@ mod tests {
     // and warm-up frames.
     #[test]
     fn the_application_lifecycle_affects_frame_scheduling() {
-        let cell = AppCell::new();
+        let (cell, _platform) = app_with_views(&[IMPLICIT_VIEW_ID]);
         let mut app = cell.borrow_mut();
         assert!(!SchedulerBinding::has_scheduled_frame(&mut app));
 
@@ -938,14 +1155,14 @@ mod tests {
 
         SchedulerBinding::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Resumed);
         assert!(SchedulerBinding::has_scheduled_frame(&mut app));
-        pump(&mut app, Duration::from_millis(10));
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(10));
         assert!(!SchedulerBinding::has_scheduled_frame(&mut app));
 
         SchedulerBinding::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Inactive);
         assert!(!SchedulerBinding::has_scheduled_frame(&mut app));
 
         SchedulerBinding::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Hidden);
-        SchedulerBinding::schedule_frame(&mut app);
+        SchedulerBinding::schedule_frame(&mut app, FrameTarget::EveryView);
         assert!(
             !SchedulerBinding::has_scheduled_frame(&mut app),
             "frames are disabled while hidden"
@@ -961,12 +1178,188 @@ mod tests {
 
     #[test]
     fn the_host_can_pump_scheduler_handlers() {
-        let cell = AppCell::new();
+        let (cell, _platform) = app_with_views(&[IMPLICIT_VIEW_ID]);
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        SchedulerBinding::schedule_frame_callback(&mut app, logging(&log, "a"), false, true);
+        SchedulerBinding::schedule_frame_callback(
+            &mut app,
+            logging(&log, "a"),
+            Some(IMPLICIT_VIEW_ID),
+            false,
+            true,
+        );
 
-        pump(&mut app, Duration::from_millis(10));
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(10));
         assert_eq!(*log.borrow(), vec!["a@0ms"]);
+    }
+
+    #[test]
+    fn a_frame_runs_the_callbacks_of_its_views_then_those_of_no_view() {
+        let (cell, _platform) = app_with_views(&[IMPLICIT_VIEW_ID, SECOND_VIEW]);
+        let mut app = cell.borrow_mut();
+        let log = Log::default();
+        SchedulerBinding::schedule_frame_callback(
+            &mut app,
+            logging(&log, "no view"),
+            None,
+            false,
+            true,
+        );
+        SchedulerBinding::schedule_frame_callback(
+            &mut app,
+            logging(&log, "first"),
+            Some(IMPLICIT_VIEW_ID),
+            false,
+            true,
+        );
+        SchedulerBinding::schedule_frame_callback(
+            &mut app,
+            logging(&log, "second"),
+            Some(SECOND_VIEW),
+            false,
+            true,
+        );
+        SchedulerBinding::add_post_frame_callback(&mut app, logging(&log, "no view post"), None);
+        SchedulerBinding::add_post_frame_callback(
+            &mut app,
+            logging(&log, "first post"),
+            Some(IMPLICIT_VIEW_ID),
+        );
+        SchedulerBinding::add_post_frame_callback(
+            &mut app,
+            logging(&log, "second post"),
+            Some(SECOND_VIEW),
+        );
+
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(10));
+        assert_eq!(
+            *log.borrow(),
+            [
+                "first@0ms",
+                "no view@0ms",
+                "first post@0ms",
+                "no view post@0ms"
+            ],
+        );
+
+        log.borrow_mut().clear();
+        pump(&mut app, &[SECOND_VIEW], millis(12));
+        assert_eq!(*log.borrow(), ["second@2ms", "second post@2ms"]);
+    }
+
+    #[test]
+    fn a_request_for_another_view_made_during_a_frame_is_not_lost() {
+        let (cell, platform) = app_with_views(&[IMPLICIT_VIEW_ID, SECOND_VIEW]);
+        let mut app = cell.borrow_mut();
+        let asking = FrameCallback::new(|app, _time_stamp| {
+            SchedulerBinding::ensure_visual_update(app, FrameTarget::View(SECOND_VIEW));
+            SchedulerBinding::ensure_visual_update(app, FrameTarget::View(IMPLICIT_VIEW_ID));
+            SchedulerBinding::ensure_visual_update(app, FrameTarget::EveryView);
+        });
+        SchedulerBinding::schedule_frame_callback(
+            &mut app,
+            asking,
+            Some(IMPLICIT_VIEW_ID),
+            false,
+            true,
+        );
+        assert_eq!(platform.take_frame_requests(), [IMPLICIT_VIEW_ID]);
+
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(10));
+        assert_eq!(
+            platform.take_frame_requests(),
+            [SECOND_VIEW],
+            "the frame under way stands for its own views, not another"
+        );
+    }
+
+    #[test]
+    fn a_frame_time_never_goes_back() {
+        let (cell, _platform) = app_with_views(&[IMPLICIT_VIEW_ID, SECOND_VIEW]);
+        let mut app = cell.borrow_mut();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        SchedulerBinding::add_persistent_frame_callback(
+            &mut app,
+            PersistentFrameCallback::new({
+                let seen = Rc::clone(&seen);
+                move |_app, _views, time_stamp| seen.borrow_mut().push(time_stamp)
+            }),
+        );
+
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(10));
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(26));
+        // Another screen, whose refresh came before the last one.
+        pump(&mut app, &[SECOND_VIEW], millis(20));
+        assert_eq!(*seen.borrow(), [Duration::ZERO, millis(16), millis(16)]);
+    }
+
+    #[test]
+    fn a_callback_for_a_view_the_platform_does_not_have_runs_at_the_next_frame() {
+        let (cell, _platform) = app_with_views(&[IMPLICIT_VIEW_ID]);
+        let mut app = cell.borrow_mut();
+        let log = Log::default();
+        let gone = ViewId(7);
+        SchedulerBinding::schedule_frame_callback(
+            &mut app,
+            logging(&log, "tick"),
+            Some(gone),
+            false,
+            true,
+        );
+        SchedulerBinding::add_post_frame_callback(&mut app, logging(&log, "post"), Some(gone));
+        assert!(
+            SchedulerBinding::has_scheduled_frame(&mut app),
+            "asked of the views there are"
+        );
+
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(10));
+        assert_eq!(*log.borrow(), ["tick@0ms", "post@0ms"]);
+    }
+
+    #[test]
+    fn the_warm_up_frame_is_a_frame_of_every_view() {
+        let (cell, _platform) = app_with_views(&[IMPLICIT_VIEW_ID, SECOND_VIEW]);
+        let frames = Rc::new(RefCell::new(Vec::new()));
+        SchedulerBinding::add_persistent_frame_callback(
+            &mut cell.borrow_mut(),
+            PersistentFrameCallback::new({
+                let frames = Rc::clone(&frames);
+                move |_app, views, _time_stamp| frames.borrow_mut().push(views.to_vec())
+            }),
+        );
+        SchedulerBinding::schedule_warm_up_frame(&mut cell.borrow_mut());
+        cell.elapse(Duration::ZERO);
+        assert_eq!(*frames.borrow(), [vec![IMPLICIT_VIEW_ID, SECOND_VIEW]]);
+    }
+
+    #[test]
+    fn a_callback_scheduled_without_a_new_frame_asks_for_none_after_a_frame() {
+        let (cell, platform) = app_with_views(&[IMPLICIT_VIEW_ID]);
+        let mut app = cell.borrow_mut();
+        let log = Log::default();
+        let scheduled = Rc::new(Cell::new(false));
+        // As a render object's layout schedules work for the next frame without asking for one.
+        SchedulerBinding::add_persistent_frame_callback(&mut app, {
+            let log = Rc::clone(&log);
+            PersistentFrameCallback::new(move |app, _views, _time_stamp| {
+                if !scheduled.replace(true) {
+                    SchedulerBinding::schedule_frame_callback(
+                        app,
+                        logging(&log, "next frame"),
+                        None,
+                        false,
+                        false,
+                    );
+                }
+            })
+        });
+
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(10));
+        assert!(
+            platform.take_frame_requests().is_empty(),
+            "no frame is asked for it"
+        );
+        pump(&mut app, &[IMPLICIT_VIEW_ID], millis(20));
+        assert_eq!(*log.borrow(), ["next frame@10ms"]);
     }
 }

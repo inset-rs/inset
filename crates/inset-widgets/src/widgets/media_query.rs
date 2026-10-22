@@ -2334,13 +2334,13 @@ mod tests {
     use std::time::Duration;
 
     use inset_embedder::{TargetPlatform, ViewConstraints, ViewId, ViewMetrics};
-    use inset_scheduler::SchedulerBinding;
     use inset_test::TestPlatform;
 
     use super::*;
     use crate::binding::run_widget;
     use crate::framework::StatelessWidget;
     use crate::test_harness::Harness;
+    use crate::test_harness::pump_every_view;
     use crate::view::View;
     use crate::widgets::basic::SizedBox;
 
@@ -2439,13 +2439,6 @@ mod tests {
         let harness = Harness::mount(app, child);
         harness.pump(app);
         harness
-    }
-
-    fn pump_frame(app: &mut App, at: Duration) {
-        SchedulerBinding::handle_begin_frame(app, Some(at));
-        app.drain_microtasks();
-        SchedulerBinding::handle_draw_frame(app);
-        app.drain_microtasks();
     }
 
     #[test]
@@ -2724,7 +2717,7 @@ mod tests {
         drop(app);
         cell.elapse(Duration::ZERO);
         let mut app = cell.borrow_mut();
-        pump_frame(&mut app, Duration::ZERO);
+        pump_every_view(&mut app, Duration::ZERO);
 
         assert_eq!(seen.borrow().len(), 1);
         let data = seen.borrow()[0].clone();

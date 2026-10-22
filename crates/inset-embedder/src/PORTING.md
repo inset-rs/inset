@@ -66,6 +66,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the host is what hears a window minimized, covered or moved, and an app that stops drawing what nobody sees must know it of each window rather than of the whole application.
   Affect: an app tells a minimized or covered window from a shown one while its other windows show, and where the system does not say, as Windows does not say a window is covered and Wayland says neither, the window answers no.
 
+- Change: the framework asks the host for a frame of one view, and the host gives one refresh of a screen at a time with the views on it that asked, where Flutter asks for and gets one frame of every view.
+  Reason: platform — each window is on a screen with its own refresh rate and can be minimized or occluded, and a host that paces every view by one screen stops them all while that one is out of sight.
+  Affect: each window draws at its own screen's refresh rate, and a minimized or occluded window draws nothing until it shows while the others keep drawing.
+
 - Change: `MouseCursor::activate_system_cursor` also takes the view the pointer is over.
   Reason: platform — where each window has its own cursor, the host must know which window to change.
   Affect: in an app with several windows, a cursor change reaches only the window under the pointer.
@@ -135,7 +139,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 
 ## client.rs → dart:ui `hooks.dart`
 
-- Change: the isolate-global engine hooks are methods on `EmbedderClient`: one `frame` is a complete engine frame, pointer packets and key data arrive as calls, view lifecycle is a typed notification, and `key_data` returns whether the framework handled the key.
+- Change: the isolate-global engine hooks are methods on `EmbedderClient`: one `frame` is a complete engine frame of the views one refresh names, pointer packets and key data arrive as calls, view lifecycle is a typed notification, and `key_data` returns whether the framework handled the key.
   Reason: platform — there is no isolate-global hooks table; the host drives a client without naming `App`.
   Affect: the host does not run scheduler phases or build `PointerEvent` / `KeyEvent` itself, and decides from `key_data`'s answer whether to keep propagating the native event.
 

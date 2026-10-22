@@ -8,6 +8,10 @@ use inset_embedder::{
     HostWindow, RequestId, Scene, View, ViewConstraints, ViewId, ViewMetrics, WindowRef,
 };
 
+/// The id of a [`TestView`] given none: the view of a test with one, as the engine numbers
+/// Flutter's implicit view.
+pub const IMPLICIT_VIEW_ID: ViewId = ViewId(0);
+
 /// A view of a fixed physical size and pixel ratio that counts the pictures presented to it
 /// and shows none. `flutter_test`'s `TestFlutterView` in its two settable dimensions.
 pub struct TestView {
@@ -22,15 +26,15 @@ pub struct TestView {
 }
 
 impl TestView {
-    /// View `ViewId(0)` at pixel ratio 1, `width` by `height` physical pixels.
+    /// View [`IMPLICIT_VIEW_ID`] at pixel ratio 1, `width` by `height` physical pixels.
     pub fn new(width: f64, height: f64) -> TestView {
         TestView::with_pixel_ratio(width, height, 1.0)
     }
 
-    /// View `ViewId(0)` at `device_pixel_ratio`, `width` by `height` physical pixels.
+    /// View [`IMPLICIT_VIEW_ID`] at `device_pixel_ratio`, `width` by `height` physical pixels.
     pub fn with_pixel_ratio(width: f64, height: f64, device_pixel_ratio: f64) -> TestView {
         TestView {
-            id: ViewId(0),
+            id: IMPLICIT_VIEW_ID,
             size: Cell::new([width, height]),
             device_pixel_ratio,
             presented: Cell::new(0),

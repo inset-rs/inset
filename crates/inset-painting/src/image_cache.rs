@@ -117,6 +117,7 @@ impl CachedImage {
                     handle.dispose(app);
                 }
             }),
+            None,
         );
     }
 }
@@ -637,10 +638,11 @@ mod tests {
         assert_eq!(key("logo.png"), key("logo.png"));
         assert_ne!(key("logo.png"), key("badge.png"));
     }
+    /// A frame of no view: the cache's post-frame work is of none.
     fn finish_frame(app: &mut App) {
-        SchedulerBinding::handle_begin_frame(app, Some(std::time::Duration::ZERO));
+        SchedulerBinding::handle_begin_frame(app, &[], Some(std::time::Duration::ZERO));
         app.drain_microtasks();
-        SchedulerBinding::handle_draw_frame(app);
+        SchedulerBinding::handle_draw_frame(app, &[]);
         app.drain_microtasks();
     }
 

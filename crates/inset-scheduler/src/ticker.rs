@@ -8,9 +8,10 @@ use std::rc::Rc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+use inset_embedder::ViewId;
 use inset_foundation::{App, Completer, CompleterFuture, Handle, Listener};
 
-use crate::binding::{FrameCallback, SchedulerBinding, SchedulerPhase};
+use crate::binding::{FrameCallback, FrameTarget, SchedulerBinding, SchedulerPhase};
 
 /// Signature for the callback passed to the [`Ticker`] class's constructor.
 ///
@@ -68,6 +69,9 @@ impl<T: TickerProvider + ?Sized> TickerProvider for Rc<T> {
 /// [`stop`](Ticker::stop) methods are used by the ticker's consumer
 /// (for example, an `AnimationController`), and the muted property is
 /// controlled by the [`TickerProvider`] that created the ticker.
+///
+/// A ticker ticks at the frames of its view, or at every frame when it has none. Its view must
+/// follow its widget: the [`TickerProvider`] moves it with [`set_view`](Ticker::set_view).
 pub struct Ticker {
     future: Option<TickerFuture>,
 
@@ -84,12 +88,13 @@ pub struct Ticker {
     start_time: Option<Duration>,
     on_tick: TickerCallback,
     animation_id: Option<i64>,
+    view: Option<ViewId>,
 }
 
 impl Ticker {
-    /// Creates a ticker that will call the provided callback once per frame
-    /// while running.
-    pub fn new(app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    /// Creates a ticker that will call the provided callback once per frame of `view`, or of
+    /// every frame for `None`, while running.
+    pub fn new(app: &mut App, on_tick: TickerCallback, view: Option<ViewId>) -> Handle<Ticker> {
         app.create(Ticker {
             future: None,
             force_frames: false,
@@ -97,7 +102,20 @@ impl Ticker {
             start_time: None,
             on_tick,
             animation_id: None,
+            view,
         })
+    }
+
+    /// Its widget moved to `view`: a pending tick moves with it and asks for that view's frame.
+    pub fn set_view(self: Handle<Self>, app: &mut App, view: Option<ViewId>) {
+        if app.get(self).view == view {
+            return;
+        }
+        app.get_mut(self).view = view;
+        if let Some(animation_id) = app.get_mut(self).animation_id.take() {
+            SchedulerBinding::cancel_frame_callback_with_id(app, animation_id);
+            self.schedule_tick(app, false);
+        }
     }
 
     /// Whether this ticker has been silenced.
@@ -165,14 +183,20 @@ impl Ticker {
     fn schedule_tick(self: Handle<Self>, app: &mut App, rescheduling: bool) {
         debug_assert!(!self.scheduled(app));
         debug_assert!(self.should_schedule_tick(app));
+        let view = app.get(self).view;
+        let target = match view {
+            Some(view) => FrameTarget::View(view),
+            None => FrameTarget::EveryView,
+        };
         if app.get(self).force_frames {
-            SchedulerBinding::schedule_forced_frame(app);
+            SchedulerBinding::schedule_forced_frame(app, target);
         } else {
-            SchedulerBinding::schedule_frame(app);
+            SchedulerBinding::schedule_frame(app, target);
         }
         let animation_id = SchedulerBinding::schedule_frame_callback(
             app,
             FrameCallback::handle_method(self, Ticker::tick),
+            view,
             rescheduling,
             false,
         );
@@ -522,17 +546,23 @@ impl std::error::Error for TickerCanceled {}
 
 #[cfg(test)]
 mod tests {
-    use inset_foundation::AppCell;
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
-    use super::*;
+    use inset_foundation::AppCell;
+    use inset_test::IMPLICIT_VIEW_ID;
 
+    use super::*;
+    use crate::test_support::app_with_views;
+
+    /// A refresh of the implicit view at `at`.
     fn pump(app: &mut App, at: Duration) {
-        SchedulerBinding::handle_begin_frame(app, Some(at));
-        app.drain_microtasks();
-        SchedulerBinding::handle_draw_frame(app);
-        app.drain_microtasks();
+        crate::test_support::pump(app, &[IMPLICIT_VIEW_ID], at);
+    }
+
+    /// An app on a platform with the implicit view.
+    fn app_with_implicit_view() -> Rc<AppCell> {
+        app_with_views(&[IMPLICIT_VIEW_ID]).0
     }
 
     fn elapsed_recorder(log: &Rc<RefCell<Vec<Duration>>>) -> TickerCallback {
@@ -544,10 +574,10 @@ mod tests {
     // come from handle_begin_frame, as flutter_test's pump does).
     #[test]
     fn a_ticker_ticks_with_elapsed_time_until_stopped() {
-        let cell = AppCell::new();
+        let cell = app_with_implicit_view();
         let mut app = cell.borrow_mut();
         let log = Rc::new(RefCell::new(Vec::new()));
-        let ticker = Ticker::new(&mut app, elapsed_recorder(&log));
+        let ticker = Ticker::new(&mut app, elapsed_recorder(&log), Some(IMPLICIT_VIEW_ID));
 
         ticker.start(&mut app);
         assert!(ticker.is_active(&app));
@@ -569,10 +599,10 @@ mod tests {
     // ticker_test.dart 'Ticker mute control test' (without lifecycle).
     #[test]
     fn a_muted_ticker_keeps_time_but_does_not_call_back() {
-        let cell = AppCell::new();
+        let cell = app_with_implicit_view();
         let mut app = cell.borrow_mut();
         let log = Rc::new(RefCell::new(Vec::new()));
-        let ticker = Ticker::new(&mut app, elapsed_recorder(&log));
+        let ticker = Ticker::new(&mut app, elapsed_recorder(&log), Some(IMPLICIT_VIEW_ID));
 
         ticker.start(&mut app);
         assert!(ticker.is_ticking(&mut app));
@@ -581,7 +611,7 @@ mod tests {
         ticker.set_muted(&mut app, true);
         assert!(!ticker.is_ticking(&mut app));
         assert!(ticker.is_active(&app));
-        SchedulerBinding::schedule_frame(&mut app);
+        SchedulerBinding::schedule_frame(&mut app, FrameTarget::View(IMPLICIT_VIEW_ID));
         pump(&mut app, Duration::from_millis(20));
         assert_eq!(log.borrow().len(), 1, "no tick while muted");
 
@@ -606,7 +636,7 @@ mod tests {
     // ticker_test.dart 'Ticker can be slowed down with time dilation'
     #[test]
     fn a_ticker_is_slowed_by_time_dilation() {
-        let cell = AppCell::new();
+        let cell = app_with_implicit_view();
         let mut app = cell.borrow_mut();
         SchedulerBinding::set_time_dilation(&mut app, 2.0);
         let last = Rc::new(Cell::new(None::<Duration>));
@@ -616,6 +646,7 @@ mod tests {
                 let last = Rc::clone(&last);
                 move |_app, duration| last.set(Some(duration))
             }),
+            Some(IMPLICIT_VIEW_ID),
         );
         ticker.start(&mut app);
         pump(&mut app, Duration::from_millis(10));
@@ -627,9 +658,13 @@ mod tests {
 
     #[test]
     fn the_ticker_future_completes_through_the_microtask_queue() {
-        let cell = AppCell::new();
+        let cell = app_with_implicit_view();
         let mut app = cell.borrow_mut();
-        let ticker = Ticker::new(&mut app, FrameCallback::new(|_app, _t| {}));
+        let ticker = Ticker::new(
+            &mut app,
+            FrameCallback::new(|_app, _t| {}),
+            Some(IMPLICIT_VIEW_ID),
+        );
         let future = ticker.start(&mut app);
 
         let completed = Rc::new(Cell::new(false));
@@ -652,9 +687,13 @@ mod tests {
 
     #[test]
     fn disposing_an_active_ticker_cancels_without_completing() {
-        let cell = AppCell::new();
+        let cell = app_with_implicit_view();
         let mut app = cell.borrow_mut();
-        let ticker = Ticker::new(&mut app, FrameCallback::new(|_app, _t| {}));
+        let ticker = Ticker::new(
+            &mut app,
+            FrameCallback::new(|_app, _t| {}),
+            Some(IMPLICIT_VIEW_ID),
+        );
         let future = ticker.start(&mut app);
 
         let completed = Rc::new(Cell::new(false));
@@ -688,13 +727,17 @@ mod tests {
     // survives under the absorbing ticker's identity.
     #[test]
     fn absorbing_a_ticker_keeps_the_original_future_alive() {
-        let cell = AppCell::new();
+        let cell = app_with_implicit_view();
         let mut app = cell.borrow_mut();
         let log = Rc::new(RefCell::new(Vec::new()));
-        let original = Ticker::new(&mut app, elapsed_recorder(&log));
+        let original = Ticker::new(&mut app, elapsed_recorder(&log), Some(IMPLICIT_VIEW_ID));
         let future = original.start(&mut app);
 
-        let absorber = Ticker::new(&mut app, FrameCallback::new(|_app, _t| {}));
+        let absorber = Ticker::new(
+            &mut app,
+            FrameCallback::new(|_app, _t| {}),
+            Some(IMPLICIT_VIEW_ID),
+        );
         absorber.absorb_ticker(&mut app, original);
 
         assert!(absorber.is_active(&app));
@@ -714,7 +757,7 @@ mod tests {
 
     #[test]
     fn a_zero_duration_sequence_is_already_complete() {
-        let cell = AppCell::new();
+        let cell = app_with_implicit_view();
         let mut app = cell.borrow_mut();
         let future = TickerFuture::complete();
 
@@ -735,13 +778,13 @@ mod tests {
 
     impl TickerProvider for TestVSync {
         fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
-            Ticker::new(app, on_tick)
+            Ticker::new(app, on_tick, Some(IMPLICIT_VIEW_ID))
         }
     }
 
     #[test]
     fn a_ticker_provider_vends_a_ticker_that_ticks() {
-        let cell = AppCell::new();
+        let cell = app_with_implicit_view();
         let mut app = cell.borrow_mut();
         let log = Rc::new(RefCell::new(Vec::new()));
         let ticker = TestVSync.create_ticker(&mut app, elapsed_recorder(&log));
@@ -757,7 +800,7 @@ mod tests {
 
     impl TickerProvider for Handle<Host> {
         fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
-            let ticker = Ticker::new(app, on_tick);
+            let ticker = Ticker::new(app, on_tick, Some(IMPLICIT_VIEW_ID));
             app.get_mut(*self).ticker = Some(ticker);
             ticker
         }
@@ -765,7 +808,7 @@ mod tests {
 
     #[test]
     fn a_provider_in_the_app_can_vend_a_ticker() {
-        let cell = AppCell::new();
+        let cell = app_with_implicit_view();
         let mut app = cell.borrow_mut();
         let host = app.create(Host { ticker: None });
         let log = Rc::new(RefCell::new(Vec::new()));
@@ -774,6 +817,54 @@ mod tests {
         ticker.start(&mut app);
         pump(&mut app, Duration::from_millis(10));
         assert_eq!(*log.borrow(), vec![Duration::ZERO]);
+        ticker.stop(&mut app, false);
+    }
+
+    #[test]
+    fn a_ticker_moved_to_another_view_ticks_at_its_frames() {
+        let other = ViewId(1);
+        let (cell, platform) = app_with_views(&[IMPLICIT_VIEW_ID, other]);
+        let mut app = cell.borrow_mut();
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let ticker = Ticker::new(&mut app, elapsed_recorder(&log), Some(IMPLICIT_VIEW_ID));
+        ticker.start(&mut app);
+
+        crate::test_support::pump(&mut app, &[other], Duration::from_millis(5));
+        assert!(log.borrow().is_empty(), "another view's frame");
+        pump(&mut app, Duration::from_millis(10));
+        assert_eq!(log.borrow().len(), 1);
+
+        // Its widget moved to the other view, with a tick due.
+        platform.take_frame_requests();
+        ticker.set_view(&mut app, Some(other));
+        assert_eq!(
+            platform.take_frame_requests(),
+            [other],
+            "the tick asks for its new view"
+        );
+        pump(&mut app, Duration::from_millis(20));
+        assert_eq!(log.borrow().len(), 1, "its old view's frame");
+        crate::test_support::pump(&mut app, &[other], Duration::from_millis(21));
+        assert_eq!(
+            *log.borrow(),
+            [Duration::ZERO, Duration::from_millis(11)],
+            "its new view's frame"
+        );
+        ticker.stop(&mut app, false);
+    }
+
+    #[test]
+    fn a_ticker_in_no_view_ticks_at_every_frame() {
+        let other = ViewId(1);
+        let (cell, _platform) = app_with_views(&[IMPLICIT_VIEW_ID, other]);
+        let mut app = cell.borrow_mut();
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let ticker = Ticker::new(&mut app, elapsed_recorder(&log), None);
+        ticker.start(&mut app);
+
+        pump(&mut app, Duration::from_millis(10));
+        crate::test_support::pump(&mut app, &[other], Duration::from_millis(18));
+        assert_eq!(*log.borrow(), [Duration::ZERO, Duration::from_millis(8)]);
         ticker.stop(&mut app, false);
     }
 }

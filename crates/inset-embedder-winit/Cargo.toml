@@ -45,7 +45,7 @@ objc2-io-surface = "0.3"
 # test may end by quitting the process. A test file without an entry here runs under the
 # harness, whose `main` replaces the test's, and passes having run nothing.
 [[test]]
-name = "frames_while_the_first_window_is_hidden"
+name = "a_hidden_window_takes_no_frames_while_a_shown_one_draws"
 harness = false
 
 [[test]]

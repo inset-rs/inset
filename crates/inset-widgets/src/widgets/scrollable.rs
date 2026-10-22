@@ -1302,13 +1302,13 @@ mod tests {
     use std::cell::{Cell, RefCell};
 
     use inset_embedder::Restoration;
-    use inset_scheduler::SchedulerBinding;
     use inset_services::{RestorationMap, RestorationUpdate};
     use inset_test::TestPlatform;
 
     use super::*;
     use crate::framework::Element;
     use crate::test_harness::Harness;
+    use crate::test_harness::pump_every_view;
     use crate::widgets::basic::{Builder, SizedBox};
     use crate::widgets::media_query::{MediaQuery, MediaQueryData};
     use crate::widgets::restoration::RootRestorationScope;
@@ -1391,13 +1391,6 @@ mod tests {
             }
         };
         (harness, state)
-    }
-
-    fn pump_frame(app: &mut App) {
-        SchedulerBinding::handle_begin_frame(app, Some(Duration::ZERO));
-        app.drain_microtasks();
-        SchedulerBinding::handle_draw_frame(app);
-        app.drain_microtasks();
     }
 
     /// A leaf widget whose render object is a `RenderViewport` over 800 logical pixels of
@@ -1586,7 +1579,7 @@ mod tests {
         };
 
         ScrollContext::save_offset(&state, &mut app, 55.0);
-        pump_frame(&mut app);
+        pump_every_view(&mut app, Duration::ZERO);
 
         let stored = restoration.puts.borrow();
         let last = stored.last().expect("the manager sent the data");

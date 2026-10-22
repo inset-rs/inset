@@ -642,7 +642,7 @@ mod tests {
             Some(region.as_box()),
         );
         let root = RenderRepaintBoundary::new(app, Some(padding.as_box()));
-        let owner = PipelineOwner::new(app, None);
+        let owner = PipelineOwner::new(app, None, None);
         owner.set_root_node(app, Some(root.as_object()));
         root.schedule_initial_layout(app);
         root.layout(app, BoxConstraints::tight(Size::new(200.0, 200.0)), false);
@@ -809,7 +809,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let region = RenderMouseRegion::new(&mut app, true, None);
         assert!(region.valid_for_mouse_tracker(&app));
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         region.as_object().attach(&mut app, owner);
         assert!(region.valid_for_mouse_tracker(&app));
         region.as_object().detach(&mut app);
@@ -960,7 +960,7 @@ mod tests {
         let back = RenderMouseRegion::new(&mut app, true, None);
         let front = RenderMouseRegion::new(&mut app, true, Some(back.as_box()));
         let root = RenderRepaintBoundary::new(&mut app, Some(front.as_box()));
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         owner.set_root_node(&mut app, Some(root.as_object()));
         root.schedule_initial_layout(&mut app);
         root.layout(
@@ -999,7 +999,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let region = RenderMouseRegion::new(&mut app, true, None);
         let root = RenderRepaintBoundary::new(&mut app, Some(region.as_box()));
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         owner.set_root_node(&mut app, Some(root.as_object()));
         root.schedule_initial_layout(&mut app);
         root.layout(
@@ -1035,7 +1035,7 @@ mod tests {
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(10.0, 10.0)), None);
         let root = RenderRepaintBoundary::new(&mut app, Some(child.as_box()));
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         owner.set_root_node(&mut app, Some(root.as_object()));
         root.schedule_initial_layout(&mut app);
         root.layout(

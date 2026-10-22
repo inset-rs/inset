@@ -2601,7 +2601,7 @@ mod tests {
     fn nodes_needing_layout_updated_with_layout_changes() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         let node = RenderHandle::new_box(&mut app, leaf(Rc::new(Cell::new(0))));
         node.as_object().attach(&mut app, owner);
         assert!(owner.nodes_needing_layout(&app).is_empty());
@@ -2633,7 +2633,7 @@ mod tests {
     fn parent_uses_size_marks_parent() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         let child = RenderHandle::new_box(&mut app, leaf(Rc::new(Cell::new(0))));
         let parent = RenderHandle::new_box(
             &mut app,
@@ -2658,7 +2658,7 @@ mod tests {
     fn adopt_drop_attach_detach() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         let child = RenderHandle::new_box(&mut app, leaf(Rc::new(Cell::new(0))));
         let parent = RenderHandle::new_box(
             &mut app,
@@ -2703,7 +2703,7 @@ mod tests {
     fn flush_layout_orders_by_depth() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let owner = PipelineOwner::new(&mut app, None);
+        let owner = PipelineOwner::new(&mut app, None, None);
         let order = Rc::new(std::cell::RefCell::new(Vec::new()));
         let child_order = Rc::clone(&order);
         let parent_order = Rc::clone(&order);
@@ -2799,6 +2799,7 @@ mod tests {
             Some(Listener::new(move |_| {
                 updates_cb.set(updates_cb.get() + 1);
             })),
+            None,
         );
         let node = RenderHandle::new_box(&mut app, leaf(Rc::new(Cell::new(0))));
         owner.set_root_node(&mut app, Some(node.as_object()));

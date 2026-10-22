@@ -1803,7 +1803,6 @@ mod tests {
 
     use inset_embedder::TextDirection;
     use inset_painting::PaintingBinding;
-    use inset_scheduler::SchedulerBinding;
     use inset_services::LogicalKeyboardKey;
     use inset_test::{TestPlatform, TestView};
 
@@ -1862,10 +1861,7 @@ mod tests {
         let mut at = Duration::ZERO;
         for _ in 0..20 {
             at += Duration::from_millis(20);
-            SchedulerBinding::handle_begin_frame(app, Some(at));
-            app.drain_microtasks();
-            SchedulerBinding::handle_draw_frame(app);
-            app.drain_microtasks();
+            crate::test_harness::pump_every_view(app, at);
         }
     }
 

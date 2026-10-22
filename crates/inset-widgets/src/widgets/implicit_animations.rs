@@ -1528,6 +1528,10 @@ impl State for AnimatedContainerState {
         AnimatedWidgetBaseState::init_state(self, app);
     }
 
+    fn activate(self: Handle<Self>, app: &mut App) {
+        SingleTickerProviderStateMixin::activate(self, app);
+    }
+
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &AnimatedContainer) {
         ImplicitlyAnimatedWidgetState::did_update_widget(self, app, old_widget);
     }
@@ -1706,6 +1710,10 @@ impl State for AnimatedPaddingState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         AnimatedWidgetBaseState::init_state(self, app);
+    }
+
+    fn activate(self: Handle<Self>, app: &mut App) {
+        SingleTickerProviderStateMixin::activate(self, app);
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &AnimatedPadding) {
@@ -1911,6 +1919,10 @@ impl State for AnimatedAlignState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         AnimatedWidgetBaseState::init_state(self, app);
+    }
+
+    fn activate(self: Handle<Self>, app: &mut App) {
+        SingleTickerProviderStateMixin::activate(self, app);
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &AnimatedAlign) {
@@ -2190,6 +2202,10 @@ impl State for AnimatedPositionedState {
         AnimatedWidgetBaseState::init_state(self, app);
     }
 
+    fn activate(self: Handle<Self>, app: &mut App) {
+        SingleTickerProviderStateMixin::activate(self, app);
+    }
+
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &AnimatedPositioned) {
         ImplicitlyAnimatedWidgetState::did_update_widget(self, app, old_widget);
     }
@@ -2439,6 +2455,10 @@ impl State for AnimatedPositionedDirectionalState {
         AnimatedWidgetBaseState::init_state(self, app);
     }
 
+    fn activate(self: Handle<Self>, app: &mut App) {
+        SingleTickerProviderStateMixin::activate(self, app);
+    }
+
     fn did_update_widget(
         self: Handle<Self>,
         app: &mut App,
@@ -2606,6 +2626,10 @@ impl State for AnimatedScaleState {
         ImplicitlyAnimatedWidgetState::init_state(self, app);
     }
 
+    fn activate(self: Handle<Self>, app: &mut App) {
+        SingleTickerProviderStateMixin::activate(self, app);
+    }
+
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &AnimatedScale) {
         ImplicitlyAnimatedWidgetState::did_update_widget(self, app, old_widget);
     }
@@ -2761,6 +2785,10 @@ impl State for AnimatedRotationState {
         ImplicitlyAnimatedWidgetState::init_state(self, app);
     }
 
+    fn activate(self: Handle<Self>, app: &mut App) {
+        SingleTickerProviderStateMixin::activate(self, app);
+    }
+
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &AnimatedRotation) {
         ImplicitlyAnimatedWidgetState::did_update_widget(self, app, old_widget);
     }
@@ -2907,6 +2935,10 @@ impl State for AnimatedSlideState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         ImplicitlyAnimatedWidgetState::init_state(self, app);
+    }
+
+    fn activate(self: Handle<Self>, app: &mut App) {
+        SingleTickerProviderStateMixin::activate(self, app);
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &AnimatedSlide) {
@@ -3068,6 +3100,10 @@ impl State for AnimatedOpacityState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         ImplicitlyAnimatedWidgetState::init_state(self, app);
+    }
+
+    fn activate(self: Handle<Self>, app: &mut App) {
+        SingleTickerProviderStateMixin::activate(self, app);
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &AnimatedOpacity) {
@@ -3291,6 +3327,10 @@ impl State for AnimatedDefaultTextStyleState {
         AnimatedWidgetBaseState::init_state(self, app);
     }
 
+    fn activate(self: Handle<Self>, app: &mut App) {
+        SingleTickerProviderStateMixin::activate(self, app);
+    }
+
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &AnimatedDefaultTextStyle) {
         ImplicitlyAnimatedWidgetState::did_update_widget(self, app, old_widget);
     }
@@ -3497,6 +3537,10 @@ impl State for AnimatedFractionallySizedBoxState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         AnimatedWidgetBaseState::init_state(self, app);
+    }
+
+    fn activate(self: Handle<Self>, app: &mut App) {
+        SingleTickerProviderStateMixin::activate(self, app);
     }
 
     fn did_update_widget(
@@ -4066,5 +4110,84 @@ mod tests {
         let app = cell.borrow();
         let halfway = tween.transform(&app, 0.5).expect("both ends are set");
         assert_eq!(halfway.top_left.x, 5.0);
+    }
+
+    /// An animating state moved by a `GlobalKey`: its `activate` moves its ticker to the view it
+    /// is in now, and mutes it under a `TickerMode` that disables tickers.
+    #[test]
+    fn an_implicit_animation_moved_by_a_global_key_follows_its_view_and_ticker_mode() {
+        use inset_embedder::{TargetPlatform, ViewId};
+        use inset_test::TestPlatform;
+
+        use crate::view::ViewCollection;
+        use crate::widgets::ticker_provider::TickerMode;
+
+        let (first, second) = (ViewId(1), ViewId(2));
+        let platform = Rc::new(
+            TestPlatform::new()
+                .on(TargetPlatform::MacOS)
+                .with_views(&[first, second]),
+        );
+        let cell = AppCell::with_platform(platform.clone());
+        let key = Rc::new(GlobalKey::new());
+        let tree = |view: ViewId, enabled: bool, opacity: f64| -> WidgetRef {
+            let animated = TickerMode::new(
+                enabled,
+                AnimatedOpacity::new(opacity, DURATION).key(key.clone()),
+            )
+            .into_widget();
+            let (in_first, in_second) = if view == first {
+                (animated, SizedBox::new().into_widget())
+            } else {
+                (SizedBox::new().into_widget(), animated)
+            };
+            ViewCollection::new(vec![
+                View::new(platform.test_view(first), in_first).into_widget(),
+                View::new(platform.test_view(second), in_second).into_widget(),
+            ])
+            .into_widget()
+        };
+        let pump = |app: &mut App, view: ViewId, ms: u64| {
+            crate::test_harness::binding_pump_view(app, view, Duration::from_millis(ms));
+        };
+        let attach = |app: &mut App, root: WidgetRef| {
+            WidgetsBinding::instance(app).attach_root_widget(app, root);
+        };
+        crate::binding::run_widget(&mut cell.borrow_mut(), tree(first, true, 1.0));
+        cell.elapse(Duration::ZERO);
+        let mut app = cell.borrow_mut();
+        let value = |app: &mut App| {
+            let state = key
+                .current_state::<AnimatedOpacityState>(app)
+                .expect("mounted");
+            ImplicitlyAnimatedWidgetState::controller(state, app).value(app)
+        };
+
+        attach(&mut app, tree(first, true, 0.0));
+        pump(&mut app, first, 16);
+        pump(&mut app, first, 32);
+        let before_move = value(&mut app);
+        assert!(before_move > 0.0, "it animates in the first view");
+
+        // The second view's frame builds the move; the tick, still the first view's then, waits.
+        attach(&mut app, tree(second, true, 0.0));
+        pump(&mut app, second, 48);
+        assert_eq!(value(&mut app), before_move);
+        pump(&mut app, first, 64);
+        assert_eq!(
+            value(&mut app),
+            before_move,
+            "no tick at the first view's frame"
+        );
+        pump(&mut app, second, 64);
+        let moved = value(&mut app);
+        assert!(moved > before_move, "it ticks at the second view's frame");
+
+        attach(&mut app, tree(first, false, 0.0));
+        pump(&mut app, first, 80);
+        let muted = value(&mut app);
+        pump(&mut app, first, 96);
+        pump(&mut app, second, 96);
+        assert_eq!(value(&mut app), muted, "muted by its new TickerMode");
     }
 }

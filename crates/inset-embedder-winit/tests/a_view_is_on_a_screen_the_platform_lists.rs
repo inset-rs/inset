@@ -104,7 +104,7 @@ mod client {
     }
 
     impl EmbedderClient for ScreenClient {
-        fn frame(&mut self, _frame: Frame) {}
+        fn frame(&mut self, _views: &[ViewId], _frame: Frame) {}
 
         fn wake(&mut self, _elapsed: Duration) {}
 

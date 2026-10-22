@@ -253,7 +253,7 @@ mod tests {
             TargetPlatform::Android
         }
 
-        fn request_frame(&self) {}
+        fn request_frame(&self, _view: ViewId) {}
 
         fn now(&self) -> Instant {
             Instant::now()

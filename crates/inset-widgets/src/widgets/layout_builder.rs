@@ -23,6 +23,7 @@ use crate::framework::{
     RenderObjectElement, RenderObjectElementData, RenderObjectElementWidget, RenderObjectWidget,
     Slot, Widget, WidgetKind, WidgetRef, downcast_widget,
 };
+use crate::view::View;
 
 /// The signature of the [`LayoutBuilder`] builder function.
 pub type LayoutWidgetBuilder = Rc<dyn Fn(&mut App, BuildContext, BoxConstraints) -> WidgetRef>;
@@ -215,6 +216,7 @@ impl LayoutBuilderElement {
         SchedulerBinding::schedule_frame_callback(
             app,
             FrameCallback::new(move |app, _time_stamp| self.frame_callback(app)),
+            View::maybe_id_of(app, self.as_element()),
             false,
             true,
         );

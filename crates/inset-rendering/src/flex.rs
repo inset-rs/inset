@@ -1599,7 +1599,7 @@ mod tests {
         root: AnyRenderBox,
         constraints: BoxConstraints,
     ) -> Handle<PipelineOwner> {
-        let owner = PipelineOwner::new(app, None);
+        let owner = PipelineOwner::new(app, None, None);
         owner.set_root_node(app, Some(root.as_object()));
         root.layout(app, constraints, false);
         schedule_root_paint(app, root.as_object());

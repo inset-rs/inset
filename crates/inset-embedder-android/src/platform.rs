@@ -138,8 +138,9 @@ impl Platform for AndroidPlatform {
         TargetPlatform::Android
     }
 
-    fn request_frame(&self) {
-        if !self.frame_requested.replace(true) {
+    /// The activity's window is the one view: a frame of any other is no frame of the app's.
+    fn request_frame(&self, view: inset_embedder::ViewId) {
+        if view == VIEW && !self.frame_requested.replace(true) {
             self.wakes.waker.wake();
         }
     }

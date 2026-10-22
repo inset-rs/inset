@@ -53,6 +53,7 @@ impl<C: EmbedderClient> MainLoop<C> {
         let visibility_notices =
             ThisOs::observe_visibility(&window, self.send_visibility_notice(window.id()));
         self.state.add_view_with_window(open, visibility_notices);
+        self.sync_frame_scheduler(view_id);
         self.client.view_added(view_id);
         self.read_theme_of(&window);
     }
@@ -82,18 +83,26 @@ impl<C: EmbedderClient> MainLoop<C> {
             give_surface(&view, &window);
         }
         self.views().attach_screen_window(Arc::clone(&window));
+        self.sync_frame_scheduler(view.id());
         self.client.view_metrics_changed(view.id());
         self.read_theme_of(&window);
     }
 
     /// Closes a window: it is freed, and its view goes with it, but for the screen view,
-    /// which outlives its window.
+    /// which outlives its window and takes no frames until it has one again.
     pub(super) fn close_window(&mut self, id: WindowId) {
+        let Some(closing) = self.view_id_of(id) else {
+            return;
+        };
         let Some(after_close) = self.views().close(id) else {
             return;
         };
-        if let ViewAfterClose::Removed(view) = after_close {
-            self.client.view_removed(view);
+        match after_close {
+            ViewAfterClose::Removed(view) => {
+                self.frame_scheduler.remove_view(view);
+                self.client.view_removed(view);
+            }
+            ViewAfterClose::Stays => self.sync_frame_scheduler(closing),
         }
     }
 
@@ -146,8 +155,8 @@ impl<C: EmbedderClient> MainLoop<C> {
         }
     }
 
-    /// Reads again which screen each window is on, and tells the client of the views whose
-    /// screen changed.
+    /// Reads again which screen each window is on, and tells the client and the frame scheduler
+    /// of the views whose screen changed.
     pub(super) fn sync_screens(&mut self) {
         let changed: Vec<ViewId> = self
             .views()
@@ -158,6 +167,7 @@ impl<C: EmbedderClient> MainLoop<C> {
             .collect();
         for view_id in changed {
             self.client.view_metrics_changed(view_id);
+            self.sync_frame_scheduler(view_id);
         }
     }
 
@@ -177,15 +187,19 @@ impl<C: EmbedderClient> MainLoop<C> {
     }
 
     /// The system gives the windows surfaces, at launch and each time it gives them back: every
-    /// view gets one, at the metrics its window has now, and the framework is asked for a frame
-    /// to draw on them, as Flutter's shell asks when a view's surface is made.
+    /// view gets one, at the metrics its window has now, and draws its last scene on it, since the
+    /// framework presents only what changed; and the framework is asked for a frame of each.
     pub(super) fn give_surfaces(&mut self) {
         self.surfaces_given = true;
-        for open in self.views().open_windows() {
+        let open_windows = self.views().open_windows();
+        for open in &open_windows {
             give_surface(&open.view, &open.window);
         }
         self.sync_metrics();
-        self.request_frame();
+        for open in open_windows {
+            open.view.draw_last_scene();
+            self.request_frame(open.view.id());
+        }
     }
 
     /// The system takes every window's surface away: the app and its views stay, and each view
@@ -203,28 +217,28 @@ impl<C: EmbedderClient> MainLoop<C> {
     /// presented again if it is not on the surface; otherwise the content is current and
     /// nothing is drawn.
     pub(super) fn on_redraw_requested(&mut self, id: WindowId) {
-        if let Some(open) = self.views().by_window(id) {
-            open.view.draw_last_scene();
-        }
-        self.request_vsync_for_owed_scenes();
+        let Some(open) = self.views().by_window(id) else {
+            return;
+        };
+        open.view.draw_last_scene();
+        self.request_vsync_if_owed(open.view.id());
     }
 
     /// A window moved, and may be on another screen now: the app hears of its view's new
     /// screen, as Flutter's macOS embedder sends a window's metrics again when its screen changes,
-    /// and of the move, its native surfaces follow it, and so do the framework's vsyncs if it is
-    /// the first window. AppKit moves the windows off a screen that goes away, so this is also how
-    /// their vsyncs leave it.
+    /// and of the move, and its native surfaces and its view's frames follow it to that screen's
+    /// vsyncs. AppKit moves the windows off a screen that goes away, so this is also how their
+    /// vsyncs leave it.
     pub(super) fn on_moved(&mut self, id: WindowId) {
-        if let Some(open) = self.views().by_window(id) {
-            if open.view.refresh_screen(&open.window) {
-                self.client.view_metrics_changed(open.view.id());
-            }
-            self.report_window_changed(&open);
-            open.view.follow_window();
+        let Some(open) = self.views().by_window(id) else {
+            return;
+        };
+        if open.view.refresh_screen(&open.window) {
+            self.client.view_metrics_changed(open.view.id());
         }
-        if let Some(display) = self.first_window_display() {
-            self.frame_scheduler.follow_display(&display);
-        }
+        self.report_window_changed(&open);
+        open.view.follow_window();
+        self.sync_frame_scheduler(open.view.id());
     }
 
     /// winit says a window is occluded, or shown: the app hears of it once the window answers so,
@@ -240,12 +254,13 @@ impl<C: EmbedderClient> MainLoop<C> {
         }
     }
 
-    /// Reads again whether window `id` is minimized and whether it is occluded, and tells the app
-    /// if either changed since it last heard.
+    /// Reads again whether window `id` is minimized and whether it is occluded: its view's frames
+    /// are held while it is either, and the app hears if either changed since it last heard.
     pub(super) fn sync_window_state(&mut self, id: WindowId) {
         let Some(open) = self.views().by_window(id) else {
             return;
         };
+        self.sync_frame_scheduler(open.view.id());
         let Some(handle) = &open.handle else {
             return;
         };

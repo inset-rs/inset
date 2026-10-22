@@ -2234,6 +2234,7 @@ impl EditableTextState {
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::handle_method(self, Self::bring_selection_into_view_after_frame),
+                View::maybe_id_of(app, self.context(app)),
             );
             TextSelectionDelegate::hide_toolbar(self, app, true);
         }
@@ -3996,6 +3997,7 @@ impl EditableTextState {
         SchedulerBinding::add_post_frame_callback(
             app,
             FrameCallback::handle_method(self, Self::schedule_periodic_post_frame_callbacks),
+            View::maybe_id_of(app, self.context(app)),
         );
     }
 
@@ -4242,6 +4244,7 @@ impl State for EditableTextState {
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::handle_method(self, Self::apply_autofocus),
+                View::maybe_id_of(app, self.context(app)),
             );
         }
         let new_ticker_enabled = TickerMode::values_of(app, context).enabled;
@@ -4270,6 +4273,7 @@ impl State for EditableTextState {
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::handle_method(self, Self::post_frame_update_style),
+                View::maybe_id_of(app, self.context(app)),
             );
         }
         let platform = app.platform().target_platform();
@@ -4328,6 +4332,7 @@ impl State for EditableTextState {
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::handle_method(self, Self::post_frame_open_connection),
+                View::maybe_id_of(app, self.context(app)),
             );
         }
         if self.has_input_connection(app) {
@@ -4382,6 +4387,7 @@ impl State for EditableTextState {
                 SchedulerBinding::add_post_frame_callback(
                     app,
                     FrameCallback::handle_method(self, Self::post_frame_update_style),
+                    View::maybe_id_of(app, self.context(app)),
                 );
             }
         }
@@ -4401,6 +4407,7 @@ impl State for EditableTextState {
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::handle_method(self, Self::post_frame_rebuild_toolbar),
+                View::maybe_id_of(app, self.context(app)),
             );
         }
         if app.get(self).selection_overlay.is_some()
@@ -4440,6 +4447,7 @@ impl State for EditableTextState {
                             }
                         }
                     }),
+                    View::maybe_id_of(app, self.context(app)),
                 );
             }
         } else if self.widget(app).controller.selection(app) != old_widget.controller.selection(app)
@@ -4720,6 +4728,7 @@ impl WidgetsBindingObserverObject for EditableTextState {
         SchedulerBinding::add_post_frame_callback(
             app,
             FrameCallback::handle_method(self, Self::post_frame_update_for_scroll),
+            View::maybe_id_of(app, self.context(app)),
         );
     }
 }
@@ -5054,6 +5063,7 @@ impl TextSelectionDelegate for EditableTextState {
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::handle_method(self, Self::bring_selection_into_view_after_frame),
+                View::maybe_id_of(app, self.context(app)),
             );
             TextSelectionDelegate::hide_toolbar(self, app, true);
         }
@@ -6289,11 +6299,7 @@ mod tests {
         let mut pump = |cell: &AppCell| {
             for _ in 0..5 {
                 at += Duration::from_millis(20);
-                let mut app = cell.borrow_mut();
-                SchedulerBinding::handle_begin_frame(&mut app, Some(at));
-                app.drain_microtasks();
-                SchedulerBinding::handle_draw_frame(&mut app);
-                app.drain_microtasks();
+                crate::test_harness::pump_every_view(&mut cell.borrow_mut(), at);
             }
         };
         pump(&cell);

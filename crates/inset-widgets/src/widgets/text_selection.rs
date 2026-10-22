@@ -50,6 +50,7 @@ use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindin
 use crate::framework::{
     BuildContext, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
 };
+use crate::view::View;
 use crate::widgets::basic::{CompositedTransformFollower, Directionality, SizedBox, WidgetBuilder};
 use crate::widgets::editable_text::EditableTextState;
 use crate::widgets::feedback::Feedback;
@@ -2450,6 +2451,7 @@ impl SelectionOverlay {
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::handle_method(self, Self::mark_needs_build_after_frame),
+                View::maybe_id_of(app, app.get(self).context),
             );
         } else {
             self.rebuild_overlay_entries(app);
@@ -5224,7 +5226,6 @@ mod tests {
         use inset_embedder::{TargetPlatform, TextDirection};
         use inset_foundation::ValueNotifier;
         use inset_painting::{PaintingBinding, TextStyle};
-        use inset_scheduler::SchedulerBinding;
         use inset_test::{TestPlatform, TestView};
 
         let platform = TestPlatform::new()
@@ -5265,11 +5266,7 @@ mod tests {
         let mut pump = |cell: &AppCell| {
             for _ in 0..5 {
                 at += Duration::from_millis(20);
-                let mut app = cell.borrow_mut();
-                SchedulerBinding::handle_begin_frame(&mut app, Some(at));
-                app.drain_microtasks();
-                SchedulerBinding::handle_draw_frame(&mut app);
-                app.drain_microtasks();
+                crate::test_harness::pump_every_view(&mut cell.borrow_mut(), at);
             }
         };
         pump(&cell);
