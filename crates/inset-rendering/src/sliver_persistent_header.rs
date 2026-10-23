@@ -540,7 +540,7 @@ pub trait RenderSliverScrollingPersistentHeader: RenderSliverPersistentHeader {
 
         self.set_geometry(
             app,
-            SliverGeometry::new()
+            SliverGeometry::builder()
                 .scroll_extent(max_extent)
                 .paint_origin(constraints.overlap.min(0.0))
                 .paint_extent(clamp_double(
@@ -551,7 +551,8 @@ pub trait RenderSliverScrollingPersistentHeader: RenderSliverPersistentHeader {
                 .cache_extent(cache_extent)
                 .max_paint_extent(max_extent + stretch_offset)
                 // Conservatively say we do have overflow to avoid complexity.
-                .has_visual_overflow(true),
+                .has_visual_overflow(true)
+                .build(),
         );
         if stretch_offset > 0.0 {
             0.0
@@ -644,7 +645,7 @@ pub trait RenderSliverPinnedPersistentHeader: RenderSliverPersistentHeader {
         let min_extent = self.min_extent(app);
         self.set_geometry(
             app,
-            SliverGeometry::new()
+            SliverGeometry::builder()
                 .scroll_extent(max_extent)
                 .paint_origin(constraints.overlap)
                 .paint_extent(child_extent.min(effective_remaining_paint_extent))
@@ -657,7 +658,8 @@ pub trait RenderSliverPinnedPersistentHeader: RenderSliverPersistentHeader {
                     layout_extent
                 })
                 // Conservatively say we do have overflow to avoid complexity.
-                .has_visual_overflow(true),
+                .has_visual_overflow(true)
+                .build(),
         );
     }
 
@@ -892,7 +894,7 @@ pub trait RenderSliverFloatingPersistentHeader: RenderSliverPersistentHeader {
         let layout_extent = max_extent - constraints.scroll_offset;
         self.set_geometry(
             app,
-            SliverGeometry::new()
+            SliverGeometry::builder()
                 .scroll_extent(max_extent)
                 .paint_origin(constraints.overlap.min(0.0))
                 .paint_extent(clamp_double(
@@ -907,7 +909,8 @@ pub trait RenderSliverFloatingPersistentHeader: RenderSliverPersistentHeader {
                 ))
                 .max_paint_extent(max_extent + stretch_offset)
                 // Conservatively say we do have overflow to avoid complexity.
-                .has_visual_overflow(true),
+                .has_visual_overflow(true)
+                .build(),
         );
         if stretch_offset > 0.0 {
             0.0
@@ -1306,7 +1309,7 @@ pub trait RenderSliverFloatingPinnedPersistentHeader: RenderSliverFloatingPersis
         };
         self.set_geometry(
             app,
-            SliverGeometry::new()
+            SliverGeometry::builder()
                 .scroll_extent(max_extent)
                 .paint_origin(constraints.overlap.min(0.0))
                 .paint_extent(clamped_paint_extent)
@@ -1314,7 +1317,8 @@ pub trait RenderSliverFloatingPinnedPersistentHeader: RenderSliverFloatingPersis
                 .max_paint_extent(max_extent + stretch_offset)
                 .max_scroll_obstruction_extent(min_extent)
                 // Conservatively say we do have overflow to avoid complexity.
-                .has_visual_overflow(true),
+                .has_visual_overflow(true)
+                .build(),
         );
         0.0
     }

@@ -261,7 +261,9 @@ impl RenderObject for RenderSliverList {
                 // offset correction.
                 self.set_geometry(
                     app,
-                    SliverGeometry::new().scroll_offset_correction(-scroll_offset),
+                    SliverGeometry::builder()
+                        .scroll_offset_correction(-scroll_offset)
+                        .build(),
                 );
                 return;
             };
@@ -275,7 +277,9 @@ impl RenderObject for RenderSliverList {
                 // the next layout if it is not.
                 self.set_geometry(
                     app,
-                    SliverGeometry::new().scroll_offset_correction(-first_child_scroll_offset),
+                    SliverGeometry::builder()
+                        .scroll_offset_correction(-first_child_scroll_offset)
+                        .build(),
                 );
                 first_child
                     .as_object()
@@ -330,7 +334,9 @@ impl RenderObject for RenderSliverList {
                 if first_child_scroll_offset < -PRECISION_ERROR_TOLERANCE {
                     self.set_geometry(
                         app,
-                        SliverGeometry::new().scroll_offset_correction(-first_child_scroll_offset),
+                        SliverGeometry::builder()
+                            .scroll_offset_correction(-first_child_scroll_offset)
+                            .build(),
                     );
                     return;
                 }
@@ -435,9 +441,10 @@ impl RenderObject for RenderSliverList {
                     + self.paint_extent_of(app, last_child);
                 self.set_geometry(
                     app,
-                    SliverGeometry::new()
+                    SliverGeometry::builder()
                         .scroll_extent(extent)
-                        .max_paint_extent(extent),
+                        .max_paint_extent(extent)
+                        .build(),
                 );
                 return;
             }
@@ -499,7 +506,7 @@ impl RenderObject for RenderSliverList {
             constraints.scroll_offset + constraints.remaining_paint_extent;
         self.set_geometry(
             app,
-            SliverGeometry::new()
+            SliverGeometry::builder()
                 .scroll_extent(estimated_max_scroll_offset)
                 .paint_extent(paint_extent)
                 .cache_extent(cache_extent)
@@ -508,7 +515,8 @@ impl RenderObject for RenderSliverList {
                 .has_visual_overflow(
                     end_scroll_offset > target_end_scroll_offset_for_paint
                         || constraints.scroll_offset > 0.0,
-                ),
+                )
+                .build(),
         );
 
         // We may have started the layout while scrolled to the end, which would not expose a new

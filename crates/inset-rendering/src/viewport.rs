@@ -2458,11 +2458,12 @@ mod tests {
             let cached = self.calculate_cache_offset(app, constraints, 0.0, extent);
             self.set_geometry(
                 app,
-                SliverGeometry::new()
+                SliverGeometry::builder()
                     .scroll_extent(extent)
                     .paint_extent(painted)
                     .cache_extent(cached)
-                    .max_paint_extent(extent),
+                    .max_paint_extent(extent)
+                    .build(),
             );
         }
 

@@ -126,11 +126,12 @@ pub trait RenderSliverEdgeInsetsPadding:
             let cache_extent = cache_offset(0.0, main_axis_padding);
             self.set_geometry(
                 app,
-                SliverGeometry::new()
+                SliverGeometry::builder()
                     .scroll_extent(main_axis_padding)
                     .paint_extent(paint_extent.min(constraints.remaining_paint_extent))
                     .max_paint_extent(main_axis_padding)
-                    .cache_extent(cache_extent),
+                    .cache_extent(cache_extent)
+                    .build(),
             );
             return;
         };
@@ -158,7 +159,9 @@ pub trait RenderSliverEdgeInsetsPadding:
         if let Some(correction) = child_layout_geometry.scroll_offset_correction {
             self.set_geometry(
                 app,
-                SliverGeometry::new().scroll_offset_correction(correction),
+                SliverGeometry::builder()
+                    .scroll_offset_correction(correction)
+                    .build(),
             );
             return;
         }
@@ -183,7 +186,7 @@ pub trait RenderSliverEdgeInsetsPadding:
         .min(constraints.remaining_paint_extent);
         self.set_geometry(
             app,
-            SliverGeometry::new()
+            SliverGeometry::builder()
                 .paint_origin(child_layout_geometry.paint_origin)
                 .scroll_extent(main_axis_padding + scroll_extent)
                 .paint_extent(paint_extent)
@@ -200,7 +203,8 @@ pub trait RenderSliverEdgeInsetsPadding:
                     (main_axis_padding_paint_extent + child_layout_geometry.paint_extent)
                         .max(before_padding_paint_extent + child_layout_geometry.hit_test_extent),
                 )
-                .has_visual_overflow(child_layout_geometry.has_visual_overflow),
+                .has_visual_overflow(child_layout_geometry.has_visual_overflow)
+                .build(),
         );
         let calculated_offset = match apply_growth_direction_to_axis_direction(
             constraints.axis_direction,

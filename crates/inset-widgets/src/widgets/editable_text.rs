@@ -849,9 +849,9 @@ pub struct EditableText {
     pub read_only: bool,
     pub obscuring_character: String,
     pub obscure_text: bool,
-    pub autocorrect: bool,
-    pub smart_dashes_type: SmartDashesType,
-    pub smart_quotes_type: SmartQuotesType,
+    pub autocorrect: Option<bool>,
+    pub smart_dashes_type: Option<SmartDashesType>,
+    pub smart_quotes_type: Option<SmartQuotesType>,
     pub enable_suggestions: bool,
     pub style: TextStyle,
     pub cursor_color: Color,
@@ -868,11 +868,11 @@ pub struct EditableText {
     pub text_height_behavior: Option<TextHeightBehavior>,
     pub text_width_basis: TextWidthBasis,
     pub autofocus: bool,
-    pub show_cursor: bool,
+    pub show_cursor: Option<bool>,
     pub show_selection_handles: bool,
     pub selection_color: Option<Color>,
     pub selection_controls: Option<Rc<dyn TextSelectionControls>>,
-    pub keyboard_type: TextInputType,
+    pub keyboard_type: Option<TextInputType>,
     pub text_input_action: Option<TextInputAction>,
     pub text_capitalization: TextCapitalization,
     pub on_changed: Option<Rc<dyn Fn(&mut App, String)>>,
@@ -898,12 +898,12 @@ pub struct EditableText {
     pub scroll_padding: EdgeInsets,
     pub keyboard_appearance: Brightness,
     pub drag_start_behavior: DragStartBehavior,
-    pub enable_interactive_selection: bool,
+    pub enable_interactive_selection: Option<bool>,
     pub select_all_on_focus: Option<bool>,
     pub scroll_controller: Option<Handle<ScrollController>>,
     pub scroll_physics: Option<ScrollPhysicsRef>,
     pub autocorrection_text_rect_color: Option<Color>,
-    pub toolbar_options: ToolbarOptions,
+    pub toolbar_options: Option<ToolbarOptions>,
     pub autofill_hints: Vec<String>,
     pub autofill_client: Option<AnyAutofillClient>,
     pub clip_behavior: Clip,
@@ -964,15 +964,6 @@ impl EditableText {
         let obscure_text = false;
         let read_only = false;
         let max_lines = Some(1);
-        let autofill_hints = Vec::new();
-        let autocorrect = infer_autocorrect(&autofill_hints);
-        let keyboard_type = infer_keyboard_type(&autofill_hints, max_lines);
-        let input_formatters = Some(vec![FilteringTextInputFormatter::single_line_formatter()]);
-        let toolbar_options = ToolbarOptions::new()
-            .copy(true)
-            .cut(true)
-            .select_all(true)
-            .paste(true);
         debug_assert!(!obscure_text || max_lines == Some(1));
         EditableText {
             key: None,
@@ -981,9 +972,9 @@ impl EditableText {
             read_only,
             obscuring_character: "\u{2022}".into(),
             obscure_text,
-            autocorrect,
-            smart_dashes_type: SmartDashesType::Enabled,
-            smart_quotes_type: SmartQuotesType::Enabled,
+            autocorrect: None,
+            smart_dashes_type: None,
+            smart_quotes_type: None,
             enable_suggestions: true,
             style,
             cursor_color,
@@ -1000,11 +991,11 @@ impl EditableText {
             text_height_behavior: None,
             text_width_basis: TextWidthBasis::Parent,
             autofocus: false,
-            show_cursor: !read_only,
+            show_cursor: None,
             show_selection_handles: false,
             selection_color: None,
             selection_controls: None,
-            keyboard_type,
+            keyboard_type: None,
             text_input_action: None,
             text_capitalization: TextCapitalization::None,
             on_changed: None,
@@ -1016,7 +1007,7 @@ impl EditableText {
             group_id: TypeId::of::<EditableText>(),
             on_tap_outside: None,
             on_tap_up_outside: None,
-            input_formatters,
+            input_formatters: None,
             mouse_cursor: None,
             renderer_ignores_pointer: false,
             cursor_width: 2.0,
@@ -1030,13 +1021,13 @@ impl EditableText {
             scroll_padding: EdgeInsets::all(20.0),
             keyboard_appearance: Brightness::Light,
             drag_start_behavior: DragStartBehavior::Start,
-            enable_interactive_selection: true,
+            enable_interactive_selection: None,
             select_all_on_focus: None,
             scroll_controller: None,
             scroll_physics: None,
             autocorrection_text_rect_color: None,
-            toolbar_options,
-            autofill_hints,
+            toolbar_options: None,
+            autofill_hints: Vec::new(),
             autofill_client: None,
             clip_behavior: Clip::HardEdge,
             restoration_id: None,
@@ -1063,9 +1054,6 @@ impl EditableText {
     /// Dart `EditableText(readOnly:)`.
     pub fn read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
-        self.show_cursor = !read_only;
-        self.enable_interactive_selection = !read_only || !self.obscure_text;
-        self.toolbar_options = default_toolbar_options(self.read_only, self.obscure_text);
         self
     }
 
@@ -1084,36 +1072,24 @@ impl EditableText {
     pub fn obscure_text(mut self, obscure_text: bool) -> Self {
         debug_assert!(!obscure_text || self.max_lines == Some(1));
         self.obscure_text = obscure_text;
-        self.smart_dashes_type = if obscure_text {
-            SmartDashesType::Disabled
-        } else {
-            SmartDashesType::Enabled
-        };
-        self.smart_quotes_type = if obscure_text {
-            SmartQuotesType::Disabled
-        } else {
-            SmartQuotesType::Enabled
-        };
-        self.enable_interactive_selection = !self.read_only || !obscure_text;
-        self.toolbar_options = default_toolbar_options(self.read_only, obscure_text);
         self
     }
 
     /// Dart `EditableText(autocorrect:)`.
     pub fn autocorrect(mut self, autocorrect: bool) -> Self {
-        self.autocorrect = autocorrect;
+        self.autocorrect = Some(autocorrect);
         self
     }
 
     /// Dart `EditableText(smartDashesType:)`.
     pub fn smart_dashes_type(mut self, smart_dashes_type: SmartDashesType) -> Self {
-        self.smart_dashes_type = smart_dashes_type;
+        self.smart_dashes_type = Some(smart_dashes_type);
         self
     }
 
     /// Dart `EditableText(smartQuotesType:)`.
     pub fn smart_quotes_type(mut self, smart_quotes_type: SmartQuotesType) -> Self {
-        self.smart_quotes_type = smart_quotes_type;
+        self.smart_quotes_type = Some(smart_quotes_type);
         self
     }
 
@@ -1162,32 +1138,6 @@ impl EditableText {
         debug_assert!(!self.expands || max_lines.is_none());
         debug_assert!(!self.obscure_text || max_lines == Some(1));
         self.max_lines = max_lines;
-        self.keyboard_type = infer_keyboard_type(&self.autofill_hints, max_lines);
-        self.input_formatters = match max_lines {
-            Some(1) => {
-                let mut formatters = vec![FilteringTextInputFormatter::single_line_formatter()];
-                if let Some(existing) = self.input_formatters.take() {
-                    formatters.extend(existing.into_iter().filter(|formatter| {
-                        !Rc::ptr_eq(
-                            &formatter.0,
-                            &FilteringTextInputFormatter::single_line_formatter().0,
-                        )
-                    }));
-                }
-                Some(formatters)
-            }
-            _ => self.input_formatters.take().map(|formatters| {
-                formatters
-                    .into_iter()
-                    .filter(|formatter| {
-                        !Rc::ptr_eq(
-                            &formatter.0,
-                            &FilteringTextInputFormatter::single_line_formatter().0,
-                        )
-                    })
-                    .collect()
-            }),
-        };
         self
     }
 
@@ -1236,7 +1186,7 @@ impl EditableText {
 
     /// Dart `EditableText(showCursor:)`.
     pub fn show_cursor(mut self, show_cursor: bool) -> Self {
-        self.show_cursor = show_cursor;
+        self.show_cursor = Some(show_cursor);
         self
     }
 
@@ -1260,7 +1210,7 @@ impl EditableText {
 
     /// Dart `EditableText(keyboardType:)`.
     pub fn keyboard_type(mut self, keyboard_type: TextInputType) -> Self {
-        self.keyboard_type = keyboard_type;
+        self.keyboard_type = Some(keyboard_type);
         self
     }
 
@@ -1347,13 +1297,7 @@ impl EditableText {
 
     /// Dart `EditableText(inputFormatters:)`.
     pub fn input_formatters(mut self, input_formatters: Vec<TextInputFormatterRef>) -> Self {
-        self.input_formatters = if self.max_lines == Some(1) {
-            let mut formatters = vec![FilteringTextInputFormatter::single_line_formatter()];
-            formatters.extend(input_formatters);
-            Some(formatters)
-        } else {
-            Some(input_formatters)
-        };
+        self.input_formatters = Some(input_formatters);
         self
     }
 
@@ -1437,7 +1381,7 @@ impl EditableText {
 
     /// Dart `EditableText(enableInteractiveSelection:)`.
     pub fn enable_interactive_selection(mut self, enable_interactive_selection: bool) -> Self {
-        self.enable_interactive_selection = enable_interactive_selection;
+        self.enable_interactive_selection = Some(enable_interactive_selection);
         self
     }
 
@@ -1467,15 +1411,13 @@ impl EditableText {
 
     /// Dart `EditableText(toolbarOptions:)`.
     pub fn toolbar_options(mut self, toolbar_options: ToolbarOptions) -> Self {
-        self.toolbar_options = toolbar_options;
+        self.toolbar_options = Some(toolbar_options);
         self
     }
 
     /// Dart `EditableText(autofillHints:)`.
     pub fn autofill_hints(mut self, autofill_hints: Vec<String>) -> Self {
         self.autofill_hints = autofill_hints;
-        self.autocorrect = infer_autocorrect(&self.autofill_hints);
-        self.keyboard_type = infer_keyboard_type(&self.autofill_hints, self.max_lines);
         self
     }
 
@@ -1663,12 +1605,78 @@ impl EditableText {
     }
 
     fn user_selection_enabled(&self) -> bool {
-        self.enable_interactive_selection && (!self.read_only || !self.obscure_text)
+        self.effective_enable_interactive_selection() && (!self.read_only || !self.obscure_text)
     }
 
-    fn select_all_on_focus_or_default(&self, app: &App) -> bool {
+    /// Dart's `autocorrect` field, as its constructor fills it.
+    pub fn effective_autocorrect(&self, app: &App) -> bool {
+        self.autocorrect.unwrap_or_else(|| {
+            infer_autocorrect(&self.autofill_hints, app.platform().target_platform())
+        })
+    }
+
+    /// Dart's `smartDashesType` field, as its constructor fills it.
+    pub fn effective_smart_dashes_type(&self) -> SmartDashesType {
+        self.smart_dashes_type.unwrap_or(if self.obscure_text {
+            SmartDashesType::Disabled
+        } else {
+            SmartDashesType::Enabled
+        })
+    }
+
+    /// Dart's `smartQuotesType` field, as its constructor fills it.
+    pub fn effective_smart_quotes_type(&self) -> SmartQuotesType {
+        self.smart_quotes_type.unwrap_or(if self.obscure_text {
+            SmartQuotesType::Disabled
+        } else {
+            SmartQuotesType::Enabled
+        })
+    }
+
+    /// Dart's `enableInteractiveSelection` field, as its constructor fills it.
+    pub fn effective_enable_interactive_selection(&self) -> bool {
+        self.enable_interactive_selection
+            .unwrap_or(!self.read_only || !self.obscure_text)
+    }
+
+    /// Dart's `selectAllOnFocus` field, as its constructor fills it.
+    pub fn effective_select_all_on_focus(&self, app: &App) -> bool {
         self.select_all_on_focus
             .unwrap_or_else(|| default_select_all_on_focus(app.platform().target_platform()))
+    }
+
+    /// Dart's `toolbarOptions` field, as its constructor fills it.
+    pub fn effective_toolbar_options(&self) -> ToolbarOptions {
+        self.toolbar_options
+            .unwrap_or_else(|| default_toolbar_options(self.read_only, self.obscure_text))
+    }
+
+    /// Dart's `keyboardType` field, as its constructor fills it.
+    pub fn effective_keyboard_type(&self, app: &App) -> TextInputType {
+        self.keyboard_type.unwrap_or_else(|| {
+            infer_keyboard_type(
+                &self.autofill_hints,
+                self.max_lines,
+                app.platform().target_platform(),
+            )
+        })
+    }
+
+    /// Dart's `inputFormatters` field, as its constructor fills it.
+    pub fn effective_input_formatters(&self) -> Vec<TextInputFormatterRef> {
+        let given = self.input_formatters.iter().flatten().cloned();
+        if self.max_lines == Some(1) {
+            std::iter::once(FilteringTextInputFormatter::single_line_formatter())
+                .chain(given)
+                .collect()
+        } else {
+            given.collect()
+        }
+    }
+
+    /// Dart's `showCursor` field, as its constructor fills it.
+    pub fn effective_show_cursor(&self) -> bool {
+        self.show_cursor.unwrap_or(!self.read_only)
     }
 }
 
@@ -1775,30 +1783,178 @@ fn find_render_editable(
     found
 }
 
-fn infer_autocorrect(autofill_hints: &[String]) -> bool {
+fn infer_autocorrect(autofill_hints: &[String], platform: TargetPlatform) -> bool {
     if autofill_hints.is_empty() || K_IS_WEB {
         return true;
+    }
+    match platform {
+        TargetPlatform::IOS => {
+            // username, password and newPassword are password related hint.
+            // newUsername is not supported on iOS.
+            let password_related_hint = autofill_hints.iter().any(|hint| {
+                hint == AutofillHints::USERNAME
+                    || hint == AutofillHints::PASSWORD
+                    || hint == AutofillHints::NEW_PASSWORD
+            });
+            if password_related_hint {
+                // https://github.com/flutter/flutter/issues/134723
+                // Set autocorrect to false to prevent password bar from flashing.
+                return false;
+            }
+        }
+        TargetPlatform::MacOS
+        | TargetPlatform::Android
+        | TargetPlatform::Fuchsia
+        | TargetPlatform::Linux
+        | TargetPlatform::Windows => {}
     }
     true
 }
 
-fn infer_keyboard_type(autofill_hints: &[String], max_lines: Option<i32>) -> TextInputType {
-    if autofill_hints.is_empty() {
+fn infer_keyboard_type(
+    autofill_hints: &[String],
+    max_lines: Option<i32>,
+    platform: TargetPlatform,
+) -> TextInputType {
+    let Some(effective_hint) = autofill_hints.first() else {
         return if max_lines == Some(1) {
             TextInputType::TEXT
         } else {
             TextInputType::MULTILINE
         };
+    };
+    let effective_hint = effective_hint.as_str();
+
+    // On iOS oftentimes specifying a text content type is not enough to qualify
+    // the input field for autofill. The keyboard type also needs to be compatible
+    // with the content type. To get autofill to work by default on EditableText,
+    // the keyboard type inference on iOS is done differently from other platforms.
+    if !K_IS_WEB {
+        match platform {
+            TargetPlatform::IOS | TargetPlatform::MacOS => {
+                if let Some(keyboard_type) = ios_keyboard_type(effective_hint) {
+                    return keyboard_type;
+                }
+            }
+            TargetPlatform::Android
+            | TargetPlatform::Fuchsia
+            | TargetPlatform::Linux
+            | TargetPlatform::Windows => {}
+        }
     }
-    match autofill_hints[0].as_str() {
+
+    if max_lines != Some(1) {
+        return TextInputType::MULTILINE;
+    }
+
+    match effective_hint {
+        AutofillHints::ADDRESS_CITY
+        | AutofillHints::ADDRESS_CITY_AND_STATE
+        | AutofillHints::ADDRESS_STATE => TextInputType::STREET_ADDRESS,
+        AutofillHints::BIRTHDAY
+        | AutofillHints::BIRTHDAY_DAY
+        | AutofillHints::BIRTHDAY_MONTH
+        | AutofillHints::BIRTHDAY_YEAR => TextInputType::DATETIME,
+        AutofillHints::COUNTRY_CODE => TextInputType::NUMBER,
+        AutofillHints::COUNTRY_NAME => TextInputType::TEXT,
+        AutofillHints::CREDIT_CARD_EXPIRATION_DATE
+        | AutofillHints::CREDIT_CARD_EXPIRATION_DAY
+        | AutofillHints::CREDIT_CARD_EXPIRATION_MONTH
+        | AutofillHints::CREDIT_CARD_EXPIRATION_YEAR => TextInputType::DATETIME,
+        AutofillHints::CREDIT_CARD_FAMILY_NAME
+        | AutofillHints::CREDIT_CARD_GIVEN_NAME
+        | AutofillHints::CREDIT_CARD_MIDDLE_NAME
+        | AutofillHints::CREDIT_CARD_NAME => TextInputType::NAME,
+        AutofillHints::CREDIT_CARD_NUMBER | AutofillHints::CREDIT_CARD_SECURITY_CODE => {
+            TextInputType::NUMBER
+        }
+        AutofillHints::CREDIT_CARD_TYPE => TextInputType::TEXT,
         AutofillHints::EMAIL => TextInputType::EMAIL_ADDRESS,
+        AutofillHints::EMAIL_OTP_CODE => TextInputType::TEXT,
+        AutofillHints::FAMILY_NAME => TextInputType::NAME,
+        AutofillHints::FULL_STREET_ADDRESS => TextInputType::STREET_ADDRESS,
+        AutofillHints::GENDER => TextInputType::TEXT,
+        AutofillHints::GIVEN_NAME => TextInputType::NAME,
+        AutofillHints::IMPP => TextInputType::URL,
+        AutofillHints::JOB_TITLE | AutofillHints::LANGUAGE => TextInputType::TEXT,
+        AutofillHints::LOCATION => TextInputType::STREET_ADDRESS,
+        AutofillHints::MIDDLE_INITIAL
+        | AutofillHints::MIDDLE_NAME
+        | AutofillHints::NAME
+        | AutofillHints::NAME_PREFIX
+        | AutofillHints::NAME_SUFFIX => TextInputType::NAME,
+        AutofillHints::NEW_PASSWORD
+        | AutofillHints::NEW_USERNAME
+        | AutofillHints::NICKNAME
+        | AutofillHints::ONE_TIME_CODE
+        | AutofillHints::ORGANIZATION_NAME
+        | AutofillHints::PASSWORD
+        | AutofillHints::PHOTO => TextInputType::TEXT,
+        AutofillHints::POSTAL_ADDRESS | AutofillHints::POSTAL_ADDRESS_EXTENDED => {
+            TextInputType::STREET_ADDRESS
+        }
+        AutofillHints::POSTAL_ADDRESS_EXTENDED_POSTAL_CODE | AutofillHints::POSTAL_CODE => {
+            TextInputType::NUMBER
+        }
+        AutofillHints::STREET_ADDRESS_LEVEL1
+        | AutofillHints::STREET_ADDRESS_LEVEL2
+        | AutofillHints::STREET_ADDRESS_LEVEL3
+        | AutofillHints::STREET_ADDRESS_LEVEL4
+        | AutofillHints::STREET_ADDRESS_LINE1
+        | AutofillHints::STREET_ADDRESS_LINE2
+        | AutofillHints::STREET_ADDRESS_LINE3
+        | AutofillHints::SUBLOCALITY => TextInputType::STREET_ADDRESS,
         AutofillHints::TELEPHONE_NUMBER
-        | AutofillHints::TELEPHONE_NUMBER_NATIONAL
-        | AutofillHints::TELEPHONE_NUMBER_DEVICE => TextInputType::PHONE,
+        | AutofillHints::TELEPHONE_NUMBER_AREA_CODE
+        | AutofillHints::TELEPHONE_NUMBER_COUNTRY_CODE
+        | AutofillHints::TELEPHONE_NUMBER_DEVICE
+        | AutofillHints::TELEPHONE_NUMBER_EXTENSION
+        | AutofillHints::TELEPHONE_NUMBER_LOCAL
+        | AutofillHints::TELEPHONE_NUMBER_LOCAL_PREFIX
+        | AutofillHints::TELEPHONE_NUMBER_LOCAL_SUFFIX
+        | AutofillHints::TELEPHONE_NUMBER_NATIONAL => TextInputType::PHONE,
+        AutofillHints::TRANSACTION_AMOUNT => TextInputType::number_with_options().decimal(true),
+        AutofillHints::TRANSACTION_CURRENCY => TextInputType::TEXT,
         AutofillHints::URL => TextInputType::URL,
-        AutofillHints::CREDIT_CARD_NUMBER => TextInputType::NUMBER,
+        AutofillHints::USERNAME => TextInputType::TEXT,
         _ => TextInputType::TEXT,
     }
+}
+
+/// Dart's `iOSKeyboardType` table in `_inferKeyboardType`. The hints marked "autofill not
+/// working" are the iOS text content types that should work with the specified keyboard type
+/// but won't trigger (even within a native app). Tested on iOS 13.5.
+fn ios_keyboard_type(hint: &str) -> Option<TextInputType> {
+    let keyboard_type = match hint {
+        AutofillHints::ADDRESS_CITY => TextInputType::NAME,
+        AutofillHints::ADDRESS_CITY_AND_STATE => TextInputType::NAME, // Autofill not working.
+        AutofillHints::ADDRESS_STATE | AutofillHints::COUNTRY_NAME => TextInputType::NAME,
+        AutofillHints::CREDIT_CARD_NUMBER => TextInputType::NUMBER, // Couldn't test.
+        AutofillHints::EMAIL => TextInputType::EMAIL_ADDRESS,
+        AutofillHints::EMAIL_OTP_CODE => TextInputType::TEXT,
+        AutofillHints::FAMILY_NAME
+        | AutofillHints::FULL_STREET_ADDRESS
+        | AutofillHints::GIVEN_NAME => TextInputType::NAME,
+        AutofillHints::JOB_TITLE => TextInputType::NAME, // Autofill not working.
+        AutofillHints::LOCATION => TextInputType::NAME,  // Autofill not working.
+        AutofillHints::MIDDLE_NAME => TextInputType::NAME, // Autofill not working.
+        AutofillHints::NAME => TextInputType::NAME,
+        AutofillHints::NAME_PREFIX => TextInputType::NAME, // Autofill not working.
+        AutofillHints::NAME_SUFFIX => TextInputType::NAME, // Autofill not working.
+        AutofillHints::NEW_PASSWORD | AutofillHints::NEW_USERNAME => TextInputType::TEXT,
+        AutofillHints::NICKNAME => TextInputType::NAME, // Autofill not working.
+        AutofillHints::ONE_TIME_CODE => TextInputType::NUMBER,
+        AutofillHints::ORGANIZATION_NAME => TextInputType::TEXT, // Autofill not working.
+        AutofillHints::PASSWORD => TextInputType::TEXT,
+        AutofillHints::POSTAL_CODE | AutofillHints::STREET_ADDRESS_LINE1 => TextInputType::NAME,
+        AutofillHints::STREET_ADDRESS_LINE2 => TextInputType::NAME, // Autofill not working.
+        AutofillHints::SUBLOCALITY => TextInputType::NAME,          // Autofill not working.
+        AutofillHints::TELEPHONE_NUMBER => TextInputType::NAME,
+        AutofillHints::URL => TextInputType::URL, // Autofill not working.
+        AutofillHints::USERNAME => TextInputType::TEXT,
+        _ => return None,
+    };
+    Some(keyboard_type)
 }
 
 fn default_select_all_on_focus(platform: TargetPlatform) -> bool {
@@ -2124,7 +2280,7 @@ impl EditableTextState {
         self: Handle<Self>,
         app: &mut App,
     ) -> Option<Vec<ContextMenuButtonItem>> {
-        let toolbar_options = self.widget(app).toolbar_options;
+        let toolbar_options = self.widget(app).effective_toolbar_options();
         if toolbar_options == ToolbarOptions::EMPTY {
             return None;
         }
@@ -2757,7 +2913,7 @@ impl EditableTextState {
     fn show_blinking_cursor(self: Handle<Self>, app: &mut App) -> bool {
         app.get(self).has_focus
             && self.value(app).selection.is_collapsed()
-            && self.widget(app).show_cursor
+            && self.widget(app).effective_show_cursor()
             && app.get(self).tickers_enabled
     }
 
@@ -3586,8 +3742,8 @@ impl EditableTextState {
 
     fn adjusted_selection_when_focused(self: Handle<Self>, app: &mut App) -> Option<TextSelection> {
         let widget = self.widget(app);
-        let should_select_all = widget.select_all_on_focus_or_default(app)
-            && widget.enable_interactive_selection
+        let should_select_all = widget.effective_select_all_on_focus(app)
+            && widget.effective_enable_interactive_selection()
             && !self.is_multiline(app)
             && !app.get(self).next_focus_change_is_internal
             && !app.get(self).just_resumed;
@@ -3710,11 +3866,9 @@ impl EditableTextState {
         let text_changed = old_value.text != value.text;
         let text_committed = !old_value.composing.is_collapsed() && value.composing.is_collapsed();
         let selection_changed = old_value.selection != value.selection;
-        if (text_changed || text_committed)
-            && let Some(formatters) = self.widget(app).input_formatters.as_ref()
-        {
+        if text_changed || text_committed {
             let current = self.value(app);
-            for formatter in formatters {
+            for formatter in self.widget(app).effective_input_formatters() {
                 value = formatter.format_edit_update(&current, &value);
             }
         }
@@ -3828,7 +3982,7 @@ impl EditableTextState {
     }
 
     fn on_cursor_color_tick(self: Handle<Self>, app: &mut App) {
-        let show_cursor = self.widget(app).show_cursor;
+        let show_cursor = self.widget(app).effective_show_cursor();
         let visible = show_cursor
             && (EditableText::debug_deterministic_cursor()
                 || self.cursor_blink_opacity_controller(app).value(app) > 0.0);
@@ -3836,7 +3990,7 @@ impl EditableTextState {
     }
 
     fn start_cursor_blink(self: Handle<Self>, app: &mut App) {
-        if !self.widget(app).show_cursor || !app.get(self).tickers_enabled {
+        if !self.widget(app).effective_show_cursor() || !app.get(self).tickers_enabled {
             return;
         }
         if let Some(timer) = app.get(self).cursor_timer {
@@ -4168,7 +4322,8 @@ impl State for EditableTextState {
         } else {
             Some(LiveTextInputStatusNotifier::new(app))
         };
-        let cursor_visibility = app.create(ValueNotifier::new(self.widget(app).show_cursor));
+        let cursor_visibility =
+            app.create(ValueNotifier::new(self.widget(app).effective_show_cursor()));
         let toolbar_link = LayerLink::new(app);
         let start_link = LayerLink::new(app);
         let end_link = LayerLink::new(app);
@@ -4202,7 +4357,7 @@ impl State for EditableTextState {
         let inferred = infer_spell_check_configuration(
             widget.spell_check_configuration.as_ref(),
             widget.obscure_text,
-            widget.keyboard_type,
+            widget.effective_keyboard_type(app),
             &widget.autofill_hints,
         );
         app.get_mut(self).spell_check_configuration = inferred;
@@ -4337,7 +4492,10 @@ impl State for EditableTextState {
         }
         if self.has_input_connection(app) {
             let obscure_changed = old_widget.obscure_text != self.widget(app).obscure_text;
-            if obscure_changed || old_widget.keyboard_type != self.widget(app).keyboard_type {
+            if obscure_changed
+                || old_widget.effective_keyboard_type(app)
+                    != self.widget(app).effective_keyboard_type(app)
+            {
                 if obscure_changed {
                     app.get_mut(self).obscure_show_char_ticks_pending = 0;
                     app.get_mut(self).obscure_latest_char_index = None;
@@ -4360,13 +4518,13 @@ impl State for EditableTextState {
                 .as_ref()
                 .map(|c| c.spell_check_enabled())
             || old_widget.obscure_text != widget.obscure_text
-            || old_widget.keyboard_type != widget.keyboard_type
+            || old_widget.effective_keyboard_type(app) != widget.effective_keyboard_type(app)
             || old_widget.autofill_hints != widget.autofill_hints
         {
             let inferred = infer_spell_check_configuration(
                 widget.spell_check_configuration.as_ref(),
                 widget.obscure_text,
-                widget.keyboard_type,
+                widget.effective_keyboard_type(app),
                 &widget.autofill_hints,
             );
             app.get_mut(self).spell_check_configuration = inferred;
@@ -4391,7 +4549,7 @@ impl State for EditableTextState {
                 );
             }
         }
-        if self.widget(app).show_cursor != old_widget.show_cursor {
+        if self.widget(app).effective_show_cursor() != old_widget.effective_show_cursor() {
             self.start_or_stop_cursor_timer_if_needed(app);
         }
         let selection_overlay = app.get(self).selection_overlay;
@@ -4464,7 +4622,10 @@ impl State for EditableTextState {
             .selection_controls
             .as_ref()
             .is_some_and(|controls| controls.can_paste(app, self.as_text_selection_delegate()));
-        if self.widget(app).enable_interactive_selection && self.paste_enabled(app) && can_paste {
+        if self.widget(app).effective_enable_interactive_selection()
+            && self.paste_enabled(app)
+            && can_paste
+        {
             self.clipboard_status(app).update(app);
         }
     }
@@ -4879,19 +5040,20 @@ impl AutofillClient for EditableTextState {
             widget.autofill_hints.clone(),
             self.value(app),
         );
-        let mut config = TextInputConfiguration::new()
-            .input_type(widget.keyboard_type)
+        let mut config = TextInputConfiguration::builder()
+            .input_type(widget.effective_keyboard_type(app))
             .read_only(widget.read_only)
             .obscure_text(widget.obscure_text)
-            .autocorrect(widget.autocorrect)
+            .autocorrect(widget.effective_autocorrect(app))
             .enable_suggestions(widget.enable_suggestions)
-            .enable_interactive_selection(widget.enable_interactive_selection)
+            .enable_interactive_selection(widget.effective_enable_interactive_selection())
             .input_action(input_action)
             .text_capitalization(widget.text_capitalization)
             .keyboard_appearance(widget.keyboard_appearance)
-            .enable_ime_personalized_learning(widget.enable_ime_personalized_learning);
-        config.smart_dashes_type = widget.smart_dashes_type;
-        config.smart_quotes_type = widget.smart_quotes_type;
+            .enable_ime_personalized_learning(widget.enable_ime_personalized_learning)
+            .smart_dashes_type(widget.effective_smart_dashes_type())
+            .smart_quotes_type(widget.effective_smart_quotes_type())
+            .build();
         config.autofill_configuration = autofill_configuration;
         config.allowed_mime_types = widget
             .content_insertion_configuration
@@ -4945,24 +5107,24 @@ impl TextSelectionDelegate for EditableTextState {
 
     fn cut_enabled(self: Handle<Self>, app: &App) -> bool {
         let widget = self.widget(app);
-        widget.toolbar_options.cut && !widget.read_only && !widget.obscure_text
+        widget.effective_toolbar_options().cut && !widget.read_only && !widget.obscure_text
     }
 
     fn copy_enabled(self: Handle<Self>, app: &App) -> bool {
         let widget = self.widget(app);
-        widget.toolbar_options.copy && !widget.obscure_text
+        widget.effective_toolbar_options().copy && !widget.obscure_text
     }
 
     fn paste_enabled(self: Handle<Self>, app: &App) -> bool {
         let widget = self.widget(app);
-        widget.toolbar_options.paste && !widget.read_only
+        widget.effective_toolbar_options().paste && !widget.read_only
     }
 
     fn select_all_enabled(self: Handle<Self>, app: &App) -> bool {
         let widget = self.widget(app);
-        widget.toolbar_options.select_all
+        widget.effective_toolbar_options().select_all
             && (!widget.read_only || !widget.obscure_text)
-            && widget.enable_interactive_selection
+            && widget.effective_enable_interactive_selection()
     }
 
     fn look_up_enabled(self: Handle<Self>, app: &App) -> bool {
@@ -6005,6 +6167,92 @@ impl ContextAction for PasteSelectionAction {
 mod tests {
     use super::*;
     use inset_foundation::AppCell;
+
+    fn field(app: &mut App) -> EditableText {
+        let controller = TextEditingController::new(app);
+        let focus_node = FocusNode::new(app);
+        let color = Color::from_argb(255, 0, 0, 0);
+        EditableText::new(controller, focus_node, TextStyle::new(), color, color)
+    }
+
+    #[test]
+    fn a_multiline_field_keeps_its_newlines() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let digits = FilteringTextInputFormatter::digits_only();
+        let multiline = field(&mut app)
+            .input_formatters(vec![digits.clone()])
+            .max_lines(None);
+        assert_eq!(multiline.effective_input_formatters().len(), 1);
+        let single = field(&mut app).max_lines(None).max_lines(Some(1));
+        assert_eq!(single.effective_input_formatters().len(), 1);
+        let single = field(&mut app).input_formatters(vec![digits]);
+        assert_eq!(single.effective_input_formatters().len(), 2);
+    }
+
+    #[test]
+    fn a_later_setter_keeps_what_an_earlier_one_set() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let multiline = field(&mut app)
+            .keyboard_type(TextInputType::NUMBER)
+            .autocorrect(false)
+            .show_cursor(true)
+            .enable_interactive_selection(false)
+            .toolbar_options(ToolbarOptions::EMPTY)
+            .max_lines(None)
+            .read_only(true)
+            .autofill_hints(vec![AutofillHints::EMAIL.into()]);
+        assert_eq!(
+            multiline.effective_keyboard_type(&app),
+            TextInputType::NUMBER
+        );
+        assert!(!multiline.effective_autocorrect(&app));
+        assert!(multiline.effective_show_cursor());
+        assert!(!multiline.effective_enable_interactive_selection());
+        assert_eq!(multiline.effective_toolbar_options(), ToolbarOptions::EMPTY);
+        let obscured = field(&mut app)
+            .smart_dashes_type(SmartDashesType::Enabled)
+            .smart_quotes_type(SmartQuotesType::Enabled)
+            .obscure_text(true);
+        assert_eq!(
+            obscured.effective_smart_dashes_type(),
+            SmartDashesType::Enabled
+        );
+        assert_eq!(
+            obscured.effective_smart_quotes_type(),
+            SmartQuotesType::Enabled
+        );
+    }
+
+    #[test]
+    fn values_left_unset_follow_the_other_settings() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let read_only = field(&mut app).read_only(true);
+        assert!(!read_only.effective_show_cursor());
+        assert_eq!(
+            read_only.effective_toolbar_options(),
+            ToolbarOptions::new().select_all(true).copy(true)
+        );
+        let multiline = field(&mut app).max_lines(None);
+        assert_eq!(
+            multiline.effective_keyboard_type(&app),
+            TextInputType::MULTILINE
+        );
+        let email = field(&mut app).autofill_hints(vec![AutofillHints::EMAIL.into()]);
+        assert_eq!(
+            email.effective_keyboard_type(&app),
+            TextInputType::EMAIL_ADDRESS
+        );
+        let obscured = field(&mut app).obscure_text(true).read_only(true);
+        assert_eq!(
+            obscured.effective_smart_dashes_type(),
+            SmartDashesType::Disabled
+        );
+        assert!(!obscured.effective_enable_interactive_selection());
+        assert_eq!(obscured.effective_toolbar_options(), ToolbarOptions::EMPTY);
+    }
 
     #[test]
     fn controller_starts_empty() {

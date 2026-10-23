@@ -389,93 +389,41 @@ impl SliverGeometry {
         cross_axis_extent: None,
     };
 
-    /// Creates geometry with Flutter's constructor defaults.
-    pub const fn new() -> SliverGeometry {
-        SliverGeometry::ZERO
+    /// Starts geometry with Flutter's constructor defaults. Extents left out are filled in by
+    /// [`SliverGeometryBuilder::build`], as Flutter's constructor fills them.
+    pub const fn builder() -> SliverGeometryBuilder {
+        SliverGeometryBuilder {
+            scroll_extent: 0.0,
+            paint_origin: 0.0,
+            paint_extent: 0.0,
+            layout_extent: None,
+            max_paint_extent: 0.0,
+            max_scroll_obstruction_extent: 0.0,
+            hit_test_extent: None,
+            visible: None,
+            has_visual_overflow: false,
+            scroll_offset_correction: None,
+            cache_extent: None,
+            cross_axis_extent: None,
+        }
     }
 
-    /// Sets [`scroll_extent`](Self::scroll_extent).
-    pub const fn scroll_extent(mut self, value: f64) -> SliverGeometry {
-        self.scroll_extent = value;
-        self
-    }
-
-    /// Sets [`paint_origin`](Self::paint_origin).
-    pub const fn paint_origin(mut self, value: f64) -> SliverGeometry {
-        self.paint_origin = value;
-        self
-    }
-
-    /// Sets [`paint_extent`](Self::paint_extent). Also fills layout, hit-test,
-    /// cache, and visible the way Flutter's constructor does when those
-    /// arguments are omitted.
-    pub const fn paint_extent(mut self, value: f64) -> SliverGeometry {
-        self.paint_extent = value;
-        self.layout_extent = value;
-        self.hit_test_extent = value;
-        self.cache_extent = value;
-        self.visible = value > 0.0;
-        self
-    }
-
-    /// Sets [`layout_extent`](Self::layout_extent).
-    pub const fn layout_extent(mut self, value: f64) -> SliverGeometry {
-        self.layout_extent = value;
-        self
-    }
-
-    /// Sets [`max_paint_extent`](Self::max_paint_extent).
-    pub const fn max_paint_extent(mut self, value: f64) -> SliverGeometry {
-        self.max_paint_extent = value;
-        self
-    }
-
-    /// Sets [`max_scroll_obstruction_extent`](Self::max_scroll_obstruction_extent).
-    pub const fn max_scroll_obstruction_extent(mut self, value: f64) -> SliverGeometry {
-        self.max_scroll_obstruction_extent = value;
-        self
-    }
-
-    /// Sets [`hit_test_extent`](Self::hit_test_extent).
-    pub const fn hit_test_extent(mut self, value: f64) -> SliverGeometry {
-        self.hit_test_extent = value;
-        self
-    }
-
-    /// Sets [`visible`](Self::visible).
-    pub const fn visible(mut self, value: bool) -> SliverGeometry {
-        self.visible = value;
-        self
-    }
-
-    /// Sets [`has_visual_overflow`](Self::has_visual_overflow).
-    pub const fn has_visual_overflow(mut self, value: bool) -> SliverGeometry {
-        self.has_visual_overflow = value;
-        self
-    }
-
-    /// Sets [`scroll_offset_correction`](Self::scroll_offset_correction).
-    pub fn scroll_offset_correction(mut self, value: f64) -> SliverGeometry {
-        debug_assert!(value != 0.0);
-        self.scroll_offset_correction = Some(value);
-        self
-    }
-
-    /// Sets [`cache_extent`](Self::cache_extent).
-    pub const fn cache_extent(mut self, value: f64) -> SliverGeometry {
-        self.cache_extent = value;
-        self
-    }
-
-    /// Sets [`cross_axis_extent`](Self::cross_axis_extent).
-    pub const fn cross_axis_extent(mut self, value: f64) -> SliverGeometry {
-        self.cross_axis_extent = Some(value);
-        self
-    }
-
-    /// Creates a copy of this object. Chain field replacements.
-    pub const fn copy_with(self) -> SliverGeometry {
-        self
+    /// Dart `copyWith`: a builder holding this geometry's values, for fields to be replaced.
+    pub const fn copy_with(self) -> SliverGeometryBuilder {
+        SliverGeometryBuilder {
+            scroll_extent: self.scroll_extent,
+            paint_origin: self.paint_origin,
+            paint_extent: self.paint_extent,
+            layout_extent: Some(self.layout_extent),
+            max_paint_extent: self.max_paint_extent,
+            max_scroll_obstruction_extent: self.max_scroll_obstruction_extent,
+            hit_test_extent: Some(self.hit_test_extent),
+            visible: Some(self.visible),
+            has_visual_overflow: self.has_visual_overflow,
+            scroll_offset_correction: self.scroll_offset_correction,
+            cache_extent: Some(self.cache_extent),
+            cross_axis_extent: self.cross_axis_extent,
+        }
     }
 
     /// Dart's `geometry == SliverGeometry.zero`: whether this geometry occupies no space at
@@ -531,9 +479,125 @@ impl SliverGeometry {
     }
 }
 
+/// `SliverGeometryBuilder` collects a [`SliverGeometry`]'s values, as Dart's constructor takes
+/// them, and fills in the ones left out when it builds.
+#[derive(Clone, Copy, Debug)]
+pub struct SliverGeometryBuilder {
+    scroll_extent: f64,
+    paint_origin: f64,
+    paint_extent: f64,
+    layout_extent: Option<f64>,
+    max_paint_extent: f64,
+    max_scroll_obstruction_extent: f64,
+    hit_test_extent: Option<f64>,
+    visible: Option<bool>,
+    has_visual_overflow: bool,
+    scroll_offset_correction: Option<f64>,
+    cache_extent: Option<f64>,
+    cross_axis_extent: Option<f64>,
+}
+
+impl SliverGeometryBuilder {
+    /// Sets [`SliverGeometry::scroll_extent`].
+    pub const fn scroll_extent(mut self, value: f64) -> SliverGeometryBuilder {
+        self.scroll_extent = value;
+        self
+    }
+
+    /// Sets [`SliverGeometry::paint_origin`].
+    pub const fn paint_origin(mut self, value: f64) -> SliverGeometryBuilder {
+        self.paint_origin = value;
+        self
+    }
+
+    /// Sets [`SliverGeometry::paint_extent`].
+    pub const fn paint_extent(mut self, value: f64) -> SliverGeometryBuilder {
+        self.paint_extent = value;
+        self
+    }
+
+    /// Sets [`SliverGeometry::layout_extent`].
+    pub const fn layout_extent(mut self, value: f64) -> SliverGeometryBuilder {
+        self.layout_extent = Some(value);
+        self
+    }
+
+    /// Sets [`SliverGeometry::max_paint_extent`].
+    pub const fn max_paint_extent(mut self, value: f64) -> SliverGeometryBuilder {
+        self.max_paint_extent = value;
+        self
+    }
+
+    /// Sets [`SliverGeometry::max_scroll_obstruction_extent`].
+    pub const fn max_scroll_obstruction_extent(mut self, value: f64) -> SliverGeometryBuilder {
+        self.max_scroll_obstruction_extent = value;
+        self
+    }
+
+    /// Sets [`SliverGeometry::hit_test_extent`].
+    pub const fn hit_test_extent(mut self, value: f64) -> SliverGeometryBuilder {
+        self.hit_test_extent = Some(value);
+        self
+    }
+
+    /// Sets [`SliverGeometry::visible`].
+    pub const fn visible(mut self, value: bool) -> SliverGeometryBuilder {
+        self.visible = Some(value);
+        self
+    }
+
+    /// Sets [`SliverGeometry::has_visual_overflow`].
+    pub const fn has_visual_overflow(mut self, value: bool) -> SliverGeometryBuilder {
+        self.has_visual_overflow = value;
+        self
+    }
+
+    /// Sets [`SliverGeometry::scroll_offset_correction`].
+    pub fn scroll_offset_correction(mut self, value: f64) -> SliverGeometryBuilder {
+        debug_assert!(value != 0.0);
+        self.scroll_offset_correction = Some(value);
+        self
+    }
+
+    /// Sets [`SliverGeometry::cache_extent`].
+    pub const fn cache_extent(mut self, value: f64) -> SliverGeometryBuilder {
+        self.cache_extent = Some(value);
+        self
+    }
+
+    /// Sets [`SliverGeometry::cross_axis_extent`].
+    pub const fn cross_axis_extent(mut self, value: f64) -> SliverGeometryBuilder {
+        self.cross_axis_extent = Some(value);
+        self
+    }
+
+    /// `build` makes the geometry, filling the extents left out as Dart's constructor does:
+    /// the layout and hit-test extents and `visible` from the paint extent, and the cache
+    /// extent from the layout extent.
+    pub fn build(self) -> SliverGeometry {
+        SliverGeometry {
+            scroll_extent: self.scroll_extent,
+            paint_origin: self.paint_origin,
+            paint_extent: self.paint_extent,
+            layout_extent: self.layout_extent.unwrap_or(self.paint_extent),
+            max_paint_extent: self.max_paint_extent,
+            max_scroll_obstruction_extent: self.max_scroll_obstruction_extent,
+            hit_test_extent: self.hit_test_extent.unwrap_or(self.paint_extent),
+            visible: self.visible.unwrap_or(self.paint_extent > 0.0),
+            has_visual_overflow: self.has_visual_overflow,
+            scroll_offset_correction: self.scroll_offset_correction,
+            cache_extent: self
+                .cache_extent
+                .or(self.layout_extent)
+                .unwrap_or(self.paint_extent),
+            cross_axis_extent: self.cross_axis_extent,
+        }
+    }
+}
+
 impl Default for SliverGeometry {
     fn default() -> SliverGeometry {
-        SliverGeometry::new()
+        SliverGeometry::builder().build()
     }
 }
 
@@ -2016,7 +2080,7 @@ impl RenderObject for RenderSliverToBoxAdapter {
 
         debug_assert!(painted_child_size.is_finite());
         debug_assert!(painted_child_size >= 0.0);
-        let geometry = SliverGeometry::new()
+        let geometry = SliverGeometry::builder()
             .scroll_extent(child_extent)
             .paint_extent(painted_child_size)
             .cache_extent(cache_extent)
@@ -2025,7 +2089,8 @@ impl RenderObject for RenderSliverToBoxAdapter {
             .has_visual_overflow(
                 child_extent > constraints.remaining_paint_extent
                     || constraints.scroll_offset > 0.0,
-            );
+            )
+            .build();
         self.set_geometry(app, geometry);
         self.set_child_parent_data(app, child.as_object(), constraints, geometry);
     }
@@ -2090,10 +2155,11 @@ mod tests {
             let extent = constraints.remaining_paint_extent.min(20.0);
             self.set_geometry(
                 app,
-                SliverGeometry::new()
+                SliverGeometry::builder()
                     .scroll_extent(20.0)
                     .paint_extent(extent)
-                    .max_paint_extent(20.0),
+                    .max_paint_extent(20.0)
+                    .build(),
             );
         }
     }
@@ -2292,12 +2358,46 @@ mod tests {
     /// `SliverGeometry.debugAssertIsValid` accepts a consistent geometry.
     #[test]
     fn a_consistent_geometry_is_valid() {
-        let geometry = SliverGeometry::new()
+        let geometry = SliverGeometry::builder()
             .scroll_extent(100.0)
             .paint_extent(40.0)
-            .max_paint_extent(100.0);
+            .max_paint_extent(100.0)
+            .build();
         assert!(geometry.debug_assert_is_valid());
         assert!(!geometry.is_zero());
         assert!(SliverGeometry::ZERO.is_zero());
+    }
+
+    #[test]
+    fn extents_left_out_follow_the_ones_given_in_any_order() {
+        let geometry = SliverGeometry::builder()
+            .layout_extent(10.0)
+            .hit_test_extent(20.0)
+            .paint_extent(40.0)
+            .build();
+        assert_eq!(geometry.layout_extent, 10.0);
+        assert_eq!(geometry.hit_test_extent, 20.0);
+        assert_eq!(geometry.cache_extent, 10.0);
+        assert!(geometry.visible);
+        let geometry = SliverGeometry::builder()
+            .cache_extent(5.0)
+            .layout_extent(10.0)
+            .paint_extent(40.0)
+            .build();
+        assert_eq!(geometry.cache_extent, 5.0);
+    }
+
+    #[test]
+    fn a_copy_keeps_the_extents_it_was_made_with() {
+        let copy = SliverGeometry::builder()
+            .paint_extent(40.0)
+            .layout_extent(10.0)
+            .build()
+            .copy_with()
+            .paint_extent(0.0)
+            .build();
+        assert_eq!(copy.layout_extent, 10.0);
+        assert_eq!(copy.cache_extent, 10.0);
+        assert!(copy.visible);
     }
 }

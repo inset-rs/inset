@@ -802,11 +802,13 @@ mod tests {
         }
 
         fn text_input_configuration(self: Handle<Self>, app: &App) -> TextInputConfiguration {
-            TextInputConfiguration::new().autofill_configuration(crate::AutofillConfiguration::new(
-                app.get(self).autofill_id.clone(),
-                vec![AutofillHints::EMAIL.to_owned()],
-                app.get(self).value.clone(),
-            ))
+            TextInputConfiguration::builder()
+                .autofill_configuration(crate::AutofillConfiguration::new(
+                    app.get(self).autofill_id.clone(),
+                    vec![AutofillHints::EMAIL.to_owned()],
+                    app.get(self).value.clone(),
+                ))
+                .build()
         }
 
         fn autofill(self: Handle<Self>, app: &mut App, new_editing_value: TextEditingValue) {

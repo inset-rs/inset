@@ -412,10 +412,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: platform — the host's `perform_private_command` carries no map.
   Affect: a private command handler cannot read the arguments the platform sent with it.
 
-- Change: `select_all_on_focus` is resolved from the target platform when it is used, and construction skips Dart's iOS password autocorrect rule and its platform keyboard-type tables, inferring the keyboard from `max_lines` and a small hint map.
-  Reason: language — construction has no `App`, so `defaultTargetPlatform` cannot be read there.
-  Affect: an iOS password field autocorrects and a hint-specific keyboard is not chosen unless `autocorrect` and `keyboard_type` are set explicitly.
-
 - Change: `want_keep_alive` reads a focus flag the focus listener updates instead of walking the node.
   Reason: language — `FocusNode::has_focus` needs `&mut App`, which the getter does not have.
   Affect: keep-alive follows the last focus change the state handled, so it lags a change no listener has run for yet.

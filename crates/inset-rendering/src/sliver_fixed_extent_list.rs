@@ -346,9 +346,10 @@ pub trait RenderSliverFixedExtentBoxAdaptor: RenderSliverMultiBoxAdaptor {
                 };
                 self.set_geometry(
                     app,
-                    SliverGeometry::new()
+                    SliverGeometry::builder()
                         .scroll_extent(max)
-                        .max_paint_extent(max),
+                        .max_paint_extent(max)
+                        .build(),
                 );
                 child_manager.did_finish_layout(app);
                 return;
@@ -369,7 +370,9 @@ pub trait RenderSliverFixedExtentBoxAdaptor: RenderSliverMultiBoxAdaptor {
                 let correction = self.index_to_layout_offset(app, index);
                 self.set_geometry(
                     app,
-                    SliverGeometry::new().scroll_offset_correction(correction),
+                    SliverGeometry::builder()
+                        .scroll_offset_correction(correction)
+                        .build(),
                 );
                 return;
             };
@@ -478,7 +481,7 @@ pub trait RenderSliverFixedExtentBoxAdaptor: RenderSliverMultiBoxAdaptor {
 
         self.set_geometry(
             app,
-            SliverGeometry::new()
+            SliverGeometry::builder()
                 .scroll_extent(estimated_max_scroll_offset)
                 .paint_extent(paint_extent)
                 .cache_extent(cache_extent)
@@ -487,7 +490,8 @@ pub trait RenderSliverFixedExtentBoxAdaptor: RenderSliverMultiBoxAdaptor {
                 .has_visual_overflow(
                     target_last_index_for_paint.is_some_and(|target| last_index >= target)
                         || constraints.scroll_offset > 0.0,
-                ),
+                )
+                .build(),
         );
 
         // We may have started the layout while scrolled to the end, which would not expose a new

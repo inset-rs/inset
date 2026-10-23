@@ -80,14 +80,16 @@ impl Default for TestWindows {
     }
 }
 
-/// A window that shows nothing, and counts how often it was closed: one of [`TestWindows`], or
-/// one a test gives the app a view in. A closed window's view is in no window any more, and is no
-/// longer among the views of [`TestWindows`]. It is neither minimized nor occluded until a test
-/// says so, and the test then reports the change itself, as a host would through
-/// `EmbedderClient::window_changed`.
+/// A window that shows nothing, keeps the frame it was last given and whether it was last shown
+/// or hidden, and counts how often it was closed: one of [`TestWindows`], or one a test gives the
+/// app a view in. A closed window's view is in no window any more, and is no longer among the
+/// views of [`TestWindows`]. It is neither minimized nor occluded until a test says so, and the
+/// test then reports the change itself, as a host would through `EmbedderClient::window_changed`.
 pub struct TestWindow {
     view: Rc<TestView>,
     config: WindowConfig,
+    frame: Cell<Rect>,
+    shown: Cell<bool>,
     closes: Cell<u32>,
     minimized: Cell<bool>,
     occluded: Cell<bool>,
@@ -95,13 +97,18 @@ pub struct TestWindow {
 
 impl TestWindow {
     /// A window configured as `config` around `view`, which is in it from now on: as a desktop
-    /// makes for a request, or as WaOS shows a program's view it gives.
+    /// makes for a request, or as WaOS shows a program's view it gives. It starts where the
+    /// configuration places it, or at the origin, and shown as the configuration says.
     pub fn around(view: TestView, config: WindowConfig) -> Rc<TestWindow> {
+        let [width, height] = config.size;
+        let [left, top] = config.position.unwrap_or([0.0, 0.0]);
         Rc::new_cyclic(|window: &Weak<TestWindow>| {
             let window: Weak<dyn HostWindow> = window.clone();
             view.set_window(Some(window));
             TestWindow {
                 view: Rc::new(view),
+                frame: Cell::new(Rect::from_ltwh(left, top, width, height)),
+                shown: Cell::new(config.visible),
                 config,
                 closes: Cell::new(0),
                 minimized: Cell::new(false),
@@ -118,6 +125,11 @@ impl TestWindow {
     /// The configuration the window was asked for with.
     pub fn config(&self) -> &WindowConfig {
         &self.config
+    }
+
+    /// Whether the window was last shown, rather than hidden.
+    pub fn is_shown(&self) -> bool {
+        self.shown.get()
     }
 
     /// How many times the window was closed.
@@ -142,17 +154,22 @@ impl HostWindow for TestWindow {
     }
 
     fn frame(&self) -> Rect {
-        let [width, height] = self.config.size;
-        Rect::from_ltwh(0.0, 0.0, width, height)
+        self.frame.get()
     }
 
-    fn set_frame(&self, _frame: Rect, _animate: Option<Duration>) {}
+    fn set_frame(&self, frame: Rect, _animate: Option<Duration>) {
+        self.frame.set(frame);
+    }
 
     fn set_title(&self, _title: &str) {}
 
-    fn show(&self) {}
+    fn show(&self) {
+        self.shown.set(true);
+    }
 
-    fn hide(&self) {}
+    fn hide(&self) {
+        self.shown.set(false);
+    }
 
     fn is_minimized(&self) -> bool {
         self.minimized.get()

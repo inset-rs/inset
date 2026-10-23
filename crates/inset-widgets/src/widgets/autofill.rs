@@ -310,13 +310,15 @@ mod tests {
 
         fn text_input_configuration(self: Handle<Self>, app: &App) -> TextInputConfiguration {
             if !app.get(self).enabled {
-                return TextInputConfiguration::new();
+                return TextInputConfiguration::default();
             }
-            TextInputConfiguration::new().autofill_configuration(AutofillConfiguration::new(
-                app.get(self).autofill_id.clone(),
-                vec![AutofillHints::EMAIL.to_owned()],
-                TextEditingValue::new(),
-            ))
+            TextInputConfiguration::builder()
+                .autofill_configuration(AutofillConfiguration::new(
+                    app.get(self).autofill_id.clone(),
+                    vec![AutofillHints::EMAIL.to_owned()],
+                    TextEditingValue::new(),
+                ))
+                .build()
         }
 
         fn autofill(self: Handle<Self>, _app: &mut App, _new_editing_value: TextEditingValue) {}

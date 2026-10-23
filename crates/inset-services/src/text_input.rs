@@ -1051,7 +1051,7 @@ mod tests {
         let connection = TextInput::attach(
             &mut app,
             client.as_text_input_client(),
-            TextInputConfiguration::new(),
+            TextInputConfiguration::default(),
         );
         assert!(connection.attached(&mut app));
 
@@ -1072,7 +1072,7 @@ mod tests {
         let connection = TextInput::attach(
             &mut app,
             client.as_text_input_client(),
-            TextInputConfiguration::new(),
+            TextInputConfiguration::default(),
         );
         connection.close(&mut app);
         assert!(!connection.attached(&mut app));
@@ -1087,7 +1087,7 @@ mod tests {
         TextInput::attach(
             &mut app,
             client.as_text_input_client(),
-            TextInputConfiguration::new(),
+            TextInputConfiguration::default(),
         );
         TextInput::instance(&mut app).connection_closed(&mut app);
         assert!(app.get(client).closed);
@@ -1101,7 +1101,9 @@ mod tests {
         TextInput::attach(
             &mut app,
             client.as_text_input_client(),
-            TextInputConfiguration::new().input_action(TextInputAction::Done),
+            TextInputConfiguration::builder()
+                .input_action(TextInputAction::Done)
+                .build(),
         );
         TextInput::instance(&mut app).perform_action(&mut app, TextInputAction::Done);
         assert_eq!(app.get(client).actions, [TextInputAction::Done]);
@@ -1115,7 +1117,7 @@ mod tests {
         let connection = TextInput::attach(
             &mut app,
             client.as_text_input_client(),
-            TextInputConfiguration::new(),
+            TextInputConfiguration::default(),
         );
         let invalid = Rect::from_ltrb(f64::NAN, 0.0, 1.0, 1.0);
         connection.set_composing_rect(&mut app, invalid);

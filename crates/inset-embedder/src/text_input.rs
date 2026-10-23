@@ -652,68 +652,85 @@ pub struct TextInputConfiguration {
 }
 
 impl TextInputConfiguration {
-    /// Creates configuration information for a text input control.
-    pub fn new() -> TextInputConfiguration {
-        TextInputConfiguration {
-            view_id: None,
-            input_type: TextInputType::TEXT,
-            read_only: false,
-            obscure_text: false,
-            autocorrect: true,
-            smart_dashes_type: SmartDashesType::Enabled,
-            smart_quotes_type: SmartQuotesType::Enabled,
-            enable_suggestions: true,
-            enable_interactive_selection: true,
-            action_label: None,
-            input_action: TextInputAction::Done,
-            text_capitalization: TextCapitalization::None,
-            keyboard_appearance: Brightness::Light,
-            autofill_configuration: AutofillConfiguration::DISABLED,
-            enable_ime_personalized_learning: true,
-            allowed_mime_types: Vec::new(),
-            enable_delta_model: false,
-            hint_locales: Vec::new(),
-            enable_inline_prediction: None,
+    /// Starts configuration information for a text input control, with Dart's defaults.
+    /// Values left out are filled in by [`TextInputConfigurationBuilder::build`], as Dart's
+    /// constructor fills them.
+    pub fn builder() -> TextInputConfigurationBuilder {
+        TextInputConfigurationBuilder {
+            configuration: TextInputConfiguration {
+                view_id: None,
+                input_type: TextInputType::TEXT,
+                read_only: false,
+                obscure_text: false,
+                autocorrect: true,
+                smart_dashes_type: SmartDashesType::Enabled,
+                smart_quotes_type: SmartQuotesType::Enabled,
+                enable_suggestions: true,
+                enable_interactive_selection: true,
+                action_label: None,
+                input_action: TextInputAction::Done,
+                text_capitalization: TextCapitalization::None,
+                keyboard_appearance: Brightness::Light,
+                autofill_configuration: AutofillConfiguration::DISABLED,
+                enable_ime_personalized_learning: true,
+                allowed_mime_types: Vec::new(),
+                enable_delta_model: false,
+                hint_locales: Vec::new(),
+                enable_inline_prediction: None,
+            },
+            smart_dashes_type: None,
+            smart_quotes_type: None,
         }
     }
 
+    /// Dart `copyWith`: a builder holding this configuration's values, for fields to be
+    /// replaced.
+    pub fn copy_with(&self) -> TextInputConfigurationBuilder {
+        TextInputConfigurationBuilder {
+            configuration: self.clone(),
+            smart_dashes_type: Some(self.smart_dashes_type),
+            smart_quotes_type: Some(self.smart_quotes_type),
+        }
+    }
+}
+
+/// `TextInputConfigurationBuilder` collects a [`TextInputConfiguration`]'s values, as Dart's
+/// constructor takes them, and fills in the ones left out when it builds.
+#[derive(Clone, Debug)]
+pub struct TextInputConfigurationBuilder {
+    configuration: TextInputConfiguration,
+    smart_dashes_type: Option<SmartDashesType>,
+    smart_quotes_type: Option<SmartQuotesType>,
+}
+
+impl TextInputConfigurationBuilder {
     /// Dart `TextInputConfiguration(viewId:)`.
-    pub fn view_id(mut self, view_id: i32) -> TextInputConfiguration {
-        self.view_id = Some(view_id);
+    pub fn view_id(mut self, view_id: i32) -> TextInputConfigurationBuilder {
+        self.configuration.view_id = Some(view_id);
         self
     }
 
     /// Dart `TextInputConfiguration(inputType:)`.
-    pub fn input_type(mut self, input_type: TextInputType) -> TextInputConfiguration {
-        self.input_type = input_type;
+    pub fn input_type(mut self, input_type: TextInputType) -> TextInputConfigurationBuilder {
+        self.configuration.input_type = input_type;
         self
     }
 
     /// Dart `TextInputConfiguration(readOnly:)`.
-    pub fn read_only(mut self, read_only: bool) -> TextInputConfiguration {
-        self.read_only = read_only;
+    pub fn read_only(mut self, read_only: bool) -> TextInputConfigurationBuilder {
+        self.configuration.read_only = read_only;
         self
     }
 
     /// Dart `TextInputConfiguration(obscureText:)`.
-    pub fn obscure_text(mut self, obscure_text: bool) -> TextInputConfiguration {
-        self.obscure_text = obscure_text;
-        self.smart_dashes_type = if obscure_text {
-            SmartDashesType::Disabled
-        } else {
-            SmartDashesType::Enabled
-        };
-        self.smart_quotes_type = if obscure_text {
-            SmartQuotesType::Disabled
-        } else {
-            SmartQuotesType::Enabled
-        };
+    pub fn obscure_text(mut self, obscure_text: bool) -> TextInputConfigurationBuilder {
+        self.configuration.obscure_text = obscure_text;
         self
     }
 
     /// Dart `TextInputConfiguration(autocorrect:)`.
-    pub fn autocorrect(mut self, autocorrect: bool) -> TextInputConfiguration {
-        self.autocorrect = autocorrect;
+    pub fn autocorrect(mut self, autocorrect: bool) -> TextInputConfigurationBuilder {
+        self.configuration.autocorrect = autocorrect;
         self
     }
 
@@ -721,8 +738,8 @@ impl TextInputConfiguration {
     pub fn smart_dashes_type(
         mut self,
         smart_dashes_type: SmartDashesType,
-    ) -> TextInputConfiguration {
-        self.smart_dashes_type = smart_dashes_type;
+    ) -> TextInputConfigurationBuilder {
+        self.smart_dashes_type = Some(smart_dashes_type);
         self
     }
 
@@ -730,14 +747,14 @@ impl TextInputConfiguration {
     pub fn smart_quotes_type(
         mut self,
         smart_quotes_type: SmartQuotesType,
-    ) -> TextInputConfiguration {
-        self.smart_quotes_type = smart_quotes_type;
+    ) -> TextInputConfigurationBuilder {
+        self.smart_quotes_type = Some(smart_quotes_type);
         self
     }
 
     /// Dart `TextInputConfiguration(enableSuggestions:)`.
-    pub fn enable_suggestions(mut self, enable_suggestions: bool) -> TextInputConfiguration {
-        self.enable_suggestions = enable_suggestions;
+    pub fn enable_suggestions(mut self, enable_suggestions: bool) -> TextInputConfigurationBuilder {
+        self.configuration.enable_suggestions = enable_suggestions;
         self
     }
 
@@ -745,20 +762,23 @@ impl TextInputConfiguration {
     pub fn enable_interactive_selection(
         mut self,
         enable_interactive_selection: bool,
-    ) -> TextInputConfiguration {
-        self.enable_interactive_selection = enable_interactive_selection;
+    ) -> TextInputConfigurationBuilder {
+        self.configuration.enable_interactive_selection = enable_interactive_selection;
         self
     }
 
     /// Dart `TextInputConfiguration(actionLabel:)`.
-    pub fn action_label(mut self, action_label: impl Into<String>) -> TextInputConfiguration {
-        self.action_label = Some(action_label.into());
+    pub fn action_label(
+        mut self,
+        action_label: impl Into<String>,
+    ) -> TextInputConfigurationBuilder {
+        self.configuration.action_label = Some(action_label.into());
         self
     }
 
     /// Dart `TextInputConfiguration(inputAction:)`.
-    pub fn input_action(mut self, input_action: TextInputAction) -> TextInputConfiguration {
-        self.input_action = input_action;
+    pub fn input_action(mut self, input_action: TextInputAction) -> TextInputConfigurationBuilder {
+        self.configuration.input_action = input_action;
         self
     }
 
@@ -766,8 +786,8 @@ impl TextInputConfiguration {
     pub fn keyboard_appearance(
         mut self,
         keyboard_appearance: Brightness,
-    ) -> TextInputConfiguration {
-        self.keyboard_appearance = keyboard_appearance;
+    ) -> TextInputConfigurationBuilder {
+        self.configuration.keyboard_appearance = keyboard_appearance;
         self
     }
 
@@ -775,8 +795,8 @@ impl TextInputConfiguration {
     pub fn text_capitalization(
         mut self,
         text_capitalization: TextCapitalization,
-    ) -> TextInputConfiguration {
-        self.text_capitalization = text_capitalization;
+    ) -> TextInputConfigurationBuilder {
+        self.configuration.text_capitalization = text_capitalization;
         self
     }
 
@@ -784,8 +804,8 @@ impl TextInputConfiguration {
     pub fn autofill_configuration(
         mut self,
         autofill_configuration: AutofillConfiguration,
-    ) -> TextInputConfiguration {
-        self.autofill_configuration = autofill_configuration;
+    ) -> TextInputConfigurationBuilder {
+        self.configuration.autofill_configuration = autofill_configuration;
         self
     }
 
@@ -793,26 +813,29 @@ impl TextInputConfiguration {
     pub fn enable_ime_personalized_learning(
         mut self,
         enable_ime_personalized_learning: bool,
-    ) -> TextInputConfiguration {
-        self.enable_ime_personalized_learning = enable_ime_personalized_learning;
+    ) -> TextInputConfigurationBuilder {
+        self.configuration.enable_ime_personalized_learning = enable_ime_personalized_learning;
         self
     }
 
     /// Dart `TextInputConfiguration(allowedMimeTypes:)`.
-    pub fn allowed_mime_types(mut self, allowed_mime_types: Vec<String>) -> TextInputConfiguration {
-        self.allowed_mime_types = allowed_mime_types;
+    pub fn allowed_mime_types(
+        mut self,
+        allowed_mime_types: Vec<String>,
+    ) -> TextInputConfigurationBuilder {
+        self.configuration.allowed_mime_types = allowed_mime_types;
         self
     }
 
     /// Dart `TextInputConfiguration(enableDeltaModel:)`.
-    pub fn enable_delta_model(mut self, enable_delta_model: bool) -> TextInputConfiguration {
-        self.enable_delta_model = enable_delta_model;
+    pub fn enable_delta_model(mut self, enable_delta_model: bool) -> TextInputConfigurationBuilder {
+        self.configuration.enable_delta_model = enable_delta_model;
         self
     }
 
     /// Dart `TextInputConfiguration(hintLocales:)`.
-    pub fn hint_locales(mut self, hint_locales: Vec<Locale>) -> TextInputConfiguration {
-        self.hint_locales = hint_locales;
+    pub fn hint_locales(mut self, hint_locales: Vec<Locale>) -> TextInputConfigurationBuilder {
+        self.configuration.hint_locales = hint_locales;
         self
     }
 
@@ -820,21 +843,33 @@ impl TextInputConfiguration {
     pub fn enable_inline_prediction(
         mut self,
         enable_inline_prediction: bool,
-    ) -> TextInputConfiguration {
-        self.enable_inline_prediction = Some(enable_inline_prediction);
+    ) -> TextInputConfigurationBuilder {
+        self.configuration.enable_inline_prediction = Some(enable_inline_prediction);
         self
     }
 
-    /// Creates a copy of this [`TextInputConfiguration`] with the given fields
-    /// replaced with new values.
-    pub fn copy_with(&self) -> TextInputConfiguration {
-        self.clone()
+    /// `build` makes the configuration, turning smart dashes and quotes off for obscured text
+    /// unless they were given, as Dart's constructor does.
+    pub fn build(self) -> TextInputConfiguration {
+        let mut configuration = self.configuration;
+        let obscure_text = configuration.obscure_text;
+        configuration.smart_dashes_type = self.smart_dashes_type.unwrap_or(if obscure_text {
+            SmartDashesType::Disabled
+        } else {
+            SmartDashesType::Enabled
+        });
+        configuration.smart_quotes_type = self.smart_quotes_type.unwrap_or(if obscure_text {
+            SmartQuotesType::Disabled
+        } else {
+            SmartQuotesType::Enabled
+        });
+        configuration
     }
 }
 
 impl Default for TextInputConfiguration {
     fn default() -> TextInputConfiguration {
-        TextInputConfiguration::new()
+        TextInputConfiguration::builder().build()
     }
 }
 
@@ -1382,18 +1417,31 @@ mod tests {
 
     #[test]
     fn obscure_text_disables_smart_punctuation_unless_overridden() {
-        let obscured = TextInputConfiguration::new().obscure_text(true);
+        let obscured = TextInputConfiguration::builder().obscure_text(true).build();
         assert!(obscured.obscure_text);
         assert_eq!(obscured.smart_dashes_type, SmartDashesType::Disabled);
         assert_eq!(obscured.smart_quotes_type, SmartQuotesType::Disabled);
 
-        let restored = obscured.smart_dashes_type(SmartDashesType::Enabled);
-        assert_eq!(restored.smart_dashes_type, SmartDashesType::Enabled);
+        let given_first = TextInputConfiguration::builder()
+            .smart_dashes_type(SmartDashesType::Enabled)
+            .obscure_text(true)
+            .build();
+        assert_eq!(given_first.smart_dashes_type, SmartDashesType::Enabled);
+    }
+
+    #[test]
+    fn a_copy_keeps_the_smart_punctuation_it_was_made_with() {
+        let copy = TextInputConfiguration::default()
+            .copy_with()
+            .obscure_text(true)
+            .build();
+        assert_eq!(copy.smart_dashes_type, SmartDashesType::Enabled);
+        assert_eq!(copy.smart_quotes_type, SmartQuotesType::Enabled);
     }
 
     #[test]
     fn autofill_disabled_is_the_configuration_default() {
-        let configuration = TextInputConfiguration::new();
+        let configuration = TextInputConfiguration::default();
         assert!(!configuration.autofill_configuration.enabled);
         assert_eq!(
             AutofillConfiguration::new("id", vec!["email".into()], TextEditingValue::EMPTY)
