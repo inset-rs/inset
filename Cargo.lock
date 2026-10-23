@@ -2062,6 +2062,7 @@ dependencies = [
  "inset-embedder",
  "inset-foundation",
  "inset-scheduler",
+ "valo",
  "valo-system-fonts",
 ]
 

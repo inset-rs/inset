@@ -4,16 +4,12 @@
 use inset_embedder::{ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId};
 use winit::window::Window;
 
-use crate::view::WinitView;
-
-/// Focuses `window`, `view`'s, if `request` asks for the focus and it does not have it; a
+/// Focuses `window`, the view's, if `request` asks for the focus and it does not have it; a
 /// request to give the focus up is ignored, as Flutter's macOS embedder ignores it. The system's
 /// focus event reports the result.
-pub(crate) fn focus_window_if_asked(request: &ViewFocusEvent, window: &Window, view: &WinitView) {
+pub(crate) fn focus_window_if_asked(request: &ViewFocusEvent, window: &Window) {
     if request.state == ViewFocusState::Focused && !window.has_focus() {
         window.focus_window();
-        // Focusing orders the window front, maybe on another screen: its surfaces follow it.
-        view.follow_window();
     }
 }
 

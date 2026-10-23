@@ -123,14 +123,12 @@ impl HostWindow for WinitWindow {
     fn show(&self) {
         if let Some(window) = self.window.upgrade() {
             window.set_visible(true);
-            self.view.follow_window();
         }
     }
 
     fn hide(&self) {
         if let Some(window) = self.window.upgrade() {
             window.set_visible(false);
-            self.view.follow_window();
         }
     }
 

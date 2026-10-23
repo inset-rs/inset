@@ -69,7 +69,7 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - List every screen the system has, a phone's one included, the main one first, and give every position in the coordinates of a window's frame, from the main screen's top-left corner. Give each screen an id it keeps while it stays connected, and every view the id of the screen it is on. Follow the system's notices as screens change, calling `screens_changed` once `Platform::screens` answers the new list, and as windows move between screens, reporting a view whose screen changed through `view_metrics_changed`: a window's screen sets its scale and its vsync.
 
 **Visibility**
-- `EmbedderClient::app_lifecycle_state_changed`, `Surface::next_vsync`
+- `EmbedderClient::app_lifecycle_state_changed`
 - A window nobody can see draws nothing, and draws again as soon as any part shows.
 
 **Focus**
@@ -83,8 +83,8 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - At each vsync of a screen, give one frame of the views on it that asked for one before it came. Hold a frame asked of a window that is minimized or occluded until the window shows. Draw a resized view's frame inside the resize, as a frame of that view alone, as below.
 
 **Vsync**
-- `Surface::next_vsync`, `VsyncObserver::vsync`
-- Take vsync from each display, or from a timer at its rate where the system gives none, so each visible window keeps ticking while others are hidden.
+- `Platform::vsync_waiter`, `VsyncWaiter::next_vsync`, `VsyncObserver::vsync`
+- Take vsync from each display, or from a timer at its rate where the system gives none, so each visible window keeps ticking while others are hidden. Hand a producer that waits for a screen's refresh the same ticks the frames on that screen are drawn at, one call per wait, whether or not a window on it is in sight.
 
 **Presenting**
 - `View::present`
@@ -96,7 +96,7 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 
 **Native surfaces**
 - `Platform::compositor`, `Compositor::open_surface`, `Surface::present`, `Scene::surfaces`
-- Place a scene's surfaces beneath its picture in the same native transaction, and run each buffer's `released` once the compositor is done with it.
+- Place a scene's surfaces beneath its picture in the same native transaction, and run each buffer's `released` once the compositor is done with it: where the system only answers whether it still is, as macOS does, ask at the surface's next present and when it goes.
 
 ## Input
 
@@ -173,7 +173,7 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 ## Robustness
 
 **Threads**
-- `Dispatcher`, `Compositor`, `Surface` and `VsyncObserver`, the parts other threads may call
+- `Dispatcher`, `Compositor`, `Surface` and `VsyncWaiter`, the parts other threads may call
 - Call the client only on the main thread, and reach each native window on the thread that owns it.
 
 **Re-entrancy**
@@ -181,8 +181,8 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - Whatever a framework call or a system callback needs of the loop or the client becomes a request, served in order on a later turn.
 
 **Nested loops**
-- `PopupMenus::show`
-- Wakes and vsyncs keep coming while the system runs a nested loop, such as a popup menu, a modal dialog or a live resize.
+- `PopupMenus::show`, `PopupMenuFuture`
+- Wakes, vsyncs and frames keep coming while the system runs a nested loop, such as a popup menu, a modal dialog or a live resize: open a popup menu after `show` returns, its loop outside every call into the app, and answer the entry chosen through the future once it closes.
 
 **Panics**
 - none yet

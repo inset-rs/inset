@@ -125,7 +125,7 @@ impl<C: EmbedderClient> MainLoop<C> {
     /// Honours the framework's request to focus a view, or to give up its focus.
     pub(super) fn change_view_focus(&mut self, change: ViewFocusEvent) {
         if let Some(open) = self.views().by_view(change.view_id) {
-            view_focus::focus_window_if_asked(&change, &open.window, &open.view);
+            view_focus::focus_window_if_asked(&change, &open.window);
         }
     }
 
@@ -226,8 +226,7 @@ impl<C: EmbedderClient> MainLoop<C> {
 
     /// A window moved, and may be on another screen now: the app hears of its view's new
     /// screen, as Flutter's macOS embedder sends a window's metrics again when its screen changes,
-    /// and of the move, and its native surfaces and its view's frames follow it to that screen's
-    /// vsyncs. AppKit moves the windows off a screen that goes away, so this is also how their
+    /// and of the move, and its view's frames follow it to that screen's vsyncs. AppKit moves the windows off a screen that goes away, so this is also how their
     /// vsyncs leave it.
     pub(super) fn on_moved(&mut self, id: WindowId) {
         let Some(open) = self.views().by_window(id) else {
@@ -237,7 +236,6 @@ impl<C: EmbedderClient> MainLoop<C> {
             self.client.view_metrics_changed(open.view.id());
         }
         self.report_window_changed(&open);
-        open.view.follow_window();
         self.sync_frame_scheduler(open.view.id());
     }
 

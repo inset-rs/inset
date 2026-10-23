@@ -1,7 +1,9 @@
 //! When each view's frames are drawn: at a vsync of the screen its window is on, after the
 //! framework asks for a frame of it, as Flutter's `Animator` asks its `VsyncWaiter` for the next
 //! vsync when a frame is requested and draws at it. Every view on a screen shares one vsync
-//! source, and a vsync draws one refresh of the views on that screen that are due.
+//! source, and a vsync draws one refresh of the views on that screen that are due. Where the loop
+//! serves the platform's vsync waiter (`vsync_waiter.rs`), whoever waits on a screen is served by
+//! the same source, at the same vsync, whether or not a window on the screen is in sight.
 //!
 //! A screen's vsyncs do not stop for its windows
 //! (`2026-09-29-view-display-link-unseen` in the `experiments` folder beside this repository), so a
@@ -15,34 +17,47 @@
 //! draws none.
 //!
 //! The rule a later editor could break: a frame asked of a view in sight is drawn once and no more
-//! than once between two vsyncs of its screen, so every view that owes a frame has asked its
-//! screen's source for the vsync it is drawn at. The scheduler learns a window's screen and
-//! whether it is in sight only from the window's events ([`FrameScheduler::follow_window`]).
+//! than once between two vsyncs of its screen, so every view that owes a frame, and every wait on
+//! a screen, has asked its screen's source for the vsync it is served at. The scheduler learns a
+//! window's screen and whether it is in sight only from the window's events
+//! ([`FrameScheduler::follow_window`]).
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::Weak;
 use std::time::Instant;
 
-use inset_embedder::{ScreenId, ViewId};
+use inset_embedder::{ScreenId, ViewId, VsyncObserver};
 use winit::monitor::MonitorHandle;
 
 use crate::os::{Screens, ThisOs};
 use crate::vsync_source::VsyncSource;
 
-/// When each view's frame is drawn; owned by the loop.
+/// When each view's frame is drawn, and each wait on a screen served; owned by the loop.
 pub(crate) struct FrameScheduler {
     /// Each view's frames, in the order the views came.
     views: BTreeMap<ViewId, ViewFrames>,
-    /// The vsyncs of each screen a view's window is on.
+    /// The vsyncs of each screen a view's window is on, or someone waits on.
     screens: Vec<ScreenVsyncs>,
     /// What a screen's vsync sends the loop.
     send_vsync: Rc<dyn Fn(ScreenId)>,
 }
 
-/// One screen's vsyncs, shared by every view whose window is on it.
+/// One screen's vsyncs, shared by every view whose window is on it and everyone who waits on it.
 struct ScreenVsyncs {
     screen: ScreenId,
     vsync: VsyncSource,
+    /// Who waits for the screen's next vsync through the platform's waiter, in the order they
+    /// asked.
+    waiting: Vec<Weak<dyn VsyncObserver>>,
+}
+
+/// What one vsync of a screen serves.
+pub(crate) struct ScreenRefresh {
+    /// The views on the screen whose frames are drawn now, in the order they came.
+    pub(crate) views: Vec<ViewId>,
+    /// Who waited for this vsync, in the order they asked.
+    pub(crate) waiting: Vec<Weak<dyn VsyncObserver>>,
 }
 
 /// One view's frames: whether one is asked for, and whether its window takes vsyncs.
@@ -95,32 +110,56 @@ impl FrameScheduler {
         let screen = monitor.map(|monitor| self.follow_screen(monitor));
         self.view_frames(view).follow_window(screen, in_sight);
         self.request_vsync_if_waiting(view);
-        self.drop_screens_without_views();
+        self.drop_unused_screens();
     }
 
     /// `view` is gone: no frame is drawn for it again.
     pub(crate) fn remove_view(&mut self, view: ViewId) {
         self.views.remove(&view);
-        self.drop_screens_without_views();
+        self.drop_unused_screens();
     }
 
-    /// A vsync of `screen` came: answers the views on it whose frames are drawn now, in the order
-    /// they came. A view whose resize drew this vsync's frame waits for the next.
-    pub(crate) fn on_vsync(&mut self, screen: ScreenId) -> Vec<ViewId> {
+    /// `observer` waits for the next vsync of `screen`, and is called once then however often it
+    /// asks before. A screen no view's window is on is followed from now on, `monitor` finding
+    /// it; one that is not connected has no vsync, and the wait is dropped.
+    pub(crate) fn wait_for_vsync(
+        &mut self,
+        screen: ScreenId,
+        observer: Weak<dyn VsyncObserver>,
+        monitor: impl FnOnce() -> Option<MonitorHandle>,
+    ) {
+        if self.screen_vsyncs(screen).is_none() {
+            let Some(monitor) = monitor() else {
+                return;
+            };
+            self.follow_screen(&monitor);
+        }
+        if let Some(vsyncs) = self.screen_vsyncs(screen) {
+            vsyncs.wait(observer);
+        }
+    }
+
+    /// A vsync of `screen` came: answers what it serves. A view whose resize drew this vsync's
+    /// frame waits for the next.
+    pub(crate) fn on_vsync(&mut self, screen: ScreenId) -> ScreenRefresh {
         let Some(vsyncs) = self.screen_vsyncs(screen) else {
-            return Vec::new();
+            return ScreenRefresh {
+                views: Vec::new(),
+                waiting: Vec::new(),
+            };
         };
         vsyncs.vsync.vsync_came();
-        let mut due = Vec::new();
+        let waiting = std::mem::take(&mut vsyncs.waiting);
+        let mut views = Vec::new();
         for (&view, frames) in &mut self.views {
             if frames.screen == Some(screen) && frames.vsync_came() {
-                due.push(view);
+                views.push(view);
             }
         }
         for view in self.views_on(screen) {
             self.request_vsync_if_waiting(view);
         }
-        due
+        ScreenRefresh { views, waiting }
     }
 
     /// A resize drew a frame of `view` between vsyncs: it stands for the frame asked for, and the
@@ -192,6 +231,7 @@ impl FrameScheduler {
             self.screens.push(ScreenVsyncs {
                 screen,
                 vsync: VsyncSource::on(monitor, move || send_vsync(screen)),
+                waiting: Vec::new(),
             });
         }
         screen
@@ -203,14 +243,29 @@ impl FrameScheduler {
             .find(|vsyncs| vsyncs.screen == screen)
     }
 
-    /// Lets go of the vsyncs of every screen no view's window is on.
-    fn drop_screens_without_views(&mut self) {
+    /// Lets go of the vsyncs of every screen no view's window is on and nobody waits on.
+    fn drop_unused_screens(&mut self) {
         let views = &self.views;
         self.screens.retain(|vsyncs| {
-            views
-                .values()
-                .any(|frames| frames.screen == Some(vsyncs.screen))
+            !vsyncs.waiting.is_empty()
+                || views
+                    .values()
+                    .any(|frames| frames.screen == Some(vsyncs.screen))
         });
+    }
+}
+
+impl ScreenVsyncs {
+    /// `observer` waits for the next vsync: once, however often it asks before.
+    fn wait(&mut self, observer: Weak<dyn VsyncObserver>) {
+        if !self
+            .waiting
+            .iter()
+            .any(|known| Weak::ptr_eq(known, &observer))
+        {
+            self.waiting.push(observer);
+        }
+        self.vsync.request_vsync();
     }
 }
 

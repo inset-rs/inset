@@ -1,11 +1,14 @@
-//! The main loop's frames and wakes: when the app is woken, when each screen's refresh is drawn,
-//! and the scenes a surface still owes.
+//! The main loop's frames and wakes: when the app is woken, when each screen's refresh is drawn
+//! and its waits served, and the scenes a surface still owes.
 
+use std::sync::Weak;
 use std::time::Instant;
 
-use inset_embedder::{EmbedderClient, Frame, HostWindow, ScreenId, View, ViewId};
+use inset_embedder::{EmbedderClient, Frame, HostWindow, ScreenId, View, ViewId, VsyncObserver};
+use winit::event_loop::ActiveEventLoop;
+use winit::monitor::MonitorHandle;
 
-use crate::os::{ThisOs, WindowVisibility};
+use crate::os::{Screens, ThisOs, WindowVisibility};
 use crate::view::WinitView;
 use crate::vsync_source::monitor_of;
 use crate::windows::OpenWindow;
@@ -48,12 +51,24 @@ impl<C: EmbedderClient> MainLoop<C> {
         }
     }
 
-    /// A vsync of `screen`: one refresh of the views on it whose frames are due, unless none is,
-    /// and the scenes their surfaces timed out on.
+    /// Someone waits, through the platform's waiter, for the next vsync of `screen`.
+    pub(super) fn on_vsync_waited(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        screen: ScreenId,
+        observer: Weak<dyn VsyncObserver>,
+    ) {
+        self.frame_scheduler
+            .wait_for_vsync(screen, observer, || monitor_numbered(event_loop, screen));
+    }
+
+    /// A vsync of `screen`: the waits on it are served, then one refresh of the views on it whose
+    /// frames are due, unless none is, and the scenes their surfaces timed out on.
     pub(super) fn on_vsync(&mut self, screen: ScreenId) {
-        let views = self.frame_scheduler.on_vsync(screen);
-        if !views.is_empty() {
-            self.draw_frame(&views);
+        let refresh = self.frame_scheduler.on_vsync(screen);
+        serve_waits(&refresh.waiting, Instant::now());
+        if !refresh.views.is_empty() {
+            self.draw_frame(&refresh.views);
         }
         self.retry_owed_scenes(screen);
     }
@@ -116,6 +131,21 @@ impl<C: EmbedderClient> MainLoop<C> {
             None => self.frame_scheduler.follow_window(view, None, false),
         }
     }
+}
+
+/// Calls everyone who waited for a vsync served `at`, in the order they asked; one that is gone is
+/// not called.
+fn serve_waits(waiting: &[Weak<dyn VsyncObserver>], at: Instant) {
+    for observer in waiting.iter().filter_map(Weak::upgrade) {
+        observer.vsync(at);
+    }
+}
+
+/// The monitor that is `screen`, if it is connected.
+fn monitor_numbered(event_loop: &ActiveEventLoop, screen: ScreenId) -> Option<MonitorHandle> {
+    event_loop
+        .available_monitors()
+        .find(|monitor| ThisOs::screen_id(monitor) == screen)
 }
 
 /// Whether the window of `open` is in sight: neither minimized nor occluded, as the app's handle

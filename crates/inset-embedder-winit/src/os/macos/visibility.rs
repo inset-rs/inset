@@ -1,21 +1,12 @@
-//! Whether a window is visible, and AppKit's notices that its visibility may have changed: what
-//! decides whether the producers of the window's native surfaces get vsyncs, and what the app
-//! hears of its window being minimized or restored, occluded or shown (`WindowVisibility`).
+//! Whether a window is occluded, and AppKit's notices that its visibility may have changed: what
+//! the app hears of its window being minimized or restored, occluded or shown
+//! (`WindowVisibility`).
 //!
-//! A window is visible while it is ordered in and its occlusion state has the visible bit: not
-//! while it is hidden or minimized, nor while its application is hidden, nor while other
-//! windows cover all of it. That is the test Chromium hides a page's renderer by on macOS
-//! (`-[WebContentsViewCocoa updateWebContentsVisibility]` and `WebContentsOcclusionCheckerMac`,
-//! in `content/app_shim_remote_cocoa/`), and WebKit a page (`PageClientImpl::isViewVisible`).
-//!
-//! AppKit posts a notice for every change of a window's occlusion state, which is enough to
-//! hear every change of the test. The notices Chromium takes a window's visibility from are
-//! heard too (`components/remote_cocoa/app_shim/native_widget_ns_window_bridge.mm`
-//! `OnVisibilityChanged`, `views_nswindow_delegate.mm`), as WebKit's `WebViewImpl` hears them:
-//! the application hidden and unhidden, and the window minimized and restored. The embedder's own
-//! showing, hiding and ordering front of a window, and its moves, which Chromium hears by
-//! overriding `-orderWindow:relativeTo:`, the embedder reports itself
-//! (`WindowSurfaces::follow_window`).
+//! AppKit posts a notice for every change of a window's occlusion state. The notices Chromium
+//! takes a window's visibility from are heard too
+//! (`components/remote_cocoa/app_shim/native_widget_ns_window_bridge.mm` `OnVisibilityChanged`,
+//! `views_nswindow_delegate.mm`), as WebKit's `WebViewImpl` hears them: the application hidden
+//! and unhidden, and the window minimized and restored.
 //!
 //! A window is occluded while its occlusion state has no visible bit, whatever the reason: covered
 //! all over, hidden, minimized, or in a hidden application. winit reports a change of it as
@@ -45,12 +36,6 @@ impl WindowVisibility for AppKit {
     fn observe_visibility(window: &Window, on_notice: Box<dyn Fn()>) -> Option<VisibilityNotices> {
         VisibilityNotices::observe(window, on_notice)
     }
-}
-
-/// Whether `window` is visible: ordered in, and not covered all over. Hidden, minimized and in a
-/// hidden application, a window is out of sight.
-pub(crate) fn is_visible(window: &Window) -> bool {
-    ns_window(window).is_some_and(|window| window.isVisible() && has_visible_bit(&window))
 }
 
 /// Whether some of `window` shows, as its occlusion state says.

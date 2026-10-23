@@ -16,7 +16,7 @@ use inset_widgets::{
     StackFit, SurfaceView, Text, Transform, WidgetRef, Window, WindowController, run_widget,
 };
 
-use crate::producer;
+use crate::producer::{self, Pacing, ViewScreen};
 
 /// The surface's size in logical pixels.
 const SURFACE_SIZE: [f64; 2] = [400.0, 300.0];
@@ -76,23 +76,34 @@ fn quit(app: &mut App, _view: ViewId) {
 }
 
 /// Starts the producer at the first frame in which `view` has a size: only then does the view
-/// have the display's pixel ratio the producer draws at.
+/// have the display's pixel ratio the producer draws at. Each frame tells it the screen the view
+/// is on, whose refreshes it paces by.
 fn start_producer_once_sized(
     app: &mut App,
     view: ViewRef,
     surface: Arc<dyn Surface>,
     exit_after: Option<Duration>,
 ) {
-    let waiting = Cell::new(Some(surface));
+    let waiter = app
+        .platform()
+        .vsync_waiter()
+        .expect("the macOS host has a vsync waiter");
+    let screen = Arc::new(ViewScreen::default());
+    let waiting = Cell::new(Some(Pacing {
+        surface,
+        waiter,
+        screen: Arc::clone(&screen),
+    }));
     SchedulerBinding::add_persistent_frame_callback(
         app,
         PersistentFrameCallback::new(move |_app, _views, _elapsed| {
             let metrics = view.metrics();
+            screen.set(metrics.screen);
             if metrics.physical_size == [0.0, 0.0] {
                 return;
             }
-            if let Some(surface) = waiting.take() {
-                producer::start(surface, pixel_size(metrics.device_pixel_ratio), exit_after);
+            if let Some(pacing) = waiting.take() {
+                producer::start(pacing, pixel_size(metrics.device_pixel_ratio), exit_after);
             }
         }),
     );

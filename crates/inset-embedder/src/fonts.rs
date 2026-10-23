@@ -1,12 +1,16 @@
 //! The font collection a paragraph shapes against. Flutter's engine owns one per process and
 //! asks the OS for faces; here the collection is the host's [`FontCollection`], filled from
-//! [`Platform::font_source`](crate::Platform::font_source) and whatever the application
-//! registers, and handed to [`ParagraphBuilder::build`](crate::ParagraphBuilder::build).
+//! [`Platform::font_source`](crate::Platform::font_source), with the faces of
+//! [`Platform::default_font_families`](crate::Platform::default_font_families) as its fallback
+//! chain, and from whatever the application registers, and handed to
+//! [`ParagraphBuilder::build`](crate::ParagraphBuilder::build).
 
 use valo::{Font, FontAttrs};
 pub use valo::{FontCollection, FontDemand, FontId, FontSource};
 use valo_system_fonts::SystemFonts;
 pub use valo_system_fonts::fontmgr::{FontManager, Typeface};
+
+use crate::TargetPlatform;
 
 /// The engine's font manager: the platform's installed fonts through a [`FontManager`], and
 /// the two family names Flutter's engine defines for the platform's own user-interface font.
@@ -65,62 +69,45 @@ impl FontSource for SystemFontSource {
     }
 }
 
-/// Flutter `txt::GetDefaultFontFamilies()`: the family names
-/// `FontCollection::setDefaultFontManager` looks up when a style leaves `fontFamily` unset.
+/// Flutter `txt::GetDefaultFontFamilies()` of the engine built for `os`, from that OS's file
+/// (`txt/platform_mac.mm`, `platform_linux.cc`, …): the families text is drawn in when its style
+/// names none, first match first.
 ///
-/// On Apple, Flutter reads `[systemFontOfSize:14].familyName`. That face is what this source
-/// answers as `CupertinoSystemText`, so that is the name the default manager is given.
-pub fn default_font_families() -> Vec<String> {
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    {
-        vec![CUPERTINO_TEXT.to_owned()]
-    }
-    #[cfg(target_os = "android")]
-    {
-        vec!["sans-serif".to_owned()]
-    }
-    #[cfg(target_os = "windows")]
-    {
-        vec!["Segoe UI".to_owned(), "Arial".to_owned()]
-    }
-    #[cfg(target_os = "linux")]
-    {
-        vec![
-            "Ubuntu".to_owned(),
-            "Adwaita Sans".to_owned(),
-            "Cantarell".to_owned(),
-            "DejaVu Sans".to_owned(),
-            "Liberation Sans".to_owned(),
-            "Arial".to_owned(),
-        ]
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        vec!["Roboto".to_owned()]
-    }
-    #[cfg(not(any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "android",
-        target_os = "windows",
-        target_os = "linux",
-        target_arch = "wasm32",
-    )))]
-    {
-        vec!["Arial".to_owned()]
-    }
+/// On Apple's systems Flutter reads `[systemFontOfSize:14].familyName`. That face is what
+/// [`SystemFontSource`] answers as `CupertinoSystemText`, so that is the name given here.
+pub fn default_font_families(os: TargetPlatform) -> Vec<String> {
+    let families: &[&str] = match os {
+        TargetPlatform::Android => &["sans-serif"],
+        TargetPlatform::Fuchsia => &["Roboto"],
+        TargetPlatform::IOS | TargetPlatform::MacOS => &[CUPERTINO_TEXT],
+        TargetPlatform::Linux => &[
+            "Ubuntu",
+            "Adwaita Sans",
+            "Cantarell",
+            "DejaVu Sans",
+            "Liberation Sans",
+            "Arial",
+        ],
+        TargetPlatform::Windows => &["Segoe UI", "Arial"],
+    };
+    families.iter().map(|&family| family.to_owned()).collect()
 }
 
-/// Flutter `skia::textlayout::FontCollection::setDefaultFontManager`: register the default
-/// family's faces as the collection's fallback chain, then keep `source` for later lookups.
+/// Flutter `skia::textlayout::FontCollection::setDefaultFontManager`: register the faces of
+/// `families`, the platform's default families, as the collection's fallback chain, then keep
+/// `source` for later lookups.
 ///
 /// Valo has no default font manager. An empty style `families` list walks this fallback
 /// chain, then `FontId(0)`. Without the chain, a later `register` (the Cupertino icon font)
 /// becomes font 0 and unspecified-family text paints `.notdef`.
-pub fn set_default_font_manager(fonts: &mut FontCollection, mut source: Box<dyn FontSource>) {
-    for name in default_font_families() {
-        for mut font in source.family(&name) {
-            font.add_alias(&name);
+pub fn set_default_font_manager(
+    fonts: &mut FontCollection,
+    mut source: Box<dyn FontSource>,
+    families: &[String],
+) {
+    for name in families {
+        for mut font in source.family(name) {
+            font.add_alias(name);
             let id = fonts.add(font);
             fonts.add_fallback(id);
         }
@@ -131,10 +118,11 @@ pub fn set_default_font_manager(fonts: &mut FontCollection, mut source: Box<dyn 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Platform;
 
     #[test]
     fn default_font_families_match_the_engine_on_this_os() {
-        let names = default_font_families();
+        let names = crate::InertPlatform.default_font_families();
         assert!(!names.is_empty());
         #[cfg(any(target_os = "macos", target_os = "ios"))]
         assert_eq!(names, vec![CUPERTINO_TEXT]);

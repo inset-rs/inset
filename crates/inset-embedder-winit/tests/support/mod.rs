@@ -85,11 +85,17 @@ pub fn take_opened_windows(
 
 /// What the tests ask of AppKit that the embedder offers no call for.
 pub mod appkit {
+    use std::time::Duration;
+
+    use dispatch2::{DispatchQueue, DispatchTime};
     use objc2::rc::{Retained, Weak};
     use objc2::{ClassType, MainThreadMarker};
-    use objc2_app_kit::{NSApplication, NSWindow};
+    use objc2_app_kit::{NSApplication, NSEvent, NSEventModifierFlags, NSEventType, NSWindow};
     use objc2_foundation::{NSObjectProtocol, NSPoint, NSString};
     use objc2_quartz_core::CAMetalLayer;
+
+    /// The virtual key code of Escape (`kVK_Escape`).
+    const ESCAPE_KEY_CODE: u16 = 0x35;
 
     fn application() -> Retained<NSApplication> {
         NSApplication::sharedApplication(MainThreadMarker::new().expect("the main thread"))
@@ -162,6 +168,33 @@ pub mod appkit {
         window_titled(title)
             .expect("the window")
             .orderFrontRegardless();
+    }
+
+    /// Presses Escape, as a person closing the menu that tracks the pointer would: the key goes to
+    /// the front of the application's events, which a menu's own loop reads too.
+    pub fn press_escape() {
+        let escape = NSString::from_str("\u{1b}");
+        let event = NSEvent::keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode(
+            NSEventType::KeyDown,
+            NSPoint::new(0.0, 0.0),
+            NSEventModifierFlags::empty(),
+            0.0,
+            0,
+            None,
+            &escape,
+            &escape,
+            false,
+            ESCAPE_KEY_CODE,
+        )
+        .expect("an Escape key event");
+        application().postEvent_atStart(&event, true);
+    }
+
+    /// Presses Escape `after` from now, from the main queue, which runs while a menu tracks the
+    /// pointer.
+    pub fn press_escape_after(after: Duration) {
+        let when = DispatchTime::try_from(after).expect("a delay that fits");
+        let _ = DispatchQueue::main().after(when, press_escape);
     }
 
     /// A window as AppKit has it, held weakly: whether it is still alive tells whether anything

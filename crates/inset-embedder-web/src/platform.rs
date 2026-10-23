@@ -16,6 +16,7 @@ use web_sys::HtmlCanvasElement;
 use web_time::Instant;
 
 use crate::dispatcher;
+use crate::font_fallback::ROBOTO;
 use crate::gpu::Gpu;
 use crate::text_input::{TextInputListener, WebTextInput};
 
@@ -163,6 +164,12 @@ impl Platform for WebPlatform {
             Rc::clone(&self.frame_requested),
             Rc::clone(&self.on_schedule),
         )))
+    }
+
+    /// Roboto, the family this host ships, on whatever system the page runs: Flutter web's
+    /// `setDefaultFontFamilies(['Roboto'])`.
+    fn default_font_families(&self) -> Vec<String> {
+        vec![String::from(ROBOTO)]
     }
 
     fn now(&self) -> Instant {

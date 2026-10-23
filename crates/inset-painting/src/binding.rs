@@ -66,14 +66,17 @@ impl PaintingBinding {
     }
 
     /// Installs the app-wide font collection seeded with the platform's own font lookup
-    /// (`Platform::font_source`), the way Flutter's engine asks the OS for faces.
+    /// (`Platform::font_source`) and its default families (`Platform::default_font_families`),
+    /// the way Flutter's engine asks the OS for faces.
     pub fn install_platform_fonts(self: Handle<Self>, app: &mut App) -> Handle<FontCollection> {
-        let source = app.platform().font_source();
+        let platform = app.platform();
+        let source = platform.font_source();
+        let families = platform.default_font_families();
         self.install_fonts(app, |fonts| {
             if let Some(source) = source {
                 // txt::FontCollection::CreateSktFontCollection:
                 // setDefaultFontManager(mgr, GetDefaultFontFamilies()).
-                set_default_font_manager(fonts, source);
+                set_default_font_manager(fonts, source, &families);
             }
         })
     }
@@ -118,7 +121,14 @@ impl PaintingBinding {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use inset_embedder::{
+        Dispatcher, FontSource, InertDispatcher, Instant, Platform, TargetPlatform, ViewId, ViewRef,
+    };
     use inset_foundation::AppCell;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::sync::Arc;
+    use valo::{Font, FontAttrs};
 
     #[test]
     fn fonts_are_installed_once_and_read_back() {
@@ -140,7 +150,6 @@ mod tests {
     fn system_fonts_notify_reaches_a_listener() {
         use inset_foundation::{Listenable, Listener};
         use std::cell::Cell;
-        use std::rc::Rc;
 
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
@@ -167,6 +176,70 @@ mod tests {
             binding.has_fonts(&app),
             "the collection the face would have joined"
         );
+    }
+
+    /// A font source that answers no family, keeping the names it was asked for.
+    struct AskedFamilies(Rc<RefCell<Vec<String>>>);
+
+    impl FontSource for AskedFamilies {
+        fn family(&mut self, name: &str) -> Vec<Font> {
+            self.0.borrow_mut().push(name.to_owned());
+            Vec::new()
+        }
+
+        fn face_for_codepoint(&mut self, _codepoint: char, _attrs: FontAttrs) -> Option<Font> {
+            None
+        }
+    }
+
+    /// A platform whose fonts are its own, as a web page's are, so it names its default family
+    /// itself.
+    struct OwnDefaultFamily {
+        asked: Rc<RefCell<Vec<String>>>,
+    }
+
+    impl Platform for OwnDefaultFamily {
+        fn target_platform(&self) -> TargetPlatform {
+            TargetPlatform::Android
+        }
+
+        fn request_frame(&self, _view: ViewId) {}
+
+        fn now(&self) -> Instant {
+            Instant::now()
+        }
+
+        fn dispatcher(&self) -> Arc<dyn Dispatcher> {
+            Arc::new(InertDispatcher)
+        }
+
+        fn views(&self) -> Vec<ViewRef> {
+            Vec::new()
+        }
+
+        fn view(&self, _id: ViewId) -> Option<ViewRef> {
+            None
+        }
+
+        fn font_source(&self) -> Option<Box<dyn FontSource>> {
+            Some(Box::new(AskedFamilies(Rc::clone(&self.asked))))
+        }
+
+        fn default_font_families(&self) -> Vec<String> {
+            vec![String::from("Roboto")]
+        }
+    }
+
+    #[test]
+    fn the_platforms_own_default_families_are_installed() {
+        let asked = Rc::new(RefCell::new(Vec::new()));
+        let platform = OwnDefaultFamily {
+            asked: Rc::clone(&asked),
+        };
+        let cell = AppCell::with_platform(Rc::new(platform));
+        let mut app = cell.borrow_mut();
+        PaintingBinding::instance(&mut app).install_platform_fonts(&mut app);
+        assert_eq!(*asked.borrow(), ["Roboto"]);
     }
 
     #[test]

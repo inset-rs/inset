@@ -432,6 +432,24 @@ pub enum TargetPlatform {
     Windows,
 }
 
+/// The OS this build targets, as Flutter names it; `None` for one Flutter does not name, such as
+/// a web page's or a WebAssembly component's.
+const THIS_OS: Option<TargetPlatform> = if cfg!(target_os = "android") {
+    Some(TargetPlatform::Android)
+} else if cfg!(target_os = "fuchsia") {
+    Some(TargetPlatform::Fuchsia)
+} else if cfg!(target_os = "ios") {
+    Some(TargetPlatform::IOS)
+} else if cfg!(target_os = "linux") {
+    Some(TargetPlatform::Linux)
+} else if cfg!(target_os = "macos") {
+    Some(TargetPlatform::MacOS)
+} else if cfg!(target_os = "windows") {
+    Some(TargetPlatform::Windows)
+} else {
+    None
+};
+
 /// One line of a popup menu the host shows with its own menu system.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PopupMenuEntry {
@@ -631,6 +649,21 @@ pub trait Platform: Any {
         None
     }
 
+    /// Flutter's `txt::GetDefaultFontFamilies()`: the families text uses when its style names
+    /// none, first match first.
+    ///
+    /// Defaults to the engine's answer on the OS this build targets
+    /// ([`default_font_families`](crate::default_font_families)). A host that learns its OS at
+    /// run time answers for that OS, and one whose fonts are not the OS's, as a web page's are
+    /// not, answers its own.
+    fn default_font_families(&self) -> Vec<String> {
+        match THIS_OS {
+            Some(os) => crate::default_font_families(os),
+            // `txt/platform.cc`: the engine's answer on an OS it has no file of its own for.
+            None => vec![String::from("Arial")],
+        }
+    }
+
     /// Open an encoded image, answering with a codec for its frames.
     ///
     /// Flutter dart:ui `instantiateImageCodec`. The host decodes with whatever its platform
@@ -654,6 +687,13 @@ pub trait Platform: Any {
     /// framework's picture. `None` on the web, on X11, on the inert host, and on an
     /// embedder that chose not to have one.
     fn compositor(&self) -> Option<Arc<dyn crate::Compositor>> {
+        None
+    }
+
+    /// Flutter's `VsyncWaiter`, for any screen: the refreshes the host draws the framework's
+    /// frames at, for a producer that paces by them, as a native surface's does. `None` for a
+    /// host without screen ticks.
+    fn vsync_waiter(&self) -> Option<Arc<dyn crate::VsyncWaiter>> {
         None
     }
 
@@ -783,15 +823,20 @@ pub trait SystemContextMenu {
 
 /// A native pop-up menu shown at the pointer, answered with the index chosen.
 pub trait PopupMenus {
-    /// Shows `entries` as the platform's own popup menu at the pointer and waits for it to
-    /// close; answers the index of the entry chosen. Not a Flutter call: Flutter's context
-    /// menus draw inside the view, and a desktop panel narrower than its menu needs the
-    /// system's, which is its own window.
+    /// Shows `entries` as the platform's own popup menu at the pointer; answers the index of the
+    /// entry chosen once it closes, `None` when it closed with none chosen. Not a Flutter call:
+    /// Flutter's context menus draw inside the view, and a desktop panel narrower than its menu
+    /// needs the system's, which is its own window.
     ///
-    /// The host runs the menu's event loop inside this call, so nothing else of the app runs
-    /// meanwhile and a native callback that arrives then must post, not borrow.
-    fn show(&self, entries: &[PopupMenuEntry]) -> Option<usize>;
+    /// The host opens the menu after this call returns and runs the menu's own loop outside every
+    /// call into the app, so the app's frames, timers and events go on while it is open, as they
+    /// do in Flutter, whose platform calls answer later.
+    fn show(&self, entries: &[PopupMenuEntry]) -> PopupMenuFuture;
 }
+
+/// A popup menu on screen: the index of the entry chosen, once it closes. Flutter's `Future<int?>`
+/// from a platform call.
+pub type PopupMenuFuture = Pin<Box<dyn Future<Output = Option<usize>>>>;
 
 /// The screens the app's views are on: what drawing on each needs, as Flutter's
 /// `PlatformDispatcher.displays` lists them, and where each is, for an app that places a window

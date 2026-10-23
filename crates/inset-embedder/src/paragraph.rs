@@ -1113,6 +1113,7 @@ mod layout_tests {
     //! Shaping needs real fonts: these shape against the OS fonts.
 
     use super::*;
+    use crate::Platform;
 
     fn fonts() -> FontCollection {
         let mut fonts = FontCollection::new();
@@ -1240,7 +1241,11 @@ mod layout_tests {
     #[test]
     fn unspecified_family_at_black_weight_covers_latin() {
         let mut fonts = FontCollection::new();
-        crate::set_default_font_manager(&mut fonts, Box::new(crate::SystemFontSource::platform()));
+        crate::set_default_font_manager(
+            &mut fonts,
+            Box::new(crate::SystemFontSource::platform()),
+            &crate::InertPlatform.default_font_families(),
+        );
         let mut builder = ParagraphBuilder::new(ParagraphStyle::new());
         builder.push_style(TextStyle {
             font_size: Some(10.2),

@@ -24,9 +24,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — a host with its own lookup (a guest across a boundary) passes a font manager instead of the platform's.
   Affect: Cupertino text shapes with the system font on every platform that has one.
 
-- Change: `default_font_families` on wasm answers `Roboto`, Flutter web's default, not `Arial`.
-  Reason: platform — the browser has no OS UI font; Flutter's web engine ships Roboto as the fallback family.
-  Affect: unspecified-family text on the web host waits for Roboto (and Noto chunks for other scripts) instead of looking for Arial.
+- Change: `Platform::default_font_families` asks the host for `txt::GetDefaultFontFamilies()`, by default the engine's answer on the OS this build targets, where Flutter's engine has its own OS's answer compiled in.
+  Reason: platform — one build can run on several systems, as a WebAssembly component does, and only its host knows at run time which one it is on.
+  Affect: such a build draws text that leaves `font_family` unset in the default family of the system it runs on, not of one fixed when it was compiled.
 
 - Change: `set_default_font_manager` registers the platform's default family as the collection's fallback chain, as Skia's `FontCollection::setDefaultFontManager` does.
   Reason: platform — valo has no default font manager, so an empty `families` list would walk fallbacks and land on `FontId(0)`.
@@ -74,7 +74,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — where each window has its own cursor, the host must know which window to change.
   Affect: in an app with several windows, a cursor change reaches only the window under the pointer.
 
-- Change: a host's `PopupMenus` capability shows the host's own popup menu at the pointer and answers the chosen entry; Flutter has no such call, only in-view context menus and the macOS menu bar.
+- Change: a host's `PopupMenus` capability shows the host's own popup menu at the pointer and answers the chosen entry once it closes, as a future; Flutter has no such call, only in-view context menus and the macOS menu bar.
   Reason: platform — a desktop window narrower than its menu, such as a panel at a screen's edge, cannot hold a menu drawn inside its view.
   Affect: a menu shown this way is the system's, drawn outside the window and styled by the OS; the app waits inside the call while it is open, and hosts without menus answer `None`.
 

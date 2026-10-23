@@ -48,6 +48,7 @@ mod touch;
 mod view;
 mod view_focus;
 mod vsync_source;
+mod vsync_waiter;
 mod windows;
 
 use inset_embedder::{EmbedderClient, PlatformRef};

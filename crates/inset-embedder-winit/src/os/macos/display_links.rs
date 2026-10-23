@@ -1,9 +1,9 @@
 //! The screens' refreshes as signals: one `CADisplayLink` per screen, `NSScreen`'s (macOS 14),
-//! shared by everyone who paces by that screen, the frames of the views on it and every window's
-//! native surfaces. A screen's link ticks whether or not any window is shown
-//! (`2026-09-29-view-display-link-unseen` in the `experiments` folder beside this repository),
-//! and is delivered on the main run loop in
-//! the common modes, so it keeps ticking through a window's own frame animations.
+//! shared by everyone who paces by that screen, the frames of the views on it and the waits on it
+//! through the platform's vsync waiter (`vsync_waiter.rs`). A screen's link ticks whether or not
+//! any window is shown (`2026-09-29-view-display-link-unseen` in the `experiments` folder beside
+//! this repository), and is delivered on the main run loop in the common modes, so it keeps
+//! ticking through a window's own frame animations and while a menu tracks the pointer.
 //!
 //! A screen's link is made at the first subscription to that screen, runs while any
 //! subscription to it wants its ticks, pauses once none does, and goes with the last one. The
@@ -33,8 +33,8 @@ use crate::os::DisplayLink;
 /// in AppKit, and a monitor's native id in winit.
 pub(crate) type DisplayId = u32;
 
-/// A subscription to the display link of one screen, as the frames of the views on it and a
-/// window's surfaces hold it.
+/// A subscription to the display link of one screen, as the frames of the views on it and the
+/// vsync waiter hold it.
 pub(crate) type ScreenDisplayLink = ScreenSubscription<CoreAnimationLink>;
 
 thread_local! {
@@ -64,23 +64,25 @@ impl DisplayLink for ScreenDisplayLink {
 }
 
 impl ScreenDisplayLink {
-    /// Moves the subscription to the link of `display`'s screen unless it is on it already,
-    /// keeping its calls and whether it wants ticks. It stays where it is for a display AppKit
+    /// Subscribes `on_tick` to the link of the screen `display` numbers, not wanting its ticks
+    /// yet. `None` before macOS 14, where a screen has no display link, and for a display AppKit
     /// shows no screen for.
-    pub(crate) fn follow(&mut self, display: &MonitorHandle) {
-        let display = display.native_id();
-        let Some(main_thread) = MainThreadMarker::new() else {
-            return;
-        };
-        if self.display() == display {
-            return;
-        }
+    pub(crate) fn of_display(
+        display: DisplayId,
+        on_tick: Box<dyn Fn()>,
+        main_thread: MainThreadMarker,
+    ) -> Option<ScreenDisplayLink> {
         SCREEN_CLOCKS.with(|clocks| {
-            clocks.move_subscription(self, display, |tick| {
+            clocks.subscribe(display, on_tick, |tick| {
                 CoreAnimationLink::of_screen(display, tick, main_thread)
             })
-        });
+        })
     }
+}
+
+/// Whether this system gives a screen a display link: macOS 14 and later.
+pub(crate) fn screens_have_display_links() -> bool {
+    NSScreen::class().responds_to(sel!(displayLinkWithTarget:selector:))
 }
 
 /// What a screen's clock needs of the link it runs on.
@@ -121,23 +123,6 @@ impl<L: PausableLink> ScreenClocks<L> {
         Some(ScreenSubscription { clock, subscriber })
     }
 
-    /// Moves `subscription` to the clock of `display`, keeping its calls and whether it wants
-    /// ticks: the clock it leaves pauses or goes as its other subscriptions say. It stays where it
-    /// is when `make_link` makes no link for `display`.
-    pub(crate) fn move_subscription(
-        self: &Rc<Self>,
-        subscription: &mut ScreenSubscription<L>,
-        display: DisplayId,
-        make_link: impl FnOnce(Box<dyn Fn()>) -> Option<L>,
-    ) {
-        let Some(clock) = self.clock_of(display, make_link) else {
-            return;
-        };
-        clock.add(Rc::clone(&subscription.subscriber));
-        let left = std::mem::replace(&mut subscription.clock, clock);
-        left.remove(&subscription.subscriber);
-    }
-
     /// The clock the subscriptions to `display` share, or a new one on the link `make_link`
     /// makes.
     fn clock_of(
@@ -157,7 +142,6 @@ impl<L: PausableLink> ScreenClocks<L> {
         }))?;
         let clock = Rc::new(ScreenClock {
             link,
-            display,
             subscribers: RefCell::default(),
         });
         self.clocks
@@ -178,7 +162,6 @@ impl<L: PausableLink> ScreenClocks<L> {
 /// One screen's link and the subscriptions to it.
 struct ScreenClock<L: PausableLink> {
     link: L,
-    display: DisplayId,
     subscribers: RefCell<Vec<Rc<Subscriber>>>,
 }
 
@@ -234,11 +217,6 @@ pub(crate) struct ScreenSubscription<L: PausableLink> {
 }
 
 impl<L: PausableLink> ScreenSubscription<L> {
-    /// The display whose refreshes the calls are.
-    pub(crate) fn display(&self) -> DisplayId {
-        self.clock.display
-    }
-
     /// Wants the ticks from now on, or no longer.
     pub(crate) fn set_ticks_wanted(&self, wanted: bool) {
         self.subscriber.wanted.set(wanted);
@@ -268,7 +246,7 @@ impl CoreAnimationLink {
         on_tick: Box<dyn Fn()>,
         main_thread: MainThreadMarker,
     ) -> Option<CoreAnimationLink> {
-        if !NSScreen::class().responds_to(sel!(displayLinkWithTarget:selector:)) {
+        if !screens_have_display_links() {
             return None;
         }
         let screen = screen_numbered(display, main_thread)?;
@@ -414,7 +392,7 @@ mod tests {
         let clocks = Rc::new(ScreenClocks::default());
         let links = MadeLinks::default();
         let _frames = clocks.subscribe(1, ignoring(), links.for_screen(1));
-        let _surfaces = clocks.subscribe(1, ignoring(), links.for_screen(1));
+        let _waits = clocks.subscribe(1, ignoring(), links.for_screen(1));
         let _elsewhere = clocks.subscribe(2, ignoring(), links.for_screen(2));
         assert_eq!(links.count(), 2, "one link per screen");
     }
@@ -426,17 +404,17 @@ mod tests {
         let frames = clocks
             .subscribe(1, ignoring(), links.for_screen(1))
             .unwrap();
-        let surfaces = clocks
+        let waits = clocks
             .subscribe(1, ignoring(), links.for_screen(1))
             .unwrap();
         let link = links.of(1);
         assert!(link.paused.get(), "nobody wants ticks yet");
 
         frames.set_ticks_wanted(true);
-        surfaces.set_ticks_wanted(true);
+        waits.set_ticks_wanted(true);
         frames.set_ticks_wanted(false);
-        assert!(!link.paused.get(), "the surfaces still want them");
-        surfaces.set_ticks_wanted(false);
+        assert!(!link.paused.get(), "the waits still want them");
+        waits.set_ticks_wanted(false);
         assert!(link.paused.get());
     }
 
@@ -468,37 +446,5 @@ mod tests {
 
         let _again = clocks.subscribe(1, ignoring(), links.for_screen(1));
         assert_eq!(links.count(), 2, "a new link for a new subscription");
-    }
-
-    #[test]
-    fn a_subscription_follows_its_window_to_another_screen() {
-        let clocks = Rc::new(ScreenClocks::default());
-        let links = MadeLinks::default();
-        let ticks = Rc::new(Cell::new(0));
-        let mut surfaces = clocks
-            .subscribe(1, counting(&ticks), links.for_screen(1))
-            .unwrap();
-        let frames = clocks
-            .subscribe(1, ignoring(), links.for_screen(1))
-            .unwrap();
-        surfaces.set_ticks_wanted(true);
-
-        clocks.move_subscription(&mut surfaces, 2, links.for_screen(2));
-        assert_eq!(surfaces.display(), 2);
-        assert!(
-            links.of(1).paused.get(),
-            "nobody left on the first screen wants ticks"
-        );
-        assert!(!links.of(2).paused.get(), "the move kept wanting them");
-        (links.of(1).tick)();
-        (links.of(2).tick)();
-        assert_eq!(
-            ticks.get(),
-            1,
-            "only the second screen's refreshes reach it"
-        );
-
-        drop(frames);
-        assert!(links.of(1).gone.get());
     }
 }

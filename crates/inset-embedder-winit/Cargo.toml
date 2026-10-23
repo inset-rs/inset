@@ -49,7 +49,11 @@ name = "a_hidden_window_takes_no_frames_while_a_shown_one_draws"
 harness = false
 
 [[test]]
-name = "surface_vsyncs_follow_visibility"
+name = "a_vsync_waiter_calls_once_per_wait"
+harness = false
+
+[[test]]
+name = "an_app_goes_on_while_a_popup_menu_is_open"
 harness = false
 
 [[test]]

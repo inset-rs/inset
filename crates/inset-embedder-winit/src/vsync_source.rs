@@ -1,7 +1,9 @@
 //! One display's vsyncs, one call for each vsync asked for: from the system's display link for
 //! it where it has one ([`ThisOsDisplayLink`]), which comes whether or not a window on the display
 //! is shown, and from a timer at the display's rate elsewhere. Every view whose window is on the
-//! display shares its source (`frame_scheduler.rs`).
+//! display shares its source, and so does every wait on it where the loop serves the platform's
+//! vsync waiter (`frame_scheduler.rs`); on macOS the waiter subscribes to the display's link
+//! itself (`os/macos/vsync_waiter.rs`).
 //!
 //! A vsync is asked for one at a time, as Flutter's `VsyncWaiter` is. The source runs on for one
 //! vsync after the one asked for, so an animation that asks again from each frame finds it

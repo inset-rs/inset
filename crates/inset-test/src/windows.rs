@@ -5,7 +5,8 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use inset_embedder::{
-    HostWindow, RawWindowHandle, Rect, RequestId, ViewId, ViewRef, ViewRequest, WindowConfig,
+    HostWindow, RawWindowHandle, Rect, RequestId, ScreenId, ViewId, ViewRef, ViewRequest,
+    WindowConfig,
 };
 
 use crate::TestView;
@@ -21,6 +22,8 @@ const FIRST_VIEW_ID: u64 = 1000;
 pub struct TestWindows {
     next_request: Cell<u64>,
     made: RefCell<Vec<Rc<TestWindow>>>,
+    /// The screen every window is made on; none by default.
+    screen: Option<ScreenId>,
 }
 
 impl TestWindows {
@@ -28,7 +31,14 @@ impl TestWindows {
         TestWindows {
             next_request: Cell::new(1),
             made: RefCell::default(),
+            screen: None,
         }
+    }
+
+    /// The same desktop making every window on `screen`, which each view's metrics name.
+    pub fn on_screen(mut self, screen: ScreenId) -> TestWindows {
+        self.screen = Some(screen);
+        self
     }
 
     /// The windows made so far, in the order they were asked for, closed ones included.
@@ -41,9 +51,12 @@ impl TestWindows {
         let id = RequestId(self.next_request.get());
         self.next_request.set(id.0 + 1);
         let [width, height] = request.config.size;
-        let view = TestView::new(width, height)
+        let mut view = TestView::new(width, height)
             .with_id(ViewId(FIRST_VIEW_ID + id.0))
             .with_request(id, request.initial_data);
+        if let Some(screen) = self.screen {
+            view = view.on_screen(screen);
+        }
         self.made
             .borrow_mut()
             .push(TestWindow::around(view, request.config));

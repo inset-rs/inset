@@ -10,14 +10,19 @@
 //! asked. A frame it asks of a view goes to the frame scheduler, which the loop owns and which
 //! says at which vsync of the view's screen it is drawn, holding it while the view's window is
 //! minimized or occluded (`frame_scheduler.rs`); the loop draws it then, in one refresh with the
-//! other views of that screen that are due.
+//! other views of that screen that are due. Where the system's display links serve the waits on
+//! a screen's vsync through the platform's waiter themselves, as macOS's do
+//! (`os/macos/vsync_waiter.rs`), those never reach the loop; elsewhere the loop serves them at
+//! the same vsync, before the refresh (`vsync_waiter.rs`).
 //!
 //! # Who calls whom
 //!
 //! Everything here runs on the main thread. Two things reach the embedder from other threads, and
 //! each only sends the loop an event through winit's proxy or runs where it was sent: the
-//! dispatcher's wakes and work (`dispatcher.rs`), and native surfaces' producers, which present
-//! and ask for vsyncs from their own threads (`os/macos/composition`).
+//! dispatcher's wakes and work (`dispatcher.rs`), and the vsync waiter's waits where the loop
+//! serves them (`vsync_waiter.rs`). On macOS the waits go to the main dispatch queue and are
+//! served at the display links' ticks, and native surfaces' producers present from their own
+//! threads straight to Core Animation: neither reaches the loop.
 //!
 //! winit calls the handler here from AppKit's callbacks, and never again while a call is
 //! running: what AppKit reports meanwhile, winit queues and delivers once the call returns. The
@@ -29,10 +34,13 @@
 //! (the loop lets go of it on its next turn), sliding one in, hiding the application, the
 //! clipboard, a view's present and its text input, and what the screens and the pointer are.
 //!
-//! One framework call runs a loop of AppKit's own: `PopupMenus::show`, while the menu tracks the
-//! pointer. winit calls the handler nothing meanwhile, but the display links, which run in the
-//! run loop's common modes, keep running, so native surfaces' producers get their vsyncs there,
-//! and the main dispatch queue is served.
+//! A popup menu runs a loop of AppKit's own while it tracks the pointer. `PopupMenus::show` only
+//! asks for it: a perform request on the main run loop opens the menu once winit's call has
+//! returned (`os/macos/popup_menu.rs`), so its loop runs outside every call of winit's into the
+//! handler, and winit, whose run-loop observers and event source are in the common modes, goes on
+//! calling the handler from inside it: the framework's frames, wakes and input go on while the
+//! menu is open. Once it closes, `MenuClosed` reconciles the buttons it kept, and the app then
+//! hears the entry chosen through the future `show` answered (`popup_menus.rs`).
 //!
 //! The loop runs two of the app's own handlers directly, from a turn of its own and outside every
 //! framework call, so a handler may post to the app: the files to open and the reopen
@@ -42,8 +50,7 @@
 //! reaches the loop's state or the client: the application delegate's methods, the
 //! application's lifecycle notices and the loop's own notices of a window's visibility only queue
 //! for the loop (`os/macos/app_delegate.rs`, `os/macos/app_lifecycle.rs`,
-//! `os/macos/visibility.rs`), and a window's native surfaces hear the same notices, and their
-//! screen's display link, for themselves alone (`os/macos/composition`).
+//! `os/macos/visibility.rs`).
 //!
 //! # A window minimized, occluded or moved
 //!
@@ -77,9 +84,10 @@ mod quitting;
 mod windows;
 
 use std::rc::Rc;
+use std::sync::Weak;
 use std::time::Instant;
 
-use inset_embedder::{DropChange, EmbedderClient, ScreenId, ViewId, WindowConfig};
+use inset_embedder::{DropChange, EmbedderClient, ScreenId, ViewId, VsyncObserver, WindowConfig};
 use winit::application::ApplicationHandler;
 use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
@@ -108,7 +116,7 @@ pub(crate) enum MainLoopEvent {
     /// request waiting (`app_requests.rs`).
     AppRequest,
     /// A native menu ran its own loop and closed: the buttons it kept are reconciled and the
-    /// client woken.
+    /// client woken, before the app hears the entry chosen.
     MenuClosed,
     /// When to wake the framework for its earliest waiting timer, or `None` when no timer
     /// is waiting; served by `about_to_wait` when that time comes.
@@ -116,8 +124,10 @@ pub(crate) enum MainLoopEvent {
     /// A ready task asking for the framework to be woken; served by the next wake, and it
     /// never changes the timer wakeup above.
     WakeNow,
-    /// A vsync of a screen a view's window is on, from its display link.
+    /// A vsync of a screen a view's window is on, or someone waits on, from its display link.
     Vsync(ScreenId),
+    /// Someone waits, through the platform's waiter, for the next vsync of a screen.
+    VsyncWaited(ScreenId, Weak<dyn VsyncObserver>),
     /// Something the system asked of the application as a whole.
     SystemRequest(SystemRequest),
     /// Something the system said of the application as a whole: whether it is active, or
@@ -283,6 +293,9 @@ impl<C: EmbedderClient> ApplicationHandler<MainLoopEvent> for MainLoop<C> {
             MainLoopEvent::TimerWakeup(wakeup) => self.on_wake_at(wakeup),
             MainLoopEvent::WakeNow => self.on_wake_now(),
             MainLoopEvent::Vsync(screen) => self.on_vsync(screen),
+            MainLoopEvent::VsyncWaited(screen, observer) => {
+                self.on_vsync_waited(event_loop, screen, observer)
+            }
             MainLoopEvent::SystemRequest(request) => self.on_system_request(request),
             MainLoopEvent::Lifecycle(notice) => self.on_lifecycle_notice(notice),
             MainLoopEvent::SystemChange(change) => self.on_system_change(change),

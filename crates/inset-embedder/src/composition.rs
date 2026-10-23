@@ -1,14 +1,14 @@
 //! Native surfaces the OS compositor shows beside the framework's picture: the capability a
 //! host with a compositor hands out, and the surface a producer feeds from a thread of its
-//! own. `docs/composition.md` says why it is shaped as it is.
+//! own. The macOS host's `os/macos/composition` module, in `inset-embedder-winit`, says why it is
+//! shaped as it is. A producer that paces by the screen's refreshes waits on the platform's
+//! [`VsyncWaiter`](crate::VsyncWaiter).
 //!
 //! The invariant: a surface is on screen only where a frame's [`Scene`](crate::Scene) places
 //! it, and the host, not the framework, owns the native object behind it.
 
 use std::any::Any;
-use std::sync::{Arc, Weak};
-
-use web_time::Instant;
+use std::sync::Arc;
 
 use crate::ViewId;
 
@@ -29,23 +29,11 @@ pub trait Compositor: Send + Sync {
 pub trait Surface: Any + Send + Sync {
     /// Shows `buffer` from the compositor's next frame on. Returns once the host holds the
     /// buffer, not once it is on screen. `released` runs, on any thread, when the compositor
-    /// has finished with the buffer and the producer may draw into it again; on Apple
-    /// platforms the host infers that from `IOSurfaceIsInUse`, so a producer there keeps
-    /// three buffers.
+    /// has finished with the buffer and the producer may draw into it again. On Apple
+    /// platforms the host learns that from `IOSurfaceIsInUse` at the surface's next present,
+    /// or when the surface goes, so a producer there never waits for a buffer to come back: it
+    /// draws into one it knows is free, or a new one.
     fn present(&self, buffer: Buffer, released: Box<dyn FnOnce() + Send + Sync>);
-
-    /// Calls `observer` once, on the main thread, at the next vsync of the display the
-    /// surface's window is on. While nobody can see that window, hidden, minimized, in a
-    /// hidden application or covered all over, the call waits for the first vsync after part
-    /// of it shows again. A producer that draws on demand asks before each frame; a video,
-    /// paced by its own clock, never does.
-    fn next_vsync(&self, observer: Weak<dyn VsyncObserver>);
-}
-
-/// What a surface calls at a vsync it asked for.
-pub trait VsyncObserver: Send + Sync {
-    /// `at` is the host's clock when the vsync was served.
-    fn vsync(&self, at: Instant);
 }
 
 /// What a producer draws into and hands over: the platform's own type.

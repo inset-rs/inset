@@ -32,10 +32,11 @@ mod text;
 mod text_editing;
 mod text_input;
 mod views;
+mod vsync;
 mod window;
 
 pub use client::EmbedderClient;
-pub use composition::{Buffer, Compositor, Surface, VsyncObserver};
+pub use composition::{Buffer, Compositor, Surface};
 pub use drag_drop::{DropChange, DropData};
 pub use fonts::{
     FontCollection, FontDemand, FontId, FontManager, FontSource, SystemFontSource, Typeface,
@@ -55,8 +56,9 @@ pub use platform::{
     ApplicationSwitcherDescription, Brightness, Clipboard, ClipboardHasStringsFuture,
     ClipboardSetTextFuture, ClipboardTextFuture, Dispatcher, FileOpening, Frame,
     HapticFeedbackType, Haptics, InertDispatcher, InertPlatform, MouseCursor, OpenFilesHandler,
-    Platform, PlatformRef, PopupMenuEntry, PopupMenus, Restoration, Screen, ScreenId, Screens,
-    SystemChrome, SystemContextMenu, SystemUiOverlayStyle, TargetPlatform, TextServices, ViewRef,
+    Platform, PlatformRef, PopupMenuEntry, PopupMenuFuture, PopupMenus, Restoration, Screen,
+    ScreenId, Screens, SystemChrome, SystemContextMenu, SystemUiOverlayStyle, TargetPlatform,
+    TextServices, ViewRef,
 };
 pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
@@ -71,6 +73,7 @@ pub use views::{
     GestureSettings, TextInputHost, View, ViewConstraints, ViewFocusDirection, ViewFocusEvent,
     ViewFocusState, ViewId, ViewMetrics, ViewPadding,
 };
+pub use vsync::{VsyncObserver, VsyncWaiter};
 pub use web_time::Instant;
 pub use window::{
     HostWindow, RawWindowHandle, RequestId, ViewError, ViewRequest, WindowBackground, WindowConfig,

@@ -6,33 +6,32 @@
 //! wgpu draws the framework into (raw-window-metal makes that one a sublayer too), so the clear
 //! rectangle the framework paints where the surface goes shows it through. A buffer shows at
 //! the scale the scene places the surface at: whole, and smaller, under a transform that shrinks
-//! it. `docs/composition.md` has the design, and the experiment that settled each choice here.
+//! it. The experiments in the `experiments` folder beside this repository settled the choices
+//! here: `2026-09-22-layer-under-a-hole` the layer beneath the window's content and its contents
+//! changed off the main thread, and `2026-09-25-buffer-hold` how long the display engine holds a
+//! buffer.
 //!
 //! The module holds the compositor and the surface; `buffers` what a surface was presented and
-//! when each goes back to its producer, `window_surfaces` placing a scene's surfaces in a window,
-//! and `window_vsync` a window's share of its screen's display link.
+//! when each goes back to its producer, and `window_surfaces` placing a scene's surfaces in a
+//! window.
 //!
-//! Three things touch a surface. Its producer presents from its own thread, in an explicit
-//! transaction. The main thread places it with the window's frame. The display link of the screen
-//! the window is on, shared with the framework's frames and that screen's other windows
-//! (`display_links.rs`), on the main thread, releases the buffers the compositor has finished with
-//! and calls the producers waiting for a vsync, while the window is visible (`visibility.rs`); a
-//! producer that asks while the window's ticks are paused has the main queue restart them, so
-//! nothing of this reaches the embedder's event loop. Out of sight, the window's ticks stop, and
-//! AppKit's notice that it may be seen again restarts them. The invariant a later editor must keep:
-//! a buffer's release callback runs only once `IOSurfaceIsInUse` answers false for it, or when its
-//! surface is gone.
+//! Two things touch a surface. Its producer presents from its own thread, in an explicit
+//! transaction. The main thread places it with the window's frame. A producer that paces by the
+//! screen's refreshes waits on the platform's vsync waiter, as the framework's frames do
+//! (`vsync_waiter.rs`); nothing of the surface's is driven by the screen. Core Animation says only
+//! whether the compositor still reads a buffer, not when it stops, so a surface asks at each
+//! present, of every buffer that was replaced, and a producer never waits for one to come back: it
+//! draws into one it knows is free, or a new one, as Flutter's `FlutterSurfaceManager`
+//! (`2026-09-25-surface-buffers-practice`) and Firefox's `SurfacePoolCA` do. The invariant a later editor must keep: a buffer's release
+//! callback runs only once `IOSurfaceIsInUse` answers false for it, or when its surface is gone.
 
 mod buffers;
 mod window_surfaces;
-mod window_vsync;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 
-use inset_embedder::{
-    Buffer, Compositor, Offset, Rect, Surface, SurfacePlacement, ViewId, VsyncObserver,
-};
+use inset_embedder::{Buffer, Compositor, Offset, Rect, Surface, SurfacePlacement, ViewId};
 use objc2::rc::Retained;
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 use objc2_quartz_core::{CALayer, CATransaction};
@@ -40,7 +39,6 @@ use objc2_quartz_core::{CALayer, CATransaction};
 use super::AppKit;
 use crate::os::NativeComposition;
 use buffers::{CrossThreadBuffer, PresentedBuffers, notify_released};
-use window_vsync::PlacedSurfaces;
 
 use window_surfaces::CoreAnimationWindowSurfaces;
 
@@ -63,8 +61,7 @@ impl Compositor for CoreAnimationCompositor {
     }
 }
 
-/// A surface: its layers, the buffers presented to it and not yet released, and the producers
-/// waiting for a vsync.
+/// A surface: its layers, and the buffers presented to it and not yet released.
 pub(crate) struct CoreAnimationSurface {
     /// The view whose scenes may place the surface.
     view: ViewId,
@@ -74,9 +71,6 @@ pub(crate) struct CoreAnimationSurface {
     /// The buffer's layer, inside the clip layer.
     layer: CrossThreadLayer,
     buffers: Mutex<PresentedBuffers<CrossThreadBuffer>>,
-    vsync_observers: Mutex<Vec<Weak<dyn VsyncObserver>>>,
-    /// The window the surface was placed in, once a scene has placed it.
-    window: Mutex<Weak<PlacedSurfaces>>,
     /// Whether a placement in another view's scene was reported already.
     misplacement_reported: AtomicBool,
 }
@@ -100,8 +94,6 @@ impl CoreAnimationSurface {
             clip_layer: CrossThreadLayer(clip_layer),
             layer: CrossThreadLayer(layer),
             buffers: Mutex::new(PresentedBuffers::new()),
-            vsync_observers: Mutex::new(Vec::new()),
-            window: Mutex::new(Weak::new()),
             misplacement_reported: AtomicBool::new(false),
         }
     }
@@ -155,20 +147,6 @@ impl CoreAnimationSurface {
         self.clip_layer.0.setHidden(true);
     }
 
-    /// From now on the surface's vsyncs come through `window`, the surfaces of the window a
-    /// scene placed it in.
-    fn attach_to_window(&self, window: Weak<PlacedSurfaces>) {
-        *self.window.lock().expect(HELD_BRIEFLY) = window;
-    }
-
-    fn is_waiting_for_vsync(&self) -> bool {
-        !self.vsync_observers.lock().expect(HELD_BRIEFLY).is_empty()
-    }
-
-    fn take_vsync_observers(&self) -> Vec<Weak<dyn VsyncObserver>> {
-        std::mem::take(&mut *self.vsync_observers.lock().expect(HELD_BRIEFLY))
-    }
-
     /// Calls the release callback of every replaced buffer the compositor has finished with.
     fn release_unused_buffers(&self) {
         let released = self
@@ -181,6 +159,7 @@ impl CoreAnimationSurface {
 }
 
 impl Surface for CoreAnimationSurface {
+    /// Shows `buffer`, and releases the replaced buffers the compositor has finished with.
     fn present(&self, buffer: Buffer, released: Box<dyn FnOnce() + Send + Sync>) {
         let buffer = CrossThreadBuffer(buffer);
         in_transaction(|| buffer.set_as_contents_of(&self.layer.0));
@@ -189,21 +168,6 @@ impl Surface for CoreAnimationSurface {
             .expect(HELD_BRIEFLY)
             .present(buffer, released);
         self.release_unused_buffers();
-    }
-
-    fn next_vsync(&self, observer: Weak<dyn VsyncObserver>) {
-        let mut observers = self.vsync_observers.lock().expect(HELD_BRIEFLY);
-        if !observers.iter().any(|known| Weak::ptr_eq(known, &observer)) {
-            observers.push(observer);
-        }
-        // Released before the window's lock is taken, which a vsync takes around this one.
-        drop(observers);
-        // A surface no scene has placed yet has no window to take a vsync from; its first
-        // placement starts the window's link for the observers waiting here.
-        let window = self.window.lock().expect(HELD_BRIEFLY).upgrade();
-        if let Some(window) = window {
-            window.request_vsync();
-        }
     }
 }
 

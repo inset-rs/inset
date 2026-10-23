@@ -115,14 +115,6 @@ impl WinitView {
         PresentingInTransaction::begin(&self.rasterizer)
     }
 
-    /// The window moved, or was shown, hidden or ordered front: the native surfaces placed in
-    /// it take their vsyncs from the screen it is on now, while it is visible.
-    pub(crate) fn follow_window(&self) {
-        if let Some(native_surfaces) = &*self.native_surfaces.borrow() {
-            native_surfaces.follow_window();
-        }
-    }
-
     /// `handle` is the app's handle on the view's window from now on: the view answers it as its
     /// window until the window closes.
     pub(crate) fn set_window_handle(&self, handle: &Rc<WinitWindow>) {

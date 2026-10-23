@@ -1,6 +1,6 @@
 //! A native surface beneath the framework's content. A producer thread draws a moving stripe
-//! into three IOSurfaces in turn, one frame at each vsync of the window's display, and
-//! presents them to a `SurfaceView`; a label the framework paints above the surface shows that
+//! into IOSurfaces in turn, three or a few more, one frame at each refresh of the window's screen,
+//! which it waits for on the platform's vsync waiter, and presents them to a `SurfaceView`; a label the framework paints above the surface shows that
 //! its own content stays on top. Once a second the producer prints what it counted, so the
 //! compositor can be checked without looking. `--scale` draws the surface and its label through
 //! a transform that scales them about their middle: at 0.5 the whole buffer shows, at half its

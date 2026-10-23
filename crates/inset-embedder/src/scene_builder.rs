@@ -462,8 +462,6 @@ mod tests {
 
     impl Surface for IdleSurface {
         fn present(&self, _buffer: crate::Buffer, _released: Box<dyn FnOnce() + Send + Sync>) {}
-
-        fn next_vsync(&self, _observer: std::sync::Weak<dyn crate::VsyncObserver>) {}
     }
 
     fn idle_surface() -> Arc<dyn Surface> {

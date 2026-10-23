@@ -7510,10 +7510,12 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let binding = PaintingBinding::instance(&mut app);
+        let families = app.platform().default_font_families();
         binding.install_fonts(&mut app, |fonts| {
             inset_embedder::set_default_font_manager(
                 fonts,
                 Box::new(inset_embedder::SystemFontSource::platform()),
+                &families,
             );
         });
         install_cupertino_icon_font(&mut app);

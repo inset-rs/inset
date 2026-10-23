@@ -15,11 +15,11 @@
 //! inset-embedder = { workspace = true, features = ["test-support"] }
 //! ```
 
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use valo::{Context, ImageDesc};
 
-use crate::{Buffer, Image, Picture, Surface, VsyncObserver};
+use crate::{Buffer, Image, Picture, Surface};
 
 /// One device for the whole test process, created on first use.
 ///
@@ -104,11 +104,9 @@ pub fn idle_surface() -> Arc<dyn Surface> {
     Arc::new(IdleSurface)
 }
 
-/// What [`idle_surface`] hands out: presents and vsync requests go nowhere.
+/// What [`idle_surface`] hands out: presents go nowhere.
 struct IdleSurface;
 
 impl Surface for IdleSurface {
     fn present(&self, _buffer: Buffer, _released: Box<dyn FnOnce() + Send + Sync>) {}
-
-    fn next_vsync(&self, _observer: Weak<dyn VsyncObserver>) {}
 }

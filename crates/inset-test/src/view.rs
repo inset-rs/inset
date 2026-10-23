@@ -5,7 +5,7 @@ use std::rc::Weak;
 use std::sync::Arc;
 
 use inset_embedder::{
-    HostWindow, RequestId, Scene, View, ViewConstraints, ViewId, ViewMetrics, WindowRef,
+    HostWindow, RequestId, Scene, ScreenId, View, ViewConstraints, ViewId, ViewMetrics, WindowRef,
 };
 
 /// The id of a [`TestView`] given none: the view of a test with one, as the engine numbers
@@ -18,6 +18,8 @@ pub struct TestView {
     id: ViewId,
     size: Cell<[f64; 2]>,
     device_pixel_ratio: f64,
+    /// The screen its metrics say it is on; none by default.
+    screen: Option<ScreenId>,
     presented: Cell<u32>,
     request_id: Option<RequestId>,
     initial_data: Option<String>,
@@ -37,6 +39,7 @@ impl TestView {
             id: IMPLICIT_VIEW_ID,
             size: Cell::new([width, height]),
             device_pixel_ratio,
+            screen: None,
             presented: Cell::new(0),
             request_id: None,
             initial_data: None,
@@ -54,6 +57,12 @@ impl TestView {
     pub fn with_request(mut self, id: RequestId, initial_data: Option<String>) -> TestView {
         self.request_id = Some(id);
         self.initial_data = initial_data;
+        self
+    }
+
+    /// The same view on `screen`, as its metrics say.
+    pub fn on_screen(mut self, screen: ScreenId) -> TestView {
+        self.screen = Some(screen);
         self
     }
 
@@ -90,6 +99,7 @@ impl View for TestView {
             physical_size: [width, height],
             physical_constraints: ViewConstraints::tight(width, height),
             device_pixel_ratio: self.device_pixel_ratio,
+            screen: self.screen,
             ..ViewMetrics::default()
         }
     }

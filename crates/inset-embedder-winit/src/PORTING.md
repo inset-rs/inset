@@ -29,11 +29,19 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — a panic cannot unwind through AppKit's frames.
   Affect: such a panic ends the process rather than coming out of `run`.
 
-## frame_scheduler.rs / vsync_source.rs
+## frame_scheduler.rs / vsync_source.rs / vsync_waiter.rs / os/macos/vsync_waiter.rs
 
 - Change: without a screen's display link, on macOS before 14 and on the other desktops, frames follow a timer at the display's refresh rate.
   Reason: platform — winit offers no vsync, and only macOS 14 and later gives a screen's display link.
   Affect: an animation's frames come at the display's rate but not in step with its refresh.
+
+- Change: the platform hands out Flutter's `VsyncWaiter` for any screen, served at the vsyncs the frames of the views on that screen are drawn at, whether or not a window on it is in sight.
+  Reason: platform — Flutter's waiter is the engine's own, but a producer feeding a native surface, or a host drawing for programs, paces by the same refreshes from threads of its own.
+  Affect: such a producer gets one call per wait from the screen's one source, and decides for itself whether to draw for a window nobody sees.
+
+- Change: on macOS 14 and later the waiter serves each wait at the tick of its screen's display link, in the run loop's common modes, a wait from another thread starting the ticks through the main dispatch queue, as Flutter's `FlutterVSyncWaiter` hands its ticks to `FlutterRunLoop`, not through the main loop as the framework's own frames are.
+  Reason: platform — the display links and the main queue run in every mode of the run loop, while a turn of the main loop waits for winit, which calls the embedder nothing while AppKit runs a loop of its own inside one of winit's calls.
+  Affect: a producer is served at the tick itself, also while the main loop is held up.
 
 ## screens.rs / os/macos/screens.rs
 
@@ -103,13 +111,9 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Core Animation composites the buffers it's given, so a producer's frame needs no copy and no framework frame.
   Affect: framework content can sit above a surface but not beneath it.
 
-- Change: a buffer is released once the system says it's no longer in use, checked at each vsync.
+- Change: a buffer is released once the system says it's no longer in use, checked at the surface's next present and when the surface goes.
   Reason: platform — Core Animation gives no signal when it lets go of a buffer.
-  Affect: a producer needs three buffers, not two.
-
-- Change: a surface's vsync comes from its window's screen, and stops while nobody can see the window.
-  Reason: platform — vsync belongs to a display, and macOS tells a window's visibility only through notices.
-  Affect: a program in a hidden or occluded window draws nothing until part of it shows.
+  Affect: a producer never waits for a buffer to come back, but draws into another when none is known free, as Flutter's `FlutterSurfaceManager` does.
 
 ## host_window.rs / main_loop/windows.rs / os/macos/visibility.rs → Flutter's desktop window controllers (`_window_macos.dart`, `_window_win32.dart`, `_window_linux.dart`)
 

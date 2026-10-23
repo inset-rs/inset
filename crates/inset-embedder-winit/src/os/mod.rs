@@ -32,17 +32,19 @@ use std::time::Duration;
 
 use inset_embedder::{
     Compositor, Offset, PopupMenuEntry, Rect, Screen, ScreenId, SurfacePlacement, TargetPlatform,
-    ViewId, ViewPadding, WindowConfig,
+    ViewId, ViewPadding, VsyncWaiter, WindowConfig,
 };
 use valo_codec::Decoder;
-use winit::event_loop::ActiveEventLoop;
+use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::monitor::MonitorHandle;
 use winit::window::{Window, WindowAttributes};
 
 use crate::lifecycle::LifecycleNotice;
+use crate::main_loop::MainLoopEvent;
 use crate::screens::{monitor_number, monitor_screens};
 use crate::system_changes::SystemChange;
 use crate::system_requests::SystemRequest;
+use crate::vsync_waiter::LoopVsyncWaiter;
 
 /// The system this build targets.
 #[cfg(target_os = "macos")]
@@ -214,6 +216,15 @@ pub(crate) trait FramePresentation {
     /// The system's vsyncs for a display, which the framework's frames are drawn at.
     type DisplayLink: DisplayLink;
 
+    /// Where any thread waits for a screen's next vsync: by default the main loop, which serves
+    /// a wait at the vsync its frames on that screen are drawn at (`vsync_waiter.rs`). A system
+    /// whose display links tick in every mode of its run loop serves the waits there, so they are
+    /// served while the system runs a loop of its own and the main loop hears nothing. Main
+    /// thread.
+    fn vsync_waiter(proxy: &EventLoopProxy<MainLoopEvent>) -> Arc<dyn VsyncWaiter> {
+        Arc::new(LoopVsyncWaiter(proxy.clone()))
+    }
+
     /// Whether a resize draws a frame before it returns, for a system that commits window
     /// geometry on its own before the next redraw.
     const FRAME_ON_RESIZE: bool = false;
@@ -237,7 +248,8 @@ pub(crate) trait DisplayLink: Sized {
     fn set_wanted(&self, wanted: bool);
 }
 
-/// The system's compositor for native surfaces (`docs/composition.md`).
+/// The system's compositor for native surfaces: macOS's, and why it is shaped as it is, in
+/// `macos/composition`.
 pub(crate) trait NativeComposition {
     /// One window's share of the compositor.
     type WindowSurfaces: WindowSurfaces;
@@ -250,24 +262,25 @@ pub(crate) trait NativeComposition {
 }
 
 /// One window's share of the compositor: it places a scene's native surfaces beneath the
-/// window's content. How the surfaces' producers get their vsyncs is the system's own.
+/// window's content.
 pub(crate) trait WindowSurfaces {
     fn new(window: Arc<Window>) -> Self;
 
     /// Places a scene's surfaces beneath the window's content, bottom-most first. Main thread.
     fn place(&self, placements: &[SurfacePlacement], view: ViewId);
-
-    /// The window moved, or was shown, hidden or ordered front: the surfaces' vsyncs follow
-    /// the screen it is on now, and run only while it is visible. Main thread.
-    fn follow_window(&self) {}
 }
 
 /// Menus the system draws itself.
 pub(crate) trait NativeMenus {
-    /// Shows `entries` as the system's menu at the pointer and waits for it to close,
-    /// answering the index of the entry chosen. `None` where the system has no such menu.
-    fn popup_menu(_entries: &[PopupMenuEntry]) -> Option<usize> {
-        None
+    /// Shows `entries` as the system's menu at the pointer once the embedder's current call has
+    /// returned, its loop outside every call into the embedder, and hands `closed` the index of
+    /// the entry chosen once it closes. Hands it `None` at once where the system has no such
+    /// menu.
+    fn open_popup_menu(
+        _entries: Vec<PopupMenuEntry>,
+        closed: Box<dyn FnOnce(Option<usize>) + Send>,
+    ) {
+        closed(None);
     }
 }
 

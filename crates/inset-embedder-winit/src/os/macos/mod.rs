@@ -1,12 +1,12 @@
 //! What AppKit adds to winit, one concern per module: how a window moves and the screens it can
 //! be on (`screens`), what its configuration asks beyond winit's attributes (`window_chrome`), how
-//! a frame reaches the display (`frame_presentation`, `display_links`), the pointer (`pointer`),
-//! native surfaces (`composition`) and whether a window is visible, for them and for the app
-//! (`visibility`), the popup menu (`popup_menu`), work off the main thread (`work_queue`), what
-//! AppKit asks of the application through its delegate, how it quits and hiding it
-//! (`app_delegate`), what it says of the application's activation and visibility
-//! (`app_lifecycle`), and what it says changed about the screens and the user's languages
-//! (`system_changes`).
+//! a frame reaches the display (`frame_presentation`, `display_links`) and how a wait on a
+//! screen's vsync is served (`vsync_waiter`), the pointer (`pointer`), native surfaces
+//! (`composition`), whether a window is visible, for the app (`visibility`), the popup menu
+//! (`popup_menu`), work off the main thread (`work_queue`), what AppKit asks of the application
+//! through its delegate, how it quits and hiding it (`app_delegate`), what it says of the
+//! application's activation and visibility (`app_lifecycle`), and what it says changed about the
+//! screens and the user's languages (`system_changes`).
 //!
 //! A panic must not unwind from the embedder into AppKit, whose frames were never built to be
 //! unwound: it aborts the process once the panic hook has printed it, as one does in winit's own
@@ -30,6 +30,7 @@ mod popup_menu;
 mod screens;
 mod system_changes;
 mod visibility;
+mod vsync_waiter;
 mod window_chrome;
 mod work_queue;
 

@@ -17,7 +17,7 @@ use inset_embedder::{
     AppExit, Brightness, Clipboard, Compositor, Dispatcher, FileOpening, FontSource,
     ImageCodecFuture, Locale, MouseCursor, Platform, PopupMenus, RequestId, Screens,
     SystemFontSource, TargetPlatform, ViewError, ViewFocusDirection, ViewFocusEvent,
-    ViewFocusState, ViewId, ViewRef, ViewRequest,
+    ViewFocusState, ViewId, ViewRef, ViewRequest, VsyncWaiter,
 };
 use winit::event_loop::EventLoopProxy;
 
@@ -26,7 +26,7 @@ use crate::clipboard::Pasteboard;
 use crate::dispatcher::WinitDispatcher;
 use crate::macos::MacOs;
 use crate::main_loop::MainLoopEvent;
-use crate::os::{NativeComposition, OperatingSystem, SystemRequests, ThisOs};
+use crate::os::{FramePresentation, NativeComposition, OperatingSystem, SystemRequests, ThisOs};
 use crate::popup_menus::NativePopupMenus;
 use crate::state::EmbedderState;
 use crate::windows::WindowRequest;
@@ -46,12 +46,15 @@ use crate::windows::WindowRequest;
 pub struct WinitPlatform {
     /// What the embedder knows, shared with the main loop, which changes it.
     state: Rc<EmbedderState>,
-    /// Where the dispatcher's wakes and a closed menu's word go, from any thread.
+    /// Where the dispatcher's wakes, the waits on a screen's vsync and a closed menu's word go,
+    /// from any thread.
     proxy: EventLoopProxy<MainLoopEvent>,
     /// The id of the next request for a view.
     next_request_id: Cell<u64>,
     /// The system's compositor for native surfaces, where it has one.
     compositor: Option<Arc<dyn Compositor>>,
+    /// Where any thread waits for a screen's next vsync.
+    vsync_waiter: Arc<dyn VsyncWaiter>,
     origin: Instant,
     pasteboard: Pasteboard,
     popup_menus: NativePopupMenus,
@@ -69,6 +72,7 @@ impl WinitPlatform {
             macos: cfg!(target_os = "macos").then(|| MacOs::new(Rc::clone(&state))),
             state,
             compositor: ThisOs::compositor(),
+            vsync_waiter: ThisOs::vsync_waiter(&proxy),
             origin: Instant::now(),
             pasteboard: Pasteboard::default(),
             popup_menus: NativePopupMenus::new(proxy.clone()),
@@ -174,6 +178,13 @@ impl Platform for WinitPlatform {
 
     fn compositor(&self) -> Option<Arc<dyn Compositor>> {
         self.compositor.clone()
+    }
+
+    /// Served at the vsyncs the frames of the views on the screen are drawn at: at the ticks of
+    /// its display link, in the run loop's every mode, on macOS (`os/macos/vsync_waiter.rs`), and
+    /// by the main loop elsewhere (`vsync_waiter.rs`).
+    fn vsync_waiter(&self) -> Option<Arc<dyn VsyncWaiter>> {
+        Some(Arc::clone(&self.vsync_waiter))
     }
 
     /// A window for the view, made on a turn of the main loop, where the app may open windows:

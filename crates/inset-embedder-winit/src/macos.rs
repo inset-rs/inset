@@ -39,9 +39,7 @@ impl MacOs {
         let Some(open) = self.state.views().by_view(window.view().id()) else {
             return;
         };
-        if ThisOs::show_sliding_in(&open.window, from, duration) {
-            open.view.follow_window();
-        } else {
+        if !ThisOs::show_sliding_in(&open.window, from, duration) {
             window.show();
         }
     }
