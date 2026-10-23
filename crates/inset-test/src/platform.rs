@@ -6,16 +6,19 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use inset_embedder::{
-    AppExit, AppLifecycleState, Brightness, Clipboard, Dispatcher, FontSource, Haptics,
+    AppExit, AppLifecycleState, Brightness, Clipboard, Dispatcher, FontSource, Haptics, Image,
     ImageCodecFuture, ImageDecodeError, Instant, MouseCursor, Platform, PopupMenus, RequestId,
     Restoration, SystemChrome, SystemContextMenu, TargetPlatform, TextServices, View, ViewError,
     ViewId, ViewRef, ViewRequest,
 };
 
+use inset_embedder::valo;
+
 use crate::{TestView, TestWindows};
 
 type FontSourceMaker = Rc<dyn Fn() -> Box<dyn FontSource>>;
 type ImageCodecOpener = Rc<dyn Fn(Arc<[u8]>) -> ImageCodecFuture>;
+type PixelImporter = Rc<dyn Fn(valo::PixelBuffer) -> Option<Image>>;
 
 /// A platform a test builds: which host it claims to be, the views it offers, and each
 /// capability as the test's own implementation or absent. It keeps the frames the framework asks
@@ -35,6 +38,7 @@ pub struct TestPlatform {
     dispatcher: Arc<TestDispatcher>,
     font_source: Option<FontSourceMaker>,
     image_codec: Option<ImageCodecOpener>,
+    pixel_import: Option<PixelImporter>,
     windows: Option<Rc<TestWindows>>,
     clipboard: Option<Rc<dyn Clipboard>>,
     system_chrome: Option<Rc<dyn SystemChrome>>,
@@ -62,6 +66,7 @@ impl TestPlatform {
             dispatcher: Arc::new(TestDispatcher::default()),
             font_source: None,
             image_codec: None,
+            pixel_import: None,
             windows: None,
             clipboard: None,
             system_chrome: None,
@@ -153,6 +158,15 @@ impl TestPlatform {
         open: impl Fn(Arc<[u8]>) -> ImageCodecFuture + 'static,
     ) -> TestPlatform {
         self.image_codec = Some(Rc::new(open));
+        self
+    }
+
+    /// The renderer behind `import_pixels`; none unless set, so no image is made from pixels.
+    pub fn with_pixel_import(
+        mut self,
+        import: impl Fn(valo::PixelBuffer) -> Option<Image> + 'static,
+    ) -> TestPlatform {
+        self.pixel_import = Some(Rc::new(import));
         self
     }
 
@@ -323,6 +337,10 @@ impl Platform for TestPlatform {
             Some(open) => open(bytes),
             None => Box::pin(std::future::ready(Err(ImageDecodeError::NoDecoder))),
         }
+    }
+
+    fn import_pixels(&self, pixels: valo::PixelBuffer) -> Option<Image> {
+        self.pixel_import.as_ref().and_then(|import| import(pixels))
     }
 
     fn clipboard(&self) -> Option<&dyn Clipboard> {

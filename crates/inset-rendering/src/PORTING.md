@@ -35,6 +35,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — no `FlutterError.reportError` hook to catch and continue.
   Affect: layout and paint do not survive a failing render object.
 
+- Change: `mark_needs_compositing_bits_update` skips telling the parent only when the node's own stored compositing bit, the one the parent last counted, is set and it is still a repaint boundary, where Flutter checks `_wasRepaintBoundary`.
+  Reason: platform — `_wasRepaintBoundary` changes only when the node paints, so a boundary that stopped being one while an ancestor skipped painting it keeps a stale `true`; Flutter's display list ignores the resulting unmatched `restore()`, valo's panics.
+  Affect: an `Opacity` inside a clip, inside another `Opacity`, that both go from 0 to visible in one frame stays clipped, where Flutter (3.47.1, checked) draws it outside the clip, and Inset no longer panics.
+
 - Change: `layout` lives on the protocol's type-erased handle and takes that protocol's constraints.
   Reason: language — there is no abstract `Constraints` an erased node can hold.
   Affect: a parent that does not know its child's protocol cannot lay it out; there is no protocol-neutral `layout`.

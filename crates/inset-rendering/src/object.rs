@@ -2074,7 +2074,10 @@ impl AnyRenderObject {
             if parent.needs_compositing_bits_update(app) {
                 return;
             }
-            if (!self.was_repaint_boundary(app) || !self.is_repaint_boundary(app))
+            // The parent last counted this node by its own compositing bit, which goes stale
+            // in `was_repaint_boundary` when a node stops being a boundary while it is not
+            // painted.
+            if (!self.data(app).needs_compositing || !self.is_repaint_boundary(app))
                 && !parent.is_repaint_boundary(app)
             {
                 parent.mark_needs_compositing_bits_update(app);

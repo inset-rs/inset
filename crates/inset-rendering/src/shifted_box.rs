@@ -777,9 +777,16 @@ pub struct RenderConstrainedOverflowBox {
 }
 
 impl RenderConstrainedOverflowBox {
-    /// Creates a render object that lets its child overflow itself.
+    /// Creates a render object that lets its child overflow itself; `None` constraints use the
+    /// parent's, and Dart's default `fit` is [`OverflowBoxFit::Max`].
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         app: &mut App,
+        min_width: Option<f64>,
+        max_width: Option<f64>,
+        min_height: Option<f64>,
+        max_height: Option<f64>,
+        fit: OverflowBoxFit,
         alignment: AlignmentGeometry,
         text_direction: Option<TextDirection>,
         child: Option<AnyRenderBox>,
@@ -791,11 +798,11 @@ impl RenderConstrainedOverflowBox {
                 render_box: RenderBoxData::new(),
                 child: RenderObjectWithChildData::new(),
                 aligning: RenderAligningShiftedBoxData::new(alignment, text_direction),
-                min_width: None,
-                max_width: None,
-                min_height: None,
-                max_height: None,
-                fit: OverflowBoxFit::Max,
+                min_width,
+                max_width,
+                min_height,
+                max_height,
+                fit,
             },
         );
         this.set_child(app, child);
@@ -2516,12 +2523,15 @@ mod tests {
         let child = RenderConstrainedBox::new(&mut app, BoxConstraints::new(), None);
         let overflow = RenderConstrainedOverflowBox::new(
             &mut app,
+            Some(200.0),
+            Some(200.0),
+            None,
+            None,
+            OverflowBoxFit::Max,
             AlignmentGeometry::CENTER,
             None,
             Some(child.as_box()),
         );
-        overflow.set_min_width(&mut app, Some(200.0));
-        overflow.set_max_width(&mut app, Some(200.0));
         overflow.layout(
             &mut app,
             BoxConstraints::tight(Size::new(100.0, 100.0)),

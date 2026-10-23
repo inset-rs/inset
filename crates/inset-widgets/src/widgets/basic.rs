@@ -3628,14 +3628,18 @@ impl RenderObjectWidget for OverflowBox {
 
     fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject {
         let text_direction = Directionality::maybe_of(app, context);
-        let render_object =
-            RenderConstrainedOverflowBox::new(app, self.alignment, text_direction, None);
-        render_object.set_min_width(app, self.min_width);
-        render_object.set_max_width(app, self.max_width);
-        render_object.set_min_height(app, self.min_height);
-        render_object.set_max_height(app, self.max_height);
-        render_object.set_fit(app, self.fit);
-        render_object.as_object()
+        RenderConstrainedOverflowBox::new(
+            app,
+            self.min_width,
+            self.max_width,
+            self.min_height,
+            self.max_height,
+            self.fit,
+            self.alignment,
+            text_direction,
+            None,
+        )
+        .as_object()
     }
 
     fn update_render_object(
@@ -7819,6 +7823,27 @@ mod tests {
     }
 
     #[test]
+    fn nested_opacities_appearing_together_paint_inside_a_clip() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let nested = |outer: f64, inner: f64| {
+            Opacity::new(outer)
+                .child(
+                    ClipRRect::new()
+                        .border_radius(crate::BorderRadius::circular(4.0).into())
+                        .child(Opacity::new(inner).child(sized(20.0, 20.0))),
+                )
+                .into_widget()
+        };
+        let harness = Harness::mount(&mut app, nested(1.0, 1.0));
+        harness.pump(&mut app);
+        harness.set_child(&mut app, nested(0.0, 0.0));
+        harness.pump(&mut app);
+        harness.set_child(&mut app, nested(1.0, 1.0));
+        harness.pump(&mut app);
+    }
+
+    #[test]
     fn repaint_boundary_isolates_repaints() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
@@ -9051,6 +9076,30 @@ mod tests {
             render_object_under_root::<RenderConstrainedOverflowBox>(&harness, &app).size(&app),
             Size::new(40.0, 20.0),
             "deferring to the child takes the child's size"
+        );
+    }
+
+    #[test]
+    fn overflow_box_can_start_deferring_to_its_child() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            Center::new()
+                .child(
+                    OverflowBox::new()
+                        .fit(OverflowBoxFit::DeferToChild)
+                        .max_width(40.0)
+                        .max_height(20.0)
+                        .child(SizedBox::expand()),
+                )
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        let center = render_object_under_root::<RenderPositionedBox>(&harness, &app);
+        assert_eq!(
+            center.child(&app).expect("the overflow box").size(&app),
+            Size::new(40.0, 20.0)
         );
     }
 
