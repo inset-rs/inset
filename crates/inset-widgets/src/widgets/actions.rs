@@ -1860,6 +1860,11 @@ impl State for FocusableActionDetectorState {
         SchedulerBinding::add_post_frame_callback(
             app,
             FrameCallback::new(move |app, _duration| {
+                // Removed within the frame it was made in: Dart's callback then runs on the
+                // defunct state and changes nothing, but a Rust handle to it is gone.
+                if !self.mounted(app) {
+                    return;
+                }
                 let mode = FocusManager::instance(app).highlight_mode(app);
                 self.update_highlight_mode(app, mode);
             }),
