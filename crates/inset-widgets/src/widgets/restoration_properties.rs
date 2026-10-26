@@ -11,7 +11,7 @@ use inset_foundation::{
 };
 use inset_services::{RestorationData, TextEditingValue};
 
-use crate::widgets::editable_text::TextEditingController;
+use crate::widgets::editable_text::{TextEditingController, TextEditingControllerLeaf};
 use crate::widgets::restoration::{RestorableProperty, RestorablePropertyData};
 
 // ---------------------------------------------------------------------------------------------

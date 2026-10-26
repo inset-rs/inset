@@ -5271,7 +5271,7 @@ mod tests {
 
         use crate::{
             Directionality, EditableText, FocusNode, ListenableBuilder, Overlay,
-            TextEditingController, run_app,
+            TextEditingController, TextEditingControllerLeaf, run_app,
         };
         use inset_embedder::{TargetPlatform, TextDirection};
         use inset_foundation::ValueNotifier;
@@ -5295,7 +5295,7 @@ mod tests {
                     return SizedBox::shrink().into_widget();
                 }
                 EditableText::new(
-                    controller,
+                    controller.as_controller(),
                     focus_node,
                     TextStyle::new(),
                     Color::from_argb(255, 0, 0, 0),

@@ -776,6 +776,18 @@ impl TextPainter {
         if value.is_empty() || Some(&value) == self.placeholder_dimensions.as_ref() {
             return;
         }
+        if cfg!(debug_assertions) {
+            let mut placeholder_count = 0;
+            if let Some(text) = &self.text {
+                text.visit_children(&mut |span| {
+                    if span.as_placeholder_span().is_some() {
+                        placeholder_count += 1;
+                    }
+                    value.len() >= placeholder_count
+                });
+            }
+            assert_eq!(placeholder_count, value.len());
+        }
         self.placeholder_dimensions = Some(value);
         self.mark_needs_layout();
     }

@@ -212,7 +212,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app-events"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "inset-embedder",
  "inset-embedder-winit",
@@ -977,7 +977,7 @@ dependencies = [
 
 [[package]]
 name = "cupertino-gallery"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "indexmap",
  "inset",
@@ -1882,7 +1882,7 @@ dependencies = [
 
 [[package]]
 name = "inset"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "inset-embedder",
  "inset-embedder-default",
@@ -1896,7 +1896,7 @@ dependencies = [
 
 [[package]]
 name = "inset-animation"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "inset-embedder",
  "inset-foundation",
@@ -1906,7 +1906,7 @@ dependencies = [
 
 [[package]]
 name = "inset-cli"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "brotli",
@@ -1926,7 +1926,7 @@ dependencies = [
 
 [[package]]
 name = "inset-cupertino"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "indexmap",
  "inset-animation",
@@ -1945,7 +1945,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "indexmap",
  "objc2-core-foundation",
@@ -1961,7 +1961,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder-android"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "android-activity",
  "inset-embedder",
@@ -1978,7 +1978,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder-default"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "inset-embedder",
  "inset-embedder-android",
@@ -1988,7 +1988,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder-web"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.3.4",
@@ -2004,7 +2004,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder-winit"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "arboard",
  "block2 0.6.2",
@@ -2030,7 +2030,7 @@ dependencies = [
 
 [[package]]
 name = "inset-foundation"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "async-task",
  "indexmap",
@@ -2040,7 +2040,7 @@ dependencies = [
 
 [[package]]
 name = "inset-gestures"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "indexmap",
  "inset-embedder",
@@ -2051,7 +2051,7 @@ dependencies = [
 
 [[package]]
 name = "inset-macros"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2060,7 +2060,7 @@ dependencies = [
 
 [[package]]
 name = "inset-painting"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "indexmap",
  "inset-embedder",
@@ -2072,14 +2072,14 @@ dependencies = [
 
 [[package]]
 name = "inset-physics"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "inset-embedder",
 ]
 
 [[package]]
 name = "inset-rendering"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "indexmap",
  "inset-animation",
@@ -2097,7 +2097,7 @@ dependencies = [
 
 [[package]]
 name = "inset-scheduler"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "indexmap",
  "inset-embedder",
@@ -2107,7 +2107,7 @@ dependencies = [
 
 [[package]]
 name = "inset-services"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "indexmap",
  "inset-embedder",
@@ -2120,7 +2120,7 @@ dependencies = [
 
 [[package]]
 name = "inset-shell"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "inset-embedder",
  "inset-foundation",
@@ -2134,14 +2134,14 @@ dependencies = [
 
 [[package]]
 name = "inset-test"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "inset-embedder",
 ]
 
 [[package]]
 name = "inset-widgets"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "indexmap",
  "inset-animation",
@@ -2287,7 +2287,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "layout"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "inset-embedder",
  "inset-foundation",
@@ -2539,7 +2539,7 @@ dependencies = [
 
 [[package]]
 name = "native_surface"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "inset-embedder",
  "inset-embedder-winit",
@@ -3195,7 +3195,7 @@ dependencies = [
 
 [[package]]
 name = "paint"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "inset-embedder",
  "inset-embedder-winit",
@@ -4763,9 +4763,9 @@ dependencies = [
 
 [[package]]
 name = "valo"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66ec9e4b9b692bf9b57aae8ded4d717ce829a8d9752ba9c7bc57bbfd7db913be"
+checksum = "0b65a3e30d4a3902d253f7fccbe17b467dbd6b35bbe9331aa7c2edb4805b4d8f"
 dependencies = [
  "objc2 0.6.4",
  "objc2-metal 0.3.2",
@@ -4779,9 +4779,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c55329afaa5bb5a248235015adbe66ec1dd3b534de33e4ab9e68d250d7505e5d"
+checksum = "ee1b5b5c4dd2df6a0277abac2e595650a0ce8f791c111965bc9a37a75433e6d3"
 dependencies = [
  "valo",
  "wgpu",
@@ -4789,9 +4789,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec-apple"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9a48d1cd6d83a43b2ac5c61a50e2ae227a1326ee393f8627eef1288acda6bc9"
+checksum = "b913386360dd61dbf55b5fe34a063d3539107d8e4b32fc4f54a923a9d5a1f173"
 dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
@@ -4808,9 +4808,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec-software"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "156d92ce1523eabfa98e54ba8587ffa79d217683e8269ba7b63e50af15cbcf92"
+checksum = "d470cf70330af5a002520211fcd153f929a307ac9913d0ce769a31f9259dceb5"
 dependencies = [
  "gif",
  "image",
@@ -4823,9 +4823,9 @@ dependencies = [
 
 [[package]]
 name = "valo-dl"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "083dfc4ed9ac056d5b87f9f410a438f23cd25cb78ae2ef59ac6f67bac82caa4b"
+checksum = "e0969f6e41bbef48cb7a2d65ac9c875b516c4eb2ca761b10d63bafb2421169c0"
 dependencies = [
  "valo-geometry",
  "valo-text",
@@ -4834,9 +4834,9 @@ dependencies = [
 
 [[package]]
 name = "valo-fontmgr"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd69e859c323e9536ab079ebc6d78a8ebc67f51a71a095c6d48b34f33d82d0d3"
+checksum = "e000b436234309204f32889c045de15af32b516cb965e1ece5cbf6c1589acb2b"
 dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
@@ -4848,18 +4848,18 @@ dependencies = [
 
 [[package]]
 name = "valo-geometry"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "812b9fbc95ec511403783865683dc1f78191c10fddc3939cdfa1cbe2b7a2010a"
+checksum = "7bccf52afbb9a251ceaa9bac9293e1228df84ae9fe1c19f9cb3b3ba993d8702b"
 dependencies = [
  "glam",
 ]
 
 [[package]]
 name = "valo-renderer"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c0a4d7b6b33e307a96b412b64be9354d161406ed0592dd08d9372dee7a1fa30"
+checksum = "21f142175908745790a2f217390318e684fd3969ebc1dd507293132a15464bef"
 dependencies = [
  "bytemuck",
  "etagere",
@@ -4875,9 +4875,9 @@ dependencies = [
 
 [[package]]
 name = "valo-system-fonts"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40ecd235240c50b1c4f01958bac6849ba02df0f6c37ac4a36639b26b588d3b20"
+checksum = "10689075e777f6e0be1dc86ce81df2d082bb0a382d9ff9e4c24e3ff88d66d43a"
 dependencies = [
  "valo-fontmgr",
  "valo-text",
@@ -4885,9 +4885,9 @@ dependencies = [
 
 [[package]]
 name = "valo-text"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffb981dfa812bb0537f85921988d694b349582d0bf147faa5b2b8b3a05673d8a"
+checksum = "8c3f2d8817f901a38912442b9146c42301ab899f024f2a685b4eb57cf537f290"
 dependencies = [
  "allsorts",
  "harfrust",
@@ -5323,7 +5323,7 @@ dependencies = [
 
 [[package]]
 name = "window"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "inset-cupertino",
  "inset-embedder",

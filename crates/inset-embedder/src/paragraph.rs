@@ -498,6 +498,24 @@ fn native_align(align: Option<TextAlign>, direction: Option<TextDirection>) -> v
     }
 }
 
+fn native_placeholder_alignment(alignment: PlaceholderAlignment) -> valo::PlaceholderAlignment {
+    match alignment {
+        PlaceholderAlignment::Baseline => valo::PlaceholderAlignment::Baseline,
+        PlaceholderAlignment::AboveBaseline => valo::PlaceholderAlignment::AboveBaseline,
+        PlaceholderAlignment::BelowBaseline => valo::PlaceholderAlignment::BelowBaseline,
+        PlaceholderAlignment::Top => valo::PlaceholderAlignment::Top,
+        PlaceholderAlignment::Bottom => valo::PlaceholderAlignment::Bottom,
+        PlaceholderAlignment::Middle => valo::PlaceholderAlignment::Middle,
+    }
+}
+
+fn native_baseline(baseline: TextBaseline) -> valo::TextBaseline {
+    match baseline {
+        TextBaseline::Alphabetic => valo::TextBaseline::Alphabetic,
+        TextBaseline::Ideographic => valo::TextBaseline::Ideographic,
+    }
+}
+
 fn native_direction(direction: TextDirection) -> valo::TextDirection {
     match direction {
         TextDirection::Ltr => valo::TextDirection::Ltr,
@@ -521,7 +539,15 @@ fn native_direction(direction: TextDirection) -> valo::TextDirection {
 pub struct ParagraphBuilder {
     paragraph_style: ParagraphStyle,
     style_stack: Vec<TextStyle>,
-    runs: Vec<(String, valo::TextStyle)>,
+    pieces: Vec<Piece>,
+    placeholder_scales: Vec<f64>,
+}
+
+/// One addition to a [`ParagraphBuilder`], kept until [`ParagraphBuilder::build`] has the fonts
+/// to shape it.
+enum Piece {
+    Text(String, valo::TextStyle),
+    Placeholder(valo::PlaceholderStyle, valo::TextStyle),
 }
 
 impl ParagraphBuilder {
@@ -531,15 +557,19 @@ impl ParagraphBuilder {
         ParagraphBuilder {
             paragraph_style: style,
             style_stack: vec![base],
-            runs: Vec::new(),
+            pieces: Vec::new(),
+            placeholder_scales: Vec::new(),
         }
     }
 
     /// The number of placeholders currently in the paragraph.
-    ///
-    /// Placeholders are not supported by the host; this is always zero.
     pub fn placeholder_count(&self) -> i32 {
-        0
+        self.placeholder_scales.len() as i32
+    }
+
+    /// The scales of the placeholders in the paragraph.
+    pub fn placeholder_scales(&self) -> &[f64] {
+        &self.placeholder_scales
     }
 
     /// Applies the given style to the added text until [`pop`](Self::pop) is called.
@@ -569,12 +599,99 @@ impl ParagraphBuilder {
     ///
     /// The text will be styled according to the current stack of text styles.
     pub fn add_text(&mut self, text: &str) {
-        let style = self
-            .style_stack
+        let style = self.current_style();
+        self.pieces.push(Piece::Text(text.to_owned(), style));
+    }
+
+    /// Adds an inline placeholder space to the paragraph.
+    ///
+    /// The paragraph will contain a rectangular space with no text of the dimensions
+    /// specified.
+    ///
+    /// The `width` and `height` parameters specify the size of the placeholder rectangle.
+    ///
+    /// The `alignment` parameter specifies how the placeholder rectangle will be vertically
+    /// aligned with the surrounding text. When [`PlaceholderAlignment::Baseline`],
+    /// [`PlaceholderAlignment::AboveBaseline`], and [`PlaceholderAlignment::BelowBaseline`]
+    /// alignment modes are used, the baseline needs to be set with the `baseline`.
+    /// When using [`PlaceholderAlignment::Baseline`], `baseline_offset` indicates the distance
+    /// of the baseline down from the top of the rectangle. The default `baseline_offset`
+    /// is the `height`.
+    ///
+    /// Examples:
+    ///
+    /// * For a 30x50 placeholder with the bottom edge aligned with the bottom of the text, use:
+    ///   `add_placeholder(30.0, 50.0, PlaceholderAlignment::Bottom, 1.0, None, None)`
+    /// * For a 30x50 placeholder that is vertically centered around the text, use:
+    ///   `add_placeholder(30.0, 50.0, PlaceholderAlignment::Middle, 1.0, None, None)`.
+    /// * For a 30x50 placeholder that sits completely on top of the alphabetic baseline, use:
+    ///   `add_placeholder(30.0, 50.0, PlaceholderAlignment::AboveBaseline, 1.0, None,
+    ///   Some(TextBaseline::Alphabetic))`
+    /// * For a 30x50 placeholder with 40 pixels above and 10 pixels below the alphabetic
+    ///   baseline, use: `add_placeholder(30.0, 50.0, PlaceholderAlignment::Baseline, 1.0,
+    ///   Some(40.0), Some(TextBaseline::Alphabetic))`
+    ///
+    /// Lines are permitted to break around each placeholder.
+    ///
+    /// Decorations will be drawn based on the font defined in the most recently
+    /// pushed [`TextStyle`]. The decorations are drawn as if unicode text were present
+    /// in the placeholder space, and will draw the same regardless of the height and
+    /// alignment of the placeholder. To hide or manually adjust decorations to fit,
+    /// a text style with the desired decoration behavior should be pushed before
+    /// adding a placeholder.
+    ///
+    /// Any decorations drawn through a placeholder will exist on the same canvas/layer
+    /// as the text. This means any content drawn on top of the space reserved by
+    /// the placeholder will be drawn over the decoration, possibly obscuring the
+    /// decoration.
+    ///
+    /// Placeholders are represented by a unicode 0xFFFC "object replacement character"
+    /// in the text buffer. For each placeholder, one object replacement character is
+    /// added on to the text buffer.
+    ///
+    /// The `scale` parameter will scale the `width` and `height` by the specified amount,
+    /// and keep track of the scale. The scales of placeholders added can be accessed
+    /// through [`placeholder_scales`](Self::placeholder_scales). This is primarily used for
+    /// accessibility scaling.
+    pub fn add_placeholder(
+        &mut self,
+        width: f64,
+        height: f64,
+        alignment: PlaceholderAlignment,
+        scale: f64,
+        baseline_offset: Option<f64>,
+        baseline: Option<TextBaseline>,
+    ) {
+        // Require a baseline to be specified if using a baseline-based alignment.
+        debug_assert!(
+            !matches!(
+                alignment,
+                PlaceholderAlignment::AboveBaseline
+                    | PlaceholderAlignment::BelowBaseline
+                    | PlaceholderAlignment::Baseline
+            ) || baseline.is_some()
+        );
+        // Default the baselineOffset to height if null. This will place the placeholder
+        // fully above the baseline, similar to [PlaceholderAlignment.aboveBaseline].
+        let baseline_offset = baseline_offset.unwrap_or(height);
+        let placeholder = valo::PlaceholderStyle {
+            width: (width * scale) as f32,
+            height: (height * scale) as f32,
+            alignment: native_placeholder_alignment(alignment),
+            baseline: native_baseline(baseline.unwrap_or(TextBaseline::Alphabetic)),
+            baseline_offset: (baseline_offset * scale) as f32,
+        };
+        let style = self.current_style();
+        self.pieces.push(Piece::Placeholder(placeholder, style));
+        self.placeholder_scales.push(scale);
+    }
+
+    /// The style on top of the stack, in valo's terms.
+    fn current_style(&self) -> valo::TextStyle {
+        self.style_stack
             .last()
             .expect("the base style is never popped")
-            .to_native();
-        self.runs.push((text.to_owned(), style));
+            .to_native()
     }
 
     /// Applies the given paragraph style and returns a [`Paragraph`] containing the added
@@ -589,8 +706,13 @@ impl ParagraphBuilder {
             .unwrap_or(TextDirection::Ltr);
         let mut builder = valo::ParagraphBuilder::new(fonts);
         builder.style(self.paragraph_style.to_native());
-        for (text, style) in &self.runs {
-            builder.add_text(text, style);
+        for piece in &self.pieces {
+            match piece {
+                Piece::Text(text, style) => builder.add_text(text, style),
+                Piece::Placeholder(placeholder, style) => {
+                    builder.add_placeholder(*placeholder, style)
+                }
+            };
         }
         let inner = builder.build();
         Paragraph {
@@ -751,25 +873,29 @@ impl Paragraph {
         self.inner
             .rects_for_range(range)
             .into_iter()
-            .map(|rect| self.text_box(rect))
+            .map(|rect| text_box(rect, self.direction))
             .collect()
-    }
-
-    fn text_box(&self, rect: valo::Rect) -> TextBox {
-        TextBox::from_ltrbd(
-            f64::from(rect.x),
-            f64::from(rect.y),
-            f64::from(rect.x + rect.width),
-            f64::from(rect.y + rect.height),
-            self.direction,
-        )
     }
 
     /// Returns a list of text boxes that enclose all placeholders in the paragraph.
     ///
-    /// The host has no placeholders; this is always empty.
+    /// The order of the boxes are in the same order as passed in through
+    /// [`ParagraphBuilder::add_placeholder`].
+    ///
+    /// Coordinates of the [`TextBox`] are relative to the upper-left corner of the paragraph,
+    /// where positive y values indicate down.
     pub fn get_boxes_for_placeholders(&self) -> Vec<TextBox> {
-        Vec::new()
+        self.inner
+            .placeholder_boxes()
+            .into_iter()
+            .map(|placeholder| {
+                let direction = match placeholder.direction {
+                    valo::TextDirection::Ltr => TextDirection::Ltr,
+                    valo::TextDirection::Rtl => TextDirection::Rtl,
+                };
+                text_box(placeholder.rect, direction)
+            })
+            .collect()
     }
 
     /// Returns the text position closest to the given offset.
@@ -972,6 +1098,16 @@ impl Paragraph {
     }
 }
 
+fn text_box(rect: valo::Rect, direction: TextDirection) -> TextBox {
+    TextBox::from_ltrbd(
+        f64::from(rect.x),
+        f64::from(rect.y),
+        f64::from(rect.x + rect.width),
+        f64::from(rect.y + rect.height),
+        direction,
+    )
+}
+
 /// Every cluster start on the line, in text order. A cluster runs from its start to the next
 /// start on the line, whichever run that glyph sits in.
 fn cluster_starts(line: &valo::Line) -> Vec<usize> {
@@ -1060,6 +1196,27 @@ mod tests {
         assert_eq!(ltr.to_rect(), Rect::from_ltrb(1.0, 2.0, 3.0, 4.0));
     }
 
+    fn text_styles(builder: &ParagraphBuilder) -> Vec<&valo::TextStyle> {
+        builder
+            .pieces
+            .iter()
+            .filter_map(|piece| match piece {
+                Piece::Text(_, style) => Some(style),
+                Piece::Placeholder(..) => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn placeholders_are_counted_with_their_scales() {
+        let mut builder = ParagraphBuilder::new(ParagraphStyle::new());
+        builder.add_text("a");
+        builder.add_placeholder(10.0, 20.0, PlaceholderAlignment::Middle, 2.0, None, None);
+        builder.add_placeholder(5.0, 5.0, PlaceholderAlignment::Bottom, 1.0, None, None);
+        assert_eq!(builder.placeholder_count(), 2);
+        assert_eq!(builder.placeholder_scales(), [2.0, 1.0]);
+    }
+
     #[test]
     fn pushed_styles_inherit_unset_fields() {
         let mut builder = ParagraphBuilder::new(ParagraphStyle {
@@ -1073,7 +1230,7 @@ mod tests {
         builder.add_text("x");
         builder.pop();
         builder.add_text("y");
-        let styles: Vec<&valo::TextStyle> = builder.runs.iter().map(|(_, s)| s).collect();
+        let styles = text_styles(&builder);
         assert_eq!(styles[0].size, 20.0, "the child keeps the paragraph's size");
         assert_eq!(styles[0].color, Color::from_argb(255, 255, 0, 0).into());
         assert_eq!(styles[1].size, 20.0);
@@ -1102,7 +1259,7 @@ mod tests {
         let mut builder = ParagraphBuilder::new(ParagraphStyle::new());
         builder.add_text("x");
         assert!(
-            builder.runs[0].1.families.is_empty(),
+            text_styles(&builder)[0].families.is_empty(),
             "dart:ui leaves fontFamily unset; the collection's default manager supplies the face"
         );
     }
@@ -1226,6 +1383,53 @@ mod layout_tests {
                 .unwrap()
                 .grapheme_cluster_code_unit_range,
             TextRange::new(3, 4)
+        );
+    }
+
+    #[test]
+    fn placeholder_boxes_come_in_the_order_added_at_their_scaled_size() {
+        let mut builder = ParagraphBuilder::new(ParagraphStyle::new());
+        builder.push_style(TextStyle {
+            font_size: Some(20.0),
+            ..TextStyle::default()
+        });
+        builder.add_text("ab");
+        builder.add_placeholder(
+            30.0,
+            50.0,
+            PlaceholderAlignment::Baseline,
+            1.0,
+            Some(40.0),
+            Some(TextBaseline::Alphabetic),
+        );
+        builder.add_text("cd");
+        builder.add_placeholder(10.0, 10.0, PlaceholderAlignment::Bottom, 2.0, None, None);
+        let mut paragraph = builder.build(&mut fonts());
+        paragraph.layout(ParagraphConstraints::new(f64::INFINITY));
+
+        let boxes = paragraph.get_boxes_for_placeholders();
+        assert_eq!(boxes.len(), 2);
+        let baseline = paragraph.alphabetic_baseline();
+        let (first, second) = (boxes[0], boxes[1]);
+        assert!((first.right - first.left - 30.0).abs() < 1e-3);
+        assert!(
+            (first.top - (baseline - 40.0)).abs() < 1e-3,
+            "40 above the baseline"
+        );
+        assert!(
+            (first.bottom - (baseline + 10.0)).abs() < 1e-3,
+            "10 below it"
+        );
+        assert!(
+            (second.right - second.left - 20.0).abs() < 1e-3,
+            "scaled by 2"
+        );
+        assert!((second.bottom - second.top - 20.0).abs() < 1e-3);
+        assert!(second.left > first.right, "after the text between them");
+        assert_eq!(
+            paragraph.get_line_boundary(TextPosition::new(0)),
+            TextRange::new(0, 6),
+            "each placeholder is one code unit"
         );
     }
 

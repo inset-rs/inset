@@ -143,9 +143,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## paragraph.rs → paragraph.dart
 
-- Change: `RenderParagraph` takes an optional `FontCollection` handle, falling back to `PaintingBinding`'s app-wide one, and is a leaf: no inline children, no selection registrar, no `selectionColor`.
-  Reason: platform — the font collection is explicit (painting's `binding.rs`), `WidgetSpan` needs placeholders the host lacks, and selection waits on `selection.dart`.
-  Affect: a hit test stops at the paragraph, so a `RichText` span recognizer never fires and text in it cannot be selected.
+- Change: `RenderParagraph` takes an optional `FontCollection` handle, falling back to `PaintingBinding`'s app-wide one, and has no selection registrar or `selectionColor`.
+  Reason: platform — the font collection is explicit (painting's `binding.rs`), and selection waits on `selection.dart`.
+  Affect: a hit test reaches the inline children but no span, so a `RichText` span recognizer never fires, and text in it cannot be selected.
 
 - Change: `TextOverflow::Fade` clips like `Clip`.
   Reason: platform — the fade is a gradient shader, and gradients are deferred.
@@ -153,8 +153,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## editable.rs → editable.dart
 
-- Change: `RenderEditable` is a leaf: no inline children, no custom-paint child boxes, no internal tap / long-press recognizers, and caret, selection and the handle leaders paint in `paint`.
-  Reason: platform — `WidgetSpan` placeholders and engine layers wait, as on `RenderParagraph`.
+- Change: `RenderEditable` has no custom-paint child boxes and no internal tap / long-press recognizers, and caret, selection and the handle leaders paint in `paint`.
+  Reason: platform — engine layers wait.
   Affect: selection is driven from above (`select_position_at` under an `ignore_pointer`) rather than by the editable's own recognizers, and the handles' links are led from `paint` for a `CompositedTransformFollower`.
 
 - Change: `VerticalCaretMovementRun::is_valid` compares the editable's layout generation.

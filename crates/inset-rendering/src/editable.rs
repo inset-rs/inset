@@ -1,7 +1,7 @@
 //! Flutter counterpart: `rendering/editable.dart`.
 //!
-//! A leaf until inline children, the custom-paint child boxes, `LeaderLayer`
-//! handles, and pointer recognizers land.
+//! The custom-paint child boxes, `LeaderLayer` handles, and pointer recognizers
+//! wait.
 //! Caret and selection paint in `paint`, the same work Flutter's child painters
 //! do.
 
@@ -9,21 +9,27 @@ use std::collections::HashMap;
 use std::fmt;
 
 use inset_embedder::{
-    BoxHeightStyle, BoxWidthStyle, Clip, Color, FontCollection, LineMetrics, Offset, Paint, Radius,
-    Rect, Size, TargetPlatform, TextAffinity, TextAlign, TextBaseline, TextDirection,
-    TextHeightBehavior, TextPosition, TextRange, TextSelection, clamp_double,
+    BoxHeightStyle, BoxWidthStyle, Clip, Color, FontCollection, LineMetrics, Matrix4, Offset,
+    Paint, Radius, Rect, Size, TargetPlatform, TextAffinity, TextAlign, TextBaseline,
+    TextDirection, TextHeightBehavior, TextPosition, TextRange, TextSelection, clamp_double,
 };
 use inset_foundation::{App, Handle, Listenable, Listener, ValueListenable, ValueNotifier};
 use inset_gestures::TapDownDetails;
 use inset_painting::{
-    ClipContext, InlineSpanRef, PaintingBinding, TextPainter, TextScaler, TextWidthBasis,
+    ClipContext, InlineSpanRef, PaintingBinding, PlaceholderDimensions, TextPainter, TextScaler,
+    TextWidthBasis,
 };
 use inset_services::{AnyTextSelectionDelegate, SelectionChangedCause, TextLayoutMetrics};
 
-use crate::box_::{BoxConstraints, RenderBox, RenderBoxData};
+use crate::box_::{AnyRenderBox, BoxConstraints, BoxHitTestResult, RenderBox, RenderBoxData};
 use crate::layer::{ClipRectLayer, ContainerLayer, LayerHandle, LayerLink, LeaderLayer};
-use crate::object::{AnyRenderObject, RenderHandle, RenderObject, RenderObjectData};
+use crate::layout_helper::ChildLayoutHelper;
+use crate::object::{
+    AnyRenderObject, ContainerRenderObjectData, ContainerRenderObjectMixin, RenderHandle,
+    RenderObject, RenderObjectData,
+};
 use crate::painting_context::PaintingContext;
+use crate::paragraph::{RenderInlineChildrenContainerDefaults, TextParentData};
 use crate::pipeline_owner::PipelineOwner;
 use crate::relayout_when_system_fonts_change::{
     RelayoutWhenSystemFontsChangeData, RelayoutWhenSystemFontsChangeMixin,
@@ -176,8 +182,15 @@ impl VerticalCaretMovementRun {
 pub struct RenderEditable {
     render_object: RenderObjectData,
     render_box: RenderBoxData,
+    container: ContainerRenderObjectData<AnyRenderBox>,
     text_painter: TextPainter,
     text_intrinsics: Option<TextPainter>,
+    // Placeholder dimensions representing the sizes of child inline widgets.
+    //
+    // These need to be cached because the text painter's placeholder dimensions
+    // will be overwritten during intrinsic width/height calculations and must be
+    // restored to the original values before final layout and painting.
+    placeholder_dimensions: Option<Vec<PlaceholderDimensions>>,
     system_fonts: RelayoutWhenSystemFontsChangeData,
     fonts_override: Option<Handle<FontCollection>>,
     show_cursor: Handle<ValueNotifier<bool>>,
@@ -227,6 +240,9 @@ pub struct RenderEditable {
 
 impl RenderEditable {
     /// Creates a render object that implements the visual aspects of a text field.
+    ///
+    /// Add the inline children with [`add`](ContainerRenderObjectMixin::add) or
+    /// [`add_all`](ContainerRenderObjectMixin::add_all); Dart's constructor takes them.
     pub fn new(
         app: &mut App,
         text_direction: TextDirection,
@@ -246,8 +262,10 @@ impl RenderEditable {
             RenderEditable {
                 render_object: RenderObjectData::new(),
                 render_box: RenderBoxData::new(),
+                container: ContainerRenderObjectData::new(),
                 text_painter,
                 text_intrinsics: None,
+                placeholder_dimensions: None,
                 system_fonts: RelayoutWhenSystemFontsChangeData::new(),
                 fonts_override: None,
                 show_cursor,
@@ -1675,6 +1693,7 @@ impl RenderEditable {
         self.paint_highlights(app, context.canvas(), offset);
         let (painter, fonts) = self.painter_with_fonts(app);
         painter.paint(fonts, context.canvas(), effective);
+        self.paint_inline_children(app, context, effective);
         if above {
             self.paint_caret(app, context.canvas(), offset);
         }
@@ -1810,19 +1829,46 @@ impl RelayoutWhenSystemFontsChangeMixin for RenderEditable {
     }
 }
 
+impl ContainerRenderObjectMixin for RenderEditable {
+    type ChildType = AnyRenderBox;
+    type ParentDataType = TextParentData;
+
+    fn container_data(
+        self: RenderHandle<Self>,
+        app: &App,
+    ) -> &ContainerRenderObjectData<AnyRenderBox> {
+        &self.get(app).container
+    }
+
+    fn container_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut ContainerRenderObjectData<AnyRenderBox> {
+        &mut self.get_mut(app).container
+    }
+}
+
+impl RenderInlineChildrenContainerDefaults for RenderEditable {}
+
 impl RenderObject for RenderEditable {
     crate::render_object_accessors!();
 
     fn visit_children(
         self: RenderHandle<Self>,
-        _app: &App,
-        _visitor: &mut dyn FnMut(AnyRenderObject),
+        app: &App,
+        visitor: &mut dyn FnMut(AnyRenderObject),
     ) {
-        // A leaf until inline children and the custom-paint boxes are ported.
+        // The custom-paint boxes, which Dart visits first, are not ported.
+        ContainerRenderObjectMixin::visit_children(self, app, visitor)
     }
 
-    fn did_attach(self: RenderHandle<Self>, app: &mut App, _owner: Handle<PipelineOwner>) {
+    fn redepth_children(self: RenderHandle<Self>, app: &mut App) {
+        ContainerRenderObjectMixin::redepth_children(self, app)
+    }
+
+    fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: Handle<PipelineOwner>) {
         RelayoutWhenSystemFontsChangeMixin::attach_system_fonts(self, app);
+        ContainerRenderObjectMixin::did_attach(self, app, owner);
         let offset = self.get(app).offset;
         offset.add_listener(app, self.mark_needs_paint_listener());
         let show_cursor = self.get(app).show_cursor;
@@ -1835,6 +1881,7 @@ impl RenderObject for RenderEditable {
         let show_cursor = self.get(app).show_cursor;
         show_cursor.remove_listener(app, &self.mark_needs_paint_listener());
         RelayoutWhenSystemFontsChangeMixin::detach_system_fonts(self, app);
+        ContainerRenderObjectMixin::did_detach(self, app);
     }
 
     fn dispose(self: RenderHandle<Self>, app: &mut App) {
@@ -1849,10 +1896,24 @@ impl RenderObject for RenderEditable {
 
     fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
         let constraints = self.constraints(app);
+        let placeholder_dimensions = self.layout_inline_children(
+            app,
+            constraints.max_width,
+            ChildLayoutHelper::layout_child,
+            ChildLayoutHelper::get_baseline,
+        );
+        self.get_mut(app).placeholder_dimensions = Some(placeholder_dimensions.clone());
         let (min_width, max_width) =
             self.adjust_constraints(app, constraints.min_width, constraints.max_width);
         let (painter, fonts) = self.painter_with_fonts(app);
+        painter.set_placeholder_dimensions(Some(placeholder_dimensions));
         painter.layout(fonts, min_width, max_width);
+        let boxes = self
+            .get_mut(app)
+            .text_painter
+            .inline_placeholder_boxes()
+            .expect("laid out just now");
+        self.position_inline_children(app, &boxes);
         self.compute_caret_prototype(app);
         let caret_margin = self.caret_margin(app);
         let painter_width = self.get(app).text_painter.width();
@@ -1929,16 +1990,36 @@ impl RenderObject for RenderEditable {
 impl RenderBox for RenderEditable {
     crate::render_box_accessors!();
 
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        RenderInlineChildrenContainerDefaults::setup_parent_data(self, app, child);
+    }
+
     fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, _height: f64) -> f64 {
+        let placeholder_dimensions = self.layout_inline_children(
+            app,
+            f64::INFINITY,
+            |app, child, _| Size::new(child.get_min_intrinsic_width(app, f64::INFINITY), 0.0),
+            ChildLayoutHelper::get_dry_baseline,
+        );
         let (min_width, max_width) = self.adjust_constraints(app, 0.0, f64::INFINITY);
         let (intrinsics, fonts) = self.text_intrinsics_with_fonts(app);
+        intrinsics.set_placeholder_dimensions(Some(placeholder_dimensions));
         intrinsics.layout(fonts, min_width, max_width);
         intrinsics.min_intrinsic_width()
     }
 
     fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, _height: f64) -> f64 {
+        let placeholder_dimensions = self.layout_inline_children(
+            app,
+            f64::INFINITY,
+            // Height and baseline is irrelevant as all text will be laid
+            // out in a single line. Therefore, using 0.0 as a dummy for the height.
+            |app, child, _| Size::new(child.get_max_intrinsic_width(app, f64::INFINITY), 0.0),
+            ChildLayoutHelper::get_dry_baseline,
+        );
         let (min_width, max_width) = self.adjust_constraints(app, 0.0, f64::INFINITY);
         let (intrinsics, fonts) = self.text_intrinsics_with_fonts(app);
+        intrinsics.set_placeholder_dimensions(Some(placeholder_dimensions));
         intrinsics.layout(fonts, min_width, max_width);
         intrinsics.max_intrinsic_width() + self.caret_margin(app)
     }
@@ -1948,6 +2029,14 @@ impl RenderBox for RenderEditable {
     }
 
     fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        let placeholder_dimensions = self.layout_inline_children(
+            app,
+            width,
+            ChildLayoutHelper::dry_layout_child,
+            ChildLayoutHelper::get_dry_baseline,
+        );
+        let (intrinsics, _) = self.text_intrinsics_with_fonts(app);
+        intrinsics.set_placeholder_dimensions(Some(placeholder_dimensions));
         self.preferred_height(app, width)
     }
 
@@ -1956,11 +2045,18 @@ impl RenderBox for RenderEditable {
         app: &mut App,
         constraints: BoxConstraints,
     ) -> Size {
+        let placeholder_dimensions = self.layout_inline_children(
+            app,
+            constraints.max_width,
+            ChildLayoutHelper::dry_layout_child,
+            ChildLayoutHelper::get_dry_baseline,
+        );
         let (min_width, max_width) =
             self.adjust_constraints(app, constraints.min_width, constraints.max_width);
         let force_line = self.get(app).force_line;
         let caret_margin = self.caret_margin(app);
         let (intrinsics, fonts) = self.text_intrinsics_with_fonts(app);
+        intrinsics.set_placeholder_dimensions(Some(placeholder_dimensions));
         intrinsics.layout(fonts, min_width, max_width);
         let painter_width = intrinsics.width();
         let width = if force_line {
@@ -1987,6 +2083,27 @@ impl RenderBox for RenderEditable {
 
     fn hit_test_self(self: RenderHandle<Self>, _app: &App, _position: Offset) -> bool {
         true
+    }
+
+    fn hit_test_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        // Spans are not hit-test targets yet, so the hit falls to the inline children.
+        let effective_position = position - self.paint_offset(app);
+        self.hit_test_inline_children(app, result, effective_position)
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        // The custom-paint boxes, which Dart leaves untransformed, are not ported.
+        self.default_apply_paint_transform(app, child, transform);
     }
 }
 

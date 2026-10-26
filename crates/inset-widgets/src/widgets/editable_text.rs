@@ -18,8 +18,8 @@ use inset_embedder::{
     TextInputType, TextPosition, TextRange, TextSelection, ViewId, clamp_double,
 };
 use inset_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB, Listenable, Listener, Task, Timer,
-    ValueNotifier,
+    App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, K_IS_WEB, Listenable,
+    ListenableObject, Listener, Task, Timer, ValueListenable, ValueNotifier,
 };
 use inset_gestures::{DragStartBehavior, PointerDownEvent, PointerUpEvent};
 use inset_painting::{
@@ -48,7 +48,7 @@ use inset_services::{
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 use crate::framework::{
-    BuildContext, GlobalKey, IntoWidget, KeyRef, LeafRenderObjectWidget, RenderObjectWidget,
+    BuildContext, GlobalKey, IntoWidget, KeyRef, MultiChildRenderObjectWidget, RenderObjectWidget,
     SingleChildRenderObjectWidget, State, StateData, StatefulWidget, WidgetRef,
 };
 use crate::state_accessors;
@@ -106,26 +106,158 @@ use crate::widgets::ticker_provider::{
     TickerMode, TickerProviderStateMixin, TickerProviderStateMixinData,
 };
 use crate::widgets::undo_history::{UndoHistory, UndoHistoryController};
+use crate::widgets::widget_span::WidgetSpan;
+
+/// The fields of Dart's `TextEditingController`, held under the field
+/// `text_editing_controller`.
+#[derive(Debug)]
+pub struct TextEditingControllerData {
+    value: TextEditingValue,
+}
+
+impl TextEditingControllerData {
+    /// The bag of a controller holding `value`.
+    pub fn new(value: TextEditingValue) -> TextEditingControllerData {
+        TextEditingControllerData { value }
+    }
+}
+
+/// The accessors [`TextEditingControllerLeaf`] asks for, for a struct whose bag is the field
+/// `text_editing_controller`.
+#[macro_export]
+macro_rules! text_editing_controller_accessors {
+    () => {
+        fn text_editing_controller_data(
+            self: ::inset_foundation::Handle<Self>,
+            app: &::inset_foundation::App,
+        ) -> &$crate::TextEditingControllerData {
+            &app.get(self).text_editing_controller
+        }
+
+        fn text_editing_controller_data_mut(
+            self: ::inset_foundation::Handle<Self>,
+            app: &mut ::inset_foundation::App,
+        ) -> &mut $crate::TextEditingControllerData {
+            &mut app.get_mut(self).text_editing_controller
+        }
+    };
+}
+
+/// The trait every text-editing-controller leaf implements: [`TextEditingController`], and a
+/// controller of an application's own that changes how its text looks.
+///
+/// The virtual a leaf overrides is [`build_text_span`](Self::build_text_span); its shared body
+/// is [`TextEditingController::build_text_span`], which an override calls where Dart writes
+/// `super.buildTextSpan(…)`.
+pub trait TextEditingControllerLeaf: ChangeNotifier + Sized + 'static {
+    /// Dart's `TextEditingController` fields, held under the field `text_editing_controller`
+    /// ([`text_editing_controller_accessors!`](crate::text_editing_controller_accessors)).
+    fn text_editing_controller_data(self: Handle<Self>, app: &App) -> &TextEditingControllerData;
+
+    /// See [`text_editing_controller_data`](Self::text_editing_controller_data).
+    fn text_editing_controller_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut TextEditingControllerData;
+
+    /// Builds [`TextSpan`] from current editing value.
+    ///
+    /// By default makes text in composing range appear as underlined. Descendants
+    /// can override this method to customize appearance of text.
+    fn build_text_span(
+        self: Handle<Self>,
+        app: &App,
+        context: BuildContext,
+        style: Option<TextStyle>,
+        with_composing: bool,
+    ) -> TextSpan {
+        TextEditingController::build_text_span(
+            self.as_controller(),
+            app,
+            context,
+            style,
+            with_composing,
+        )
+    }
+
+    // ---- one-line forwarders to the type-erased handle ----
+
+    /// See [`AnyTextEditingController::text_value`].
+    fn text_value(self: Handle<Self>, app: &App) -> &str {
+        &self.text_editing_controller_data(app).value.text
+    }
+
+    /// See [`AnyTextEditingController::set_text`].
+    fn set_text(self: Handle<Self>, app: &mut App, new_text: impl Into<String>) {
+        self.as_controller().set_text(app, new_text);
+    }
+
+    /// See [`AnyTextEditingController::value`].
+    fn value(self: Handle<Self>, app: &App) -> &TextEditingValue {
+        &self.text_editing_controller_data(app).value
+    }
+
+    /// See [`AnyTextEditingController::set_value`].
+    fn set_value(self: Handle<Self>, app: &mut App, new_value: TextEditingValue) {
+        self.as_controller().set_value(app, new_value);
+    }
+
+    /// See [`AnyTextEditingController::selection`].
+    fn selection(self: Handle<Self>, app: &App) -> TextSelection {
+        self.as_controller().selection(app)
+    }
+
+    /// See [`AnyTextEditingController::set_selection`].
+    fn set_selection(self: Handle<Self>, app: &mut App, new_selection: TextSelection) {
+        self.as_controller().set_selection(app, new_selection);
+    }
+
+    /// See [`AnyTextEditingController::clear`].
+    fn clear(self: Handle<Self>, app: &mut App) {
+        self.as_controller().clear(app);
+    }
+
+    /// See [`AnyTextEditingController::clear_composing`].
+    fn clear_composing(self: Handle<Self>, app: &mut App) {
+        self.as_controller().clear_composing(app);
+    }
+
+    /// This controller as the erased [`AnyTextEditingController`]: what to pass where a Dart
+    /// API takes a `TextEditingController`.
+    fn as_controller(self: Handle<Self>) -> AnyTextEditingController {
+        AnyTextEditingController {
+            id: self.id(),
+            vtable: const { &TextEditingControllerVTable::of::<Self>() },
+        }
+    }
+}
 
 /// A controller for an editable text field.
 ///
 /// Whenever the user modifies the text field with an attached this controller,
-/// the text field updates [`value`](Self::value) and the controller notifies its
-/// listeners. Listeners can then read the [`text`](Self::text) and
-/// [`selection`](Self::selection) properties to learn what the user has typed or
-/// how the selection has been updated.
+/// the text field updates [`value`](TextEditingControllerLeaf::value) and the controller
+/// notifies its listeners. Listeners can then read the
+/// [`text_value`](TextEditingControllerLeaf::text_value) and
+/// [`selection`](TextEditingControllerLeaf::selection) properties to learn what the user has
+/// typed or how the selection has been updated.
 ///
-/// Similarly, you can modify the [`text`](Self::text) or [`selection`](Self::selection)
-/// properties, and the listener callbacks will fire.
+/// Similarly, you can modify the text or selection properties, and the listener callbacks
+/// will fire.
+///
+/// To change how the text looks, write a second [`TextEditingControllerLeaf`] that overrides
+/// [`build_text_span`](TextEditingControllerLeaf::build_text_span).
+///
+/// The associated functions on this type are the shared bodies of Dart's
+/// `TextEditingController`; a leaf calls one where Dart writes `super.…`.
 pub struct TextEditingController {
     change_notifier: ChangeNotifierData,
-    value: TextEditingValue,
+    text_editing_controller: TextEditingControllerData,
 }
 
 impl Debug for TextEditingController {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TextEditingController")
-            .field("value", &self.value)
+            .field("value", &self.text_editing_controller.value)
             .finish()
     }
 }
@@ -138,15 +270,12 @@ impl TextEditingController {
     ///
     /// The initial selection is `TextSelection::collapsed(-1, …)`.
     pub fn new(app: &mut App) -> Handle<TextEditingController> {
-        app.create(TextEditingController {
-            change_notifier: ChangeNotifierData::new(),
-            value: TextEditingValue::EMPTY,
-        })
+        TextEditingController::from_value(app, None)
     }
 
     /// Dart `TextEditingController(text:)`.
     pub fn text(self: Handle<Self>, app: &mut App, text: impl Into<String>) -> Handle<Self> {
-        app.get_mut(self).value = TextEditingValue::new().text(text);
+        app.get_mut(self).text_editing_controller.value = TextEditingValue::new().text(text);
         self
     }
 
@@ -165,66 +294,25 @@ impl TextEditingController {
         );
         app.create(TextEditingController {
             change_notifier: ChangeNotifierData::new(),
-            value,
+            text_editing_controller: TextEditingControllerData::new(value),
         })
     }
 
-    /// The current string the user is editing.
-    pub fn text_value(self: Handle<Self>, app: &App) -> &str {
-        &app.get(self).value.text
-    }
-
-    /// Updates the current text to the given `new_text`, and removes existing
-    /// selection and composing range held by the controller.
-    pub fn set_text(self: Handle<Self>, app: &mut App, new_text: impl Into<String>) {
-        self.set_value(
-            app,
-            self.value(app)
-                .clone()
-                .copy_with()
-                .text(new_text)
-                .selection(TextSelection::collapsed(-1, TextAffinity::Downstream))
-                .composing(TextRange::EMPTY),
-        );
-    }
-
-    /// The current [`TextEditingValue`].
-    pub fn value(self: Handle<Self>, app: &App) -> &TextEditingValue {
-        &app.get(self).value
-    }
-
-    /// Setting this does not run `TextInputFormatter`s. Apply them manually if
-    /// needed.
-    pub fn set_value(self: Handle<Self>, app: &mut App, new_value: TextEditingValue) {
-        debug_assert!(
-            !new_value.composing.is_valid() || new_value.is_composing_range_valid(),
-            "New TextEditingValue {new_value:?} has an invalid non-empty composing range \
-             {:?}. It is recommended to use a valid composing range, \
-             even for readonly text fields.",
-            new_value.composing
-        );
-        if app.get(self).value == new_value {
-            return;
-        }
-        app.get_mut(self).value = new_value;
-        self.notify_listeners(app);
-    }
-
-    /// Builds [`TextSpan`] from current editing value.
-    ///
-    /// By default makes text in composing range appear as underlined. Descendants
-    /// can override this method to customize appearance of text.
+    /// See [`TextEditingControllerLeaf::build_text_span`].
     pub fn build_text_span(
-        self: Handle<Self>,
+        controller: AnyTextEditingController,
         app: &App,
         _context: BuildContext,
         style: Option<TextStyle>,
         with_composing: bool,
     ) -> TextSpan {
-        let value = self.value(app).clone();
+        let value = controller.value(app).clone();
         debug_assert!(
             !value.composing.is_valid() || !with_composing || value.is_composing_range_valid()
         );
+        // If the composing range is out of range for the current text, ignore it to
+        // preserve the tree integrity, otherwise in release mode a RangeError will
+        // be thrown and this EditableText will be built with a broken subtree.
         let composing_region_out_of_range = !value.is_composing_range_valid() || !with_composing;
         if composing_region_out_of_range {
             return match style {
@@ -258,19 +346,160 @@ impl TextEditingController {
         ])
     }
 
+    /// Discards any resources used by the object.
+    pub fn dispose(&mut self) {
+        self.change_notifier.dispose();
+    }
+}
+
+impl ChangeNotifier for TextEditingController {
+    fn change_notifier_data(&self) -> &ChangeNotifierData {
+        &self.change_notifier
+    }
+
+    fn change_notifier_data_mut(&mut self) -> &mut ChangeNotifierData {
+        &mut self.change_notifier
+    }
+}
+
+impl TextEditingControllerLeaf for TextEditingController {
+    crate::text_editing_controller_accessors!();
+}
+
+/// The leaf's [`build_text_span`](TextEditingControllerLeaf::build_text_span), erased.
+type BuildTextSpanFn = fn(&App, HandleId, BuildContext, Option<TextStyle>, bool) -> TextSpan;
+
+/// One leaf type's entry points, reached from an [`AnyTextEditingController`].
+struct TextEditingControllerVTable {
+    type_name: fn() -> &'static str,
+    add_listener: fn(&mut App, HandleId, Listener),
+    remove_listener: fn(&mut App, HandleId, &Listener),
+    notify_listeners: fn(&mut App, HandleId),
+    dispose_change_notifier: fn(&mut App, HandleId),
+    data: fn(&App, HandleId) -> &TextEditingControllerData,
+    data_mut: fn(&mut App, HandleId) -> &mut TextEditingControllerData,
+    build_text_span: BuildTextSpanFn,
+}
+
+impl TextEditingControllerVTable {
+    /// The table for one leaf type.
+    const fn of<C: TextEditingControllerLeaf>() -> TextEditingControllerVTable {
+        TextEditingControllerVTable {
+            type_name: std::any::type_name::<C>,
+            add_listener: |app, id, listener| {
+                ListenableObject::add_listener(Handle::<C>::from_id(id), app, listener);
+            },
+            remove_listener: |app, id, listener| {
+                ListenableObject::remove_listener(Handle::<C>::from_id(id), app, listener);
+            },
+            notify_listeners: |app, id| Handle::<C>::from_id(id).notify_listeners(app),
+            dispose_change_notifier: |app, id| {
+                app.get_mut(Handle::<C>::from_id(id))
+                    .change_notifier_data_mut()
+                    .dispose();
+            },
+            data: |app, id| C::text_editing_controller_data(Handle::from_id(id), app),
+            data_mut: |app, id| C::text_editing_controller_data_mut(Handle::from_id(id), app),
+            build_text_span: |app, id, context, style, with_composing| {
+                C::build_text_span(Handle::from_id(id), app, context, style, with_composing)
+            },
+        }
+    }
+}
+
+/// Erased [`TextEditingControllerLeaf`]: what a field or parameter Dart types as
+/// `TextEditingController` becomes.
+///
+/// Equality is Dart's `==` on an object reference.
+#[derive(Clone, Copy)]
+pub struct AnyTextEditingController {
+    id: HandleId,
+    vtable: &'static TextEditingControllerVTable,
+}
+
+impl AnyTextEditingController {
+    fn data(self, app: &App) -> &TextEditingControllerData {
+        (self.vtable.data)(app, self.id)
+    }
+
+    fn data_mut(self, app: &mut App) -> &mut TextEditingControllerData {
+        (self.vtable.data_mut)(app, self.id)
+    }
+
+    /// The current string the user is editing.
+    pub fn text_value(self, app: &App) -> &str {
+        &self.data(app).value.text
+    }
+
+    /// Updates the current text to the given `new_text`, and removes existing
+    /// selection and composing range held by the controller.
+    ///
+    /// This setter is typically only used in tests, as it resets the cursor
+    /// position and the composing state. For production code, consider using the
+    /// [`value`](Self::value) setter to update the text value instead, and specify a
+    /// reasonable selection range within the new text.
+    pub fn set_text(self, app: &mut App, new_text: impl Into<String>) {
+        let value = self
+            .value(app)
+            .clone()
+            .copy_with()
+            .text(new_text)
+            .selection(TextSelection::collapsed(-1, TextAffinity::Downstream))
+            .composing(TextRange::EMPTY);
+        self.set_value(app, value);
+    }
+
+    /// The current [`TextEditingValue`].
+    pub fn value(self, app: &App) -> &TextEditingValue {
+        &self.data(app).value
+    }
+
+    /// Setting this does not run `TextInputFormatter`s. Apply them manually if
+    /// needed.
+    pub fn set_value(self, app: &mut App, new_value: TextEditingValue) {
+        debug_assert!(
+            !new_value.composing.is_valid() || new_value.is_composing_range_valid(),
+            "New TextEditingValue {new_value:?} has an invalid non-empty composing range \
+             {:?}. It is recommended to use a valid composing range, \
+             even for readonly text fields.",
+            new_value.composing
+        );
+        if self.data(app).value == new_value {
+            return;
+        }
+        self.data_mut(app).value = new_value;
+        (self.vtable.notify_listeners)(app, self.id);
+    }
+
+    /// See [`TextEditingControllerLeaf::build_text_span`].
+    pub fn build_text_span(
+        self,
+        app: &App,
+        context: BuildContext,
+        style: Option<TextStyle>,
+        with_composing: bool,
+    ) -> TextSpan {
+        (self.vtable.build_text_span)(app, self.id, context, style, with_composing)
+    }
+
     /// The currently selected range within [`text_value`](Self::text_value).
-    pub fn selection(self: Handle<Self>, app: &App) -> TextSelection {
-        app.get(self).value.selection
+    ///
+    /// If the selection is collapsed, then this property gives the offset of the
+    /// cursor within the text.
+    pub fn selection(self, app: &App) -> TextSelection {
+        self.data(app).value.selection
     }
 
     /// Sets the selection. If the new selection is outside the composing range,
     /// the composing range is cleared.
-    pub fn set_selection(self: Handle<Self>, app: &mut App, new_selection: TextSelection) {
-        let text_len = utf16_len(&app.get(self).value.text);
+    ///
+    /// Panics when the selection falls outside the text.
+    pub fn set_selection(self, app: &mut App, new_selection: TextSelection) {
+        let text_len = utf16_len(self.text_value(app));
         if text_len < new_selection.end() || text_len < new_selection.start() {
             panic!("invalid text selection: {new_selection:?}");
         }
-        let value = app.get(self).value.clone();
+        let value = self.value(app).clone();
         let new_composing = if is_selection_within_composing_range(&value, new_selection) {
             value.composing
         } else {
@@ -286,7 +515,10 @@ impl TextEditingController {
     }
 
     /// Set the [`value`](Self::value) to empty.
-    pub fn clear(self: Handle<Self>, app: &mut App) {
+    ///
+    /// After calling this function, [`text_value`](Self::text_value) will be the empty string
+    /// and the selection will be collapsed at zero offset.
+    pub fn clear(self, app: &mut App) {
         self.set_value(
             app,
             TextEditingValue::new()
@@ -295,14 +527,61 @@ impl TextEditingController {
     }
 
     /// Set the composing region to an empty range.
-    pub fn clear_composing(self: Handle<Self>, app: &mut App) {
+    ///
+    /// The composing region is the range of text that is still being composed.
+    /// Calling this function indicates that the user is done composing that
+    /// region.
+    pub fn clear_composing(self, app: &mut App) {
         let value = self.value(app).clone();
         self.set_value(app, value.copy_with().composing(TextRange::EMPTY));
     }
 
     /// Discards any resources used by the object.
-    pub fn dispose(&mut self) {
-        self.change_notifier.dispose();
+    pub fn dispose(self, app: &mut App) {
+        (self.vtable.dispose_change_notifier)(app, self.id);
+    }
+
+    /// Dart's `toString`, which reads the arena and so cannot be [`std::fmt::Debug`].
+    pub fn describe(self, app: &App) -> String {
+        let name = (self.vtable.type_name)();
+        let short = name.rsplit("::").next().unwrap_or(name);
+        format!("{short}#{:?}({:?})", self.id, self.value(app))
+    }
+}
+
+impl PartialEq for AnyTextEditingController {
+    fn eq(&self, other: &AnyTextEditingController) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for AnyTextEditingController {}
+
+impl Debug for AnyTextEditingController {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "AnyTextEditingController({:?})", self.id)
+    }
+}
+
+impl std::hash::Hash for AnyTextEditingController {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl Listenable for AnyTextEditingController {
+    fn add_listener(&self, app: &mut App, listener: Listener) {
+        (self.vtable.add_listener)(app, self.id, listener);
+    }
+
+    fn remove_listener(&self, app: &mut App, listener: &Listener) {
+        (self.vtable.remove_listener)(app, self.id, listener);
+    }
+}
+
+impl ValueListenable<TextEditingValue> for AnyTextEditingController {
+    fn value<'a>(&'a self, app: &'a App) -> &'a TextEditingValue {
+        &self.data(app).value
     }
 }
 
@@ -319,22 +598,6 @@ fn option_rc_eq<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
         (None, None) => true,
         (Some(a), Some(b)) => Rc::ptr_eq(a, b),
         _ => false,
-    }
-}
-
-impl ChangeNotifier for TextEditingController {
-    fn change_notifier_data(&self) -> &ChangeNotifierData {
-        &self.change_notifier
-    }
-
-    fn change_notifier_data_mut(&mut self) -> &mut ChangeNotifierData {
-        &mut self.change_notifier
-    }
-}
-
-impl crate::widgets::undo_history::UndoHistorySource<TextEditingValue> for TextEditingController {
-    fn history_value(self: Handle<Self>, app: &App) -> &TextEditingValue {
-        self.value(app)
     }
 }
 
@@ -843,7 +1106,7 @@ impl Simulation for DiscreteKeyFrameSimulation {
 pub struct EditableText {
     pub key: Option<KeyRef>,
     /// Controls the text being edited.
-    pub controller: Handle<TextEditingController>,
+    pub controller: AnyTextEditingController,
     /// Controls whether this widget has keyboard focus.
     pub focus_node: Handle<FocusNode>,
     pub read_only: bool,
@@ -955,7 +1218,7 @@ impl EditableText {
 
     /// Creates a basic text input field.
     pub fn new(
-        controller: Handle<TextEditingController>,
+        controller: AnyTextEditingController,
         focus_node: Handle<FocusNode>,
         style: TextStyle,
         cursor_color: Color,
@@ -4258,6 +4521,7 @@ impl EditableTextState {
         // `CompositedTransformTarget(link: _toolbarLayerLink, child: ..)` around the editable.
         let editable = Editable {
             key: Some(Rc::clone(&app.get(self).editable_key) as KeyRef),
+            children: WidgetSpan::extract_from_inline_span(&*inline_span, &text_scaler),
             inline_span,
             value,
             start_handle_layer_link: self.start_handle_layer_link(app),
@@ -5279,12 +5543,13 @@ impl TextSelectionDelegate for EditableTextState {
     }
 }
 
-/// Leaf render-object widget that configures [`RenderEditable`].
-///
-/// Flutter's `_Editable` is a `MultiChildRenderObjectWidget` so `WidgetSpan`
-/// children can mount. Ours [`RenderEditable`] is a leaf, so this widget is too.
+/// Flutter's `_Editable`: configures [`RenderEditable`], with the `WidgetSpan`s of its
+/// [`inline_span`](Self::inline_span) as its children.
 struct Editable {
     key: Option<KeyRef>,
+    /// `WidgetSpan::extract_from_inline_span(inline_span, text_scaler)`, as Dart's constructor
+    /// passes to `super(children:)`.
+    children: Vec<WidgetRef>,
     inline_span: InlineSpanRef,
     value: TextEditingValue,
     start_handle_layer_link: Handle<LayerLink>,
@@ -5406,7 +5671,11 @@ impl RenderObjectWidget for Editable {
     }
 }
 
-impl LeafRenderObjectWidget for Editable {}
+impl MultiChildRenderObjectWidget for Editable {
+    fn children(&self) -> &[WidgetRef] {
+        &self.children
+    }
+}
 
 /// Prevents scrolling with user input, but still allows programmatic scrolling.
 struct NeverUserScrollableScrollPhysics {
@@ -6172,7 +6441,13 @@ mod tests {
         let controller = TextEditingController::new(app);
         let focus_node = FocusNode::new(app);
         let color = Color::from_argb(255, 0, 0, 0);
-        EditableText::new(controller, focus_node, TextStyle::new(), color, color)
+        EditableText::new(
+            controller.as_controller(),
+            focus_node,
+            TextStyle::new(),
+            color,
+            color,
+        )
     }
 
     #[test]
@@ -6347,6 +6622,98 @@ mod tests {
             .and_then(|data| data.text)
     }
 
+    /// A controller of an application's own that shows each U+FFFC in its text as a 30x20
+    /// box, as a Dart subclass overriding `buildTextSpan` does.
+    struct BoxesController {
+        change_notifier: ChangeNotifierData,
+        text_editing_controller: TextEditingControllerData,
+    }
+
+    impl ChangeNotifier for BoxesController {
+        fn change_notifier_data(&self) -> &ChangeNotifierData {
+            &self.change_notifier
+        }
+
+        fn change_notifier_data_mut(&mut self) -> &mut ChangeNotifierData {
+            &mut self.change_notifier
+        }
+    }
+
+    impl TextEditingControllerLeaf for BoxesController {
+        crate::text_editing_controller_accessors!();
+
+        fn build_text_span(
+            self: Handle<Self>,
+            app: &App,
+            _context: BuildContext,
+            style: Option<TextStyle>,
+            _with_composing: bool,
+        ) -> TextSpan {
+            let mut children = Vec::new();
+            for (index, part) in self.text_value(app).split('\u{FFFC}').enumerate() {
+                if index > 0 {
+                    let boxed = crate::widgets::basic::SizedBox::new()
+                        .width(30.0)
+                        .height(20.0);
+                    children.push(WidgetSpan::new(boxed).into_span());
+                }
+                children.push(TextSpan::new().text(part).into_span());
+            }
+            let span = TextSpan::new().children(children);
+            match style {
+                Some(style) => span.style(style),
+                None => span,
+            }
+        }
+    }
+
+    #[test]
+    fn a_controller_of_its_own_puts_a_widget_inside_the_text() {
+        use inset_rendering::ContainerRenderObjectMixin;
+
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        install_fonts(&mut app);
+        let controller = app.create(BoxesController {
+            change_notifier: ChangeNotifierData::new(),
+            text_editing_controller: TextEditingControllerData::new(
+                TextEditingValue::new().text("ab\u{FFFC}cd"),
+            ),
+        });
+        let focus_node = FocusNode::new(&mut app);
+        let color = Color::from_argb(255, 0, 0, 0);
+        let editable = EditableText::new(
+            controller.as_controller(),
+            focus_node,
+            TextStyle::new().font_size(14.0),
+            color,
+            color,
+        );
+        let tree = MediaQuery::new(
+            MediaQueryData::new(),
+            Directionality::new(TextDirection::Ltr, editable),
+        )
+        .into_widget();
+        let harness = Harness::mount(&mut app, tree);
+        harness.pump(&mut app);
+
+        let editable =
+            find_editable(&app, harness.render_root(&app).as_object()).expect("a RenderEditable");
+        assert_eq!(editable.child_count(&app), 1, "one inline widget");
+        let inline = editable.first_child(&app).expect("the inline widget");
+        let offset = inline
+            .as_object()
+            .parent_data_of::<inset_rendering::TextParentData>(&app)
+            .offset()
+            .expect("laid out");
+        assert!(offset.dx() > 0.0, "after \"ab\"");
+        assert_eq!(inline.size(&app), Size::new(30.0, 20.0));
+        assert!(
+            editable.size(&app).height() >= 20.0,
+            "the line grows to the widget"
+        );
+    }
+
     // editable_text_test.dart 'cut and copy do nothing in obscured mode even if explicitly
     // called'.
     #[test]
@@ -6359,7 +6726,7 @@ mod tests {
             let controller = TextEditingController::new(&mut app).text(&mut app, "blah blah");
             let focus_node = FocusNode::new(&mut app);
             let editable = EditableText::new(
-                controller,
+                controller.as_controller(),
                 focus_node,
                 TextStyle::new(),
                 Color::from_argb(255, 255, 0, 0),
@@ -6424,7 +6791,7 @@ mod tests {
             );
             let focus_node = FocusNode::new(&mut app);
             let editable = EditableText::new(
-                controller,
+                controller.as_controller(),
                 focus_node,
                 TextStyle::new().font_size(36.0),
                 Color::from_argb(255, 255, 0, 0),
@@ -6486,7 +6853,7 @@ mod tests {
             let controller = TextEditingController::new(&mut app).text(&mut app, text);
             let focus_node = FocusNode::new(&mut app);
             let editable = EditableText::new(
-                controller,
+                controller.as_controller(),
                 focus_node,
                 TextStyle::new(),
                 Color::from_argb(255, 255, 0, 0),
@@ -6560,7 +6927,7 @@ mod tests {
         let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
         let focus_node = FocusNode::new(&mut app);
         let editable = EditableText::new(
-            controller,
+            controller.as_controller(),
             focus_node,
             TextStyle::new(),
             Color::from_argb(255, 0, 0, 0),
@@ -6605,7 +6972,7 @@ mod tests {
                     return SizedBox::shrink().into_widget();
                 }
                 EditableText::new(
-                    controller,
+                    controller.as_controller(),
                     focus_node,
                     TextStyle::new(),
                     Color::from_argb(255, 0, 0, 0),

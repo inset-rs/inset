@@ -10,6 +10,7 @@ use std::rc::Rc;
 use inset_embedder::{ParagraphBuilder, TextPosition};
 
 use crate::basic_types::RenderComparison;
+use crate::placeholder_span::PlaceholderSpan;
 use crate::text_painter::PlaceholderDimensions;
 use crate::text_scaler::TextScaler;
 use crate::text_style::TextStyle;
@@ -45,7 +46,7 @@ pub type InlineSpanRef = Rc<dyn InlineSpan>;
 /// An immutable span of inline content which forms part of a paragraph.
 ///
 ///  * The subclass `TextSpan` specifies text and may contain child [`InlineSpan`]s.
-///  * `PlaceholderSpan` (deferred) represents a placeholder that may be filled with
+///  * The subclass [`PlaceholderSpan`] represents a placeholder that may be filled with
 ///    non-text content.
 ///
 /// Spans are shared as [`InlineSpanRef`]. A visitor receives `&dyn InlineSpan` with the tree's
@@ -196,6 +197,11 @@ pub trait InlineSpan: Debug {
 
     /// Downcast support for Dart's `runtimeType` and `is` checks.
     fn as_any(&self) -> &dyn Any;
+
+    /// Dart's `span is PlaceholderSpan`: this span as a [`PlaceholderSpan`], when it is one.
+    fn as_placeholder_span(&self) -> Option<&dyn PlaceholderSpan> {
+        None
+    }
 
     /// Dart's `==`: deep equality on the same span class.
     fn eq_span(&self, other: &dyn InlineSpan) -> bool;

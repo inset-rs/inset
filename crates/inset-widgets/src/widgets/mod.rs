@@ -90,4 +90,5 @@ pub mod undo_history;
 pub mod value_listenable_builder;
 pub mod viewport;
 pub mod visibility;
+pub mod widget_span;
 pub mod widget_state;

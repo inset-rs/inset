@@ -26,18 +26,18 @@ use inset_services::{
     LengthLimitingTextInputFormatter, MaxLengthEnforcement, TextInputFormatterRef,
 };
 use inset_widgets::{
-    Align, AutomaticKeepAliveClientMixin, AutomaticKeepAliveClientMixinData, BuildContext,
-    Container, ContentInsertionConfiguration, Directionality, EditableText,
-    EditableTextContextMenuBuilder, EditableTextState, Expanded, FocusNode, FocusNodeLeaf,
-    GestureDetector, GlobalKey, IgnorePointer, IntoWidget, KeyRef, MediaQuery, Padding,
-    RepaintBoundary, RestorableListenable, RestorableProperty, RestorableTextEditingController,
-    RestorationBucket, RestorationMixin, RestorationMixinData, Row, ScrollController,
-    ScrollPhysicsRef, SizedBox, SpellCheckConfiguration, Stack, State, StateData, StatefulWidget,
-    SystemContextMenu, Text, TextEditingController, TextFieldTapRegion, TextMagnifierConfiguration,
-    TextSelectionControls, TextSelectionGestureDetectorBuilder,
-    TextSelectionGestureDetectorBuilderBase, TextSelectionGestureDetectorBuilderData,
-    TextSelectionGestureDetectorBuilderDelegate, ToolbarOptions, UndoHistoryController,
-    UnmanagedRestorationScope, Visibility, WidgetRef,
+    Align, AnyTextEditingController, AutomaticKeepAliveClientMixin,
+    AutomaticKeepAliveClientMixinData, BuildContext, Container, ContentInsertionConfiguration,
+    Directionality, EditableText, EditableTextContextMenuBuilder, EditableTextState, Expanded,
+    FocusNode, FocusNodeLeaf, GestureDetector, GlobalKey, IgnorePointer, IntoWidget, KeyRef,
+    MediaQuery, Padding, RepaintBoundary, RestorableListenable, RestorableProperty,
+    RestorableTextEditingController, RestorationBucket, RestorationMixin, RestorationMixinData,
+    Row, ScrollController, ScrollPhysicsRef, SizedBox, SpellCheckConfiguration, Stack, State,
+    StateData, StatefulWidget, SystemContextMenu, Text, TextEditingControllerLeaf,
+    TextFieldTapRegion, TextMagnifierConfiguration, TextSelectionControls,
+    TextSelectionGestureDetectorBuilder, TextSelectionGestureDetectorBuilderBase,
+    TextSelectionGestureDetectorBuilderData, TextSelectionGestureDetectorBuilderDelegate,
+    ToolbarOptions, UndoHistoryController, UnmanagedRestorationScope, Visibility, WidgetRef,
 };
 
 use crate::adaptive_text_selection_toolbar::CupertinoAdaptiveTextSelectionToolbar;
@@ -98,7 +98,7 @@ pub struct CupertinoTextField {
     /// Controls the text being edited.
     ///
     /// If null, this widget will create its own [`TextEditingController`].
-    pub controller: Option<Handle<TextEditingController>>,
+    pub controller: Option<AnyTextEditingController>,
     /// {@macro flutter.widgets.Focus.focusNode}
     pub focus_node: Option<Handle<FocusNode>>,
     /// {@macro flutter.widgets.undoHistory.controller}
@@ -346,7 +346,7 @@ impl CupertinoTextField {
     }
 
     /// Dart `CupertinoTextField(controller:)`.
-    pub fn controller(mut self, controller: Handle<TextEditingController>) -> CupertinoTextField {
+    pub fn controller(mut self, controller: AnyTextEditingController) -> CupertinoTextField {
         self.controller = Some(controller);
         self
     }
@@ -1009,13 +1009,13 @@ pub struct CupertinoTextFieldState {
     editable_text_key: GlobalKey,
     controller: Option<Handle<RestorableTextEditingController>>,
     focus_node: Option<Handle<FocusNode>>,
-    listening_controller: Option<Handle<TextEditingController>>,
+    listening_controller: Option<AnyTextEditingController>,
     selection_gesture_detector_builder:
         Option<Handle<CupertinoTextFieldSelectionGestureDetectorBuilder>>,
 }
 
 impl CupertinoTextFieldState {
-    fn effective_controller(self: Handle<Self>, app: &App) -> Handle<TextEditingController> {
+    fn effective_controller(self: Handle<Self>, app: &App) -> AnyTextEditingController {
         if let Some(controller) = self.widget(app).controller {
             return controller;
         }
@@ -1023,7 +1023,7 @@ impl CupertinoTextFieldState {
             .get(self)
             .controller
             .expect("a local controller exists when the widget does not supply one");
-        RestorableListenable::value(restorable, app)
+        RestorableListenable::value(restorable, app).as_controller()
     }
 
     fn effective_focus_node(self: Handle<Self>, app: &App) -> Handle<FocusNode> {
@@ -1820,6 +1820,7 @@ fn debug_assert_widget_invariants(state: Handle<CupertinoTextFieldState>, app: &
 #[cfg(test)]
 mod tests {
     use super::*;
+    use inset_widgets::TextEditingController;
     use std::any::TypeId;
     use std::time::Duration;
 
@@ -1963,7 +1964,7 @@ mod tests {
                 .home(
                     CupertinoTextField::new()
                         .key(key_ref)
-                        .controller(controller),
+                        .controller(controller.as_controller()),
                 )
                 .into_widget(),
         );
@@ -2056,7 +2057,7 @@ mod tests {
                             .child(
                                 CupertinoTextField::new()
                                     .key(key_ref)
-                                    .controller(controller),
+                                    .controller(controller.as_controller()),
                             )
                             .into_widget(),
                         // Something for a click below the field to land on, the way the gallery's

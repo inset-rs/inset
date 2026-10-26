@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use inset_embedder::TargetPlatform;
 use inset_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, Listener, Timer, ValueNotifier,
+    App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, Listener, Timer, ValueListenable,
+    ValueNotifier,
 };
 use inset_services::{UndoDirection, UndoManager, UndoManagerClient};
 
@@ -29,22 +30,6 @@ pub type ShouldChangeUndoStack<T> = Rc<dyn Fn(Option<&T>, &T) -> bool>;
 /// Called right before a new entry is pushed to the undo stack.
 pub type UndoStackModifier<T> = Rc<dyn Fn(T) -> T>;
 
-/// A leaf [`UndoHistory`] can listen to and read, Dart's `ValueNotifier<T>`.
-///
-/// [`TextEditingController`](crate::TextEditingController) is a sibling leaf of
-/// [`ValueNotifier`], not a subclass, so the widget is generic over this trait instead
-/// of `Handle<ValueNotifier<T>>`.
-pub trait UndoHistorySource<T>: ChangeNotifier + 'static {
-    /// The current value. Dart's `ValueNotifier.value`.
-    fn history_value(self: Handle<Self>, app: &App) -> &T;
-}
-
-impl<T: 'static> UndoHistorySource<T> for ValueNotifier<T> {
-    fn history_value(self: Handle<Self>, app: &App) -> &T {
-        app.get(self).value()
-    }
-}
-
 /// Provides undo/redo capabilities for a [`ValueNotifier`].
 ///
 /// Listens to [`value`](Self::value) and saves relevant values for undoing/redoing. The
@@ -57,14 +42,20 @@ impl<T: 'static> UndoHistorySource<T> for ValueNotifier<T> {
 ///
 /// The [`child`](Self::child) must manage focus on the [`focus_node`](Self::focus_node). For
 /// example, using a `TextField` or `Focus` widget.
-pub struct UndoHistory<T: Clone + PartialEq + 'static, V: UndoHistorySource<T> = ValueNotifier<T>> {
+///
+/// The [`value`](Self::value) is any [`ValueListenable`] handle, which Dart types as a
+/// `ValueNotifier<T>`: a `Handle<ValueNotifier<T>>`, or an `AnyTextEditingController`.
+pub struct UndoHistory<
+    T: Clone + PartialEq + 'static,
+    V: ValueListenable<T> + Copy + PartialEq + 'static = Handle<ValueNotifier<T>>,
+> {
     /// See [`Widget::key`](crate::Widget::key).
     pub key: Option<KeyRef>,
     /// Called when checking whether a value change should be pushed onto
     /// the undo stack.
     pub should_change_undo_stack: Option<ShouldChangeUndoStack<T>>,
     /// The value to track over time.
-    pub value: Handle<V>,
+    pub value: V,
     /// Called when an undo or redo causes a state change.
     ///
     /// If the state would still be the same before and after the undo/redo, this
@@ -94,10 +85,12 @@ pub struct UndoHistory<T: Clone + PartialEq + 'static, V: UndoHistorySource<T> =
     pub child: WidgetRef,
 }
 
-impl<T: Clone + PartialEq + 'static, V: UndoHistorySource<T>> UndoHistory<T, V> {
+impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 'static>
+    UndoHistory<T, V>
+{
     /// Creates an instance of [`UndoHistory`].
     pub fn new<K>(
-        value: Handle<V>,
+        value: V,
         on_triggered: impl Fn(&mut App, T) + 'static,
         focus_node: Handle<FocusNode>,
         child: impl IntoWidget<K>,
@@ -145,7 +138,9 @@ impl<T: Clone + PartialEq + 'static, V: UndoHistorySource<T>> UndoHistory<T, V> 
     }
 }
 
-impl<T: Clone + PartialEq + 'static, V: UndoHistorySource<T>> Debug for UndoHistory<T, V> {
+impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 'static> Debug
+    for UndoHistory<T, V>
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("UndoHistory")
             .field("child", &self.child)
@@ -153,7 +148,9 @@ impl<T: Clone + PartialEq + 'static, V: UndoHistorySource<T>> Debug for UndoHist
     }
 }
 
-impl<T: Clone + PartialEq + 'static, V: UndoHistorySource<T>> StatefulWidget for UndoHistory<T, V> {
+impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 'static>
+    StatefulWidget for UndoHistory<T, V>
+{
     type State = UndoHistoryState<T, V>;
 
     fn key(&self) -> Option<&KeyRef> {
@@ -180,7 +177,7 @@ impl<T: Clone + PartialEq + 'static, V: UndoHistorySource<T>> StatefulWidget for
 /// and redo UI implementations.
 pub struct UndoHistoryState<
     T: Clone + PartialEq + 'static,
-    V: UndoHistorySource<T> = ValueNotifier<T>,
+    V: ValueListenable<T> + Copy + PartialEq + 'static = Handle<ValueNotifier<T>>,
 > {
     state: StateData<UndoHistory<T, V>>,
     stack: UndoStack<T>,
@@ -215,7 +212,9 @@ impl Drop for DuringTriggerGuard {
     }
 }
 
-impl<T: Clone + PartialEq + 'static, V: UndoHistorySource<T>> UndoHistoryState<T, V> {
+impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 'static>
+    UndoHistoryState<T, V>
+{
     fn effective_controller(self: Handle<Self>, app: &mut App) -> Handle<UndoHistoryController> {
         if let Some(controller) = self.widget(app).controller {
             return controller;
@@ -311,12 +310,12 @@ impl<T: Clone + PartialEq + 'static, V: UndoHistorySource<T>> UndoHistoryState<T
         let _guard = DuringTriggerGuard::enter(&flag);
         let on_triggered = Rc::clone(&self.widget(app).on_triggered);
         on_triggered(app, next_value.clone());
-        debug_assert!(self.widget(app).value.history_value(app) == &next_value);
+        debug_assert!(self.widget(app).value.value(app) == &next_value);
     }
 
     fn push(self: Handle<Self>, app: &mut App) {
         let value = self.widget(app).value;
-        let current = value.history_value(app).clone();
+        let current = value.value(app).clone();
         if app.get(self).last_value.as_ref() == Some(&current) {
             return;
         }
@@ -386,8 +385,8 @@ impl<T: Clone + PartialEq + 'static, V: UndoHistorySource<T>> UndoHistoryState<T
     }
 }
 
-impl<T: Clone + PartialEq + 'static, V: UndoHistorySource<T>> UndoManagerClient
-    for UndoHistoryState<T, V>
+impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 'static>
+    UndoManagerClient for UndoHistoryState<T, V>
 {
     fn handle_platform_undo(self: Handle<Self>, app: &mut App, direction: UndoDirection) {
         match direction {
@@ -413,7 +412,9 @@ impl<T: Clone + PartialEq + 'static, V: UndoHistorySource<T>> UndoManagerClient
     }
 }
 
-impl<T: Clone + PartialEq + 'static, V: UndoHistorySource<T>> State for UndoHistoryState<T, V> {
+impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 'static> State
+    for UndoHistoryState<T, V>
+{
     type Widget = UndoHistory<T, V>;
     crate::state_accessors!();
 

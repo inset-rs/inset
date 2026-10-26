@@ -4,8 +4,8 @@
 //! `InheritedTheme` capture (`wrap`, `captureAll`) waits. [`Text`] builds only the
 //! [`RichText`] branch: selection (`SelectionContainer`, `_SelectableTextContainer`,
 //! `selectionColor`),
-//! `Locale`, `StrutStyle`, and `Semantics` wait. [`RichText`] is a leaf here: `WidgetSpan`
-//! children and the `SelectionRegistrar` wait.
+//! `Locale`, `StrutStyle`, and `Semantics` wait, and so does [`RichText`]'s
+//! `SelectionRegistrar`.
 
 use inset_embedder::{FontWeight, TextAlign, TextDirection, TextHeightBehavior};
 use inset_foundation::App;
@@ -15,12 +15,13 @@ use inset_painting::{
 use inset_rendering::{AnyRenderObject, RenderBox, RenderHandle, RenderParagraph};
 
 use crate::framework::{
-    BuildContext, InheritedWidget, IntoWidget, KeyRef, LeafRenderObjectWidget, RenderObjectWidget,
-    StatelessWidget, WidgetRef,
+    BuildContext, InheritedWidget, IntoWidget, KeyRef, MultiChildRenderObjectWidget,
+    RenderObjectWidget, StatelessWidget, WidgetRef,
 };
 use crate::view::View;
 use crate::widgets::basic::Directionality;
 use crate::widgets::media_query::MediaQuery;
+use crate::widgets::widget_span::WidgetSpan;
 
 // ---------------------------------------------------------------------------------------------
 // DefaultTextStyle
@@ -703,6 +704,9 @@ pub struct RichText {
     pub key: Option<KeyRef>,
     /// The text to display in this widget.
     pub text: InlineSpanRef,
+    /// The inline widgets of [`text`](Self::text), its `WidgetSpan`s at
+    /// [`text_scaler`](Self::text_scaler), as Dart's constructor extracts them.
+    children: Vec<WidgetRef>,
     /// How the text should be aligned horizontally.
     pub text_align: TextAlign,
     /// The directionality of the text.
@@ -752,6 +756,7 @@ impl RichText {
     pub fn new(text: InlineSpanRef) -> RichText {
         RichText {
             key: None,
+            children: WidgetSpan::extract_from_inline_span(&*text, &TextScaler::NO_SCALING),
             text,
             text_align: TextAlign::Start,
             text_direction: None,
@@ -796,6 +801,7 @@ impl RichText {
 
     /// Dart `RichText(textScaler:)`.
     pub fn text_scaler(mut self, text_scaler: TextScaler) -> RichText {
+        self.children = WidgetSpan::extract_from_inline_span(&*self.text, &text_scaler);
         self.text_scaler = text_scaler;
         self
     }
@@ -874,7 +880,11 @@ impl RenderObjectWidget for RichText {
     }
 }
 
-impl LeafRenderObjectWidget for RichText {}
+impl MultiChildRenderObjectWidget for RichText {
+    fn children(&self) -> &[WidgetRef] {
+        &self.children
+    }
+}
 
 #[cfg(test)]
 mod tests {

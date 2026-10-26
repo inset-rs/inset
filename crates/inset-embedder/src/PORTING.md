@@ -32,9 +32,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — valo has no default font manager, so an empty `families` list would walk fallbacks and land on `FontId(0)`.
   Affect: text that leaves `font_family` unset paints in the platform UI font instead of whichever face happened to be registered first.
 
-- Change: `Paragraph` and `ParagraphBuilder` wrap valo's, with offsets in UTF-16 code units; there are no placeholders, box styles are ignored, and the ideographic baseline is the first line's bottom.
-  Reason: platform — valo's paragraph has no placeholders, box styles, per-box direction or ideographic metrics.
-  Affect: a `WidgetSpan` cannot be laid out, `TextBox::direction` is the paragraph's rather than the run's, and `BoxHeightStyle::Strut` and `Max` measure as `Tight`.
+- Change: `Paragraph` and `ParagraphBuilder` wrap valo's, with offsets in UTF-16 code units; box styles are ignored, and the ideographic baseline is the first line's bottom.
+  Reason: platform — valo's paragraph has no box styles, per-box direction for a range or ideographic metrics.
+  Affect: a range's `TextBox::direction` is the paragraph's rather than the run's (a placeholder's is its run's), and `BoxHeightStyle::Strut` and `Max` measure as `Tight`.
 
 - Change: a run carries no decoration style, background paint, font features or variations, baseline or leading distribution; a combined decoration paints underline, else overline, else line-through, and an unset `font_size` shapes at valo's 14.
   Reason: platform — those are not valo span fields.
@@ -200,7 +200,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - The colour space an image carries beyond sRGB, so a photograph in a wider one is drawn as though it were sRGB. Trigger: a display that shows more colours than sRGB.
 - Making an image from pixels that were never encoded (`ImageDescriptor.raw`, `decodeImageFromPixels`). Trigger: a caller holding pixels rather than a file.
 - How far along a decode is, which Dart's codec reports as it reads the file. Trigger: a provider that reports progress.
-- `StrutStyle`, `TextStyle.locale` / `ParagraphStyle.locale`, `addPlaceholder` / `placeholderScales`, `getBoxesForPlaceholders` contents. Trigger: strut, locale-specific glyphs, `WidgetSpan`; valo has none of them.
+- `StrutStyle`, `TextStyle.locale` / `ParagraphStyle.locale`. Trigger: strut, locale-specific glyphs; valo has neither.
 - `ImageFilter.blur(tileMode:)` and the `dilate` / `erode` / `matrix` / `shader` filters. Trigger: valo growing those ops.
 - `PlatformDispatcher.locale`, the first of `locales`. Trigger: a caller of the single-locale getter.
 - The system font's optical size by text size, which CoreText applies for the engine. Trigger: valo-text setting variation axes from the text size.

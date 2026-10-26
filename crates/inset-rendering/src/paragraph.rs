@@ -1,35 +1,337 @@
 //! Flutter counterpart: `rendering/paragraph.dart` (`RenderParagraph`).
 //!
-//! The paragraph is a leaf here: inline children (`WidgetSpan` placeholders), selection
-//! (`SelectionRegistrar` / `_SelectableFragment`), the fade overflow shader, and semantics
-//! wait; see `PORTING.md`.
+//! Selection (`SelectionRegistrar` / `_SelectableFragment`), the fade overflow shader, span
+//! hit-test targets and semantics wait; see `PORTING.md`.
+
+use std::any::{Any, TypeId};
+use std::fmt;
+use std::rc::Rc;
 
 use inset_embedder::{
-    BoxHeightStyle, BoxWidthStyle, ClipOp, FontCollection, Offset, Rect, Size, TextAlign,
-    TextBaseline, TextBox, TextDirection, TextHeightBehavior, TextPosition, TextRange,
-    TextSelection,
+    BoxHeightStyle, BoxWidthStyle, ClipOp, FontCollection, Matrix4, Offset, PlaceholderAlignment,
+    Rect, Size, TextAlign, TextBaseline, TextBox, TextDirection, TextHeightBehavior, TextPosition,
+    TextRange, TextSelection,
 };
 use inset_foundation::{App, Handle};
 use inset_painting::{
-    ClipContext, InlineSpanRef, PaintingBinding, RenderComparison, TextOverflow, TextPainter,
-    TextScaler, TextWidthBasis,
+    ClipContext, InlineSpanRef, PaintingBinding, PlaceholderDimensions, PlaceholderSpan,
+    RenderComparison, TextOverflow, TextPainter, TextScaler, TextWidthBasis,
 };
 
-use crate::box_::{BoxConstraints, BoxHitTestResult, RenderBox, RenderBoxData};
-use crate::object::{AnyRenderObject, Constraints, RenderHandle, RenderObject, RenderObjectData};
+use crate::box_::{AnyRenderBox, BoxConstraints, BoxHitTestResult, RenderBox, RenderBoxData};
+use crate::layout_helper::{ChildBaselineGetter, ChildLayoutHelper, ChildLayouter};
+use crate::object::{
+    AnyRenderObject, Constraints, ContainerParentData, ContainerParentDataMixin,
+    ContainerRenderObjectData, ContainerRenderObjectMixin, ParentData, RenderHandle, RenderObject,
+    RenderObjectData,
+};
 use crate::painting_context::PaintingContext;
+use crate::pipeline_owner::PipelineOwner;
 use crate::{RelayoutWhenSystemFontsChangeData, RelayoutWhenSystemFontsChangeMixin};
 
 const K_ELLIPSIS: &str = "\u{2026}";
 
+/// Parent data used by [`RenderParagraph`] and `RenderEditable` to annotate inline contents
+/// (such as `WidgetSpan`s) with.
+#[derive(Debug, Default)]
+pub struct TextParentData {
+    container_parent_data: ContainerParentData<AnyRenderBox>,
+    offset: Option<Offset>,
+
+    /// The [`PlaceholderSpan`] associated with this render child.
+    ///
+    /// This field is usually set by a `ParentDataWidget`, and is typically not `None` when
+    /// `perform_layout` is called.
+    pub span: Option<Rc<dyn PlaceholderSpan>>,
+}
+
+impl TextParentData {
+    /// The offset at which to paint the child in the parent's coordinate system.
+    ///
+    /// A `None` value indicates this inline widget is not laid out. For instance, when the
+    /// inline widget has never been laid out, or the inline widget is ellipsized away.
+    pub fn offset(&self) -> Option<Offset> {
+        self.offset
+    }
+}
+
+impl ParentData for TextParentData {
+    fn detach(&mut self) {
+        self.span = None;
+        self.offset = None;
+        ContainerParentDataMixin::detach(self);
+    }
+
+    fn provide(&self, id: TypeId) -> Option<&dyn Any> {
+        (id == TypeId::of::<TextParentData>()).then_some(self)
+    }
+
+    fn provide_mut(&mut self, id: TypeId) -> Option<&mut dyn Any> {
+        (id == TypeId::of::<TextParentData>()).then_some(self)
+    }
+}
+
+impl ContainerParentDataMixin for TextParentData {
+    type ChildType = AnyRenderBox;
+
+    fn container_parent_data(&self) -> &ContainerParentData<AnyRenderBox> {
+        &self.container_parent_data
+    }
+
+    fn container_parent_data_mut(&mut self) -> &mut ContainerParentData<AnyRenderBox> {
+        &mut self.container_parent_data
+    }
+}
+
+impl fmt::Display for TextParentData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "widget: {:?}, ", self.span)?;
+        match self.offset {
+            None => f.write_str("not laid out"),
+            Some(offset) => write!(f, "offset: {offset:?}"),
+        }
+    }
+}
+
+/// A mixin that provides useful default behaviors for text [`RenderBox`]es
+/// ([`RenderParagraph`] and `RenderEditable` for example) with inline content children
+/// managed by the [`ContainerRenderObjectMixin`] mixin.
+///
+/// This mixin assumes every child managed by the [`ContainerRenderObjectMixin`] mixin
+/// corresponds to a [`PlaceholderSpan`], and they are organized in logical order of the text
+/// (the order each [`PlaceholderSpan`] is encountered when the user reads the text).
+///
+/// To use this mixin in a [`RenderBox`] class:
+///
+///  * Call [`layout_inline_children`](Self::layout_inline_children) in the `perform_layout`
+///    and `compute_dry_layout` implementation, and during intrinsic size calculations, to get
+///    the size information of the inline widgets as a `Vec` of [`PlaceholderDimensions`].
+///    Determine the positioning of the inline widgets (which is usually done by a
+///    [`TextPainter`] using its line break algorithm).
+///
+///  * Call [`position_inline_children`](Self::position_inline_children) with the positioning
+///    information of the inline widgets.
+///
+///  * Implement [`RenderBox::apply_paint_transform`], optionally with
+///    [`default_apply_paint_transform`](Self::default_apply_paint_transform).
+///
+///  * Call [`paint_inline_children`](Self::paint_inline_children) in [`RenderObject::paint`]
+///    to paint the inline widgets.
+///
+///  * Call [`hit_test_inline_children`](Self::hit_test_inline_children) in
+///    [`RenderBox::hit_test_children`] to hit test the inline widgets.
+///
+/// See also:
+///
+///  * `WidgetSpan::extract_from_inline_span`, a helper function for extracting `WidgetSpan`s
+///    from an `InlineSpan` tree.
+pub trait RenderInlineChildrenContainerDefaults:
+    RenderBox + ContainerRenderObjectMixin<ChildType = AnyRenderBox, ParentDataType = TextParentData>
+{
+    /// Installs [`TextParentData`] on `child`, the mixin's `setupParentData`.
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        if !child.parent_data_is::<TextParentData>(app) {
+            child.set_parent_data(app, TextParentData::default());
+        }
+    }
+
+    /// Computes the layout for every inline child using the `max_width` constraint.
+    ///
+    /// Returns a list of [`PlaceholderDimensions`], representing the layout results for each
+    /// child managed by the [`ContainerRenderObjectMixin`] mixin.
+    ///
+    /// The `get_child_baseline` parameter and the `layout_child` parameter must be
+    /// consistent: if `layout_child` computes the size of the child without modifying the
+    /// actual layout of that child, then `get_child_baseline` must also be "dry", and vice
+    /// versa.
+    ///
+    /// Since this method does not impose a maximum height constraint on the inline children,
+    /// some children may become taller than this [`RenderBox`].
+    ///
+    /// See also:
+    ///
+    ///  * [`TextPainter::set_placeholder_dimensions`], the method that usually takes the
+    ///    layout results from this method as the input.
+    fn layout_inline_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        max_width: f64,
+        layout_child: ChildLayouter,
+        get_child_baseline: ChildBaselineGetter,
+    ) -> Vec<PlaceholderDimensions> {
+        let constraints = BoxConstraints::new().max_width(max_width);
+        let mut dimensions = Vec::new();
+        let mut child = self.first_child(app);
+        while let Some(current) = child {
+            dimensions.push(layout_child_inline(
+                app,
+                current,
+                constraints,
+                layout_child,
+                get_child_baseline,
+            ));
+            child = self.child_after(app, current);
+        }
+        dimensions
+    }
+
+    /// Positions each inline child according to the coordinates provided in the `boxes`
+    /// list.
+    ///
+    /// The `boxes` list must be in logical order, which is the order each child is
+    /// encountered when the user reads the text. Usually the length of the list equals
+    /// [`child_count`](ContainerRenderObjectMixin::child_count), but it can be less than
+    /// that, when some children are omitted due to ellipsing. It never exceeds
+    /// [`child_count`](ContainerRenderObjectMixin::child_count).
+    ///
+    /// See also:
+    ///
+    ///  * [`TextPainter::inline_placeholder_boxes`], the method that can be used to get the
+    ///    input `boxes`.
+    fn position_inline_children(self: RenderHandle<Self>, app: &mut App, boxes: &[TextBox]) {
+        let mut child = self.first_child(app);
+        for text_box in boxes {
+            let Some(current) = child else {
+                debug_assert!(
+                    false,
+                    "Invalid number of boxes provided to positionInlineChildren. The number of \
+                     boxes ({}) exceeds the number of child render objects ({}).",
+                    boxes.len(),
+                    self.child_count(app)
+                );
+                return;
+            };
+            text_parent_data_mut(app, current).offset =
+                Some(Offset::new(text_box.left, text_box.top));
+            child = self.child_after(app, current);
+        }
+        while let Some(current) = child {
+            text_parent_data_mut(app, current).offset = None;
+            child = self.child_after(app, current);
+        }
+    }
+
+    /// Applies the transform that would be applied when painting the given child to the given
+    /// matrix.
+    ///
+    /// Render children whose [`TextParentData::offset`] is `None` zeros out the `transform` to
+    /// indicate they're invisible thus should not be painted.
+    fn default_apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        match child.parent_data_of::<TextParentData>(app).offset {
+            None => *transform = crate::object::zero_matrix(),
+            Some(offset) => crate::object::translate(transform, offset.dx(), offset.dy()),
+        }
+    }
+
+    /// Paints each inline child.
+    ///
+    /// Render children whose [`TextParentData::offset`] is `None` will be skipped by this
+    /// method.
+    fn paint_inline_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        let mut child = self.first_child(app);
+        while let Some(current) = child {
+            let Some(child_offset) = text_parent_data(app, current).offset else {
+                return;
+            };
+            context.paint_child(app, current.as_object(), child_offset + offset);
+            child = self.child_after(app, current);
+        }
+    }
+
+    /// Performs a hit test on each inline child.
+    ///
+    /// Render children whose [`TextParentData::offset`] is `None` will be skipped by this
+    /// method.
+    fn hit_test_inline_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        let mut child = self.first_child(app);
+        while let Some(current) = child {
+            let Some(child_offset) = text_parent_data(app, current).offset else {
+                return false;
+            };
+            let is_hit = result.add_with_paint_offset(
+                Some(child_offset),
+                position,
+                |result, transformed| current.hit_test(app, result, transformed),
+            );
+            if is_hit {
+                return true;
+            }
+            child = self.child_after(app, current);
+        }
+        false
+    }
+}
+
+/// The mixin's `_layoutChild`: lays `child` out with `layout_child` and describes it as a
+/// placeholder for its span.
+fn layout_child_inline(
+    app: &mut App,
+    child: AnyRenderBox,
+    child_constraints: BoxConstraints,
+    layout_child: ChildLayouter,
+    get_baseline: ChildBaselineGetter,
+) -> PlaceholderDimensions {
+    let span = text_parent_data(app, child).span.clone();
+    debug_assert!(span.is_some());
+    let Some(span) = span else {
+        return PlaceholderDimensions::EMPTY;
+    };
+    let size = layout_child(app, child, child_constraints);
+    let baseline_offset = match span.alignment() {
+        PlaceholderAlignment::AboveBaseline
+        | PlaceholderAlignment::BelowBaseline
+        | PlaceholderAlignment::Bottom
+        | PlaceholderAlignment::Middle
+        | PlaceholderAlignment::Top => None,
+        PlaceholderAlignment::Baseline => get_baseline(
+            app,
+            child,
+            child_constraints,
+            span.baseline()
+                .expect("a baseline-aligned placeholder names its baseline"),
+        ),
+    };
+    PlaceholderDimensions {
+        size,
+        alignment: span.alignment(),
+        baseline: span.baseline(),
+        baseline_offset,
+    }
+}
+
+fn text_parent_data(app: &App, child: AnyRenderBox) -> &TextParentData {
+    child.as_object().parent_data_of::<TextParentData>(app)
+}
+
+fn text_parent_data_mut(app: &mut App, child: AnyRenderBox) -> &mut TextParentData {
+    child.as_object().parent_data_of_mut::<TextParentData>(app)
+}
+
 /// A render object that displays a paragraph of text.
 ///
-/// Dart's constructor arguments beyond `text` and `textDirection` are the setters. The
-/// paragraph shapes against `fonts` when given, else the app-wide collection of
-/// `PaintingBinding`.
+/// Dart's constructor arguments beyond `text` and `textDirection` are the setters; add the
+/// inline children with [`add`](ContainerRenderObjectMixin::add) or
+/// [`add_all`](ContainerRenderObjectMixin::add_all). The paragraph shapes against `fonts` when
+/// given, else the app-wide collection of `PaintingBinding`.
 pub struct RenderParagraph {
     render_object: RenderObjectData,
     render_box: RenderBoxData,
+    container: ContainerRenderObjectData<AnyRenderBox>,
     text_painter: TextPainter,
     text_intrinsics: Option<TextPainter>,
     fonts_override: Option<Handle<FontCollection>>,
@@ -37,6 +339,12 @@ pub struct RenderParagraph {
     overflow: TextOverflow,
     device_pixel_ratio: f64,
     needs_clipping: bool,
+    // Placeholder dimensions representing the sizes of child inline widgets.
+    //
+    // These need to be cached because the text painter's placeholder dimensions
+    // will be overwritten during intrinsic width/height calculations and must be
+    // restored to the original values before final layout and painting.
+    placeholder_dimensions: Option<Vec<PlaceholderDimensions>>,
     system_fonts: RelayoutWhenSystemFontsChangeData,
 }
 
@@ -57,6 +365,7 @@ impl RenderParagraph {
             RenderParagraph {
                 render_object: RenderObjectData::new(),
                 render_box: RenderBoxData::new(),
+                container: ContainerRenderObjectData::new(),
                 text_painter,
                 text_intrinsics: None,
                 fonts_override: fonts,
@@ -64,6 +373,7 @@ impl RenderParagraph {
                 overflow: TextOverflow::Clip,
                 device_pixel_ratio: 1.0,
                 needs_clipping: false,
+                placeholder_dimensions: None,
                 system_fonts: RelayoutWhenSystemFontsChangeData::new(),
             },
         )
@@ -308,8 +618,15 @@ impl RenderParagraph {
 
     /// Flutter's `_computeIntrinsicHeight`: the height the text takes at `width`.
     fn compute_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        let placeholder_dimensions = self.layout_inline_children(
+            app,
+            width,
+            ChildLayoutHelper::dry_layout_child,
+            ChildLayoutHelper::get_dry_baseline,
+        );
         let max_width = self.adjust_max_width(app, width);
         let (intrinsics, fonts) = self.text_intrinsics_with_fonts(app);
+        intrinsics.set_placeholder_dimensions(Some(placeholder_dimensions));
         intrinsics.layout(fonts, width, max_width);
         intrinsics.height()
     }
@@ -328,8 +645,9 @@ impl RenderParagraph {
         constraints: BoxConstraints,
     ) {
         let max_width = self.adjust_max_width(app, constraints.max_width);
+        let placeholder_dimensions = self.get(app).placeholder_dimensions.clone();
         let (painter, fonts) = self.painter_with_fonts(app);
-        painter.set_placeholder_dimensions(None);
+        painter.set_placeholder_dimensions(placeholder_dimensions);
         painter.layout(fonts, constraints.min_width, max_width);
     }
 
@@ -469,28 +787,67 @@ impl RelayoutWhenSystemFontsChangeMixin for RenderParagraph {
     }
 }
 
+impl ContainerRenderObjectMixin for RenderParagraph {
+    type ChildType = AnyRenderBox;
+    type ParentDataType = TextParentData;
+
+    fn container_data(
+        self: RenderHandle<Self>,
+        app: &App,
+    ) -> &ContainerRenderObjectData<AnyRenderBox> {
+        &self.get(app).container
+    }
+
+    fn container_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut ContainerRenderObjectData<AnyRenderBox> {
+        &mut self.get_mut(app).container
+    }
+}
+
+impl RenderInlineChildrenContainerDefaults for RenderParagraph {}
+
 impl RenderObject for RenderParagraph {
     crate::render_object_accessors!();
 
     fn visit_children(
         self: RenderHandle<Self>,
-        _app: &App,
-        _visitor: &mut dyn FnMut(AnyRenderObject),
+        app: &App,
+        visitor: &mut dyn FnMut(AnyRenderObject),
     ) {
-        // A leaf until inline children (`WidgetSpan`) are ported.
+        ContainerRenderObjectMixin::visit_children(self, app, visitor)
     }
 
-    fn did_attach(self: RenderHandle<Self>, app: &mut App, _owner: Handle<crate::PipelineOwner>) {
+    fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: Handle<PipelineOwner>) {
+        ContainerRenderObjectMixin::did_attach(self, app, owner);
         RelayoutWhenSystemFontsChangeMixin::attach_system_fonts(self, app);
     }
 
     fn did_detach(self: RenderHandle<Self>, app: &mut App) {
         RelayoutWhenSystemFontsChangeMixin::detach_system_fonts(self, app);
+        ContainerRenderObjectMixin::did_detach(self, app);
+    }
+
+    fn redepth_children(self: RenderHandle<Self>, app: &mut App) {
+        ContainerRenderObjectMixin::redepth_children(self, app)
     }
 
     fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
         let constraints = self.constraints(app);
+        let placeholder_dimensions = self.layout_inline_children(
+            app,
+            constraints.max_width,
+            ChildLayoutHelper::layout_child,
+            ChildLayoutHelper::get_baseline,
+        );
+        self.get_mut(app).placeholder_dimensions = Some(placeholder_dimensions);
         self.layout_text_with_constraints(app, constraints);
+        let boxes = self
+            .painter_mut(app)
+            .inline_placeholder_boxes()
+            .expect("laid out just now");
+        self.position_inline_children(app, &boxes);
         let text_size = self.painter(app).size();
         let size = constraints.constrain(text_size);
         self.set_size(app, size);
@@ -540,6 +897,9 @@ impl RenderObject for RenderParagraph {
         }
         let (painter, fonts) = self.painter_with_fonts(app);
         painter.paint(fonts, context.canvas(), offset);
+
+        self.paint_inline_children(app, context, offset);
+
         if needs_clipping {
             context.canvas().restore();
         }
@@ -549,14 +909,34 @@ impl RenderObject for RenderParagraph {
 impl RenderBox for RenderParagraph {
     crate::render_box_accessors!();
 
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        RenderInlineChildrenContainerDefaults::setup_parent_data(self, app, child);
+    }
+
     fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, _height: f64) -> f64 {
+        let placeholder_dimensions = self.layout_inline_children(
+            app,
+            f64::INFINITY,
+            |app, child, _| Size::new(child.get_min_intrinsic_width(app, f64::INFINITY), 0.0),
+            ChildLayoutHelper::get_dry_baseline,
+        );
         let (intrinsics, fonts) = self.text_intrinsics_with_fonts(app);
+        intrinsics.set_placeholder_dimensions(Some(placeholder_dimensions));
         intrinsics.layout(fonts, 0.0, f64::INFINITY);
         intrinsics.min_intrinsic_width()
     }
 
     fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, _height: f64) -> f64 {
+        let placeholder_dimensions = self.layout_inline_children(
+            app,
+            f64::INFINITY,
+            // Height and baseline is irrelevant as all text will be laid
+            // out in a single line. Therefore, using 0.0 as a dummy for the height.
+            |app, child, _| Size::new(child.get_max_intrinsic_width(app, f64::INFINITY), 0.0),
+            ChildLayoutHelper::get_dry_baseline,
+        );
         let (intrinsics, fonts) = self.text_intrinsics_with_fonts(app);
+        intrinsics.set_placeholder_dimensions(Some(placeholder_dimensions));
         intrinsics.layout(fonts, 0.0, f64::INFINITY);
         intrinsics.max_intrinsic_width()
     }
@@ -574,8 +954,15 @@ impl RenderBox for RenderParagraph {
         app: &mut App,
         constraints: BoxConstraints,
     ) -> Size {
+        let placeholder_dimensions = self.layout_inline_children(
+            app,
+            constraints.max_width,
+            ChildLayoutHelper::dry_layout_child,
+            ChildLayoutHelper::get_dry_baseline,
+        );
         let max_width = self.adjust_max_width(app, constraints.max_width);
         let (intrinsics, fonts) = self.text_intrinsics_with_fonts(app);
+        intrinsics.set_placeholder_dimensions(Some(placeholder_dimensions));
         intrinsics.layout(fonts, constraints.min_width, max_width);
         let size = intrinsics.size();
         constraints.constrain(size)
@@ -606,10 +993,26 @@ impl RenderBox for RenderParagraph {
         _baseline: TextBaseline,
     ) -> Option<f64> {
         debug_assert!(constraints.debug_assert_is_valid(false));
+        let placeholder_dimensions = self.layout_inline_children(
+            app,
+            constraints.max_width,
+            ChildLayoutHelper::dry_layout_child,
+            ChildLayoutHelper::get_dry_baseline,
+        );
         let max_width = self.adjust_max_width(app, constraints.max_width);
         let (intrinsics, fonts) = self.text_intrinsics_with_fonts(app);
+        intrinsics.set_placeholder_dimensions(Some(placeholder_dimensions));
         intrinsics.layout(fonts, constraints.min_width, max_width);
         Some(intrinsics.compute_distance_to_actual_baseline(TextBaseline::Alphabetic))
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        self.default_apply_paint_transform(app, child, transform);
     }
 
     fn hit_test_self(self: RenderHandle<Self>, _app: &App, _position: Offset) -> bool {
@@ -618,12 +1021,12 @@ impl RenderBox for RenderParagraph {
 
     fn hit_test_children(
         self: RenderHandle<Self>,
-        _app: &mut App,
-        _result: &mut BoxHitTestResult<'_>,
-        _position: Offset,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
     ) -> bool {
-        // Spans are not hit-test targets, and there are no inline children.
-        false
+        // Spans are not hit-test targets yet, so the hit falls to the inline children.
+        self.hit_test_inline_children(app, result, position)
     }
 }
 

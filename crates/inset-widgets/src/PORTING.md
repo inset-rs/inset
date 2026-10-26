@@ -9,7 +9,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - widgets/annotated_region.rs → annotated_region.dart
 - widgets/scroll_activity.rs → scroll_activity.dart
 - widgets/scroll_notification_observer.rs → scroll_notification_observer.dart
-- widgets/undo_history.rs → undo_history.dart
 - widgets/autofill.rs → autofill.dart
 - widgets/spell_check.rs → spell_check.dart
 - view.rs → view.dart
@@ -432,6 +431,12 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: language — a disposed state's handle cannot be read.
   Affect: a field that closes while the clipboard is being read pastes nothing.
 
+## widgets/undo_history.rs → undo_history.dart
+
+- Change: `UndoHistory`'s `value` is any `ValueListenable<T>` handle, where Dart takes a `ValueNotifier<T>`.
+  Reason: language — without subclassing, a `TextEditingController` is no `ValueNotifier`; both are value listenables.
+  Affect: an `UndoHistory` can also track another value listenable, such as an animation.
+
 ## widgets/system_context_menu.rs → system_context_menu.dart
 
 - Change: custom item callback ids are a process-wide counter string, not Dart's `hashCode`.
@@ -488,6 +493,12 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: language — no garbage collector, and the pointer callbacks outlive the widgets that started the drag.
   Affect: a drag continues after its source widget is removed, and the retained objects are released when it completes or is cancelled.
 
+## widgets/widget_span.rs → widget_span.dart
+
+- Change: `WidgetSpan::extract_from_inline_span` wraps each inline widget in its parent-data and scaling widgets only, without Dart's `Semantics` tagged with the placeholder's index.
+  Reason: platform — the `Semantics` wrappers Dart adds are deferred, as on `RawDialogRoute`.
+  Affect: an inline widget contributes no semantics node of its own.
+
 ## window.rs → _window.dart
 
 - Change: `Window` and `WindowScope` carry a `WindowController` of one kind, a regular window made from a configuration, where Flutter has a controller for each archetype; there is no `WindowManager` or registry, and a `Window` does not rebuild on its own when the window's size changes.
@@ -516,7 +527,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - `LookupBoundary` in the `View`, `Overlay` and theater-marker lookups, which look straight up the tree. Trigger: `LookupBoundary` in framework.
 - `debugCheckHasDirectionality` in the widgets that resolve a directional value. Trigger: diagnostics.
 - `InheritedTheme` capture on `DefaultTextStyle`, `DefaultTextHeightBehavior` and `IconTheme`, and `DefaultTextStyle.merge`. Trigger: `InheritedTheme`; `Builder`.
-- text.rs: selection, `locale`, `strutStyle`, the semantics labels, `WidgetSpan` children, and the deprecated `textScaleFactor`. Trigger: `SelectionContainer`; `Locale` / `StrutStyle`; inline children in `RenderParagraph`.
+- text.rs: selection, `locale`, `strutStyle`, the semantics labels, and the deprecated `textScaleFactor`. Trigger: `SelectionContainer`; `Locale` / `StrutStyle`.
 - basic.rs: `ListBody`, `Wrap`, `Flow`, `PositionedDirectional`, `PhysicalModel`, `PhysicalShape`, `RotatedBox`, `IgnoreBaseline`, `ShaderMask`, `RawImage`, `WidgetToRenderBoxAdapter`. Trigger: each one's render object.
 - basic.rs: the key-wrapping helpers, `StatefulBuilder`, `DefaultAssetBundle`. Trigger: a key over object identity; a caller; asset bundles.
 - basic.rs: the semantics widgets and the semantics flags on the pointer and opacity widgets. Trigger: accessibility (do not stub).
@@ -542,7 +553,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - app.rs: the escape-key handler that dismisses tooltips. Trigger: `raw_tooltip.dart`.
 - app.rs: the performance overlay, semantics debugger and widget inspector the three carried debug flags would show. Trigger: `performance_overlay.dart`; accessibility (do not stub); `widget_inspector.dart`.
 - default_text_editing_shortcuts.rs: the Control-key editing bindings macOS supplies from its own key tables (Control-A, Control-E, Control-K, Control-D), which Dart's macOS map leaves to the host. Trigger: nothing else supplies them over a host that reports plain key presses.
-- editable_text.rs: `_Editable` stays a leaf until `WidgetSpan` and host placeholders exist. Trigger: embedder placeholders.
 - editable_text.rs: scribble and stylus support, the spell-check fetch, the magnifier overlay, `StrutStyle`, the floating cursor, `insertContent`, and the semantics wrappers. Trigger: `StrutStyle`; `UndoManagerClient`; `RenderEditable.setFloatingCursor`; accessibility.
 - app_lifecycle_listener.rs: diagnostics. Trigger: diagnostics.
 - text_selection.rs: the selection handle overlay and the empty selection controls; handle entries do not yet follow a composited transform. Trigger: those types; `EditableText`.
