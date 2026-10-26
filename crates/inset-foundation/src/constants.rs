@@ -63,13 +63,17 @@ pub const PRECISION_ERROR_TOLERANCE: f64 = 1e-10;
 
 /// A constant that is true if the application was compiled to run on the web.
 ///
+/// The web is a browser's WebAssembly, `wasm32-unknown-unknown`: a WebAssembly component another
+/// host runs, such as a WaOS program (`wasm32-wasip2`), has no browser around it, and runs as an
+/// app native to the platform its host reports.
+///
 /// See also:
 ///
 /// * `default_target_platform`, which is used by themes to find out which
 ///   platform the application is running on (or, in the case of a web app,
 ///   which platform the application's browser is running in). Can be overridden
 ///   in tests with `debug_default_target_platform_override`.
-pub const K_IS_WEB: bool = cfg!(target_family = "wasm");
+pub const K_IS_WEB: bool = cfg!(all(target_family = "wasm", target_os = "unknown"));
 
 /// A constant that is true if the application was compiled to WebAssembly.
 ///

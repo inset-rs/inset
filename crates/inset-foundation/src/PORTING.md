@@ -56,9 +56,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — `cfg(debug_assertions)` is the only build distinction Rust exposes, and it splits two ways where Dart splits three.
   Affect: Dart's `kProfileMode` branches never run.
 
-- Change: `kIsWeb` and `kIsWasm` are always equal (`cfg!(target_family = "wasm")`).
-  Reason: language — Rust has one wasm target family and no JS-compilation path.
-  Affect: `kIsWeb && !kIsWasm` is never true.
+- Change: `kIsWeb` is true for a browser's WebAssembly alone (`wasm32-unknown-unknown`), and `kIsWasm` for every WebAssembly build, a component another host runs included.
+  Reason: platform — a WebAssembly component runs outside any browser too, as a WaOS program does, while Rust has no JS-compilation path.
+  Affect: a WaOS program's widgets act as the native app of the platform its host reports: text fields take their editing and clipboard keys, and buttons show the arrow; `kIsWeb && !kIsWasm` is never true.
 
 ## date_time.rs → dart:core `DateTime`
 
