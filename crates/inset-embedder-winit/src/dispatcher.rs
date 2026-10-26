@@ -63,20 +63,26 @@ impl Wakeups {
     }
 
     /// How the loop waits once this turn is done: not at all while a ready task waits,
-    /// otherwise until the earlier of the timer wakeup and `vsync_due`, the next vsync of a
-    /// timer standing in for a display link, or until an event when there is neither.
-    pub(crate) fn control_flow(&self, vsync_due: Option<Instant>) -> ControlFlow {
+    /// otherwise until the earlier of the timer wakeup and `loop_due`, the earliest of the loop's
+    /// own times (the next vsync of a timer standing in for a display link, a copy's expiry), or
+    /// until an event when there is neither.
+    pub(crate) fn control_flow(&self, loop_due: Option<Instant>) -> ControlFlow {
         if self.wake_now_requested {
             return ControlFlow::Poll;
         }
-        let resume_at = match (self.timer_wakeup, vsync_due) {
-            (Some(wake), Some(vsync)) => Some(wake.min(vsync)),
-            (wake, vsync) => wake.or(vsync),
-        };
+        let resume_at = earliest(self.timer_wakeup, loop_due);
         match resume_at {
             Some(resume_at) => ControlFlow::WaitUntil(resume_at),
             None => ControlFlow::Wait,
         }
+    }
+}
+
+/// The earlier of two times, either of which may be none.
+pub(crate) fn earliest(first: Option<Instant>, second: Option<Instant>) -> Option<Instant> {
+    match (first, second) {
+        (Some(first), Some(second)) => Some(first.min(second)),
+        (first, second) => first.or(second),
     }
 }
 

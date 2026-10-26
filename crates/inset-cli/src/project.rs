@@ -110,7 +110,7 @@ pub struct IosMetadata {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct AndroidMetadata {
-    /// `minSdkVersion`. Defaults to 24.
+    /// `minSdkVersion`. Defaults to 26, Android 8.0.
     pub min_sdk: Option<u32>,
     /// `targetSdkVersion`. Defaults to 34, the last level before the system stops fitting the
     /// window to its bars, which is how the host learns the safe area.

@@ -9,13 +9,11 @@
 //! does not set it for them; an engine that never asks is why a Flutter app runs at 60 on
 //! a 120 panel.
 
-// The VM and the activity reach this crate as raw pointers, which JNI takes back as its
-// own handles; that is the `unsafe` here.
-#![allow(unsafe_code)]
-
 use android_activity::AndroidApp;
 use jni::objects::{JObject, JObjectArray, JValue};
 use jni::{jni_sig, jni_str};
+
+use crate::activity::with_activity;
 
 /// Asks the activity's window to run as fast as its display can, which is the fastest of
 /// the modes the display reports. Window attributes belong to the Java main thread, so the
@@ -31,14 +29,10 @@ pub(crate) fn follow_the_display(app: &AndroidApp) {
 }
 
 fn prefer_the_fastest_mode(app: &AndroidApp) -> jni::errors::Result<()> {
-    // SAFETY: this process's own VM, as android-activity hands it out.
-    let vm = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr().cast()) };
-    vm.attach_current_thread(|env| {
-        // SAFETY: an unowned global reference to the activity, borrowed for this frame.
-        let activity = unsafe { JObject::from_raw(env, app.activity_as_ptr().cast()) };
+    with_activity(app, |env, activity| {
         let window = env
             .call_method(
-                &activity,
+                activity,
                 jni_str!("getWindow"),
                 jni_sig!("()Landroid/view/Window;"),
                 &[],

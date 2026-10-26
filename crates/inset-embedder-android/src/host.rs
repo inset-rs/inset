@@ -104,16 +104,19 @@ impl<C: EmbedderClient> Host<C> {
         }
     }
 
-    /// How long the loop may wait: no longer than the framework's earliest timer, and not
-    /// at all while it has work of its own.
+    /// How long the loop may wait: no longer than the framework's earliest timer and the
+    /// expiry of the app's copy on the clipboard, and not at all while it has work of its own.
     fn timeout(&self) -> Option<Duration> {
         if self.refreshed.get() || self.platform.wakes.wake_now_requested() {
             return Some(Duration::ZERO);
         }
-        self.platform
-            .wakes
-            .timer_wakeup()
-            .map(|wakeup| wakeup.saturating_duration_since(Instant::now()))
+        let timer = self.platform.wakes.timer_wakeup();
+        let expiry = self.platform.clipboard.expiry();
+        let due = match (timer, expiry) {
+            (Some(timer), Some(expiry)) => Some(timer.min(expiry)),
+            (timer, expiry) => timer.or(expiry),
+        };
+        due.map(|due| due.saturating_duration_since(Instant::now()))
     }
 
     fn on_main_event(&mut self, event: Recorded) {
@@ -254,6 +257,8 @@ impl<C: EmbedderClient> Host<C> {
         }
     }
 
+    /// The activity gained or lost the focus; one that gains it has the clipboard looked at, which
+    /// only the focused app may read.
     fn on_focus(&mut self, focused: bool) {
         if let Some(client) = &mut self.client {
             client.view_focus_changed(ViewFocusEvent {
@@ -265,6 +270,19 @@ impl<C: EmbedderClient> Host<C> {
                 },
                 direction: ViewFocusDirection::Undefined,
             });
+        }
+        if focused {
+            self.look_at_clipboard();
+        }
+    }
+
+    /// The app hears the clipboard changed, if it did since the host last looked: Android tells
+    /// only a listener Java code provides (`clipboard.rs`).
+    fn look_at_clipboard(&mut self) {
+        if self.platform.clipboard.has_changed()
+            && let Some(client) = &mut self.client
+        {
+            client.clipboard_changed();
         }
     }
 
@@ -335,9 +353,15 @@ impl<C: EmbedderClient> Host<C> {
         }
     }
 
-    /// What the framework is waiting for: a wake, when one was asked for or its timer
-    /// wakeup has arrived, and a frame at the display's refresh.
+    /// What the framework is waiting for: the clipboard's change once the host cleared a copy of
+    /// the app's whose time came, a wake, when one was asked for or its timer wakeup has arrived,
+    /// and a frame at the display's refresh.
     fn serve_requests(&mut self) {
+        if self.platform.clipboard.clear_expired(Instant::now())
+            && let Some(client) = &mut self.client
+        {
+            client.clipboard_changed();
+        }
         if self.platform.wakes.should_wake(Instant::now())
             && let Some(client) = &mut self.client
         {

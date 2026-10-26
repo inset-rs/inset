@@ -94,7 +94,7 @@ use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::window::WindowId;
 
 use crate::app_requests::AppRequest;
-use crate::dispatcher::Wakeups;
+use crate::dispatcher::{Wakeups, earliest};
 use crate::drag_drop::DragReports;
 use crate::frame_scheduler::FrameScheduler;
 use crate::images::CreateImageLoader;
@@ -245,6 +245,7 @@ impl<C: EmbedderClient> MainLoop<C> {
             AppRequest::ShowCursor(kind) => self.show_cursor(kind),
             AppRequest::ChangeViewFocus(change) => self.change_view_focus(change),
             AppRequest::HandOverFiles => self.hand_over_files(),
+            AppRequest::LookAtClipboard => self.look_at_clipboard(),
         }
     }
 
@@ -271,11 +272,14 @@ impl<C: EmbedderClient> ApplicationHandler<MainLoopEvent> for MainLoop<C> {
         // A wake already due is delivered before the loop waits: a task the framework posted
         // to itself, a zero-duration timer, runs ahead of whatever the system delivers next,
         // as Dart's event queue orders them.
-        self.wake_if_due(Instant::now());
-        event_loop.set_control_flow(
-            self.wakeups
-                .control_flow(self.frame_scheduler.vsync_timer_due()),
+        let now = Instant::now();
+        self.wake_if_due(now);
+        self.clear_expired_copy(now);
+        let loop_due = earliest(
+            self.frame_scheduler.vsync_timer_due(),
+            self.platform.clipboard_expiry(),
         );
+        event_loop.set_control_flow(self.wakeups.control_flow(loop_due));
     }
 
     fn resumed(&mut self, _event_loop: &ActiveEventLoop) {

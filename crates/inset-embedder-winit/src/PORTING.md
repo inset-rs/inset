@@ -89,11 +89,31 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — winit has one cursor per window where Flutter's engine maps cursor kinds per embedder.
   Affect: a `MouseRegion` cursor shows on hover, the device id is ignored (one mouse), and an unsupported kind is silently the arrow.
 
-## clipboard.rs
+## clipboard/, os/macos/pasteboard/, os/ios/pasteboard/
 
-- Change: the clipboard methods talk to the OS pasteboard through arboard, where Flutter's `Clipboard` messages go to the engine.
-  Reason: platform — winit does not own the pasteboard, so the embedder implements the channel.
-  Affect: copy and paste work with other apps on the desktops, and an embedder that cannot open the pasteboard reads an empty clipboard rather than failing.
+- Change: on macOS the clipboard is the general pasteboard, its items in every type it carries, given or promised, files and promised files, a promised file written at the receiver's URL as its producer makes its bytes and removed when it fails, a sensitive copy marked concealed, one for this device only written for this host only, and one that expires cleared by the embedder; elsewhere it is plain text through arboard, every other form refused.
+  Reason: platform — Flutter's desktop engines carry plain text over the platform channel, and winit owns no clipboard, so the embedder reaches each system's itself.
+  Affect: on macOS an app copies and pastes images, HTML and files with other apps, and on Windows and Linux text alone.
+
+- Change: on iOS the clipboard is UIKit's general pasteboard, its items in every type it carries, a copy with every form given written whole, and one with a promised form or file written as item providers, a promised file written by its producer into a temporary file the provider hands over, one for this device only written local only, and one that expires carrying its expiration date.
+  Reason: platform — Flutter's iOS engine carries plain text over the platform channel, and arboard has no iOS code.
+  Affect: an iOS app copies and pastes images, HTML and files with other apps, and its expired copy is cleared by the system after the app has quit too.
+
+- Change: on iOS listing the pasteboard reads only its types, and a read loads the form through the item's provider, off the main thread.
+  Reason: platform — iOS shows its paste alert when an app reads another app's content, and the app's own promised form is produced on the main thread.
+  Affect: the alert shows when the app reads, never when it lists, and a read of the app's own promise never stalls it.
+
+- Change: on Windows and Linux a sensitive copy is kept out of the clipboard's history, and on Windows out of its monitoring, a copy for this device only is kept off Windows' cloud clipboard, and one that expires is cleared by the main loop, which wakes for it as it wakes for the app's timers.
+  Reason: platform — arboard carries those of the options the systems have, and neither system has an expiry of its own.
+  Affect: a password copied stays out of Windows' clipboard history, and a copy whose app quits before its time stays on the clipboard.
+
+- Change: the app hears the clipboard changed when it becomes active and when one of its windows takes the focus, if another writer moved the system's count of changes (on Linux, changed the text), when iOS says the pasteboard changed, and when a copy of its own expired and was cleared.
+  Reason: platform — no desktop system tells an application that another one wrote the clipboard, and iOS tells only an app that is active.
+  Affect: a toolbar's Paste button follows a copy made in another app once the user comes back to this one.
+
+- Change: on macOS a promised form is produced while the paste waits, on the main thread, for up to ten seconds.
+  Reason: platform — AppKit asks the pasteboard's owner for promised data synchronously, inside the paste.
+  Affect: a promise whose producer waits on the app's own loop is never answered, and the app stalls each time someone pastes it.
 
 ## platform.rs
 

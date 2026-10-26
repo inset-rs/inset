@@ -68,6 +68,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — there is no implicit view: the platform gives the app its views or makes them on request.
   Affect: an app given several views shows its content in each, with its own state; a request to close the app's last view asks to quit, as Cmd-Q does; an app embedded where views come later starts with `run_widget` over a `MultiViewApp`, as Flutter's web multi-view apps start with `runWidget`.
 
+- Change: `WidgetsBinding::handle_clipboard_event` hands the host's copy, cut and paste to the primary focus as `CopySelectionTextIntent` and `PasteTextIntent`, with the event as the clipboard while they run.
+  Reason: platform — a host that owns the user's copy and paste, as a browser does, sends them as events, where Flutter's web engine has the browser paste into its own hidden text field.
+  Affect: the browser's or an Edit menu's Copy, Cut and Paste act on whatever widget has the focus, a selectable text included.
+
 - Change: `WidgetsBindingObserver` hears a view added or removed by its id (`did_add_view`, `did_remove_view`) and a request to close one (`did_request_view_close`), where Flutter tells only `didChangeMetrics` and a listener compares `platformDispatcher.views` with what it had.
   Reason: platform — the host reports each view's arrival, departure and close request by view, and every view the app has arrives this way.
   Affect: the observers hear only the views no `WindowController` asked for, and a close request stops at the first observer that answers `true`.
@@ -435,6 +439,10 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Affect: the host sees incrementing ids such as `"1"` rather than an object hash.
 
 ## widgets/text_selection.rs → text_selection.dart
+
+- Change: a `ClipboardStatusNotifier` with listeners also updates each time the host says the clipboard changed.
+  Reason: platform — Flutter's engines never say the clipboard changed; a host that can tell, says so.
+  Affect: a toolbar's Paste button follows a copy made in another app without the app having to resume first.
 
 - Change: `show_toolbar` uses `context_menu_builder` whenever it is set, and only otherwise the deprecated `build_toolbar` path.
   Reason: language — an erased `TextSelectionControls` cannot be asked whether it is handle-controls.

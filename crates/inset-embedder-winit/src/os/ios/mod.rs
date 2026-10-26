@@ -1,16 +1,21 @@
 //! What iOS reports differently from the desktop winit was written for: its window is the
-//! screen, and winit's size for it is the safe area rather than the whole layer.
+//! screen, and winit's size for it is the safe area rather than the whole layer; and what it adds,
+//! its pasteboard (`pasteboard`).
+
+mod pasteboard;
 
 use inset_embedder::{TargetPlatform, ViewPadding};
 use valo_codec::Decoder;
 use winit::window::Window;
 
+use pasteboard::Pasteboard;
+
 use super::absent::{NoDisplayLink, NoVisibilityNotices, NoWindowSurfaces};
 use super::apple::image_io_decoders;
 use super::{
     ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeComposition,
-    NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemRequests,
-    WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
+    NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
+    SystemRequests, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
 };
 
 /// iOS. A type only: never made, its answers are associated functions.
@@ -49,6 +54,16 @@ impl WindowGeometry for Ios {
             right: (width - f64::from(safe.width) - left).max(0.0),
             bottom: (height - f64::from(safe.height) - top).max(0.0),
         }
+    }
+}
+
+/// The general pasteboard, which UIKit says changed while the app is active, and which the main
+/// loop looks at again as the app becomes active.
+impl SystemClipboard for Ios {
+    type Clipboard = Pasteboard;
+
+    fn clipboard(look: Box<dyn Fn()>) -> Pasteboard {
+        Pasteboard::general(look)
     }
 }
 

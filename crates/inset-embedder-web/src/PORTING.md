@@ -50,3 +50,17 @@ Host implementation. Flutter analogue: the web engine under `engine/lib/web_ui`.
 - Animated image frames after the first. Trigger: a GIF or APNG that must play.
 - Flutter web autofill form, delta model, and putting the editing element inside a view's `textEditingHost`. Trigger: AutofillGroup; `enableDeltaModel`.
 - A window the app manages around the page's view, with whether it is occluded, which the page's visibility state and an intersection observer on the canvas would tell, as winit's web backend reads it. Trigger: an app that must stop drawing while its page is hidden.
+
+## clipboard.rs → the web engine's clipboard and its text field's paste
+
+- Change: the app's own clipboard is the browser's asynchronous clipboard in every type it carries, listed by `read` and written by `write`, a promise resolved at the write, files refused and options left out.
+  Reason: platform — Flutter's web engine reads and writes plain text only; the page reaches as much as the browser lets it.
+  Affect: an app copies HTML or an image to other apps; a read may ask the user first, and Firefox and Safari show their own Paste button.
+
+- Change: the user's copy, cut and paste on the canvas or the text field reach the framework as clipboard events, the browser's default prevented, where Flutter's web engine lets the browser paste into its hidden text field.
+  Reason: platform — the browser's `paste` event is the only read it allows without asking.
+  Affect: a paste reaches whatever widget has the focus, in every type pasted, files included, and never asks the user.
+
+- Change: the app hears the clipboard changed at the browser's `clipboardchange`, and at each focus where the browser has none.
+  Reason: platform — a page cannot otherwise tell another application wrote the clipboard without reading it.
+  Affect: on a browser without the event, the app hears a change it cannot confirm each time the page takes the focus.

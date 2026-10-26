@@ -1,9 +1,11 @@
 # inset-test/src
 No Flutter crate in this shape. Closest analogue: `flutter_test`'s `TestPlatformDispatcher` and `TestFlutterView`.
 
-## Identical
+## clipboard.rs → `MockClipboard` in Flutter's `test/widgets/clipboard_utils.dart`
 
-- clipboard.rs → `MockClipboard` in Flutter's `test/widgets/clipboard_utils.dart`
+- Change: `MockClipboard` is the host's full clipboard in memory: items in several types, promises produced at each read, files and promised files, a promised file's bytes written into a folder as a host writes them where the receiver chose and removed when its producer fails, how the last copy is to be treated, and a count of its changes, where Flutter's holds one text.
+  Reason: platform — it stands in for the host's clipboard, which holds every form a system's does.
+  Affect: a test can check what an app copies in any type, and that a read after a change fails.
 
 ## platform.rs → flutter_test `TestPlatformDispatcher`
 

@@ -1,13 +1,15 @@
-//! A system winit covers by itself, Windows and Linux among them: nothing to add, and
-//! nothing to ask, so every answer is the trait's own.
+//! A system winit covers by itself, Linux among them: nothing to add, and nothing to ask, so
+//! every answer is the trait's own but the clipboard's, arboard's plain text.
 
 use inset_embedder::TargetPlatform;
+
+use crate::clipboard::{ChangeProbe, TextClipboard};
 
 use super::absent::{NoDisplayLink, NoVisibilityNotices, NoWindowSurfaces};
 use super::{
     ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeComposition,
-    NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemRequests,
-    WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
+    NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
+    SystemRequests, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
 };
 
 /// Any system without a module of its own. A type only: never made, its answers are
@@ -16,13 +18,22 @@ pub(crate) enum WinitOnly {}
 
 impl OperatingSystem for WinitOnly {
     /// Every system without a module of its own that Flutter names, and Linux for the rest.
-    const TARGET_PLATFORM: TargetPlatform = if cfg!(target_os = "windows") {
-        TargetPlatform::Windows
-    } else if cfg!(target_os = "fuchsia") {
+    const TARGET_PLATFORM: TargetPlatform = if cfg!(target_os = "fuchsia") {
         TargetPlatform::Fuchsia
     } else {
         TargetPlatform::Linux
     };
+}
+
+/// arboard's plain text, as winit has no clipboard (`clipboard/text.rs`), its changes told by the
+/// text itself, as arboard has no cheaper probe there; a copy that expires is cleared by the main
+/// loop.
+impl SystemClipboard for WinitOnly {
+    type Clipboard = TextClipboard;
+
+    fn clipboard(_look: Box<dyn Fn()>) -> TextClipboard {
+        TextClipboard::new(ChangeProbe::Text)
+    }
 }
 
 impl FramePresentation for WinitOnly {

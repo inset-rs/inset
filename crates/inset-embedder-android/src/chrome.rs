@@ -11,16 +11,14 @@
 //! Everything here is posted to the Java main thread, which is where a window and its
 //! decor view may be touched, so each call returns at once and the framework never waits.
 
-// The VM and the activity reach this crate as raw pointers, which JNI takes back as its
-// own handles; that is the `unsafe` here.
-#![allow(unsafe_code)]
-
 use android_activity::AndroidApp;
 use inset_embedder::{
     ApplicationSwitcherDescription, Brightness, SystemChrome, SystemUiOverlayStyle,
 };
 use jni::objects::{JObject, JValue};
 use jni::{Env, jni_sig, jni_str};
+
+use crate::activity::{device_api_level, with_activity};
 
 /// `View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR`, API 23: a light status bar, which is to say
 /// dark icons on it.
@@ -337,23 +335,4 @@ fn on_the_activity(
             crate::log::warn_to_log!("the system would not take {what}: {error:?}");
         }
     }));
-}
-
-fn with_activity(
-    app: &AndroidApp,
-    work: impl FnOnce(&mut Env<'_>, &JObject<'_>) -> jni::errors::Result<()>,
-) -> jni::errors::Result<()> {
-    // SAFETY: this process's own VM, as android-activity hands it out.
-    let vm = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr().cast()) };
-    vm.attach_current_thread(|env| {
-        // SAFETY: an unowned global reference to the activity, borrowed for this frame.
-        let activity = unsafe { JObject::from_raw(env, app.activity_as_ptr().cast()) };
-        work(env, &activity)
-    })
-}
-
-/// The release this app is running on, which decides how the bars are asked.
-fn device_api_level() -> i32 {
-    // SAFETY: a plain query of the running system, part of the platform since API 24.
-    unsafe { ndk_sys::android_get_device_api_level() }
 }

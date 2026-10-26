@@ -16,6 +16,8 @@ pub use keys::{character_of, logical_key_id, physical_key_usage};
 pub use pointer::{BACK, FORWARD, MIDDLE, PRIMARY, SECONDARY, flutter_button, flutter_buttons};
 
 #[cfg(target_arch = "wasm32")]
+mod clipboard;
+#[cfg(target_arch = "wasm32")]
 mod dispatcher;
 #[cfg(target_arch = "wasm32")]
 mod fonts;

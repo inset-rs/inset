@@ -6341,7 +6341,7 @@ mod tests {
 
     /// The text on the clipboard, as `Clipboard.getData('text/plain')` reads it.
     fn clipboard_text(cell: &Rc<AppCell>) -> Option<String> {
-        let data = Clipboard::get_data(&cell.borrow(), Clipboard::K_TEXT_PLAIN);
+        let data = Clipboard::get_data(&mut cell.borrow_mut(), Clipboard::K_TEXT_PLAIN);
         awaited(cell, data)
             .expect("the clipboard answered")
             .and_then(|data| data.text)
@@ -6393,7 +6393,7 @@ mod tests {
             state.select_all(&mut app, SelectionChangedCause::Toolbar);
             harness.pump(&mut app);
         }
-        let written = Clipboard::set_data(&cell.borrow(), ClipboardData::new(""));
+        let written = Clipboard::set_data(&mut cell.borrow_mut(), ClipboardData::new(""));
         awaited(&cell, written).expect("the clipboard was written");
         state.cut_selection(&mut cell.borrow_mut(), SelectionChangedCause::Toolbar);
         assert_eq!(clipboard_text(&cell).as_deref(), Some(""));
@@ -6403,7 +6403,7 @@ mod tests {
             state.select_all(&mut app, SelectionChangedCause::Toolbar);
             harness.pump(&mut app);
         }
-        let written = Clipboard::set_data(&cell.borrow(), ClipboardData::new(""));
+        let written = Clipboard::set_data(&mut cell.borrow_mut(), ClipboardData::new(""));
         awaited(&cell, written).expect("the clipboard was written");
         state.copy_selection(&mut cell.borrow_mut(), SelectionChangedCause::Toolbar);
         assert_eq!(clipboard_text(&cell).as_deref(), Some(""));
@@ -6450,7 +6450,7 @@ mod tests {
         };
 
         let written = Clipboard::set_data(
-            &cell.borrow(),
+            &mut cell.borrow_mut(),
             ClipboardData::new("Fairly long text to be pasted"),
         );
         awaited(&cell, written).expect("the clipboard was written");
@@ -6472,6 +6472,84 @@ mod tests {
             scroll_controller.as_controller().offset(&cell.borrow()),
             0.0
         );
+    }
+
+    /// A focused field over `text`, all of it selected, in an app whose host's clipboard is
+    /// `clipboard`.
+    fn focused_field(
+        clipboard: &Rc<inset_test::MockClipboard>,
+        text: &str,
+    ) -> (Rc<AppCell>, Harness, Handle<TextEditingController>) {
+        let cell = app_with_clipboard(clipboard);
+        let (harness, controller) = {
+            let mut app = cell.borrow_mut();
+            let controller = TextEditingController::new(&mut app).text(&mut app, text);
+            let focus_node = FocusNode::new(&mut app);
+            let editable = EditableText::new(
+                controller,
+                focus_node,
+                TextStyle::new(),
+                Color::from_argb(255, 255, 0, 0),
+                Color::from_argb(255, 128, 128, 128),
+            );
+            let tree = MediaQuery::new(
+                MediaQueryData::new(),
+                Directionality::new(TextDirection::Ltr, editable),
+            )
+            .into_widget();
+            let harness = Harness::mount(&mut app, tree);
+            harness.pump(&mut app);
+            focus_node.request_focus(&mut app, None);
+            (harness, controller)
+        };
+        // The focus moves in a microtask.
+        cell.checkpoint();
+        let mut app = cell.borrow_mut();
+        harness.pump(&mut app);
+        controller.set_selection(&mut app, TextSelection::new(0, utf16_len(text)));
+        drop(app);
+        (cell, harness, controller)
+    }
+
+    #[test]
+    fn the_users_copy_writes_the_focused_fields_selection_through_its_request() {
+        let mock_clipboard = Rc::new(inset_test::MockClipboard::new());
+        let (cell, _harness, _controller) = focused_field(&mock_clipboard, "copied");
+        let copied = inset_test::MockClipboard::new();
+        let into = copied.clone();
+        let request = inset_embedder::CopyRequest::new(move |items, options| {
+            inset_embedder::Clipboard::write(&into, items, options)
+        });
+
+        let mut app = cell.borrow_mut();
+        let binding = crate::WidgetsBinding::instance(&mut app);
+        binding.handle_clipboard_event(&mut app, inset_embedder::ClipboardEvent::Copy(request));
+        drop(app);
+        cell.checkpoint();
+
+        assert_eq!(copied.clipboard_data().as_deref(), Some("copied"));
+        assert_eq!(mock_clipboard.clipboard_data(), None);
+    }
+
+    #[test]
+    fn the_users_paste_reaches_the_focused_field_with_what_was_pasted() {
+        let mock_clipboard = Rc::new(inset_test::MockClipboard::new());
+        mock_clipboard.set_clipboard_data(Some("on the clipboard".to_owned()));
+        let (cell, _harness, controller) = focused_field(&mock_clipboard, "replaced");
+        let pasted = inset_test::MockClipboard::new();
+        pasted.set_clipboard_data(Some("pasted".to_owned()));
+        let listing = cell
+            .borrow()
+            .spawn(async move |_cx| inset_embedder::Clipboard::items(&pasted).await);
+        let items = awaited(&cell, listing).expect("a mock clipboard lists at once");
+
+        let mut app = cell.borrow_mut();
+        let binding = crate::WidgetsBinding::instance(&mut app);
+        binding.handle_clipboard_event(&mut app, inset_embedder::ClipboardEvent::Paste(items));
+        drop(app);
+        cell.checkpoint();
+
+        assert_eq!(controller.value(&cell.borrow()).text, "pasted");
     }
 
     #[test]

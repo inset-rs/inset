@@ -7,19 +7,22 @@
 //! the app to quit. The windowing owner, which keeps the window controllers and hears every view
 //! event first, is here (`windowing.rs`); a view it does not claim goes to the observers.
 //! `run_app` builds its content in every view the app is given (`multi_view_app.rs`), and asks
-//! for a window where it is given none.
+//! for a window where it is given none. The host's copy, cut and paste, which Flutter's engines
+//! never send, go to the primary focus as text editing intents.
 
 use std::rc::Rc;
 use std::time::Duration;
 
 use inset_embedder::{
-    AppExitResponse, AppExitType, AppLifecycleState, DropData, Locale, RequestId, ViewError,
-    ViewFocusEvent, ViewId, ViewRef, WindowConfig,
+    AppExitResponse, AppExitType, AppLifecycleState, ClipboardEvent, DropData, Locale, RequestId,
+    ViewError, ViewFocusEvent, ViewId, ViewRef, WindowConfig,
 };
 use inset_foundation::{App, Handle, Listenable, Listener, Task, Timer};
 use inset_rendering::{RendererBinding, RendererBindingOverridesObject};
 use inset_scheduler::{FrameTarget, SchedulerBinding, SchedulerBindingOverridesObject};
-use inset_services::{ServicesBinding, ServicesBindingOverridesObject};
+use inset_services::{
+    Clipboard, SelectionChangedCause, ServicesBinding, ServicesBindingOverridesObject,
+};
 
 use crate::framework::{
     AnyElement, BuildOwner, Element, ElementBase, ElementData, IntoWidget, KeyRef, Slot, Widget,
@@ -27,6 +30,9 @@ use crate::framework::{
 };
 use crate::multi_view_app::MultiViewApp;
 use crate::view::{View, ViewCollection};
+use crate::widgets::actions::{Actions, Intent};
+use crate::widgets::focus_manager::FocusManager;
+use crate::widgets::text_editing_intents::{CopySelectionTextIntent, PasteTextIntent};
 use crate::window::Window;
 use crate::windowing::{WindowController, WindowingOwner};
 
@@ -357,6 +363,9 @@ impl WidgetsBinding {
         callbacks.on_drop = Some(Rc::new(|app, data| {
             WidgetsBinding::instance(app).handle_drop(app, &data)
         }));
+        callbacks.on_clipboard_event = Some(Rc::new(|app, _view, event| {
+            WidgetsBinding::instance(app).handle_clipboard_event(app, event)
+        }));
         callbacks.on_locale_changed = Some(Listener::new(|app| {
             WidgetsBinding::instance(app).handle_locale_changed(app)
         }));
@@ -591,6 +600,24 @@ impl WidgetsBinding {
         }
     }
 
+    /// The user copied, cut or pasted through the platform's own command: its intent goes to the
+    /// primary focus, as `EditableTextState.performSelector` sends a macOS selector's, while the
+    /// event is the clipboard ([`Clipboard::handle_event`]), so a paste reads what the user
+    /// pasted. No Flutter counterpart: its engines paste into a text field through its text
+    /// input connection.
+    pub fn handle_clipboard_event(self: Handle<Self>, app: &mut App, event: ClipboardEvent) {
+        let intent = intent_for_clipboard_event(&event);
+        Clipboard::handle_event(app, event, |app| {
+            let Some(primary_context) = FocusManager::instance(app)
+                .primary_focus(app)
+                .and_then(|focus| focus.context(app))
+            else {
+                return;
+            };
+            Actions::maybe_invoke(app, primary_context, &*intent);
+        });
+    }
+
     /// Called when the platform brightness changes: tells the observers.
     pub fn handle_platform_brightness_changed(self: Handle<Self>, app: &mut App) {
         for observer in app.get(self).observers.clone() {
@@ -647,6 +674,17 @@ impl WidgetsBinding {
     /// called in the context of a `TestWidgetsFlutterBinding`).
     pub fn is_root_widget_attached(self: Handle<Self>, app: &App) -> bool {
         app.get(self).root_element.is_some()
+    }
+}
+
+/// The text editing intent of the platform's command behind `event`, as a key would invoke it.
+fn intent_for_clipboard_event(event: &ClipboardEvent) -> Box<dyn Intent> {
+    match event {
+        ClipboardEvent::Copy(_) => Box::new(CopySelectionTextIntent::COPY),
+        ClipboardEvent::Cut(_) => Box::new(CopySelectionTextIntent::cut(
+            SelectionChangedCause::Keyboard,
+        )),
+        ClipboardEvent::Paste(_) => Box::new(PasteTextIntent::new(SelectionChangedCause::Keyboard)),
     }
 }
 

@@ -113,13 +113,17 @@ impl<C: EmbedderClient> MainLoop<C> {
         }
     }
 
-    /// A window gained or lost the focus, which may come with its being minimized or restored.
+    /// A window gained or lost the focus, which may come with its being minimized or restored;
+    /// one that gains it has the clipboard looked at.
     pub(super) fn on_focused(&mut self, id: WindowId, focused: bool) {
         if let Some(view) = self.view_id_of(id) {
             self.client
                 .view_focus_changed(view_focus::focus_changed(view, focused));
         }
         self.sync_window_state(id);
+        if focused {
+            self.look_at_clipboard();
+        }
     }
 
     /// Honours the framework's request to focus a view, or to give up its focus.

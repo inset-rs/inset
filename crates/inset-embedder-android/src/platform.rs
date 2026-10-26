@@ -12,12 +12,13 @@ use std::time::{Duration, Instant};
 
 use android_activity::AndroidAppWaker;
 use inset_embedder::{
-    Brightness, Dispatcher, FontSource, ImageCodec, ImageCodecFuture, ImageDecodeError, ImageFrame,
-    ImageFrameFuture, ImageRepetition, Locale, Offset, Platform, Screen, Screens, SystemChrome,
-    SystemFontSource, TargetPlatform, ViewRef,
+    Brightness, Clipboard, Dispatcher, FontSource, ImageCodec, ImageCodecFuture, ImageDecodeError,
+    ImageFrame, ImageFrameFuture, ImageRepetition, Locale, Offset, Platform, Screen, Screens,
+    SystemChrome, SystemFontSource, TargetPlatform, ViewRef,
 };
 
 use crate::chrome::AndroidChrome;
+use crate::clipboard::AndroidClipboard;
 use crate::view::{AndroidView, VIEW};
 
 /// The long-lived host capability held by the application.
@@ -35,6 +36,7 @@ pub struct AndroidPlatform {
     pub(crate) image_loader: RefCell<Option<valo_codec::ImageLoader>>,
     pub(crate) images: RefCell<Option<valo::ImageContext>>,
     chrome: AndroidChrome,
+    pub(crate) clipboard: AndroidClipboard,
 }
 
 impl AndroidPlatform {
@@ -58,6 +60,7 @@ impl AndroidPlatform {
             image_loader: RefCell::new(None),
             images: RefCell::new(None),
             chrome: AndroidChrome::new(app.clone()),
+            clipboard: AndroidClipboard::new(app.clone()),
         }
     }
 
@@ -162,6 +165,11 @@ impl Platform for AndroidPlatform {
 
     fn view(&self, id: inset_embedder::ViewId) -> Option<ViewRef> {
         (id == VIEW).then(|| Rc::clone(&self.view) as ViewRef)
+    }
+
+    /// The system's clipboard, as far as an app without Java code reaches it (`clipboard.rs`).
+    fn clipboard(&self) -> Option<&dyn Clipboard> {
+        Some(&self.clipboard)
     }
 
     fn system_chrome(&self) -> Option<&dyn SystemChrome> {

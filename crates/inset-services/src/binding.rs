@@ -1,15 +1,16 @@
 //! Flutter counterpart: `services/binding.dart` (`ServicesBinding`).
 //!
-//! Only the app life cycle and the application exit are here: the lifecycle messages the host
-//! sends, which reach `SchedulerBinding::handle_app_lifecycle_state_changed`,
-//! `handleRequestAppExit`, which the widgets binding overrides, and `exitApplication`. The
-//! keyboard and the restoration manager are singletons of their own (`KeyEventManager`,
-//! `RestorationManager`); the rest waits with platform channels.
+//! Only the app life cycle, the application exit and the clipboard's changes are here: the
+//! lifecycle messages the host sends, which reach
+//! `SchedulerBinding::handle_app_lifecycle_state_changed`, `handleRequestAppExit`, which the
+//! widgets binding overrides, `exitApplication`, and the host's word that the clipboard changed,
+//! which Flutter's engines do not send. The keyboard and the restoration manager are singletons
+//! of their own (`KeyEventManager`, `RestorationManager`); the rest waits with platform channels.
 
 use std::rc::Rc;
 
 use inset_embedder::{AppExitResponse, AppExitType, AppLifecycleState};
-use inset_foundation::{App, Handle, Task};
+use inset_foundation::{App, ChangeNotifierData, Handle, Task};
 use inset_scheduler::SchedulerBinding;
 
 use crate::SystemChrome;
@@ -40,6 +41,8 @@ impl<T: ServicesBindingOverridesObject> ServicesBindingOverrides for Handle<T> {
 #[derive(Default)]
 pub struct ServicesBinding {
     overrides: Option<Rc<dyn ServicesBindingOverrides>>,
+    /// Created with the binding so that what shows the clipboard can listen.
+    clipboard: Option<Handle<ChangeNotifierData>>,
     /// Whether `initInstances`'s work is done, which the first `instance` does.
     initialized: bool,
 }
@@ -53,9 +56,29 @@ impl ServicesBinding {
         let this: Handle<ServicesBinding> = app.singleton();
         if !app.get(this).initialized {
             app.get_mut(this).initialized = true;
+            let clipboard = app.create(ChangeNotifierData::new());
+            app.get_mut(this).clipboard = Some(clipboard);
             this.read_initial_lifecycle_state_from_native_window(app);
         }
         this
+    }
+
+    /// Listenable that notifies when another app has changed what is on the clipboard, or a copy
+    /// of this app's expired and was cleared, as far as the host can tell
+    /// (`EmbedderClient::clipboard_changed`). The app's own writes are not told, but where the
+    /// host's system does not tell them apart, as a browser's does not.
+    ///
+    /// What shows whether the clipboard can be pasted, such as a toolbar's Paste button, should
+    /// listen to this and look again.
+    pub fn clipboard(self: Handle<Self>, app: &App) -> Handle<ChangeNotifierData> {
+        app.get(self)
+            .clipboard
+            .expect("ServicesBinding::instance creates the clipboard listenable")
+    }
+
+    /// Notifies [`clipboard`](Self::clipboard): the host says what is on the clipboard changed.
+    pub fn handle_clipboard_changed(self: Handle<Self>, app: &mut App) {
+        self.clipboard(app).notify_listeners(app);
     }
 
     /// Registers the binding layered above this one, as Flutter's `WidgetsBinding` does by

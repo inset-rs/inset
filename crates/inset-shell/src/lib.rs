@@ -11,9 +11,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use inset_embedder::{
-    AppExitReply, AppLifecycleState, DropData, EmbedderClient, Frame, Instant, KeyData,
-    PlatformRef, PointerDataPacket, RequestId, TextEditingValue, TextInputAction, ViewError,
-    ViewFocusEvent, ViewId,
+    AppExitReply, AppLifecycleState, ClipboardEvent, DropData, EmbedderClient, Frame, Instant,
+    KeyData, PlatformRef, PointerDataPacket, RequestId, TextEditingValue, TextInputAction,
+    ViewError, ViewFocusEvent, ViewId,
 };
 use inset_foundation::{App, AppCell};
 use inset_gestures::GestureBinding;
@@ -160,6 +160,15 @@ impl EmbedderClient for Shell {
         });
     }
 
+    fn clipboard_event(&mut self, view: ViewId, event: ClipboardEvent) {
+        self.push(|app| {
+            let callback = app.platform_callbacks().on_clipboard_event.clone();
+            if let Some(callback) = callback {
+                callback(app, view, event);
+            }
+        });
+    }
+
     fn pointer_data_packet(&mut self, packet: PointerDataPacket) {
         self.push(|app| GestureBinding::instance(app).handle_pointer_data_packet(app, packet));
     }
@@ -254,6 +263,10 @@ impl EmbedderClient for Shell {
         });
     }
 
+    fn clipboard_changed(&mut self) {
+        self.push(|app| ServicesBinding::instance(app).handle_clipboard_changed(app));
+    }
+
     fn wake(&mut self, elapsed: Duration) {
         self.advance_clock(elapsed);
         // A wake with no time behind it is a post from a native callback.
@@ -332,6 +345,41 @@ mod tests {
         let seen = seen.as_ref().expect("the callback ran");
         assert_eq!(seen.change, DropChange::Dropped);
         assert_eq!(seen.paths, [PathBuf::from("/a.wasm")]);
+    }
+
+    #[test]
+    fn a_clipboard_event_reaches_the_platform_callback_with_its_view() {
+        use inset_embedder::{ClipboardEvent, CopyRequest};
+
+        let seen = Rc::new(Cell::new(None));
+        let seen_slot = Rc::clone(&seen);
+        let mut shell = Shell::new(Rc::new(platform_with_a_view()), move |app: &mut App| {
+            app.platform_callbacks_mut().on_clipboard_event =
+                Some(Rc::new(move |_app, view, event| {
+                    seen_slot.set(Some((view, matches!(event, ClipboardEvent::Cut(_)))));
+                }));
+        });
+        let request = CopyRequest::new(|_items, _options| Box::pin(std::future::ready(Ok(()))));
+        shell.clipboard_event(IMPLICIT_VIEW_ID, ClipboardEvent::Cut(request));
+        assert_eq!(seen.get(), Some((IMPLICIT_VIEW_ID, true)));
+    }
+
+    #[test]
+    fn a_change_of_the_clipboard_reaches_the_services_bindings_listenable() {
+        use inset_foundation::{Listenable, Listener};
+        use inset_services::ServicesBinding;
+
+        let heard = Rc::new(Cell::new(0));
+        let counter = Rc::clone(&heard);
+        let mut shell = Shell::new(Rc::new(TestPlatform::new()), move |app: &mut App| {
+            let clipboard = ServicesBinding::instance(app).clipboard(app);
+            clipboard.add_listener(
+                app,
+                Listener::new(move |_app| counter.set(counter.get() + 1)),
+            );
+        });
+        shell.clipboard_changed();
+        assert_eq!(heard.get(), 1);
     }
 
     /// A reply to `shell.request_app_exit`, and the answer it was given so far.

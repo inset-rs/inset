@@ -11,6 +11,7 @@
 #![recursion_limit = "256"]
 
 mod client;
+mod clipboard;
 mod composition;
 mod drag_drop;
 mod fonts;
@@ -36,6 +37,11 @@ mod vsync;
 mod window;
 
 pub use client::EmbedderClient;
+pub use clipboard::{
+    Clipboard, ClipboardError, ClipboardEvent, ClipboardItem, ClipboardItemsFuture,
+    ClipboardReadFuture, ClipboardWriteFuture, Content, ContentFuture, CopyOptions, CopyRequest,
+    FileSink, PastedItem, URI_LIST, WriteFuture,
+};
 pub use composition::{Buffer, Compositor, Surface};
 pub use drag_drop::{DropChange, DropData};
 pub use fonts::{
@@ -53,12 +59,10 @@ pub use painting::*;
 pub use paragraph::*;
 pub use platform::{
     AppExit, AppExitReply, AppExitResponse, AppExitType, AppLifecycleState,
-    ApplicationSwitcherDescription, Brightness, Clipboard, ClipboardHasStringsFuture,
-    ClipboardSetTextFuture, ClipboardTextFuture, Dispatcher, FileOpening, Frame,
-    HapticFeedbackType, Haptics, InertDispatcher, InertPlatform, MouseCursor, OpenFilesHandler,
-    Platform, PlatformRef, PopupMenuEntry, PopupMenuFuture, PopupMenus, Restoration, Screen,
-    ScreenId, Screens, SystemChrome, SystemContextMenu, SystemUiOverlayStyle, TargetPlatform,
-    TextServices, ViewRef,
+    ApplicationSwitcherDescription, Brightness, Dispatcher, FileOpening, Frame, HapticFeedbackType,
+    Haptics, InertDispatcher, InertPlatform, MouseCursor, OpenFilesHandler, Platform, PlatformRef,
+    PopupMenuEntry, PopupMenuFuture, PopupMenus, Restoration, Screen, ScreenId, Screens,
+    SystemChrome, SystemContextMenu, SystemUiOverlayStyle, TargetPlatform, TextServices, ViewRef,
 };
 pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,

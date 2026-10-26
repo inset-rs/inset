@@ -75,7 +75,7 @@ team = "ABCDE12345"                # narrows the signing identity when a machine
 minimum_version = "15.0"
 
 [package.metadata.inset.android]
-min_sdk = 24
+min_sdk = 26                       # the default: Android 8.0, the first whose clip says when it was set
 target_sdk = 34                    # 35 and up draw edge to edge: the safe area goes, until the host reads insets
 version_code = 100                 # defaults to one derived from the version: 1.2.3 is 10203
 

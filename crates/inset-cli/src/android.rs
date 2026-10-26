@@ -24,7 +24,9 @@ use crate::icons;
 use crate::project::{Profile, Project};
 use crate::tools;
 
-const DEFAULT_MIN_SDK: u32 = 24;
+/// Android 8.0, the first whose clip says when it was set, which tells the app another writer's
+/// copy (`inset-embedder-android`'s clipboard).
+const DEFAULT_MIN_SDK: u32 = 26;
 /// The last level before the system stops fitting the window to its bars: from 35 an
 /// app is edge to edge, and the host learns the safe area from the fitted content rect.
 const DEFAULT_TARGET_SDK: u32 = 34;
@@ -859,7 +861,7 @@ mod tests {
             library: "my_app",
             version_code: 100,
             version_name: "0.1.0",
-            min_sdk: 24,
+            min_sdk: 26,
             target_sdk: 34,
             debuggable: true,
             has_icon: false,

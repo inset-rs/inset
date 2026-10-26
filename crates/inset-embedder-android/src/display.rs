@@ -7,14 +7,12 @@
 //! from the window manager's largest window, as Flutter's do, from API 30, which has it; before,
 //! the screen is the display's real size and the bars are not known.
 
-// The VM and the activity reach this crate as raw pointers, which JNI takes back as its
-// own handles; that is the `unsafe` here.
-#![allow(unsafe_code)]
-
 use android_activity::AndroidApp;
 use inset_embedder::{Rect, Screen, ScreenId};
 use jni::objects::{JObject, JString, JValue};
 use jni::{Env, jni_sig, jni_str};
+
+use crate::activity::{device_api_level, with_activity};
 
 /// The first release whose window manager reports the largest window and its insets.
 const MAXIMUM_WINDOW_METRICS: i32 = 30;
@@ -210,23 +208,4 @@ fn in_points(pixels: Rect, scale: f64) -> Rect {
         pixels.right / scale,
         pixels.bottom / scale,
     )
-}
-
-fn with_activity<T>(
-    app: &AndroidApp,
-    work: impl FnOnce(&mut Env<'_>, &JObject<'_>) -> jni::errors::Result<T>,
-) -> jni::errors::Result<T> {
-    // SAFETY: this process's own VM, as android-activity hands it out.
-    let vm = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr().cast()) };
-    vm.attach_current_thread(|env| {
-        // SAFETY: an unowned global reference to the activity, borrowed for this frame.
-        let activity = unsafe { JObject::from_raw(env, app.activity_as_ptr().cast()) };
-        work(env, &activity)
-    })
-}
-
-/// The release this app is running on, which decides how the screen is asked.
-fn device_api_level() -> i32 {
-    // SAFETY: a plain query of the running system, part of the platform since API 24.
-    unsafe { ndk_sys::android_get_device_api_level() }
 }

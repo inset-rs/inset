@@ -8,7 +8,9 @@ use std::ops::Receiver;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
-use inset_embedder::{DropData, PlatformRef, RequestId, ViewError, ViewFocusEvent, ViewId};
+use inset_embedder::{
+    ClipboardEvent, DropData, PlatformRef, RequestId, ViewError, ViewFocusEvent, ViewId,
+};
 use slotmap::new_key_type;
 
 use crate::app_cell::{AppCell, AsyncApp};
@@ -150,6 +152,9 @@ pub struct PlatformCallbacks {
     pub on_view_focus_change: Option<ViewFocusChangeCallback>,
     /// Files dragged from outside the application over a view; no Flutter counterpart.
     pub on_drop: Option<DropCallback>,
+    /// The user copied, cut or pasted in a view through the platform's own command; no Flutter
+    /// counterpart.
+    pub on_clipboard_event: Option<ClipboardEventCallback>,
     /// The user asked to go back. Answers whether the application went back. Flutter's
     /// `popRoute` on `SystemChannels.navigation`.
     pub on_pop_route: Option<PopRouteCallback>,
@@ -172,6 +177,9 @@ pub type ViewFocusChangeCallback = Rc<dyn Fn(&mut App, ViewFocusEvent)>;
 
 /// The framework's handler for `EmbedderClient::drop_data`.
 pub type DropCallback = Rc<dyn Fn(&mut App, DropData)>;
+
+/// The framework's handler for `EmbedderClient::clipboard_event`.
+pub type ClipboardEventCallback = Rc<dyn Fn(&mut App, ViewId, ClipboardEvent)>;
 
 /// The framework's handler for `EmbedderClient::pop_route`.
 pub type PopRouteCallback = Rc<dyn Fn(&mut App) -> bool>;

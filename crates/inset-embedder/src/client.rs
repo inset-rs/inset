@@ -6,8 +6,8 @@
 use std::time::Duration;
 
 use crate::{
-    AppExitReply, AppExitResponse, AppLifecycleState, DropData, Frame, KeyData, PointerDataPacket,
-    TextEditingValue, TextInputAction, ViewFocusEvent, ViewId,
+    AppExitReply, AppExitResponse, AppLifecycleState, ClipboardEvent, DropData, Frame, KeyData,
+    PointerDataPacket, TextEditingValue, TextInputAction, ViewFocusEvent, ViewId,
 };
 
 /// Complete frames and typed view lifecycle notifications.
@@ -51,6 +51,13 @@ pub trait EmbedderClient {
     /// left a view. No dart:ui hook; the default drops it.
     fn drop_data(&mut self, data: DropData) {
         let _ = data;
+    }
+
+    /// The user copied, cut or pasted in `view` through the platform's own command: the
+    /// browser's, or a desktop's Edit menu, which a key reaches only once the framework has left
+    /// it unhandled. No dart:ui hook; the default drops it.
+    fn clipboard_event(&mut self, view: ViewId, event: ClipboardEvent) {
+        let _ = (view, event);
     }
 
     /// Flutter `PlatformDispatcher.onKeyData`.
@@ -134,6 +141,12 @@ pub trait EmbedderClient {
     /// Flutter `PlatformDispatcher.onSystemFontsChanged`: the host registered faces the
     /// framework did not have when text last laid out.
     fn system_fonts_changed(&mut self) {}
+
+    /// Another app changed what is on the clipboard, or the host cleared a copy of this app's that
+    /// expired, as far as the host can tell: at the moments its system says so, or lets it check.
+    /// The app's own writes are not reported, as it made them, but where the system tells them
+    /// apart from no other change, as a browser does not. No dart:ui hook; the default drops it.
+    fn clipboard_changed(&mut self) {}
 
     /// The wake asked for through [`Dispatcher::wake_at`](crate::Dispatcher::wake_at) or
     /// [`Dispatcher::wake_now`](crate::Dispatcher::wake_now).

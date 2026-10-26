@@ -22,11 +22,14 @@ use inset_embedder::{
 use winit::event_loop::EventLoopProxy;
 
 use crate::app_requests::AppRequest;
-use crate::clipboard::Pasteboard;
+use crate::clipboard::ClipboardChanges;
 use crate::dispatcher::WinitDispatcher;
 use crate::macos::MacOs;
 use crate::main_loop::MainLoopEvent;
-use crate::os::{FramePresentation, NativeComposition, OperatingSystem, SystemRequests, ThisOs};
+use crate::os::{
+    FramePresentation, NativeComposition, OperatingSystem, SystemClipboard, SystemRequests, ThisOs,
+    ThisOsClipboard,
+};
 use crate::popup_menus::NativePopupMenus;
 use crate::state::EmbedderState;
 use crate::windows::WindowRequest;
@@ -56,7 +59,7 @@ pub struct WinitPlatform {
     /// Where any thread waits for a screen's next vsync.
     vsync_waiter: Arc<dyn VsyncWaiter>,
     origin: Instant,
-    pasteboard: Pasteboard,
+    clipboard: ThisOsClipboard,
     popup_menus: NativePopupMenus,
     /// What only macOS offers; `None` elsewhere.
     macos: Option<MacOs>,
@@ -67,6 +70,10 @@ impl WinitPlatform {
         state: Rc<EmbedderState>,
         proxy: EventLoopProxy<MainLoopEvent>,
     ) -> WinitPlatform {
+        let clipboard = ThisOs::clipboard(Box::new({
+            let requests = Rc::clone(state.requests());
+            move || requests.send(AppRequest::LookAtClipboard)
+        }));
         WinitPlatform {
             next_request_id: Cell::new(1),
             macos: cfg!(target_os = "macos").then(|| MacOs::new(Rc::clone(&state))),
@@ -74,7 +81,7 @@ impl WinitPlatform {
             compositor: ThisOs::compositor(),
             vsync_waiter: ThisOs::vsync_waiter(&proxy),
             origin: Instant::now(),
-            pasteboard: Pasteboard::default(),
+            clipboard,
             popup_menus: NativePopupMenus::new(proxy.clone()),
             proxy,
         }
@@ -101,6 +108,21 @@ impl WinitPlatform {
 
     pub(crate) fn elapsed(&self) -> Duration {
         self.now().saturating_duration_since(self.origin)
+    }
+
+    /// Whether the system's clipboard changed since this was last asked.
+    pub(crate) fn clipboard_has_changed(&self) -> bool {
+        self.clipboard.has_changed()
+    }
+
+    /// When the main loop is to clear a copy of the app's that expires (`clipboard/`).
+    pub(crate) fn clipboard_expiry(&self) -> Option<Instant> {
+        self.clipboard.expiry()
+    }
+
+    /// Clears the app's copy whose time has come by `now`; answers whether it cleared one.
+    pub(crate) fn clear_expired_clipboard(&self, now: Instant) -> bool {
+        self.clipboard.clear_expired(now)
     }
 
     /// What the embedder knows, for the parts of the platform in other files.
@@ -212,9 +234,10 @@ impl Platform for WinitPlatform {
         self.image_context()?.upload_pixels(pixels, false).ok()
     }
 
-    /// The system pasteboard, where the embedder can reach one.
+    /// The system's clipboard: on macOS its pasteboard, elsewhere its plain text
+    /// (`clipboard/`).
     fn clipboard(&self) -> Option<&dyn Clipboard> {
-        Some(&self.pasteboard)
+        Some(&self.clipboard)
     }
 
     fn popup_menus(&self) -> Option<&dyn PopupMenus> {

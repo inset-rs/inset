@@ -9,7 +9,6 @@ Only the app life cycle and the application exit of `ServicesBinding`, the hardw
 - text_editing.rs → text_editing.dart (re-export of embedder `TextSelection`)
 - text_layout_metrics.rs → text_layout_metrics.dart (`isWhitespace` / `isLineTerminator`)
 - text_boundary.rs → text_boundary.dart (`LineBoundary` needs layout, so it sits in rendering)
-- clipboard.rs → clipboard.dart
 
 ## binding.rs → binding.dart
 
@@ -21,9 +20,23 @@ Only the app life cycle and the application exit of `ServicesBinding`, the hardw
   Reason: platform — there are no method channels; the host trait is the channel.
   Affect: a test reports a lifecycle state by calling the binding.
 
+- Change: `ServicesBinding::clipboard` is a listenable the host notifies each time it says the clipboard changed.
+  Reason: platform — Flutter's engines never say the clipboard changed; a host that can tell, says so.
+  Affect: what shows whether the clipboard can be pasted follows a copy made elsewhere.
+
 - Change: `ServicesBinding::exit_application` answers `Cancel` at once on a host with no `AppExit` capability, where Dart's call fails.
   Reason: platform — the host trait is the channel, and a host without the capability answers `None`.
   Affect: on a phone or in a browser the app keeps running and the caller sees `Cancel`, not an error.
+
+## clipboard.rs → clipboard.dart
+
+- Change: `Clipboard::has_strings` answers from the types on the clipboard, never reading the text.
+  Reason: platform — the host's clipboard lists its items' types without their content, as a host whose own reads are guarded must.
+  Affect: an empty text on the clipboard counts as strings, as it does on iOS and Android.
+
+- Change: while the host's copy, cut or paste event is handled (`Clipboard::handle_event`), `set_data` writes through the event and `get_data` and `has_strings` read what was pasted.
+  Reason: platform — where only the user's own paste may read the clipboard, as in a browser, the host hands what was pasted with the event.
+  Affect: a text field pastes what the user pasted even where the app may not read the clipboard itself.
 
 ## text_input.rs → text_input.dart
 

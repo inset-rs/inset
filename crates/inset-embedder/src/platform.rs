@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use web_time::Instant;
 
+use crate::clipboard::Clipboard;
 use crate::fonts::FontSource;
 use crate::geometry::{Color, Offset, Rect};
 use crate::mouse_cursor::SystemMouseCursorKind;
@@ -765,30 +766,6 @@ impl dyn Platform {
         (self as &dyn Any).downcast_ref::<T>()
     }
 }
-
-/// The system clipboard: Flutter's `Clipboard` over the platform channel. Every call answers
-/// later, as Flutter's does: a host may have to ask its user, or another process, first.
-pub trait Clipboard {
-    /// Stores plain text on the system clipboard (Flutter's `Clipboard.setData`), and completes
-    /// once it is stored.
-    fn set_text(&self, text: &str) -> ClipboardSetTextFuture;
-
-    /// Retrieves plain text from the system clipboard (Flutter's `Clipboard.getData`); `None`
-    /// when it holds none, or the host could not read it.
-    fn text(&self) -> ClipboardTextFuture;
-
-    /// Whether the clipboard contains string data (Flutter's `Clipboard.hasStrings`).
-    fn has_strings(&self) -> ClipboardHasStringsFuture;
-}
-
-/// The clipboard's text being stored. Flutter's `Future<void>` from `Clipboard.setData`.
-pub type ClipboardSetTextFuture = Pin<Box<dyn Future<Output = ()>>>;
-
-/// The clipboard's text on its way. Flutter's `Future<ClipboardData?>`.
-pub type ClipboardTextFuture = Pin<Box<dyn Future<Output = Option<String>>>>;
-
-/// Whether the clipboard holds text, on its way. Flutter's `Future<bool>`.
-pub type ClipboardHasStringsFuture = Pin<Box<dyn Future<Output = bool>>>;
 
 /// Flutter's `SystemChrome`: the system UI around the app.
 pub trait SystemChrome {

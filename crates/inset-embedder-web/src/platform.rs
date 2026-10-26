@@ -6,15 +6,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    Brightness, Clipboard, ClipboardHasStringsFuture, ClipboardSetTextFuture, ClipboardTextFuture,
-    Dispatcher, ImageCodecFuture, Matrix4, MouseCursor, Offset, Platform, Rect, Screen, Screens,
-    Size, SystemMouseCursorKind, TargetPlatform, TextEditingValue, TextInputConfiguration,
-    TextInputHost, View, ViewId, ViewMetrics, ViewRef,
+    Brightness, Clipboard, Dispatcher, ImageCodecFuture, Matrix4, MouseCursor, Offset, Platform,
+    Rect, Screen, Screens, Size, SystemMouseCursorKind, TargetPlatform, TextEditingValue,
+    TextInputConfiguration, TextInputHost, View, ViewId, ViewMetrics, ViewRef,
 };
-use wasm_bindgen_futures::JsFuture;
 use web_sys::HtmlCanvasElement;
 use web_time::Instant;
 
+use crate::clipboard::BrowserClipboard;
 use crate::dispatcher;
 use crate::font_fallback::ROBOTO;
 use crate::gpu::Gpu;
@@ -193,8 +192,9 @@ impl Platform for WebPlatform {
             .cloned()
     }
 
+    /// The browser's asynchronous clipboard (`clipboard.rs`).
     fn clipboard(&self) -> Option<&dyn Clipboard> {
-        Some(self)
+        Some(&BrowserClipboard)
     }
 
     /// The page's one screen (`screen.rs`).
@@ -218,35 +218,6 @@ impl Platform for WebPlatform {
             Rc::clone(&self.frame_requested),
             Rc::clone(&self.on_schedule),
         )
-    }
-}
-
-impl Clipboard for WebPlatform {
-    /// The browser's `writeText`, started in the call; a write it refuses completes all the same.
-    fn set_text(&self, text: &str) -> ClipboardSetTextFuture {
-        let Some(window) = web_sys::window() else {
-            return Box::pin(std::future::ready(()));
-        };
-        let written = window.navigator().clipboard().write_text(text);
-        Box::pin(async move {
-            let _refused = JsFuture::from(written).await;
-        })
-    }
-
-    /// The browser's `readText`, which may ask the user first; a read it refuses answers `None`.
-    fn text(&self) -> ClipboardTextFuture {
-        let Some(window) = web_sys::window() else {
-            return Box::pin(std::future::ready(None));
-        };
-        let read = window.navigator().clipboard().read_text();
-        Box::pin(async move { JsFuture::from(read).await.ok()?.as_string() })
-    }
-
-    /// Found by reading the text, as Flutter's web engine does. The framework's clipboard status
-    /// on the web never asks, since a read may ask the user.
-    fn has_strings(&self) -> ClipboardHasStringsFuture {
-        let text = self.text();
-        Box::pin(async move { text.await.is_some_and(|text| !text.is_empty()) })
     }
 }
 
@@ -293,6 +264,14 @@ impl WebView {
 
     pub fn has_text_input(&self) -> bool {
         self.text_input.borrow().is_some()
+    }
+
+    /// Whether `target` is the field the view edits text in now.
+    pub(crate) fn is_text_input_field(&self, target: &web_sys::EventTarget) -> bool {
+        self.text_input
+            .borrow()
+            .as_ref()
+            .is_some_and(|input| input.is_field(target))
     }
 
     pub fn set_metrics(&self, metrics: ViewMetrics) {

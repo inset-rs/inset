@@ -43,7 +43,7 @@ use inset_scheduler::{
 };
 use inset_services::{
     AnyTextSelectionDelegate, Clipboard, HapticFeedback, HardwareKeyboard, LogicalKeyboardKey,
-    SelectionChangedCause, TextLayoutMetrics, TextSelectionDelegate,
+    SelectionChangedCause, ServicesBinding, TextLayoutMetrics, TextSelectionDelegate,
 };
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
@@ -200,7 +200,8 @@ pub enum LiveTextInputStatus {
 ///
 /// Dart's `ValueNotifier<ClipboardStatus>` superclass is the `change_notifier` and `value`
 /// fields here. Call [`update`](Self::update) to refresh [`value`](Self::value) from the
-/// clipboard.
+/// clipboard. While it has listeners it also updates each time the host says the clipboard
+/// changed ([`ServicesBinding::clipboard`]), which Flutter's engines never say.
 pub struct ClipboardStatusNotifier {
     change_notifier: ChangeNotifierData,
     value: ClipboardStatus,
@@ -246,6 +247,21 @@ impl ClipboardStatusNotifier {
             observer: None,
             web: true,
         })
+    }
+
+    /// What hears the host say the clipboard changed.
+    fn clipboard_listener(self: Handle<Self>) -> Listener {
+        Listener::handle_method(self, Self::clipboard_changed)
+    }
+
+    /// The host says the clipboard changed: an [`update`](Self::update).
+    fn clipboard_changed(self: Handle<Self>, app: &mut App) {
+        self.update(app);
+    }
+
+    fn stop_listening_to_the_clipboard(self: Handle<Self>, app: &mut App) {
+        let clipboard = ServicesBinding::instance(app).clipboard(app);
+        clipboard.remove_listener(app, &Self::clipboard_listener(self));
     }
 
     fn observer(self: Handle<Self>, app: &mut App) -> WidgetsBindingObserverRef {
@@ -298,6 +314,7 @@ impl ClipboardStatusNotifier {
         if let Some(observer) = app.get(self).observer.clone() {
             WidgetsBinding::instance(app).remove_observer(app, &observer);
         }
+        self.stop_listening_to_the_clipboard(app);
         app.get_mut(self).disposed = true;
         app.get_mut(self).change_notifier.dispose();
     }
@@ -316,6 +333,8 @@ impl ChangeNotifier for ClipboardStatusNotifier {
         if !app.get(self).change_notifier.has_listeners() {
             let observer = self.observer(app);
             WidgetsBinding::instance(app).add_observer(app, observer);
+            let clipboard = ServicesBinding::instance(app).clipboard(app);
+            clipboard.add_listener(app, Self::clipboard_listener(self));
         }
         if app.get(self).value == ClipboardStatus::Unknown {
             self.update(app);
@@ -329,6 +348,7 @@ impl ChangeNotifier for ClipboardStatusNotifier {
         if let Some(observer) = app.get(self).observer.clone() {
             WidgetsBinding::instance(app).remove_observer(app, &observer);
         }
+        self.stop_listening_to_the_clipboard(app);
     }
 }
 
@@ -5052,6 +5072,36 @@ mod tests {
         );
         cell.checkpoint();
         assert_eq!(notifier.value(&cell.borrow()), ClipboardStatus::Pasteable);
+    }
+
+    #[test]
+    fn a_listened_clipboard_status_notifier_updates_when_the_clipboard_changes() {
+        use inset_services::ServicesBinding;
+        use inset_test::{MockClipboard, TestPlatform};
+
+        let mock_clipboard = MockClipboard::new();
+        let clipboard: Rc<dyn inset_embedder::Clipboard> = Rc::new(mock_clipboard.clone());
+        let cell = AppCell::with_platform(Rc::new(TestPlatform::new().with_clipboard(clipboard)));
+        let notifier = ClipboardStatusNotifier::new(&mut cell.borrow_mut());
+        let listener = Listener::new(|_app| {});
+        notifier.add_listener(&mut cell.borrow_mut(), listener.clone());
+        cell.checkpoint();
+
+        mock_clipboard.set_clipboard_data(Some("pasteablestring".to_owned()));
+        let binding = ServicesBinding::instance(&mut cell.borrow_mut());
+        binding.handle_clipboard_changed(&mut cell.borrow_mut());
+        cell.checkpoint();
+        assert_eq!(notifier.value(&cell.borrow()), ClipboardStatus::Pasteable);
+
+        notifier.remove_listener(&mut cell.borrow_mut(), &listener);
+        mock_clipboard.set_clipboard_data(None);
+        binding.handle_clipboard_changed(&mut cell.borrow_mut());
+        cell.checkpoint();
+        assert_eq!(
+            notifier.value(&cell.borrow()),
+            ClipboardStatus::Pasteable,
+            "a notifier nobody listens to no longer looks"
+        );
     }
 
     #[test]

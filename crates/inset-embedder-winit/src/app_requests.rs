@@ -38,6 +38,9 @@ pub(crate) enum AppRequest {
     ChangeViewFocus(ViewFocusEvent),
     /// Hand the files waiting to be opened to the handler the app just set.
     HandOverFiles,
+    /// Look at the clipboard, and tell the app if it changed: the system cleared a copy of the
+    /// app's that expired, or says the clipboard changed.
+    LookAtClipboard,
 }
 
 /// The requests sent and not served yet, oldest first. Main thread.

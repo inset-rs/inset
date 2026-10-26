@@ -211,3 +211,17 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - `PlatformDispatcher` callback setters and Zones. Trigger: a requirement to expose dart:ui callbacks independently of `Shell`.
 - `_updateFrameData` and the `frameNumber` argument to `_beginFrame`. Trigger: `FrameData`.
 - The rest of `hooks.dart`. Trigger: the matching dart:ui callback.
+
+## clipboard.rs → `services/clipboard.dart`'s `Clipboard.setData`, `getData` and `hasStrings` on the platform channel
+
+- Change: the host's clipboard holds items, each offered in several MIME types, given or promised, files given or promised, and how a copy is to be treated, where Flutter's channel carries plain text.
+  Reason: platform — every system's clipboard holds items in several types, which an app reads and writes as the system's own apps do.
+  Affect: an app can copy an image or a file, and read what another app copied in any type the system names.
+
+- Change: a promised file produces its bytes into a sink the host hands it (`FileSink`), and the host writes them where the receiver chose.
+  Reason: platform — Windows and Android take a promised file as a stream, which macOS's write at a path is a copy of, while a path would need a temporary file to stream.
+  Affect: an app promising a file never learns where the receiver put it, and one in a sandbox writes nothing outside it.
+
+- Change: the host tells the client when the clipboard changed (`clipboard_changed`) and when the user copied, cut or pasted through the platform's own command (`clipboard_event`), which Flutter's engines never say.
+  Reason: platform — where only the user's own paste may read the clipboard, the paste's content comes with the host's word of it.
+  Affect: the framework learns of a copy made elsewhere, and pastes what the user pasted even where it may not read the clipboard itself.

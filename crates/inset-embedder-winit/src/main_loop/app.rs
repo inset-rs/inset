@@ -2,6 +2,8 @@
 //! appearance, the files it is asked to open and the reopen; and what it says changed about the
 //! machine: the screens and the user's languages.
 
+use std::time::Instant;
+
 use inset_embedder::EmbedderClient;
 use winit::window::{Theme, Window};
 
@@ -33,6 +35,27 @@ impl<C: EmbedderClient> MainLoop<C> {
     pub(super) fn on_lifecycle_notice(&mut self, notice: LifecycleNotice) {
         let state = self.lifecycle.state_after(notice);
         self.client.app_lifecycle_state_changed(state);
+        if let LifecycleNotice::WillBecomeActive { .. } = notice {
+            self.look_at_clipboard();
+        }
+    }
+
+    /// The app hears the clipboard changed, if another writer changed it since the loop last
+    /// looked: as the app becomes active and as one of its windows takes the focus, since no
+    /// system here tells an application that another one wrote it; and once a copy of the app's
+    /// expired and was cleared (`clipboard/`).
+    pub(super) fn look_at_clipboard(&mut self) {
+        if self.platform.clipboard_has_changed() {
+            self.client.clipboard_changed();
+        }
+    }
+
+    /// Clears the app's copy whose time has come by `now`, where the main loop keeps the expiry,
+    /// and the app hears the clipboard changed.
+    pub(super) fn clear_expired_copy(&mut self, now: Instant) {
+        if self.platform.clear_expired_clipboard(now) {
+            self.client.clipboard_changed();
+        }
     }
 
     /// The system's appearance, read again from `window`'s theme: a window just opened brings

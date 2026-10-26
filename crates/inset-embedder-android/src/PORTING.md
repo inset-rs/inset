@@ -15,9 +15,23 @@ Host implementation. Flutter analogue: the engine's Android embedder under
 
 ## platform.rs
 
-- Change: the clipboard and haptics are absent, and the platform answers that it has neither.
-  Reason: platform — both are Java APIs that need an activity of the app's own.
-  Affect: copy and paste do nothing, and a widget that would buzz stays silent. The framework's own fallbacks run, rather than a capability that silently does nothing.
+- Change: haptics are absent, and the platform answers that it has none.
+  Reason: platform — haptics are a Java API that needs an activity of the app's own.
+  Affect: a widget that would buzz stays silent. The framework's own fallbacks run, rather than a capability that silently does nothing.
+
+## clipboard.rs
+
+- Change: the clipboard is `ClipboardManager` through JNI: its clip listed from its description as one item, read as text, HTML, a URI and the URI's content, and written as text with HTML beside it only, a sensitive copy marked so and one that expires cleared by the host.
+  Reason: platform — every other form, and a form produced when pasted, is a content provider's, which is Java code of the app's own.
+  Affect: text copies and pastes with other apps, and an image another app copied can be read, but the app cannot copy an image or a file.
+
+- Change: the app hears the clipboard changed as the activity takes the focus, by the clip's time, its own writes counted as seen, and when a copy of its own expired and was cleared.
+  Reason: platform — Android tells changes only to a listener Java code provides.
+  Affect: a copy another app makes while this one is in front is heard at the next focus.
+
+- Change: a copy that expires is cleared by the host's loop, which wakes for it as it wakes for the app's timers, if the clip is still the app's.
+  Reason: platform — Android has no expiry an app can set.
+  Affect: a copy whose app quits before its time stays on the clipboard.
 
 ## display.rs / host.rs
 
@@ -33,7 +47,7 @@ Host implementation. Flutter analogue: the engine's Android embedder under
 
 ## Deferred
 
-- The keyboard, the clipboard, haptics, and the bars and keyboard as the system reports them. Trigger: any of them, which is a Java activity of the app's own, as Flutter's is.
+- The keyboard, haptics, and the bars and keyboard as the system reports them. Trigger: any of them, which is a Java activity of the app's own, as Flutter's is.
 - The predictive back gesture, with its peek animation. Trigger: a Java activity that registers with the system's back callback; the plain back button already pops.
 - Deep links, which Flutter carries beside the back button. Trigger: an app that opens on a route the system names.
 - A window the app manages around the activity's view, with whether it is minimized and whether it is occluded, which the activity's stop and start would tell. Trigger: an app that manages its window on Android, as in desktop windowing.

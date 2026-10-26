@@ -72,6 +72,11 @@ impl WebTextInput {
         input
     }
 
+    /// Whether `target` is the session's field.
+    pub(crate) fn is_field(&self, target: &EventTarget) -> bool {
+        AsRef::<EventTarget>::as_ref(&self.element) == target
+    }
+
     pub(crate) fn apply_configuration(&self, configuration: &TextInputConfiguration) {
         self.input_action.set(configuration.input_action);
         self.newline.set(is_newline(configuration));

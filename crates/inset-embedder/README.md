@@ -135,8 +135,12 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 ## System services
 
 **Clipboard**
-- `Platform::clipboard`, `Clipboard::set_text`, `text`, `has_strings`
-- Start each write inside the call, and answer each read once the text arrives, with nothing where the host cannot reach the clipboard.
+- `Platform::clipboard`, `Clipboard::items`, `write`, `PastedItem`, `ClipboardItem`, `Content`, `FileSink`, `CopyOptions`, `EmbedderClient::clipboard_changed`
+- List each item in the MIME types the system offers it in without reading it, fail a read once the clipboard has changed, write every form and option the system carries and refuse the forms it does not, write a promised file's bytes from its producer into the file where the receiver chose and remove it when the producer fails, clear a copy that expires where the system has no expiry of its own, waking for its time as for the app's timers, and call `clipboard_changed` whenever the system says another writer changed it or the host looks and finds such a change, or clears a copy that expired, counting the app's own writes as seen.
+
+**Copy, cut and paste**
+- `EmbedderClient::clipboard_event`, `ClipboardEvent`, `CopyRequest`
+- Send the platform's own copy, cut and paste, which a key reaches only once the framework has left it unhandled, with what was pasted, and with where a copy is written.
 
 **Menus and text services**
 - `PopupMenus`, `SystemContextMenu`, `TextServices`, `EmbedderClient::system_context_menu_hidden`, `custom_context_menu_action`; none yet for the menu bar

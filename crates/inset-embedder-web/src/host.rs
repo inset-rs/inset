@@ -12,9 +12,12 @@ use inset_embedder::{
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::Closure;
-use web_sys::{HtmlCanvasElement, KeyboardEvent, PointerEvent, WheelEvent, Window};
+use web_sys::{
+    ClipboardEvent, EventTarget, HtmlCanvasElement, KeyboardEvent, PointerEvent, WheelEvent, Window,
+};
 use web_time::Instant;
 
+use crate::clipboard;
 use crate::gpu::Gpu;
 use crate::keys;
 use crate::platform::{CANVAS_VIEW, WebPlatform, WebView};
@@ -142,6 +145,14 @@ async fn run_async<C: EmbedderClient + 'static>(
     }));
     bind_events(&host);
     schedule_next(&host);
+}
+
+impl<C> Host<C> {
+    /// Whether `target` is the app's: its canvas, or the field its view edits text in.
+    fn is_apps_target(&self, target: &EventTarget) -> bool {
+        AsRef::<EventTarget>::as_ref(&self.canvas) == target
+            || self.view.is_text_input_field(target)
+    }
 }
 
 fn install_turn_callbacks<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
@@ -273,6 +284,8 @@ fn bind_events<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
     bind_pointer(host);
     bind_wheel(host);
     bind_keyboard(host);
+    bind_clipboard_events(host);
+    bind_clipboard_changes(host);
     bind_resize(host);
     bind_brightness(host);
 }
@@ -454,6 +467,71 @@ fn dispatch_key<C: EmbedderClient + 'static>(
         synthesized: false,
         ..KeyData::default()
     })
+}
+
+/// The user's copy, cut and paste, which the browser runs for a key the app did not handle, as
+/// for one from its Edit menu: on the canvas or the view's text field they are the app's, and the
+/// browser does nothing more with them; elsewhere on the page they are the page's.
+fn bind_clipboard_events<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
+    let Some(document) = host.window.document() else {
+        return;
+    };
+    for name in ["copy", "cut", "paste"] {
+        let listener = Rc::clone(host);
+        let closure = Closure::<dyn FnMut(ClipboardEvent)>::new(move |event: ClipboardEvent| {
+            let is_apps = event
+                .target()
+                .is_some_and(|target| listener.is_apps_target(&target));
+            if !is_apps {
+                return;
+            }
+            let Some(clipboard_event) = clipboard_event_of(name, &event) else {
+                return;
+            };
+            event.prevent_default();
+            listener
+                .client
+                .borrow_mut()
+                .clipboard_event(CANVAS_VIEW, clipboard_event);
+        });
+        let _ = document.add_event_listener_with_callback(name, closure.as_ref().unchecked_ref());
+        closure.forget();
+    }
+}
+
+/// The framework's event for the browser's `copy`, `cut` or `paste` event; none for a paste
+/// with no data.
+fn clipboard_event_of(
+    name: &str,
+    event: &ClipboardEvent,
+) -> Option<inset_embedder::ClipboardEvent> {
+    match name {
+        "copy" => Some(inset_embedder::ClipboardEvent::Copy(
+            clipboard::copy_request(),
+        )),
+        "cut" => Some(inset_embedder::ClipboardEvent::Cut(
+            clipboard::copy_request(),
+        )),
+        _ => event.clipboard_data().map(|data| clipboard::pasted(&data)),
+    }
+}
+
+/// The browser's word that the clipboard changed, `clipboardchange`, where it has it; elsewhere
+/// the app hears that it may have changed each time the page takes the focus.
+fn bind_clipboard_changes<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
+    let listener = Rc::clone(host);
+    let closure = Closure::<dyn FnMut()>::new(move || {
+        listener.client.borrow_mut().clipboard_changed();
+    });
+    let clipboard = host.window.navigator().clipboard();
+    let _ = if clipboard::tells_changes(&clipboard) {
+        clipboard
+            .add_event_listener_with_callback("clipboardchange", closure.as_ref().unchecked_ref())
+    } else {
+        host.window
+            .add_event_listener_with_callback("focus", closure.as_ref().unchecked_ref())
+    };
+    closure.forget();
 }
 
 /// A resize, which a zoom also is, changing the screen's size in CSS pixels and its pixel ratio:

@@ -25,6 +25,7 @@ mod app_lifecycle;
 mod composition;
 mod display_links;
 mod frame_presentation;
+mod pasteboard;
 mod pointer;
 mod popup_menu;
 mod screens;

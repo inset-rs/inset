@@ -2,15 +2,17 @@
 //!
 //! Every method has the answer of a system that adds nothing, so a system implements only
 //! what it has, and the embedder calls through [`ThisOs`], the one system this build targets. The
-//! exceptions are the target platform and the two associated types, the display link and the
-//! window's native surfaces, which `absent` answers for a system that has neither. What a system
-//! lets the app do is answered in one place, on [`OperatingSystem`].
-//! Three systems: macOS adds a window frame that animates, the popup menu, a display link,
-//! native surfaces, its own answers about its screens, whether a window is occluded and its
-//! notices that a window was minimized, and the requests it makes of the application and what
-//! it says changed, among others (`macos`); iOS reports its window's size
-//! and safe area differently (`ios`); every other system winit covers by itself (`winit_only`).
-//! What macOS and iOS share is in `apple`.
+//! exceptions are the target platform and the associated types: the display link and the
+//! window's native surfaces, which `absent` answers for a system that has neither, and the
+//! clipboard, which is arboard's plain text on a system without code of its own for one. What a
+//! system lets the app do is answered in one place, on [`OperatingSystem`].
+//! Four systems: macOS adds a window frame that animates, the popup menu, its pasteboard, a
+//! display link, native surfaces, its own answers about its screens, whether a window is occluded
+//! and its notices that a window was minimized, and the requests it makes of the application and
+//! what it says changed, among others (`macos`); iOS reports its window's size and safe area
+//! differently, and has its pasteboard (`ios`); Windows tells the clipboard's changes by its
+//! sequence number (`windows`); every other system winit covers by itself (`winit_only`). What
+//! macOS and iOS share is in `apple`.
 //!
 //! A system's module is compiled for its own target only, so a change to a trait is checked
 //! against that system's answers only when building for it: build every target a change
@@ -24,21 +26,24 @@ mod apple;
 mod ios;
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+#[cfg(target_os = "windows")]
+mod windows;
+#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
 mod winit_only;
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    Compositor, Offset, PopupMenuEntry, Rect, Screen, ScreenId, SurfacePlacement, TargetPlatform,
-    ViewId, ViewPadding, VsyncWaiter, WindowConfig,
+    Clipboard, Compositor, Offset, PopupMenuEntry, Rect, Screen, ScreenId, SurfacePlacement,
+    TargetPlatform, ViewId, ViewPadding, VsyncWaiter, WindowConfig,
 };
 use valo_codec::Decoder;
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::monitor::MonitorHandle;
 use winit::window::{Window, WindowAttributes};
 
+use crate::clipboard::ClipboardChanges;
 use crate::lifecycle::LifecycleNotice;
 use crate::main_loop::MainLoopEvent;
 use crate::screens::{monitor_number, monitor_screens};
@@ -51,7 +56,9 @@ use crate::vsync_waiter::LoopVsyncWaiter;
 pub(crate) type ThisOs = macos::AppKit;
 #[cfg(target_os = "ios")]
 pub(crate) type ThisOs = ios::Ios;
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+#[cfg(target_os = "windows")]
+pub(crate) type ThisOs = windows::Windows;
+#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
 pub(crate) type ThisOs = winit_only::WinitOnly;
 
 /// This system's vsyncs for a display.
@@ -62,6 +69,9 @@ pub(crate) type ThisOsWindowSurfaces = <ThisOs as NativeComposition>::WindowSurf
 
 /// This system's notices that a window may have been minimized or occluded, for one window.
 pub(crate) type ThisOsVisibilityNotices = <ThisOs as WindowVisibility>::Notices;
+
+/// This system's clipboard.
+pub(crate) type ThisOsClipboard = <ThisOs as SystemClipboard>::Clipboard;
 
 /// Everything the embedder asks of a system, as one bound: which system it is, what it lets the
 /// app do, and the concerns it answers.
@@ -75,6 +85,7 @@ pub(crate) trait OperatingSystem:
     + FramePresentation
     + NativeComposition
     + NativeMenus
+    + SystemClipboard
     + ImageDecoding
     + WorkQueue
     + SystemRequests
@@ -282,6 +293,17 @@ pub(crate) trait NativeMenus {
     ) {
         closed(None);
     }
+}
+
+/// The system's clipboard (`clipboard/`).
+pub(crate) trait SystemClipboard {
+    /// The clipboard as the framework reaches it on this system.
+    type Clipboard: Clipboard + ClipboardChanges;
+
+    /// The clipboard, which counts the app's own writes as seen, and calls `look` to have the main
+    /// loop look at it, where the system says it changed or the clipboard clears an expired copy
+    /// itself, on the main thread, from the system's own dispatch, so `look` must only queue.
+    fn clipboard(look: Box<dyn Fn()>) -> Self::Clipboard;
 }
 
 /// The system's own image decoders.
