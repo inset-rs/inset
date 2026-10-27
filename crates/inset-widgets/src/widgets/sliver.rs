@@ -1,9 +1,9 @@
 //! Flutter counterpart: `widgets/sliver.dart`.
 //!
-//! The lazily built slivers and the element that manages their children. `SliverGrid`,
-//! `SliverOpacity`, `SliverIgnorePointer`, `SliverOffstage`, `SliverConstrainedCrossAxis`,
-//! `SliverCrossAxisGroup`, `SliverMainAxisGroup` and `SliverEnsureSemantics` wait for their
-//! render objects; see `PORTING.md`. `SliverToBoxAdapter` and `SliverPadding` are Flutter's
+//! The lazily built slivers and the element that manages their children. `SliverOpacity`,
+//! `SliverIgnorePointer`, `SliverOffstage`, `SliverConstrainedCrossAxis`, `SliverCrossAxisGroup`,
+//! `SliverMainAxisGroup` and `SliverEnsureSemantics` wait for their render objects; see
+//! `PORTING.md`. `SliverToBoxAdapter` and `SliverPadding` are Flutter's
 //! `basic.dart` and live in `widgets/basic.rs`.
 
 use std::any::{Any, TypeId};
@@ -14,9 +14,11 @@ use std::rc::Rc;
 use inset_foundation::{App, Handle};
 use inset_rendering::{
     AnyRenderBox, AnyRenderObject, ItemExtentBuilder, KeepAliveParentData, RenderHandle,
-    RenderSliver, RenderSliverBoxChildManager, RenderSliverFixedExtentList, RenderSliverList,
-    RenderSliverMultiBoxAdaptor, RenderSliverVariedExtentList, RenderSliverWithKeepAliveMixin,
-    SliverConstraints, SliverMultiBoxAdaptorParentData,
+    RenderSliver, RenderSliverBoxChildManager, RenderSliverFixedExtentList, RenderSliverGrid,
+    RenderSliverList, RenderSliverMultiBoxAdaptor, RenderSliverVariedExtentList,
+    RenderSliverWithKeepAliveMixin, SliverConstraints, SliverGridDelegate,
+    SliverGridDelegateWithFixedCrossAxisCount, SliverGridDelegateWithMaxCrossAxisExtent,
+    SliverMultiBoxAdaptorParentData,
 };
 
 use crate::framework::{
@@ -933,6 +935,347 @@ impl SliverVariedExtentListList {
 }
 
 impl IntoWidget<SliverMultiBoxAdaptorKind> for SliverVariedExtentListList {
+    fn into_widget(self) -> WidgetRef {
+        self.build().into_widget()
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// SliverGrid
+
+/// A sliver that places multiple box children in a two dimensional arrangement.
+///
+/// _To learn more about slivers, see `CustomScrollView::slivers`._
+///
+/// [`SliverGrid`] places its children in arbitrary positions determined by
+/// [`grid_delegate`](Self::grid_delegate). Each child is forced to have the size specified by the
+/// `grid_delegate`.
+///
+/// The main axis direction of a grid is the direction in which it scrolls; the cross axis
+/// direction is the orthogonal direction.
+///
+/// See also:
+///
+///  * [`SliverList`], which places its children in a linear array.
+///  * [`SliverFixedExtentList`], which places its children in a linear array with a fixed extent
+///    in the main axis.
+#[derive(Debug)]
+pub struct SliverGrid {
+    pub key: Option<KeyRef>,
+    /// The delegate that provides the children for this widget.
+    pub delegate: SliverChildDelegateRef,
+    /// The delegate that controls the size and position of the children.
+    pub grid_delegate: Rc<dyn SliverGridDelegate>,
+}
+
+impl SliverGrid {
+    /// Creates a sliver that places multiple box children in a two dimensional arrangement.
+    pub fn new(
+        delegate: SliverChildDelegateRef,
+        grid_delegate: Rc<dyn SliverGridDelegate>,
+    ) -> SliverGrid {
+        SliverGrid {
+            key: None,
+            delegate,
+            grid_delegate,
+        }
+    }
+
+    /// A sliver that creates a 2D array of widgets that are created on demand.
+    ///
+    /// This constructor is appropriate for sliver grids with a large (or infinite) number of
+    /// children because the builder is called only for those children that are actually visible.
+    ///
+    /// Providing a non-`None` [`item_count`](SliverGridBuilder::item_count) improves the ability
+    /// of the [`SliverGrid`] to estimate the maximum scroll extent.
+    ///
+    /// The item builder will be called only with indices greater than or equal to zero and less
+    /// than the item count.
+    pub fn builder(
+        grid_delegate: Rc<dyn SliverGridDelegate>,
+        item_builder: impl Fn(&mut App, BuildContext, i32) -> Option<WidgetRef> + 'static,
+    ) -> SliverGridBuilder {
+        SliverGridBuilder::new(grid_delegate, Rc::new(item_builder))
+    }
+
+    /// Creates a sliver that places multiple box children in a two dimensional arrangement with
+    /// a fixed number of tiles in the cross axis.
+    ///
+    /// Uses a [`SliverGridDelegateWithFixedCrossAxisCount`] as the
+    /// [`grid_delegate`](Self::grid_delegate), and a `SliverChildListDelegate` as the
+    /// [`delegate`](Self::delegate).
+    ///
+    /// See also:
+    ///
+    ///  * `GridView::count`, the equivalent constructor for `GridView` widgets.
+    pub fn count(cross_axis_count: i32) -> SliverGridCount {
+        SliverGridCount {
+            key: None,
+            grid_delegate: SliverGridDelegateWithFixedCrossAxisCount::new(cross_axis_count),
+            children: Vec::new(),
+        }
+    }
+
+    /// Creates a sliver that places multiple box children in a two dimensional arrangement with
+    /// tiles that each have a maximum cross-axis extent.
+    ///
+    /// Uses a [`SliverGridDelegateWithMaxCrossAxisExtent`] as the
+    /// [`grid_delegate`](Self::grid_delegate), and a `SliverChildListDelegate` as the
+    /// [`delegate`](Self::delegate).
+    ///
+    /// See also:
+    ///
+    ///  * `GridView::extent`, the equivalent constructor for `GridView` widgets.
+    pub fn extent(max_cross_axis_extent: f64) -> SliverGridExtent {
+        SliverGridExtent {
+            key: None,
+            grid_delegate: SliverGridDelegateWithMaxCrossAxisExtent::new(max_cross_axis_extent),
+            children: Vec::new(),
+        }
+    }
+
+    /// Creates a sliver that places multiple box children in a two dimensional arrangement.
+    ///
+    /// _To learn more about slivers, see `CustomScrollView::slivers`._
+    ///
+    /// Uses a `SliverChildListDelegate` as the [`delegate`](Self::delegate).
+    pub fn list(
+        grid_delegate: Rc<dyn SliverGridDelegate>,
+        children: Vec<WidgetRef>,
+    ) -> SliverGridList {
+        SliverGridList {
+            key: None,
+            delegate: SliverChildListDelegate::new(children),
+            grid_delegate,
+        }
+    }
+
+    /// Dart `SliverGrid(key:)`.
+    pub fn key(mut self, key: KeyRef) -> SliverGrid {
+        self.key = Some(key);
+        self
+    }
+
+    /// The [`SliverGrid`] with `key`, if given.
+    fn keyed(self, key: Option<KeyRef>) -> SliverGrid {
+        match key {
+            Some(key) => self.key(key),
+            None => self,
+        }
+    }
+}
+
+impl RenderObjectWidget for SliverGrid {
+    type RenderObject = RenderSliverGrid;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject {
+        RenderSliverGrid::new(
+            app,
+            child_manager_of::<SliverGrid>(app, context),
+            Rc::clone(&self.grid_delegate),
+        )
+        .as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        _context: BuildContext,
+        render_object: RenderHandle<RenderSliverGrid>,
+    ) {
+        render_object.set_grid_delegate(app, Rc::clone(&self.grid_delegate));
+    }
+}
+
+impl SliverWithKeepAliveWidget for SliverGrid {}
+
+impl SliverMultiBoxAdaptorWidget for SliverGrid {
+    fn delegate(&self) -> &SliverChildDelegateRef {
+        &self.delegate
+    }
+
+    fn estimate_max_scroll_offset(
+        &self,
+        constraints: Option<SliverConstraints>,
+        first_index: i32,
+        last_index: i32,
+        leading_scroll_offset: f64,
+        trailing_scroll_offset: f64,
+    ) -> Option<f64> {
+        debug_assert!(last_index >= first_index);
+        self.delegate
+            .estimate_max_scroll_offset(
+                first_index,
+                last_index,
+                leading_scroll_offset,
+                trailing_scroll_offset,
+            )
+            .or_else(|| {
+                let constraints = constraints.expect("a grid estimates during its layout");
+                let child_count = self
+                    .delegate
+                    .estimated_child_count()
+                    .expect("a grid whose delegate cannot estimate counts its children");
+                Some(
+                    self.grid_delegate
+                        .get_layout(constraints)
+                        .compute_max_scroll_offset(child_count),
+                )
+            })
+    }
+}
+
+/// Dart's `SliverGrid.builder(..)` arguments; `into_widget` builds the [`SliverGrid`].
+pub struct SliverGridBuilder {
+    key: Option<KeyRef>,
+    delegate: SliverChildBuilderDelegate,
+    grid_delegate: Rc<dyn SliverGridDelegate>,
+}
+
+impl SliverGridBuilder {
+    fn new(
+        grid_delegate: Rc<dyn SliverGridDelegate>,
+        item_builder: NullableIndexedWidgetBuilder,
+    ) -> SliverGridBuilder {
+        SliverGridBuilder {
+            key: None,
+            delegate: SliverChildBuilderDelegate::from_builder(item_builder),
+            grid_delegate,
+        }
+    }
+
+    builder_constructor_setters!(SliverGridBuilder);
+
+    /// Dart `semanticIndexOffset:`.
+    pub fn semantic_index_offset(mut self, value: i32) -> SliverGridBuilder {
+        self.delegate = self.delegate.semantic_index_offset(value);
+        self
+    }
+
+    /// Dart `findChildIndexCallback:`.
+    pub fn find_child_index_callback(mut self, value: ChildIndexGetter) -> SliverGridBuilder {
+        self.delegate = self.delegate.find_child_index_callback(value);
+        self
+    }
+
+    /// The `SliverGrid` this constructor describes.
+    pub fn build(self) -> SliverGrid {
+        SliverGrid::new(self.delegate.into_delegate(), self.grid_delegate).keyed(self.key)
+    }
+}
+
+impl IntoWidget<SliverMultiBoxAdaptorKind> for SliverGridBuilder {
+    fn into_widget(self) -> WidgetRef {
+        self.build().into_widget()
+    }
+}
+
+/// The fluent arguments `SliverGrid::count` and `SliverGrid::extent` share: their grid
+/// delegate's spacing and aspect ratio, and the children.
+macro_rules! tiles_constructor_setters {
+    ($name:ident) => {
+        /// Dart `key:`.
+        pub fn key(mut self, key: KeyRef) -> $name {
+            self.key = Some(key);
+            self
+        }
+
+        /// Dart `mainAxisSpacing:`.
+        pub fn main_axis_spacing(mut self, value: f64) -> $name {
+            self.grid_delegate = self.grid_delegate.main_axis_spacing(value);
+            self
+        }
+
+        /// Dart `crossAxisSpacing:`.
+        pub fn cross_axis_spacing(mut self, value: f64) -> $name {
+            self.grid_delegate = self.grid_delegate.cross_axis_spacing(value);
+            self
+        }
+
+        /// Dart `childAspectRatio:`.
+        pub fn child_aspect_ratio(mut self, value: f64) -> $name {
+            self.grid_delegate = self.grid_delegate.child_aspect_ratio(value);
+            self
+        }
+
+        /// Dart `children:`.
+        pub fn children(mut self, children: impl IntoIterator<Item = WidgetRef>) -> $name {
+            self.children = children.into_iter().collect();
+            self
+        }
+
+        /// The `SliverGrid` this constructor describes.
+        pub fn build(self) -> SliverGrid {
+            SliverGrid::new(
+                SliverChildListDelegate::new(self.children).into_delegate(),
+                Rc::new(self.grid_delegate),
+            )
+            .keyed(self.key)
+        }
+    };
+}
+
+/// Dart's `SliverGrid.count(..)` arguments; `into_widget` builds the [`SliverGrid`].
+pub struct SliverGridCount {
+    key: Option<KeyRef>,
+    grid_delegate: SliverGridDelegateWithFixedCrossAxisCount,
+    children: Vec<WidgetRef>,
+}
+
+impl SliverGridCount {
+    tiles_constructor_setters!(SliverGridCount);
+}
+
+impl IntoWidget<SliverMultiBoxAdaptorKind> for SliverGridCount {
+    fn into_widget(self) -> WidgetRef {
+        self.build().into_widget()
+    }
+}
+
+/// Dart's `SliverGrid.extent(..)` arguments; `into_widget` builds the [`SliverGrid`].
+pub struct SliverGridExtent {
+    key: Option<KeyRef>,
+    grid_delegate: SliverGridDelegateWithMaxCrossAxisExtent,
+    children: Vec<WidgetRef>,
+}
+
+impl SliverGridExtent {
+    tiles_constructor_setters!(SliverGridExtent);
+}
+
+impl IntoWidget<SliverMultiBoxAdaptorKind> for SliverGridExtent {
+    fn into_widget(self) -> WidgetRef {
+        self.build().into_widget()
+    }
+}
+
+/// Dart's `SliverGrid.list(..)` arguments; `into_widget` builds the [`SliverGrid`].
+pub struct SliverGridList {
+    key: Option<KeyRef>,
+    delegate: SliverChildListDelegate,
+    grid_delegate: Rc<dyn SliverGridDelegate>,
+}
+
+impl SliverGridList {
+    list_constructor_setters!(SliverGridList);
+
+    /// Dart `semanticIndexOffset:`.
+    pub fn semantic_index_offset(mut self, value: i32) -> SliverGridList {
+        self.delegate = self.delegate.semantic_index_offset(value);
+        self
+    }
+
+    /// The `SliverGrid` this constructor describes.
+    pub fn build(self) -> SliverGrid {
+        SliverGrid::new(self.delegate.into_delegate(), self.grid_delegate).keyed(self.key)
+    }
+}
+
+impl IntoWidget<SliverMultiBoxAdaptorKind> for SliverGridList {
     fn into_widget(self) -> WidgetRef {
         self.build().into_widget()
     }
@@ -1913,5 +2256,74 @@ mod tests {
             assert_eq!(child.size(&app).height(), 40.0);
         }
         assert_eq!(list.geometry(&app).scroll_extent, 320.0);
+    }
+
+    /// A `SliverGrid` sizes every tile by its grid delegate and places them in rows, building
+    /// only the rows in view; without an item count it estimates its extent from the rows built.
+    #[test]
+    fn a_sliver_grid_builds_only_the_rows_in_view() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let offset = FixedViewportOffset::zero(&mut app);
+        let sliver = SliverGrid::builder(
+            Rc::new(SliverGridDelegateWithFixedCrossAxisCount::new(3).main_axis_extent(50.0)),
+            |_app, _context, _index| Some(SizedBox::new().into_widget()),
+        )
+        .item_count(30)
+        .add_repaint_boundaries(false)
+        .into_widget();
+        let harness = Harness::mount(&mut app, viewport_over(sliver, offset));
+        harness.pump(&mut app);
+
+        let grid: RenderHandle<RenderSliverGrid> = first_sliver(&harness, &app);
+        let tiles = children_of(grid, &app);
+        // The harness's view is 300 by 200: four rows of three 100 by 50 tiles.
+        assert_eq!(tiles.len(), 12);
+        let width = harness.render_root(&app).size(&app).width() / 3.0;
+        assert_eq!(tiles[4].size(&app), inset_embedder::Size::new(width, 50.0));
+        let positions: Vec<(f64, f64)> = tiles[3..6]
+            .iter()
+            .map(|tile| {
+                (
+                    RenderSliver::child_main_axis_position(grid, &app, tile.as_object()),
+                    RenderSliver::child_cross_axis_position(grid, &app, tile.as_object()),
+                )
+            })
+            .collect();
+        assert_eq!(positions, [(50.0, 0.0), (50.0, width), (50.0, 2.0 * width)]);
+        assert_eq!(grid.geometry(&app).scroll_extent, 500.0, "ten rows of 50");
+    }
+
+    /// A `KeepAlive` tile of a `SliverGrid` is kept, as a list's child is: the grid's parent data
+    /// embeds the list's.
+    #[test]
+    fn keep_alive_holds_a_scrolled_off_grid_tile() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let offset = FixedViewportOffset::zero(&mut app);
+        let mut children: Vec<WidgetRef> = vec![
+            KeepAlive::new(true, SizedBox::new().key(key(0)))
+                .key(key(100))
+                .into_widget(),
+        ];
+        children.extend((1..40).map(item));
+        let tiles = SliverGridDelegateWithFixedCrossAxisCount::new(2).child_aspect_ratio(3.0);
+        let sliver = SliverGrid::list(Rc::new(tiles), children)
+            .add_repaint_boundaries(false)
+            .into_widget();
+        let harness = Harness::mount(&mut app, viewport_over(sliver, offset));
+        harness.pump(&mut app);
+
+        let grid: RenderHandle<RenderSliverGrid> = first_sliver(&harness, &app);
+        let kept = children_of(grid, &app)[0];
+
+        offset.correct_by(&mut app, 300.0);
+        grid.parent(&app)
+            .expect("the viewport")
+            .mark_needs_layout(&mut app);
+        harness.pump(&mut app);
+
+        assert_eq!(grid.keep_alive_children(&app), vec![kept]);
+        assert!(!children_of(grid, &app).contains(&kept));
     }
 }

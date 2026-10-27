@@ -41,8 +41,9 @@ use inset_rendering::{
     RenderIntrinsicWidth, RenderLeaderLayer, RenderLimitedBox, RenderMetaData, RenderMouseRegion,
     RenderOffstage, RenderOpacity, RenderPadding, RenderPointerListener, RenderPositionedBox,
     RenderRepaintBoundary, RenderSizedOverflowBox, RenderSliver, RenderSliverPadding,
-    RenderSliverToBoxAdapter, RenderStack, RenderStackBase, RenderTransform, ShapeBorderClipper,
-    SingleChildLayoutDelegate, StackFit, StackParentData,
+    RenderSliverToBoxAdapter, RenderStack, RenderStackBase, RenderTransform, RenderWrap,
+    ShapeBorderClipper, SingleChildLayoutDelegate, StackFit, StackParentData, WrapAlignment,
+    WrapCrossAlignment,
 };
 use inset_services::{MouseCursor, MouseCursorRef};
 
@@ -7111,6 +7112,290 @@ impl ParentDataWidget for Expanded {
     }
 }
 
+/// A widget that displays its children in multiple horizontal or vertical runs.
+///
+/// A [`Wrap`] lays out each child and attempts to place the child adjacent to the previous child
+/// in the main axis, given by [`direction`](Self::direction), leaving
+/// [`spacing`](Self::spacing) space in between. If there is not enough space to fit the child,
+/// [`Wrap`] creates a new _run_ adjacent to the existing children in the cross axis.
+///
+/// After all the children have been allocated to runs, the children within the runs are
+/// positioned according to the [`alignment`](Self::alignment) in the main axis and according
+/// to the [`cross_axis_alignment`](Self::cross_axis_alignment) in the cross axis.
+///
+/// The runs themselves are then positioned in the cross axis according to the
+/// [`run_spacing`](Self::run_spacing) and [`run_alignment`](Self::run_alignment).
+///
+/// See also:
+///
+///  * [`Row`], which places children in one line, and gives control over their alignment and
+///    spacing.
+///  * The [catalog of layout widgets](https://flutter.dev/widgets/layout/).
+#[derive(Debug)]
+pub struct Wrap {
+    pub key: Option<KeyRef>,
+    /// The direction to use as the main axis.
+    ///
+    /// For example, if [`direction`](Self::direction) is [`Axis::Horizontal`], the default, the
+    /// children are placed adjacent to one another in a horizontal run until the available
+    /// horizontal space is consumed, at which point a subsequent children are placed in a new
+    /// run vertically adjacent to the previous run.
+    pub direction: Axis,
+    /// How the children within a run should be placed in the main axis.
+    ///
+    /// For example, if [`alignment`](Self::alignment) is [`WrapAlignment::Center`], the
+    /// children in each run are grouped together in the center of their run in the main axis.
+    ///
+    /// Defaults to [`WrapAlignment::Start`].
+    ///
+    /// See also:
+    ///
+    ///  * [`run_alignment`](Self::run_alignment), which controls how the runs are placed
+    ///    relative to each other in the cross axis.
+    ///  * [`cross_axis_alignment`](Self::cross_axis_alignment), which controls how the children
+    ///    within each run are placed relative to each other in the cross axis.
+    pub alignment: WrapAlignment,
+    /// How much space to place between children in a run in the main axis.
+    ///
+    /// For example, if [`spacing`](Self::spacing) is 10.0, the children will be spaced at least
+    /// 10.0 logical pixels apart in the main axis.
+    ///
+    /// If there is additional free space in a run (e.g., because the wrap has a minimum size
+    /// that is not filled or because some runs are longer than others), the additional free
+    /// space will be allocated according to the [`alignment`](Self::alignment).
+    ///
+    /// Defaults to 0.0.
+    pub spacing: f64,
+    /// How the runs themselves should be placed in the cross axis.
+    ///
+    /// For example, if [`run_alignment`](Self::run_alignment) is [`WrapAlignment::Center`], the
+    /// runs are grouped together in the center of the overall [`Wrap`] in the cross axis.
+    ///
+    /// Defaults to [`WrapAlignment::Start`].
+    ///
+    /// See also:
+    ///
+    ///  * [`alignment`](Self::alignment), which controls how the children within each run are
+    ///    placed relative to each other in the main axis.
+    ///  * [`cross_axis_alignment`](Self::cross_axis_alignment), which controls how the children
+    ///    within each run are placed relative to each other in the cross axis.
+    pub run_alignment: WrapAlignment,
+    /// How much space to place between the runs themselves in the cross axis.
+    ///
+    /// For example, if [`run_spacing`](Self::run_spacing) is 10.0, the runs will be spaced at
+    /// least 10.0 logical pixels apart in the cross axis.
+    ///
+    /// If there is additional free space in the overall [`Wrap`] (e.g., because the wrap has a
+    /// minimum size that is not filled), the additional free space will be allocated according
+    /// to the [`run_alignment`](Self::run_alignment).
+    ///
+    /// Defaults to 0.0.
+    pub run_spacing: f64,
+    /// How the children within a run should be aligned relative to each other in the cross
+    /// axis.
+    ///
+    /// For example, if this is set to [`WrapCrossAlignment::End`], and the
+    /// [`direction`](Self::direction) is [`Axis::Horizontal`], then the children within each
+    /// run will have their bottom edges aligned to the bottom edge of the run.
+    ///
+    /// Defaults to [`WrapCrossAlignment::Start`].
+    ///
+    /// See also:
+    ///
+    ///  * [`alignment`](Self::alignment), which controls how the children within each run are
+    ///    placed relative to each other in the main axis.
+    ///  * [`run_alignment`](Self::run_alignment), which controls how the runs are placed
+    ///    relative to each other in the cross axis.
+    pub cross_axis_alignment: WrapCrossAlignment,
+    /// Determines the order to lay children out horizontally and how to interpret `start` and
+    /// `end` in the horizontal direction.
+    ///
+    /// Defaults to the ambient [`Directionality`].
+    ///
+    /// If the [`direction`](Self::direction) is [`Axis::Horizontal`], this controls order in
+    /// which the children are positioned (left-to-right or right-to-left), and the meaning of
+    /// the [`alignment`](Self::alignment) property's [`WrapAlignment::Start`] and
+    /// [`WrapAlignment::End`] values.
+    ///
+    /// If the [`direction`](Self::direction) is [`Axis::Horizontal`], and either the
+    /// [`alignment`](Self::alignment) is either [`WrapAlignment::Start`] or
+    /// [`WrapAlignment::End`], or there's more than one child, then the
+    /// [`text_direction`](Self::text_direction) (or the ambient [`Directionality`]) must not be
+    /// `None`.
+    ///
+    /// If the [`direction`](Self::direction) is [`Axis::Vertical`], this controls the order in
+    /// which runs are positioned, the meaning of the [`run_alignment`](Self::run_alignment)
+    /// property's [`WrapAlignment::Start`] and [`WrapAlignment::End`] values, as well as the
+    /// [`cross_axis_alignment`](Self::cross_axis_alignment) property's
+    /// [`WrapCrossAlignment::Start`] and [`WrapCrossAlignment::End`] values.
+    ///
+    /// If the [`direction`](Self::direction) is [`Axis::Vertical`], and either the
+    /// [`run_alignment`](Self::run_alignment) is either [`WrapAlignment::Start`] or
+    /// [`WrapAlignment::End`], the [`cross_axis_alignment`](Self::cross_axis_alignment) is
+    /// either [`WrapCrossAlignment::Start`] or [`WrapCrossAlignment::End`], or there's more
+    /// than one child, then the [`text_direction`](Self::text_direction) (or the ambient
+    /// [`Directionality`]) must not be `None`.
+    pub text_direction: Option<TextDirection>,
+    /// Determines the order to lay children out vertically and how to interpret `start` and
+    /// `end` in the vertical direction.
+    ///
+    /// If the [`direction`](Self::direction) is [`Axis::Vertical`], this controls which order
+    /// children are painted in (down or up), the meaning of the [`alignment`](Self::alignment)
+    /// property's [`WrapAlignment::Start`] and [`WrapAlignment::End`] values.
+    ///
+    /// If the [`direction`](Self::direction) is [`Axis::Horizontal`], this controls the order
+    /// in which runs are positioned, the meaning of the [`run_alignment`](Self::run_alignment)
+    /// property's [`WrapAlignment::Start`] and [`WrapAlignment::End`] values, as well as the
+    /// [`cross_axis_alignment`](Self::cross_axis_alignment) property's
+    /// [`WrapCrossAlignment::Start`] and [`WrapCrossAlignment::End`] values.
+    pub vertical_direction: VerticalDirection,
+    /// The content will be clipped (or not) according to this option.
+    ///
+    /// Defaults to [`Clip::None`].
+    pub clip_behavior: Clip,
+    pub children: Vec<WidgetRef>,
+}
+
+impl Wrap {
+    /// Creates a wrap layout; Dart's named arguments are the setters.
+    ///
+    /// By default, the wrap layout is horizontal and both the children and the runs are aligned
+    /// to the start.
+    ///
+    /// The [`text_direction`](Self::text_direction) defaults to the ambient [`Directionality`],
+    /// if any. If there is no ambient directionality, and a text direction is going to be
+    /// necessary to decide which direction to lay the children in or to disambiguate `start` or
+    /// `end` values for the main or cross axis directions, the
+    /// [`text_direction`](Self::text_direction) must not be `None`.
+    pub fn new() -> Wrap {
+        Wrap::default()
+    }
+
+    /// Dart `Wrap(key:)`.
+    pub fn key(mut self, key: KeyRef) -> Wrap {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `Wrap(direction:)`.
+    pub fn direction(mut self, direction: Axis) -> Wrap {
+        self.direction = direction;
+        self
+    }
+
+    /// Dart `Wrap(alignment:)`.
+    pub fn alignment(mut self, alignment: WrapAlignment) -> Wrap {
+        self.alignment = alignment;
+        self
+    }
+
+    /// Dart `Wrap(spacing:)`.
+    pub fn spacing(mut self, spacing: f64) -> Wrap {
+        self.spacing = spacing;
+        self
+    }
+
+    /// Dart `Wrap(runAlignment:)`.
+    pub fn run_alignment(mut self, run_alignment: WrapAlignment) -> Wrap {
+        self.run_alignment = run_alignment;
+        self
+    }
+
+    /// Dart `Wrap(runSpacing:)`.
+    pub fn run_spacing(mut self, run_spacing: f64) -> Wrap {
+        self.run_spacing = run_spacing;
+        self
+    }
+
+    /// Dart `Wrap(crossAxisAlignment:)`.
+    pub fn cross_axis_alignment(mut self, cross_axis_alignment: WrapCrossAlignment) -> Wrap {
+        self.cross_axis_alignment = cross_axis_alignment;
+        self
+    }
+
+    /// Dart `Wrap(textDirection:)`.
+    pub fn text_direction(mut self, text_direction: TextDirection) -> Wrap {
+        self.text_direction = Some(text_direction);
+        self
+    }
+
+    /// Dart `Wrap(verticalDirection:)`.
+    pub fn vertical_direction(mut self, vertical_direction: VerticalDirection) -> Wrap {
+        self.vertical_direction = vertical_direction;
+        self
+    }
+
+    /// Dart `Wrap(clipBehavior:)`.
+    pub fn clip_behavior(mut self, clip_behavior: Clip) -> Wrap {
+        self.clip_behavior = clip_behavior;
+        self
+    }
+
+    /// Dart `Wrap(children:)`.
+    pub fn children(mut self, children: impl IntoIterator<Item = WidgetRef>) -> Wrap {
+        self.children = children.into_iter().collect();
+        self
+    }
+}
+
+impl Default for Wrap {
+    fn default() -> Wrap {
+        Wrap {
+            key: None,
+            direction: Axis::Horizontal,
+            alignment: WrapAlignment::Start,
+            spacing: 0.0,
+            run_alignment: WrapAlignment::Start,
+            run_spacing: 0.0,
+            cross_axis_alignment: WrapCrossAlignment::Start,
+            text_direction: None,
+            vertical_direction: VerticalDirection::Down,
+            clip_behavior: Clip::None,
+            children: Vec::new(),
+        }
+    }
+}
+
+impl RenderObjectWidget for Wrap {
+    type RenderObject = RenderWrap;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject {
+        let render_object = RenderWrap::new(app);
+        self.update_render_object(app, context, render_object);
+        render_object.as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        context: BuildContext,
+        render_object: RenderHandle<RenderWrap>,
+    ) {
+        render_object.set_direction(app, self.direction);
+        render_object.set_alignment(app, self.alignment);
+        render_object.set_spacing(app, self.spacing);
+        render_object.set_run_alignment(app, self.run_alignment);
+        render_object.set_run_spacing(app, self.run_spacing);
+        render_object.set_cross_axis_alignment(app, self.cross_axis_alignment);
+        let text_direction = self
+            .text_direction
+            .or_else(|| Directionality::maybe_of(app, context));
+        render_object.set_text_direction(app, text_direction);
+        render_object.set_vertical_direction(app, self.vertical_direction);
+        render_object.set_clip_behavior(app, self.clip_behavior);
+    }
+}
+
+impl MultiChildRenderObjectWidget for Wrap {
+    fn children(&self) -> &[WidgetRef] {
+        &self.children
+    }
+}
+
 /// Creates an adjustable, empty spacer that can be used to tune the spacing between widgets in
 /// a [`Flex`] container, like [`Row`] or [`Column`].
 ///
@@ -8247,6 +8532,51 @@ mod tests {
         assert!(
             tile_state(&harness, &app, &middle).is_none(),
             "the removed child was unmounted"
+        );
+    }
+
+    /// A `Wrap` takes its text direction from the ambient `Directionality` and moves a child
+    /// that does not fit its run to the next one.
+    #[test]
+    fn a_wrap_starts_a_new_run_for_a_child_that_does_not_fit() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            ltr(Align::new()
+                .alignment(AlignmentGeometry::TOP_LEFT)
+                .child(
+                    Wrap::new()
+                        .spacing(10.0)
+                        .run_spacing(10.0)
+                        .children((0..4).map(|_| sized(80.0, 40.0))),
+                )
+                .into_widget()),
+        );
+        harness.pump(&mut app);
+
+        let align = render_object_under_root::<RenderPositionedBox>(&harness, &app);
+        let wrap = align
+            .child(&app)
+            .expect("the wrap")
+            .as_object()
+            .downcast::<RenderWrap>(&app)
+            .expect("a RenderWrap");
+        assert_eq!(wrap.text_direction(&app), Some(TextDirection::Ltr));
+        // Three 80 wide children and two gaps fill 260 of the 300 wide view; the fourth wraps.
+        assert_eq!(wrap.size(&app), Size::new(260.0, 90.0));
+        let offsets: Vec<Offset> = container_children(wrap, &app)
+            .into_iter()
+            .map(|child| child.box_parent_data(&app).offset)
+            .collect();
+        assert_eq!(
+            offsets,
+            [
+                Offset::new(0.0, 0.0),
+                Offset::new(90.0, 0.0),
+                Offset::new(180.0, 0.0),
+                Offset::new(0.0, 50.0)
+            ]
         );
     }
 

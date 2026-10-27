@@ -24,6 +24,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - pipeline_owner.rs → object.dart (PipelineOwner)
 - sliver_fixed_extent_list.rs → sliver_fixed_extent_list.dart
 - image.rs → image.dart (RenderImage)
+- wrap.rs → wrap.dart
 
 ## object.rs → object.dart (RenderObject)
 
@@ -163,7 +164,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## object.rs / box.rs → object.dart / box.dart (container children)
 
-- Change: `ParentData` answers the type-keyed query `provide(TypeId)` / `provide_mut`, read as `part::<P>()`, so a value built from several halves answers for each of them; `ContainerBoxParentData` joins the container half with `BoxParentData`.
+- Change: `ParentData` answers the type-keyed query `provide(TypeId)` / `provide_mut`, read as `part::<P>()`, so a value built from several halves answers for each of them; `ContainerBoxParentData` joins the container half with `BoxParentData`, and `parent_data_is::<P>()` / `parent_data_of::<P>()` accept a value that answers `P`, as Dart's `is` and `as` accept a subclass.
   Reason: language — an exact downcast cannot reach Dart's `parentData! as BoxParentData` on a subclass, and one cast method per half would close the set of halves to this crate.
   Affect: parent data that does not answer `BoxParentData` from `provide` cannot be positioned by a box parent; a child's offset is read as `child.box_parent_data(app).offset`.
 
@@ -182,6 +183,18 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: `RelativeRect::lerp(Some(a), None, t)` interpolates `a` towards `RelativeRect::FILL`.
   Reason: language — Dart's branch reads `b!` on the null `b`, which Rust cannot express.
   Affect: the call returns a value where Dart throws.
+
+## sliver_multi_box_adaptor.rs → sliver_multi_box_adaptor.dart
+
+- Change: moving a child into or out of the keep-alive bucket gives it new parent data from the sliver's own `setup_parent_data` and writes back its index, layout offset and keep-alive flags, where Dart re-assigns the object it saved before `dropChild` nulled it.
+  Reason: language — `drop_child` owns and drops the boxed parent data, which Dart's caller keeps a reference to.
+  Affect: a subclass's own fields restart empty while the child is kept alive: a grid tile's `cross_axis_offset` is `None` until the grid lays it out again, before it paints or hits.
+
+## sliver_grid.rs → sliver_grid.dart
+
+- Change: `SliverGridDelegate` and `SliverGridLayout` are traits, the delegate held as an `Rc` with identity by `Rc::ptr_eq` and `get_layout` returning a `Box<dyn SliverGridLayout>`; the two delegates' optional arguments are fluent setters.
+  Reason: language — a Rust trait has no constructor, no fields, no `runtimeType` and no identity equality on a boxed value.
+  Affect: a delegate rewrapped in a new `Rc` is compared with `should_relayout`, which reads `old_delegate` with `as_any().downcast_ref()`.
 
 ## sliver.rs → sliver.dart
 

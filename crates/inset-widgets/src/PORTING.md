@@ -300,9 +300,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — a fluent setter cannot see the `primary`, `controller` and direction a later setter will supply.
   Affect: `view.physics` reads `None` where Dart's field already holds the implied `AlwaysScrollableScrollPhysics`; the `Scrollable` is given the same physics either way.
 
-- Change: `ListView`'s `children` and `add*` arguments are setters, whichever of them runs last rebuilding the delegate out of all of them, and `ListView::builder(..)` and `separated(..)` are separate values that convert to the widget.
+- Change: `ListView`'s and `GridView`'s `children` and `add*` arguments are setters, whichever of them runs last rebuilding the delegate out of all of them, and `ListView::builder(..)`, `separated(..)`, `GridView::builder(..)`, `count(..)` and `extent(..)` are separate values that convert to the widget, `count` and `extent` holding their grid delegate's arguments.
   Reason: language — a fluent setter cannot see the arguments a later setter will supply, and the delegate is built from four of them.
-  Affect: any order of those four setters lands on the delegate Dart's constructor builds, and all four panic on a builder-, separated- or custom-constructed `ListView`.
+  Affect: any order of those four setters lands on the delegate Dart's constructor builds, and all four panic on a builder-, separated- or custom-constructed view; the scroll view's own arguments are set on the converted widget.
 
 ## widgets/focus_manager.rs → focus_manager.dart
 
@@ -528,7 +528,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - `debugCheckHasDirectionality` in the widgets that resolve a directional value. Trigger: diagnostics.
 - `InheritedTheme` capture on `DefaultTextStyle`, `DefaultTextHeightBehavior` and `IconTheme`, and `DefaultTextStyle.merge`. Trigger: `InheritedTheme`; `Builder`.
 - text.rs: selection, `locale`, `strutStyle`, the semantics labels, and the deprecated `textScaleFactor`. Trigger: `SelectionContainer`; `Locale` / `StrutStyle`.
-- basic.rs: `ListBody`, `Wrap`, `Flow`, `PositionedDirectional`, `PhysicalModel`, `PhysicalShape`, `RotatedBox`, `IgnoreBaseline`, `ShaderMask`, `RawImage`, `WidgetToRenderBoxAdapter`. Trigger: each one's render object.
+- basic.rs: `ListBody`, `Flow`, `PositionedDirectional`, `PhysicalModel`, `PhysicalShape`, `RotatedBox`, `IgnoreBaseline`, `ShaderMask`, `RawImage`, `WidgetToRenderBoxAdapter`. Trigger: each one's render object.
 - basic.rs: the key-wrapping helpers, `StatefulBuilder`, `DefaultAssetBundle`. Trigger: a key over object identity; a caller; asset bundles.
 - basic.rs: the semantics widgets and the semantics flags on the pointer and opacity widgets. Trigger: accessibility (do not stub).
 - `Transform.filterQuality`, and with it the transitions and implicit animations that pass it on. Trigger: `RenderTransform.filterQuality`.
@@ -563,7 +563,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - tap_region.rs: the surface's semantics listeners and semantics action handling. Trigger: accessibility (do not stub).
 - automatic_keep_alive.rs: diagnostics. Trigger: diagnostics.
 - layout_builder.rs: `SliverLayoutBuilder` with the abstract generic builders, and the error widget on a builder panic. Trigger: slivers; diagnostics.
-- sliver.rs: `SliverGrid`, `SliverOpacity`, `SliverIgnorePointer`, `SliverOffstage`, `SliverConstrainedCrossAxis`, `SliverCrossAxisExpanded`, `SliverCrossAxisGroup` and `SliverMainAxisGroup`. Trigger: each one's render sliver.
+- sliver.rs: `SliverOpacity`, `SliverIgnorePointer`, `SliverOffstage`, `SliverConstrainedCrossAxis`, `SliverCrossAxisExpanded`, `SliverCrossAxisGroup` and `SliverMainAxisGroup`. Trigger: each one's render sliver.
 - sliver.rs: `SliverEnsureSemantics` and the adaptor element's onstage-child debug walk. Trigger: accessibility (do not stub); diagnostics.
 - Two-dimensional scrolling: the two-dimensional viewport, its scrollable and scopes, its child delegates, `DiagonalDragBehavior`, and sliver.rs's `KeepAlive` under such a viewport. Trigger: `two_dimensional_viewport.dart`.
 - scroll_delegate.rs: the keep-alive and semantic-index wrappers the delegates add, and the delegate description's exception branch. Trigger: wiring `AutomaticKeepAlive`; `selection_container.dart`; accessibility (do not stub); diagnostics.
@@ -572,7 +572,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - scrollable.rs: the selection handler and container delegate around a scrollable. Trigger: `SelectionContainer` / `SelectionRegistrar`.
 - scroll_configuration.rs: the `GlowingOverscrollIndicator` `build_overscroll_indicator` would build, with `OverscrollIndicatorNotification`; `PageScrollPhysics`. Trigger: `overscroll_indicator.dart`; `page_view.dart`.
 - scrollable.rs, scroll_configuration.rs, primary_scroll_controller.rs: diagnostics, and `ScrollableDetails.hashCode` (no `Hash` over an erased physics). Trigger: diagnostics; a map keyed by scrollable details.
-- scroll_view.rs: `GridView` and its four constructors. Trigger: `RenderSliverGrid`.
 - scroll_view.rs: `ListView.prototypeItem` and its branch of the child layout. Trigger: `sliver_prototype_extent_list.dart`.
 - scroll_view.rs: the scroll view diagnostics. Trigger: diagnostics.
 - single_child_scroll_view.rs: the semantics clip and the approximate paint clip (deferred crate-wide in rendering's PORTING.md), and its diagnostics. Trigger: accessibility (do not stub); the inspector; diagnostics.

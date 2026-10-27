@@ -93,13 +93,19 @@ pub trait ParentData: Any + Debug + Display {
 }
 
 impl dyn ParentData {
-    /// The `P` half of this parent data: [`provide`](ParentData::provide), typed.
+    /// The `P` half of this parent data: the value itself when it is a `P`, else what
+    /// [`provide`](ParentData::provide) answers.
     pub fn part<P: 'static>(&self) -> Option<&P> {
-        self.provide(TypeId::of::<P>())?.downcast_ref()
+        let any: &dyn Any = self;
+        any.downcast_ref()
+            .or_else(|| self.provide(TypeId::of::<P>())?.downcast_ref())
     }
 
-    /// The `P` half of this parent data, mutably: [`provide_mut`](ParentData::provide_mut), typed.
+    /// The `P` half of this parent data, mutably: see [`part`](Self::part).
     pub fn part_mut<P: 'static>(&mut self) -> Option<&mut P> {
+        if (self as &dyn Any).is::<P>() {
+            return (self as &mut dyn Any).downcast_mut();
+        }
         self.provide_mut(TypeId::of::<P>())?.downcast_mut()
     }
 }
@@ -1363,27 +1369,30 @@ impl AnyRenderObject {
         self.data_mut(app).parent_data.as_deref_mut()
     }
 
-    /// Whether parent data is `P`. Dart's `parentData is P`.
+    /// Dart's `parentData is P`: whether parent data is a `P`, or a subclass embedding the `P`
+    /// half ([`ParentData::provide`]).
     pub fn parent_data_is<P: ParentData + 'static>(self, app: &App) -> bool {
         self.parent_data(app)
-            .is_some_and(|data| (data as &dyn Any).is::<P>())
+            .is_some_and(|data| data.part::<P>().is_some())
     }
 
-    /// Dart's `parentData! as P`.
+    /// Dart's `parentData! as P`: the parent data when it is a `P`, or the `P` half a subclass
+    /// embeds ([`ParentData::provide`]), as `SliverGridParentData` embeds
+    /// `SliverMultiBoxAdaptorParentData`.
     ///
     /// # Panics
     ///
-    /// If parent data is missing or not `P`.
+    /// If parent data is missing, or neither `P` nor a subclass of it.
     pub fn parent_data_of<P: ParentData + 'static>(self, app: &App) -> &P {
         self.parent_data(app)
-            .and_then(|data| (data as &dyn Any).downcast_ref::<P>())
+            .and_then(|data| data.part::<P>())
             .unwrap_or_else(|| panic!("parent data is not {}", std::any::type_name::<P>()))
     }
 
     /// See [`parent_data_of`](Self::parent_data_of).
     pub fn parent_data_of_mut<P: ParentData + 'static>(self, app: &mut App) -> &mut P {
         self.parent_data_mut(app)
-            .and_then(|data| (data as &mut dyn Any).downcast_mut::<P>())
+            .and_then(|data| data.part_mut::<P>())
             .unwrap_or_else(|| panic!("parent data is not {}", std::any::type_name::<P>()))
     }
 

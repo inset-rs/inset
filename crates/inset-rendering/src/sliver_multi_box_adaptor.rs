@@ -14,7 +14,7 @@ use inset_painting::{Axis, AxisDirection};
 use crate::box_::{AnyRenderBox, BoxConstraints, BoxHitTestResult};
 use crate::object::{
     AnyRenderObject, ContainerParentData, ContainerParentDataMixin, ContainerRenderObjectBase,
-    ContainerRenderObjectMixin, ParentData, RenderHandle, zero_matrix,
+    ContainerRenderObjectMixin, ParentData, RenderHandle, RenderObject, zero_matrix,
 };
 use crate::painting_context::PaintingContext;
 use crate::pipeline_owner::PipelineOwner;
@@ -275,6 +275,49 @@ impl Display for SliverMultiBoxAdaptorParentData {
             f.write_str("keepAlive; ")?;
         }
         Display::fmt(&self.sliver_logical, f)
+    }
+}
+
+/// Gives `child`, whose parent data `drop_child` cleared, `sliver`'s kind of parent data again
+/// holding `saved`, marked kept alive.
+///
+/// Dart re-assigns the parent data object it saved before `dropChild` nulled it. Here the object
+/// is gone, so the sliver's own [`RenderObject::setup_parent_data`] makes a new one (a grid's,
+/// for a grid) and the saved fields are written back. A subclass's own fields, such as a grid
+/// tile's cross-axis offset, start empty: a kept-alive child is neither painted nor hit, and it
+/// is laid out again before it shows.
+fn restore_parent_data<T: RenderSliverMultiBoxAdaptor>(
+    sliver: RenderHandle<T>,
+    app: &mut App,
+    child: AnyRenderBox,
+    saved: KeptSlot,
+) {
+    RenderObject::setup_parent_data(sliver, app, child.as_object());
+    let restored = child
+        .as_object()
+        .parent_data_of_mut::<SliverMultiBoxAdaptorParentData>(app);
+    restored.set_layout_offset(saved.layout_offset);
+    restored.set_keep_alive(saved.keep_alive);
+    restored.index = saved.index;
+    restored.keep_alive.kept_alive = true;
+}
+
+/// The fields of a child's [`SliverMultiBoxAdaptorParentData`] that a move into or out of the
+/// keep-alive bucket keeps.
+#[derive(Clone, Copy)]
+struct KeptSlot {
+    layout_offset: Option<f64>,
+    keep_alive: bool,
+    index: Option<i32>,
+}
+
+impl KeptSlot {
+    fn of(parent_data: &SliverMultiBoxAdaptorParentData) -> KeptSlot {
+        KeptSlot {
+            layout_offset: parent_data.layout_offset(),
+            keep_alive: parent_data.keep_alive(),
+            index: parent_data.index,
+        }
     }
 }
 
@@ -594,20 +637,9 @@ pub trait RenderSliverMultiBoxAdaptor:
                 .as_object()
                 .parent_data_of::<SliverMultiBoxAdaptorParentData>(app);
             debug_assert!(child_parent_data.kept_alive());
-            // Dart re-assigns the parent data it saved before `dropChild` nulled it; the fields
-            // are plain data, so the saved values are rebuilt instead.
-            let (layout_offset, keep_alive, index_of_child) = (
-                child_parent_data.layout_offset(),
-                child_parent_data.keep_alive(),
-                child_parent_data.index,
-            );
+            let saved = KeptSlot::of(child_parent_data);
             self.drop_child(app, child.as_object());
-            let mut restored = SliverMultiBoxAdaptorParentData::new();
-            restored.set_layout_offset(layout_offset);
-            restored.set_keep_alive(keep_alive);
-            restored.index = index_of_child;
-            restored.keep_alive.kept_alive = true;
-            child.as_object().set_parent_data(app, restored);
+            restore_parent_data(self, app, child, saved);
             RenderSliverMultiBoxAdaptor::insert(self, app, child, after);
             child
                 .as_object()
@@ -629,18 +661,13 @@ pub trait RenderSliverMultiBoxAdaptor:
             return;
         }
         debug_assert!(!child_parent_data.kept_alive());
-        let (layout_offset, index) = (child_parent_data.layout_offset(), child_parent_data.index);
-        let index = index.expect("a cached child has an index");
+        let saved = KeptSlot::of(child_parent_data);
+        let index = saved.index.expect("a cached child has an index");
         RenderSliverMultiBoxAdaptor::remove(self, app, child);
         self.adaptor_data_mut(app)
             .keep_alive_bucket
             .insert(index, child);
-        let mut restored = SliverMultiBoxAdaptorParentData::new();
-        restored.set_layout_offset(layout_offset);
-        restored.set_keep_alive(true);
-        restored.index = Some(index);
-        restored.keep_alive.kept_alive = true;
-        child.as_object().set_parent_data(app, restored);
+        restore_parent_data(self, app, child, saved);
         // Dart's `super.adoptChild`: the child manager is not told, because the child keeps its
         // slot.
         self.as_object().adopt_child(app, child.as_object());
@@ -925,14 +952,15 @@ pub trait RenderSliverMultiBoxAdaptor:
     /// Flutter's `paintsChild` override; `RenderObject.paintsChild` is not a virtual here (see
     /// `PORTING.md`).
     fn paints_child(self: RenderHandle<Self>, app: &App, child: AnyRenderBox) -> bool {
+        let child = child.as_object();
         let index = child
-            .as_object()
-            .parent_data(app)
-            .and_then(|parent_data| {
-                (parent_data as &dyn std::any::Any)
-                    .downcast_ref::<SliverMultiBoxAdaptorParentData>()
+            .parent_data_is::<SliverMultiBoxAdaptorParentData>(app)
+            .then(|| {
+                child
+                    .parent_data_of::<SliverMultiBoxAdaptorParentData>(app)
+                    .index
             })
-            .and_then(|parent_data| parent_data.index);
+            .flatten();
         match index {
             None => false,
             Some(index) => !self

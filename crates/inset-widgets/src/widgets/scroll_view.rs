@@ -2,7 +2,7 @@
 //!
 //! [`ScrollView`] is Dart's abstract stateless widget: a trait over a
 //! [`ScrollViewData`] bag whose shared `build` body lives on [`ScrollViewBase`].
-//! [`CustomScrollView`], [`BoxScrollView`] and [`ListView`] follow.
+//! [`CustomScrollView`], [`BoxScrollView`], [`ListView`] and [`GridView`] follow.
 
 use std::fmt::Debug;
 use std::rc::Rc;
@@ -12,7 +12,9 @@ use inset_foundation::App;
 use inset_gestures::DragStartBehavior;
 use inset_painting::{Axis, AxisDirection, EdgeInsetsGeometry};
 use inset_rendering::{
-    AnyViewportOffset, HitTestBehavior, ItemExtentBuilder, ScrollCacheExtent, SliverPaintOrder,
+    AnyViewportOffset, HitTestBehavior, ItemExtentBuilder, ScrollCacheExtent, SliverGridDelegate,
+    SliverGridDelegateWithFixedCrossAxisCount, SliverGridDelegateWithMaxCrossAxisExtent,
+    SliverPaintOrder,
 };
 
 use crate::framework::{
@@ -35,7 +37,9 @@ use crate::widgets::scroll_delegate::{
 use crate::widgets::scroll_notification::ScrollUpdateNotification;
 use crate::widgets::scroll_physics::{AlwaysScrollableScrollPhysics, ScrollPhysicsRef};
 use crate::widgets::scrollable::{Scrollable, ViewportBuilder};
-use crate::widgets::sliver::{SliverFixedExtentList, SliverList, SliverVariedExtentList};
+use crate::widgets::sliver::{
+    SliverFixedExtentList, SliverGrid, SliverList, SliverVariedExtentList,
+};
 use crate::widgets::viewport::{ShrinkWrappingViewport, Viewport};
 
 /// A representation of how a [`ScrollView`] should dismiss the on-screen
@@ -904,7 +908,8 @@ pub struct ListView {
     list_arguments: Option<ListArguments>,
 }
 
-/// The `SliverChildListDelegate` arguments of Dart's `ListView` default constructor.
+/// The `SliverChildListDelegate` arguments of the Dart constructors that take children:
+/// `ListView`'s default one, and `GridView`'s default, `count` and `extent` ones.
 #[derive(Clone, Debug)]
 struct ListArguments {
     children: Vec<WidgetRef>,
@@ -930,6 +935,56 @@ impl ListArguments {
             .add_semantic_indexes(self.add_semantic_indexes)
             .into_delegate()
     }
+}
+
+/// The fluent setters of the `SliverChildListDelegate` arguments, on a scroll view whose
+/// `list_arguments` holds them; each rebuilds `children_delegate` out of all of them.
+macro_rules! list_arguments_setters {
+    ($name:ident) => {
+        /// Dart `children:`.
+        ///
+        /// The children also fill in [`ScrollViewData::semantic_child_count`] while it still
+        /// holds the constructor's default, as Dart's `semanticChildCount ?? children.length`
+        /// does.
+        pub fn children(self, children: impl IntoIterator<Item = WidgetRef>) -> $name {
+            let children: Vec<WidgetRef> = children.into_iter().collect();
+            let count = children.len() as i32;
+            let mut this = self.with_list_arguments(|arguments| arguments.children = children);
+            if this.scroll_view.semantic_child_count == Some(0) {
+                this.scroll_view.semantic_child_count = Some(count);
+            }
+            this
+        }
+
+        /// Dart `addAutomaticKeepAlives:` on a constructor that takes children.
+        pub fn add_automatic_keep_alives(self, value: bool) -> $name {
+            self.with_list_arguments(|arguments| arguments.add_automatic_keep_alives = value)
+        }
+
+        /// Dart `addRepaintBoundaries:` on a constructor that takes children.
+        pub fn add_repaint_boundaries(self, value: bool) -> $name {
+            self.with_list_arguments(|arguments| arguments.add_repaint_boundaries = value)
+        }
+
+        /// Dart `addSemanticIndexes:` on a constructor that takes children.
+        pub fn add_semantic_indexes(self, value: bool) -> $name {
+            self.with_list_arguments(|arguments| arguments.add_semantic_indexes = value)
+        }
+
+        /// Applies one of the constructor's delegate arguments and rebuilds
+        /// [`children_delegate`](Self::children_delegate) out of all of them.
+        fn with_list_arguments(mut self, apply: impl FnOnce(&mut ListArguments)) -> $name {
+            let mut arguments = self.list_arguments.expect(concat!(
+                "the children and add* setters belong to the ",
+                stringify!($name),
+                " constructors that take children"
+            ));
+            apply(&mut arguments);
+            self.children_delegate = arguments.clone().into_delegate();
+            self.list_arguments = Some(arguments);
+            self
+        }
+    };
 }
 
 impl ListView {
@@ -1037,47 +1092,7 @@ impl ListView {
         self
     }
 
-    /// Dart `ListView(children:)`.
-    ///
-    /// The children also fill in [`ScrollViewData::semantic_child_count`] while it still
-    /// holds the constructor's default, as Dart's `semanticChildCount ?? children.length`
-    /// does.
-    pub fn children(self, children: impl IntoIterator<Item = WidgetRef>) -> ListView {
-        let children: Vec<WidgetRef> = children.into_iter().collect();
-        let count = children.len() as i32;
-        let mut this = self.with_list_arguments(|arguments| arguments.children = children);
-        if this.scroll_view.semantic_child_count == Some(0) {
-            this.scroll_view.semantic_child_count = Some(count);
-        }
-        this
-    }
-
-    /// Dart `ListView(addAutomaticKeepAlives:)` on the default constructor.
-    pub fn add_automatic_keep_alives(self, value: bool) -> ListView {
-        self.with_list_arguments(|arguments| arguments.add_automatic_keep_alives = value)
-    }
-
-    /// Dart `ListView(addRepaintBoundaries:)` on the default constructor.
-    pub fn add_repaint_boundaries(self, value: bool) -> ListView {
-        self.with_list_arguments(|arguments| arguments.add_repaint_boundaries = value)
-    }
-
-    /// Dart `ListView(addSemanticIndexes:)` on the default constructor.
-    pub fn add_semantic_indexes(self, value: bool) -> ListView {
-        self.with_list_arguments(|arguments| arguments.add_semantic_indexes = value)
-    }
-
-    /// Applies one of the default constructor's delegate arguments and rebuilds
-    /// [`children_delegate`](Self::children_delegate) out of all of them.
-    fn with_list_arguments(mut self, apply: impl FnOnce(&mut ListArguments)) -> ListView {
-        let mut arguments = self
-            .list_arguments
-            .expect("the children and add* setters belong to ListView::new");
-        apply(&mut arguments);
-        self.children_delegate = arguments.clone().into_delegate();
-        self.list_arguments = Some(arguments);
-        self
-    }
+    list_arguments_setters!(ListView);
 }
 
 impl Default for ListView {
@@ -1303,6 +1318,375 @@ impl Debug for ListView {
     }
 }
 
+/// A scrollable, 2D array of widgets.
+///
+/// The main axis direction of a grid is the direction in which it scrolls (the
+/// [`ScrollViewData::scroll_direction`]).
+///
+/// The most commonly used grid layouts are [`GridView::count`], which creates a layout with a
+/// fixed number of tiles in the cross axis, and [`GridView::extent`], which creates a layout
+/// with tiles that have a maximum cross-axis extent. A custom [`SliverGridDelegate`] can
+/// produce an arbitrary 2D arrangement of children, including arrangements that are unaligned
+/// or overlapping.
+///
+/// To create a grid with a large (or infinite) number of children, use the
+/// [`GridView::builder`] constructor with either a [`SliverGridDelegateWithFixedCrossAxisCount`]
+/// or a [`SliverGridDelegateWithMaxCrossAxisExtent`] for the grid delegate.
+///
+/// To use a custom `SliverChildDelegate`, use [`GridView::custom`].
+///
+/// To create a linear array of children, use a [`ListView`].
+///
+/// To control the initial scroll offset of the scroll view, provide a
+/// [`controller`](Self::controller) with its `ScrollController::initial_scroll_offset`
+/// property set.
+///
+/// ## Transitioning to [`CustomScrollView`]
+///
+/// A [`GridView`] is basically a [`CustomScrollView`] with a single [`SliverGrid`] in its
+/// [`CustomScrollView::slivers`] property.
+///
+/// By default, [`GridView`] will automatically pad the limits of the grid's scrollable to avoid
+/// partial obstructions indicated by `MediaQuery`'s padding. To avoid this behavior, override
+/// with a zero [`padding`](Self::padding) property.
+pub struct GridView {
+    scroll_view: ScrollViewData,
+    box_scroll_view: BoxScrollViewData,
+
+    /// A delegate that controls the layout of the children within the [`GridView`].
+    ///
+    /// The [`GridView::new`], [`GridView::builder`], and [`GridView::custom`] constructors let
+    /// you specify this delegate explicitly. The other constructors create a
+    /// [`grid_delegate`](Self::grid_delegate) implicitly.
+    pub grid_delegate: Rc<dyn SliverGridDelegate>,
+
+    /// A delegate that provides the children for the [`GridView`].
+    ///
+    /// The [`GridView::custom`] constructor lets you specify this delegate explicitly. The
+    /// other constructors create a [`children_delegate`](Self::children_delegate) that wraps
+    /// the given child list.
+    pub children_delegate: SliverChildDelegateRef,
+
+    // As `ListView`'s: the arguments of the constructors that take children, for their setters.
+    list_arguments: Option<ListArguments>,
+}
+
+impl GridView {
+    /// Creates a scrollable, 2D array of widgets with a custom [`SliverGridDelegate`], from an
+    /// explicit list of children that the [`children`](Self::children) setter supplies.
+    pub fn new(grid_delegate: Rc<dyn SliverGridDelegate>) -> GridView {
+        let list_arguments = ListArguments::new();
+        GridView {
+            scroll_view: ScrollViewData {
+                semantic_child_count: Some(0),
+                ..ScrollViewData::new()
+            },
+            box_scroll_view: BoxScrollViewData::new(),
+            grid_delegate,
+            children_delegate: list_arguments.clone().into_delegate(),
+            list_arguments: Some(list_arguments),
+        }
+    }
+
+    /// Creates a scrollable, 2D array of widgets that are created on demand.
+    ///
+    /// This constructor is appropriate for grid views with a large (or infinite) number of
+    /// children because the builder is called only for those children that are actually
+    /// visible.
+    ///
+    /// Providing a non-`None` [`item_count`](GridViewBuilder::item_count) improves the ability
+    /// of the [`GridView`] to estimate the maximum scroll extent.
+    ///
+    /// The item builder will be called only with indices greater than or equal to zero and less
+    /// than the item count.
+    pub fn builder(
+        grid_delegate: Rc<dyn SliverGridDelegate>,
+        item_builder: impl Fn(&mut App, BuildContext, i32) -> Option<WidgetRef> + 'static,
+    ) -> GridViewBuilder {
+        GridViewBuilder::new(grid_delegate, Rc::new(item_builder))
+    }
+
+    /// Creates a scrollable, 2D array of widgets with both a custom [`SliverGridDelegate`] and a
+    /// custom `SliverChildDelegate`.
+    ///
+    /// To use an item builder callback to build children, either use a
+    /// [`SliverChildBuilderDelegate`] or use the [`GridView::builder`] constructor.
+    pub fn custom(
+        grid_delegate: Rc<dyn SliverGridDelegate>,
+        children_delegate: SliverChildDelegateRef,
+    ) -> GridView {
+        GridView {
+            scroll_view: ScrollViewData::new(),
+            box_scroll_view: BoxScrollViewData::new(),
+            grid_delegate,
+            children_delegate,
+            list_arguments: None,
+        }
+    }
+
+    /// Creates a scrollable, 2D array of widgets with a fixed number of tiles in the cross axis.
+    ///
+    /// Uses a [`SliverGridDelegateWithFixedCrossAxisCount`] as the
+    /// [`grid_delegate`](Self::grid_delegate).
+    ///
+    /// See also:
+    ///
+    ///  * [`SliverGrid::count`], the equivalent constructor for [`SliverGrid`].
+    pub fn count(cross_axis_count: i32) -> GridViewCount {
+        let grid_delegate = SliverGridDelegateWithFixedCrossAxisCount::new(cross_axis_count);
+        GridViewCount {
+            grid_view: GridView::new(Rc::new(grid_delegate.clone())),
+            grid_delegate,
+        }
+    }
+
+    /// Creates a scrollable, 2D array of widgets with tiles that each have a maximum cross-axis
+    /// extent.
+    ///
+    /// Uses a [`SliverGridDelegateWithMaxCrossAxisExtent`] as the
+    /// [`grid_delegate`](Self::grid_delegate).
+    ///
+    /// See also:
+    ///
+    ///  * [`SliverGrid::extent`], the equivalent constructor for [`SliverGrid`].
+    pub fn extent(max_cross_axis_extent: f64) -> GridViewExtent {
+        let grid_delegate = SliverGridDelegateWithMaxCrossAxisExtent::new(max_cross_axis_extent);
+        GridViewExtent {
+            grid_view: GridView::new(Rc::new(grid_delegate.clone())),
+            grid_delegate,
+        }
+    }
+
+    crate::scroll_view_setters!(GridView);
+
+    /// Dart `GridView(padding:)`.
+    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> GridView {
+        self.box_scroll_view.padding = Some(padding);
+        self
+    }
+
+    list_arguments_setters!(GridView);
+}
+
+impl ScrollView for GridView {
+    crate::scroll_view_accessors!();
+
+    fn build_slivers(&self, app: &mut App, context: BuildContext) -> Vec<WidgetRef> {
+        BoxScrollViewBase::build_slivers(self, app, context)
+    }
+}
+
+impl BoxScrollView for GridView {
+    crate::box_scroll_view_accessors!();
+
+    fn build_child_layout(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
+        SliverGrid::new(
+            self.children_delegate.clone(),
+            Rc::clone(&self.grid_delegate),
+        )
+        .into_widget()
+    }
+}
+
+impl StatelessWidget for GridView {
+    fn key(&self) -> Option<&KeyRef> {
+        self.scroll_view.key.as_ref()
+    }
+
+    fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
+        ScrollViewBase::build(self, app, context)
+    }
+}
+
+impl Clone for GridView {
+    fn clone(&self) -> GridView {
+        GridView {
+            scroll_view: self.scroll_view.clone(),
+            box_scroll_view: self.box_scroll_view.clone(),
+            grid_delegate: Rc::clone(&self.grid_delegate),
+            children_delegate: self.children_delegate.clone(),
+            list_arguments: self.list_arguments.clone(),
+        }
+    }
+}
+
+impl Debug for GridView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GridView")
+            .field("gridDelegate", &self.grid_delegate)
+            .field("childrenDelegate", &self.children_delegate)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Dart's `GridView.builder(..)` arguments; the value converts to the [`GridView`].
+pub struct GridViewBuilder {
+    grid_view: GridView,
+    delegate: SliverChildBuilderDelegate,
+}
+
+impl GridViewBuilder {
+    fn new(
+        grid_delegate: Rc<dyn SliverGridDelegate>,
+        item_builder: NullableIndexedWidgetBuilder,
+    ) -> GridViewBuilder {
+        GridViewBuilder {
+            grid_view: GridView::custom(
+                grid_delegate,
+                SliverChildListDelegate::new(Vec::new()).into_delegate(),
+            ),
+            delegate: SliverChildBuilderDelegate::from_builder(item_builder),
+        }
+    }
+
+    /// Dart `itemCount:`, which also fills in [`ScrollViewData::semantic_child_count`], as
+    /// Dart's `semanticChildCount ?? itemCount` does.
+    pub fn item_count(mut self, item_count: i32) -> GridViewBuilder {
+        self.delegate = self.delegate.child_count(item_count);
+        if self.grid_view.scroll_view.semantic_child_count.is_none() {
+            self.grid_view.scroll_view.semantic_child_count = Some(item_count);
+        }
+        self
+    }
+
+    /// Dart `findChildIndexCallback:`.
+    pub fn find_child_index_callback(
+        mut self,
+        find_child_index_callback: ChildIndexGetter,
+    ) -> GridViewBuilder {
+        self.delegate = self
+            .delegate
+            .find_child_index_callback(find_child_index_callback);
+        self
+    }
+
+    /// Dart `addAutomaticKeepAlives:`.
+    pub fn add_automatic_keep_alives(mut self, value: bool) -> GridViewBuilder {
+        self.delegate = self.delegate.add_automatic_keep_alives(value);
+        self
+    }
+
+    /// Dart `addRepaintBoundaries:`.
+    pub fn add_repaint_boundaries(mut self, value: bool) -> GridViewBuilder {
+        self.delegate = self.delegate.add_repaint_boundaries(value);
+        self
+    }
+
+    /// Dart `addSemanticIndexes:`.
+    pub fn add_semantic_indexes(mut self, value: bool) -> GridViewBuilder {
+        self.delegate = self.delegate.add_semantic_indexes(value);
+        self
+    }
+
+    /// The [`GridView`] this builder describes.
+    pub fn build(self) -> GridView {
+        GridView {
+            children_delegate: self.delegate.into_delegate(),
+            ..self.grid_view
+        }
+    }
+}
+
+impl IntoWidget<StatelessKind> for GridViewBuilder {
+    fn into_widget(self) -> WidgetRef {
+        self.build().into_widget()
+    }
+}
+
+/// The fluent arguments `GridView::count` and `GridView::extent` share: their grid delegate's
+/// spacing, aspect ratio and tile extent, and the children.
+macro_rules! tiles_constructor_setters {
+    ($name:ident) => {
+        /// Dart `mainAxisSpacing:`.
+        pub fn main_axis_spacing(mut self, value: f64) -> $name {
+            self.grid_delegate = self.grid_delegate.main_axis_spacing(value);
+            self
+        }
+
+        /// Dart `crossAxisSpacing:`.
+        pub fn cross_axis_spacing(mut self, value: f64) -> $name {
+            self.grid_delegate = self.grid_delegate.cross_axis_spacing(value);
+            self
+        }
+
+        /// Dart `childAspectRatio:`.
+        pub fn child_aspect_ratio(mut self, value: f64) -> $name {
+            self.grid_delegate = self.grid_delegate.child_aspect_ratio(value);
+            self
+        }
+
+        /// Dart `mainAxisExtent:`.
+        pub fn main_axis_extent(mut self, value: f64) -> $name {
+            self.grid_delegate = self.grid_delegate.main_axis_extent(value);
+            self
+        }
+
+        /// See [`GridView::children`].
+        pub fn children(mut self, children: impl IntoIterator<Item = WidgetRef>) -> $name {
+            self.grid_view = self.grid_view.children(children);
+            self
+        }
+
+        /// See [`GridView::add_automatic_keep_alives`].
+        pub fn add_automatic_keep_alives(mut self, value: bool) -> $name {
+            self.grid_view = self.grid_view.add_automatic_keep_alives(value);
+            self
+        }
+
+        /// See [`GridView::add_repaint_boundaries`].
+        pub fn add_repaint_boundaries(mut self, value: bool) -> $name {
+            self.grid_view = self.grid_view.add_repaint_boundaries(value);
+            self
+        }
+
+        /// See [`GridView::add_semantic_indexes`].
+        pub fn add_semantic_indexes(mut self, value: bool) -> $name {
+            self.grid_view = self.grid_view.add_semantic_indexes(value);
+            self
+        }
+
+        /// The [`GridView`] this value describes.
+        pub fn build(self) -> GridView {
+            GridView {
+                grid_delegate: Rc::new(self.grid_delegate),
+                ..self.grid_view
+            }
+        }
+    };
+}
+
+/// Dart's `GridView.count(..)` arguments; the value converts to the [`GridView`].
+pub struct GridViewCount {
+    grid_view: GridView,
+    grid_delegate: SliverGridDelegateWithFixedCrossAxisCount,
+}
+
+impl GridViewCount {
+    tiles_constructor_setters!(GridViewCount);
+}
+
+impl IntoWidget<StatelessKind> for GridViewCount {
+    fn into_widget(self) -> WidgetRef {
+        self.build().into_widget()
+    }
+}
+
+/// Dart's `GridView.extent(..)` arguments; the value converts to the [`GridView`].
+pub struct GridViewExtent {
+    grid_view: GridView,
+    grid_delegate: SliverGridDelegateWithMaxCrossAxisExtent,
+}
+
+impl GridViewExtent {
+    tiles_constructor_setters!(GridViewExtent);
+}
+
+impl IntoWidget<StatelessKind> for GridViewExtent {
+    fn into_widget(self) -> WidgetRef {
+        self.build().into_widget()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use inset_foundation::AppCell;
@@ -1493,6 +1877,58 @@ mod tests {
             item_count(&app, &harness) > 0,
             "the sliver list's children are laid out below it"
         );
+    }
+
+    /// `GridView.count` sizes its tiles to fill each row and lays out only the rows in view
+    /// and in the cache.
+    #[test]
+    fn a_grid_view_count_lays_out_the_rows_in_view() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let grid = GridView::count(3)
+            .main_axis_spacing(10.0)
+            .add_repaint_boundaries(false)
+            .children(boxes(30))
+            .build();
+        assert_eq!(grid.scroll_view.semantic_child_count, Some(30));
+        let harness = Harness::mount(&mut app, wrap(grid));
+        harness.pump(&mut app);
+
+        // Tiles are 100 square in the 300 wide view, rows 110 apart: the 200 high view and its
+        // 250 of cache reach into the fifth row.
+        let tiles = count_render_objects(
+            &app,
+            harness.render_root(&app).as_object(),
+            &|app, object| {
+                object
+                    .as_box()
+                    .is_some_and(|render_box| render_box.size(app) == Size::new(100.0, 100.0))
+            },
+        );
+        assert_eq!(tiles, 15);
+    }
+
+    #[test]
+    fn a_grid_view_builder_creates_its_tiles_lazily() {
+        let built: Rc<RefCell<Vec<i32>>> = Rc::new(RefCell::new(Vec::new()));
+        let recorded = built.clone();
+        let tiles = SliverGridDelegateWithMaxCrossAxisExtent::new(150.0);
+        let grid = GridView::builder(Rc::new(tiles), move |_app, _context, index| {
+            recorded.borrow_mut().push(index);
+            Some(SizedBox::new().into_widget())
+        })
+        .item_count(1000)
+        .build();
+
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(&mut app, wrap(grid));
+        harness.pump(&mut app);
+
+        // Two columns of 150 square tiles: rows up to 450 are built, view and cache.
+        let mut built = built.borrow().clone();
+        built.sort();
+        assert_eq!(built, (0..6).collect::<Vec<i32>>());
     }
 
     #[test]
