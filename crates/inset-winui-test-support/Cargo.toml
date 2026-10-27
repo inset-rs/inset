@@ -1,0 +1,24 @@
+[package]
+name = "inset-winui-test-support"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+inset-animation.workspace = true
+inset-embedder.workspace = true
+inset-foundation.workspace = true
+inset-gestures.workspace = true
+inset-painting.workspace = true
+inset-rendering.workspace = true
+inset-scheduler.workspace = true
+inset-services.workspace = true
+inset-test.workspace = true
+inset-widgets.workspace = true
+wgpu.workspace = true
+pollster.workspace = true
+png.workspace = true
+
+[lints]
+workspace = true

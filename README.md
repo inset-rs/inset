@@ -14,7 +14,7 @@ The framework layer is a port of [Flutter](https://github.com/flutter/flutter). 
 
 The project is in alpha, while is ready to build apps on. Inset currently has two widget libraries ready to use:
 - Cupertino: for mobile apps
-- [WinUI](https://github.com/inset-rs/inset-winui): for desktop and web apps
+- [WinUI](https://github.com/inset-rs/inset/tree/main/crates/inset-winui): for desktop and web apps
 
 ## Apps built with Inset
 
@@ -57,7 +57,7 @@ The project is in alpha, while is ready to build apps on. Inset currently has tw
     </td>
     <td align="center" valign="top">
       Desktop and web widgets, from<br>
-      <a href="https://github.com/inset-rs/inset-winui">inset-winui</a>
+      <a href="https://github.com/inset-rs/inset/tree/main/crates/inset-winui">inset-winui</a>
     </td>
   </tr>
 </table>

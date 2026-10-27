@@ -6,12 +6,14 @@ Reference checkouts live under `.reference/` at the repo root. That folder is no
 
 - Flutter is the spec: `.reference/flutter/packages/flutter/lib/src`. Read the Dart. Do not write Flutter from memory.
 - Zed (`crates/gpui`) is prior art for `Entity` as a user-facing store (not used to implement Flutter): `.reference/zed/crates/gpui`.
+- Microsoft UI XAML is the spec of `crates/inset-winui`, the WinUI kit: `.reference/microsoft-ui-xaml`.
 
 If a checkout is missing, clone it there.
 
 ```
 git clone https://github.com/flutter/flutter.git .reference/flutter
 git clone https://github.com/zed-industries/zed.git .reference/zed
+git clone https://github.com/microsoft/microsoft-ui-xaml.git .reference/microsoft-ui-xaml
 ```
 
 ## Commands
@@ -44,7 +46,7 @@ Do not lease a Handle out of the arena for a pass. shaft-rs-next did that; layou
 
 ## Porting
 
-**Before writing or changing any Rust that corresponds to a Flutter file, read `.agents/skills/porting-flutter/SKILL.md`.**
+**Before writing or changing any Rust that corresponds to a Flutter file, read `.agents/skills/porting-flutter/SKILL.md`.** For `crates/inset-winui` and `winui_gallery`, whose spec is WinUI rather than Flutter, read `.agents/skills/porting-winui/SKILL.md` instead.
 
 Copy the Dart, then modify. Do not rewrite from understanding — models are bad at repeating a file they have only read.
 
