@@ -9,7 +9,6 @@ homepage.workspace = true
 keywords = ["ui", "gui", "winui", "fluent", "inset"]
 categories.workspace = true
 readme = "README.md"
-publish = ["crates-io"]
 include = ["src/**", "assets/**", "tests/**", "LICENSE", "THIRD_PARTY.md", "README.md", "Cargo.toml"]
 
 [package.metadata.docs.rs]
