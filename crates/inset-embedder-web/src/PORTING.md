@@ -54,9 +54,9 @@ Host implementation. Flutter analogue: the web engine under `engine/lib/web_ui`.
   Reason: platform — Safari and Firefox let a page read a file the user chose, never write one, and a download would give the app nothing it could write again.
   Affect: on Safari and Firefox an app opens files but saves none through a dialog.
 
-- Change: a folder pick fails.
-  Reason: platform — the browser's folder is a directory handle, which a path does not carry, and the interface has no shape for one yet.
-  Affect: an app asks for a folder in vain in the browser.
+- Change: a folder pick is the browser's directory handle (`showDirectoryPicker`, in `readwrite` mode when the app asks to write), as a `FolderHandle`: listed through `values()`, its files and folders opened by name, and made when writable; without the File System Access API a folder pick fails.
+  Reason: platform — a page has no paths, and Safari's and Firefox's `webkitdirectory` input gives a flat list of files no folder could be written through.
+  Affect: on Chrome and Edge an app lists, reads and writes a folder the user picked; elsewhere it asks for one in vain.
 
 ## Deferred
 

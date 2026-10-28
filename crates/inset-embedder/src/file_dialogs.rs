@@ -9,7 +9,9 @@
 //! web's file handle, and Android's document, open as a handle where it seeks and as a stream
 //! where it is a pipe ([`PickedFile`]). A pick grants reading only, unless the app asks to write
 //! ([`OpenOptions::writable`]); a save grants writing to the one file chosen, which may not exist
-//! yet. A folder pick answers a path, where the system gives one.
+//! yet. A folder pick answers a path where the system gives one, and the system's folder handle
+//! where it gives none, the web's directory handle and Android's document tree, which lists the
+//! folder and opens and, when writable, makes what is in it ([`PickedFolder`]).
 //!
 //! The platform answers `None` where its system has no file dialogs, and a dialog the system
 //! could not show is answered as a [`FileDialogError`]. Every answer comes through a future, once
@@ -47,7 +49,7 @@ pub trait FileDialogs {
         &self,
         parent: Option<ViewId>,
         options: FolderOptions,
-    ) -> FileDialogFuture<Option<PathBuf>>;
+    ) -> FileDialogFuture<Option<PickedFolder>>;
 
     /// Asks where to save a file, which the pick may then write; `None` if the user cancelled.
     fn save_file(
@@ -139,6 +141,62 @@ impl fmt::Debug for PickedFile {
         }
     }
 }
+
+/// A folder the user picked, as the system gives it.
+pub enum PickedFolder {
+    /// macOS, iOS, Windows and Linux: a path the app reads and writes in as any folder.
+    Path(PathBuf),
+    /// The web's directory handle, and Android's document tree.
+    Handle(Box<dyn FolderHandle>),
+}
+
+impl fmt::Debug for PickedFolder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PickedFolder::Path(path) => f.debug_tuple("Path").field(path).finish(),
+            PickedFolder::Handle(handle) => f.debug_tuple("Handle").field(&handle.name()).finish(),
+        }
+    }
+}
+
+/// A picked folder the system gives no path for: what is in it, opened by name, and, when the
+/// pick is writable, files and folders made in it. What it opens is writable when it is.
+pub trait FolderHandle {
+    /// The folder's name, which the user sees.
+    fn name(&self) -> &str;
+
+    /// What is in the folder, in no particular order.
+    fn entries(&self) -> FolderEntriesFuture;
+
+    /// The file `name` in the folder.
+    fn open_file(&self, name: &str) -> FileOpenFuture<PickedFile>;
+
+    /// The folder `name` in the folder.
+    fn open_folder(&self, name: &str) -> FileOpenFuture<PickedFolder>;
+
+    /// Makes an empty file `name` in the folder; `None` unless the pick is writable.
+    fn create_file(&self, name: &str) -> Option<FileOpenFuture<PickedFile>>;
+
+    /// Makes a folder `name` in the folder; `None` unless the pick is writable.
+    fn create_folder(&self, name: &str) -> Option<FileOpenFuture<PickedFolder>>;
+}
+
+/// One thing in a picked folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FolderEntry {
+    pub name: String,
+    pub kind: EntryKind,
+}
+
+/// Whether a folder's entry is a file or a folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EntryKind {
+    File,
+    Folder,
+}
+
+/// What a folder's listing answers.
+pub type FolderEntriesFuture = Pin<Box<dyn Future<Output = io::Result<Vec<FolderEntry>>>>>;
 
 /// A picked file the system gives no path for, read and written at any offset.
 pub trait FileHandle {

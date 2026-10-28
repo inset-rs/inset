@@ -12,7 +12,7 @@ use std::rc::Rc;
 
 use inset_embedder::{
     FileDialogError, FileDialogFuture, FileDialogs, FileType, FolderOptions, OpenOptions,
-    PickedFile, SaveOptions, ViewId,
+    PickedFile, PickedFolder, SaveOptions, ViewId,
 };
 use windows::Win32::Foundation::{ERROR_CANCELLED, HWND};
 use windows::Win32::System::Com::{
@@ -85,7 +85,7 @@ impl FileDialogs for ShellDialogs {
         &self,
         parent: Option<ViewId>,
         options: FolderOptions,
-    ) -> FileDialogFuture<Option<PathBuf>> {
+    ) -> FileDialogFuture<Option<PickedFolder>> {
         let request = Request::Open {
             types: Vec::new(),
             initial_folder: options.initial_folder,
@@ -93,7 +93,7 @@ impl FileDialogs for ShellDialogs {
             choose: Choose::Folder,
         };
         let chosen = self.show(parent, request);
-        Box::pin(async move { Ok(chosen.await?.into_iter().next()) })
+        Box::pin(async move { Ok(chosen.await?.into_iter().next().map(PickedFolder::Path)) })
     }
 
     fn save_file(

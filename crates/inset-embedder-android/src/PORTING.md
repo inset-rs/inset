@@ -43,9 +43,13 @@ Host implementation. Flutter analogue: the engine's Android embedder under
   Reason: platform — a document has no path, and a copy could not be written back.
   Affect: an app writes a picked document in place, and reads a pipe through once.
 
-- Change: the pickers filter by MIME type alone, a type's extensions mapped by `MimeTypeMap`; an initial folder and a confirming label are not taken, and a folder pick fails.
-  Reason: platform — the pickers take MIME types and a content URI, not a path, and a document tree has no shape in the interface yet.
-  Affect: an app asks for a folder in vain on Android.
+- Change: the pickers filter by MIME type alone, a type's extensions mapped by `MimeTypeMap`; an initial folder and a confirming label are not taken.
+  Reason: platform — the pickers take MIME types and a content URI, not a path.
+  Affect: a type with extensions Android does not know filters nothing.
+
+- Change: a folder pick is the document tree `ACTION_OPEN_DOCUMENT_TREE` answers, its permission taken as persistable, as a `FolderHandle` over `DocumentsContract`: listed by its children, a child file opened as a picked document is, a child folder as another handle, and files and folders made by `createDocument` when writable; `file_selector_android` answers no folder there.
+  Reason: platform — a document tree has no path, and its documents are reached through the provider alone.
+  Affect: an app lists, reads and, when it asked to write, makes files in a folder the user picked.
 
 ## display.rs / host.rs
 

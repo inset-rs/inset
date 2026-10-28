@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use inset_embedder::{
     FileDialogError, FileDialogFuture, FileDialogs, FolderOptions, OpenOptions, PickedFile,
-    SaveOptions, ViewId,
+    PickedFolder, SaveOptions, ViewId,
 };
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
@@ -115,11 +115,11 @@ impl FileDialogs for PortalDialogs {
         &self,
         parent: Option<ViewId>,
         options: FolderOptions,
-    ) -> FileDialogFuture<Option<PathBuf>> {
+    ) -> FileDialogFuture<Option<PickedFolder>> {
         let mut asked = common_options(&options.initial_folder, &options.confirm_label);
         asked.insert("directory", owned(true));
         let chosen = self.ask(parent, "OpenFile", "Open Folder", asked);
-        Box::pin(async move { Ok(chosen.await?.into_iter().next()) })
+        Box::pin(async move { Ok(chosen.await?.into_iter().next().map(PickedFolder::Path)) })
     }
 
     fn save_file(

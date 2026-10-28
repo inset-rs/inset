@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use inset_embedder::{
     FileDialogError, FileDialogFuture, FileDialogs, FileType, FolderOptions, OpenOptions,
-    PickedFile, SaveOptions, ViewId,
+    PickedFile, PickedFolder, SaveOptions, ViewId,
 };
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -99,7 +99,7 @@ impl FileDialogs for DocumentPickers {
         &self,
         parent: Option<ViewId>,
         options: FolderOptions,
-    ) -> FileDialogFuture<Option<PathBuf>> {
+    ) -> FileDialogFuture<Option<PickedFolder>> {
         // SAFETY: a constant UniformTypeIdentifiers exports for the life of the process.
         let folder = unsafe { UTTypeFolder };
         let chosen = self.open(
@@ -108,7 +108,7 @@ impl FileDialogs for DocumentPickers {
             &options.initial_folder,
             false,
         );
-        Box::pin(async move { Ok(chosen.await?.into_iter().next()) })
+        Box::pin(async move { Ok(chosen.await?.into_iter().next().map(PickedFolder::Path)) })
     }
 
     fn save_file(

@@ -13,7 +13,7 @@
 //!
 //! The pickers filter by MIME type alone: a type's extensions become the MIME types Android maps
 //! them to. They take no initial folder the app could name by a path, and no confirming label. A
-//! folder pick fails for now: the picker's folder is a document tree, which a path does not carry.
+//! folder pick is the document tree `ACTION_OPEN_DOCUMENT_TREE` answers (`document_tree`).
 //!
 //! The result arrives on the activity's thread, which only hands the documents' URIs on; they are
 //! opened on the app's thread, as the app awaits them.
@@ -28,7 +28,6 @@ use std::future::Future;
 use std::io::{Read, Seek};
 use std::os::fd::FromRawFd;
 use std::os::unix::fs::FileExt;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError};
@@ -38,7 +37,7 @@ use android_activity::AndroidApp;
 use inset_embedder::{
     FileDialogError, FileDialogFuture, FileDialogs, FileFinishFuture, FileHandle, FileOpenFuture,
     FileReadFuture, FileSizeFuture, FileStream, FileType, FileWriteFuture, FileWriter,
-    FolderOptions, OpenOptions, PickedFile, SaveOptions, ViewId,
+    FolderOptions, OpenOptions, PickedFile, PickedFolder, SaveOptions, ViewId,
 };
 use jni::errors::LogErrorAndDefault;
 use jni::objects::{JClass, JObject, JObjectArray, JString, JValue};
@@ -46,6 +45,7 @@ use jni::sys::jint;
 use jni::{Env, EnvUnowned, NativeMethod, jni_sig, jni_str};
 
 use crate::activity::with_activity;
+use crate::document_tree::DocumentFolder;
 
 /// `Activity.RESULT_OK`.
 const RESULT_OK: jint = -1;
@@ -165,15 +165,32 @@ impl FileDialogs for DocumentPickers {
         self.open(&options, true)
     }
 
-    /// A document tree is no path; folder picks have no shape here yet.
     fn open_folder(
         &self,
         _parent: Option<ViewId>,
-        _options: FolderOptions,
-    ) -> FileDialogFuture<Option<PathBuf>> {
-        Box::pin(std::future::ready(Err(FileDialogError::Failed(
-            "the picker's folder is a document tree, which a path does not carry".to_owned(),
-        ))))
+        options: FolderOptions,
+    ) -> FileDialogFuture<Option<PickedFolder>> {
+        let writable = options.writable;
+        let picked = self.pick(move |env| {
+            let intent = env.new_string("android.intent.action.OPEN_DOCUMENT_TREE")?;
+            let intent = env.new_object(
+                jni_str!("android/content/Intent"),
+                jni_sig!("(Ljava/lang/String;)V"),
+                &[JValue::Object(&intent)],
+            )?;
+            let flags = GRANT_READ | GRANT_PERSISTABLE | if writable { GRANT_WRITE } else { 0 };
+            add_flags(env, &intent, flags)?;
+            Ok(intent)
+        });
+        let app = self.app.clone();
+        Box::pin(async move {
+            let Some(tree) = picked.await?.into_iter().next() else {
+                return Ok(None);
+            };
+            let folder = DocumentFolder::picked(app, &tree, writable)
+                .map_err(|error| FileDialogError::Failed(error.to_string()))?;
+            Ok(Some(PickedFolder::Handle(Box::new(folder))))
+        })
     }
 
     fn save_file(
@@ -336,7 +353,10 @@ fn mime_types(env: &mut Env<'_>, types: &[FileType]) -> jni::errors::Result<Vec<
     Ok(mime_types)
 }
 
-fn string(env: &mut Env<'_>, object: JObject<'_>) -> jni::errors::Result<Option<String>> {
+pub(crate) fn string(
+    env: &mut Env<'_>,
+    object: JObject<'_>,
+) -> jni::errors::Result<Option<String>> {
     if object.is_null() {
         return Ok(None);
     }
@@ -437,7 +457,7 @@ fn uri_string(env: &mut Env<'_>, uri: JObject<'_>) -> jni::errors::Result<Option
 
 /// Opens the document `uri` names, keeping its permission: a handle where it seeks, a stream
 /// where it is a pipe.
-fn open_document(
+pub(crate) fn open_document(
     app: &AndroidApp,
     uri: &str,
     writable: bool,
@@ -501,7 +521,12 @@ fn open_document(
 }
 
 /// Takes the pick's permission as persistable, which a provider may decline.
-fn keep_permission(env: &mut Env<'_>, resolver: &JObject<'_>, uri: &JObject<'_>, writable: bool) {
+pub(crate) fn keep_permission(
+    env: &mut Env<'_>,
+    resolver: &JObject<'_>,
+    uri: &JObject<'_>,
+    writable: bool,
+) {
     let flags = GRANT_READ | if writable { GRANT_WRITE } else { 0 };
     let taken = env.call_method(
         resolver,

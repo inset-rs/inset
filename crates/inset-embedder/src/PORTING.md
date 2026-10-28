@@ -282,6 +282,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — Android's documents and the web's files have no path, and a copy into the app's cache could not be written back.
   Affect: an app reads and writes a handle at any offset where the system gives no path, and reads a stream through once.
 
+- Change: a folder pick is a `PickedFolder`: a path where the system gives one, and the system's folder handle where it gives none (the web's directory handle, Android's document tree), which lists the folder, opens its files and folders by name, and makes them when writable, where `getDirectoryPath` answers a path or nothing.
+  Reason: platform — neither the web nor Android gives a folder a path, and a copy could not be written back.
+  Affect: an app reaches a picked folder's files through the handle on the web and Android, and through the path elsewhere.
+
 - Change: an open pick grants reading only unless the app asks to write (`OpenOptions::writable`), and a save grants writing to the one file chosen; `file_selector` has no such option.
   Reason: platform — Android grants write only with `FLAG_GRANT_WRITE_URI_PERMISSION`, and the web only when asked for `readwrite`.
   Affect: a handle opens for writing only when the pick asked to write.

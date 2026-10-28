@@ -47,9 +47,10 @@ pub use clipboard::{
 pub use composition::{Buffer, Compositor, Surface};
 pub use drag_drop::{DropChange, DropData};
 pub use file_dialogs::{
-    FileDialogError, FileDialogFuture, FileDialogs, FileFinishFuture, FileHandle, FileOpenFuture,
-    FileReadFuture, FileSizeFuture, FileStream, FileType, FileWriteFuture, FileWriter,
-    FolderOptions, OpenOptions, PickedFile, SaveOptions,
+    EntryKind, FileDialogError, FileDialogFuture, FileDialogs, FileFinishFuture, FileHandle,
+    FileOpenFuture, FileReadFuture, FileSizeFuture, FileStream, FileType, FileWriteFuture,
+    FileWriter, FolderEntriesFuture, FolderEntry, FolderHandle, FolderOptions, OpenOptions,
+    PickedFile, PickedFolder, SaveOptions,
 };
 pub use fonts::{
     FontCollection, FontDemand, FontId, FontManager, FontSource, SystemFontSource, Typeface,

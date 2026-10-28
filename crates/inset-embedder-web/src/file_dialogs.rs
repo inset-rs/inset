@@ -9,20 +9,25 @@
 //!
 //! Elsewhere (Safari, Firefox), opening falls back to an `<input type="file">`, whose files are
 //! read-only handles; a save fails, as the browser has no way to write a file where the user
-//! chooses, and a download would give the app nothing it could write again. A folder pick fails
-//! everywhere for now: the browser's folder is a directory handle, which a path does not carry.
+//! chooses, and a download would give the app nothing it could write again.
+//!
+//! A folder pick is the browser's `FileSystemDirectoryHandle` (`showDirectoryPicker`, in
+//! `readwrite` mode when the app asks to write, which the browser asks the user about), listed
+//! through its `values()`, opening its files and folders by name, and making them when writable.
+//! Elsewhere a folder pick fails: Safari's and Firefox's `webkitdirectory` input gives a flat list
+//! of files, which no folder could be written through.
 //!
 //! A dialog asks for the user's gesture: the app opens one while it handles the user's click or
 //! key, as the browser tells a page's own dialog from one a script forced. The initial folder and
 //! the confirming button's label have no counterpart in the browser's pickers.
 
 use std::cell::Cell;
-use std::path::PathBuf;
 
 use inset_embedder::{
-    FileDialogError, FileDialogFuture, FileDialogs, FileFinishFuture, FileHandle, FileOpenFuture,
-    FileReadFuture, FileSizeFuture, FileType, FileWriteFuture, FileWriter, FolderOptions,
-    OpenOptions, PickedFile, SaveOptions, ViewId,
+    EntryKind, FileDialogError, FileDialogFuture, FileDialogs, FileFinishFuture, FileHandle,
+    FileOpenFuture, FileReadFuture, FileSizeFuture, FileType, FileWriteFuture, FileWriter,
+    FolderEntriesFuture, FolderEntry, FolderHandle, FolderOptions, OpenOptions, PickedFile,
+    PickedFolder, SaveOptions, ViewId,
 };
 use js_sys::{Array, Function, Object, Promise, Reflect, Uint8Array};
 use wasm_bindgen::closure::Closure;
@@ -51,13 +56,29 @@ impl FileDialogs for BrowserFileDialogs {
         Box::pin(open(options, true))
     }
 
-    /// A directory handle is no path; folder picks have no shape here yet.
     fn open_folder(
         &self,
         _parent: Option<ViewId>,
-        _options: FolderOptions,
-    ) -> FileDialogFuture<Option<PathBuf>> {
-        failed("the browser's folder is a directory handle, which a path does not carry")
+        options: FolderOptions,
+    ) -> FileDialogFuture<Option<PickedFolder>> {
+        let Some(show) = picker("showDirectoryPicker") else {
+            return failed("this browser cannot pick a folder");
+        };
+        let asked = Object::new();
+        let mode = if options.writable {
+            "readwrite"
+        } else {
+            "read"
+        };
+        set(&asked, "mode", &JsValue::from_str(mode));
+        let shown = call(&show, &asked);
+        Box::pin(async move {
+            let Some(handle) = answered(shown).await? else {
+                return Ok(None);
+            };
+            let folder = SystemFolder::new(handle, options.writable);
+            Ok(Some(PickedFolder::Handle(Box::new(folder))))
+        })
     }
 
     fn save_file(
@@ -311,6 +332,132 @@ impl FileHandle for SystemFile {
                 finished: Cell::new(false),
             }) as Box<dyn FileWriter>)
         }))
+    }
+}
+
+/// A folder the browser's picker gave: its handle, and whether the app may write in it, which
+/// what it opens inherits.
+struct SystemFolder {
+    handle: JsValue,
+    name: String,
+    writable: bool,
+}
+
+impl SystemFolder {
+    fn new(handle: JsValue, writable: bool) -> SystemFolder {
+        let name = Reflect::get(&handle, &JsValue::from_str("name"))
+            .ok()
+            .and_then(|name| name.as_string())
+            .unwrap_or_default();
+        SystemFolder {
+            handle,
+            name,
+            writable,
+        }
+    }
+
+    /// The handle `getter` answers for `name`, made first when `create` is set.
+    fn child(&self, getter: &str, name: &str, create: bool) -> FileOpenFuture<JsValue> {
+        let asked = Object::new();
+        set(&asked, "create", &JsValue::from_bool(create));
+        let got = method(
+            &self.handle,
+            getter,
+            &[JsValue::from_str(name), asked.into()],
+        );
+        Box::pin(async move {
+            JsFuture::from(got.map_err(io_error)?)
+                .await
+                .map_err(|error| {
+                    if error_name(&error) == "NotFoundError" {
+                        std::io::Error::new(std::io::ErrorKind::NotFound, describe(&error))
+                    } else {
+                        io_error(failure(&describe(&error)))
+                    }
+                })
+        })
+    }
+
+    fn file(&self, name: &str, create: bool) -> FileOpenFuture<PickedFile> {
+        let child = self.child("getFileHandle", name, create);
+        let writable = self.writable;
+        Box::pin(async move {
+            let file = SystemFile::new(child.await?, writable);
+            Ok(PickedFile::Handle(Box::new(file)))
+        })
+    }
+
+    fn folder(&self, name: &str, create: bool) -> FileOpenFuture<PickedFolder> {
+        let child = self.child("getDirectoryHandle", name, create);
+        let writable = self.writable;
+        Box::pin(async move {
+            let folder = SystemFolder::new(child.await?, writable);
+            Ok(PickedFolder::Handle(Box::new(folder)))
+        })
+    }
+}
+
+impl FolderHandle for SystemFolder {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The folder's `values()`, an asynchronous iterator, read to its end.
+    fn entries(&self) -> FolderEntriesFuture {
+        let handle = self.handle.clone();
+        Box::pin(async move {
+            let values: Function = Reflect::get(&handle, &JsValue::from_str("values"))
+                .ok()
+                .and_then(|values| values.dyn_into().ok())
+                .ok_or_else(|| io_error(failure("the folder lists nothing")))?;
+            let iterator = values
+                .call0(&handle)
+                .map_err(|error| io_error(failure(&describe(&error))))?;
+            let mut entries = Vec::new();
+            loop {
+                let step = JsFuture::from(method(&iterator, "next", &[]).map_err(io_error)?)
+                    .await
+                    .map_err(|error| io_error(failure(&describe(&error))))?;
+                if Reflect::get(&step, &JsValue::from_str("done"))
+                    .is_ok_and(|done| done.is_truthy())
+                {
+                    return Ok(entries);
+                }
+                let entry = Reflect::get(&step, &JsValue::from_str("value"))
+                    .map_err(|error| io_error(failure(&describe(&error))))?;
+                let text = |key: &str| {
+                    Reflect::get(&entry, &JsValue::from_str(key))
+                        .ok()
+                        .and_then(|value| value.as_string())
+                        .unwrap_or_default()
+                };
+                let kind = if text("kind") == "directory" {
+                    EntryKind::Folder
+                } else {
+                    EntryKind::File
+                };
+                entries.push(FolderEntry {
+                    name: text("name"),
+                    kind,
+                });
+            }
+        })
+    }
+
+    fn open_file(&self, name: &str) -> FileOpenFuture<PickedFile> {
+        self.file(name, false)
+    }
+
+    fn open_folder(&self, name: &str) -> FileOpenFuture<PickedFolder> {
+        self.folder(name, false)
+    }
+
+    fn create_file(&self, name: &str) -> Option<FileOpenFuture<PickedFile>> {
+        self.writable.then(|| self.file(name, true))
+    }
+
+    fn create_folder(&self, name: &str) -> Option<FileOpenFuture<PickedFolder>> {
+        self.writable.then(|| self.folder(name, true))
     }
 }
 

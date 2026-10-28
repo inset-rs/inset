@@ -14,7 +14,7 @@ use std::rc::Rc;
 use block2::RcBlock;
 use inset_embedder::{
     FileDialogError, FileDialogFuture, FileDialogs, FileType, FolderOptions, OpenOptions,
-    PickedFile, SaveOptions, ViewId,
+    PickedFile, PickedFolder, SaveOptions, ViewId,
 };
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -86,7 +86,7 @@ impl FileDialogs for Panels {
         &self,
         parent: Option<ViewId>,
         options: FolderOptions,
-    ) -> FileDialogFuture<Option<PathBuf>> {
+    ) -> FileDialogFuture<Option<PickedFolder>> {
         let chosen = self.open(
             parent,
             &[],
@@ -94,7 +94,7 @@ impl FileDialogs for Panels {
             &options.confirm_label,
             Choose::Folder,
         );
-        Box::pin(async move { Ok(chosen.await?.into_iter().next()) })
+        Box::pin(async move { Ok(chosen.await?.into_iter().next().map(PickedFolder::Path)) })
     }
 
     fn save_file(
