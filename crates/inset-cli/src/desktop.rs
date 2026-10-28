@@ -1,7 +1,8 @@
 //! Desktop bundles and installers, through cargo-packager.
 //!
 //! The app's file associations go to cargo-packager for every format, and the macOS
-//! bundle's `Info.plist` also gets what `file_associations` writes beyond them.
+//! bundle's `Info.plist` also gets what `file_associations` writes beyond them and the usage
+//! descriptions, whose devices its entitlements allow.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,12 +10,14 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use cargo_packager::config::{Binary, MacOsConfig, Resource};
 use cargo_packager::{Config, PackageFormat};
+use plist::Dictionary;
 
 use crate::cargo::{self, Artifact, Build};
 use crate::file_associations;
 use crate::icons;
 use crate::ios;
 use crate::project::{Profile, Project};
+use crate::usage_descriptions;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
@@ -111,13 +114,10 @@ fn package(
     macos.minimum_system_version = project.macos.minimum_system_version.clone();
     macos.background_app = project.macos.background_app;
     macos.signing_identity = macos_signing_identity(project);
-    macos.entitlements = project
-        .macos
-        .entitlements
-        .as_ref()
-        .map(|entitlements| entitlements.to_string_lossy().into_owned());
     if matches!(format, PackageFormat::App | PackageFormat::Dmg) {
-        macos.info_plist_path = macos_file_associations_plist(project, out)?;
+        macos.info_plist_path = macos_info_plist_additions(project, out)?;
+        macos.entitlements = macos_entitlements(project, out)?
+            .map(|entitlements| entitlements.to_string_lossy().into_owned());
     }
     let mut config = Config::default();
     config.product_name = project.name.clone();
@@ -141,16 +141,47 @@ fn package(
         .collect())
 }
 
-/// The `Info.plist` keys of the app's file associations that cargo-packager does not write,
-/// in a file beside the bundle that it merges over its own; `None` when the app has none.
-fn macos_file_associations_plist(project: &Project, out: &Path) -> Result<Option<PathBuf>> {
-    if project.file_associations.is_empty() {
+/// The `Info.plist` keys cargo-packager does not write, in a file beside the bundle that it
+/// merges over its own: the file associations' and the usage descriptions'. `None` when the app
+/// has neither.
+fn macos_info_plist_additions(project: &Project, out: &Path) -> Result<Option<PathBuf>> {
+    let mut info = Dictionary::new();
+    if !project.file_associations.is_empty() {
+        info = file_associations::macos_info_plist(&project.file_associations, &project.identifier);
+    }
+    info.extend(usage_descriptions::info_plist(&project.usage_descriptions));
+    if info.is_empty() {
         return Ok(None);
     }
-    let path = out.join("file-types.plist");
-    let info = file_associations::macos_info_plist(&project.file_associations, &project.identifier);
+    let path = out.join("info-additions.plist");
     plist::to_file_xml(&path, &info)
-        .context("could not write the file associations' Info.plist keys")?;
+        .context("could not write the Info.plist keys cargo-packager leaves out")?;
+    Ok(Some(path))
+}
+
+/// The entitlements the bundle is signed with: the app's own, and for each device the app
+/// declares a usage description for, the hardened runtime's leave to open it, unless the app's
+/// own file says otherwise. `None` when there are none.
+fn macos_entitlements(project: &Project, out: &Path) -> Result<Option<PathBuf>> {
+    let devices = usage_descriptions::macos_entitlements(&project.usage_descriptions);
+    let own = project.macos.entitlements.clone();
+    if devices.is_empty() {
+        return Ok(own);
+    }
+    let mut entitlements = match &own {
+        Some(path) => plist::Value::from_file(path)
+            .with_context(|| format!("could not read the entitlements {}", path.display()))?
+            .into_dictionary()
+            .with_context(|| format!("the entitlements {} are not a dictionary", path.display()))?,
+        None => Dictionary::new(),
+    };
+    for (key, value) in devices {
+        if !entitlements.contains_key(&key) {
+            entitlements.insert(key, value);
+        }
+    }
+    let path = out.join("entitlements.plist");
+    plist::to_file_xml(&path, &entitlements).context("could not write the entitlements")?;
     Ok(Some(path))
 }
 

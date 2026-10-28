@@ -7,6 +7,7 @@ use cargo_metadata::{MetadataCommand, Package, TargetKind};
 use serde::Deserialize;
 
 use crate::file_associations;
+use crate::usage_descriptions;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Profile {
@@ -41,6 +42,8 @@ pub struct Metadata {
     pub resources: Vec<String>,
     /// The kinds of file the app opens, which the system then offers it for.
     pub file_associations: Vec<FileAssociation>,
+    /// Why the app uses each device the system asks the user about first.
+    pub usage_descriptions: UsageDescriptions,
     pub macos: MacosMetadata,
     pub ios: IosMetadata,
     pub android: AndroidMetadata,
@@ -83,6 +86,18 @@ pub enum FileRole {
     Shell,
     /// Claims no use of it, for a type declared only so the system knows it.
     None,
+}
+
+/// `[package.metadata.inset.usage_descriptions]`: why the app uses each device the system asks
+/// the user about before an app may open it, in the sentence the system's prompt shows. macOS and
+/// iOS end an app that opens one of these without its description.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct UsageDescriptions {
+    /// `NSCameraUsageDescription`.
+    pub camera: Option<String>,
+    /// `NSMicrophoneUsageDescription`.
+    pub microphone: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -143,6 +158,7 @@ pub struct Project {
     pub icon: Option<PathBuf>,
     pub resources: Vec<String>,
     pub file_associations: Vec<FileAssociation>,
+    pub usage_descriptions: UsageDescriptions,
     pub macos: MacosMetadata,
     pub ios: IosMetadata,
     pub android: AndroidMetadata,
@@ -195,6 +211,7 @@ impl Project {
             None => Some(root.join("assets/icon.png")).filter(|p| p.exists()),
         };
         file_associations::check(&inset.file_associations)?;
+        usage_descriptions::check(&inset.usage_descriptions)?;
         let mut macos = inset.macos;
         macos.entitlements = macos
             .entitlements
@@ -215,6 +232,7 @@ impl Project {
             icon,
             resources: inset.resources,
             file_associations: inset.file_associations,
+            usage_descriptions: inset.usage_descriptions,
             macos,
             ios: inset.ios,
             android: inset.android,

@@ -18,6 +18,7 @@ mod new;
 mod project;
 mod serve;
 mod tools;
+mod usage_descriptions;
 mod wasm;
 mod web;
 

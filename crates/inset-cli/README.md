@@ -64,6 +64,10 @@ name = "My App"                    # display name; defaults to the package name
 icon = "assets/icon.png"           # defaults to assets/icon.png when it exists
 resources = ["assets/**"]          # globs copied into the bundle at the same relative path
 
+[package.metadata.inset.usage_descriptions]  # why the app uses a device the system asks the user about first
+camera = "Takes the photo on your badge."
+microphone = "Records sound with your videos."
+
 [package.metadata.inset.macos]
 minimum_system_version = "11.0"
 background_app = true              # LSUIElement: no Dock tile or menu bar
@@ -106,6 +110,15 @@ Each `file_associations` table lets the system open the app for files with those
 - iOS, Android and the web: not declared.
 
 On macOS a running app receives opened files through `Platform::file_opening` (see `examples/app_events`).
+
+### Usage descriptions
+
+macOS and iOS ask the user before an app opens the camera or the microphone, showing the app's own sentence for why, and end an app that opens one without such a sentence in its `Info.plist`. Each key of `usage_descriptions` declares one device and gives its sentence:
+
+- `camera`: `NSCameraUsageDescription`.
+- `microphone`: `NSMicrophoneUsageDescription`.
+
+On macOS the bundle is also signed with the hardened runtime's entitlement for each declared device, `com.apple.security.device.camera` and `com.apple.security.device.audio-input`, merged into the app's own `entitlements`, whose value wins where it names one: a signed bundle runs with the hardened runtime, which refuses a device its entitlements leave out. Android and the web: not declared yet.
 
 ## Signing
 

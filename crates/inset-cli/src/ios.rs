@@ -18,6 +18,7 @@ use crate::cargo::{self, Artifact, Build};
 use crate::icons;
 use crate::project::{Profile, Project};
 use crate::tools;
+use crate::usage_descriptions;
 
 const DEFAULT_MINIMUM_VERSION: &str = "15.0";
 
@@ -206,6 +207,7 @@ fn info_plist(
         put("CFBundleIcons", Value::Dictionary(icons.clone()));
         put("CFBundleIcons~ipad", Value::Dictionary(icons));
     }
+    info.extend(usage_descriptions::info_plist(&project.usage_descriptions));
     Value::Dictionary(info)
 }
 
@@ -654,6 +656,19 @@ mod tests {
         assert!(dict.get("UILaunchScreen").is_some());
         assert!(dict.get("CFBundleIcons").is_none());
         assert!(dict.get("UIRequiredDeviceCapabilities").is_none());
+        assert!(dict.get("NSCameraUsageDescription").is_none());
+    }
+
+    #[test]
+    fn info_plist_says_why_the_app_uses_the_camera() {
+        let mut project = test_project();
+        project.usage_descriptions.camera = Some("Scans the code on a ticket.".into());
+        let plist = info_plist(&project, Destination::Device, "15.0", &[]);
+        let dict = plist.as_dictionary().unwrap();
+        assert_eq!(
+            dict.get("NSCameraUsageDescription").unwrap().as_string(),
+            Some("Scans the code on a ticket.")
+        );
     }
 
     fn test_project() -> Project {
@@ -673,6 +688,7 @@ mod tests {
             icon: None,
             resources: Vec::new(),
             file_associations: Vec::new(),
+            usage_descriptions: Default::default(),
             macos: Default::default(),
             ios: Default::default(),
             android: Default::default(),
