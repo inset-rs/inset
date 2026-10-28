@@ -72,12 +72,31 @@ Host implementation. Flutter analogue: the web engine under `engine/lib/web_ui`.
   Reason: platform — the browser grants a launch's files reading alone, and asking to write needs the user's gesture.
   Affect: an installed app whose manifest declares `file_handlers` opens the user's files on Chrome and Edge, and a folder handle in a launch is left out; a scheme the manifest's `protocol_handlers` registers reaches the page in its own address, which the app reads itself.
 
+## notifications.rs → `flutter_local_notifications`' implementations, on the browser's `Notification`
+
+- Change: the notifications are the page's own, `new Notification` with the app's id as its `tag`, which the browser replaces by, alerting again unless the notification is silent; the page keeps the object it made for each id, so `remove` closes it, and a click on one reaches the app as an activation with no action, the browser's own response of bringing the page forward left as it is; they are `None` where the page has no `Notification`, as outside a secure context.
+  Reason: platform — a notification a page shows itself belongs to that page, and only a service worker's outlives it.
+  Affect: an app's notifications and their clicks work while its page is open, a click after the page closed reaches nothing, and `remove` reaches only the notifications this visit showed.
+
+- Change: a notification shows without its actions, and `replies()` and `scheduling()` are `None`.
+  Reason: platform — buttons and typed replies belong to a service worker's notifications (`showNotification`, `notificationclick`), which Inset gives the app none of, and the browser holds no notification for later.
+  Affect: on the web a notification's buttons are left out, a click on it names no action, and a reminder for later is the app's to keep while its page runs.
+
+- Change: `permission()` is the browser's for the page's origin, `default` being `NotAsked`, and a post where the user was never asked calls `Notification.requestPermission` at once, before the app awaits it, and answers `Denied` where the user declined or dismissed the question.
+  Reason: platform — browsers show the question only while the page handles the user's click or key, and some ignore it outside one.
+  Affect: an app's first post shows the browser's question when it posts while handling a click, and is denied without one where the browser requires one.
+
+- Change: the image is the notification's `icon`, a PNG `data:` URL the browser's own canvas encodes; a post the browser refuses, as Chrome on Android refuses every page's own notification, fails with what it threw.
+  Reason: platform — a notification takes its icon by URL, and a page cannot tell beforehand whether the browser will make its notifications.
+  Affect: an app's image shows where the browser shows icons, and on Chrome for Android every post fails.
+
 ## Deferred
 
 - Hearing the pixel ratio change without a resize, as on a move to a screen at another ratio, which Flutter web hears through a `(resolution)` media query, and the screen's own `change` event. Trigger: an app that must follow its page across screens.
 - Animated image frames after the first. Trigger: a GIF or APNG that must play.
 - Flutter web autofill form, delta model, and putting the editing element inside a view's `textEditingHost`. Trigger: AutofillGroup; `enableDeltaModel`.
 - A window the app manages around the page's view, with whether it is occluded, which the page's visibility state and an intersection observer on the canvas would tell, as winit's web backend reads it. Trigger: an app that must stop drawing while its page is hidden.
+- A notification's buttons, and its clicks once the page has closed, through a service worker's `showNotification` and `notificationclick`. Trigger: an installed web app whose notifications carry actions.
 
 ## clipboard.rs → the web engine's clipboard and its text field's paste
 

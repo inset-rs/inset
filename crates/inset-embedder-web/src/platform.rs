@@ -6,9 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    Brightness, Clipboard, Dispatcher, FileDialogs, ImageCodecFuture, Matrix4, MouseCursor, Offset,
-    Opener, Platform, Rect, Screen, Screens, Size, SystemMouseCursorKind, TargetPlatform,
-    TextEditingValue, TextInputConfiguration, TextInputHost, View, ViewId, ViewMetrics, ViewRef,
+    Brightness, Clipboard, Dispatcher, FileDialogs, ImageCodecFuture, Matrix4, MouseCursor,
+    NotificationActivation, Notifications, Offset, Opener, Platform, Rect, Screen, Screens, Size,
+    SystemMouseCursorKind, TargetPlatform, TextEditingValue, TextInputConfiguration, TextInputHost,
+    View, ViewId, ViewMetrics, ViewRef,
 };
 use web_sys::HtmlCanvasElement;
 use web_time::Instant;
@@ -18,6 +19,7 @@ use crate::dispatcher;
 use crate::file_dialogs::BrowserFileDialogs;
 use crate::font_fallback::ROBOTO;
 use crate::gpu::Gpu;
+use crate::notifications::BrowserNotifications;
 use crate::opener::BrowserOpener;
 use crate::text_input::{TextInputListener, WebTextInput};
 
@@ -44,6 +46,8 @@ pub struct WebPlatform {
     /// Shared with the font source, which is created before the host installs the callback.
     on_schedule: OnSchedule,
     images: RefCell<Option<valo::ImageContext>>,
+    /// The browser's notifications, where the page has them (`notifications.rs`).
+    notifications: Option<BrowserNotifications>,
 }
 
 impl WebPlatform {
@@ -64,6 +68,7 @@ impl WebPlatform {
             screen: RefCell::new(screen),
             on_schedule: Rc::new(RefCell::new(None)),
             images: RefCell::new(None),
+            notifications: BrowserNotifications::new(),
         };
         dispatcher::install(
             Rc::clone(&platform.timer_wakeup),
@@ -83,6 +88,16 @@ impl WebPlatform {
 
     pub fn set_images(&self, images: valo::ImageContext) {
         *self.images.borrow_mut() = Some(images);
+    }
+
+    /// Hands each click on the app's notifications to `clicked`, where the page has notifications.
+    pub(crate) fn hear_notification_clicks(
+        &self,
+        clicked: impl Fn(NotificationActivation) + 'static,
+    ) {
+        if let Some(notifications) = &self.notifications {
+            notifications.hear_clicks(clicked);
+        }
     }
 
     pub fn take_frame_request(&self) -> bool {
@@ -207,6 +222,13 @@ impl Platform for WebPlatform {
     /// The browser's tabs for links (`opener.rs`).
     fn opener(&self) -> Option<&dyn Opener> {
         Some(&BrowserOpener)
+    }
+
+    /// The page's own notifications, while it runs (`notifications.rs`).
+    fn notifications(&self) -> Option<&dyn Notifications> {
+        self.notifications
+            .as_ref()
+            .map(|notifications| notifications as &dyn Notifications)
     }
 
     /// The page's one screen (`screen.rs`).
