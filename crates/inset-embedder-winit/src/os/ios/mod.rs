@@ -1,26 +1,30 @@
 //! What iOS reports differently from the desktop winit was written for: its window is the
 //! screen, and winit's size for it is the safe area rather than the whole layer; and what it adds,
 //! its pasteboard (`pasteboard`), its document pickers (`file_dialogs`), opening (`opener`) and
-//! what it asks the app to open (`open_requests`).
+//! what it asks the app to open (`open_requests`). Notifications are the center macOS shares
+//! (`apple/notifications`).
 
 mod file_dialogs;
 mod open_requests;
 mod opener;
 mod pasteboard;
 
-use inset_embedder::{TargetPlatform, ViewPadding};
+use std::rc::Rc;
+
+use inset_embedder::{Notifications, TargetPlatform, ViewPadding};
 use valo_codec::Decoder;
 use winit::window::Window;
 
 use pasteboard::Pasteboard;
 
 use super::absent::{NoDisplayLink, NoVisibilityNotices, NoWindowSurfaces};
-use super::apple::image_io_decoders;
+use super::apple::{image_io_decoders, notifications};
 use super::{
     ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeComposition,
     NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
-    WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
+    SystemNotifications, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
 };
+use crate::notifications::NotificationActivations;
 
 /// iOS. A type only: never made, its answers are associated functions.
 pub(crate) enum Ios {}
@@ -86,6 +90,17 @@ impl WindowVisibility for Ios {
 impl ImageDecoding for Ios {
     fn system_decoders() -> Vec<Box<dyn Decoder>> {
         image_io_decoders()
+    }
+}
+
+/// `UNUserNotificationCenter`'s (`apple/notifications`).
+impl SystemNotifications for Ios {
+    fn hear_notification_activations(activations: NotificationActivations) {
+        notifications::hear_activations(activations);
+    }
+
+    fn notifications(_activations: NotificationActivations) -> Option<Rc<dyn Notifications>> {
+        notifications::notifications()
     }
 }
 

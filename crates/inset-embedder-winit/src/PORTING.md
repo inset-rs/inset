@@ -233,6 +233,64 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — iOS shares a file with another app only through a controller the user chooses the app in, and answers `canOpenURL:` falsely for a scheme the app did not declare.
   Affect: opening a file on iOS shows the user the apps that take it.
 
+## notifications.rs, os/*/notifications → `flutter_local_notifications`' macOS, iOS, Windows and Linux implementations
+
+- Change: on macOS and iOS the notifications are `UNUserNotificationCenter`'s, and they are `None` for a process outside an application bundle, as `cargo run` starts one: a notification is a request under the app's id, its actions a category named after the actions themselves, its reply a `UNTextInputNotificationAction` sent with a button of its label, its image an attachment of a PNG file the embedder writes, and a click comes to the center's delegate, set before the loop runs.
+  Reason: platform — UserNotifications raises an exception, which aborts the process, when a process without a bundle touches the center, and it reports the click that launched the app only to a delegate set before the launch finishes.
+  Affect: an app has notifications once it runs from its `.app`, as `cargo inset build` makes it, and hears the click that launched it like any other.
+
+- Change: on macOS and iOS a post asks the user first with `requestAuthorizationWithOptions:` (alerts and sounds) where they were never asked, and answers `Denied` where they said no; `permission()` answers from `getNotificationSettings`, a provisional or an ephemeral authorization being `Granted`.
+  Reason: platform — the center keeps neither the requests nor the categories of an app the user was never asked about.
+  Affect: an app's first post shows the system's question, and the post answers once the user has.
+
+- Change: on macOS and iOS each action brings the app forward (`UNNotificationActionOptionForeground`), and a notification shows while the app is in front, as a banner and in the list, with its sound unless it is silent, where `flutter_local_notifications` leaves both to the app's settings.
+  Reason: platform — the center shows nothing for an app in front unless its delegate asks, and a click on an action is the app's to act on, as a click on the notification is.
+  Affect: an app's notifications look the same in front and behind, and an action opens the app, as on Android and Windows.
+
+- Change: on macOS and iOS the categories the app's notifications need are kept by the embedder, and each `setNotificationCategories:` is the center's own set joined with them, followed by a `getNotificationCategories` the request waits for; a category's id is a hash of its actions, the same in every run.
+  Reason: platform — the center replaces its whole set at each call, keeps it across runs for scheduled notifications, and shows a request added before its category is in place without its actions.
+  Affect: a scheduled notification keeps its buttons after the app restarts, and the center's categories grow only with the distinct sets of actions the app shows.
+
+- Change: on macOS and iOS a scheduled notification is a calendar trigger at the time, rounded up to the whole second, in a Gregorian calendar at GMT; a time less than a second away is shown at once.
+  Reason: platform — a `SystemTime` is the time a clock reads, which a calendar trigger follows when the clock is set, where a time-interval trigger counts from the request.
+  Affect: a reminder fires when the clock reads its time, wherever the user travels.
+
+- Change: on Windows the notifications are WinRT's toasts (`ToastNotificationManager`): a notification is a `ToastGeneric` toast tagged with its id, or a hash of an id longer than 64 characters, in the group `inset`, which a later toast of its tag replaces and `remove` takes out of the history and the schedule; its image is the app's logo on the toast, a PNG file the embedder writes in the temporary folder and names by its pixels; a reply action is a text box with a send button beside it; a silent one has `<audio silent="true"/>`.
+  Reason: platform — the platform replaces and removes a toast by its tag and group, takes a tag of 64 characters at most, and reads a toast's image from a file whenever it draws the toast, in the Action Center too.
+  Affect: an app's notifications replace and go as elsewhere whatever the length of their ids, and the temporary folder keeps one file for each image shown.
+
+- Change: on Windows the notifications are `None` for an unpackaged process that set no AppUserModelID of its own (`SetCurrentProcessExplicitAppUserModelID`) before the embedder runs; a packaged app is known by its package; the embedder registers nothing.
+  Reason: platform — the platform shows the toasts of an app it knows: a package, or an AppUserModelID that a Start-menu shortcut carries or that the key `HKCU\Software\Classes\AppUserModelId\<id>` registers with its `DisplayName` and `IconUri`, which are the app's installer's to write.
+  Affect: `cargo run` has no notifications on Windows, and an installed app has them once it sets its id at start and its installer registers that id.
+
+- Change: on Windows a click comes through the app's toast activator where its registration's `CustomActivator` names one: the embedder registers that COM class (`INotificationActivationCallback`) before the loop runs, from a thread of its own, and the click that started the app comes through it too; without one, a click comes through the shown toast's own `Activated` event while the app runs.
+  Reason: platform — the platform starts an app for a click, or reaches a running one from the Action Center, only through a COM class registered as the app's local server (`HKCU\Software\Classes\CLSID\{clsid}\LocalServer32`), and a toast's events live only in the process that showed it.
+  Affect: an app registered with an activator hears every click, at launch too; one without hears clicks on the toasts it showed while it runs, and none on a scheduled one or after it quit.
+
+- Change: on Windows `permission()` is the app's switch in Settings (`ToastNotifier.Setting`), `request()` asks nothing, and a post answers `Denied` while the switch is off.
+  Reason: platform — Windows asks the user no question; they turn an app's notifications off in Settings.
+  Affect: an app learns that its notifications are off, and its first post shows without a question.
+
+- Change: on Windows a scheduled notification is a `ScheduledToastNotification` at the time, a time less than a second away is shown at once, and a post or a schedule under an id first takes the toast scheduled under it out of the schedule.
+  Reason: platform — the schedule refuses a time it has passed, and keeps two toasts of one tag rather than replacing one.
+  Affect: a reminder shows at its time whether the app runs, and a later post under its id replaces it.
+
+- Change: on Linux the notifications are the desktop's notification server, `org.freedesktop.Notifications` on the session bus: the app's id is mapped to the server's number, which a later post passes as `replaces_id` and a remove closes; a button is one of the server's action keys and a click on the notification itself the `default` one, heard as `ActionInvoked` while the app runs; the notifications are `None` where the bus has no server, running or one it starts.
+  Reason: platform — every desktop's server speaks the specification, numbers the notifications itself, and keeps no click for an app that is not running.
+  Affect: a click on a notification after the app quit reaches nothing, where on the other systems it starts the app.
+
+- Change: on Linux `replies()` is KDE's `inline-reply` where the server's capabilities advertise it: a notification's first reply action is the server's `inline-reply` action, its placeholder the `x-kde-reply-placeholder-text` hint, and the typed text comes as `NotificationReplied`; a later reply action is a button.
+  Reason: platform — the specification has no reply, and KDE's extension takes one field a notification.
+  Affect: an app offers a reply on KDE Plasma, and has no `replies()` on GNOME and the others.
+
+- Change: on Linux `permission()` and `scheduling()` are `None`.
+  Reason: platform — the specification keeps no permission for an app and holds no notification for later.
+  Affect: an app posts without asking, and a reminder for later is the app's to keep while it runs.
+
+- Change: on Linux a body is escaped where the server reads markup (`body-markup`), the image is the `image-data` hint of its pixels, a silent notification has the `suppress-sound` hint, and the `desktop-entry` hint names the app's desktop file where the system says which it is: a Flatpak's id, or the file GLib's launcher started this process from.
+  Reason: platform — a server that reads markup would read the app's `<` and `&` as markup, and a server finds an app's name and icon by its desktop file, which the embedder cannot otherwise know.
+  Affect: a body shows as the app wrote it, and the desktop shows the app's own name and icon where it knows the desktop file, its process's elsewhere.
+
 ## macos.rs / os/macos → what only macOS offers beyond `Platform`
 
 - Change: `WinitPlatform::macos` slides a window in and hides the app, neither of which Flutter's framework offers.
@@ -249,5 +307,6 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - Dead keys and `Key::Unidentified`. Trigger: composing input, or a key of the system's that winit cannot name.
 - Synthesizing the key ups a focus change swallowed. Trigger: `HardwareKeyboard::sync_keyboard_state` gaining a way to ask the system.
 - Registering a StatusNotifierItem again when the watcher comes back on the bus, and a tray that appears after the app started. Trigger: a desktop whose panel restarts.
+- Bringing the app forward on a click on Linux, with the activation token a server sends before `ActionInvoked` (`ActivationToken`, specification 1.2): winit 0.30 activates no window already shown with a token. Trigger: winit taking an `xdg_activation` token for a shown window.
 - A menu item's icon at the screen's scale on Windows, where it shows at its own size in pixels. Trigger: a menu with icons on a display scaled above 100%.
 - Translating the labels of macOS's and Windows' provided items, which are English. Trigger: an app localized beyond English.

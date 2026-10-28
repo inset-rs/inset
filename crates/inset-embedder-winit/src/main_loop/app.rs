@@ -23,6 +23,9 @@ impl<C: EmbedderClient> MainLoop<C> {
                 links,
             }),
             SystemRequest::Reopen(reopen) => self.state.handlers().reopen(reopen),
+            SystemRequest::NotificationActivated(activation) => {
+                self.client.notification_activated(activation);
+            }
             SystemRequest::Quit => self.on_quit_requested(),
         }
     }

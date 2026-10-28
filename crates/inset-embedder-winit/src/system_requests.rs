@@ -15,7 +15,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use inset_embedder::{Offset, OpenRequest, PickedFile};
+use inset_embedder::{NotificationActivation, Offset, OpenRequest, PickedFile};
 
 /// A request the system makes of the application as a whole.
 #[derive(Debug)]
@@ -33,6 +33,9 @@ pub(crate) enum SystemRequest {
         allow(dead_code, reason = "only macOS asks to reopen")
     )]
     Reopen(Reopen),
+    /// The user clicked one of the app's notifications, or one of its actions, or replied, which
+    /// the system's notifications report (`notifications.rs`).
+    NotificationActivated(NotificationActivation),
     /// Quit if the application agrees: the user chose Quit, or is logging out. The framework is
     /// asked, and an exit is carried out with
     /// [`ApplicationControl::quit`](crate::os::ApplicationControl::quit); a cancel changes

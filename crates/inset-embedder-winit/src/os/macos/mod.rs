@@ -6,7 +6,8 @@
 //! bar, pop-up menus, the Dock icon's menu and the status items (`menus`), work off the main thread (`work_queue`), what AppKit asks of the application
 //! through its delegate, how it quits and hiding it (`app_delegate`), what it says of the
 //! application's activation and visibility (`app_lifecycle`), and what it says changed about the
-//! screens and the user's languages (`system_changes`).
+//! screens and the user's languages (`system_changes`). Notifications are the center iOS shares
+//! (`apple/notifications`).
 //!
 //! A panic must not unwind from the embedder into AppKit, whose frames were never built to be
 //! unwound: it aborts the process once the panic hook has printed it, as one does in winit's own
@@ -39,8 +40,9 @@ mod work_queue;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::process;
+use std::rc::Rc;
 
-use inset_embedder::TargetPlatform;
+use inset_embedder::{Notifications, TargetPlatform};
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2_app_kit::{NSView, NSWindow};
@@ -48,8 +50,9 @@ use valo_codec::Decoder;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
-use super::apple::image_io_decoders;
-use super::{ImageDecoding, OperatingSystem, WindowGeometry};
+use super::apple::{image_io_decoders, notifications};
+use super::{ImageDecoding, OperatingSystem, SystemNotifications, WindowGeometry};
+use crate::notifications::NotificationActivations;
 
 /// macOS, as AppKit answers. A type only: never made, its answers are associated functions.
 pub(crate) enum AppKit {}
@@ -64,6 +67,17 @@ impl WindowGeometry for AppKit {}
 impl ImageDecoding for AppKit {
     fn system_decoders() -> Vec<Box<dyn Decoder>> {
         image_io_decoders()
+    }
+}
+
+/// `UNUserNotificationCenter`'s, for an app that runs from its bundle (`apple/notifications`).
+impl SystemNotifications for AppKit {
+    fn hear_notification_activations(activations: NotificationActivations) {
+        notifications::hear_activations(activations);
+    }
+
+    fn notifications(_activations: NotificationActivations) -> Option<Rc<dyn Notifications>> {
+        notifications::notifications()
     }
 }
 

@@ -6,42 +6,22 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 
-use zbus::blocking::fdo::DBusProxy;
-use zbus::blocking::{Connection, Proxy};
+use zbus::blocking::Proxy;
 use zbus::export::serde::Serialize;
-use zbus::names::BusName;
 use zbus::proxy::CacheProperties;
 use zbus::zvariant::{DynamicType, OwnedValue, Value};
+
+use super::session_bus;
 
 pub(super) const PORTAL: &str = "org.freedesktop.portal.Desktop";
 const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 const REQUEST: &str = "org.freedesktop.portal.Request";
-/// The longest a call to the bus may take; the wait for the user's answer has no limit.
-const PATIENCE: Duration = Duration::from_secs(5);
 
-/// Whether the session bus has the desktop portal, running or one it starts when asked.
+/// Whether the session bus has the desktop portal, running or one it starts when asked; a call to
+/// it waits no longer than the bus's patience, and the wait for the user's answer has no limit.
 pub(super) fn is_on_the_bus() -> bool {
-    let Some(connection) = session() else {
-        return false;
-    };
-    let Ok(bus) = DBusProxy::new(&connection) else {
-        return false;
-    };
-    let portal = BusName::try_from(PORTAL).expect("a valid bus name");
-    bus.name_has_owner(portal).unwrap_or(false)
-        || bus
-            .list_activatable_names()
-            .is_ok_and(|names| names.iter().any(|name| name.as_str() == PORTAL))
-}
-
-fn session() -> Option<Connection> {
-    zbus::blocking::connection::Builder::session()
-        .ok()?
-        .method_timeout(PATIENCE)
-        .build()
-        .ok()
+    session_bus::has_service(PORTAL)
 }
 
 /// What the portal answered: `0` done, `1` cancelled by the user, `2` ended otherwise; and its
@@ -65,7 +45,7 @@ pub(super) fn request<B>(
 where
     B: Serialize + DynamicType,
 {
-    let connection = session()
+    let connection = session_bus::connect()
         .ok_or_else(|| zbus::Error::Failure("the session bus could not be reached".to_owned()))?;
     let token = format!("inset{}", NEXT_TOKEN.fetch_add(1, Ordering::Relaxed));
     let sender = connection

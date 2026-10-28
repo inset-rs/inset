@@ -37,6 +37,7 @@ mod macos;
 mod main_loop;
 mod menus;
 mod mouse_cursor;
+mod notifications;
 mod os;
 mod platform;
 mod pointer;
