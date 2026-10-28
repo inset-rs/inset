@@ -13,6 +13,7 @@ use std::time::Duration;
 use web_time::Instant;
 
 use crate::clipboard::Clipboard;
+use crate::file_dialogs::FileDialogs;
 use crate::fonts::FontSource;
 use crate::geometry::{Color, Offset, Rect};
 use crate::menus::{DockMenu, MenuBar, PopupMenus, TrayIcons};
@@ -696,6 +697,11 @@ pub trait Platform: Any {
 
     /// The app's icons in the system's tray, or `None` where the system has no tray.
     fn tray_icons(&self) -> Option<&dyn TrayIcons> {
+        None
+    }
+
+    /// The system's file dialogs, or `None` where the system has none.
+    fn file_dialogs(&self) -> Option<&dyn FileDialogs> {
         None
     }
 

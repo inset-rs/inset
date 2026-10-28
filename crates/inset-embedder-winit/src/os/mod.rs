@@ -45,9 +45,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    Clipboard, Compositor, DockMenu, KeyData, MenuBar, MenuEntry, MenuId, Offset, Rect, Screen,
-    ScreenId, SurfacePlacement, TargetPlatform, TrayIcons, ViewId, ViewPadding, VsyncWaiter,
-    WindowConfig,
+    Clipboard, Compositor, DockMenu, FileDialogs, KeyData, MenuBar, MenuEntry, MenuId, Offset,
+    Rect, Screen, ScreenId, SurfacePlacement, TargetPlatform, TrayIcons, ViewId, ViewPadding,
+    VsyncWaiter, WindowConfig,
 };
 use valo_codec::Decoder;
 use winit::event_loop::{ActiveEventLoop, EventLoopBuilder, EventLoopProxy};
@@ -55,6 +55,7 @@ use winit::monitor::MonitorHandle;
 use winit::window::{Window, WindowAttributes};
 
 use crate::clipboard::ClipboardChanges;
+use crate::file_dialogs::ParentWindows;
 use crate::lifecycle::LifecycleNotice;
 use crate::main_loop::MainLoopEvent;
 use crate::menus::MenuEvents;
@@ -104,6 +105,7 @@ pub(crate) trait OperatingSystem:
     + FramePresentation
     + NativeComposition
     + NativeMenus
+    + SystemFileDialogs
     + SystemClipboard
     + ImageDecoding
     + WorkQueue
@@ -360,6 +362,15 @@ pub(crate) trait NativeMenus {
     /// claims the key and hands it back to the menu bar later (`MenuBar::perform_key_equivalent`):
     /// macOS's. Main thread, inside the call that reports the key.
     fn keep_key_event(_key: &KeyData) {}
+}
+
+/// The system's file dialogs (`file_dialogs.rs`).
+pub(crate) trait SystemFileDialogs {
+    /// The system's file dialogs, each shown on its parent view's window, or `None` where the
+    /// system has none.
+    fn file_dialogs(_windows: ParentWindows) -> Option<Rc<dyn FileDialogs>> {
+        None
+    }
 }
 
 /// The system's clipboard (`clipboard/`).

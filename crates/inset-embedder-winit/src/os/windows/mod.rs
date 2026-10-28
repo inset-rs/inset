@@ -1,11 +1,14 @@
 //! Windows: what winit covers by itself, the clipboard's sequence number, which tells the app
-//! another writer's change without reading the clipboard (`clipboard/text.rs`), and Win32's menus
-//! at a point and icons in the notification area (`menus`).
+//! another writer's change without reading the clipboard (`clipboard/text.rs`), Win32's menus at a
+//! point and icons in the notification area (`menus`), and the shell's file dialogs
+//! (`file_dialogs`), whose loops run from the embedder's hidden window (`hidden_window`).
 
 // Win32 is reached through system calls, which Rust reaches through `unsafe`; this module and its
 // children are the one place on Windows that writes it.
 #![allow(unsafe_code)]
 
+mod file_dialogs;
+mod hidden_window;
 mod menus;
 
 use inset_embedder::TargetPlatform;

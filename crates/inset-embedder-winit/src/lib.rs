@@ -21,6 +21,7 @@ mod appearance;
 mod clipboard;
 mod dispatcher;
 mod drag_drop;
+mod file_dialogs;
 mod frame_scheduler;
 mod gpu;
 mod host_window;

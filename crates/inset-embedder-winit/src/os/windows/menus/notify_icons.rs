@@ -1,5 +1,5 @@
 //! The app's icons in the notification area: `Shell_NotifyIcon`'s, at version 4, each telling the
-//! hidden window what the user did to it (`menu_window`), which reports it to the app as the
+//! hidden window what the user did to it (`hidden_window`), which reports it to the app as the
 //! system says it: a click or a key as `Activated`, a right click or the menu key as
 //! `ContextMenuRequested`, a middle click as `SecondaryActivated`, a double click, each at the
 //! point Windows gives, in the screens' logical pixels. An icon has no menu Windows opens by
@@ -27,8 +27,8 @@ use windows_sys::Win32::UI::Shell::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{WM_CONTEXTMENU, WM_LBUTTONDBLCLK, WM_MBUTTONUP};
 
+use super::super::hidden_window::{ICON_NOTIFICATION, hidden_window};
 use super::bitmaps::{Icon, icon};
-use super::menu_window::{ICON_NOTIFICATION, menu_window};
 use super::popup_menu::open_at_pointer;
 use crate::menus::{MenuEvent, MenuEvents};
 use crate::popup_menus::menu_answer;
@@ -168,7 +168,7 @@ fn add_to_notification_area(id: u16) -> bool {
 /// Sends the notification area `message` about the icon `id`, as it is now; answers whether it
 /// took the message.
 fn notify(message: NOTIFY_ICON_MESSAGE, id: u16) -> bool {
-    let Some(window) = menu_window() else {
+    let Some(window) = hidden_window() else {
         return false;
     };
     let data = SHOWN.with_borrow(|shown| {
@@ -207,7 +207,7 @@ fn copy_tooltip(tooltip: &str, buffer: &mut [u16]) {
 
 /// What the notification area sent about an icon, at version 4: the event and the icon's id in
 /// `lparam`'s low and high words, and the point in `wparam`'s.
-pub(super) fn notified(wparam: WPARAM, lparam: LPARAM) {
+pub(in crate::os::windows) fn notified(wparam: WPARAM, lparam: LPARAM) {
     let message = (lparam & 0xFFFF) as u32;
     let id = ((lparam >> 16) & 0xFFFF) as u16;
     let point = POINT {
@@ -237,7 +237,7 @@ pub(super) fn notified(wparam: WPARAM, lparam: LPARAM) {
 }
 
 /// The taskbar came back after Explorer restarted, without the app's icons: they are added again.
-pub(super) fn taskbar_created() {
+pub(in crate::os::windows) fn taskbar_created() {
     let ids: Vec<u16> = SHOWN.with_borrow(|shown| shown.icons.keys().copied().collect());
     for id in ids {
         add_to_notification_area(id);

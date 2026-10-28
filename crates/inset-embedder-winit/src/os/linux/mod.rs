@@ -16,7 +16,8 @@ use super::absent::{NoDisplayLink, NoVisibilityNotices, NoWindowSurfaces};
 use super::{
     ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeComposition,
     NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
-    SystemRequests, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
+    SystemFileDialogs, SystemRequests, WindowChrome, WindowGeometry, WindowMotion,
+    WindowVisibility, WorkQueue,
 };
 
 /// Linux. A type only: never made, its answers are associated functions.
@@ -64,6 +65,7 @@ impl Screens for Linux {}
 impl PointerQueries for Linux {}
 impl ImageDecoding for Linux {}
 impl WorkQueue for Linux {}
+impl SystemFileDialogs for Linux {}
 impl SystemRequests for Linux {}
 impl SystemChanges for Linux {}
 impl ApplicationControl for Linux {}

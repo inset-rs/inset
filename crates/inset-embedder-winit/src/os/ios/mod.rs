@@ -15,7 +15,8 @@ use super::apple::image_io_decoders;
 use super::{
     ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeComposition,
     NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
-    SystemRequests, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
+    SystemFileDialogs, SystemRequests, WindowChrome, WindowGeometry, WindowMotion,
+    WindowVisibility, WorkQueue,
 };
 
 /// iOS. A type only: never made, its answers are associated functions.
@@ -91,6 +92,7 @@ impl Screens for Ios {}
 impl PointerQueries for Ios {}
 impl NativeMenus for Ios {}
 impl WorkQueue for Ios {}
+impl SystemFileDialogs for Ios {}
 impl SystemRequests for Ios {}
 impl SystemChanges for Ios {}
 impl ApplicationControl for Ios {}

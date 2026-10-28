@@ -14,6 +14,7 @@ mod client;
 mod clipboard;
 mod composition;
 mod drag_drop;
+mod file_dialogs;
 mod fonts;
 mod geometry;
 mod image;
@@ -45,6 +46,11 @@ pub use clipboard::{
 };
 pub use composition::{Buffer, Compositor, Surface};
 pub use drag_drop::{DropChange, DropData};
+pub use file_dialogs::{
+    FileDialogError, FileDialogFuture, FileDialogs, FileFinishFuture, FileHandle, FileOpenFuture,
+    FileReadFuture, FileSizeFuture, FileStream, FileType, FileWriteFuture, FileWriter,
+    FolderOptions, OpenOptions, PickedFile, SaveOptions,
+};
 pub use fonts::{
     FontCollection, FontDemand, FontId, FontManager, FontSource, SystemFontSource, Typeface,
     default_font_families, set_default_font_manager,

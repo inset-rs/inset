@@ -1,6 +1,6 @@
 //! A menu at a point: Win32's `TrackPopupMenuEx`, built from the framework's value each time it
 //! opens, at a point in a window or, for a notification-area icon, at the pointer. A menu asked
-//! for waits in a queue until the hidden window's procedure opens it (`menu_window`), outside every
+//! for is posted to the hidden window, whose procedure opens it (`hidden_window`), outside every
 //! call into the app, and the item chosen is handed to the one who asked once it closes.
 //!
 //! Every entry has its number (`menus/numbered.rs`), an item's command id, which the menu answers
@@ -9,8 +9,6 @@
 //! are left out, as are the window's where the menu is at an icon. A shortcut is written after its
 //! item's label, which is all a Windows menu does with it: the framework's shortcuts act on keys.
 
-use std::cell::RefCell;
-use std::collections::VecDeque;
 use std::ptr;
 
 use inset_embedder::{
@@ -28,8 +26,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
+use super::super::hidden_window::{hidden_window, run_soon, wide};
 use super::bitmaps::{Bitmap, menu_item_bitmap};
-use super::menu_window::{menu_window, open_menus_soon, wide};
 use crate::menus::numbered::{Choice, Numbered, choice, numbered};
 use crate::menus::{EditAction, MenuEvent, MenuEvents, accelerator_text};
 
@@ -51,11 +49,6 @@ enum Place {
     Window { window: HWND, at: POINT },
     /// At the pointer, owned by the hidden window, for an icon of the notification area.
     Pointer,
-}
-
-thread_local! {
-    /// The menus asked for, in order. Main thread.
-    static ASKED_FOR: RefCell<VecDeque<AskedFor>> = RefCell::default();
 }
 
 /// Opens `menu` at `at`, in logical pixels from the top-left corner of `window`'s content.
@@ -99,26 +92,21 @@ pub(super) fn open_at_pointer(menu: Vec<MenuEntry>, events: MenuEvents, closed: 
 }
 
 fn ask_for(asked_for: AskedFor) {
-    ASKED_FOR.with_borrow_mut(|queue| queue.push_back(asked_for));
-    if !open_menus_soon() {
-        ASKED_FOR.with_borrow_mut(VecDeque::clear);
-    }
+    run_soon(Box::new(move || open(asked_for)));
 }
 
-/// Opens the menus asked for, one after the other, from the hidden window's procedure.
-pub(super) fn open_asked_for() {
-    while let Some(asked_for) = ASKED_FOR.with_borrow_mut(VecDeque::pop_front) {
-        let chosen = track(&asked_for);
-        let answer = match chosen {
-            Some(Choice::App(id)) => Some(id),
-            Some(Choice::Provided(item)) => {
-                act(item, asked_for.place, &asked_for.events);
-                None
-            }
-            None => None,
-        };
-        (asked_for.closed)(answer);
-    }
+/// Opens the menu asked for, from the hidden window's procedure, and hands on the item chosen.
+fn open(asked_for: AskedFor) {
+    let chosen = track(&asked_for);
+    let answer = match chosen {
+        Some(Choice::App(id)) => Some(id),
+        Some(Choice::Provided(item)) => {
+            act(item, asked_for.place, &asked_for.events);
+            None
+        }
+        None => None,
+    };
+    (asked_for.closed)(answer);
 }
 
 /// Shows the menu until it closes, and answers what the item chosen does.
@@ -128,7 +116,7 @@ fn track(asked_for: &AskedFor) -> Option<Choice> {
     let (owner, at) = match asked_for.place {
         Place::Window { window, at } => (window, at),
         Place::Pointer => {
-            let owner = menu_window()?;
+            let owner = hidden_window()?;
             let mut at = POINT::default();
             // SAFETY: the point is the call's own; the hidden window is the embedder's. Windows
             // asks that the owner of a notification-area icon's menu be the foreground window,

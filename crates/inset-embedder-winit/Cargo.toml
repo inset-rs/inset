@@ -35,6 +35,8 @@ arboard.workspace = true
 # version arboard reaches Windows' clipboard with.
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_DataExchange", "Win32_System_LibraryLoader", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+# The shell's file dialogs, COM interfaces windows-sys does not carry, at the version wgpu builds.
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_Shell_Common"] }
 
 # The tray's StatusNotifierItems and their DBus menus, over the session bus, and a menu item's icon
 # as the PNG the DBus menu takes. zbus is pure Rust; its 5.x line keeps the blocking API that the
@@ -59,7 +61,7 @@ objc2-uniform-type-identifiers = { version = "0.3", features = ["UTType"] }
 objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UIPasteboard", "UIApplication"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSMenu", "NSMenuItem", "NSEvent", "NSGraphicsContext", "NSView", "NSCell", "NSResponder", "NSWindow", "NSScreen", "NSAnimation", "NSAnimationContext", "NSVisualEffectView", "NSGlassEffectView", "NSGraphics", "NSTrackingArea", "NSPasteboard", "NSPasteboardItem", "NSFilePromiseProvider", "NSFilePromiseReceiver", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSButtonCell", "NSActionCell", "NSColorSpace", "block2", "objc2-quartz-core"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSMenu", "NSMenuItem", "NSEvent", "NSGraphicsContext", "NSView", "NSCell", "NSResponder", "NSWindow", "NSScreen", "NSAnimation", "NSAnimationContext", "NSVisualEffectView", "NSGlassEffectView", "NSGraphics", "NSTrackingArea", "NSPasteboard", "NSPasteboardItem", "NSFilePromiseProvider", "NSFilePromiseReceiver", "NSOpenPanel", "NSSavePanel", "objc2-uniform-type-identifiers", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSButtonCell", "NSActionCell", "NSColorSpace", "block2", "objc2-quartz-core"] }
 objc2-quartz-core = { version = "0.3", features = ["CAMediaTimingFunction", "CADisplayLink", "CALayer", "CATransaction"] }
 # The buffer a native surface shows, and whether the compositor still reads it.
 objc2-io-surface = "0.3"

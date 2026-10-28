@@ -2209,6 +2209,7 @@ dependencies = [
  "valo-codec-apple",
  "valo-codec-software",
  "wgpu",
+ "windows",
  "windows-sys 0.60.2",
  "winit",
  "zbus",
@@ -3039,6 +3040,7 @@ dependencies = [
  "objc2-core-video",
  "objc2-foundation 0.3.2",
  "objc2-quartz-core 0.3.2",
+ "objc2-uniform-type-identifiers 0.3.2",
 ]
 
 [[package]]

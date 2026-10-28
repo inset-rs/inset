@@ -9,7 +9,8 @@ use super::absent::{NoDisplayLink, NoVisibilityNotices, NoWindowSurfaces};
 use super::{
     ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeComposition,
     NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
-    SystemRequests, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
+    SystemFileDialogs, SystemRequests, WindowChrome, WindowGeometry, WindowMotion,
+    WindowVisibility, WorkQueue,
 };
 
 /// Any system without a module of its own. A type only: never made, its answers are
@@ -57,6 +58,7 @@ impl PointerQueries for WinitOnly {}
 impl NativeMenus for WinitOnly {}
 impl ImageDecoding for WinitOnly {}
 impl WorkQueue for WinitOnly {}
+impl SystemFileDialogs for WinitOnly {}
 impl SystemRequests for WinitOnly {}
 impl SystemChanges for WinitOnly {}
 impl ApplicationControl for WinitOnly {}

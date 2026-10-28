@@ -24,6 +24,7 @@ mod app_delegate;
 mod app_lifecycle;
 mod composition;
 mod display_links;
+mod file_dialogs;
 mod frame_presentation;
 mod menus;
 mod pasteboard;

@@ -13,12 +13,14 @@
 //! ```
 
 mod clipboard;
+mod file_dialogs;
 mod menus;
 mod platform;
 mod view;
 mod windows;
 
 pub use clipboard::MockClipboard;
+pub use file_dialogs::{AskedDialog, MemoryFile, MockFileDialogs};
 pub use menus::{
     MockDockMenu, MockMenuBar, MockPopupMenus, MockTrayIcons, ShownMenu, ShownTrayIcon,
 };

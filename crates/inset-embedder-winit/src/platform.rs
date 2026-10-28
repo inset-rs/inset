@@ -14,22 +14,23 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use inset_embedder::{
-    AppExit, Brightness, Clipboard, Compositor, Dispatcher, DockMenu, FileOpening, FontSource,
-    ImageCodecFuture, Locale, MenuBar, MouseCursor, Platform, PopupMenus, RequestId, Screens,
-    SystemFontSource, TargetPlatform, TrayIcons, ViewError, ViewFocusDirection, ViewFocusEvent,
-    ViewFocusState, ViewId, ViewRef, ViewRequest, VsyncWaiter,
+    AppExit, Brightness, Clipboard, Compositor, Dispatcher, DockMenu, FileDialogs, FileOpening,
+    FontSource, ImageCodecFuture, Locale, MenuBar, MouseCursor, Platform, PopupMenus, RequestId,
+    Screens, SystemFontSource, TargetPlatform, TrayIcons, ViewError, ViewFocusDirection,
+    ViewFocusEvent, ViewFocusState, ViewId, ViewRef, ViewRequest, VsyncWaiter,
 };
 use winit::event_loop::EventLoopProxy;
 
 use crate::app_requests::AppRequest;
 use crate::clipboard::ClipboardChanges;
 use crate::dispatcher::WinitDispatcher;
+use crate::file_dialogs::ParentWindows;
 use crate::macos::MacOs;
 use crate::main_loop::MainLoopEvent;
 use crate::menus::MenuEvents;
 use crate::os::{
     FramePresentation, NativeComposition, NativeMenus, OperatingSystem, SystemClipboard,
-    SystemRequests, ThisOs, ThisOsClipboard,
+    SystemFileDialogs, SystemRequests, ThisOs, ThisOsClipboard,
 };
 use crate::popup_menus::NativePopupMenus;
 use crate::state::EmbedderState;
@@ -66,6 +67,8 @@ pub struct WinitPlatform {
     menu_bar: Option<Rc<dyn MenuBar>>,
     dock_menu: Option<Rc<dyn DockMenu>>,
     tray_icons: Option<Rc<dyn TrayIcons>>,
+    /// The system's file dialogs, where it has them (`file_dialogs.rs`).
+    file_dialogs: Option<Rc<dyn FileDialogs>>,
     /// What only macOS offers; `None` elsewhere.
     macos: Option<MacOs>,
 }
@@ -84,6 +87,7 @@ impl WinitPlatform {
         WinitPlatform {
             next_request_id: Cell::new(1),
             macos: cfg!(target_os = "macos").then(|| MacOs::new(Rc::clone(&state))),
+            file_dialogs: ThisOs::file_dialogs(ParentWindows::new(Rc::clone(&state))),
             state,
             compositor: ThisOs::compositor(),
             vsync_waiter: ThisOs::vsync_waiter(&proxy),
@@ -267,6 +271,10 @@ impl Platform for WinitPlatform {
 
     fn dock_menu(&self) -> Option<&dyn DockMenu> {
         self.dock_menu.as_deref()
+    }
+
+    fn file_dialogs(&self) -> Option<&dyn FileDialogs> {
+        self.file_dialogs.as_deref()
     }
 
     fn mouse_cursor(&self) -> Option<&dyn MouseCursor> {
