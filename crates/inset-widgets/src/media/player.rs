@@ -14,37 +14,29 @@ use super::{PictureSource, SurfacePicture};
 use crate::framework::{BuildContext, IntoWidget, KeyRef, StatelessWidget, WidgetRef};
 
 /// A player of one source, which loads by itself: the host's player, whose listeners hear its
-/// state change. Where the platform has no players, its state is a failure from the start.
+/// state change. A source the system cannot play gives a player whose state is a failure.
 pub struct Player {
     change_notifier: ChangeNotifierData,
-    /// The host's player, until [`dispose`](Player::dispose); `None` where the platform has no
-    /// players.
+    /// The host's player, until [`dispose`](Player::dispose).
     host: Option<Rc<dyn MediaPlayer>>,
     /// The host's state when it last changed.
     state: PlayerState,
 }
 
 impl Player {
-    /// A player of `source`, which starts loading at once.
-    pub fn new(app: &mut App, source: MediaSource) -> Handle<Player> {
+    /// A player of `source`, which starts loading at once; `None` where the platform has no
+    /// players.
+    pub fn new(app: &mut App, source: MediaSource) -> Option<Handle<Player>> {
         let platform = app.platform();
-        let host: Option<Rc<dyn MediaPlayer>> = platform
-            .players()
-            .map(|players| Rc::from(players.open(source)));
-        let changed = host.as_ref().map(|host| host.changed());
-        let state = match &host {
-            Some(host) => host.state(),
-            None => PlayerState::failed("this platform has no media players"),
-        };
+        let host: Rc<dyn MediaPlayer> = Rc::from(platform.players()?.open(source));
+        let changed = host.changed();
         let player = app.create(Player {
             change_notifier: ChangeNotifierData::new(),
-            host,
-            state,
+            state: host.state(),
+            host: Some(host),
         });
-        if let Some(changed) = changed {
-            player.follow(app, changed);
-        }
-        player
+        player.follow(app, changed);
+        Some(player)
     }
 
     /// The player's state when it last changed.
@@ -53,43 +45,42 @@ impl Player {
     }
 
     pub fn play(self: Handle<Self>, app: &App) {
-        self.with_host(app, |host| host.play());
+        self.host(app).play();
     }
 
     pub fn pause(self: Handle<Self>, app: &App) {
-        self.with_host(app, |host| host.pause());
+        self.host(app).pause();
     }
 
     /// Moves to `position`, playing on from there if it was playing.
     pub fn seek_to(self: Handle<Self>, app: &App, position: Duration) {
-        self.with_host(app, |host| host.seek(position));
+        self.host(app).seek(position);
     }
 
     /// How fast it plays, `1.0` the media's own speed.
     pub fn set_rate(self: Handle<Self>, app: &App, rate: f64) {
-        self.with_host(app, |host| host.set_rate(rate));
+        self.host(app).set_rate(rate);
     }
 
     /// How loud it plays, from `0.0` to `1.0`.
     pub fn set_volume(self: Handle<Self>, app: &App, volume: f64) {
-        self.with_host(app, |host| host.set_volume(volume));
+        self.host(app).set_volume(volume);
     }
 
     /// Whether it starts again from the beginning when it reaches the end.
     pub fn set_looping(self: Handle<Self>, app: &App, looping: bool) {
-        self.with_host(app, |host| host.set_looping(looping));
+        self.host(app).set_looping(looping);
     }
 
     /// Shows the video on `surface` from now on, and on no surface or frame reader it went to
     /// before: what [`VideoView`] does with a surface of its own.
     pub fn show_on(self: Handle<Self>, app: &App, surface: Arc<dyn Surface>) {
-        self.with_host(app, |host| host.show_on(surface));
+        self.host(app).show_on(surface);
     }
 
-    /// Hands the video to a frame reader from now on, and to no surface; `None` where the
-    /// platform has no players.
-    pub fn read_frames(self: Handle<Self>, app: &App) -> Option<Arc<dyn FrameReader>> {
-        app.get(self).host.as_ref().map(|host| host.read_frames())
+    /// Hands the video to a frame reader from now on, and to no surface.
+    pub fn read_frames(self: Handle<Self>, app: &App) -> Arc<dyn FrameReader> {
+        self.host(app).read_frames()
     }
 
     /// Stops the player and lets go of the host's: its picture leaves the surface it showed on.
@@ -100,10 +91,16 @@ impl Player {
         player.change_notifier.dispose();
     }
 
-    fn with_host(self: Handle<Self>, app: &App, action: impl FnOnce(&dyn MediaPlayer)) {
-        if let Some(host) = &app.get(self).host {
-            action(&**host);
-        }
+    /// The host's player.
+    ///
+    /// # Panics
+    ///
+    /// Once disposed.
+    fn host(self: Handle<Self>, app: &App) -> &dyn MediaPlayer {
+        app.get(self)
+            .host
+            .as_deref()
+            .expect("a Player used after dispose")
     }
 
     /// Takes the host's state at each of its changes, from the one `changed` resolves at, until
@@ -249,7 +246,8 @@ mod tests {
         let player = Player::new(
             &mut cell.borrow_mut(),
             MediaSource::file(PickedFile::Path(PathBuf::from("/movies/a.mov"))),
-        );
+        )
+        .unwrap();
         let opened = players.opened();
         assert_eq!(opened[0].source(), "/movies/a.mov");
         assert_eq!(player.state(&cell.borrow()).status, PlayerStatus::Loading);
@@ -298,17 +296,13 @@ mod tests {
     }
 
     #[test]
-    fn a_platform_without_players_gives_a_player_that_failed() {
+    fn a_platform_without_players_gives_no_player() {
         let cell = AppCell::with_platform(Rc::new(TestPlatform::new()));
         let player = Player::new(
             &mut cell.borrow_mut(),
             MediaSource::link("https://example.com/a.mp4"),
         );
-        assert!(matches!(
-            player.state(&cell.borrow()).status,
-            PlayerStatus::Failed(_)
-        ));
-        assert!(player.read_frames(&cell.borrow()).is_none());
+        assert!(player.is_none());
     }
 
     #[test]
@@ -320,7 +314,8 @@ mod tests {
         let player = Player::new(
             &mut cell.borrow_mut(),
             MediaSource::link("https://example.com/a.mp4"),
-        );
+        )
+        .unwrap();
         run_app(
             &mut cell.borrow_mut(),
             crate::Center::new()

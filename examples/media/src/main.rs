@@ -17,9 +17,8 @@ use inset_foundation::{App, Handle, Listener};
 use inset_painting::{BoxDecoration, TextStyle};
 use inset_shell::Shell;
 use inset_widgets::{
-    CameraPreview, CameraSession, Center, DecoratedBox, Directionality, Expanded,
-    GestureDetector, IntoWidget, Player, Row, Text, VideoView, WidgetRef, available_cameras,
-    run_app_with,
+    CameraPreview, CameraSession, Center, DecoratedBox, Directionality, Expanded, GestureDetector,
+    IntoWidget, Player, Row, Text, VideoView, WidgetRef, available_cameras, run_app_with,
 };
 
 const BACKGROUND: Color = Color::from_argb(255, 20, 20, 24);
@@ -40,7 +39,7 @@ fn source_of(argument: String) -> MediaSource {
 }
 
 fn start(app: &mut App, source: Option<MediaSource>) {
-    let player = source.map(|source| Player::new(app, source));
+    let player = source.and_then(|source| Player::new(app, source));
     if let Some(player) = player {
         Player::set_looping(player, app, true);
         Player::play(player, app);
@@ -62,7 +61,7 @@ fn start(app: &mut App, source: Option<MediaSource>) {
 fn home(player: Option<Handle<Player>>, session: Option<Handle<CameraSession>>) -> WidgetRef {
     let video = match player {
         Some(player) => clickable(player),
-        None => label("No movie: pass a path or a link"),
+        None => label("No movie: pass a path or a link, on a platform with players"),
     };
     let preview = match session {
         Some(session) => CameraPreview::new(session).into_widget(),
@@ -70,12 +69,10 @@ fn home(player: Option<Handle<Player>>, session: Option<Handle<CameraSession>>) 
     };
     Directionality::new(
         TextDirection::Ltr,
-        DecoratedBox::new(BoxDecoration::new().color(BACKGROUND)).child(
-            Row::new().children([
-                Expanded::new(Center::new().child(video)).into_widget(),
-                Expanded::new(Center::new().child(preview)).into_widget(),
-            ]),
-        ),
+        DecoratedBox::new(BoxDecoration::new().color(BACKGROUND)).child(Row::new().children([
+            Expanded::new(Center::new().child(video)).into_widget(),
+            Expanded::new(Center::new().child(preview)).into_widget(),
+        ])),
     )
     .into_widget()
 }
