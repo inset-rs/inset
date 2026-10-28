@@ -20,6 +20,8 @@ mod clipboard;
 #[cfg(target_arch = "wasm32")]
 mod dispatcher;
 #[cfg(target_arch = "wasm32")]
+mod file_dialogs;
+#[cfg(target_arch = "wasm32")]
 mod fonts;
 #[cfg(target_arch = "wasm32")]
 mod gpu;

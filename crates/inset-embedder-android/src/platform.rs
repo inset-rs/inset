@@ -12,13 +12,14 @@ use std::time::{Duration, Instant};
 
 use android_activity::AndroidAppWaker;
 use inset_embedder::{
-    Brightness, Clipboard, Dispatcher, FontSource, ImageCodec, ImageCodecFuture, ImageDecodeError,
-    ImageFrame, ImageFrameFuture, ImageRepetition, Locale, Offset, Platform, Screen, Screens,
-    SystemChrome, SystemFontSource, TargetPlatform, ViewRef,
+    Brightness, Clipboard, Dispatcher, FileDialogs, FontSource, ImageCodec, ImageCodecFuture,
+    ImageDecodeError, ImageFrame, ImageFrameFuture, ImageRepetition, Locale, Offset, Platform,
+    Screen, Screens, SystemChrome, SystemFontSource, TargetPlatform, ViewRef,
 };
 
 use crate::chrome::AndroidChrome;
 use crate::clipboard::AndroidClipboard;
+use crate::file_dialogs::DocumentPickers;
 use crate::view::{AndroidView, VIEW};
 
 /// The long-lived host capability held by the application.
@@ -37,6 +38,8 @@ pub struct AndroidPlatform {
     pub(crate) images: RefCell<Option<valo::ImageContext>>,
     chrome: AndroidChrome,
     pub(crate) clipboard: AndroidClipboard,
+    /// The document pickers, where the activity is Inset's.
+    file_dialogs: Option<DocumentPickers>,
 }
 
 impl AndroidPlatform {
@@ -61,6 +64,7 @@ impl AndroidPlatform {
             images: RefCell::new(None),
             chrome: AndroidChrome::new(app.clone()),
             clipboard: AndroidClipboard::new(app.clone()),
+            file_dialogs: DocumentPickers::new(app.clone()),
         }
     }
 
@@ -170,6 +174,13 @@ impl Platform for AndroidPlatform {
     /// The system's clipboard, as far as an app without Java code reaches it (`clipboard.rs`).
     fn clipboard(&self) -> Option<&dyn Clipboard> {
         Some(&self.clipboard)
+    }
+
+    /// The document pickers, under Inset's activity (`file_dialogs.rs`).
+    fn file_dialogs(&self) -> Option<&dyn FileDialogs> {
+        self.file_dialogs
+            .as_ref()
+            .map(|pickers| pickers as &dyn FileDialogs)
     }
 
     fn system_chrome(&self) -> Option<&dyn SystemChrome> {

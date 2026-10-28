@@ -1,13 +1,17 @@
 //! Android: the `.apk` Gradle would produce, assembled from a cargo library.
 //!
-//! No Gradle project and no Java of the app's own. The activity is the platform's
-//! `NativeActivity`, which loads the app's shared library and calls its `android_main`,
-//! so the package is that library, a manifest, and icons, put together with the SDK's own
-//! tools: `aapt2` links the manifest and resources, `zipalign` aligns, `apksigner` signs
-//! with the debug key, and `adb` installs and launches it on an emulator or a device.
+//! No Gradle project and no Java of the app's own. The activity is Inset's one Java class,
+//! `rs.inset.InsetActivity` (`android/rs/inset/InsetActivity.java` in this crate): the
+//! platform's `NativeActivity`, which loads the app's shared library and calls its
+//! `android_main`, with the results of the activities the app starts handed on to its native
+//! code, as the document pickers answer. So the package is that library, the class compiled to
+//! `classes.dex`, a manifest, and icons, put together with the SDK's own tools: `javac` and `d8`
+//! compile the class, `aapt2` links the manifest and resources, `zipalign` aligns, `apksigner`
+//! signs with the debug key, and `adb` installs and launches it on an emulator or a device.
 //!
 //! Everything but the NDK's linker and Java is found under the SDK. The NDK is where the
-//! linker and the C library for the target live; Java runs `apksigner` and `keytool`.
+//! linker and the C library for the target live; Java compiles the activity and runs `d8`,
+//! `apksigner` and `keytool`.
 
 use std::fs;
 use std::io::Write;
@@ -30,8 +34,13 @@ const DEFAULT_MIN_SDK: u32 = 26;
 /// The last level before the system stops fitting the window to its bars: from 35 an
 /// app is edge to edge, and the host learns the safe area from the fitted content rect.
 const DEFAULT_TARGET_SDK: u32 = 34;
-/// The activity class Android ships that loads a native library and calls `android_main`.
-const NATIVE_ACTIVITY: &str = "android.app.NativeActivity";
+/// Inset's activity: the platform's `NativeActivity`, which loads a native library and calls
+/// `android_main`, handing activity results on to it.
+const INSET_ACTIVITY: &str = "rs.inset.InsetActivity";
+/// Its source, which every app's package compiles.
+const INSET_ACTIVITY_SOURCE: &str = include_str!("../android/rs/inset/InsetActivity.java");
+/// The Java release the activity is compiled for, which `d8` takes and lowers to `min_sdk`.
+const JAVA_RELEASE: &str = "11";
 /// What the app says it is, for a system that asks. An app that says nothing is
 /// `CATEGORY_UNDEFINED`, and the makers' own optimisers take an uncategorised app that
 /// draws with the GPU for a game they do not know and hold it at 60 Hz whatever the panel
@@ -65,7 +74,8 @@ pub struct Platform {
     pub jar: PathBuf,
 }
 
-/// A Java runtime, for `apksigner` and `keytool`, which are Java programs.
+/// A Java development kit: `javac` for Inset's activity, and the runtime of `d8`, `apksigner`
+/// and `keytool`, which are Java programs.
 pub struct Java {
     pub home: PathBuf,
 }
@@ -280,7 +290,7 @@ pub fn build(project: &Project, profile: Profile, abi: Abi) -> Result<Apk> {
     let java = sdk
         .java
         .as_ref()
-        .context("no Java runtime for apksigner: install Android Studio, or set JAVA_HOME")?;
+        .context("no Java for javac and apksigner: install Android Studio, or set JAVA_HOME")?;
     let min_sdk = project.android.min_sdk.unwrap_or(DEFAULT_MIN_SDK);
     tools::ensure_rust_target(&project.root, abi.triple())?;
     let shared_library = cargo::build(&Build {
@@ -323,6 +333,8 @@ pub fn build(project: &Project, profile: Profile, abi: Abi) -> Result<Apk> {
     )?;
     let linked = stage.join("unaligned.apk");
     link(&sdk, &stage, &linked, has_icon)?;
+    let classes = compile_activity(&sdk, java, &stage, min_sdk)?;
+    add_to_package(&linked, "classes.dex", &classes)?;
     let packaged = match profile {
         // Symbols are for reading a crash report, not for the device: they double the
         // download and nothing loads them. The built library keeps them, so a stack trace
@@ -330,7 +342,7 @@ pub fn build(project: &Project, profile: Profile, abi: Abi) -> Result<Apk> {
         Profile::Release => strip(ndk, &shared_library, &stage.join("stripped.so"))?,
         Profile::Debug => shared_library,
     };
-    add_library(
+    add_to_package(
         &linked,
         &format!("lib/{}/lib{library}.so", abi.dir_name()),
         &packaged,
@@ -442,7 +454,7 @@ struct Manifest<'a> {
     category: &'a str,
 }
 
-/// The manifest around `NativeActivity`. `configChanges` keeps the activity, and so the
+/// The manifest around Inset's activity. `configChanges` keeps the activity, and so the
 /// app's state, through a rotation or a switch to dark mode, which winit reports as a
 /// resize; `adjustResize` has the system fit the window to the keyboard, which is how
 /// the host learns of it.
@@ -467,7 +479,7 @@ fn manifest(manifest: &Manifest) -> String {
   <application
       android:label="{label}"{icon}{debuggable}
       android:appCategory="{category}"
-      android:hasCode="false"
+      android:hasCode="true"
       android:extractNativeLibs="false"
       android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
     <activity
@@ -493,7 +505,7 @@ fn manifest(manifest: &Manifest) -> String {
         target_sdk = manifest.target_sdk,
         label = xml_escape(manifest.label),
         category = manifest.category,
-        activity = NATIVE_ACTIVITY,
+        activity = INSET_ACTIVITY,
         library = manifest.library,
     )
 }
@@ -570,15 +582,50 @@ fn link(sdk: &Sdk, stage: &Path, out: &Path, has_resources: bool) -> Result<()> 
     tools::run(&mut command, "aapt2 link")
 }
 
-/// Adds the shared library to the package, stored rather than deflated: the system loads
-/// it from the package in place, page-aligned by `zipalign`.
-fn add_library(apk: &Path, entry: &str, library: &Path) -> Result<()> {
-    let file = fs::OpenOptions::new().read(true).write(true).open(apk)?;
-    let mut writer = zip::ZipWriter::new_append(file).context("reading the linked package")?;
+/// `javac` and `d8`: Inset's activity, compiled against the platform's `android.jar` into the
+/// `classes.dex` the package carries.
+fn compile_activity(sdk: &Sdk, java: &Java, stage: &Path, min_sdk: u32) -> Result<PathBuf> {
+    let sources = stage.join("java");
+    let source = sources.join("rs/inset/InsetActivity.java");
+    fs::create_dir_all(sources.join("rs/inset"))?;
+    fs::write(&source, INSET_ACTIVITY_SOURCE)?;
+    let classes = stage.join("classes");
+    tools::run(
+        java.bin("javac")
+            .args(["--release", JAVA_RELEASE, "-Xlint:-options", "-classpath"])
+            .arg(&sdk.platform.jar)
+            .arg("-d")
+            .arg(&classes)
+            .arg(&source),
+        "javac",
+    )?;
+    let dex = stage.join("dex");
+    fs::create_dir_all(&dex)?;
+    tools::run(
+        java.bin("java")
+            .arg("-cp")
+            .arg(sdk.build_tools.join("lib/d8.jar"))
+            .args(["com.android.tools.r8.D8", "--release", "--min-api"])
+            .arg(min_sdk.to_string())
+            .arg("--lib")
+            .arg(&sdk.platform.jar)
+            .arg("--output")
+            .arg(&dex)
+            .arg(classes.join("rs/inset/InsetActivity.class")),
+        "d8",
+    )?;
+    Ok(dex.join("classes.dex"))
+}
+
+/// Adds `file` to the package as `entry`, stored rather than deflated: the system loads a
+/// shared library from the package in place, page-aligned by `zipalign`, and maps the dex.
+fn add_to_package(apk: &Path, entry: &str, file: &Path) -> Result<()> {
+    let package = fs::OpenOptions::new().read(true).write(true).open(apk)?;
+    let mut writer = zip::ZipWriter::new_append(package).context("reading the linked package")?;
     let options =
         zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
     writer.start_file(entry, options)?;
-    writer.write_all(&fs::read(library)?)?;
+    writer.write_all(&fs::read(file)?)?;
     writer.finish()?;
     Ok(())
 }
@@ -804,7 +851,7 @@ pub fn run(apk: &Apk, device: &Device) -> Result<()> {
     let _ = adb(&["shell", "am", "force-stop", &apk.package]).output();
     tools::run(adb(&["install", "-r", "-t"]).arg(&apk.path), "adb install")?;
     println!("launching {} on {}", apk.package, device.model);
-    let component = format!("{}/{NATIVE_ACTIVITY}", apk.package);
+    let component = format!("{}/{INSET_ACTIVITY}", apk.package);
     tools::run(
         &mut adb(&["shell", "am", "start", "-W", "-n", &component]),
         "adb shell am start",
@@ -854,7 +901,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_names_the_native_activity_and_its_library() {
+    fn manifest_names_insets_activity_and_its_library() {
         let manifest = manifest(&Manifest {
             package: "com.example.my_app",
             label: "My <App>",
@@ -868,7 +915,8 @@ mod tests {
             category: "productivity",
         });
         assert!(manifest.contains(r#"package="com.example.my_app""#));
-        assert!(manifest.contains(r#"android:name="android.app.NativeActivity""#));
+        assert!(manifest.contains(r#"android:name="rs.inset.InsetActivity""#));
+        assert!(manifest.contains(r#"android:hasCode="true""#));
         assert!(manifest.contains(r#"android:value="my_app""#));
         assert!(manifest.contains(r#"android:label="My &lt;App&gt;""#));
         assert!(manifest.contains(r#"android:debuggable="true""#));

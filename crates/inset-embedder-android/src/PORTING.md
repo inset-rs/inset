@@ -33,6 +33,20 @@ Host implementation. Flutter analogue: the engine's Android embedder under
   Reason: platform — Android has no expiry an app can set.
   Affect: a copy whose app quits before its time stays on the clipboard.
 
+## file_dialogs.rs → `file_selector_android`
+
+- Change: the file dialogs are the Storage Access Framework's pickers (`ACTION_OPEN_DOCUMENT`, `ACTION_CREATE_DOCUMENT`), started by the activity for a result, which Inset's one Java class, `rs.inset.InsetActivity`, hands to native code; under another activity the dialogs are `None`.
+  Reason: platform — `NativeActivity` forwards no activity result to native code, which `file_selector_android` gets from its plugin's Java.
+  Affect: an app built by inset-cli has file dialogs; one run under the bare `NativeActivity` has none.
+
+- Change: each pick is opened as it is answered, `"rw"` when the app asked to write and `"r"` otherwise, its permission taken as persistable: a handle where the document seeks, a stream where the provider answers a pipe, where `file_selector_android` copies the document into the app's cache and answers the copy's path.
+  Reason: platform — a document has no path, and a copy could not be written back.
+  Affect: an app writes a picked document in place, and reads a pipe through once.
+
+- Change: the pickers filter by MIME type alone, a type's extensions mapped by `MimeTypeMap`; an initial folder and a confirming label are not taken, and a folder pick fails.
+  Reason: platform — the pickers take MIME types and a content URI, not a path, and a document tree has no shape in the interface yet.
+  Affect: an app asks for a folder in vain on Android.
+
 ## display.rs / host.rs
 
 - Change: the one screen is the activity's display, numbered by its own id, read when a window arrives and at each configuration change, and the app hears it changed only then; Flutter's embedder numbers it 0 and hears its refresh rate through a display listener.

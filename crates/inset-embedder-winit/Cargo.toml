@@ -54,11 +54,11 @@ dispatch2 = "0.3"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSString", "NSObject", "NSGeometry", "NSArray", "NSData", "NSDate", "NSDictionary", "NSError", "NSIndexSet", "NSItemProvider", "NSNotification", "NSOperation", "NSProgress", "NSPropertyList", "NSRunLoop", "NSURL", "NSValue", "NSProcessInfo", "block2"] }
 # The UTI a pasteboard names a MIME type by.
-objc2-uniform-type-identifiers = { version = "0.3", features = ["UTType"] }
+objc2-uniform-type-identifiers = { version = "0.3", features = ["UTType", "UTCoreTypes"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 # The general pasteboard, and the notices that it changed or the application became active.
-objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UIPasteboard", "UIApplication"] }
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-uniform-type-identifiers", "UIPasteboard", "UIApplication", "UIDocumentPickerViewController", "UIResponder", "UIView", "UIViewController", "UIWindow"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSMenu", "NSMenuItem", "NSEvent", "NSGraphicsContext", "NSView", "NSCell", "NSResponder", "NSWindow", "NSScreen", "NSAnimation", "NSAnimationContext", "NSVisualEffectView", "NSGlassEffectView", "NSGraphics", "NSTrackingArea", "NSPasteboard", "NSPasteboardItem", "NSFilePromiseProvider", "NSFilePromiseReceiver", "NSOpenPanel", "NSSavePanel", "objc2-uniform-type-identifiers", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSButtonCell", "NSActionCell", "NSColorSpace", "block2", "objc2-quartz-core"] }
@@ -131,8 +131,9 @@ objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSGeometry"] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer", "CAMetalLayer"] }
 
-# AppKit's selectors and view hierarchy, UIKit's pasteboard and Win32 need `unsafe`, which the
-# workspace forbids; here it is denied instead, and `os/macos`, `os/ios/pasteboard`, `os/windows`
-# and the tests' AppKit support, for a local event monitor, alone allow it.
+# AppKit's selectors and view hierarchy, UIKit's pasteboard and document picker, and Win32 need
+# `unsafe`, which the workspace forbids; here it is denied instead, and `os/macos`,
+# `os/ios/pasteboard`, `os/ios/file_dialogs`, `os/windows` and the tests' AppKit support, for a local
+# event monitor, alone allow it.
 [lints.rust]
 unsafe_code = "deny"

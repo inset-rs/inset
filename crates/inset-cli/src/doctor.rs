@@ -110,8 +110,8 @@ pub fn report() -> Result<()> {
             match &sdk.java {
                 Some(java) => ok(&format!("Java: {}", java.home.display())),
                 None => gap(
-                    "Java: runs apksigner",
-                    "install Android Studio, whose runtime is used, or set JAVA_HOME",
+                    "Java: compiles the activity and runs d8 and apksigner",
+                    "install Android Studio, whose JDK is used, or set JAVA_HOME",
                 ),
             }
             target(&targets, "aarch64-linux-android");

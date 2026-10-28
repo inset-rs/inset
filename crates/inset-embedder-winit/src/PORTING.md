@@ -193,6 +193,24 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — the desktop draws a StatusNotifierItem's menu and decides when to open it, and Linux's toolkits draw their own menus at a point.
   Affect: a click reaches the app as the desktop reports it, `Activate`, `SecondaryActivate`, `ContextMenu` or a vertical scroll, at the desktop's position, which Wayland often leaves at zero.
 
+## file_dialogs.rs, os/*/file_dialogs.rs → `file_selector`'s macOS, Windows, Linux and iOS implementations
+
+- Change: on macOS the dialogs are `NSOpenPanel` and `NSSavePanel`, begun without blocking, as a sheet on the parent view's window where there is one, as `file_selector_macos` shows them; a type's extensions and MIME types become the uniform types the panel enables, with no label, since a label needs an accessory view.
+  Reason: platform — a sheet keeps the dialog with its window and the app's loop running.
+  Affect: a dialog with a parent slides out of its window; every pick is a path the app may read and write, as AppKit grants a sandboxed app.
+
+- Change: on Windows the dialogs are the shell's `IFileOpenDialog` and `IFileSaveDialog`, owned by the parent's window, shown from the embedder's hidden window once the framework's call has returned, as its menus are; a type's extensions become a filter under its label, and its MIME types filter nothing.
+  Reason: platform — a dialog runs its own modal loop, which must run outside every call into the app.
+  Affect: the app goes on drawing while the dialog is open, and a type with MIME types alone shows every file.
+
+- Change: on Linux the dialogs are the desktop portal's `FileChooser` over the session bus, asked from a thread of its own that waits for the portal's `Response`, answering its `file://` URIs as paths; the dialogs are `None` where the bus has no portal, running or activatable. A dialog is modal to its parent on X11 only, since naming a Wayland window would need it exported, which winit does not.
+  Reason: platform — the portal is the desktop's own dialog, on GNOME, KDE and in a Flatpak alike, without linking GTK or Qt.
+  Affect: the dialog is the desktop's, and on Wayland it stands apart from its window.
+
+- Change: on iOS the dialogs are `UIDocumentPickerViewController`, presented by the parent view's view controller or the screen view's, opening in place; each picked URL's security-scoped access starts when it is answered and is kept for the app's life, since a path carries no lifetime to end it by. A save makes an empty file under the suggested name in a folder of its own in the temporary folder and has the picker export it, answering the file where the user put it.
+  Reason: platform — iOS has no dialog that answers a file yet to be written, and a picked document outside the sandbox is reached only while its access lasts.
+  Affect: a picked path stays readable and writable until the app quits; an app picking without end would run out of the kernel's sandbox extensions.
+
 ## macos.rs / os/macos → what only macOS offers beyond `Platform`
 
 - Change: `WinitPlatform::macos` slides a window in and hides the app, neither of which Flutter's framework offers.

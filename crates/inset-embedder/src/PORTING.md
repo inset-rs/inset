@@ -272,3 +272,21 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — AppKit asks the application's delegate for it, which only the host is.
   Affect: an app's Dock menu is set whole like any other, and every other system answers `None`.
 
+## file_dialogs.rs → the `file_selector` package's `openFile`, `openFiles`, `getDirectoryPath`, `getSaveLocation`, and cross_file's `XFile`
+
+- Change: the system's file dialogs are a host capability, `Platform::file_dialogs`, with one function a kind, where Flutter reaches them through the `file_selector` plugin over method channels.
+  Reason: platform — there are no plugins and no method channels; the host trait is the channel.
+  Affect: an app asks the platform for its dialogs, and a host without them answers `None`.
+
+- Change: a pick is a `PickedFile`: a path where the system gives one, the system's handle where it gives none (the web; Android where the document seeks), and a stream where the system gives a pipe (Android), where Flutter's `XFile` holds a path or a blob, reading only; `PickedFile::read_all` is `XFile.readAsBytes`.
+  Reason: platform — Android's documents and the web's files have no path, and a copy into the app's cache could not be written back.
+  Affect: an app reads and writes a handle at any offset where the system gives no path, and reads a stream through once.
+
+- Change: an open pick grants reading only unless the app asks to write (`OpenOptions::writable`), and a save grants writing to the one file chosen; `file_selector` has no such option.
+  Reason: platform — Android grants write only with `FLAG_GRANT_WRITE_URI_PERMISSION`, and the web only when asked for `readwrite`.
+  Affect: a handle opens for writing only when the pick asked to write.
+
+- Change: every dialog takes the parent view whose window it belongs to, which macOS shows it as a sheet on.
+  Reason: platform — a file dialog belongs to a window, which a view-based interface names by its view.
+  Affect: a dialog opened for a window stays with it on macOS, and stands alone without one.
+

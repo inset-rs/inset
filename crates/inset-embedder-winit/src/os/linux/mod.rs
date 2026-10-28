@@ -1,8 +1,10 @@
-//! Linux: what winit covers by itself, arboard's plain text for the clipboard, and the desktop's
-//! tray, whose icons are StatusNotifierItems with their DBus menus (`status_notifier_items`).
+//! Linux: what winit covers by itself, arboard's plain text for the clipboard, the desktop's tray,
+//! whose icons are StatusNotifierItems with their DBus menus (`status_notifier_items`), and the
+//! desktop portal's file dialogs (`file_dialogs`).
 //! Linux's desktops have no menu bar and no menu at a point of the system's: GTK and Qt draw
 //! theirs in the app's own surfaces, so those answer none and the app draws its own.
 
+mod file_dialogs;
 mod status_notifier_items;
 
 use std::rc::Rc;
@@ -16,8 +18,7 @@ use super::absent::{NoDisplayLink, NoVisibilityNotices, NoWindowSurfaces};
 use super::{
     ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeComposition,
     NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
-    SystemFileDialogs, SystemRequests, WindowChrome, WindowGeometry, WindowMotion,
-    WindowVisibility, WorkQueue,
+    SystemRequests, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
 };
 
 /// Linux. A type only: never made, its answers are associated functions.
@@ -65,7 +66,6 @@ impl Screens for Linux {}
 impl PointerQueries for Linux {}
 impl ImageDecoding for Linux {}
 impl WorkQueue for Linux {}
-impl SystemFileDialogs for Linux {}
 impl SystemRequests for Linux {}
 impl SystemChanges for Linux {}
 impl ApplicationControl for Linux {}

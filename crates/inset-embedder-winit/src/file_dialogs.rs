@@ -30,6 +30,12 @@ impl ParentWindows {
     pub(crate) fn window(&self, parent: Option<ViewId>) -> Option<Arc<Window>> {
         Some(self.0.views().by_view(parent?)?.window)
     }
+
+    /// The app's first window, for a system whose dialogs always show on one.
+    #[cfg(target_os = "ios")]
+    pub(crate) fn first_window(&self) -> Option<Arc<Window>> {
+        Some(self.0.views().first_window()?.window)
+    }
 }
 
 /// What a dialog answers, on its way from the system to the app.

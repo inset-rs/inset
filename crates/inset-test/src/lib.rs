@@ -1,7 +1,8 @@
 //! Test scaffolding: a [`TestPlatform`] to run an `App` on, a [`TestView`] for it to draw
-//! into, a [`MockClipboard`] for it to copy to and paste from, and the system's menus
+//! into, a [`MockClipboard`] for it to copy to and paste from, the system's menus
 //! ([`MockMenuBar`], [`MockPopupMenus`], [`MockDockMenu`], [`MockTrayIcons`]) for it to set and
-//! choose in, so a test supplies only the piece it is about. The shape of `flutter_test`'s `TestPlatformDispatcher` and
+//! choose in, and file dialogs ([`MockFileDialogs`], with [`MemoryFile`]) for it to open and save
+//! through, so a test supplies only the piece it is about. The shape of `flutter_test`'s `TestPlatformDispatcher` and
 //! `TestFlutterView`: real implementations of the host traits that answer what a test
 //! configures and record what the framework asks of them.
 //!

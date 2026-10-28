@@ -27,6 +27,8 @@ mod clipboard;
 #[cfg(target_os = "android")]
 mod display;
 #[cfg(target_os = "android")]
+mod file_dialogs;
+#[cfg(target_os = "android")]
 mod gpu;
 #[cfg(target_os = "android")]
 mod host;

@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    Brightness, Clipboard, Dispatcher, ImageCodecFuture, Matrix4, MouseCursor, Offset, Platform,
-    Rect, Screen, Screens, Size, SystemMouseCursorKind, TargetPlatform, TextEditingValue,
+    Brightness, Clipboard, Dispatcher, FileDialogs, ImageCodecFuture, Matrix4, MouseCursor, Offset,
+    Platform, Rect, Screen, Screens, Size, SystemMouseCursorKind, TargetPlatform, TextEditingValue,
     TextInputConfiguration, TextInputHost, View, ViewId, ViewMetrics, ViewRef,
 };
 use web_sys::HtmlCanvasElement;
@@ -15,6 +15,7 @@ use web_time::Instant;
 
 use crate::clipboard::BrowserClipboard;
 use crate::dispatcher;
+use crate::file_dialogs::BrowserFileDialogs;
 use crate::font_fallback::ROBOTO;
 use crate::gpu::Gpu;
 use crate::text_input::{TextInputListener, WebTextInput};
@@ -195,6 +196,11 @@ impl Platform for WebPlatform {
     /// The browser's asynchronous clipboard (`clipboard.rs`).
     fn clipboard(&self) -> Option<&dyn Clipboard> {
         Some(&BrowserClipboard)
+    }
+
+    /// The browser's pickers (`file_dialogs.rs`).
+    fn file_dialogs(&self) -> Option<&dyn FileDialogs> {
+        Some(&BrowserFileDialogs)
     }
 
     /// The page's one screen (`screen.rs`).

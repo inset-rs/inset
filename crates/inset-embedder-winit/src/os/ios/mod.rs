@@ -1,7 +1,8 @@
 //! What iOS reports differently from the desktop winit was written for: its window is the
 //! screen, and winit's size for it is the safe area rather than the whole layer; and what it adds,
-//! its pasteboard (`pasteboard`).
+//! its pasteboard (`pasteboard`) and its document pickers (`file_dialogs`).
 
+mod file_dialogs;
 mod pasteboard;
 
 use inset_embedder::{TargetPlatform, ViewPadding};
@@ -15,8 +16,7 @@ use super::apple::image_io_decoders;
 use super::{
     ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeComposition,
     NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
-    SystemFileDialogs, SystemRequests, WindowChrome, WindowGeometry, WindowMotion,
-    WindowVisibility, WorkQueue,
+    SystemRequests, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
 };
 
 /// iOS. A type only: never made, its answers are associated functions.
@@ -92,7 +92,6 @@ impl Screens for Ios {}
 impl PointerQueries for Ios {}
 impl NativeMenus for Ios {}
 impl WorkQueue for Ios {}
-impl SystemFileDialogs for Ios {}
 impl SystemRequests for Ios {}
 impl SystemChanges for Ios {}
 impl ApplicationControl for Ios {}

@@ -150,6 +150,10 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - `SystemContextMenu`, `TextServices`, `EmbedderClient::system_context_menu_hidden`, `custom_context_menu_action`
 - Perform the system context menu's built-in items in the host, and report its custom items and its closing to the client.
 
+**File dialogs**
+- `Platform::file_dialogs`, `FileDialogs::open_file`, `open_files`, `open_folder`, `save_file`, `OpenOptions`, `FolderOptions`, `SaveOptions`, `FileType`, `PickedFile`, `FileHandle`, `FileWriter`, `FileStream`, `FileDialogError`
+- Show the system's own panel, as a sheet on the parent view's window where the system has sheets; answer a path where the system gives one and the system's handle where it gives none, opening each pick as it is answered; grant writing only to a pick the app asked to write, and to a save's one file; answer `None` where the system has no file dialogs, and an error where it could not show one.
+
 **Dialogs**
 - none yet
 - Start each dialog with the system's non-blocking call and answer through a future, so the host's loop keeps running.

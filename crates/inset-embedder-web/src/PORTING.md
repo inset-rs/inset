@@ -44,6 +44,20 @@ Host implementation. Flutter analogue: the web engine under `engine/lib/web_ui`.
   Reason: platform — the browser IME talks to a focused HTML field, not winit's preedit events, and assigning `input.value` cancels composition.
   Affect: a field that has called `TextInput::attach` accepts typing and composition, a composing CJK cluster is not wiped by a caret update, the candidate window sits at the caret, and autofill / delta-model / a visible overlay field are absent.
 
+## file_dialogs.rs → `file_selector_web`
+
+- Change: where the browser has the File System Access API, a pick is the browser's file handle, read through `File.slice` and written through `createWritable({ keepExistingData: true })`, the file replaced when the writer finishes, where `file_selector_web` reads through an `<input type="file">` only and saves nothing.
+  Reason: platform — a page has no paths, and the handle is the one thing the browser lets a page read and write again.
+  Affect: on Chrome and Edge an app opens, writes and saves a file the user chose; an open pick asks for write permission only when the app asked to write.
+
+- Change: elsewhere opening falls back to an `<input type="file">`, whose files are read-only handles, and a save fails.
+  Reason: platform — Safari and Firefox let a page read a file the user chose, never write one, and a download would give the app nothing it could write again.
+  Affect: on Safari and Firefox an app opens files but saves none through a dialog.
+
+- Change: a folder pick fails.
+  Reason: platform — the browser's folder is a directory handle, which a path does not carry, and the interface has no shape for one yet.
+  Affect: an app asks for a folder in vain in the browser.
+
 ## Deferred
 
 - Hearing the pixel ratio change without a resize, as on a move to a screen at another ratio, which Flutter web hears through a `(resolution)` media query, and the screen's own `change` event. Trigger: an app that must follow its page across screens.

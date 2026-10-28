@@ -136,20 +136,20 @@ Signing happens when credentials are present, never by flag.
 
 ## Android
 
-The `.apk` is built without Gradle and without any Java of your own. The activity is Android's `NativeActivity`, which loads your library and calls the `android_main` that `#[inset::main]` emits.
+The `.apk` is built without Gradle and without any Java of your own. The activity is Inset's one Java class, `rs.inset.InsetActivity` (`android/rs/inset/InsetActivity.java`): Android's `NativeActivity`, which loads your library and calls the `android_main` that `#[inset::main]` emits, with the results of the activities your app starts handed on to it, as the file dialogs need. `javac` and `d8` compile it into the package's `classes.dex`.
 
 You need:
 
 - the Android SDK, with build tools and a platform, as Android Studio installs it. `ANDROID_HOME` names a different one.
 - the NDK, for the linker. SDK Manager > SDK Tools > NDK, or `ANDROID_NDK_HOME`.
-- a Java runtime for `apksigner`. Android Studio bundles one, or set `JAVA_HOME`.
+- a Java development kit, for `javac`, `d8` and `apksigner`. Android Studio bundles one, or set `JAVA_HOME`.
 - `rustup target add aarch64-linux-android`.
 
 `doctor` checks all four.
 
 `run -d <device>` builds for that device's processor. `build apk` builds for 64-bit ARM. After launching, the app's log follows until ctrl-c, which is `adb logcat` for its process.
 
-Still missing, because `NativeActivity` alone cannot reach them: the keyboard, the clipboard, and haptics. Text fields draw and scroll, but nothing can be typed into them yet. Each of these needs an activity written in Java.
+Still missing, because the activity does not reach them yet: the keyboard, the clipboard beyond text, and haptics. Text fields draw and scroll, but nothing can be typed into them yet. Each of these needs more of the activity's Java.
 
 File associations are not declared either: the host does not read the intent the activity starts with, so an intent filter would list the app under Open with and then drop the file.
 
