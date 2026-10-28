@@ -7187,6 +7187,20 @@ mod tests {
     }
 
     #[test]
+    fn an_edit_command_from_the_platforms_menu_reaches_the_focused_field() {
+        let mock_clipboard = Rc::new(inset_test::MockClipboard::new());
+        let (cell, _harness, controller) = focused_field(&mock_clipboard, "deleted");
+
+        let mut app = cell.borrow_mut();
+        let binding = crate::WidgetsBinding::instance(&mut app);
+        binding.handle_edit_command(&mut app, inset_embedder::EditCommand::Delete);
+        drop(app);
+        cell.checkpoint();
+
+        assert_eq!(controller.value(&cell.borrow()).text, "");
+    }
+
+    #[test]
     fn editable_text_builds_a_render_editable() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();

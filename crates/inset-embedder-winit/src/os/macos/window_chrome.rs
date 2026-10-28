@@ -1,5 +1,5 @@
-//! What a window's configuration asks of AppKit beyond winit's attributes: its shadow, presence
-//! on every Space, the glass or blur behind a see-through window, and, for a window that never
+//! What a window's configuration asks of AppKit beyond winit's attributes: its shadow, its keys
+//! offered to the framework before the menu bar, presence on every Space, the glass or blur behind a see-through window, and, for a window that never
 //! becomes key, the pointer's moves.
 
 use inset_embedder::{WindowBackground, WindowConfig};
@@ -15,7 +15,7 @@ use objc2_foundation::NSRect;
 use winit::platform::macos::WindowAttributesExtMacOS;
 use winit::window::{Window, WindowAttributes};
 
-use super::{AppKit, ns_view, ns_window};
+use super::{AppKit, menus, ns_view, ns_window};
 use crate::os::WindowChrome;
 
 impl WindowChrome for AppKit {
@@ -24,9 +24,11 @@ impl WindowChrome for AppKit {
         attributes.with_has_shadow(config.shadow)
     }
 
-    /// Pointer tracking for a window that never activates, presence on every Space, and the
-    /// blur or glass behind a see-through window.
+    /// The window's keys going to the framework before the menu bar, pointer tracking for a window
+    /// that never activates, presence on every Space, and the blur or glass behind a see-through
+    /// window.
     fn configure(window: &Window, config: &WindowConfig) {
+        menus::app_window_opened(window);
         if !config.activating {
             track_pointer_always(window);
         }

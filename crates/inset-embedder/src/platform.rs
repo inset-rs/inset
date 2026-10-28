@@ -5,9 +5,7 @@
 //! `EmbedderClient`, so this interface contains requests and state only.
 
 use std::any::Any;
-use std::future::Future;
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,6 +15,7 @@ use web_time::Instant;
 use crate::clipboard::Clipboard;
 use crate::fonts::FontSource;
 use crate::geometry::{Color, Offset, Rect};
+use crate::menus::{DockMenu, MenuBar, PopupMenus, TrayIcons};
 use crate::mouse_cursor::SystemMouseCursorKind;
 use crate::restoration::{RestorationMap, RestorationUpdate};
 use crate::system_context_menu::SystemContextMenuItem;
@@ -451,50 +450,6 @@ const THIS_OS: Option<TargetPlatform> = if cfg!(target_os = "android") {
     None
 };
 
-/// One line of a popup menu the host shows with its own menu system.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PopupMenuEntry {
-    Item {
-        label: String,
-        enabled: bool,
-        /// Drawn with a check mark, for a setting the menu toggles.
-        checked: bool,
-    },
-    Separator,
-}
-
-impl PopupMenuEntry {
-    pub fn item(label: impl Into<String>) -> PopupMenuEntry {
-        PopupMenuEntry::Item {
-            label: label.into(),
-            enabled: true,
-            checked: false,
-        }
-    }
-
-    pub fn checked(self, checked: bool) -> PopupMenuEntry {
-        match self {
-            PopupMenuEntry::Item { label, enabled, .. } => PopupMenuEntry::Item {
-                label,
-                enabled,
-                checked,
-            },
-            separator => separator,
-        }
-    }
-
-    pub fn enabled(self, enabled: bool) -> PopupMenuEntry {
-        match self {
-            PopupMenuEntry::Item { label, checked, .. } => PopupMenuEntry::Item {
-                label,
-                enabled,
-                checked,
-            },
-            separator => separator,
-        }
-    }
-}
-
 /// The host's threads as any thread reaches them: the two things the framework asks of them.
 /// gpui's `PlatformDispatcher`. Flutter's embedder API has the first as `post_task_callback`,
 /// with its target time, and keeps the second — the engine's own worker threads — to itself.
@@ -727,8 +682,25 @@ pub trait Platform: Any {
         None
     }
 
-    /// Native pop-up menus shown at the pointer, or `None` where the host has none.
+    /// The app's menu bar, or `None` where the system has none and the app draws its own, as on
+    /// Windows, Linux and phones (`menus`).
+    fn menu_bar(&self) -> Option<&dyn MenuBar> {
+        None
+    }
+
+    /// Menus the system opens at a point in a view, or `None` where the system has none and the
+    /// framework draws them.
     fn popup_menus(&self) -> Option<&dyn PopupMenus> {
+        None
+    }
+
+    /// The app's icons in the system's tray, or `None` where the system has no tray.
+    fn tray_icons(&self) -> Option<&dyn TrayIcons> {
+        None
+    }
+
+    /// The menu of the app's Dock icon, or `None` where the system has no Dock.
+    fn dock_menu(&self) -> Option<&dyn DockMenu> {
         None
     }
 
@@ -797,23 +769,6 @@ pub trait SystemContextMenu {
     /// Hides the system context menu (Flutter's `ContextMenu.hideSystemContextMenu`).
     fn hide(&self);
 }
-
-/// A native pop-up menu shown at the pointer, answered with the index chosen.
-pub trait PopupMenus {
-    /// Shows `entries` as the platform's own popup menu at the pointer; answers the index of the
-    /// entry chosen once it closes, `None` when it closed with none chosen. Not a Flutter call:
-    /// Flutter's context menus draw inside the view, and a desktop panel narrower than its menu
-    /// needs the system's, which is its own window.
-    ///
-    /// The host opens the menu after this call returns and runs the menu's own loop outside every
-    /// call into the app, so the app's frames, timers and events go on while it is open, as they
-    /// do in Flutter, whose platform calls answer later.
-    fn show(&self, entries: &[PopupMenuEntry]) -> PopupMenuFuture;
-}
-
-/// A popup menu on screen: the index of the entry chosen, once it closes. Flutter's `Future<int?>`
-/// from a platform call.
-pub type PopupMenuFuture = Pin<Box<dyn Future<Output = Option<usize>>>>;
 
 /// The screens the app's views are on: what drawing on each needs, as Flutter's
 /// `PlatformDispatcher.displays` lists them, and where each is, for an app that places a window

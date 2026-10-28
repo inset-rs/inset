@@ -2,8 +2,8 @@
 //! be on (`screens`), what its configuration asks beyond winit's attributes (`window_chrome`), how
 //! a frame reaches the display (`frame_presentation`, `display_links`) and how a wait on a
 //! screen's vsync is served (`vsync_waiter`), the pointer (`pointer`), native surfaces
-//! (`composition`), whether a window is visible, for the app (`visibility`), the popup menu
-//! (`popup_menu`), work off the main thread (`work_queue`), what AppKit asks of the application
+//! (`composition`), whether a window is visible, for the app (`visibility`), the menus: the menu
+//! bar, pop-up menus, the Dock icon's menu and the status items (`menus`), work off the main thread (`work_queue`), what AppKit asks of the application
 //! through its delegate, how it quits and hiding it (`app_delegate`), what it says of the
 //! application's activation and visibility (`app_lifecycle`), and what it says changed about the
 //! screens and the user's languages (`system_changes`).
@@ -25,9 +25,9 @@ mod app_lifecycle;
 mod composition;
 mod display_links;
 mod frame_presentation;
+mod menus;
 mod pasteboard;
 mod pointer;
-mod popup_menu;
 mod screens;
 mod system_changes;
 mod visibility;

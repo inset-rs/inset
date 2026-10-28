@@ -139,11 +139,15 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - List each item in the MIME types the system offers it in without reading it, fail a read once the clipboard has changed, write every form and option the system carries and refuse the forms it does not, write a promised file's bytes from its producer into the file where the receiver chose and remove it when the producer fails, clear a copy that expires where the system has no expiry of its own, waking for its time as for the app's timers, and call `clipboard_changed` whenever the system says another writer changed it or the host looks and finds such a change, or clears a copy that expired, counting the app's own writes as seen.
 
 **Copy, cut and paste**
-- `EmbedderClient::clipboard_event`, `ClipboardEvent`, `CopyRequest`
-- Send the platform's own copy, cut and paste, which a key reaches only once the framework has left it unhandled, with what was pasted, and with where a copy is written.
+- `EmbedderClient::clipboard_event`, `ClipboardEvent`, `CopyRequest`, `edit_command`, `EditCommand`, `TextInputHost::provides_edit_commands`
+- Send the platform's own copy, cut and paste, which a key reaches only once the framework has left it unhandled, with what was pasted, and with where a copy is written; send Edit's undo, redo, select all and delete as `edit_command`; and say whether the system's menus send copy, cut and paste, so a text field leaves those keys to them.
 
-**Menus and text services**
-- `PopupMenus`, `SystemContextMenu`, `TextServices`, `EmbedderClient::system_context_menu_hidden`, `custom_context_menu_action`; none yet for the menu bar
+**Menus**
+- `MenuEntry`, `MenuItem`, `ProvidedItem`, `Platform::menu_bar`, `popup_menus`, `dock_menu`, `tray_icons`, `MenuBar`, `MenuBar::perform_key_equivalent`, `PopupMenus`, `DockMenu`, `TrayIcons`, `TrayIconFuture`, `TrayIconError`, `TrayIcon`, `AttachedMenu`, `MenuAtIcon`, `EmbedderClient::menu_selected`, `dock_menu_selected`, `tray_icon_event`
+- Answer each place with the system's own menu, or `None` where the system has none, never one the host draws; build a menu whole from the value each time it is set; make a provided item act as the system's own, Edit's sent to the focused view, and leave out one the system has no counterpart for; show the system's standard menu bar until the app sets its own; give the framework a key before the menu bar's key equivalents, and keep each key-down's own event a short while, bounded, so a key the app hands back later reaches the menu bar as the system's event; answer a tray icon once it exists, or why the system did not show it; and remove a tray icon when its handle drops.
+
+**Text services**
+- `SystemContextMenu`, `TextServices`, `EmbedderClient::system_context_menu_hidden`, `custom_context_menu_action`
 - Perform the system context menu's built-in items in the host, and report its custom items and its closing to the client.
 
 **Dialogs**
@@ -185,8 +189,8 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - Whatever a framework call or a system callback needs of the loop or the client becomes a request, served in order on a later turn.
 
 **Nested loops**
-- `PopupMenus::show`, `PopupMenuFuture`
-- Wakes, vsyncs and frames keep coming while the system runs a nested loop, such as a popup menu, a modal dialog or a live resize: open a popup menu after `show` returns, its loop outside every call into the app, and answer the entry chosen through the future once it closes.
+- `PopupMenus::show`, `MenuAtIcon::show`, `PopupMenuFuture`
+- Wakes, vsyncs and frames keep coming while the system runs a nested loop, such as a popup menu, a modal dialog or a live resize: open a popup menu after `show` returns, its loop outside every call into the app, and answer the item chosen through the future once it closes.
 
 **Panics**
 - none yet

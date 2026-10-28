@@ -10,7 +10,7 @@ use winit::window::WindowId;
 
 use crate::ime::ImeOutcome;
 use crate::mouse_cursor;
-use crate::os::{PointerQueries, ThisOs};
+use crate::os::{NativeMenus, PointerQueries, ThisOs};
 use crate::pointer::PointerStamp;
 use crate::text_input::Typed;
 
@@ -134,9 +134,14 @@ impl<C: EmbedderClient> MainLoop<C> {
         else {
             return;
         };
-        // Flutter's macOS `FlutterKeyboardManager`: the text input plugin sees a key only
-        // after the framework declined it.
-        if !self.client.key_data(data) && event.state == ElementState::Pressed {
+        // Flutter's macOS `FlutterKeyboardManager`: the system's menus see a key only after the
+        // framework declined it, as a key equivalent it redispatches, and the text input plugin
+        // after those. The key's own event is kept for an app that declines it later.
+        ThisOs::keep_key_event(&data);
+        if !self.client.key_data(data)
+            && event.state == ElementState::Pressed
+            && !ThisOs::perform_key_equivalent()
+        {
             self.type_into_text_input(id, event);
         }
     }

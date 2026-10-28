@@ -44,8 +44,9 @@ mod client {
     use std::time::Duration;
 
     use inset_embedder::{
-        Dispatcher, EmbedderClient, Frame, Instant, KeyData, PlatformRef, PointerDataPacket,
-        PopupMenuEntry, PopupMenuFuture, ScreenId, ViewId, VsyncObserver, VsyncWaiter,
+        Dispatcher, EmbedderClient, Frame, Instant, KeyData, MenuEntry, MenuItem, Offset,
+        PlatformRef, PointerDataPacket, PopupMenuFuture, ScreenId, ViewId, VsyncObserver,
+        VsyncWaiter,
     };
 
     use crate::TEST;
@@ -85,15 +86,14 @@ mod client {
             }
         }
 
-        /// Shows a popup menu, closed with Escape after [`MENU_OPEN_FOR`].
-        fn open_menu(&mut self) {
+        /// Shows a popup menu in `view`, closed with Escape after [`MENU_OPEN_FOR`].
+        fn open_menu(&mut self, view: ViewId) {
             let menus = self.platform.popup_menus().expect("a popup menu on macOS");
-            let entries = [PopupMenuEntry::Item {
-                label: "Drawing".to_owned(),
-                enabled: true,
-                checked: false,
+            let entries = [MenuEntry::Item {
+                id: 1,
+                item: MenuItem::new("Drawing"),
             }];
-            let shown = menus.show(&entries);
+            let shown = menus.show(view, Offset::new(20.0, 20.0), &entries);
             appkit::press_escape_after(MENU_OPEN_FOR);
             self.menu = Some((shown, Instant::now()));
         }
@@ -193,7 +193,7 @@ mod client {
             let (waits, stop) = (Arc::clone(&self.waits), Arc::clone(&self.stop_waiting));
             std::thread::spawn(move || wait_on(waiter, screen, waits, stop));
             self.platform.request_frame(id);
-            self.open_menu();
+            self.open_menu(id);
         }
 
         fn view_metrics_changed(&mut self, _id: ViewId) {}

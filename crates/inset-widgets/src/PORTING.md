@@ -72,6 +72,18 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — a host that owns the user's copy and paste, as a browser does, sends them as events, where Flutter's web engine has the browser paste into its own hidden text field.
   Affect: the browser's or an Edit menu's Copy, Cut and Paste act on whatever widget has the focus, a selectable text included.
 
+- Change: `WidgetsBinding::handle_edit_command` hands the system Edit menu's undo, redo, select all and delete to the primary focus as `UndoTextIntent`, `RedoTextIntent`, `SelectAllTextIntent` and a forward `DeleteCharacterIntent`; Flutter's macOS embedder sends the field its selectors through the text input channel instead.
+  Reason: platform — the host sends Edit's items as commands for the focused view, as it sends copy, cut and paste.
+  Affect: Edit's items act on whatever widget has the focus and handles the intent, and on nothing when none does.
+
+- Change: the binding hears every tray icon's events and hands each to the listener set for its icon (`add_tray_icon_listener`); Flutter has no tray.
+  Reason: platform — the host reports a tray icon's events through one client hook, and several icons, each a `PlatformTrayIcon` or one the app added itself, hear their own.
+  Affect: an app that adds an icon itself hears it through a listener, since the binding owns the hook.
+
+- Change: the binding makes its `DefaultPlatformMenuDelegate` over the app, which sets menus on the platform's `MenuBar` and hears its choices through `EmbedderClient::menu_selected`, where Flutter's binding makes one over `SystemChannels.menu`.
+  Reason: platform — there are no method channels; the host trait is the channel.
+  Affect: a `PlatformMenuBar` sets nothing on a host without a menu bar, where Flutter's channel call fails unheard.
+
 - Change: `WidgetsBindingObserver` hears a view added or removed by its id (`did_add_view`, `did_remove_view`) and a request to close one (`did_request_view_close`), where Flutter tells only `didChangeMetrics` and a listener compares `platformDispatcher.views` with what it had.
   Reason: platform — the host reports each view's arrival, departure and close request by view, and every view the app has arrives this way.
   Affect: the observers hear only the views no `WindowController` asked for, and a close request stops at the first observer that answers `true`.
@@ -232,6 +244,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: the keys a platform is said to handle itself are only stood aside for when the host says it turns editing keys into edits.
   Reason: platform — Dart stands aside for every macOS and iOS host because its embedders for those two are the only ones it has; a host that reports plain key presses interprets nothing, so standing aside would leave those keys to nobody.
   Affect: over such a host a field's backspace, delete and arrow keys edit the text instead of doing nothing, on macOS and iOS as everywhere else.
+
+- Change: where the host says the system's menus send Edit's cut, copy and paste, a field stands aside for those keys, the clipboard entries of the web's table, with Control and with Command, and acts on the `clipboard_event` the menu sends; Dart does so on the web only.
+  Reason: platform — such a menu takes the key once the framework leaves it, and its command is the system's own, which a host may require for a paste.
+  Affect: on macOS with the standard Edit menu, ⌘C, ⌘X and ⌘V reach a field through the menu, which flashes, and select all stays the field's.
 
 ## widgets/app.rs → app.dart
 
@@ -438,6 +454,42 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: language — without subclassing, a `TextEditingController` is no `ValueNotifier`; both are value listenables.
   Affect: an `UndoHistory` can also track another value listenable, such as an animation.
 
+## widgets/platform_menu_bar.rs → platform_menu_bar.dart
+
+- Change: `PlatformMenuItem` is a trait with `PlainPlatformMenuItem` as Dart's concrete class, its shared bodies on `PlatformMenuItemBase`, and `to_menu_entries` builds `MenuEntry` values where Dart's `toChannelRepresentation` builds maps.
+  Reason: language — no class inheritance; and platform — the menu crosses to the host as a value, not a channel message.
+  Affect: a subclass of `PlatformMenuItem` implements the trait, and the delegate hands the host values it can check.
+
+- Change: an item also has a `check` and an `icon`, which a native menu draws; Dart's `PlatformMenuItem` has neither.
+  Reason: platform — AppKit, Win32 and the DBus menu draw check marks and icons, which only a menu the framework draws could draw otherwise.
+  Affect: a checkbox or radio item shows its state in the system's menu.
+
+- Change: `PlatformProvidedMenuItemType` adds `Undo`, `Redo`, `Cut`, `Copy`, `Paste`, `SelectAll` and `Delete`, and its speaking items map to no item of the host's.
+  Reason: platform — the system knows its Edit menu by these, and the host sends them to the focused view (`ProvidedItem`); no host provides speech.
+  Affect: an app gets the system's Edit menu with dictation and emoji on macOS, and `has_menu` answers no for the speaking items.
+
+- Change: a tooltip is not carried, and `onOpen` and `onClose` are never called.
+  Reason: platform — no host's menu interface says a menu opened or closed, and AppKit's menus show no tooltip the host sets.
+  Affect: a menu's open and close callbacks stay silent, and a tooltip shows nowhere.
+
+- Change: a provided item's label is the host's, in English, and its enabled state is the value's alone, where AppKit validates items through the responder chain.
+  Reason: platform — the host builds each menu whole from the value and leaves deciding to the app.
+  Affect: macOS's Enter Full Screen keeps its title in full screen, and an Edit item stays enabled with nothing to copy.
+
+## widgets/platform_tray_icon.rs → no Flutter counterpart: `PlatformMenuBar`'s form, SwiftUI's `MenuBarExtra`'s lifetime, Electron's `Tray.setContextMenu`'s trigger
+
+- Change: `PlatformTrayIcon` is an icon in the system's tray with an image, a tooltip, a menu of the items `PlatformMenuBar` takes and callbacks for a click and a double click, which Flutter does not have; it takes `PlatformMenuBar`'s form, a widget with no look of its own that hands the host a value on each change and dispatches a choice to the item's callback or intent, by ids of each icon's own.
+  Reason: platform — a desktop app's tray icon is part of what it shows, and a value rebuilt from state is how this framework hands the host its menus.
+  Affect: an app shows a tray icon by putting the widget in its tree, and several may be there at once.
+
+- Change: the icon is there while the widget is in the tree, as SwiftUI's `MenuBarExtra` is while it is in its scene: added when the widget is mounted, once the host answers it, removed when it is unmounted, and updated by a rebuild.
+  Reason: platform — the host's icon is a resource the widget owns, as a ticker or a focus node is a state's.
+  Affect: an icon the system refuses, or one answered after the widget left the tree, shows nowhere.
+
+- Change: the menu shows on each system's own trigger, as Electron's `Tray.setContextMenu` shows it: handed to the system where the icon offers a menu the system opens by itself (macOS, Linux), opened at the icon on `ContextMenuRequested` elsewhere (Windows).
+  Reason: platform — each system decides when a tray's menu opens, and the framework, not the host, keeps the convention.
+  Affect: the same widget gives a macOS click, a Linux desktop's trigger and a Windows right click the menu; an app that wants another trigger uses the icon's capabilities directly.
+
 ## widgets/system_context_menu.rs → system_context_menu.dart
 
 - Change: custom item callback ids are a process-wide counter string, not Dart's `hashCode`.
@@ -529,7 +581,8 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - table.rs: the `Semantics(role: cell)` wrapper `TableCell.build` adds. Trigger: accessibility (do not stub).
 - framework/: `reassemble`. Trigger: hot reload.
 - framework/: `ObjectKey`, `GlobalObjectKey`. Trigger: a widget keyed by object identity.
-- binding.rs: the observer callbacks no host reports (memory pressure, predictive back, pushed routes and route information, the text scale, accessibility features), the platform menu delegate, `scheduleWarmUpFrame`. Trigger: a host that reports those events.
+- binding.rs: the observer callbacks no host reports (memory pressure, predictive back, pushed routes and route information, the text scale, accessibility features), `scheduleWarmUpFrame`. Trigger: a host that reports those events.
+- platform_menu_bar.rs: `PlatformMenuItem.onOpen` and `onClose`, and the tooltip. Trigger: a host that reports a menu opened or closed.
 - binding.rs: first-frame-rasterized reporting and the push/pop route handlers. Trigger: `SchedulerBinding.addTimingsCallback`; navigation.
 - view.rs: `LookupBoundary` around a `ViewAnchor`'s view, and the view's semantics owner callbacks. Trigger: `LookupBoundary`; accessibility.
 - `LookupBoundary` in the `View`, `Overlay` and theater-marker lookups, which look straight up the tree. Trigger: `LookupBoundary` in framework.
@@ -586,7 +639,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - scrollbar.rs: the painter's semantics and the structured error reports, which are plain assert messages here. Trigger: accessibility (do not stub); diagnostics.
 - radio_group.rs: the radio-group semantics wrapper. Trigger: accessibility (do not stub).
 - radio_group.rs: the post-frame check that at most one radio carries the group value. Trigger: diagnostics, and a post-frame callback usable from a state that may run without a binding.
-- shortcuts.rs: menu serialization of the activators, the deprecated `isActivatedBy`, the duplicate-shortcut check, and `Shortcuts.includeSemantics`. Trigger: `platform_menu_bar.dart`; content equality on `ShortcutActivator`; diagnostics; accessibility.
+- shortcuts.rs: the deprecated `isActivatedBy`, the duplicate-shortcut check, and `Shortcuts.includeSemantics`. Trigger: content equality on `ShortcutActivator`; diagnostics; accessibility.
 - actions.rs, shortcuts.rs, focus_traversal.rs: diagnostics on the actions, intents, activators, managers, policies and orders. Trigger: diagnostics.
 - navigator.rs, routes.rs, pop_scope.rs: the members Dart deprecates in favour of the pop-with-result and mark-for-complete ones. Trigger: never — port them only if Flutter un-deprecates them.
 - navigator.rs: restoring the focused semantic node after a pop. Trigger: accessibility (do not stub).

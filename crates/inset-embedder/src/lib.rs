@@ -19,6 +19,7 @@ mod geometry;
 mod image;
 mod key;
 mod locale;
+mod menus;
 mod mouse_cursor;
 mod painting;
 mod paragraph;
@@ -54,6 +55,12 @@ pub use image::{
 };
 pub use key::{KeyData, KeyEventDeviceType, KeyEventType};
 pub use locale::Locale;
+pub use menus::{
+    AttachedMenu, CheckState, DockMenu, EditCommand, IconImage, MenuAtIcon, MenuBar, MenuEntry,
+    MenuId, MenuItem, MenuItemCheck, MenuShortcut, PopupMenuFuture, PopupMenus, ProvidedItem,
+    ShortcutModifiers, TrayIcon, TrayIconError, TrayIconEvent, TrayIconFuture, TrayIconId,
+    TrayIcons,
+};
 pub use mouse_cursor::SystemMouseCursorKind;
 pub use painting::*;
 pub use paragraph::*;
@@ -61,8 +68,8 @@ pub use platform::{
     AppExit, AppExitReply, AppExitResponse, AppExitType, AppLifecycleState,
     ApplicationSwitcherDescription, Brightness, Dispatcher, FileOpening, Frame, HapticFeedbackType,
     Haptics, InertDispatcher, InertPlatform, MouseCursor, OpenFilesHandler, Platform, PlatformRef,
-    PopupMenuEntry, PopupMenuFuture, PopupMenus, Restoration, Screen, ScreenId, Screens,
-    SystemChrome, SystemContextMenu, SystemUiOverlayStyle, TargetPlatform, TextServices, ViewRef,
+    Restoration, Screen, ScreenId, Screens, SystemChrome, SystemContextMenu, SystemUiOverlayStyle,
+    TargetPlatform, TextServices, ViewRef,
 };
 pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,

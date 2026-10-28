@@ -9,7 +9,8 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use inset_embedder::{
-    ClipboardEvent, DropData, PlatformRef, RequestId, ViewError, ViewFocusEvent, ViewId,
+    ClipboardEvent, DropData, EditCommand, MenuId, PlatformRef, RequestId, TrayIconEvent,
+    TrayIconId, ViewError, ViewFocusEvent, ViewId,
 };
 use slotmap::new_key_type;
 
@@ -155,6 +156,18 @@ pub struct PlatformCallbacks {
     /// The user copied, cut or pasted in a view through the platform's own command; no Flutter
     /// counterpart.
     pub on_clipboard_event: Option<ClipboardEventCallback>,
+    /// The user chose an edit command for a view from the platform's own Edit menu; no Flutter
+    /// counterpart.
+    pub on_edit_command: Option<EditCommandCallback>,
+    /// The user chose an item of the app's menu bar. Flutter's `Menu.selectedCallback` on the
+    /// `flutter/menu` channel, which `DefaultPlatformMenuDelegate` handles.
+    pub on_menu_selected: Option<MenuSelectedCallback>,
+    /// The user chose an item of the Dock icon's menu; no Flutter counterpart, and the app's to
+    /// set.
+    pub on_dock_menu_selected: Option<MenuSelectedCallback>,
+    /// Something happened to one of the app's tray icons; no Flutter counterpart, and the app's to
+    /// set.
+    pub on_tray_icon_event: Option<TrayIconEventCallback>,
     /// The user asked to go back. Answers whether the application went back. Flutter's
     /// `popRoute` on `SystemChannels.navigation`.
     pub on_pop_route: Option<PopRouteCallback>,
@@ -180,6 +193,15 @@ pub type DropCallback = Rc<dyn Fn(&mut App, DropData)>;
 
 /// The framework's handler for `EmbedderClient::clipboard_event`.
 pub type ClipboardEventCallback = Rc<dyn Fn(&mut App, ViewId, ClipboardEvent)>;
+
+/// The framework's handler for `EmbedderClient::edit_command`.
+pub type EditCommandCallback = Rc<dyn Fn(&mut App, ViewId, EditCommand)>;
+
+/// The handler for `EmbedderClient::menu_selected` and `dock_menu_selected`.
+pub type MenuSelectedCallback = Rc<dyn Fn(&mut App, MenuId)>;
+
+/// The app's handler for `EmbedderClient::tray_icon_event`.
+pub type TrayIconEventCallback = Rc<dyn Fn(&mut App, TrayIconId, TrayIconEvent)>;
 
 /// The framework's handler for `EmbedderClient::pop_route`.
 pub type PopRouteCallback = Rc<dyn Fn(&mut App) -> bool>;

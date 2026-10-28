@@ -10,12 +10,13 @@
 //! for a window where it is given none. The host's copy, cut and paste, which Flutter's engines
 //! never send, go to the primary focus as text editing intents.
 
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
 use inset_embedder::{
-    AppExitResponse, AppExitType, AppLifecycleState, ClipboardEvent, DropData, Locale, RequestId,
-    ViewError, ViewFocusEvent, ViewId, ViewRef, WindowConfig,
+    AppExitResponse, AppExitType, AppLifecycleState, ClipboardEvent, DropData, EditCommand, Locale,
+    RequestId, TrayIconEvent, TrayIconId, ViewError, ViewFocusEvent, ViewId, ViewRef, WindowConfig,
 };
 use inset_foundation::{App, Handle, Listenable, Listener, Task, Timer};
 use inset_rendering::{RendererBinding, RendererBindingOverridesObject};
@@ -32,7 +33,11 @@ use crate::multi_view_app::MultiViewApp;
 use crate::view::{View, ViewCollection};
 use crate::widgets::actions::{Actions, Intent};
 use crate::widgets::focus_manager::FocusManager;
-use crate::widgets::text_editing_intents::{CopySelectionTextIntent, PasteTextIntent};
+use crate::widgets::platform_menu_bar::{DefaultPlatformMenuDelegate, PlatformMenuDelegateRef};
+use crate::widgets::text_editing_intents::{
+    CopySelectionTextIntent, DeleteCharacterIntent, PasteTextIntent, RedoTextIntent,
+    SelectAllTextIntent, UndoTextIntent,
+};
 use crate::window::Window;
 use crate::windowing::{WindowController, WindowingOwner};
 
@@ -54,7 +59,14 @@ pub struct WidgetsBinding {
     observers: Vec<WidgetsBindingObserverRef>,
     /// Flutter's `windowingOwner`: the window controllers, and every view event first.
     windowing_owner: Option<Handle<WindowingOwner>>,
+    /// Flutter's `platformMenuDelegate`.
+    platform_menu_delegate: Option<PlatformMenuDelegateRef>,
+    /// Who hears each tray icon's events, by the icon's id.
+    tray_icon_listeners: HashMap<TrayIconId, TrayIconListener>,
 }
+
+/// What hears a tray icon's events (`WidgetsBinding::add_tray_icon_listener`).
+pub type TrayIconListener = Rc<dyn Fn(&mut App, TrayIconEvent)>;
 
 /// Interface for classes that register with the Widgets layer binding.
 ///
@@ -338,6 +350,28 @@ impl WidgetsBinding {
         let windowing_owner = WindowingOwner::new(app);
         app.get_mut(self).windowing_owner = Some(windowing_owner);
         WidgetsBinding::assign_dispatcher_callbacks(app);
+        let platform_menu_delegate: PlatformMenuDelegateRef = DefaultPlatformMenuDelegate::new(app);
+        app.get_mut(self).platform_menu_delegate = Some(platform_menu_delegate);
+    }
+
+    /// The [`PlatformMenuDelegate`] the app's [`PlatformMenuBar`] hands its menus to: by default
+    /// a [`DefaultPlatformMenuDelegate`], which hands them to the host's menu bar.
+    pub fn platform_menu_delegate(self: Handle<Self>, app: &App) -> PlatformMenuDelegateRef {
+        Rc::clone(
+            app.get(self)
+                .platform_menu_delegate
+                .as_ref()
+                .expect("init_instances sets the platform menu delegate"),
+        )
+    }
+
+    /// Replaces the [`PlatformMenuDelegate`], as Flutter's `platformMenuDelegate` setter does.
+    pub fn set_platform_menu_delegate(
+        self: Handle<Self>,
+        app: &mut App,
+        delegate: PlatformMenuDelegateRef,
+    ) {
+        app.get_mut(self).platform_menu_delegate = Some(delegate);
     }
 
     /// Registers this binding's overrides with the bindings below it, setting each of them up
@@ -365,6 +399,12 @@ impl WidgetsBinding {
         }));
         callbacks.on_clipboard_event = Some(Rc::new(|app, _view, event| {
             WidgetsBinding::instance(app).handle_clipboard_event(app, event)
+        }));
+        callbacks.on_edit_command = Some(Rc::new(|app, _view, command| {
+            WidgetsBinding::instance(app).handle_edit_command(app, command)
+        }));
+        callbacks.on_tray_icon_event = Some(Rc::new(|app, icon, event| {
+            WidgetsBinding::instance(app).handle_tray_icon_event(app, icon, event)
         }));
         callbacks.on_locale_changed = Some(Listener::new(|app| {
             WidgetsBinding::instance(app).handle_locale_changed(app)
@@ -618,6 +658,51 @@ impl WidgetsBinding {
         });
     }
 
+    /// The user chose an edit command from the platform's own Edit menu: the command's text
+    /// editing intent goes to the primary focus, as a key's shortcut sends it. No Flutter
+    /// counterpart: Flutter's macOS embedder sends the command to its text input plugin.
+    pub fn handle_edit_command(self: Handle<Self>, app: &mut App, command: EditCommand) {
+        let Some(primary_context) = FocusManager::instance(app)
+            .primary_focus(app)
+            .and_then(|focus| focus.context(app))
+        else {
+            return;
+        };
+        let intent = intent_for_edit_command(command);
+        Actions::maybe_invoke(app, primary_context, &*intent);
+    }
+
+    /// Has `listener` hear the events of the tray icon `icon`, in place of whatever heard them
+    /// before: a [`PlatformTrayIcon`](crate::widgets::platform_tray_icon::PlatformTrayIcon)'s
+    /// icon, or one the app added itself. No Flutter counterpart: Flutter has no tray.
+    pub fn add_tray_icon_listener(
+        self: Handle<Self>,
+        app: &mut App,
+        icon: TrayIconId,
+        listener: TrayIconListener,
+    ) {
+        app.get_mut(self).tray_icon_listeners.insert(icon, listener);
+    }
+
+    /// Stops the events of the tray icon `icon` reaching its listener.
+    pub fn remove_tray_icon_listener(self: Handle<Self>, app: &mut App, icon: TrayIconId) {
+        app.get_mut(self).tray_icon_listeners.remove(&icon);
+    }
+
+    /// Something happened to the tray icon `icon`, as the host reports it: its listener hears it,
+    /// and nothing does when it has none.
+    pub fn handle_tray_icon_event(
+        self: Handle<Self>,
+        app: &mut App,
+        icon: TrayIconId,
+        event: TrayIconEvent,
+    ) {
+        let listener = app.get(self).tray_icon_listeners.get(&icon).cloned();
+        if let Some(listener) = listener {
+            listener(app, event);
+        }
+    }
+
     /// Called when the platform brightness changes: tells the observers.
     pub fn handle_platform_brightness_changed(self: Handle<Self>, app: &mut App) {
         for observer in app.get(self).observers.clone() {
@@ -678,6 +763,17 @@ impl WidgetsBinding {
 }
 
 /// The text editing intent of the platform's command behind `event`, as a key would invoke it.
+fn intent_for_edit_command(command: EditCommand) -> Box<dyn Intent> {
+    match command {
+        EditCommand::Undo => Box::new(UndoTextIntent::new(SelectionChangedCause::Keyboard)),
+        EditCommand::Redo => Box::new(RedoTextIntent::new(SelectionChangedCause::Keyboard)),
+        EditCommand::SelectAll => {
+            Box::new(SelectAllTextIntent::new(SelectionChangedCause::Keyboard))
+        }
+        EditCommand::Delete => Box::new(DeleteCharacterIntent::new(true)),
+    }
+}
+
 fn intent_for_clipboard_event(event: &ClipboardEvent) -> Box<dyn Intent> {
     match event {
         ClipboardEvent::Copy(_) => Box::new(CopySelectionTextIntent::COPY),

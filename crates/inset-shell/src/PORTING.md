@@ -16,6 +16,10 @@ No Flutter counterpart. Dart has no type — the engine owns the isolate.
   Reason: platform — the shell cannot name `WidgetsBinding`, which lives above it.
   Affect: a host that reports a theme or locale change reaches `MediaQuery` observers without the shell knowing widgets.
 
+- Change: `edit_command`, `menu_selected`, `dock_menu_selected` and `tray_icon_event` invoke the callbacks set on `App::platform_callbacks`, each in a turn of its own: the widgets binding sets the edit command's, the menu bar's and the tray icons', and the app the Dock menu's.
+  Reason: platform — the shell cannot name `WidgetsBinding` or the app, which live above it.
+  Affect: a choice in a menu with no callback set, such as the Dock menu of an app that set none, is dropped.
+
 - Change: `system_fonts_changed` notifies `PaintingBinding.systemFonts` in a turn of its own.
   Reason: platform — Dart's engine posts `fontsChange` on a system channel; here the host calls the client.
   Affect: paragraphs listening to `systemFonts` relayout after the host loads faces.

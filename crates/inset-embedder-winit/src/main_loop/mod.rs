@@ -34,12 +34,14 @@
 //! (the loop lets go of it on its next turn), sliding one in, hiding the application, the
 //! clipboard, a view's present and its text input, and what the screens and the pointer are.
 //!
-//! A popup menu runs a loop of AppKit's own while it tracks the pointer. `PopupMenus::show` only
-//! asks for it: a perform request on the main run loop opens the menu once winit's call has
-//! returned (`os/macos/popup_menu.rs`), so its loop runs outside every call of winit's into the
-//! handler, and winit, whose run-loop observers and event source are in the common modes, goes on
-//! calling the handler from inside it: the framework's frames, wakes and input go on while the
-//! menu is open. Once it closes, `MenuClosed` reconciles the buttons it kept, and the app then
+//! A popup menu runs a loop of the system's own while it tracks the pointer. `PopupMenus::show`
+//! only asks for it: on macOS a perform request on the main run loop opens the menu once winit's
+//! call has returned (`os/macos/menus/popup_menu.rs`), so its loop runs outside every call of
+//! winit's into the handler, and winit, whose run-loop observers and event source are in the
+//! common modes, goes on calling the handler from inside it: the framework's frames, wakes and
+//! input go on while the menu is open. On Windows a message posted to the embedder's hidden window
+//! opens it (`os/windows/menus/`), and Windows goes on dispatching winit's messages from the
+//! menu's loop. Once it closes, `MenuClosed` reconciles the buttons it kept, and the app then
 //! hears the entry chosen through the future `show` answered (`popup_menus.rs`).
 //!
 //! The loop runs two of the app's own handlers directly, from a turn of its own and outside every
@@ -80,6 +82,7 @@
 mod app;
 mod frames;
 mod input;
+mod menus;
 mod quitting;
 mod windows;
 
@@ -101,6 +104,7 @@ use crate::images::CreateImageLoader;
 use crate::keyboard::Keyboard;
 use crate::launch::StartApp;
 use crate::lifecycle::{AppLifecycle, LifecycleNotice};
+use crate::menus::MenuEvent;
 use crate::platform::WinitPlatform;
 use crate::pointer::{Pointer, PointerIds};
 use crate::state::EmbedderState;
@@ -118,6 +122,15 @@ pub(crate) enum MainLoopEvent {
     /// A native menu ran its own loop and closed: the buttons it kept are reconciled and the
     /// client woken, before the app hears the entry chosen.
     MenuClosed,
+    /// What a menu of the system's tells the app (`menus/`).
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "windows", target_os = "linux")),
+        allow(
+            dead_code,
+            reason = "a system without menus of its own sends no menu's events"
+        )
+    )]
+    Menu(MenuEvent),
     /// When to wake the framework for its earliest waiting timer, or `None` when no timer
     /// is waiting; served by `about_to_wait` when that time comes.
     TimerWakeup(Option<Instant>),
@@ -294,6 +307,7 @@ impl<C: EmbedderClient> ApplicationHandler<MainLoopEvent> for MainLoop<C> {
         match event {
             MainLoopEvent::AppRequest => self.serve_next_app_request(event_loop),
             MainLoopEvent::MenuClosed => self.on_menu_closed(),
+            MainLoopEvent::Menu(event) => self.on_menu_event(event),
             MainLoopEvent::TimerWakeup(wakeup) => self.on_wake_at(wakeup),
             MainLoopEvent::WakeNow => self.on_wake_now(),
             MainLoopEvent::Vsync(screen) => self.on_vsync(screen),

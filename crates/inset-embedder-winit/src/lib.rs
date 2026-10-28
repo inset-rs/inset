@@ -33,6 +33,7 @@ mod lifecycle;
 mod locales;
 mod macos;
 mod main_loop;
+mod menus;
 mod mouse_cursor;
 mod os;
 mod platform;

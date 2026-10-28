@@ -31,9 +31,17 @@ sys-locale = "0.3"
 [target.'cfg(not(any(target_os = "macos", target_os = "ios")))'.dependencies]
 arboard.workspace = true
 
-# The clipboard's sequence number, at the version arboard reaches Windows' clipboard with.
+# The clipboard's sequence number, menus at a point and icons in the notification area, at the
+# version arboard reaches Windows' clipboard with.
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.60", features = ["Win32_System_DataExchange"] }
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_DataExchange", "Win32_System_LibraryLoader", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+# The tray's StatusNotifierItems and their DBus menus, over the session bus, and a menu item's icon
+# as the PNG the DBus menu takes. zbus is pure Rust; its 5.x line keeps the blocking API that the
+# embedder, which runs no async executor, calls.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
+png = "0.18"
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 valo-codec-apple = { version = "0.13.1", optional = true }
@@ -42,7 +50,7 @@ valo-codec-apple = { version = "0.13.1", optional = true }
 block2 = "0.6"
 dispatch2 = "0.3"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSString", "NSObject", "NSGeometry", "NSArray", "NSData", "NSDate", "NSDictionary", "NSError", "NSIndexSet", "NSItemProvider", "NSNotification", "NSOperation", "NSProgress", "NSPropertyList", "NSRunLoop", "NSURL", "NSValue", "block2"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSObject", "NSGeometry", "NSArray", "NSData", "NSDate", "NSDictionary", "NSError", "NSIndexSet", "NSItemProvider", "NSNotification", "NSOperation", "NSProgress", "NSPropertyList", "NSRunLoop", "NSURL", "NSValue", "NSProcessInfo", "block2"] }
 # The UTI a pasteboard names a MIME type by.
 objc2-uniform-type-identifiers = { version = "0.3", features = ["UTType"] }
 
@@ -51,7 +59,7 @@ objc2-uniform-type-identifiers = { version = "0.3", features = ["UTType"] }
 objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UIPasteboard", "UIApplication"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSMenu", "NSMenuItem", "NSEvent", "NSGraphicsContext", "NSView", "NSCell", "NSResponder", "NSWindow", "NSScreen", "NSAnimation", "NSAnimationContext", "NSVisualEffectView", "NSGlassEffectView", "NSGraphics", "NSTrackingArea", "NSPasteboard", "NSPasteboardItem", "NSFilePromiseProvider", "NSFilePromiseReceiver", "block2", "objc2-quartz-core"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSMenu", "NSMenuItem", "NSEvent", "NSGraphicsContext", "NSView", "NSCell", "NSResponder", "NSWindow", "NSScreen", "NSAnimation", "NSAnimationContext", "NSVisualEffectView", "NSGlassEffectView", "NSGraphics", "NSTrackingArea", "NSPasteboard", "NSPasteboardItem", "NSFilePromiseProvider", "NSFilePromiseReceiver", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSButtonCell", "NSActionCell", "NSColorSpace", "block2", "objc2-quartz-core"] }
 objc2-quartz-core = { version = "0.3", features = ["CAMediaTimingFunction", "CADisplayLink", "CALayer", "CATransaction"] }
 # The buffer a native surface shows, and whether the compositor still reads it.
 objc2-io-surface = "0.3"
@@ -104,16 +112,25 @@ harness = false
 name = "a_window_tells_the_app_it_was_minimized_occluded_or_moved"
 harness = false
 
+[[test]]
+name = "the_menus_report_what_is_chosen"
+harness = false
+
+[[test]]
+name = "a_key_left_later_goes_to_the_menu_bar"
+harness = false
+
 # What the tests ask of AppKit that the host offers no call for: minimizing, hiding the
-# application, and whether a window's content has the layer a surface draws into.
+# application, whether a window's content has the layer a surface draws into, choosing in its
+# menus, and pressing a key in a window that is not key.
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "NSWindow", "NSView", "objc2-quartz-core"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "NSWindow", "NSView", "NSMenu", "NSMenuItem", "NSEvent", "block2", "objc2-quartz-core"] }
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSGeometry"] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer", "CAMetalLayer"] }
 
-# AppKit's selectors and view hierarchy, UIKit's pasteboard and Windows' clipboard need `unsafe`,
-# which the workspace forbids; here it is denied instead, and `os/macos`, `os/ios/pasteboard` and
-# `os/windows` alone allow it.
+# AppKit's selectors and view hierarchy, UIKit's pasteboard and Win32 need `unsafe`, which the
+# workspace forbids; here it is denied instead, and `os/macos`, `os/ios/pasteboard`, `os/windows`
+# and the tests' AppKit support, for a local event monitor, alone allow it.
 [lints.rust]
 unsafe_code = "deny"

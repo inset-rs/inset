@@ -252,4 +252,16 @@ pub trait TextInputHost {
     fn handles_editing_keys(&self) -> bool {
         false
     }
+
+    /// Whether the host sends the view Edit's commands as events through a command of its own,
+    /// which the user's ⌘C, ⌘X and ⌘V reach once the framework leaves them unhandled: macOS's Edit
+    /// menu, or the host's of a program that runs inside another app. A text field then leaves
+    /// those keys unhandled and acts on the `clipboard_event` the command sends, as Flutter's text
+    /// fields on the web leave them to the browser.
+    ///
+    /// Defaults to false: a host whose system has no such command, or whose app may have set a
+    /// menu bar without Edit's commands, keeps them in the field.
+    fn provides_edit_commands(&self) -> bool {
+        false
+    }
 }

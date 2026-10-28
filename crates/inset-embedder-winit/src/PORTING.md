@@ -159,6 +159,40 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — winit owns the application delegate, so an app cannot write its own.
   Affect: files that arrive before the app sets its handler wait for it, and a reopen with no handler set is dropped.
 
+## menus/, popup_menus.rs, main_loop/menus.rs, os/macos/menus/, os/windows/menus/, os/linux/status_notifier_items/ → the macOS embedder's `FlutterMenuPlugin`, and the system menus Flutter does not reach
+
+- Change: on macOS the menu bar shows the system's standard menus, the application's (About, Services, Hide, Hide Others, Show All, Quit), Edit and Window, until the app sets its own, in place of winit's default menu, which is left out; Flutter's macOS template shows the menu in the app's `MainMenu.xib`.
+  Reason: platform — an app here has no nib, and winit's default menu has no Edit menu for AppKit to recognise.
+  Affect: an app that sets no menu bar quits with ⌘Q through its quit flow and copies with ⌘C through `clipboard_event`.
+
+- Change: on macOS a key goes to the framework before the menu bar's key equivalents, and a key the framework leaves goes to the menu bar after, through the menu bar's own `performKeyEquivalent:` declining a key while one of the app's windows is key and the main loop offering it again; Flutter's macOS embedder redispatches a key its framework left, from its view's `performKeyEquivalent:`.
+  Reason: platform — winit's view takes no key equivalent, so AppKit would give each key to the menu first, and the menu bar is an `NSMenu` subclass of the embedder's, which needs no change to winit's classes.
+  Affect: a shortcut the app handles wins over a menu item with the same key, and a key while another window is key, such as the About panel, goes to the menu at once.
+
+- Change: on macOS each key-down reported is kept, the 16 latest for at most 3 seconds, so a key the app claimed and hands back later (`MenuBar::perform_key_equivalent`) goes to the menu bar as the event AppKit delivered, through the same redispatch; a key no longer kept answers no.
+  Reason: platform — an app that waits on another thread, as WaOS does for a program, answers after AppKit's call has returned, and Chrome keeps its event for the same reason; an event rebuilt from the key's data would have no modifiers and no keyboard layout, and could choose another item.
+  Affect: a key handed back within seconds chooses its item as if the app had left it at once, and one handed back later does nothing.
+
+- Change: a menu item's action goes to the main loop as an event, and the app hears it on a turn of its own, where `FlutterMenuPlugin` sends `Menu.selectedCallback` from the action.
+  Reason: platform — AppKit sends the action from inside its own dispatch, where the client may already be in a call.
+  Affect: the app hears a choice after the menu has closed, never inside a call of its own.
+
+- Change: Edit's provided items send the focused view, the one whose window has the focus, copy, cut and paste as `clipboard_event` and undo, redo, select all and delete as `edit_command`; Flutter's macOS embedder sends the selectors to its text input plugin.
+  Reason: platform — the host's copy and paste go through the clipboard's events, and any focused widget may act on them, not only a text field.
+  Affect: Edit works on a selectable text as on a field, and with no focused view nothing happens.
+
+- Change: on macOS the Dock icon's menu is answered from `applicationDockMenu:`, which the embedder adds to winit's application delegate class, as it adds its other delegate methods; status items are `NSStatusItem`s whose button reports a click as `Activated`, a right click or a Control-click as `ContextMenuRequested` and a double click as `DoubleClicked`, at the pointer, and whose attached menu is the item's own menu.
+  Reason: platform — winit owns the application delegate, and AppKit opens a status item's menu by itself on a click.
+  Affect: a status item with an attached menu reports no click, as AppKit sends it none.
+
+- Change: on Windows a menu at a point is `TrackPopupMenuEx`, opened from a hidden window of the embedder's once the framework's call has returned, and a tray icon is `Shell_NotifyIcon`'s at version 4, reporting a click or a key as `Activated`, a right click or the menu key as `ContextMenuRequested`, a middle click as `SecondaryActivated` and a double click as `DoubleClicked`, at the point Windows gives in logical pixels; its menu is opened at the pointer by the app.
+  Reason: platform — a menu's modal loop must run outside every call into the app, and the notification area tells an icon's events to a window, which also hears the taskbar come back after Explorer restarts.
+  Affect: the icons come back after Explorer restarts, an icon added while the taskbar is not there is answered as an error, and an app on Windows opens an icon's menu when it hears `ContextMenuRequested`.
+
+- Change: on Linux a tray icon is a StatusNotifierItem with its DBus menu, over zbus on the session bus, each icon a connection of its own answered once the watcher has registered it, or with the bus's error, and the tray is `None` where no StatusNotifierWatcher is on the bus at start; there is no menu at a point and no menu the app opens at an icon.
+  Reason: platform — the desktop draws a StatusNotifierItem's menu and decides when to open it, and Linux's toolkits draw their own menus at a point.
+  Affect: a click reaches the app as the desktop reports it, `Activate`, `SecondaryActivate`, `ContextMenu` or a vertical scroll, at the desktop's position, which Wayland often leaves at zero.
+
 ## macos.rs / os/macos → what only macOS offers beyond `Platform`
 
 - Change: `WinitPlatform::macos` slides a window in and hides the app, neither of which Flutter's framework offers.
@@ -175,3 +209,6 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - The layout keymap for character keys, so a shifted symbol reports `!` where Flutter reports `digit1`. Trigger: a shortcut that matches a shifted symbol by logical key.
 - Dead keys and `Key::Unidentified`. Trigger: composing input, or a key of the system's that winit cannot name.
 - Synthesizing the key ups a focus change swallowed. Trigger: `HardwareKeyboard::sync_keyboard_state` gaining a way to ask the system.
+- Registering a StatusNotifierItem again when the watcher comes back on the bus, and a tray that appears after the app started. Trigger: a desktop whose panel restarts.
+- A menu item's icon at the screen's scale on Windows, where it shows at its own size in pixels. Trigger: a menu with icons on a display scaled above 100%.
+- Translating the labels of macOS's and Windows' provided items, which are English. Trigger: an app localized beyond English.

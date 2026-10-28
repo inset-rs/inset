@@ -124,6 +124,10 @@ The key constants and the four tables are machine-written from the Dart, as Flut
   Reason: language — no `FlutterError.reportError` hook to catch and continue.
   Affect: one failing handler unwinds the dispatch and the remaining handlers do not run.
 
+- Change: `KeyEvent::to_key_data` gives back the `KeyData` an event was made from, which Dart does not offer.
+  Reason: platform — an app that claims a key and leaves it later hands it back to the host's menu bar (`MenuBar::perform_key_equivalent`), which knows its own event by the key it reported.
+  Affect: a key kept back can still reach the menu bar's item with its shortcut.
+
 ## mouse_cursor.rs → mouse_cursor.dart
 
 - Change: a session's `activate` calls the host's `MouseCursor` capability with a `SystemMouseCursorKind` and returns nothing.

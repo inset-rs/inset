@@ -14,9 +14,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use inset_embedder::{
-    AppExit, Brightness, Clipboard, Compositor, Dispatcher, FileOpening, FontSource,
-    ImageCodecFuture, Locale, MouseCursor, Platform, PopupMenus, RequestId, Screens,
-    SystemFontSource, TargetPlatform, ViewError, ViewFocusDirection, ViewFocusEvent,
+    AppExit, Brightness, Clipboard, Compositor, Dispatcher, DockMenu, FileOpening, FontSource,
+    ImageCodecFuture, Locale, MenuBar, MouseCursor, Platform, PopupMenus, RequestId, Screens,
+    SystemFontSource, TargetPlatform, TrayIcons, ViewError, ViewFocusDirection, ViewFocusEvent,
     ViewFocusState, ViewId, ViewRef, ViewRequest, VsyncWaiter,
 };
 use winit::event_loop::EventLoopProxy;
@@ -26,9 +26,10 @@ use crate::clipboard::ClipboardChanges;
 use crate::dispatcher::WinitDispatcher;
 use crate::macos::MacOs;
 use crate::main_loop::MainLoopEvent;
+use crate::menus::MenuEvents;
 use crate::os::{
-    FramePresentation, NativeComposition, OperatingSystem, SystemClipboard, SystemRequests, ThisOs,
-    ThisOsClipboard,
+    FramePresentation, NativeComposition, NativeMenus, OperatingSystem, SystemClipboard,
+    SystemRequests, ThisOs, ThisOsClipboard,
 };
 use crate::popup_menus::NativePopupMenus;
 use crate::state::EmbedderState;
@@ -61,6 +62,10 @@ pub struct WinitPlatform {
     origin: Instant,
     clipboard: ThisOsClipboard,
     popup_menus: NativePopupMenus,
+    /// The system's own menus, each where it has one (`menus/`).
+    menu_bar: Option<Rc<dyn MenuBar>>,
+    dock_menu: Option<Rc<dyn DockMenu>>,
+    tray_icons: Option<Rc<dyn TrayIcons>>,
     /// What only macOS offers; `None` elsewhere.
     macos: Option<MacOs>,
 }
@@ -74,6 +79,8 @@ impl WinitPlatform {
             let requests = Rc::clone(state.requests());
             move || requests.send(AppRequest::LookAtClipboard)
         }));
+        let menu_events = MenuEvents::new(proxy.clone());
+        let popup_menus = NativePopupMenus::new(menu_events.clone(), Rc::clone(&state));
         WinitPlatform {
             next_request_id: Cell::new(1),
             macos: cfg!(target_os = "macos").then(|| MacOs::new(Rc::clone(&state))),
@@ -82,7 +89,10 @@ impl WinitPlatform {
             vsync_waiter: ThisOs::vsync_waiter(&proxy),
             origin: Instant::now(),
             clipboard,
-            popup_menus: NativePopupMenus::new(proxy.clone()),
+            popup_menus,
+            menu_bar: ThisOs::menu_bar(menu_events.clone()),
+            dock_menu: ThisOs::dock_menu(menu_events.clone()),
+            tray_icons: ThisOs::tray_icons(menu_events),
             proxy,
         }
     }
@@ -240,8 +250,23 @@ impl Platform for WinitPlatform {
         Some(&self.clipboard)
     }
 
+    /// The menu bar where the system has one, macOS's, which shows the system's standard one
+    /// until the app sets its own.
+    fn menu_bar(&self) -> Option<&dyn MenuBar> {
+        self.menu_bar.as_deref()
+    }
+
+    /// The system's menus at a point in a view, where it has them: macOS's and Windows'.
     fn popup_menus(&self) -> Option<&dyn PopupMenus> {
-        Some(&self.popup_menus)
+        ThisOs::POPUP_MENUS.then_some(&self.popup_menus as &dyn PopupMenus)
+    }
+
+    fn tray_icons(&self) -> Option<&dyn TrayIcons> {
+        self.tray_icons.as_deref()
+    }
+
+    fn dock_menu(&self) -> Option<&dyn DockMenu> {
+        self.dock_menu.as_deref()
     }
 
     fn mouse_cursor(&self) -> Option<&dyn MouseCursor> {

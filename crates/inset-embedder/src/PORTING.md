@@ -74,10 +74,6 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — where each window has its own cursor, the host must know which window to change.
   Affect: in an app with several windows, a cursor change reaches only the window under the pointer.
 
-- Change: a host's `PopupMenus` capability shows the host's own popup menu at the pointer and answers the chosen entry once it closes, as a future; Flutter has no such call, only in-view context menus and the macOS menu bar.
-  Reason: platform — a desktop window narrower than its menu, such as a panel at a screen's edge, cannot hold a menu drawn inside its view.
-  Affect: a menu shown this way is the system's, drawn outside the window and styled by the OS; the app waits inside the call while it is open, and hosts without menus answer `None`.
-
 - Change: `PlatformDispatcher.displays` is a host's `Screens` capability, whose `Screen` is Flutter's `Display` with a name, a frame placed on the desktop in points in place of a size in pixels, and what the system's bars leave free, and which also says where the pointer is.
   Reason: platform — a desktop app that places a window against a screen's edge or its own icon needs to know where the screens are, in the points its window frames are in.
   Affect: an app can place a window in screen coordinates, `Display.size` is the frame's size at `scale`, and a host with no screens to report answers `None`.
@@ -101,6 +97,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - Change: `Platform` asks the host whether its own text input turns editing keys into edits — backspace, delete, caret movement — and the default answer is no.
   Reason: platform — Flutter writes one embedder per host and settles this per target platform, where one framework here meets hosts that differ on the same platform.
   Affect: on a host that reports plain key presses, a text field's editing keys work whichever platform the host claims to be.
+
+- Change: the host's text input also says whether the system's menus send Edit's cut, copy and paste (`TextInputHost::provides_edit_commands`), as macOS's menu bar does while it holds those items, and the default answer is no.
+  Reason: platform — such a menu takes the key the framework leaves and sends the system's own command, which is what lets a host give a paste to the user's command alone.
+  Affect: a text field there leaves ⌘C, ⌘X and ⌘V to the menu and acts on the `clipboard_event` it sends; elsewhere it handles them itself.
 
 - Change: `Platform::dispatcher` hands out the host's threads as one `Send + Sync` object: any thread asks it for a turn at a time, answered by `EmbedderClient::wake`, and the framework hands it work to run off the main thread; Dart's isolate is woken by its message port and `Isolate.run` uses the VM's own threads.
   Reason: platform — the host owns the event loop and knows its system's work queues, and a task completed on another thread has no other way to give the app a turn.
@@ -183,6 +183,14 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — there are no method channels; the host trait is the channel.
   Affect: a host cannot report a state the framework does not know.
 
+- Change: `menu_selected` reports an item of the menu bar chosen by its id, as the `Menu.selectedCallback` message does, and `dock_menu_selected` and `tray_icon_event` report the Dock menu's and a tray icon's, which Flutter has not.
+  Reason: platform — there are no method channels, and each place's ids are its own, so each reports through its own hook.
+  Affect: an id set in one place never reaches the handler of another.
+
+- Change: `edit_command` reports Edit's undo, redo, select all and delete, chosen from a system's menu, for the view with the focus; no Flutter hook says so.
+  Reason: platform — a provided Edit item acts on the focused view, as AppKit sends its action to the first responder, and copy, cut and paste already arrive as `clipboard_event`.
+  Affect: a text field undoes, selects all or deletes when the user chooses it from the system's Edit menu, without the app handling the item.
+
 ## scene_builder.rs → dart:ui `SceneBuilder` / `Scene`
 
 - Change: a push records into a display list of its own, which `pop` returns as the engine layer; there is no `oldLayer`, `addTexture` or the shader-mask, colour-filter and image-filter pushes.
@@ -225,3 +233,42 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - Change: the host tells the client when the clipboard changed (`clipboard_changed`) and when the user copied, cut or pasted through the platform's own command (`clipboard_event`), which Flutter's engines never say.
   Reason: platform — where only the user's own paste may read the clipboard, the paste's content comes with the host's word of it.
   Affect: the framework learns of a copy made elsewhere, and pastes what the user pasted even where it may not read the clipboard itself.
+
+## menus.rs → services `system_channels.dart`'s `SystemChannels.menu` (`Menu.setMenus`, `Menu.selectedCallback`), `platform_menu_bar.dart`'s `PlatformProvidedMenuItemType`
+
+- Change: a menu is a value of `MenuEntry`s (the app's items, the system's provided items, submenus and separators) set whole at each place the system draws menus: the menu bar (`Platform::menu_bar`), a menu at a point in a view (`popup_menus`), the Dock icon's (`dock_menu`) and a tray icon's; Flutter's `flutter/menu` channel carries the menu bar alone, as maps.
+  Reason: platform — every place a system draws a menu takes the same tree, and there are no method channels.
+  Affect: an app builds each menu from its state and sets it again when the state changes, and a place the system lacks answers `None`, where the app draws its own.
+
+- Change: an item carries a check (a checkbox on, off or mixed, or a radio on or off) and an icon, which Flutter's serialized `PlatformMenuItem` does not.
+  Reason: platform — AppKit, Win32 and the DBus menu draw both, and only a menu the framework draws itself could draw them otherwise.
+  Affect: a native menu shows check marks and icons; Windows, which has no mixed state, shows a mixed one unchecked.
+
+- Change: `ProvidedItem` adds Edit's undo, redo, cut, copy, paste, select all and delete to Flutter's provided items, and leaves out the speaking ones; each acts as the system's own, Edit's sent to the focused view as `clipboard_event` and `edit_command`, and an item the system has no counterpart for is left out of its menu.
+  Reason: platform — a system knows its Edit menu by its standard items, as macOS adds dictation and emoji to it, and a host never stands in for an item its system lacks.
+  Affect: Edit's items work in every text field without the app handling them, and the same menu shows fewer provided items on Windows and Linux than on macOS.
+
+- Change: the macOS menu bar shows the system's standard menus, the application's, Edit and Window, until the app sets its own, where Flutter's macOS embedder shows the one in the app's `MainMenu.xib`.
+  Reason: platform — an app here has no nib, and one without a menu bar would have no Quit, Hide or Edit.
+  Affect: an app that sets no menu bar still quits with ⌘Q and copies with ⌘C, and one that sets its own replaces the standard menus whole.
+
+- Change: `PopupMenus::show` shows the system's own menu at a point in a view and answers the chosen item's id once it closes, as a future; Flutter has no such call, only in-view context menus and the macOS menu bar.
+  Reason: platform — a window narrower than its menu, such as a panel at a screen's edge, cannot hold a menu drawn inside its view.
+  Affect: the menu is the system's, drawn outside the window, and Linux answers `None`: its desktops have no menu of the system's, as GTK and Qt draw theirs in a pop-up surface, which winit offers from 0.31, where a framework can draw them.
+
+- Change: `TrayIcons::add` shows an icon in the system's tray with an image and a tooltip, removed when its handle drops, and reports what the system tells of it as `TrayIconEvent`s; its menu is one the system opens by itself (`attached_menu`, macOS and Linux) or one the app opens at it (`menu_at_icon`, macOS and Windows), each `None` where the system has not; Flutter has no tray.
+  Reason: platform — each system offers some of these and decides when a tray's menu opens, so a convention such as Windows' right click opening a menu is the app's.
+  Affect: an app on Windows opens a menu when it hears `ContextMenuRequested`, and on macOS a click on an icon with an attached menu opens the menu and reports nothing.
+
+- Change: `TrayIcons::add` answers the icon as a future once it exists, or a `TrayIconError` where the system did not show it, as `PopupMenus::show` and `Clipboard::write` answer theirs; the icon then says which menus it offers.
+  Reason: platform — a host may make the icon elsewhere, on another thread or in another process, as WaOS makes a program's, and a system may refuse it, as a Linux desktop's bus can.
+  Affect: an app has an icon, and knows which menus it offers, only once the future answers; a native host answers at once.
+
+- Change: `MenuBar::perform_key_equivalent` takes a key-down the app claimed when it came and leaves later, as Chrome's browser process sends on to the menu a key its page did not consume; Flutter's engines answer every key at once.
+  Reason: platform — AppKit wants a key's answer before its call returns, and an app that waits on another thread, as WaOS waits on a program, answers later.
+  Affect: a key a program leaves still chooses the menu bar's item, from the system's own event, until the host lets go of that event a few seconds later.
+
+- Change: `DockMenu::set_menu` sets the items macOS adds to the Dock icon's menu; Flutter has none.
+  Reason: platform — AppKit asks the application's delegate for it, which only the host is.
+  Affect: an app's Dock menu is set whole like any other, and every other system answers `None`.
+

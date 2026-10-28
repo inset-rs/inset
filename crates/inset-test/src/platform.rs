@@ -6,10 +6,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use inset_embedder::{
-    AppExit, AppLifecycleState, Brightness, Clipboard, Dispatcher, FontSource, Haptics, Image,
-    ImageCodecFuture, ImageDecodeError, Instant, MouseCursor, Platform, PopupMenus, RequestId,
-    Restoration, SystemChrome, SystemContextMenu, TargetPlatform, TextServices, View, ViewError,
-    ViewId, ViewRef, ViewRequest,
+    AppExit, AppLifecycleState, Brightness, Clipboard, Dispatcher, DockMenu, FontSource, Haptics,
+    Image, ImageCodecFuture, ImageDecodeError, Instant, MenuBar, MouseCursor, Platform, PopupMenus,
+    RequestId, Restoration, SystemChrome, SystemContextMenu, TargetPlatform, TextServices,
+    TrayIcons, View, ViewError, ViewId, ViewRef, ViewRequest,
 };
 
 use inset_embedder::valo;
@@ -44,7 +44,10 @@ pub struct TestPlatform {
     system_chrome: Option<Rc<dyn SystemChrome>>,
     haptics: Option<Rc<dyn Haptics>>,
     system_context_menu: Option<Rc<dyn SystemContextMenu>>,
+    menu_bar: Option<Rc<dyn MenuBar>>,
     popup_menus: Option<Rc<dyn PopupMenus>>,
+    tray_icons: Option<Rc<dyn TrayIcons>>,
+    dock_menu: Option<Rc<dyn DockMenu>>,
     text_services: Option<Rc<dyn TextServices>>,
     mouse_cursor: Option<Rc<dyn MouseCursor>>,
     restoration: Option<Rc<dyn Restoration>>,
@@ -72,7 +75,10 @@ impl TestPlatform {
             system_chrome: None,
             haptics: None,
             system_context_menu: None,
+            menu_bar: None,
             popup_menus: None,
+            tray_icons: None,
+            dock_menu: None,
             text_services: None,
             mouse_cursor: None,
             restoration: None,
@@ -197,8 +203,23 @@ impl TestPlatform {
         self
     }
 
+    pub fn with_menu_bar(mut self, menu_bar: Rc<dyn MenuBar>) -> TestPlatform {
+        self.menu_bar = Some(menu_bar);
+        self
+    }
+
     pub fn with_popup_menus(mut self, menus: Rc<dyn PopupMenus>) -> TestPlatform {
         self.popup_menus = Some(menus);
+        self
+    }
+
+    pub fn with_tray_icons(mut self, tray_icons: Rc<dyn TrayIcons>) -> TestPlatform {
+        self.tray_icons = Some(tray_icons);
+        self
+    }
+
+    pub fn with_dock_menu(mut self, dock_menu: Rc<dyn DockMenu>) -> TestPlatform {
+        self.dock_menu = Some(dock_menu);
         self
     }
 
@@ -359,8 +380,20 @@ impl Platform for TestPlatform {
         self.system_context_menu.as_deref()
     }
 
+    fn menu_bar(&self) -> Option<&dyn MenuBar> {
+        self.menu_bar.as_deref()
+    }
+
     fn popup_menus(&self) -> Option<&dyn PopupMenus> {
         self.popup_menus.as_deref()
+    }
+
+    fn tray_icons(&self) -> Option<&dyn TrayIcons> {
+        self.tray_icons.as_deref()
+    }
+
+    fn dock_menu(&self) -> Option<&dyn DockMenu> {
+        self.dock_menu.as_deref()
     }
 
     fn text_services(&self) -> Option<&dyn TextServices> {

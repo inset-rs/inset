@@ -396,6 +396,25 @@ impl KeyEvent {
             KeyEvent::Repeat(_) => false,
         }
     }
+
+    /// The host's [`KeyData`] this event was made from, as `KeyEventManager` reads it: what an
+    /// app hands back to the host, such as a key it kept back for the menu bar
+    /// (`MenuBar::perform_key_equivalent`).
+    pub fn to_key_data(&self) -> KeyData {
+        KeyData {
+            time_stamp: self.time_stamp(),
+            event_type: match self {
+                KeyEvent::Down(_) => KeyEventType::Down,
+                KeyEvent::Up(_) => KeyEventType::Up,
+                KeyEvent::Repeat(_) => KeyEventType::Repeat,
+            },
+            device_type: self.device_type(),
+            physical: self.physical_key().usb_hid_usage,
+            logical: self.logical_key().key_id,
+            character: self.character().map(str::to_owned),
+            synthesized: self.synthesized(),
+        }
+    }
 }
 
 impl From<KeyDownEvent> for KeyEvent {
@@ -868,6 +887,22 @@ mod tests {
 
     fn up(physical: PhysicalKeyboardKey, logical: LogicalKeyboardKey) -> KeyEvent {
         KeyEvent::Up(KeyUpEvent::new(physical, logical, Duration::ZERO))
+    }
+
+    #[test]
+    fn an_event_gives_back_the_key_data_it_was_made_from() {
+        let data = KeyData {
+            time_stamp: Duration::from_millis(1234),
+            event_type: KeyEventType::Repeat,
+            physical: PhysicalKeyboardKey::KEY_O.usb_hid_usage,
+            logical: LogicalKeyboardKey::KEY_O.key_id,
+            character: Some("o".to_owned()),
+            ..KeyData::default()
+        };
+        assert_eq!(
+            KeyEventManager::event_from_data(data.clone()).to_key_data(),
+            data
+        );
     }
 
     #[test]

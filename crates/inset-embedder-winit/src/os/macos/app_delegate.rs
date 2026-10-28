@@ -179,7 +179,7 @@ extern "C" fn should_terminate(
 }
 
 /// The class of `NSApp`'s delegate, which is winit's once the event loop is built.
-fn delegate_class() -> Option<&'static AnyClass> {
+pub(super) fn delegate_class() -> Option<&'static AnyClass> {
     let mtm = MainThreadMarker::new()?;
     let delegate = NSApplication::sharedApplication(mtm).delegate()?;
     let delegate: &AnyObject = delegate.as_ref();
@@ -206,7 +206,7 @@ fn add_delegate_methods(class: &AnyClass) {
 
 /// Adds `method` to `class` as `sel`, with the type encoding its Rust signature gives. A class
 /// that already answers `sel` keeps its own.
-fn add_method<F: MethodImplementation>(class: &AnyClass, sel: Sel, method: F) {
+pub(super) fn add_method<F: MethodImplementation>(class: &AnyClass, sel: Sel, method: F) {
     if class.instance_method(sel).is_some() {
         eprintln!("inset: winit's application delegate answers {sel} itself; not reported");
         return;

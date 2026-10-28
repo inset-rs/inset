@@ -44,6 +44,8 @@ pub mod notification_listener;
 pub mod overlay;
 pub mod page_storage;
 pub mod pages;
+pub mod platform_menu_bar;
+pub mod platform_tray_icon;
 pub mod pop_scope;
 pub mod preferred_size;
 pub mod primary_scroll_controller;

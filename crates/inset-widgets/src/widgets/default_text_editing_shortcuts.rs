@@ -103,15 +103,21 @@ impl DefaultTextEditingShortcuts {
     }
 
     /// The shortcuts the platform handles itself, which the framework must hand back to it
-    /// (Dart's `_getDisablingShortcut`): the table for this host, and for whether the
-    /// view's text input edits keys itself.
+    /// (Dart's `_getDisablingShortcut`): the table for this host, for whether the view's text
+    /// input edits keys itself, and for whether its host provides Edit's commands.
     fn get_disabling_shortcut(app: &mut App, context: BuildContext) -> Option<ShortcutMap> {
         let platform = app.platform().target_platform();
-        let host_edits = crate::view::View::maybe_of(app, context).is_some_and(|view| {
-            view.text_input()
-                .is_some_and(|input| input.handles_editing_keys())
-        });
-        disabling_shortcuts_for(platform, host_edits)
+        let view = crate::view::View::maybe_of(app, context);
+        let text_input = view.as_ref().and_then(|view| view.text_input());
+        let host_edits = text_input.is_some_and(|input| input.handles_editing_keys());
+        let host_commands = text_input.is_some_and(|input| input.provides_edit_commands());
+        let mut shortcuts = disabling_shortcuts_for(platform, host_edits);
+        if host_commands && !K_IS_WEB {
+            shortcuts
+                .get_or_insert_with(ShortcutMap::new)
+                .append(&mut edit_command_disabling_shortcuts());
+        }
+        shortcuts
     }
 }
 
@@ -575,6 +581,27 @@ fn web_disabling_text_shortcuts() -> ShortcutMap {
     shortcuts
 }
 
+/// The keys of Edit's cut, copy and paste, which a host that provides those commands receives
+/// once the field leaves them, and sends back as a `clipboard_event`: the clipboard part of
+/// [`web_disabling_text_shortcuts`], select all aside, which the field keeps.
+fn edit_command_disabling_shortcuts() -> ShortcutMap {
+    let mut shortcuts = ShortcutMap::new();
+    for (activator, intent) in clipboard_shortcuts() {
+        if !intent.as_any().is::<SelectAllTextIntent>() {
+            shortcuts.push((
+                activator,
+                Rc::new(DoNothingAndStopPropagationTextIntent::new()) as IntentRef,
+            ));
+        }
+    }
+    shortcuts.append(&mut shortcut_map![
+        KEY_X.meta(true) => DoNothingAndStopPropagationTextIntent::new(),
+        KEY_C.meta(true) => DoNothingAndStopPropagationTextIntent::new(),
+        KEY_V.meta(true) => DoNothingAndStopPropagationTextIntent::new(),
+    ]);
+    shortcuts
+}
+
 fn common_disabling_text_shortcuts() -> ShortcutMap {
     shortcut_map![
         ARROW_DOWN.alt(true) => DoNothingAndStopPropagationTextIntent::new(),
@@ -755,7 +782,9 @@ mod tests {
     use crate::binding::WidgetsBinding;
     use crate::framework::{AnyElement, downcast_widget};
     use crate::widgets::basic::SizedBox;
-    use crate::widgets::focus_manager::tests::{app_with_view_whose_host_edits, mount};
+    use crate::widgets::focus_manager::tests::{
+        app_with_view_whose_host_edits, app_with_view_whose_host_provides_edit_commands, mount,
+    };
 
     /// How the copy shortcut of a platform's table is described.
     fn copy_shortcut(shortcuts: &ShortcutMap) -> String {
@@ -859,5 +888,36 @@ mod tests {
             "the disabling table is nested inside, so it is found first"
         );
         assert_eq!(copy_shortcut(&shortcuts[0].1), "Meta + Key C");
+    }
+
+    #[test]
+    fn a_host_that_provides_edit_commands_gets_the_cut_copy_and_paste_keys_and_no_other() {
+        let cell = app_with_view_whose_host_provides_edit_commands();
+        mount(
+            &cell,
+            DefaultTextEditingShortcuts::new(SizedBox::shrink()).into_widget(),
+        );
+        let mut app = cell.borrow_mut();
+        let shortcuts = mounted_shortcuts(&mut app);
+        let (label, disabling) = &shortcuts[1];
+        assert_eq!(label, "<Web Disabling Text Editing Shortcuts>");
+        let left: Vec<String> = disabling
+            .iter()
+            .map(|(activator, _)| activator.debug_describe_keys())
+            .collect();
+        for keys in [
+            "Meta + Key C",
+            "Meta + Key X",
+            "Meta + Key V",
+            "Control + Key C",
+        ] {
+            assert!(
+                left.iter().any(|left| left == keys),
+                "{keys} left in {left:?}"
+            );
+        }
+        for keys in ["Meta + Key A", "Control + Key A", "Arrow Left"] {
+            assert!(!left.iter().any(|left| left == keys), "{keys} kept");
+        }
     }
 }

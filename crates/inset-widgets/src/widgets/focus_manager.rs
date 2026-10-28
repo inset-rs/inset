@@ -2670,9 +2670,11 @@ pub(crate) mod tests {
     use crate::test_harness::pump_every_view;
     use crate::widgets::basic::{Builder, SizedBox};
 
-    /// A view whose text input answers whether its host edits keys itself.
+    /// A view whose text input answers whether its host edits keys itself, and whether it
+    /// provides Edit's commands.
     struct TestView {
         handles_editing_keys: bool,
+        provides_edit_commands: bool,
     }
 
     impl TextInputHost for TestView {
@@ -2690,6 +2692,10 @@ pub(crate) mod tests {
 
         fn handles_editing_keys(&self) -> bool {
             self.handles_editing_keys
+        }
+
+        fn provides_edit_commands(&self) -> bool {
+            self.provides_edit_commands
         }
     }
 
@@ -2735,7 +2741,20 @@ pub(crate) mod tests {
     ) -> Rc<AppCell> {
         let platform = TestPlatform::new().on(target).with_view(Rc::new(TestView {
             handles_editing_keys,
+            provides_edit_commands: false,
         }));
+        AppCell::with_platform(Rc::new(platform))
+    }
+
+    /// An [`App`] with a single view on a macOS host that reports plain keys and provides Edit's
+    /// commands, as Inset's macOS host does with its Edit menu.
+    pub(crate) fn app_with_view_whose_host_provides_edit_commands() -> Rc<AppCell> {
+        let platform = TestPlatform::new()
+            .on(TargetPlatform::MacOS)
+            .with_view(Rc::new(TestView {
+                handles_editing_keys: false,
+                provides_edit_commands: true,
+            }));
         AppCell::with_platform(Rc::new(platform))
     }
 

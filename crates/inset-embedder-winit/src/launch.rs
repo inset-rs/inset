@@ -8,7 +8,7 @@ use winit::event_loop::{EventLoop, EventLoopProxy};
 
 use crate::images::CreateImageLoader;
 use crate::main_loop::{MainLoop, MainLoopEvent};
-use crate::os::{ApplicationLifecycle, SystemChanges, SystemRequests, ThisOs};
+use crate::os::{ApplicationLifecycle, NativeMenus, SystemChanges, SystemRequests, ThisOs};
 
 /// What starts the app, on the platform it is handed, and answers the client the embedder drives.
 pub(crate) type StartApp<C> = Box<dyn FnOnce(PlatformRef) -> C>;
@@ -18,9 +18,9 @@ pub(crate) fn run<C: EmbedderClient + 'static>(
     start: StartApp<C>,
     create_image_loader: Option<CreateImageLoader>,
 ) {
-    let event_loop = EventLoop::<MainLoopEvent>::with_user_event()
-        .build()
-        .expect("create winit event loop");
+    let mut builder = EventLoop::<MainLoopEvent>::with_user_event();
+    ThisOs::configure_event_loop(&mut builder);
+    let event_loop = builder.build().expect("create winit event loop");
     let proxy = event_loop.create_proxy();
     // Before the loop runs: AppKit hands over the files a launch opens before winit's first call.
     forward_system_messages(&proxy);

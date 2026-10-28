@@ -1,9 +1,12 @@
-//! Windows: what winit covers by itself, and the clipboard's sequence number, which tells the app
-//! another writer's change without reading the clipboard (`clipboard/text.rs`).
+//! Windows: what winit covers by itself, the clipboard's sequence number, which tells the app
+//! another writer's change without reading the clipboard (`clipboard/text.rs`), and Win32's menus
+//! at a point and icons in the notification area (`menus`).
 
-// `GetClipboardSequenceNumber` is a system call, which Rust reaches through `unsafe`; this module
-// is the one place on Windows that writes it.
+// Win32 is reached through system calls, which Rust reaches through `unsafe`; this module and its
+// children are the one place on Windows that writes it.
 #![allow(unsafe_code)]
+
+mod menus;
 
 use inset_embedder::TargetPlatform;
 use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
@@ -13,8 +16,8 @@ use crate::clipboard::{ChangeProbe, TextClipboard};
 use super::absent::{NoDisplayLink, NoVisibilityNotices, NoWindowSurfaces};
 use super::{
     ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeComposition,
-    NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
-    SystemRequests, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
+    OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard, SystemRequests,
+    WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
 };
 
 /// Windows. A type only: never made, its answers are associated functions.
@@ -58,7 +61,6 @@ impl WindowMotion for Windows {}
 impl WindowChrome for Windows {}
 impl Screens for Windows {}
 impl PointerQueries for Windows {}
-impl NativeMenus for Windows {}
 impl ImageDecoding for Windows {}
 impl WorkQueue for Windows {}
 impl SystemRequests for Windows {}

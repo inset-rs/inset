@@ -85,17 +85,25 @@ pub fn take_opened_windows(
 
 /// What the tests ask of AppKit that the embedder offers no call for.
 pub mod appkit {
+    use std::cell::Cell;
+    use std::ptr::{self, NonNull};
     use std::time::Duration;
 
+    use block2::RcBlock;
     use dispatch2::{DispatchQueue, DispatchTime};
     use objc2::rc::{Retained, Weak};
     use objc2::{ClassType, MainThreadMarker};
-    use objc2_app_kit::{NSApplication, NSEvent, NSEventModifierFlags, NSEventType, NSWindow};
+    use objc2_app_kit::{
+        NSApplication, NSApplicationDelegate, NSEvent, NSEventMask, NSEventModifierFlags,
+        NSEventType, NSMenu, NSMenuItem, NSView, NSWindow,
+    };
     use objc2_foundation::{NSObjectProtocol, NSPoint, NSString};
     use objc2_quartz_core::CAMetalLayer;
 
     /// The virtual key code of Escape (`kVK_Escape`).
     const ESCAPE_KEY_CODE: u16 = 0x35;
+    /// The virtual key code of the O key (`kVK_ANSI_O`).
+    const O_KEY_CODE: u16 = 0x1F;
 
     fn application() -> Retained<NSApplication> {
         NSApplication::sharedApplication(MainThreadMarker::new().expect("the main thread"))
@@ -195,6 +203,154 @@ pub mod appkit {
     pub fn press_escape_after(after: Duration) {
         let when = DispatchTime::try_from(after).expect("a delay that fits");
         let _ = DispatchQueue::main().after(when, press_escape);
+    }
+
+    /// The titles of the menu bar's menus, in order.
+    pub fn menu_bar_titles() -> Vec<String> {
+        let Some(menu) = application().mainMenu() else {
+            return Vec::new();
+        };
+        menu.itemArray()
+            .iter()
+            .map(|item| item.title().to_string())
+            .collect()
+    }
+
+    /// The name of the menu bar's class.
+    pub fn menu_bar_class_name() -> String {
+        application()
+            .mainMenu()
+            .map(|menu| menu.class().name().to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
+
+    fn menu_bar_item(menu: &str, item: &str) -> (Retained<NSMenu>, isize) {
+        let submenu = application()
+            .mainMenu()
+            .and_then(|bar| bar.itemWithTitle(&NSString::from_str(menu)))
+            .and_then(|item| item.submenu())
+            .expect("the menu in the menu bar");
+        let index = submenu.indexOfItemWithTitle(&NSString::from_str(item));
+        assert!(index >= 0, "the item {item} in {menu}");
+        (submenu, index)
+    }
+
+    /// The name of the action the item `item` of the menu bar's menu `menu` sends.
+    pub fn menu_bar_action(menu: &str, item: &str) -> String {
+        let (submenu, index) = menu_bar_item(menu, item);
+        let item: Retained<NSMenuItem> = submenu.itemAtIndex(index).expect("the item");
+        item.action()
+            .map(|action| action.name().to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
+
+    /// Chooses the item `item` of the menu bar's menu `menu`, as a click on it would.
+    pub fn choose_in_menu_bar(menu: &str, item: &str) {
+        let (submenu, index) = menu_bar_item(menu, item);
+        submenu.performActionForItemAtIndex(index);
+    }
+
+    /// Chooses the item `item` of the menu the Dock icon shows, which AppKit asks the
+    /// application's delegate for.
+    pub fn choose_in_dock_menu(item: &str) {
+        let app = application();
+        let delegate = app.delegate().expect("the application's delegate");
+        let menu = delegate.applicationDockMenu(&app).expect("a Dock menu");
+        let index = menu.indexOfItemWithTitle(&NSString::from_str(item));
+        assert!(index >= 0, "the item {item} in the Dock menu");
+        menu.performActionForItemAtIndex(index);
+    }
+
+    /// Offers the menu bar Command and `character` as AppKit offers a key equivalent, and answers
+    /// whether it took it.
+    pub fn offer_command_key_to_menu_bar(character: &str) -> bool {
+        let characters = NSString::from_str(character);
+        let event = NSEvent::keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode(
+            NSEventType::KeyDown,
+            NSPoint::new(0.0, 0.0),
+            NSEventModifierFlags::Command,
+            0.0,
+            0,
+            None,
+            &characters,
+            &characters,
+            false,
+            0,
+        )
+        .expect("a key event");
+        application()
+            .mainMenu()
+            .expect("a menu bar")
+            .performKeyEquivalent(&event)
+    }
+
+    /// Whether one of the application's windows is key.
+    pub fn a_window_is_key() -> bool {
+        application().keyWindow().is_some()
+    }
+
+    /// Presses Command-O in the window titled `title` as AppKit delivers a key to the key window,
+    /// while the window is not key: activating the application would take the keyboard from the
+    /// user's own app. A local monitor hands the key-down, which AppKit is delivering as its
+    /// current event, to the window itself, and nothing else sees it.
+    #[allow(
+        unsafe_code,
+        reason = "AppKit's local event monitor answers through a raw pointer"
+    )]
+    pub fn press_command_o_in(title: &str) {
+        let window = window_titled(title).expect("the window");
+        let window_number = window.windowNumber();
+        let delivered = Cell::new(false);
+        let handler = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+            if delivered.replace(true) {
+                return event.as_ptr();
+            }
+            // SAFETY: AppKit hands the monitor a live event, for the length of the call.
+            window.sendEvent(unsafe { event.as_ref() });
+            ptr::null_mut()
+        });
+        // SAFETY: the handler answers the event it was given, or null for one it delivered.
+        let monitor = unsafe {
+            NSEvent::addLocalMonitorForEventsMatchingMask_handler(NSEventMask::KeyDown, &handler)
+        };
+        // The monitor stays for the test's life, which ends with the process.
+        std::mem::forget(monitor);
+        let characters = NSString::from_str("o");
+        let event = NSEvent::keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode(
+            NSEventType::KeyDown,
+            NSPoint::new(0.0, 0.0),
+            NSEventModifierFlags::Command,
+            0.0,
+            window_number,
+            None,
+            &characters,
+            &characters,
+            false,
+            O_KEY_CODE,
+        )
+        .expect("a key event");
+        application().postEvent_atStart(&event, true);
+    }
+
+    /// Whether a status item whose button's tooltip is `tooltip` shows in the menu bar: each
+    /// status item's button is in a window of the application's own, ordered out once the item
+    /// is removed.
+    pub fn shows_status_item_with_tooltip(tooltip: &str) -> bool {
+        let tooltip = NSString::from_str(tooltip);
+        application().windows().iter().any(|window| {
+            window.isVisible()
+                && window
+                    .contentView()
+                    .is_some_and(|view| has_tooltip(&view, &tooltip))
+        })
+    }
+
+    fn has_tooltip(view: &NSView, tooltip: &NSString) -> bool {
+        view.toolTip().is_some_and(|own| &*own == tooltip)
+            || view
+                .subviews()
+                .iter()
+                .any(|subview| has_tooltip(&subview, tooltip))
     }
 
     /// A window as AppKit has it, held weakly: whether it is still alive tells whether anything

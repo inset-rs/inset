@@ -1,76 +1,88 @@
-//! The system's own popup menus, as the framework's [`PopupMenus`]: a menu opens once the
-//! framework's call has returned, its loop outside every call into the app, and the entry chosen
-//! reaches the app through the future `show` answered, once the menu has closed and the main loop
-//! has reconciled the buttons it kept.
+//! The system's own menus at a point in a view, as the framework's [`PopupMenus`]: a menu opens
+//! once the framework's call has returned, its loop outside every call into the app, and the item
+//! chosen reaches the app through the future `show` answered, once the menu has closed and the
+//! main loop has reconciled the buttons it kept. The answer of a menu the app opens at a tray
+//! icon comes the same way ([`menu_answer`]).
 //!
-//! The invariant: the future is answered exactly once, with the entry chosen, or with none when the
+//! The invariant: the future is answered exactly once, with the item chosen, or with none when the
 //! menu's answer is lost on the way, so the app never waits on a menu for ever.
 
 use std::future::Future;
 use std::pin::Pin;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Context, Poll, Waker};
 
-use inset_embedder::{PopupMenuEntry, PopupMenuFuture, PopupMenus};
-use winit::event_loop::EventLoopProxy;
+use inset_embedder::{MenuEntry, MenuId, Offset, PopupMenuFuture, PopupMenus, ViewId};
 
-use crate::main_loop::MainLoopEvent;
+use crate::menus::MenuEvents;
 use crate::os::{NativeMenus, ThisOs};
+use crate::state::EmbedderState;
 
 const HELD_BRIEFLY: &str = "a menu's answer is never held across a panic";
 
 /// Opens menus in the system's own loop, and tells the event loop once each has closed.
 pub(crate) struct NativePopupMenus {
-    proxy: EventLoopProxy<MainLoopEvent>,
+    events: MenuEvents,
+    /// Where the views' windows are.
+    state: Rc<EmbedderState>,
 }
 
 impl NativePopupMenus {
-    pub(crate) fn new(proxy: EventLoopProxy<MainLoopEvent>) -> NativePopupMenus {
-        NativePopupMenus { proxy }
+    pub(crate) fn new(events: MenuEvents, state: Rc<EmbedderState>) -> NativePopupMenus {
+        NativePopupMenus { events, state }
     }
 }
 
 impl PopupMenus for NativePopupMenus {
-    fn show(&self, entries: &[PopupMenuEntry]) -> PopupMenuFuture {
+    fn show(&self, view: ViewId, at: Offset, menu: &[MenuEntry]) -> PopupMenuFuture {
         let (answer, chosen) = menu_answer();
-        let proxy = self.proxy.clone();
+        let Some(open) = self.state.views().by_view(view) else {
+            answer.give(None);
+            return Box::pin(chosen);
+        };
+        let events = self.events.clone();
         ThisOs::open_popup_menu(
-            entries.to_vec(),
-            Box::new(move |index| {
+            &open.window,
+            at,
+            menu.to_vec(),
+            self.events.clone(),
+            Box::new(move |chosen| {
                 // The menu ran its own event loop and kept the release of the button that opened
                 // it; the loop reconciles the buttons before the app hears the choice.
-                let _ = proxy.send_event(MainLoopEvent::MenuClosed);
-                answer.give(index);
+                events.closed();
+                answer.give(chosen);
             }),
         );
         Box::pin(chosen)
     }
 }
 
-/// The entry chosen, on its way from the menu to the app.
+/// The item chosen, on its way from the menu to the app.
 #[derive(Default)]
 struct Answer {
     /// What the menu answered, once it has.
-    chosen: Option<Option<usize>>,
+    chosen: Option<Option<MenuId>>,
     /// The app's task waiting for it.
     waiter: Option<Waker>,
 }
 
 /// The menu's side of its answer: given once, or `None` if it is dropped unused.
-struct MenuAnswer(Arc<Mutex<Answer>>);
+pub(crate) struct MenuAnswer(Arc<Mutex<Answer>>);
 
 /// The app's side: the future `show` answers.
-struct ChosenEntry(Arc<Mutex<Answer>>);
+pub(crate) struct ChosenEntry(Arc<Mutex<Answer>>);
 
-fn menu_answer() -> (MenuAnswer, ChosenEntry) {
+/// A menu's answer: what the menu gives, and the future the app awaits.
+pub(crate) fn menu_answer() -> (MenuAnswer, ChosenEntry) {
     let answer = Arc::new(Mutex::new(Answer::default()));
     (MenuAnswer(Arc::clone(&answer)), ChosenEntry(answer))
 }
 
 impl MenuAnswer {
-    /// The menu closed with `index` chosen, or none.
-    fn give(self, index: Option<usize>) {
-        answer(&self.0, index);
+    /// The menu closed with `chosen`, or none.
+    pub(crate) fn give(self, chosen: Option<MenuId>) {
+        answer(&self.0, chosen);
     }
 }
 
@@ -81,14 +93,14 @@ impl Drop for MenuAnswer {
     }
 }
 
-/// Answers `index` unless an answer was given already, and wakes the app's task.
-fn answer(answer: &Mutex<Answer>, index: Option<usize>) {
+/// Answers `chosen` unless an answer was given already, and wakes the app's task.
+fn answer(answer: &Mutex<Answer>, chosen: Option<MenuId>) {
     let waiter = {
         let mut answer = locked(answer);
         if answer.chosen.is_some() {
             return;
         }
-        answer.chosen = Some(index);
+        answer.chosen = Some(chosen);
         answer.waiter.take()
     };
     if let Some(waiter) = waiter {
@@ -97,12 +109,12 @@ fn answer(answer: &Mutex<Answer>, index: Option<usize>) {
 }
 
 impl Future for ChosenEntry {
-    type Output = Option<usize>;
+    type Output = Option<MenuId>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<usize>> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<MenuId>> {
         let mut answer = locked(&self.0);
         match answer.chosen {
-            Some(index) => Poll::Ready(index),
+            Some(chosen) => Poll::Ready(chosen),
             None => {
                 answer.waiter = Some(cx.waker().clone());
                 Poll::Pending
@@ -131,7 +143,7 @@ mod tests {
         }
     }
 
-    fn poll(chosen: &mut ChosenEntry, waker: &Arc<CountingWaker>) -> Poll<Option<usize>> {
+    fn poll(chosen: &mut ChosenEntry, waker: &Arc<CountingWaker>) -> Poll<Option<MenuId>> {
         let waker = Waker::from(Arc::clone(waker));
         Pin::new(chosen).poll(&mut Context::from_waker(&waker))
     }

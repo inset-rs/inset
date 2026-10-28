@@ -1,4 +1,4 @@
-//! A system winit covers by itself, Linux among them: nothing to add, and nothing to ask, so
+//! A system winit covers by itself, the BSDs among them: nothing to add, and nothing to ask, so
 //! every answer is the trait's own but the clipboard's, arboard's plain text.
 
 use inset_embedder::TargetPlatform;
@@ -17,7 +17,8 @@ use super::{
 pub(crate) enum WinitOnly {}
 
 impl OperatingSystem for WinitOnly {
-    /// Every system without a module of its own that Flutter names, and Linux for the rest.
+    /// Every system without a module of its own that Flutter names, and Linux for the rest,
+    /// which are Linux's relatives.
     const TARGET_PLATFORM: TargetPlatform = if cfg!(target_os = "fuchsia") {
         TargetPlatform::Fuchsia
     } else {

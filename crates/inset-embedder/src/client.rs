@@ -6,8 +6,9 @@
 use std::time::Duration;
 
 use crate::{
-    AppExitReply, AppExitResponse, AppLifecycleState, ClipboardEvent, DropData, Frame, KeyData,
-    PointerDataPacket, TextEditingValue, TextInputAction, ViewFocusEvent, ViewId,
+    AppExitReply, AppExitResponse, AppLifecycleState, ClipboardEvent, DropData, EditCommand, Frame,
+    KeyData, MenuId, PointerDataPacket, TextEditingValue, TextInputAction, TrayIconEvent,
+    TrayIconId, ViewFocusEvent, ViewId,
 };
 
 /// Complete frames and typed view lifecycle notifications.
@@ -58,6 +59,31 @@ pub trait EmbedderClient {
     /// it unhandled. No dart:ui hook; the default drops it.
     fn clipboard_event(&mut self, view: ViewId, event: ClipboardEvent) {
         let _ = (view, event);
+    }
+
+    /// The user chose an edit command for `view` from the system's own Edit menu, which a key
+    /// reaches only once the framework has left it unhandled: undo, redo, select all or delete.
+    /// No dart:ui hook; the default drops it.
+    fn edit_command(&mut self, view: ViewId, command: EditCommand) {
+        let _ = (view, command);
+    }
+
+    /// The user chose the item `id` of the app's menu bar (`MenuBar::set_menus`). Flutter's
+    /// `Menu.selectedCallback` on the `flutter/menu` channel. The default drops it.
+    fn menu_selected(&mut self, id: MenuId) {
+        let _ = id;
+    }
+
+    /// The user chose the item `id` of the Dock icon's menu (`DockMenu::set_menu`). No dart:ui
+    /// hook; the default drops it.
+    fn dock_menu_selected(&mut self, id: MenuId) {
+        let _ = id;
+    }
+
+    /// Something happened to the tray icon `icon`, as its system reports it. No dart:ui hook; the
+    /// default drops it.
+    fn tray_icon_event(&mut self, icon: TrayIconId, event: TrayIconEvent) {
+        let _ = (icon, event);
     }
 
     /// Flutter `PlatformDispatcher.onKeyData`.

@@ -17,7 +17,10 @@
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
 mod text;
 
+use std::task::{Context, Poll, Waker};
 use std::time::Instant;
+
+use inset_embedder::{Clipboard, PastedItem};
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
 pub(crate) use text::{ChangeProbe, TextClipboard};
@@ -38,5 +41,19 @@ pub(crate) trait ClipboardChanges {
     /// answers whether it cleared one, which the app hears as a change.
     fn clear_expired(&self, _now: Instant) -> bool {
         false
+    }
+}
+
+/// What is on `clipboard` now, as a paste from the system's own Edit menu hands it to the app:
+/// every system's clipboard here lists its items in the call, so one listing that does not is
+/// taken as empty.
+pub(crate) fn listed_now(clipboard: &dyn Clipboard) -> Vec<Box<dyn PastedItem>> {
+    let mut listing = clipboard.items();
+    match listing
+        .as_mut()
+        .poll(&mut Context::from_waker(Waker::noop()))
+    {
+        Poll::Ready(items) => items,
+        Poll::Pending => Vec::new(),
     }
 }

@@ -6,13 +6,15 @@
 //! window's native surfaces, which `absent` answers for a system that has neither, and the
 //! clipboard, which is arboard's plain text on a system without code of its own for one. What a
 //! system lets the app do is answered in one place, on [`OperatingSystem`].
-//! Four systems: macOS adds a window frame that animates, the popup menu, its pasteboard, a
-//! display link, native surfaces, its own answers about its screens, whether a window is occluded
-//! and its notices that a window was minimized, and the requests it makes of the application and
-//! what it says changed, among others (`macos`); iOS reports its window's size and safe area
-//! differently, and has its pasteboard (`ios`); Windows tells the clipboard's changes by its
-//! sequence number (`windows`); every other system winit covers by itself (`winit_only`). What
-//! macOS and iOS share is in `apple`.
+//! Five systems: macOS adds a window frame that animates, its menus (the menu bar, a menu at a
+//! point, the Dock icon's and the status items), its pasteboard, a display link, native surfaces,
+//! its own answers about its screens, whether a window is occluded and its notices that a window
+//! was minimized, and the requests it makes of the application and what it says changed, among
+//! others (`macos`); iOS reports its window's size and safe area differently, and has its
+//! pasteboard (`ios`); Windows tells the clipboard's changes by its sequence number, and has a
+//! menu at a point and icons in the notification area (`windows`); Linux has the desktop's tray
+//! (`linux`); every other system winit covers by itself (`winit_only`). What macOS and iOS share
+//! is in `apple`.
 //!
 //! A system's module is compiled for its own target only, so a change to a trait is checked
 //! against that system's answers only when building for it: build every target a change
@@ -24,28 +26,38 @@ mod absent;
 mod apple;
 #[cfg(target_os = "ios")]
 mod ios;
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
-#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "windows",
+    target_os = "linux"
+)))]
 mod winit_only;
 
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    Clipboard, Compositor, Offset, PopupMenuEntry, Rect, Screen, ScreenId, SurfacePlacement,
-    TargetPlatform, ViewId, ViewPadding, VsyncWaiter, WindowConfig,
+    Clipboard, Compositor, DockMenu, KeyData, MenuBar, MenuEntry, MenuId, Offset, Rect, Screen,
+    ScreenId, SurfacePlacement, TargetPlatform, TrayIcons, ViewId, ViewPadding, VsyncWaiter,
+    WindowConfig,
 };
 use valo_codec::Decoder;
-use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
+use winit::event_loop::{ActiveEventLoop, EventLoopBuilder, EventLoopProxy};
 use winit::monitor::MonitorHandle;
 use winit::window::{Window, WindowAttributes};
 
 use crate::clipboard::ClipboardChanges;
 use crate::lifecycle::LifecycleNotice;
 use crate::main_loop::MainLoopEvent;
+use crate::menus::MenuEvents;
 use crate::screens::{monitor_number, monitor_screens};
 use crate::system_changes::SystemChange;
 use crate::system_requests::SystemRequest;
@@ -58,7 +70,14 @@ pub(crate) type ThisOs = macos::AppKit;
 pub(crate) type ThisOs = ios::Ios;
 #[cfg(target_os = "windows")]
 pub(crate) type ThisOs = windows::Windows;
-#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
+#[cfg(target_os = "linux")]
+pub(crate) type ThisOs = linux::Linux;
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "windows",
+    target_os = "linux"
+)))]
 pub(crate) type ThisOs = winit_only::WinitOnly;
 
 /// This system's vsyncs for a display.
@@ -281,18 +300,66 @@ pub(crate) trait WindowSurfaces {
     fn place(&self, placements: &[SurfacePlacement], view: ViewId);
 }
 
-/// Menus the system draws itself.
+/// Menus the system draws itself (`menus/`): each place is the system's, or none where it has
+/// none, and the app draws its own there.
 pub(crate) trait NativeMenus {
-    /// Shows `entries` as the system's menu at the pointer once the embedder's current call has
-    /// returned, its loop outside every call into the embedder, and hands `closed` the index of
-    /// the entry chosen once it closes. Hands it `None` at once where the system has no such
-    /// menu.
+    /// Whether the system opens a menu at a point in a window: macOS's and Windows' do. Linux's
+    /// desktops have no menu of the system's: GTK and Qt draw theirs in a pop-up surface, which
+    /// winit offers only from 0.31, where a framework can draw them.
+    const POPUP_MENUS: bool = false;
+
+    /// Shows `menu` at `at`, in logical pixels from the top-left corner of `window`'s content,
+    /// once the embedder's current call has returned, its loop outside every call into the
+    /// embedder, and hands `closed` the id of the item chosen once it closes. A provided item acts
+    /// as the system's own does, its edit commands sent through `events`, and answers none.
     fn open_popup_menu(
-        _entries: Vec<PopupMenuEntry>,
-        closed: Box<dyn FnOnce(Option<usize>) + Send>,
+        _window: &Window,
+        _at: Offset,
+        _menu: Vec<MenuEntry>,
+        _events: MenuEvents,
+        closed: Box<dyn FnOnce(Option<MenuId>) + Send>,
     ) {
         closed(None);
     }
+
+    /// The app's menu bar, which shows the system's standard one until the app sets its own:
+    /// macOS's. `None` where the system has none.
+    fn menu_bar(_events: MenuEvents) -> Option<Rc<dyn MenuBar>> {
+        None
+    }
+
+    /// The Dock icon's menu: macOS's. `None` where the system has no Dock.
+    fn dock_menu(_events: MenuEvents) -> Option<Rc<dyn DockMenu>> {
+        None
+    }
+
+    /// The app's icons in the system's tray: macOS's status items, Windows' notification area,
+    /// Linux's StatusNotifierItems. `None` where the system has no tray.
+    fn tray_icons(_events: MenuEvents) -> Option<Rc<dyn TrayIcons>> {
+        None
+    }
+
+    /// Configures winit's event loop before it is built: macOS leaves winit's own menu bar out,
+    /// for the system's standard one (`menu_bar`).
+    fn configure_event_loop(_builder: &mut EventLoopBuilder<MainLoopEvent>) {}
+
+    /// Whether the system's menus send the focused view Edit's cut, copy and paste, which a key
+    /// the framework leaves reaches: macOS's menu bar, while it holds those items.
+    fn provides_edit_commands() -> bool {
+        false
+    }
+
+    /// Offers the key-down being handled, which the framework left, to the system's menus, as
+    /// AppKit offers a key equivalent to its main menu after the window's views; answers whether
+    /// a menu took it. Main thread, inside the call that reports the key.
+    fn perform_key_equivalent() -> bool {
+        false
+    }
+
+    /// Keeps the system's own event of `key`, being reported, a short while, for an app that
+    /// claims the key and hands it back to the menu bar later (`MenuBar::perform_key_equivalent`):
+    /// macOS's. Main thread, inside the call that reports the key.
+    fn keep_key_event(_key: &KeyData) {}
 }
 
 /// The system's clipboard (`clipboard/`).

@@ -11,9 +11,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use inset_embedder::{
-    AppExitReply, AppLifecycleState, ClipboardEvent, DropData, EmbedderClient, Frame, Instant,
-    KeyData, PlatformRef, PointerDataPacket, RequestId, TextEditingValue, TextInputAction,
-    ViewError, ViewFocusEvent, ViewId,
+    AppExitReply, AppLifecycleState, ClipboardEvent, DropData, EditCommand, EmbedderClient, Frame,
+    Instant, KeyData, MenuId, PlatformRef, PointerDataPacket, RequestId, TextEditingValue,
+    TextInputAction, TrayIconEvent, TrayIconId, ViewError, ViewFocusEvent, ViewId,
 };
 use inset_foundation::{App, AppCell};
 use inset_gestures::GestureBinding;
@@ -165,6 +165,42 @@ impl EmbedderClient for Shell {
             let callback = app.platform_callbacks().on_clipboard_event.clone();
             if let Some(callback) = callback {
                 callback(app, view, event);
+            }
+        });
+    }
+
+    fn edit_command(&mut self, view: ViewId, command: EditCommand) {
+        self.push(|app| {
+            let callback = app.platform_callbacks().on_edit_command.clone();
+            if let Some(callback) = callback {
+                callback(app, view, command);
+            }
+        });
+    }
+
+    fn menu_selected(&mut self, id: MenuId) {
+        self.push(|app| {
+            let callback = app.platform_callbacks().on_menu_selected.clone();
+            if let Some(callback) = callback {
+                callback(app, id);
+            }
+        });
+    }
+
+    fn dock_menu_selected(&mut self, id: MenuId) {
+        self.push(|app| {
+            let callback = app.platform_callbacks().on_dock_menu_selected.clone();
+            if let Some(callback) = callback {
+                callback(app, id);
+            }
+        });
+    }
+
+    fn tray_icon_event(&mut self, icon: TrayIconId, event: TrayIconEvent) {
+        self.push(|app| {
+            let callback = app.platform_callbacks().on_tray_icon_event.clone();
+            if let Some(callback) = callback {
+                callback(app, icon, event);
             }
         });
     }
@@ -362,6 +398,58 @@ mod tests {
         let request = CopyRequest::new(|_items, _options| Box::pin(std::future::ready(Ok(()))));
         shell.clipboard_event(IMPLICIT_VIEW_ID, ClipboardEvent::Cut(request));
         assert_eq!(seen.get(), Some((IMPLICIT_VIEW_ID, true)));
+    }
+
+    #[test]
+    fn menu_choices_edit_commands_and_tray_icon_events_reach_their_callbacks() {
+        use std::cell::RefCell;
+
+        use inset_embedder::{EditCommand, Offset, TrayIconEvent};
+
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let slot = Rc::clone(&seen);
+        let mut shell = Shell::new(Rc::new(platform_with_a_view()), move |app: &mut App| {
+            let callbacks = app.platform_callbacks_mut();
+            let menu = Rc::clone(&slot);
+            callbacks.on_menu_selected = Some(Rc::new(move |_app, id| {
+                menu.borrow_mut().push(format!("menu {id}"));
+            }));
+            let dock = Rc::clone(&slot);
+            callbacks.on_dock_menu_selected = Some(Rc::new(move |_app, id| {
+                dock.borrow_mut().push(format!("dock {id}"));
+            }));
+            let edit = Rc::clone(&slot);
+            callbacks.on_edit_command = Some(Rc::new(move |_app, view, command| {
+                edit.borrow_mut().push(format!("{view:?} {command:?}"));
+            }));
+            let tray = Rc::clone(&slot);
+            callbacks.on_tray_icon_event = Some(Rc::new(move |_app, icon, event| {
+                tray.borrow_mut().push(format!("tray {icon} {event:?}"));
+            }));
+        });
+        shell.menu_selected(3);
+        shell.dock_menu_selected(4);
+        shell.edit_command(IMPLICIT_VIEW_ID, EditCommand::Undo);
+        shell.tray_icon_event(
+            7,
+            TrayIconEvent::Activated {
+                position: Offset::new(1.0, 2.0),
+            },
+        );
+        assert_eq!(
+            *seen.borrow(),
+            [
+                "menu 3".to_owned(),
+                "dock 4".to_owned(),
+                format!("{IMPLICIT_VIEW_ID:?} Undo"),
+                format!(
+                    "tray 7 {:?}",
+                    TrayIconEvent::Activated {
+                        position: Offset::new(1.0, 2.0)
+                    }
+                ),
+            ]
+        );
     }
 
     #[test]
