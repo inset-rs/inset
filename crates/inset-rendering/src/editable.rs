@@ -11,7 +11,8 @@ use std::fmt;
 use inset_embedder::{
     BoxHeightStyle, BoxWidthStyle, Clip, Color, FontCollection, LineMetrics, Matrix4, Offset,
     Paint, Radius, Rect, Size, TargetPlatform, TextAffinity, TextAlign, TextBaseline,
-    TextDirection, TextHeightBehavior, TextPosition, TextRange, TextSelection, clamp_double,
+    TextBox, TextDirection, TextHeightBehavior, TextPosition, TextRange, TextSelection,
+    clamp_double,
 };
 use inset_foundation::{App, Handle, Listenable, Listener, ValueListenable, ValueNotifier};
 use inset_gestures::TapDownDetails;
@@ -911,6 +912,38 @@ impl RenderEditable {
         }
         self.get_mut(app).clip_behavior = value;
         self.mark_needs_paint(app);
+    }
+
+    /// Returns a list of rects that bound the given selection, and the text
+    /// direction. The text direction is used by the engine to calculate
+    /// the closest position to a given point.
+    ///
+    /// See [`TextPainter::get_boxes_for_selection`] for more details.
+    pub fn get_boxes_for_selection(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        selection: TextSelection,
+    ) -> Vec<TextBox> {
+        self.compute_text_metrics_if_needed(app);
+        let paint_offset = self.paint_offset(app);
+        let this = self.get(app);
+        this.text_painter
+            .get_boxes_for_selection(
+                selection,
+                this.selection_height_style,
+                this.selection_width_style,
+            )
+            .into_iter()
+            .map(|text_box| {
+                TextBox::from_ltrbd(
+                    text_box.left + paint_offset.dx(),
+                    text_box.top + paint_offset.dy(),
+                    text_box.right + paint_offset.dx(),
+                    text_box.bottom + paint_offset.dy(),
+                    text_box.direction,
+                )
+            })
+            .collect()
     }
 
     /// Track whether the start of the selection is currently in the visible

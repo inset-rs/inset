@@ -6304,8 +6304,15 @@ impl FlexConfiguration {
         render_object.as_object()
     }
 
-    /// `Flex.updateRenderObject`'s body; also the shape of Dart's constructor cascade.
+    /// `Flex.updateRenderObject`'s body; also the shape of Dart's constructor cascade. It first
+    /// checks the constructor's assert, which needs two fields and so cannot run on a setter.
     fn push(&self, app: &mut App, context: BuildContext, render_object: RenderHandle<RenderFlex>) {
+        debug_assert!(
+            self.cross_axis_alignment != CrossAxisAlignment::Baseline
+                || self.text_baseline.is_some(),
+            "textBaseline is required if you specify the crossAxisAlignment with \
+             CrossAxisAlignment.baseline"
+        );
         render_object.set_direction(app, self.direction);
         render_object.set_main_axis_alignment(app, self.main_axis_alignment);
         render_object.set_main_axis_size(app, self.main_axis_size);
@@ -8432,6 +8439,75 @@ mod tests {
         let children = container_children(column, &app);
         assert_eq!(flex_offset(children[0], &app), Offset::new(0.0, 0.0));
         assert_eq!(flex_offset(children[1], &app), Offset::new(0.0, 170.0));
+    }
+
+    /// `basic_test.dart`: `Row` `multiple baseline aligned children`. A large one-line text and
+    /// a small seven-line one share the first line's baseline, so the small one hangs below it,
+    /// and the row is just tall enough for both.
+    #[test]
+    fn a_baseline_aligned_row_puts_texts_of_different_sizes_on_one_baseline() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let binding = inset_painting::PaintingBinding::instance(&mut app);
+        binding.install_fonts(&mut app, |fonts| {
+            fonts.add_source(valo_system_fonts::SystemFonts::load());
+        });
+        let text = |data: &str, font_size: f64| {
+            crate::Text::new(data)
+                .style(
+                    inset_painting::TextStyle::new()
+                        .font_size(font_size)
+                        .height(1.0),
+                )
+                .into_widget()
+        };
+        let harness = Harness::mount(
+            &mut app,
+            ltr(Row::new()
+                .cross_axis_alignment(CrossAxisAlignment::Baseline)
+                .text_baseline(TextBaseline::Alphabetic)
+                .children([
+                    text("big text", 52.0),
+                    text("one\ntwo\nthree\nfour\nfive\nsix\nseven", 12.0),
+                ])
+                .into_widget()),
+        );
+        harness.pump(&mut app);
+
+        let row = render_object_under_root::<RenderFlex>(&harness, &app);
+        let texts = container_children(row, &app);
+        let mut above_baseline = |text: AnyRenderBox| {
+            text.get_distance_to_baseline(&mut app, TextBaseline::Alphabetic, true)
+                .expect("a text has a baseline")
+        };
+        let (above_baseline_1, above_baseline_2) =
+            (above_baseline(texts[0]), above_baseline(texts[1]));
+        let below_baseline_1 = texts[0].size(&app).height() - above_baseline_1;
+        let below_baseline_2 = texts[1].size(&app).height() - above_baseline_2;
+        assert!(above_baseline_1 > above_baseline_2 && below_baseline_2 > below_baseline_1);
+        assert!(row.size(&app).height() > texts[0].size(&app).height());
+        assert!(row.size(&app).height() > texts[1].size(&app).height());
+        assert_eq!(row.size(&app).height(), above_baseline_1 + below_baseline_2);
+        assert_eq!(flex_offset(texts[0], &app).dy(), 0.0);
+        assert_eq!(
+            flex_offset(texts[1], &app).dy(),
+            above_baseline_1 - above_baseline_2
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "textBaseline is required")]
+    fn a_baseline_aligned_row_needs_a_text_baseline() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            ltr(Row::new()
+                .cross_axis_alignment(CrossAxisAlignment::Baseline)
+                .children([sized(10.0, 10.0)])
+                .into_widget()),
+        );
+        harness.pump(&mut app);
     }
 
     #[test]

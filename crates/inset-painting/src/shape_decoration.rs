@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use inset_embedder::{BlurStyle, Canvas, ClipOp, FillRule, Matrix4, Offset, Paint};
 use inset_embedder::{Path, PathBuilder, Rect, Size};
+use inset_foundation::{App, VoidCallback};
 
 use crate::basic_types::TextDirection;
 use crate::borders::{BorderSide, BorderStyle, ShapeBorder};
@@ -272,7 +273,7 @@ impl Decoration for ShapeDecoration {
             .hit_test(Offset::ZERO & size, position, text_direction)
     }
 
-    fn create_box_painter(&self, on_changed: Option<Box<dyn Fn()>>) -> Box<dyn BoxPainter> {
+    fn create_box_painter(&self, on_changed: Option<VoidCallback>) -> Box<dyn BoxPainter> {
         Box::new(ShapeDecorationPainter::new(self.clone(), on_changed))
     }
 
@@ -309,7 +310,7 @@ impl Debug for ShapeDecoration {
 /// An object that paints a [`ShapeDecoration`] into a canvas.
 struct ShapeDecorationPainter {
     decoration: ShapeDecoration,
-    on_changed: Option<Box<dyn Fn()>>,
+    on_changed: Option<VoidCallback>,
     last_rect: Option<Rect>,
     last_text_direction: Option<TextDirection>,
     outer_path: Option<Arc<Path>>,
@@ -323,7 +324,7 @@ struct ShapeDecorationPainter {
 impl ShapeDecorationPainter {
     fn new(
         decoration: ShapeDecoration,
-        on_changed: Option<Box<dyn Fn()>>,
+        on_changed: Option<VoidCallback>,
     ) -> ShapeDecorationPainter {
         ShapeDecorationPainter {
             decoration,
@@ -509,7 +510,7 @@ impl BoxPainter for ShapeDecorationPainter {
         self.decoration.shape.paint(canvas, rect, text_direction);
     }
 
-    fn on_changed(&self) -> Option<&dyn Fn()> {
+    fn on_changed(&self) -> Option<&dyn Fn(&mut App)> {
         self.on_changed.as_deref()
     }
 }

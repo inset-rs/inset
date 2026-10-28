@@ -9,7 +9,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use inset_animation::{AnimationBehavior, AnimationController, Curves};
+use inset_animation::{AnimationBehavior, AnimationController, Curve, Curves};
 use inset_embedder::{
     AutofillConfiguration, BoxHeightStyle, BoxWidthStyle, Brightness, Clip, Color, FontWeight,
     Locale, Matrix4, Offset, PointerDeviceKind, Radius, Rect, Size, SmartDashesType,
@@ -65,6 +65,7 @@ use crate::widgets::automatic_keep_alive::{
 use crate::widgets::basic::CompositedTransformTarget;
 use crate::widgets::basic::WidgetBuilder;
 use crate::widgets::basic::{Builder, Directionality};
+use crate::widgets::constants::K_MIN_INTERACTIVE_DIMENSION;
 use crate::widgets::context_menu_button_item::{ContextMenuButtonItem, ContextMenuButtonType};
 use crate::widgets::default_text_editing_shortcuts::intent_for_macos_selector;
 use crate::widgets::focus_manager::{FocusManager, FocusNode, FocusNodeLeaf, UnfocusDisposition};
@@ -99,7 +100,7 @@ use crate::widgets::text_editing_intents::{
 };
 use crate::widgets::text_selection::{
     ClipboardStatus, ClipboardStatusNotifier, LiveTextInputStatus, LiveTextInputStatusNotifier,
-    TextSelectionControls, TextSelectionOverlay,
+    TextSelectionControls, TextSelectionHandleType, TextSelectionOverlay,
 };
 use crate::widgets::text_selection_toolbar_anchors::TextSelectionToolbarAnchors;
 use crate::widgets::ticker_provider::{
@@ -2004,6 +2005,8 @@ impl StatefulWidget for EditableText {
             last_orientation: None,
             binding_observer: None,
             registered_as_observer: false,
+            show_caret_on_screen_scheduled: false,
+            last_bottom_view_inset: 0.0,
             has_focus: false,
             next_focus_change_is_internal: false,
             selection_overlay: None,
@@ -2309,6 +2312,8 @@ pub struct EditableTextState {
     last_orientation: Option<Orientation>,
     binding_observer: Option<WidgetsBindingObserverRef>,
     registered_as_observer: bool,
+    show_caret_on_screen_scheduled: bool,
+    last_bottom_view_inset: f64,
     has_focus: bool,
     next_focus_change_is_internal: bool,
     selection_overlay: Option<Handle<TextSelectionOverlay>>,
@@ -3983,10 +3988,15 @@ impl EditableTextState {
         self.start_or_stop_cursor_timer_if_needed(app);
         self.update_or_dispose_selection_overlay_if_needed(app);
         if has_focus {
+            // Listen for changing viewInsets, which indicates keyboard showing up.
             let observer = self.observer(app);
             if !app.get(self).registered_as_observer {
                 WidgetsBinding::instance(app).add_observer(app, observer);
                 app.get_mut(self).registered_as_observer = true;
+            }
+            app.get_mut(self).last_bottom_view_inset = self.bottom_view_inset(app);
+            if !self.widget(app).read_only {
+                self.schedule_show_caret_on_screen(app, true);
             }
             let updated = self.adjusted_selection_when_focused(app);
             if let Some(selection) = updated {
@@ -4146,7 +4156,7 @@ impl EditableTextState {
                 ))
         {
             self.handle_selection_changed(app, value.selection, cause);
-            let _ = old_selection;
+            self.bring_into_view_by_selection_state(app, old_selection, value.selection, cause);
         }
         let current_text = self.value(app).text.clone();
         if old_value.text != current_text
@@ -4155,6 +4165,37 @@ impl EditableTextState {
             on_changed(app, current_text);
         }
         self.end_batch_edit(app);
+    }
+
+    fn bring_into_view_by_selection_state(
+        self: Handle<Self>,
+        app: &mut App,
+        old_selection: TextSelection,
+        new_selection: TextSelection,
+        cause: Option<SelectionChangedCause>,
+    ) {
+        match app.platform().target_platform() {
+            TargetPlatform::IOS | TargetPlatform::MacOS => {
+                if matches!(
+                    cause,
+                    Some(SelectionChangedCause::LongPress | SelectionChangedCause::Drag)
+                ) {
+                    self.bring_into_view(app, new_selection.extent());
+                }
+            }
+            TargetPlatform::Linux
+            | TargetPlatform::Windows
+            | TargetPlatform::Fuchsia
+            | TargetPlatform::Android => {
+                if cause == Some(SelectionChangedCause::Drag) {
+                    if old_selection.base_offset != new_selection.base_offset {
+                        self.bring_into_view(app, new_selection.base());
+                    } else if old_selection.extent_offset != new_selection.extent_offset {
+                        self.bring_into_view(app, new_selection.extent());
+                    }
+                }
+            }
+        }
     }
 
     fn handle_selection_changed(
@@ -4206,6 +4247,123 @@ impl EditableTextState {
         if self.show_blinking_cursor(app) && app.get(self).cursor_timer.is_some() {
             self.stop_cursor_blink(app, false);
             self.start_cursor_blink(app);
+        }
+    }
+
+    /// Dart's `View.of(context).viewInsets.bottom`, read as the view id is: zero for a tree
+    /// mounted without a `View`.
+    fn bottom_view_inset(self: Handle<Self>, app: &mut App) -> f64 {
+        let context = self.context(app);
+        View::maybe_of(app, context).map_or(0.0, |view| view.metrics().view_insets.bottom)
+    }
+
+    // Animation configuration for scrolling the caret back on screen.
+    const CARET_ANIMATION_DURATION: Duration = Duration::from_millis(100);
+
+    fn caret_animation_curve() -> Rc<dyn Curve> {
+        Curves::fast_out_slow_in()
+    }
+
+    fn schedule_show_caret_on_screen(self: Handle<Self>, app: &mut App, with_animation: bool) {
+        if app.get(self).show_caret_on_screen_scheduled {
+            return;
+        }
+        app.get_mut(self).show_caret_on_screen_scheduled = true;
+        let view = View::maybe_id_of(app, self.context(app));
+        SchedulerBinding::add_post_frame_callback(
+            app,
+            FrameCallback::new(move |app, _| self.show_caret_on_screen(app, with_animation)),
+            view,
+        );
+    }
+
+    /// The body of Dart's `EditableText.showCaret` post-frame callback.
+    fn show_caret_on_screen(self: Handle<Self>, app: &mut App, with_animation: bool) {
+        // Since we are in a post frame callback, check that the state is still mounted in case
+        // RenderEditable has been disposed.
+        if !app.contains(self) || !self.mounted(app) {
+            return;
+        }
+        app.get_mut(self).show_caret_on_screen_scheduled = false;
+        let render_editable = self.render_editable(app);
+        let Some(caret_selection) = render_editable
+            .selection(app)
+            .filter(|selection| selection.is_valid())
+        else {
+            return;
+        };
+        if !self.scroll_controller(app).has_clients(app) {
+            return;
+        }
+
+        let line_height = render_editable.preferred_line_height(app);
+
+        // Enlarge the target rect by scrollPadding to ensure that caret is not
+        // positioned directly at the edge after scrolling.
+        let scroll_padding = self.widget(app).scroll_padding;
+        let mut bottom_spacing = scroll_padding.bottom;
+        let selection_controls = app
+            .get(self)
+            .selection_overlay
+            .and_then(|overlay| app.get(overlay).selection_controls.clone());
+        if let Some(selection_controls) = selection_controls {
+            let handle_height = selection_controls.get_handle_size(line_height).height();
+            let interactive_handle_height = handle_height.max(K_MIN_INTERACTIVE_DIMENSION);
+            let anchor = selection_controls
+                .get_handle_anchor(TextSelectionHandleType::Collapsed, line_height);
+            let handle_center = handle_height / 2.0 - anchor.dy();
+            bottom_spacing = (handle_center + interactive_handle_height / 2.0).max(bottom_spacing);
+        }
+
+        let caret_padding = scroll_padding.copy_with(None, None, None, Some(bottom_spacing));
+
+        let caret_rect = render_editable.get_local_rect_for_caret(app, caret_selection.extent());
+        let target_offset = self.get_offset_to_reveal_caret(app, caret_rect);
+
+        let selection = self.value(app).selection;
+        let rect_to_reveal = if selection.is_collapsed() {
+            target_offset.rect
+        } else {
+            let selection_boxes = render_editable.get_boxes_for_selection(app, selection);
+            // selection_boxes may be empty if, for example, the selection does not
+            // encompass a full character, like if it only contained part of an
+            // extended grapheme cluster.
+            match (selection_boxes.first(), selection_boxes.last()) {
+                (Some(first), Some(last)) => {
+                    if selection.base_offset < selection.extent_offset {
+                        last.to_rect()
+                    } else {
+                        first.to_rect()
+                    }
+                }
+                _ => target_offset.rect,
+            }
+        };
+
+        if with_animation {
+            self.scroll_controller(app).animate_to(
+                app,
+                target_offset.offset,
+                Self::CARET_ANIMATION_DURATION,
+                Self::caret_animation_curve(),
+            );
+            render_editable.show_on_screen(
+                app,
+                None,
+                Some(caret_padding.inflate_rect(rect_to_reveal)),
+                Self::CARET_ANIMATION_DURATION,
+                Self::caret_animation_curve(),
+            );
+        } else {
+            self.scroll_controller(app)
+                .jump_to(app, target_offset.offset);
+            render_editable.show_on_screen(
+                app,
+                None,
+                Some(caret_padding.inflate_rect(rect_to_reveal)),
+                Duration::ZERO,
+                Curves::ease(),
+            );
         }
     }
 
@@ -5150,11 +5308,22 @@ impl WidgetsBindingObserverObject for EditableTextState {
         if !self.mounted(app) {
             return;
         }
-        SchedulerBinding::add_post_frame_callback(
-            app,
-            FrameCallback::handle_method(self, Self::post_frame_update_for_scroll),
-            View::maybe_id_of(app, self.context(app)),
-        );
+        let context = self.context(app);
+        let bottom_view_inset = self.bottom_view_inset(app);
+        let last_bottom_view_inset = app.get(self).last_bottom_view_inset;
+        if last_bottom_view_inset != bottom_view_inset {
+            SchedulerBinding::add_post_frame_callback(
+                app,
+                FrameCallback::handle_method(self, Self::post_frame_update_for_scroll),
+                View::maybe_id_of(app, context),
+            );
+            if last_bottom_view_inset < bottom_view_inset {
+                // Because the metrics change signal from engine will come here every frame
+                // (on both iOS and Android). So we don't need to show caret with animation.
+                self.schedule_show_caret_on_screen(app, false);
+            }
+        }
+        app.get_mut(self).last_bottom_view_inset = bottom_view_inset;
     }
 }
 
@@ -5208,9 +5377,16 @@ impl TextInputClient for EditableTextState {
             self.format_and_set_value(app, value, Some(SelectionChangedCause::Keyboard), false);
         }
         if self.show_blinking_cursor(app) && app.get(self).cursor_timer.is_some() {
+            // To keep the cursor from blinking while typing, restart the timer here.
             self.stop_cursor_blink(app, false);
             self.start_cursor_blink(app);
         }
+
+        // Wherever the value is changed by the user, schedule a showCaretOnScreen
+        // to make sure the user can see the changes they just made. Programmatic
+        // changes to `textEditingValue` do not trigger the behavior even if the
+        // text field is focused.
+        self.schedule_show_caret_on_screen(app, true);
     }
 
     fn perform_action(self: Handle<Self>, app: &mut App, action: TextInputAction) {
@@ -5346,6 +5522,27 @@ impl TextSelectionDelegate for EditableTextState {
         value: TextEditingValue,
         cause: SelectionChangedCause,
     ) {
+        // Compare the current TextEditingValue with the pre-format new
+        // TextEditingValue value, in case the formatter would reject the change.
+        // Do not automatically scroll to the caret during a selection drag.
+        // Viewport scrolling is instead managed downstream by bring_into_view_by_selection_state
+        // (called via format_and_set_value), which ensures the active handle is kept in view.
+        // Bypassing the default caret auto-scroll here prevents conflicts that would snap
+        // the viewport back to the opposite, static selection end.
+        let current = self.value(app);
+        let should_show_caret = (if self.widget(app).read_only {
+            current.selection != value.selection
+        } else {
+            current != value
+        }) && cause != SelectionChangedCause::Drag;
+
+        if should_show_caret {
+            self.schedule_show_caret_on_screen(app, true);
+        }
+
+        // Even if the value doesn't change, it may be necessary to focus and build
+        // the selection overlay. For example, this happens when right clicking an
+        // unfocused field that previously had a selection in the same spot.
         if value == self.value(app) {
             if !app.get(self).has_focus {
                 app.get_mut(self).next_focus_change_is_internal = true;
@@ -6838,6 +7035,76 @@ mod tests {
         assert_eq!(
             scroll_controller.as_controller().offset(&cell.borrow()),
             0.0
+        );
+    }
+
+    /// Typing past the lines the field shows scrolls the caret back on screen, as Dart's
+    /// `_scheduleShowCaretOnScreen` does after a user edit.
+    #[test]
+    fn a_user_edit_scrolls_the_caret_on_screen() {
+        use crate::test_harness::{binding_cell, binding_mount, binding_pump};
+
+        let cell = binding_cell();
+        install_fonts(&mut cell.borrow_mut());
+        let key = crate::framework::GlobalKey::new();
+        let (controller, focus_node, scroll_controller) = {
+            let mut app = cell.borrow_mut();
+            (
+                TextEditingController::new(&mut app),
+                FocusNode::new(&mut app),
+                ScrollController::default(&mut app),
+            )
+        };
+        let editable = EditableText::new(
+            controller.as_controller(),
+            focus_node,
+            TextStyle::new().font_size(20.0),
+            Color::from_argb(255, 255, 0, 0),
+            Color::from_argb(255, 128, 128, 128),
+        )
+        .scroll_controller(scroll_controller)
+        .max_lines(None)
+        .key(Rc::new(key.clone()));
+        let tree = MediaQuery::new(
+            MediaQueryData::new(),
+            Directionality::new(
+                TextDirection::Ltr,
+                Center::new().child(SizedBox::square(Some(200.0)).child(editable)),
+            ),
+        )
+        .into_widget();
+        binding_mount(&cell, tree);
+        let state = key
+            .current_state::<EditableTextState>(&mut cell.borrow_mut())
+            .expect("the field is mounted");
+        focus_node.request_focus(&mut cell.borrow_mut(), None);
+        binding_pump(&mut cell.borrow_mut(), Duration::from_millis(16));
+        assert_eq!(
+            scroll_controller.as_controller().offset(&cell.borrow()),
+            0.0
+        );
+
+        let text = "line\n".repeat(20);
+        let end = utf16_len(&text);
+        TextSelectionDelegate::user_update_text_editing_value(
+            state,
+            &mut cell.borrow_mut(),
+            TextEditingValue::new()
+                .text(text)
+                .selection(TextSelection::collapsed(end, TextAffinity::Downstream)),
+            SelectionChangedCause::Keyboard,
+        );
+        // The edit's frame schedules the reveal, which then animates for 100 ms.
+        for ms in [32, 48, 100, 200, 300] {
+            binding_pump(&mut cell.borrow_mut(), Duration::from_millis(ms));
+        }
+
+        let app = cell.borrow();
+        let position = scroll_controller.as_controller().position(&app);
+        assert!(position.max_scroll_extent(&app) > 0.0);
+        assert_eq!(
+            scroll_controller.as_controller().offset(&app),
+            position.max_scroll_extent(&app)
         );
     }
 

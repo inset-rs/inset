@@ -44,6 +44,10 @@ Ported against: aa3207e6
   Reason: framework — Flutter's multiline layout does not provide independent wrapping and two-axis editor scrolling.
   Affect: A field configured to accept newlines preserves typed line breaks but also wraps lines that exceed its width.
 
+- Change: A multiline `TextBox` also takes `max_lines`, a limit on its height in lines that WinUI's `TextBox` does not have, and grows with its text from one line up to it; a height limit from its parent works as WinUI's `MaxHeight` does.
+  Reason: framework — Inset's editor takes a line limit, as Flutter's does, and the box passes it on beside WinUI's height limit.
+  Affect: Without `max_lines` a multiline box grows until its parent's height limit and then scrolls, as WinUI's does; with it, the box also stops growing after that many lines.
+
 - Change: `TextBox` receives a TextEditingController owned by the application instead of storing editable text on the widget itself.
   Reason: framework — Inset keeps mutable editing state in a persistent controller while rebuilding the surrounding widget descriptions.
   Affect: Callers read or assign text and selection through the controller and dispose it after the editor unmounts.

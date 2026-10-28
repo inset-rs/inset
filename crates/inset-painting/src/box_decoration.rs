@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use inset_embedder::{BlendMode, Canvas, ClipOp, Paint};
 use inset_embedder::{Offset, Path, PathBuilder, Rect, Size};
+use inset_foundation::{App, VoidCallback};
 
 use crate::basic_types::TextDirection;
 use crate::border_radius::BorderRadiusGeometry;
@@ -336,7 +337,7 @@ impl Decoration for BoxDecoration {
         }
     }
 
-    fn create_box_painter(&self, on_changed: Option<Box<dyn Fn()>>) -> Box<dyn BoxPainter> {
+    fn create_box_painter(&self, on_changed: Option<VoidCallback>) -> Box<dyn BoxPainter> {
         Box::new(BoxDecorationPainter::new(self.clone(), on_changed))
     }
 
@@ -372,12 +373,12 @@ impl Debug for BoxDecoration {
 /// An object that paints a [`BoxDecoration`] into a canvas.
 struct BoxDecorationPainter {
     decoration: BoxDecoration,
-    on_changed: Option<Box<dyn Fn()>>,
+    on_changed: Option<VoidCallback>,
     cached_background_paint: Option<Paint>,
 }
 
 impl BoxDecorationPainter {
-    fn new(decoration: BoxDecoration, on_changed: Option<Box<dyn Fn()>>) -> BoxDecorationPainter {
+    fn new(decoration: BoxDecoration, on_changed: Option<VoidCallback>) -> BoxDecorationPainter {
         BoxDecorationPainter {
             decoration,
             on_changed,
@@ -579,7 +580,7 @@ impl BoxPainter for BoxDecorationPainter {
         }
     }
 
-    fn on_changed(&self) -> Option<&dyn Fn()> {
+    fn on_changed(&self) -> Option<&dyn Fn(&mut App)> {
         self.on_changed.as_deref()
     }
 }

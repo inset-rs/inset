@@ -88,7 +88,8 @@ pub struct TextBox {
     /// Wraps text independently of accepting Enter; multiline input always wraps under the accepted native policy.
     pub text_wrapping: TextWrapping,
 
-    /// Limits the visible height in lines for a multiline editor; the content scrolls vertically.
+    /// Limits the visible height in lines for a multiline editor, which grows with its text from
+    /// one line up to it; past it, the content scrolls vertically.
     pub max_lines: Option<i32>,
 
     /// Alignment of editor and placeholder text.

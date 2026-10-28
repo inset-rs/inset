@@ -13,7 +13,9 @@ categories.workspace = true
 indexmap.workspace = true
 inset-embedder.workspace = true
 inset-foundation.workspace = true
+inset-gestures.workspace = true
 inset-scheduler.workspace = true
+inset-services.workspace = true
 
 [dev-dependencies]
 inset-embedder = { workspace = true, features = ["test-support"] }

@@ -779,7 +779,7 @@ impl TextPainter {
         if cfg!(debug_assertions) {
             let mut placeholder_count = 0;
             if let Some(text) = &self.text {
-                text.visit_children(&mut |span| {
+                text.clone().visit_children(&mut |span| {
                     if span.as_placeholder_span().is_some() {
                         placeholder_count += 1;
                     }
@@ -1101,7 +1101,7 @@ impl TextPainter {
 
     /// Returns the closest offset after `offset` at which the input cursor can be positioned.
     pub fn get_offset_after(&self, offset: i32) -> Option<i32> {
-        let next_code_unit = self.text.as_ref()?.code_unit_at(offset)?;
+        let next_code_unit = self.text.clone()?.code_unit_at(offset)?;
         // TODO(goderbauer): doesn't handle extended grapheme clusters with more than one
         // Unicode scalar value (https://github.com/flutter/flutter/issues/13404).
         Some(if TextPainter::is_high_surrogate(next_code_unit) {
@@ -1114,7 +1114,7 @@ impl TextPainter {
     /// Returns the closest offset before `offset` at which the input cursor can be
     /// positioned.
     pub fn get_offset_before(&self, offset: i32) -> Option<i32> {
-        let prev_code_unit = self.text.as_ref()?.code_unit_at(offset - 1)?;
+        let prev_code_unit = self.text.clone()?.code_unit_at(offset - 1)?;
         // TODO(goderbauer): doesn't handle extended grapheme clusters with more than one
         // Unicode scalar value (https://github.com/flutter/flutter/issues/13404).
         Some(if TextPainter::is_low_surrogate(prev_code_unit) {

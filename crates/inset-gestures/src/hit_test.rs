@@ -2,6 +2,7 @@
 
 use std::any::Any;
 use std::fmt::{self, Debug};
+use std::rc::Rc;
 
 use inset_embedder::{Matrix4, Offset, ViewId};
 use inset_foundation::{App, HandleId, RetainedHandleId};
@@ -54,7 +55,7 @@ pub trait HitTestTarget: Debug + Any {
 /// Subclass this object to pass additional information from the hit test phase
 /// to the event propagation phase.
 pub struct HitTestEntry {
-    target: Box<dyn HitTestTarget>,
+    target: Rc<dyn HitTestTarget>,
     transform: Option<Matrix4>,
 }
 
@@ -62,7 +63,7 @@ impl HitTestEntry {
     /// Creates a hit test entry.
     pub fn new(target: impl HitTestTarget + 'static) -> HitTestEntry {
         HitTestEntry {
-            target: Box::new(target),
+            target: Rc::new(target),
             transform: None,
         }
     }
@@ -70,6 +71,11 @@ impl HitTestEntry {
     /// The [`HitTestTarget`] encountered during the hit test.
     pub fn target(&self) -> &dyn HitTestTarget {
         &*self.target
+    }
+
+    /// The [`target`](Self::target) as the `Rc` that holds it, to keep it past the hit test.
+    pub fn shared_target(&self) -> &Rc<dyn HitTestTarget> {
+        &self.target
     }
 
     /// Returns a matrix describing how [`PointerEvent`]s delivered to this
@@ -82,6 +88,16 @@ impl HitTestEntry {
     ///    to build up this transform.
     pub fn transform(&self) -> Option<Matrix4> {
         self.transform
+    }
+}
+
+/// An entry for a target that others hold too, such as a span of a paragraph's text.
+impl From<Rc<dyn HitTestTarget>> for HitTestEntry {
+    fn from(target: Rc<dyn HitTestTarget>) -> HitTestEntry {
+        HitTestEntry {
+            target,
+            transform: None,
+        }
     }
 }
 

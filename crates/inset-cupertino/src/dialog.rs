@@ -3804,6 +3804,23 @@ impl RenderBox for RenderAlertDialogActionsLayout {
         height
     }
 
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderFlexMixin::compute_distance_to_actual_baseline(self, app, baseline)
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderFlexMixin::compute_dry_baseline(self, app, constraints, baseline)
+    }
+
     fn compute_dry_layout(
         self: RenderHandle<Self>,
         app: &mut App,
@@ -4116,6 +4133,23 @@ impl RenderBox for RenderPriorityColumn {
         let last_child = self.last_child(app).expect("two children");
         first_child.get_max_intrinsic_height(app, width)
             + last_child.get_max_intrinsic_height(app, width)
+    }
+
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderFlexMixin::compute_distance_to_actual_baseline(self, app, baseline)
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderFlexMixin::compute_dry_baseline(self, app, constraints, baseline)
     }
 
     fn compute_dry_layout(

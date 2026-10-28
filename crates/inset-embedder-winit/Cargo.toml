@@ -19,7 +19,7 @@ image-worker = ["valo-codec/worker"]
 inset-embedder.workspace = true
 valo.workspace = true
 valo-codec.workspace = true
-valo-codec-software = { version = "0.10.0", optional = true }
+valo-codec-software = { version = "0.13.1", optional = true }
 wgpu.workspace = true
 pollster.workspace = true
 winit.workspace = true
@@ -36,7 +36,7 @@ arboard.workspace = true
 windows-sys = { version = "0.60", features = ["Win32_System_DataExchange"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
-valo-codec-apple = { version = "0.10.0", optional = true }
+valo-codec-apple = { version = "0.13.1", optional = true }
 # The pasteboards' completion handlers and load handlers, and the main queue the app's futures run
 # on for them.
 block2 = "0.6"

@@ -8,6 +8,7 @@ use std::fmt::Debug;
 use std::rc::Rc;
 
 use inset_embedder::{ParagraphBuilder, TextPosition};
+use inset_gestures::HitTestTarget;
 
 use crate::basic_types::RenderComparison;
 use crate::placeholder_span::PlaceholderSpan;
@@ -49,8 +50,9 @@ pub type InlineSpanRef = Rc<dyn InlineSpan>;
 ///  * The subclass [`PlaceholderSpan`] represents a placeholder that may be filled with
 ///    non-text content.
 ///
-/// Spans are shared as [`InlineSpanRef`]. A visitor receives `&dyn InlineSpan` with the tree's
-/// lifetime, so [`get_span_for_position`](Self::get_span_for_position) can hand a span back.
+/// Spans are shared as [`InlineSpanRef`]. The walks hand each span to their visitor as the
+/// [`InlineSpanRef`] that holds it, so [`get_span_for_position`](Self::get_span_for_position)
+/// returns the span itself, as Dart returns the same object.
 pub trait InlineSpan: Debug {
     /// The [`TextStyle`] to apply to this span.
     ///
@@ -82,7 +84,10 @@ pub trait InlineSpan: Debug {
     ///
     /// When `visitor` returns true, the walk will continue. When `visitor` returns false,
     /// then the walk will end.
-    fn visit_children<'a>(&'a self, visitor: &mut dyn FnMut(&'a dyn InlineSpan) -> bool) -> bool;
+    ///
+    /// It is called through the span's own [`InlineSpanRef`], so it can hand that to
+    /// `visitor`.
+    fn visit_children(self: Rc<Self>, visitor: &mut dyn FnMut(&InlineSpanRef) -> bool) -> bool;
 
     /// Calls `visitor` for each immediate child of this [`InlineSpan`].
     ///
@@ -92,18 +97,17 @@ pub trait InlineSpan: Debug {
     ///
     /// The traversal stops when all immediate children are visited, or when `visitor` returns
     /// false. When `visitor` returns false, the walk will end.
-    fn visit_direct_children<'a>(
-        &'a self,
-        visitor: &mut dyn FnMut(&'a dyn InlineSpan) -> bool,
-    ) -> bool;
+    fn visit_direct_children(&self, visitor: &mut dyn FnMut(&InlineSpanRef) -> bool) -> bool;
 
     /// Returns the [`InlineSpan`] that contains the given position in the text.
-    fn get_span_for_position(&self, position: TextPosition) -> Option<&dyn InlineSpan> {
+    fn get_span_for_position(self: Rc<Self>, position: TextPosition) -> Option<InlineSpanRef> {
         debug_assert!(self.debug_assert_is_valid());
         let mut offset = Accumulator::default();
-        let mut result: Option<&dyn InlineSpan> = None;
+        let mut result: Option<InlineSpanRef> = None;
         self.visit_children(&mut |span| {
-            result = span.get_span_for_position_visitor(position, &mut offset);
+            result = span
+                .clone()
+                .get_span_for_position_visitor(position, &mut offset);
             result.is_none()
         });
         result
@@ -120,10 +124,10 @@ pub trait InlineSpan: Debug {
     ///
     /// [`get_span_for_position`]: Self::get_span_for_position
     fn get_span_for_position_visitor(
-        &self,
+        self: Rc<Self>,
         position: TextPosition,
         offset: &mut Accumulator,
-    ) -> Option<&dyn InlineSpan>;
+    ) -> Option<InlineSpanRef>;
 
     /// Flattens the [`InlineSpan`] tree into a single string.
     ///
@@ -155,7 +159,7 @@ pub trait InlineSpan: Debug {
     /// This only accounts for the `TextSpan.text` values and ignores `PlaceholderSpan`s.
     ///
     /// Returns `None` if the `index` is out of bounds.
-    fn code_unit_at(&self, index: i32) -> Option<u16> {
+    fn code_unit_at(self: Rc<Self>, index: i32) -> Option<u16> {
         if index < 0 {
             return None;
         }
@@ -200,6 +204,12 @@ pub trait InlineSpan: Debug {
 
     /// Dart's `span is PlaceholderSpan`: this span as a [`PlaceholderSpan`], when it is one.
     fn as_placeholder_span(&self) -> Option<&dyn PlaceholderSpan> {
+        None
+    }
+
+    /// Dart's `span is HitTestTarget`: this span as the target a hit on it adds to a hit test,
+    /// when it is one. `None`, the default, for a span that is not.
+    fn to_hit_test_target(self: Rc<Self>) -> Option<Rc<dyn HitTestTarget>> {
         None
     }
 

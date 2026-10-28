@@ -1,7 +1,7 @@
 //! Flutter counterpart: `rendering/paragraph.dart` (`RenderParagraph`).
 //!
-//! Selection (`SelectionRegistrar` / `_SelectableFragment`), the fade overflow shader, span
-//! hit-test targets and semantics wait; see `PORTING.md`.
+//! Selection (`SelectionRegistrar` / `_SelectableFragment`), the fade overflow shader and
+//! semantics wait; see `PORTING.md`.
 
 use std::any::{Any, TypeId};
 use std::fmt;
@@ -1025,8 +1025,32 @@ impl RenderBox for RenderParagraph {
         result: &mut BoxHitTestResult<'_>,
         position: Offset,
     ) -> bool {
-        // Spans are not hit-test targets yet, so the hit falls to the inline children.
-        self.hit_test_inline_children(app, result, position)
+        let painter = self.painter(app);
+        let glyph = painter.get_closest_glyph_for_offset(position);
+        // The hit-test can't fall through the horizontal gaps between visually
+        // adjacent characters on the same line, even with a large letter-spacing or
+        // text justification, as grapheme_cluster_layout_bounds.width is the advance
+        // width to the next character, so there's no gap between their
+        // grapheme_cluster_layout_bounds rects.
+        let span_hit = glyph
+            .filter(|glyph| glyph.grapheme_cluster_layout_bounds.contains(position))
+            .and_then(|glyph| {
+                painter
+                    .text()
+                    .expect("a paragraph always has text")
+                    .clone()
+                    .get_span_for_position(TextPosition::new(
+                        glyph.grapheme_cluster_code_unit_range.start,
+                    ))
+                    .and_then(|span| span.to_hit_test_target())
+            });
+        match span_hit {
+            Some(span) => {
+                result.add(span.into());
+                true
+            }
+            None => self.hit_test_inline_children(app, result, position),
+        }
     }
 }
 
@@ -1067,8 +1091,19 @@ mod tests {
         RenderHandle<RenderParagraph>,
         RenderHandle<RenderRepaintBoundary>,
     ) {
+        laid_out_span(app, span(text), constraints)
+    }
+
+    fn laid_out_span(
+        app: &mut App,
+        text: InlineSpanRef,
+        constraints: BoxConstraints,
+    ) -> (
+        RenderHandle<RenderParagraph>,
+        RenderHandle<RenderRepaintBoundary>,
+    ) {
         install_fonts(app);
-        let paragraph = RenderParagraph::new(app, span(text), TextDirection::Ltr, None);
+        let paragraph = RenderParagraph::new(app, text, TextDirection::Ltr, None);
         let root = RenderRepaintBoundary::new(app, Some(paragraph.as_box()));
         let owner = PipelineOwner::new(app, None, None);
         owner.set_root_node(app, Some(root.as_object()));
@@ -1260,7 +1295,7 @@ mod tests {
     }
 
     #[test]
-    fn painting_records_glyphs_and_hit_testing_lands_on_the_paragraph() {
+    fn painting_records_glyphs_and_hit_testing_lands_on_the_span_and_the_paragraph() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let loose = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
@@ -1277,12 +1312,346 @@ mod tests {
             Offset::new(2.0, 2.0),
         );
         assert!(hit);
-        assert_eq!(result.path().len(), 1);
+        assert_eq!(result.path().len(), 2, "the span, then the paragraph");
         let position = paragraph.get_position_for_offset(&mut app, Offset::new(0.0, 1.0));
         assert_eq!(position.offset, 0);
         assert_eq!(
             paragraph.get_word_boundary(&mut app, TextPosition::new(1)),
             TextRange::new(0, 5)
         );
+    }
+
+    // ---- spans as hit-test targets and mouse tracker annotations ----
+
+    /// The boxes of the text between UTF-16 offsets `start` and `end`, one per line.
+    fn boxes_of(
+        app: &mut App,
+        paragraph: RenderHandle<RenderParagraph>,
+        start: i32,
+        end: i32,
+    ) -> Vec<TextBox> {
+        paragraph.get_boxes_for_selection(
+            app,
+            TextSelection::new(start, end),
+            BoxHeightStyle::Tight,
+            BoxWidthStyle::Tight,
+        )
+    }
+
+    fn center_of(text_box: &TextBox) -> Offset {
+        Offset::new(
+            (text_box.left + text_box.right) / 2.0,
+            (text_box.top + text_box.bottom) / 2.0,
+        )
+    }
+
+    /// The text of each span a hit test at `position` added, front to back.
+    fn spans_hit(
+        app: &mut App,
+        paragraph: RenderHandle<RenderParagraph>,
+        position: Offset,
+    ) -> (bool, Vec<String>) {
+        let mut result = HitTestResult::new();
+        let hit = paragraph.hit_test(app, &mut BoxHitTestResult::wrap(&mut result), position);
+        let spans = result
+            .path()
+            .iter()
+            .filter_map(|entry| {
+                let target: &dyn Any = entry.target();
+                target.downcast_ref::<TextSpan>()?.text.clone()
+            })
+            .collect();
+        (hit, spans)
+    }
+
+    /// `paragraph_test.dart`, "Basic TextSpan Hit testing": a hit on a glyph adds the span the
+    /// glyph is in, and a hit off the glyphs adds no span.
+    #[test]
+    fn a_hit_on_a_glyph_adds_its_span_and_a_hit_off_the_glyphs_adds_none() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let text = TextSpan::new()
+            .style(TextStyle::new().font_size(10.0))
+            .children(vec![
+                TextSpan::new().text("A".repeat(10)).into_span(),
+                TextSpan::new()
+                    .text("BC")
+                    .style(TextStyle::new().letter_spacing(26.0))
+                    .into_span(),
+            ])
+            .into_span();
+        let (paragraph, _root) =
+            laid_out_span(&mut app, text, BoxConstraints::tight_for(Some(300.0), None));
+
+        let first_a = center_of(&boxes_of(&mut app, paragraph, 0, 1)[0]);
+        let last_a = center_of(&boxes_of(&mut app, paragraph, 9, 10)[0]);
+        let b = boxes_of(&mut app, paragraph, 10, 11)[0];
+        let c = center_of(&boxes_of(&mut app, paragraph, 11, 12)[0]);
+        for position in [first_a, last_a] {
+            assert_eq!(
+                spans_hit(&mut app, paragraph, position),
+                (true, vec!["A".repeat(10)])
+            );
+        }
+        // Past B's glyph, in its letter spacing: still B, as the advance reaches C.
+        let between_b_and_c = Offset::new(b.right - 1.0, center_of(&b).dy());
+        for position in [center_of(&b), between_b_and_c, c] {
+            assert_eq!(
+                spans_hit(&mut app, paragraph, position),
+                (true, vec!["BC".to_owned()])
+            );
+        }
+
+        let after_c = Offset::new(299.0, c.dy());
+        assert_eq!(
+            spans_hit(&mut app, paragraph, after_c),
+            (true, Vec::new()),
+            "the paragraph hits itself, and no span is under the pointer"
+        );
+        assert_eq!(
+            spans_hit(&mut app, paragraph, Offset::new(9999.0, 9999.0)),
+            (false, Vec::new())
+        );
+    }
+
+    /// Plays `RendererBinding`'s part: hit-tests the paragraph's root before the gesture binding
+    /// adds itself to the path.
+    struct RootHitTester {
+        root: RenderHandle<RenderRepaintBoundary>,
+    }
+
+    impl inset_gestures::GestureBindingOverridesObject for RootHitTester {
+        fn hit_test_in_view(
+            self: Handle<Self>,
+            app: &mut App,
+            result: &mut HitTestResult,
+            position: Offset,
+            _view_id: inset_embedder::ViewId,
+        ) {
+            let root = app.get(self).root;
+            root.hit_test(app, &mut BoxHitTestResult::wrap(result), position);
+        }
+
+        fn will_dispatch_event(
+            self: Handle<Self>,
+            _app: &mut App,
+            _event: &inset_gestures::PointerEvent,
+            _hit_test_result: Option<&HitTestResult>,
+        ) {
+        }
+    }
+
+    fn tap_at(app: &mut App, position: Offset) {
+        use inset_gestures::{GestureBinding, PointerDownEvent, PointerEvent, PointerUpEvent};
+        let binding = GestureBinding::instance(app);
+        binding.handle_pointer_event(
+            app,
+            PointerEvent::Down(PointerDownEvent {
+                position,
+                ..PointerDownEvent::default()
+            }),
+        );
+        app.drain_microtasks();
+        binding.handle_pointer_event(
+            app,
+            PointerEvent::Up(PointerUpEvent {
+                position,
+                ..PointerUpEvent::default()
+            }),
+        );
+        app.drain_microtasks();
+    }
+
+    /// A press on a span reaches its `TapGestureRecognizer`; a tap on the text beside it does
+    /// not.
+    #[test]
+    fn a_tap_on_a_span_runs_its_recognizer_and_a_tap_beside_it_does_not() {
+        use inset_gestures::{GestureBinding, GestureRecognizerLeaf, TapGestureRecognizer};
+
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let taps = Rc::new(std::cell::Cell::new(0));
+        let recognizer = TapGestureRecognizer::new(&mut app);
+        let counter = Rc::clone(&taps);
+        recognizer.set_on_tap(
+            &mut app,
+            Some(inset_foundation::Listener::new(move |_app| {
+                counter.set(counter.get() + 1)
+            })),
+        );
+        let text = TextSpan::new()
+            .style(TextStyle::new().font_size(20.0))
+            .children(vec![
+                TextSpan::new().text("Tap ").into_span(),
+                TextSpan::new()
+                    .text("here")
+                    .recognizer(recognizer.as_recognizer())
+                    .into_span(),
+                TextSpan::new().text(" please").into_span(),
+            ])
+            .into_span();
+        let (paragraph, root) = laid_out_span(
+            &mut app,
+            text,
+            BoxConstraints::new().max_width(1000.0).max_height(1000.0),
+        );
+        let hit_tester = app.create(RootHitTester { root });
+        GestureBinding::instance(&mut app).set_overrides(&mut app, Rc::new(hit_tester));
+
+        let here = center_of(&boxes_of(&mut app, paragraph, 4, 8)[0]);
+        tap_at(&mut app, here);
+        assert_eq!(taps.get(), 1);
+
+        let beside = center_of(&boxes_of(&mut app, paragraph, 0, 3)[0]);
+        tap_at(&mut app, beside);
+        assert_eq!(taps.get(), 1, "the plain span has no recognizer");
+        recognizer.as_recognizer().dispose(&mut app);
+    }
+
+    /// A span's cursor shows while the mouse is over it: the click cursor by default for a span
+    /// with a recognizer, the one it names otherwise, and the one behind when it defers.
+    #[test]
+    fn the_mouse_shows_the_cursor_of_the_span_under_it() {
+        use inset_gestures::{
+            GestureRecognizerLeaf, PointerAddedEvent, PointerEvent, PointerHoverEvent,
+            TapGestureRecognizer,
+        };
+        use inset_services::{MouseCursorRef, SystemMouseCursors};
+
+        use crate::mouse_tracker::MouseTracker;
+
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let recognizer = TapGestureRecognizer::new(&mut app);
+        let text = TextSpan::new()
+            .style(TextStyle::new().font_size(20.0))
+            .children(vec![
+                TextSpan::new().text("plain ").into_span(),
+                TextSpan::new()
+                    .text("link")
+                    .recognizer(recognizer.as_recognizer())
+                    .into_span(),
+                TextSpan::new()
+                    .text(" forbidden")
+                    .mouse_cursor(SystemMouseCursors::FORBIDDEN)
+                    .into_span(),
+            ])
+            .into_span();
+        let (paragraph, root) = laid_out_span(
+            &mut app,
+            text,
+            BoxConstraints::new().max_width(1000.0).max_height(1000.0),
+        );
+        let tracker = MouseTracker::new(
+            &mut app,
+            Rc::new(move |app: &mut App, position: Offset, _view| {
+                let mut result = HitTestResult::new();
+                root.hit_test(app, &mut BoxHitTestResult::wrap(&mut result), position);
+                result
+            }),
+        );
+        let plain = center_of(&boxes_of(&mut app, paragraph, 0, 5)[0]);
+        let link = center_of(&boxes_of(&mut app, paragraph, 6, 10)[0]);
+        let forbidden = center_of(&boxes_of(&mut app, paragraph, 11, 20)[0]);
+        tracker.update_with_event(
+            &mut app,
+            &PointerEvent::Added(PointerAddedEvent {
+                kind: inset_embedder::PointerDeviceKind::Mouse,
+                position: plain,
+                ..PointerAddedEvent::default()
+            }),
+            None,
+        );
+        let cursor_at = |app: &mut App, position: Offset| -> MouseCursorRef {
+            tracker.update_with_event(
+                app,
+                &PointerEvent::Hover(PointerHoverEvent {
+                    kind: inset_embedder::PointerDeviceKind::Mouse,
+                    position,
+                    ..PointerHoverEvent::default()
+                }),
+                None,
+            );
+            tracker.debug_device_active_cursor(app, 0).unwrap()
+        };
+        let basic: MouseCursorRef = SystemMouseCursors::BASIC.into();
+        let click: MouseCursorRef = SystemMouseCursors::CLICK.into();
+        let forbidden_cursor: MouseCursorRef = SystemMouseCursors::FORBIDDEN.into();
+        assert!(*cursor_at(&mut app, link) == *click);
+        assert!(*cursor_at(&mut app, plain) == *basic, "a plain span defers");
+        assert!(*cursor_at(&mut app, forbidden) == *forbidden_cursor);
+        recognizer.as_recognizer().dispose(&mut app);
+    }
+
+    /// A span that wraps over two lines is one annotation: the mouse enters it once on the
+    /// first line, stays in it on the second, and exits it once.
+    #[test]
+    fn a_wrapped_span_is_entered_once_across_its_lines() {
+        use std::cell::RefCell;
+
+        use inset_gestures::{
+            PointerAddedEvent, PointerEnterEvent, PointerEvent, PointerExitEvent, PointerHoverEvent,
+        };
+
+        use crate::mouse_tracker::MouseTracker;
+
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let log: Rc<RefCell<Vec<&str>>> = Rc::default();
+        let enter_log = Rc::clone(&log);
+        let exit_log = Rc::clone(&log);
+        let words = "one two three four five six seven eight";
+        let text = TextSpan::new()
+            .text(words)
+            .style(TextStyle::new().font_size(20.0))
+            .on_enter(Rc::new(move |_app: &mut App, _event: PointerEnterEvent| {
+                enter_log.borrow_mut().push("enter")
+            }))
+            .on_exit(Rc::new(move |_app: &mut App, _event: PointerExitEvent| {
+                exit_log.borrow_mut().push("exit")
+            }))
+            .into_span();
+        let (paragraph, root) = laid_out_span(
+            &mut app,
+            text,
+            BoxConstraints::new().max_width(120.0).max_height(1000.0),
+        );
+        let boxes = boxes_of(&mut app, paragraph, 0, 3);
+        let first_line = center_of(&boxes[0]);
+        let last = words.len() as i32;
+        let last_box = *boxes_of(&mut app, paragraph, last - 1, last)
+            .last()
+            .unwrap();
+        assert!(last_box.top > boxes[0].bottom - 1.0, "the span wraps");
+        let last_line = center_of(&last_box);
+        let tracker = MouseTracker::new(
+            &mut app,
+            Rc::new(move |app: &mut App, position: Offset, _view| {
+                let mut result = HitTestResult::new();
+                root.hit_test(app, &mut BoxHitTestResult::wrap(&mut result), position);
+                result
+            }),
+        );
+        let mouse = |position: Offset| {
+            PointerEvent::Hover(PointerHoverEvent {
+                kind: inset_embedder::PointerDeviceKind::Mouse,
+                position,
+                ..PointerHoverEvent::default()
+            })
+        };
+        tracker.update_with_event(
+            &mut app,
+            &PointerEvent::Added(PointerAddedEvent {
+                kind: inset_embedder::PointerDeviceKind::Mouse,
+                position: Offset::new(5000.0, 5000.0),
+                ..PointerAddedEvent::default()
+            }),
+            None,
+        );
+        tracker.update_with_event(&mut app, &mouse(first_line), None);
+        tracker.update_with_event(&mut app, &mouse(last_line), None);
+        assert_eq!(*log.borrow(), ["enter"]);
+        tracker.update_with_event(&mut app, &mouse(Offset::new(5000.0, 5000.0)), None);
+        assert_eq!(*log.borrow(), ["enter", "exit"]);
     }
 }

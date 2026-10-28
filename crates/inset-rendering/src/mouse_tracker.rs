@@ -1,6 +1,7 @@
 //! Flutter counterpart: `rendering/mouse_tracker.dart`.
 
 use std::any::Any;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use indexmap::IndexMap;
@@ -9,7 +10,10 @@ use inset_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Retained
 use inset_gestures::{
     HitTestEntry, HitTestResult, PointerEnterEvent, PointerEvent, PointerExitEvent,
 };
-use inset_services::{MouseCursorManager, MouseCursorRef, SystemMouseCursors};
+use inset_painting::{InlineSpan, TextSpan};
+use inset_services::{
+    MouseCursorManager, MouseCursorRef, MouseTrackerAnnotation, SystemMouseCursors,
+};
 
 use crate::box_::BoxHitTestEntry;
 use crate::object::AnyRenderObject;
@@ -23,10 +27,61 @@ pub type MouseTrackerHitTest = Rc<dyn Fn(&mut App, Offset, ViewId) -> HitTestRes
 /// The annotations under a mouse, front to back, each with the transform of its hit test
 /// entry.
 ///
-/// Dart keys this map by the annotation object. Here the key is the render object that
-/// implements the annotation (see [`crate::RenderObject::mouse_tracker_annotation`]), and the
-/// annotation itself is read from it when needed.
-type Annotations = IndexMap<AnyRenderObject, Matrix4>;
+/// Dart keys this map by the annotation object, compared with `==`. Here the key is the object
+/// that implements the annotation, and the annotation itself is read from it when needed.
+type Annotations = IndexMap<TrackedAnnotation, Matrix4>;
+
+/// An object that implements `MouseTrackerAnnotation`, as a key of [`Annotations`].
+#[derive(Clone, Debug)]
+enum TrackedAnnotation {
+    /// A render object that answers [`crate::RenderObject::mouse_tracker_annotation`].
+    RenderObject(AnyRenderObject),
+    /// A [`TextSpan`] that a paragraph's hit test added. Two equal spans are one key, as
+    /// they are in Dart, so a span hit on each of the lines it wraps over stays one annotation.
+    Span(Rc<TextSpan>),
+}
+
+impl TrackedAnnotation {
+    /// The annotation's current values; `None` for a render object that is not an annotation
+    /// or has left the arena.
+    fn annotation(&self, app: &App) -> Option<MouseTrackerAnnotation> {
+        match self {
+            TrackedAnnotation::RenderObject(target) => target.mouse_tracker_annotation(app),
+            TrackedAnnotation::Span(span) => Some(span.mouse_tracker_annotation()),
+        }
+    }
+
+    /// The render object to keep in the arena while the tracker remembers it; a span is kept
+    /// by the key itself.
+    fn render_object(&self) -> Option<AnyRenderObject> {
+        match self {
+            TrackedAnnotation::RenderObject(target) => Some(*target),
+            TrackedAnnotation::Span(_) => None,
+        }
+    }
+}
+
+impl PartialEq for TrackedAnnotation {
+    fn eq(&self, other: &TrackedAnnotation) -> bool {
+        match (self, other) {
+            (TrackedAnnotation::RenderObject(a), TrackedAnnotation::RenderObject(b)) => a == b,
+            (TrackedAnnotation::Span(a), TrackedAnnotation::Span(b)) => a.eq_span(&**b),
+            _ => false,
+        }
+    }
+}
+
+impl Eq for TrackedAnnotation {}
+
+impl Hash for TrackedAnnotation {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            TrackedAnnotation::RenderObject(target) => target.hash(state),
+            // Equal spans have equal text; the rest of `==` is left to `eq`.
+            TrackedAnnotation::Span(span) => span.text.hash(state),
+        }
+    }
+}
 
 // Various states of a connected mouse device used by [MouseTracker].
 struct MouseState {
@@ -223,7 +278,7 @@ impl MouseTracker {
     ) -> Vec<RetainedHandle<AnyRenderObject>> {
         annotations
             .keys()
-            .copied()
+            .filter_map(TrackedAnnotation::render_object)
             .map(|target| app.retain(target))
             .collect()
     }
@@ -313,7 +368,7 @@ impl MouseTracker {
         let cursors: Vec<MouseCursorRef> = details
             .next_annotations
             .keys()
-            .filter_map(|target| target.mouse_tracker_annotation(app))
+            .filter_map(|target| target.annotation(app))
             .map(|annotation| annotation.cursor)
             .collect();
         let platform = app.platform();
@@ -535,7 +590,7 @@ impl MouseTracker {
             if next_annotations.contains_key(target) {
                 continue;
             }
-            let Some(annotation) = target.mouse_tracker_annotation(app) else {
+            let Some(annotation) = target.annotation(app) else {
                 continue;
             };
             if annotation.valid_for_mouse_tracker
@@ -547,14 +602,14 @@ impl MouseTracker {
 
         // Send enter events to annotations that are not in last but in next, in
         // reverse hit-test order.
-        let entering_annotations: Vec<(AnyRenderObject, Matrix4)> = next_annotations
+        let entering_annotations: Vec<(TrackedAnnotation, Matrix4)> = next_annotations
             .iter()
             .filter(|(target, _)| !last_annotations.contains_key(*target))
-            .map(|(target, transform)| (*target, *transform))
+            .map(|(target, transform)| (target.clone(), *transform))
             .collect();
         let base_enter_event = PointerEnterEvent::from_mouse_event(latest_event);
         for (target, transform) in entering_annotations.into_iter().rev() {
-            let Some(annotation) = target.mouse_tracker_annotation(app) else {
+            let Some(annotation) = target.annotation(app) else {
                 continue;
             };
             if annotation.valid_for_mouse_tracker
@@ -574,15 +629,22 @@ fn is_signal_event(event: &PointerEvent) -> bool {
     )
 }
 
-/// Dart's `entry.target is MouseTrackerAnnotation`: the render object behind a hit test entry,
-/// when it implements the annotation.
-fn annotation_target(app: &App, entry: &HitTestEntry) -> Option<AnyRenderObject> {
-    let target: &dyn Any = entry.target();
+/// Dart's `entry.target is MouseTrackerAnnotation`: the object behind a hit test entry, when it
+/// implements the annotation. That is a render object answering
+/// [`crate::RenderObject::mouse_tracker_annotation`], or a [`TextSpan`].
+fn annotation_target(app: &App, entry: &HitTestEntry) -> Option<TrackedAnnotation> {
+    let target: Rc<dyn Any> = entry.shared_target().clone();
+    let target = match target.downcast::<TextSpan>() {
+        Ok(span) => return Some(TrackedAnnotation::Span(span)),
+        Err(target) => target,
+    };
     let target = target
         .downcast_ref::<BoxHitTestEntry>()?
         .target()
         .as_object();
-    target.mouse_tracker_annotation(app).map(|_| target)
+    target
+        .mouse_tracker_annotation(app)
+        .map(|_| TrackedAnnotation::RenderObject(target))
 }
 
 #[cfg(test)]

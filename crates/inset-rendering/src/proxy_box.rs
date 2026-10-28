@@ -1951,9 +1951,10 @@ impl RenderDecoratedBox {
         let debug_save_count = context.canvas().save_count();
         let is_complex = {
             let this = self.get_mut(app);
-            let painter = this
-                .painter
-                .get_or_insert_with(|| this.decoration.create_box_painter(None));
+            let painter = this.painter.get_or_insert_with(|| {
+                this.decoration
+                    .create_box_painter(Some(Rc::new(move |app| self.mark_needs_paint(app))))
+            });
             painter.paint(context.canvas(), offset, configuration);
             this.decoration.is_complex()
         };

@@ -13,7 +13,7 @@ use inset_animation::{
     AnyAnimation, CurvedAnimation, Curves, Tween,
 };
 use inset_embedder::{Canvas, Color, ImageFilter, Offset, Paint, Rect, TextDirection};
-use inset_foundation::{App, CompleterFuture, Handle, Listener, ValueNotifier};
+use inset_foundation::{App, CompleterFuture, Handle, Listener, ValueNotifier, VoidCallback};
 use inset_gestures::{
     DragEndDetails, DragGestureRecognizer, DragStartDetails, DragUpdateDetails,
     HorizontalDragGestureRecognizer, PointerDownEvent, RecognizerLeaf,
@@ -2018,7 +2018,7 @@ impl Decoration for CupertinoEdgeShadowDecoration {
             .map(|decoration| Box::new(decoration) as Box<dyn Decoration>)
     }
 
-    fn create_box_painter(&self, on_changed: Option<Box<dyn Fn()>>) -> Box<dyn BoxPainter> {
+    fn create_box_painter(&self, on_changed: Option<VoidCallback>) -> Box<dyn BoxPainter> {
         Box::new(CupertinoEdgeShadowPainter::new(self.clone(), on_changed))
     }
 
@@ -2041,13 +2041,13 @@ impl Decoration for CupertinoEdgeShadowDecoration {
 /// A `BoxPainter` used to draw the page transition shadow using gradients.
 struct CupertinoEdgeShadowPainter {
     decoration: CupertinoEdgeShadowDecoration,
-    on_changed: Option<Box<dyn Fn()>>,
+    on_changed: Option<VoidCallback>,
 }
 
 impl CupertinoEdgeShadowPainter {
     fn new(
         decoration: CupertinoEdgeShadowDecoration,
-        on_changed: Option<Box<dyn Fn()>>,
+        on_changed: Option<VoidCallback>,
     ) -> CupertinoEdgeShadowPainter {
         debug_assert!(
             decoration
@@ -2129,7 +2129,7 @@ impl BoxPainter for CupertinoEdgeShadowPainter {
         }
     }
 
-    fn on_changed(&self) -> Option<&dyn Fn()> {
+    fn on_changed(&self) -> Option<&dyn Fn(&mut App)> {
         self.on_changed.as_deref()
     }
 }

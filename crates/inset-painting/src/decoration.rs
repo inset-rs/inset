@@ -5,6 +5,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use inset_embedder::{Canvas, Offset, Path, Rect, Size};
+use inset_foundation::{App, VoidCallback};
 
 use crate::basic_types::TextDirection;
 use crate::edge_insets::{EdgeInsets, EdgeInsetsGeometry};
@@ -68,7 +69,7 @@ pub trait Decoration: Any + Debug {
     }
 
     /// Returns a [`BoxPainter`] that will paint this decoration.
-    fn create_box_painter(&self, on_changed: Option<Box<dyn Fn()>>) -> Box<dyn BoxPainter>;
+    fn create_box_painter(&self, on_changed: Option<VoidCallback>) -> Box<dyn BoxPainter>;
 
     /// Returns a closed [`Path`] that describes the outer edge of this decoration.
     ///
@@ -165,7 +166,7 @@ pub trait BoxPainter {
 
     /// Callback that is invoked if an asynchronously-loading resource used by
     /// the decoration finishes loading.
-    fn on_changed(&self) -> Option<&dyn Fn()>;
+    fn on_changed(&self) -> Option<&dyn Fn(&mut App)>;
 
     /// Discard any resources being held by the object.
     ///
@@ -182,7 +183,7 @@ mod tests {
     struct DummyDecoration;
 
     impl Decoration for DummyDecoration {
-        fn create_box_painter(&self, _on_changed: Option<Box<dyn Fn()>>) -> Box<dyn BoxPainter> {
+        fn create_box_painter(&self, _on_changed: Option<VoidCallback>) -> Box<dyn BoxPainter> {
             panic!("DummyDecoration does not paint");
         }
 

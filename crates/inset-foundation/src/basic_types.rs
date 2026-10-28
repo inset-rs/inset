@@ -5,6 +5,12 @@ use std::rc::Rc;
 use crate::App;
 use crate::executor::Task;
 
+/// Signature of callbacks that have no arguments and return no data.
+///
+/// Dart's `VoidCallback`, from `dart:ui`. Receives [`App`] because a Rust callback cannot
+/// capture what it mutates.
+pub type VoidCallback = Rc<dyn Fn(&mut App)>;
+
 /// Signature for callbacks that report that an underlying value has changed.
 ///
 /// Flutter's `ValueChanged<T>` is `void Function(T value)`. Receives [`App`]

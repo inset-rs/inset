@@ -918,7 +918,8 @@ pub trait RenderViewportBase:
             }
             let mut transform = Matrix4::IDENTITY;
             // must be invertible
-            RenderObject::apply_paint_transform(self, app, child.as_object(), &mut transform);
+            self.as_object()
+                .apply_paint_transform(app, child.as_object(), &mut transform);
             let child_main_axis_position =
                 self.compute_child_main_axis_position(app, child, main_axis_position);
             let is_hit =
@@ -2668,6 +2669,36 @@ mod tests {
         assert_eq!(
             viewport.compute_child_main_axis_position(&app, second, 150.0),
             50.0
+        );
+    }
+
+    /// A sliver's hit test entry carries the viewport's paint transform, so pointer events
+    /// reach it in its own coordinates.
+    #[test]
+    fn a_sliver_hit_entry_maps_into_the_sliver() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let (first, _) = test_sliver(&mut app, 100.0);
+        let (second, _) = test_sliver(&mut app, 300.0);
+        let offset = FixedViewportOffset::zero(&mut app);
+        let viewport = vertical_viewport(&mut app, offset, vec![first, second]);
+        first_frame(
+            &mut app,
+            viewport.as_box(),
+            BoxConstraints::tight(Size::new(200.0, 400.0)),
+        );
+
+        let mut result = HitTestResult::new();
+        viewport.hit_test(
+            &mut app,
+            &mut BoxHitTestResult::wrap(&mut result),
+            Offset::new(20.0, 150.0),
+        );
+
+        let transform = result.path()[0].transform().unwrap();
+        assert_eq!(
+            inset_painting::transform_point(&transform, Offset::new(20.0, 150.0)),
+            Offset::new(20.0, 50.0)
         );
     }
 

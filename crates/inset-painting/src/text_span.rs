@@ -1,13 +1,18 @@
 //! Flutter counterpart: `painting/text_span.dart`.
 //!
-//! `recognizer`, `mouseCursor`, `onEnter` / `onExit` (the span as a hit-test target and mouse
-//! tracker annotation), `semanticsLabel` / `semanticsIdentifier`, `locale`, and `spellOut`
-//! wait; see `PORTING.md`.
+//! `semanticsLabel` / `semanticsIdentifier`, `locale`, and `spellOut` wait; see `PORTING.md`.
 
 use std::any::Any;
 use std::fmt;
+use std::rc::Rc;
 
 use inset_embedder::{ParagraphBuilder, TextAffinity, TextPosition};
+use inset_foundation::App;
+use inset_gestures::{
+    AnyGestureRecognizer, HitTestEntry, HitTestTarget, PointerEnterEventListener, PointerEvent,
+    PointerExitEventListener,
+};
+use inset_services::{MouseCursor, MouseCursorRef, MouseTrackerAnnotation, SystemMouseCursors};
 
 use crate::basic_types::RenderComparison;
 use crate::inline_span::{Accumulator, InlineSpan, InlineSpanRef, same_span, utf16_len};
@@ -25,7 +30,11 @@ use crate::text_style::TextStyle;
 /// [`text`](Self::text) of a span is rendered before its children.
 ///
 /// Dart's named constructor arguments are the fluent setters (`TextSpan::new().text("x")`).
-#[derive(Default)]
+///
+/// Dart's `TextSpan implements HitTestTarget, MouseTrackerAnnotation`: the span is a
+/// [`HitTestTarget`], and [`mouse_tracker_annotation`](Self::mouse_tracker_annotation) is the
+/// annotation it implements.
+#[derive(Clone, Default)]
 pub struct TextSpan {
     /// The text contained in this span.
     ///
@@ -39,6 +48,35 @@ pub struct TextSpan {
     pub children: Option<Vec<InlineSpanRef>>,
     /// The [`TextStyle`] to apply to this span and its children.
     pub style: Option<TextStyle>,
+    /// A gesture recognizer that will receive events that hit this span.
+    ///
+    /// [`InlineSpan`] itself does not implement hit testing or event dispatch. The object that
+    /// manages the [`InlineSpan`] painting is also responsible for dispatching events. In the
+    /// rendering library, that is the `RenderParagraph` object, which corresponds to the
+    /// `RichText` widget in the widgets layer; these objects do not bubble events in
+    /// [`InlineSpan`]s, so a [`recognizer`](Self::recognizer) is only effective for events that
+    /// directly hit the [`text`](Self::text) of that [`InlineSpan`], not any of its
+    /// [`children`](Self::children).
+    ///
+    /// [`InlineSpan`] also does not manage the lifetime of the gesture recognizer. The code
+    /// that owns the gesture recognizer must call its `dispose` when the [`InlineSpan`] object
+    /// is no longer used.
+    pub recognizer: Option<AnyGestureRecognizer>,
+    /// Mouse cursor when the mouse hovers over this span, as the caller gave it; read it with
+    /// [`effective_mouse_cursor`](Self::effective_mouse_cursor).
+    ///
+    /// The default value is [`SystemMouseCursors::CLICK`] if [`recognizer`](Self::recognizer)
+    /// is not `None`, or `MouseCursor.defer` otherwise.
+    ///
+    /// [`TextSpan`] itself does not implement hit testing or cursor changing. The object that
+    /// manages the [`TextSpan`] painting is responsible to return the [`TextSpan`] in its hit
+    /// test, as well as providing the correct mouse cursor when the [`TextSpan`]'s mouse cursor
+    /// is `MouseCursor.defer`.
+    pub mouse_cursor: Option<MouseCursorRef>,
+    /// Triggered when a mouse pointer has entered this span.
+    pub on_enter: Option<PointerEnterEventListener>,
+    /// Triggered when a mouse pointer has exited this span.
+    pub on_exit: Option<PointerExitEventListener>,
 }
 
 impl TextSpan {
@@ -65,9 +103,67 @@ impl TextSpan {
         self
     }
 
+    /// Dart `TextSpan(recognizer:)`.
+    pub fn recognizer(mut self, recognizer: AnyGestureRecognizer) -> TextSpan {
+        self.recognizer = Some(recognizer);
+        self
+    }
+
+    /// Dart `TextSpan(mouseCursor:)`.
+    pub fn mouse_cursor(mut self, mouse_cursor: impl Into<MouseCursorRef>) -> TextSpan {
+        self.mouse_cursor = Some(mouse_cursor.into());
+        self
+    }
+
+    /// Dart `TextSpan(onEnter:)`.
+    pub fn on_enter(mut self, on_enter: PointerEnterEventListener) -> TextSpan {
+        self.on_enter = Some(on_enter);
+        self
+    }
+
+    /// Dart `TextSpan(onExit:)`.
+    pub fn on_exit(mut self, on_exit: PointerExitEventListener) -> TextSpan {
+        self.on_exit = Some(on_exit);
+        self
+    }
+
+    /// Dart's `mouseCursor` field, as its constructor fills it: the cursor given, else
+    /// [`SystemMouseCursors::CLICK`] when there is a [`recognizer`](Self::recognizer), else
+    /// `MouseCursor.defer`.
+    pub fn effective_mouse_cursor(&self) -> MouseCursorRef {
+        match (&self.mouse_cursor, self.recognizer) {
+            (Some(mouse_cursor), _) => Rc::clone(mouse_cursor),
+            (None, None) => <dyn MouseCursor>::defer(),
+            (None, Some(_)) => SystemMouseCursors::CLICK.into(),
+        }
+    }
+
+    /// Dart's `TextSpan implements MouseTrackerAnnotation`: the annotation this span is to the
+    /// mouse tracker, with its [`on_enter`](Self::on_enter), [`on_exit`](Self::on_exit) and
+    /// [`effective_mouse_cursor`](Self::effective_mouse_cursor). A span is always valid for the
+    /// mouse tracker.
+    pub fn mouse_tracker_annotation(&self) -> MouseTrackerAnnotation {
+        MouseTrackerAnnotation {
+            on_enter: self.on_enter.clone(),
+            on_exit: self.on_exit.clone(),
+            cursor: self.effective_mouse_cursor(),
+            valid_for_mouse_tracker: true,
+        }
+    }
+
     /// The span as a shared [`InlineSpanRef`].
     pub fn into_span(self) -> InlineSpanRef {
         std::rc::Rc::new(self)
+    }
+}
+
+impl HitTestTarget for TextSpan {
+    fn handle_event(&self, app: &mut App, event: &PointerEvent, _entry: &HitTestEntry) {
+        if let PointerEvent::Down(event) = event
+            && let Some(recognizer) = self.recognizer
+        {
+            recognizer.add_pointer(app, event);
+        }
     }
 }
 
@@ -111,13 +207,13 @@ impl InlineSpan for TextSpan {
     ///
     /// When `visitor` returns true, the walk will continue. When `visitor` returns false,
     /// then the walk will end.
-    fn visit_children<'a>(&'a self, visitor: &mut dyn FnMut(&'a dyn InlineSpan) -> bool) -> bool {
-        if self.text.is_some() && !visitor(self) {
+    fn visit_children(self: Rc<Self>, visitor: &mut dyn FnMut(&InlineSpanRef) -> bool) -> bool {
+        if self.text.is_some() && !visitor(&(self.clone() as InlineSpanRef)) {
             return false;
         }
         if let Some(children) = &self.children {
             for child in children {
-                if !child.visit_children(visitor) {
+                if !child.clone().visit_children(visitor) {
                     return false;
                 }
             }
@@ -125,13 +221,10 @@ impl InlineSpan for TextSpan {
         true
     }
 
-    fn visit_direct_children<'a>(
-        &'a self,
-        visitor: &mut dyn FnMut(&'a dyn InlineSpan) -> bool,
-    ) -> bool {
+    fn visit_direct_children(&self, visitor: &mut dyn FnMut(&InlineSpanRef) -> bool) -> bool {
         if let Some(children) = &self.children {
             for child in children {
-                if !visitor(&**child) {
+                if !visitor(child) {
                     return false;
                 }
             }
@@ -141,10 +234,10 @@ impl InlineSpan for TextSpan {
 
     /// Returns the text span that contains the given position in the text.
     fn get_span_for_position_visitor(
-        &self,
+        self: Rc<Self>,
         position: TextPosition,
         offset: &mut Accumulator,
-    ) -> Option<&dyn InlineSpan> {
+    ) -> Option<InlineSpanRef> {
         let text = self.text.as_deref()?;
         if text.is_empty() {
             return None;
@@ -220,7 +313,11 @@ impl InlineSpan for TextSpan {
         {
             return RenderComparison::Layout;
         }
-        let mut result = RenderComparison::Identical;
+        let mut result = if self.recognizer == text_span.recognizer {
+            RenderComparison::Identical
+        } else {
+            RenderComparison::Metadata
+        };
         if let (Some(style), Some(other_style)) = (&self.style, &text_span.style) {
             let candidate = style.compare_to(other_style);
             if candidate > result {
@@ -248,6 +345,10 @@ impl InlineSpan for TextSpan {
         self
     }
 
+    fn to_hit_test_target(self: Rc<Self>) -> Option<Rc<dyn HitTestTarget>> {
+        Some(self)
+    }
+
     fn eq_span(&self, other: &dyn InlineSpan) -> bool {
         if same_span(self, other) {
             return true;
@@ -255,7 +356,13 @@ impl InlineSpan for TextSpan {
         let Some(other) = other.as_any().downcast_ref::<TextSpan>() else {
             return false;
         };
-        if other.style != self.style || other.text != self.text {
+        if other.style != self.style
+            || other.text != self.text
+            || other.recognizer != self.recognizer
+            || !same_listener(&self.on_enter, &other.on_enter)
+            || !same_listener(&self.on_exit, &other.on_exit)
+            || *self.effective_mouse_cursor() != *other.effective_mouse_cursor()
+        {
             return false;
         }
         match (&self.children, &other.children) {
@@ -268,6 +375,15 @@ impl InlineSpan for TextSpan {
     }
 }
 
+/// Dart's `==` on two optional function values: the same closure, or both absent.
+fn same_listener<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+        _ => false,
+    }
+}
+
 impl fmt::Debug for TextSpan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut s = f.debug_struct("TextSpan");
@@ -277,11 +393,28 @@ impl fmt::Debug for TextSpan {
         if let Some(style) = &self.style {
             s.field("style", style);
         }
-        if let Some(children) = &self.children {
-            s.field("children", children);
-        }
         if self.style.is_none() && self.text.is_none() && self.children.is_none() {
             s.field("(empty)", &true);
+        }
+        if let Some(recognizer) = &self.recognizer {
+            s.field("recognizer", recognizer);
+        }
+        let mut callbacks = Vec::new();
+        if self.on_enter.is_some() {
+            callbacks.push("enter");
+        }
+        if self.on_exit.is_some() {
+            callbacks.push("exit");
+        }
+        if !callbacks.is_empty() {
+            s.field("callbacks", &callbacks);
+        }
+        let cursor = self.effective_mouse_cursor();
+        if !cursor.is_defer() {
+            s.field("mouse_cursor", &cursor.debug_description());
+        }
+        if let Some(children) = &self.children {
+            s.field("children", children);
         }
         s.finish()
     }
@@ -309,32 +442,46 @@ mod tests {
 
     #[test]
     fn code_units_are_utf16_across_the_tree() {
-        let span = tree();
-        assert_eq!(span.code_unit_at(0), Some(u16::from(b'a')));
-        assert_eq!(span.code_unit_at(2), Some(u16::from(b'c')));
-        assert_eq!(span.code_unit_at(4), Some(u16::from(b'e')));
+        let span = tree().into_span();
+        let code_unit_at = |index| span.clone().code_unit_at(index);
+        assert_eq!(code_unit_at(0), Some(u16::from(b'a')));
+        assert_eq!(code_unit_at(2), Some(u16::from(b'c')));
+        assert_eq!(code_unit_at(4), Some(u16::from(b'e')));
         assert_eq!(
-            span.code_unit_at(5),
+            code_unit_at(5),
             Some(0xD83D),
             "the emoji's high surrogate"
         );
-        assert_eq!(span.code_unit_at(7), None);
-        assert_eq!(span.code_unit_at(-1), None);
+        assert_eq!(code_unit_at(7), None);
+        assert_eq!(code_unit_at(-1), None);
     }
 
     #[test]
     fn span_for_position_follows_affinity_at_boundaries() {
-        let span = tree();
+        let span = tree().into_span();
         let hit = |offset: i32, affinity: TextAffinity| {
-            span.get_span_for_position(TextPosition::with_affinity(offset, affinity))
-                .and_then(|found| found.as_any().downcast_ref::<TextSpan>())
-                .and_then(|found| found.text.clone())
+            span.clone()
+                .get_span_for_position(TextPosition::with_affinity(offset, affinity))
+                .and_then(|found| found.as_any().downcast_ref::<TextSpan>()?.text.clone())
         };
         assert_eq!(hit(1, TextAffinity::Downstream).as_deref(), Some("ab"));
         assert_eq!(hit(2, TextAffinity::Downstream).as_deref(), Some("cd"));
         assert_eq!(hit(2, TextAffinity::Upstream).as_deref(), Some("ab"));
         assert_eq!(hit(7, TextAffinity::Upstream).as_deref(), Some("e😀"));
         assert_eq!(hit(7, TextAffinity::Downstream), None);
+    }
+
+    #[test]
+    fn span_for_position_returns_the_tree_s_own_span() {
+        let child = TextSpan::new().text("cd").into_span();
+        let root = TextSpan::new()
+            .text("ab")
+            .children(vec![child.clone()])
+            .into_span();
+        let found = root.clone().get_span_for_position(TextPosition::new(0));
+        assert!(Rc::ptr_eq(&found.unwrap(), &root));
+        let found = root.clone().get_span_for_position(TextPosition::new(3));
+        assert!(Rc::ptr_eq(&found.unwrap(), &child));
     }
 
     #[test]
@@ -366,5 +513,71 @@ mod tests {
         assert!(*a == *b);
         let c: InlineSpanRef = TextSpan::new().text("ab").into_span();
         assert!(*a != *c);
+    }
+
+    /// `text_span_test.dart`, "TextSpan equals": the callbacks compare by identity and the
+    /// cursors by value.
+    #[test]
+    fn equality_compares_callbacks_by_identity_and_cursors_by_value() {
+        let callback1: PointerEnterEventListener = Rc::new(|_app, _event| {});
+        let callback2: PointerEnterEventListener = Rc::new(|_app, _event| {});
+        let a1 = TextSpan::new().text("a");
+        let d1 = TextSpan::new().text("a").on_enter(Rc::clone(&callback1));
+        let d2 = TextSpan::new().text("a").on_enter(Rc::clone(&callback1));
+        let d3 = TextSpan::new().text("a").on_enter(Rc::clone(&callback2));
+        let e1 = TextSpan::new()
+            .text("a")
+            .on_enter(Rc::clone(&callback2))
+            .mouse_cursor(SystemMouseCursors::FORBIDDEN);
+        let e2 = TextSpan::new()
+            .text("a")
+            .on_enter(Rc::clone(&callback2))
+            .mouse_cursor(SystemMouseCursors::FORBIDDEN);
+
+        assert!(!a1.eq_span(&d1));
+        assert!(d1.eq_span(&d2));
+        assert!(!d2.eq_span(&d3));
+        assert!(!d3.eq_span(&e1));
+        assert!(e1.eq_span(&e2));
+    }
+
+    /// A span with a recognizer shows the click cursor unless it names one, and a span without
+    /// defers; a change of recognizer alone is metadata.
+    #[test]
+    fn the_recognizer_sets_the_default_cursor() {
+        use inset_foundation::AppCell;
+        use inset_gestures::{GestureRecognizerLeaf, TapGestureRecognizer};
+
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let first = TapGestureRecognizer::new(&mut app).as_recognizer();
+        let second = TapGestureRecognizer::new(&mut app).as_recognizer();
+        let click: MouseCursorRef = SystemMouseCursors::CLICK.into();
+        let forbidden: MouseCursorRef = SystemMouseCursors::FORBIDDEN.into();
+
+        let link = TextSpan::new().text("a").recognizer(first);
+        assert!(*link.effective_mouse_cursor() == *click);
+        assert!(
+            TextSpan::new()
+                .text("a")
+                .effective_mouse_cursor()
+                .is_defer()
+        );
+        let named = TextSpan::new()
+            .text("a")
+            .recognizer(first)
+            .mouse_cursor(SystemMouseCursors::FORBIDDEN);
+        assert!(*named.effective_mouse_cursor() == *forbidden);
+        assert!(*link.mouse_tracker_annotation().cursor == *click);
+
+        let relinked = TextSpan::new().text("a").recognizer(second);
+        assert_eq!(link.compare_to(&relinked), RenderComparison::Metadata);
+        assert!(!link.eq_span(&relinked));
+        assert!(
+            Rc::new(link).to_hit_test_target().is_some(),
+            "a text span is a target"
+        );
+        first.dispose(&mut app);
+        second.dispose(&mut app);
     }
 }

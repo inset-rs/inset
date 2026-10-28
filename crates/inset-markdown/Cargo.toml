@@ -1,0 +1,27 @@
+[package]
+name = "inset-markdown"
+description = "Markdown widgets for Inset, with flutter_markdown's API ideas and look, built on pulldown-cmark"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+inset-embedder.workspace = true
+inset-foundation.workspace = true
+inset-gestures.workspace = true
+inset-painting.workspace = true
+inset-rendering.workspace = true
+inset-widgets.workspace = true
+pulldown-cmark.workspace = true
+
+[dev-dependencies]
+inset-scheduler.workspace = true
+inset-test.workspace = true
+valo-system-fonts.workspace = true
+
+[lints]
+workspace = true

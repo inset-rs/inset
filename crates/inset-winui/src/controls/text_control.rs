@@ -566,6 +566,10 @@ impl State for TextControlState {
         // composition without the unfocusing Flutter defaults to.
         let controller = config.controller;
         editable = editable.on_editing_complete(move |app| controller.clear_composing(app));
+        // A multiline box grows with its text from one line, as WinUI's does up to its height.
+        if multiline && config.max_lines.is_some() {
+            editable = editable.min_lines(1);
+        }
         if password.is_some() {
             editable = editable.toolbar_options(ToolbarOptions {
                 copy: false,

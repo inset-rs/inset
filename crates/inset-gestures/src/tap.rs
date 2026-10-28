@@ -423,6 +423,11 @@ impl TapGestureRecognizer {
 
     /// A pointer has stopped contacting the screen, which is recognized as a
     /// tap of a primary button.
+    pub fn on_tap(self: Handle<Self>, app: &App) -> Option<GestureTapCallback> {
+        app.get(self).on_tap.clone()
+    }
+
+    /// Sets [`on_tap`](Self::on_tap).
     pub fn set_on_tap(self: Handle<Self>, app: &mut App, callback: Option<GestureTapCallback>) {
         app.get_mut(self).on_tap = callback;
     }

@@ -5,6 +5,7 @@
 
 use std::any::Any;
 use std::fmt;
+use std::rc::Rc;
 
 use inset_embedder::{
     Matrix4, Offset, ParagraphBuilder, PlaceholderAlignment, Size, TextBaseline, TextPosition,
@@ -196,7 +197,7 @@ fn visit_subtree(
          supported."
     );
     span.visit_direct_children(&mut |child| {
-        visit_subtree(child, text_scaler, font_size_stack, widgets)
+        visit_subtree(&**child, text_scaler, font_size_stack, widgets)
     });
     if let Some(pushed) = font_size_to_push {
         let popped_font_size = font_size_stack.pop();
@@ -270,28 +271,25 @@ impl InlineSpan for WidgetSpan {
     }
 
     /// Calls `visitor` on this [`WidgetSpan`]. There are no children spans to walk.
-    fn visit_children<'a>(&'a self, visitor: &mut dyn FnMut(&'a dyn InlineSpan) -> bool) -> bool {
-        visitor(self)
+    fn visit_children(self: Rc<Self>, visitor: &mut dyn FnMut(&InlineSpanRef) -> bool) -> bool {
+        visitor(&(self as InlineSpanRef))
     }
 
-    fn visit_direct_children<'a>(
-        &'a self,
-        _visitor: &mut dyn FnMut(&'a dyn InlineSpan) -> bool,
-    ) -> bool {
+    fn visit_direct_children(&self, _visitor: &mut dyn FnMut(&InlineSpanRef) -> bool) -> bool {
         true
     }
 
     /// [`WidgetSpan`]s are not hit-test targets: this always returns `None`.
-    fn get_span_for_position(&self, _position: TextPosition) -> Option<&dyn InlineSpan> {
-        debug_assert!(InlineSpan::debug_assert_is_valid(self));
+    fn get_span_for_position(self: Rc<Self>, _position: TextPosition) -> Option<InlineSpanRef> {
+        debug_assert!(InlineSpan::debug_assert_is_valid(&*self));
         None
     }
 
     fn get_span_for_position_visitor(
-        &self,
+        self: Rc<Self>,
         position: TextPosition,
         offset: &mut Accumulator,
-    ) -> Option<&dyn InlineSpan> {
+    ) -> Option<InlineSpanRef> {
         if position.offset == offset.value() {
             return Some(self);
         }
@@ -814,7 +812,7 @@ mod tests {
     }
 
     #[test]
-    fn a_hit_on_an_inline_widget_reaches_it_and_a_hit_on_the_text_stops_at_the_paragraph() {
+    fn a_hit_on_an_inline_widget_reaches_it_and_a_hit_on_the_text_lands_on_its_span() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let opaque = ColoredBox::new(Color::from_argb(255, 0, 0, 255)).child(sized_box(30.0, 20.0));
@@ -859,7 +857,14 @@ mod tests {
             &mut BoxHitTestResult::wrap(&mut result),
             Offset::new(1.0, offset.dy() + 10.0),
         );
-        assert_eq!(result.path().len(), 1, "only the paragraph");
+        assert_eq!(result.path().len(), 2, "the span and the paragraph");
+        let target: &dyn std::any::Any = result.path()[0].target();
+        assert_eq!(
+            target
+                .downcast_ref::<TextSpan>()
+                .and_then(|span| span.text.as_deref()),
+            Some("ab")
+        );
     }
 
     // Regression test for https://github.com/flutter/flutter/issues/59316

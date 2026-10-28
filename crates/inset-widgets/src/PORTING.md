@@ -3,6 +3,7 @@ Flutter home: packages/flutter/lib/src/widgets
 Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## Identical
+- widgets/constants.rs → constants.dart
 - widgets/expansible.rs → expansible.dart
 - widgets/sliver_persistent_header.rs → sliver_persistent_header.dart
 - widgets/shared_app_data.rs → shared_app_data.dart
@@ -499,6 +500,12 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: platform — the `Semantics` wrappers Dart adds are deferred, as on `RawDialogRoute`.
   Affect: an inline widget contributes no semantics node of its own.
 
+## widgets/table.rs → table.dart
+
+- Change: `Table`'s constructor checks (a baseline alignment has a `text_baseline`, the rows have the same number of cells, no row is empty) run when the table creates or updates its render object.
+  Reason: language — Rust has no named arguments, so the table is built by setters that each see one argument, and none sees them all.
+  Affect: in a debug build, a malformed table panics when it is mounted or rebuilt, not where it is written.
+
 ## window.rs → _window.dart
 
 - Change: `Window` and `WindowScope` carry a `WindowController` of one kind, a regular window made from a configuration, where Flutter has a controller for each archetype; there is no `WindowManager` or registry, and a `Window` does not rebuild on its own when the window's size changes.
@@ -518,7 +525,8 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - focus_manager.rs, focus_scope.rs: focus-tree diagnostics and the debug focus border. Trigger: diagnostics.
 - focus_scope.rs: `_FocusInheritedScope` keeps the copy of the inherited-notifier element it grew before inherited_notifier.rs was ported. Trigger: the next change to that element.
 - A disposed arena object keeps its slot — `dispose` does Dart's work and frees nothing — across the focus, scroll, draggable-sheet, restoration, action, shortcut, traversal and route objects. Trigger: an arena-slot lifetime for disposed foundation objects.
-- framework/: `ErrorWidget` with its exception reporting, and the build-time diagnostics and duplicate-key checks. Trigger: diagnostics.
+- framework/: `ErrorWidget` with its exception reporting, and the build-time diagnostics and duplicate-key checks, `Table`'s checks for duplicate row and cell keys among them. Trigger: diagnostics.
+- table.rs: the `Semantics(role: cell)` wrapper `TableCell.build` adds. Trigger: accessibility (do not stub).
 - framework/: `reassemble`. Trigger: hot reload.
 - framework/: `ObjectKey`, `GlobalObjectKey`. Trigger: a widget keyed by object identity.
 - binding.rs: the observer callbacks no host reports (memory pressure, predictive back, pushed routes and route information, the text scale, accessibility features), the platform menu delegate, `scheduleWarmUpFrame`. Trigger: a host that reports those events.

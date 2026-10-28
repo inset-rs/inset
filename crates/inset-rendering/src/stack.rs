@@ -1,18 +1,16 @@
 //! Flutter counterpart: `rendering/stack.dart` (`RelativeRect`, `StackParentData`, `StackFit`,
 //! `RenderStack`, `RenderIndexedStack`).
-//!
-//! Baselines wait; see `PORTING.md`.
 
 use std::any::{Any, TypeId};
 use std::fmt::{self, Debug};
 
-use inset_embedder::{Clip, Offset, Rect, Size, TextDirection, lerp_double};
+use inset_embedder::{Clip, Offset, Rect, Size, TextBaseline, TextDirection, lerp_double};
 use inset_foundation::{App, Handle};
 use inset_painting::{Alignment, AlignmentGeometry};
 
 use crate::box_::{
-    AnyRenderBox, BoxConstraints, BoxHitTestResult, BoxParentData, ContainerBoxParentData,
-    RenderBox, RenderBoxContainerDefaultsMixin, RenderBoxData,
+    AnyRenderBox, BaselineOffset, BoxConstraints, BoxHitTestResult, BoxParentData,
+    ContainerBoxParentData, RenderBox, RenderBoxContainerDefaultsMixin, RenderBoxData,
 };
 use crate::layer::{ClipRectLayer, LayerHandle};
 use crate::layout_helper::ChildLayoutHelper;
@@ -527,6 +525,35 @@ pub fn layout_positioned_child(
         || y + child_size.height() > size.height()
 }
 
+/// Flutter's `RenderStack._baselineForChild`.
+fn baseline_for_child(
+    app: &mut App,
+    child: AnyRenderBox,
+    stack_size: Size,
+    non_positioned_child_constraints: BoxConstraints,
+    alignment: Alignment,
+    baseline: TextBaseline,
+) -> Option<f64> {
+    let child_parent_data = child.as_object().parent_data_of::<StackParentData>(app);
+    let child_constraints = if child_parent_data.is_positioned() {
+        child_parent_data.positioned_child_constraints(stack_size)
+    } else {
+        non_positioned_child_constraints
+    };
+    let (top, bottom) = (child_parent_data.top, child_parent_data.bottom);
+    let baseline_offset = child.get_dry_baseline(app, child_constraints, baseline)?;
+    let y = match (top, bottom) {
+        (Some(top), _) => top,
+        (None, Some(bottom)) => {
+            stack_size.height() - bottom - child.get_dry_layout(app, child_constraints).height()
+        }
+        (None, None) => alignment
+            .along_offset(stack_size - child.get_dry_layout(app, child_constraints))
+            .dy(),
+    };
+    Some(baseline_offset + y)
+}
+
 /// Implements the stack layout algorithm.
 ///
 /// In a stack layout, the children are positioned on top of each other in the order in which they
@@ -697,6 +724,47 @@ pub trait RenderStackBase:
         get_intrinsic_dimension(app, first_child, |app, child| {
             child.get_max_intrinsic_height(app, width)
         })
+    }
+
+    /// The stack's baseline: the highest of its children's.
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        self.default_compute_distance_to_highest_actual_baseline(app, baseline)
+    }
+
+    /// The baseline the stack would have, measuring its children dry.
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        let non_positioned_child_constraints = match self.fit(app) {
+            StackFit::Loose => constraints.loosen(),
+            StackFit::Expand => BoxConstraints::tight(constraints.biggest()),
+            StackFit::Passthrough => constraints,
+        };
+
+        let alignment = self.resolved_alignment(app);
+        let size = self.as_box().get_dry_layout(app, constraints);
+
+        let mut baseline_offset = BaselineOffset::NO_BASELINE;
+        let mut child = self.first_child(app);
+        while let Some(current) = child {
+            baseline_offset = baseline_offset.min_of(BaselineOffset(baseline_for_child(
+                app,
+                current,
+                size,
+                non_positioned_child_constraints,
+                alignment,
+                baseline,
+            )));
+            child = self.child_after(app, current);
+        }
+        baseline_offset.offset()
     }
 
     /// The size the stack would take, measuring its non-positioned children dry.
@@ -985,6 +1053,23 @@ impl RenderBox for RenderStack {
         RenderStackBase::compute_max_intrinsic_height(self, app, width)
     }
 
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderStackBase::compute_distance_to_actual_baseline(self, app, baseline)
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderStackBase::compute_dry_baseline(self, app, constraints, baseline)
+    }
+
     fn compute_dry_layout(
         self: RenderHandle<Self>,
         app: &mut App,
@@ -1172,6 +1257,49 @@ impl RenderBox for RenderIndexedStack {
         RenderStackBase::compute_max_intrinsic_height(self, app, width)
     }
 
+    /// The displayed child's baseline.
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        let displayed_child = self.child_at_index(app)?;
+        let child_offset = displayed_child
+            .as_object()
+            .parent_data_of::<StackParentData>(app)
+            .offset();
+        let offset = BaselineOffset(displayed_child.get_distance_to_actual_baseline(app, baseline))
+            + child_offset.dy();
+        offset.offset()
+    }
+
+    /// The baseline the displayed child would have, measured dry.
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        let displayed_child = self.child_at_index(app)?;
+        let non_positioned_child_constraints = match self.fit(app) {
+            StackFit::Loose => constraints.loosen(),
+            StackFit::Expand => BoxConstraints::tight(constraints.biggest()),
+            StackFit::Passthrough => constraints,
+        };
+
+        let alignment = self.resolved_alignment(app);
+        let size = self.as_box().get_dry_layout(app, constraints);
+
+        baseline_for_child(
+            app,
+            displayed_child,
+            size,
+            non_positioned_child_constraints,
+            alignment,
+            baseline,
+        )
+    }
+
     fn compute_dry_layout(
         self: RenderHandle<Self>,
         app: &mut App,
@@ -1245,6 +1373,79 @@ mod tests {
 
     impl RenderBox for SizedTestBox {
         crate::render_box_accessors!();
+    }
+
+    /// A leaf that takes its preferred size where the constraints allow, with a baseline at a
+    /// fixed distance from its top.
+    struct BaselineTestBox {
+        render_object: RenderObjectData,
+        render_box: RenderBoxData,
+        preferred_size: Size,
+        baseline: f64,
+    }
+
+    impl RenderObject for BaselineTestBox {
+        crate::render_object_accessors!();
+
+        fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+            let preferred_size = self.get(app).preferred_size;
+            let size = self.constraints(app).constrain(preferred_size);
+            self.set_size(app, size);
+        }
+    }
+
+    impl RenderBox for BaselineTestBox {
+        crate::render_box_accessors!();
+
+        fn compute_dry_layout(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            constraints: BoxConstraints,
+        ) -> Size {
+            constraints.constrain(self.get(app).preferred_size)
+        }
+
+        fn compute_distance_to_actual_baseline(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            _baseline: TextBaseline,
+        ) -> Option<f64> {
+            Some(self.get(app).baseline)
+        }
+
+        fn compute_dry_baseline(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            _constraints: BoxConstraints,
+            _baseline: TextBaseline,
+        ) -> Option<f64> {
+            Some(self.get(app).baseline)
+        }
+    }
+
+    fn baseline_box(app: &mut App, size: Size, baseline: f64) -> AnyRenderBox {
+        RenderHandle::new_box(
+            app,
+            BaselineTestBox {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                preferred_size: size,
+                baseline,
+            },
+        )
+        .as_box()
+    }
+
+    /// The stack's baseline, dry and after layout under `constraints`.
+    fn dry_and_actual_baseline(
+        app: &mut App,
+        stack: AnyRenderBox,
+        constraints: BoxConstraints,
+    ) -> (Option<f64>, Option<f64>) {
+        let dry = stack.get_dry_baseline(app, constraints, TextBaseline::Alphabetic);
+        stack.layout(app, constraints, true);
+        let actual = stack.get_distance_to_baseline(app, TextBaseline::Alphabetic, true);
+        (dry, actual)
     }
 
     fn sized_box(app: &mut App, size: Size) -> (AnyRenderBox, Rc<Cell<u32>>) {
@@ -1489,5 +1690,48 @@ mod tests {
             assert_eq!(clipped, clips, "{clip_behavior:?}");
             let _ = owner;
         }
+    }
+
+    /// A stack's baseline is the highest of its children's, each where the stack places it, the
+    /// same dry as after layout.
+    #[test]
+    fn a_stack_baseline_is_its_highest_child_baseline() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let short = baseline_box(&mut app, Size::new(40.0, 20.0), 15.0);
+        let tall = baseline_box(&mut app, Size::new(40.0, 60.0), 50.0);
+        let pinned = baseline_box(&mut app, Size::new(40.0, 20.0), 15.0);
+        let stack = RenderStack::new(&mut app);
+        stack.set_text_direction(&mut app, Some(TextDirection::Ltr));
+        stack.set_alignment(&mut app, AlignmentGeometry::from(Alignment::CENTER));
+        stack.add_all(&mut app, Some(vec![short, tall, pinned]));
+        pinned.parent_data_of_mut::<StackParentData>(&mut app).bottom = Some(0.0);
+
+        let constraints = BoxConstraints::new().max_width(100.0).max_height(100.0);
+        // The short child is centred in the tall one's 60: 20 down, its baseline at 35.
+        assert_eq!(
+            dry_and_actual_baseline(&mut app, stack.as_box(), constraints),
+            (Some(35.0), Some(35.0))
+        );
+    }
+
+    /// An indexed stack's baseline is its displayed child's.
+    #[test]
+    fn an_indexed_stack_baseline_is_its_displayed_child_baseline() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let short = baseline_box(&mut app, Size::new(40.0, 20.0), 15.0);
+        let tall = baseline_box(&mut app, Size::new(40.0, 60.0), 50.0);
+        let stack = RenderIndexedStack::new(&mut app);
+        stack.set_text_direction(&mut app, Some(TextDirection::Ltr));
+        stack.set_alignment(&mut app, AlignmentGeometry::from(Alignment::CENTER));
+        stack.add_all(&mut app, Some(vec![short, tall]));
+        stack.set_index(&mut app, Some(0));
+
+        let constraints = BoxConstraints::new().max_width(100.0).max_height(100.0);
+        assert_eq!(
+            dry_and_actual_baseline(&mut app, stack.as_box(), constraints),
+            (Some(35.0), Some(35.0))
+        );
     }
 }

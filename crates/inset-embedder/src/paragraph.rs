@@ -1386,6 +1386,32 @@ mod layout_tests {
         );
     }
 
+    /// Either half of a glyph finds that glyph, and a point past the end of the line finds the
+    /// last glyph.
+    #[test]
+    fn the_closest_glyph_is_the_one_under_the_point() {
+        let paragraph = paragraph("abc", ParagraphStyle::new(), f64::INFINITY);
+        let b = paragraph.get_glyph_info_at(1).expect("the b glyph");
+        let bounds = b.grapheme_cluster_layout_bounds;
+        let y = bounds.center().dy();
+        for x in [bounds.left + 0.5, bounds.right - 0.5] {
+            let closest = paragraph
+                .get_closest_glyph_info_for_offset(Offset::new(x, y))
+                .expect("a glyph");
+            assert_eq!(
+                closest.grapheme_cluster_code_unit_range,
+                TextRange::new(1, 2)
+            );
+        }
+        let past_the_end = paragraph
+            .get_closest_glyph_info_for_offset(Offset::new(1000.0, y))
+            .expect("a glyph");
+        assert_eq!(
+            past_the_end.grapheme_cluster_code_unit_range,
+            TextRange::new(2, 3)
+        );
+    }
+
     #[test]
     fn placeholder_boxes_come_in_the_order_added_at_their_scaled_size() {
         let mut builder = ParagraphBuilder::new(ParagraphStyle::new());

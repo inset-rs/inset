@@ -565,6 +565,7 @@ impl StatelessWidget for Text {
                     .text_span
                     .as_ref()
                     .map(|text_span| vec![text_span.clone()]),
+                ..TextSpan::default()
             },
         );
         let text_scaler = self
@@ -654,6 +655,10 @@ fn apply_text_style_overrides(override_text_style: &TextStyle, text_span: &TextS
             Some(style) => style.merge(Some(override_text_style)),
             None => override_text_style.clone(),
         }),
+        recognizer: text_span.recognizer,
+        mouse_cursor: text_span.mouse_cursor.clone(),
+        on_enter: text_span.on_enter.clone(),
+        on_exit: text_span.on_exit.clone(),
     }
 }
 

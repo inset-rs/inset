@@ -24,8 +24,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - rounded_rectangle_border.rs → rounded_rectangle_border.dart
 - stadium_border.rs → stadium_border.dart
 - inline_span.rs → inline_span.dart
-- placeholder_span.rs → placeholder_span.dart
 - text_span.rs → text_span.dart
+- placeholder_span.rs → placeholder_span.dart
 - image_stream.rs → image_stream.dart (ImageInfo, ImageStreamListener, completer listener/keep-alive lifetime)
 - image_cache.rs → image_cache.dart (pending/live/LRU tracking, limits, status, and post-frame retention release)
 
@@ -124,7 +124,5 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - The rest of `PaintingBinding`. Trigger: image cache / shader warm-up.
 - `strut_style.dart` and `TextPainter.strutStyle`. Trigger: a paragraph that sets strut; the host has no strut.
 - `TextPainter.locale` / `TextSpan.locale` / `TextSpan.spellOut`. Trigger: `Locale`.
-- `TextSpan.recognizer` and `TextSpan` as a `HitTestTarget`. Trigger: `RichText` with a tappable span.
-- `TextSpan.mouseCursor` / `onEnter` / `onExit`. Trigger: a hoverable span; the mouse tracker keys annotations by render object.
 - `TextSpan` semantics and `computeSemanticsInformation`. Trigger: accessibility; do not stub.
 - `TextPainter.wordBoundaries`: `WordBoundary` reads a laid-out paragraph, which lives in the render object here, so it sits with `RenderEditable` in rendering. Trigger: a word boundary wanted without a render object.

@@ -1,9 +1,8 @@
 //! Flutter counterpart: `rendering/flex.dart` (`FlexFit`, `FlexParentData`, `MainAxisSize`,
 //! `MainAxisAlignment`, `CrossAxisAlignment`, `RenderFlex`).
-//!
-//! Baseline alignment waits; see `PORTING.md`.
 
 use std::any::{Any, TypeId};
+use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::ops::Add;
 
@@ -12,14 +11,16 @@ use inset_foundation::{App, Handle, PRECISION_ERROR_TOLERANCE};
 use inset_painting::{Axis, VerticalDirection};
 
 use crate::box_::{
-    AnyRenderBox, BoxConstraints, BoxHitTestResult, BoxParentData, ContainerBoxParentData,
-    DryLayoutFailure, RenderBox, RenderBoxContainerDefaultsMixin, RenderBoxData,
+    AnyRenderBox, BaselineOffset, BoxConstraints, BoxHitTestResult, BoxParentData,
+    ContainerBoxParentData, DryLayoutFailure, RenderBox, RenderBoxContainerDefaultsMixin,
+    RenderBoxData,
 };
 use crate::layer::{ClipRectLayer, LayerHandle};
-use crate::layout_helper::ChildLayoutHelper;
+use crate::layout_helper::{ChildBaselineGetter, ChildLayoutHelper};
 use crate::object::{
     AnyRenderObject, ContainerParentData, ContainerParentDataMixin, ContainerRenderObjectData,
     ContainerRenderObjectMixin, ParentData, RenderHandle, RenderObject, RenderObjectData,
+    debug_checking_intrinsics,
 };
 use crate::painting_context::PaintingContext;
 use crate::pipeline_owner::PipelineOwner;
@@ -30,6 +31,8 @@ use crate::pipeline_owner::PipelineOwner;
 struct AxisSize(Size);
 
 impl AxisSize {
+    const EMPTY: AxisSize = AxisSize(Size::ZERO);
+
     fn new(main_axis_extent: f64, cross_axis_extent: f64) -> AxisSize {
         AxisSize(Size::new(main_axis_extent, cross_axis_extent))
     }
@@ -77,6 +80,44 @@ impl Add for AxisSize {
     }
 }
 
+/// The ascent and descent of a baseline-aligned child.
+///
+/// Baseline-aligned children contributes to the cross axis extent of a [`RenderFlex`]
+/// differently from children with other [`CrossAxisAlignment`]s.
+#[derive(Clone, Copy)]
+struct AscentDescent(Option<(f64, f64)>);
+
+impl AscentDescent {
+    const NONE: AscentDescent = AscentDescent(None);
+
+    fn new(baseline_offset: Option<f64>, cross_size: f64) -> AscentDescent {
+        match baseline_offset {
+            None => AscentDescent::NONE,
+            Some(baseline_offset) => {
+                AscentDescent(Some((baseline_offset, cross_size - baseline_offset)))
+            }
+        }
+    }
+
+    fn baseline_offset(self) -> Option<f64> {
+        self.0.map(|(ascent, _)| ascent)
+    }
+}
+
+impl Add for AscentDescent {
+    type Output = AscentDescent;
+
+    fn add(self, other: AscentDescent) -> AscentDescent {
+        match (self.0, other.0) {
+            (None, _) => other,
+            (_, None) => self,
+            (Some((x_ascent, x_descent)), Some((y_ascent, y_descent))) => {
+                AscentDescent(Some((x_ascent.max(y_ascent), x_descent.max(y_descent))))
+            }
+        }
+    }
+}
+
 /// Flutter's `_ChildSizingFunction`: a method that finds a child's size in the sizing
 /// direction, given the extent in the other direction.
 type ChildSizingFunction = fn(AnyRenderBox, &mut App, f64) -> f64;
@@ -90,6 +131,13 @@ pub struct LayoutSizes {
     /// distributed according to the [`MainAxisAlignment`] specified. A negative value indicates
     /// the [`RenderFlex`] overflows along the main axis.
     main_axis_free_space: f64,
+
+    /// `None` if the [`RenderFlex`] is not baseline aligned, or none of its children has a valid
+    /// baseline of the given [`TextBaseline`] type.
+    baseline_offset: Option<f64>,
+
+    /// The allocated space for flex children.
+    space_per_flex: Option<f64>,
 }
 
 /// How the child is inscribed into the available space.
@@ -359,14 +407,31 @@ pub enum CrossAxisAlignment {
     /// Place the children along the cross axis such that their baselines match.
     ///
     /// Consider using this value for any horizontal main axis (as with a row) where the children
-    /// primarily contain text.
+    /// primarily contain text. If the different children have text with different font metrics
+    /// (for example because they differ in font size or other text style properties, or because
+    /// they use different fonts due to being written in different scripts), then this typically
+    /// produces better visual alignment than the other [`CrossAxisAlignment`] values, which use
+    /// no information about where the text sits vertically within its bounding box.
+    ///
+    /// The baseline of a widget is typically the typographic baseline of the first text in the
+    /// first text widget it encloses, if any. The typographic baseline is a horizontal line used
+    /// for aligning text, which is specified by each font; for alphabetic scripts, it ordinarily
+    /// runs along the bottom of letters excluding any descenders.
     ///
     /// Because baselines are always horizontal, this alignment is intended for horizontal main
-    /// axes. If the main axis is vertical, then this value is treated like
-    /// [`Start`](Self::Start).
+    /// axes (as with a row). If the main axis is vertical (as with a column), then this value is
+    /// treated like [`Start`](Self::Start).
     ///
-    /// Children who report no baseline will be top-aligned. No [`RenderBox`] reports a baseline
-    /// yet, so every child is top-aligned; see `PORTING.md`.
+    /// For horizontal main axes, if the minimum height constraint passed to the flex layout
+    /// exceeds the intrinsic height of the cross axis, children will be aligned as close to the
+    /// top as they can be while honoring the baseline alignment. In other words, the extra space
+    /// will be below all the children.
+    ///
+    /// Children who report no baseline will be top-aligned.
+    ///
+    /// See also:
+    ///
+    ///  * [`AnyRenderBox::get_distance_to_baseline`], which defines the baseline of a box.
     Baseline,
 }
 
@@ -696,6 +761,9 @@ pub trait RenderFlexMixin:
     /// Flutter's `_debugHasNecessaryDirections`: asserts the directions the current alignment
     /// needs are available. Always returns true. Internal to the flex layout.
     fn debug_has_necessary_directions(self: RenderHandle<Self>, app: &App) -> bool {
+        if debug_checking_intrinsics() {
+            return true;
+        }
         let direction = self.direction(app);
         if self.first_child(app).is_some() && self.last_child(app) != self.first_child(app) {
             // i.e. there's more than one child
@@ -730,6 +798,21 @@ pub trait RenderFlexMixin:
             );
         }
         true
+    }
+
+    /// Whether the children are placed on a shared baseline: a [`CrossAxisAlignment::Baseline`]
+    /// along a horizontal main axis. Internal to the flex layout.
+    fn is_baseline_aligned(self: RenderHandle<Self>, app: &App) -> bool {
+        match self.cross_axis_alignment(app) {
+            CrossAxisAlignment::Baseline => match self.direction(app) {
+                Axis::Horizontal => true,
+                Axis::Vertical => false,
+            },
+            CrossAxisAlignment::Start
+            | CrossAxisAlignment::Center
+            | CrossAxisAlignment::End
+            | CrossAxisAlignment::Stretch => false,
+        }
     }
 
     /// The extent of `size` along the cross axis. Internal to the flex layout.
@@ -903,9 +986,14 @@ pub trait RenderFlexMixin:
         } else {
             BoxConstraints::new().max_height(extent)
         };
-        self.compute_sizes(app, constraints, layout_child)
-            .axis_size
-            .cross_axis_extent()
+        self.compute_sizes(
+            app,
+            constraints,
+            layout_child,
+            ChildLayoutHelper::get_dry_baseline,
+        )
+        .axis_size
+        .cross_axis_extent()
     }
 
     /// Flutter's `_debugCheckConstraints`: the error to report when a child has a non-zero flex
@@ -956,13 +1044,19 @@ pub trait RenderFlexMixin:
         None
     }
 
-    /// Flutter's `_computeSizes`: measures the children with `layout_child` and works out this
-    /// flex's own size. Internal to the flex layout.
+    /// Flutter's `_computeSizes`: measures the children with `layout_child`, reads their
+    /// baselines with `get_baseline` when they are baseline aligned, and works out this flex's
+    /// own size. Internal to the flex layout.
+    ///
+    /// # Panics
+    ///
+    /// If the children are baseline aligned and [`text_baseline`](Self::text_baseline) is `None`.
     fn compute_sizes(
         self: RenderHandle<Self>,
         app: &mut App,
         constraints: BoxConstraints,
         mut layout_child: impl FnMut(&mut App, AnyRenderBox, BoxConstraints) -> Size,
+        get_baseline: ChildBaselineGetter,
     ) -> LayoutSizes {
         debug_assert!(self.debug_has_necessary_directions(app));
 
@@ -971,10 +1065,20 @@ pub trait RenderFlexMixin:
         let max_main_size = self.get_main_size(app, constraints.biggest());
         let can_flex = max_main_size.is_finite();
         let non_flex_child_constraints = self.constraints_for_non_flex_child(app, constraints);
+        // None indicates the children are not baseline aligned.
+        let text_baseline = if self.is_baseline_aligned(app) {
+            Some(self.text_baseline(app).expect(
+                "To use CrossAxisAlignment.baseline, you must also specify which baseline to use \
+                 using the \"textBaseline\" argument.",
+            ))
+        } else {
+            None
+        };
 
         // The first pass lays out non-flex children and computes total flex.
         let mut total_flex = 0;
         let mut first_flex_child: Option<AnyRenderBox> = None;
+        let mut accumulated_ascent_descent = AscentDescent::NONE;
         // Initially, accumulated_size is the sum of the spaces between children in the main axis.
         let mut accumulated_size = AxisSize::new(
             self.spacing(app) * (self.child_count(app) as f64 - 1.0),
@@ -987,8 +1091,17 @@ pub trait RenderFlexMixin:
                 total_flex += flex;
                 first_flex_child.get_or_insert(current);
             } else {
-                let child_size = layout_child(app, current, non_flex_child_constraints);
-                accumulated_size = accumulated_size + AxisSize::from_size(child_size, direction);
+                let child_size = AxisSize::from_size(
+                    layout_child(app, current, non_flex_child_constraints),
+                    direction,
+                );
+                accumulated_size = accumulated_size + child_size;
+                // Baseline-aligned children contributes to the cross axis extent separately.
+                let baseline_offset = text_baseline.and_then(|text_baseline| {
+                    get_baseline(app, current, non_flex_child_constraints, text_baseline)
+                });
+                accumulated_ascent_descent = accumulated_ascent_descent
+                    + AscentDescent::new(baseline_offset, child_size.cross_axis_extent());
             }
             child = self.child_after(app, current);
         }
@@ -1015,12 +1128,25 @@ pub trait RenderFlexMixin:
                 );
                 let child_constraints =
                     self.constraints_for_flex_child(app, current, constraints, max_child_extent);
-                let child_size = layout_child(app, current, child_constraints);
-                accumulated_size = accumulated_size + AxisSize::from_size(child_size, direction);
+                let child_size =
+                    AxisSize::from_size(layout_child(app, current, child_constraints), direction);
+                accumulated_size = accumulated_size + child_size;
+                let baseline_offset = text_baseline.and_then(|text_baseline| {
+                    get_baseline(app, current, child_constraints, text_baseline)
+                });
+                accumulated_ascent_descent = accumulated_ascent_descent
+                    + AscentDescent::new(baseline_offset, child_size.cross_axis_extent());
             }
             child = self.child_after(app, current);
         }
         debug_assert_eq!(total_flex, 0);
+
+        // The overall height of baseline-aligned children contributes to the cross axis extent.
+        accumulated_size = accumulated_size
+            + match accumulated_ascent_descent.0 {
+                None => AxisSize::EMPTY,
+                Some((ascent, descent)) => AxisSize::new(0.0, ascent + descent),
+            };
 
         let ideal_main_size = match self.main_axis_size(app) {
             MainAxisSize::Max if max_main_size.is_finite() => max_main_size,
@@ -1029,10 +1155,14 @@ pub trait RenderFlexMixin:
 
         let constrained_size = AxisSize::new(ideal_main_size, accumulated_size.cross_axis_extent())
             .apply_constraints(constraints, direction);
+        let space_per_flex = first_flex_child.map(|_| space_per_flex);
+        debug_assert!(space_per_flex.is_none_or(f64::is_finite));
         LayoutSizes {
             axis_size: constrained_size,
             main_axis_free_space: constrained_size.main_axis_extent()
                 - accumulated_size.main_axis_extent(),
+            baseline_offset: accumulated_ascent_descent.baseline_offset(),
+            space_per_flex,
         }
     }
 
@@ -1045,7 +1175,12 @@ pub trait RenderFlexMixin:
             panic!("{error}");
         }
 
-        let sizes = self.compute_sizes(app, constraints, ChildLayoutHelper::layout_child);
+        let sizes = self.compute_sizes(
+            app,
+            constraints,
+            ChildLayoutHelper::layout_child,
+            ChildLayoutHelper::get_baseline,
+        );
 
         let direction = self.direction(app);
         let cross_axis_extent = sizes.axis_size.cross_axis_extent();
@@ -1067,15 +1202,34 @@ pub trait RenderFlexMixin:
         } else {
             self.first_child(app)
         };
+        let baseline_offset = sizes.baseline_offset;
+        debug_assert!(
+            baseline_offset.is_none()
+                || (cross_axis_alignment == CrossAxisAlignment::Baseline
+                    && direction == Axis::Horizontal)
+        );
+        let text_baseline = self.text_baseline(app);
 
         // Position all children in visual order: starting from the top-left child and work
         // towards the child that's farthest away from the origin.
         let mut child_main_position = leading_space;
         let mut child = top_left_child;
         while let Some(current) = child {
+            let child_baseline_offset = match baseline_offset {
+                Some(_) => current.get_distance_to_baseline(
+                    app,
+                    text_baseline.expect("a baseline-aligned flex has a text baseline"),
+                    true,
+                ),
+                None => None,
+            };
             let child_size = current.size(app);
             let free_cross_space = cross_axis_extent - self.get_cross_size(app, child_size);
-            let child_cross_position = if cross_axis_alignment == CrossAxisAlignment::Baseline
+            let child_cross_position = if let (Some(baseline_offset), Some(child_baseline_offset)) =
+                (baseline_offset, child_baseline_offset)
+            {
+                baseline_offset - child_baseline_offset
+            } else if cross_axis_alignment == CrossAxisAlignment::Baseline
                 && direction == Axis::Horizontal
             {
                 // In a baseline-aligned horizontal flex, a child without a baseline is aligned to
@@ -1195,6 +1349,230 @@ pub trait RenderFlexMixin:
         )
     }
 
+    /// A row's highest child baseline, or a column's first child baseline.
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        match self.direction(app) {
+            Axis::Horizontal => {
+                self.default_compute_distance_to_highest_actual_baseline(app, baseline)
+            }
+            Axis::Vertical => self.default_compute_distance_to_first_actual_baseline(app, baseline),
+        }
+    }
+
+    /// The baseline [`compute_distance_to_actual_baseline`](Self::compute_distance_to_actual_baseline)
+    /// would answer, measuring the children dry; a baseline-aligned flex answers its shared
+    /// baseline.
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        let sizes = self.compute_sizes(
+            app,
+            constraints,
+            ChildLayoutHelper::dry_layout_child,
+            ChildLayoutHelper::get_dry_baseline,
+        );
+
+        if self.is_baseline_aligned(app) {
+            return sizes.baseline_offset;
+        }
+
+        // For non-baseline-aligned, match the logic of compute_distance_to_actual_baseline
+        // exactly.
+        match self.direction(app) {
+            Axis::Horizontal => {
+                self.compute_dry_distance_to_highest_baseline(app, constraints, baseline, &sizes)
+            }
+            Axis::Vertical => {
+                self.compute_dry_distance_to_first_baseline(app, constraints, baseline, &sizes)
+            }
+        }
+    }
+
+    /// Dry layout equivalent of
+    /// [`default_compute_distance_to_highest_actual_baseline`](RenderBoxContainerDefaultsMixin::default_compute_distance_to_highest_actual_baseline).
+    /// Internal to the flex layout.
+    fn compute_dry_distance_to_highest_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+        sizes: &LayoutSizes,
+    ) -> Option<f64> {
+        // Simulate the exact logic from default_compute_distance_to_highest_actual_baseline.
+        // The key insight: the actual method uses the child's parent data offset.dy, so we need
+        // to simulate that.
+
+        let non_flex_constraints = self.constraints_for_non_flex_child(app, constraints);
+        let space_per_flex = sizes.space_per_flex;
+        let constraints_for_child = |app: &App, child: AnyRenderBox| {
+            let flex = get_flex(app, child);
+            match space_per_flex {
+                Some(space_per_flex) if flex > 0 => self.constraints_for_flex_child(
+                    app,
+                    child,
+                    constraints,
+                    f64::from(flex) * space_per_flex,
+                ),
+                _ => non_flex_constraints,
+            }
+        };
+
+        // Simulate the layout positioning logic from perform_layout.
+        let flip_main_axis = self.flip_main_axis(app);
+        let flip_cross_axis = self.flip_cross_axis(app);
+        let top_left_child = if flip_main_axis {
+            self.last_child(app)
+        } else {
+            self.first_child(app)
+        };
+        let is_baseline_aligned = self.is_baseline_aligned(app);
+        let text_baseline = self.text_baseline(app);
+        let baseline_offset = if is_baseline_aligned && text_baseline.is_some() {
+            sizes.baseline_offset
+        } else {
+            None
+        };
+        let cross_axis_alignment = self.cross_axis_alignment(app);
+        let direction = self.direction(app);
+
+        let mut min_baseline = BaselineOffset::NO_BASELINE;
+
+        let mut child = top_left_child;
+        while let Some(current) = child {
+            let child_constraints = constraints_for_child(app, current);
+            let child_baseline = current.get_dry_baseline(app, child_constraints, baseline);
+            if let Some(child_baseline) = child_baseline {
+                // Calculate cross-axis position to match perform_layout exactly.
+                let child_baseline_offset = match text_baseline {
+                    Some(text_baseline) if is_baseline_aligned => {
+                        current.get_dry_baseline(app, child_constraints, text_baseline)
+                    }
+                    _ => None,
+                };
+
+                let child_cross_position =
+                    if let (Some(baseline_offset), Some(child_baseline_offset)) =
+                        (baseline_offset, child_baseline_offset)
+                    {
+                        baseline_offset - child_baseline_offset
+                    } else if cross_axis_alignment == CrossAxisAlignment::Baseline
+                        && direction == Axis::Horizontal
+                    {
+                        // Baseline mode with a child that lacks a baseline: align to the top
+                        // (dy = 0), regardless of vertical_direction. Ignore flip_cross_axis here to
+                        // match perform_layout.
+                        let child_size = current.get_dry_layout(app, child_constraints);
+                        CrossAxisAlignment::Start.get_child_cross_axis_offset(
+                            sizes.axis_size.cross_axis_extent()
+                                - self.get_cross_size(app, child_size),
+                            false,
+                        )
+                    } else {
+                        // Non-baseline: respect configured cross_axis_alignment.
+                        let child_size = current.get_dry_layout(app, child_constraints);
+                        cross_axis_alignment.get_child_cross_axis_offset(
+                            sizes.axis_size.cross_axis_extent()
+                                - self.get_cross_size(app, child_size),
+                            flip_cross_axis,
+                        )
+                    };
+
+                // For horizontal flex: offset.dy = child_cross_position. This simulates the
+                // child's parent data offset.dy from the actual method.
+                let candidate = BaselineOffset(Some(child_baseline)) + child_cross_position;
+                min_baseline = min_baseline.min_of(candidate);
+            }
+
+            // Main-axis advancement is irrelevant for highest-baseline computation.
+            child = if flip_main_axis {
+                self.child_before(app, current)
+            } else {
+                self.child_after(app, current)
+            };
+        }
+
+        min_baseline.offset()
+    }
+
+    /// Dry layout equivalent of
+    /// [`default_compute_distance_to_first_actual_baseline`](RenderBoxContainerDefaultsMixin::default_compute_distance_to_first_actual_baseline).
+    /// Internal to the flex layout.
+    fn compute_dry_distance_to_first_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+        sizes: &LayoutSizes,
+    ) -> Option<f64> {
+        // We must mimic default_compute_distance_to_first_actual_baseline which walks children
+        // in child-list order (not painting order) but uses actual offsets.
+        let non_flex_constraints = self.constraints_for_non_flex_child(app, constraints);
+        let space_per_flex = sizes.space_per_flex;
+        let constraints_for_child = |app: &App, child: AnyRenderBox| {
+            let flex = get_flex(app, child);
+            match space_per_flex {
+                Some(space_per_flex) if flex > 0 => self.constraints_for_flex_child(
+                    app,
+                    child,
+                    constraints,
+                    f64::from(flex) * space_per_flex,
+                ),
+                _ => non_flex_constraints,
+            }
+        };
+
+        // First, compute each child's main-axis position in painting order.
+        let remaining_space = sizes.main_axis_free_space.max(0.0);
+        let flip_main_axis = self.flip_main_axis(app);
+        let (leading_space, between_space) = self.main_axis_alignment(app).distribute_space(
+            remaining_space,
+            self.child_count(app),
+            flip_main_axis,
+            self.spacing(app),
+        );
+
+        let mut main_positions: HashMap<AnyRenderBox, f64> = HashMap::new();
+        let start_child = if flip_main_axis {
+            self.last_child(app)
+        } else {
+            self.first_child(app)
+        };
+        let mut pos = leading_space;
+        let mut child = start_child;
+        while let Some(current) = child {
+            main_positions.insert(current, pos);
+            let cc = constraints_for_child(app, current);
+            let cs = current.get_dry_layout(app, cc);
+            pos += self.get_main_size(app, cs) + between_space;
+            child = if flip_main_axis {
+                self.child_before(app, current)
+            } else {
+                self.child_after(app, current)
+            };
+        }
+
+        // Then, find the first child with a baseline in child-list order and return its
+        // baseline + position.
+        let mut child = self.first_child(app);
+        while let Some(current) = child {
+            let cc = constraints_for_child(app, current);
+            if let Some(child_baseline) = current.get_dry_baseline(app, cc, baseline) {
+                let position = main_positions.get(&current).copied();
+                // If somehow missing (no children), fall back to leading_space.
+                return Some(child_baseline + position.unwrap_or(leading_space));
+            }
+            child = self.child_after(app, current);
+        }
+        None
+    }
+
     /// The size this flex would take, measuring the children dry.
     fn compute_dry_layout(
         self: RenderHandle<Self>,
@@ -1208,9 +1586,14 @@ pub trait RenderFlexMixin:
             return Size::ZERO;
         }
         let direction = self.direction(app);
-        self.compute_sizes(app, constraints, ChildLayoutHelper::dry_layout_child)
-            .axis_size
-            .to_size(direction)
+        self.compute_sizes(
+            app,
+            constraints,
+            ChildLayoutHelper::dry_layout_child,
+            ChildLayoutHelper::get_dry_baseline,
+        )
+        .axis_size
+        .to_size(direction)
     }
 
     /// Hit tests the children in paint order.
@@ -1504,6 +1887,23 @@ impl RenderBox for RenderFlex {
         RenderFlexMixin::compute_max_intrinsic_height(self, app, width)
     }
 
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderFlexMixin::compute_distance_to_actual_baseline(self, app, baseline)
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderFlexMixin::compute_dry_baseline(self, app, constraints, baseline)
+    }
+
     fn compute_dry_layout(
         self: RenderHandle<Self>,
         app: &mut App,
@@ -1681,8 +2081,6 @@ mod tests {
         assert!(last.as_object().parent(&app).is_none());
     }
 
-    /// `flex_test.dart`: a row gives the flexible child the space the fixed one leaves, and the
-    /// spacing goes between them.
     /// A box with fixed intrinsic dimensions that takes the size its constraints allow around
     /// them.
     struct IntrinsicTestBox {
@@ -1819,6 +2217,8 @@ mod tests {
         }
     }
 
+    /// `flex_test.dart`: a row gives the flexible child the space the fixed one leaves, and the
+    /// spacing goes between them.
     #[test]
     fn row_lays_out_fixed_and_flexible_children_with_spacing() {
         let cell = AppCell::new();
@@ -1876,8 +2276,8 @@ mod tests {
         }
     }
 
-    /// `flex_test.dart`: `Test Flex Widget CrossAxisAlignment`. Baseline alignment top-aligns
-    /// because no `RenderBox` reports a baseline yet; see `PORTING.md`.
+    /// Each cross axis alignment places a child that is smaller than the row; a child with no
+    /// baseline in a baseline-aligned row is top-aligned.
     #[test]
     fn cross_axis_alignment_positions_children() {
         let cases = [
@@ -1956,5 +2356,375 @@ mod tests {
         );
         assert!(hit);
         assert_eq!(hit_boxes(&result), vec![second, flex.as_box()]);
+    }
+
+    /// The size of one cell of a [`FlowBaselineTestBox`].
+    const GRID_SIZE: Size = Size::new(10.0, 10.0);
+
+    /// `flex_test.dart`'s `RenderFlowBaselineTestBox`: `grid_count` cells in rows as wide as
+    /// the width allows, with the baseline `baseline_placer` gives for its height.
+    struct FlowBaselineTestBox {
+        render_object: RenderObjectData,
+        render_box: RenderBoxData,
+        grid_count: usize,
+        baseline_placer: fn(f64) -> Option<f64>,
+    }
+
+    impl FlowBaselineTestBox {
+        fn line_grid_count(&self, width: f64) -> usize {
+            let grids_per_line = if width >= self.grid_count as f64 * GRID_SIZE.width() {
+                self.grid_count
+            } else {
+                (width / GRID_SIZE.width()) as usize
+            };
+            grids_per_line.max(1)
+        }
+
+        fn line_count(&self, width: f64) -> usize {
+            (self.grid_count as f64 / self.line_grid_count(width) as f64).ceil() as usize
+        }
+    }
+
+    impl RenderObject for FlowBaselineTestBox {
+        crate::render_object_accessors!();
+
+        fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+            let constraints = self.constraints(app);
+            let size = RenderBox::compute_dry_layout(self, app, constraints);
+            self.set_size(app, size);
+        }
+    }
+
+    impl RenderBox for FlowBaselineTestBox {
+        crate::render_box_accessors!();
+
+        fn compute_min_intrinsic_width(
+            self: RenderHandle<Self>,
+            _app: &mut App,
+            _height: f64,
+        ) -> f64 {
+            GRID_SIZE.width()
+        }
+
+        fn compute_max_intrinsic_width(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            _height: f64,
+        ) -> f64 {
+            GRID_SIZE.width() * self.get(app).grid_count as f64
+        }
+
+        fn compute_min_intrinsic_height(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            width: f64,
+        ) -> f64 {
+            GRID_SIZE.height() * self.get(app).line_count(width) as f64
+        }
+
+        fn compute_max_intrinsic_height(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            width: f64,
+        ) -> f64 {
+            RenderBox::compute_min_intrinsic_height(self, app, width)
+        }
+
+        fn compute_dry_layout(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            constraints: BoxConstraints,
+        ) -> Size {
+            let this = self.get(app);
+            constraints.constrain(Size::new(
+                GRID_SIZE.width() * this.line_grid_count(constraints.max_width) as f64,
+                GRID_SIZE.height() * this.line_count(constraints.max_width) as f64,
+            ))
+        }
+
+        fn compute_dry_baseline(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            constraints: BoxConstraints,
+            _baseline: TextBaseline,
+        ) -> Option<f64> {
+            let height = self.as_box().get_dry_layout(app, constraints).height();
+            (self.get(app).baseline_placer)(height)
+        }
+
+        fn compute_distance_to_actual_baseline(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            _baseline: TextBaseline,
+        ) -> Option<f64> {
+            let height = self.size(app).height();
+            (self.get(app).baseline_placer)(height)
+        }
+    }
+
+    fn flow_baseline_box(
+        app: &mut App,
+        grid_count: usize,
+        baseline_placer: fn(f64) -> Option<f64>,
+    ) -> AnyRenderBox {
+        RenderHandle::new_box(
+            app,
+            FlowBaselineTestBox {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                grid_count,
+                baseline_placer,
+            },
+        )
+        .as_box()
+    }
+
+    /// A left-to-right row of `children` whose children share the alphabetic baseline.
+    fn baseline_row(app: &mut App, children: Vec<AnyRenderBox>) -> RenderHandle<RenderFlex> {
+        let flex = row(app, children);
+        flex.set_cross_axis_alignment(app, CrossAxisAlignment::Baseline);
+        flex.set_text_baseline(app, Some(TextBaseline::Alphabetic));
+        flex
+    }
+
+    /// Lays `root` out as the root of a pipeline, so that a changed property is laid out again
+    /// by `flush_layout`.
+    fn lay_out_root(
+        app: &mut App,
+        root: AnyRenderBox,
+        constraints: BoxConstraints,
+    ) -> Handle<PipelineOwner> {
+        let owner = PipelineOwner::new(app, None, None);
+        owner.set_root_node(app, Some(root.as_object()));
+        root.as_object().schedule_initial_layout(app);
+        root.layout(app, constraints, false);
+        owner
+    }
+
+    /// Gives `child` the flex factor `flex` and the fit `fit` in its flex.
+    fn set_flex(app: &mut App, child: AnyRenderBox, flex: i32, fit: FlexFit) {
+        let parent_data = child.parent_data_of_mut::<FlexParentData>(app);
+        parent_data.flex = Some(flex);
+        parent_data.fit = Some(fit);
+    }
+
+    /// `flex_test.dart`: `children with no baselines are top-aligned`, whichever the vertical
+    /// direction.
+    #[test]
+    fn children_with_no_baselines_are_top_aligned() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let first = sized_box(&mut app, Size::new(100.0, 100.0));
+        let second = sized_box(&mut app, Size::new(100.0, 100.0));
+        let flex = baseline_row(&mut app, vec![first, second]);
+        flex.set_vertical_direction(&mut app, VerticalDirection::Up);
+        let owner = lay_out_root(
+            &mut app,
+            flex.as_box(),
+            BoxConstraints::tight(Size::new(800.0, 600.0)),
+        );
+
+        // Not start-aligned.
+        assert_eq!(offset_of(&app, first).dy(), 0.0);
+        assert_eq!(offset_of(&app, second).dy(), 0.0);
+
+        flex.set_vertical_direction(&mut app, VerticalDirection::Down);
+        owner.flush_layout(&mut app);
+        assert_eq!(offset_of(&app, first).dy(), 0.0);
+        assert_eq!(offset_of(&app, second).dy(), 0.0);
+    }
+
+    /// `flex_test.dart`: `Vertical Flex Baseline`. A column's baseline is its first child's
+    /// baseline, wherever the main axis alignment and the vertical direction place that child;
+    /// the dry baseline and the laid-out one agree.
+    #[test]
+    fn a_column_s_baseline_is_its_first_child_s_baseline() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let square = BoxConstraints::tight_for(Some(100.0), Some(100.0));
+        let boxed = |app: &mut App, baseline: Option<AnyRenderBox>| {
+            crate::proxy_box::RenderConstrainedBox::new(app, square, baseline).as_box()
+        };
+        let first_inner = flow_baseline_box(&mut app, 1, |_| Some(10.0));
+        let second_inner = flow_baseline_box(&mut app, 1, |_| Some(10.0));
+        let children = vec![
+            boxed(&mut app, None),
+            boxed(&mut app, Some(first_inner)),
+            boxed(&mut app, None),
+            boxed(&mut app, Some(second_inner)),
+            boxed(&mut app, None),
+        ];
+        let flex = RenderFlex::new(&mut app);
+        flex.set_text_direction(&mut app, Some(TextDirection::Ltr));
+        flex.set_direction(&mut app, Axis::Vertical);
+        flex.add_all(&mut app, Some(children));
+        let constraints = BoxConstraints::tight(Size::new(800.0, 600.0));
+        let owner = lay_out_root(&mut app, flex.as_box(), constraints);
+        let flex_height = flex.size(&app).height();
+
+        let expect_baseline = |app: &mut App, expected: f64| {
+            let column = flex.as_box();
+            assert_eq!(
+                column.get_dry_baseline(app, constraints, TextBaseline::Alphabetic),
+                Some(expected)
+            );
+            assert_eq!(
+                column.get_distance_to_baseline(app, TextBaseline::Alphabetic, true),
+                Some(expected)
+            );
+        };
+        expect_baseline(&mut app, 100.0 + 10.0);
+
+        flex.set_main_axis_alignment(&mut app, MainAxisAlignment::End);
+        owner.flush_layout(&mut app);
+        expect_baseline(&mut app, flex_height - 400.0 + 10.0);
+
+        flex.set_vertical_direction(&mut app, VerticalDirection::Up);
+        owner.flush_layout(&mut app);
+        expect_baseline(&mut app, 300.0 + 10.0);
+
+        flex.set_main_axis_alignment(&mut app, MainAxisAlignment::Start);
+        owner.flush_layout(&mut app);
+        expect_baseline(&mut app, flex_height - 200.0 + 10.0);
+    }
+
+    /// `flex_test.dart`: `baseline aligned flex flow computeDryLayout`. The cross extent is the
+    /// tallest ascent plus the deepest descent, and the dry baseline is the tallest ascent.
+    #[test]
+    fn baseline_aligned_dry_layout_adds_the_largest_ascent_and_descent() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        // The first box has its baseline at its top, the second at its bottom.
+        let first = flow_baseline_box(&mut app, 10, |_| Some(0.0));
+        let second = flow_baseline_box(&mut app, 10, Some);
+        let flex = baseline_row(&mut app, vec![first, second]);
+        set_flex(&mut app, first, 2, FlexFit::Tight);
+        set_flex(&mut app, second, 1, FlexFit::Loose);
+        let flex = flex.as_box();
+
+        // The first box one line, the second two lines.
+        let constraints = BoxConstraints::loose(Size::new(200.0, 100.0));
+        assert_eq!(
+            flex.get_dry_layout(&mut app, constraints),
+            Size::new(200.0, 30.0)
+        );
+        assert_eq!(
+            flex.get_dry_baseline(&mut app, constraints, TextBaseline::Alphabetic),
+            Some(20.0)
+        );
+        // Both boxes one line.
+        let constraints = BoxConstraints::loose(Size::new(300.0, 100.0));
+        assert_eq!(
+            flex.get_dry_layout(&mut app, constraints),
+            Size::new(300.0, 20.0)
+        );
+        assert_eq!(
+            flex.get_dry_baseline(&mut app, constraints, TextBaseline::Alphabetic),
+            Some(10.0)
+        );
+    }
+
+    /// `flex_test.dart`: `baseline aligned children cross intrinsic size`.
+    #[test]
+    fn baseline_aligned_cross_intrinsics_add_the_largest_ascent_and_descent() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let first = flow_baseline_box(&mut app, 10, |_| Some(0.0));
+        let second = flow_baseline_box(&mut app, 10, Some);
+        let flex = baseline_row(&mut app, vec![first, second]);
+        set_flex(&mut app, first, 2, FlexFit::Tight);
+        set_flex(&mut app, second, 1, FlexFit::Loose);
+        let flex = flex.as_box();
+
+        // The first box one line, the second two lines.
+        assert_eq!(flex.get_max_intrinsic_height(&mut app, 200.0), 30.0);
+        assert_eq!(flex.get_min_intrinsic_height(&mut app, 200.0), 30.0);
+        // Both boxes one line.
+        assert_eq!(flex.get_max_intrinsic_height(&mut app, 300.0), 20.0);
+        assert_eq!(flex.get_min_intrinsic_height(&mut app, 300.0), 20.0);
+    }
+
+    /// `flex_test.dart`: `children with no baselines do not affect the baseline location`; a
+    /// taller child without one still counts towards the cross extent.
+    #[test]
+    fn children_with_no_baselines_do_not_affect_the_baseline_location() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let first = flow_baseline_box(&mut app, 10, Some);
+        let second = flow_baseline_box(&mut app, 10, |_| None);
+        let flex = baseline_row(&mut app, vec![first, second]);
+        set_flex(&mut app, first, 2, FlexFit::Tight);
+        set_flex(&mut app, second, 1, FlexFit::Loose);
+        let flex = flex.as_box();
+
+        // The first box one line, the second two lines.
+        let constraints = BoxConstraints::loose(Size::new(200.0, 100.0));
+        assert_eq!(
+            flex.get_dry_layout(&mut app, constraints),
+            Size::new(200.0, 20.0)
+        );
+        assert_eq!(
+            flex.get_dry_baseline(&mut app, constraints, TextBaseline::Alphabetic),
+            Some(10.0)
+        );
+        // Both boxes one line.
+        let constraints = BoxConstraints::loose(Size::new(300.0, 100.0));
+        assert_eq!(
+            flex.get_dry_layout(&mut app, constraints),
+            Size::new(300.0, 10.0)
+        );
+        assert_eq!(
+            flex.get_dry_baseline(&mut app, constraints, TextBaseline::Alphabetic),
+            Some(10.0)
+        );
+    }
+
+    /// Laying a baseline-aligned row out puts each child's baseline on the row's baseline, a
+    /// child without one at the top, and the extra cross space below them all; the dry layout
+    /// and the dry baseline agree with it.
+    #[test]
+    fn layout_places_the_children_on_a_shared_baseline() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let tight_box = |app: &mut App, size: Size, child: Option<AnyRenderBox>| {
+            crate::proxy_box::RenderConstrainedBox::new(app, BoxConstraints::tight(size), child)
+                .as_box()
+        };
+        // 30 above the baseline and 10 below it; 10 above and 10 below; 50 tall with none.
+        let deep_baseline = flow_baseline_box(&mut app, 1, |_| Some(30.0));
+        let deep = tight_box(&mut app, Size::new(10.0, 40.0), Some(deep_baseline));
+        let shallow_baseline = flow_baseline_box(&mut app, 1, |_| Some(10.0));
+        let shallow = tight_box(&mut app, Size::new(10.0, 20.0), Some(shallow_baseline));
+        let without = tight_box(&mut app, Size::new(10.0, 50.0), None);
+        let flex = baseline_row(&mut app, vec![deep, shallow, without]);
+        let row = flex.as_box();
+        let loose = BoxConstraints::loose(Size::new(200.0, 100.0));
+        let dry_size = row.get_dry_layout(&mut app, loose);
+        let dry_baseline = row.get_dry_baseline(&mut app, loose, TextBaseline::Alphabetic);
+        let _owner = lay_out_root(&mut app, row, loose);
+
+        assert_eq!(flex.size(&app), Size::new(200.0, 50.0));
+        assert_eq!(offset_of(&app, deep).dy(), 0.0);
+        assert_eq!(offset_of(&app, shallow).dy(), 20.0);
+        assert_eq!(offset_of(&app, without).dy(), 0.0);
+        let baseline = row.get_distance_to_baseline(&mut app, TextBaseline::Alphabetic, true);
+        assert_eq!(baseline, Some(30.0));
+        assert_eq!(
+            (dry_size, dry_baseline),
+            (flex.size(&app), baseline),
+            "the dry layout is the real layout"
+        );
+
+        let tall = BoxConstraints {
+            min_height: 100.0,
+            ..loose
+        };
+        row.layout(&mut app, tall, false);
+        assert_eq!(flex.size(&app), Size::new(200.0, 100.0));
+        assert_eq!(
+            offset_of(&app, shallow).dy(),
+            20.0,
+            "the extra space is below the children"
+        );
     }
 }

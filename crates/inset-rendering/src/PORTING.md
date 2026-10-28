@@ -10,7 +10,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - relayout_when_system_fonts_change.rs → object.dart (`RelayoutWhenSystemFontsChangeMixin`)
 - sliver.rs → GrowthDirection, applyGrowthDirectionToAxisDirection / ScrollDirection, SliverConstraints (`isTight` / `isNormalized` / `asBoxConstraints` / `==`)
 - viewport_offset.rs → ScrollDirection, flipScrollDirection
-- flex.rs → FlexFit, MainAxisSize, MainAxisAlignment
+- flex.rs → flex.dart
 - stack.rs → StackFit
 - box.rs → RenderBox intrinsics, dry layout and dry baselines with their caches
 - layout_helper.rs → layout_helper.dart
@@ -102,15 +102,11 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## mouse_tracker.rs → mouse_tracker.dart
 
-- Change: Dart's `target is MouseTrackerAnnotation` is the virtual `RenderObject::mouse_tracker_annotation`, which the tracker re-reads from the render object on every dispatch.
-  Reason: language — an erased render object cannot be asked whether it implements an interface.
-  Affect: a render object receives enter and exit only if it overrides that virtual; one that has left the arena reads as no annotation and is skipped.
+- Change: `MouseTracker` finds the annotations in a hit test by asking two kinds of target: a render object answers through its `RenderObject::mouse_tracker_annotation` override, which the tracker reads again on each pointer event, and a `TextSpan` is one.
+  Reason: language — a `dyn HitTestTarget` cannot be asked whether it also implements another trait, so the tracker checks the two kinds of object Flutter's framework makes annotations of.
+  Affect: a hit test target of any other type never gets enter, exit or a cursor, and a render object already freed from the `App` is skipped.
 
 ## proxy_box.rs → proxy_box.dart / shifted_box.rs → shifted_box.dart
-
-- Change: `RenderOpacity` and `RenderAnimatedOpacity` have no `alwaysIncludeSemantics`, and `RenderDecoratedBox` gives its painter no `onChanged`.
-  Reason: platform — accessibility is deferred, and a `BoxPainter` callback cannot reach `App` yet.
-  Affect: a decoration that loads an image does not repaint when the image arrives.
 
 - Change: `CustomClipper<T>` is a trait held as an `Rc`: `reclip()` is a method the implementor answers, `should_reclip` receives the old clipper as `&dyn CustomClipper<T>`, and two clippers compare by `Rc::ptr_eq`.
   Reason: language — a Rust trait has no fields, no constructor, no `runtimeType` and no identity equality on a boxed value.
@@ -146,11 +142,23 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 - Change: `RenderParagraph` takes an optional `FontCollection` handle, falling back to `PaintingBinding`'s app-wide one, and has no selection registrar or `selectionColor`.
   Reason: platform — the font collection is explicit (painting's `binding.rs`), and selection waits on `selection.dart`.
-  Affect: a hit test reaches the inline children but no span, so a `RichText` span recognizer never fires, and text in it cannot be selected.
+  Affect: text in a `RichText` cannot be selected.
 
 - Change: `TextOverflow::Fade` clips like `Clip`.
   Reason: platform — the fade is a gradient shader, and gradients are deferred.
   Affect: overflowing text is cut, not faded.
+
+## table.rs → table.dart
+
+- Change: `RenderTable`'s column width setters skip the relayout only when given the same `Rc` (`TableColumnWidthRef`, compared with `Rc::ptr_eq`), and Dart's `const FlexColumnWidth()` default is one shared value, `FlexColumnWidth::default_width`.
+  Reason: language — Dart compares column widths by identity and makes each `const` one object, and Rust has no such constants.
+  Affect: a column width built afresh on each rebuild lays the table out again each time, as a non-`const` one does in Dart; keeping the same `Rc` avoids it.
+
+## table_border.rs → table_border.dart
+
+- Change: `TableBorder::lerp` returns `a` when the two borders are equal, where Dart returns it when they are the same object.
+  Reason: language — a `Copy` value has no identity.
+  Affect: lerping two equal borders keeps their `border_radius`, which Dart's lerp drops for two distinct equal borders.
 
 ## editable.rs → editable.dart
 
@@ -229,7 +237,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `TextureLayer`, `PlatformViewLayer`, `PerformanceOverlayLayer`, `ClipRSuperellipseLayer`, `ColorFilterLayer`, `ImageFilterLayer`, `ShaderMaskLayer`, `OffsetLayer.toImage` / `toImageSync`, `PaintingContext.pushColorFilter`. Trigger: a texture or platform view, a superellipse clip, a colour/image/shader filter widget, `RepaintBoundary.toImage`.
 - `PaintingContext.addCompositionCallback`. Trigger: a caller that needs composition callbacks on the painting context (layers already have them).
 - Debug paint overlays on boxes, slivers and the viewport, and the overflow indicators of `RenderFlex` and `RenderConstraintsTransformBox` (an overflowing box clips but paints no striped hint); with them, `paintsChild` as a virtual. Trigger: inspector.
-- Semantics on `PipelineOwner`, `RenderObject`, `RenderCustomPaint`, the ignore- and absorb-pointer boxes, `RenderOffstage`, the viewport and the slivers. Trigger: a11y; do not stub.
+- Semantics on `PipelineOwner`, `RenderObject`, `RenderCustomPaint`, the ignore- and absorb-pointer boxes, `RenderOffstage`, the opacity boxes' `alwaysIncludeSemantics`, `RenderTable`, the viewport and the slivers. Trigger: a11y; do not stub.
 - The semantics half of `PipelineManifold`; the frame-request half is ported, and `RendererBinding::init_render_view` stays for render-tree-only hosts and must never be called in an app that runs `run_app`. Trigger: semantics.
 - The layout-contract asserts: `_DebugSize` and `debugAssertDoesMeetConstraints` on box, sliver and the fixed-extent adaptor; `SliverGeometry::debug_assert_is_valid` is ported and the viewport calls it. Trigger: the first layout bug one of them would have caught.
 - `layout` and `constraints` as override points; `markNeedsLayout` is one on the box protocol only. Trigger: OverlayPortal, `RenderView`. Ask before adding.
@@ -237,6 +245,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `RenderParagraph.applyPaintTransform`. Trigger: a caller that needs the paragraph's paint transform.
 - `RenderEditable` inline children, the custom-paint child boxes and the internal tap / long-press recognizers. Trigger: `WidgetSpan`; a field that does not set `ignorePointer`.
 - `SliverConstraints.debugAssertIsValid` extra numeric checks. Trigger: a caller that relies on those messages.
-- Baseline alignment on the multi-child boxes and `RenderIgnoreBaseline`; meanwhile a `CrossAxisAlignment::Baseline` row top-aligns its children. Trigger: the first baseline-aligned `Row`.
+- `RenderIgnoreBaseline`, which reports no baseline for a child that has one, so that a baseline-aligned row puts that child at the top. Trigger: a child a baseline-aligned `Row` should not align by its baseline.
 - `RenderBoxBase` sits in `proxy_box.rs` beside its callers instead of next to `RenderBox`. Trigger: the next edit of `box.rs`.
 - `RenderTransform.filterQuality` and Dart's `ImageFilterLayer` path. Trigger: the first `Transform(filterQuality:)`, with `PaintingContext.pushColorFilter`.
