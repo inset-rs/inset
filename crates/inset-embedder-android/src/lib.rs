@@ -21,6 +21,8 @@ pub use pointer::{buttons_of, device_id, kind_of_tool, scroll_delta};
 #[cfg(target_os = "android")]
 mod activity;
 #[cfg(target_os = "android")]
+mod answer;
+#[cfg(target_os = "android")]
 mod chrome;
 #[cfg(target_os = "android")]
 mod clipboard;
@@ -39,7 +41,11 @@ mod images;
 #[cfg(target_os = "android")]
 mod input;
 #[cfg(target_os = "android")]
+mod intents;
+#[cfg(target_os = "android")]
 mod log;
+#[cfg(target_os = "android")]
+mod notifications;
 #[cfg(target_os = "android")]
 mod open_requests;
 #[cfg(target_os = "android")]

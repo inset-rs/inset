@@ -1,11 +1,14 @@
 //! Android: the `.apk` Gradle would produce, assembled from a cargo library.
 //!
-//! No Gradle project and no Java of the app's own. The Java is Inset's two classes (under
+//! No Gradle project and no Java of the app's own. The Java is Inset's three classes (under
 //! `android/rs/inset/` in this crate). The activity, `rs.inset.InsetActivity`, is the platform's
 //! `NativeActivity`, which loads the app's shared library and calls its `android_main`, with the
-//! results of the activities the app starts and the intents that reach it while it runs handed on
-//! to its native code, as the document pickers and being opened need. The file provider,
-//! `rs.inset.InsetFileProvider`, shares a file of the app's with the app that opens it. So the
+//! results of the activities the app starts, the intents that reach it while it runs and the
+//! answers to the permissions it asks for handed on to its native code, as the document pickers,
+//! being opened and notifications need. The file provider, `rs.inset.InsetFileProvider`, shares a
+//! file of the app's with the app that opens it. The notification receiver,
+//! `rs.inset.InsetNotificationReceiver`, builds and shows the app's notifications, and shows one
+//! when its alarm goes off, whether or not the app runs. So the
 //! package is that library, the classes compiled to `classes.dex`, a manifest, and icons, put
 //! together with the SDK's own tools: `javac` and `d8` compile the classes, `aapt2` links the
 //! manifest and resources, `zipalign` aligns, `apksigner` signs with the debug key, and `adb`
@@ -41,8 +44,16 @@ const DEFAULT_TARGET_SDK: u32 = 34;
 const INSET_ACTIVITY: &str = "rs.inset.InsetActivity";
 /// Inset's file provider, which shares a file of the app's with the app that opens it.
 const INSET_FILE_PROVIDER: &str = "rs.inset.InsetFileProvider";
+/// Inset's notification receiver, which builds the app's notifications and hears their alarms.
+const INSET_NOTIFICATION_RECEIVER: &str = "rs.inset.InsetNotificationReceiver";
+/// What the app may do for its notifications: post them, which Android 13 asks the user for, and
+/// show one at its exact time, which Android 14 leaves to the user to grant in the app's settings.
+const PERMISSIONS: [&str; 2] = [
+    "android.permission.POST_NOTIFICATIONS",
+    "android.permission.SCHEDULE_EXACT_ALARM",
+];
 /// The Java classes every app's package compiles, by their paths under the sources' root.
-const JAVA_SOURCES: [(&str, &str); 2] = [
+const JAVA_SOURCES: [(&str, &str); 3] = [
     (
         "rs/inset/InsetActivity.java",
         include_str!("../android/rs/inset/InsetActivity.java"),
@@ -50,6 +61,10 @@ const JAVA_SOURCES: [(&str, &str); 2] = [
     (
         "rs/inset/InsetFileProvider.java",
         include_str!("../android/rs/inset/InsetFileProvider.java"),
+    ),
+    (
+        "rs/inset/InsetNotificationReceiver.java",
+        include_str!("../android/rs/inset/InsetNotificationReceiver.java"),
     ),
 ];
 /// The schemes of the links whose viewers the app may ask about (`<queries>`): from Android 11 the
@@ -477,8 +492,9 @@ struct Manifest<'a> {
 /// app's state, through a rotation or a switch to dark mode, which winit reports as a
 /// resize; `adjustResize` has the system fit the window to the keyboard, which is how
 /// the host learns of it. Inset's file provider is declared at `<package>.inset.files`, not
-/// exported, granting each URI it shares; `<queries>` names viewing the links of
-/// [`QUERIED_SCHEMES`].
+/// exported, granting each URI it shares; its notification receiver, not exported, hears only the
+/// app's own alarms; `<queries>` names viewing the links of [`QUERIED_SCHEMES`]; the app asks for
+/// [`PERMISSIONS`].
 fn manifest(manifest: &Manifest) -> String {
     let icon = if manifest.has_icon {
         r#" android:icon="@mipmap/ic_launcher""#
@@ -497,7 +513,7 @@ fn manifest(manifest: &Manifest) -> String {
     android:versionCode="{version_code}"
     android:versionName="{version_name}">
   <uses-sdk android:minSdkVersion="{min_sdk}" android:targetSdkVersion="{target_sdk}" />
-  <application
+{permissions}  <application
       android:label="{label}"{icon}{debuggable}
       android:appCategory="{category}"
       android:hasCode="true"
@@ -520,6 +536,7 @@ fn manifest(manifest: &Manifest) -> String {
         android:authorities="{package}.inset.files"
         android:exported="false"
         android:grantUriPermissions="true" />
+    <receiver android:name="{receiver}" android:exported="false" />
     <meta-data android:name="{queried_schemes_key}" android:value="{queried_schemes}" />
   </application>
   <queries>
@@ -537,10 +554,20 @@ fn manifest(manifest: &Manifest) -> String {
         activity = INSET_ACTIVITY,
         library = manifest.library,
         provider = INSET_FILE_PROVIDER,
+        receiver = INSET_NOTIFICATION_RECEIVER,
+        permissions = uses_permissions(),
         queried_schemes_key = QUERIED_SCHEMES_KEY,
         queried_schemes = QUERIED_SCHEMES.join(","),
         queries = queried_intents(),
     )
+}
+
+/// One `<uses-permission>` for each of [`PERMISSIONS`].
+fn uses_permissions() -> String {
+    PERMISSIONS
+        .iter()
+        .map(|permission| format!("  <uses-permission android:name=\"{permission}\" />\n"))
+        .collect()
 }
 
 /// One `<intent>` for viewing a link of each of [`QUERIED_SCHEMES`].
@@ -652,9 +679,7 @@ fn compile_classes(sdk: &Sdk, java: &Java, stage: &Path, min_sdk: u32) -> Result
             .args(&source_paths),
         "javac",
     )?;
-    let class_files = JAVA_SOURCES
-        .iter()
-        .map(|(path, _)| classes.join(path).with_extension("class"));
+    let class_files = class_files(&classes.join("rs/inset"))?;
     let dex = stage.join("dex");
     fs::create_dir_all(&dex)?;
     tools::run(
@@ -671,6 +696,21 @@ fn compile_classes(sdk: &Sdk, java: &Java, stage: &Path, min_sdk: u32) -> Result
         "d8",
     )?;
     Ok(dex.join("classes.dex"))
+}
+
+/// The classes `javac` wrote into `dir`, a nested class's file beside its outer class's.
+fn class_files(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "class")
+        {
+            files.push(path);
+        }
+    }
+    Ok(files)
 }
 
 /// Adds `file` to the package as `entry`, stored rather than deflated: the system loads a
@@ -1021,6 +1061,35 @@ mod tests {
         assert!(manifest.contains(
             r#"<meta-data android:name="rs.inset.queried_schemes" android:value="http,https,mailto" />"#
         ));
+    }
+
+    #[test]
+    fn manifest_declares_the_notification_receiver_and_its_permissions() {
+        let manifest = manifest(&Manifest {
+            package: "com.example.my_app",
+            label: "My App",
+            library: "my_app",
+            version_code: 100,
+            version_name: "0.1.0",
+            min_sdk: 26,
+            target_sdk: 34,
+            debuggable: false,
+            has_icon: false,
+            category: "productivity",
+        });
+        assert!(manifest.contains(
+            r#"<receiver android:name="rs.inset.InsetNotificationReceiver" android:exported="false" />"#
+        ));
+        assert!(manifest.contains(
+            r#"<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />"#
+        ));
+        assert!(manifest.contains(
+            r#"<uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />"#
+        ));
+        assert!(
+            manifest.find("<uses-permission") < manifest.find("<application"),
+            "permissions belong to the manifest, before the application"
+        );
     }
 
     #[test]

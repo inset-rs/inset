@@ -61,11 +61,29 @@ Host implementation. Flutter analogue: the engine's Android embedder under
   Reason: platform — from Android 11 an app sees only the apps its `<queries>` names.
   Affect: an app built by inset-cli is answered for `http`, `https` and `mailto`.
 
-## open_requests.rs → the Android embedder's `FlutterActivity` intent handling
+## intents.rs / open_requests.rs → the Android embedder's `FlutterActivity` intent handling
 
 - Change: the intent the activity started with and each one `onNewIntent` brings, which `InsetActivity` hands on, reach the client as `open_requested` when they are `ACTION_VIEW`: a `content://` document opened as a picked one is, to write where the intent grants writing, a `file://` URI as a path, and any other URI as a link; Flutter's activity hands them to its route and its plugins.
   Reason: platform — `NativeActivity` keeps `onNewIntent` to itself, and a document has no path.
   Affect: an app opened with a document reads it as it reads a pick; under the bare `NativeActivity` only the intent it started with comes.
+
+## notifications/ → `flutter_local_notifications`' Android implementation
+
+- Change: a notification is built by Inset's notification receiver, `rs.inset.InsetNotificationReceiver`, from a `Bundle` the host fills, and shown with `NotificationManager.notify` under its string id as the tag, so posting the id again replaces it, on one of two channels the receiver makes, "Notifications" and "Silent notifications", both `IMPORTANCE_HIGH` and the silent one without sound or vibration; `flutter_local_notifications` takes an int id and the channel the app describes.
+  Reason: platform — a notification for later is built when its alarm goes off, in a process where the app's native code may not run, so the one builder is Java's, which inset-cli compiles and declares, not exported; Android 8 sets sound by channel, and `setSilent` came only with Android 12.
+  Affect: a notification pops up, as the other systems' do, with the app's launcher icon as its small icon and the image as its large icon, fitted to the system's size; the user sees the two channels in the app's settings and may change either.
+
+- Change: a tap on a notification, on one of its buttons, or a reply typed into its `RemoteInput` field starts `InsetActivity` with an intent of the receiver's own action, which the host reads at launch and from `onNewIntent` (`intents.rs`) and hands on as `notification_activated`; a button or a reply also takes the notification away.
+  Reason: platform — `NativeActivity` keeps `onNewIntent` to itself, Android before 15 shows a reply as sending until its notification changes, and from Android 12 a receiver a tap reaches may not start the activity.
+  Affect: the app hears a tap whether it was running or started by it, and every action, a reply included, brings it to the front; from Android 15 a replied notification stays, showing the reply, until the user dismisses it, as the system holds it past the host's cancel.
+
+- Change: the permission is Android 13's `POST_NOTIFICATIONS`, which inset-cli declares, asked for with `requestPermissions` and answered through `InsetActivity.onRequestPermissionsResult`, with `shouldShowRequestPermissionRationale` telling a refusal the user may still be asked about; before Android 13, or for a package that targets an earlier release, it is `areNotificationsEnabled` alone, with no question.
+  Reason: platform — Android tells no app a permission never asked from one refused for good.
+  Affect: `state` answers `NotAsked` for a permission refused for good, and asking then answers `Denied` at once, without a question.
+
+- Change: a schedule is an `AlarmManager` alarm whose intent carries the notification to the receiver, exact (`setExactAndAllowWhileIdle`) where the app may set exact alarms, and inexact (`setAndAllowWhileIdle`) where not; inset-cli declares `SCHEDULE_EXACT_ALARM`.
+  Reason: platform — from Android 14 an app sets exact alarms only once the user grants it in the app's settings, and the system forgets alarms when the device restarts.
+  Affect: a scheduled notification shows whether or not the app runs, late by as much as the system defers it where exact alarms are not granted, and not at all after a restart.
 
 ## display.rs / host.rs
 
