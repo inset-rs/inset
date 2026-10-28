@@ -8,8 +8,9 @@ use std::sync::{Arc, Mutex};
 use inset_embedder::{
     AppExit, AppLifecycleState, Brightness, Clipboard, Dispatcher, DockMenu, FileDialogs,
     FontSource, Haptics, Image, ImageCodecFuture, ImageDecodeError, Instant, MenuBar, MouseCursor,
-    Opener, Platform, PopupMenus, RequestId, Restoration, SystemChrome, SystemContextMenu,
-    TargetPlatform, TextServices, TrayIcons, View, ViewError, ViewId, ViewRef, ViewRequest,
+    Notifications, Opener, Platform, PopupMenus, RequestId, Restoration, SystemChrome,
+    SystemContextMenu, TargetPlatform, TextServices, TrayIcons, View, ViewError, ViewId, ViewRef,
+    ViewRequest,
 };
 
 use inset_embedder::valo;
@@ -49,6 +50,7 @@ pub struct TestPlatform {
     tray_icons: Option<Rc<dyn TrayIcons>>,
     file_dialogs: Option<Rc<dyn FileDialogs>>,
     opener: Option<Rc<dyn Opener>>,
+    notifications: Option<Rc<dyn Notifications>>,
     dock_menu: Option<Rc<dyn DockMenu>>,
     text_services: Option<Rc<dyn TextServices>>,
     mouse_cursor: Option<Rc<dyn MouseCursor>>,
@@ -82,6 +84,7 @@ impl TestPlatform {
             tray_icons: None,
             file_dialogs: None,
             opener: None,
+            notifications: None,
             dock_menu: None,
             text_services: None,
             mouse_cursor: None,
@@ -229,6 +232,11 @@ impl TestPlatform {
 
     pub fn with_opener(mut self, opener: Rc<dyn Opener>) -> TestPlatform {
         self.opener = Some(opener);
+        self
+    }
+
+    pub fn with_notifications(mut self, notifications: Rc<dyn Notifications>) -> TestPlatform {
+        self.notifications = Some(notifications);
         self
     }
 
@@ -412,6 +420,10 @@ impl Platform for TestPlatform {
 
     fn opener(&self) -> Option<&dyn Opener> {
         self.opener.as_deref()
+    }
+
+    fn notifications(&self) -> Option<&dyn Notifications> {
+        self.notifications.as_deref()
     }
 
     fn dock_menu(&self) -> Option<&dyn DockMenu> {

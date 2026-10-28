@@ -22,6 +22,7 @@ mod key;
 mod locale;
 mod menus;
 mod mouse_cursor;
+mod notifications;
 mod opener;
 mod painting;
 mod paragraph;
@@ -70,6 +71,11 @@ pub use menus::{
     TrayIcons,
 };
 pub use mouse_cursor::SystemMouseCursorKind;
+pub use notifications::{
+    Notification, NotificationAction, NotificationActivation, NotificationError,
+    NotificationPermission, NotificationReplies, NotificationScheduling, Notifications,
+    PermissionFuture, PermissionState, PostFuture,
+};
 pub use opener::{OpenError, OpenFuture, OpenRequest, Opener, file_uri_path};
 pub use painting::*;
 pub use paragraph::*;

@@ -9,8 +9,8 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use inset_embedder::{
-    ClipboardEvent, DropData, EditCommand, MenuId, OpenRequest, PlatformRef, RequestId,
-    TrayIconEvent, TrayIconId, ViewError, ViewFocusEvent, ViewId,
+    ClipboardEvent, DropData, EditCommand, MenuId, NotificationActivation, OpenRequest,
+    PlatformRef, RequestId, TrayIconEvent, TrayIconId, ViewError, ViewFocusEvent, ViewId,
 };
 use slotmap::new_key_type;
 
@@ -139,19 +139,34 @@ pub struct App {
     /// The host's threads, told when to wake this application for its next timer.
     dispatcher: std::sync::Arc<dyn inset_embedder::Dispatcher>,
     platform_callbacks: PlatformCallbacks,
-    open_requests: OpenRequests,
+    open_requests: UntilHandled<OpenRequest>,
+    notification_activations: UntilHandled<NotificationActivation>,
 }
 
-/// What hears the system's requests to open files and links, and the requests that came before
-/// there was a handler.
-#[derive(Default)]
-struct OpenRequests {
-    handler: Option<OpenRequestedCallback>,
-    waiting: Vec<OpenRequest>,
+/// What hears one kind of what the system asks of the app, and what it asked before there was a
+/// handler, which waits for one, as a launch's requests do.
+struct UntilHandled<T> {
+    handler: Option<Handler<T>>,
+    waiting: Vec<T>,
 }
+
+impl<T> Default for UntilHandled<T> {
+    fn default() -> UntilHandled<T> {
+        UntilHandled {
+            handler: None,
+            waiting: Vec::new(),
+        }
+    }
+}
+
+/// The app's handler for one kind of what the system asks of it.
+type Handler<T> = Rc<dyn Fn(&mut App, T)>;
 
 /// The app's handler for the system's requests to open files and links.
 pub type OpenRequestedCallback = Rc<dyn Fn(&mut App, OpenRequest)>;
+
+/// The app's handler for the clicks on its notifications.
+pub type NotificationActivatedCallback = Rc<dyn Fn(&mut App, NotificationActivation)>;
 
 /// The callbacks the framework assigns onto dart:ui's `PlatformDispatcher`
 /// (`onPlatformBrightnessChanged`, `onLocaleChanged`). The host's half of the dispatcher
@@ -247,7 +262,8 @@ impl App {
             dispatcher: platform.dispatcher(),
             platform,
             platform_callbacks: PlatformCallbacks::default(),
-            open_requests: OpenRequests::default(),
+            open_requests: UntilHandled::default(),
+            notification_activations: UntilHandled::default(),
         }
     }
 
@@ -304,20 +320,48 @@ impl App {
     /// was set, as a launch's do; with `None`, later requests wait for the next handler. No
     /// Flutter counterpart: Flutter's embedders hand these to their plugins.
     pub fn set_open_requested_handler(&mut self, handler: Option<OpenRequestedCallback>) {
-        self.open_requests.handler = handler.clone();
-        let Some(handler) = handler else {
-            return;
-        };
-        for request in std::mem::take(&mut self.open_requests.waiting) {
-            handler(self, request);
-        }
+        self.set_handler(|app| &mut app.open_requests, handler);
     }
 
     /// The system asks the app to open `request`: the handler hears it, or it waits for one.
     pub fn open_requested(&mut self, request: OpenRequest) {
-        match self.open_requests.handler.clone() {
-            Some(handler) => handler(self, request),
-            None => self.open_requests.waiting.push(request),
+        self.hand_to_handler(|app| &mut app.open_requests, request);
+    }
+
+    /// Sets what hears the clicks on the app's notifications
+    /// (`EmbedderClient::notification_activated`), and hands it at once the clicks that came
+    /// before it was set, as the one that started the app does; with `None`, later clicks wait for
+    /// the next handler. No Flutter counterpart: Flutter's apps hear them through plugins.
+    pub fn set_notification_activated_handler(
+        &mut self,
+        handler: Option<NotificationActivatedCallback>,
+    ) {
+        self.set_handler(|app| &mut app.notification_activations, handler);
+    }
+
+    /// The user clicked a notification: the handler hears it, or it waits for one.
+    pub fn notification_activated(&mut self, activation: NotificationActivation) {
+        self.hand_to_handler(|app| &mut app.notification_activations, activation);
+    }
+
+    fn set_handler<T>(
+        &mut self,
+        queue: fn(&mut App) -> &mut UntilHandled<T>,
+        handler: Option<Handler<T>>,
+    ) {
+        queue(self).handler = handler.clone();
+        let Some(handler) = handler else {
+            return;
+        };
+        for waiting in std::mem::take(&mut queue(self).waiting) {
+            handler(self, waiting);
+        }
+    }
+
+    fn hand_to_handler<T>(&mut self, queue: fn(&mut App) -> &mut UntilHandled<T>, asked: T) {
+        match queue(self).handler.clone() {
+            Some(handler) => handler(self, asked),
+            None => queue(self).waiting.push(asked),
         }
     }
 

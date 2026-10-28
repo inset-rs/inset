@@ -17,6 +17,7 @@ use crate::fonts::FontSource;
 use crate::geometry::{Color, Offset, Rect};
 use crate::menus::{DockMenu, MenuBar, PopupMenus, TrayIcons};
 use crate::mouse_cursor::SystemMouseCursorKind;
+use crate::notifications::Notifications;
 use crate::opener::Opener;
 use crate::restoration::{RestorationMap, RestorationUpdate};
 use crate::system_context_menu::SystemContextMenuItem;
@@ -733,6 +734,11 @@ pub trait Platform: Any {
 
     /// The system's way to open links and files in other apps, or `None` where it has none.
     fn opener(&self) -> Option<&dyn Opener> {
+        None
+    }
+
+    /// The system's notifications, or `None` where it has none for the app.
+    fn notifications(&self) -> Option<&dyn Notifications> {
         None
     }
 }

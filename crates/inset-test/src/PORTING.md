@@ -19,6 +19,12 @@ No Flutter crate in this shape. Closest analogue: `flutter_test`'s `TestPlatform
   Reason: platform — they stand in for the host's menus, which Flutter's tests reach only as `flutter/menu` channel calls.
   Affect: a test checks the menus an app sets and drives its choices without a host.
 
+## notifications.rs → no Flutter counterpart
+
+- Change: `MockNotifications` shows nothing: it keeps the notifications posted and scheduled by id, a later one replacing the one under its id and `remove` taking either away, and answers as a system with no question unless the test gave it one (`asking`), whose first post asks and whose user answers as the test set; replies and scheduling are there unless the test leaves them out.
+  Reason: platform — it stands in for the host's notifications, which Flutter's tests reach only as `flutter_local_notifications` channel calls.
+  Affect: a test checks what an app posted and scheduled, and how it meets a refusal, without a host; a click is driven through the shell's `notification_activated`.
+
 ## opener.rs → no Flutter counterpart
 
 - Change: `MockOpener` opens nothing: it keeps each link and file opened and revealed as an `Opened`, answers them with the failure the test gave, or success, and answers `can_open_link` as the test set.
