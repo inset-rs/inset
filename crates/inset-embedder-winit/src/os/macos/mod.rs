@@ -42,7 +42,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::process;
 use std::rc::Rc;
 
-use inset_embedder::{Notifications, TargetPlatform};
+use inset_embedder::{Cameras, Notifications, Players, TargetPlatform};
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2_app_kit::{NSView, NSWindow};
@@ -51,7 +51,7 @@ use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
 use super::apple::{image_io_decoders, notifications};
-use super::{ImageDecoding, OperatingSystem, SystemNotifications, WindowGeometry};
+use super::{ImageDecoding, OperatingSystem, SystemMedia, SystemNotifications, WindowGeometry};
 use crate::notifications::NotificationActivations;
 
 /// macOS, as AppKit answers. A type only: never made, its answers are associated functions.
@@ -63,6 +63,17 @@ impl OperatingSystem for AppKit {
 
 /// winit's sizes are AppKit's, and a desktop window has no safe area.
 impl WindowGeometry for AppKit {}
+
+/// AVFoundation's players and cameras, which iOS shares.
+impl SystemMedia for AppKit {
+    fn players() -> Option<Rc<dyn Players>> {
+        super::apple::media::players()
+    }
+
+    fn cameras() -> Option<Rc<dyn Cameras>> {
+        super::apple::media::cameras()
+    }
+}
 
 impl ImageDecoding for AppKit {
     fn system_decoders() -> Vec<Box<dyn Decoder>> {

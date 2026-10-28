@@ -2,7 +2,8 @@
 //! screen, and winit's size for it is the safe area rather than the whole layer; and what it adds,
 //! its pasteboard (`pasteboard`), its document pickers (`file_dialogs`), opening (`opener`), what
 //! it asks the app to open (`open_requests`) and native surfaces (`composition`). Notifications are
-//! the center macOS shares (`apple/notifications`).
+//! the center macOS shares (`apple/notifications`), and players and cameras its AVFoundation
+//! (`apple/media`).
 
 mod composition;
 mod file_dialogs;
@@ -12,7 +13,7 @@ mod pasteboard;
 
 use std::rc::Rc;
 
-use inset_embedder::{Notifications, TargetPlatform, ViewPadding};
+use inset_embedder::{Cameras, Notifications, Players, TargetPlatform, ViewPadding};
 use valo_codec::Decoder;
 use winit::window::Window;
 
@@ -22,8 +23,8 @@ use super::absent::{NoDisplayLink, NoVisibilityNotices};
 use super::apple::{image_io_decoders, notifications};
 use super::{
     ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeMenus,
-    OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard, SystemNotifications,
-    WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
+    OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard, SystemMedia,
+    SystemNotifications, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
 };
 use crate::notifications::NotificationActivations;
 
@@ -82,6 +83,17 @@ impl FramePresentation for Ios {
 
 impl WindowVisibility for Ios {
     type Notices = NoVisibilityNotices;
+}
+
+/// AVFoundation's players and cameras, which macOS shares.
+impl SystemMedia for Ios {
+    fn players() -> Option<Rc<dyn Players>> {
+        super::apple::media::players()
+    }
+
+    fn cameras() -> Option<Rc<dyn Cameras>> {
+        super::apple::media::cameras()
+    }
 }
 
 impl ImageDecoding for Ios {

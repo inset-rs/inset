@@ -46,9 +46,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    Clipboard, Compositor, DockMenu, FileDialogs, KeyData, MenuBar, MenuEntry, MenuId,
-    Notifications, Offset, Opener, Rect, Screen, ScreenId, SurfacePlacement, TargetPlatform,
-    TrayIcons, ViewId, ViewPadding, VsyncWaiter, WindowConfig,
+    Cameras, Clipboard, Compositor, DockMenu, FileDialogs, KeyData, MenuBar, MenuEntry, MenuId,
+    Notifications, Offset, Opener, Players, Rect, Screen, ScreenId, SurfacePlacement,
+    TargetPlatform, TrayIcons, ViewId, ViewPadding, VsyncWaiter, WindowConfig,
 };
 use valo_codec::Decoder;
 use winit::event_loop::{ActiveEventLoop, EventLoopBuilder, EventLoopProxy};
@@ -110,6 +110,7 @@ pub(crate) trait OperatingSystem:
     + SystemFileDialogs
     + SystemOpener
     + SystemNotifications
+    + SystemMedia
     + SystemClipboard
     + ImageDecoding
     + WorkQueue
@@ -397,6 +398,19 @@ pub(crate) trait SystemFileDialogs {
     /// The system's file dialogs, each shown on its parent view's window, or `None` where the
     /// system has none.
     fn file_dialogs(_windows: ParentWindows) -> Option<Rc<dyn FileDialogs>> {
+        None
+    }
+}
+
+/// The system's media stack: its players and its cameras (`apple/media` on macOS and iOS).
+pub(crate) trait SystemMedia {
+    /// The system's players, or `None` where the embedder has none.
+    fn players() -> Option<Rc<dyn Players>> {
+        None
+    }
+
+    /// The system's cameras, or `None` where the embedder has none.
+    fn cameras() -> Option<Rc<dyn Cameras>> {
         None
     }
 }

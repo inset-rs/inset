@@ -14,10 +14,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use inset_embedder::{
-    AppExit, Brightness, Clipboard, Compositor, Dispatcher, DockMenu, FileDialogs, FontSource,
-    ImageCodecFuture, Locale, MenuBar, MouseCursor, Notifications, Opener, Platform, PopupMenus,
-    RequestId, Screens, SystemFontSource, TargetPlatform, TrayIcons, ViewError, ViewFocusDirection,
-    ViewFocusEvent, ViewFocusState, ViewId, ViewRef, ViewRequest, VsyncWaiter,
+    AppExit, Brightness, Cameras, Clipboard, Compositor, Dispatcher, DockMenu, FileDialogs,
+    FontSource, ImageCodecFuture, Locale, MenuBar, MouseCursor, Notifications, Opener, Platform,
+    Players, PopupMenus, RequestId, Screens, SystemFontSource, TargetPlatform, TrayIcons,
+    ViewError, ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId, ViewRef, ViewRequest,
+    VsyncWaiter,
 };
 use winit::event_loop::EventLoopProxy;
 
@@ -31,7 +32,7 @@ use crate::menus::MenuEvents;
 use crate::notifications::NotificationActivations;
 use crate::os::{
     FramePresentation, NativeComposition, NativeMenus, OperatingSystem, SystemClipboard,
-    SystemFileDialogs, SystemNotifications, SystemOpener, ThisOs, ThisOsClipboard,
+    SystemFileDialogs, SystemMedia, SystemNotifications, SystemOpener, ThisOs, ThisOsClipboard,
 };
 use crate::popup_menus::NativePopupMenus;
 use crate::state::EmbedderState;
@@ -74,6 +75,9 @@ pub struct WinitPlatform {
     opener: Option<Rc<dyn Opener>>,
     /// The system's notifications, where the app has them (`os/*/notifications`).
     notifications: Option<Rc<dyn Notifications>>,
+    /// The system's players and cameras, where it has them (`media.rs`).
+    players: Option<Rc<dyn Players>>,
+    cameras: Option<Rc<dyn Cameras>>,
     /// What only macOS offers; `None` elsewhere.
     macos: Option<MacOs>,
 }
@@ -95,6 +99,8 @@ impl WinitPlatform {
             file_dialogs: ThisOs::file_dialogs(ParentWindows::new(Rc::clone(&state))),
             opener: ThisOs::opener(ParentWindows::new(Rc::clone(&state))),
             notifications: ThisOs::notifications(NotificationActivations::new(proxy.clone())),
+            players: ThisOs::players(),
+            cameras: ThisOs::cameras(),
             state,
             compositor: ThisOs::compositor(),
             vsync_waiter: ThisOs::vsync_waiter(&proxy),
@@ -282,6 +288,14 @@ impl Platform for WinitPlatform {
 
     fn file_dialogs(&self) -> Option<&dyn FileDialogs> {
         self.file_dialogs.as_deref()
+    }
+
+    fn players(&self) -> Option<&dyn Players> {
+        self.players.as_deref()
+    }
+
+    fn cameras(&self) -> Option<&dyn Cameras> {
+        self.cameras.as_deref()
     }
 
     fn mouse_cursor(&self) -> Option<&dyn MouseCursor> {

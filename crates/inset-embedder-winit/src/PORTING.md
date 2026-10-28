@@ -139,6 +139,20 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Core Animation gives no signal when it lets go of a buffer.
   Affect: a producer never waits for a buffer to come back, but draws into another when none is known free, as Flutter's `FlutterSurfaceManager` does.
 
+## media.rs, os/apple/media/ → `video_player_avfoundation` and `camera_avfoundation`
+
+- Change: a player is an `AVPlayer` whose state is read from it on the main thread when the app hears it changed, its changes told by key-value observing, a periodic time observer every half second and its end-of-item notification, where Flutter's plugin copies events over an event channel.
+  Reason: platform — AVFoundation changes a player's state on the main queue, where the app reads it.
+  Affect: the app's player hears its state change at once on load, play, pause, seek and end, and its position every half second while it plays.
+
+- Change: a player shown on a surface hangs an `AVPlayerLayer` in the surface's own layers, and one read as frames adds an `AVPlayerItemVideoOutput` of BGRA `IOSurface`-backed pixel buffers, where Flutter's plugin copies every frame into a texture.
+  Reason: platform — Core Animation clips and scales a layer with the surface it hangs in, and a pixel buffer backed by an `IOSurface` reaches the GPU with no copy.
+  Affect: a video moves, clips and shrinks with the framework's frame, and a frame reader hands out the newest picture only.
+
+- Change: a camera session is an `AVCaptureSession` configured and run on a queue of its own, asking for the camera, and for the microphone where a recording wants sound, at its start, with its preview a layer hung in a surface and its frames, photos and recordings the system's video data, photo and movie file outputs.
+  Reason: platform — starting a session blocks, and each output is AVFoundation's own.
+  Affect: a session reports starting, running, denied or failed, photos arrive as JPEG and recordings as QuickTime movies.
+
 ## host_window.rs / main_loop/windows.rs / os/macos/visibility.rs → Flutter's desktop window controllers (`_window_macos.dart`, `_window_win32.dart`, `_window_linux.dart`)
 
 - Change: a window answers whether it is minimized and whether it is occluded, and the app hears each time either changes or the window moves, read on macOS from the window and its notices and elsewhere from winit's events, where Flutter's desktop embedders notify a window's controller at every resize and activation on Windows and at every configure and state change on Linux.
