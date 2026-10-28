@@ -2673,6 +2673,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
 
 [[package]]
+name = "media"
+version = "0.15.0"
+dependencies = [
+ "inset-embedder",
+ "inset-embedder-winit",
+ "inset-foundation",
+ "inset-painting",
+ "inset-shell",
+ "inset-widgets",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
