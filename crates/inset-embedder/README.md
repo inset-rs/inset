@@ -95,8 +95,8 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - Draw the new size's frame inside the system's resize callback, so the size and the picture reach the screen in one transaction.
 
 **Native surfaces**
-- `Platform::compositor`, `Compositor::open_surface`, `Surface::present`, `Scene::surfaces`
-- Place a scene's surfaces beneath its picture in the same native transaction, and run each buffer's `released` once the compositor is done with it: where the system only answers whether it still is, as macOS does, ask at the surface's next present and when it goes.
+- `Platform::compositor`, `Compositor::open_surface`, `Surface::present`, `Surface::open_child`, `Scene::surfaces`
+- Place a scene's surfaces beneath its picture in the same native transaction, and a present's children beneath its buffer in the same one as the buffer, moved, clipped and scaled with their parent; and run each buffer's `released` once the compositor is done with it: where the system only answers whether it still is, as Core Animation does, ask at the surface's next present and when it goes.
 
 ## Input
 

@@ -3,7 +3,7 @@
 //! decoder or a program in a launcher would. It starts with three buffers and never waits for one
 //! to come back: the host learns that the compositor has let go of a buffer only at the surface's
 //! next present, so when none is free the producer makes another, as Flutter's surface manager
-//! does (the macOS host's `os/macos/composition` says why). It counts what happened so a run can
+//! does (the Apple host's `os/apple/composition` says why). It counts what happened so a run can
 //! be judged from its output: among it, how often the buffer on screen was in use by the system's
 //! compositor at a refresh, which it is only while the compositor really shows the surface's
 //! layer.
@@ -170,6 +170,7 @@ impl Producer {
         let hand_back = self.hand_back.clone();
         self.pacing.surface.present(
             self.buffers[index].clone(),
+            &[],
             Box::new(move || {
                 let _ = hand_back.send(index);
             }),

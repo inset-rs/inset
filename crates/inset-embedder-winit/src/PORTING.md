@@ -125,11 +125,15 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Flutter's engine finds platform fonts itself; valo needs a `FontSource`.
   Affect: text uses installed fonts, the Cupertino system-font names resolve to SF, and an uninstalled family falls back to whatever the OS picks for the character.
 
-## os/macos/composition/ → the macOS embedder's platform views (`FlutterSurfaceManager`, `FlutterMutatorView`)
+## os/apple/composition/ → the macOS and iOS embedders' platform views (`FlutterSurfaceManager`, `FlutterMutatorView`, `FlutterPlatformViewsController`)
 
-- Change: each native surface is a Core Animation layer beneath the framework's layer, showing its producer's buffer directly.
+- Change: each native surface is a Core Animation layer beneath the framework's layer, showing its producer's buffer directly, on macOS and iOS alike.
   Reason: platform — Core Animation composites the buffers it's given, so a producer's frame needs no copy and no framework frame.
   Affect: framework content can sit above a surface but not beneath it.
+
+- Change: a surface's buffer and its children sit in one layer scaled by a transform, the children beneath the buffer, and the surface's present places its children in the same transaction as the buffer.
+  Reason: platform — a program whose picture is itself a surface in another app's window places its own surfaces in that picture, and Core Animation moves, clips and scales a layer's sublayers with it.
+  Affect: a child moves, is cut and shrinks with its parent, and shows through its parent's clear pixels.
 
 - Change: a buffer is released once the system says it's no longer in use, checked at the surface's next present and when the surface goes.
   Reason: platform — Core Animation gives no signal when it lets go of a buffer.
