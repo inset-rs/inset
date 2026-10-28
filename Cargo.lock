@@ -2133,6 +2133,7 @@ version = "0.15.0"
 dependencies = [
  "indexmap",
  "objc2-core-foundation",
+ "objc2-core-video",
  "objc2-io-surface",
  "pollster",
  "raw-window-handle",

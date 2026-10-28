@@ -6,6 +6,7 @@
 
 mod binding;
 mod framework;
+mod media;
 mod multi_view_app;
 #[cfg(test)]
 mod test_harness;
@@ -16,6 +17,7 @@ mod windowing;
 
 pub use binding::*;
 pub use framework::*;
+pub use media::*;
 // Flutter's `basic.dart` re-exports the animation and painting libraries whole, and these
 // from `rendering.dart`, so a widget author never names those layers for a `Row`, a curve
 // or a border. The animation mixins stay behind: they are Rust's spelling of Dart's, and

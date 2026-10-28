@@ -20,6 +20,7 @@ mod geometry;
 mod image;
 mod key;
 mod locale;
+mod media;
 mod menus;
 mod mouse_cursor;
 mod notifications;
@@ -64,6 +65,12 @@ pub use image::{
 };
 pub use key::{KeyData, KeyEventDeviceType, KeyEventType};
 pub use locale::Locale;
+pub use media::{
+    Camera, CameraFacing, CameraId, CameraState, CameraStatus, Cameras, CaptureSession,
+    FrameReader, MediaChangeFuture, MediaError, MediaPlayer, MediaSource, MovieOptions,
+    MovieOutput, Photo, PhotoFuture, PhotoOutput, PixelBuffer, PlayerState, PlayerStatus, Players,
+    RecordingFuture,
+};
 pub use menus::{
     AttachedMenu, CheckState, DockMenu, EditCommand, IconImage, MenuAtIcon, MenuBar, MenuEntry,
     MenuId, MenuItem, MenuItemCheck, MenuShortcut, PopupMenuFuture, PopupMenus, ProvidedItem,

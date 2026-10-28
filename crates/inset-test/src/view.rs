@@ -12,8 +12,8 @@ use inset_embedder::{
 /// Flutter's implicit view.
 pub const IMPLICIT_VIEW_ID: ViewId = ViewId(0);
 
-/// A view of a fixed physical size and pixel ratio that counts the pictures presented to it
-/// and shows none. `flutter_test`'s `TestFlutterView` in its two settable dimensions.
+/// A view of a fixed physical size and pixel ratio that counts the scenes presented to it, keeps
+/// the last, and shows none. `flutter_test`'s `TestFlutterView` in its two settable dimensions.
 pub struct TestView {
     id: ViewId,
     size: Cell<[f64; 2]>,
@@ -21,6 +21,7 @@ pub struct TestView {
     /// The screen its metrics say it is on; none by default.
     screen: Option<ScreenId>,
     presented: Cell<u32>,
+    last_scene: RefCell<Option<Arc<Scene>>>,
     request_id: Option<RequestId>,
     initial_data: Option<String>,
     /// The window the view is in, until it closes; held weakly, since the window holds the view.
@@ -41,6 +42,7 @@ impl TestView {
             device_pixel_ratio,
             screen: None,
             presented: Cell::new(0),
+            last_scene: RefCell::new(None),
             request_id: None,
             initial_data: None,
             window: RefCell::new(None),
@@ -82,6 +84,11 @@ impl TestView {
         self.presented.get()
     }
 
+    /// The scene presented last: its picture and the surfaces it places.
+    pub fn last_scene(&self) -> Option<Arc<Scene>> {
+        self.last_scene.borrow().clone()
+    }
+
     /// The view is in `window` from now on, or in none.
     pub(crate) fn set_window(&self, window: Option<Weak<dyn HostWindow>>) {
         *self.window.borrow_mut() = window;
@@ -104,8 +111,9 @@ impl View for TestView {
         }
     }
 
-    fn present(&self, _scene: Arc<Scene>) {
+    fn present(&self, scene: Arc<Scene>) {
         self.presented.set(self.presented.get() + 1);
+        *self.last_scene.borrow_mut() = Some(scene);
     }
 
     fn initial_data(&self) -> Option<String> {

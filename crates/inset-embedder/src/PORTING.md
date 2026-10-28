@@ -334,3 +334,17 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — a file dialog belongs to a window, which a view-based interface names by its view.
   Affect: a dialog opened for a window stays with it on macOS, and stands alone without one.
 
+## media.rs → the `video_player` package's `VideoPlayerController` and the `camera` package's `CameraController`, through their platform interfaces
+
+- Change: players and cameras are host capabilities, `Platform::players` and `Platform::cameras`: a player is one host object made from a source, loading by itself, controlled and observed through its state, and a camera a session on one device with an output per use, where Flutter's plugins have controllers that are initialized over method channels.
+  Reason: platform — the host is the system's media stack, and its players and capture sessions are that model on every system Inset targets.
+  Affect: an app makes a player and calls it at once, without awaiting an initialization, and a system without players or cameras answers `None`.
+
+- Change: a player's or a camera's picture goes to one destination at a time, a surface the system draws into, or a frame reader handing out the platform's own pixel buffers, where Flutter's plugins register a texture the engine copies from.
+  Reason: platform — protected and HDR video show only where the system draws them itself, and Windows' and Android's decoders feed one output.
+  Affect: a player shown on a surface has no frames to read, and one read as frames shows on no surface.
+
+- Change: a camera's photos are answered encoded by the system, as bytes and their MIME type, and its recordings written by the system to a path the app gives, where the `camera` plugin answers an `XFile` in a folder of its own.
+  Reason: platform — the system encodes and writes them, and an app chooses where its files go.
+  Affect: a photo arrives as JPEG bytes, and a recording is a QuickTime movie at the app's path.
+

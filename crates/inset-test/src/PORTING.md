@@ -13,6 +13,12 @@ No Flutter crate in this shape. Closest analogue: `flutter_test`'s `TestPlatform
   Reason: platform — it stands in for the host's dialogs, which Flutter's tests reach only as plugin channel calls.
   Affect: a test drives an app's open and save without a host, and checks what it wrote.
 
+## media.rs → `FakeController` in `video_player`'s tests and `FakeCameraPlatform` in `camera`'s
+
+- Change: `MockCompositor` opens surfaces under a view's root that show nothing and keeps each with its view; `MockPlayers` and `MockCameras` keep each player and camera session opened, what it was asked and the surface it shows on, and report the state the test sets, waking the app's watch of it; a session's photos answer what the test gave while it runs, and its recordings answer when stopped, writing nothing.
+  Reason: platform — they stand in for the host's compositor and media stack, which Flutter's tests reach only as plugin channel calls.
+  Affect: a test drives a player or a camera and its views without a host, and checks what the app asked of them.
+
 ## menus.rs → no Flutter counterpart
 
 - Change: `MockMenuBar`, `MockDockMenu`, `MockPopupMenus` and `MockTrayIcons` keep each menu set and each menu shown, and answer a shown menu with the item a test chose; the menu bar keeps the keys offered it and takes a key-down whose logical key is one of the test's shortcuts, by the key alone, since a key's data carries no modifiers; the tray answers each icon at once, offering both kinds of menu unless the test leaves one out as a system does, or refuses it.

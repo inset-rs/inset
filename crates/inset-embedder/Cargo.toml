@@ -23,9 +23,11 @@ valo-geometry.workspace = true
 valo-system-fonts.workspace = true
 web-time.workspace = true
 
-# The buffer a producer hands a composited surface is the platform's own type.
+# The buffer a producer hands a composited surface, and the picture a player or a camera hands a
+# frame reader, are the platform's own types.
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2-core-foundation = "0.3"
+objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVBuffer", "CVImageBuffer", "CVPixelBuffer"] }
 objc2-io-surface = "0.3"
 
 [dev-dependencies]
