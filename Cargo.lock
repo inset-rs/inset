@@ -2338,6 +2338,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "inset-single-instance"
+version = "0.15.0"
+dependencies = [
+ "inset-embedder",
+ "windows-sys 0.60.2",
+ "zbus",
+]
+
+[[package]]
 name = "inset-test"
 version = "0.15.0"
 dependencies = [
