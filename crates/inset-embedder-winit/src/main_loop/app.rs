@@ -1,10 +1,10 @@
 //! What the system says of the application as a whole and asks of it: its lifecycle, its
-//! appearance, the files it is asked to open and the reopen; and what it says changed about the
+//! appearance, the files and links it is asked to open and the reopen; and what it says changed about the
 //! machine: the screens and the user's languages.
 
 use std::time::Instant;
 
-use inset_embedder::EmbedderClient;
+use inset_embedder::{EmbedderClient, OpenRequest, PickedFile};
 use winit::window::{Theme, Window};
 
 use crate::lifecycle::LifecycleNotice;
@@ -14,20 +14,17 @@ use crate::system_requests::SystemRequest;
 use super::MainLoop;
 
 impl<C: EmbedderClient> MainLoop<C> {
-    /// The system's requests of the application: files and reopens go to the handlers the
-    /// app set, and a quit to the framework.
+    /// The system's requests of the application: files and links to open go to the client, a
+    /// reopen to the handler the app set, and a quit to the framework.
     pub(super) fn on_system_request(&mut self, request: SystemRequest) {
         match request {
-            SystemRequest::OpenFiles(files) => self.state.handlers().open_files(files),
+            SystemRequest::Open { files, links } => self.client.open_requested(OpenRequest {
+                files: files.into_iter().map(PickedFile::Path).collect(),
+                links,
+            }),
             SystemRequest::Reopen(reopen) => self.state.handlers().reopen(reopen),
             SystemRequest::Quit => self.on_quit_requested(),
         }
-    }
-
-    /// The app set its open-files handler while files were waiting for one: they reach it now,
-    /// outside every framework call.
-    pub(super) fn hand_over_files(&mut self) {
-        self.state.handlers().hand_over_files();
     }
 
     /// The system said the application became active or stopped being so, or became visible or

@@ -20,6 +20,7 @@ use web_time::Instant;
 use crate::clipboard;
 use crate::gpu::Gpu;
 use crate::keys;
+use crate::launch_queue;
 use crate::platform::{CANVAS_VIEW, WebPlatform, WebView};
 use crate::pointer;
 use crate::screen::read_screen;
@@ -288,6 +289,7 @@ fn bind_events<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
     bind_clipboard_changes(host);
     bind_resize(host);
     bind_brightness(host);
+    bind_launches(host);
 }
 
 fn bind_pointer<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
@@ -497,6 +499,15 @@ fn bind_clipboard_events<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
         let _ = document.add_event_listener_with_callback(name, closure.as_ref().unchecked_ref());
         closure.forget();
     }
+}
+
+/// The files the browser launches the installed app with, at launch and while it runs
+/// (`launch_queue.rs`).
+fn bind_launches<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
+    let listener = Rc::clone(host);
+    launch_queue::consume(&host.window, move |request| {
+        listener.client.borrow_mut().open_requested(request);
+    });
 }
 
 /// The framework's event for the browser's `copy`, `cut` or `paste` event; none for a paste

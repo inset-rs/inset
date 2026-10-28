@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use crate::{
     AppExitReply, AppExitResponse, AppLifecycleState, ClipboardEvent, DropData, EditCommand, Frame,
-    KeyData, MenuId, PointerDataPacket, TextEditingValue, TextInputAction, TrayIconEvent,
-    TrayIconId, ViewFocusEvent, ViewId,
+    KeyData, MenuId, OpenRequest, PointerDataPacket, TextEditingValue, TextInputAction,
+    TrayIconEvent, TrayIconId, ViewFocusEvent, ViewId,
 };
 
 /// Complete frames and typed view lifecycle notifications.
@@ -84,6 +84,14 @@ pub trait EmbedderClient {
     /// default drops it.
     fn tray_icon_event(&mut self, icon: TrayIconId, event: TrayIconEvent) {
         let _ = (icon, event);
+    }
+
+    /// The system asks the app to open files and links: from the file manager, another app or
+    /// the command line, at launch or while it runs. A launch's request comes once the client
+    /// exists. No dart:ui hook: Flutter's embedders hand these to their plugins. The default drops
+    /// it.
+    fn open_requested(&mut self, request: OpenRequest) {
+        let _ = request;
     }
 
     /// Flutter `PlatformDispatcher.onKeyData`.

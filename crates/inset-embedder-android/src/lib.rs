@@ -41,6 +41,10 @@ mod input;
 #[cfg(target_os = "android")]
 mod log;
 #[cfg(target_os = "android")]
+mod open_requests;
+#[cfg(target_os = "android")]
+mod opener;
+#[cfg(target_os = "android")]
 mod platform;
 #[cfg(target_os = "android")]
 mod refresh;

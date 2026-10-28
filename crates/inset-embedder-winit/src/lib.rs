@@ -15,6 +15,7 @@
 // wgpu's handle registry nests auto-trait obligations past the default depth.
 #![recursion_limit = "256"]
 
+mod answer;
 mod app_exit;
 mod app_requests;
 mod appearance;

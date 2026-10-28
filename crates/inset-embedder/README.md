@@ -34,9 +34,9 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - `EmbedderClient::app_lifecycle_state_changed`, `Platform::initial_lifecycle_state`
 - At each notice from the system, report the state the app is now in, and let the framework fill in the states between.
 
-**Links, files and back**
-- `EmbedderClient::pop_route`, `Platform::default_route_name`, `file_opening`, `FileOpening::set_open_files_handler`; a reopen is the host's own
-- Keep what a launch hands over until the app listens, and do the system's own back when `pop_route` answers false.
+**Being opened, and back**
+- `EmbedderClient::open_requested`, `OpenRequest`, `OpenRequest::from_arguments`, `EmbedderClient::pop_route`, `Platform::default_route_name`; a reopen is the host's own
+- Hand on every file and link the system asks the app to open, at launch and while it runs, the launch's own once the client is there: a launch's arguments, which `from_arguments` reads, where the system starts the app with them; a path where the system gives one, and a file opened as a pick is where it gives a document or a handle. Do the system's own back when `pop_route` answers false.
 
 ## Windows and views
 
@@ -153,6 +153,10 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 **File dialogs**
 - `Platform::file_dialogs`, `FileDialogs::open_file`, `open_files`, `open_folder`, `save_file`, `OpenOptions`, `FolderOptions`, `SaveOptions`, `FileType`, `PickedFile`, `FileHandle`, `FileWriter`, `FileStream`, `PickedFolder`, `FolderHandle`, `FolderEntry`, `FileDialogError`
 - Show the system's own panel, as a sheet on the parent view's window where the system has sheets; answer a path where the system gives one and the system's handle where it gives none, opening each pick as it is answered; grant writing only to a pick the app asked to write, and to a save's one file; answer `None` where the system has no file dialogs, and an error where it could not show one.
+
+**Opening**
+- `Platform::opener`, `Opener::open_link`, `open_file`, `reveal_file`, `can_open_link`, `OpenFuture`, `OpenError`
+- Open each in the app the system gives it, and answer `NoApp` where the system says none takes it; share a file through the system where another app cannot read it by its path; answer `can_open_link` only where the system answers for every scheme, or for the schemes the app declared, and `None` otherwise; fail what the system has no counterpart for, such as revealing a file on a phone.
 
 **Dialogs**
 - none yet

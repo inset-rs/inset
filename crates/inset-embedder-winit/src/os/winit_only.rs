@@ -9,7 +9,7 @@ use super::absent::{NoDisplayLink, NoVisibilityNotices, NoWindowSurfaces};
 use super::{
     ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeComposition,
     NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
-    SystemFileDialogs, SystemRequests, WindowChrome, WindowGeometry, WindowMotion,
+    SystemFileDialogs, SystemOpener, SystemRequests, WindowChrome, WindowGeometry, WindowMotion,
     WindowVisibility, WorkQueue,
 };
 
@@ -59,6 +59,7 @@ impl NativeMenus for WinitOnly {}
 impl ImageDecoding for WinitOnly {}
 impl WorkQueue for WinitOnly {}
 impl SystemFileDialogs for WinitOnly {}
+impl SystemOpener for WinitOnly {}
 impl SystemRequests for WinitOnly {}
 impl SystemChanges for WinitOnly {}
 impl ApplicationControl for WinitOnly {}

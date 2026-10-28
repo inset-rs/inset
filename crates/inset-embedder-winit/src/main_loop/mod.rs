@@ -257,7 +257,6 @@ impl<C: EmbedderClient> MainLoop<C> {
             AppRequest::AnswerExit(response) => self.on_exit_answered(event_loop, response),
             AppRequest::ShowCursor(kind) => self.show_cursor(kind),
             AppRequest::ChangeViewFocus(change) => self.change_view_focus(change),
-            AppRequest::HandOverFiles => self.hand_over_files(),
             AppRequest::LookAtClipboard => self.look_at_clipboard(),
         }
     }

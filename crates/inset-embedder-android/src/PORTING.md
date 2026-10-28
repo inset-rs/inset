@@ -51,6 +51,22 @@ Host implementation. Flutter analogue: the engine's Android embedder under
   Reason: platform — a document tree has no path, and its documents are reached through the provider alone.
   Affect: an app lists, reads and, when it asked to write, makes files in a folder the user picked.
 
+## opener.rs → `url_launcher_android`
+
+- Change: a link opens through an `ACTION_VIEW` intent on its URI, `ActivityNotFoundException` being no app; a file through an `ACTION_VIEW` intent on the URI Inset's file provider, `rs.inset.InsetFileProvider`, gives it at `<package>.inset.files`, granting the app that opens it reading that URI; revealing a file fails, where `url_launcher_android` opens only URIs.
+  Reason: platform — no other app reads the app's storage by path, and Android has no file manager that shows a file in its folder; androidx's `FileProvider` comes with a Gradle dependency the package does not have, so the provider is Inset's own, which inset-cli compiles and declares, not exported.
+  Affect: an app built by inset-cli opens its own files in another app; without the provider opening a file fails.
+
+- Change: `can_open_link` is `resolveActivity`'s answer, `None` from Android 11 for a scheme the manifest's `<queries>` does not name, which the application's meta-data `rs.inset.queried_schemes` lists, where `canLaunchUrl` answers false.
+  Reason: platform — from Android 11 an app sees only the apps its `<queries>` names.
+  Affect: an app built by inset-cli is answered for `http`, `https` and `mailto`.
+
+## open_requests.rs → the Android embedder's `FlutterActivity` intent handling
+
+- Change: the intent the activity started with and each one `onNewIntent` brings, which `InsetActivity` hands on, reach the client as `open_requested` when they are `ACTION_VIEW`: a `content://` document opened as a picked one is, to write where the intent grants writing, a `file://` URI as a path, and any other URI as a link; Flutter's activity hands them to its route and its plugins.
+  Reason: platform — `NativeActivity` keeps `onNewIntent` to itself, and a document has no path.
+  Affect: an app opened with a document reads it as it reads a pick; under the bare `NativeActivity` only the intent it started with comes.
+
 ## display.rs / host.rs
 
 - Change: the one screen is the activity's display, numbered by its own id, read when a window arrives and at each configuration change, and the app hears it changed only then; Flutter's embedder numbers it 0 and hears its refresh rate through a display listener.

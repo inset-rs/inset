@@ -14,8 +14,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use inset_embedder::{
-    AppExit, Brightness, Clipboard, Compositor, Dispatcher, DockMenu, FileDialogs, FileOpening,
-    FontSource, ImageCodecFuture, Locale, MenuBar, MouseCursor, Platform, PopupMenus, RequestId,
+    AppExit, Brightness, Clipboard, Compositor, Dispatcher, DockMenu, FileDialogs, FontSource,
+    ImageCodecFuture, Locale, MenuBar, MouseCursor, Opener, Platform, PopupMenus, RequestId,
     Screens, SystemFontSource, TargetPlatform, TrayIcons, ViewError, ViewFocusDirection,
     ViewFocusEvent, ViewFocusState, ViewId, ViewRef, ViewRequest, VsyncWaiter,
 };
@@ -30,7 +30,7 @@ use crate::main_loop::MainLoopEvent;
 use crate::menus::MenuEvents;
 use crate::os::{
     FramePresentation, NativeComposition, NativeMenus, OperatingSystem, SystemClipboard,
-    SystemFileDialogs, SystemRequests, ThisOs, ThisOsClipboard,
+    SystemFileDialogs, SystemOpener, ThisOs, ThisOsClipboard,
 };
 use crate::popup_menus::NativePopupMenus;
 use crate::state::EmbedderState;
@@ -69,6 +69,8 @@ pub struct WinitPlatform {
     tray_icons: Option<Rc<dyn TrayIcons>>,
     /// The system's file dialogs, where it has them (`file_dialogs.rs`).
     file_dialogs: Option<Rc<dyn FileDialogs>>,
+    /// The system's opener, where it has one.
+    opener: Option<Rc<dyn Opener>>,
     /// What only macOS offers; `None` elsewhere.
     macos: Option<MacOs>,
 }
@@ -88,6 +90,7 @@ impl WinitPlatform {
             next_request_id: Cell::new(1),
             macos: cfg!(target_os = "macos").then(|| MacOs::new(Rc::clone(&state))),
             file_dialogs: ThisOs::file_dialogs(ParentWindows::new(Rc::clone(&state))),
+            opener: ThisOs::opener(ParentWindows::new(Rc::clone(&state))),
             state,
             compositor: ThisOs::compositor(),
             vsync_waiter: ThisOs::vsync_waiter(&proxy),
@@ -285,7 +288,7 @@ impl Platform for WinitPlatform {
         ThisOs::APP_MAY_QUIT.then_some(self)
     }
 
-    fn file_opening(&self) -> Option<&dyn FileOpening> {
-        ThisOs::ASKS_TO_OPEN_FILES.then_some(self)
+    fn opener(&self) -> Option<&dyn Opener> {
+        self.opener.as_deref()
     }
 }

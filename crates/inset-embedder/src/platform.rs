@@ -5,7 +5,6 @@
 //! `EmbedderClient`, so this interface contains requests and state only.
 
 use std::any::Any;
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,6 +17,7 @@ use crate::fonts::FontSource;
 use crate::geometry::{Color, Offset, Rect};
 use crate::menus::{DockMenu, MenuBar, PopupMenus, TrayIcons};
 use crate::mouse_cursor::SystemMouseCursorKind;
+use crate::opener::Opener;
 use crate::restoration::{RestorationMap, RestorationUpdate};
 use crate::system_context_menu::SystemContextMenuItem;
 use crate::{View, ViewFocusDirection, ViewFocusState, ViewId};
@@ -731,9 +731,8 @@ pub trait Platform: Any {
         None
     }
 
-    /// The files the system asks the app to open, or `None` where the system never asks: it
-    /// starts the app with them on its command line instead, or has no files to open.
-    fn file_opening(&self) -> Option<&dyn FileOpening> {
+    /// The system's way to open links and files in other apps, or `None` where it has none.
+    fn opener(&self) -> Option<&dyn Opener> {
         None
     }
 }
@@ -863,20 +862,6 @@ pub trait AppExit {
     /// and Linux embedders ignore it, and a host may too.
     fn quit(&self, exit_code: i32);
 }
-
-/// The files the system asks the app to open: documents opened from the system's file browser, or
-/// dropped on the app's icon, at launch or while it runs. Flutter's macOS embedder hands them to
-/// its plugins (`FlutterAppLifecycleDelegate.handleOpenURLs:`), outside the framework.
-pub trait FileOpening {
-    /// What happens with the files the system asks the app to open. The host calls `handler`
-    /// with each request's files on the main thread, outside every framework call, so it may
-    /// post to the app. Files asked for before a handler is set wait for one: a launch asks for
-    /// its files before the app has started.
-    fn set_open_files_handler(&self, handler: Option<OpenFilesHandler>);
-}
-
-/// A handler for the files the system asks the app to open.
-pub type OpenFilesHandler = Rc<dyn Fn(Vec<PathBuf>)>;
 
 /// Platform for hand-pumped tests.
 pub struct InertPlatform;

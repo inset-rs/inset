@@ -13,13 +13,14 @@ use std::time::{Duration, Instant};
 use android_activity::AndroidAppWaker;
 use inset_embedder::{
     Brightness, Clipboard, Dispatcher, FileDialogs, FontSource, ImageCodec, ImageCodecFuture,
-    ImageDecodeError, ImageFrame, ImageFrameFuture, ImageRepetition, Locale, Offset, Platform,
-    Screen, Screens, SystemChrome, SystemFontSource, TargetPlatform, ViewRef,
+    ImageDecodeError, ImageFrame, ImageFrameFuture, ImageRepetition, Locale, Offset, Opener,
+    Platform, Screen, Screens, SystemChrome, SystemFontSource, TargetPlatform, ViewRef,
 };
 
 use crate::chrome::AndroidChrome;
 use crate::clipboard::AndroidClipboard;
 use crate::file_dialogs::DocumentPickers;
+use crate::opener::IntentOpener;
 use crate::view::{AndroidView, VIEW};
 
 /// The long-lived host capability held by the application.
@@ -40,6 +41,7 @@ pub struct AndroidPlatform {
     pub(crate) clipboard: AndroidClipboard,
     /// The document pickers, where the activity is Inset's.
     file_dialogs: Option<DocumentPickers>,
+    opener: IntentOpener,
 }
 
 impl AndroidPlatform {
@@ -65,6 +67,7 @@ impl AndroidPlatform {
             chrome: AndroidChrome::new(app.clone()),
             clipboard: AndroidClipboard::new(app.clone()),
             file_dialogs: DocumentPickers::new(app.clone()),
+            opener: IntentOpener::new(app.clone()),
         }
     }
 
@@ -181,6 +184,11 @@ impl Platform for AndroidPlatform {
         self.file_dialogs
             .as_ref()
             .map(|pickers| pickers as &dyn FileDialogs)
+    }
+
+    /// Intents to view (`opener.rs`).
+    fn opener(&self) -> Option<&dyn Opener> {
+        Some(&self.opener)
     }
 
     fn system_chrome(&self) -> Option<&dyn SystemChrome> {

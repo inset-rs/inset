@@ -269,15 +269,15 @@ fn input_accept(types: &[FileType]) -> String {
     extensions.chain(mime_types).collect::<Vec<_>>().join(",")
 }
 
-/// A file the browser's picker gave: its handle, and whether the app may write it.
-struct SystemFile {
+/// A file the browser's picker or a launch gave: its handle, and whether the app may write it.
+pub(crate) struct SystemFile {
     handle: JsValue,
     name: String,
     writable: bool,
 }
 
 impl SystemFile {
-    fn new(handle: JsValue, writable: bool) -> SystemFile {
+    pub(crate) fn new(handle: JsValue, writable: bool) -> SystemFile {
         let name = Reflect::get(&handle, &JsValue::from_str("name"))
             .ok()
             .and_then(|name| name.as_string())
@@ -579,7 +579,8 @@ fn error_name(error: &JsValue) -> String {
         .unwrap_or_default()
 }
 
-fn describe(error: &JsValue) -> String {
+/// What the browser says went wrong: an error's message, or what it threw.
+pub(crate) fn describe(error: &JsValue) -> String {
     Reflect::get(error, &JsValue::from_str("message"))
         .ok()
         .and_then(|message| message.as_string())

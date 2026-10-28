@@ -27,6 +27,7 @@ mod display_links;
 mod file_dialogs;
 mod frame_presentation;
 mod menus;
+mod opener;
 mod pasteboard;
 mod pointer;
 mod screens;

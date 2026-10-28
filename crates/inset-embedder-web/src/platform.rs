@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use inset_embedder::{
     Brightness, Clipboard, Dispatcher, FileDialogs, ImageCodecFuture, Matrix4, MouseCursor, Offset,
-    Platform, Rect, Screen, Screens, Size, SystemMouseCursorKind, TargetPlatform, TextEditingValue,
-    TextInputConfiguration, TextInputHost, View, ViewId, ViewMetrics, ViewRef,
+    Opener, Platform, Rect, Screen, Screens, Size, SystemMouseCursorKind, TargetPlatform,
+    TextEditingValue, TextInputConfiguration, TextInputHost, View, ViewId, ViewMetrics, ViewRef,
 };
 use web_sys::HtmlCanvasElement;
 use web_time::Instant;
@@ -18,6 +18,7 @@ use crate::dispatcher;
 use crate::file_dialogs::BrowserFileDialogs;
 use crate::font_fallback::ROBOTO;
 use crate::gpu::Gpu;
+use crate::opener::BrowserOpener;
 use crate::text_input::{TextInputListener, WebTextInput};
 
 /// The page's canvas's view, the one view the page gives the app.
@@ -201,6 +202,11 @@ impl Platform for WebPlatform {
     /// The browser's pickers (`file_dialogs.rs`).
     fn file_dialogs(&self) -> Option<&dyn FileDialogs> {
         Some(&BrowserFileDialogs)
+    }
+
+    /// The browser's tabs for links (`opener.rs`).
+    fn opener(&self) -> Option<&dyn Opener> {
+        Some(&BrowserOpener)
     }
 
     /// The page's one screen (`screen.rs`).

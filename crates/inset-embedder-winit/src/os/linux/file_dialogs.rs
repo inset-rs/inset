@@ -14,59 +14,26 @@ use std::collections::HashMap;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 
 use inset_embedder::{
     FileDialogError, FileDialogFuture, FileDialogs, FolderOptions, OpenOptions, PickedFile,
-    PickedFolder, SaveOptions, ViewId,
+    PickedFolder, SaveOptions, ViewId, file_uri_path,
 };
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
-use zbus::blocking::fdo::DBusProxy;
-use zbus::blocking::{Connection, Proxy};
-use zbus::names::BusName;
-use zbus::proxy::CacheProperties;
-use zbus::zvariant::{OwnedValue, Value};
+use zbus::zvariant::OwnedValue;
 
 use super::Linux;
-use crate::file_dialogs::{ParentWindows, dialog_answer, file_uri_path, portal_filters};
+use super::portal::{self, owned};
+use crate::file_dialogs::{ParentWindows, dialog_answer, portal_filters};
 use crate::os::SystemFileDialogs;
 
-const PORTAL: &str = "org.freedesktop.portal.Desktop";
-const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 const FILE_CHOOSER: &str = "org.freedesktop.portal.FileChooser";
-const REQUEST: &str = "org.freedesktop.portal.Request";
-/// The longest a call to the bus may take; the wait for the user's answer has no limit.
-const PATIENCE: Duration = Duration::from_secs(5);
 
 impl SystemFileDialogs for Linux {
     fn file_dialogs(windows: ParentWindows) -> Option<Rc<dyn FileDialogs>> {
-        portal_is_on_the_bus().then(|| Rc::new(PortalDialogs { windows }) as Rc<dyn FileDialogs>)
+        portal::is_on_the_bus().then(|| Rc::new(PortalDialogs { windows }) as Rc<dyn FileDialogs>)
     }
-}
-
-/// Whether the session bus has the desktop portal, running or one it starts when asked.
-fn portal_is_on_the_bus() -> bool {
-    let Some(connection) = session() else {
-        return false;
-    };
-    let Ok(bus) = DBusProxy::new(&connection) else {
-        return false;
-    };
-    let portal = BusName::try_from(PORTAL).expect("a valid bus name");
-    bus.name_has_owner(portal).unwrap_or(false)
-        || bus
-            .list_activatable_names()
-            .is_ok_and(|names| names.iter().any(|name| name.as_str() == PORTAL))
-}
-
-fn session() -> Option<Connection> {
-    zbus::blocking::connection::Builder::session()
-        .ok()?
-        .method_timeout(PATIENCE)
-        .build()
-        .ok()
 }
 
 /// The portal's file dialogs.
@@ -173,13 +140,6 @@ fn nul_terminated(path: &Path) -> Vec<u8> {
         .collect()
 }
 
-fn owned<'v>(value: impl Into<Value<'v>>) -> OwnedValue {
-    value
-        .into()
-        .try_into_owned()
-        .expect("a value without file descriptors")
-}
-
 impl PortalDialogs {
     /// Asks the portal's `method` on a thread of its own, and answers the paths it gives.
     fn ask(
@@ -221,47 +181,20 @@ fn parent_window(window: &Window) -> Option<String> {
     }
 }
 
-/// A token each request is told by.
-static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
-
 /// Asks the portal and waits for its answer: the paths chosen, none if the user cancelled.
-fn ask_portal(mut ask: Ask) -> Result<Vec<PathBuf>, FileDialogError> {
-    let failed = |error: zbus::Error| FileDialogError::Failed(error.to_string());
-    let connection = session().ok_or_else(|| {
-        FileDialogError::Failed("the session bus could not be reached".to_owned())
-    })?;
-    let token = format!("inset{}", NEXT_TOKEN.fetch_add(1, Ordering::Relaxed));
-    let sender = connection
-        .unique_name()
-        .map(|name| name.trim_start_matches(':').replace('.', "_"))
-        .unwrap_or_default();
-    // The response is listened for before the request is made, at the path the token names, so it
-    // cannot come before the listening.
-    let request: Proxy<'_> = zbus::blocking::proxy::Builder::new(&connection)
-        .destination(PORTAL)
-        .and_then(|builder| builder.path(format!("{PORTAL_PATH}/request/{sender}/{token}")))
-        .and_then(|builder| builder.interface(REQUEST))
-        .map(|builder| builder.cache_properties(CacheProperties::No))
-        .and_then(|builder| builder.build())
-        .map_err(failed)?;
-    let mut responses = request.receive_signal("Response").map_err(failed)?;
-    ask.options.insert("handle_token", owned(token));
-    connection
-        .call_method(
-            Some(PORTAL),
-            PORTAL_PATH,
-            Some(FILE_CHOOSER),
-            ask.method,
-            &(ask.parent_window.as_str(), ask.title, ask.options),
-        )
-        .map_err(failed)?;
-    let response = responses
-        .next()
-        .ok_or_else(|| FileDialogError::Failed("the portal closed without an answer".to_owned()))?;
-    let (code, results): (u32, HashMap<String, OwnedValue>) =
-        response.body().deserialize().map_err(failed)?;
-    match code {
-        0 => Ok(uris(&results)
+fn ask_portal(ask: Ask) -> Result<Vec<PathBuf>, FileDialogError> {
+    let Ask {
+        method,
+        title,
+        parent_window,
+        options,
+    } = ask;
+    let response = portal::request(FILE_CHOOSER, method, options, |options| {
+        (parent_window, title, options)
+    })
+    .map_err(|error| FileDialogError::Failed(error.to_string()))?;
+    match response.code {
+        0 => Ok(uris(&response.results)
             .iter()
             .filter_map(|uri| file_uri_path(uri))
             .collect()),

@@ -9,8 +9,8 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use inset_embedder::{
-    ClipboardEvent, DropData, EditCommand, MenuId, PlatformRef, RequestId, TrayIconEvent,
-    TrayIconId, ViewError, ViewFocusEvent, ViewId,
+    ClipboardEvent, DropData, EditCommand, MenuId, OpenRequest, PlatformRef, RequestId,
+    TrayIconEvent, TrayIconId, ViewError, ViewFocusEvent, ViewId,
 };
 use slotmap::new_key_type;
 
@@ -139,7 +139,19 @@ pub struct App {
     /// The host's threads, told when to wake this application for its next timer.
     dispatcher: std::sync::Arc<dyn inset_embedder::Dispatcher>,
     platform_callbacks: PlatformCallbacks,
+    open_requests: OpenRequests,
 }
+
+/// What hears the system's requests to open files and links, and the requests that came before
+/// there was a handler.
+#[derive(Default)]
+struct OpenRequests {
+    handler: Option<OpenRequestedCallback>,
+    waiting: Vec<OpenRequest>,
+}
+
+/// The app's handler for the system's requests to open files and links.
+pub type OpenRequestedCallback = Rc<dyn Fn(&mut App, OpenRequest)>;
 
 /// The callbacks the framework assigns onto dart:ui's `PlatformDispatcher`
 /// (`onPlatformBrightnessChanged`, `onLocaleChanged`). The host's half of the dispatcher
@@ -235,6 +247,7 @@ impl App {
             dispatcher: platform.dispatcher(),
             platform,
             platform_callbacks: PlatformCallbacks::default(),
+            open_requests: OpenRequests::default(),
         }
     }
 
@@ -284,6 +297,28 @@ impl App {
 
     pub fn platform_callbacks_mut(&mut self) -> &mut PlatformCallbacks {
         &mut self.platform_callbacks
+    }
+
+    /// Sets what hears the system's requests to open files and links
+    /// (`EmbedderClient::open_requested`), and hands it at once the requests that came before it
+    /// was set, as a launch's do; with `None`, later requests wait for the next handler. No
+    /// Flutter counterpart: Flutter's embedders hand these to their plugins.
+    pub fn set_open_requested_handler(&mut self, handler: Option<OpenRequestedCallback>) {
+        self.open_requests.handler = handler.clone();
+        let Some(handler) = handler else {
+            return;
+        };
+        for request in std::mem::take(&mut self.open_requests.waiting) {
+            handler(self, request);
+        }
+    }
+
+    /// The system asks the app to open `request`: the handler hears it, or it waits for one.
+    pub fn open_requested(&mut self, request: OpenRequest) {
+        match self.open_requests.handler.clone() {
+            Some(handler) => handler(self, request),
+            None => self.open_requests.waiting.push(request),
+        }
     }
 
     /// One `T` per App (`SchedulerBinding.instance`, `kAlwaysCompleteAnimation`). Do not destroy it — the stored id goes stale and the next call panics.

@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use inset_embedder::{
     AppExit, AppLifecycleState, Brightness, Clipboard, Dispatcher, DockMenu, FileDialogs,
     FontSource, Haptics, Image, ImageCodecFuture, ImageDecodeError, Instant, MenuBar, MouseCursor,
-    Platform, PopupMenus, RequestId, Restoration, SystemChrome, SystemContextMenu, TargetPlatform,
-    TextServices, TrayIcons, View, ViewError, ViewId, ViewRef, ViewRequest,
+    Opener, Platform, PopupMenus, RequestId, Restoration, SystemChrome, SystemContextMenu,
+    TargetPlatform, TextServices, TrayIcons, View, ViewError, ViewId, ViewRef, ViewRequest,
 };
 
 use inset_embedder::valo;
@@ -48,6 +48,7 @@ pub struct TestPlatform {
     popup_menus: Option<Rc<dyn PopupMenus>>,
     tray_icons: Option<Rc<dyn TrayIcons>>,
     file_dialogs: Option<Rc<dyn FileDialogs>>,
+    opener: Option<Rc<dyn Opener>>,
     dock_menu: Option<Rc<dyn DockMenu>>,
     text_services: Option<Rc<dyn TextServices>>,
     mouse_cursor: Option<Rc<dyn MouseCursor>>,
@@ -80,6 +81,7 @@ impl TestPlatform {
             popup_menus: None,
             tray_icons: None,
             file_dialogs: None,
+            opener: None,
             dock_menu: None,
             text_services: None,
             mouse_cursor: None,
@@ -222,6 +224,11 @@ impl TestPlatform {
 
     pub fn with_file_dialogs(mut self, file_dialogs: Rc<dyn FileDialogs>) -> TestPlatform {
         self.file_dialogs = Some(file_dialogs);
+        self
+    }
+
+    pub fn with_opener(mut self, opener: Rc<dyn Opener>) -> TestPlatform {
+        self.opener = Some(opener);
         self
     }
 
@@ -401,6 +408,10 @@ impl Platform for TestPlatform {
 
     fn file_dialogs(&self) -> Option<&dyn FileDialogs> {
         self.file_dialogs.as_deref()
+    }
+
+    fn opener(&self) -> Option<&dyn Opener> {
+        self.opener.as_deref()
     }
 
     fn dock_menu(&self) -> Option<&dyn DockMenu> {

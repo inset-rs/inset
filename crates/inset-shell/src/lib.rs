@@ -12,8 +12,9 @@ use std::time::Duration;
 
 use inset_embedder::{
     AppExitReply, AppLifecycleState, ClipboardEvent, DropData, EditCommand, EmbedderClient, Frame,
-    Instant, KeyData, MenuId, PlatformRef, PointerDataPacket, RequestId, TextEditingValue,
-    TextInputAction, TrayIconEvent, TrayIconId, ViewError, ViewFocusEvent, ViewId,
+    Instant, KeyData, MenuId, OpenRequest, PlatformRef, PointerDataPacket, RequestId,
+    TextEditingValue, TextInputAction, TrayIconEvent, TrayIconId, ViewError, ViewFocusEvent,
+    ViewId,
 };
 use inset_foundation::{App, AppCell};
 use inset_gestures::GestureBinding;
@@ -203,6 +204,10 @@ impl EmbedderClient for Shell {
                 callback(app, icon, event);
             }
         });
+    }
+
+    fn open_requested(&mut self, request: OpenRequest) {
+        self.push(|app| app.open_requested(request));
     }
 
     fn pointer_data_packet(&mut self, packet: PointerDataPacket) {
@@ -398,6 +403,36 @@ mod tests {
         let request = CopyRequest::new(|_items, _options| Box::pin(std::future::ready(Ok(()))));
         shell.clipboard_event(IMPLICIT_VIEW_ID, ClipboardEvent::Cut(request));
         assert_eq!(seen.get(), Some((IMPLICIT_VIEW_ID, true)));
+    }
+
+    #[test]
+    fn an_open_request_waits_for_the_apps_handler() {
+        use std::cell::RefCell;
+
+        use inset_embedder::OpenRequest;
+
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let mut shell = Shell::new(Rc::new(platform_with_a_view()), |_app: &mut App| {});
+        shell.open_requested(OpenRequest {
+            files: Vec::new(),
+            links: vec!["https://example.org/launch".to_owned()],
+        });
+        let slot = Rc::clone(&seen);
+        shell
+            .app
+            .borrow_mut()
+            .set_open_requested_handler(Some(Rc::new(move |_app, request: OpenRequest| {
+                slot.borrow_mut().extend(request.links)
+            })));
+        shell.open_requested(OpenRequest {
+            files: Vec::new(),
+            links: vec!["https://example.org/later".to_owned()],
+        });
+        assert_eq!(
+            *seen.borrow(),
+            ["https://example.org/launch", "https://example.org/later"],
+            "the launch's request waited for the handler"
+        );
     }
 
     #[test]
