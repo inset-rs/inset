@@ -7,6 +7,7 @@
 //! static web folder, a wasm component.
 
 mod android;
+mod apple;
 mod cargo;
 mod desktop;
 mod devices;

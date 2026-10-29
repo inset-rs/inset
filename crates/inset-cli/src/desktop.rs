@@ -12,10 +12,10 @@ use cargo_packager::config::{Binary, MacOsConfig, Resource};
 use cargo_packager::{Config, PackageFormat};
 use plist::Dictionary;
 
+use crate::apple;
 use crate::cargo::{self, Artifact, Build};
 use crate::file_associations;
 use crate::icons;
-use crate::ios;
 use crate::project::{Profile, Project};
 use crate::usage_descriptions;
 
@@ -196,7 +196,7 @@ fn macos_signing_identity(project: &Project) -> Option<String> {
     if !cfg!(target_os = "macos") {
         return None;
     }
-    match ios::signing_identity(project.macos.team.as_deref()) {
+    match apple::development_identity(project.macos.team.as_deref()) {
         Ok(identity) => {
             println!("signing with {}", identity.name);
             Some(identity.hash)
