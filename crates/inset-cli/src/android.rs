@@ -505,10 +505,10 @@ struct Manifest<'a> {
 /// again by its intent's data (`intoExisting`), with up to [`MAX_RECENTS`] cards in Recents.
 /// `configChanges` keeps each activity, and so its view's state, through a rotation or a switch
 /// to dark mode, which the host reports as new metrics; `adjustResize` has the system fit the
-/// window to the keyboard, which is how the host learns of it. Inset's file provider is declared at `<package>.inset.files`, not
-/// exported, granting each URI it shares; its notification receiver, not exported, hears only the
-/// app's own alarms; `<queries>` names viewing the links of [`QUERIED_SCHEMES`]; the app asks for
-/// [`PERMISSIONS`].
+/// window to the keyboard, which is how the host learns of it. Inset's file provider is declared
+/// at `<package>.inset.files`, not exported, granting each URI it shares; its notification
+/// receiver, not exported, hears only the app's own alarms; `<queries>` names viewing the links
+/// of [`QUERIED_SCHEMES`]; the app asks for [`PERMISSIONS`].
 fn manifest(manifest: &Manifest) -> String {
     let icon = if manifest.has_icon {
         r#" android:icon="@mipmap/ic_launcher""#

@@ -28,10 +28,15 @@ use crate::gpu::Gpu;
 use crate::host_window::AndroidWindow;
 use crate::notifications::AndroidNotifications;
 use crate::opener::IntentOpener;
+use crate::shortcuts::PinnedShortcuts;
 use crate::task::{TaskDescriptions, ViewRequests};
 use crate::view::AndroidView;
 
 /// The long-lived host capability held by the application.
+///
+/// What only Android has is reached by downcasting the platform
+/// (`platform.downcast_ref::<AndroidPlatform>()`): the app's [pinned
+/// shortcuts](AndroidPlatform::pinned_shortcuts).
 pub struct AndroidPlatform {
     /// The activities attached to the app, each a view.
     pub(crate) activities: Activities,
@@ -60,6 +65,7 @@ pub struct AndroidPlatform {
     opener: IntentOpener,
     /// The system's notifications, where the activities are Inset's.
     notifications: Option<AndroidNotifications>,
+    pinned_shortcuts: PinnedShortcuts,
 }
 
 impl AndroidPlatform {
@@ -87,6 +93,7 @@ impl AndroidPlatform {
             file_dialogs: DocumentPickers::new(activities.clone()),
             opener: IntentOpener::new(activities.clone()),
             notifications: AndroidNotifications::new(activities.clone()),
+            pinned_shortcuts: PinnedShortcuts::new(),
             activities,
             descriptions,
         }
@@ -173,6 +180,11 @@ impl AndroidPlatform {
 
     pub(crate) fn elapsed(&self) -> Duration {
         Instant::now().saturating_duration_since(self.origin)
+    }
+
+    /// The app's shortcuts on the home screen, each opening one view.
+    pub fn pinned_shortcuts(&self) -> &PinnedShortcuts {
+        &self.pinned_shortcuts
     }
 
     /// The renderer's image store, on the device the window draws with: an image made
