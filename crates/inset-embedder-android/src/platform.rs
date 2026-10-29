@@ -13,13 +13,14 @@ use std::time::{Duration, Instant};
 use android_activity::AndroidAppWaker;
 use inset_embedder::{
     Brightness, Clipboard, Dispatcher, FileDialogs, FontSource, ImageCodec, ImageCodecFuture,
-    ImageDecodeError, ImageFrame, ImageFrameFuture, ImageRepetition, Locale, Offset, Opener,
-    Platform, Screen, Screens, SystemChrome, SystemFontSource, TargetPlatform, ViewRef,
+    ImageDecodeError, ImageFrame, ImageFrameFuture, ImageRepetition, Locale, Notifications, Offset,
+    Opener, Platform, Screen, Screens, SystemChrome, SystemFontSource, TargetPlatform, ViewRef,
 };
 
 use crate::chrome::AndroidChrome;
 use crate::clipboard::AndroidClipboard;
 use crate::file_dialogs::DocumentPickers;
+use crate::notifications::AndroidNotifications;
 use crate::opener::IntentOpener;
 use crate::view::{AndroidView, VIEW};
 
@@ -42,6 +43,8 @@ pub struct AndroidPlatform {
     /// The document pickers, where the activity is Inset's.
     file_dialogs: Option<DocumentPickers>,
     opener: IntentOpener,
+    /// The system's notifications, where the activity is Inset's.
+    notifications: Option<AndroidNotifications>,
 }
 
 impl AndroidPlatform {
@@ -68,6 +71,7 @@ impl AndroidPlatform {
             clipboard: AndroidClipboard::new(app.clone()),
             file_dialogs: DocumentPickers::new(app.clone()),
             opener: IntentOpener::new(app.clone()),
+            notifications: AndroidNotifications::new(app.clone()),
         }
     }
 
@@ -189,6 +193,13 @@ impl Platform for AndroidPlatform {
     /// Intents to view (`opener.rs`).
     fn opener(&self) -> Option<&dyn Opener> {
         Some(&self.opener)
+    }
+
+    /// The notification manager, through Inset's notification receiver (`notifications/`).
+    fn notifications(&self) -> Option<&dyn Notifications> {
+        self.notifications
+            .as_ref()
+            .map(|notifications| notifications as &dyn Notifications)
     }
 
     fn system_chrome(&self) -> Option<&dyn SystemChrome> {

@@ -24,14 +24,11 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::future::Future;
 use std::io::{Read, Seek};
 use std::os::fd::FromRawFd;
 use std::os::unix::fs::FileExt;
-use std::pin::Pin;
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError};
-use std::task::{Context, Poll, Waker};
+use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
 
 use android_activity::AndroidApp;
 use inset_embedder::{
@@ -45,6 +42,7 @@ use jni::sys::jint;
 use jni::{Env, EnvUnowned, NativeMethod, jni_sig, jni_str};
 
 use crate::activity::with_activity;
+use crate::answer::{Answer, Answered, answer};
 use crate::document_tree::DocumentFolder;
 
 /// `Activity.RESULT_OK`.
@@ -366,7 +364,7 @@ pub(crate) fn string(
 }
 
 /// The picks waiting for their results, by request code.
-static PENDING: LazyLock<Mutex<HashMap<jint, Answer>>> = LazyLock::new(Mutex::default);
+static PENDING: LazyLock<Mutex<HashMap<jint, Answer<Picked>>>> = LazyLock::new(Mutex::default);
 /// The request codes, counted from one.
 static NEXT_REQUEST: AtomicI32 = AtomicI32::new(1);
 
@@ -664,69 +662,14 @@ impl FileStream for DocumentStream {
 /// The URIs a picker answers, on their way from the activity's thread to the app's.
 type Picked = Result<Vec<String>, FileDialogError>;
 
-struct Shared {
-    answered: Option<Picked>,
-    waiter: Option<Waker>,
-}
+/// The app's side of a pick: the URIs, once the result came.
+type UrisPicked = Answered<Picked>;
 
-/// The activity's side of a pick's answer: given once, or a failure if dropped unused.
-struct Answer(Arc<Mutex<Shared>>);
-
-/// The app's side: the URIs, once the result came.
-struct UrisPicked(Arc<Mutex<Shared>>);
-
-fn one_shot() -> (Answer, UrisPicked) {
-    let shared = Arc::new(Mutex::new(Shared {
-        answered: None,
-        waiter: None,
-    }));
-    (Answer(Arc::clone(&shared)), UrisPicked(shared))
-}
-
-impl Answer {
-    fn give(self, picked: Picked) {
-        give(&self.0, picked);
-    }
-}
-
-impl Drop for Answer {
-    fn drop(&mut self) {
-        give(
-            &self.0,
-            Err(FileDialogError::Failed(
-                "the picker ended without an answer".to_owned(),
-            )),
-        );
-    }
-}
-
-fn give(shared: &Mutex<Shared>, picked: Picked) {
-    let waiter = {
-        let mut shared = locked(shared);
-        if shared.answered.is_some() {
-            return;
-        }
-        shared.answered = Some(picked);
-        shared.waiter.take()
-    };
-    if let Some(waiter) = waiter {
-        waiter.wake();
-    }
-}
-
-impl Future for UrisPicked {
-    type Output = Picked;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Picked> {
-        let mut shared = locked(&self.0);
-        match shared.answered.take() {
-            Some(picked) => Poll::Ready(picked),
-            None => {
-                shared.waiter = Some(cx.waker().clone());
-                Poll::Pending
-            }
-        }
-    }
+/// A pick's answer, a failure if the picker ended without one.
+fn one_shot() -> (Answer<Picked>, UrisPicked) {
+    answer(Err(FileDialogError::Failed(
+        "the picker ended without an answer".to_owned(),
+    )))
 }
 
 fn locked<T>(shared: &Mutex<T>) -> MutexGuard<'_, T> {

@@ -50,6 +50,7 @@ impl AndroidEmbedder {
         let platform = Rc::new(AndroidPlatform::new(Rc::clone(&view), &self.app));
         *platform.images.borrow_mut() = Some(view.image_context());
         *platform.image_loader.borrow_mut() = crate::images::loader(view.image_context());
+        crate::intents::hear(&self.app);
         let open_requests = OpenRequests::new(self.app.clone());
         let mut host = Host {
             open_requests,
@@ -85,7 +86,7 @@ struct Host<C> {
     destroyed: bool,
     /// The devices the framework has been told about.
     pointers: crate::input::Pointers,
-    /// What the system asks the app to open (`open_requests.rs`).
+    /// Opens what the intents that reach the app ask to open (`open_requests.rs`).
     open_requests: OpenRequests,
 }
 
@@ -358,15 +359,11 @@ impl<C: EmbedderClient> Host<C> {
         }
     }
 
-    /// What the framework is waiting for: the clipboard's change once the host cleared a copy of
-    /// the app's whose time came, a wake, when one was asked for or its timer wakeup has arrived,
-    /// and a frame at the display's refresh.
+    /// What the framework is waiting for: what the intents that reached the app ask of it, the
+    /// clipboard's change once the host cleared a copy of the app's whose time came, a wake, when
+    /// one was asked for or its timer wakeup has arrived, and a frame at the display's refresh.
     fn serve_requests(&mut self) {
-        if let Some(client) = &mut self.client
-            && let Some(request) = self.open_requests.take()
-        {
-            client.open_requested(request);
-        }
+        self.hand_on_intents();
         if self.platform.clipboard.clear_expired(Instant::now())
             && let Some(client) = &mut self.client
         {
@@ -379,6 +376,21 @@ impl<C: EmbedderClient> Host<C> {
             client.wake(elapsed);
         }
         self.pace();
+    }
+
+    /// Hands the client what the intents that arrived ask: the files and links to open, and the
+    /// taps on the app's notifications. They wait while there is no client yet.
+    fn hand_on_intents(&mut self) {
+        let Some(client) = &mut self.client else {
+            return;
+        };
+        let arrived = crate::intents::take();
+        if let Some(request) = self.open_requests.request(arrived.viewed) {
+            client.open_requested(request);
+        }
+        for activation in arrived.activations {
+            client.notification_activated(activation);
+        }
     }
 
     /// One refresh of the display: the frame the framework asked for, if it asked. The

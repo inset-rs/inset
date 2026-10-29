@@ -136,12 +136,13 @@ Signing happens when credentials are present, never by flag.
 
 ## Android
 
-The `.apk` is built without Gradle and without any Java of your own. The Java is Inset's two classes (`android/rs/inset/`), which `javac` and `d8` compile into the package's `classes.dex`:
+The `.apk` is built without Gradle and without any Java of your own. The Java is Inset's three classes (`android/rs/inset/`), which `javac` and `d8` compile into the package's `classes.dex`:
 
-- `rs.inset.InsetActivity`, the activity: Android's `NativeActivity`, which loads your library and calls the `android_main` that `#[inset::main]` emits, with the results of the activities your app starts and the intents that reach it while it runs handed on to it, as the file dialogs and being opened need.
+- `rs.inset.InsetActivity`, the activity: Android's `NativeActivity`, which loads your library and calls the `android_main` that `#[inset::main]` emits, with the results of the activities your app starts, the intents that reach it while it runs and the user's answers to the permissions it asks for handed on to it, as the file dialogs, being opened and notifications need.
 - `rs.inset.InsetFileProvider`, a content provider at `<package>.inset.files`, not exported, through which the opener shares a file of the app's with the app that opens it.
+- `rs.inset.InsetNotificationReceiver`, a broadcast receiver, not exported, which builds and shows the app's notifications, and shows a scheduled one when its alarm goes off, whether or not the app runs.
 
-The manifest's `<queries>` names viewing `http`, `https` and `mailto` links, so the opener can say whether some app takes one; the application's meta-data `rs.inset.queried_schemes` lists the same schemes for it.
+The manifest's `<queries>` names viewing `http`, `https` and `mailto` links, so the opener can say whether some app takes one; the application's meta-data `rs.inset.queried_schemes` lists the same schemes for it. It asks for `POST_NOTIFICATIONS`, which Android 13 asks the user for on the app's first notification, and `SCHEDULE_EXACT_ALARM`, which Android 14 leaves to the user to grant under the app's Alarms & reminders setting: without it a scheduled notification may come late. A scheduled notification does not survive a restart of the device.
 
 You need:
 

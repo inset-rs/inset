@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use crate::{
     AppExitReply, AppExitResponse, AppLifecycleState, ClipboardEvent, DropData, EditCommand, Frame,
-    KeyData, MenuId, OpenRequest, PointerDataPacket, TextEditingValue, TextInputAction,
-    TrayIconEvent, TrayIconId, ViewFocusEvent, ViewId,
+    KeyData, MenuId, NotificationActivation, OpenRequest, PointerDataPacket, TextEditingValue,
+    TextInputAction, TrayIconEvent, TrayIconId, ViewFocusEvent, ViewId,
 };
 
 /// Complete frames and typed view lifecycle notifications.
@@ -92,6 +92,13 @@ pub trait EmbedderClient {
     /// it.
     fn open_requested(&mut self, request: OpenRequest) {
         let _ = request;
+    }
+
+    /// The user clicked a notification the app posted, or one of its actions, or replied: while
+    /// the app runs, or to start it, when the activation comes once the client exists. No dart:ui
+    /// hook: Flutter's apps hear these through plugins. The default drops it.
+    fn notification_activated(&mut self, activation: NotificationActivation) {
+        let _ = activation;
     }
 
     /// Flutter `PlatformDispatcher.onKeyData`.

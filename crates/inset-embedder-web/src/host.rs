@@ -290,6 +290,7 @@ fn bind_events<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
     bind_resize(host);
     bind_brightness(host);
     bind_launches(host);
+    bind_notification_clicks(host);
 }
 
 fn bind_pointer<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
@@ -507,6 +508,17 @@ fn bind_launches<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
     let listener = Rc::clone(host);
     launch_queue::consume(&host.window, move |request| {
         listener.client.borrow_mut().open_requested(request);
+    });
+}
+
+/// The clicks on the app's notifications, while the page runs (`notifications.rs`).
+fn bind_notification_clicks<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
+    let listener = Rc::clone(host);
+    host.platform.hear_notification_clicks(move |activation| {
+        listener
+            .client
+            .borrow_mut()
+            .notification_activated(activation);
     });
 }
 

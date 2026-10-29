@@ -5,8 +5,10 @@
 //! theirs in the app's own surfaces, so those answer none and the app draws its own.
 
 mod file_dialogs;
+mod notifications;
 mod opener;
 mod portal;
+mod session_bus;
 mod status_notifier_items;
 
 use std::rc::Rc;

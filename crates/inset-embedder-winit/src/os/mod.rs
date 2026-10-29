@@ -12,9 +12,9 @@
 //! was minimized, and the requests it makes of the application and what it says changed, among
 //! others (`macos`); iOS reports its window's size and safe area differently, and has its
 //! pasteboard (`ios`); Windows tells the clipboard's changes by its sequence number, and has a
-//! menu at a point and icons in the notification area (`windows`); Linux has the desktop's tray
-//! (`linux`); every other system winit covers by itself (`winit_only`). What macOS and iOS share
-//! is in `apple`.
+//! menu at a point, icons in the notification area and toasts (`windows`); Linux has the desktop's
+//! tray and its notification server (`linux`); every other system winit covers by itself
+//! (`winit_only`). What macOS and iOS share, their notification center among it, is in `apple`.
 //!
 //! A system's module is compiled for its own target only, so a change to a trait is checked
 //! against that system's answers only when building for it: build every target a change
@@ -45,9 +45,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    Clipboard, Compositor, DockMenu, FileDialogs, KeyData, MenuBar, MenuEntry, MenuId, Offset,
-    Opener, Rect, Screen, ScreenId, SurfacePlacement, TargetPlatform, TrayIcons, ViewId,
-    ViewPadding, VsyncWaiter, WindowConfig,
+    Clipboard, Compositor, DockMenu, FileDialogs, KeyData, MenuBar, MenuEntry, MenuId,
+    Notifications, Offset, Opener, Rect, Screen, ScreenId, SurfacePlacement, TargetPlatform,
+    TrayIcons, ViewId, ViewPadding, VsyncWaiter, WindowConfig,
 };
 use valo_codec::Decoder;
 use winit::event_loop::{ActiveEventLoop, EventLoopBuilder, EventLoopProxy};
@@ -59,6 +59,7 @@ use crate::file_dialogs::ParentWindows;
 use crate::lifecycle::LifecycleNotice;
 use crate::main_loop::MainLoopEvent;
 use crate::menus::MenuEvents;
+use crate::notifications::NotificationActivations;
 use crate::screens::{monitor_number, monitor_screens};
 use crate::system_changes::SystemChange;
 use crate::system_requests::SystemRequest;
@@ -107,6 +108,7 @@ pub(crate) trait OperatingSystem:
     + NativeMenus
     + SystemFileDialogs
     + SystemOpener
+    + SystemNotifications
     + SystemClipboard
     + ImageDecoding
     + WorkQueue
@@ -369,6 +371,22 @@ pub(crate) trait NativeMenus {
 pub(crate) trait SystemOpener {
     /// The system's opener, or `None` where it has none.
     fn opener(_windows: ParentWindows) -> Option<Rc<dyn Opener>> {
+        None
+    }
+}
+
+/// The system's notifications (`os/*/notifications`), their clicks sent to the main loop
+/// (`notifications.rs`).
+pub(crate) trait SystemNotifications {
+    /// Starts hearing the clicks on the app's notifications before the loop runs, where the system
+    /// reports the click that launched the app only to a listener set by then: Apple's, whose
+    /// center wants its delegate before the launch finishes, and Windows', whose toast activator
+    /// the app registers once it starts.
+    fn hear_notification_activations(_activations: NotificationActivations) {}
+
+    /// The system's notifications, each click sent to `activations`, or `None` where the app has
+    /// none.
+    fn notifications(_activations: NotificationActivations) -> Option<Rc<dyn Notifications>> {
         None
     }
 }

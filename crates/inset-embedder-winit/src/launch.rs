@@ -8,7 +8,10 @@ use winit::event_loop::{EventLoop, EventLoopProxy};
 
 use crate::images::CreateImageLoader;
 use crate::main_loop::{MainLoop, MainLoopEvent};
-use crate::os::{ApplicationLifecycle, NativeMenus, SystemChanges, SystemRequests, ThisOs};
+use crate::notifications::NotificationActivations;
+use crate::os::{
+    ApplicationLifecycle, NativeMenus, SystemChanges, SystemNotifications, SystemRequests, ThisOs,
+};
 use crate::system_requests::SystemRequest;
 
 /// What starts the app, on the platform it is handed, and answers the client the embedder drives.
@@ -51,4 +54,5 @@ fn forward_system_messages(proxy: &EventLoopProxy<MainLoopEvent>) {
     ThisOs::send_system_changes(Box::new(move |change| {
         let _ = changes.send_event(MainLoopEvent::SystemChange(change));
     }));
+    ThisOs::hear_notification_activations(NotificationActivations::new(proxy.clone()));
 }

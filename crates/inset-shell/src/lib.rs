@@ -12,9 +12,9 @@ use std::time::Duration;
 
 use inset_embedder::{
     AppExitReply, AppLifecycleState, ClipboardEvent, DropData, EditCommand, EmbedderClient, Frame,
-    Instant, KeyData, MenuId, OpenRequest, PlatformRef, PointerDataPacket, RequestId,
-    TextEditingValue, TextInputAction, TrayIconEvent, TrayIconId, ViewError, ViewFocusEvent,
-    ViewId,
+    Instant, KeyData, MenuId, NotificationActivation, OpenRequest, PlatformRef, PointerDataPacket,
+    RequestId, TextEditingValue, TextInputAction, TrayIconEvent, TrayIconId, ViewError,
+    ViewFocusEvent, ViewId,
 };
 use inset_foundation::{App, AppCell};
 use inset_gestures::GestureBinding;
@@ -208,6 +208,10 @@ impl EmbedderClient for Shell {
 
     fn open_requested(&mut self, request: OpenRequest) {
         self.push(|app| app.open_requested(request));
+    }
+
+    fn notification_activated(&mut self, activation: NotificationActivation) {
+        self.push(|app| app.notification_activated(activation));
     }
 
     fn pointer_data_packet(&mut self, packet: PointerDataPacket) {
@@ -432,6 +436,35 @@ mod tests {
             *seen.borrow(),
             ["https://example.org/launch", "https://example.org/later"],
             "the launch's request waited for the handler"
+        );
+    }
+
+    #[test]
+    fn a_notification_click_waits_for_the_apps_handler() {
+        use std::cell::RefCell;
+
+        use inset_embedder::NotificationActivation;
+
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let mut shell = Shell::new(Rc::new(platform_with_a_view()), |_app: &mut App| {});
+        let click = |action: Option<&str>| NotificationActivation {
+            id: "message-7".to_owned(),
+            action: action.map(str::to_owned),
+            reply: None,
+        };
+        shell.notification_activated(click(None));
+        let slot = Rc::clone(&seen);
+        shell
+            .app
+            .borrow_mut()
+            .set_notification_activated_handler(Some(Rc::new(move |_app, activation| {
+                slot.borrow_mut().push(activation)
+            })));
+        shell.notification_activated(click(Some("later")));
+        assert_eq!(
+            *seen.borrow(),
+            [click(None), click(Some("later"))],
+            "the click that started the app waited for the handler"
         );
     }
 

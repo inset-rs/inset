@@ -1,9 +1,9 @@
 //! The embedder capability the framework holds: [`Platform`], whose answers are each handed to
 //! the module that owns them — the clipboard (`clipboard.rs`), native popup menus
 //! (`popup_menus.rs`), the mouse cursor (`mouse_cursor.rs`), quitting (`app_exit.rs`), images
-//! (`images.rs`), files the system asks the app to open (`system_requests.rs`), the screens
-//! (`screens.rs`), the user's languages (`locales.rs`) — and what only macOS offers beyond
-//! `Platform` (`macos.rs`).
+//! (`images.rs`), files the system asks the app to open (`system_requests.rs`), the system's
+//! notifications (`os/*`, their clicks through `notifications.rs`), the screens (`screens.rs`), the
+//! user's languages (`locales.rs`) — and what only macOS offers beyond `Platform` (`macos.rs`).
 //!
 //! No call here calls the client. What needs the event loop is sent to it as a request, and the
 //! rest acts at once: `main_loop/` says which is which.
@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 
 use inset_embedder::{
     AppExit, Brightness, Clipboard, Compositor, Dispatcher, DockMenu, FileDialogs, FontSource,
-    ImageCodecFuture, Locale, MenuBar, MouseCursor, Opener, Platform, PopupMenus, RequestId,
-    Screens, SystemFontSource, TargetPlatform, TrayIcons, ViewError, ViewFocusDirection,
+    ImageCodecFuture, Locale, MenuBar, MouseCursor, Notifications, Opener, Platform, PopupMenus,
+    RequestId, Screens, SystemFontSource, TargetPlatform, TrayIcons, ViewError, ViewFocusDirection,
     ViewFocusEvent, ViewFocusState, ViewId, ViewRef, ViewRequest, VsyncWaiter,
 };
 use winit::event_loop::EventLoopProxy;
@@ -28,9 +28,10 @@ use crate::file_dialogs::ParentWindows;
 use crate::macos::MacOs;
 use crate::main_loop::MainLoopEvent;
 use crate::menus::MenuEvents;
+use crate::notifications::NotificationActivations;
 use crate::os::{
     FramePresentation, NativeComposition, NativeMenus, OperatingSystem, SystemClipboard,
-    SystemFileDialogs, SystemOpener, ThisOs, ThisOsClipboard,
+    SystemFileDialogs, SystemNotifications, SystemOpener, ThisOs, ThisOsClipboard,
 };
 use crate::popup_menus::NativePopupMenus;
 use crate::state::EmbedderState;
@@ -71,6 +72,8 @@ pub struct WinitPlatform {
     file_dialogs: Option<Rc<dyn FileDialogs>>,
     /// The system's opener, where it has one.
     opener: Option<Rc<dyn Opener>>,
+    /// The system's notifications, where the app has them (`os/*/notifications`).
+    notifications: Option<Rc<dyn Notifications>>,
     /// What only macOS offers; `None` elsewhere.
     macos: Option<MacOs>,
 }
@@ -91,6 +94,7 @@ impl WinitPlatform {
             macos: cfg!(target_os = "macos").then(|| MacOs::new(Rc::clone(&state))),
             file_dialogs: ThisOs::file_dialogs(ParentWindows::new(Rc::clone(&state))),
             opener: ThisOs::opener(ParentWindows::new(Rc::clone(&state))),
+            notifications: ThisOs::notifications(NotificationActivations::new(proxy.clone())),
             state,
             compositor: ThisOs::compositor(),
             vsync_waiter: ThisOs::vsync_waiter(&proxy),
@@ -290,5 +294,10 @@ impl Platform for WinitPlatform {
 
     fn opener(&self) -> Option<&dyn Opener> {
         self.opener.as_deref()
+    }
+
+    /// The system's notifications (`os/*/notifications`).
+    fn notifications(&self) -> Option<&dyn Notifications> {
+        self.notifications.as_deref()
     }
 }

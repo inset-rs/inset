@@ -24,6 +24,10 @@ No Flutter counterpart. Dart has no type — the engine owns the isolate.
   Reason: platform — the app's handler is set on the `App`, which the shell owns.
   Affect: a request that comes before the app sets its handler waits there for it.
 
+- Change: `notification_activated` hands the click to `App::notification_activated` in a turn of its own.
+  Reason: platform — the app's handler is set on the `App`, which the shell owns.
+  Affect: a click that comes before the app sets its handler waits there for it.
+
 - Change: `system_fonts_changed` notifies `PaintingBinding.systemFonts` in a turn of its own.
   Reason: platform — Dart's engine posts `fontsChange` on a system channel; here the host calls the client.
   Affect: paragraphs listening to `systemFonts` relayout after the host loads faces.

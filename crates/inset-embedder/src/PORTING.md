@@ -286,6 +286,24 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the systems tell no app from another failure, and Windows' and Linux's ask a service that answers later.
   Affect: an app can tell the user that nothing opens a kind of link or file.
 
+## notifications.rs → the `flutter_local_notifications` package's `show`, `zonedSchedule`, `cancel`, `requestPermissions` and `onDidReceiveNotificationResponse`
+
+- Change: notifications are a host capability, `Platform::notifications`, and a notification is a value posted under a string id, which a later post under the same id replaces, where the plugin shows one under an int id over method channels.
+  Reason: platform — there are no plugins, and each system's own model is a notification under a name of the app's (a request's identifier on Apple's, Android's tag, the web's tag, a Windows toast's tag, Linux's `replaces_id`), which a string reaches on every one.
+  Affect: an app names its notifications by strings, and a host where the system would not show the app's answers `None`, as macOS does for a program outside an application bundle.
+
+- Change: a typed reply (`replies`), delivery at a later time (`scheduling`) and the user's permission (`permission`) are capabilities, each `None` where the system lacks it, and a reply action is made only through `NotificationReplies::reply_action`, where the plugin offers each everywhere and fails where the system has none.
+  Reason: platform — Linux and the web hold no notification for later, Linux takes a reply only where the server advertises KDE's `inline-reply` and the web none without a service worker, and Linux keeps no permission for an app.
+  Affect: an app offers a reply field or a reminder only where `replies()` or `scheduling()` answers, and has a reply action only there.
+
+- Change: `post` and `schedule` ask the user with the system's own question where they were never asked, and answer `NotificationError::Denied` without asking where they said no, where the plugin leaves asking to `requestPermissions`; `NotificationPermission` answers the state and asks ahead of a post.
+  Reason: platform — every system that asks keeps the answer and drops or refuses an app's notification without it, so a host that did not ask would post into nothing.
+  Affect: an app posts without asking first, and learns the user's no from the post's answer.
+
+- Change: a click on a notification, one of its actions or a reply reaches the app as `EmbedderClient::notification_activated(NotificationActivation { id, action, reply })`, the click that started the app included, where the plugin hands a running app's to `onDidReceiveNotificationResponse` and the launch's to `getNotificationAppLaunchDetails`.
+  Reason: platform — there are no plugins, and the client is the only listener; the launch's click arrives once the client exists, as a launch's open request does.
+  Affect: an app hears every click in one place, by the notification's id and the action's, the launch's waiting for its handler.
+
 ## file_dialogs.rs → the `file_selector` package's `openFile`, `openFiles`, `getDirectoryPath`, `getSaveLocation`, and cross_file's `XFile`
 
 - Change: the system's file dialogs are a host capability, `Platform::file_dialogs`, with one function a kind, where Flutter reaches them through the `file_selector` plugin over method channels.
