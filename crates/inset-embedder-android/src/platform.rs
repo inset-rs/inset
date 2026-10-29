@@ -26,7 +26,7 @@ use crate::clipboard::AndroidClipboard;
 use crate::file_dialogs::DocumentPickers;
 use crate::gpu::Gpu;
 use crate::host_window::AndroidWindow;
-use crate::notifications::AndroidNotifications;
+use crate::notifications::{AndroidNotifications, NotificationChannelGroups};
 use crate::opener::IntentOpener;
 use crate::shortcuts::PinnedShortcuts;
 use crate::task::{TaskDescriptions, ViewRequests};
@@ -36,7 +36,8 @@ use crate::view::AndroidView;
 ///
 /// What only Android has is reached by downcasting the platform
 /// (`platform.downcast_ref::<AndroidPlatform>()`): the app's [pinned
-/// shortcuts](AndroidPlatform::pinned_shortcuts).
+/// shortcuts](AndroidPlatform::pinned_shortcuts) and the [sections of its
+/// notifications](AndroidPlatform::notification_channel_groups).
 pub struct AndroidPlatform {
     /// The activities attached to the app, each a view.
     pub(crate) activities: Activities,
@@ -65,6 +66,7 @@ pub struct AndroidPlatform {
     opener: IntentOpener,
     /// The system's notifications, where the activities are Inset's.
     notifications: Option<AndroidNotifications>,
+    notification_channel_groups: NotificationChannelGroups,
     pinned_shortcuts: PinnedShortcuts,
 }
 
@@ -73,6 +75,7 @@ impl AndroidPlatform {
     pub(crate) fn new(looper: ForeignLooper) -> AndroidPlatform {
         let activities = Activities::default();
         let descriptions = TaskDescriptions::new(activities.clone());
+        let notifications = AndroidNotifications::new(activities.clone());
         AndroidPlatform {
             windows: RefCell::default(),
             requests: ViewRequests::new(),
@@ -92,7 +95,8 @@ impl AndroidPlatform {
             clipboard: AndroidClipboard::new(),
             file_dialogs: DocumentPickers::new(activities.clone()),
             opener: IntentOpener::new(activities.clone()),
-            notifications: AndroidNotifications::new(activities.clone()),
+            notification_channel_groups: NotificationChannelGroups::new(notifications.as_ref()),
+            notifications,
             pinned_shortcuts: PinnedShortcuts::new(),
             activities,
             descriptions,
@@ -180,6 +184,12 @@ impl AndroidPlatform {
 
     pub(crate) fn elapsed(&self) -> Duration {
         Instant::now().saturating_duration_since(self.origin)
+    }
+
+    /// The sections of the app's notifications, each its own channel group with its own switch in
+    /// the app's notification settings.
+    pub fn notification_channel_groups(&self) -> &NotificationChannelGroups {
+        &self.notification_channel_groups
     }
 
     /// The app's shortcuts on the home screen, each opening one view.

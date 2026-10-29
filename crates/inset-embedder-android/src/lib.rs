@@ -82,6 +82,8 @@ pub use android_activity::AndroidApp;
 #[cfg(target_os = "android")]
 pub use host::AndroidEmbedder;
 #[cfg(target_os = "android")]
+pub use notifications::NotificationChannelGroups;
+#[cfg(target_os = "android")]
 pub use platform::AndroidPlatform;
 #[cfg(target_os = "android")]
 pub use shortcuts::{PinError, PinFuture, PinnedShortcut, PinnedShortcuts};

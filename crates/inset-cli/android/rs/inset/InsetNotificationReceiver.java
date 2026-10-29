@@ -3,6 +3,7 @@ package rs.inset;
 import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
+import android.app.NotificationChannelGroup;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.RemoteInput;
@@ -18,9 +19,11 @@ import android.os.Bundle;
 /**
  * Inset's notifications, as the app's native code and the system's alarms reach them. A
  * notification arrives as a {@link Bundle} the native code fills, under the keys below: its id,
- * title, body, image, actions and whether it is silent. It is built here and shown under its id as
- * the tag, so a later one under the same id replaces it, on one of two channels of the app's: one
- * that sounds and one that does not. A tap on it, on one of its buttons, or a reply typed into it
+ * title, body, image, actions, whether it is silent, and the section it is posted in, if any. It
+ * is built here and shown under its id as the tag, so a later one under the same id replaces it,
+ * whatever its section, on one of two channels: one that sounds and one that does not. The app has
+ * two of its own, and each section, a channel group, has two of its own, so that the user turns a
+ * section's notifications on and off apart from the rest. A tap on it, on one of its buttons, or a reply typed into it
  * starts Inset's activity with an intent of {@link #ACTIVATED}, which names the notification and
  * the action and carries the reply, and which the native code reads.
  *
@@ -47,6 +50,8 @@ public final class InsetNotificationReceiver extends BroadcastReceiver {
     private static final String TITLE = "title";
     private static final String BODY = "body";
     private static final String SILENT = "silent";
+    /** The section's id, a channel group's; none for the app's own channels. */
+    private static final String SECTION = "section";
     /** The image's pixels as non-premultiplied ARGB colours, row by row. */
     private static final String PIXELS = "pixels";
     private static final String WIDTH = "width";
@@ -68,6 +73,8 @@ public final class InsetNotificationReceiver extends BroadcastReceiver {
     private static final int NUMBER = 1;
     private static final String CHANNEL = "rs.inset.notifications";
     private static final String SILENT_CHANNEL = "rs.inset.notifications.silent";
+    /** Between a channel's id and its section's in a section's channel: no channel id of Inset's has it. */
+    private static final String IN_SECTION = ":";
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -105,6 +112,22 @@ public final class InsetNotificationReceiver extends BroadcastReceiver {
         cancelAlarm(context, id);
     }
 
+    /**
+     * Makes the section {@code id}, a channel group named {@code name}, with its two channels, or
+     * renames it; the user's settings for it and its channels stay.
+     */
+    public static void setSection(Context context, String id, String name) {
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        manager.createNotificationChannelGroup(new NotificationChannelGroup(id, name));
+        channel(context, false, id);
+        channel(context, true, id);
+    }
+
+    /** Takes the section {@code id} away, with its channels and their notifications. */
+    public static void removeSection(Context context, String id) {
+        context.getSystemService(NotificationManager.class).deleteNotificationChannelGroup(id);
+    }
+
     /** Takes away the notification shown under {@code id}, as one of its actions answers it. */
     public static void dismiss(Context context, String id) {
         context.getSystemService(NotificationManager.class).cancel(id, NUMBER);
@@ -118,7 +141,12 @@ public final class InsetNotificationReceiver extends BroadcastReceiver {
     private static Notification built(Context context, Bundle notification) {
         String id = notification.getString(ID);
         Notification.Builder builder =
-                new Notification.Builder(context, channel(context, notification.getBoolean(SILENT)))
+                new Notification.Builder(
+                                context,
+                                channel(
+                                        context,
+                                        notification.getBoolean(SILENT),
+                                        notification.getString(SECTION)))
                         .setSmallIcon(smallIcon(context))
                         .setContentTitle(notification.getString(TITLE))
                         .setAutoCancel(true)
@@ -211,25 +239,41 @@ public final class InsetNotificationReceiver extends BroadcastReceiver {
     }
 
     /**
-     * The channel the notification is shown on, made the first time: both pop up, as the other
-     * systems' notifications do, and the silent one makes no sound and does not vibrate. The user
-     * may change either in the app's settings.
+     * The channel the notification is shown on, the app's or {@code section}'s, made the first
+     * time: both pop up, as the other systems' notifications do, and the silent one makes no sound
+     * and does not vibrate. A section posted in before it was set is made, named after its id. The
+     * user may change either channel in the app's settings, which making it again keeps.
      */
-    private static String channel(Context context, boolean silent) {
+    private static String channel(Context context, boolean silent, String section) {
         NotificationManager manager = context.getSystemService(NotificationManager.class);
-        if (!silent) {
-            manager.createNotificationChannel(
-                    new NotificationChannel(
-                            CHANNEL, "Notifications", NotificationManager.IMPORTANCE_HIGH));
-            return CHANNEL;
+        String id = silent ? SILENT_CHANNEL : CHANNEL;
+        if (section != null) {
+            id = id + IN_SECTION + section;
+            if (!hasGroup(manager, section)) {
+                manager.createNotificationChannelGroup(new NotificationChannelGroup(section, section));
+            }
         }
-        NotificationChannel quiet =
+        NotificationChannel channel =
                 new NotificationChannel(
-                        SILENT_CHANNEL, "Silent notifications", NotificationManager.IMPORTANCE_HIGH);
-        quiet.setSound(null, null);
-        quiet.enableVibration(false);
-        manager.createNotificationChannel(quiet);
-        return SILENT_CHANNEL;
+                        id,
+                        silent ? "Silent notifications" : "Notifications",
+                        NotificationManager.IMPORTANCE_HIGH);
+        if (silent) {
+            channel.setSound(null, null);
+            channel.enableVibration(false);
+        }
+        channel.setGroup(section);
+        manager.createNotificationChannel(channel);
+        return id;
+    }
+
+    private static boolean hasGroup(NotificationManager manager, String id) {
+        for (NotificationChannelGroup group : manager.getNotificationChannelGroups()) {
+            if (group.getId().equals(id)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The app's icon, or the system's default app icon for an app without one. */

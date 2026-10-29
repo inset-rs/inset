@@ -15,11 +15,17 @@
 //! package without Inset's activity or the receiver, the app has no notifications: nothing would
 //! hear a tap.
 //!
+//! A section of the app's notifications is a channel group of its own (`channel_groups`), with its
+//! own two channels, which the user turns on and off apart from the rest; the ids are the app's
+//! across sections, so a later notification under an id replaces the one there in any section.
+//!
 //! The bundle's keys, the activation's action and extras and the reply's key are the receiver's
 //! own: a change to one here is a change to the receiver.
 
+mod channel_groups;
 mod permission;
 
+use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
 use inset_embedder::{
@@ -30,6 +36,7 @@ use jni::objects::{JClass, JObject, JObjectArray, JValue};
 use jni::sys::jint;
 use jni::{Env, jni_sig, jni_str};
 
+pub use self::channel_groups::NotificationChannelGroups;
 use self::permission::Permission;
 use crate::activity::{Activities, clear_exception, package_class, with_application};
 use crate::bitmap::argb_colors;
@@ -45,12 +52,17 @@ const EXTRA_ACTION: &str = "rs.inset.notification.ACTION";
 /// The key of a reply among the reply field's results.
 const REPLY: &str = "rs.inset.notification.REPLY";
 
-/// The app's notifications, where the activities and the package are Inset's.
+/// The app's notifications, on its own channels or a section's, where the activities and the
+/// package are Inset's.
 pub(crate) struct AndroidNotifications {
-    permission: Permission,
+    /// The app's one permission, which every section shares.
+    permission: Rc<Permission>,
+    /// The channel group the notifications are posted in; `None` for the app's own channels.
+    section: Option<String>,
 }
 
 impl AndroidNotifications {
+    /// The app's notifications, on its own channels.
     pub(crate) fn new(activities: Activities) -> Option<AndroidNotifications> {
         let permission = Permission::new(activities)?;
         let has_receiver =
@@ -59,7 +71,10 @@ impl AndroidNotifications {
             clear_exception();
             return None;
         }
-        Some(AndroidNotifications { permission })
+        Some(AndroidNotifications {
+            permission: Rc::new(permission),
+            section: None,
+        })
     }
 
     /// Hands `notification` to the receiver to show now, or at `at`, in milliseconds since the
@@ -67,7 +82,7 @@ impl AndroidNotifications {
     fn hand_over(&self, notification: &Notification, at: Option<i64>) -> PostFuture {
         let handed = self.permission.allowed().and_then(|()| {
             call_receiver(|env, context, receiver| {
-                let bundle = bundle(env, notification)?;
+                let bundle = bundle(env, notification, self.section.as_deref())?;
                 match at {
                     None => env.call_static_method(
                         receiver,
@@ -114,9 +129,9 @@ impl Notifications for AndroidNotifications {
         }
     }
 
-    /// The user's permission to notify (`permission`).
+    /// The user's permission to notify (`permission`), the app's whatever the section.
     fn permission(&self) -> Option<&dyn NotificationPermission> {
-        Some(&self.permission)
+        Some(&*self.permission)
     }
 
     /// A reply field, the platform's `RemoteInput`.
@@ -171,13 +186,15 @@ pub(crate) fn activation(
     Ok(Some(NotificationActivation { id, action, reply }))
 }
 
-/// The notification as the receiver reads it: the keys are the receiver's.
+/// The notification, posted in `section`, as the receiver reads it: the keys are the receiver's.
 fn bundle<'local>(
     env: &mut Env<'local>,
     notification: &Notification,
+    section: Option<&str>,
 ) -> jni::errors::Result<JObject<'local>> {
     let bundle = env.new_object(jni_str!("android/os/Bundle"), jni_sig!("()V"), &[])?;
     put_string(env, &bundle, "id", Some(&notification.id))?;
+    put_string(env, &bundle, "section", section)?;
     put_string(env, &bundle, "title", Some(&notification.title))?;
     put_string(env, &bundle, "body", notification.body.as_deref())?;
     let silent = env.new_string("silent")?;
