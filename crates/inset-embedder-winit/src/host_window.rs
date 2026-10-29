@@ -7,10 +7,10 @@ use std::rc::Rc;
 use std::sync::Weak;
 use std::time::Duration;
 
-use inset_embedder::{HostWindow, RawWindowHandle, Rect, ViewRef};
+use inset_embedder::{HostWindow, IconImage, RawWindowHandle, Rect, ViewRef};
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::raw_window_handle::HasWindowHandle;
-use winit::window::{Window, WindowId};
+use winit::window::{Icon, Window, WindowId};
 
 use crate::app_requests::{AppRequest, AppRequests};
 use crate::os::{ThisOs, WindowMotion, WindowVisibility};
@@ -118,6 +118,20 @@ impl HostWindow for WinitWindow {
         if let Some(window) = self.window.upgrade() {
             window.set_title(title);
         }
+    }
+
+    /// winit's: the title bar's icon on Windows and X11, nothing on macOS and Wayland, whose
+    /// windows have none of their own.
+    fn set_icon(&self, icon: Option<IconImage>) {
+        let Some(window) = self.window.upgrade() else {
+            return;
+        };
+        let icon = icon.and_then(|icon| {
+            Icon::from_rgba(icon.rgba.to_vec(), icon.width, icon.height)
+                .inspect_err(|error| eprintln!("inset: the window's icon was refused: {error}"))
+                .ok()
+        });
+        window.set_window_icon(icon);
     }
 
     fn show(&self) {

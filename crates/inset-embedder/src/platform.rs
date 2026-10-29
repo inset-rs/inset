@@ -533,8 +533,9 @@ pub trait Platform: Any {
     /// Looks up one of the app's views.
     fn view(&self, id: ViewId) -> Option<ViewRef>;
 
-    /// Asks for a view. A desktop makes a window for it; a platform that gives the app its
-    /// views and makes none, a phone or an embedder, answers [`ViewError::Unsupported`](crate::ViewError::Unsupported).
+    /// Asks for a view. A desktop makes a window for it, and Android a task of its own; a
+    /// platform that gives the app its views and makes none, iOS or an embedder, answers
+    /// [`ViewError::Unsupported`](crate::ViewError::Unsupported).
     /// The view arrives later, through `EmbedderClient::view_added`, carrying the id answered
     /// here; a request that fails on the way is reported through
     /// `EmbedderClient::view_request_failed`.
