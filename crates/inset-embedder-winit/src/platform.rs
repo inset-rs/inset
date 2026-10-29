@@ -116,9 +116,9 @@ impl WinitPlatform {
 
     /// The renderer's image context, on the device every window draws with, which this makes if
     /// nothing has needed it yet: an image made through it, from pixels or from a texture
-    /// imported from a buffer only this system has, is one `RawImage` shows. Always `Some`.
-    pub fn image_context(&self) -> Option<valo::ImageContext> {
-        Some(self.state.images().store())
+    /// imported from a buffer only this system has, is one `RawImage` shows.
+    pub fn image_context(&self) -> valo::ImageContext {
+        self.state.images().store()
     }
 
     /// What only macOS offers an app: hearing a reopen, a window that slides in, and hiding the
@@ -257,11 +257,7 @@ impl Platform for WinitPlatform {
     }
 
     fn import_pixels(&self, pixels: valo::PixelBuffer) -> Option<valo::Image> {
-        self.state
-            .images()
-            .store()
-            .upload_pixels(pixels, false)
-            .ok()
+        self.image_context().upload_pixels(pixels, false).ok()
     }
 
     /// The system's clipboard: on macOS its pasteboard, elsewhere its plain text
