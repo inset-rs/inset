@@ -42,7 +42,7 @@ thread_local! {
 }
 
 /// `window` is one of the app's own, whose keys go to the framework before the menu bar.
-pub(in crate::os::macos) fn app_window_opened(window: &Window) {
+pub(in crate::os::macos) fn app_window_opened(window: &dyn Window) {
     let Some(window) = ns_window(window) else {
         return;
     };

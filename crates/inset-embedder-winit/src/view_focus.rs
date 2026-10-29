@@ -7,7 +7,7 @@ use winit::window::Window;
 /// Focuses `window`, the view's, if `request` asks for the focus and it does not have it; a
 /// request to give the focus up is ignored, as Flutter's macOS embedder ignores it. The system's
 /// focus event reports the result.
-pub(crate) fn focus_window_if_asked(request: &ViewFocusEvent, window: &Window) {
+pub(crate) fn focus_window_if_asked(request: &ViewFocusEvent, window: &dyn Window) {
     if request.state == ViewFocusState::Focused && !window.has_focus() {
         window.focus_window();
     }

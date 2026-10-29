@@ -11,24 +11,10 @@ use inset_embedder::{
 use winit::event::{MouseButton, MouseScrollDelta};
 use winit::window::WindowId;
 
-/// Flutter `kFlutterPointerButtonMousePrimary` (`embedder.h`).
-const PRIMARY_MOUSE_BUTTON: i64 = 1 << 0;
-/// Flutter `kFlutterPointerButtonMouseSecondary`.
-const SECONDARY_MOUSE_BUTTON: i64 = 1 << 1;
-/// Flutter `kFlutterPointerButtonMouseMiddle`.
-const MIDDLE_MOUSE_BUTTON: i64 = 1 << 2;
-/// Flutter `kFlutterPointerButtonMouseBack`.
-const BACK_MOUSE_BUTTON: i64 = 1 << 3;
-/// Flutter `kFlutterPointerButtonMouseForward`.
-const FORWARD_MOUSE_BUTTON: i64 = 1 << 4;
-/// The buttons the system can be asked about, for reconciling with what it reports.
-const KNOWN_BUTTONS: [i64; 5] = [
-    PRIMARY_MOUSE_BUTTON,
-    SECONDARY_MOUSE_BUTTON,
-    MIDDLE_MOUSE_BUTTON,
-    BACK_MOUSE_BUTTON,
-    FORWARD_MOUSE_BUTTON,
-];
+/// The buttons the system can be asked about, for reconciling with what it reports: Flutter's
+/// `kFlutterPointerButtonMousePrimary`, `Secondary`, `Middle`, `Back` and `Forward`
+/// (`embedder.h`).
+const KNOWN_BUTTONS: [i64; 5] = [1 << 0, 1 << 1, 1 << 2, 1 << 3, 1 << 4];
 
 /// The numbers Flutter's engine gives pointer data as it passes through: an `embedder_id`
 /// per datum, and a `pointerIdentifier` per press, each unique across every device the embedder
@@ -93,19 +79,22 @@ impl Pointer {
         self.window
     }
 
-    /// The mouse came into `window`, at `position` where the system can say where it is now:
-    /// the framework is told it is present, before anything else about it.
+    /// Where the mouse was last seen, in its window's physical pixels.
+    pub(crate) fn position(&self) -> [f64; 2] {
+        self.position
+    }
+
+    /// The mouse came into `window` at `position`: the framework is told it is present, before
+    /// anything else about it.
     pub(crate) fn entered(
         &mut self,
         window: WindowId,
-        position: Option<[f64; 2]>,
+        position: [f64; 2],
         stamp: PointerStamp,
         ids: &mut PointerIds,
     ) -> Option<PointerDataPacket> {
         self.window = Some(window);
-        if let Some(position) = position {
-            self.position = position;
-        }
+        self.position = position;
         self.added_packet(stamp, ids)
     }
 
@@ -143,16 +132,18 @@ impl Pointer {
         packets
     }
 
-    /// A button pressed or released: Down when the first goes down, Move while any remain,
-    /// Up when the last is released, as Flutter's macOS `dispatchMouseEvent:` splits them.
+    /// A button pressed or released at `position`: Down when the first goes down, Move while any
+    /// remain, Up when the last is released, as Flutter's macOS `dispatchMouseEvent:` splits them.
     pub(crate) fn button(
         &mut self,
         button: MouseButton,
         pressed: bool,
+        position: [f64; 2],
         stamp: PointerStamp,
         ids: &mut PointerIds,
     ) -> Option<PointerDataPacket> {
-        let change = self.set_button_bit(flutter_mouse_button(button)?, pressed)?;
+        let change = self.set_button_bit(flutter_mouse_button(button), pressed)?;
+        self.position = position;
         self.record(change, None, stamp, ids)
     }
 
@@ -290,22 +281,11 @@ impl Pointer {
     }
 }
 
-/// Flutter engine mouse-button bits for a winit button.
-///
-/// Named buttons follow `kFlutterPointerButtonMouse*` in `embedder.h`. Extra buttons use
-/// `1 << n`, matching the macOS embedder's `otherMouseDown:` (`1 << event.buttonNumber`).
-fn flutter_mouse_button(button: MouseButton) -> Option<i64> {
-    match button {
-        MouseButton::Left => Some(PRIMARY_MOUSE_BUTTON),
-        MouseButton::Right => Some(SECONDARY_MOUSE_BUTTON),
-        MouseButton::Middle => Some(MIDDLE_MOUSE_BUTTON),
-        MouseButton::Back => Some(BACK_MOUSE_BUTTON),
-        MouseButton::Forward => Some(FORWARD_MOUSE_BUTTON),
-        MouseButton::Other(n) => {
-            let shift = u32::from(n);
-            (shift < i64::BITS).then_some(1_i64 << shift)
-        }
-    }
+/// Flutter engine mouse-button bits for a winit button: `1 << n` for the button the system
+/// numbers `n`, as the macOS embedder's `otherMouseDown:` takes `1 << event.buttonNumber`. winit
+/// numbers the five named ones as `kFlutterPointerButtonMouse*` in `embedder.h` does.
+fn flutter_mouse_button(button: MouseButton) -> i64 {
+    1 << button as u8
 }
 
 /// Down when the first button goes down, Move while any remain, Up when the last is released.
@@ -336,6 +316,8 @@ fn wheel_to_physical(delta: MouseScrollDelta, scale: f64) -> [f64; 2] {
             -f64::from(dy) * LOGICAL_PIXELS_PER_LINE * scale,
         ],
         MouseScrollDelta::PixelDelta(physical) => [-physical.x, -physical.y],
+        // A kind of delta winit adds later scrolls nothing until it is ported.
+        _ => [0.0, 0.0],
     }
 }
 
@@ -344,6 +326,9 @@ mod tests {
     use winit::dpi::PhysicalPosition;
 
     use super::*;
+
+    const PRIMARY_MOUSE_BUTTON: i64 = 1 << 0;
+    const SECONDARY_MOUSE_BUTTON: i64 = 1 << 1;
 
     #[test]
     fn line_deltas_scale_to_physical_pixels_with_flutter_sign() {
@@ -372,25 +357,16 @@ mod tests {
     fn winit_mouse_buttons_map_to_flutter_bits() {
         assert_eq!(
             flutter_mouse_button(MouseButton::Left),
-            Some(PRIMARY_MOUSE_BUTTON)
+            PRIMARY_MOUSE_BUTTON
         );
         assert_eq!(
             flutter_mouse_button(MouseButton::Right),
-            Some(SECONDARY_MOUSE_BUTTON)
+            SECONDARY_MOUSE_BUTTON
         );
-        assert_eq!(
-            flutter_mouse_button(MouseButton::Middle),
-            Some(MIDDLE_MOUSE_BUTTON)
-        );
-        assert_eq!(
-            flutter_mouse_button(MouseButton::Back),
-            Some(BACK_MOUSE_BUTTON)
-        );
-        assert_eq!(
-            flutter_mouse_button(MouseButton::Forward),
-            Some(FORWARD_MOUSE_BUTTON)
-        );
-        assert_eq!(flutter_mouse_button(MouseButton::Other(5)), Some(1 << 5));
+        assert_eq!(flutter_mouse_button(MouseButton::Middle), 1 << 2);
+        assert_eq!(flutter_mouse_button(MouseButton::Back), 1 << 3);
+        assert_eq!(flutter_mouse_button(MouseButton::Forward), 1 << 4);
+        assert_eq!(flutter_mouse_button(MouseButton::Button6), 1 << 5);
     }
 
     #[test]
