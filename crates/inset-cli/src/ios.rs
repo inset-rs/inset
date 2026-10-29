@@ -76,9 +76,10 @@ pub fn build(project: &Project, profile: Profile, destination: Destination) -> R
     tools::ensure_rust_target(&project.root, destination.triple())?;
     let executable = cargo::build(&Build {
         project,
+        package: &project.package,
         profile,
         triple: Some(destination.triple()),
-        artifact: Artifact::Executable,
+        artifact: Artifact::Executable(&project.bin),
         env: vec![("IPHONEOS_DEPLOYMENT_TARGET", minimum_version.clone())],
     })?;
 

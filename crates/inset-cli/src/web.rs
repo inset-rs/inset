@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result};
 
 use crate::cargo::{self, Artifact, Build};
 use crate::project::{Profile, Project};
@@ -14,17 +14,16 @@ use crate::tools;
 const WASM_TARGET: &str = "wasm32-unknown-unknown";
 
 pub fn build(project: &Project, profile: Profile) -> Result<PathBuf> {
-    if project.library.is_none() {
-        bail!(
-            "the web host loads a library: add `crate-type = [\"cdylib\", \"rlib\"]` under [lib] in Cargo.toml"
-        );
-    }
+    let library = project.library.as_deref().context(
+        "the web host loads a library: add `crate-type = [\"cdylib\", \"rlib\"]` under [lib] in Cargo.toml",
+    )?;
     tools::ensure_rust_target(&project.root, WASM_TARGET)?;
     let wasm = cargo::build(&Build {
         project,
+        package: &project.package,
         profile,
         triple: Some(WASM_TARGET),
-        artifact: Artifact::Wasm,
+        artifact: Artifact::Wasm(library),
         env: Vec::new(),
     })?;
 

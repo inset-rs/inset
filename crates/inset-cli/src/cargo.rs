@@ -9,42 +9,52 @@ use cargo_metadata::Message;
 
 use crate::project::{Profile, Project};
 
-/// What a build is for: the target cargo is asked to build, and the one file taken back.
+/// What a build is for: the target cargo is asked to build, by its name, and the one file
+/// taken back.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Artifact {
-    /// The binary the desktops and iOS run.
-    Executable,
-    /// The `cdylib` as the target's loader takes it: `.so`, `.dylib` or `.dll`.
-    Library,
-    /// The `.wasm` a `cdylib` compiles to on a wasm target.
-    Wasm,
+pub enum Artifact<'a> {
+    /// A binary target: the one the desktops and iOS run, or a helper an app carries.
+    Executable(&'a str),
+    /// A `cdylib` target as the target's loader takes it: `.so`, `.dylib` or `.dll`.
+    Library(&'a str),
+    /// The `.wasm` a `cdylib` target compiles to on a wasm target.
+    Wasm(&'a str),
 }
 
-impl Artifact {
-    /// The extensions this artifact's file can have, empty for the binary, which cargo
-    /// names outright.
-    fn extensions(self) -> &'static [&'static str] {
+impl Artifact<'_> {
+    fn target_name(&self) -> &str {
         match self {
-            Artifact::Executable => &[],
-            Artifact::Library => &["so", "dylib", "dll"],
-            Artifact::Wasm => &["wasm"],
+            Artifact::Executable(name) | Artifact::Library(name) | Artifact::Wasm(name) => name,
         }
     }
 
-    fn describe(self) -> &'static str {
+    /// The extensions this artifact's file can have, empty for the binary, which cargo
+    /// names outright.
+    fn extensions(&self) -> &'static [&'static str] {
         match self {
-            Artifact::Executable => "an executable",
-            Artifact::Library => "a library",
-            Artifact::Wasm => "a .wasm",
+            Artifact::Executable(_) => &[],
+            Artifact::Library(_) => &["so", "dylib", "dll"],
+            Artifact::Wasm(_) => &["wasm"],
+        }
+    }
+
+    fn describe(&self) -> &'static str {
+        match self {
+            Artifact::Executable(_) => "an executable",
+            Artifact::Library(_) => "a library",
+            Artifact::Wasm(_) => "a .wasm",
         }
     }
 }
 
 pub struct Build<'a> {
+    /// The app, in whose workspace cargo runs.
     pub project: &'a Project,
+    /// The package the artifact is a target of: the app's own, or another of its workspace.
+    pub package: &'a str,
     pub profile: Profile,
     pub triple: Option<&'a str>,
-    pub artifact: Artifact,
+    pub artifact: Artifact<'a>,
     /// Environment for rustc and the linker, such as a deployment target.
     pub env: Vec<(&'a str, String)>,
 }
@@ -57,7 +67,7 @@ pub fn build(build: &Build) -> Result<PathBuf> {
         .current_dir(&build.project.root)
         .arg("build")
         .arg("--message-format=json-render-diagnostics")
-        .args(["-p", &build.project.package]);
+        .args(["-p", build.package]);
     if build.profile.is_release() {
         command.arg("--release");
     }
@@ -65,10 +75,10 @@ pub fn build(build: &Build) -> Result<PathBuf> {
         command.args(["--target", triple]);
     }
     match build.artifact {
-        Artifact::Executable => {
-            command.args(["--bin", &build.project.bin]);
+        Artifact::Executable(name) => {
+            command.args(["--bin", name]);
         }
-        Artifact::Library | Artifact::Wasm => {
+        Artifact::Library(_) | Artifact::Wasm(_) => {
             command.arg("--lib");
         }
     }
@@ -101,14 +111,10 @@ pub fn build(build: &Build) -> Result<PathBuf> {
 /// The target's name is checked as well as the extension: a dependency that is a proc
 /// macro compiles to a `.dylib` or `.so` of its own, and cargo reports it the same way.
 fn wanted_file(build: &Build, artifact: &cargo_metadata::Artifact) -> Option<PathBuf> {
-    let wanted_name = match build.artifact {
-        Artifact::Executable => &build.project.bin,
-        Artifact::Library | Artifact::Wasm => build.project.library.as_ref()?,
-    };
-    if &artifact.target.name != wanted_name {
+    if artifact.target.name != build.artifact.target_name() {
         return None;
     }
-    if build.artifact == Artifact::Executable {
+    if let Artifact::Executable(_) = build.artifact {
         return artifact
             .executable
             .as_ref()
