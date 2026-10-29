@@ -186,6 +186,13 @@ impl CoreAnimationSurface {
         if !is_sublayer_at(parent, clip_layer, index) {
             parent.insertSublayer_atIndex(clip_layer, index);
         }
+        self.lay_out(&geometry, window_scale);
+    }
+
+    /// Lays the surface's layers out as `geometry` says, in a window `window_scale` of whose
+    /// physical pixels make a point, and shows it. Inside the caller's transaction.
+    fn lay_out(&self, geometry: &LayerGeometry, window_scale: f64) {
+        let clip_layer = &self.clip_layer.0;
         clip_layer.setFrame(geometry.clip_frame);
         let content_layer = &self.content_layer.0;
         content_layer.setPosition(geometry.content_origin);
