@@ -1,9 +1,10 @@
 //! What iOS reports differently from the desktop winit was written for: its window is the
 //! screen, and winit's size for it is the safe area rather than the whole layer; and what it adds,
-//! its pasteboard (`pasteboard`), its document pickers (`file_dialogs`), opening (`opener`) and
-//! what it asks the app to open (`open_requests`). Notifications are the center macOS shares
-//! (`apple/notifications`).
+//! its pasteboard (`pasteboard`), its document pickers (`file_dialogs`), opening (`opener`), what
+//! it asks the app to open (`open_requests`) and native surfaces (`composition`). Notifications are
+//! the center macOS shares (`apple/notifications`).
 
+mod composition;
 mod file_dialogs;
 mod open_requests;
 mod opener;
@@ -17,12 +18,12 @@ use winit::window::Window;
 
 use pasteboard::Pasteboard;
 
-use super::absent::{NoDisplayLink, NoVisibilityNotices, NoWindowSurfaces};
+use super::absent::{NoDisplayLink, NoVisibilityNotices};
 use super::apple::{image_io_decoders, notifications};
 use super::{
-    ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeComposition,
-    NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
-    SystemNotifications, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
+    ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeMenus,
+    OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard, SystemNotifications,
+    WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
 };
 use crate::notifications::NotificationActivations;
 
@@ -77,10 +78,6 @@ impl SystemClipboard for Ios {
 
 impl FramePresentation for Ios {
     type DisplayLink = NoDisplayLink;
-}
-
-impl NativeComposition for Ios {
-    type WindowSurfaces = NoWindowSurfaces;
 }
 
 impl WindowVisibility for Ios {

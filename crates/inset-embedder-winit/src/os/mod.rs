@@ -11,10 +11,11 @@
 //! its own answers about its screens, whether a window is occluded and its notices that a window
 //! was minimized, and the requests it makes of the application and what it says changed, among
 //! others (`macos`); iOS reports its window's size and safe area differently, and has its
-//! pasteboard (`ios`); Windows tells the clipboard's changes by its sequence number, and has a
-//! menu at a point, icons in the notification area and toasts (`windows`); Linux has the desktop's
-//! tray and its notification server (`linux`); every other system winit covers by itself
-//! (`winit_only`). What macOS and iOS share, their notification center among it, is in `apple`.
+//! pasteboard and native surfaces (`ios`); Windows tells the clipboard's changes by its sequence
+//! number, and has a menu at a point, icons in the notification area and toasts (`windows`); Linux
+//! has the desktop's tray and its notification server (`linux`); every other system winit covers by
+//! itself (`winit_only`). What macOS and iOS share, their notification center and the compositor
+//! of native surfaces among it, is in `apple`.
 //!
 //! A system's module is compiled for its own target only, so a change to a trait is checked
 //! against that system's answers only when building for it: build every target a change
@@ -283,8 +284,8 @@ pub(crate) trait DisplayLink: Sized {
     fn set_wanted(&self, wanted: bool);
 }
 
-/// The system's compositor for native surfaces: macOS's, and why it is shaped as it is, in
-/// `macos/composition`.
+/// The system's compositor for native surfaces: Core Animation's on macOS and iOS, and why it is
+/// shaped as it is, in `apple/composition`.
 pub(crate) trait NativeComposition {
     /// One window's share of the compositor.
     type WindowSurfaces: WindowSurfaces;

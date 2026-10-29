@@ -63,16 +63,19 @@ objc2-uniform-type-identifiers = { version = "0.3", features = ["UTType", "UTCor
 # attachment is made from.
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "bitflags", "block2", "UNError", "UNNotification", "UNNotificationAction", "UNNotificationAttachment", "UNNotificationCategory", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger", "UNUserNotificationCenter"] }
 png = "0.18"
+# Native surfaces: the layers they are, the buffer each shows and whether the compositor still
+# reads it, and the transform that scales a surface with its children.
+objc2-quartz-core = { version = "0.3", features = ["CALayer", "CATransaction"] }
+objc2-io-surface = "0.3"
+objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 # The general pasteboard, and the notices that it changed or the application became active.
-objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-uniform-type-identifiers", "UIPasteboard", "UIApplication", "objc2-core-foundation", "UIDocumentInteractionController", "UIDocumentPickerViewController", "UIResponder", "UIView", "UIViewController", "UIWindow"] }
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-quartz-core", "objc2-uniform-type-identifiers", "UIPasteboard", "UIApplication", "objc2-core-foundation", "UIDocumentInteractionController", "UIDocumentPickerViewController", "UIResponder", "UIView", "UIViewController", "UIWindow"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSMenu", "NSMenuItem", "NSEvent", "NSGraphicsContext", "NSView", "NSCell", "NSResponder", "NSWindow", "NSScreen", "NSAnimation", "NSAnimationContext", "NSVisualEffectView", "NSGlassEffectView", "NSGraphics", "NSTrackingArea", "NSPasteboard", "NSPasteboardItem", "NSFilePromiseProvider", "NSFilePromiseReceiver", "NSOpenPanel", "NSSavePanel", "NSWorkspace", "objc2-uniform-type-identifiers", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSButtonCell", "NSActionCell", "NSColorSpace", "block2", "objc2-quartz-core"] }
-objc2-quartz-core = { version = "0.3", features = ["CAMediaTimingFunction", "CADisplayLink", "CALayer", "CATransaction"] }
-# The buffer a native surface shows, and whether the compositor still reads it.
-objc2-io-surface = "0.3"
+objc2-quartz-core = { version = "0.3", features = ["CAMediaTimingFunction", "CADisplayLink"] }
 
 # Each test is a program of its own, without the test harness, which runs every test on a thread
 # it spawns: winit makes AppKit's event loop on the main thread only, once per process, and a
@@ -139,11 +142,12 @@ objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSGeometry"] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer", "CAMetalLayer"] }
 
-# AppKit's selectors and view hierarchy, UIKit's pasteboard and document picker, the notification
-# center's delegate and completion handlers, and Win32 and COM, the toast activator's included,
-# need `unsafe`, which the workspace forbids; here it is denied instead, and `os/macos`,
+# AppKit's selectors and view hierarchy, UIKit's pasteboard, document picker and view, the
+# notification center's delegate and completion handlers, Core Animation's layers, and Win32 and
+# COM, the toast activator's included, need `unsafe`, which the workspace forbids; here it is
+# denied instead, and `os/macos`, `os/apple/composition`, `os/apple/notifications`,
 # `os/ios/pasteboard`, `os/ios/file_dialogs`, `os/ios/opener`, `os/ios/open_requests`,
-# `os/apple/notifications`, `os/windows` and the tests' AppKit support, for a local event monitor,
+# `os/ios/composition`, `os/windows` and the tests' AppKit support, for a local event monitor,
 # alone allow it.
 [lints.rust]
 unsafe_code = "deny"

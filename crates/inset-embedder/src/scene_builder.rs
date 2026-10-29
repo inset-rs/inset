@@ -461,7 +461,14 @@ mod tests {
     struct IdleSurface;
 
     impl Surface for IdleSurface {
-        fn present(&self, _buffer: crate::Buffer, _released: Box<dyn FnOnce() + Send + Sync>) {}
+        fn present(&self, _frame: crate::SurfaceFrame, _released: Box<dyn FnOnce() + Send + Sync>) {
+        }
+    }
+
+    impl crate::SurfaceParent for IdleSurface {
+        fn open_child(&self, _opaque: bool) -> Arc<dyn Surface> {
+            idle_surface()
+        }
     }
 
     fn idle_surface() -> Arc<dyn Surface> {
