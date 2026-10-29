@@ -2,31 +2,22 @@
 //! other targets of the app's workspace, built with the app.
 //!
 //! A helper goes in `Contents/Helpers`, as Chrome keeps its app shims' loader in its framework's
-//! Helpers, and a library in `Contents/Frameworks`. cargo-packager has no place for a helper,
-//! and signs a bundle as it makes it, before anything can be added to it, so the CLI puts both in
-//! and signs the bundle itself, inside out: each carried file with the app's identity and the
-//! hardened runtime, and no entitlements of its own, then the bundle with the app's entitlements.
+//! Helpers, and a library in `Contents/Frameworks`. The bundle signs each before itself
+//! (`macos/`): a signature seals what is in the bundle when it is made.
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use cargo_metadata::{Metadata, TargetKind};
 
 use crate::cargo::{self, Artifact, Build};
 use crate::project::{Helper, Library, MacosMetadata, Profile, Project};
-use crate::tools;
 
 /// A target the bundle carries, built: its file, and where it goes under `Contents`.
 pub struct Carried {
     file: PathBuf,
     place: PathBuf,
-}
-
-/// Whether the app's bundle carries anything beside its executable.
-pub fn any(project: &Project) -> bool {
-    !project.macos.helpers.is_empty() || !project.macos.libraries.is_empty()
 }
 
 /// Fails unless every helper names a binary target, and every library a `cdylib` target, of a
@@ -69,30 +60,19 @@ pub fn build(project: &Project, profile: Profile) -> Result<Vec<Carried>> {
     helpers.chain(libraries).collect()
 }
 
-/// Puts `carried` in the bundle `app` and, with an `identity`, signs it inside out: each carried
-/// file with the hardened runtime and no entitlements, then the bundle with `entitlements`.
-/// Without one nothing is signed, and each file keeps the ad hoc signature the linker gave it, as
-/// the app's executable does.
-pub fn put_in(
-    app: &Path,
-    carried: &[Carried],
-    identity: Option<&str>,
-    entitlements: Option<&Path>,
-) -> Result<()> {
-    let contents = app.join("Contents");
-    for target in carried {
-        let dest = contents.join(&target.place);
-        fs::create_dir_all(dest.parent().context("a carried file has a folder")?)?;
-        fs::copy(&target.file, &dest)
-            .with_context(|| format!("could not copy {} into the bundle", target.file.display()))?;
-        if let Some(identity) = identity {
-            sign(&dest, identity, None)?;
-        }
-    }
-    if let Some(identity) = identity {
-        sign(app, identity, entitlements)?;
-    }
-    Ok(())
+/// Puts `carried` in the bundle's `contents`, each where it goes; answers where each went.
+pub fn put_in(contents: &Path, carried: &[Carried]) -> Result<Vec<PathBuf>> {
+    carried
+        .iter()
+        .map(|target| {
+            let dest = contents.join(&target.place);
+            fs::create_dir_all(dest.parent().context("a carried file has a folder")?)?;
+            fs::copy(&target.file, &dest).with_context(|| {
+                format!("could not copy {} into the bundle", target.file.display())
+            })?;
+            Ok(dest)
+        })
+        .collect()
 }
 
 fn build_helper(project: &Project, profile: Profile, helper: &Helper) -> Result<Carried> {
@@ -144,24 +124,6 @@ fn has_target(metadata: &Metadata, package: &str, name: &str, kind: TargetKind) 
         .filter(|candidate| candidate.name.as_str() == package)
         .flat_map(|candidate| &candidate.targets)
         .any(|target| target.name == name && target.kind.contains(&kind))
-}
-
-/// Signs `path` with `identity` and the hardened runtime, with `entitlements` or none, as
-/// cargo-packager signs what it puts in a bundle.
-fn sign(path: &Path, identity: &str, entitlements: Option<&Path>) -> Result<()> {
-    let mut command = Command::new("codesign");
-    command.args([
-        "--force",
-        "--sign",
-        identity,
-        "--options",
-        "runtime",
-        "--timestamp",
-    ]);
-    if let Some(entitlements) = entitlements {
-        command.arg("--entitlements").arg(entitlements);
-    }
-    tools::run(command.arg(path), "codesign")
 }
 
 #[cfg(test)]

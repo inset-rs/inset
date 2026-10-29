@@ -115,9 +115,9 @@ An app hears the files and links the system itself opens it with through `App::s
 
 ### Helpers and libraries
 
-A macOS app can carry other targets of its workspace in its bundle: `helpers`, binaries, in `Contents/Helpers/<bin>`, and `libraries`, `cdylib`s named by their `[lib] name`, in `Contents/Frameworks/lib<name>.dylib`. `build macos` and `run` build each with the app's own profile, for the same machine, and put it in.
+A macOS app can carry other targets of its workspace in its bundle: `helpers`, binaries, in `Contents/Helpers/<bin>`, and `libraries`, `cdylib`s named by their `[lib] name`, in `Contents/Frameworks/lib<name>.dylib`. `build macos`, `build dmg` and `run` build each with the app's own profile, for the same machine, and put it in.
 
-cargo-packager has no place for a helper, and signs a bundle as it makes it, so for an app that carries anything the CLI signs the bundle itself, inside out: each helper and library with the app's identity and the hardened runtime, and no entitlements of their own, then the bundle with the app's entitlements. Without an identity nothing is signed, and each keeps the ad hoc signature the linker gave it, as the app's executable does. The app and its helpers find them by path from their own executable: `../Helpers/<bin>` and `../Frameworks/lib<name>.dylib`.
+The bundle is signed inside out: each helper and library with the app's identity, under the hardened runtime when the identity is a certificate, and with no entitlements of its own, then the bundle with the app's entitlements. A disk image and notarization carry them as they carry the app. The app and its helpers find them by path from their own executable: `../Helpers/<bin>` and `../Frameworks/lib<name>.dylib`.
 
 ### Usage descriptions
 
@@ -191,4 +191,4 @@ File associations are not declared either: the host does not read the intent the
 
 ## Not here yet
 
-An `ipa` upload step, a release key for Android, rebuild-on-change for `run -d web`, a MIME type definition for a Linux app's own file associations, and a disk image or notarization for a macOS app that carries helpers or libraries.
+An `ipa` upload step, a release key for Android, rebuild-on-change for `run -d web`, and a MIME type definition for a Linux app's own file associations.
