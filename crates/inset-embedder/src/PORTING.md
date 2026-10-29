@@ -300,9 +300,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — Linux and the web hold no notification for later, Linux takes a reply only where the server advertises KDE's `inline-reply` and the web none without a service worker, and Linux keeps no permission for an app.
   Affect: an app offers a reply field or a reminder only where `replies()` or `scheduling()` answers, and has a reply action only there.
 
-- Change: `post` and `schedule` ask the user with the system's own question where they were never asked, and answer `NotificationError::Denied` without asking where they said no, where the plugin leaves asking to `requestPermissions`; `NotificationPermission` answers the state and asks ahead of a post.
-  Reason: platform — every system that asks keeps the answer and drops or refuses an app's notification without it, so a host that did not ask would post into nothing.
-  Affect: an app posts without asking first, and learns the user's no from the post's answer.
+- Change: `post` and `schedule` never ask the user: where the system does not let the app notify, because the user was never asked or said no, they answer `NotificationError::Denied`, and the app asks first with `NotificationPermission::request`, the plugin's `requestPermissions`; the plugin's `show` answers nothing either way.
+  Reason: platform — no system's own post asks (`UNUserNotificationCenter`'s `add` fails with `notificationsNotAllowed`, Android 13's `notify` and the web's `Notification` show nothing), and only the system's own request does.
+  Affect: an app asks before its first post, and learns from a post's answer that it was not shown.
 
 - Change: a click on a notification, one of its actions or a reply reaches the app as `EmbedderClient::notification_activated(NotificationActivation { id, action, reply })`, the click that started the app included, where the plugin hands a running app's to `onDidReceiveNotificationResponse` and the launch's to `getNotificationAppLaunchDetails`.
   Reason: platform — there are no plugins, and the client is the only listener; the launch's click arrives once the client exists, as a launch's open request does.

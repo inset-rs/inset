@@ -188,7 +188,7 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 
 **Notifications**
 - `Platform::notifications`, `Notifications::post`, `remove`, `permission`, `replies`, `scheduling`, `Notification`, `NotificationAction`, `NotificationPermission`, `PermissionState`, `NotificationReplies::reply_action`, `NotificationScheduling::schedule`, `PostFuture`, `NotificationError`, `EmbedderClient::notification_activated`, `NotificationActivation`
-- Post each under its id as the system's own id or tag, so a later post under it replaces it and `remove` takes it away, shown or scheduled; ask with the system's own question before a post where the user was never asked, and answer `Denied` where they said no; hand on every click with its action and reply, the one that started the app once the client is there; answer `None` where the system would not show the app's notifications, and for a reply, a later delivery or a permission the system lacks, never standing in for one.
+- Post each under its id as the system's own id or tag, so a later post under it replaces it and `remove` takes it away, shown or scheduled; ask the user only in `NotificationPermission::request`, with the system's own question, and answer a post or a schedule the system does not allow with `Denied`, never asking; hand on every click with its action and reply, the one that started the app once the client is there; answer `None` where the system would not show the app's notifications, and for a reply, a later delivery or a permission the system lacks, never standing in for one.
 
 **Dock and taskbar**
 - none yet

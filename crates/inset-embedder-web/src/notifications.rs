@@ -12,8 +12,10 @@
 //! is scheduled. Where the browser refuses a page's own notifications, as Chrome on Android does,
 //! the post fails with what it threw.
 //!
-//! The permission is the browser's for the page's origin. Browsers show their question only while
-//! the page handles the user's click or key, so a post asks at once, before its future is awaited.
+//! The permission is the browser's for the page's origin. Only the app's `request` asks, and it
+//! asks at once, before its future is awaited, as browsers show their question only while the page
+//! handles the user's click or key; a post never asks, and answers `Denied` unless the user allowed
+//! the page.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -70,31 +72,17 @@ impl BrowserNotifications {
     pub(crate) fn hear_clicks(&self, clicked: impl Fn(NotificationActivation) + 'static) {
         *self.0.clicked.borrow_mut() = Some(Rc::new(clicked));
     }
-
-    /// Asks the user now, while the page may still be handling their gesture, and shows
-    /// `notification` once they allow it.
-    fn show_once_allowed(&self, notification: &Notification) -> PostFuture {
-        let asked = requested();
-        let showing = Rc::clone(&self.0);
-        let notification = notification.clone();
-        Box::pin(async move {
-            match asked.await {
-                PermissionState::Granted => showing.show(&notification),
-                PermissionState::Denied | PermissionState::NotAsked => {
-                    Err(NotificationError::Denied)
-                }
-            }
-        })
-    }
 }
 
 impl Notifications for BrowserNotifications {
+    /// Shows `notification` where the user lets the page notify, and answers `Denied` without
+    /// asking where not, as the browser's own `Notification` shows nothing then.
     fn post(&self, notification: &Notification) -> PostFuture {
-        match permission() {
-            PermissionState::Granted => Box::pin(std::future::ready(self.0.show(notification))),
-            PermissionState::Denied => Box::pin(std::future::ready(Err(NotificationError::Denied))),
-            PermissionState::NotAsked => self.show_once_allowed(notification),
-        }
+        let posted = match permission() {
+            PermissionState::Granted => self.0.show(notification),
+            PermissionState::Denied | PermissionState::NotAsked => Err(NotificationError::Denied),
+        };
+        Box::pin(std::future::ready(posted))
     }
 
     /// Closes the notification this page showed under `id`; one an earlier visit showed is out of

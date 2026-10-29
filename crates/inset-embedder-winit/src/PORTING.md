@@ -261,9 +261,9 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — UserNotifications raises an exception, which aborts the process, when a process without a bundle touches the center, and it reports the click that launched the app only to a delegate set before the launch finishes.
   Affect: an app has notifications once it runs from its `.app`, as `cargo inset build` makes it, and hears the click that launched it like any other.
 
-- Change: on macOS and iOS a post asks the user first with `requestAuthorizationWithOptions:` (alerts and sounds) where they were never asked, and answers `Denied` where they said no; `permission()` answers from `getNotificationSettings`, a provisional or an ephemeral authorization being `Granted`.
-  Reason: platform — the center keeps neither the requests nor the categories of an app the user was never asked about.
-  Affect: an app's first post shows the system's question, and the post answers once the user has.
+- Change: on macOS and iOS `permission()` answers from `getNotificationSettings`, a provisional or an ephemeral authorization being `Granted`, and its `request` asks with `requestAuthorizationWithOptions:` (alerts and sounds); a post reads the settings first and answers `Denied` without touching the center where the app is not let notify.
+  Reason: platform — the center's `add` never asks, fails with `notificationsNotAllowed` for an app not let notify, and keeps no category for an app the user was never asked about.
+  Affect: an app asks before its first post, which otherwise answers `Denied` and shows nothing.
 
 - Change: on macOS and iOS each action brings the app forward (`UNNotificationActionOptionForeground`), and a notification shows while the app is in front, as a banner and in the list, with its sound unless it is silent, where `flutter_local_notifications` leaves both to the app's settings.
   Reason: platform — the center shows nothing for an app in front unless its delegate asks, and a click on an action is the app's to act on, as a click on the notification is.

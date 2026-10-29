@@ -8,7 +8,10 @@
 //! The system says whether the permission is granted, and whether the user refused it once and
 //! may be asked again (`shouldShowRequestPermissionRationale`), but not whether they were never
 //! asked or refused it for good: both answer `NotAsked`. Asking then shows the question, or for one
-//! refused for good answers at once that it is denied, so a post asks at most once.
+//! refused for good answers at once that it is denied.
+//!
+//! Only the app's `request` asks. A post never does, as `notify` does not: it answers `Denied`
+//! unless the permission is granted, where the system would show nothing.
 
 // JNI hands the native method raw arguments; that is the `unsafe` here.
 #![allow(unsafe_code)]
@@ -71,9 +74,9 @@ impl Permission {
         }
     }
 
-    /// Whether the app may notify, asking the user first where they have not been asked.
-    pub(super) async fn allowed(&self) -> Result<(), NotificationError> {
-        match self.request().await {
+    /// Whether the app may notify now, without asking.
+    pub(super) fn allowed(&self) -> Result<(), NotificationError> {
+        match self.current() {
             PermissionState::Granted => Ok(()),
             PermissionState::Denied | PermissionState::NotAsked => Err(NotificationError::Denied),
         }

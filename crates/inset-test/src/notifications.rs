@@ -49,8 +49,9 @@ impl MockNotifications {
         MockNotifications::default()
     }
 
-    /// A system that asks the user first, where the permission stands at `state`, and the user
-    /// answers `answer` when asked.
+    /// A system with a question of its own, where the permission stands at `state`, and the user
+    /// answers `answer` when the app asks (`NotificationPermission::request`); a post never asks,
+    /// and is denied until the permission is granted.
     pub fn asking(self, state: PermissionState, answer: PermissionState) -> MockNotifications {
         self.rebuilt(|notifications| {
             notifications.permission = Some(MockPermission {
@@ -96,9 +97,14 @@ impl MockNotifications {
         MockNotifications(Rc::new(state))
     }
 
-    /// Asks where the user has not been asked; answers whether the app may notify.
+    /// Whether the app may notify, without asking: a post never asks.
     fn allowed(&self) -> Result<(), NotificationError> {
-        match self.0.permission.as_ref().map(MockPermission::ask) {
+        let state = self
+            .0
+            .permission
+            .as_ref()
+            .map(|permission| *permission.state.borrow());
+        match state {
             None | Some(PermissionState::Granted) => Ok(()),
             Some(_) => Err(NotificationError::Denied),
         }
@@ -223,21 +229,39 @@ mod tests {
     }
 
     #[test]
-    fn the_first_post_asks_and_a_refusal_denies_without_asking_again() {
+    fn a_post_never_asks_and_is_denied_until_the_user_allows() {
         let notifications =
-            MockNotifications::new().asking(PermissionState::NotAsked, PermissionState::Denied);
+            MockNotifications::new().asking(PermissionState::NotAsked, PermissionState::Granted);
         let reminder = Notification::new("reminder", "Stand up");
         assert_eq!(
             now(notifications.post(&reminder)),
             Err(NotificationError::Denied)
         );
+        let at = SystemTime::UNIX_EPOCH + Duration::from_secs(60);
+        let scheduling = notifications.scheduling().expect("scheduling");
         assert_eq!(
-            now(notifications.post(&reminder)),
+            now(scheduling.schedule(&reminder, at)),
             Err(NotificationError::Denied)
         );
-        assert_eq!(notifications.times_asked(), 1);
+        assert_eq!(notifications.times_asked(), 0, "no post asked");
         let permission = notifications.permission().expect("the system asks");
-        assert_eq!(now(permission.state()), PermissionState::Denied);
+        assert_eq!(now(permission.request()), PermissionState::Granted);
+        assert_eq!(now(notifications.post(&reminder)), Ok(()));
+        assert_eq!(notifications.times_asked(), 1);
+    }
+
+    #[test]
+    fn a_refusal_is_asked_once() {
+        let notifications =
+            MockNotifications::new().asking(PermissionState::NotAsked, PermissionState::Denied);
+        let permission = notifications.permission().expect("the system asks");
+        assert_eq!(now(permission.request()), PermissionState::Denied);
+        assert_eq!(now(permission.request()), PermissionState::Denied);
+        assert_eq!(notifications.times_asked(), 1);
+        assert_eq!(
+            now(notifications.post(&Notification::new("reminder", "Stand up"))),
+            Err(NotificationError::Denied)
+        );
     }
 
     #[test]

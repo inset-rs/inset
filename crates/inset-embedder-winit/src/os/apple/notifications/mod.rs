@@ -1,11 +1,12 @@
 //! Notifications: `UNUserNotificationCenter`'s, which macOS and iOS share. A notification is a
 //! request under the app's id, which a later request under the same id replaces; its buttons and
 //! reply field are a category's, which the center must hold before the request is added
-//! (`categories`); its image is an attachment and its time a calendar trigger (`request`). Each
-//! post asks the user first where they have not been asked, as the center refuses an app it was
-//! never let notify, and keeps no category for it (`permission`). A click comes to the center's
-//! delegate, set before the launch finishes so the click that launched the app is heard too
-//! (`delegate`).
+//! (`categories`); its image is an attachment and its time a calendar trigger (`request`). A post
+//! never asks the user, as the center's `add` does not: where the app is not let notify it answers
+//! `Denied` before it touches the center, which refuses such an app's request and keeps no
+//! category for it; only the permission's `request` asks (`permission`). A click comes to the
+//! center's delegate, set before the launch finishes so the click that launched the app is heard
+//! too (`delegate`).
 //!
 //! UserNotifications raises an exception, which aborts the process, when a process outside an
 //! application bundle touches the center, as a program `cargo run` starts is: nothing here may
@@ -88,8 +89,9 @@ struct Center {
 }
 
 impl Center {
-    /// Adds the request that shows `notification` at `trigger`'s time, or at once: after asking
-    /// the user where they have not been asked, and once the center holds its actions' category.
+    /// Adds the request that shows `notification` at `trigger`'s time, or at once, where the user
+    /// lets the app notify, once the center holds its actions' category; answers `Denied`
+    /// without asking where they do not.
     fn add(
         &self,
         notification: &Notification,
@@ -105,7 +107,7 @@ impl Center {
         let center = self.center.clone();
         let categories = self.categories.clone();
         let actions = notification.actions.clone();
-        permission::asked(&self.center, move |permission| {
+        permission::current(&self.center, move |permission| {
             if permission != PermissionState::Granted {
                 return answer.give(Err(NotificationError::Denied));
             }

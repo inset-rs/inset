@@ -86,9 +86,9 @@ Host implementation. Flutter analogue: the web engine under `engine/lib/web_ui`.
   Reason: platform — buttons and typed replies belong to a service worker's notifications (`showNotification`, `notificationclick`), which Inset gives the app none of, and the browser holds no notification for later.
   Affect: on the web a notification's buttons are left out, a click on it names no action, and a reminder for later is the app's to keep while its page runs.
 
-- Change: `permission()` is the browser's for the page's origin, `default` being `NotAsked`, and a post where the user was never asked calls `Notification.requestPermission` at once, before the app awaits it, and answers `Denied` where the user declined or dismissed the question.
-  Reason: platform — browsers show the question only while the page handles the user's click or key, and some ignore it outside one.
-  Affect: an app's first post shows the browser's question when it posts while handling a click, and is denied without one where the browser requires one.
+- Change: `permission()` is the browser's for the page's origin, `default` being `NotAsked`; its `request` calls `Notification.requestPermission` at once, before the app awaits it, and a post never asks, answering `Denied` unless the user allowed the page.
+  Reason: platform — browsers show the question only while the page handles the user's click or key, and some ignore it outside one, and the page's own `Notification` shows nothing without the permission.
+  Affect: an app asks while it handles a click, before its first post, which otherwise answers `Denied`.
 
 - Change: the image is the notification's `icon`, a PNG `data:` URL the browser's own canvas encodes; a post the browser refuses, as Chrome on Android refuses every page's own notification, fails with what it threw.
   Reason: platform — a notification takes its icon by URL, and a page cannot tell beforehand whether the browser will make its notifications.
