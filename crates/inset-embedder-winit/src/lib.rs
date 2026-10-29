@@ -35,6 +35,9 @@ mod lifecycle;
 mod locales;
 mod macos;
 mod main_loop;
+// Only the systems with players and cameras use what their media share.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+mod media;
 mod menus;
 mod mouse_cursor;
 mod notifications;
@@ -56,6 +59,23 @@ mod vsync_waiter;
 mod windows;
 
 use inset_embedder::{EmbedderClient, PlatformRef};
+
+/// The system's players without the event loop, for a test that serves the main thread itself, as
+/// AVFoundation changes a player's state on the main queue. Not an API.
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub mod test_support {
+    use std::rc::Rc;
+
+    use inset_embedder::Players;
+
+    use crate::os::{SystemMedia, ThisOs};
+
+    /// The system's players, as `Platform::players` answers them; on the main thread.
+    pub fn players() -> Option<Rc<dyn Players>> {
+        ThisOs::players()
+    }
+}
 
 pub use images::{DecodeExecution, create_image_loader};
 pub use macos::MacOs;

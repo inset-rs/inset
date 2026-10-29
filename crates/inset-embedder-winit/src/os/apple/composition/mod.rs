@@ -2,10 +2,11 @@
 //!
 //! A surface is three layers. Its clip layer cuts it to what the placement shows of it. Inside, its
 //! content layer is the surface in its own points, scaled into its parent's by a transform, so one
-//! scale moves the group: the clip layers of its children first, then its buffer's layer on top,
-//! whose contents are the `IOSurface` its producer presented last. A surface opened under a view's
-//! root joins that view's layer tree once its scene places it, as a sublayer of the view's layer
-//! below the `CAMetalLayer` wgpu draws the framework into (raw-window-metal makes that one a
+//! scale moves the group: the clip layers of its children first, then a layer the system draws into
+//! where one hangs in the surface, a player's or a camera's preview, then its buffer's layer on
+//! top, whose contents are the `IOSurface` its producer presented last. A surface opened under a
+//! view's root joins that view's layer tree once its scene places it, as a sublayer of the view's
+//! layer below the `CAMetalLayer` wgpu draws the framework into (raw-window-metal makes that one a
 //! sublayer too, of an `NSView` and a `UIView` alike), so the clear rectangle the framework paints
 //! where the surface goes shows it through; a child joins its parent's content layer where its
 //! parent's present places it, below the parent's buffer, showing through its clear pixels. Every
@@ -44,6 +45,7 @@ use std::sync::{Arc, Mutex};
 use inset_embedder::{
     Compositor, Rect, Surface, SurfaceFrame, SurfaceParent, SurfacePlacement, ViewId,
 };
+use objc2::Message;
 use objc2::rc::Retained;
 use objc2_core_foundation::CGAffineTransform;
 use objc2_foundation::{NSPoint, NSRect, NSSize};
@@ -96,6 +98,8 @@ pub(crate) struct CoreAnimationSurface {
     /// clip layers, then [`buffer_layer`](Self::buffer_layer) on top.
     content_layer: CrossThreadLayer,
     buffer_layer: CrossThreadLayer,
+    /// A layer the system draws into, filling the surface beneath its buffer's layer.
+    system_layer: Mutex<Option<CrossThreadLayer>>,
     buffers: Mutex<PresentedBuffers<CrossThreadBuffer>>,
     children: Mutex<Children>,
     /// Whether a placement by another placer was reported already.
@@ -137,6 +141,7 @@ impl CoreAnimationSurface {
             clip_layer: CrossThreadLayer(clip_layer),
             content_layer: CrossThreadLayer(content_layer),
             buffer_layer: CrossThreadLayer(buffer_layer),
+            system_layer: Mutex::new(None),
             buffers: Mutex::new(PresentedBuffers::new()),
             children: Mutex::new(Children {
                 placed: PlacedSurfaces::new(),
@@ -189,12 +194,35 @@ impl CoreAnimationSurface {
         let buffer_layer = &self.buffer_layer.0;
         buffer_layer.setFrame(content_layer.bounds());
         buffer_layer.setContentsScale(window_scale);
+        if let Some(system_layer) = &*self.system_layer.lock().expect(HELD_BRIEFLY)
+            && is_sublayer_of(&system_layer.0, content_layer)
+        {
+            system_layer.0.setFrame(content_layer.bounds());
+        }
         self.lay_out_children_for(window_scale);
         clip_layer.setHidden(false);
     }
 
     fn hide(&self) {
         self.clip_layer.0.setHidden(true);
+    }
+
+    /// Hangs `layer`, which the system draws into, in the surface, filling it beneath its
+    /// buffer's layer, in place of any hung before. Main thread.
+    fn hang(&self, layer: &CALayer) {
+        let mut system_layer = self.system_layer.lock().expect(HELD_BRIEFLY);
+        in_transaction(|| {
+            let content_layer = &self.content_layer.0;
+            if let Some(previous) = system_layer.take()
+                && !std::ptr::eq(&*previous.0, layer)
+                && is_sublayer_of(&previous.0, content_layer)
+            {
+                previous.0.removeFromSuperlayer();
+            }
+            layer.setFrame(content_layer.bounds());
+            content_layer.insertSublayer_below(layer, Some(&self.buffer_layer.0));
+        });
+        *system_layer = Some(CrossThreadLayer(layer.retain()));
     }
 
     /// Lays the children out again for a window of `window_scale`, if they were laid out for
@@ -264,6 +292,16 @@ impl Drop for CoreAnimationSurface {
         in_transaction(|| self.clip_layer.0.removeFromSuperlayer());
         let released = self.buffers.get_mut().expect(HELD_BRIEFLY).release_all();
         notify_released(released);
+    }
+}
+
+/// Shows `layer`, which the system draws into, such as a player's, in `surface`, filling it and
+/// clipped and scaled with it, in place of any shown there before. A surface no compositor of this
+/// host opened shows nothing. Main thread.
+pub(crate) fn show_layer_on(surface: &Arc<dyn Surface>, layer: &CALayer) {
+    match CoreAnimationSurface::downcast_from(surface) {
+        Some(surface) => surface.hang(layer),
+        None => placed::report_foreign_surface(),
     }
 }
 
@@ -338,6 +376,13 @@ fn is_sublayer_at(parent: &CALayer, layer: &CALayer, index: u32) -> bool {
         && std::ptr::eq(&*sublayers.objectAtIndex(index as usize), layer)
 }
 
+/// Whether `layer` hangs in `parent` still: a system layer moves from one surface to another.
+fn is_sublayer_of(layer: &CALayer, parent: &CALayer) -> bool {
+    layer
+        .superlayer()
+        .is_some_and(|superlayer| std::ptr::eq(&*superlayer, parent))
+}
+
 /// `rect`, in a window's physical pixels, in points: `scale` pixels each.
 fn points_of(rect: Rect, scale: f64) -> NSRect {
     NSRect::new(
@@ -360,7 +405,7 @@ fn scaling(scale: f64) -> CGAffineTransform {
 
 /// Runs `change` in a transaction of its own with implicit animations off: a layer changed
 /// off the main thread must be in one, and a layer the framework moves must not animate.
-fn in_transaction(change: impl FnOnce()) {
+pub(crate) fn in_transaction(change: impl FnOnce()) {
     CATransaction::begin();
     CATransaction::setDisableActions(true);
     change();
@@ -528,6 +573,37 @@ mod tests {
         let layers = CoreAnimationSurface::downcast_from(&surface).unwrap();
         assert!(layers.may_be_placed_by(Placer::View(ViewId(3))));
         assert!(!layers.may_be_placed_by(Placer::View(ViewId(4))));
+    }
+
+    /// A player's layer fills the surface it hangs in, beneath the buffer, through every
+    /// placement, and a second replaces the first.
+    #[test]
+    fn a_system_layer_fills_its_surface_beneath_the_buffer() {
+        let view_layer = flipped_view_layer();
+        let surface: Arc<dyn Surface> = idle_surface();
+        let layers = CoreAnimationSurface::downcast_from(&surface).unwrap();
+        let first = CALayer::new();
+        show_layer_on(&surface, &first);
+        layers.place(
+            &view_layer,
+            0,
+            &unclipped(Rect::from_ltwh(20.0, 40.0, 640.0, 360.0), 2.0),
+            2.0,
+        );
+        assert_eq!(
+            frame_in(&first, &view_layer),
+            NSRect::new(NSPoint::new(10.0, 20.0), NSSize::new(320.0, 180.0))
+        );
+
+        let second = CALayer::new();
+        show_layer_on(&surface, &second);
+        assert!(first.superlayer().is_none());
+        let sublayers = unsafe { layers.content_layer.0.sublayers() }.unwrap();
+        assert!(std::ptr::eq(&*sublayers.objectAtIndex(0), &*second));
+        assert!(std::ptr::eq(
+            &*sublayers.lastObject().unwrap(),
+            &*layers.buffer_layer.0
+        ));
     }
 
     /// A placement's own surface, which [`CoreAnimationSurface::place`] does not read.

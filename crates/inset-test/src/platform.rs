@@ -6,11 +6,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use inset_embedder::{
-    AppExit, AppLifecycleState, Brightness, Clipboard, Dispatcher, DockMenu, FileDialogs,
-    FontSource, Haptics, Image, ImageCodecFuture, ImageDecodeError, Instant, MenuBar, MouseCursor,
-    Notifications, Opener, Platform, PopupMenus, RequestId, Restoration, SystemChrome,
-    SystemContextMenu, TargetPlatform, TextServices, TrayIcons, View, ViewError, ViewId, ViewRef,
-    ViewRequest,
+    AppExit, AppLifecycleState, Brightness, Cameras, Clipboard, Compositor, Dispatcher, DockMenu,
+    FileDialogs, FontSource, Haptics, Image, ImageCodecFuture, ImageDecodeError, Instant, MenuBar,
+    MouseCursor, Notifications, Opener, Platform, Players, PopupMenus, RequestId, Restoration,
+    SystemChrome, SystemContextMenu, TargetPlatform, TextServices, TrayIcons, View, ViewError,
+    ViewId, ViewRef, ViewRequest,
 };
 
 use inset_embedder::valo;
@@ -51,6 +51,9 @@ pub struct TestPlatform {
     file_dialogs: Option<Rc<dyn FileDialogs>>,
     opener: Option<Rc<dyn Opener>>,
     notifications: Option<Rc<dyn Notifications>>,
+    compositor: Option<Arc<dyn Compositor>>,
+    players: Option<Rc<dyn Players>>,
+    cameras: Option<Rc<dyn Cameras>>,
     dock_menu: Option<Rc<dyn DockMenu>>,
     text_services: Option<Rc<dyn TextServices>>,
     mouse_cursor: Option<Rc<dyn MouseCursor>>,
@@ -85,6 +88,9 @@ impl TestPlatform {
             file_dialogs: None,
             opener: None,
             notifications: None,
+            compositor: None,
+            players: None,
+            cameras: None,
             dock_menu: None,
             text_services: None,
             mouse_cursor: None,
@@ -237,6 +243,21 @@ impl TestPlatform {
 
     pub fn with_notifications(mut self, notifications: Rc<dyn Notifications>) -> TestPlatform {
         self.notifications = Some(notifications);
+        self
+    }
+
+    pub fn with_compositor(mut self, compositor: Arc<dyn Compositor>) -> TestPlatform {
+        self.compositor = Some(compositor);
+        self
+    }
+
+    pub fn with_players(mut self, players: Rc<dyn Players>) -> TestPlatform {
+        self.players = Some(players);
+        self
+    }
+
+    pub fn with_cameras(mut self, cameras: Rc<dyn Cameras>) -> TestPlatform {
+        self.cameras = Some(cameras);
         self
     }
 
@@ -424,6 +445,18 @@ impl Platform for TestPlatform {
 
     fn notifications(&self) -> Option<&dyn Notifications> {
         self.notifications.as_deref()
+    }
+
+    fn compositor(&self) -> Option<Arc<dyn Compositor>> {
+        self.compositor.clone()
+    }
+
+    fn players(&self) -> Option<&dyn Players> {
+        self.players.as_deref()
+    }
+
+    fn cameras(&self) -> Option<&dyn Cameras> {
+        self.cameras.as_deref()
     }
 
     fn dock_menu(&self) -> Option<&dyn DockMenu> {

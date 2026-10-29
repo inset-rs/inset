@@ -14,6 +14,8 @@ default = ["image-apple", "image-software", "image-worker"]
 image-software = ["dep:valo-codec-software"]
 image-apple = ["dep:valo-codec-apple"]
 image-worker = ["valo-codec/worker"]
+# The system's players without the event loop, for a test that serves the main thread itself.
+test-support = []
 
 [dependencies]
 inset-embedder.workspace = true
@@ -56,7 +58,7 @@ valo-codec-apple = { version = "0.13.1", optional = true }
 block2 = "0.6"
 dispatch2 = "0.3"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSString", "NSObject", "NSGeometry", "NSArray", "NSBundle", "NSCalendar", "NSData", "NSDate", "NSDictionary", "NSError", "NSSet", "NSIndexSet", "NSItemProvider", "NSNotification", "NSOperation", "NSProgress", "NSPropertyList", "NSRunLoop", "NSURL", "NSValue", "NSProcessInfo", "NSTimeZone", "block2"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSObject", "NSGeometry", "NSArray", "NSBundle", "NSCalendar", "NSData", "NSDate", "NSDictionary", "NSError", "NSSet", "NSIndexSet", "NSItemProvider", "NSKeyValueObserving", "NSNotification", "NSOperation", "NSProgress", "NSPropertyList", "NSRunLoop", "NSURL", "NSValue", "NSProcessInfo", "NSTimeZone", "block2"] }
 # The UTI a pasteboard names a MIME type by.
 objc2-uniform-type-identifiers = { version = "0.3", features = ["UTType", "UTCoreTypes"] }
 # Notifications, a notification's time as a calendar date, and its image as the PNG file an
@@ -65,9 +67,14 @@ objc2-user-notifications = { version = "0.3", default-features = false, features
 png = "0.18"
 # Native surfaces: the layers they are, the buffer each shows and whether the compositor still
 # reads it, and the transform that scales a surface with its children.
-objc2-quartz-core = { version = "0.3", features = ["CALayer", "CATransaction"] }
+objc2-quartz-core = { version = "0.3", features = ["CABase", "CALayer", "CATransaction"] }
 objc2-io-surface = "0.3"
 objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
+# Players and cameras: AVFoundation, the times and sample buffers it speaks in, and the pixel
+# buffers a frame reader hands out.
+objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "dispatch2", "objc2-core-foundation", "objc2-core-media", "objc2-core-video", "objc2-quartz-core", "AVAnimation", "AVCaptureDevice", "AVCaptureFileOutput", "AVCaptureInput", "AVCaptureOutputBase", "AVCapturePhotoOutput", "AVCaptureSession", "AVCaptureSessionPreset", "AVCaptureVideoDataOutput", "AVCaptureVideoPreviewLayer", "AVError", "AVMediaFormat", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVPlayerLayer", "AVVideoSettings"] }
+objc2-core-media = { version = "0.3", default-features = false, features = ["std", "objc2-core-video", "CMBase", "CMFormatDescription", "CMSampleBuffer", "CMSync", "CMTime"] }
+objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 # The general pasteboard, and the notices that it changed or the application became active.
@@ -133,6 +140,14 @@ harness = false
 name = "a_key_left_later_goes_to_the_menu_bar"
 harness = false
 
+[[test]]
+name = "a_player_reads_the_frames_of_a_file"
+harness = false
+
+# The test seam the media test reaches the system's players through.
+[dev-dependencies]
+inset-embedder-winit = { path = ".", features = ["test-support"] }
+
 # What the tests ask of AppKit that the host offers no call for: minimizing, hiding the
 # application, whether a window's content has the layer a surface draws into, choosing in its
 # menus, and pressing a key in a window that is not key.
@@ -142,12 +157,18 @@ objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSGeometry"] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer", "CAMetalLayer"] }
 
+# What the media test asks of the system that the host offers no call for: serving the main run
+# loop, and reading a frame's pixel buffer.
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dev-dependencies]
+objc2-foundation = { version = "0.3", features = ["NSDate", "NSRunLoop", "NSString"] }
+objc2-core-video = { version = "0.3", default-features = false, features = ["std", "objc2-io-surface", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVPixelBufferIOSurface"] }
+
 # AppKit's selectors and view hierarchy, UIKit's pasteboard, document picker and view, the
-# notification center's delegate and completion handlers, Core Animation's layers, and Win32 and
-# COM, the toast activator's included, need `unsafe`, which the workspace forbids; here it is
-# denied instead, and `os/macos`, `os/apple/composition`, `os/apple/notifications`,
-# `os/ios/pasteboard`, `os/ios/file_dialogs`, `os/ios/opener`, `os/ios/open_requests`,
-# `os/ios/composition`, `os/windows` and the tests' AppKit support, for a local event monitor,
-# alone allow it.
+# notification center's delegate and completion handlers, Core Animation's layers, AVFoundation,
+# and Win32 and COM, the toast activator's included, need `unsafe`, which the workspace forbids;
+# here it is denied instead, and `os/macos`, `os/apple/composition`, `os/apple/media`,
+# `os/apple/notifications`, `os/ios/pasteboard`, `os/ios/file_dialogs`, `os/ios/opener`,
+# `os/ios/open_requests`, `os/ios/composition`, `os/windows` and the tests' AppKit support, for a
+# local event monitor, alone allow it.
 [lints.rust]
 unsafe_code = "deny"

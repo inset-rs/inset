@@ -115,6 +115,49 @@ fn has_scheme(text: &str) -> bool {
             .all(|letter| letter.is_ascii_alphanumeric() || matches!(letter, '+' | '-' | '.'))
 }
 
+/// `path` as a `file:` URI, which [`file_uri_path`] reads back: made absolute against the working
+/// folder, its separators `/`, and every byte a URI's path may not hold as is percent-encoded. A Windows drive keeps its colon,
+/// and a Windows share is the URL's host.
+pub(crate) fn file_uri(path: &Path) -> String {
+    let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let written = uri_path_of(&path);
+    let encoded = percent_encoded(&written);
+    if let Some(share) = encoded.strip_prefix("//") {
+        format!("file://{share}")
+    } else if encoded.starts_with('/') {
+        format!("file://{encoded}")
+    } else {
+        format!("file:///{encoded}")
+    }
+}
+
+/// The path's bytes, with `/` between its parts.
+#[cfg(unix)]
+fn uri_path_of(path: &Path) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+    path.as_os_str().as_bytes().to_vec()
+}
+
+/// The path's bytes, with `/` between its parts.
+#[cfg(not(unix))]
+fn uri_path_of(path: &Path) -> Vec<u8> {
+    path.to_string_lossy().replace('\\', "/").into_bytes()
+}
+
+/// `bytes` with every byte outside a URI path's own characters (RFC 3986's `pchar` and `/`)
+/// percent-encoded.
+fn percent_encoded(bytes: &[u8]) -> String {
+    let mut encoded = String::with_capacity(bytes.len());
+    for &byte in bytes {
+        if byte.is_ascii_alphanumeric() || b"-._~!$&'()*+,;=:@/".contains(&byte) {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
+}
+
 /// The path a `file:` URI names on this system, its percent-encoding decoded; `None` for another
 /// URI, one on another host, or one that does not decode.
 pub fn file_uri_path(uri: &str) -> Option<PathBuf> {
@@ -211,6 +254,30 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[cfg(unix)]
+    #[test]
+    fn a_path_is_a_file_uri_with_what_a_uri_cannot_hold_encoded_and_reads_back() {
+        let path = Path::new("/Movies/a b/été #1?.mp4");
+        let uri = file_uri(path);
+        assert_eq!(uri, "file:///Movies/a%20b/%C3%A9t%C3%A9%20%231%3F.mp4");
+        assert_eq!(file_uri_path(&uri).as_deref(), Some(path));
+        let relative = file_uri(Path::new("clip.mov"));
+        assert!(relative.starts_with("file:///") && relative.ends_with("/clip.mov"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_path_is_a_file_uri_with_its_drive_or_its_share() {
+        assert_eq!(
+            file_uri(Path::new(r"C:\Movies\a b.mp4")),
+            "file:///C:/Movies/a%20b.mp4"
+        );
+        assert_eq!(
+            file_uri(Path::new(r"\\server\share\a.mp4")),
+            "file://server/share/a.mp4"
+        );
+    }
+
     #[test]
     fn a_file_uri_names_its_path_decoded() {
         assert_eq!(

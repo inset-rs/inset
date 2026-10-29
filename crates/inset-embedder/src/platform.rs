@@ -706,6 +706,17 @@ pub trait Platform: Any {
         None
     }
 
+    /// The system's media players, or `None` where the host has none.
+    fn players(&self) -> Option<&dyn crate::Players> {
+        None
+    }
+
+    /// The system's cameras, or `None` where the host has none. A host with cameras answers
+    /// one with none attached as an empty list.
+    fn cameras(&self) -> Option<&dyn crate::Cameras> {
+        None
+    }
+
     /// The menu of the app's Dock icon, or `None` where the system has no Dock.
     fn dock_menu(&self) -> Option<&dyn DockMenu> {
         None

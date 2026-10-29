@@ -318,6 +318,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — Android's documents and the web's files have no path, and a copy into the app's cache could not be written back.
   Affect: an app reads and writes a handle at any offset where the system gives no path, and reads a stream through once.
 
+- Change: `PickedFile::url` answers the URL the system reads a pick by: a percent-encoded `file:` URL for a path, Android's `content:` URI, the web's `blob:` URL, where `XFile.path` is a path or a blob URL by platform.
+  Reason: platform — every system's player and every API that takes a URL reads a pick by it, and a pick without a path has a URL all the same.
+  Affect: an app hands any pick to a player, or another API that takes a URL, without reading it first.
+
 - Change: a folder pick is a `PickedFolder`: a path where the system gives one, and the system's folder handle where it gives none (the web's directory handle, Android's document tree), which lists the folder, opens its files and folders by name, and makes them when writable, where `getDirectoryPath` answers a path or nothing.
   Reason: platform — neither the web nor Android gives a folder a path, and a copy could not be written back.
   Affect: an app reaches a picked folder's files through the handle on the web and Android, and through the path elsewhere.
@@ -329,4 +333,18 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - Change: every dialog takes the parent view whose window it belongs to, which macOS shows it as a sheet on.
   Reason: platform — a file dialog belongs to a window, which a view-based interface names by its view.
   Affect: a dialog opened for a window stays with it on macOS, and stands alone without one.
+
+## media.rs → the `video_player` package's `VideoPlayerController` and the `camera` package's `CameraController`, through their platform interfaces
+
+- Change: players and cameras are host capabilities, `Platform::players` and `Platform::cameras`: a player is one host object made from a URL, a link or a pick's `PickedFile::url`, loading by itself, controlled and observed through its state, and a camera a session on one device with an output per use, where Flutter's plugins have controllers that are initialized over method channels.
+  Reason: platform — the host is the system's media stack, and its players and capture sessions are that model on every system Inset targets.
+  Affect: an app makes a player and calls it at once, without awaiting an initialization, and a system without players or cameras answers `None`.
+
+- Change: a player's or a camera's picture goes to one destination at a time, a surface the system draws into, or a frame reader handing out the platform's own pixel buffers, where Flutter's plugins register a texture the engine copies from.
+  Reason: platform — protected and HDR video show only where the system draws them itself, and Windows' and Android's decoders feed one output.
+  Affect: a player shown on a surface has no frames to read, and one read as frames shows on no surface.
+
+- Change: a camera's photos are answered encoded by the system, as bytes and their MIME type, and its recordings written by the system to a path the app gives, where the `camera` plugin answers an `XFile` in a folder of its own.
+  Reason: platform — the system encodes and writes them, and an app chooses where its files go.
+  Affect: a photo arrives as JPEG bytes, and a recording is a QuickTime movie at the app's path.
 

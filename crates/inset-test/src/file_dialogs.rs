@@ -188,6 +188,11 @@ impl FileHandle for MemoryFile {
         &self.0.name
     }
 
+    /// `memory:` and the file's name, which no system reads: a test's stand-in for a URL.
+    fn url(&self) -> String {
+        format!("memory:{}", self.0.name)
+    }
+
     fn size(&self) -> FileSizeFuture {
         let size = self.0.bytes.borrow().len() as u64;
         Box::pin(std::future::ready(Ok(size)))

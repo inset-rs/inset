@@ -9,9 +9,15 @@ No Flutter crate in this shape. Closest analogue: `flutter_test`'s `TestPlatform
 
 ## file_dialogs.rs → no Flutter counterpart
 
-- Change: `MockFileDialogs` answers every dialog at once with the paths or picks the test gave, or a failure, and keeps each dialog asked for; `MemoryFile` is a picked file in memory whose writes land when its writer finishes, and `MemoryFolder` a picked folder in memory, which lists, opens and, when writable, makes its files and folders.
+- Change: `MockFileDialogs` answers every dialog at once with the paths or picks the test gave, or a failure, and keeps each dialog asked for; `MemoryFile` is a picked file in memory whose writes land when its writer finishes and whose URL is `memory:` and its name, and `MemoryFolder` a picked folder in memory, which lists, opens and, when writable, makes its files and folders.
   Reason: platform — it stands in for the host's dialogs, which Flutter's tests reach only as plugin channel calls.
   Affect: a test drives an app's open and save without a host, and checks what it wrote.
+
+## media.rs → `FakeController` in `video_player`'s tests and `FakeCameraPlatform` in `camera`'s
+
+- Change: `MockCompositor` opens surfaces under a view's root that show nothing and keeps each with its view; `MockPlayers` and `MockCameras` keep each player and camera session opened, what it was asked and the surface it shows on, and report the state the test sets, waking the app's watch of it; a session's photos answer what the test gave while it runs, and its recordings answer when stopped, writing nothing.
+  Reason: platform — they stand in for the host's compositor and media stack, which Flutter's tests reach only as plugin channel calls.
+  Affect: a test drives a player or a camera and its views without a host, and checks what the app asked of them.
 
 ## menus.rs → no Flutter counterpart
 

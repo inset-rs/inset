@@ -17,11 +17,16 @@
 //! Elsewhere a folder pick fails: Safari's and Firefox's `webkitdirectory` input gives a flat list
 //! of files, which no folder could be written through.
 //!
+//! A pick's URL (`PickedFile::url`) is a `blob:` URL of the file as it was when picked: the
+//! picker's handle gives its file only through a promise, so a handle's file is taken as the pick
+//! is answered. The URL is made at its first asking and never revoked, since a player may read it
+//! after the pick is let go; the page frees it when it unloads.
+//!
 //! A dialog asks for the user's gesture: the app opens one while it handles the user's click or
 //! key, as the browser tells a page's own dialog from one a script forced. The initial folder and
 //! the confirming button's label have no counterpart in the browser's pickers.
 
-use std::cell::Cell;
+use std::cell::{Cell, OnceCell};
 
 use inset_embedder::{
     EntryKind, FileDialogError, FileDialogFuture, FileDialogs, FileFinishFuture, FileHandle,
@@ -33,7 +38,7 @@ use js_sys::{Array, Function, Object, Promise, Reflect, Uint8Array};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{Blob, File, HtmlInputElement};
+use web_sys::{Blob, File, HtmlInputElement, Url};
 
 /// The browser's pickers.
 pub(crate) struct BrowserFileDialogs;
@@ -99,7 +104,9 @@ impl FileDialogs for BrowserFileDialogs {
             let Some(handle) = answered(shown).await? else {
                 return Ok(None);
             };
-            let file = SystemFile::new(handle, true);
+            let file = SystemFile::open(handle, true)
+                .await
+                .map_err(|error| failure(&error.to_string()))?;
             Ok(Some(PickedFile::Handle(Box::new(file))))
         })
     }
@@ -133,9 +140,10 @@ async fn open_with_picker(
     let mut picked = Vec::new();
     for handle in Array::from(&handles).iter() {
         let writable = options.writable && write_granted(&handle).await;
-        picked.push(PickedFile::Handle(Box::new(SystemFile::new(
-            handle, writable,
-        ))));
+        let file = SystemFile::open(handle, writable)
+            .await
+            .map_err(|error| failure(&error.to_string()))?;
+        picked.push(PickedFile::Handle(Box::new(file)));
     }
     Ok(picked)
 }
@@ -269,24 +277,32 @@ fn input_accept(types: &[FileType]) -> String {
     extensions.chain(mime_types).collect::<Vec<_>>().join(",")
 }
 
-/// A file the browser's picker or a launch gave: its handle, and whether the app may write it.
+/// A file the browser's picker or a launch gave: its handle, the file as it was picked, and
+/// whether the app may write it.
 pub(crate) struct SystemFile {
     handle: JsValue,
     name: String,
+    /// The file when it was picked, which its URL is made of.
+    picked: File,
+    url: OnceCell<String>,
     writable: bool,
 }
 
 impl SystemFile {
-    pub(crate) fn new(handle: JsValue, writable: bool) -> SystemFile {
+    /// The file `handle` names, as it is now.
+    pub(crate) async fn open(handle: JsValue, writable: bool) -> std::io::Result<SystemFile> {
         let name = Reflect::get(&handle, &JsValue::from_str("name"))
             .ok()
             .and_then(|name| name.as_string())
             .unwrap_or_default();
-        SystemFile {
+        let picked = SystemFile::file(&handle).await?;
+        Ok(SystemFile {
             handle,
             name,
+            picked,
+            url: OnceCell::new(),
             writable,
-        }
+        })
     }
 
     /// The file as it is now, which the browser reads afresh at each call.
@@ -302,6 +318,10 @@ impl SystemFile {
 impl FileHandle for SystemFile {
     fn name(&self) -> &str {
         &self.name
+    }
+
+    fn url(&self) -> String {
+        blob_url(&self.url, &self.picked)
     }
 
     fn size(&self) -> FileSizeFuture {
@@ -382,7 +402,7 @@ impl SystemFolder {
         let child = self.child("getFileHandle", name, create);
         let writable = self.writable;
         Box::pin(async move {
-            let file = SystemFile::new(child.await?, writable);
+            let file = SystemFile::open(child.await?, writable).await?;
             Ok(PickedFile::Handle(Box::new(file)))
         })
     }
@@ -465,18 +485,27 @@ impl FolderHandle for SystemFolder {
 struct InputFile {
     file: File,
     name: String,
+    url: OnceCell<String>,
 }
 
 impl InputFile {
     fn new(file: File) -> InputFile {
         let name = file.name();
-        InputFile { file, name }
+        InputFile {
+            file,
+            name,
+            url: OnceCell::new(),
+        }
     }
 }
 
 impl FileHandle for InputFile {
     fn name(&self) -> &str {
         &self.name
+    }
+
+    fn url(&self) -> String {
+        blob_url(&self.url, &self.file)
     }
 
     fn size(&self) -> FileSizeFuture {
@@ -491,6 +520,13 @@ impl FileHandle for InputFile {
     fn open_write(&self) -> Option<FileOpenFuture<Box<dyn FileWriter>>> {
         None
     }
+}
+
+/// The `blob:` URL of `file`, made at the first asking and kept in `url`; never revoked, as the
+/// module says. Empty where the page cannot make one.
+fn blob_url(url: &OnceCell<String>, file: &File) -> String {
+    url.get_or_init(|| Url::create_object_url_with_blob(file).unwrap_or_default())
+        .clone()
 }
 
 /// Reads `blob` into `buf` from `offset`: the slice of it that fits.

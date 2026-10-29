@@ -118,6 +118,20 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — a surface is a rectangle and a buffer on every compositor, and only the buffer's type differs, which the surface carries.
   Affect: the widget takes no input and reports no size, so an app wraps it in a `Listener` and tells the producer the size itself.
 
+## media/ → the `video_player` package's `VideoPlayerController` and `VideoPlayer`, and the `camera` package's `CameraController`, `CameraPreview` and `availableCameras`
+
+- Change: `Player` is a listenable over the host's player, made from a URL and loading by itself, with no `initialize` and no copied value, and `VideoView::new(player)` shows it, where Flutter's `VideoPlayerController` is initialized and `VideoPlayer` takes the controller.
+  Reason: platform — the host's player is the system's, which loads by itself and reports its state, and a host without players answers none.
+  Affect: an app calls `play` on a new player, `Player::new` answers `None` where the platform has no players, a URL the system cannot play reports a failure, and a `VideoView` takes the video's size in logical pixels, or none until it is known.
+
+- Change: `CameraSession` is a listenable over the host's session on one camera, with an output per use, `start` and `stop`, and `CameraPreview::new(session)` shows its preview, where Flutter's `CameraController` initializes a camera with a resolution preset and takes pictures and videos itself.
+  Reason: platform — the host's session is the system's, whose outputs are its own, and a platform without cameras answers none.
+  Affect: `CameraSession::new` answers `None` where the platform has no cameras, a photo arrives as encoded bytes and a recording at the app's path.
+
+- Change: a `VideoView` or a `CameraPreview` opens a surface under the root of the view it is in and shows its player or session there, which the system draws into.
+  Reason: platform — the picture is drawn by the system into the surface's layer, which no frame of the framework's touches.
+  Affect: a player or a session shows on the view built for it last, and nothing shows where the host has no compositor.
+
 ## widgets/banner.rs → banner.dart
 
 - Change: `BannerPainter` answers no `repaint` listenable, where Dart repaints on `PaintingBinding.systemFonts`.
