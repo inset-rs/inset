@@ -1,6 +1,6 @@
 //! What the system asks of an application as a whole, through the winit embedder: the files and
-//! links it is asked to open, the Dock icon clicked, and quitting. The window lists them, and each
-//! is printed as it comes.
+//! links it is asked to open, the Dock icon clicked, and quitting; and what is dragged onto its
+//! window. The window lists them, and each is printed as it comes.
 //!
 //! A quit asks the app first: Cmd-Q, Quit in the app menu, or Quit in the Dock icon's menu on
 //! macOS, and closing the window on every system, since closing `run_app`'s only window asks to
@@ -32,21 +32,26 @@
 //!
 //! Click the Dock icon for a reopen, with the window on screen or minimized: each is printed
 //! with whether a window was visible and where the pointer was.
+//!
+//! Drag anything onto the window, files, text, a link or an image from another application: each
+//! report of the drag is printed with the types its items are offered in, and on the drop each
+//! item is read in its first type, which the window lists.
 #![feature(arbitrary_self_types)]
 
 use std::rc::Rc;
 use std::time::Duration;
 
 use inset_embedder::{
-    AppExitResponse, Color, OpenRequest, PickedFile, TextDirection, WindowConfig,
+    AppExitResponse, Color, DataTransferItem, DragData, OpenRequest, PickedFile, TextDirection,
+    WindowConfig,
 };
 use inset_embedder_winit::{Reopen, WinitEmbedder, WinitPlatform};
 use inset_foundation::{App, Completer, Entity, Listener, Task, Timer};
 use inset_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
 use inset_shell::Shell;
 use inset_widgets::{
-    AppLifecycleListener, BuildContext, Column, DecoratedBox, Directionality, IntoWidget, Padding,
-    StatelessWidget, Text, WidgetRef, run_app_with,
+    AppLifecycleListener, BuildContext, Column, DecoratedBox, Directionality, DropListener,
+    IntoWidget, Padding, StatelessWidget, Text, WidgetRef, run_app_with,
 };
 
 const BACKGROUND: Color = Color::from_argb(255, 245, 245, 240);
@@ -77,6 +82,8 @@ fn main() {
 struct Requests {
     /// The files and links the system asked the app to open, as the window lists them.
     opened: Vec<String>,
+    /// What was dropped on the window, each item in its first type, as the window lists it.
+    dropped: Vec<String>,
     reopens: u32,
     save: Save,
 }
@@ -95,6 +102,7 @@ enum Save {
 fn listen(app: &mut App, requests: &Entity<Requests>) {
     listen_for_opens(app, requests);
     listen_for_reopens(app, requests);
+    listen_for_drags(app, requests);
 }
 
 /// The files and links the system asks the app to open, at launch and on macOS while it runs, and
@@ -159,6 +167,60 @@ fn listen_for_reopens(app: &mut App, requests: &Entity<Requests>) {
             });
         });
     })));
+}
+
+/// What is dragged onto the window: each report printed, and each dropped item read.
+fn listen_for_drags(app: &mut App, requests: &Entity<Requests>) {
+    let requests = requests.clone();
+    DropListener::new(app)
+        .on_change(
+            app,
+            Rc::new(|_app, data: &DragData| println!("drag: {data:?}")),
+        )
+        .on_dropped(
+            app,
+            Rc::new(move |app, items| read_dropped(app, &requests, items)),
+        );
+}
+
+/// Reads each of `items` in its first type, starting every read while the drop is reported, and
+/// lists what each gives once it has.
+fn read_dropped(app: &mut App, requests: &Entity<Requests>, items: &[Rc<dyn DataTransferItem>]) {
+    for item in items {
+        let Some(mime) = item.types().first().cloned() else {
+            continue;
+        };
+        let read = item.read(&mime);
+        let requests = requests.clone();
+        // Dropping the task lets it run, as a Dart future does.
+        let _listed = app.spawn(async move |cx| {
+            let dropped = match read.await {
+                Ok(content) => format!("{mime}: {}", preview(&content)),
+                Err(error) => format!("{mime}: {error}"),
+            };
+            println!("dropped {dropped}");
+            cx.update(|app| {
+                requests.update(app, |requests, cx| {
+                    requests.dropped.push(dropped);
+                    cx.notify();
+                });
+            });
+        });
+    }
+}
+
+/// The start of `content`, as text where it is text, or else its size.
+fn preview(content: &[u8]) -> String {
+    match std::str::from_utf8(content) {
+        Ok(text) => text
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .take(80)
+            .collect(),
+        Err(_) => format!("{} bytes", content.len()),
+    }
 }
 
 /// Answers each quit with an `AppLifecycleListener`: yes, once the app has saved.
@@ -239,6 +301,12 @@ impl StatelessWidget for RequestList {
                 .opened
                 .iter()
                 .map(|opened| line(format!("Opened {opened}"))),
+        );
+        lines.extend(
+            requests
+                .dropped
+                .iter()
+                .map(|dropped| line(format!("Dropped {dropped}"))),
         );
         Column::new().spacing(8.0).children(lines).into_widget()
     }
