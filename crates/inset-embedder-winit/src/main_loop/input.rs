@@ -1,18 +1,29 @@
-//! The main loop's input: the mouse, the fingers, the keyboard, typing into a text input, files
-//! dragged over a window, and the cursor the app shows.
+//! The main loop's input: the mouse, the fingers and pens, the keyboard, typing into a text
+//! input, files dragged over a window, and the cursor the app shows.
+//!
+//! winit reports every pointer through one set of events, entered, moved, pressed or released and
+//! left, naming which pointer it is: the mouse goes to the pointer that is the mouse
+//! (`pointer.rs`), a finger or a pen to the contacts (`touch.rs`). A scroll is the mouse's signal
+//! when a wheel turns, and a trackpad's fingers pan as Flutter's pan-zoom pointer, with their
+//! pinches and rotations (`trackpad.rs`).
 
-use std::path::PathBuf;
-
-use inset_embedder::{DropChange, EmbedderClient, PointerDataPacket, SystemMouseCursorKind, View};
+use inset_embedder::{EmbedderClient, Offset, PointerDataPacket, SystemMouseCursorKind, View};
+use winit::data_transfer::{DataTransferId, TypeHint, TypedData};
 use winit::dpi::PhysicalPosition;
-use winit::event::{ElementState, Ime, KeyEvent, Modifiers, MouseButton, MouseScrollDelta, Touch};
+use winit::event::{
+    ButtonSource, ElementState, Ime, KeyEvent, Modifiers, MouseScrollDelta, PointerKind,
+    PointerSource, ScrollSource, TouchPhase,
+};
+use winit::event_loop::{ActiveEventLoop, AsyncRequestSerial, DndAction};
 use winit::window::WindowId;
 
+use crate::drag_drop::file_path;
 use crate::ime::ImeOutcome;
 use crate::mouse_cursor;
 use crate::os::{NativeMenus, PointerQueries, ThisOs};
 use crate::pointer::PointerStamp;
 use crate::text_input::Typed;
+use crate::touch::Contact;
 
 use super::MainLoop;
 
@@ -25,61 +36,151 @@ impl<C: EmbedderClient> MainLoop<C> {
             .window()
             .and_then(|id| self.views().by_window(id));
         if let Some(open) = pointer_window {
-            mouse_cursor::show(&open.window, kind);
+            mouse_cursor::show(&*open.window, kind);
         }
     }
 
-    pub(super) fn on_cursor_entered(&mut self, id: WindowId) {
-        // The entry carries no position, and the last one seen may be from
-        // before the window moved; the add goes out at where the pointer is.
-        let position = self
-            .views()
-            .by_window(id)
-            .and_then(|open| ThisOs::pointer_position_in(&open.window));
-        let stamp = self.pointer_stamp(id);
-        let packet = self.pointer.entered(id, position, stamp, &mut self.ids);
-        self.send_pointer_packets(packet);
-    }
-
-    pub(super) fn on_cursor_left(&mut self, id: WindowId) {
-        let stamp = self.pointer_stamp(id);
-        let packet = self.pointer.left(stamp, &mut self.ids);
-        self.send_pointer_packets(packet);
-    }
-
-    pub(super) fn on_cursor_moved(&mut self, id: WindowId, position: PhysicalPosition<f64>) {
-        let stamp = self.pointer_stamp(id);
-        let packets = self.pointer.moved(
-            id,
-            [position.x, position.y],
-            ThisOs::pressed_buttons(),
-            stamp,
-            &mut self.ids,
-        );
-        self.send_pointer_packets(packets);
-    }
-
-    pub(super) fn on_mouse_input(
+    /// A pointer came into `window` at `position`: the mouse, or a finger or a pen arriving.
+    pub(super) fn on_pointer_entered(
         &mut self,
-        id: WindowId,
-        state: ElementState,
-        button: MouseButton,
+        window: WindowId,
+        position: PhysicalPosition<f64>,
+        kind: PointerKind,
     ) {
-        let stamp = self.pointer_stamp(id);
-        let pressed = state == ElementState::Pressed;
-        let packet = self.pointer.button(button, pressed, stamp, &mut self.ids);
+        let stamp = self.pointer_stamp(window);
+        let at = [position.x, position.y];
+        let packet = match Contact::of(kind) {
+            Some(contact) => self.touches.entered(contact, at, stamp, &mut self.ids),
+            None => self.pointer.entered(window, at, stamp, &mut self.ids),
+        };
         self.send_pointer_packets(packet);
     }
 
-    pub(super) fn on_mouse_wheel(&mut self, id: WindowId, delta: MouseScrollDelta) {
-        let scale = self
-            .views()
-            .by_window(id)
-            .map(|open| open.view.metrics().device_pixel_ratio)
-            .unwrap_or(1.0);
-        let stamp = self.pointer_stamp(id);
-        let packet = self.pointer.scrolled(delta, scale, stamp, &mut self.ids);
+    /// A pointer left `window`, at `position` where winit says: the mouse, or a finger or a pen
+    /// leaving.
+    pub(super) fn on_pointer_left(
+        &mut self,
+        window: WindowId,
+        position: Option<PhysicalPosition<f64>>,
+        kind: PointerKind,
+    ) {
+        let stamp = self.pointer_stamp(window);
+        let packet = match Contact::of(kind) {
+            Some(contact) => {
+                let at = position.map(|position| [position.x, position.y]);
+                self.touches.left(contact, at, stamp, &mut self.ids)
+            }
+            None => self.pointer.left(stamp, &mut self.ids),
+        };
         self.send_pointer_packets(packet);
+    }
+
+    /// A pointer moved in `window` to `position`.
+    pub(super) fn on_pointer_moved(
+        &mut self,
+        window: WindowId,
+        position: PhysicalPosition<f64>,
+        source: PointerSource,
+    ) {
+        let stamp = self.pointer_stamp(window);
+        let at = [position.x, position.y];
+        match Contact::moved_from(&source) {
+            Some((contact, pressure)) => {
+                let packet = self
+                    .touches
+                    .moved(contact, at, pressure, stamp, &mut self.ids);
+                self.send_pointer_packets(packet);
+            }
+            None => {
+                let packets =
+                    self.pointer
+                        .moved(window, at, ThisOs::pressed_buttons(), stamp, &mut self.ids);
+                self.send_pointer_packets(packets);
+            }
+        }
+    }
+
+    /// A pointer pressed or lifted one of its buttons in `window` at `position`: a mouse's
+    /// button, a finger, or a pen's tip.
+    pub(super) fn on_pointer_button(
+        &mut self,
+        window: WindowId,
+        state: ElementState,
+        position: PhysicalPosition<f64>,
+        button: ButtonSource,
+    ) {
+        let stamp = self.pointer_stamp(window);
+        let at = [position.x, position.y];
+        let pressed = state == ElementState::Pressed;
+        let packet = if let Some((contact, pressure)) = Contact::pressed_by(&button) {
+            if pressed {
+                self.touches
+                    .pressed(contact, at, pressure, stamp, &mut self.ids)
+            } else {
+                self.touches
+                    .released(contact, at, pressure, stamp, &mut self.ids)
+            }
+        } else if let ButtonSource::Mouse(button) = button {
+            self.pointer
+                .button(button, pressed, at, stamp, &mut self.ids)
+        } else {
+            None
+        };
+        self.send_pointer_packets(packet);
+    }
+
+    /// A scroll in `window`, by what drives it, as Flutter's macOS embedder takes a scroll event
+    /// (`dispatchGestureEvent:`): fingers on a trackpad pan, the system's momentum after they
+    /// lift is left out, since the framework makes its own fling, and a wheel's turn, or a scroll
+    /// winit cannot name the source of, is the mouse's scroll signal.
+    pub(super) fn on_mouse_wheel(
+        &mut self,
+        window: WindowId,
+        delta: MouseScrollDelta,
+        phase: TouchPhase,
+        source: ScrollSource,
+    ) {
+        let scale = self.scale_of(window);
+        let stamp = self.pointer_stamp(window);
+        let packet = match source {
+            ScrollSource::Finger => {
+                let at = self.pointer.position();
+                self.trackpad
+                    .scrolled(phase, delta, scale, at, stamp, &mut self.ids)
+            }
+            ScrollSource::Momentum => None,
+            _ => self.pointer.scrolled(delta, scale, stamp, &mut self.ids),
+        };
+        self.send_pointer_packets(packet);
+    }
+
+    /// Fingers pinched on the trackpad over `window`, which scales the pan-zoom.
+    pub(super) fn on_pinch(&mut self, window: WindowId, magnification: f64, phase: TouchPhase) {
+        let stamp = self.pointer_stamp(window);
+        let at = self.pointer.position();
+        let packet = self
+            .trackpad
+            .pinched(phase, magnification, at, stamp, &mut self.ids);
+        self.send_pointer_packets(packet);
+    }
+
+    /// Fingers rotated on the trackpad over `window` by `degrees`, which rotates the pan-zoom.
+    pub(super) fn on_rotation(&mut self, window: WindowId, degrees: f32, phase: TouchPhase) {
+        let stamp = self.pointer_stamp(window);
+        let at = self.pointer.position();
+        let packet = self
+            .trackpad
+            .rotated(phase, degrees, at, stamp, &mut self.ids);
+        self.send_pointer_packets(packet);
+    }
+
+    /// How many physical pixels `window`'s view has to the logical one; one for a window the
+    /// embedder no longer has.
+    fn scale_of(&self, window: WindowId) -> f64 {
+        self.views()
+            .by_window(window)
+            .map(|open| open.view.metrics().device_pixel_ratio)
+            .unwrap_or(1.0)
     }
 
     /// A native menu ran its own event loop and closed: the presses and releases it kept are
@@ -93,16 +194,6 @@ impl<C: EmbedderClient> MainLoop<C> {
             self.send_pointer_packets(packets);
         }
         self.wake_client();
-    }
-
-    pub(super) fn on_touch(&mut self, id: WindowId, touch: &Touch) {
-        let Some(view) = self.view_id_of(id) else {
-            return;
-        };
-        let packet = self
-            .touches
-            .packet(touch, view, self.platform.elapsed(), &mut self.ids);
-        self.send_pointer_packets(packet);
     }
 
     /// The view of `window`, if the embedder has it, and the time a pointer event there happens.
@@ -176,24 +267,76 @@ impl<C: EmbedderClient> MainLoop<C> {
         }
     }
 
-    /// One file of a drag that came over `window`, or was let go over it.
-    pub(super) fn on_dragged_file(&mut self, window: WindowId, change: DropChange, path: PathBuf) {
-        if let Some(view) = self.view_id_of(window) {
-            self.drag_reports.add_file(view, change, path);
+    /// A drag came over `window` at `position`: it is accepted, its files copied, and the app
+    /// hears it once winit has answered the fetch of its files. A drag whose list of files winit
+    /// cannot fetch carries none, and is left refused.
+    pub(super) fn on_drag_entered(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        window: WindowId,
+        drag: DataTransferId,
+        position: Option<PhysicalPosition<f64>>,
+    ) {
+        let Some(view) = self.view_id_of(window) else {
+            return;
+        };
+        let Ok(fetch) = event_loop.fetch_data_transfer(drag, &TypeHint::UriList) else {
+            return;
+        };
+        let _ = event_loop.set_valid_dnd_actions(drag, &[DndAction::Copy]);
+        self.drags
+            .entered(drag, view, position.map(offset_of), fetch);
+    }
+
+    /// The drag moved to `position` over its window.
+    pub(super) fn on_drag_moved(&mut self, drag: DataTransferId, position: PhysicalPosition<f64>) {
+        if let Some(report) = self.drags.moved(drag, offset_of(position)) {
+            self.client.drop_data(report);
         }
     }
 
-    /// The drag left `window` without dropping.
-    pub(super) fn on_drag_exited(&mut self, window: WindowId) {
-        if let Some(view) = self.view_id_of(window) {
-            self.drag_reports.add_exit(view);
+    /// The drag was let go over its window.
+    pub(super) fn on_drag_dropped(&mut self, drag: DataTransferId) {
+        if let Some(report) = self.drags.dropped(drag) {
+            self.client.drop_data(report);
         }
     }
 
-    /// Reports the turn's drags to the client.
-    pub(super) fn report_drags(&mut self) {
-        for drop in self.drag_reports.take() {
-            self.client.drop_data(drop);
+    /// The drag left its window without dropping.
+    pub(super) fn on_drag_left(&mut self, drag: DataTransferId) {
+        if let Some(report) = self.drags.left(drag) {
+            self.client.drop_data(report);
         }
     }
+
+    /// winit answered the fetch `fetch` of a drag's files with `uris`: the reports waiting for
+    /// them go to the app, or the drag is refused when they name no file.
+    pub(super) fn on_drag_files(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        fetch: AsyncRequestSerial,
+        uris: &dyn TypedData,
+    ) {
+        let files = uris
+            .try_as_uris()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|uri| file_path(uri))
+            .collect();
+        match self.drags.files_arrived(fetch, files) {
+            Ok(reports) => {
+                for report in reports {
+                    self.client.drop_data(report);
+                }
+            }
+            Err(drag) => {
+                let _ = event_loop.set_valid_dnd_actions(drag, &[]);
+            }
+        }
+    }
+}
+
+/// A position in a window's physical pixels, as the framework takes one.
+fn offset_of(position: PhysicalPosition<f64>) -> Offset {
+    Offset::new(position.x, position.y)
 }

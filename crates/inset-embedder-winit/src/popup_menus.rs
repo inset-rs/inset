@@ -43,7 +43,7 @@ impl PopupMenus for NativePopupMenus {
         };
         let events = self.events.clone();
         ThisOs::open_popup_menu(
-            &open.window,
+            &*open.window,
             at,
             menu.to_vec(),
             self.events.clone(),

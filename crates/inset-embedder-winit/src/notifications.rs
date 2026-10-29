@@ -3,12 +3,11 @@
 //! (`EmbedderClient::notification_activated`) as a request of the system's. The system's
 //! notifications themselves are each system's (`os/*/notifications`).
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
 use inset_embedder::NotificationActivation;
-use winit::event_loop::EventLoopProxy;
 
-use crate::main_loop::MainLoopEvent;
+use crate::main_loop::{MainLoopEvent, MainLoopProxy};
 use crate::system_requests::SystemRequest;
 
 /// Where a system's notifications send the user's clicks, from any thread.
@@ -17,11 +16,9 @@ pub(crate) struct NotificationActivations(Arc<dyn Fn(NotificationActivation) + S
 
 impl NotificationActivations {
     /// Clicks sent to the main loop through `proxy`.
-    pub(crate) fn new(proxy: EventLoopProxy<MainLoopEvent>) -> NotificationActivations {
-        let proxy = Mutex::new(proxy);
+    pub(crate) fn new(proxy: MainLoopProxy) -> NotificationActivations {
         NotificationActivations(Arc::new(move |activation| {
-            let proxy = proxy.lock().unwrap_or_else(PoisonError::into_inner);
-            let _ = proxy.send_event(MainLoopEvent::SystemRequest(
+            proxy.send(MainLoopEvent::SystemRequest(
                 SystemRequest::NotificationActivated(activation),
             ));
         }))

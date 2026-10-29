@@ -447,11 +447,7 @@ mod tests {
         assert_eq!(code_unit_at(0), Some(u16::from(b'a')));
         assert_eq!(code_unit_at(2), Some(u16::from(b'c')));
         assert_eq!(code_unit_at(4), Some(u16::from(b'e')));
-        assert_eq!(
-            code_unit_at(5),
-            Some(0xD83D),
-            "the emoji's high surrogate"
-        );
+        assert_eq!(code_unit_at(5), Some(0xD83D), "the emoji's high surrogate");
         assert_eq!(code_unit_at(7), None);
         assert_eq!(code_unit_at(-1), None);
     }

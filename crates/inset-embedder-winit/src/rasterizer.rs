@@ -14,7 +14,8 @@
 //! scene instead, since the framework draws only when asked, and draws it again when the
 //! system says the window can take it, as Flutter's `DrawLastLayerTree` does.
 //!
-//! The surface is the system's to give and take, winit's `Resumed` and `Suspended`: a
+//! The surface is the system's to give and take, winit's `can_create_surfaces` and
+//! `destroy_surfaces`: a
 //! rasterizer starts without one, and one taken away is made again on the same window when the
 //! system gives it back. Without a surface nothing is drawn: every draw is refused as lost, and
 //! the last scene is owed until a surface is given.
@@ -126,7 +127,7 @@ impl Rasterizer {
 
     /// The system gives `window` a surface: one is made on it, at the size the window has now,
     /// owed the last scene.
-    pub(crate) fn give_surface(&mut self, window: &Arc<Window>) -> Result<(), String> {
+    pub(crate) fn give_surface(&mut self, window: &Arc<dyn Window>) -> Result<(), String> {
         self.surface = Some(make_surface(&self.gpu, window, self.content_alpha)?);
         self.last_scene.surface_reset();
         Ok(())
@@ -289,7 +290,7 @@ impl LastScene {
 /// honouring its alpha or not.
 fn make_surface(
     gpu: &Gpu,
-    window: &Arc<Window>,
+    window: &Arc<dyn Window>,
     alpha: valo::SurfaceAlpha,
 ) -> Result<valo::Surface, String> {
     valo::Surface::new_with_options(
@@ -297,7 +298,7 @@ fn make_surface(
         &gpu.adapter,
         &gpu.device,
         Arc::clone(window),
-        ThisOs::surface_size(window),
+        ThisOs::surface_size(&**window),
         valo::SurfaceOptions::default().with_alpha(alpha),
     )
     .map_err(|error| error.to_string())

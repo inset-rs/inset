@@ -9,8 +9,9 @@ use std::time::Duration;
 
 use inset_embedder::{HostWindow, IconImage, RawWindowHandle, Rect, ViewRef};
 use winit::dpi::{LogicalPosition, LogicalSize};
+use winit::icon::{Icon, RgbaIcon};
 use winit::raw_window_handle::HasWindowHandle;
-use winit::window::{Icon, Window, WindowId};
+use winit::window::{Window, WindowId};
 
 use crate::app_requests::{AppRequest, AppRequests};
 use crate::os::{ThisOs, WindowMotion, WindowVisibility};
@@ -20,7 +21,7 @@ use crate::view::WinitView;
 /// and closing it there frees it (`windows.rs`); from then on a call here changes nothing.
 pub(crate) struct WinitWindow {
     id: WindowId,
-    window: Weak<Window>,
+    window: Weak<dyn Window>,
     view: Rc<WinitView>,
     requests: Rc<AppRequests>,
     /// winit's last `Occluded` event: whether the window is occluded where the system cannot be
@@ -40,7 +41,7 @@ struct WindowState {
 impl WinitWindow {
     pub(crate) fn new(
         id: WindowId,
-        window: Weak<Window>,
+        window: Weak<dyn Window>,
         view: Rc<WinitView>,
         requests: Rc<AppRequests>,
     ) -> WinitWindow {
@@ -101,17 +102,17 @@ impl HostWindow for WinitWindow {
             return;
         };
         if let Some(duration) = animate
-            && ThisOs::animate_frame(&window, frame, duration)
+            && ThisOs::animate_frame(&*window, frame, duration)
         {
             return;
         }
-        if ThisOs::set_frame(&window, frame) {
+        if ThisOs::set_frame(&*window, frame) {
             return;
         }
         // Size before position: a system that anchors a window at its bottom-left, as
         // AppKit does, places the top edge from the size the window has at the time.
-        let _ = window.request_inner_size(LogicalSize::new(frame.width(), frame.height()));
-        window.set_outer_position(LogicalPosition::new(frame.left, frame.top));
+        let _ = window.request_surface_size(LogicalSize::new(frame.width(), frame.height()).into());
+        window.set_outer_position(LogicalPosition::new(frame.left, frame.top).into());
     }
 
     fn set_title(&self, title: &str) {
@@ -120,18 +121,12 @@ impl HostWindow for WinitWindow {
         }
     }
 
-    /// winit's: the title bar's icon on Windows and X11, nothing on macOS and Wayland, whose
-    /// windows have none of their own.
+    /// winit's: the title bar's icon on Windows and X11, and on Wayland where the compositor shows
+    /// one (`xdg_toplevel_icon`); nothing on macOS, whose windows have none of their own.
     fn set_icon(&self, icon: Option<IconImage>) {
-        let Some(window) = self.window.upgrade() else {
-            return;
-        };
-        let icon = icon.and_then(|icon| {
-            Icon::from_rgba(icon.rgba.to_vec(), icon.width, icon.height)
-                .inspect_err(|error| eprintln!("inset: the window's icon was refused: {error}"))
-                .ok()
-        });
-        window.set_window_icon(icon);
+        if let Some(window) = self.window.upgrade() {
+            window.set_window_icon(icon.as_ref().and_then(winit_icon));
+        }
     }
 
     fn show(&self) {
@@ -160,7 +155,7 @@ impl HostWindow for WinitWindow {
         let Some(window) = self.window.upgrade() else {
             return false;
         };
-        ThisOs::is_occluded(&window).unwrap_or(self.occluded.get())
+        ThisOs::is_occluded(&*window).unwrap_or(self.occluded.get())
     }
 
     fn close(&self) {
@@ -176,4 +171,13 @@ impl HostWindow for WinitWindow {
         let window = self.window.upgrade()?;
         window.window_handle().ok().map(|handle| handle.as_raw())
     }
+}
+
+/// `image` as winit's icon, whose pixels are straight RGBA too; `None`, said on stderr, where winit
+/// refuses them.
+fn winit_icon(image: &IconImage) -> Option<Icon> {
+    RgbaIcon::new(image.rgba.to_vec(), image.width, image.height)
+        .map(Icon::from)
+        .inspect_err(|error| eprintln!("inset: the window's icon was refused: {error}"))
+        .ok()
 }
