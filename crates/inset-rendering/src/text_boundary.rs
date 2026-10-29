@@ -113,12 +113,14 @@ fn code_point_from_surrogates(high_surrogate: i32, low_surrogate: i32) -> i32 {
 fn code_point_at(text: &InlineSpanRef, index: i32) -> Option<i32> {
     let code_unit_at_index = i32::from(text.clone().code_unit_at(index)?);
     Some(match code_unit_at_index & 0xFC00 {
-        0xD800 => {
-            code_point_from_surrogates(code_unit_at_index, i32::from(text.clone().code_unit_at(index + 1)?))
-        }
-        0xDC00 => {
-            code_point_from_surrogates(i32::from(text.clone().code_unit_at(index - 1)?), code_unit_at_index)
-        }
+        0xD800 => code_point_from_surrogates(
+            code_unit_at_index,
+            i32::from(text.clone().code_unit_at(index + 1)?),
+        ),
+        0xDC00 => code_point_from_surrogates(
+            i32::from(text.clone().code_unit_at(index - 1)?),
+            code_unit_at_index,
+        ),
         _ => code_unit_at_index,
     })
 }
@@ -159,7 +161,9 @@ fn skip_spaces_and_punctuations(text: &InlineSpanRef, offset: i32, forward: bool
     // "inner" here refers to the code unit that's before the break in the
     // search direction (`forward`).
     let inner_code_point = code_point_at(text, if forward { offset - 1 } else { offset });
-    let outer_code_unit = text.clone().code_unit_at(if forward { offset } else { offset - 1 });
+    let outer_code_unit = text
+        .clone()
+        .code_unit_at(if forward { offset } else { offset - 1 });
 
     // Make sure the hard break rules in UAX#29 take precedence over the ones we
     // add below. Luckily there're only 4 hard break rules for word breaks, and

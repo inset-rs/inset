@@ -1,202 +1,285 @@
-//! Touches as Flutter's pointers: one device per finger, numbered by the touch id the
-//! system gave it, with the add before its down and the remove after its up that Flutter's
-//! iOS embedder sends around every touch (`FlutterViewController.mm`, `dispatchTouches:`),
-//! so the framework meets each finger the way it meets a mouse and lets go of it after.
+//! Fingers and pens as Flutter's pointers: one device each, the add, down, move, up and remove
+//! Flutter's iOS embedder sends for every touch (`FlutterViewController.mm`, `dispatchTouches:`),
+//! which winit reports in that order as a contact entering, pressing, moving, releasing and
+//! leaving, so the framework meets each finger the way it meets a mouse and lets go of it after.
+//! A contact that leaves still pressed was cancelled, and is cancelled before it is removed. A pen
+//! is a stylus, as Flutter's iOS and Windows embedders report it, and hovers where the system
+//! reports it near the screen.
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use inset_embedder::{PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, ViewId};
-use winit::event::{Touch, TouchPhase};
+use winit::event::{ButtonSource, Force, PointerKind, PointerSource, TabletToolButton};
 
-use crate::pointer::PointerIds;
+use crate::pointer::{PointerIds, PointerStamp};
 
-/// The fingers on the screen: where each was last reported, and the press it is.
+/// The device of the pen: winit names no pen, and a finger's device, the system's id of the
+/// touch, is never negative.
+const PEN_DEVICE: i64 = -1;
+
+/// A finger or a pen, as the pointer device it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Contact {
+    device: i64,
+    kind: PointerDeviceKind,
+}
+
+impl Contact {
+    /// The contact a pointer of `kind` is; `None` for the mouse, and for a pointer winit cannot
+    /// name, which the mouse stands for.
+    pub(crate) fn of(kind: PointerKind) -> Option<Contact> {
+        match kind {
+            PointerKind::Touch(finger) => Some(Contact::finger(finger.into_raw())),
+            PointerKind::TabletTool(_) => Some(Contact::pen()),
+            _ => None,
+        }
+    }
+
+    /// The contact that moved, with how hard it presses, from the source of a move.
+    pub(crate) fn moved_from(source: &PointerSource) -> Option<(Contact, f64)> {
+        match source {
+            PointerSource::Touch { finger_id, force } => {
+                Some((Contact::finger(finger_id.into_raw()), pressure(*force)))
+            }
+            PointerSource::TabletTool { data, .. } => Some((Contact::pen(), pen_pressure(data))),
+            _ => None,
+        }
+    }
+
+    /// The contact a button event presses or lifts, with how hard it presses: a finger, or a
+    /// pen's tip. `None` for a mouse's button, and for a pen's other buttons.
+    pub(crate) fn pressed_by(button: &ButtonSource) -> Option<(Contact, f64)> {
+        match button {
+            ButtonSource::Touch { finger_id, force } => {
+                Some((Contact::finger(finger_id.into_raw()), pressure(*force)))
+            }
+            ButtonSource::TabletTool {
+                button: TabletToolButton::Contact,
+                data,
+                ..
+            } => Some((Contact::pen(), pen_pressure(data))),
+            _ => None,
+        }
+    }
+
+    fn finger(id: usize) -> Contact {
+        Contact {
+            device: id as i64,
+            kind: PointerDeviceKind::Touch,
+        }
+    }
+
+    fn pen() -> Contact {
+        Contact {
+            device: PEN_DEVICE,
+            kind: PointerDeviceKind::Stylus,
+        }
+    }
+}
+
+/// How hard a finger presses, from none to full; a screen that cannot tell reports full.
+fn pressure(force: Option<Force>) -> f64 {
+    force.map_or(1.0, |force| force.normalized(None))
+}
+
+/// How hard a pen presses, its force taken along its own axis where it reports its angle.
+fn pen_pressure(data: &winit::event::TabletToolData) -> f64 {
+    data.force
+        .map_or(1.0, |force| force.normalized(data.clone().angle()))
+}
+
+/// The contacts on the screen, or near it: where each was last reported, and the press it is in.
 #[derive(Default)]
 pub(crate) struct Touches {
-    fingers: HashMap<u64, Finger>,
+    contacts: HashMap<i64, ContactState>,
 }
 
-struct Finger {
+struct ContactState {
     last_position: [f64; 2],
-    /// Flutter's `pointerIdentifier` for this press, given at the down.
-    pointer_identifier: i64,
+    /// Flutter's `pointerIdentifier` of the press it is in, given at the down; `None` while it
+    /// hovers.
+    press: Option<i64>,
 }
 
-/// One change of one finger, as the framework takes it.
+/// One change of one contact, as the framework takes it.
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct TouchChange {
+struct ContactChange {
     device: i64,
+    kind: PointerDeviceKind,
     change: PointerChange,
     position: [f64; 2],
     delta: [f64; 2],
     pointer_identifier: i64,
+    pressure: f64,
 }
 
 impl Touches {
-    /// One finger's change in `view`, as the pointer that finger is: its arrival and departure
-    /// go with its down and its up, in one packet. `None` for a change the framework is not
-    /// told of.
-    pub(crate) fn packet(
+    /// `contact` came to `at`: the framework adds it as a device, before anything else about it.
+    /// A second arrival is dropped.
+    pub(crate) fn entered(
         &mut self,
-        touch: &Touch,
-        view: ViewId,
-        time_stamp: Duration,
+        contact: Contact,
+        at: [f64; 2],
+        stamp: PointerStamp,
         ids: &mut PointerIds,
     ) -> Option<PointerDataPacket> {
-        let position = [touch.location.x, touch.location.y];
-        let pressure = touch.force.map_or(1.0, |force| force.normalized());
-        let data: Vec<_> = self
-            .apply(touch.id, touch.phase, position, ids)
-            .into_iter()
-            .map(|change| change.data(view, pressure, time_stamp, ids))
-            .collect();
-        (!data.is_empty()).then(|| PointerDataPacket::new(data))
-    }
-
-    /// The changes one touch event makes, in the order the framework takes them: a finger
-    /// arriving is an add then a down, a finger leaving an up (or a cancel) then a remove.
-    /// A move of a finger the embedder never saw arrive is dropped, as is a second down of one.
-    fn apply(
-        &mut self,
-        id: u64,
-        phase: TouchPhase,
-        position: [f64; 2],
-        ids: &mut PointerIds,
-    ) -> Vec<TouchChange> {
-        let device = id as i64;
-        match phase {
-            TouchPhase::Started => {
-                if self.fingers.contains_key(&id) {
-                    return Vec::new();
-                }
-                let pointer_identifier = ids.next_pointer();
-                self.fingers.insert(
-                    id,
-                    Finger {
-                        last_position: position,
-                        pointer_identifier,
-                    },
-                );
-                vec![
-                    TouchChange::arrival(device, position),
-                    TouchChange::press(device, position, pointer_identifier),
-                ]
-            }
-            TouchPhase::Moved => {
-                let Some(finger) = self.fingers.get_mut(&id) else {
-                    return Vec::new();
-                };
-                let delta = delta_from(finger.last_position, position);
-                finger.last_position = position;
-                vec![TouchChange::motion(
-                    device,
-                    position,
-                    delta,
-                    finger.pointer_identifier,
-                )]
-            }
-            TouchPhase::Ended | TouchPhase::Cancelled => {
-                let Some(finger) = self.fingers.remove(&id) else {
-                    return Vec::new();
-                };
-                let change = if phase == TouchPhase::Ended {
-                    PointerChange::Up
-                } else {
-                    PointerChange::Cancel
-                };
-                let delta = delta_from(finger.last_position, position);
-                vec![
-                    TouchChange::release(
-                        device,
-                        change,
-                        position,
-                        delta,
-                        finger.pointer_identifier,
-                    ),
-                    TouchChange::departure(device, position),
-                ]
-            }
+        if self.contacts.contains_key(&contact.device) {
+            return None;
         }
-    }
-}
-
-fn delta_from([last_x, last_y]: [f64; 2], [x, y]: [f64; 2]) -> [f64; 2] {
-    [x - last_x, y - last_y]
-}
-
-impl TouchChange {
-    /// The finger arrived at `at`: the framework adds it as a device, before its press.
-    fn arrival(device: i64, at: [f64; 2]) -> TouchChange {
-        TouchChange::new(device, PointerChange::Add, at, [0.0, 0.0], 0)
+        self.contacts.insert(
+            contact.device,
+            ContactState {
+                last_position: at,
+                press: None,
+            },
+        );
+        let arrival = ContactChange::new(contact, PointerChange::Add, at, [0.0, 0.0], 0, 0.0);
+        packet([arrival], stamp, ids)
     }
 
-    /// The finger went down at `at`, starting the press numbered `pointer`.
-    fn press(device: i64, at: [f64; 2], pointer: i64) -> TouchChange {
-        TouchChange::new(device, PointerChange::Down, at, [0.0, 0.0], pointer)
-    }
-
-    /// The finger moved to `at`, by `delta`, during the press numbered `pointer`.
-    fn motion(device: i64, at: [f64; 2], delta: [f64; 2], pointer: i64) -> TouchChange {
-        TouchChange::new(device, PointerChange::Move, at, delta, pointer)
-    }
-
-    /// The press numbered `pointer` ended at `at`, by `delta` since the last move: `change` is
-    /// an Up, or a Cancel.
-    fn release(
-        device: i64,
-        change: PointerChange,
+    /// `contact` pressed at `at`, starting a press of its own. A press of a contact the embedder
+    /// never saw arrive, or of one already pressing, is dropped.
+    pub(crate) fn pressed(
+        &mut self,
+        contact: Contact,
         at: [f64; 2],
-        delta: [f64; 2],
-        pointer: i64,
-    ) -> TouchChange {
-        TouchChange::new(device, change, at, delta, pointer)
+        pressure: f64,
+        stamp: PointerStamp,
+        ids: &mut PointerIds,
+    ) -> Option<PointerDataPacket> {
+        let state = self.contacts.get_mut(&contact.device)?;
+        if state.press.is_some() {
+            return None;
+        }
+        let press = ids.next_pointer();
+        state.press = Some(press);
+        let delta = state.moved_to(at);
+        let down = ContactChange::new(contact, PointerChange::Down, at, delta, press, pressure);
+        packet([down], stamp, ids)
     }
 
-    /// The finger left at `at`: the framework removes it as a device, after its release.
-    fn departure(device: i64, at: [f64; 2]) -> TouchChange {
-        TouchChange::new(device, PointerChange::Remove, at, [0.0, 0.0], 0)
+    /// `contact` moved to `at`: a move while it presses, a hover otherwise. A move of a contact
+    /// the embedder never saw arrive is dropped.
+    pub(crate) fn moved(
+        &mut self,
+        contact: Contact,
+        at: [f64; 2],
+        pressure: f64,
+        stamp: PointerStamp,
+        ids: &mut PointerIds,
+    ) -> Option<PointerDataPacket> {
+        let state = self.contacts.get_mut(&contact.device)?;
+        let delta = state.moved_to(at);
+        let motion = match state.press {
+            Some(press) => {
+                ContactChange::new(contact, PointerChange::Move, at, delta, press, pressure)
+            }
+            None => ContactChange::new(contact, PointerChange::Hover, at, delta, 0, pressure),
+        };
+        packet([motion], stamp, ids)
     }
 
+    /// `contact` lifted at `at`, ending its press; it stays until it leaves. A lift of a contact
+    /// that was not pressing is dropped.
+    pub(crate) fn released(
+        &mut self,
+        contact: Contact,
+        at: [f64; 2],
+        pressure: f64,
+        stamp: PointerStamp,
+        ids: &mut PointerIds,
+    ) -> Option<PointerDataPacket> {
+        let state = self.contacts.get_mut(&contact.device)?;
+        let press = state.press.take()?;
+        let delta = state.moved_to(at);
+        let up = ContactChange::new(contact, PointerChange::Up, at, delta, press, pressure);
+        packet([up], stamp, ids)
+    }
+
+    /// `contact` left, at `at` where winit says: the framework removes it as a device, after
+    /// cancelling the press it was still in.
+    pub(crate) fn left(
+        &mut self,
+        contact: Contact,
+        at: Option<[f64; 2]>,
+        stamp: PointerStamp,
+        ids: &mut PointerIds,
+    ) -> Option<PointerDataPacket> {
+        let mut state = self.contacts.remove(&contact.device)?;
+        let at = at.unwrap_or(state.last_position);
+        let delta = state.moved_to(at);
+        let departure = ContactChange::new(contact, PointerChange::Remove, at, [0.0, 0.0], 0, 0.0);
+        let changes = match state.press {
+            Some(press) => vec![
+                ContactChange::new(contact, PointerChange::Cancel, at, delta, press, 0.0),
+                departure,
+            ],
+            None => vec![departure],
+        };
+        packet(changes, stamp, ids)
+    }
+}
+
+impl ContactState {
+    /// Takes `at` as where the contact is, and answers how far it came since it was last reported.
+    fn moved_to(&mut self, [x, y]: [f64; 2]) -> [f64; 2] {
+        let [last_x, last_y] = std::mem::replace(&mut self.last_position, [x, y]);
+        [x - last_x, y - last_y]
+    }
+}
+
+/// The packet of `changes` in the view `stamp` names; `None` for a window the embedder no longer
+/// has.
+fn packet(
+    changes: impl IntoIterator<Item = ContactChange>,
+    stamp: PointerStamp,
+    ids: &mut PointerIds,
+) -> Option<PointerDataPacket> {
+    let view = stamp.view?;
+    let data = changes
+        .into_iter()
+        .map(|change| change.data(view, stamp, ids))
+        .collect();
+    Some(PointerDataPacket::new(data))
+}
+
+impl ContactChange {
     fn new(
-        device: i64,
+        contact: Contact,
         change: PointerChange,
         position: [f64; 2],
         delta: [f64; 2],
         pointer_identifier: i64,
-    ) -> TouchChange {
-        TouchChange {
-            device,
+        pressure: f64,
+    ) -> ContactChange {
+        ContactChange {
+            device: contact.device,
+            kind: contact.kind,
             change,
             position,
             delta,
             pointer_identifier,
+            pressure,
         }
     }
 
-    /// The datum for this change in `view`, with `pressure` as the screen reports it, from
-    /// none to full. Buttons are left at none, as Flutter's Android embedder leaves them:
-    /// the framework's converter supplies the primary button a touch in contact means.
-    fn data(
-        self,
-        view_id: ViewId,
-        pressure: f64,
-        time_stamp: Duration,
-        ids: &mut PointerIds,
-    ) -> PointerData {
+    /// The datum for this change in `view`. Buttons are left at none, as Flutter's Android
+    /// embedder leaves them: the framework's converter supplies the primary button a contact
+    /// pressing means.
+    fn data(self, view_id: ViewId, stamp: PointerStamp, ids: &mut PointerIds) -> PointerData {
         PointerData {
             view_id,
             embedder_id: ids.next_embedder(),
-            time_stamp,
+            time_stamp: stamp.time_stamp,
             change: self.change,
-            kind: PointerDeviceKind::Touch,
+            kind: self.kind,
             device: self.device,
             pointer_identifier: self.pointer_identifier,
             physical_x: self.position[0],
             physical_y: self.position[1],
             physical_delta_x: self.delta[0],
             physical_delta_y: self.delta[1],
-            pressure,
+            pressure: self.pressure,
             pressure_min: 0.0,
             pressure_max: 1.0,
             ..PointerData::default()
@@ -206,48 +289,65 @@ impl TouchChange {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
-    fn changes(
-        touches: &mut Touches,
-        ids: &mut PointerIds,
-        id: u64,
-        phase: TouchPhase,
-        at: [f64; 2],
-    ) -> Vec<PointerChange> {
-        touches
-            .apply(id, phase, at, ids)
-            .into_iter()
-            .map(|change| change.change)
-            .collect()
+    const FINGER: Contact = Contact {
+        device: 7,
+        kind: PointerDeviceKind::Touch,
+    };
+
+    fn stamp() -> PointerStamp {
+        PointerStamp {
+            view: Some(ViewId(1)),
+            time_stamp: Duration::ZERO,
+        }
+    }
+
+    fn data(packet: Option<PointerDataPacket>) -> Vec<PointerData> {
+        packet.map(|packet| packet.data).unwrap_or_default()
+    }
+
+    fn changes(packet: Option<PointerDataPacket>) -> Vec<PointerChange> {
+        data(packet).iter().map(|datum| datum.change).collect()
     }
 
     #[test]
-    fn a_finger_is_added_before_its_down_and_removed_after_its_up() {
+    fn a_finger_is_added_pressed_moved_lifted_and_removed() {
         let mut touches = Touches::default();
         let mut ids = PointerIds::default();
+        let at = [1.0, 2.0];
         assert_eq!(
-            changes(&mut touches, &mut ids, 7, TouchPhase::Started, [1.0, 2.0]),
-            [PointerChange::Add, PointerChange::Down]
+            changes(touches.entered(FINGER, at, stamp(), &mut ids)),
+            [PointerChange::Add]
         );
         assert_eq!(
-            changes(&mut touches, &mut ids, 7, TouchPhase::Moved, [3.0, 2.0]),
-            [PointerChange::Move]
+            changes(touches.pressed(FINGER, at, 1.0, stamp(), &mut ids)),
+            [PointerChange::Down]
+        );
+        let moved = data(touches.moved(FINGER, [3.0, 2.0], 1.0, stamp(), &mut ids));
+        assert_eq!(moved[0].change, PointerChange::Move);
+        assert_eq!(moved[0].physical_delta_x, 2.0);
+        assert_eq!(
+            changes(touches.released(FINGER, [3.0, 2.0], 1.0, stamp(), &mut ids)),
+            [PointerChange::Up]
         );
         assert_eq!(
-            changes(&mut touches, &mut ids, 7, TouchPhase::Ended, [3.0, 2.0]),
-            [PointerChange::Up, PointerChange::Remove]
+            changes(touches.left(FINGER, Some([3.0, 2.0]), stamp(), &mut ids)),
+            [PointerChange::Remove]
         );
-        assert!(touches.fingers.is_empty());
+        assert!(touches.contacts.is_empty());
     }
 
     #[test]
-    fn a_cancelled_finger_is_cancelled_then_removed() {
+    fn a_finger_that_leaves_while_pressing_is_cancelled_then_removed() {
         let mut touches = Touches::default();
         let mut ids = PointerIds::default();
-        touches.apply(1, TouchPhase::Started, [0.0, 0.0], &mut ids);
+        touches.entered(FINGER, [0.0, 0.0], stamp(), &mut ids);
+        touches.pressed(FINGER, [0.0, 0.0], 1.0, stamp(), &mut ids);
         assert_eq!(
-            changes(&mut touches, &mut ids, 1, TouchPhase::Cancelled, [0.0, 0.0]),
+            changes(touches.left(FINGER, None, stamp(), &mut ids)),
             [PointerChange::Cancel, PointerChange::Remove]
         );
     }
@@ -256,30 +356,52 @@ mod tests {
     fn each_press_gets_its_own_pointer_identifier_and_its_moves_keep_it() {
         let mut touches = Touches::default();
         let mut ids = PointerIds::default();
-        let first = touches.apply(1, TouchPhase::Started, [0.0, 0.0], &mut ids);
-        let second = touches.apply(2, TouchPhase::Started, [9.0, 9.0], &mut ids);
-        assert_eq!(first[0].pointer_identifier, 0, "an add is no press");
-        assert_eq!(first[1].pointer_identifier, 1);
-        assert_eq!(second[1].pointer_identifier, 2);
-        let moved = touches.apply(1, TouchPhase::Moved, [4.0, 0.0], &mut ids);
+        let second = Contact {
+            device: 8,
+            ..FINGER
+        };
+        let added = data(touches.entered(FINGER, [0.0, 0.0], stamp(), &mut ids));
+        assert_eq!(added[0].pointer_identifier, 0, "an add is no press");
+        touches.entered(second, [9.0, 9.0], stamp(), &mut ids);
+        let first_down = data(touches.pressed(FINGER, [0.0, 0.0], 1.0, stamp(), &mut ids));
+        let second_down = data(touches.pressed(second, [9.0, 9.0], 1.0, stamp(), &mut ids));
+        assert_eq!(first_down[0].pointer_identifier, 1);
+        assert_eq!(second_down[0].pointer_identifier, 2);
+        let moved = data(touches.moved(FINGER, [4.0, 0.0], 1.0, stamp(), &mut ids));
         assert_eq!(moved[0].pointer_identifier, 1);
-        assert_eq!(moved[0].delta, [4.0, 0.0]);
-        assert_eq!(moved[0].device, 1);
+        assert_eq!(moved[0].device, 7);
     }
 
     #[test]
-    fn a_finger_the_host_never_saw_arrive_is_dropped() {
+    fn a_pen_hovers_until_it_touches_and_is_a_stylus() {
+        let mut touches = Touches::default();
+        let mut ids = PointerIds::default();
+        let pen = Contact::pen();
+        touches.entered(pen, [0.0, 0.0], stamp(), &mut ids);
+        let hover = data(touches.moved(pen, [1.0, 0.0], 0.0, stamp(), &mut ids));
+        assert_eq!(hover[0].change, PointerChange::Hover);
+        assert_eq!(hover[0].kind, PointerDeviceKind::Stylus);
+        assert_eq!(hover[0].pointer_identifier, 0);
+        touches.pressed(pen, [1.0, 0.0], 0.5, stamp(), &mut ids);
+        let drawn = data(touches.moved(pen, [2.0, 0.0], 0.5, stamp(), &mut ids));
+        assert_eq!(drawn[0].change, PointerChange::Move);
+        assert_eq!(drawn[0].pressure, 0.5);
+    }
+
+    #[test]
+    fn a_contact_the_host_never_saw_arrive_is_dropped() {
         let mut touches = Touches::default();
         let mut ids = PointerIds::default();
         assert!(
             touches
-                .apply(3, TouchPhase::Moved, [0.0, 0.0], &mut ids)
-                .is_empty()
+                .moved(FINGER, [0.0, 0.0], 1.0, stamp(), &mut ids)
+                .is_none()
         );
         assert!(
             touches
-                .apply(3, TouchPhase::Ended, [0.0, 0.0], &mut ids)
-                .is_empty()
+                .pressed(FINGER, [0.0, 0.0], 1.0, stamp(), &mut ids)
+                .is_none()
         );
+        assert!(touches.left(FINGER, None, stamp(), &mut ids).is_none());
     }
 }

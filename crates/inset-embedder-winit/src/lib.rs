@@ -52,6 +52,7 @@ mod system_changes;
 mod system_requests;
 mod text_input;
 mod touch;
+mod trackpad;
 mod view;
 mod view_focus;
 mod vsync_source;

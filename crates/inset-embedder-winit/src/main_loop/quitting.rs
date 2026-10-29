@@ -24,7 +24,7 @@ impl<C: EmbedderClient> MainLoop<C> {
     /// otherwise, with nothing to undo.
     pub(super) fn on_exit_answered(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        event_loop: &dyn ActiveEventLoop,
         response: AppExitResponse,
     ) {
         if response == AppExitResponse::Exit {
@@ -34,7 +34,7 @@ impl<C: EmbedderClient> MainLoop<C> {
 
     /// Quits the way the system quits an application: on the framework's answer, or for the
     /// application's own required exit.
-    pub(super) fn quit(&mut self, event_loop: &ActiveEventLoop) {
+    pub(super) fn quit(&mut self, event_loop: &dyn ActiveEventLoop) {
         ThisOs::quit(event_loop);
     }
 }

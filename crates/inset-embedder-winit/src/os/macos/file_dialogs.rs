@@ -171,7 +171,7 @@ impl Panels {
         match self
             .windows
             .window(parent)
-            .and_then(|window| ns_window(&window))
+            .and_then(|window| ns_window(&*window))
         {
             Some(window) => panel.beginSheetModalForWindow_completionHandler(&window, &handler),
             None => panel.beginWithCompletionHandler(&handler),

@@ -33,14 +33,14 @@ impl Screens for WinitPlatform {
 
 /// The screen `window` is on, by the id `screens` gives it; `None` where the system names no
 /// monitor for the window.
-pub(crate) fn screen_of(window: &Window) -> Option<ScreenId> {
+pub(crate) fn screen_of(window: &dyn Window) -> Option<ScreenId> {
     window
         .current_monitor()
         .map(|monitor| ThisOs::screen_id(&monitor))
 }
 
 /// The monitors winit lists through `window`, the primary one first, as screens.
-pub(crate) fn monitor_screens(window: &Window) -> Vec<Screen> {
+pub(crate) fn monitor_screens(window: &dyn Window) -> Vec<Screen> {
     let mut monitors: Vec<MonitorHandle> = window.available_monitors().collect();
     if let Some(primary) = window.primary_monitor()
         && let Some(index) = monitors.iter().position(|monitor| *monitor == primary)
@@ -51,24 +51,33 @@ pub(crate) fn monitor_screens(window: &Window) -> Vec<Screen> {
 }
 
 /// `monitor` as winit describes it: its place and size in logical points at its own scale, which
-/// is how a window on it measures its frame (`host_window.rs`), and the name winit gives it, which
-/// is the system's name for the output: `\\.\DISPLAY1` on Windows, `HDMI-1` on X11. winit knows
-/// nothing of the system's bars, so the visible frame is the whole frame.
+/// is how a window on it measures its frame (`host_window.rs`), its size and rate those of the mode
+/// it shows, and the name winit gives it, which is the system's name for the output: `\\.\DISPLAY1`
+/// on Windows, `HDMI-1` on X11. winit knows nothing of the system's bars, so the visible frame is
+/// the whole frame. A monitor winit gives no position for is at the origin, and one showing no
+/// mode has no size.
 fn monitor_screen(monitor: &MonitorHandle) -> Screen {
     let scale = monitor.scale_factor();
-    let position = monitor.position().to_logical::<f64>(scale);
-    let size = monitor.size().to_logical::<f64>(scale);
+    let position = monitor
+        .position()
+        .unwrap_or_default()
+        .to_logical::<f64>(scale);
+    let mode = monitor.current_video_mode();
+    let size = mode
+        .as_ref()
+        .map(|mode| mode.size())
+        .unwrap_or_default()
+        .to_logical::<f64>(scale);
     let frame = Rect::from_ltwh(position.x, position.y, size.width, size.height);
     Screen {
         id: ThisOs::screen_id(monitor),
-        name: monitor.name().unwrap_or_default(),
+        name: monitor.name().map(String::from).unwrap_or_default(),
         frame,
         visible_frame: frame,
         scale,
-        refresh_rate: monitor
-            .refresh_rate_millihertz()
-            .filter(|&millihertz| millihertz > 0)
-            .map(|millihertz| f64::from(millihertz) / 1000.0),
+        refresh_rate: mode
+            .and_then(|mode| mode.refresh_rate_millihertz())
+            .map(|millihertz| f64::from(millihertz.get()) / 1000.0),
     }
 }
 
