@@ -1,6 +1,7 @@
-//! A player of a small movie loads it by itself, says its size and length, plays it, hands its
-//! frames to a reader as BGRA pixel buffers backed by IOSurfaces, ends, and plays on past its end
-//! once it loops: all without a window, a surface or a sound.
+//! A player of a small movie, opened by a picked file's URL at a path the URL must encode, loads it
+//! by itself, says its size and length, plays it, hands its frames to a reader as BGRA pixel
+//! buffers backed by IOSurfaces, ends, and plays on past its end once it loops: all without a
+//! window, a surface or a sound.
 //!
 //! Its own binary, without the test harness: AVFoundation changes a player's state on the main
 //! queue, which only the main thread serves, so this one serves it while it waits. On iOS it runs
@@ -26,7 +27,7 @@ mod player {
     use std::task::{Context, Poll, Waker};
     use std::time::{Duration, Instant};
 
-    use inset_embedder::{MediaChangeFuture, MediaSource, PickedFile, PlayerStatus, Size};
+    use inset_embedder::{MediaChangeFuture, PickedFile, PlayerStatus, Size};
     use objc2_core_video::{
         CVPixelBufferGetHeight, CVPixelBufferGetIOSurface, CVPixelBufferGetPixelFormatType,
         CVPixelBufferGetWidth, kCVPixelFormatType_32BGRA,
@@ -41,8 +42,8 @@ mod player {
     pub(crate) fn reads_the_frames_of_a_file() {
         let players = inset_embedder_winit::test_support::players()
             .expect("the system's players, on the main thread");
-        let movie = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/media/ten-frames.mp4");
-        let player = players.open(MediaSource::file(PickedFile::Path(movie)));
+        let movie = copied_where_a_url_must_encode_its_path();
+        let player = players.open(&PickedFile::Path(movie.clone()).url());
         player.set_volume(0.0);
 
         let mut changed = player.changed();
@@ -93,6 +94,18 @@ mod player {
             is_ready(&mut gone),
             "a player let go of tells the app it is gone"
         );
+        std::fs::remove_dir_all(movie.parent().expect("the copy's folder")).expect("cleaned up");
+    }
+
+    /// The movie, copied into a folder of its own whose name and the copy's need encoding in a
+    /// URL: a space, a letter beyond ASCII and a `#`.
+    fn copied_where_a_url_must_encode_its_path() -> PathBuf {
+        let folder = std::env::temp_dir().join(format!("inset media {}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder for the copy");
+        let copy = folder.join("été #1.mp4");
+        let movie = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/media/ten-frames.mp4");
+        std::fs::copy(movie, &copy).expect("the movie copied");
+        copy
     }
 
     /// Serves the main run loop until `done`, failing once `PATIENCE` has passed.

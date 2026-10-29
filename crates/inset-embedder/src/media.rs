@@ -1,7 +1,7 @@
 //! Players and cameras: the system's own media stack, as a host hands it to the app. Not a
 //! dart:ui file: Flutter reaches media through its `video_player` and `camera` plugins, whose
 //! controllers come from their method channels. These follow the systems' own model instead,
-//! which they share: a player is one object made from a source, loading by itself, which the app
+//! which they share: a player is one object made from a URL, loading by itself, which the app
 //! controls and whose state it observes (`AVPlayer`, Media3's `ExoPlayer`, Windows'
 //! `MediaPlayer`, the web's `<video>`); a camera is a session on one device with outputs, each for
 //! one use (`AVCaptureSession` with its preview layer and its photo, video data and movie file
@@ -26,34 +26,17 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::{PickedFile, Size, Surface};
+use crate::{Size, Surface};
 
 /// The system's players, or `None` from [`Platform::players`](crate::Platform::players) where it
 /// has none.
 pub trait Players {
-    /// A player of `source`, which loads by itself, its state saying how far it got. A source
-    /// the system cannot play gives a player that failed, with the system's reason.
-    fn open(&self, source: MediaSource) -> Box<dyn MediaPlayer>;
-}
-
-/// Where a player's media comes from.
-#[derive(Debug)]
-pub enum MediaSource {
-    /// A file the user picked, as the file dialogs answer it. A system plays the picks it gives
-    /// a path for; a handle or a stream gives a player that failed, until a host reads one.
-    File(PickedFile),
-    /// A link the system fetches: `https:` and `file:`, and what else its media stack takes.
-    Link(String),
-}
-
-impl MediaSource {
-    pub fn link(link: impl Into<String>) -> MediaSource {
-        MediaSource::Link(link.into())
-    }
-
-    pub fn file(file: PickedFile) -> MediaSource {
-        MediaSource::File(file)
-    }
+    /// A player of the media at `url`, which loads by itself, its state saying how far it got: a
+    /// link the system fetches (`https:`, a streaming playlist), or a picked file's
+    /// [`PickedFile::url`](crate::PickedFile::url), as every system's player takes a URL. A URL
+    /// the system cannot play gives a player that failed, with the system's reason. A player of
+    /// bytes the app makes itself is for later.
+    fn open(&self, url: &str) -> Box<dyn MediaPlayer>;
 }
 
 /// One player, controlled on the app's main thread. Dropped, it stops, and its picture leaves

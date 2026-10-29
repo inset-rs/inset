@@ -13,9 +13,9 @@ use std::time::Duration;
 
 use inset_embedder::{
     Camera, CameraState, Cameras, CaptureSession, Compositor, FrameReader, MediaChangeFuture,
-    MediaError, MediaPlayer, MediaSource, MovieOptions, MovieOutput, Photo, PhotoFuture,
-    PhotoOutput, PickedFile, PixelBuffer, PlayerState, Players, RecordingFuture, Surface,
-    SurfaceFrame, SurfaceParent, ViewId,
+    MediaError, MediaPlayer, MovieOptions, MovieOutput, Photo, PhotoFuture, PhotoOutput,
+    PixelBuffer, PlayerState, Players, RecordingFuture, Surface, SurfaceFrame, SurfaceParent,
+    ViewId,
 };
 
 /// A compositor whose surfaces show nowhere, and which keeps each surface opened under a view's
@@ -105,9 +105,9 @@ impl MockPlayers {
 }
 
 impl Players for MockPlayers {
-    fn open(&self, source: MediaSource) -> Box<dyn MediaPlayer> {
+    fn open(&self, url: &str) -> Box<dyn MediaPlayer> {
         let player = MockPlayer(Rc::new(PlayerShared {
-            source: source_name(&source),
+            url: url.to_owned(),
             state: RefCell::new(PlayerState::loading()),
             calls: RefCell::default(),
             shown_on: RefCell::default(),
@@ -137,7 +137,7 @@ pub enum PlayerCall {
 pub struct MockPlayer(Rc<PlayerShared>);
 
 struct PlayerShared {
-    source: String,
+    url: String,
     state: RefCell<PlayerState>,
     calls: RefCell<Vec<PlayerCall>>,
     shown_on: RefCell<Option<Arc<dyn Surface>>>,
@@ -146,9 +146,9 @@ struct PlayerShared {
 }
 
 impl MockPlayer {
-    /// The source the player was opened from: a link, or a picked file's path or name.
-    pub fn source(&self) -> String {
-        self.0.source.clone()
+    /// The URL the player was opened from.
+    pub fn url(&self) -> String {
+        self.0.url.clone()
     }
 
     /// What the player was asked, in order.
@@ -525,15 +525,5 @@ impl Future for NextChange {
         }
         self.changes.wakers.borrow_mut().push(cx.waker().clone());
         Poll::Pending
-    }
-}
-
-/// A source as a test names it: a link, or a picked file's path or name.
-fn source_name(source: &MediaSource) -> String {
-    match source {
-        MediaSource::Link(link) => link.clone(),
-        MediaSource::File(PickedFile::Path(path)) => path.display().to_string(),
-        MediaSource::File(PickedFile::Handle(handle)) => handle.name().to_owned(),
-        MediaSource::File(PickedFile::Stream(stream)) => stream.name().to_owned(),
     }
 }

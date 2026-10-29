@@ -336,7 +336,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 
 ## media.rs → the `video_player` package's `VideoPlayerController` and the `camera` package's `CameraController`, through their platform interfaces
 
-- Change: players and cameras are host capabilities, `Platform::players` and `Platform::cameras`: a player is one host object made from a source, loading by itself, controlled and observed through its state, and a camera a session on one device with an output per use, where Flutter's plugins have controllers that are initialized over method channels.
+- Change: players and cameras are host capabilities, `Platform::players` and `Platform::cameras`: a player is one host object made from a URL, a link or a pick's `PickedFile::url`, loading by itself, controlled and observed through its state, and a camera a session on one device with an output per use, where Flutter's plugins have controllers that are initialized over method channels.
   Reason: platform — the host is the system's media stack, and its players and capture sessions are that model on every system Inset targets.
   Affect: an app makes a player and calls it at once, without awaiting an initialization, and a system without players or cameras answers `None`.
 

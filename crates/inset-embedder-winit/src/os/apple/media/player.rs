@@ -11,8 +11,7 @@ use std::time::Duration;
 
 use block2::RcBlock;
 use inset_embedder::{
-    FrameReader, MediaChangeFuture, MediaPlayer, MediaSource, PickedFile, PlayerState,
-    PlayerStatus, Players, Size, Surface,
+    FrameReader, MediaChangeFuture, MediaPlayer, PlayerState, PlayerStatus, Players, Size, Surface,
 };
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -48,8 +47,8 @@ impl AvPlayers {
 }
 
 impl Players for AvPlayers {
-    fn open(&self, source: MediaSource) -> Box<dyn MediaPlayer> {
-        match url_of(&source) {
+    fn open(&self, url: &str) -> Box<dyn MediaPlayer> {
+        match url_of(url) {
             Ok(url) => Box::new(AvMediaPlayer::new(self.main_thread, &url)),
             Err(reason) => Box::new(FailedPlayer {
                 reason,
@@ -59,18 +58,9 @@ impl Players for AvPlayers {
     }
 }
 
-/// The URL AVFoundation plays `source` from, or why there is none.
-fn url_of(source: &MediaSource) -> Result<Retained<NSURL>, String> {
-    match source {
-        MediaSource::File(PickedFile::Path(path)) => Ok(NSURL::fileURLWithPath(
-            &NSString::from_str(&path.to_string_lossy()),
-        )),
-        MediaSource::File(_) => {
-            Err("this system plays a picked file from its path, and this pick has none".to_owned())
-        }
-        MediaSource::Link(link) => NSURL::URLWithString(&NSString::from_str(link))
-            .ok_or_else(|| format!("`{link}` is not a link")),
-    }
+/// `url` as AVFoundation takes it, or why it is none.
+fn url_of(url: &str) -> Result<Retained<NSURL>, String> {
+    NSURL::URLWithString(&NSString::from_str(url)).ok_or_else(|| format!("`{url}` is not a URL"))
 }
 
 /// A player over one item.
@@ -393,6 +383,8 @@ impl Drop for FailedPlayer {
 
 #[cfg(test)]
 mod tests {
+    use inset_embedder::PickedFile;
+
     use super::*;
 
     #[test]
@@ -415,30 +407,14 @@ mod tests {
     }
 
     #[test]
-    fn a_path_is_a_file_url_and_a_pick_without_one_has_no_url() {
-        assert!(
-            url_of(&MediaSource::file(PickedFile::Path("/tmp/a.mov".into())))
-                .is_ok_and(|url| url.isFileURL())
+    fn a_link_and_a_picked_files_url_are_urls_avfoundation_takes() {
+        assert!(url_of("https://example.com/a.mp4").is_ok());
+        let picked = PickedFile::Path("/tmp/a b/été.mov".into());
+        let url = url_of(&picked.url()).unwrap();
+        assert!(url.isFileURL());
+        assert_eq!(
+            url.path().map(|path| path.to_string()).as_deref(),
+            Some("/tmp/a b/été.mov")
         );
-        assert!(url_of(&MediaSource::link("https://example.com/a.mp4")).is_ok());
-        let stream = PickedFile::Stream(Box::new(Unnamed));
-        assert!(url_of(&MediaSource::file(stream)).is_err());
-    }
-
-    /// A picked file read through once, as Android gives some.
-    struct Unnamed;
-
-    impl inset_embedder::FileStream for Unnamed {
-        fn name(&self) -> &str {
-            "unnamed"
-        }
-
-        fn url(&self) -> String {
-            "content://unnamed".to_owned()
-        }
-
-        fn read<'a>(&'a mut self, _buf: &'a mut [u8]) -> inset_embedder::FileReadFuture<'a> {
-            Box::pin(std::future::ready(Ok(0)))
-        }
     }
 }

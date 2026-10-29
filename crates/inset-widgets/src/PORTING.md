@@ -120,9 +120,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## media/ → the `video_player` package's `VideoPlayerController` and `VideoPlayer`, and the `camera` package's `CameraController`, `CameraPreview` and `availableCameras`
 
-- Change: `Player` is a listenable over the host's player, made from a source and loading by itself, with no `initialize` and no copied value, and `VideoView::new(player)` shows it, where Flutter's `VideoPlayerController` is initialized and `VideoPlayer` takes the controller.
+- Change: `Player` is a listenable over the host's player, made from a URL and loading by itself, with no `initialize` and no copied value, and `VideoView::new(player)` shows it, where Flutter's `VideoPlayerController` is initialized and `VideoPlayer` takes the controller.
   Reason: platform — the host's player is the system's, which loads by itself and reports its state, and a host without players answers none.
-  Affect: an app calls `play` on a new player, `Player::new` answers `None` where the platform has no players, a source the system cannot play reports a failure, and a `VideoView` takes the video's size in logical pixels, or none until it is known.
+  Affect: an app calls `play` on a new player, `Player::new` answers `None` where the platform has no players, a URL the system cannot play reports a failure, and a `VideoView` takes the video's size in logical pixels, or none until it is known.
 
 - Change: `CameraSession` is a listenable over the host's session on one camera, with an output per use, `start` and `stop`, and `CameraPreview::new(session)` shows its preview, where Flutter's `CameraController` initializes a camera with a resolution preset and takes pictures and videos itself.
   Reason: platform — the host's session is the system's, whose outputs are its own, and a platform without cameras answers none.

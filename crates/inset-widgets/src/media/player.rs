@@ -5,9 +5,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use inset_embedder::{
-    FrameReader, MediaChangeFuture, MediaPlayer, MediaSource, PlayerState, Size, Surface,
-};
+use inset_embedder::{FrameReader, MediaChangeFuture, MediaPlayer, PlayerState, Size, Surface};
 use inset_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle};
 
 use super::{PictureSource, SurfacePicture};
@@ -24,11 +22,11 @@ pub struct Player {
 }
 
 impl Player {
-    /// A player of `source`, which starts loading at once; `None` where the platform has no
-    /// players.
-    pub fn new(app: &mut App, source: MediaSource) -> Option<Handle<Player>> {
+    /// A player of the media at `url`, which starts loading at once: a link, or a picked file's
+    /// `PickedFile::url`. `None` where the platform has no players.
+    pub fn new(app: &mut App, url: &str) -> Option<Handle<Player>> {
         let platform = app.platform();
-        let host: Rc<dyn MediaPlayer> = Rc::from(platform.players()?.open(source));
+        let host: Rc<dyn MediaPlayer> = Rc::from(platform.players()?.open(url));
         let changed = host.changed();
         let player = app.create(Player {
             change_notifier: ChangeNotifierData::new(),
@@ -243,13 +241,10 @@ mod tests {
             &MockCompositor::new(),
             &Rc::new(TestView::new(800.0, 600.0)),
         );
-        let player = Player::new(
-            &mut cell.borrow_mut(),
-            MediaSource::file(PickedFile::Path(PathBuf::from("/movies/a.mov"))),
-        )
-        .unwrap();
+        let picked = PickedFile::Path(PathBuf::from("/movies/a b.mov"));
+        let player = Player::new(&mut cell.borrow_mut(), &picked.url()).unwrap();
         let opened = players.opened();
-        assert_eq!(opened[0].source(), "/movies/a.mov");
+        assert_eq!(opened[0].url(), "file:///movies/a%20b.mov");
         assert_eq!(player.state(&cell.borrow()).status, PlayerStatus::Loading);
 
         let heard = Rc::new(std::cell::Cell::new(0));
@@ -298,10 +293,7 @@ mod tests {
     #[test]
     fn a_platform_without_players_gives_no_player() {
         let cell = AppCell::with_platform(Rc::new(TestPlatform::new()));
-        let player = Player::new(
-            &mut cell.borrow_mut(),
-            MediaSource::link("https://example.com/a.mp4"),
-        );
+        let player = Player::new(&mut cell.borrow_mut(), "https://example.com/a.mp4");
         assert!(player.is_none());
     }
 
@@ -311,11 +303,7 @@ mod tests {
         let compositor = MockCompositor::new();
         let view = Rc::new(TestView::new(800.0, 600.0));
         let cell = app_with(&players, &compositor, &view);
-        let player = Player::new(
-            &mut cell.borrow_mut(),
-            MediaSource::link("https://example.com/a.mp4"),
-        )
-        .unwrap();
+        let player = Player::new(&mut cell.borrow_mut(), "https://example.com/a.mp4").unwrap();
         run_app(
             &mut cell.borrow_mut(),
             crate::Center::new()

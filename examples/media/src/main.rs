@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 
-use inset_embedder::{Color, MediaSource, PickedFile, TextDirection, WindowConfig};
+use inset_embedder::{Color, PickedFile, TextDirection, WindowConfig};
 use inset_embedder_winit::WinitEmbedder;
 use inset_foundation::{App, Handle, Listener};
 use inset_painting::{BoxDecoration, TextStyle};
@@ -25,21 +25,21 @@ const BACKGROUND: Color = Color::from_argb(255, 20, 20, 24);
 const LABEL: Color = Color::from_argb(255, 200, 200, 200);
 
 fn main() {
-    let source = std::env::args().nth(1).map(source_of);
-    WinitEmbedder.run(move |platform| Shell::new(platform, move |app| start(app, source)));
+    let url = std::env::args().nth(1).map(url_of);
+    WinitEmbedder.run(move |platform| Shell::new(platform, move |app| start(app, url)));
 }
 
-/// A link as it is, and anything else as a file's path.
-fn source_of(argument: String) -> MediaSource {
+/// A link as it is, and anything else as a file's path, by the URL a pick of it would have.
+fn url_of(argument: String) -> String {
     if argument.contains("://") {
-        MediaSource::link(argument)
+        argument
     } else {
-        MediaSource::file(PickedFile::Path(PathBuf::from(argument)))
+        PickedFile::Path(PathBuf::from(argument)).url()
     }
 }
 
-fn start(app: &mut App, source: Option<MediaSource>) {
-    let player = source.and_then(|source| Player::new(app, source));
+fn start(app: &mut App, url: Option<String>) {
+    let player = url.and_then(|url| Player::new(app, &url));
     if let Some(player) = player {
         Player::set_looping(player, app, true);
         Player::play(player, app);
