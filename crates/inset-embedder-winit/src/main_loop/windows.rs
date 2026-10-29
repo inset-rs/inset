@@ -12,7 +12,9 @@ use winit::window::{Window, WindowId};
 use crate::os::{FramePresentation, ThisOs, WindowVisibility};
 use crate::view::WinitView;
 use crate::view_focus;
-use crate::windows::{OpenWindow, ViewAfterClose, WindowRequest, open_screen_window};
+use crate::windows::{
+    OpenWindow, ViewAfterClose, WindowObservers, WindowRequest, open_screen_window,
+};
 
 use super::{MainLoop, MainLoopEvent};
 
@@ -45,17 +47,26 @@ impl<C: EmbedderClient> MainLoop<C> {
         Ok(())
     }
 
-    /// A view the app asked for, with its window: it joins the platform's views, with the system's
-    /// notices that its window may have been minimized or occluded, and then the app hears of it.
+    /// A view the app asked for, with its window: it joins the platform's views, with what the
+    /// embedder observes of its window, and then the app hears of it.
     pub(super) fn add_view(&mut self, open: OpenWindow) {
         let view_id = open.view.id();
         let window = Arc::clone(&open.window);
-        let visibility_notices =
-            ThisOs::observe_visibility(&*window, self.send_visibility_notice(window.id()));
-        self.state.add_view_with_window(open, visibility_notices);
+        let observers = self.observe_window(&*window);
+        self.state.add_view_with_window(open, observers);
         self.sync_frame_scheduler(view_id);
         self.client.view_added(view_id);
         self.read_theme_of(&*window);
+    }
+
+    /// What the embedder observes of `window` beyond winit's events, for as long as it is open.
+    fn observe_window(&self, window: &dyn Window) -> WindowObservers {
+        WindowObservers {
+            visibility: ThisOs::observe_visibility(
+                window,
+                self.send_visibility_notice(window.id()),
+            ),
+        }
     }
 
     /// What a notice that the window `id` may have been minimized or occluded does: it queues for

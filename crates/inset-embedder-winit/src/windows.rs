@@ -68,11 +68,24 @@ struct ViewEntry {
 }
 
 struct ViewWindow {
+    /// Before the window, so that it is dropped first: what observes the window lets go of it
+    /// while it is still open.
+    _observers: WindowObservers,
     window: Arc<dyn Window>,
     handle: Option<Rc<WinitWindow>>,
-    /// The system's notices that the window may have been minimized or occluded, for the app;
-    /// `None` where winit's events are all the system says, and for the screen view's window.
-    _visibility_notices: Option<ThisOsVisibilityNotices>,
+}
+
+/// What the embedder hears of one window from the system beyond winit's events, each kept until
+/// the window closes: `None` where winit's events are all the system says, and for the screen
+/// view's window.
+#[derive(Default)]
+#[expect(
+    dead_code,
+    reason = "each is kept for its drop, which ends the observing"
+)]
+pub(crate) struct WindowObservers {
+    /// The system's notices that the window may have been minimized or occluded, for the app.
+    pub(crate) visibility: Option<ThisOsVisibilityNotices>,
 }
 
 impl Views {
@@ -85,21 +98,17 @@ impl Views {
         });
     }
 
-    /// A view the app asked for, with its window and the system's notices about the window,
-    /// which end as the window closes.
-    pub(crate) fn add_with_window(
-        &self,
-        open: OpenWindow,
-        visibility_notices: Option<ThisOsVisibilityNotices>,
-    ) {
+    /// A view the app asked for, with its window and what the embedder observes of the window,
+    /// which ends as the window closes.
+    pub(crate) fn add_with_window(&self, open: OpenWindow, observers: WindowObservers) {
         let window = open.window.id();
         let view = open.view.id();
         self.insert(ViewEntry {
             view: open.view,
             window: Some(ViewWindow {
+                _observers: observers,
                 window: open.window,
                 handle: open.handle,
-                _visibility_notices: visibility_notices,
             }),
             screen: false,
         });
@@ -115,9 +124,9 @@ impl Views {
             .find(|entry| entry.screen)
             .expect("the screen view was added");
         entry.window = Some(ViewWindow {
+            _observers: WindowObservers::default(),
             window,
             handle: None,
-            _visibility_notices: None,
         });
         self.view_of_window.borrow_mut().insert(id, entry.view.id());
     }
