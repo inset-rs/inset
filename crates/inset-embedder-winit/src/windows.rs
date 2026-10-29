@@ -32,7 +32,7 @@ pub(crate) const SCREEN_VIEW: ViewId = ViewId(0);
 /// A view with its window, as the registry answers it.
 #[derive(Clone)]
 pub(crate) struct OpenWindow {
-    pub(crate) window: Arc<Window>,
+    pub(crate) window: Arc<dyn Window>,
     pub(crate) view: Rc<WinitView>,
     /// The app's handle on a window it asked for; the screen view's window has none.
     pub(crate) handle: Option<Rc<WinitWindow>>,
@@ -68,7 +68,7 @@ struct ViewEntry {
 }
 
 struct ViewWindow {
-    window: Arc<Window>,
+    window: Arc<dyn Window>,
     handle: Option<Rc<WinitWindow>>,
     /// The system's notices that the window may have been minimized or occluded, for the app;
     /// `None` where winit's events are all the system says, and for the screen view's window.
@@ -107,7 +107,7 @@ impl Views {
     }
 
     /// `window` is the screen view's from now on.
-    pub(crate) fn attach_screen_window(&self, window: Arc<Window>) {
+    pub(crate) fn attach_screen_window(&self, window: Arc<dyn Window>) {
         let id = window.id();
         let mut entries = self.entries.borrow_mut();
         let entry = entries
@@ -250,7 +250,7 @@ impl ViewMaker {
     /// `requests`.
     pub(crate) fn make_requested(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        event_loop: &dyn ActiveEventLoop,
         window_request: &WindowRequest,
         requests: Rc<AppRequests>,
     ) -> Result<OpenWindow, String> {
@@ -292,10 +292,10 @@ pub(crate) fn screen_window_config() -> Option<WindowConfig> {
 
 /// The screen view's window, configured as `config`, attached to `view`.
 pub(crate) fn open_screen_window(
-    event_loop: &ActiveEventLoop,
+    event_loop: &dyn ActiveEventLoop,
     config: &WindowConfig,
     view: &WinitView,
-) -> Result<Arc<Window>, String> {
+) -> Result<Arc<dyn Window>, String> {
     let window = open_window(event_loop, config)?;
     view.attach_window(&window);
     Ok(window)
@@ -303,12 +303,15 @@ pub(crate) fn open_screen_window(
 
 /// A window configured as `config`: winit's attributes, then what the system's module applies
 /// beyond them.
-fn open_window(event_loop: &ActiveEventLoop, config: &WindowConfig) -> Result<Arc<Window>, String> {
+fn open_window(
+    event_loop: &dyn ActiveEventLoop,
+    config: &WindowConfig,
+) -> Result<Arc<dyn Window>, String> {
     let window = event_loop
         .create_window(attributes_for(config))
         .map_err(|error| error.to_string())?;
-    ThisOs::configure(&window, config);
-    Ok(Arc::new(window))
+    ThisOs::configure(&*window, config);
+    Ok(Arc::from(window))
 }
 
 /// winit's attributes for a configuration. What winit has no attribute for, the system's
@@ -319,9 +322,9 @@ fn attributes_for(config: &WindowConfig) -> WindowAttributes {
         WindowLevel::AlwaysOnTop => winit::window::WindowLevel::AlwaysOnTop,
         WindowLevel::AlwaysOnBottom => winit::window::WindowLevel::AlwaysOnBottom,
     };
-    let mut attributes = Window::default_attributes();
+    let mut attributes = WindowAttributes::default();
     if !ThisOs::WINDOW_IS_THE_SCREEN {
-        attributes = attributes.with_inner_size(LogicalSize::new(config.size[0], config.size[1]));
+        attributes = attributes.with_surface_size(LogicalSize::new(config.size[0], config.size[1]));
     }
     attributes = attributes
         .with_title(&config.title)

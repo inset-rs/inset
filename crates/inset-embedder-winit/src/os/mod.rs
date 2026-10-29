@@ -51,14 +51,14 @@ use inset_embedder::{
     TargetPlatform, TrayIcons, ViewId, ViewPadding, VsyncWaiter, WindowConfig,
 };
 use valo_codec::Decoder;
-use winit::event_loop::{ActiveEventLoop, EventLoopBuilder, EventLoopProxy};
+use winit::event_loop::{ActiveEventLoop, EventLoopBuilder};
 use winit::monitor::MonitorHandle;
 use winit::window::{Window, WindowAttributes};
 
 use crate::clipboard::ClipboardChanges;
 use crate::file_dialogs::ParentWindows;
 use crate::lifecycle::LifecycleNotice;
-use crate::main_loop::MainLoopEvent;
+use crate::main_loop::MainLoopProxy;
 use crate::menus::MenuEvents;
 use crate::notifications::NotificationActivations;
 use crate::screens::{monitor_number, monitor_screens};
@@ -143,15 +143,15 @@ fn answers_everything<T: OperatingSystem>() {}
 
 /// How big a window's drawing surface is, and what of it the system covers.
 pub(crate) trait WindowGeometry {
-    /// The pixels valo presents into: the window's content.
-    fn surface_size(window: &Window) -> [u32; 2] {
-        let size = window.inner_size();
+    /// The pixels valo presents into: the window's surface.
+    fn surface_size(window: &dyn Window) -> [u32; 2] {
+        let size = window.surface_size();
         [size.width, size.height]
     }
 
     /// The safe area as Flutter reports it: the whole view is the size, what the system
     /// draws over it is padding. None on a desktop.
-    fn view_padding(_window: &Window, _size: [f64; 2]) -> ViewPadding {
+    fn view_padding(_window: &dyn Window) -> ViewPadding {
         ViewPadding::ZERO
     }
 }
@@ -161,20 +161,20 @@ pub(crate) trait WindowGeometry {
 pub(crate) trait WindowMotion {
     /// Puts the window at `frame`, position and size in one step. `false` where the system
     /// cannot, and the caller sets them through winit instead.
-    fn set_frame(_window: &Window, _frame: Rect) -> bool {
+    fn set_frame(_window: &dyn Window, _frame: Rect) -> bool {
         false
     }
 
     /// Moves and sizes the window over `duration`. `false` where the system cannot animate a
     /// frame, and the caller sets it at once instead.
-    fn animate_frame(_window: &Window, _frame: Rect, _duration: Duration) -> bool {
+    fn animate_frame(_window: &dyn Window, _frame: Rect, _duration: Duration) -> bool {
         false
     }
 
     /// Shows the window, sliding in to where it is placed from `from` away while it fades in,
     /// over `duration`, without changing its size. `false` where the system cannot animate a
     /// window, and the caller shows it at once instead.
-    fn show_sliding_in(_window: &Window, _from: Offset, _duration: Duration) -> bool {
+    fn show_sliding_in(_window: &dyn Window, _from: Offset, _duration: Duration) -> bool {
         false
     }
 }
@@ -187,7 +187,7 @@ pub(crate) trait WindowChrome {
     }
 
     /// Applies, once the window exists, what `config` asks for and no attribute carries.
-    fn configure(_window: &Window, _config: &WindowConfig) {}
+    fn configure(_window: &dyn Window, _config: &WindowConfig) {}
 }
 
 /// Whether a window is occluded, and the system's notices that a window may have been minimized
@@ -199,14 +199,17 @@ pub(crate) trait WindowVisibility {
 
     /// Whether `window` is occluded now: covered all over, or otherwise not shown. `None` where the
     /// system cannot be asked, and the embedder answers with winit's last `Occluded` event instead.
-    fn is_occluded(_window: &Window) -> Option<bool> {
+    fn is_occluded(_window: &dyn Window) -> Option<bool> {
         None
     }
 
     /// Calls `on_notice`, on the main thread and from wherever the system posts, so it must only
     /// queue, whenever the system says `window` may have been minimized or restored, occluded or
     /// shown, until the answer is dropped. `None` where winit's events are all the system says.
-    fn observe_visibility(_window: &Window, _on_notice: Box<dyn Fn()>) -> Option<Self::Notices> {
+    fn observe_visibility(
+        _window: &dyn Window,
+        _on_notice: Box<dyn Fn()>,
+    ) -> Option<Self::Notices> {
         None
     }
 }
@@ -216,7 +219,7 @@ pub(crate) trait Screens {
     /// The screens, the main one first, in the coordinates of a window's frame. winit's monitors
     /// by default, which winit lists only through a window or inside its own calls: `window` is
     /// one of the app's, and with none no screen is known.
-    fn screens(window: Option<&Window>) -> Vec<Screen> {
+    fn screens(window: Option<&dyn Window>) -> Vec<Screen> {
         window.map(monitor_screens).unwrap_or_default()
     }
 
@@ -240,12 +243,6 @@ pub(crate) trait PointerQueries {
     fn pressed_buttons() -> Option<i64> {
         None
     }
-
-    /// Where the pointer is now, in `window`'s physical pixels from its top-left corner.
-    /// `None` where the system cannot be asked.
-    fn pointer_position_in(_window: &Window) -> Option<[f64; 2]> {
-        None
-    }
 }
 
 /// How a frame reaches the display, and when.
@@ -258,7 +255,7 @@ pub(crate) trait FramePresentation {
     /// whose display links tick in every mode of its run loop serves the waits there, so they are
     /// served while the system runs a loop of its own and the main loop hears nothing. Main
     /// thread.
-    fn vsync_waiter(proxy: &EventLoopProxy<MainLoopEvent>) -> Arc<dyn VsyncWaiter> {
+    fn vsync_waiter(proxy: &MainLoopProxy) -> Arc<dyn VsyncWaiter> {
         Arc::new(LoopVsyncWaiter(proxy.clone()))
     }
 
@@ -278,7 +275,7 @@ pub(crate) trait FramePresentation {
 
     /// Has `window` show `color` behind its content and its surfaces, for the frames that are not
     /// drawn. Main thread.
-    fn show_background(_window: &Window, _color: valo::Color) {}
+    fn show_background(_window: &dyn Window, _color: valo::Color) {}
 }
 
 /// A display's vsyncs: a call at each vsync of one display, whether or not a window on it is
@@ -311,7 +308,7 @@ pub(crate) trait NativeComposition {
 /// One window's share of the compositor: it places a scene's native surfaces beneath the
 /// window's content.
 pub(crate) trait WindowSurfaces {
-    fn new(window: Arc<Window>) -> Self;
+    fn new(window: Arc<dyn Window>) -> Self;
 
     /// Places a scene's surfaces beneath the window's content, bottom-most first. Main thread.
     fn place(&self, placements: &[SurfacePlacement], view: ViewId);
@@ -322,7 +319,7 @@ pub(crate) trait WindowSurfaces {
 pub(crate) trait NativeMenus {
     /// Whether the system opens a menu at a point in a window: macOS's and Windows' do. Linux's
     /// desktops have no menu of the system's: GTK and Qt draw theirs in a pop-up surface, which
-    /// winit offers only from 0.31, where a framework can draw them.
+    /// winit offers as a popup window (`WindowType::Popup`), where a framework can draw them.
     const POPUP_MENUS: bool = false;
 
     /// Shows `menu` at `at`, in logical pixels from the top-left corner of `window`'s content,
@@ -330,7 +327,7 @@ pub(crate) trait NativeMenus {
     /// embedder, and hands `closed` the id of the item chosen once it closes. A provided item acts
     /// as the system's own does, its edit commands sent through `events`, and answers none.
     fn open_popup_menu(
-        _window: &Window,
+        _window: &dyn Window,
         _at: Offset,
         _menu: Vec<MenuEntry>,
         _events: MenuEvents,
@@ -358,7 +355,7 @@ pub(crate) trait NativeMenus {
 
     /// Configures winit's event loop before it is built: macOS leaves winit's own menu bar out,
     /// for the system's standard one (`menu_bar`).
-    fn configure_event_loop(_builder: &mut EventLoopBuilder<MainLoopEvent>) {}
+    fn configure_event_loop(_builder: &mut EventLoopBuilder) {}
 
     /// Whether the system's menus send the focused view Edit's cut, copy and paste, which a key
     /// the framework leaves reaches: macOS's menu bar, while it holds those items.
@@ -482,7 +479,7 @@ pub(crate) trait SystemChanges {
 pub(crate) trait ApplicationControl {
     /// Quits the way the system quits an application; the event loop ends where the system has
     /// no quit of its own.
-    fn quit(event_loop: &ActiveEventLoop) {
+    fn quit(event_loop: &dyn ActiveEventLoop) {
         event_loop.exit();
     }
 

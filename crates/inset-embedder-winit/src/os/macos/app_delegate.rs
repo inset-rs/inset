@@ -1,19 +1,19 @@
-//! The requests AppKit makes of the application through its delegate, which winit's delegate
-//! does not answer: files and links to open (`application:openURLs:`), a click on the Dock icon or
-//! another reopen (`applicationShouldHandleReopen:hasVisibleWindows:`), and quitting
-//! (`applicationShouldTerminate:`); and hiding the application, which AppKit does itself.
+//! The application's delegate, the embedder's own, which answers what AppKit asks of the
+//! application: files and links to open (`application:openURLs:`), a click on the Dock icon or
+//! another reopen (`applicationShouldHandleReopen:hasVisibleWindows:`), quitting
+//! (`applicationShouldTerminate:`) and the Dock icon's menu (`applicationDockMenu:`, which
+//! `menus/dock_menu` keeps); and hiding the application, which AppKit does itself.
 //!
-//! winit sets `NSApp`'s delegate and checks its class whenever it reaches for it, so the
-//! delegate cannot be replaced. These methods are added to the class of winit's delegate at
-//! run time instead, as winit itself replaces `NSApplication`'s `sendEvent:`. A method winit
-//! comes to answer itself stays winit's, with a warning printed, and that request is no
-//! longer reported.
+//! winit leaves `NSApp`'s delegate to the application, and only observes the launch and the
+//! termination through notices. The embedder sets its delegate before the loop runs, since AppKit
+//! asks for the files a launch opens before it reports the launch finished, and keeps it for the
+//! process's life, since AppKit holds its delegate weakly.
 //!
-//! AppKit calls these from its own dispatch, which can be inside a winit callback, so they
-//! only queue the request for the event loop and must never reach the embedder's state. What
+//! AppKit calls the delegate from its own dispatch, which can be inside a winit callback, so it
+//! only queues the request for the event loop and must never reach the embedder's state. What
 //! belongs to the moment AppKit asks, such as where the pointer is at a reopen, is read there, and
-//! queued with the request. Each is `extern "C"`, so a panic in one aborts the process rather than
-//! unwinding into AppKit.
+//! queued with the request. Each method's body runs through `abort_on_panic`, so a panic in one
+//! aborts the process rather than unwinding into AppKit.
 //!
 //! A quit is two calls of `terminate:`, since `applicationShouldTerminate:` must answer at once and
 //! the framework may answer much later: the first cancels and asks the framework, and once it
@@ -22,46 +22,46 @@
 //! application asks for itself goes through the same second call.
 
 use std::cell::{Cell, RefCell};
-use std::ffi::CString;
 use std::path::PathBuf;
 
 use dispatch2::DispatchQueue;
-use objc2::encode::{EncodeArguments, EncodeReturn};
-use objc2::runtime::{AnyClass, AnyObject, Bool, Imp, MethodImplementation, Sel};
-use objc2::{MainThreadMarker, sel};
-use objc2_app_kit::{NSApplication, NSApplicationTerminateReply};
+use objc2::rc::Retained;
+use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
+use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
+use objc2_app_kit::{NSApplication, NSApplicationDelegate, NSApplicationTerminateReply, NSMenu};
 use objc2_foundation::{NSArray, NSURL};
 use winit::event_loop::ActiveEventLoop;
 
-use super::{AppKit, screens};
+use super::{AppKit, abort_on_panic, menus, screens};
 use crate::os::{ApplicationControl, SystemRequests};
 use crate::system_requests::{Reopen, SystemRequest};
 
 impl SystemRequests for AppKit {
-    /// Adds the three methods to winit's delegate, which exists once the event loop is built.
-    /// This must run before the loop does: AppKit asks for the files a launch opens before it
-    /// reports the launch finished.
+    /// Sets the embedder's delegate as `NSApp`'s, its requests sent to `send`. This must run
+    /// before the loop does: AppKit asks for the files a launch opens before it reports the launch
+    /// finished.
     fn send_system_requests(send: Box<dyn Fn(SystemRequest)>) {
-        let Some(class) = delegate_class() else {
+        let Some(mtm) = MainThreadMarker::new() else {
             return;
         };
-        DELEGATE.set(Some(Delegate {
-            send,
-            termination: Termination::default(),
-        }));
-        add_delegate_methods(class);
+        let delegate = AppDelegate::new(mtm, send);
+        NSApplication::sharedApplication(mtm)
+            .setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+        APP_DELEGATE.set(Some(delegate));
     }
 }
 
 impl ApplicationControl for AppKit {
     /// Quits through `terminate:`, as Flutter's macOS embedder does once the framework agrees:
     /// AppKit asks the delegate again, which answers at once, and winit hears
-    /// `applicationWillTerminate:`. Where there was no delegate to add the methods to, AppKit
-    /// quits without asking, as Flutter's engine does when the app's delegate is not a
-    /// `FlutterAppDelegate`. Run from the main queue, since winit's handler would be entered
-    /// again from inside the callback that asked.
-    fn quit(_event_loop: &ActiveEventLoop) {
-        with_termination(Termination::allow);
+    /// `NSApplicationWillTerminateNotification`. Run from the main queue, since winit's handler
+    /// would be entered again from inside the callback that asked.
+    fn quit(_event_loop: &dyn ActiveEventLoop) {
+        APP_DELEGATE.with_borrow(|delegate| {
+            if let Some(delegate) = delegate {
+                delegate.ivars().termination.allow();
+            }
+        });
         DispatchQueue::main().exec_async(|| {
             if let Some(mtm) = MainThreadMarker::new() {
                 NSApplication::sharedApplication(mtm).terminate(None);
@@ -80,29 +80,14 @@ impl ApplicationControl for AppKit {
 }
 
 thread_local! {
-    /// Where the delegate methods send their requests: set once, on the main thread, where
-    /// AppKit calls them.
-    static DELEGATE: RefCell<Option<Delegate>> = const { RefCell::new(None) };
+    /// The delegate set as `NSApp`'s, kept for the life of the process. Main thread.
+    static APP_DELEGATE: RefCell<Option<Retained<AppDelegate>>> = const { RefCell::new(None) };
 }
 
+/// What the delegate keeps: where it sends its requests, and whether a quit may go through.
 struct Delegate {
     send: Box<dyn Fn(SystemRequest)>,
     termination: Termination,
-}
-
-/// The one way to the delegate's state; `None` before it is set, where there was no delegate to
-/// add the methods to. The state stays borrowed across `send`, which only queues for the event
-/// loop (`SystemRequests::send_system_requests`), so nothing borrows it again meanwhile.
-fn with_delegate<R>(f: impl FnOnce(&Delegate) -> R) -> Option<R> {
-    DELEGATE.with_borrow(|delegate| delegate.as_ref().map(f))
-}
-
-fn with_termination(change: impl FnOnce(&Termination)) {
-    with_delegate(|delegate| change(&delegate.termination));
-}
-
-fn send(request: SystemRequest) {
-    with_delegate(|delegate| (delegate.send)(request));
 }
 
 /// Whether AppKit may terminate the application, so that the `terminate:` the embedder calls goes
@@ -131,12 +116,75 @@ impl Termination {
     }
 }
 
-extern "C" fn open_urls(
-    _delegate: &AnyObject,
-    _cmd: Sel,
-    _application: &NSApplication,
-    urls: &NSArray<NSURL>,
-) {
+define_class!(
+    // SAFETY: NSObject has no subclassing requirements, and `AppDelegate` has no `Drop`.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "InsetApplicationDelegate"]
+    #[ivars = Delegate]
+    struct AppDelegate;
+
+    unsafe impl NSObjectProtocol for AppDelegate {}
+
+    unsafe impl NSApplicationDelegate for AppDelegate {
+        #[unsafe(method(application:openURLs:))]
+        fn application_open_urls(&self, _application: &NSApplication, urls: &NSArray<NSURL>) {
+            abort_on_panic(|| {
+                if let Some(request) = open_request(urls) {
+                    (self.ivars().send)(request);
+                }
+            });
+        }
+
+        /// Reports every reopen, with the pointer read now, while it is still where the click
+        /// was, and answers yes so AppKit still brings a minimized window back as it does for any
+        /// application.
+        #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
+        fn should_handle_reopen(
+            &self,
+            _application: &NSApplication,
+            has_visible_windows: bool,
+        ) -> bool {
+            abort_on_panic(|| {
+                (self.ivars().send)(SystemRequest::Reopen(Reopen {
+                    had_visible_windows: has_visible_windows,
+                    pointer: screens::pointer_location(),
+                }));
+                true
+            })
+        }
+
+        #[unsafe(method(applicationShouldTerminate:))]
+        fn should_terminate(&self, _application: &NSApplication) -> NSApplicationTerminateReply {
+            abort_on_panic(|| {
+                let delegate = self.ivars();
+                delegate
+                    .termination
+                    .should_terminate(|| (delegate.send)(SystemRequest::Quit))
+            })
+        }
+
+        #[unsafe(method_id(applicationDockMenu:))]
+        fn dock_menu(&self, _application: &NSApplication) -> Option<Retained<NSMenu>> {
+            abort_on_panic(menus::dock_menu)
+        }
+    }
+);
+
+impl AppDelegate {
+    fn new(mtm: MainThreadMarker, send: Box<dyn Fn(SystemRequest)>) -> Retained<AppDelegate> {
+        let this = AppDelegate::alloc(mtm).set_ivars(Delegate {
+            send,
+            termination: Termination::default(),
+        });
+        // SAFETY: plain NSObject initialisation of an allocated instance.
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
+/// The files and links `urls` names, a file URL as a path and any other as a link; `None` when it
+/// names neither.
+fn open_request(urls: &NSArray<NSURL>) -> Option<SystemRequest> {
     let (files, links): (Vec<_>, Vec<_>) = urls.iter().partition(|url| url.isFileURL());
     let files: Vec<PathBuf> = files.iter().filter_map(|url| url.to_file_path()).collect();
     let links: Vec<String> = links
@@ -144,105 +192,7 @@ extern "C" fn open_urls(
         .filter_map(|url| url.absoluteString())
         .map(|link| link.to_string())
         .collect();
-    if !files.is_empty() || !links.is_empty() {
-        send(SystemRequest::Open { files, links });
-    }
-}
-
-/// Reports every reopen, with the pointer read now, while it is still where the click was, and
-/// answers yes so AppKit still brings a minimized window back as it does for any application.
-extern "C" fn should_handle_reopen(
-    _delegate: &AnyObject,
-    _cmd: Sel,
-    _application: &NSApplication,
-    has_visible_windows: Bool,
-) -> Bool {
-    send(SystemRequest::Reopen(Reopen {
-        had_visible_windows: has_visible_windows.as_bool(),
-        pointer: screens::pointer_location(),
-    }));
-    Bool::YES
-}
-
-extern "C" fn should_terminate(
-    _delegate: &AnyObject,
-    _cmd: Sel,
-    _application: &NSApplication,
-) -> NSApplicationTerminateReply {
-    with_delegate(|delegate| {
-        delegate
-            .termination
-            .should_terminate(|| (delegate.send)(SystemRequest::Quit))
-    })
-    .unwrap_or(NSApplicationTerminateReply::TerminateNow)
-}
-
-/// The class of `NSApp`'s delegate, which is winit's once the event loop is built.
-pub(super) fn delegate_class() -> Option<&'static AnyClass> {
-    let mtm = MainThreadMarker::new()?;
-    let delegate = NSApplication::sharedApplication(mtm).delegate()?;
-    let delegate: &AnyObject = delegate.as_ref();
-    Some(delegate.class())
-}
-
-fn add_delegate_methods(class: &AnyClass) {
-    add_method(
-        class,
-        sel!(application:openURLs:),
-        open_urls as extern "C" fn(_, _, _, _),
-    );
-    add_method(
-        class,
-        sel!(applicationShouldHandleReopen:hasVisibleWindows:),
-        should_handle_reopen as extern "C" fn(_, _, _, _) -> _,
-    );
-    add_method(
-        class,
-        sel!(applicationShouldTerminate:),
-        should_terminate as extern "C" fn(_, _, _) -> _,
-    );
-}
-
-/// Adds `method` to `class` as `sel`, with the type encoding its Rust signature gives. A class
-/// that already answers `sel` keeps its own.
-pub(super) fn add_method<F: MethodImplementation>(class: &AnyClass, sel: Sel, method: F) {
-    if class.instance_method(sel).is_some() {
-        eprintln!("inset: winit's application delegate answers {sel} itself; not reported");
-        return;
-    }
-    assert_eq!(
-        size_of::<F>(),
-        size_of::<Imp>(),
-        "a method is a function pointer"
-    );
-    // SAFETY: every `MethodImplementation` is an `extern` function pointer, which is what an
-    // `Imp` is, called with the arguments its own encoding below declares.
-    let imp = unsafe { std::mem::transmute_copy::<F, Imp>(&method) };
-    let types = type_encoding::<F>();
-    // SAFETY: a class registered with the runtime, on the main thread, before AppKit sends
-    // it any of these messages; the encoding matches the function's signature.
-    let added = unsafe {
-        objc2::ffi::class_addMethod(
-            std::ptr::from_ref(class).cast_mut(),
-            sel,
-            imp,
-            types.as_ptr(),
-        )
-    };
-    if !added.as_bool() {
-        eprintln!("inset: could not add {sel} to the application delegate; not reported");
-    }
-}
-
-/// The runtime's type encoding of a method: the return type, the receiver and selector, then
-/// each argument.
-fn type_encoding<F: MethodImplementation>() -> CString {
-    let mut types = F::Return::ENCODING_RETURN.to_string();
-    types.push_str("@:");
-    for argument in F::Arguments::ENCODINGS {
-        types.push_str(&argument.to_string());
-    }
-    CString::new(types).expect("a type encoding has no NUL")
+    (!files.is_empty() || !links.is_empty()).then_some(SystemRequest::Open { files, links })
 }
 
 #[cfg(test)]
@@ -274,18 +224,5 @@ mod tests {
         termination.allow();
         let reply = termination.should_terminate(|| panic!("asked again"));
         assert_eq!(reply, NSApplicationTerminateReply::TerminateNow);
-    }
-
-    #[test]
-    fn a_method_is_encoded_from_its_signature() {
-        type ShouldTerminate = extern "C" fn(
-            &'static AnyObject,
-            Sel,
-            &'static NSApplication,
-        ) -> NSApplicationTerminateReply;
-        assert_eq!(type_encoding::<ShouldTerminate>().to_str().unwrap(), "Q@:@");
-        type OpenUrls =
-            extern "C" fn(&'static AnyObject, Sel, &'static NSApplication, &'static NSArray<NSURL>);
-        assert_eq!(type_encoding::<OpenUrls>().to_str().unwrap(), "v@:@@");
     }
 }

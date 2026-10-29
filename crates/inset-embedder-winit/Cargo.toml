@@ -26,6 +26,8 @@ valo-codec-software = { version = "0.13.1", optional = true }
 valo-geometry.workspace = true
 wgpu.workspace = true
 pollster.workspace = true
+# The paths in the `file:` URIs winit lists a drag's files by.
+percent-encoding = "2"
 winit.workspace = true
 # The user's languages, as each system lists them.
 sys-locale = "0.3"

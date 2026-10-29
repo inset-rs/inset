@@ -18,11 +18,19 @@
 //! # Who calls whom
 //!
 //! Everything here runs on the main thread. Two things reach the embedder from other threads, and
-//! each only sends the loop an event through winit's proxy or runs where it was sent: the
-//! dispatcher's wakes and work (`dispatcher.rs`), and the vsync waiter's waits where the loop
-//! serves them (`vsync_waiter.rs`). On macOS the waits go to the main dispatch queue and are
+//! each only sends the loop an event through its proxy ([`MainLoopProxy`]) or runs where it was
+//! sent: the dispatcher's wakes and work (`dispatcher.rs`), and the vsync waiter's waits where the
+//! loop serves them (`vsync_waiter.rs`). On macOS the waits go to the main dispatch queue and are
 //! served at the display links' ticks, and native surfaces' producers present from their own
 //! threads straight to Core Animation: neither reaches the loop.
+//!
+//! winit's proxy carries no event, only a wake, and merges the wakes sent before the loop hears
+//! them. So each event waits in the loop's own queue, in the order sent from every thread, and
+//! the proxy sends a wake after it; at a wake the loop hears every event waiting by then and
+//! those sent meanwhile. winit does not order a wake after its first call (`StartCause::Init`): on
+//! macOS a wake sent before the loop ran can come before AppKit has finished launching, and a
+//! window opened then has AppKit finish it inside winit's call, which winit cannot take. So the
+//! loop hears no event before winit's first call, and wakes itself again then.
 //!
 //! winit calls the handler here from AppKit's callbacks, and never again while a call is
 //! running: what AppKit reports meanwhile, winit queues and delivers once the call returns. The
@@ -75,9 +83,10 @@
 //! embedders. A window closes only when the app closes it: the user's asking only reports it
 //! (`view_close_requested`), and what the last window's closing means is the app's to decide.
 //!
-//! A view draws on a surface the system gives and takes away: winit's `resumed` gives every view
-//! one and asks for a frame, at launch and each time after, and `suspended` takes them all while
-//! the app and its views stay. A view made while the system gives surfaces gets its own at once.
+//! A view draws on a surface the system gives and takes away: winit's `can_create_surfaces` gives
+//! every view one and asks for a frame, at launch and each time after, and `destroy_surfaces`
+//! takes them all while the app and its views stay. A view made while the system gives surfaces
+//! gets its own at once.
 
 mod app;
 mod frames;
@@ -88,9 +97,10 @@ mod windows;
 
 use std::rc::Rc;
 use std::sync::Weak;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Instant;
 
-use inset_embedder::{DropChange, EmbedderClient, ScreenId, ViewId, VsyncObserver, WindowConfig};
+use inset_embedder::{EmbedderClient, ScreenId, ViewId, VsyncObserver, WindowConfig};
 use winit::application::ApplicationHandler;
 use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
@@ -98,7 +108,7 @@ use winit::window::WindowId;
 
 use crate::app_requests::AppRequest;
 use crate::dispatcher::{Wakeups, earliest};
-use crate::drag_drop::DragReports;
+use crate::drag_drop::Drags;
 use crate::frame_scheduler::FrameScheduler;
 use crate::images::CreateImageLoader;
 use crate::keyboard::Keyboard;
@@ -111,10 +121,11 @@ use crate::state::EmbedderState;
 use crate::system_changes::SystemChange;
 use crate::system_requests::SystemRequest;
 use crate::touch::Touches;
+use crate::trackpad::Trackpad;
 use crate::windows::{ViewMaker, Views, screen_window_config};
 
-/// What reaches the loop through winit's proxy: the framework's requests, wakes asked for
-/// from other threads, and the system's requests of the application.
+/// What reaches the loop through its proxy: the framework's requests, wakes asked for from
+/// other threads, and the system's requests of the application.
 pub(crate) enum MainLoopEvent {
     /// Something the framework asked, through the platform, in the order asked: the oldest
     /// request waiting (`app_requests.rs`).
@@ -154,6 +165,35 @@ pub(crate) enum MainLoopEvent {
     WindowVisibility(WindowId),
 }
 
+/// Where an event for the loop is sent from, on any thread: it waits in the loop's queue, after
+/// every event sent before it, and winit's loop is woken to hear it.
+#[derive(Clone)]
+pub(crate) struct MainLoopProxy {
+    events: Sender<MainLoopEvent>,
+    wake: EventLoopProxy,
+}
+
+impl MainLoopProxy {
+    /// A proxy that wakes the loop through `wake`, and the queue its events wait in, which the
+    /// loop alone reads.
+    pub(crate) fn new(wake: EventLoopProxy) -> (MainLoopProxy, Receiver<MainLoopEvent>) {
+        let (events, queue) = mpsc::channel();
+        (MainLoopProxy { events, wake }, queue)
+    }
+
+    /// Sends the loop `event`; one sent once the loop has ended is dropped.
+    pub(crate) fn send(&self, event: MainLoopEvent) {
+        if self.events.send(event).is_ok() {
+            self.wake.wake_up();
+        }
+    }
+
+    /// Wakes the loop to hear the events waiting.
+    fn wake(&self) {
+        self.wake.wake_up();
+    }
+}
+
 /// The embedder of the running app.
 pub(crate) struct MainLoop<C> {
     /// The app, as the embedder drives it.
@@ -173,30 +213,37 @@ pub(crate) struct MainLoop<C> {
     screen_window: Option<WindowConfig>,
     /// The mouse, as Flutter's pointer.
     pointer: Pointer,
-    /// The fingers on the screen, each as a pointer of its own.
+    /// The fingers and pens on the screen, each as a pointer of its own.
     touches: Touches,
+    /// The trackpad's gestures, as one pan-zoom pointer.
+    trackpad: Trackpad,
     /// The numbers every pointer's data carries, shared so no two devices' presses collide.
     ids: PointerIds,
     keyboard: Keyboard,
-    /// Files dragged over the views this turn, reported when the loop is about to wait.
-    drag_reports: DragReports,
+    /// The drags of files over the views, and the reports waiting for their files.
+    drags: Drags,
     /// Whether the application is active and visible, for its lifecycle state.
     lifecycle: AppLifecycle,
-    /// Whether the system gives the windows surfaces now: from winit's `resumed` until its
-    /// `suspended`.
+    /// Whether the system gives the windows surfaces now: from winit's `can_create_surfaces`
+    /// until its `destroy_surfaces`.
     surfaces_given: bool,
+    /// The events sent to the loop and not heard yet, oldest first.
+    events: Receiver<MainLoopEvent>,
+    /// Whether winit has made its first call, from which on the loop hears its events.
+    started: bool,
     /// Where a window's visibility notices send the loop their events.
-    proxy: EventLoopProxy<MainLoopEvent>,
+    proxy: MainLoopProxy,
 }
 
 impl<C: EmbedderClient> MainLoop<C> {
     /// Starts the app: the screen view is made, where the system's window is the screen, with
     /// no window yet, and then the app, with that view among its views. The view's window opens
-    /// at winit's first call.
+    /// at winit's first call. The loop hears `events`, which `proxy` sends.
     pub(crate) fn start(
         start: StartApp<C>,
         create_image_loader: Option<CreateImageLoader>,
-        proxy: EventLoopProxy<MainLoopEvent>,
+        proxy: MainLoopProxy,
+        events: Receiver<MainLoopEvent>,
     ) -> MainLoop<C> {
         let state = Rc::new(EmbedderState::new(proxy.clone(), create_image_loader));
         let platform = Rc::new(WinitPlatform::new(Rc::clone(&state), proxy.clone()));
@@ -214,22 +261,31 @@ impl<C: EmbedderClient> MainLoop<C> {
             platform,
             frame_scheduler: FrameScheduler::new({
                 let proxy = proxy.clone();
-                move |screen| {
-                    let _ = proxy.send_event(MainLoopEvent::Vsync(screen));
-                }
+                move |screen| proxy.send(MainLoopEvent::Vsync(screen))
             }),
             wakeups: Wakeups::default(),
             view_maker,
             screen_window,
             pointer: Pointer::new(),
             touches: Touches::default(),
+            trackpad: Trackpad::default(),
             ids: PointerIds::default(),
             keyboard: Keyboard::new(),
-            drag_reports: DragReports::default(),
+            drags: Drags::default(),
             lifecycle: AppLifecycle::default(),
             surfaces_given: false,
+            events,
+            started: false,
             proxy,
         }
+    }
+
+    /// winit made its first call: the screen view's window opens, and the loop hears from now on
+    /// the events sent before, on a wake of its own.
+    fn on_started(&mut self, event_loop: &dyn ActiveEventLoop) {
+        self.started = true;
+        self.open_screen_window(event_loop);
+        self.proxy.wake();
     }
 
     /// Wakes the client: the futures its app awaits resolve at the checkpoint a wake brings.
@@ -242,15 +298,34 @@ impl<C: EmbedderClient> MainLoop<C> {
         self.state.views()
     }
 
+    /// Hears one event sent to the loop.
+    fn on_main_loop_event(&mut self, event_loop: &dyn ActiveEventLoop, event: MainLoopEvent) {
+        match event {
+            MainLoopEvent::AppRequest => self.serve_next_app_request(event_loop),
+            MainLoopEvent::MenuClosed => self.on_menu_closed(),
+            MainLoopEvent::Menu(event) => self.on_menu_event(event),
+            MainLoopEvent::TimerWakeup(wakeup) => self.on_wake_at(wakeup),
+            MainLoopEvent::WakeNow => self.on_wake_now(),
+            MainLoopEvent::Vsync(screen) => self.on_vsync(screen),
+            MainLoopEvent::VsyncWaited(screen, observer) => {
+                self.on_vsync_waited(event_loop, screen, observer)
+            }
+            MainLoopEvent::SystemRequest(request) => self.on_system_request(request),
+            MainLoopEvent::Lifecycle(notice) => self.on_lifecycle_notice(notice),
+            MainLoopEvent::SystemChange(change) => self.on_system_change(change),
+            MainLoopEvent::WindowVisibility(id) => self.sync_window_state(id),
+        }
+    }
+
     /// Serves the oldest request the framework or the app made that is not served yet.
-    fn serve_next_app_request(&mut self, event_loop: &ActiveEventLoop) {
+    fn serve_next_app_request(&mut self, event_loop: &dyn ActiveEventLoop) {
         if let Some(request) = self.state.requests().take_next() {
             self.on_app_request(event_loop, request);
         }
     }
 
     /// Serves one request the framework or the app made.
-    fn on_app_request(&mut self, event_loop: &ActiveEventLoop, request: AppRequest) {
+    fn on_app_request(&mut self, event_loop: &dyn ActiveEventLoop, request: AppRequest) {
         match request {
             AppRequest::RequestFrame(view) => self.request_frame(view),
             AppRequest::OpenWindow(request) => self.open_window(event_loop, request),
@@ -269,20 +344,19 @@ impl<C: EmbedderClient> MainLoop<C> {
     }
 }
 
-impl<C: EmbedderClient> ApplicationHandler<MainLoopEvent> for MainLoop<C> {
-    fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+impl<C: EmbedderClient> ApplicationHandler for MainLoop<C> {
+    fn new_events(&mut self, event_loop: &dyn ActiveEventLoop, cause: StartCause) {
         match cause {
             // winit's first call, on every system.
-            StartCause::Init => self.open_screen_window(event_loop),
+            StartCause::Init => self.on_started(event_loop),
             StartCause::ResumeTimeReached {
                 requested_resume, ..
             } => self.on_wait_ended(requested_resume),
-            StartCause::WaitCancelled { .. } | StartCause::Poll => {}
+            _ => {}
         }
     }
 
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        self.report_drags();
+    fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
         // A wake already due is delivered before the loop waits: a task the framework posted
         // to itself, a zero-duration timer, runs ahead of whatever the system delivers next,
         // as Dart's event queue orders them.
@@ -296,44 +370,59 @@ impl<C: EmbedderClient> ApplicationHandler<MainLoopEvent> for MainLoop<C> {
         event_loop.set_control_flow(self.wakeups.control_flow(loop_due));
     }
 
-    fn resumed(&mut self, _event_loop: &ActiveEventLoop) {
+    fn can_create_surfaces(&mut self, _event_loop: &dyn ActiveEventLoop) {
         self.give_surfaces();
     }
 
-    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+    fn destroy_surfaces(&mut self, _event_loop: &dyn ActiveEventLoop) {
         self.take_surfaces();
     }
 
-    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: MainLoopEvent) {
-        match event {
-            MainLoopEvent::AppRequest => self.serve_next_app_request(event_loop),
-            MainLoopEvent::MenuClosed => self.on_menu_closed(),
-            MainLoopEvent::Menu(event) => self.on_menu_event(event),
-            MainLoopEvent::TimerWakeup(wakeup) => self.on_wake_at(wakeup),
-            MainLoopEvent::WakeNow => self.on_wake_now(),
-            MainLoopEvent::Vsync(screen) => self.on_vsync(screen),
-            MainLoopEvent::VsyncWaited(screen, observer) => {
-                self.on_vsync_waited(event_loop, screen, observer)
-            }
-            MainLoopEvent::SystemRequest(request) => self.on_system_request(request),
-            MainLoopEvent::Lifecycle(notice) => self.on_lifecycle_notice(notice),
-            MainLoopEvent::SystemChange(change) => self.on_system_change(change),
-            MainLoopEvent::WindowVisibility(id) => self.sync_window_state(id),
+    /// Hears every event waiting, and those sent while it hears them: winit merges the wakes
+    /// sent before the loop heard the first. Before winit's first call it hears none.
+    fn proxy_wake_up(&mut self, event_loop: &dyn ActiveEventLoop) {
+        if !self.started {
+            return;
+        }
+        while let Ok(event) = self.events.try_recv() {
+            self.on_main_loop_event(event_loop, event);
         }
     }
 
-    fn window_event(&mut self, _event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &dyn ActiveEventLoop, id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::Focused(focused) => self.on_focused(id, focused),
             WindowEvent::CloseRequested => self.on_close_requested(id),
-            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => self.on_resized(id),
+            WindowEvent::SurfaceResized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                self.on_resized(id)
+            }
             WindowEvent::Moved(_) => self.on_moved(id),
             WindowEvent::Occluded(occluded) => self.on_occluded(id, occluded),
             WindowEvent::RedrawRequested => self.on_redraw_requested(id),
             WindowEvent::ThemeChanged(theme) => self.on_theme_changed(theme),
-            WindowEvent::CursorEntered { .. } => self.on_cursor_entered(id),
-            WindowEvent::CursorLeft { .. } => self.on_cursor_left(id),
-            WindowEvent::CursorMoved { position, .. } => self.on_cursor_moved(id, position),
+            WindowEvent::PointerEntered { position, kind, .. } => {
+                self.on_pointer_entered(id, position, kind)
+            }
+            WindowEvent::PointerLeft { position, kind, .. } => {
+                self.on_pointer_left(id, position, kind)
+            }
+            WindowEvent::PointerMoved {
+                position, source, ..
+            } => self.on_pointer_moved(id, position, source),
+            WindowEvent::PointerButton {
+                state,
+                position,
+                button,
+                ..
+            } => self.on_pointer_button(id, state, position, button),
+            WindowEvent::MouseWheel {
+                delta,
+                phase,
+                source,
+                ..
+            } => self.on_mouse_wheel(id, delta, phase, source),
+            WindowEvent::PinchGesture { delta, phase, .. } => self.on_pinch(id, delta, phase),
+            WindowEvent::RotationGesture { delta, phase, .. } => self.on_rotation(id, delta, phase),
             WindowEvent::ModifiersChanged(modifiers) => self.on_modifiers_changed(modifiers),
             WindowEvent::KeyboardInput {
                 event,
@@ -341,12 +430,17 @@ impl<C: EmbedderClient> ApplicationHandler<MainLoopEvent> for MainLoop<C> {
                 ..
             } => self.on_keyboard_input(id, &event, is_synthetic),
             WindowEvent::Ime(ime) => self.on_ime(id, ime),
-            WindowEvent::MouseWheel { delta, .. } => self.on_mouse_wheel(id, delta),
-            WindowEvent::MouseInput { state, button, .. } => self.on_mouse_input(id, state, button),
-            WindowEvent::Touch(touch) => self.on_touch(id, &touch),
-            WindowEvent::HoveredFile(path) => self.on_dragged_file(id, DropChange::Entered, path),
-            WindowEvent::DroppedFile(path) => self.on_dragged_file(id, DropChange::Dropped, path),
-            WindowEvent::HoveredFileCancelled => self.on_drag_exited(id),
+            WindowEvent::DragEntered { id: drag, position } => {
+                self.on_drag_entered(event_loop, id, drag, position)
+            }
+            WindowEvent::DragPosition {
+                id: drag, position, ..
+            } => self.on_drag_moved(drag, position),
+            WindowEvent::DragDropped { id: drag, .. } => self.on_drag_dropped(drag),
+            WindowEvent::DragLeft { id: drag } => self.on_drag_left(drag),
+            WindowEvent::DataTransferReceived { serial, value, .. } => {
+                self.on_drag_files(event_loop, serial, &*value)
+            }
             _ => {}
         }
     }

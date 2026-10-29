@@ -5,14 +5,12 @@
 
 use std::rc::Rc;
 
-use winit::event_loop::EventLoopProxy;
-
 use crate::app_requests::AppRequests;
 use crate::appearance::Appearance;
 use crate::gpu::LazyGpu;
 use crate::images::{CreateImageLoader, Images};
 use crate::locales::Locales;
-use crate::main_loop::MainLoopEvent;
+use crate::main_loop::MainLoopProxy;
 use crate::system_requests::SystemRequestHandlers;
 use crate::windows::Views;
 
@@ -39,7 +37,7 @@ impl EmbedderState {
     /// The state of an app about to start: no view yet, and the user's languages as the system
     /// lists them now. Requests reach the main loop through `proxy`.
     pub(crate) fn new(
-        proxy: EventLoopProxy<MainLoopEvent>,
+        proxy: MainLoopProxy,
         create_image_loader: Option<CreateImageLoader>,
     ) -> EmbedderState {
         let gpu = LazyGpu::default();
@@ -49,9 +47,7 @@ impl EmbedderState {
             locales: Locales::read(),
             images: Images::new(gpu.clone(), create_image_loader),
             gpu,
-            requests: Rc::new(AppRequests::new(move |event| {
-                let _ = proxy.send_event(event);
-            })),
+            requests: Rc::new(AppRequests::new(move |event| proxy.send(event))),
             handlers: SystemRequestHandlers::default(),
         }
     }

@@ -132,7 +132,7 @@ impl VsyncTimer {
 /// minimized window, the one it was last shown on. The primary monitor for a window the system
 /// names none for, and any monitor where it names no primary one; `None` where the system knows
 /// no monitor at all.
-pub(crate) fn monitor_of(window: &Window) -> Option<MonitorHandle> {
+pub(crate) fn monitor_of(window: &dyn Window) -> Option<MonitorHandle> {
     window
         .current_monitor()
         .or_else(|| window.primary_monitor())
@@ -143,9 +143,9 @@ pub(crate) fn monitor_of(window: &Window) -> Option<MonitorHandle> {
 /// reports none.
 fn interval_of(display: &MonitorHandle) -> Duration {
     display
-        .refresh_rate_millihertz()
-        .filter(|&millihertz| millihertz > 0)
-        .map(|millihertz| Duration::from_secs_f64(1000.0 / f64::from(millihertz)))
+        .current_video_mode()
+        .and_then(|mode| mode.refresh_rate_millihertz())
+        .map(|millihertz| Duration::from_secs_f64(1000.0 / f64::from(millihertz.get())))
         .unwrap_or(DEFAULT_INTERVAL)
 }
 

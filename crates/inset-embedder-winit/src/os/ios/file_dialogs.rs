@@ -171,7 +171,7 @@ impl DocumentPickers {
             .windows
             .window(parent)
             .or_else(|| self.windows.first_window());
-        let Some(presenter) = window.and_then(|window| view_controller(&window)) else {
+        let Some(presenter) = window.and_then(|window| view_controller(&*window)) else {
             return failed("no view controller to present the picker from".to_owned());
         };
         let (answer, answered) = dialog_answer();
@@ -225,7 +225,7 @@ fn empty_file(name: Option<&str>) -> std::io::Result<PathBuf> {
 }
 
 /// The view controller of `window`'s view: winit's own, or its window's root.
-pub(super) fn view_controller(window: &Window) -> Option<Retained<UIViewController>> {
+pub(super) fn view_controller(window: &dyn Window) -> Option<Retained<UIViewController>> {
     let RawWindowHandle::UiKit(uikit) = window.window_handle().ok()?.as_raw() else {
         return None;
     };

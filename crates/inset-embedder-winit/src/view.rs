@@ -82,10 +82,10 @@ impl WinitView {
 
     /// `window` is the view's from now on: its native surfaces and text input are on it, and
     /// the view takes its metrics. Its surface comes when the system gives the windows theirs.
-    pub(crate) fn attach_window(&self, window: &Arc<Window>) {
+    pub(crate) fn attach_window(&self, window: &Arc<dyn Window>) {
         *self.native_surfaces.borrow_mut() = Some(ThisOsWindowSurfaces::new(Arc::clone(window)));
         self.text_input.attach(window);
-        self.refresh_metrics(window);
+        self.refresh_metrics(&**window);
     }
 
     /// Draws the last scene again if the surface does not show it: an owed frame, paid
@@ -128,7 +128,7 @@ impl WinitView {
     /// Reads the window's metrics again; when they changed, fits the surface to the new size and
     /// answers it. `None` for the same geometry again: winit reports a resize for more than one
     /// of the system's notices.
-    pub(crate) fn window_resized(&self, window: &Window) -> Option<[u32; 2]> {
+    pub(crate) fn window_resized(&self, window: &dyn Window) -> Option<[u32; 2]> {
         if !self.refresh_metrics(window) {
             return None;
         }
@@ -149,7 +149,7 @@ impl WinitView {
     }
 
     /// The system gives `window`, the view's, a surface: the view draws on it from now on.
-    pub(crate) fn give_surface(&self, window: &Arc<Window>) {
+    pub(crate) fn give_surface(&self, window: &Arc<dyn Window>) {
         self.rasterizer.borrow_mut().give_surface(window);
     }
 
@@ -162,7 +162,7 @@ impl WinitView {
     /// Reads the window's metrics again and answers whether they changed. winit reports a
     /// resize for more than one of the system's notices, and some systems report none for
     /// a change of the safe area; the same geometry again is nothing to lay out for.
-    pub(crate) fn refresh_metrics(&self, window: &Window) -> bool {
+    pub(crate) fn refresh_metrics(&self, window: &dyn Window) -> bool {
         let metrics = read_metrics(window);
         if self.metrics.get() == metrics {
             return false;
@@ -173,7 +173,7 @@ impl WinitView {
 
     /// Reads again which screen the window is on, and answers whether that changed: a window
     /// that moved to another screen has new metrics, though its surface stays as it is.
-    pub(crate) fn refresh_screen(&self, window: &Window) -> bool {
+    pub(crate) fn refresh_screen(&self, window: &dyn Window) -> bool {
         let screen = screen_of(window);
         let mut metrics = self.metrics.get();
         if metrics.screen == screen {
@@ -186,9 +186,9 @@ impl WinitView {
 }
 
 /// The metrics of `window` as the framework takes them.
-fn read_metrics(window: &Window) -> ViewMetrics {
+fn read_metrics(window: &dyn Window) -> ViewMetrics {
     let [width, height] = ThisOs::surface_size(window).map(f64::from);
-    let padding = ThisOs::view_padding(window, [width, height]);
+    let padding = ThisOs::view_padding(window);
     ViewMetrics {
         physical_size: [width, height],
         physical_constraints: ViewConstraints::tight(width, height),

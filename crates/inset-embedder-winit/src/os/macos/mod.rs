@@ -94,7 +94,7 @@ impl SystemNotifications for AppKit {
 
 /// The window's content view; `None` off the main thread, where AppKit's views may not be
 /// touched.
-fn ns_view(window: &Window) -> Option<Retained<NSView>> {
+fn ns_view(window: &dyn Window) -> Option<Retained<NSView>> {
     MainThreadMarker::new()?;
     let handle = window.window_handle().ok()?;
     let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
@@ -105,7 +105,7 @@ fn ns_view(window: &Window) -> Option<Retained<NSView>> {
     unsafe { Retained::retain(appkit.ns_view.cast::<NSView>().as_ptr()) }
 }
 
-fn ns_window(window: &Window) -> Option<Retained<NSWindow>> {
+fn ns_window(window: &dyn Window) -> Option<Retained<NSWindow>> {
     ns_view(window)?.window()
 }
 

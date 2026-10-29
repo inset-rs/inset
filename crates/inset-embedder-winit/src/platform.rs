@@ -13,21 +13,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use inset_embedder::{
-    AppExit, Brightness, Cameras, Clipboard, Compositor, Dispatcher, DockMenu, FileDialogs,
-    FontSource, ImageCodecFuture, Locale, MenuBar, MouseCursor, Notifications, Opener, Platform,
-    Players, PopupMenus, RequestId, Screens, SystemFontSource, TargetPlatform, TrayIcons,
-    ViewError, ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId, ViewRef, ViewRequest,
-    VsyncWaiter,
-};
-use winit::event_loop::EventLoopProxy;
-
 use crate::app_requests::AppRequest;
 use crate::clipboard::ClipboardChanges;
 use crate::dispatcher::WinitDispatcher;
 use crate::file_dialogs::ParentWindows;
 use crate::macos::MacOs;
-use crate::main_loop::MainLoopEvent;
+use crate::main_loop::MainLoopProxy;
 use crate::menus::MenuEvents;
 use crate::notifications::NotificationActivations;
 use crate::os::{
@@ -37,6 +28,13 @@ use crate::os::{
 use crate::popup_menus::NativePopupMenus;
 use crate::state::EmbedderState;
 use crate::windows::WindowRequest;
+use inset_embedder::{
+    AppExit, Brightness, Cameras, Clipboard, Compositor, Dispatcher, DockMenu, FileDialogs,
+    FontSource, ImageCodecFuture, Locale, MenuBar, MouseCursor, Notifications, Opener, Platform,
+    Players, PopupMenus, RequestId, Screens, SystemFontSource, TargetPlatform, TrayIcons,
+    ViewError, ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId, ViewRef, ViewRequest,
+    VsyncWaiter,
+};
 
 /// The long-lived embedder capability held by `App`.
 ///
@@ -55,7 +53,7 @@ pub struct WinitPlatform {
     state: Rc<EmbedderState>,
     /// Where the dispatcher's wakes, the waits on a screen's vsync and a closed menu's word go,
     /// from any thread.
-    proxy: EventLoopProxy<MainLoopEvent>,
+    proxy: MainLoopProxy,
     /// The id of the next request for a view.
     next_request_id: Cell<u64>,
     /// The system's compositor for native surfaces, where it has one.
@@ -83,10 +81,7 @@ pub struct WinitPlatform {
 }
 
 impl WinitPlatform {
-    pub(crate) fn new(
-        state: Rc<EmbedderState>,
-        proxy: EventLoopProxy<MainLoopEvent>,
-    ) -> WinitPlatform {
+    pub(crate) fn new(state: Rc<EmbedderState>, proxy: MainLoopProxy) -> WinitPlatform {
         let clipboard = ThisOs::clipboard(Box::new({
             let requests = Rc::clone(state.requests());
             move || requests.send(AppRequest::LookAtClipboard)

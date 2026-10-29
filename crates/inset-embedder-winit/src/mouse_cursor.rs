@@ -2,7 +2,8 @@
 //! it on the window the pointer is in.
 
 use inset_embedder::{MouseCursor, SystemMouseCursorKind, ViewId};
-use winit::window::{CursorIcon, Window};
+use winit::cursor::CursorIcon;
+use winit::window::Window;
 
 use crate::WinitPlatform;
 use crate::app_requests::AppRequest;
@@ -16,10 +17,10 @@ impl MouseCursor for WinitPlatform {
 }
 
 /// Shows `kind` on `window`, the one the pointer was last seen in.
-pub(crate) fn show(window: &Window, kind: SystemMouseCursorKind) {
+pub(crate) fn show(window: &dyn Window, kind: SystemMouseCursorKind) {
     match cursor_icon_of(kind) {
         Some(icon) => {
-            window.set_cursor(icon);
+            window.set_cursor(icon.into());
             window.set_cursor_visible(true);
         }
         None => window.set_cursor_visible(false),
@@ -73,7 +74,7 @@ fn cursor_icon_of(kind: SystemMouseCursorKind) -> Option<CursorIcon> {
 #[cfg(test)]
 mod tests {
     use inset_embedder::SystemMouseCursorKind;
-    use winit::window::CursorIcon;
+    use winit::cursor::CursorIcon;
 
     use super::cursor_icon_of;
 

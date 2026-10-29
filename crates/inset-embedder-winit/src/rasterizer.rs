@@ -14,10 +14,10 @@
 //! scene instead, since the framework draws only when asked, and draws it again when the
 //! system says the window can take it, as Flutter's `DrawLastLayerTree` does.
 //!
-//! The surface is the system's to give and take, winit's `Resumed` and `Suspended`: a
-//! rasterizer starts without one, and one taken away is made again on the same window when the
-//! system gives it back. Without a surface nothing is drawn: every draw is refused as lost, and
-//! the last scene is owed until a surface is given.
+//! The surface is the system's to give and take, winit's `can_create_surfaces` and
+//! `destroy_surfaces`: a rasterizer starts without one, and one taken away is made again on the
+//! same window when the system gives it back. Without a surface nothing is drawn: every draw is
+//! refused as lost, and the last scene is owed until a surface is given.
 //!
 //! What draws is made at the view's first draw, not before: the renderer's context, the device
 //! every view shares (`gpu.rs`), and the surface the system gave, which is made on that device at
@@ -65,7 +65,7 @@ enum WindowSurface {
     /// The system has not given the window one, or has taken it away, or the window closed.
     None,
     /// The system gives the window one, which is made at the view's next draw.
-    Given(Arc<Window>),
+    Given(Arc<dyn Window>),
     /// Made on the device, and drawn on.
     Made(valo::Surface),
 }
@@ -143,7 +143,7 @@ impl Rasterizer {
 
     /// The system gives `window` a surface, owed the last scene, which is made at the next draw,
     /// at the size the window has then.
-    pub(crate) fn give_surface(&mut self, window: &Arc<Window>) {
+    pub(crate) fn give_surface(&mut self, window: &Arc<dyn Window>) {
         self.surface = WindowSurface::Given(Arc::clone(window));
         self.last_scene.surface_reset();
     }
@@ -196,7 +196,7 @@ impl Rasterizer {
             return Err(valo::Refused::Lost);
         };
         if !self.background_shown {
-            ThisOs::show_background(window, self.clear);
+            ThisOs::show_background(&**window, self.clear);
             self.background_shown = true;
         }
         Ok(())
@@ -363,7 +363,7 @@ fn context_on(gpu: &Gpu) -> valo::Context {
 /// honouring its alpha or not.
 fn make_surface(
     gpu: &Gpu,
-    window: &Arc<Window>,
+    window: &Arc<dyn Window>,
     alpha: valo::SurfaceAlpha,
 ) -> Result<valo::Surface, String> {
     valo::Surface::new_with_options(
@@ -371,7 +371,7 @@ fn make_surface(
         &gpu.adapter,
         &gpu.device,
         Arc::clone(window),
-        ThisOs::surface_size(window),
+        ThisOs::surface_size(&**window),
         valo::SurfaceOptions::default().with_alpha(alpha),
     )
     .map_err(|error| error.to_string())
