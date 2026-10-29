@@ -89,6 +89,10 @@ Host implementation. Flutter analogue: the engine's Android embedder under
   Reason: platform — a notification for later is built when its alarm goes off, in a process where the app's native code may not run, so the one builder is Java's, which inset-cli compiles and declares, not exported; Android 8 sets sound by channel, and `setSilent` came only with Android 12.
   Affect: a notification pops up, as the other systems' do, with the app's launcher icon as its small icon and the image as its large icon, fitted to the system's size; the user sees the two channels in the app's settings and may change either.
 
+- Change: a section of the app's notifications is a notification channel group the host makes with two channels of its own, the sounding and the silent, both named as the app's own two; `flutter_local_notifications` makes the groups and channels the app describes in full.
+  Reason: platform — Android sets the sound by channel, and the user turns notifications on and off by channel and by group.
+  Affect: each section has its own heading and switch in the app's notification settings, and posts either kind; a later notification under an id replaces the one there in any section.
+
 - Change: a tap on a notification, on one of its buttons, or a reply typed into its `RemoteInput` field starts `InsetActivity` with an intent of the receiver's own action, which the host reads at launch and from `onNewIntent` (`intents.rs`) and hands on as `notification_activated`; a button or a reply also takes the notification away.
   Reason: platform — `NativeActivity` keeps `onNewIntent` to itself, Android before 15 shows a reply as sending until its notification changes, and from Android 12 a receiver a tap reaches may not start the activity.
   Affect: the app hears a tap whether it was running or started by it, and every action, a reply included, brings it to the front; from Android 15 a replied notification stays, showing the reply, until the user dismisses it, as the system holds it past the host's cancel.
