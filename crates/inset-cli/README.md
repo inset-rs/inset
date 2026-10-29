@@ -73,6 +73,8 @@ minimum_system_version = "11.0"
 background_app = true              # LSUIElement: no Dock tile or menu bar
 team = "ABCDE12345"                # narrows the signing identity when a machine has several
 entitlements = "macos/app.entitlements"  # signed into the bundle: what the hardened runtime otherwise denies
+helpers = [{ package = "my-app-tools", bin = "my-helper" }]  # other targets of the workspace the bundle carries, built with the app
+libraries = [{ package = "my-app-tools", lib = "my_plugin" }]
 
 [package.metadata.inset.ios]
 team = "ABCDE12345"                # narrows the signing identity when a machine has several
@@ -110,6 +112,12 @@ Each `file_associations` table lets the system open the app for files with those
 - iOS, Android and the web: not declared.
 
 An app hears the files and links the system itself opens it with through `App::set_open_requested_handler`, at launch and while it runs on macOS, iOS and Android, and at launch on the web. On Windows and Linux the system gives the app only its command line: the app reads it, decides which arguments are files, and hands them to the same handler with `App::open_requested` (see `examples/app_events`). There a second launch is a new process; `inset-single-instance` hands its command line to the first.
+
+### Helpers and libraries
+
+A macOS app can carry other targets of its workspace in its bundle: `helpers`, binaries, in `Contents/Helpers/<bin>`, and `libraries`, `cdylib`s named by their `[lib] name`, in `Contents/Frameworks/lib<name>.dylib`. `build macos` and `run` build each with the app's own profile, for the same machine, and put it in.
+
+cargo-packager has no place for a helper, and signs a bundle as it makes it, so for an app that carries anything the CLI signs the bundle itself, inside out: each helper and library with the app's identity and the hardened runtime, and no entitlements of their own, then the bundle with the app's entitlements. Without an identity nothing is signed, and each keeps the ad hoc signature the linker gave it, as the app's executable does. The app and its helpers find them by path from their own executable: `../Helpers/<bin>` and `../Frameworks/lib<name>.dylib`.
 
 ### Usage descriptions
 
@@ -174,4 +182,4 @@ File associations are not declared either: the host does not read the intent the
 
 ## Not here yet
 
-An `ipa` upload step, a release key for Android, rebuild-on-change for `run -d web`, and a MIME type definition for a Linux app's own file associations.
+An `ipa` upload step, a release key for Android, rebuild-on-change for `run -d web`, a MIME type definition for a Linux app's own file associations, and a disk image or notarization for a macOS app that carries helpers or libraries.
