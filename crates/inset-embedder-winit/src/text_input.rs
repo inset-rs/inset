@@ -17,7 +17,9 @@ use inset_embedder::{
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{Ime, KeyEvent};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
-use winit::window::{ImePurpose, Window};
+use winit::window::{
+    ImeCapabilities, ImeEnableRequest, ImeHint, ImePurpose, ImeRequest, ImeRequestData, Window,
+};
 
 use crate::ime::{ImeOutcome, apply_commit, apply_ime};
 use crate::keys;
@@ -28,7 +30,7 @@ use crate::os::{NativeMenus, ThisOs};
 pub(crate) struct TextInput {
     /// The view's window, held weakly: the text input of a view with no window, before its
     /// window opens or once it closed, does nothing.
-    window: RefCell<Weak<Window>>,
+    window: RefCell<Option<Weak<dyn Window>>>,
     /// Set from `TextInputHost::start` to `TextInputHost::stop`; an unhandled key types into it.
     active: Cell<Option<ActiveTextInput>>,
     /// The editing value as the framework last set it, and as the IME's events changed it since.
@@ -41,16 +43,21 @@ impl TextInput {
     /// The text input of a view with no window yet.
     pub(crate) fn new() -> TextInput {
         TextInput {
-            window: RefCell::new(Weak::new()),
+            window: RefCell::new(None),
             active: Cell::new(None),
             editing_value: RefCell::new(TextEditingValue::EMPTY),
             transform: RefCell::new(None),
         }
     }
 
+    /// The view's window, while it is open.
+    fn window(&self) -> Option<Arc<dyn Window>> {
+        self.window.borrow().as_ref()?.upgrade()
+    }
+
     /// The view's window from now on.
-    pub(crate) fn attach(&self, window: &Arc<Window>) {
-        *self.window.borrow_mut() = Arc::downgrade(window);
+    pub(crate) fn attach(&self, window: &Arc<dyn Window>) {
+        *self.window.borrow_mut() = Some(Arc::downgrade(window));
     }
 
     /// What an IME event makes of the editing value; a new value is the last one from now on.
@@ -93,14 +100,16 @@ impl TextInput {
             Some(transform) => transform3(transform, Offset::new(rect.left, rect.top)),
             None => Offset::new(rect.left, rect.top),
         };
-        let Some(window) = self.window.borrow().upgrade() else {
+        let Some(window) = self.window() else {
             return;
         };
         let scale = window.scale_factor();
-        window.set_ime_cursor_area(
-            PhysicalPosition::new(origin.dx() * scale, origin.dy() * scale),
-            PhysicalSize::new(rect.width() * scale, rect.height() * scale),
-        );
+        let _ = window.request_ime_update(ImeRequest::Update(
+            ImeRequestData::default().with_cursor_area(
+                PhysicalPosition::new(origin.dx() * scale, origin.dy() * scale).into(),
+                PhysicalSize::new(rect.width() * scale, rect.height() * scale).into(),
+            ),
+        ));
     }
 }
 
@@ -111,23 +120,27 @@ impl TextInputHost for TextInput {
         ThisOs::provides_edit_commands()
     }
 
+    /// Turns the window's input method on for this input, its purpose a password's where the text
+    /// is obscured, and its candidates placed where the framework says the caret is from now on;
+    /// an input method on for another input is turned off first, as winit asks.
     fn start(&self, configuration: &TextInputConfiguration) {
         self.active.set(Some(ActiveTextInput::new(configuration)));
-        let Some(window) = self.window.borrow().upgrade() else {
+        let Some(window) = self.window() else {
             return;
         };
-        window.set_ime_allowed(true);
-        window.set_ime_purpose(if configuration.obscure_text {
+        let purpose = if configuration.obscure_text {
             ImePurpose::Password
         } else {
             ImePurpose::Normal
-        });
+        };
+        let _ = window.request_ime_update(ImeRequest::Disable);
+        let _ = window.request_ime_update(ImeRequest::Enable(enable_request(purpose)));
     }
 
     fn stop(&self) {
         self.active.set(None);
-        if let Some(window) = self.window.borrow().upgrade() {
-            window.set_ime_allowed(false);
+        if let Some(window) = self.window() {
+            let _ = window.request_ime_update(ImeRequest::Disable);
         }
     }
 
@@ -146,6 +159,21 @@ impl TextInputHost for TextInput {
     fn set_client_geometry(&self, _size: Size, transform: &Matrix4) {
         *self.transform.borrow_mut() = Some(*transform);
     }
+}
+
+/// The request that turns an input method on for an input of `purpose`, with its candidates at
+/// the window's corner until the framework places them.
+fn enable_request(purpose: ImePurpose) -> ImeEnableRequest {
+    let capabilities = ImeCapabilities::new()
+        .with_hint_and_purpose()
+        .with_cursor_area();
+    let data = ImeRequestData::default()
+        .with_hint_and_purpose(ImeHint::NONE, purpose)
+        .with_cursor_area(
+            PhysicalPosition::new(0, 0).into(),
+            PhysicalSize::new(0, 0).into(),
+        );
+    ImeEnableRequest::new(capabilities, data).expect("every capability asked for has its value")
 }
 
 /// The text input a view opened with `TextInputHost::start`, kept until `TextInputHost::stop`.
@@ -174,7 +202,7 @@ impl ActiveTextInput {
     ) -> TextInputKeyEffect {
         // `NSTextInputContext` hands a Command or Control chord to the menu, never to
         // `insertText:`; winit's `text` still carries the bare character for those.
-        if modifiers.control_key() || modifiers.super_key() {
+        if modifiers.control_key() || modifiers.meta_key() {
             return TextInputKeyEffect::None;
         }
         if *key == Key::Named(NamedKey::Enter) {
@@ -262,7 +290,7 @@ mod tests {
 
     #[test]
     fn command_and_control_chords_do_not_type() {
-        for modifiers in [ModifiersState::SUPER, ModifiersState::CONTROL] {
+        for modifiers in [ModifiersState::META, ModifiersState::CONTROL] {
             let effect =
                 single_line().key_effect(&Key::Character("c".into()), Some("c"), modifiers);
             assert_eq!(effect, TextInputKeyEffect::None);

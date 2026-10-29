@@ -23,7 +23,7 @@ impl NativeComposition for AppKit {
 }
 
 impl WindowLayer for AppKit {
-    fn window_layer(window: &Window) -> Option<Retained<CALayer>> {
+    fn window_layer(window: &dyn Window) -> Option<Retained<CALayer>> {
         ns_view(window)?.layer()
     }
 }

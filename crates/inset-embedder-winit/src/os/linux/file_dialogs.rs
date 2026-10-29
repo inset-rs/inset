@@ -155,7 +155,7 @@ impl PortalDialogs {
             parent_window: self
                 .windows
                 .window(parent)
-                .and_then(|window| parent_window(&window))
+                .and_then(|window| parent_window(&*window))
                 .unwrap_or_default(),
             options,
         };
@@ -173,7 +173,7 @@ impl PortalDialogs {
 }
 
 /// The portal's name for `window`: its id on X11, and none elsewhere.
-fn parent_window(window: &Window) -> Option<String> {
+fn parent_window(window: &dyn Window) -> Option<String> {
     match window.window_handle().ok()?.as_raw() {
         RawWindowHandle::Xlib(xlib) => Some(format!("x11:{:x}", xlib.window)),
         RawWindowHandle::Xcb(xcb) => Some(format!("x11:{:x}", xcb.window.get())),

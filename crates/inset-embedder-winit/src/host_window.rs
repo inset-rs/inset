@@ -20,7 +20,7 @@ use crate::view::WinitView;
 /// and closing it there frees it (`windows.rs`); from then on a call here changes nothing.
 pub(crate) struct WinitWindow {
     id: WindowId,
-    window: Weak<Window>,
+    window: Weak<dyn Window>,
     view: Rc<WinitView>,
     requests: Rc<AppRequests>,
     /// winit's last `Occluded` event: whether the window is occluded where the system cannot be
@@ -40,7 +40,7 @@ struct WindowState {
 impl WinitWindow {
     pub(crate) fn new(
         id: WindowId,
-        window: Weak<Window>,
+        window: Weak<dyn Window>,
         view: Rc<WinitView>,
         requests: Rc<AppRequests>,
     ) -> WinitWindow {
@@ -101,17 +101,17 @@ impl HostWindow for WinitWindow {
             return;
         };
         if let Some(duration) = animate
-            && ThisOs::animate_frame(&window, frame, duration)
+            && ThisOs::animate_frame(&*window, frame, duration)
         {
             return;
         }
-        if ThisOs::set_frame(&window, frame) {
+        if ThisOs::set_frame(&*window, frame) {
             return;
         }
         // Size before position: a system that anchors a window at its bottom-left, as
         // AppKit does, places the top edge from the size the window has at the time.
-        let _ = window.request_inner_size(LogicalSize::new(frame.width(), frame.height()));
-        window.set_outer_position(LogicalPosition::new(frame.left, frame.top));
+        let _ = window.request_surface_size(LogicalSize::new(frame.width(), frame.height()).into());
+        window.set_outer_position(LogicalPosition::new(frame.left, frame.top).into());
     }
 
     fn set_title(&self, title: &str) {
@@ -160,7 +160,7 @@ impl HostWindow for WinitWindow {
         let Some(window) = self.window.upgrade() else {
             return false;
         };
-        ThisOs::is_occluded(&window).unwrap_or(self.occluded.get())
+        ThisOs::is_occluded(&*window).unwrap_or(self.occluded.get())
     }
 
     fn close(&self) {

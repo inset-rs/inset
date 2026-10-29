@@ -19,7 +19,6 @@ use winit::platform::macos::EventLoopBuilderExtMacOS;
 
 use super::key_equivalents::{self, MainMenu};
 use super::{MenuTarget, Place, application_name, native_item};
-use crate::main_loop::MainLoopEvent;
 use crate::menus::{MenuEvent, MenuEvents};
 
 thread_local! {
@@ -33,7 +32,7 @@ pub(super) fn provides_edit_commands() -> bool {
 }
 
 /// winit's own menu bar is left out: the system's standard one replaces it.
-pub(in crate::os::macos) fn leave_winit_menu_out(builder: &mut EventLoopBuilder<MainLoopEvent>) {
+pub(in crate::os::macos) fn leave_winit_menu_out(builder: &mut EventLoopBuilder) {
     builder.with_default_menu(false);
 }
 
