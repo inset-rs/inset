@@ -3,22 +3,22 @@
 //! A surface is three layers. Its clip layer cuts it to what the placement shows of it. Inside, its
 //! content layer is the surface in its own points, scaled into its parent's by a transform, so one
 //! scale moves the group: the clip layers of its children first, then its buffer's layer on top,
-//! whose contents are the `IOSurface` its producer presented last. A surface joins the layer tree
-//! of the view whose scene first places it, as a sublayer of the view's layer below the
-//! `CAMetalLayer` wgpu draws the framework into (raw-window-metal makes that one a sublayer too,
-//! of an `NSView` and a `UIView` alike), so the clear rectangle the framework paints where the
-//! surface goes shows it through; a child joins its parent's content layer where its parent's
-//! present places it, below the parent's buffer, showing through its clear pixels. Every layer's
-//! coordinates are the window's physical pixels over its scale, as a scene's placements are
+//! whose contents are the `IOSurface` its producer presented last. A surface opened under a view's
+//! root joins that view's layer tree once its scene places it, as a sublayer of the view's layer
+//! below the `CAMetalLayer` wgpu draws the framework into (raw-window-metal makes that one a
+//! sublayer too, of an `NSView` and a `UIView` alike), so the clear rectangle the framework paints
+//! where the surface goes shows it through; a child joins its parent's content layer where its
+//! parent's present places it, below the parent's buffer, showing through its clear pixels. Every
+//! layer's coordinates are the window's physical pixels over its scale, as a scene's placements are
 //! pixels: a buffer shows whole at the scale its surface is placed at, and smaller under a
 //! transform that shrinks it. The experiments in the `experiments` folder beside this repository
 //! settled the choices here: `2026-09-22-layer-under-a-hole` the layer beneath the window's content
 //! and its contents changed off the main thread, and `2026-09-25-buffer-hold` how long the display
 //! engine holds a buffer.
 //!
-//! The module holds the compositor and the surface; `buffers` what a surface was presented and
-//! when each goes back to its producer, `placed` the surfaces a scene or a present placed last,
-//! and `window_surfaces` placing a scene's surfaces in a window.
+//! The module holds the compositor, a view's root and the surface; `buffers` what a surface was
+//! presented and when each goes back to its producer, `placed` the surfaces a scene or a present
+//! placed last, and `window_surfaces` placing a scene's surfaces in a window.
 //!
 //! Two things touch a surface. Its producer presents a frame from its own thread, in an explicit
 //! transaction, which places the frame's children too. The main thread places it with the
@@ -41,7 +41,9 @@ mod window_surfaces;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use inset_embedder::{Compositor, Rect, Surface, SurfaceFrame, SurfacePlacement, ViewId};
+use inset_embedder::{
+    Compositor, Rect, Surface, SurfaceFrame, SurfaceParent, SurfacePlacement, ViewId,
+};
 use objc2::rc::Retained;
 use objc2_core_foundation::CGAffineTransform;
 use objc2_foundation::{NSPoint, NSRect, NSSize};
@@ -58,8 +60,18 @@ const HELD_BRIEFLY: &str = "a surface's state is never held across a panic";
 pub(crate) struct CoreAnimationCompositor;
 
 impl Compositor for CoreAnimationCompositor {
-    fn open_surface(&self, view: ViewId, opaque: bool) -> Arc<dyn Surface> {
-        Arc::new(CoreAnimationSurface::new(Placer::View(view), opaque))
+    fn root(&self, view: ViewId) -> Arc<dyn SurfaceParent> {
+        Arc::new(ViewRoot(view))
+    }
+}
+
+/// A view as the parent of its surfaces, which its window's layer holds once its scene places
+/// them (`window_surfaces`).
+struct ViewRoot(ViewId);
+
+impl SurfaceParent for ViewRoot {
+    fn open_child(&self, opaque: bool) -> Arc<dyn Surface> {
+        Arc::new(CoreAnimationSurface::new(Placer::View(self.0), opaque))
     }
 }
 
@@ -234,7 +246,9 @@ impl Surface for CoreAnimationSurface {
             .present(buffer, released);
         self.release_unused_buffers();
     }
+}
 
+impl SurfaceParent for CoreAnimationSurface {
     fn open_child(&self, opaque: bool) -> Arc<dyn Surface> {
         Arc::new(CoreAnimationSurface::new(
             Placer::Surface(self.number),
@@ -506,6 +520,14 @@ mod tests {
             stranger_layers.clip_layer.0.superlayer().is_none(),
             "a surface opened for a view is placed by its scenes alone"
         );
+    }
+
+    #[test]
+    fn a_surface_opened_under_a_views_root_is_placed_by_that_views_scenes_alone() {
+        let surface = CoreAnimationCompositor.root(ViewId(3)).open_child(true);
+        let layers = CoreAnimationSurface::downcast_from(&surface).unwrap();
+        assert!(layers.may_be_placed_by(Placer::View(ViewId(3))));
+        assert!(!layers.may_be_placed_by(Placer::View(ViewId(4))));
     }
 
     /// A placement's own surface, which [`CoreAnimationSurface::place`] does not read.

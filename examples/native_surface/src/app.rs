@@ -109,12 +109,12 @@ fn start_producer_once_sized(
     );
 }
 
-/// A surface of `view`'s, from the host's compositor.
+/// A surface under `view`'s root, from the host's compositor.
 fn open_surface(platform: &PlatformRef, view: ViewId) -> Arc<dyn Surface> {
     let compositor = platform
         .compositor()
         .expect("the macOS host has a compositor");
-    compositor.open_surface(view, true)
+    compositor.root(view).open_child(true)
 }
 
 /// The surface's size in the display's pixels, which is what the producer draws.

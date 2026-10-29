@@ -46,7 +46,7 @@ pub use clipboard::{
     ClipboardReadFuture, ClipboardWriteFuture, Content, ContentFuture, CopyOptions, CopyRequest,
     FileSink, PastedItem, URI_LIST, WriteFuture,
 };
-pub use composition::{Buffer, Compositor, Surface, SurfaceFrame};
+pub use composition::{Buffer, Compositor, Surface, SurfaceFrame, SurfaceParent};
 pub use drag_drop::{DropChange, DropData};
 pub use file_dialogs::{
     EntryKind, FileDialogError, FileDialogFuture, FileDialogs, FileFinishFuture, FileHandle,

@@ -19,7 +19,8 @@ use crate::framework::{BuildContext, KeyRef, LeafRenderObjectWidget, RenderObjec
 pub struct SurfaceView {
     /// See [`Widget::key`](crate::Widget::key).
     pub key: Option<KeyRef>,
-    /// The surface a producer feeds, opened on the host's compositor.
+    /// The surface a producer feeds, opened under the root of the view the widget is in
+    /// (`Compositor::root`).
     pub surface: Arc<dyn Surface>,
 }
 

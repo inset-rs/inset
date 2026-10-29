@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use valo::{Context, ImageDesc};
 
-use crate::{Image, Picture, Surface, SurfaceFrame};
+use crate::{Image, Picture, Surface, SurfaceFrame, SurfaceParent};
 
 /// One device for the whole test process, created on first use.
 ///
@@ -109,7 +109,9 @@ struct IdleSurface;
 
 impl Surface for IdleSurface {
     fn present(&self, _frame: SurfaceFrame, _released: Box<dyn FnOnce() + Send + Sync>) {}
+}
 
+impl SurfaceParent for IdleSurface {
     fn open_child(&self, _opaque: bool) -> Arc<dyn Surface> {
         idle_surface()
     }

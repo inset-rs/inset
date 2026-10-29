@@ -106,8 +106,8 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the framework, the host and every producer share one process, so a buffer can go to the host's compositor directly.
   Affect: a host without a compositor answers `None`, and a surface placed there leaves only a clear rectangle.
 
-- Change: a surface opens child surfaces beneath its own buffer (`Surface::open_child`), and each of its presents shows a `SurfaceFrame`, its buffer with its children placed in the buffer's pixels, as a scene places a view's.
-  Reason: platform — a host that draws programs shows each program's picture as a surface of its own window, and a program's surfaces go beneath its picture, where Flutter's platform views are always the view's own.
+- Change: a surface is opened under a parent, a view's root (`Compositor::root`) or another surface, with `SurfaceParent::open_child`, and placed by that parent's next frame: a view's scene, or a surface's `SurfaceFrame`, its buffer with its children placed beneath it in the buffer's pixels.
+  Reason: platform — every compositor Inset targets makes a layer under a parent and places it with that parent's frame, and a host that draws programs shows each program's picture as a surface whose own surfaces go beneath it, where Flutter's platform views are always the view's own.
   Affect: a child shows only where its parent's last present placed it, and moves, is clipped and is scaled with its parent.
 
 ## image.rs → dart:ui `instantiateImageCodec` / `Codec` / `FrameInfo`

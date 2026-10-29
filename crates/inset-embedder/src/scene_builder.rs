@@ -463,7 +463,9 @@ mod tests {
     impl Surface for IdleSurface {
         fn present(&self, _frame: crate::SurfaceFrame, _released: Box<dyn FnOnce() + Send + Sync>) {
         }
+    }
 
+    impl crate::SurfaceParent for IdleSurface {
         fn open_child(&self, _opaque: bool) -> Arc<dyn Surface> {
             idle_surface()
         }
