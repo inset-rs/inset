@@ -20,8 +20,8 @@
 //! when each goes back to its producer, `placed` the surfaces a scene or a present placed last,
 //! and `window_surfaces` placing a scene's surfaces in a window.
 //!
-//! Two things touch a surface. Its producer presents from its own thread, in an explicit
-//! transaction, placing its children in the same one. The main thread places it with the
+//! Two things touch a surface. Its producer presents a frame from its own thread, in an explicit
+//! transaction, which places the frame's children too. The main thread places it with the
 //! window's frame. A producer that paces by the screen's refreshes waits on the platform's vsync
 //! waiter, as the framework's frames do (`vsync_waiter.rs`); nothing of the surface's is driven by
 //! the screen. Core Animation says only whether the compositor still reads a buffer, not when it
@@ -41,7 +41,7 @@ mod window_surfaces;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use inset_embedder::{Buffer, Compositor, Rect, Surface, SurfacePlacement, ViewId};
+use inset_embedder::{Compositor, Rect, Surface, SurfaceFrame, SurfacePlacement, ViewId};
 use objc2::rc::Retained;
 use objc2_core_foundation::CGAffineTransform;
 use objc2_foundation::{NSPoint, NSRect, NSSize};
@@ -219,18 +219,14 @@ impl CoreAnimationSurface {
 }
 
 impl Surface for CoreAnimationSurface {
-    /// Shows `buffer` and places `children` in one transaction, and releases the replaced
-    /// buffers the compositor has finished with.
-    fn present(
-        &self,
-        buffer: Buffer,
-        children: &[SurfacePlacement],
-        released: Box<dyn FnOnce() + Send + Sync>,
-    ) {
+    /// Shows the frame's buffer and places its children in one transaction, and releases the
+    /// replaced buffers the compositor has finished with.
+    fn present(&self, frame: SurfaceFrame, released: Box<dyn FnOnce() + Send + Sync>) {
+        let SurfaceFrame { buffer, children } = frame;
         let buffer = CrossThreadBuffer(buffer);
         in_transaction(|| {
             buffer.set_as_contents_of(&self.buffer_layer.0);
-            self.place_children(children);
+            self.place_children(&children);
         });
         self.buffers
             .lock()

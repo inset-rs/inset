@@ -131,7 +131,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Core Animation composites the buffers it's given, so a producer's frame needs no copy and no framework frame.
   Affect: framework content can sit above a surface but not beneath it.
 
-- Change: a surface's buffer and its children sit in one layer scaled by a transform, the children beneath the buffer, and the surface's present places its children in the same transaction as the buffer.
+- Change: a surface's buffer and its children sit in one layer scaled by a transform, the children beneath the buffer, and a present shows a surface frame's buffer and places its children in one transaction.
   Reason: platform — a program whose picture is itself a surface in another app's window places its own surfaces in that picture, and Core Animation moves, clips and scales a layer's sublayers with it.
   Affect: a child moves, is cut and shrinks with its parent, and shows through its parent's clear pixels.
 

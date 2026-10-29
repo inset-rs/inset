@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use inset_embedder::{Buffer, ScreenId, Surface, VsyncObserver, VsyncWaiter};
+use inset_embedder::{Buffer, ScreenId, Surface, SurfaceFrame, VsyncObserver, VsyncWaiter};
 
 use crate::iosurface;
 
@@ -169,8 +169,7 @@ impl Producer {
         iosurface::fill(&self.buffers[index], self.frame);
         let hand_back = self.hand_back.clone();
         self.pacing.surface.present(
-            self.buffers[index].clone(),
-            &[],
+            SurfaceFrame::new(self.buffers[index].clone()),
             Box::new(move || {
                 let _ = hand_back.send(index);
             }),

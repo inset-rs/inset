@@ -7,13 +7,18 @@
 //! A surface may hold child surfaces beneath its own buffer, which its own presents place, in
 //! its buffer's pixels: a program whose picture is itself a surface in another app's window
 //! places its own surfaces under that picture so, and the placement of the parent moves, clips
-//! and scales the whole group as one.
+//! and scales the whole group as one. What one present shows is a [`SurfaceFrame`], a surface's
+//! own small frame, as a view's frame is its [`Scene`](crate::Scene): the host lands its buffer
+//! and its children's placements together, in the one transaction every compositor has for it
+//! (a `CATransaction`, a parent's `wl_surface.commit`, `IDCompositionDevice::Commit`, a
+//! `SurfaceControl.Transaction`).
 //!
 //! The invariant: a surface is on screen only where a frame's [`Scene`](crate::Scene) places
 //! it, or its parent's last present does, and the host, not the framework, owns the native
 //! object behind it.
 
 use std::any::Any;
+use std::fmt;
 use std::sync::Arc;
 
 use crate::{SurfacePlacement, ViewId};
@@ -33,22 +38,16 @@ pub trait Compositor: Send + Sync {
 /// that exists can be placed, and it lives while anything shows it. A host gets its own
 /// type back from a placed surface by downcasting through `Any`.
 pub trait Surface: Any + Send + Sync {
-    /// Shows `buffer` from the compositor's next frame on, with `children`, surfaces this one
-    /// opened, beneath it where they say, in the same step: a child is on screen only where the
-    /// last present placed it. Each child's placement is in the buffer's pixels, as a scene's
-    /// are in its view's, and the buffer's own placement moves, clips and scales them with it.
+    /// Shows `frame` from the compositor's next frame on: its buffer, and its children beneath
+    /// it where they say, in one step. A child is on screen only where the last present placed
+    /// it.
     ///
     /// Returns once the host holds the buffer, not once it is on screen. `released` runs, on any
     /// thread, when the compositor has finished with the buffer and the producer may draw into
     /// it again. On Apple platforms the host learns that from `IOSurfaceIsInUse` at the
     /// surface's next present, or when the surface goes, so a producer there never waits for a
     /// buffer to come back: it draws into one it knows is free, or a new one.
-    fn present(
-        &self,
-        buffer: Buffer,
-        children: &[SurfacePlacement],
-        released: Box<dyn FnOnce() + Send + Sync>,
-    );
+    fn present(&self, frame: SurfaceFrame, released: Box<dyn FnOnce() + Send + Sync>);
 
     /// A surface beneath this one's buffer, shown wherever this one's presents place it, never in
     /// a view's scene. `opaque` says whether its buffers carry alpha the compositor must blend;
@@ -56,6 +55,45 @@ pub trait Surface: Any + Send + Sync {
     /// children is opened not opaque. The child goes when its last handle does, its parent's
     /// last present among them, and it is gone from the screen with its parent.
     fn open_child(&self, opaque: bool) -> Arc<dyn Surface>;
+}
+
+/// What one present of a surface shows: a buffer, and the surface's children placed beneath it,
+/// bottom-most first, as a [`Scene`](crate::Scene) is what one frame of a view shows. What a
+/// later present needs beyond these, such as the part of the buffer that changed, joins them
+/// here.
+pub struct SurfaceFrame {
+    /// The picture, which fills the surface.
+    pub buffer: Buffer,
+    /// Surfaces the presented one opened (`Surface::open_child`), each placed as a scene places
+    /// one in its view, in the buffer's pixels instead of the view's: the buffer's own placement
+    /// moves, clips and scales them with it.
+    pub children: Vec<SurfacePlacement>,
+}
+
+impl SurfaceFrame {
+    /// A frame showing `buffer`, placing no child: what a surface without children presents.
+    pub fn new(buffer: Buffer) -> SurfaceFrame {
+        SurfaceFrame {
+            buffer,
+            children: Vec::new(),
+        }
+    }
+
+    /// The same frame placing a child too, above the children placed before it: a program's
+    /// placements come whole from its own scene, with the scale and the clip the transforms
+    /// and clips above each of its surfaces give it.
+    pub fn child(mut self, placement: SurfacePlacement) -> SurfaceFrame {
+        self.children.push(placement);
+        self
+    }
+}
+
+impl fmt::Debug for SurfaceFrame {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SurfaceFrame")
+            .field("children", &self.children)
+            .finish_non_exhaustive()
+    }
 }
 
 /// What a producer draws into and hands over: the platform's own type.
