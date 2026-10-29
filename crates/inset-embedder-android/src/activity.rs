@@ -24,9 +24,9 @@ use std::rc::Rc;
 
 use android_activity::AndroidApp;
 use inset_embedder::ViewId;
-use jni::Env;
-use jni::objects::{JClass, JObject};
+use jni::objects::{JClass, JClassLoader, JObject};
 use jni::refs::LoaderContext;
+use jni::{Env, jni_sig, jni_str};
 
 /// Inset's activity, which declares the native methods the host registers; the document activity
 /// is a subclass of it.
@@ -63,15 +63,33 @@ pub(crate) fn with_application<T>(
     })
 }
 
-/// Inset's activity class, `rs.inset.InsetActivity`, through `context`'s class loader: a thread the
-/// app started finds no class of the package's by its name alone. An error in a package without
-/// it, where the host's native methods have nowhere to be registered.
+/// The package's class `name`, through `context`'s class loader, which is the package's: a thread
+/// the app started finds no class of the package's by its name alone, and the application's own
+/// class is the platform's, whose loader knows none of them either.
+pub(crate) fn package_class<'local>(
+    env: &mut Env<'local>,
+    context: &JObject<'_>,
+    name: &str,
+) -> jni::errors::Result<JClass<'local>> {
+    let loader = env
+        .call_method(
+            context,
+            jni_str!("getClassLoader"),
+            jni_sig!("()Ljava/lang/ClassLoader;"),
+            &[],
+        )?
+        .l()?;
+    let loader = env.cast_local::<JClassLoader>(loader)?;
+    LoaderContext::Loader(&loader).load_class(env, jni::strings::JNIString::new(name), false)
+}
+
+/// Inset's activity class, `rs.inset.InsetActivity`, which declares the native methods the host
+/// registers; an error in a package without it, where they have nowhere to be registered.
 pub(crate) fn inset_activity_class<'local>(
     env: &mut Env<'local>,
     context: &JObject<'_>,
 ) -> jni::errors::Result<JClass<'local>> {
-    let name = jni::strings::JNIString::new(INSET_ACTIVITY);
-    LoaderContext::FromObject(context).load_class(env, name, false)
+    package_class(env, context, INSET_ACTIVITY)
 }
 
 /// Clears the Java exception a failed call left on this thread, so the next call into Java is not

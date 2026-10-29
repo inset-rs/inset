@@ -27,12 +27,11 @@ use inset_embedder::{
     NotificationReplies, NotificationScheduling, Notifications, PostFuture,
 };
 use jni::objects::{JClass, JObject, JObjectArray, JValue};
-use jni::refs::LoaderContext;
 use jni::sys::jint;
 use jni::{Env, jni_sig, jni_str};
 
 use self::permission::Permission;
-use crate::activity::{Activities, clear_exception, with_application};
+use crate::activity::{Activities, clear_exception, package_class, with_application};
 use crate::bitmap::argb_colors;
 use crate::file_dialogs::string;
 use crate::log::warn_to_log;
@@ -352,14 +351,12 @@ fn dismiss(env: &mut Env<'_>, context: &JObject<'_>, id: &str) -> jni::errors::R
     .map(drop)
 }
 
-/// Inset's notification receiver, through `context`'s class loader: a thread the app started
-/// finds no class of the package's by its name alone.
+/// Inset's notification receiver, through `context`'s class loader, the package's.
 fn receiver<'local>(
     env: &mut Env<'local>,
     context: &JObject<'_>,
 ) -> jni::errors::Result<JClass<'local>> {
-    let name = jni::strings::JNIString::new(RECEIVER);
-    LoaderContext::FromObject(context).load_class(env, name, false)
+    package_class(env, context, RECEIVER)
 }
 
 /// Calls the receiver with the application as its context; a Java exception is the failure it
