@@ -149,7 +149,7 @@ pub trait HostWindow: 'static {
 
     fn set_title(&self, title: &str);
 
-    /// The window's own icon, where its system shows one: in the title bar on Windows and X11,
+    /// The window's own icon, where its system shows one: in the title bar on Windows and Linux,
     /// on the task's card in Recents on Android. `None` gives the window back the app's icon. A
     /// system whose windows have no icon of their own, as macOS's do not, leaves it unset.
     fn set_icon(&self, icon: Option<IconImage>);
