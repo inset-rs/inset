@@ -11,7 +11,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use inset_embedder::{
-    AppExitReply, AppLifecycleState, ClipboardEvent, DropData, EditCommand, EmbedderClient, Frame,
+    AppExitReply, AppLifecycleState, ClipboardEvent, DragData, EditCommand, EmbedderClient, Frame,
     Instant, KeyData, MenuId, NotificationActivation, OpenRequest, PlatformRef, PointerDataPacket,
     RequestId, TextEditingValue, TextInputAction, TrayIconEvent, TrayIconId, ViewError,
     ViewFocusEvent, ViewId,
@@ -152,9 +152,9 @@ impl EmbedderClient for Shell {
         });
     }
 
-    fn drop_data(&mut self, data: DropData) {
+    fn drag_data(&mut self, data: DragData) {
         self.push(|app| {
-            let callback = app.platform_callbacks().on_drop.clone();
+            let callback = app.platform_callbacks().on_drag.clone();
             if let Some(callback) = callback {
                 callback(app, data);
             }
@@ -366,29 +366,29 @@ mod tests {
     }
 
     #[test]
-    fn drop_data_reaches_the_platform_callback() {
+    fn drag_data_reaches_the_platform_callback() {
         use std::cell::RefCell;
         use std::path::PathBuf;
 
-        use inset_embedder::{DropChange, DropData};
+        use inset_embedder::{DragChange, DragData};
 
         let seen = Rc::new(RefCell::new(None));
         let seen_slot = Rc::clone(&seen);
         let platform = Rc::new(platform_with_a_view());
         let mut shell = Shell::new(platform, move |app: &mut App| {
-            app.platform_callbacks_mut().on_drop = Some(Rc::new(move |_app, data| {
+            app.platform_callbacks_mut().on_drag = Some(Rc::new(move |_app, data| {
                 *seen_slot.borrow_mut() = Some(data);
             }));
         });
-        shell.drop_data(DropData {
+        shell.drag_data(DragData {
             view_id: IMPLICIT_VIEW_ID,
-            change: DropChange::Dropped,
+            change: DragChange::Dropped,
             physical_position: None,
             paths: vec![PathBuf::from("/a.wasm")],
         });
         let seen = seen.borrow();
         let seen = seen.as_ref().expect("the callback ran");
-        assert_eq!(seen.change, DropChange::Dropped);
+        assert_eq!(seen.change, DragChange::Dropped);
         assert_eq!(seen.paths, [PathBuf::from("/a.wasm")]);
     }
 

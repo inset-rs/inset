@@ -9,10 +9,10 @@ use inset_foundation::{App, Handle};
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 
-pub use inset_embedder::{DropChange, DropData};
+pub use inset_embedder::{DragChange, DragData};
 
 /// Called for every report of an external drag: entered, moved, dropped, exited.
-pub type DropChangeCallback = Rc<dyn Fn(&mut App, &DropData)>;
+pub type DragChangeCallback = Rc<dyn Fn(&mut App, &DragData)>;
 /// Called with the files let go over a view.
 pub type DroppedCallback = Rc<dyn Fn(&mut App, &[PathBuf])>;
 
@@ -23,7 +23,7 @@ pub struct DropListener {
     /// The [`WidgetsBinding`] listened to.
     pub binding: Handle<WidgetsBinding>,
     /// Called for every report, whatever its phase.
-    pub on_change: Option<DropChangeCallback>,
+    pub on_change: Option<DragChangeCallback>,
     /// Called with the dropped files.
     pub on_dropped: Option<DroppedCallback>,
     observer: Option<WidgetsBindingObserverRef>,
@@ -56,7 +56,7 @@ impl DropListener {
     pub fn on_change(
         self: Handle<Self>,
         app: &mut App,
-        on_change: DropChangeCallback,
+        on_change: DragChangeCallback,
     ) -> Handle<Self> {
         app.get_mut(self).on_change = Some(on_change);
         self
@@ -81,7 +81,7 @@ impl DropListener {
 }
 
 impl WidgetsBindingObserverObject for DropListener {
-    fn did_change_drop(self: Handle<Self>, app: &mut App, data: &DropData) {
+    fn did_change_drag(self: Handle<Self>, app: &mut App, data: &DragData) {
         let (on_change, on_dropped) = {
             let this = app.get(self);
             (this.on_change.clone(), this.on_dropped.clone())
@@ -89,7 +89,7 @@ impl WidgetsBindingObserverObject for DropListener {
         if let Some(on_change) = on_change {
             on_change(app, data);
         }
-        if data.change == DropChange::Dropped
+        if data.change == DragChange::Dropped
             && let Some(on_dropped) = on_dropped
         {
             on_dropped(app, &data.paths);
@@ -106,10 +106,10 @@ mod tests {
 
     use super::*;
 
-    fn dropped(paths: &[&str]) -> DropData {
-        DropData {
+    fn dropped(paths: &[&str]) -> DragData {
+        DragData {
             view_id: ViewId(0),
-            change: DropChange::Dropped,
+            change: DragChange::Dropped,
             physical_position: None,
             paths: paths.iter().map(PathBuf::from).collect(),
         }
@@ -125,7 +125,7 @@ mod tests {
             app,
             Rc::new(move |_app, paths| seen_slot.borrow_mut().extend_from_slice(paths)),
         );
-        WidgetsBinding::instance(app).handle_drop(app, &dropped(&["/a.wasm", "/b.wasm"]));
+        WidgetsBinding::instance(app).handle_drag(app, &dropped(&["/a.wasm", "/b.wasm"]));
         assert_eq!(
             *seen.borrow(),
             [PathBuf::from("/a.wasm"), PathBuf::from("/b.wasm")]
@@ -143,7 +143,7 @@ mod tests {
             Rc::new(move |_app, _data| *seen_slot.borrow_mut() += 1),
         );
         listener.dispose(app);
-        WidgetsBinding::instance(app).handle_drop(app, &dropped(&["/a.wasm"]));
+        WidgetsBinding::instance(app).handle_drag(app, &dropped(&["/a.wasm"]));
         assert_eq!(*seen.borrow(), 0);
     }
 }

@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use crate::{
-    AppExitReply, AppExitResponse, AppLifecycleState, ClipboardEvent, DropData, EditCommand, Frame,
+    AppExitReply, AppExitResponse, AppLifecycleState, ClipboardEvent, DragData, EditCommand, Frame,
     KeyData, MenuId, NotificationActivation, OpenRequest, PointerDataPacket, TextEditingValue,
     TextInputAction, TrayIconEvent, TrayIconId, ViewFocusEvent, ViewId,
 };
@@ -50,7 +50,7 @@ pub trait EmbedderClient {
 
     /// Files dragged from outside the application entered, moved over, were dropped on or
     /// left a view. No dart:ui hook; the default drops it.
-    fn drop_data(&mut self, data: DropData) {
+    fn drag_data(&mut self, data: DragData) {
         let _ = data;
     }
 

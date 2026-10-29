@@ -291,21 +291,21 @@ impl<C: EmbedderClient> MainLoop<C> {
     /// The drag moved to `position` over its window.
     pub(super) fn on_drag_moved(&mut self, drag: DataTransferId, position: PhysicalPosition<f64>) {
         if let Some(report) = self.drags.moved(drag, offset_of(position)) {
-            self.client.drop_data(report);
+            self.client.drag_data(report);
         }
     }
 
     /// The drag was let go over its window.
     pub(super) fn on_drag_dropped(&mut self, drag: DataTransferId) {
         if let Some(report) = self.drags.dropped(drag) {
-            self.client.drop_data(report);
+            self.client.drag_data(report);
         }
     }
 
     /// The drag left its window without dropping.
     pub(super) fn on_drag_left(&mut self, drag: DataTransferId) {
         if let Some(report) = self.drags.left(drag) {
-            self.client.drop_data(report);
+            self.client.drag_data(report);
         }
     }
 
@@ -326,7 +326,7 @@ impl<C: EmbedderClient> MainLoop<C> {
         match self.drags.files_arrived(fetch, files) {
             Ok(reports) => {
                 for report in reports {
-                    self.client.drop_data(report);
+                    self.client.drag_data(report);
                 }
             }
             Err(drag) => {

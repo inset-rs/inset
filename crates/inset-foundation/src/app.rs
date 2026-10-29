@@ -9,7 +9,7 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use inset_embedder::{
-    ClipboardEvent, DropData, EditCommand, MenuId, NotificationActivation, OpenRequest,
+    ClipboardEvent, DragData, EditCommand, MenuId, NotificationActivation, OpenRequest,
     PlatformRef, RequestId, TrayIconEvent, TrayIconId, ViewError, ViewFocusEvent, ViewId,
 };
 use slotmap::new_key_type;
@@ -179,7 +179,7 @@ pub struct PlatformCallbacks {
     /// Flutter `PlatformDispatcher.onViewFocusChange`.
     pub on_view_focus_change: Option<ViewFocusChangeCallback>,
     /// Files dragged from outside the application over a view; no Flutter counterpart.
-    pub on_drop: Option<DropCallback>,
+    pub on_drag: Option<DragCallback>,
     /// The user copied, cut or pasted in a view through the platform's own command; no Flutter
     /// counterpart.
     pub on_clipboard_event: Option<ClipboardEventCallback>,
@@ -215,8 +215,8 @@ pub struct PlatformCallbacks {
 /// Flutter `PlatformDispatcher.onViewFocusChange`.
 pub type ViewFocusChangeCallback = Rc<dyn Fn(&mut App, ViewFocusEvent)>;
 
-/// The framework's handler for `EmbedderClient::drop_data`.
-pub type DropCallback = Rc<dyn Fn(&mut App, DropData)>;
+/// The framework's handler for `EmbedderClient::drag_data`.
+pub type DragCallback = Rc<dyn Fn(&mut App, DragData)>;
 
 /// The framework's handler for `EmbedderClient::clipboard_event`.
 pub type ClipboardEventCallback = Rc<dyn Fn(&mut App, ViewId, ClipboardEvent)>;

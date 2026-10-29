@@ -11,22 +11,22 @@ use crate::{Offset, ViewId};
 
 /// One report of an external drag over a view.
 #[derive(Clone, Debug, PartialEq)]
-pub struct DropData {
+pub struct DragData {
     /// The [`crate::View`] the drag is over.
     pub view_id: ViewId,
     /// What happened since the last report.
-    pub change: DropChange,
+    pub change: DragChange,
     /// Where over the view, in physical pixels, when the host knows: a host may report no
-    /// position at all, and none reports one on [`DropChange::Exited`].
+    /// position at all, and none reports one on [`DragChange::Exited`].
     pub physical_position: Option<Offset>,
-    /// The dragged files: always on [`DropChange::Dropped`], on [`DropChange::Entered`]
+    /// The dragged files: always on [`DragChange::Dropped`], on [`DragChange::Entered`]
     /// where the system tells the host ahead of the drop, empty otherwise.
     pub paths: Vec<PathBuf>,
 }
 
 /// The four phases of an external drag, as every toolkit has them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DropChange {
+pub enum DragChange {
     /// The drag came over the view.
     Entered,
     /// The drag moved over the view.

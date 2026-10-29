@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use inset_embedder::{DropChange, DropData, Offset, ViewId};
+use inset_embedder::{DragChange, DragData, Offset, ViewId};
 use percent_encoding::percent_decode_str;
 use winit::data_transfer::DataTransferId;
 use winit::event_loop::AsyncRequestSerial;
@@ -60,7 +60,7 @@ impl Drags {
         &mut self,
         fetch: AsyncRequestSerial,
         files: Vec<PathBuf>,
-    ) -> Result<Vec<DropData>, DataTransferId> {
+    ) -> Result<Vec<DragData>, DataTransferId> {
         let Some(transfer) = self.fetching.remove(&fetch) else {
             return Ok(Vec::new());
         };
@@ -71,9 +71,9 @@ impl Drags {
         let Some(drag) = self.over.get_mut(&transfer) else {
             return Ok(Vec::new());
         };
-        let mut reports = vec![drag.report(DropChange::Entered, files.clone())];
+        let mut reports = vec![drag.report(DragChange::Entered, files.clone())];
         if drag.dropped {
-            reports.push(drag.report(DropChange::Dropped, files));
+            reports.push(drag.report(DragChange::Dropped, files));
             self.over.remove(&transfer);
         } else {
             drag.files = Some(files);
@@ -82,34 +82,34 @@ impl Drags {
     }
 
     /// The drag `transfer` moved to `position`: the app hears it once it has heard the drag enter.
-    pub(crate) fn moved(&mut self, transfer: DataTransferId, position: Offset) -> Option<DropData> {
+    pub(crate) fn moved(&mut self, transfer: DataTransferId, position: Offset) -> Option<DragData> {
         let drag = self.over.get_mut(&transfer)?;
         drag.position = Some(position);
         drag.files.as_ref()?;
-        Some(drag.report(DropChange::Moved, Vec::new()))
+        Some(drag.report(DragChange::Moved, Vec::new()))
     }
 
     /// The drag `transfer` was let go: the app hears it with its files, now, or once they are
     /// known.
-    pub(crate) fn dropped(&mut self, transfer: DataTransferId) -> Option<DropData> {
+    pub(crate) fn dropped(&mut self, transfer: DataTransferId) -> Option<DragData> {
         let drag = self.over.get_mut(&transfer)?;
         let Some(files) = drag.files.take() else {
             drag.dropped = true;
             return None;
         };
-        let report = drag.report(DropChange::Dropped, files);
+        let report = drag.report(DragChange::Dropped, files);
         self.over.remove(&transfer);
         Some(report)
     }
 
     /// The drag `transfer` left without dropping: the app hears it if it heard the drag enter.
-    pub(crate) fn left(&mut self, transfer: DataTransferId) -> Option<DropData> {
+    pub(crate) fn left(&mut self, transfer: DataTransferId) -> Option<DragData> {
         let drag = self.over.remove(&transfer)?;
         self.fetching.retain(|_, fetched| *fetched != transfer);
         drag.files.as_ref()?;
-        Some(DropData {
+        Some(DragData {
             view_id: drag.view,
-            change: DropChange::Exited,
+            change: DragChange::Exited,
             physical_position: None,
             paths: Vec::new(),
         })
@@ -117,8 +117,8 @@ impl Drags {
 }
 
 impl Drag {
-    fn report(&self, change: DropChange, paths: Vec<PathBuf>) -> DropData {
-        DropData {
+    fn report(&self, change: DragChange, paths: Vec<PathBuf>) -> DragData {
+        DragData {
             view_id: self.view,
             change,
             physical_position: self.position,
@@ -168,7 +168,7 @@ mod tests {
         names.iter().map(PathBuf::from).collect()
     }
 
-    fn changes(reports: &[DropData]) -> Vec<DropChange> {
+    fn changes(reports: &[DragData]) -> Vec<DragChange> {
         reports.iter().map(|report| report.change).collect()
     }
 
@@ -182,13 +182,13 @@ mod tests {
             "no move before the enter"
         );
         let entered = drags.files_arrived(fetch, files(&["/a", "/b"])).unwrap();
-        assert_eq!(changes(&entered), [DropChange::Entered]);
+        assert_eq!(changes(&entered), [DragChange::Entered]);
         assert_eq!(entered[0].paths, files(&["/a", "/b"]));
         assert_eq!(entered[0].physical_position, Some(Offset::new(3.0, 4.0)));
         let moved = drags.moved(DRAG, Offset::new(5.0, 6.0)).unwrap();
-        assert_eq!(moved.change, DropChange::Moved);
+        assert_eq!(moved.change, DragChange::Moved);
         let dropped = drags.dropped(DRAG).unwrap();
-        assert_eq!(dropped.change, DropChange::Dropped);
+        assert_eq!(dropped.change, DragChange::Dropped);
         assert_eq!(dropped.paths, files(&["/a", "/b"]));
         assert_eq!(dropped.physical_position, Some(Offset::new(5.0, 6.0)));
         assert!(drags.left(DRAG).is_none(), "a dropped drag is gone");
@@ -203,7 +203,7 @@ mod tests {
         let reports = drags.files_arrived(fetch, files(&["/a"])).unwrap();
         assert_eq!(
             changes(&reports),
-            [DropChange::Entered, DropChange::Dropped]
+            [DragChange::Entered, DragChange::Dropped]
         );
         assert_eq!(reports[1].paths, files(&["/a"]));
     }
@@ -225,7 +225,7 @@ mod tests {
         drags.entered(DRAG, A, None, fetch);
         drags.files_arrived(fetch, files(&["/a"])).unwrap();
         let left = drags.left(DRAG).unwrap();
-        assert_eq!(left.change, DropChange::Exited);
+        assert_eq!(left.change, DragChange::Exited);
         assert_eq!(left.physical_position, None);
     }
 

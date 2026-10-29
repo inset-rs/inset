@@ -129,8 +129,8 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - Show the last cursor asked for over the view the pointer is on, and set it again each time the system resets it.
 
 **Drag and drop**
-- `EmbedderClient::drop_data`
-- Send one `DropData` per phase, with all its files in that one report, and the position where the system gives one.
+- `EmbedderClient::drag_data`
+- Send one `DragData` per phase, with all its files in that one report, and the position where the system gives one.
 
 ## System services
 
