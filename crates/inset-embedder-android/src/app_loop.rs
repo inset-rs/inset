@@ -19,14 +19,12 @@ use inset_embedder::{
     EmbedderClient, Frame, PlatformRef, PointerDataPacket, ViewFocusDirection, ViewFocusEvent,
     ViewFocusState, ViewId,
 };
-use jni::{jni_sig, jni_str};
 use ndk::looper::ThreadLooper;
 
-use crate::activity::with_activity;
 use crate::app_thread::{ActivityEvent, Done, Inbox};
 use crate::gpu::Gpu;
 use crate::platform::AndroidPlatform;
-use crate::view::{AndroidView, Geometry};
+use crate::view::Geometry;
 use crate::vsync::Vsync;
 
 /// Refreshes in a row with nothing to draw before the signal is paused, so an idle app
@@ -58,29 +56,21 @@ impl<C: EmbedderClient> AppLoop<C> {
         view: ViewId,
         start: impl FnOnce(PlatformRef) -> C + 'static,
     ) -> AppLoop<C> {
-        let gpu = Gpu::acquire();
-        let platform = Rc::new(AndroidPlatform::new(
-            looper.as_foreign().clone(),
-            first.clone(),
-            view,
-        ));
-        let first_view = Rc::new(AndroidView::new(view, &gpu));
-        *platform.images.borrow_mut() = Some(first_view.image_context());
-        *platform.image_loader.borrow_mut() = crate::images::loader(first_view.image_context());
-        platform.add_view(first_view);
-        crate::intents::wake_with(looper.as_foreign().clone());
-        crate::intents::hear(&first);
-        AppLoop {
+        let platform = Rc::new(AndroidPlatform::new(looper.as_foreign().clone()));
+        crate::intents::hear(looper.as_foreign().clone());
+        let mut app_loop = AppLoop {
             looper,
             inbox,
-            gpu,
+            gpu: Gpu::acquire(),
             platform,
             client: None,
             start: Some(Box::new(start)),
             vsync: None,
             refreshed: Rc::new(Cell::new(false)),
             idle_ticks: 0,
-        }
+        };
+        app_loop.view_created(view, first);
+        app_loop
     }
 
     /// Runs for the rest of the process.
@@ -147,12 +137,16 @@ impl<C: EmbedderClient> AppLoop<C> {
         }
     }
 
-    /// An activity the system created after the app started: a view of the app's from now on.
+    /// An activity the system created: a view of the app's from now on. The first one's view
+    /// starts the image loader on its device.
     fn view_created(&mut self, view: ViewId, app: AndroidApp) {
-        crate::intents::hear(&app);
-        self.platform.activities.attach(view, app);
-        self.platform
-            .add_view(Rc::new(AndroidView::new(view, &self.gpu)));
+        crate::intents::read_launch_intent(&app);
+        let android_view = self.platform.attach(view, app, &self.gpu);
+        if self.platform.images.borrow().is_none() {
+            *self.platform.images.borrow_mut() = Some(android_view.image_context());
+            *self.platform.image_loader.borrow_mut() =
+                crate::images::loader(android_view.image_context());
+        }
         if let Some(client) = &mut self.client {
             client.view_added(view);
         }
@@ -160,10 +154,7 @@ impl<C: EmbedderClient> AppLoop<C> {
 
     /// The activity `view` is was destroyed: the view is gone from the app, which goes on.
     fn view_destroyed(&mut self, view: ViewId, done: Done) {
-        self.platform.activities.detach(view);
-        if let Some(gone) = self.platform.remove_view(view) {
-            gone.window_gone();
-        }
+        self.platform.detach(view);
         self.stop_vsync_without_windows();
         if let Some(client) = &mut self.client {
             client.view_removed(view);
@@ -220,7 +211,7 @@ impl<C: EmbedderClient> AppLoop<C> {
 
     /// The display's signal goes when no view has a window to draw in.
     fn stop_vsync_without_windows(&mut self) {
-        if !self.platform.any_view_has_a_window() {
+        if !self.platform.any_view_has_a_native_window() {
             self.vsync = None;
         }
     }
@@ -358,7 +349,7 @@ impl<C: EmbedderClient> AppLoop<C> {
             .as_mut()
             .is_some_and(|client| client.pop_route());
         if !went_back && let Some(app) = self.platform.activities.of(view) {
-            finish(&app);
+            crate::task::finish(&app);
         }
     }
 
@@ -439,18 +430,4 @@ fn density(app: &AndroidApp) -> f64 {
     app.config()
         .density()
         .map_or(1.0, |dpi| f64::from(dpi) / 160.0)
-}
-
-/// Finishes the activity, on the Java main thread, where an activity is finished.
-fn finish(app: &AndroidApp) {
-    let activity = app.clone();
-    app.run_on_java_main_thread(Box::new(move || {
-        let finished = with_activity(&activity, |env, activity| {
-            env.call_method(activity, jni_str!("finish"), jni_sig!("()V"), &[])
-                .map(drop)
-        });
-        if let Err(error) = finished {
-            crate::log::warn_to_log!("inset: the activity would not finish: {error:?}");
-        }
-    }));
 }

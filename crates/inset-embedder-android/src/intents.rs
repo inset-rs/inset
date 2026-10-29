@@ -1,8 +1,8 @@
 //! The intents that reach the activities: the one each started with, and each one Inset's activity
 //! hands on from `onNewIntent` (`NativeActivity` keeps it to itself). Each is read into what it asks
 //! of the app: files and links to open (`open_requests`), or a tap on one of the app's
-//! notifications (`notifications`); other intents ask nothing. Under an activity that is not
-//! Inset's, only the intent the activity started with comes.
+//! notifications (`notifications`); other intents ask nothing. In a package without Inset's
+//! activity, only the intent each activity started with comes.
 //!
 //! What an intent asks is set down and the app's thread woken; its loop hands it on once the client
 //! is there, so the intent the first activity started with waits for the app to start.
@@ -19,7 +19,7 @@ use jni::objects::JObject;
 use jni::{Env, EnvUnowned, NativeMethod, jni_sig, jni_str};
 use ndk::looper::ForeignLooper;
 
-use crate::activity::{clear_exception, with_activity};
+use crate::activity::{clear_exception, inset_activity_class, with_activity, with_application};
 use crate::log::warn_to_log;
 use crate::open_requests::{self, Viewed};
 
@@ -37,17 +37,18 @@ pub(crate) struct Arrived {
     pub(crate) activations: Vec<NotificationActivation>,
 }
 
-/// Wakes `looper`, the app's, when an intent arrives.
-pub(crate) fn wake_with(looper: ForeignLooper) {
+/// Hears the intents that reach Inset's activities from now on, and wakes `looper`, the app's,
+/// when one arrives.
+pub(crate) fn hear(looper: ForeignLooper) {
     let _ = LOOPER.set(looper);
-}
-
-/// Hears the intents that reach the activity `app` from now on, and reads the one it started with.
-pub(crate) fn hear(app: &AndroidApp) {
-    if let Err(error) = with_activity(app, hear_new_intents) {
+    if let Err(error) = with_application(hear_new_intents) {
         clear_exception();
         warn_to_log!("inset: intents that reach the running app are not heard: {error}");
     }
+}
+
+/// Reads the intent the activity `app` started with.
+pub(crate) fn read_launch_intent(app: &AndroidApp) {
     if let Err(error) = with_activity(app, record_launch_intent) {
         clear_exception();
         warn_to_log!("inset: the intent the activity started with could not be read: {error}");
@@ -60,8 +61,8 @@ pub(crate) fn take() -> Arrived {
 }
 
 /// Registers `InsetActivity.onIntent`, which the activity calls from `onNewIntent`.
-fn hear_new_intents(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Result<()> {
-    let class = env.get_object_class(activity)?;
+fn hear_new_intents(env: &mut Env<'_>, application: &JObject<'_>) -> jni::errors::Result<()> {
+    let class = inset_activity_class(env, application)?;
     let method = [
         // SAFETY: `on_intent` takes the arguments `(Landroid/content/Intent;)V` names, as an
         // instance method's native function does.

@@ -8,9 +8,10 @@
 //! window from API 30 carries an insets controller that owns the bars' appearance, and
 //! before that the appearance is flags on the decor view.
 //!
-//! The bars and the switcher are the activity's in front, the one the user is in. Everything here
-//! is posted to the Java main thread, which is where a window and its decor view may be touched,
-//! so each call returns at once and the framework never waits.
+//! The bars are the activity's in front, the one the user is in, and the app's description in
+//! the switcher is every task's (`task`). Everything here is posted to the Java main thread, which
+//! is where a window and its decor view may be touched, so each call returns at once and the
+//! framework never waits.
 
 use inset_embedder::{
     ApplicationSwitcherDescription, Brightness, SystemChrome, SystemUiOverlayStyle,
@@ -19,6 +20,7 @@ use jni::objects::{JObject, JValue};
 use jni::{Env, jni_sig, jni_str};
 
 use crate::activity::{Activities, device_api_level, with_activity};
+use crate::task::TaskDescriptions;
 
 /// `View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR`, API 23: a light status bar, which is to say
 /// dark icons on it.
@@ -36,18 +38,20 @@ const INSETS_CONTROLLER: i32 = 30;
 const NAVIGATION_BAR_DIVIDER: i32 = 28;
 /// The first release that scrims a transparent bar for contrast, and lets an app say not to.
 const BAR_CONTRAST: i32 = 29;
-/// The first release whose task description takes an icon by resource id rather than a
-/// bitmap.
-const TASK_ICON_BY_ID: i32 = 28;
 
-/// The system bars around the window of the activity in front.
+/// The system bars around the window of the activity in front, and the app's description in
+/// Recents.
 pub(crate) struct AndroidChrome {
     activities: Activities,
+    descriptions: TaskDescriptions,
 }
 
 impl AndroidChrome {
-    pub(crate) fn new(activities: Activities) -> AndroidChrome {
-        AndroidChrome { activities }
+    pub(crate) fn new(activities: Activities, descriptions: TaskDescriptions) -> AndroidChrome {
+        AndroidChrome {
+            activities,
+            descriptions,
+        }
     }
 }
 
@@ -65,13 +69,10 @@ impl SystemChrome for AndroidChrome {
         );
     }
 
+    /// Every task's description in Recents, under what each view's window was given of its own
+    /// (`task.rs`).
     fn set_application_switcher_description(&self, description: &ApplicationSwitcherDescription) {
-        let description = description.clone();
-        on_the_activity_in_front(
-            &self.activities,
-            "a description for the switcher",
-            move |env, activity| describe_the_task(env, activity, &description),
-        );
+        self.descriptions.describe_app(description);
     }
 }
 
@@ -234,47 +235,6 @@ fn set_the_decor_flags(
         jni_str!("setSystemUiVisibility"),
         jni_sig!("(I)V"),
         &[JValue::Int(flags)],
-    )?;
-    Ok(())
-}
-
-/// How the app appears in the switcher: `ActivityManager.TaskDescription`, whose icon this
-/// leaves to the manifest. The older constructor takes a bitmap where the newer takes a
-/// resource id, and both are happy with nothing.
-fn describe_the_task(
-    env: &mut Env<'_>,
-    activity: &JObject<'_>,
-    description: &ApplicationSwitcherDescription,
-) -> jni::errors::Result<()> {
-    let label = match &description.label {
-        Some(label) => JObject::from(env.new_string(label)?),
-        None => JObject::null(),
-    };
-    let color = description.primary_color.unwrap_or(0) as i32;
-    let class = env.find_class(jni_str!("android/app/ActivityManager$TaskDescription"))?;
-    let task = if device_api_level() >= TASK_ICON_BY_ID {
-        env.new_object(
-            &class,
-            jni_sig!("(Ljava/lang/String;II)V"),
-            &[JValue::Object(&label), JValue::Int(0), JValue::Int(color)],
-        )?
-    } else {
-        let icon = JObject::null();
-        env.new_object(
-            &class,
-            jni_sig!("(Ljava/lang/String;Landroid/graphics/Bitmap;I)V"),
-            &[
-                JValue::Object(&label),
-                JValue::Object(&icon),
-                JValue::Int(color),
-            ],
-        )?
-    };
-    env.call_method(
-        activity,
-        jni_str!("setTaskDescription"),
-        jni_sig!("(Landroid/app/ActivityManager$TaskDescription;)V"),
-        &[JValue::Object(&task)],
     )?;
     Ok(())
 }

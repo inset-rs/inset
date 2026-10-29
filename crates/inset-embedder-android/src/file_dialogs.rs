@@ -2,7 +2,7 @@
 //! `ACTION_CREATE_DOCUMENT`), which the activity in front starts for a result. `NativeActivity`
 //! hands no result to native code, so the dialogs need Inset's activity, `rs.inset.InsetActivity`,
 //! which inset-cli builds into the app and whose `onActivityResult` calls the method registered
-//! here; under another activity the dialogs are `None`.
+//! here; in a package without it the dialogs are `None`.
 //!
 //! A document has no path, so each pick is opened when it is answered: `"rw"` for a writable pick,
 //! which a provider answers with a file that seeks, and `"r"` otherwise, which it may answer with a
@@ -40,7 +40,7 @@ use jni::objects::{JClass, JObject, JObjectArray, JString, JValue};
 use jni::sys::jint;
 use jni::{Env, EnvUnowned, NativeMethod, jni_sig, jni_str};
 
-use crate::activity::{Activities, clear_exception, with_application};
+use crate::activity::{Activities, clear_exception, inset_activity_class, with_application};
 use crate::answer::{Answer, Answered, answer};
 use crate::document_tree::DocumentFolder;
 
@@ -59,32 +59,31 @@ pub(crate) struct DocumentPickers {
 }
 
 impl DocumentPickers {
-    /// The pickers, once the activity's result method is registered; `None` under an activity
-    /// that is not Inset's, which hands no result on.
+    /// The pickers, once the activity's result method is registered; `None` in a package without
+    /// Inset's activity, where nothing hands a result on.
     pub(crate) fn new(activities: Activities) -> Option<DocumentPickers> {
-        activities
-            .with_front(|env, activity| {
-                let class = env.get_object_class(activity)?;
-                let method = [
-                    // SAFETY: `on_result` takes the arguments `(IILandroid/content/Intent;)V` names,
-                    // as a static method's native function does.
-                    unsafe {
-                        NativeMethod::from_raw_parts(
-                            jni_str!("onResult"),
-                            jni_str!("(IILandroid/content/Intent;)V"),
-                            on_result as *mut std::ffi::c_void,
-                        )
-                    },
-                ];
-                // SAFETY: the method's function matches its signature, above.
-                let registered = unsafe { env.register_native_methods(&class, &method) };
-                if registered.is_err() {
-                    env.exception_clear();
-                }
-                Ok(registered.is_ok())
-            })
-            .unwrap_or(false)
-            .then_some(DocumentPickers { activities })
+        with_application(|env, application| {
+            let class = inset_activity_class(env, application)?;
+            let method = [
+                // SAFETY: `on_result` takes the arguments `(IILandroid/content/Intent;)V` names,
+                // as a static method's native function does.
+                unsafe {
+                    NativeMethod::from_raw_parts(
+                        jni_str!("onResult"),
+                        jni_str!("(IILandroid/content/Intent;)V"),
+                        on_result as *mut std::ffi::c_void,
+                    )
+                },
+            ];
+            // SAFETY: the method's function matches its signature, above.
+            let registered = unsafe { env.register_native_methods(&class, &method) };
+            if registered.is_err() {
+                env.exception_clear();
+            }
+            Ok(registered.is_ok())
+        })
+        .unwrap_or(false)
+        .then_some(DocumentPickers { activities })
     }
 
     /// Starts the picker `intent` makes for a result, and answers the URIs of the documents

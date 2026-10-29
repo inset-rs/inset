@@ -1,23 +1,32 @@
 //! The host's [`View`]: an activity's window as the framework sees it.
 //!
-//! One activity has one window, so each activity is one view, and the view outlives the windows
-//! the system hands the activity out: the framework keeps its tree and its last picture while the
-//! activity is in the background, and the picture is presented again on the window that comes
-//! back.
+//! One activity has one window, so each activity is one view, in the activity's task
+//! (`host_window`), and the view outlives the windows the system hands the activity out: the
+//! framework keeps its tree and its last picture while the activity is in the background, and the
+//! picture is presented again on the window that comes back.
 
 use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex};
 
 use inset_embedder::{
-    Picture, Scene, ScreenId, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding,
+    Picture, RequestId, Scene, ScreenId, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding,
+    WindowRef,
 };
 use ndk::native_window::NativeWindow;
 
 use crate::gpu::Gpu;
+use crate::host_window::AndroidWindow;
 use crate::surface::{Surface, Target};
 
 pub(crate) struct AndroidView {
     id: ViewId,
+    /// The request the view arrived for; `None` for a view the platform gave.
+    request_id: Option<RequestId>,
+    /// The data the view's activity was started with.
+    initial_data: Option<String>,
+    /// The app's handle on the view's task, while the activity lives.
+    window: RefCell<Weak<AndroidWindow>>,
     pub(crate) surface: Arc<Mutex<Surface>>,
     metrics: Cell<ViewMetrics>,
     /// What a frame starts from.
@@ -34,11 +43,19 @@ pub(crate) struct AndroidView {
 
 impl AndroidView {
     /// A view with no window yet: it draws nothing until the system gives one.
-    pub(crate) fn new(id: ViewId, gpu: &Gpu) -> AndroidView {
+    pub(crate) fn new(
+        id: ViewId,
+        request_id: Option<RequestId>,
+        initial_data: Option<String>,
+        gpu: &Gpu,
+    ) -> AndroidView {
         let mut context = valo::Context::new(gpu.device.clone(), gpu.queue.clone());
         context.set_hide_missing_glyphs(true);
         AndroidView {
             id,
+            request_id,
+            initial_data,
+            window: RefCell::default(),
             surface: Arc::new(Mutex::new(Surface {
                 surface: None,
                 context,
@@ -78,8 +95,21 @@ impl AndroidView {
         self.on_screen.set(false);
     }
 
-    /// Whether the system has given the view a window to draw in.
-    pub(crate) fn has_window(&self) -> bool {
+    /// `window` is the app's handle on the view's task from now on, until the activity is
+    /// destroyed.
+    pub(crate) fn set_window(&self, window: &Rc<AndroidWindow>) {
+        *self.window.borrow_mut() = Rc::downgrade(window);
+    }
+
+    /// The activity was destroyed: the view is in no task from now on, while the framework may
+    /// still hold it, and draws nowhere.
+    pub(crate) fn activity_destroyed(&self) {
+        *self.window.borrow_mut() = Weak::new();
+        self.window_gone();
+    }
+
+    /// Whether the system has given the view's activity a native window to draw in.
+    pub(crate) fn has_native_window(&self) -> bool {
         self.surface.lock().expect("surface lock").surface.is_some()
     }
 
@@ -169,6 +199,20 @@ impl View for AndroidView {
         }
         *self.latest.borrow_mut() = Some(Arc::clone(&scene));
         self.draw(&scene.picture);
+    }
+
+    fn initial_data(&self) -> Option<String> {
+        self.initial_data.clone()
+    }
+
+    fn request_id(&self) -> Option<RequestId> {
+        self.request_id
+    }
+
+    /// The view's task, which every activity has.
+    fn window(&self) -> Option<WindowRef> {
+        let window = self.window.borrow().upgrade()?;
+        Some(window as WindowRef)
     }
 }
 

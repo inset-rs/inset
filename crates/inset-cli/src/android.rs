@@ -1,11 +1,12 @@
 //! Android: the `.apk` Gradle would produce, assembled from a cargo library.
 //!
-//! No Gradle project and no Java of the app's own. The Java is Inset's three classes (under
+//! No Gradle project and no Java of the app's own. The Java is Inset's four classes (under
 //! `android/rs/inset/` in this crate). The activity, `rs.inset.InsetActivity`, is the platform's
 //! `NativeActivity`, which loads the app's shared library and calls its `android_main`, with the
 //! results of the activities the app starts, the intents that reach it while it runs and the
 //! answers to the permissions it asks for handed on to its native code, as the document pickers,
-//! being opened and notifications need. The file provider, `rs.inset.InsetFileProvider`, shares a
+//! being opened and notifications need. The document activity, `rs.inset.InsetDocumentActivity`,
+//! is the same activity in a task of its own, for each view the app asks for. The file provider, `rs.inset.InsetFileProvider`, shares a
 //! file of the app's with the app that opens it. The notification receiver,
 //! `rs.inset.InsetNotificationReceiver`, builds and shows the app's notifications, and shows one
 //! when its alarm goes off, whether or not the app runs. So the
@@ -42,6 +43,12 @@ const DEFAULT_TARGET_SDK: u32 = 34;
 /// Inset's activity: the platform's `NativeActivity`, which loads a native library and calls
 /// `android_main`, handing activity results on to it.
 const INSET_ACTIVITY: &str = "rs.inset.InsetActivity";
+/// Inset's activity for a view of its own, each instance a document task with its own card in
+/// Recents.
+const INSET_DOCUMENT_ACTIVITY: &str = "rs.inset.InsetDocumentActivity";
+/// The most document tasks the app keeps in Recents: Android's own ceiling, where its default is
+/// 16, so that each open view keeps its card.
+const MAX_RECENTS: u32 = 50;
 /// Inset's file provider, which shares a file of the app's with the app that opens it.
 const INSET_FILE_PROVIDER: &str = "rs.inset.InsetFileProvider";
 /// Inset's notification receiver, which builds the app's notifications and hears their alarms.
@@ -53,10 +60,14 @@ const PERMISSIONS: [&str; 2] = [
     "android.permission.SCHEDULE_EXACT_ALARM",
 ];
 /// The Java classes every app's package compiles, by their paths under the sources' root.
-const JAVA_SOURCES: [(&str, &str); 3] = [
+const JAVA_SOURCES: [(&str, &str); 4] = [
     (
         "rs/inset/InsetActivity.java",
         include_str!("../android/rs/inset/InsetActivity.java"),
+    ),
+    (
+        "rs/inset/InsetDocumentActivity.java",
+        include_str!("../android/rs/inset/InsetDocumentActivity.java"),
     ),
     (
         "rs/inset/InsetFileProvider.java",
@@ -488,10 +499,13 @@ struct Manifest<'a> {
     category: &'a str,
 }
 
-/// The manifest around Inset's activity. `configChanges` keeps the activity, and so its
-/// view's state, through a rotation or a switch to dark mode, which the host reports as new
-/// metrics; `adjustResize` has the system fit the window to the keyboard, which is how
-/// the host learns of it. Inset's file provider is declared at `<package>.inset.files`, not
+/// The manifest around Inset's activities. The launcher's, `singleTask`, is the task the app
+/// starts in, which files, links and notification taps reach; the document activity,
+/// `standard` as a document must be, is a task of its own for each view the app asks for, found
+/// again by its intent's data (`intoExisting`), with up to [`MAX_RECENTS`] cards in Recents.
+/// `configChanges` keeps each activity, and so its view's state, through a rotation or a switch
+/// to dark mode, which the host reports as new metrics; `adjustResize` has the system fit the
+/// window to the keyboard, which is how the host learns of it. Inset's file provider is declared at `<package>.inset.files`, not
 /// exported, granting each URI it shares; its notification receiver, not exported, hears only the
 /// app's own alarms; `<queries>` names viewing the links of [`QUERIED_SCHEMES`]; the app asks for
 /// [`PERMISSIONS`].
@@ -531,6 +545,16 @@ fn manifest(manifest: &Manifest) -> String {
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
     </activity>
+    <activity
+        android:name="{document_activity}"
+        android:exported="false"
+        android:launchMode="standard"
+        android:documentLaunchMode="intoExisting"
+        android:maxRecents="{max_recents}"
+        android:configChanges="{config_changes}"
+        android:windowSoftInputMode="adjustResize">
+      <meta-data android:name="android.app.lib_name" android:value="{library}" />
+    </activity>
     <provider
         android:name="{provider}"
         android:authorities="{package}.inset.files"
@@ -552,6 +576,8 @@ fn manifest(manifest: &Manifest) -> String {
         label = xml_escape(manifest.label),
         category = manifest.category,
         activity = INSET_ACTIVITY,
+        document_activity = INSET_DOCUMENT_ACTIVITY,
+        max_recents = MAX_RECENTS,
         library = manifest.library,
         provider = INSET_FILE_PROVIDER,
         receiver = INSET_NOTIFICATION_RECEIVER,
@@ -1033,6 +1059,48 @@ mod tests {
                 "the activity must absorb {change} rather than be recreated for it"
             );
         }
+    }
+
+    #[test]
+    fn manifest_declares_a_document_activity_for_the_views_the_app_asks_for() {
+        let manifest = manifest(&Manifest {
+            package: "com.example.my_app",
+            label: "My App",
+            library: "my_app",
+            version_code: 100,
+            version_name: "0.1.0",
+            min_sdk: 26,
+            target_sdk: 34,
+            debuggable: false,
+            has_icon: false,
+            category: "productivity",
+        });
+        let launcher = activity_named(&manifest, INSET_ACTIVITY);
+        assert!(launcher.contains(r#"android:launchMode="singleTask""#));
+        assert!(launcher.contains("android.intent.category.LAUNCHER"));
+        let document = activity_named(&manifest, INSET_DOCUMENT_ACTIVITY);
+        assert!(
+            document.contains(r#"android:launchMode="standard""#),
+            "a document task needs the standard launch mode"
+        );
+        assert!(document.contains(r#"android:documentLaunchMode="intoExisting""#));
+        assert!(document.contains(r#"android:maxRecents="50""#));
+        assert!(document.contains(r#"android:exported="false""#));
+        assert!(
+            document.contains(r#"android:name="android.app.lib_name" android:value="my_app""#),
+            "a NativeActivity finds its library in its own meta-data"
+        );
+        assert!(!document.contains("android.intent.action.MAIN"));
+    }
+
+    /// The `<activity>` element whose name is `name`.
+    fn activity_named<'a>(manifest: &'a str, name: &str) -> &'a str {
+        let named = format!(r#"android:name="{name}""#);
+        let start = manifest[..manifest.find(&named).expect("the activity is declared")]
+            .rfind("<activity")
+            .expect("in an activity element");
+        let end = start + manifest[start..].find("</activity>").expect("closed");
+        &manifest[start..end]
     }
 
     #[test]

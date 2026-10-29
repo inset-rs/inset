@@ -25,7 +25,12 @@ use std::rc::Rc;
 use android_activity::AndroidApp;
 use inset_embedder::ViewId;
 use jni::Env;
-use jni::objects::JObject;
+use jni::objects::{JClass, JObject};
+use jni::refs::LoaderContext;
+
+/// Inset's activity, which declares the native methods the host registers; the document activity
+/// is a subclass of it.
+const INSET_ACTIVITY: &str = "rs.inset.InsetActivity";
 
 /// Runs `work` with this thread attached to the app's VM and the activity in hand.
 pub(crate) fn with_activity<T>(
@@ -56,6 +61,17 @@ pub(crate) fn with_application<T>(
         let application = unsafe { JObject::from_raw(env, context.context().cast()) };
         work(env, &application)
     })
+}
+
+/// Inset's activity class, `rs.inset.InsetActivity`, through `context`'s class loader: a thread the
+/// app started finds no class of the package's by its name alone. An error in a package without
+/// it, where the host's native methods have nowhere to be registered.
+pub(crate) fn inset_activity_class<'local>(
+    env: &mut Env<'local>,
+    context: &JObject<'_>,
+) -> jni::errors::Result<JClass<'local>> {
+    let name = jni::strings::JNIString::new(INSET_ACTIVITY);
+    LoaderContext::FromObject(context).load_class(env, name, false)
 }
 
 /// Clears the Java exception a failed call left on this thread, so the next call into Java is not
