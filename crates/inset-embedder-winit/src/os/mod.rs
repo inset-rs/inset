@@ -98,7 +98,8 @@ pub(crate) type ThisOsClipboard = <ThisOs as SystemClipboard>::Clipboard;
 /// Everything the embedder asks of a system, as one bound: which system it is, what it lets the
 /// app do, and the concerns it answers.
 pub(crate) trait OperatingSystem:
-    WindowGeometry
+    EventLoopSetup
+    + WindowGeometry
     + WindowMotion
     + WindowChrome
     + WindowVisibility
@@ -140,6 +141,14 @@ pub(crate) trait OperatingSystem:
 const _: fn() = answers_everything::<ThisOs>;
 
 fn answers_everything<T: OperatingSystem>() {}
+
+/// What winit sets up of the application as it builds its event loop, which the system's module
+/// sets up otherwise.
+pub(crate) trait EventLoopSetup {
+    /// Configures winit's event loop before it is built: macOS leaves winit's own menu bar out,
+    /// for the system's standard one.
+    fn configure_event_loop(_builder: &mut EventLoopBuilder<MainLoopEvent>) {}
+}
 
 /// How big a window's drawing surface is, and what of it the system covers.
 pub(crate) trait WindowGeometry {
@@ -345,10 +354,6 @@ pub(crate) trait NativeMenus {
     fn tray_icons(_events: MenuEvents) -> Option<Rc<dyn TrayIcons>> {
         None
     }
-
-    /// Configures winit's event loop before it is built: macOS leaves winit's own menu bar out,
-    /// for the system's standard one (`menu_bar`).
-    fn configure_event_loop(_builder: &mut EventLoopBuilder<MainLoopEvent>) {}
 
     /// Whether the system's menus send the focused view Edit's cut, copy and paste, which a key
     /// the framework leaves reaches: macOS's menu bar, while it holds those items.

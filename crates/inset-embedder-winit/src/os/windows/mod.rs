@@ -21,9 +21,10 @@ use crate::clipboard::{ChangeProbe, TextClipboard};
 
 use super::absent::{NoDisplayLink, NoVisibilityNotices, NoWindowSurfaces};
 use super::{
-    ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeComposition,
-    OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard, SystemMedia,
-    SystemRequests, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
+    ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, ImageDecoding,
+    NativeComposition, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
+    SystemMedia, SystemRequests, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility,
+    WorkQueue,
 };
 
 /// Windows. A type only: never made, its answers are associated functions.
@@ -62,6 +63,7 @@ impl WindowVisibility for Windows {
     type Notices = NoVisibilityNotices;
 }
 
+impl EventLoopSetup for Windows {}
 impl WindowGeometry for Windows {}
 impl SystemMedia for Windows {}
 impl WindowMotion for Windows {}
