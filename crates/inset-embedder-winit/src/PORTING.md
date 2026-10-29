@@ -7,6 +7,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - app_exit.rs → how Flutter's desktop embedders quit for a required `System.exitApplication`, and hear the framework's reply to `System.requestAppExit`
 - lifecycle.rs, os/macos/app_lifecycle.rs → the macOS embedder's lifecycle states (`FlutterEngine`)
 - os/macos/app_delegate.rs, quitting → the macOS embedder's `FlutterAppDelegate`, which asks the framework before the app quits
+- launch.rs, os/macos/event_loop.rs → a Flutter macOS app's launch, which comes forward or stays behind as macOS launched it
 - launch.rs, main_loop/ → the engine's start (`Shell` adds the implicit view with empty metrics): where the system's window is the screen, the app starts with the screen view at no size, and its window and surface come after
 - platform.rs, main_loop/windows.rs → the embedders' implicit view, here the screen view, which the framework never hears removed: it outlives its window and draws nowhere once the window closes
 - main_loop/windows.rs → the engine's window close request, which goes to the framework and closes nothing until the framework closes the window
