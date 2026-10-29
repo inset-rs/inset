@@ -178,7 +178,7 @@ pub struct PlatformCallbacks {
     pub on_locale_changed: Option<Listener>,
     /// Flutter `PlatformDispatcher.onViewFocusChange`.
     pub on_view_focus_change: Option<ViewFocusChangeCallback>,
-    /// Files dragged from outside the application over a view; no Flutter counterpart.
+    /// What is dragged from outside the application over a view; no Flutter counterpart.
     pub on_drag: Option<DragCallback>,
     /// The user copied, cut or pasted in a view through the platform's own command; no Flutter
     /// counterpart.

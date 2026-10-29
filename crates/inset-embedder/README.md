@@ -130,7 +130,7 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 
 **Drag and drop**
 - `EmbedderClient::drag_data`
-- Send one `DragData` per phase, with all its files in that one report, and the position where the system gives one.
+- Send one `DragData` per phase, with the drag's items listed as a paste's are, through `DraggedItems` so they are read only while the drop is reported, and the position where the system gives one; fetch what is read then before the system lets the drop's data go, and refuse a drag carrying nothing the app could read.
 
 ## System services
 

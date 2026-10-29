@@ -2,7 +2,8 @@
 //! each offered in several types, which AppKit names by UTI and the framework by MIME type
 //! (`types`); a form produced when someone pastes it, and a file that exists only once pasted
 //! (`promises`); a file another application promised, received when it is read
-//! (`received_files`); and the options a copy is treated with.
+//! (`received_files`); and the options a copy is treated with. What is dragged over a window is
+//! read from the dragging pasteboard as the general one is read (`dragging`).
 //!
 //! What a copy may hold follows AppKit's items: each item an `NSPasteboardItem` with a form for
 //! each type, but an item carrying a file, given or promised, which is that file alone, as
@@ -17,6 +18,7 @@
 //! The invariant: an item read is the pasteboard's as listed. Listing notes the pasteboard's count
 //! of changes, and a read once it has moved fails, since AppKit answers a stale item with nothing.
 
+mod dragging;
 mod promises;
 mod received_files;
 mod waiting;

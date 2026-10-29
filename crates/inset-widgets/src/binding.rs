@@ -99,8 +99,8 @@ pub trait WidgetsBindingObserver {
         let _ = (app, event);
     }
 
-    /// Called when files dragged from outside the application enter, move over, are dropped
-    /// on or leave a view. Flutter has no counterpart: external drops are a plugin there.
+    /// Called when what is dragged from outside the application enters, moves over, is dropped
+    /// on or leaves a view. Flutter has no counterpart: external drops are a plugin there.
     fn did_change_drag(&self, app: &mut App, data: &DragData) {
         let _ = (app, data);
     }

@@ -48,7 +48,7 @@ pub use clipboard::{
     DataTransferItem, FileSink, URI_LIST, WriteFuture,
 };
 pub use composition::{Buffer, Compositor, Surface, SurfaceFrame, SurfaceParent};
-pub use drag_drop::{DragChange, DragData};
+pub use drag_drop::{DragChange, DragData, DraggedItems};
 pub use file_dialogs::{
     EntryKind, FileDialogError, FileDialogFuture, FileDialogs, FileFinishFuture, FileHandle,
     FileOpenFuture, FileReadFuture, FileSizeFuture, FileStream, FileType, FileWriteFuture,

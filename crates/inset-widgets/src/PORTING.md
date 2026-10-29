@@ -60,9 +60,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — no `FlutterError.reportError` hook to catch and continue.
   Affect: one failing observer unwinds the lifecycle change or the exit request, and the observers after it hear nothing.
 
-- Change: `WidgetsBindingObserver::did_change_drag` and the `DropListener` in `widgets/drop_listener.rs` hear files dragged from outside the application, from `EmbedderClient::drag_data`; Flutter has no drop in its framework and leaves it to plugins.
+- Change: `WidgetsBindingObserver::did_change_drag` and the `DropListener` hear what is dragged from outside the application, from `EmbedderClient::drag_data`, and the listener's `on_dropped` hands over the dropped items as a paste hands over its own; Flutter has no drop in its framework and leaves it to plugins.
   Reason: platform — the host reports the drag at the window, and the binding's observers are where window-level events reach the tree.
-  Affect: any observer hears every drag over any view; with a host that reports no position, the whole view is the target.
+  Affect: any observer hears every drag over any view, an `on_dropped` callback starts each read it wants before it returns, and with a host that reports no position the whole view is the target.
 
 - Change: `run_app` builds its content in every view the platform gives the app, and where it gives none at start, as on a desktop, asks for a window through a `WindowController` configured as `run_app_with` says and panics if the platform refuses, where Flutter's `runApp` draws into the implicit view.
   Reason: platform — there is no implicit view: the platform gives the app its views or makes them on request.

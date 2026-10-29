@@ -1,5 +1,5 @@
 //! The main loop's input: the mouse, the fingers and pens, the keyboard, typing into a text
-//! input, files dragged over a window, and the cursor the app shows.
+//! input, what is dragged over a window, and the cursor the app shows.
 //!
 //! winit reports every pointer through one set of events, entered, moved, pressed or released and
 //! left, naming which pointer it is: the mouse goes to the pointer that is the mouse
@@ -8,7 +8,7 @@
 //! pinches and rotations (`trackpad.rs`).
 
 use inset_embedder::{EmbedderClient, Offset, PointerDataPacket, SystemMouseCursorKind, View};
-use winit::data_transfer::{DataTransferId, TypeHint, TypedData};
+use winit::data_transfer::{DataTransferId, TypedData};
 use winit::dpi::PhysicalPosition;
 use winit::event::{
     ButtonSource, ElementState, Ime, KeyEvent, Modifiers, MouseScrollDelta, PointerKind,
@@ -17,7 +17,7 @@ use winit::event::{
 use winit::event_loop::{ActiveEventLoop, AsyncRequestSerial, DndAction};
 use winit::window::WindowId;
 
-use crate::drag_drop::file_path;
+use crate::drag_drop::Carried;
 use crate::ime::ImeOutcome;
 use crate::mouse_cursor;
 use crate::os::{NativeMenus, PointerQueries, ThisOs};
@@ -267,9 +267,8 @@ impl<C: EmbedderClient> MainLoop<C> {
         }
     }
 
-    /// A drag came over `window` at `position`: it is accepted, its files copied, and the app
-    /// hears it once winit has answered the fetch of its files. A drag whose list of files winit
-    /// cannot fetch carries none, and is left refused.
+    /// A drag came over `window` at `position`: the app hears it with what it carries, which is
+    /// accepted as a copy, or it is refused when it carries nothing the app could read.
     pub(super) fn on_drag_entered(
         &mut self,
         event_loop: &dyn ActiveEventLoop,
@@ -280,12 +279,19 @@ impl<C: EmbedderClient> MainLoop<C> {
         let Some(view) = self.view_id_of(window) else {
             return;
         };
-        let Ok(fetch) = event_loop.fetch_data_transfer(drag, &TypeHint::UriList) else {
-            return;
+        let carried = Carried::by(event_loop, drag);
+        let report = self
+            .drags
+            .entered(drag, view, position.map(offset_of), carried);
+        let accepted: &[DndAction] = if report.is_some() {
+            &[DndAction::Copy]
+        } else {
+            &[]
         };
-        let _ = event_loop.set_valid_dnd_actions(drag, &[DndAction::Copy]);
-        self.drags
-            .entered(drag, view, position.map(offset_of), fetch);
+        let _ = event_loop.set_valid_dnd_actions(drag, accepted);
+        if let Some(report) = report {
+            self.client.drag_data(report);
+        }
     }
 
     /// The drag moved to `position` over its window.
@@ -295,11 +301,19 @@ impl<C: EmbedderClient> MainLoop<C> {
         }
     }
 
-    /// The drag was let go over its window.
-    pub(super) fn on_drag_dropped(&mut self, drag: DataTransferId) {
-        if let Some(report) = self.drags.dropped(drag) {
-            self.client.drag_data(report);
-        }
+    /// The drag was let go over its window: the app hears it, and what it reads then is fetched
+    /// before winit lets the drop's data go.
+    pub(super) fn on_drag_dropped(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        drag: DataTransferId,
+    ) {
+        let client = &mut self.client;
+        self.drags.dropped(
+            drag,
+            |report| client.drag_data(report),
+            |form| event_loop.fetch_data_transfer(drag, form),
+        );
     }
 
     /// The drag left its window without dropping.
@@ -309,30 +323,9 @@ impl<C: EmbedderClient> MainLoop<C> {
         }
     }
 
-    /// winit answered the fetch `fetch` of a drag's files with `uris`: the reports waiting for
-    /// them go to the app, or the drag is refused when they name no file.
-    pub(super) fn on_drag_files(
-        &mut self,
-        event_loop: &dyn ActiveEventLoop,
-        fetch: AsyncRequestSerial,
-        uris: &dyn TypedData,
-    ) {
-        let files = uris
-            .try_as_uris()
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|uri| file_path(uri))
-            .collect();
-        match self.drags.files_arrived(fetch, files) {
-            Ok(reports) => {
-                for report in reports {
-                    self.client.drag_data(report);
-                }
-            }
-            Err(drag) => {
-                let _ = event_loop.set_valid_dnd_actions(drag, &[]);
-            }
-        }
+    /// winit answered the fetch `fetch` of a dropped drag's form with `value`.
+    pub(super) fn on_drag_fetched(&mut self, fetch: AsyncRequestSerial, value: &dyn TypedData) {
+        self.drags.fetched(fetch, value);
     }
 }
 

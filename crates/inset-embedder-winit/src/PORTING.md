@@ -175,11 +175,23 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — winit reports window focus without a direction.
   Affect: focus arriving from the system always reads as `ViewFocusDirection::Undefined`.
 
-## drag_drop.rs → the macOS embedder's `draggingEntered:`/`performDragOperation:`
+## drag_drop/ / os/macos/pasteboard/dragging.rs → the macOS embedder's `draggingEntered:`/`performDragOperation:`
 
-- Change: a drag over a window reaches the app once winit has answered the fetch of its files: it enters with them, then moves and drops where it is, and a drag whose list names no file is refused.
-  Reason: platform — winit hands a drag's data apart from its events, through a fetch it answers later, and accepts a drag only for a target that says so.
-  Affect: an app hears a drag of files a moment after it enters, never a drag of text or links alone, and on a system that answers late a drop that comes first is reported right after its enter.
+- Change: a drag over a window reaches the app as it enters, carrying the items the system lists, and a drag carrying nothing the app could read is refused.
+  Reason: platform — macOS's dragging pasteboard lists its items as the clipboard's does, and winit lists a drag's types as it enters.
+  Affect: an app hears drags of text, links, images and files from the moment they enter, and never one whose data it could not read.
+
+- Change: on Windows and Linux a drag is one item, and on Windows that item offers only the drag's text, its files and a PNG image.
+  Reason: platform — those systems hold a drag's data as one item in several types, and winit hands out no `IDataObject`, copying just those forms out of it.
+  Affect: several files dropped there are one item whose URI list names them all, and a drag on Windows that carries none of those forms, such as an image in another format alone, is refused.
+
+- Change: on Windows and Linux, what the app reads of a drop is fetched once the drop's report returns, and answers later.
+  Reason: platform — winit fetches a drop's data asynchronously, and only while the drop is handled.
+  Affect: there every read of a dropped item completes a moment after the drop, never during its report.
+
+- Change: on macOS a window also takes drags of a URL, rich text and a file another application promises, besides the forms winit registers it for.
+  Reason: platform — AppKit offers a window only the drags that hold a type it is registered for.
+  Affect: a drag holding only a link, rich text or a promised file reaches the app, and a promised file is written when its URI list is read.
 
 ## system_requests.rs / launch.rs / os/macos/app_delegate.rs / os/ios/open_requests.rs → the macOS embedder's `FlutterAppDelegate`, iOS's `FlutterAppDelegate` and `FlutterSceneDelegate`
 

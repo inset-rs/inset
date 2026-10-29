@@ -63,16 +63,18 @@ pub trait FileSink {
     ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a>>;
 }
 
-/// One item on the clipboard, as it was when the clipboard was listed: the web's
-/// `DataTransferItem`, the item its clipboard events and its drag and drop both hand over.
+/// One item on the clipboard, as it was when the clipboard was listed, or of a drag
+/// ([`DragData`](crate::DragData)): the web's `DataTransferItem`, the item its clipboard events
+/// and its drag and drop both hand over.
 pub trait DataTransferItem {
     /// The forms it is offered in, by MIME type, in the order its writer gave them: the most
     /// faithful first. A file is offered as [`URI_LIST`].
     fn types(&self) -> &[String];
 
     /// Its content in `mime`, one of its types. Fails with [`ClipboardError::Changed`] if the
-    /// clipboard changed since it was listed. A file promised is written into a folder of the
-    /// host's when its [`URI_LIST`] is read, and the list names it there.
+    /// clipboard changed since it was listed; a dragged item reads only while its drop is
+    /// reported. A file promised is written into a folder of the host's when its [`URI_LIST`] is
+    /// read, and the list names it there.
     fn read(&self, mime: &str) -> ClipboardReadFuture;
 }
 
@@ -166,11 +168,13 @@ impl CopyOptions {
 /// Why the clipboard was not read or written.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClipboardError {
-    /// The clipboard changed since the item was listed.
+    /// The clipboard changed since the item was listed; for a dragged item, its drop was
+    /// reported, and the system let its data go.
     Changed,
     /// The item is not offered in that type.
     NotFound,
-    /// The user, or what they set, does not let the app read or write it.
+    /// The user, or what they set, does not let the app read or write it; for a dragged item,
+    /// the user has not dropped it.
     Denied,
     /// A form or a type this host's system cannot carry, such as a promised file where it has
     /// no file promises.
