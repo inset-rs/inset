@@ -26,7 +26,7 @@ use winit::event::{Ime, KeyEvent};
 use winit::keyboard::ModifiersState;
 use winit::window::Window;
 
-use crate::gpu::Gpu;
+use crate::gpu::LazyGpu;
 use crate::host_window::WinitWindow;
 use crate::ime::ImeOutcome;
 use crate::os::{ThisOs, ThisOsWindowSurfaces, WindowGeometry, WindowSurfaces};
@@ -56,7 +56,7 @@ impl WinitView {
     /// with a surface. A view whose window sees through gets surfaces whose alpha the compositor
     /// honours, cleared to nothing, so what the app leaves unpainted shows what is behind the
     /// window.
-    pub(crate) fn new(id: ViewId, gpu: &Gpu, sees_through: bool) -> WinitView {
+    pub(crate) fn new(id: ViewId, gpu: &LazyGpu, sees_through: bool) -> WinitView {
         WinitView {
             id,
             metrics: Cell::new(ViewMetrics::default()),
@@ -86,11 +86,6 @@ impl WinitView {
         *self.native_surfaces.borrow_mut() = Some(ThisOsWindowSurfaces::new(Arc::clone(window)));
         self.text_input.attach(window);
         self.refresh_metrics(window);
-    }
-
-    /// The renderer's image context, for the images decoded on this device.
-    pub(crate) fn image_context(&self) -> valo::ImageContext {
-        self.rasterizer.borrow().image_context()
     }
 
     /// Draws the last scene again if the surface does not show it: an owed frame, paid
@@ -154,8 +149,8 @@ impl WinitView {
     }
 
     /// The system gives `window`, the view's, a surface: the view draws on it from now on.
-    pub(crate) fn give_surface(&self, window: &Arc<Window>) -> Result<(), String> {
-        self.rasterizer.borrow_mut().give_surface(window)
+    pub(crate) fn give_surface(&self, window: &Arc<Window>) {
+        self.rasterizer.borrow_mut().give_surface(window);
     }
 
     /// The system took the window's surface away: the view keeps its scene and owes it until

@@ -21,7 +21,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use crate::app_requests::AppRequests;
-use crate::gpu::Gpu;
+use crate::gpu::LazyGpu;
 use crate::host_window::WinitWindow;
 use crate::os::{OperatingSystem, ThisOs, ThisOsVisibilityNotices, WindowChrome};
 use crate::view::WinitView;
@@ -224,24 +224,24 @@ pub(crate) struct WindowRequest {
     pub request: ViewRequest,
 }
 
-/// Makes the views, on the one device every view draws with, and their windows.
+/// Makes the views, which share the one device they draw with, and their windows.
 pub(crate) struct ViewMaker {
-    /// One device for every view: decoded images belong to it. A device needs no window.
-    gpu: Option<Gpu>,
+    /// One device for every view, made at the first draw if no image made it before.
+    gpu: LazyGpu,
     /// The number of the next view the app asks for; the screen view is the first.
     next_view_id: u64,
 }
 
 impl ViewMaker {
-    pub(crate) fn new() -> ViewMaker {
+    pub(crate) fn new(gpu: LazyGpu) -> ViewMaker {
         ViewMaker {
-            gpu: None,
+            gpu,
             next_view_id: SCREEN_VIEW.0 + 1,
         }
     }
 
     /// The screen view, with no window yet, for a window configured as `config`.
-    pub(crate) fn make_screen_view(&mut self, config: &WindowConfig) -> Rc<WinitView> {
+    pub(crate) fn make_screen_view(&self, config: &WindowConfig) -> Rc<WinitView> {
         Rc::new(self.view(SCREEN_VIEW, config))
     }
 
@@ -277,11 +277,10 @@ impl ViewMaker {
         })
     }
 
-    /// The view numbered `id`, on the device every view draws with, for a window configured as
-    /// `config`.
-    fn view(&mut self, id: ViewId, config: &WindowConfig) -> WinitView {
-        let gpu = self.gpu.get_or_insert_with(Gpu::acquire);
-        WinitView::new(id, gpu, config.background.sees_through())
+    /// The view numbered `id`, drawing with the device every view shares, for a window
+    /// configured as `config`.
+    fn view(&self, id: ViewId, config: &WindowConfig) -> WinitView {
+        WinitView::new(id, &self.gpu, config.background.sees_through())
     }
 }
 
