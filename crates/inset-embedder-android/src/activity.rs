@@ -24,8 +24,9 @@ use std::rc::Rc;
 
 use android_activity::AndroidApp;
 use inset_embedder::ViewId;
-use jni::Env;
-use jni::objects::JObject;
+use jni::objects::{JClass, JClassLoader, JObject};
+use jni::refs::LoaderContext;
+use jni::{Env, jni_sig, jni_str};
 
 /// Runs `work` with this thread attached to the app's VM and the activity in hand.
 pub(crate) fn with_activity<T>(
@@ -56,6 +57,26 @@ pub(crate) fn with_application<T>(
         let application = unsafe { JObject::from_raw(env, context.context().cast()) };
         work(env, &application)
     })
+}
+
+/// The package's class `name`, through `context`'s class loader, which is the package's: a thread
+/// the app started finds no class of the package's by its name alone, and the application's own
+/// class is the platform's, whose loader knows none of them either.
+pub(crate) fn package_class<'local>(
+    env: &mut Env<'local>,
+    context: &JObject<'_>,
+    name: &str,
+) -> jni::errors::Result<JClass<'local>> {
+    let loader = env
+        .call_method(
+            context,
+            jni_str!("getClassLoader"),
+            jni_sig!("()Ljava/lang/ClassLoader;"),
+            &[],
+        )?
+        .l()?;
+    let loader = env.cast_local::<JClassLoader>(loader)?;
+    LoaderContext::Loader(&loader).load_class(env, jni::strings::JNIString::new(name), false)
 }
 
 /// Clears the Java exception a failed call left on this thread, so the next call into Java is not
