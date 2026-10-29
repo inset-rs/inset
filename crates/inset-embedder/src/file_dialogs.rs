@@ -203,6 +203,9 @@ pub trait FileHandle {
     /// The file's name, which the user sees.
     fn name(&self) -> &str;
 
+    /// The URL the system reads the file by (`PickedFile::url`).
+    fn url(&self) -> String;
+
     fn size(&self) -> FileSizeFuture;
 
     /// Reads into `buf` from `offset`; answers how many bytes it read, `0` at the end.
@@ -227,6 +230,9 @@ pub trait FileWriter {
 pub trait FileStream {
     fn name(&self) -> &str;
 
+    /// The URL the system reads the file by (`PickedFile::url`).
+    fn url(&self) -> String;
+
     /// Reads the next bytes into `buf`; answers how many, `0` at the end.
     fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> FileReadFuture<'a>;
 }
@@ -241,6 +247,19 @@ pub type FileFinishFuture = Pin<Box<dyn Future<Output = io::Result<()>>>>;
 const READ_CHUNK: usize = 64 * 1024;
 
 impl PickedFile {
+    /// The URL a player, or any API that takes a URL, reads the file by, as every system's
+    /// player does: a `file:` URL for a path, absolute and percent-encoded; Android's
+    /// `content:` URI; the web's `blob:` URL, of the file as it was when picked. A `blob:` URL is
+    /// made once a pick and never revoked: a player may read it after the pick is let go, so the
+    /// page keeps the file until it unloads.
+    pub fn url(&self) -> String {
+        match self {
+            PickedFile::Path(path) => crate::opener::file_uri(path),
+            PickedFile::Handle(handle) => handle.url(),
+            PickedFile::Stream(stream) => stream.url(),
+        }
+    }
+
     /// The whole file, as Flutter's `XFile.readAsBytes` reads it: a path is read on a thread of
     /// its own, a handle from its start to its end, and a stream through, which uses it up.
     pub fn read_all(&mut self) -> Pin<Box<dyn Future<Output = io::Result<Vec<u8>>> + '_>> {
@@ -341,6 +360,10 @@ mod tests {
             "bytes"
         }
 
+        fn url(&self) -> String {
+            "memory:bytes".to_owned()
+        }
+
         fn size(&self) -> FileSizeFuture {
             let size = self.0.borrow().len() as u64;
             Box::pin(async move { Ok(size) })
@@ -368,6 +391,12 @@ mod tests {
             }
             std::thread::yield_now();
         }
+    }
+
+    #[test]
+    fn a_handle_answers_the_url_it_holds() {
+        let picked = PickedFile::Handle(Box::new(Bytes(RefCell::new(Vec::new()))));
+        assert_eq!(picked.url(), "memory:bytes");
     }
 
     #[test]

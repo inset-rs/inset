@@ -54,6 +54,10 @@ Host implementation. Flutter analogue: the web engine under `engine/lib/web_ui`.
   Reason: platform — Safari and Firefox let a page read a file the user chose, never write one, and a download would give the app nothing it could write again.
   Affect: on Safari and Firefox an app opens files but saves none through a dialog.
 
+- Change: a pick's URL is a `blob:` URL of its file as it was picked, which a file handle's file is taken for as the pick is answered, made once and never revoked, where `file_selector_web`'s `XFile` holds a blob URL of its input's file.
+  Reason: platform — a file handle gives its file only through a promise, and a player may read the URL after the pick is let go.
+  Affect: a player plays a pick on the web, the URL shows the file as it was picked, and the page keeps the file until it unloads.
+
 - Change: a folder pick is the browser's directory handle (`showDirectoryPicker`, in `readwrite` mode when the app asks to write), as a `FolderHandle`: listed through `values()`, its files and folders opened by name, and made when writable; without the File System Access API a folder pick fails.
   Reason: platform — a page has no paths, and Safari's and Firefox's `webkitdirectory` input gives a flat list of files no folder could be written through.
   Affect: on Chrome and Edge an app lists, reads and writes a folder the user picked; elsewhere it asks for one in vain.

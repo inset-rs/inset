@@ -507,14 +507,16 @@ pub(crate) fn open_document(
     // SAFETY: `detachFd` handed this descriptor over; the file owns it from here.
     let mut file = unsafe { File::from_raw_fd(fd) };
     let name = name.unwrap_or_default();
+    let uri = uri.to_owned();
     Ok(if file.stream_position().is_ok() {
         PickedFile::Handle(Box::new(Document {
             file,
             name,
+            uri,
             writable,
         }))
     } else {
-        PickedFile::Stream(Box::new(DocumentStream { file, name }))
+        PickedFile::Stream(Box::new(DocumentStream { file, name, uri }))
     })
 }
 
@@ -594,12 +596,18 @@ fn display_name(
 struct Document {
     file: File,
     name: String,
+    /// The `content:` URI the document was picked as, which any app it is granted to reads.
+    uri: String,
     writable: bool,
 }
 
 impl FileHandle for Document {
     fn name(&self) -> &str {
         &self.name
+    }
+
+    fn url(&self) -> String {
+        self.uri.clone()
     }
 
     fn size(&self) -> FileSizeFuture {
@@ -647,11 +655,17 @@ impl FileWriter for DocumentWriter {
 struct DocumentStream {
     file: File,
     name: String,
+    /// The `content:` URI the document was picked as.
+    uri: String,
 }
 
 impl FileStream for DocumentStream {
     fn name(&self) -> &str {
         &self.name
+    }
+
+    fn url(&self) -> String {
+        self.uri.clone()
     }
 
     fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> FileReadFuture<'a> {

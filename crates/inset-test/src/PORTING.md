@@ -9,7 +9,7 @@ No Flutter crate in this shape. Closest analogue: `flutter_test`'s `TestPlatform
 
 ## file_dialogs.rs → no Flutter counterpart
 
-- Change: `MockFileDialogs` answers every dialog at once with the paths or picks the test gave, or a failure, and keeps each dialog asked for; `MemoryFile` is a picked file in memory whose writes land when its writer finishes, and `MemoryFolder` a picked folder in memory, which lists, opens and, when writable, makes its files and folders.
+- Change: `MockFileDialogs` answers every dialog at once with the paths or picks the test gave, or a failure, and keeps each dialog asked for; `MemoryFile` is a picked file in memory whose writes land when its writer finishes and whose URL is `memory:` and its name, and `MemoryFolder` a picked folder in memory, which lists, opens and, when writable, makes its files and folders.
   Reason: platform — it stands in for the host's dialogs, which Flutter's tests reach only as plugin channel calls.
   Affect: a test drives an app's open and save without a host, and checks what it wrote.
 
