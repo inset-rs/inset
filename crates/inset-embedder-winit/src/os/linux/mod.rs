@@ -22,10 +22,10 @@ use super::absent::{
     NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices, NoWindowSurfaces,
 };
 use super::{
-    ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeComposition,
-    NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
-    SystemDrags, SystemMedia, SystemRequests, TrackpadTouches, WindowChrome, WindowGeometry,
-    WindowMotion, WindowVisibility, WorkQueue,
+    ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, ImageDecoding,
+    NativeComposition, NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges,
+    SystemClipboard, SystemDrags, SystemMedia, SystemRequests, TrackpadTouches, WindowChrome,
+    WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
 };
 
 /// Linux. A type only: never made, its answers are associated functions.
@@ -70,6 +70,7 @@ impl TrackpadTouches for Linux {
     type Observer = NoTrackpadTouchObserver;
 }
 
+impl EventLoopSetup for Linux {}
 impl WindowGeometry for Linux {}
 impl SystemMedia for Linux {}
 impl SystemDrags for Linux {}

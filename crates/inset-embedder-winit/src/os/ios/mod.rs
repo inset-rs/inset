@@ -22,10 +22,10 @@ use pasteboard::Pasteboard;
 use super::absent::{NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices};
 use super::apple::{image_io_decoders, notifications};
 use super::{
-    ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeMenus,
-    OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard, SystemDrags,
-    SystemMedia, SystemNotifications, TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion,
-    WindowVisibility, WorkQueue,
+    ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, ImageDecoding,
+    NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
+    SystemDrags, SystemMedia, SystemNotifications, TrackpadTouches, WindowChrome, WindowGeometry,
+    WindowMotion, WindowVisibility, WorkQueue,
 };
 use crate::notifications::NotificationActivations;
 
@@ -107,6 +107,7 @@ impl SystemNotifications for Ios {
     }
 }
 
+impl EventLoopSetup for Ios {}
 impl WindowMotion for Ios {}
 impl WindowChrome for Ios {}
 impl SystemDrags for Ios {}

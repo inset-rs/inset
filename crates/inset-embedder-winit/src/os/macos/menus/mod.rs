@@ -36,7 +36,6 @@ use objc2_app_kit::{
     NSMenu, NSMenuItem,
 };
 use objc2_foundation::{NSObject, NSProcessInfo, NSString};
-use winit::event_loop::EventLoopBuilder;
 use winit::window::Window;
 
 use super::{AppKit, abort_on_panic};
@@ -44,6 +43,7 @@ use crate::menus::{EditAction, MenuEvent, MenuEvents};
 use crate::os::NativeMenus;
 
 pub(super) use key_equivalents::app_window_opened;
+pub(super) use menu_bar::leave_winit_menu_out;
 
 /// The Dock icon's menu, as the application's delegate answers it: the one the app last set.
 pub(super) fn dock_menu() -> Option<Retained<NSMenu>> {
@@ -76,10 +76,6 @@ impl NativeMenus for AppKit {
     fn tray_icons(events: MenuEvents) -> Option<Rc<dyn TrayIcons>> {
         let main_thread = MainThreadMarker::new()?;
         Some(Rc::new(tray_icons::StatusItems::new(main_thread, events)))
-    }
-
-    fn configure_event_loop(builder: &mut EventLoopBuilder) {
-        menu_bar::leave_winit_menu_out(builder);
     }
 
     fn provides_edit_commands() -> bool {
