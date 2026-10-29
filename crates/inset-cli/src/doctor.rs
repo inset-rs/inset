@@ -84,8 +84,16 @@ pub fn report() -> Result<()> {
     section("macOS distribution");
     env_present("APPLE_SIGNING_IDENTITY", "signs .app and .dmg");
     env_present(
+        "APPLE_KEYCHAIN_PROFILE",
+        "notarizes with a profile notarytool stored",
+    );
+    env_present(
         "APPLE_ID",
         "notarizes with APPLE_PASSWORD and APPLE_TEAM_ID",
+    );
+    env_present(
+        "APPLE_API_KEY",
+        "notarizes with APPLE_API_ISSUER and APPLE_API_KEY_PATH",
     );
 
     section("Android");
