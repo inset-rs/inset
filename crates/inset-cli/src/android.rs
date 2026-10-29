@@ -1,6 +1,6 @@
 //! Android: the `.apk` Gradle would produce, assembled from a cargo library.
 //!
-//! No Gradle project and no Java of the app's own. The Java is Inset's four classes (under
+//! No Gradle project and no Java of the app's own. The Java is Inset's five classes (under
 //! `android/rs/inset/` in this crate). The activity, `rs.inset.InsetActivity`, is the platform's
 //! `NativeActivity`, which loads the app's shared library and calls its `android_main`, with the
 //! results of the activities the app starts, the intents that reach it while it runs and the
@@ -9,7 +9,8 @@
 //! is the same activity in a task of its own, for each view the app asks for. The file provider, `rs.inset.InsetFileProvider`, shares a
 //! file of the app's with the app that opens it. The notification receiver,
 //! `rs.inset.InsetNotificationReceiver`, builds and shows the app's notifications, and shows one
-//! when its alarm goes off, whether or not the app runs. So the
+//! when its alarm goes off, whether or not the app runs. The shortcut receiver,
+//! `rs.inset.InsetShortcutReceiver`, hears that the launcher pinned a shortcut of the app's. So the
 //! package is that library, the classes compiled to `classes.dex`, a manifest, and icons, put
 //! together with the SDK's own tools: `javac` and `d8` compile the classes, `aapt2` links the
 //! manifest and resources, `zipalign` aligns, `apksigner` signs with the debug key, and `adb`
@@ -53,6 +54,8 @@ const MAX_RECENTS: u32 = 50;
 const INSET_FILE_PROVIDER: &str = "rs.inset.InsetFileProvider";
 /// Inset's notification receiver, which builds the app's notifications and hears their alarms.
 const INSET_NOTIFICATION_RECEIVER: &str = "rs.inset.InsetNotificationReceiver";
+/// Inset's shortcut receiver, which hears that the launcher pinned one of the app's shortcuts.
+const INSET_SHORTCUT_RECEIVER: &str = "rs.inset.InsetShortcutReceiver";
 /// What the app may do for its notifications: post them, which Android 13 asks the user for, and
 /// show one at its exact time, which Android 14 leaves to the user to grant in the app's settings.
 const PERMISSIONS: [&str; 2] = [
@@ -60,7 +63,7 @@ const PERMISSIONS: [&str; 2] = [
     "android.permission.SCHEDULE_EXACT_ALARM",
 ];
 /// The Java classes every app's package compiles, by their paths under the sources' root.
-const JAVA_SOURCES: [(&str, &str); 4] = [
+const JAVA_SOURCES: [(&str, &str); 5] = [
     (
         "rs/inset/InsetActivity.java",
         include_str!("../android/rs/inset/InsetActivity.java"),
@@ -76,6 +79,10 @@ const JAVA_SOURCES: [(&str, &str); 4] = [
     (
         "rs/inset/InsetNotificationReceiver.java",
         include_str!("../android/rs/inset/InsetNotificationReceiver.java"),
+    ),
+    (
+        "rs/inset/InsetShortcutReceiver.java",
+        include_str!("../android/rs/inset/InsetShortcutReceiver.java"),
     ),
 ];
 /// The schemes of the links whose viewers the app may ask about (`<queries>`): from Android 11 the
@@ -505,10 +512,11 @@ struct Manifest<'a> {
 /// again by its intent's data (`intoExisting`), with up to [`MAX_RECENTS`] cards in Recents.
 /// `configChanges` keeps each activity, and so its view's state, through a rotation or a switch
 /// to dark mode, which the host reports as new metrics; `adjustResize` has the system fit the
-/// window to the keyboard, which is how the host learns of it. Inset's file provider is declared at `<package>.inset.files`, not
-/// exported, granting each URI it shares; its notification receiver, not exported, hears only the
-/// app's own alarms; `<queries>` names viewing the links of [`QUERIED_SCHEMES`]; the app asks for
-/// [`PERMISSIONS`].
+/// window to the keyboard, which is how the host learns of it. Inset's file provider is declared
+/// at `<package>.inset.files`, not exported, granting each URI it shares; its notification
+/// receiver, not exported, hears only the app's own alarms, and its shortcut receiver, not
+/// exported, only the launcher's answers to the app's own requests; `<queries>` names viewing
+/// the links of [`QUERIED_SCHEMES`]; the app asks for [`PERMISSIONS`].
 fn manifest(manifest: &Manifest) -> String {
     let icon = if manifest.has_icon {
         r#" android:icon="@mipmap/ic_launcher""#
@@ -561,6 +569,7 @@ fn manifest(manifest: &Manifest) -> String {
         android:exported="false"
         android:grantUriPermissions="true" />
     <receiver android:name="{receiver}" android:exported="false" />
+    <receiver android:name="{shortcut_receiver}" android:exported="false" />
     <meta-data android:name="{queried_schemes_key}" android:value="{queried_schemes}" />
   </application>
   <queries>
@@ -581,6 +590,7 @@ fn manifest(manifest: &Manifest) -> String {
         library = manifest.library,
         provider = INSET_FILE_PROVIDER,
         receiver = INSET_NOTIFICATION_RECEIVER,
+        shortcut_receiver = INSET_SHORTCUT_RECEIVER,
         permissions = uses_permissions(),
         queried_schemes_key = QUERIED_SCHEMES_KEY,
         queried_schemes = QUERIED_SCHEMES.join(","),
@@ -1157,6 +1167,25 @@ mod tests {
             manifest.find("<uses-permission") < manifest.find("<application"),
             "permissions belong to the manifest, before the application"
         );
+    }
+
+    #[test]
+    fn manifest_declares_the_shortcut_receiver_unexported() {
+        let manifest = manifest(&Manifest {
+            package: "com.example.my_app",
+            label: "My App",
+            library: "my_app",
+            version_code: 100,
+            version_name: "0.1.0",
+            min_sdk: 26,
+            target_sdk: 34,
+            debuggable: false,
+            has_icon: false,
+            category: "productivity",
+        });
+        assert!(manifest.contains(
+            r#"<receiver android:name="rs.inset.InsetShortcutReceiver" android:exported="false" />"#
+        ));
     }
 
     #[test]

@@ -67,6 +67,8 @@ mod platform;
 #[cfg(target_os = "android")]
 mod refresh;
 #[cfg(target_os = "android")]
+mod shortcuts;
+#[cfg(target_os = "android")]
 mod surface;
 #[cfg(target_os = "android")]
 mod task;
@@ -81,3 +83,5 @@ pub use android_activity::AndroidApp;
 pub use host::AndroidEmbedder;
 #[cfg(target_os = "android")]
 pub use platform::AndroidPlatform;
+#[cfg(target_os = "android")]
+pub use shortcuts::{PinError, PinFuture, PinnedShortcut, PinnedShortcuts};
