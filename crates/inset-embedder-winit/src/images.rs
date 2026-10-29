@@ -66,6 +66,7 @@ pub(crate) type CreateImageLoader = Box<dyn FnOnce(ImageContext) -> ImageLoader>
 /// at the first image the app decodes or brings, on the device every view draws with, which that
 /// makes if no view has drawn yet (`gpu.rs`).
 pub(crate) struct Images {
+    /// The device the images belong to, which every view draws with.
     gpu: LazyGpu,
     /// The application's loader, made once the store exists; `None` for the built-in one.
     create_loader: Cell<Option<CreateImageLoader>>,
