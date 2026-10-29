@@ -33,6 +33,7 @@ mod pasteboard;
 mod pointer;
 mod screens;
 mod system_changes;
+mod trackpad_touches;
 mod visibility;
 mod vsync_waiter;
 mod window_chrome;

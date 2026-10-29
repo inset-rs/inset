@@ -4,14 +4,17 @@
 
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 
 use inset_embedder::{EmbedderClient, View, ViewError, ViewFocusEvent, ViewId};
 use winit::event_loop::ActiveEventLoop;
-use winit::window::WindowId;
+use winit::window::{Window, WindowId};
 
-use crate::os::{FramePresentation, ThisOs, WindowVisibility};
+use crate::os::{FramePresentation, ThisOs, TrackpadTouches, WindowVisibility};
 use crate::view_focus;
-use crate::windows::{OpenWindow, ViewAfterClose, WindowRequest, open_screen_window};
+use crate::windows::{
+    OpenWindow, ViewAfterClose, WindowObservers, WindowRequest, open_screen_window,
+};
 
 use super::{MainLoop, MainLoopEvent};
 
@@ -44,17 +47,37 @@ impl<C: EmbedderClient> MainLoop<C> {
         Ok(())
     }
 
-    /// A view the app asked for, with its window: it joins the platform's views, with the system's
-    /// notices that its window may have been minimized or occluded, and then the app hears of it.
+    /// A view the app asked for, with its window: it joins the platform's views, with what the
+    /// embedder observes of its window, and then the app hears of it.
     pub(super) fn add_view(&mut self, open: OpenWindow) {
         let view_id = open.view.id();
         let window = Arc::clone(&open.window);
-        let visibility_notices =
-            ThisOs::observe_visibility(&*window, self.send_visibility_notice(window.id()));
-        self.views().add_with_window(open, visibility_notices);
+        let observers = self.observe_window(&*window);
+        self.views().add_with_window(open, observers);
         self.sync_frame_scheduler(view_id);
         self.client.view_added(view_id);
         self.read_theme_of(&*window);
+    }
+
+    /// What the embedder observes of `window` beyond winit's events, for as long as it is open.
+    fn observe_window(&self, window: &dyn Window) -> WindowObservers {
+        WindowObservers {
+            visibility: ThisOs::observe_visibility(
+                window,
+                self.send_visibility_notice(window.id()),
+            ),
+            trackpad_touches: ThisOs::observe_trackpad_touches(
+                window,
+                self.send_trackpad_touch(window.id()),
+            ),
+        }
+    }
+
+    /// What fingers coming down on a trackpad over the window `id` do: the moment queues for the
+    /// loop.
+    fn send_trackpad_touch(&self, id: WindowId) -> Box<dyn Fn(Instant)> {
+        let proxy = self.proxy.clone();
+        Box::new(move |at| proxy.send(MainLoopEvent::TrackpadTouched(id, at)))
     }
 
     /// What a notice that the window `id` may have been minimized or occluded does: it queues for
