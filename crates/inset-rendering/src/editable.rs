@@ -10,9 +10,8 @@ use std::fmt;
 
 use inset_embedder::{
     BoxHeightStyle, BoxWidthStyle, Clip, Color, FontCollection, LineMetrics, Matrix4, Offset,
-    Paint, Radius, Rect, Size, TargetPlatform, TextAffinity, TextAlign, TextBaseline,
-    TextBox, TextDirection, TextHeightBehavior, TextPosition, TextRange, TextSelection,
-    clamp_double,
+    Paint, Radius, Rect, Size, TargetPlatform, TextAffinity, TextAlign, TextBaseline, TextBox,
+    TextDirection, TextHeightBehavior, TextPosition, TextRange, TextSelection, clamp_double,
 };
 use inset_foundation::{App, Handle, Listenable, Listener, ValueListenable, ValueNotifier};
 use inset_gestures::TapDownDetails;

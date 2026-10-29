@@ -14,11 +14,11 @@ use anyhow::{Context, Result, bail};
 use crate::devices::Device;
 use plist::{Dictionary, Value};
 
+use crate::apple::{self, SigningIdentity, SigningSettings};
 use crate::cargo::{self, Artifact, Build};
 use crate::icons;
 use crate::project::{Profile, Project};
 use crate::tools;
-use crate::usage_descriptions;
 
 const DEFAULT_MINIMUM_VERSION: &str = "15.0";
 
@@ -149,20 +149,11 @@ fn info_plist(
     minimum_version: &str,
     icon_names: &[String],
 ) -> Value {
-    let mut info = Dictionary::new();
+    let mut info = apple::info_plist(project);
     let mut put = |key: &str, value: Value| {
         info.insert(key.to_owned(), value);
     };
     let text = |s: &str| Value::String(s.to_owned());
-    put("CFBundleDevelopmentRegion", text("en"));
-    put("CFBundleExecutable", text(&project.bin));
-    put("CFBundleIdentifier", text(&project.identifier));
-    put("CFBundleInfoDictionaryVersion", text("6.0"));
-    put("CFBundleName", text(&project.name));
-    put("CFBundleDisplayName", text(&project.name));
-    put("CFBundlePackageType", text("APPL"));
-    put("CFBundleShortVersionString", text(&project.version));
-    put("CFBundleVersion", text(&project.version));
     put(
         "CFBundleSupportedPlatforms",
         Value::Array(vec![text(destination.supported_platform())]),
@@ -208,7 +199,6 @@ fn info_plist(
         put("CFBundleIcons", Value::Dictionary(icons.clone()));
         put("CFBundleIcons~ipad", Value::Dictionary(icons));
     }
-    info.extend(usage_descriptions::info_plist(&project.usage_descriptions));
     Value::Dictionary(info)
 }
 
@@ -234,16 +224,19 @@ fn write_icons(project: &Project, app: &Path) -> Result<Vec<String>> {
 }
 
 fn sign_ad_hoc(app: &Path) -> Result<()> {
-    tools::run(
-        Command::new("codesign")
-            .args(["--force", "--sign", "-"])
-            .arg(app),
-        "codesign",
+    apple::sign(
+        app,
+        &SigningSettings {
+            identity: &SigningIdentity::AdHoc,
+            hardened_runtime: false,
+            entitlements: None,
+            timestamp: false,
+        },
     )
 }
 
 fn sign_for_device(project: &Project, app: &Path, out: &Path) -> Result<()> {
-    let identity = signing_identity(project.ios.team.as_deref())?;
+    let identity = apple::development_identity(project.ios.team.as_deref())?;
     let profile = provisioning_profile(&project.identifier, &identity.team)?;
     fs::copy(&profile.path, app.join("embedded.mobileprovision"))?;
     let entitlements = out.join("entitlements.plist");
@@ -251,22 +244,16 @@ fn sign_for_device(project: &Project, app: &Path, out: &Path) -> Result<()> {
         &entitlements,
         &entitlements_plist(&project.identifier, &identity.team),
     )?;
-    tools::run(
-        Command::new("codesign")
-            .args([
-                "--force",
-                "--timestamp=none",
-                "--generate-entitlement-der",
-                "--sign",
-            ])
-            .arg(&identity.hash)
-            .arg("--entitlements")
-            .arg(&entitlements)
-            .arg(app),
-        "codesign",
-    )?;
-    println!("signed with {} ({})", identity.name, profile.name);
-    Ok(())
+    println!("signing with {} ({})", identity.name, profile.name);
+    apple::sign(
+        app,
+        &SigningSettings {
+            identity: &SigningIdentity::Keychain(identity),
+            hardened_runtime: false,
+            entitlements: Some(&entitlements),
+            timestamp: false,
+        },
+    )
 }
 
 fn entitlements_plist(bundle_id: &str, team: &str) -> Value {
@@ -281,50 +268,6 @@ fn entitlements_plist(bundle_id: &str, team: &str) -> Value {
     );
     entitlements.insert("get-task-allow".to_owned(), Value::Boolean(true));
     Value::Dictionary(entitlements)
-}
-
-pub struct Identity {
-    pub hash: String,
-    pub name: String,
-    pub team: String,
-}
-
-/// The development certificate in the login keychain, from `security find-identity`.
-pub fn signing_identity(team: Option<&str>) -> Result<Identity> {
-    let listing = tools::output(
-        Command::new("security").args(["find-identity", "-v", "-p", "codesigning"]),
-        "security find-identity",
-    )?;
-    let identities: Vec<Identity> = listing.lines().filter_map(parse_identity).collect();
-    let development = identities
-        .iter()
-        .filter(|i| {
-            i.name.starts_with("Apple Development") || i.name.starts_with("iPhone Developer")
-        })
-        .find(|i| team.is_none_or(|team| i.team == team));
-    match development {
-        Some(identity) => Ok(Identity {
-            hash: identity.hash.clone(),
-            name: identity.name.clone(),
-            team: identity.team.clone(),
-        }),
-        None => bail!(
-            "no Apple Development certificate{}; sign in to Xcode once (Settings > Accounts) to create one",
-            team.map(|t| format!(" for team {t}")).unwrap_or_default()
-        ),
-    }
-}
-
-/// `  1) 0123…ABCD "Apple Development: Jane Doe (TEAMID)"`.
-fn parse_identity(line: &str) -> Option<Identity> {
-    let (hash, rest) = line.trim().split_once(") ")?.1.split_once(' ')?;
-    let name = rest.trim().trim_matches('"').to_owned();
-    let team = name.rsplit_once('(')?.1.trim_end_matches(')').to_owned();
-    Some(Identity {
-        hash: hash.to_owned(),
-        name,
-        team,
-    })
 }
 
 struct Profile_ {
@@ -595,16 +538,6 @@ mod tests {
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].id, "ID1");
         assert_eq!(devices[0].state, "connected");
-    }
-
-    #[test]
-    fn identity_line_yields_hash_name_and_team() {
-        let identity =
-            parse_identity(r#"  1) ABCDEF0123456789ABCDEF0123456789ABCDEF01 "Apple Development: Jane Doe (TEAM12345)""#)
-                .unwrap();
-        assert_eq!(identity.hash, "ABCDEF0123456789ABCDEF0123456789ABCDEF01");
-        assert_eq!(identity.name, "Apple Development: Jane Doe (TEAM12345)");
-        assert_eq!(identity.team, "TEAM12345");
     }
 
     #[test]

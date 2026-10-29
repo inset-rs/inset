@@ -8,17 +8,15 @@
 use std::sync::Weak;
 
 use inset_embedder::{ScreenId, VsyncObserver, VsyncWaiter};
-use winit::event_loop::EventLoopProxy;
 
-use crate::main_loop::MainLoopEvent;
+use crate::main_loop::{MainLoopEvent, MainLoopProxy};
 
-/// The screens' vsyncs as any thread waits on them: each wait is an event through winit's proxy.
-pub(crate) struct LoopVsyncWaiter(pub(crate) EventLoopProxy<MainLoopEvent>);
+/// The screens' vsyncs as any thread waits on them: each wait is an event through the loop's
+/// proxy.
+pub(crate) struct LoopVsyncWaiter(pub(crate) MainLoopProxy);
 
 impl VsyncWaiter for LoopVsyncWaiter {
     fn next_vsync(&self, screen: ScreenId, observer: Weak<dyn VsyncObserver>) {
-        let _ = self
-            .0
-            .send_event(MainLoopEvent::VsyncWaited(screen, observer));
+        self.0.send(MainLoopEvent::VsyncWaited(screen, observer));
     }
 }

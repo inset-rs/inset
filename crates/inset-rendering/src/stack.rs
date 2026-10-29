@@ -1705,7 +1705,9 @@ mod tests {
         stack.set_text_direction(&mut app, Some(TextDirection::Ltr));
         stack.set_alignment(&mut app, AlignmentGeometry::from(Alignment::CENTER));
         stack.add_all(&mut app, Some(vec![short, tall, pinned]));
-        pinned.parent_data_of_mut::<StackParentData>(&mut app).bottom = Some(0.0);
+        pinned
+            .parent_data_of_mut::<StackParentData>(&mut app)
+            .bottom = Some(0.0);
 
         let constraints = BoxConstraints::new().max_width(100.0).max_height(100.0);
         // The short child is centred in the tall one's 60: 20 down, its baseline at 35.

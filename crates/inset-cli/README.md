@@ -134,7 +134,12 @@ Signing happens when credentials are present, never by flag.
 
 - iOS simulator: no account and no signing.
 - iOS device: the Apple Development certificate in your keychain and a provisioning profile Xcode stored, found the way Flutter finds them; nothing to configure once you have signed in under Xcode Settings > Accounts and run any app on the device. `doctor` names the certificate that will be used; `ios.team` in the metadata picks one when a machine has several. `build ipa` needs a distribution profile and is uploaded with Transporter or `xcrun altool`.
-- macOS: the `.app` is signed with the keychain's Apple Development certificate when there is one, so permission grants such as Accessibility survive a rebuild; ad hoc otherwise. Distribution needs a Developer ID and notarization, which Apple only grants against an account: `APPLE_SIGNING_IDENTITY` signs; `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, or an `APPLE_KEYCHAIN_PROFILE` stored with `xcrun notarytool store-credentials`, notarize and staple `build dmg`. These are cargo-packager's variables, so its docs apply.
+- macOS: the `.app` is signed with `APPLE_SIGNING_IDENTITY`, an identity in the keychain by its name, part of it, or its hash, `-` for ad hoc; else with the keychain's Apple Development certificate when there is one, so permission grants such as Accessibility survive a rebuild; else ad hoc. A certificate's signature carries the hardened runtime. Distribution needs a Developer ID and notarization, which Apple only grants against an account: with `APPLE_SIGNING_IDENTITY` naming the Developer ID, `build macos` notarizes and staples the `.app`, and `build dmg` the `.app` and the disk image, when the environment holds one of these sets:
+  - `APPLE_KEYCHAIN_PROFILE`, a profile stored with `xcrun notarytool store-credentials`;
+  - `APPLE_ID`, `APPLE_PASSWORD` (an app-specific password) and `APPLE_TEAM_ID`;
+  - an App Store Connect key: `APPLE_API_KEY` (its id), `APPLE_API_ISSUER` and `APPLE_API_KEY_PATH`.
+
+  `run` is never notarized.
 - Windows: `certificate_thumbprint` or a custom sign command, through cargo-packager.
 - Android: the debug key in `~/.android/debug.keystore`, made with `keytool` when the machine has none, for `run` and `build apk` alike. A release key is not here yet.
 
@@ -150,6 +155,10 @@ Signing happens when credentials are present, never by flag.
 | `opt-level = "z"`                    | 8.0 MB   | 1.85 MB  |
 
 `panic = "abort"` changes nothing on wasm. `new` writes the LTO pair, which mostly buys speed; add `opt-level = "s"` when download size matters more than native speed.
+
+## macOS
+
+The CLI puts the `.app` together itself, as it does an iOS app: the executable in `Contents/MacOS`, the `Info.plist`, the icon (an `.icns` made by `iconutil`) and the resources in `Contents/Resources`, signed with `codesign` as [Signing](#signing) says. `build dmg` makes the disk image around it with `hdiutil`: the app beside a link to Applications in a 600 by 400 window, laid out by a `.DS_Store` the CLI writes, so no Finder window opens while it builds, and the app's icon as the volume's.
 
 ## Tools it fetches
 

@@ -21,6 +21,8 @@ pub(crate) fn apply_ime(value: &TextEditingValue, ime: &Ime) -> ImeOutcome {
         Ime::Disabled => ImeOutcome::Closed,
         Ime::Preedit(text, cursor) => ImeOutcome::Value(apply_preedit(value, text, *cursor)),
         Ime::Commit(text) => ImeOutcome::Value(apply_commit(value, text)),
+        // Only an input method told the surrounding text deletes it, and the embedder tells none.
+        _ => ImeOutcome::None,
     }
 }
 
