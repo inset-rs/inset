@@ -1,7 +1,7 @@
 //! A player of a small movie, opened by a picked file's URL at a path the URL must encode, loads it
 //! by itself, says its size and length, plays it, hands its frames to a reader as BGRA pixel
 //! buffers backed by IOSurfaces, ends, and plays on past its end once it loops: all without a
-//! window, a surface or a sound.
+//! window or a sound. On its way it is put on a surface, not in any window, and nowhere again.
 //!
 //! Its own binary, without the test harness: AVFoundation changes a player's state on the main
 //! queue, which only the main thread serves, so this one serves it while it waits. On iOS it runs
@@ -27,7 +27,7 @@ mod player {
     use std::task::{Context, Poll, Waker};
     use std::time::{Duration, Instant};
 
-    use inset_embedder::{MediaChangeFuture, PickedFile, PlayerStatus, Size};
+    use inset_embedder::{MediaChangeFuture, PickedFile, PlayerStatus, Size, ViewId};
     use objc2_core_video::{
         CVPixelBufferGetHeight, CVPixelBufferGetIOSurface, CVPixelBufferGetPixelFormatType,
         CVPixelBufferGetWidth, kCVPixelFormatType_32BGRA,
@@ -56,6 +56,12 @@ mod player {
         assert_eq!(state.size, Some(Size::new(64.0, 48.0)));
         assert_eq!(state.duration, Some(Duration::from_secs(1)));
         assert!(!state.playing && !state.ended);
+
+        let compositor =
+            inset_embedder_winit::test_support::compositor().expect("the system's compositor");
+        let surface = compositor.root(ViewId(0)).open_child(false);
+        player.set_video_surface(Some(surface));
+        player.set_video_surface(None);
 
         let frames = player.read_frames();
         player.play();

@@ -110,7 +110,7 @@ impl Players for MockPlayers {
             url: url.to_owned(),
             state: RefCell::new(PlayerState::loading()),
             calls: RefCell::default(),
-            shown_on: RefCell::default(),
+            video_surface: RefCell::default(),
             changes: Changes::default(),
             dropped: Cell::new(false),
         }));
@@ -128,7 +128,8 @@ pub enum PlayerCall {
     SetRate(f64),
     SetVolume(f64),
     SetLooping(bool),
-    ShowOn,
+    /// Whether a surface was given, or none.
+    SetVideoSurface(bool),
     ReadFrames,
 }
 
@@ -140,7 +141,7 @@ struct PlayerShared {
     url: String,
     state: RefCell<PlayerState>,
     calls: RefCell<Vec<PlayerCall>>,
-    shown_on: RefCell<Option<Arc<dyn Surface>>>,
+    video_surface: RefCell<Option<Arc<dyn Surface>>>,
     changes: Changes,
     dropped: Cell<bool>,
 }
@@ -156,9 +157,10 @@ impl MockPlayer {
         self.0.calls.borrow().clone()
     }
 
-    /// The surface the player shows on; `None` once it hands its picture to a frame reader.
-    pub fn shown_on(&self) -> Option<Arc<dyn Surface>> {
-        self.0.shown_on.borrow().clone()
+    /// The surface the player's picture is on; `None` once it is put nowhere, or handed to a
+    /// frame reader.
+    pub fn video_surface(&self) -> Option<Arc<dyn Surface>> {
+        self.0.video_surface.borrow().clone()
     }
 
     /// Whether the app let go of the player.
@@ -213,14 +215,14 @@ impl MediaPlayer for OpenedPlayer {
         self.0.0.changes.next()
     }
 
-    fn show_on(&self, surface: Arc<dyn Surface>) {
-        self.0.call(PlayerCall::ShowOn);
-        *self.0.0.shown_on.borrow_mut() = Some(surface);
+    fn set_video_surface(&self, surface: Option<Arc<dyn Surface>>) {
+        self.0.call(PlayerCall::SetVideoSurface(surface.is_some()));
+        *self.0.0.video_surface.borrow_mut() = surface;
     }
 
     fn read_frames(&self) -> Arc<dyn FrameReader> {
         self.0.call(PlayerCall::ReadFrames);
-        *self.0.0.shown_on.borrow_mut() = None;
+        *self.0.0.video_surface.borrow_mut() = None;
         Arc::new(NoFrames)
     }
 }
@@ -268,7 +270,7 @@ impl Cameras for MockCameras {
             camera: camera.clone(),
             state: RefCell::new(CameraState::stopped()),
             calls: RefCell::default(),
-            shown_on: RefCell::default(),
+            preview_surface: RefCell::default(),
             photo: RefCell::default(),
             recordings: RefCell::default(),
             changes: Changes::default(),
@@ -284,7 +286,8 @@ impl Cameras for MockCameras {
 pub enum SessionCall {
     Start,
     Stop,
-    ShowOn,
+    /// Whether a surface was given, or none.
+    SetPreviewSurface(bool),
     FrameOutput,
     PhotoOutput,
     MovieOutput(MovieOptions),
@@ -300,7 +303,7 @@ struct SessionShared {
     camera: Camera,
     state: RefCell<CameraState>,
     calls: RefCell<Vec<SessionCall>>,
-    shown_on: RefCell<Option<Arc<dyn Surface>>>,
+    preview_surface: RefCell<Option<Arc<dyn Surface>>>,
     photo: RefCell<Option<Photo>>,
     /// The paths recorded to, the last one first to answer when stopped.
     recordings: RefCell<Vec<PathBuf>>,
@@ -318,9 +321,9 @@ impl MockCaptureSession {
         self.0.calls.borrow().clone()
     }
 
-    /// The surface the session's preview shows on.
-    pub fn shown_on(&self) -> Option<Arc<dyn Surface>> {
-        self.0.shown_on.borrow().clone()
+    /// The surface the session's preview is on; `None` once it is put nowhere.
+    pub fn preview_surface(&self) -> Option<Arc<dyn Surface>> {
+        self.0.preview_surface.borrow().clone()
     }
 
     /// The paths the app recorded to, in order.
@@ -368,9 +371,10 @@ impl CaptureSession for OpenedSession {
         self.0.0.changes.next()
     }
 
-    fn show_on(&self, surface: Arc<dyn Surface>) {
-        self.0.call(SessionCall::ShowOn);
-        *self.0.0.shown_on.borrow_mut() = Some(surface);
+    fn set_preview_surface(&self, surface: Option<Arc<dyn Surface>>) {
+        self.0
+            .call(SessionCall::SetPreviewSurface(surface.is_some()));
+        *self.0.0.preview_surface.borrow_mut() = surface;
     }
 
     fn frame_output(&self) -> Arc<dyn FrameReader> {

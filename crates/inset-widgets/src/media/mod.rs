@@ -9,9 +9,11 @@
 //!
 //! A view shows its picture through a native surface under the root of the view it is in
 //! (`SurfaceView`): the framework leaves its rectangle clear, and the system draws the picture into
-//! the surface's layer, which no frame of the framework's touches. The invariant: a player or a session shows
-//! on the surface of the view built last for it, and a view laid out before its picture's size is
-//! known takes no room.
+//! the surface's layer, which no frame of the framework's touches. A view puts its player's or
+//! session's picture on its surface as it is mounted, and nowhere as it is unmounted. The
+//! invariant: a player or a session shows on the surface of the view built last for it, a view
+//! puts nowhere only the picture still on its own surface, and a view laid out before its
+//! picture's size is known takes no room.
 
 mod camera;
 mod player;
@@ -30,10 +32,13 @@ use crate::widgets::surface_view::SurfaceView;
 pub use camera::{CameraPreview, CameraSession, available_cameras};
 pub use player::{Player, VideoView};
 
-/// What shows its picture on a surface: a player or a camera session.
+/// What puts its picture on a surface it is given: a player or a camera session.
 trait PictureSource: ListenableObject {
-    /// Shows the picture on `surface` from now on.
-    fn show_on(handle: Handle<Self>, app: &mut App, surface: Arc<dyn Surface>);
+    /// Puts the picture on `surface` from now on; `None` puts it nowhere.
+    fn set_surface(handle: Handle<Self>, app: &mut App, surface: Option<Arc<dyn Surface>>);
+
+    /// The surface the picture was put on last; `None` once put nowhere, or disposed.
+    fn surface(handle: Handle<Self>, app: &App) -> Option<&Arc<dyn Surface>>;
 
     /// The picture's size, in its own pixels, once known.
     fn picture_size(handle: Handle<Self>, app: &App) -> Option<Size>;
@@ -74,8 +79,8 @@ impl<S: PictureSource> SurfacePictureState<S> {
         self.set_state(app, |_| {});
     }
 
-    /// Shows the source on a surface under the root of the view the widget is in now, opening one
-    /// if the view changed or the source did.
+    /// Puts the source's picture on a surface under the root of the view the widget is in now,
+    /// opening one if the view changed or the source did.
     fn show_in_current_view(self: Handle<Self>, app: &mut App, source_changed: bool) {
         let context = self.context(app);
         let view = View::maybe_of(app, context).map(|view| view.id());
@@ -83,12 +88,25 @@ impl<S: PictureSource> SurfacePictureState<S> {
         if view == current && !source_changed {
             return;
         }
+        let source = self.widget(app).source;
         let surface = view.and_then(|view| open_surface(app, view));
-        if let Some((_, surface)) = &surface {
-            let source = self.widget(app).source;
-            S::show_on(source, app, Arc::clone(surface));
+        match &surface {
+            Some((_, surface)) => S::set_surface(source, app, Some(Arc::clone(surface))),
+            None => self.release(app, source),
         }
         app.get_mut(self).surface = surface;
+    }
+
+    /// Puts `source`'s picture nowhere, if it is still on this widget's surface: a later view
+    /// may have taken the source since.
+    fn release(self: Handle<Self>, app: &mut App, source: Handle<S>) {
+        let Some((_, ours)) = &app.get(self).surface else {
+            return;
+        };
+        let still_ours = S::surface(source, app).is_some_and(|shown| Arc::ptr_eq(shown, ours));
+        if still_ours {
+            S::set_surface(source, app, None);
+        }
     }
 }
 
@@ -116,11 +134,13 @@ impl<S: PictureSource> State for SurfacePictureState<S> {
         let listener = inset_foundation::Listener::handle_method(self, Self::picture_changed);
         old_widget.source.remove_listener(app, &listener);
         source.add_listener(app, listener);
+        self.release(app, old_widget.source);
         self.show_in_current_view(app, true);
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         let source = self.widget(app).source;
+        self.release(app, source);
         source.remove_listener(
             app,
             &inset_foundation::Listener::handle_method(self, Self::picture_changed),

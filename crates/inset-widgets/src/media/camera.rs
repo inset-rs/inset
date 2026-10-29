@@ -31,6 +31,9 @@ pub struct CameraSession {
     host: Option<Rc<dyn CaptureSession>>,
     /// The host's state when it last changed.
     state: CameraState,
+    /// The surface the preview was put on last, which a [`CameraPreview`] puts it nowhere from
+    /// only while it is still its own.
+    preview_surface: Option<Arc<dyn Surface>>,
 }
 
 impl CameraSession {
@@ -43,6 +46,7 @@ impl CameraSession {
             change_notifier: ChangeNotifierData::new(),
             state: host.state(),
             host: Some(host),
+            preview_surface: None,
         });
         session.follow(app, changed);
         Some(session)
@@ -62,10 +66,16 @@ impl CameraSession {
         self.host(app).stop();
     }
 
-    /// Shows the preview on `surface` from now on, and on no surface it showed on before: what
-    /// [`CameraPreview`] does with a surface of its own.
-    pub fn show_on(self: Handle<Self>, app: &App, surface: Arc<dyn Surface>) {
-        self.host(app).show_on(surface);
+    /// Puts the preview on `surface` from now on, and on no surface it went to before; `None`
+    /// puts it nowhere: what [`CameraPreview`] does with a surface of its own as it is mounted,
+    /// and with `None` as it is unmounted.
+    pub fn set_preview_surface(
+        self: Handle<Self>,
+        app: &mut App,
+        surface: Option<Arc<dyn Surface>>,
+    ) {
+        self.host(app).set_preview_surface(surface.clone());
+        app.get_mut(self).preview_surface = surface;
     }
 
     /// The camera's frames, the newest each time.
@@ -88,10 +98,11 @@ impl CameraSession {
     }
 
     /// Stops the camera and lets go of the host's session: its preview leaves the surface it
-    /// showed on, and its listeners hear nothing more.
+    /// was on, and its listeners hear nothing more.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
         let session = app.get_mut(self);
         session.host = None;
+        session.preview_surface = None;
         session.change_notifier.dispose();
     }
 
@@ -156,8 +167,12 @@ impl fmt::Debug for CameraSession {
 }
 
 impl PictureSource for CameraSession {
-    fn show_on(handle: Handle<Self>, app: &mut App, surface: Arc<dyn Surface>) {
-        handle.show_on(app, surface);
+    fn set_surface(handle: Handle<Self>, app: &mut App, surface: Option<Arc<dyn Surface>>) {
+        handle.set_preview_surface(app, surface);
+    }
+
+    fn surface(handle: Handle<Self>, app: &App) -> Option<&Arc<dyn Surface>> {
+        app.get(handle).preview_surface.as_ref()
     }
 
     fn picture_size(handle: Handle<Self>, app: &App) -> Option<Size> {
@@ -334,7 +349,10 @@ mod tests {
         pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
         let host = &cameras.sessions()[0];
         let opened = compositor.opened();
-        assert!(Arc::ptr_eq(&host.shown_on().unwrap(), &opened[0].surface));
+        assert!(Arc::ptr_eq(
+            &host.preview_surface().unwrap(),
+            &opened[0].surface
+        ));
 
         host.set_state(running(Size::new(1920.0, 1080.0)));
         cell.checkpoint();
@@ -344,6 +362,14 @@ mod tests {
             scene.surfaces[0].rect.size(),
             Size::new(400.0, 225.0),
             "as wide as the view lets it be, at the camera's aspect"
+        );
+
+        run_app(&mut cell.borrow_mut(), crate::SizedBox::new().into_widget());
+        cell.elapse(Duration::ZERO);
+        pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(32));
+        assert!(
+            host.preview_surface().is_none(),
+            "unmounted, it puts the preview nowhere"
         );
     }
 }
