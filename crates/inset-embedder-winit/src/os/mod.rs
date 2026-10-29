@@ -146,7 +146,7 @@ fn answers_everything<T: OperatingSystem>() {}
 /// sets up otherwise.
 pub(crate) trait EventLoopSetup {
     /// Configures winit's event loop before it is built: macOS leaves winit's own menu bar out,
-    /// for the system's standard one.
+    /// for the system's standard one, and leaves the app's coming forward at launch to the system.
     fn configure_event_loop(_builder: &mut EventLoopBuilder<MainLoopEvent>) {}
 }
 
