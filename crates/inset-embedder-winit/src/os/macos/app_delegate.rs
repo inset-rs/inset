@@ -1,5 +1,5 @@
 //! The requests AppKit makes of the application through its delegate, which winit's delegate
-//! does not answer: files to open (`application:openURLs:`), a click on the Dock icon or
+//! does not answer: files and links to open (`application:openURLs:`), a click on the Dock icon or
 //! another reopen (`applicationShouldHandleReopen:hasVisibleWindows:`), and quitting
 //! (`applicationShouldTerminate:`); and hiding the application, which AppKit does itself.
 //!
@@ -38,9 +38,6 @@ use crate::os::{ApplicationControl, SystemRequests};
 use crate::system_requests::{Reopen, SystemRequest};
 
 impl SystemRequests for AppKit {
-    /// The Finder, Open With and the Dock icon ask through `application:openURLs:`.
-    const ASKS_TO_OPEN_FILES: bool = true;
-
     /// Adds the three methods to winit's delegate, which exists once the event loop is built.
     /// This must run before the loop does: AppKit asks for the files a launch opens before it
     /// reports the launch finished.
@@ -140,13 +137,15 @@ extern "C" fn open_urls(
     _application: &NSApplication,
     urls: &NSArray<NSURL>,
 ) {
-    let files: Vec<PathBuf> = urls
+    let (files, links): (Vec<_>, Vec<_>) = urls.iter().partition(|url| url.isFileURL());
+    let files: Vec<PathBuf> = files.iter().filter_map(|url| url.to_file_path()).collect();
+    let links: Vec<String> = links
         .iter()
-        .filter(|url| url.isFileURL())
-        .filter_map(|url| url.to_file_path())
+        .filter_map(|url| url.absoluteString())
+        .map(|link| link.to_string())
         .collect();
-    if !files.is_empty() {
-        send(SystemRequest::OpenFiles(files));
+    if !files.is_empty() || !links.is_empty() {
+        send(SystemRequest::Open { files, links });
     }
 }
 

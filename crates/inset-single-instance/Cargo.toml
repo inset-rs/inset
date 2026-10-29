@@ -1,0 +1,26 @@
+[package]
+name = "inset-single-instance"
+description = "One instance of an Inset app: later launches hand what they open to the first"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+inset-embedder.workspace = true
+
+# The first instance's name on the session bus, and its `org.freedesktop.Application`.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
+
+# A named mutex, and the pipe later launches write to.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes", "Win32_System_RemoteDesktop", "Win32_System_Threading"] }
+
+# Windows' mutex and pipe are system calls, which Rust reaches through `unsafe`; here it is denied
+# instead of forbidden, and `windows` alone allows it.
+[lints.rust]
+unsafe_code = "deny"

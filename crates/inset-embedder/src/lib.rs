@@ -22,6 +22,7 @@ mod key;
 mod locale;
 mod menus;
 mod mouse_cursor;
+mod opener;
 mod painting;
 mod paragraph;
 mod platform;
@@ -69,14 +70,15 @@ pub use menus::{
     TrayIcons,
 };
 pub use mouse_cursor::SystemMouseCursorKind;
+pub use opener::{OpenError, OpenFuture, OpenRequest, Opener, file_uri_path};
 pub use painting::*;
 pub use paragraph::*;
 pub use platform::{
     AppExit, AppExitReply, AppExitResponse, AppExitType, AppLifecycleState,
-    ApplicationSwitcherDescription, Brightness, Dispatcher, FileOpening, Frame, HapticFeedbackType,
-    Haptics, InertDispatcher, InertPlatform, MouseCursor, OpenFilesHandler, Platform, PlatformRef,
-    Restoration, Screen, ScreenId, Screens, SystemChrome, SystemContextMenu, SystemUiOverlayStyle,
-    TargetPlatform, TextServices, ViewRef,
+    ApplicationSwitcherDescription, Brightness, Dispatcher, Frame, HapticFeedbackType, Haptics,
+    InertDispatcher, InertPlatform, MouseCursor, Platform, PlatformRef, Restoration, Screen,
+    ScreenId, Screens, SystemChrome, SystemContextMenu, SystemUiOverlayStyle, TargetPlatform,
+    TextServices, ViewRef,
 };
 pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,

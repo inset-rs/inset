@@ -40,6 +40,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — there is no isolate-global dispatcher to assign a handler onto.
   Affect: a host reports the change through its client and never calls a binding.
 
+- Change: `App::set_open_requested_handler` takes the app's one handler for what the system asks it to open, and `App::open_requested` keeps each request that comes before a handler is set, handing them over in order as it is set; Flutter's app hears a launch's arguments in `main` and later ones through a plugin.
+  Reason: platform — there are no plugins, and the host hands the launch's request on as soon as the client exists, which is before the app has set anything up.
+  Affect: an app sets the handler during its setup and still hears the request it was launched with.
+
 - Change: `App::run_in_background` hands a closure to the host's dispatcher and answers its result as a `Task`: dart:isolate's `Isolate.run`.
   Reason: language — there are no isolates; the host's threads and a task are the Rust shape, and the work's panic resumes in the awaiting task as the isolate's error would rethrow.
   Affect: blocking work — a request, a file read — leaves the main thread for the system's queue and comes back through the ordinary checkpoint.

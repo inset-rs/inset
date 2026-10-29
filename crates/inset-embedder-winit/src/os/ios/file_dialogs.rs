@@ -225,7 +225,7 @@ fn empty_file(name: Option<&str>) -> std::io::Result<PathBuf> {
 }
 
 /// The view controller of `window`'s view: winit's own, or its window's root.
-fn view_controller(window: &Window) -> Option<Retained<UIViewController>> {
+pub(super) fn view_controller(window: &Window) -> Option<Retained<UIViewController>> {
     let RawWindowHandle::UiKit(uikit) = window.window_handle().ok()?.as_raw() else {
         return None;
     };

@@ -2338,6 +2338,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "inset-single-instance"
+version = "0.15.0"
+dependencies = [
+ "inset-embedder",
+ "windows-sys 0.60.2",
+ "zbus",
+]
+
+[[package]]
 name = "inset-test"
 version = "0.15.0"
 dependencies = [
@@ -3341,6 +3350,7 @@ dependencies = [
  "bitflags 2.13.2",
  "block2 0.6.2",
  "objc2 0.6.4",
+ "objc2-core-foundation",
  "objc2-foundation 0.3.2",
  "objc2-uniform-type-identifiers 0.3.2",
 ]

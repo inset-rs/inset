@@ -58,6 +58,20 @@ Host implementation. Flutter analogue: the web engine under `engine/lib/web_ui`.
   Reason: platform — a page has no paths, and Safari's and Firefox's `webkitdirectory` input gives a flat list of files no folder could be written through.
   Affect: on Chrome and Edge an app lists, reads and writes a folder the user picked; elsewhere it asks for one in vain.
 
+## opener.rs / launch_queue.rs → `url_launcher_web`, and the web app's file handlers
+
+- Change: a link opens in a new browsing context through `window.open`, its `opener` cut as a `noopener` link's is, and fails where the browser blocks the window, as it does outside the user's click or key; `url_launcher_web` opens with `noopener` and cannot tell a blocked window.
+  Reason: platform — `window.open` with `noopener` answers no window whether it opened one or not.
+  Affect: an app opens links while it handles a click, and hears a failure when the browser refused.
+
+- Change: opening and revealing a file fail, and `can_open_link` is `None`.
+  Reason: platform — a page has no paths, and the browser never says which schemes some app takes.
+  Affect: an app that opens files does so on the systems that have them.
+
+- Change: an installed app opened with files hears them through `window.launchQueue`, at launch and, where its manifest launches into the window it has, while it runs, each a read-only `FileSystemFileHandle`; Flutter's web engine does not read the launch queue.
+  Reason: platform — the browser grants a launch's files reading alone, and asking to write needs the user's gesture.
+  Affect: an installed app whose manifest declares `file_handlers` opens the user's files on Chrome and Edge, and a folder handle in a launch is left out; a scheme the manifest's `protocol_handlers` registers reaches the page in its own address, which the app reads itself.
+
 ## Deferred
 
 - Hearing the pixel ratio change without a resize, as on a move to a screen at another ratio, which Flutter web hears through a `(resolution)` media query, and the screen's own `change` event. Trigger: an app that must follow its page across screens.

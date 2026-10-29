@@ -20,6 +20,10 @@ No Flutter counterpart. Dart has no type — the engine owns the isolate.
   Reason: platform — the shell cannot name `WidgetsBinding` or the app, which live above it.
   Affect: a choice in a menu with no callback set, such as the Dock menu of an app that set none, is dropped.
 
+- Change: `open_requested` hands the request to `App::open_requested` in a turn of its own.
+  Reason: platform — the app's handler is set on the `App`, which the shell owns.
+  Affect: a request that comes before the app sets its handler waits there for it.
+
 - Change: `system_fonts_changed` notifies `PaintingBinding.systemFonts` in a turn of its own.
   Reason: platform — Dart's engine posts `fontsChange` on a system channel; here the host calls the client.
   Affect: paragraphs listening to `systemFonts` relayout after the host loads faces.

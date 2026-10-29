@@ -1,39 +1,71 @@
-//! What the system asks of the application as a whole: files to open, handed to the handler the
-//! app sets through `Platform::file_opening`; showing itself again, handed to the handler it sets
-//! through [`WinitPlatform::macos`](crate::WinitPlatform::macos); and quitting, which goes to the
-//! framework instead, through the client (`app_exit.rs`).
+//! What the system asks of the application as a whole: files and links to open, which reach the
+//! client as an open request (`EmbedderClient::open_requested`); showing itself again, handed to
+//! the handler the app sets through [`WinitPlatform::macos`](crate::WinitPlatform::macos); and
+//! quitting, which goes to the framework instead, through the client (`app_exit.rs`).
 //!
-//! The main loop calls a handler outside every framework call, so a handler may post to the
-//! app. Files asked for before there is a handler wait for one: a launch opens its files
-//! before the app has started.
+//! macOS asks to open through its application delegate, at launch and while the app runs
+//! (`application:openURLs:`), and iOS through the application's delegate
+//! (`application:openURL:options:`); Windows and Linux start the app with its files and links on
+//! its command line, which the launch reads and sends as a request of its own, served on the
+//! loop's first turn.
+//!
+//! The main loop calls a handler outside every framework call, so a handler may post to the app.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use inset_embedder::{FileOpening, Offset, OpenFilesHandler};
-
-use crate::WinitPlatform;
-use crate::app_requests::AppRequest;
+use inset_embedder::{Offset, OpenRequest, PickedFile};
 
 /// A request the system makes of the application as a whole.
 #[derive(Debug)]
-#[cfg_attr(
-    not(target_os = "macos"),
-    expect(dead_code, reason = "only macOS makes these requests")
-)]
 pub(crate) enum SystemRequest {
-    /// Open these files: documents opened from the system's file browser or dropped on the
-    /// application's icon.
-    OpenFiles(Vec<PathBuf>),
+    /// Open these files and links: documents opened from the system's file browser or dropped on
+    /// the application's icon, links whose scheme is the app's, or a launch's arguments.
+    Open {
+        files: Vec<PathBuf>,
+        links: Vec<String>,
+    },
     /// Show yourself again: the application's icon was clicked, or the application opened
     /// again while it runs.
+    #[cfg_attr(
+        not(target_os = "macos"),
+        allow(dead_code, reason = "only macOS asks to reopen")
+    )]
     Reopen(Reopen),
     /// Quit if the application agrees: the user chose Quit, or is logging out. The framework is
     /// asked, and an exit is carried out with
     /// [`ApplicationControl::quit`](crate::os::ApplicationControl::quit); a cancel changes
     /// nothing.
+    #[cfg_attr(
+        not(target_os = "macos"),
+        allow(dead_code, reason = "only macOS asks to quit")
+    )]
     Quit,
+}
+
+impl SystemRequest {
+    /// The files and links a launch's arguments ask to open, as Windows and Linux start an app with
+    /// them on its command line; `None` when they ask for nothing.
+    pub(crate) fn launch() -> Option<SystemRequest> {
+        let current_dir = std::env::current_dir().unwrap_or_default();
+        let request = OpenRequest::from_arguments(std::env::args_os().skip(1), &current_dir);
+        if request.is_empty() {
+            return None;
+        }
+        let files = request
+            .files
+            .into_iter()
+            .filter_map(|file| match file {
+                PickedFile::Path(path) => Some(path),
+                PickedFile::Handle(_) | PickedFile::Stream(_) => None,
+            })
+            .collect();
+        Some(SystemRequest::Open {
+            files,
+            links: request.links,
+        })
+    }
 }
 
 /// A handler for the system asking the app to show itself again.
@@ -55,41 +87,12 @@ pub struct Reopen {
 
 #[derive(Default)]
 pub(crate) struct SystemRequestHandlers {
-    /// Files the system asked to open that no handler has taken yet.
-    files_to_open: RefCell<Vec<PathBuf>>,
-    open_files: RefCell<Option<OpenFilesHandler>>,
     reopen: RefCell<Option<ReopenHandler>>,
 }
 
 impl SystemRequestHandlers {
-    pub(crate) fn set_open_files(&self, handler: Option<OpenFilesHandler>) {
-        *self.open_files.borrow_mut() = handler;
-    }
-
-    /// Whether files the system asked to open wait for a handler.
-    pub(crate) fn files_waiting(&self) -> bool {
-        !self.files_to_open.borrow().is_empty()
-    }
-
     pub(crate) fn set_reopen(&self, handler: Option<ReopenHandler>) {
         *self.reopen.borrow_mut() = handler;
-    }
-
-    /// The system asked to open `files`: they go to the handler, or wait for one.
-    pub(crate) fn open_files(&self, files: Vec<PathBuf>) {
-        self.files_to_open.borrow_mut().extend(files);
-        self.hand_over_files();
-    }
-
-    /// Hands the waiting files to the handler, all together, if there is one.
-    pub(crate) fn hand_over_files(&self) {
-        let Some(handler) = self.open_files.borrow().clone() else {
-            return;
-        };
-        let files = self.files_to_open.take();
-        if !files.is_empty() {
-            handler(files);
-        }
     }
 
     /// The system asked the app to show itself again; nothing happens without a handler.
@@ -101,59 +104,9 @@ impl SystemRequestHandlers {
     }
 }
 
-/// Where the system asks the app to open files: macOS. Elsewhere it starts the app with the files
-/// on its command line, and the platform offers no file opening.
-impl FileOpening for WinitPlatform {
-    /// Files already waiting reach `handler` from the main loop, on its next turn, as files the
-    /// system asks for later do.
-    fn set_open_files_handler(&self, handler: Option<OpenFilesHandler>) {
-        let handlers = self.state().handlers();
-        handlers.set_open_files(handler);
-        if handlers.files_waiting() {
-            self.send(AppRequest::HandOverFiles);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn recording() -> (Rc<RefCell<Vec<Vec<PathBuf>>>>, OpenFilesHandler) {
-        let received = Rc::new(RefCell::new(Vec::new()));
-        let handler: OpenFilesHandler = Rc::new({
-            let received = Rc::clone(&received);
-            move |files| received.borrow_mut().push(files)
-        });
-        (received, handler)
-    }
-
-    #[test]
-    fn files_asked_for_before_a_handler_wait_for_it() {
-        let handlers = SystemRequestHandlers::default();
-        handlers.open_files(vec![PathBuf::from("/a.wapk")]);
-        handlers.open_files(vec![PathBuf::from("/b.wasm")]);
-        let (received, handler) = recording();
-        handlers.set_open_files(Some(handler));
-        assert!(handlers.files_waiting());
-        assert!(received.borrow().is_empty());
-        handlers.hand_over_files();
-        assert_eq!(
-            *received.borrow(),
-            vec![vec![PathBuf::from("/a.wapk"), PathBuf::from("/b.wasm")]]
-        );
-    }
-
-    #[test]
-    fn files_asked_for_with_a_handler_reach_it_at_once_and_once() {
-        let handlers = SystemRequestHandlers::default();
-        let (received, handler) = recording();
-        handlers.set_open_files(Some(handler));
-        assert!(!handlers.files_waiting());
-        handlers.open_files(vec![PathBuf::from("/a.wapk")]);
-        handlers.hand_over_files();
-        assert_eq!(*received.borrow(), vec![vec![PathBuf::from("/a.wapk")]]);
-    }
 
     #[test]
     fn a_reopen_reaches_the_handler_set_when_it_comes() {

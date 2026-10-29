@@ -46,8 +46,8 @@ use std::time::Duration;
 
 use inset_embedder::{
     Clipboard, Compositor, DockMenu, FileDialogs, KeyData, MenuBar, MenuEntry, MenuId, Offset,
-    Rect, Screen, ScreenId, SurfacePlacement, TargetPlatform, TrayIcons, ViewId, ViewPadding,
-    VsyncWaiter, WindowConfig,
+    Opener, Rect, Screen, ScreenId, SurfacePlacement, TargetPlatform, TrayIcons, ViewId,
+    ViewPadding, VsyncWaiter, WindowConfig,
 };
 use valo_codec::Decoder;
 use winit::event_loop::{ActiveEventLoop, EventLoopBuilder, EventLoopProxy};
@@ -106,6 +106,7 @@ pub(crate) trait OperatingSystem:
     + NativeComposition
     + NativeMenus
     + SystemFileDialogs
+    + SystemOpener
     + SystemClipboard
     + ImageDecoding
     + WorkQueue
@@ -364,6 +365,14 @@ pub(crate) trait NativeMenus {
     fn keep_key_event(_key: &KeyData) {}
 }
 
+/// The system's way to open links and files in other apps.
+pub(crate) trait SystemOpener {
+    /// The system's opener, or `None` where it has none.
+    fn opener(_windows: ParentWindows) -> Option<Rc<dyn Opener>> {
+        None
+    }
+}
+
 /// The system's file dialogs (`file_dialogs.rs`).
 pub(crate) trait SystemFileDialogs {
     /// The system's file dialogs, each shown on its parent view's window, or `None` where the
@@ -410,9 +419,9 @@ pub(crate) trait WorkQueue {
 /// What the system asks of the application as a whole, beyond the events winit reports
 /// (`system_requests.rs`).
 pub(crate) trait SystemRequests {
-    /// Whether the system asks the application to open files, rather than starting it with
-    /// them on its command line.
-    const ASKS_TO_OPEN_FILES: bool = false;
+    /// Whether the system starts the application with the files and links it opens on its
+    /// command line, rather than asking it to open them: Windows and Linux.
+    const OPENED_BY_ARGUMENTS: bool = false;
 
     /// Starts sending the system's requests to `send`, on the main thread, from wherever the
     /// system makes them, so `send` must only queue. Nothing is sent where the system makes

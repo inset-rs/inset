@@ -36,8 +36,6 @@ pub(crate) enum AppRequest {
     ShowCursor(SystemMouseCursorKind),
     /// Focus a view's window, or give up its focus.
     ChangeViewFocus(ViewFocusEvent),
-    /// Hand the files waiting to be opened to the handler the app just set.
-    HandOverFiles,
     /// Look at the clipboard, and tell the app if it changed: the system cleared a copy of the
     /// app's that expired, or says the clipboard changed.
     LookAtClipboard,
@@ -106,12 +104,15 @@ mod tests {
             }
         });
         queue.send(focus(2));
-        queue.send(AppRequest::HandOverFiles);
+        queue.send(AppRequest::LookAtClipboard);
         queue.send(focus(1));
         assert_eq!(events.get(), 3, "one event for each request");
 
         assert_eq!(focused_view(queue.take_next()), Some(2));
-        assert!(matches!(queue.take_next(), Some(AppRequest::HandOverFiles)));
+        assert!(matches!(
+            queue.take_next(),
+            Some(AppRequest::LookAtClipboard)
+        ));
         assert_eq!(focused_view(queue.take_next()), Some(1));
         assert!(queue.take_next().is_none(), "each served once");
     }

@@ -5,6 +5,8 @@
 //! theirs in the app's own surfaces, so those answer none and the app draws its own.
 
 mod file_dialogs;
+mod opener;
+mod portal;
 mod status_notifier_items;
 
 use std::rc::Rc;
@@ -66,7 +68,10 @@ impl Screens for Linux {}
 impl PointerQueries for Linux {}
 impl ImageDecoding for Linux {}
 impl WorkQueue for Linux {}
-impl SystemRequests for Linux {}
+/// The system starts the app with the files and links it opens on its command line.
+impl SystemRequests for Linux {
+    const OPENED_BY_ARGUMENTS: bool = true;
+}
 impl SystemChanges for Linux {}
 impl ApplicationControl for Linux {}
 impl ApplicationLifecycle for Linux {}

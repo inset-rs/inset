@@ -105,7 +105,7 @@ Each `file_associations` table lets the system open the app for files with those
 - Linux: the desktop entry lists each `mime_type`; a type without one isn't associated.
 - iOS, Android and the web: not declared.
 
-On macOS a running app receives opened files through `Platform::file_opening` (see `examples/app_events`).
+An app hears the files and links it is opened with through `App::set_open_requested_handler`, at launch on every system and while it runs on macOS, iOS and Android (see `examples/app_events`). On Windows and Linux a second launch is a new process; `inset-single-instance` hands its files to the first.
 
 ## Signing
 
@@ -136,7 +136,12 @@ Signing happens when credentials are present, never by flag.
 
 ## Android
 
-The `.apk` is built without Gradle and without any Java of your own. The activity is Inset's one Java class, `rs.inset.InsetActivity` (`android/rs/inset/InsetActivity.java`): Android's `NativeActivity`, which loads your library and calls the `android_main` that `#[inset::main]` emits, with the results of the activities your app starts handed on to it, as the file dialogs need. `javac` and `d8` compile it into the package's `classes.dex`.
+The `.apk` is built without Gradle and without any Java of your own. The Java is Inset's two classes (`android/rs/inset/`), which `javac` and `d8` compile into the package's `classes.dex`:
+
+- `rs.inset.InsetActivity`, the activity: Android's `NativeActivity`, which loads your library and calls the `android_main` that `#[inset::main]` emits, with the results of the activities your app starts and the intents that reach it while it runs handed on to it, as the file dialogs and being opened need.
+- `rs.inset.InsetFileProvider`, a content provider at `<package>.inset.files`, not exported, through which the opener shares a file of the app's with the app that opens it.
+
+The manifest's `<queries>` names viewing `http`, `https` and `mailto` links, so the opener can say whether some app takes one; the application's meta-data `rs.inset.queried_schemes` lists the same schemes for it.
 
 You need:
 

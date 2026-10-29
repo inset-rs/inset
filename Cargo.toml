@@ -36,6 +36,7 @@ inset-rendering = { version = "0.15.0", path = "crates/inset-rendering" }
 inset-scheduler = { version = "0.15.0", path = "crates/inset-scheduler" }
 inset-services = { version = "0.15.0", path = "crates/inset-services" }
 inset-shell = { version = "0.15.0", path = "crates/inset-shell" }
+inset-single-instance = { version = "0.15.0", path = "crates/inset-single-instance" }
 inset-test = { version = "0.15.0", path = "crates/inset-test" }
 inset-widgets = { version = "0.15.0", path = "crates/inset-widgets" }
 inset-winui = { version = "0.15.0", path = "crates/inset-winui" }

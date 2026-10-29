@@ -16,6 +16,7 @@
 mod clipboard;
 mod file_dialogs;
 mod menus;
+mod opener;
 mod platform;
 mod view;
 mod windows;
@@ -25,6 +26,7 @@ pub use file_dialogs::{AskedDialog, MemoryFile, MemoryFolder, MockFileDialogs};
 pub use menus::{
     MockDockMenu, MockMenuBar, MockPopupMenus, MockTrayIcons, ShownMenu, ShownTrayIcon,
 };
+pub use opener::{MockOpener, Opened};
 pub use platform::{TestDispatcher, TestPlatform};
 pub use view::{IMPLICIT_VIEW_ID, TestView};
 pub use windows::{TestWindow, TestWindows};

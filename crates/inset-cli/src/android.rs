@@ -1,16 +1,18 @@
 //! Android: the `.apk` Gradle would produce, assembled from a cargo library.
 //!
-//! No Gradle project and no Java of the app's own. The activity is Inset's one Java class,
-//! `rs.inset.InsetActivity` (`android/rs/inset/InsetActivity.java` in this crate): the
-//! platform's `NativeActivity`, which loads the app's shared library and calls its
-//! `android_main`, with the results of the activities the app starts handed on to its native
-//! code, as the document pickers answer. So the package is that library, the class compiled to
-//! `classes.dex`, a manifest, and icons, put together with the SDK's own tools: `javac` and `d8`
-//! compile the class, `aapt2` links the manifest and resources, `zipalign` aligns, `apksigner`
-//! signs with the debug key, and `adb` installs and launches it on an emulator or a device.
+//! No Gradle project and no Java of the app's own. The Java is Inset's two classes (under
+//! `android/rs/inset/` in this crate). The activity, `rs.inset.InsetActivity`, is the platform's
+//! `NativeActivity`, which loads the app's shared library and calls its `android_main`, with the
+//! results of the activities the app starts and the intents that reach it while it runs handed on
+//! to its native code, as the document pickers and being opened need. The file provider,
+//! `rs.inset.InsetFileProvider`, shares a file of the app's with the app that opens it. So the
+//! package is that library, the classes compiled to `classes.dex`, a manifest, and icons, put
+//! together with the SDK's own tools: `javac` and `d8` compile the classes, `aapt2` links the
+//! manifest and resources, `zipalign` aligns, `apksigner` signs with the debug key, and `adb`
+//! installs and launches it on an emulator or a device.
 //!
 //! Everything but the NDK's linker and Java is found under the SDK. The NDK is where the
-//! linker and the C library for the target live; Java compiles the activity and runs `d8`,
+//! linker and the C library for the target live; Java compiles the classes and runs `d8`,
 //! `apksigner` and `keytool`.
 
 use std::fs;
@@ -37,9 +39,26 @@ const DEFAULT_TARGET_SDK: u32 = 34;
 /// Inset's activity: the platform's `NativeActivity`, which loads a native library and calls
 /// `android_main`, handing activity results on to it.
 const INSET_ACTIVITY: &str = "rs.inset.InsetActivity";
-/// Its source, which every app's package compiles.
-const INSET_ACTIVITY_SOURCE: &str = include_str!("../android/rs/inset/InsetActivity.java");
-/// The Java release the activity is compiled for, which `d8` takes and lowers to `min_sdk`.
+/// Inset's file provider, which shares a file of the app's with the app that opens it.
+const INSET_FILE_PROVIDER: &str = "rs.inset.InsetFileProvider";
+/// The Java classes every app's package compiles, by their paths under the sources' root.
+const JAVA_SOURCES: [(&str, &str); 2] = [
+    (
+        "rs/inset/InsetActivity.java",
+        include_str!("../android/rs/inset/InsetActivity.java"),
+    ),
+    (
+        "rs/inset/InsetFileProvider.java",
+        include_str!("../android/rs/inset/InsetFileProvider.java"),
+    ),
+];
+/// The schemes of the links whose viewers the app may ask about (`<queries>`): from Android 11 the
+/// system answers an app only about the intents its manifest names. The application's meta-data
+/// lists them for the app's native code under [`QUERIED_SCHEMES_KEY`], so it knows which answers
+/// are the system's whole answer.
+const QUERIED_SCHEMES: [&str; 3] = ["http", "https", "mailto"];
+const QUERIED_SCHEMES_KEY: &str = "rs.inset.queried_schemes";
+/// The Java release the classes are compiled for, which `d8` takes and lowers to `min_sdk`.
 const JAVA_RELEASE: &str = "11";
 /// What the app says it is, for a system that asks. An app that says nothing is
 /// `CATEGORY_UNDEFINED`, and the makers' own optimisers take an uncategorised app that
@@ -333,7 +352,7 @@ pub fn build(project: &Project, profile: Profile, abi: Abi) -> Result<Apk> {
     )?;
     let linked = stage.join("unaligned.apk");
     link(&sdk, &stage, &linked, has_icon)?;
-    let classes = compile_activity(&sdk, java, &stage, min_sdk)?;
+    let classes = compile_classes(&sdk, java, &stage, min_sdk)?;
     add_to_package(&linked, "classes.dex", &classes)?;
     let packaged = match profile {
         // Symbols are for reading a crash report, not for the device: they double the
@@ -457,7 +476,9 @@ struct Manifest<'a> {
 /// The manifest around Inset's activity. `configChanges` keeps the activity, and so the
 /// app's state, through a rotation or a switch to dark mode, which winit reports as a
 /// resize; `adjustResize` has the system fit the window to the keyboard, which is how
-/// the host learns of it.
+/// the host learns of it. Inset's file provider is declared at `<package>.inset.files`, not
+/// exported, granting each URI it shares; `<queries>` names viewing the links of
+/// [`QUERIED_SCHEMES`].
 fn manifest(manifest: &Manifest) -> String {
     let icon = if manifest.has_icon {
         r#" android:icon="@mipmap/ic_launcher""#
@@ -494,7 +515,15 @@ fn manifest(manifest: &Manifest) -> String {
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
     </activity>
+    <provider
+        android:name="{provider}"
+        android:authorities="{package}.inset.files"
+        android:exported="false"
+        android:grantUriPermissions="true" />
+    <meta-data android:name="{queried_schemes_key}" android:value="{queried_schemes}" />
   </application>
+  <queries>
+{queries}  </queries>
 </manifest>
 "#,
         config_changes = CONFIG_CHANGES,
@@ -507,7 +536,27 @@ fn manifest(manifest: &Manifest) -> String {
         category = manifest.category,
         activity = INSET_ACTIVITY,
         library = manifest.library,
+        provider = INSET_FILE_PROVIDER,
+        queried_schemes_key = QUERIED_SCHEMES_KEY,
+        queried_schemes = QUERIED_SCHEMES.join(","),
+        queries = queried_intents(),
     )
+}
+
+/// One `<intent>` for viewing a link of each of [`QUERIED_SCHEMES`].
+fn queried_intents() -> String {
+    QUERIED_SCHEMES
+        .iter()
+        .map(|scheme| {
+            format!(
+                r#"    <intent>
+      <action android:name="android.intent.action.VIEW" />
+      <data android:scheme="{scheme}" />
+    </intent>
+"#
+            )
+        })
+        .collect()
 }
 
 fn xml_escape(text: &str) -> String {
@@ -582,13 +631,17 @@ fn link(sdk: &Sdk, stage: &Path, out: &Path, has_resources: bool) -> Result<()> 
     tools::run(&mut command, "aapt2 link")
 }
 
-/// `javac` and `d8`: Inset's activity, compiled against the platform's `android.jar` into the
+/// `javac` and `d8`: Inset's classes, compiled against the platform's `android.jar` into the
 /// `classes.dex` the package carries.
-fn compile_activity(sdk: &Sdk, java: &Java, stage: &Path, min_sdk: u32) -> Result<PathBuf> {
+fn compile_classes(sdk: &Sdk, java: &Java, stage: &Path, min_sdk: u32) -> Result<PathBuf> {
     let sources = stage.join("java");
-    let source = sources.join("rs/inset/InsetActivity.java");
     fs::create_dir_all(sources.join("rs/inset"))?;
-    fs::write(&source, INSET_ACTIVITY_SOURCE)?;
+    let mut source_paths = Vec::new();
+    for (path, source) in JAVA_SOURCES {
+        let written = sources.join(path);
+        fs::write(&written, source)?;
+        source_paths.push(written);
+    }
     let classes = stage.join("classes");
     tools::run(
         java.bin("javac")
@@ -596,9 +649,12 @@ fn compile_activity(sdk: &Sdk, java: &Java, stage: &Path, min_sdk: u32) -> Resul
             .arg(&sdk.platform.jar)
             .arg("-d")
             .arg(&classes)
-            .arg(&source),
+            .args(&source_paths),
         "javac",
     )?;
+    let class_files = JAVA_SOURCES
+        .iter()
+        .map(|(path, _)| classes.join(path).with_extension("class"));
     let dex = stage.join("dex");
     fs::create_dir_all(&dex)?;
     tools::run(
@@ -611,7 +667,7 @@ fn compile_activity(sdk: &Sdk, java: &Java, stage: &Path, min_sdk: u32) -> Resul
             .arg(&sdk.platform.jar)
             .arg("--output")
             .arg(&dex)
-            .arg(classes.join("rs/inset/InsetActivity.class")),
+            .args(class_files),
         "d8",
     )?;
     Ok(dex.join("classes.dex"))
@@ -938,6 +994,33 @@ mod tests {
                 "the activity must absorb {change} rather than be recreated for it"
             );
         }
+    }
+
+    #[test]
+    fn manifest_declares_the_file_provider_and_the_queried_links() {
+        let manifest = manifest(&Manifest {
+            package: "com.example.my_app",
+            label: "My App",
+            library: "my_app",
+            version_code: 100,
+            version_name: "0.1.0",
+            min_sdk: 26,
+            target_sdk: 34,
+            debuggable: false,
+            has_icon: false,
+            category: "productivity",
+        });
+        assert!(manifest.contains(r#"android:name="rs.inset.InsetFileProvider""#));
+        assert!(manifest.contains(r#"android:authorities="com.example.my_app.inset.files""#));
+        assert!(
+            manifest.contains(r#"android:exported="false""#),
+            "the provider shares only the URIs it grants"
+        );
+        assert!(manifest.contains(r#"android:grantUriPermissions="true""#));
+        assert!(manifest.contains(r#"<data android:scheme="mailto" />"#));
+        assert!(manifest.contains(
+            r#"<meta-data android:name="rs.inset.queried_schemes" android:value="http,https,mailto" />"#
+        ));
     }
 
     #[test]

@@ -10,6 +10,7 @@
 mod file_dialogs;
 mod hidden_window;
 mod menus;
+mod opener;
 
 use inset_embedder::TargetPlatform;
 use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
@@ -66,7 +67,10 @@ impl Screens for Windows {}
 impl PointerQueries for Windows {}
 impl ImageDecoding for Windows {}
 impl WorkQueue for Windows {}
-impl SystemRequests for Windows {}
+/// The system starts the app with the files and links it opens on its command line.
+impl SystemRequests for Windows {
+    const OPENED_BY_ARGUMENTS: bool = true;
+}
 impl SystemChanges for Windows {}
 impl ApplicationControl for Windows {}
 impl ApplicationLifecycle for Windows {}

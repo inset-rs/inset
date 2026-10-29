@@ -1,6 +1,6 @@
-//! What macOS asks of an application as a whole, through the winit embedder: the files it is
-//! asked to open, the Dock icon clicked, and quitting. The window lists them, and each is
-//! printed as it comes.
+//! What the system asks of an application as a whole, through the winit embedder: the files and
+//! links it is asked to open, the Dock icon clicked, and quitting. The window lists them, and each
+//! is printed as it comes.
 //!
 //! A quit asks the app first: Cmd-Q, Quit in the app menu, or Quit in the Dock icon's menu on
 //! macOS, and closing the window on every system, since closing `run_app`'s only window asks to
@@ -13,7 +13,8 @@
 //! ```
 //!
 //! macOS opens files only with an app bundle it knows, and matches files to it by the types the
-//! bundle declares, which `[package.metadata.inset.file_types]` in this crate's Cargo.toml gives:
+//! bundle declares, which `[package.metadata.inset.file_associations]` in this crate's Cargo.toml
+//! gives:
 //!
 //! ```text
 //! cargo inset build macos -p app-events
@@ -21,15 +22,22 @@
 //! open -a "App events" note.insetnote     # at launch or while it runs
 //! ```
 //!
+//! Windows and Linux start the app with what it opens on its command line:
+//!
+//! ```text
+//! cargo run -p app-events -- note.insetnote https://example.org
+//! ```
+//!
 //! Click the Dock icon for a reopen, with the window on screen or minimized: each is printed
 //! with whether a window was visible and where the pointer was.
 #![feature(arbitrary_self_types)]
 
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
-use inset_embedder::{AppExitResponse, Color, TextDirection, WindowConfig};
+use inset_embedder::{
+    AppExitResponse, Color, OpenRequest, PickedFile, TextDirection, WindowConfig,
+};
 use inset_embedder_winit::{Reopen, WinitEmbedder, WinitPlatform};
 use inset_foundation::{App, Completer, Entity, Listener, Task, Timer};
 use inset_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
@@ -64,7 +72,8 @@ fn main() {
 /// What the system has asked of the app so far.
 #[derive(Debug, Default)]
 struct Requests {
-    files: Vec<PathBuf>,
+    /// The files and links the system asked the app to open, as the window lists them.
+    opened: Vec<String>,
     reopens: u32,
     save: Save,
 }
@@ -81,28 +90,31 @@ enum Save {
 /// Sets the handlers for what the system asks of the app, which the embedder calls from its event
 /// loop; each posts its request to the app.
 fn listen(app: &mut App, requests: &Entity<Requests>) {
-    listen_for_files(app, requests);
+    listen_for_opens(app, requests);
     listen_for_reopens(app, requests);
 }
 
-/// Files the system asks the app to open, where it asks: on macOS.
-fn listen_for_files(app: &mut App, requests: &Entity<Requests>) {
-    let platform = app.platform();
-    let Some(file_opening) = platform.file_opening() else {
-        return;
-    };
-    let cx = app.to_async();
+/// The files and links the system asks the app to open: at launch, and on macOS while it runs.
+/// A request that came before the handler was set reaches it as it is set.
+fn listen_for_opens(app: &mut App, requests: &Entity<Requests>) {
     let requests = requests.clone();
-    file_opening.set_open_files_handler(Some(Rc::new(move |files: Vec<PathBuf>| {
-        println!("open files: {files:?}");
-        let requests = requests.clone();
-        cx.post(move |app| {
-            requests.update(app, |requests, cx| {
-                requests.files.extend(files);
-                cx.notify();
-            });
+    app.set_open_requested_handler(Some(Rc::new(move |app: &mut App, request: OpenRequest| {
+        println!("open: {request:?}");
+        requests.update(app, |requests, cx| {
+            requests.opened.extend(request.files.iter().map(described));
+            requests.opened.extend(request.links);
+            cx.notify();
         });
     })));
+}
+
+/// A file as the window lists it: its path, or the name the system gives it.
+fn described(file: &PickedFile) -> String {
+    match file {
+        PickedFile::Path(path) => path.display().to_string(),
+        PickedFile::Handle(handle) => handle.name().to_owned(),
+        PickedFile::Stream(stream) => stream.name().to_owned(),
+    }
 }
 
 /// The system asking the app to show itself again, which only macOS does.
@@ -198,14 +210,14 @@ impl StatelessWidget for RequestList {
             line(save_line(requests.save).to_owned()),
             line(format!("Reopened {} time(s)", requests.reopens)),
         ];
-        if requests.files.is_empty() {
-            lines.push(line("No file opened yet".to_owned()));
+        if requests.opened.is_empty() {
+            lines.push(line("Nothing opened yet".to_owned()));
         }
         lines.extend(
             requests
-                .files
+                .opened
                 .iter()
-                .map(|file| line(format!("Opened {}", file.display()))),
+                .map(|opened| line(format!("Opened {opened}"))),
         );
         Column::new().spacing(8.0).children(lines).into_widget()
     }

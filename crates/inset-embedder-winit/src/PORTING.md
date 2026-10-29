@@ -153,11 +153,15 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — winit reports each dragged file on its own and never says where the drag is.
   Affect: an app hears a drag enter, drop and leave but never move, and must treat the whole window as the target.
 
-## system_requests.rs / os/macos/app_delegate.rs → the macOS embedder's `FlutterAppDelegate`
+## system_requests.rs / launch.rs / os/macos/app_delegate.rs / os/ios/open_requests.rs → the macOS embedder's `FlutterAppDelegate`, iOS's `FlutterAppDelegate` and `FlutterSceneDelegate`
 
-- Change: on macOS, files the system asks the app to open go to the handler the app sets through `Platform::file_opening`, and a reopen, such as a click on the Dock icon, to the one it sets through `WinitPlatform::macos`, where a Flutter app answers them in its own application delegate.
-  Reason: platform — winit owns the application delegate, so an app cannot write its own.
-  Affect: files that arrive before the app sets its handler wait for it, and a reopen with no handler set is dropped.
+- Change: the files and links the system asks the app to open reach the client as `EmbedderClient::open_requested`, and a reopen, such as a click on the Dock icon, the handler the app sets through `WinitPlatform::macos`, where a Flutter app answers them in its own application delegate: macOS's `application:openURLs:`, a file URL as a path and any other as a link, at launch and while the app runs; Windows' and Linux's launch arguments, read once at launch and served on the loop's first turn.
+  Reason: platform — winit owns the application delegate, so an app cannot write its own; Windows and Linux start a new process with what it opens, so a running app hears nothing more without `inset-single-instance`.
+  Affect: the launch's request waits in the `App` for the app's handler, and a reopen with no handler set is dropped.
+
+- Change: on iOS a link or a file opened with the app comes through the application delegate's `application:openURL:options:`, where Flutter's scene-based apps hear `scene:openURLContexts:`; the launch's URL is read from the launch options when the application finishes launching, and a delegate of the embedder's is set then. A file URL's security-scoped access starts as it arrives and is kept for the app's life, as a picked document's is.
+  Reason: platform — winit gives `UIApplicationMain` no delegate class and runs no scenes, so the scene delegate's calls never come; the application delegate's are what UIKit sends an app without scenes.
+  Affect: an app opened with a file or a link on iOS hears it as on every other system; once winit runs scenes, the delegate's calls move to the scene's.
 
 ## menus/, popup_menus.rs, main_loop/menus.rs, os/macos/menus/, os/windows/menus/, os/linux/status_notifier_items/ → the macOS embedder's `FlutterMenuPlugin`, and the system menus Flutter does not reach
 
@@ -211,6 +215,24 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — iOS has no dialog that answers a file yet to be written, and a picked document outside the sandbox is reached only while its access lasts.
   Affect: a picked path stays readable and writable until the app quits; an app picking without end would run out of the kernel's sandbox extensions.
 
+## os/*/opener.rs, os/linux/portal.rs → `url_launcher`'s and Electron's `shell` implementations
+
+- Change: on macOS the opener is `NSWorkspace`: a link or a file opens in the app Launch Services gives it, asked first through `URLForApplicationToOpenURL:`, which also answers `can_open_link` for every scheme; a file is revealed with `activateFileViewerSelectingURLs:`.
+  Reason: platform — `openURL:` answers only whether it handed the URL on, so no app is told from a failure by asking first.
+  Affect: opening answers `NoApp` for a scheme or a kind no app takes, at once.
+
+- Change: on Windows the opener is the shell: `ShellExecuteW`'s `open` of the link or the path, run on a thread of its own in a COM apartment of its own, `SE_ERR_NOASSOC` being no app; a file is revealed with `SHOpenFolderAndSelectItems`, and `can_open_link` is whether the registry associates an executable with the scheme (`AssocQueryStringW`).
+  Reason: platform — the shell may wait on the app it starts, and asks its caller for an apartment, which the main thread's loop must not be held for.
+  Affect: opening answers once the shell has handed the link or file on.
+
+- Change: on Linux the opener is the desktop portal's `OpenURI`, over the session bus, as the file dialogs are: `OpenURI` for a link, `OpenFile` for a file and `OpenDirectory` to reveal one, each handed the file's descriptor and asked from a thread of its own that waits for the portal's `Response`; `can_open_link` is `None`, since the portal never says; the opener is `None` where the bus has no portal.
+  Reason: platform — the portal is the desktop's own way, in a Flatpak too, and reveals a file the way its file manager does.
+  Affect: the user may be asked to choose an app, and a choice cancelled answers a failure.
+
+- Change: on iOS the opener is `UIApplication`'s `openURL:options:completionHandler:` for a link, its `false` being no app, and `UIDocumentInteractionController`'s Open In menu for a file, presented from the first window's view controller, its `false` being no app; revealing fails, and `can_open_link` asks `canOpenURL:` only for a scheme the app's `LSApplicationQueriesSchemes` declares, `None` for another.
+  Reason: platform — iOS shares a file with another app only through a controller the user chooses the app in, and answers `canOpenURL:` falsely for a scheme the app did not declare.
+  Affect: opening a file on iOS shows the user the apps that take it.
+
 ## macos.rs / os/macos → what only macOS offers beyond `Platform`
 
 - Change: `WinitPlatform::macos` slides a window in and hides the app, neither of which Flutter's framework offers.
@@ -223,7 +245,6 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - The fallback languages Flutter's Windows and Linux embedders add after the user's: Windows's own (`MUI_UI_FALLBACK`), and GLib's, such as `en` after `en_US`, and `C`. Trigger: an app whose locale resolution needs a fallback the user did not set.
 - Hearing the user's languages change on Windows (`WM_SETTINGCHANGE`), which winit does not report and Flutter's Windows embedder does not hear either. Trigger: an app there that must follow a change without a restart.
 - Letting a logout or shutdown go on once the app agrees, through `NSTerminateLater`: the delegate cancels it at once, as Flutter's does, so an Inset app stops every logout. Trigger: an app that must not stop a logout it agrees to; AppKit's loop while it waits needs an experiment first.
-- Files opened from the system on Windows and Linux. Trigger: an app that wants them through `Platform::file_opening` there too.
 - The layout keymap for character keys, so a shifted symbol reports `!` where Flutter reports `digit1`. Trigger: a shortcut that matches a shifted symbol by logical key.
 - Dead keys and `Key::Unidentified`. Trigger: composing input, or a key of the system's that winit cannot name.
 - Synthesizing the key ups a focus change swallowed. Trigger: `HardwareKeyboard::sync_keyboard_state` gaining a way to ask the system.

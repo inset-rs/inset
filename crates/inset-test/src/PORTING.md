@@ -19,6 +19,12 @@ No Flutter crate in this shape. Closest analogue: `flutter_test`'s `TestPlatform
   Reason: platform — they stand in for the host's menus, which Flutter's tests reach only as `flutter/menu` channel calls.
   Affect: a test checks the menus an app sets and drives its choices without a host.
 
+## opener.rs → no Flutter counterpart
+
+- Change: `MockOpener` opens nothing: it keeps each link and file opened and revealed as an `Opened`, answers them with the failure the test gave, or success, and answers `can_open_link` as the test set.
+  Reason: platform — it stands in for the host's opener, which Flutter's tests reach only as `url_launcher` channel calls.
+  Affect: a test checks what an app opened without a host or another app.
+
 ## platform.rs → flutter_test `TestPlatformDispatcher`
 
 - Change: `TestPlatform` is built by a test — which host it claims to be, its views, and each capability as the test's own implementation or absent — and keeps the frame requests and wake deadlines; `TestPlatformDispatcher` wraps the real dispatcher and overrides fields one at a time.

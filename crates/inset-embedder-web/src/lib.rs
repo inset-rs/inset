@@ -30,6 +30,10 @@ mod host;
 #[cfg(target_arch = "wasm32")]
 mod images;
 #[cfg(target_arch = "wasm32")]
+mod launch_queue;
+#[cfg(target_arch = "wasm32")]
+mod opener;
+#[cfg(target_arch = "wasm32")]
 mod platform;
 #[cfg(target_arch = "wasm32")]
 mod screen;

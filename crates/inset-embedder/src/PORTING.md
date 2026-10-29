@@ -82,10 +82,6 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — a view holds no reference to the platform, and a host has no screen for a view without a window.
   Affect: a view's screen comes from the platform's list, and a view moved to another screen is reported as a metrics change, as Flutter's window metrics event carries its `display_id`.
 
-- Change: a host's `FileOpening` capability takes one handler for the files the system asks the app to open; Flutter's macOS embedder hands them to its plugins through `FlutterAppLifecycleDelegate.handleOpenURLs:`.
-  Reason: platform — there are no plugins, and the app is the only listener on the host's side.
-  Affect: an app sets the handler once, files asked for before then wait for it, and hosts whose system never asks answer `None`.
-
 - Change: `default_target_platform` and `platform_brightness` are queries on `Platform`, with no library global and no `debugDefaultTargetPlatformOverride`; the inert platform answers Android and light, as Flutter's test binding does.
   Reason: platform — the host-supplied `Platform` is the only source of truth.
   Affect: changing the target platform means swapping the host's `Platform`, and two Apps can disagree at once.
@@ -162,6 +158,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - Change: `EmbedderClient::drop_data` reports files dragged from outside the application over a view as a `DropData` — the entered, moved, dropped and exited phases, a batch of paths, a physical position when the host has one — where Flutter has no drop hook and leaves it to plugins.
   Reason: platform — every desktop toolkit reports this shape at the window, and a host is the only place it can come from.
   Affect: an app hears external drops through the widgets binding's observers; a host that reports no position, as winit does, leaves the app to treat the whole view as the target.
+
+- Change: `EmbedderClient::open_requested` hands the client what the system asks the app to open, an `OpenRequest` of files and links, at launch and while it runs; Flutter's macOS embedder hands a running app's to its plugins through `FlutterAppLifecycleDelegate.handleOpenURLs:`, iOS's through `application:openURL:options:` and `scene:openURLContexts:`, and Android's through `onNewIntent`, while a launch's arguments reach `main`.
+  Reason: platform — there are no plugins, and the app is the only listener; one call covers every system's way, whose files are the file dialogs' `PickedFile`, as Android hands one over as a `content://` document and the web's `launchQueue` as a file handle.
+  Affect: an app hears what it is asked to open in one place on every system, the launch's request included, which waits for its handler.
 
 - Change: `EmbedderClient::pop_route` answers at once whether the application went back, and the framework never tells the host in advance whether it handles back.
   Reason: platform — Dart's `popRoute` crosses a channel and cannot answer in time, which is why Flutter tells the host in advance; this call is direct.
@@ -271,6 +271,20 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - Change: `DockMenu::set_menu` sets the items macOS adds to the Dock icon's menu; Flutter has none.
   Reason: platform — AppKit asks the application's delegate for it, which only the host is.
   Affect: an app's Dock menu is set whole like any other, and every other system answers `None`.
+
+## opener.rs → the `url_launcher` package's `launchUrl` and `canLaunchUrl`
+
+- Change: opening is a host capability, `Platform::opener`, with a call for each kind, `open_link`, `open_file` and `reveal_file`, as Electron's `shell` and Tauri's opener have them, where `url_launcher` takes one URI.
+  Reason: platform — phones share a file through the system (Android's `FileProvider`, iOS's `UIDocumentInteractionController`) rather than by a `file://` URI, and only a file can be revealed.
+  Affect: an app names a file by its path, and a host without a file manager answers `reveal_file` with a failure.
+
+- Change: `Opener::can_open_link` answers `None` where the system will not say, where `canLaunchUrl` answers false.
+  Reason: platform — iOS answers only for the schemes the app declares, Android only for the intents its manifest's `<queries>` names, and Linux's portal not at all, since asking about many schemes tells which apps the user has.
+  Affect: an app learns that nothing opens a link when opening it fails with `OpenError::NoApp`.
+
+- Change: opening answers `Result<(), OpenError>` through a future, `NoApp` where no app takes the link or file, where `launchUrl` answers a bool.
+  Reason: platform — the systems tell no app from another failure, and Windows' and Linux's ask a service that answers later.
+  Affect: an app can tell the user that nothing opens a kind of link or file.
 
 ## file_dialogs.rs → the `file_selector` package's `openFile`, `openFiles`, `getDirectoryPath`, `getSaveLocation`, and cross_file's `XFile`
 
