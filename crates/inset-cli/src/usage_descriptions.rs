@@ -3,8 +3,8 @@
 //! it.
 //!
 //! Both systems end an app that opens the camera or the microphone without a usage description
-//! for it in its `Info.plist`; a macOS bundle signed with the hardened runtime, as cargo-packager
-//! signs one, is also refused the device unless its entitlements allow it. Keep the two lists
+//! for it in its `Info.plist`; a macOS bundle signed with the hardened runtime, as the CLI signs
+//! one with a certificate, is also refused the device unless its entitlements allow it. Keep the two lists
 //! describing the same devices.
 
 use anyhow::{Result, bail};

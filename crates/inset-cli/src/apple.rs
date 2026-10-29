@@ -73,6 +73,27 @@ pub fn development_identity(team: Option<&str>) -> Result<Identity> {
     }
 }
 
+/// The keychain identity `named` names, as `codesign --sign` takes it: its hash, or its name or
+/// a part of it that only it has.
+pub fn keychain_identity(named: &str) -> Result<Identity> {
+    let mut matching: Vec<Identity> = keychain_identities()?
+        .into_iter()
+        .filter(|i| i.hash.eq_ignore_ascii_case(named) || i.name.contains(named))
+        .collect();
+    match matching.len() {
+        1 => Ok(matching.remove(0)),
+        0 => bail!("no signing identity in the keychain matches `{named}`"),
+        _ => bail!(
+            "several signing identities match `{named}`: {}",
+            matching
+                .iter()
+                .map(|i| i.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
 /// Signs `path`, a bundle, an executable, a library or a disk image, replacing any signature it
 /// has.
 pub fn sign(path: &Path, settings: &SigningSettings) -> Result<()> {
