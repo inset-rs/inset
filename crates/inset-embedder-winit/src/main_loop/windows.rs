@@ -4,12 +4,13 @@
 
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 
 use inset_embedder::{EmbedderClient, View, ViewError, ViewFocusEvent, ViewId};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
-use crate::os::{FramePresentation, ThisOs, WindowVisibility};
+use crate::os::{FramePresentation, ThisOs, TrackpadTouches, WindowVisibility};
 use crate::view::WinitView;
 use crate::view_focus;
 use crate::windows::{
@@ -66,7 +67,18 @@ impl<C: EmbedderClient> MainLoop<C> {
                 window,
                 self.send_visibility_notice(window.id()),
             ),
+            trackpad_touches: ThisOs::observe_trackpad_touches(
+                window,
+                self.send_trackpad_touch(window.id()),
+            ),
         }
+    }
+
+    /// What fingers coming down on a trackpad over the window `id` do: the moment queues for the
+    /// loop.
+    fn send_trackpad_touch(&self, id: WindowId) -> Box<dyn Fn(Instant)> {
+        let proxy = self.proxy.clone();
+        Box::new(move |at| proxy.send(MainLoopEvent::TrackpadTouched(id, at)))
     }
 
     /// What a notice that the window `id` may have been minimized or occluded does: it queues for

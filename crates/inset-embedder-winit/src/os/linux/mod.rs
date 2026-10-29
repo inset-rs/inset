@@ -18,12 +18,14 @@ use inset_embedder::{TargetPlatform, TrayIcons};
 use crate::clipboard::{ChangeProbe, TextClipboard};
 use crate::menus::MenuEvents;
 
-use super::absent::{NoDisplayLink, NoVisibilityNotices, NoWindowSurfaces};
+use super::absent::{
+    NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices, NoWindowSurfaces,
+};
 use super::{
     ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeComposition,
     NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
-    SystemMedia, SystemRequests, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility,
-    WorkQueue,
+    SystemMedia, SystemRequests, TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion,
+    WindowVisibility, WorkQueue,
 };
 
 /// Linux. A type only: never made, its answers are associated functions.
@@ -62,6 +64,10 @@ impl NativeComposition for Linux {
 
 impl WindowVisibility for Linux {
     type Notices = NoVisibilityNotices;
+}
+
+impl TrackpadTouches for Linux {
+    type Observer = NoTrackpadTouchObserver;
 }
 
 impl WindowGeometry for Linux {}

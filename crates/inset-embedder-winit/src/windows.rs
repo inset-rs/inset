@@ -23,7 +23,9 @@ use winit::window::{Window, WindowAttributes, WindowId};
 use crate::app_requests::AppRequests;
 use crate::gpu::Gpu;
 use crate::host_window::WinitWindow;
-use crate::os::{OperatingSystem, ThisOs, ThisOsVisibilityNotices, WindowChrome};
+use crate::os::{
+    OperatingSystem, ThisOs, ThisOsTrackpadTouchObserver, ThisOsVisibilityNotices, WindowChrome,
+};
 use crate::view::WinitView;
 
 /// The screen view's id, as in Flutter: the views the app asks for are numbered after it.
@@ -86,6 +88,8 @@ struct ViewWindow {
 pub(crate) struct WindowObservers {
     /// The system's notices that the window may have been minimized or occluded, for the app.
     pub(crate) visibility: Option<ThisOsVisibilityNotices>,
+    /// What reports the fingers coming down on a trackpad over the window.
+    pub(crate) trackpad_touches: Option<ThisOsTrackpadTouchObserver>,
 }
 
 impl Views {
