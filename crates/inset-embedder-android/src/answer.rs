@@ -1,4 +1,4 @@
-//! An answer the system gives once, on the activity's thread or another, and the future the app
+//! An answer the system gives once, on the Java main thread or another, and the future the app
 //! awaits it through: a picker's documents, or the user's answer to a permission. The invariant:
 //! the future is answered exactly once, with what the system gave, or with what its giver set for
 //! an answer dropped unused, so the app never waits for ever.

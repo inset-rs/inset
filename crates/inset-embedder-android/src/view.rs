@@ -1,8 +1,9 @@
-//! The host's [`View`]: the activity's window as the framework sees it.
+//! The host's [`View`]: an activity's window as the framework sees it.
 //!
-//! One activity has one window, so the host has one view, and it outlives the windows the
-//! system hands out: the framework keeps its tree and its last picture while the app is in
-//! the background, and the picture is presented again on the window that comes back.
+//! One activity has one window, so each activity is one view, and the view outlives the windows
+//! the system hands the activity out: the framework keeps its tree and its last picture while the
+//! activity is in the background, and the picture is presented again on the window that comes
+//! back.
 
 use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Mutex};
@@ -15,10 +16,8 @@ use ndk::native_window::NativeWindow;
 use crate::gpu::Gpu;
 use crate::surface::{Surface, Target};
 
-/// The one view the activity has.
-pub(crate) const VIEW: ViewId = ViewId(0);
-
 pub(crate) struct AndroidView {
+    id: ViewId,
     pub(crate) surface: Arc<Mutex<Surface>>,
     metrics: Cell<ViewMetrics>,
     /// What a frame starts from.
@@ -35,10 +34,11 @@ pub(crate) struct AndroidView {
 
 impl AndroidView {
     /// A view with no window yet: it draws nothing until the system gives one.
-    pub(crate) fn new(gpu: &Gpu) -> AndroidView {
+    pub(crate) fn new(id: ViewId, gpu: &Gpu) -> AndroidView {
         let mut context = valo::Context::new(gpu.device.clone(), gpu.queue.clone());
         context.set_hide_missing_glyphs(true);
         AndroidView {
+            id,
             surface: Arc::new(Mutex::new(Surface {
                 surface: None,
                 context,
@@ -76,6 +76,11 @@ impl AndroidView {
             Err(error) => crate::log::warn_to_log!("no surface on the window given: {error}"),
         }
         self.on_screen.set(false);
+    }
+
+    /// Whether the system has given the view a window to draw in.
+    pub(crate) fn has_window(&self) -> bool {
+        self.surface.lock().expect("surface lock").surface.is_some()
     }
 
     /// The system took the window away: the view keeps its picture and owes it.
@@ -145,7 +150,7 @@ impl AndroidView {
 
 impl View for AndroidView {
     fn id(&self) -> ViewId {
-        VIEW
+        self.id
     }
 
     fn metrics(&self) -> ViewMetrics {

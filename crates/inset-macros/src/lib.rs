@@ -5,7 +5,7 @@
 //!
 //! - desktop and iOS: `main`
 //! - web: an exported `main`, called once the page has the module
-//! - Android: `android_main`, called by the activity's glue with its `AndroidApp`
+//! - Android: `android_main`, called by the activity's glue with each activity's `AndroidApp`
 //!
 //! A WASI component, such as one for wapk, gets no entry: Inset ships no host for it, so
 //! the app writes its own with that host's embedder crate.
@@ -62,8 +62,9 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         // The activity's glue looks this symbol up in the app's library and calls it on a
-        // thread of its own with the `AndroidApp` the loop runs on. The window is the
-        // screen, which the system sizes and titles.
+        // thread of its own for each activity the system creates, with that activity's
+        // `AndroidApp`; the first starts the app. The window is the screen, which the
+        // system sizes and titles.
         #[cfg(target_os = "android")]
         #[unsafe(no_mangle)]
         fn android_main(app: ::inset::AndroidApp) {

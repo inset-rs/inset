@@ -1,10 +1,9 @@
 //! Being opened: an intent to view (`ACTION_VIEW`) asks to open its data, at launch or while the app
 //! runs (`intents`): a `content://` document, opened as a picked one is
 //! (`file_dialogs::open_document`), to write where the intent grants writing; a `file://` URI as its
-//! path; any other URI as a link. The intent is read on the activity's thread, which only records
-//! its URI; the loop opens the documents on the app's thread.
+//! path; any other URI as a link. The intent is read where it arrives, which only records its URI;
+//! the app's loop opens the documents on the app's thread.
 
-use android_activity::AndroidApp;
 use inset_embedder::{OpenRequest, PickedFile, file_uri_path};
 use jni::objects::JObject;
 use jni::sys::jint;
@@ -25,45 +24,34 @@ pub(crate) struct Viewed {
     writable: bool,
 }
 
-/// The files and links intents to view ask the app to open.
-pub(crate) struct OpenRequests {
-    app: AndroidApp,
+/// What the intents to view that arrived ask the app to open; `None` when nothing.
+pub(crate) fn request(arrived: Vec<Viewed>) -> Option<OpenRequest> {
+    let mut request = OpenRequest::default();
+    for viewed in arrived {
+        match viewed.uri.split_once(':').map(|(scheme, _)| scheme) {
+            Some("content") => request.files.extend(open(&viewed)),
+            Some("file") => match file_uri_path(&viewed.uri) {
+                Some(path) => request.files.push(PickedFile::Path(path)),
+                None => warn_to_log!("inset: {} names no file", viewed.uri),
+            },
+            _ => request.links.push(viewed.uri),
+        }
+    }
+    (!request.is_empty()).then_some(request)
 }
 
-impl OpenRequests {
-    pub(crate) fn new(app: AndroidApp) -> OpenRequests {
-        OpenRequests { app }
-    }
-
-    /// What the intents to view that arrived ask to open; `None` when nothing.
-    pub(crate) fn request(&self, arrived: Vec<Viewed>) -> Option<OpenRequest> {
-        let mut request = OpenRequest::default();
-        for viewed in arrived {
-            match viewed.uri.split_once(':').map(|(scheme, _)| scheme) {
-                Some("content") => request.files.extend(self.open(&viewed)),
-                Some("file") => match file_uri_path(&viewed.uri) {
-                    Some(path) => request.files.push(PickedFile::Path(path)),
-                    None => warn_to_log!("inset: {} names no file", viewed.uri),
-                },
-                _ => request.links.push(viewed.uri),
-            }
-        }
-        (!request.is_empty()).then_some(request)
-    }
-
-    /// The document an intent asks to open: to write where it grants writing and the provider
-    /// lets it, to read otherwise.
-    fn open(&self, viewed: &Viewed) -> Option<PickedFile> {
-        let written = viewed
-            .writable
-            .then(|| open_document(&self.app, &viewed.uri, true).ok())
-            .flatten();
-        match written.map_or_else(|| open_document(&self.app, &viewed.uri, false), Ok) {
-            Ok(file) => Some(file),
-            Err(error) => {
-                warn_to_log!("inset: {} could not be opened: {error}", viewed.uri);
-                None
-            }
+/// The document an intent asks to open: to write where it grants writing and the provider lets
+/// it, to read otherwise.
+fn open(viewed: &Viewed) -> Option<PickedFile> {
+    let written = viewed
+        .writable
+        .then(|| open_document(&viewed.uri, true).ok())
+        .flatten();
+    match written.map_or_else(|| open_document(&viewed.uri, false), Ok) {
+        Ok(file) => Some(file),
+        Err(error) => {
+            warn_to_log!("inset: {} could not be opened: {error}", viewed.uri);
+            None
         }
     }
 }

@@ -1,8 +1,8 @@
 //! The display's refresh, from the system's own signal.
 //!
 //! `AChoreographer` is the platform's vsync for native code, on the thread that asks for
-//! it, which here is the loop's. Flutter's engine takes the same signal for its Android
-//! `VsyncWaiter`. A callback fires once, so each one asks for the next.
+//! it, which here is the app's, whose looper calls it back. Flutter's engine takes the same
+//! signal for its Android `VsyncWaiter`. A callback fires once, so each one asks for the next.
 //!
 //! The rate the panel runs at is the system's own choice. `ANativeWindow_setFrameRate`
 //! would ask for one, but it is an API 30 symbol and this library loads on API 24, where
@@ -17,9 +17,7 @@ use std::cell::Cell;
 use std::ffi::c_void;
 use std::rc::Rc;
 
-use ndk::native_window::NativeWindow;
-
-/// The signal for one window's display, stopped when dropped.
+/// The display's signal, stopped when dropped.
 ///
 /// The state a posted callback reads is shared with it by a strong reference the callback
 /// takes back, so it outlives this handle while one is still in flight; dropping the
@@ -30,7 +28,7 @@ pub(crate) struct Vsync {
 }
 
 struct Ticks {
-    /// The choreographer for the loop's thread, which owns it for that thread's life.
+    /// The choreographer for the app's thread, which owns it for that thread's life.
     choreographer: *mut ndk_sys::AChoreographer,
     on_tick: Box<dyn Fn()>,
     /// Whether ticks are wanted; a paused signal asks for nothing.
@@ -40,10 +38,10 @@ struct Ticks {
 }
 
 impl Vsync {
-    /// Starts the signal for the display `window` is on. `None` where the thread has no
-    /// choreographer, which leaves the caller to pace frames itself.
-    pub(crate) fn start(_window: &NativeWindow, on_tick: Box<dyn Fn()>) -> Option<Vsync> {
-        // SAFETY: the instance for the calling thread, which is the loop's own and has the
+    /// Starts the signal. `None` where the thread has no choreographer, which leaves the
+    /// caller to pace frames itself.
+    pub(crate) fn start(on_tick: Box<dyn Fn()>) -> Option<Vsync> {
+        // SAFETY: the instance for the calling thread, which is the app's own and has the
         // looper a choreographer needs. Null where it has none.
         let choreographer = unsafe { ndk_sys::AChoreographer_getInstance() };
         if choreographer.is_null() {

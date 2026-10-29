@@ -1,8 +1,8 @@
 //! The file dialogs: the Storage Access Framework's document pickers (`ACTION_OPEN_DOCUMENT`,
-//! `ACTION_CREATE_DOCUMENT`), which the activity starts for a result. `NativeActivity` hands no
-//! result to native code, so the dialogs need Inset's activity, `rs.inset.InsetActivity`, which
-//! inset-cli builds into the app and whose `onActivityResult` calls the method registered here;
-//! under another activity the dialogs are `None`.
+//! `ACTION_CREATE_DOCUMENT`), which the activity in front starts for a result. `NativeActivity`
+//! hands no result to native code, so the dialogs need Inset's activity, `rs.inset.InsetActivity`,
+//! which inset-cli builds into the app and whose `onActivityResult` calls the method registered
+//! here; under another activity the dialogs are `None`.
 //!
 //! A document has no path, so each pick is opened when it is answered: `"rw"` for a writable pick,
 //! which a provider answers with a file that seeks, and `"r"` otherwise, which it may answer with a
@@ -15,8 +15,8 @@
 //! them to. They take no initial folder the app could name by a path, and no confirming label. A
 //! folder pick is the document tree `ACTION_OPEN_DOCUMENT_TREE` answers (`document_tree`).
 //!
-//! The result arrives on the activity's thread, which only hands the documents' URIs on; they are
-//! opened on the app's thread, as the app awaits them.
+//! The result arrives on the Java main thread, which only hands the documents' URIs on; they are
+//! opened through the application on the app's thread, as the app awaits them.
 
 // JNI hands the native method raw arguments, and a document arrives as a raw file descriptor;
 // that is the `unsafe` here.
@@ -30,7 +30,6 @@ use std::os::unix::fs::FileExt;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
 
-use android_activity::AndroidApp;
 use inset_embedder::{
     FileDialogError, FileDialogFuture, FileDialogs, FileFinishFuture, FileHandle, FileOpenFuture,
     FileReadFuture, FileSizeFuture, FileStream, FileType, FileWriteFuture, FileWriter,
@@ -41,7 +40,7 @@ use jni::objects::{JClass, JObject, JObjectArray, JString, JValue};
 use jni::sys::jint;
 use jni::{Env, EnvUnowned, NativeMethod, jni_sig, jni_str};
 
-use crate::activity::with_activity;
+use crate::activity::{Activities, clear_exception, with_application};
 use crate::answer::{Answer, Answered, answer};
 use crate::document_tree::DocumentFolder;
 
@@ -54,37 +53,38 @@ const GRANT_WRITE: jint = 0x2;
 /// `Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION`.
 const GRANT_PERSISTABLE: jint = 0x40;
 
-/// The pickers, where the activity is Inset's.
+/// The pickers, where the activities are Inset's.
 pub(crate) struct DocumentPickers {
-    app: AndroidApp,
+    activities: Activities,
 }
 
 impl DocumentPickers {
     /// The pickers, once the activity's result method is registered; `None` under an activity
     /// that is not Inset's, which hands no result on.
-    pub(crate) fn new(app: AndroidApp) -> Option<DocumentPickers> {
-        with_activity(&app, |env, activity| {
-            let class = env.get_object_class(activity)?;
-            let method = [
-                // SAFETY: `on_result` takes the arguments `(IILandroid/content/Intent;)V` names,
-                // as a static method's native function does.
-                unsafe {
-                    NativeMethod::from_raw_parts(
-                        jni_str!("onResult"),
-                        jni_str!("(IILandroid/content/Intent;)V"),
-                        on_result as *mut std::ffi::c_void,
-                    )
-                },
-            ];
-            // SAFETY: the method's function matches its signature, above.
-            let registered = unsafe { env.register_native_methods(&class, &method) };
-            if registered.is_err() {
-                env.exception_clear();
-            }
-            Ok(registered.is_ok())
-        })
-        .unwrap_or(false)
-        .then_some(DocumentPickers { app })
+    pub(crate) fn new(activities: Activities) -> Option<DocumentPickers> {
+        activities
+            .with_front(|env, activity| {
+                let class = env.get_object_class(activity)?;
+                let method = [
+                    // SAFETY: `on_result` takes the arguments `(IILandroid/content/Intent;)V` names,
+                    // as a static method's native function does.
+                    unsafe {
+                        NativeMethod::from_raw_parts(
+                            jni_str!("onResult"),
+                            jni_str!("(IILandroid/content/Intent;)V"),
+                            on_result as *mut std::ffi::c_void,
+                        )
+                    },
+                ];
+                // SAFETY: the method's function matches its signature, above.
+                let registered = unsafe { env.register_native_methods(&class, &method) };
+                if registered.is_err() {
+                    env.exception_clear();
+                }
+                Ok(registered.is_ok())
+            })
+            .unwrap_or(false)
+            .then_some(DocumentPickers { activities })
     }
 
     /// Starts the picker `intent` makes for a result, and answers the URIs of the documents
@@ -96,7 +96,7 @@ impl DocumentPickers {
         let request = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed);
         let (answer, answered) = one_shot();
         locked(&PENDING).insert(request, answer);
-        let started = with_activity(&self.app, |env, activity| {
+        let started = self.activities.with_front(|env, activity| {
             let intent = intent(env)?;
             env.call_method(
                 activity,
@@ -108,10 +108,7 @@ impl DocumentPickers {
         });
         if let Err(error) = started {
             locked(&PENDING).remove(&request);
-            let _ = with_activity(&self.app, |env, _| {
-                env.exception_clear();
-                Ok(())
-            });
+            clear_exception();
             let (failed, answered) = one_shot();
             failed.give(Err(FileDialogError::Failed(format!(
                 "the picker did not start: {error}"
@@ -135,11 +132,10 @@ impl DocumentPickers {
             add_flags(env, &intent, flags)?;
             Ok(intent)
         });
-        let app = self.app.clone();
         Box::pin(async move {
             let uris = picked.await?;
             uris.iter()
-                .map(|uri| open_document(&app, uri, writable))
+                .map(|uri| open_document(uri, writable))
                 .collect()
         })
     }
@@ -180,12 +176,11 @@ impl FileDialogs for DocumentPickers {
             add_flags(env, &intent, flags)?;
             Ok(intent)
         });
-        let app = self.app.clone();
         Box::pin(async move {
             let Some(tree) = picked.await?.into_iter().next() else {
                 return Ok(None);
             };
-            let folder = DocumentFolder::picked(app, &tree, writable)
+            let folder = DocumentFolder::picked(&tree, writable)
                 .map_err(|error| FileDialogError::Failed(error.to_string()))?;
             Ok(Some(PickedFolder::Handle(Box::new(folder))))
         })
@@ -209,12 +204,9 @@ impl FileDialogs for DocumentPickers {
             add_flags(env, &intent, GRANT_READ | GRANT_WRITE | GRANT_PERSISTABLE)?;
             Ok(intent)
         });
-        let app = self.app.clone();
         Box::pin(async move {
             let uris = picked.await?;
-            uris.first()
-                .map(|uri| open_document(&app, uri, true))
-                .transpose()
+            uris.first().map(|uri| open_document(uri, true)).transpose()
         })
     }
 }
@@ -368,7 +360,7 @@ static PENDING: LazyLock<Mutex<HashMap<jint, Answer<Picked>>>> = LazyLock::new(M
 /// The request codes, counted from one.
 static NEXT_REQUEST: AtomicI32 = AtomicI32::new(1);
 
-/// What `InsetActivity.onActivityResult` hands on, on the activity's thread: the URIs of the
+/// What `InsetActivity.onActivityResult` hands on, on the Java main thread: the URIs of the
 /// documents picked, as strings, which the app's thread opens.
 extern "system" fn on_result<'local>(
     mut env: EnvUnowned<'local>,
@@ -455,15 +447,11 @@ fn uri_string(env: &mut Env<'_>, uri: JObject<'_>) -> jni::errors::Result<Option
 
 /// Opens the document `uri` names, keeping its permission: a handle where it seeks, a stream
 /// where it is a pipe.
-pub(crate) fn open_document(
-    app: &AndroidApp,
-    uri: &str,
-    writable: bool,
-) -> Result<PickedFile, FileDialogError> {
-    let (fd, name) = with_activity(app, |env, activity| {
+pub(crate) fn open_document(uri: &str, writable: bool) -> Result<PickedFile, FileDialogError> {
+    let (fd, name) = with_application(|env, application| {
         let resolver = env
             .call_method(
-                activity,
+                application,
                 jni_str!("getContentResolver"),
                 jni_sig!("()Landroid/content/ContentResolver;"),
                 &[],
@@ -498,10 +486,7 @@ pub(crate) fn open_document(
         Ok((fd, name))
     })
     .map_err(|error| {
-        let _ = with_activity(app, |env, _| {
-            env.exception_clear();
-            Ok(())
-        });
+        clear_exception();
         FileDialogError::Failed(format!("the document could not be opened: {error}"))
     })?;
     // SAFETY: `detachFd` handed this descriptor over; the file owns it from here.
@@ -673,7 +658,7 @@ impl FileStream for DocumentStream {
     }
 }
 
-/// The URIs a picker answers, on their way from the activity's thread to the app's.
+/// The URIs a picker answers, on their way from the Java main thread to the app's.
 type Picked = Result<Vec<String>, FileDialogError>;
 
 /// The app's side of a pick: the URIs, once the result came.

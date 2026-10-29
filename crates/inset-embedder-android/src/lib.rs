@@ -1,10 +1,12 @@
-//! Android host: the activity's own loop, native window and input.
+//! Android host: the app's own loop, and each activity's window and input as a view of it.
 //!
 //! The entry point is `android_main`, which the platform's activity glue calls on a thread
-//! of its own with an [`AndroidApp`]. The application hands that to [`AndroidEmbedder`],
-//! which runs the loop until the activity is destroyed.
+//! of its own with an [`AndroidApp`] for each activity the system creates. The application
+//! hands that to [`AndroidEmbedder`], which attaches the activity to the app, starting the app
+//! on a thread of its own for the first, and runs the activity's thread until the activity is
+//! destroyed. The app outlives its activities, as Android's process does.
 //!
-//! The glue is [`android_activity`], the crate that owns `android_main`, the activity's
+//! The glue is [`android_activity`], the crate that owns `android_main`, each activity's
 //! lifecycle and its looper. Everything above it — the window, the surface, input, the
 //! display's refresh — is this crate's, so the host answers the framework in dart:ui's
 //! terms rather than a desktop windowing library's.
@@ -21,7 +23,13 @@ pub use pointer::{buttons_of, device_id, kind_of_tool, scroll_delta};
 #[cfg(target_os = "android")]
 mod activity;
 #[cfg(target_os = "android")]
+mod activity_thread;
+#[cfg(target_os = "android")]
 mod answer;
+#[cfg(target_os = "android")]
+mod app_loop;
+#[cfg(target_os = "android")]
+mod app_thread;
 #[cfg(target_os = "android")]
 mod chrome;
 #[cfg(target_os = "android")]

@@ -4,7 +4,8 @@
 //! An application depends on this crate instead of picking an embedder and repeating
 //! target-cfg dependencies. `DefaultEmbedder::run` is the same closure on all of them; what
 //! differs is what each host needs before it can start, which is nothing on the desktops, a
-//! canvas in the browser, and the `AndroidApp` the activity handed `android_main`.
+//! canvas in the browser, and the `AndroidApp` the activity handed `android_main`, where the
+//! closure is also sent to the app's own thread.
 //!
 //! A `wasm32-wasi` build, a component for a WASI host, has no default host: the host's own
 //! embedder crate exports the guest's start and runs the app, and this crate is empty there.
@@ -44,20 +45,25 @@ impl DefaultEmbedder {
 
     /// Starts the host loop. `start` runs once, at launch, with the views the host has then,
     /// and returns the client the host drives.
+    #[cfg(not(target_os = "android"))]
     pub fn run<C: EmbedderClient + 'static>(
         self,
         start: impl FnOnce(inset_embedder::PlatformRef) -> C + 'static,
     ) {
-        #[cfg(target_os = "android")]
-        {
-            let app = self
-                .app
-                .expect("DefaultEmbedder::android_app: the AndroidApp android_main received");
-            inset_embedder_android::AndroidEmbedder::new(app).run(start);
-        }
-        #[cfg(not(target_os = "android"))]
-        {
-            self.inner.run(start);
-        }
+        self.inner.run(start);
+    }
+
+    /// Attaches the activity to the app and runs it until the activity is destroyed; the
+    /// process's first activity starts the app. `start` runs once, on the app's own thread, which
+    /// outlives every activity, so it is sent there.
+    #[cfg(target_os = "android")]
+    pub fn run<C: EmbedderClient + 'static>(
+        self,
+        start: impl FnOnce(inset_embedder::PlatformRef) -> C + Send + 'static,
+    ) {
+        let app = self
+            .app
+            .expect("DefaultEmbedder::android_app: the AndroidApp android_main received");
+        inset_embedder_android::AndroidEmbedder::new(app).run(start);
     }
 }

@@ -9,9 +9,10 @@
 //! Android 15 the system shows a reply as sending until its notification changes, and from Android
 //! 15 it keeps a replied notification, showing the reply, until the user dismisses it.
 //!
-//! A post or a schedule never asks the user: it answers `Denied` unless the permission is granted,
-//! and only the app's `request` asks (`permission`). Under
-//! an activity that is not Inset's, or in a package without the receiver, the app has no
+//! The receiver is reached through the application, so the app posts whether or not it has an
+//! activity. A post or a schedule never asks the user: it answers `Denied` unless the permission is
+//! granted, and only the app's `request` asks, from the activity in front (`permission`). Under an
+//! activity that is not Inset's, or in a package without the receiver, the app has no
 //! notifications: nothing would hear a tap.
 //!
 //! The bundle's keys, the activation's action and extras and the reply's key are the receiver's
@@ -21,7 +22,6 @@ mod permission;
 
 use std::time::{Duration, SystemTime};
 
-use android_activity::AndroidApp;
 use inset_embedder::{
     IconImage, Notification, NotificationActivation, NotificationError, NotificationPermission,
     NotificationReplies, NotificationScheduling, Notifications, PostFuture,
@@ -32,7 +32,7 @@ use jni::sys::jint;
 use jni::{Env, jni_sig, jni_str};
 
 use self::permission::Permission;
-use crate::activity::with_activity;
+use crate::activity::{Activities, clear_exception, with_application};
 use crate::file_dialogs::string;
 use crate::log::warn_to_log;
 
@@ -45,42 +45,42 @@ const EXTRA_ACTION: &str = "rs.inset.notification.ACTION";
 /// The key of a reply among the reply field's results.
 const REPLY: &str = "rs.inset.notification.REPLY";
 
-/// The app's notifications, where the activity and the package are Inset's.
+/// The app's notifications, where the activities and the package are Inset's.
 pub(crate) struct AndroidNotifications {
-    app: AndroidApp,
     permission: Permission,
 }
 
 impl AndroidNotifications {
-    pub(crate) fn new(app: AndroidApp) -> Option<AndroidNotifications> {
-        let permission = Permission::new(app.clone())?;
-        let has_receiver = with_activity(&app, |env, activity| receiver(env, activity).map(drop));
+    pub(crate) fn new(activities: Activities) -> Option<AndroidNotifications> {
+        let permission = Permission::new(activities)?;
+        let has_receiver =
+            with_application(|env, application| receiver(env, application).map(drop));
         if has_receiver.is_err() {
-            clear_exception(&app);
+            clear_exception();
             return None;
         }
-        Some(AndroidNotifications { app, permission })
+        Some(AndroidNotifications { permission })
     }
 
     /// Hands `notification` to the receiver to show now, or at `at`, in milliseconds since the
     /// epoch, where the user lets the app notify; answers `Denied` without asking where not.
     fn hand_over(&self, notification: &Notification, at: Option<i64>) -> PostFuture {
         let handed = self.permission.allowed().and_then(|()| {
-            call_receiver(&self.app, |env, activity, receiver| {
+            call_receiver(|env, context, receiver| {
                 let bundle = bundle(env, notification)?;
                 match at {
                     None => env.call_static_method(
                         receiver,
                         jni_str!("show"),
                         jni_sig!("(Landroid/content/Context;Landroid/os/Bundle;)V"),
-                        &[JValue::Object(activity), JValue::Object(&bundle)],
+                        &[JValue::Object(context), JValue::Object(&bundle)],
                     ),
                     Some(at) => env.call_static_method(
                         receiver,
                         jni_str!("schedule"),
                         jni_sig!("(Landroid/content/Context;Landroid/os/Bundle;J)V"),
                         &[
-                            JValue::Object(activity),
+                            JValue::Object(context),
                             JValue::Object(&bundle),
                             JValue::Long(at),
                         ],
@@ -99,13 +99,13 @@ impl Notifications for AndroidNotifications {
     }
 
     fn remove(&self, id: &str) {
-        let removed = call_receiver(&self.app, |env, activity, receiver| {
+        let removed = call_receiver(|env, context, receiver| {
             let id = env.new_string(id)?;
             env.call_static_method(
                 receiver,
                 jni_str!("remove"),
                 jni_sig!("(Landroid/content/Context;Ljava/lang/String;)V"),
-                &[JValue::Object(activity), JValue::Object(&id)],
+                &[JValue::Object(context), JValue::Object(&id)],
             )
             .map(drop)
         });
@@ -143,10 +143,10 @@ impl NotificationScheduling for AndroidNotifications {
 
 /// What a tap on one of the app's notifications, one of its actions or a reply tells the app, for an
 /// intent of the receiver's; `None` for any other intent. A tap on one of its actions takes the
-/// notification away, as the action answers it. Activity's thread.
+/// notification away, as the action answers it, through `context`.
 pub(crate) fn activation(
     env: &mut Env<'_>,
-    activity: &JObject<'_>,
+    context: &JObject<'_>,
     intent: &JObject<'_>,
 ) -> jni::errors::Result<Option<NotificationActivation>> {
     let action = env
@@ -166,7 +166,7 @@ pub(crate) fn activation(
     let action = string_extra(env, intent, EXTRA_ACTION)?;
     let reply = reply(env, intent)?;
     if action.is_some() {
-        dismiss(env, activity, &id)?;
+        dismiss(env, context, &id)?;
     }
     Ok(Some(NotificationActivation { id, action, reply }))
 }
@@ -348,40 +348,40 @@ fn reply(env: &mut Env<'_>, intent: &JObject<'_>) -> jni::errors::Result<Option<
 }
 
 /// Takes away the notification shown under `id`.
-fn dismiss(env: &mut Env<'_>, activity: &JObject<'_>, id: &str) -> jni::errors::Result<()> {
-    let receiver = receiver(env, activity)?;
+fn dismiss(env: &mut Env<'_>, context: &JObject<'_>, id: &str) -> jni::errors::Result<()> {
+    let receiver = receiver(env, context)?;
     let id = env.new_string(id)?;
     env.call_static_method(
         &receiver,
         jni_str!("dismiss"),
         jni_sig!("(Landroid/content/Context;Ljava/lang/String;)V"),
-        &[JValue::Object(activity), JValue::Object(&id)],
+        &[JValue::Object(context), JValue::Object(&id)],
     )
     .map(drop)
 }
 
-/// Inset's notification receiver, through the activity's class loader: a thread the app started
+/// Inset's notification receiver, through `context`'s class loader: a thread the app started
 /// finds no class of the package's by its name alone.
 fn receiver<'local>(
     env: &mut Env<'local>,
-    activity: &JObject<'_>,
+    context: &JObject<'_>,
 ) -> jni::errors::Result<JClass<'local>> {
     let name = jni::strings::JNIString::new(RECEIVER);
-    LoaderContext::FromObject(activity).load_class(env, name, false)
+    LoaderContext::FromObject(context).load_class(env, name, false)
 }
 
-/// Calls the receiver with the activity as its context; a Java exception is the failure it
+/// Calls the receiver with the application as its context; a Java exception is the failure it
 /// describes.
 fn call_receiver(
-    app: &AndroidApp,
     call: impl for<'local> FnOnce(
         &mut Env<'local>,
         &JObject<'_>,
         &JClass<'local>,
     ) -> jni::errors::Result<()>,
 ) -> Result<(), NotificationError> {
-    with_activity(app, |env, activity| {
-        let called = receiver(env, activity).and_then(|receiver| call(env, activity, &receiver));
+    with_application(|env, application| {
+        let called =
+            receiver(env, application).and_then(|receiver| call(env, application, &receiver));
         Ok(called.map_err(|error| failure(env, &error)))
     })
     .unwrap_or_else(|error| Err(NotificationError::Failed(error.to_string())))
@@ -417,11 +417,4 @@ fn epoch_millis(at: SystemTime) -> i64 {
         .as_millis()
         .try_into()
         .unwrap_or(i64::MAX)
-}
-
-fn clear_exception(app: &AndroidApp) {
-    let _ = with_activity(app, |env, _| {
-        env.exception_clear();
-        Ok(())
-    });
 }

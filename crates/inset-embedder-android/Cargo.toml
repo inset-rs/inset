@@ -27,6 +27,7 @@ wgpu.workspace = true
 android-activity = { version = "0.6", features = ["native-activity"] }
 jni = "0.22.4"
 ndk = { version = "0.9", features = ["rwh_06"] }
+ndk-context = "0.1"
 ndk-sys = "0.6"
 
 # The NDK's C APIs — the choreographer, the native window, JNI — need `unsafe`, which the
