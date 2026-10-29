@@ -53,7 +53,7 @@ enum Place {
 
 /// Opens `menu` at `at`, in logical pixels from the top-left corner of `window`'s content.
 pub(super) fn open_in_window(
-    window: &Window,
+    window: &dyn Window,
     at: Offset,
     menu: Vec<MenuEntry>,
     events: MenuEvents,
@@ -353,7 +353,7 @@ fn mnemonic_free(label: &str) -> String {
 }
 
 /// The window's handle; `None` for a window winit gives none.
-fn hwnd(window: &Window) -> Option<HWND> {
+fn hwnd(window: &dyn Window) -> Option<HWND> {
     let handle = window.window_handle().ok()?;
     let RawWindowHandle::Win32(win32) = handle.as_raw() else {
         return None;

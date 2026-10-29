@@ -40,17 +40,21 @@ use winit::event_loop::EventLoopBuilder;
 use winit::window::Window;
 
 use super::{AppKit, abort_on_panic};
-use crate::main_loop::MainLoopEvent;
 use crate::menus::{EditAction, MenuEvent, MenuEvents};
 use crate::os::NativeMenus;
 
 pub(super) use key_equivalents::app_window_opened;
 
+/// The Dock icon's menu, as the application's delegate answers it: the one the app last set.
+pub(super) fn dock_menu() -> Option<Retained<NSMenu>> {
+    dock_menu::shown()
+}
+
 impl NativeMenus for AppKit {
     const POPUP_MENUS: bool = true;
 
     fn open_popup_menu(
-        window: &Window,
+        window: &dyn Window,
         at: Offset,
         menu: Vec<MenuEntry>,
         events: MenuEvents,
@@ -66,8 +70,7 @@ impl NativeMenus for AppKit {
 
     fn dock_menu(events: MenuEvents) -> Option<Rc<dyn DockMenu>> {
         let main_thread = MainThreadMarker::new()?;
-        dock_menu::AppDockMenu::new(main_thread, events)
-            .map(|menu| Rc::new(menu) as Rc<dyn DockMenu>)
+        Some(Rc::new(dock_menu::AppDockMenu::new(main_thread, events)))
     }
 
     fn tray_icons(events: MenuEvents) -> Option<Rc<dyn TrayIcons>> {
@@ -75,7 +78,7 @@ impl NativeMenus for AppKit {
         Some(Rc::new(tray_icons::StatusItems::new(main_thread, events)))
     }
 
-    fn configure_event_loop(builder: &mut EventLoopBuilder<MainLoopEvent>) {
+    fn configure_event_loop(builder: &mut EventLoopBuilder) {
         menu_bar::leave_winit_menu_out(builder);
     }
 

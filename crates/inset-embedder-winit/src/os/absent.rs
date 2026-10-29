@@ -34,7 +34,7 @@ pub(crate) struct NoWindowSurfaces;
 
 #[cfg(not(target_os = "ios"))]
 impl WindowSurfaces for NoWindowSurfaces {
-    fn new(_window: Arc<Window>) -> Self {
+    fn new(_window: Arc<dyn Window>) -> Self {
         NoWindowSurfaces
     }
 

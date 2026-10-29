@@ -27,7 +27,7 @@ impl NativeMenus for Windows {
     const POPUP_MENUS: bool = true;
 
     fn open_popup_menu(
-        window: &Window,
+        window: &dyn Window,
         at: Offset,
         menu: Vec<MenuEntry>,
         events: MenuEvents,

@@ -45,7 +45,7 @@ pulldown-cmark = { version = "0.13", default-features = false }
 slotmap = "1"
 unicode-general-category = "1"
 unicode-segmentation = "1"
-winit = "0.30"
+winit = "=0.31.0-beta.4"
 raw-window-handle = "0.6"
 valo = "0.13.1"
 valo-codec = "0.13.1"

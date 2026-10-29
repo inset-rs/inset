@@ -87,7 +87,7 @@ impl Opener for UiKitOpener {
         let Some(presenter) = self
             .windows
             .first_window()
-            .and_then(|window| view_controller(&window))
+            .and_then(|window| view_controller(&*window))
         else {
             return failed("no view to show the Open In menu from".to_owned());
         };

@@ -54,7 +54,7 @@ impl<C: EmbedderClient> MainLoop<C> {
     /// Someone waits, through the platform's waiter, for the next vsync of `screen`.
     pub(super) fn on_vsync_waited(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        event_loop: &dyn ActiveEventLoop,
         screen: ScreenId,
         observer: Weak<dyn VsyncObserver>,
     ) {
@@ -124,7 +124,7 @@ impl<C: EmbedderClient> MainLoop<C> {
     pub(super) fn sync_frame_scheduler(&mut self, view: ViewId) {
         match self.views().by_view(view) {
             Some(open) => {
-                let monitor = monitor_of(&open.window);
+                let monitor = monitor_of(&*open.window);
                 self.frame_scheduler
                     .follow_window(view, monitor.as_ref(), is_in_sight(&open));
             }
@@ -142,7 +142,7 @@ fn serve_waits(waiting: &[Weak<dyn VsyncObserver>], at: Instant) {
 }
 
 /// The monitor that is `screen`, if it is connected.
-fn monitor_numbered(event_loop: &ActiveEventLoop, screen: ScreenId) -> Option<MonitorHandle> {
+fn monitor_numbered(event_loop: &dyn ActiveEventLoop, screen: ScreenId) -> Option<MonitorHandle> {
     event_loop
         .available_monitors()
         .find(|monitor| ThisOs::screen_id(monitor) == screen)
@@ -154,6 +154,6 @@ fn monitor_numbered(event_loop: &ActiveEventLoop, screen: ScreenId) -> Option<Mo
 fn is_in_sight(open: &OpenWindow) -> bool {
     match &open.handle {
         Some(handle) => !handle.is_minimized() && !handle.is_occluded(),
-        None => ThisOs::is_occluded(&open.window) != Some(true),
+        None => ThisOs::is_occluded(&*open.window) != Some(true),
     }
 }

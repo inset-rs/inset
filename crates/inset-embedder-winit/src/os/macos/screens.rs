@@ -11,7 +11,6 @@ use objc2_app_kit::{NSAnimatablePropertyContainer, NSAnimationContext, NSEvent, 
 use objc2_foundation::{NSNumber, NSPoint, NSRect, NSSize, ns_string};
 use objc2_quartz_core::{CAMediaTimingFunction, kCAMediaTimingFunctionEaseInEaseOut};
 use winit::monitor::MonitorHandle;
-use winit::platform::macos::MonitorHandleExtMacOS;
 use winit::window::Window;
 
 use super::display_links::DisplayId;
@@ -19,7 +18,7 @@ use super::{AppKit, ns_window};
 use crate::os::{Screens, WindowMotion};
 
 impl WindowMotion for AppKit {
-    fn set_frame(window: &Window, frame: Rect) -> bool {
+    fn set_frame(window: &dyn Window, frame: Rect) -> bool {
         let Some(ns_window) = ns_window(window) else {
             return false;
         };
@@ -31,7 +30,7 @@ impl WindowMotion for AppKit {
     }
 
     /// With AppKit's own animation, easing in and out, as a window a person drags settles.
-    fn animate_frame(window: &Window, frame: Rect, duration: Duration) -> bool {
+    fn animate_frame(window: &dyn Window, frame: Rect, duration: Duration) -> bool {
         let Some(ns_window) = ns_window(window) else {
             return false;
         };
@@ -53,7 +52,7 @@ impl WindowMotion for AppKit {
 
     /// With AppKit's own animation of the window's place and opacity. The size stays, so the
     /// window's surface is not configured again while it moves.
-    fn show_sliding_in(window: &Window, from: Offset, duration: Duration) -> bool {
+    fn show_sliding_in(window: &dyn Window, from: Offset, duration: Duration) -> bool {
         let Some(ns_window) = ns_window(window) else {
             return false;
         };
@@ -75,7 +74,7 @@ impl WindowMotion for AppKit {
 impl Screens for AppKit {
     /// Every screen AppKit knows, the one with the menu bar first, as Flutter's macOS embedder
     /// lists them: none off the main thread, where AppKit may not be asked.
-    fn screens(_window: Option<&Window>) -> Vec<Screen> {
+    fn screens(_window: Option<&dyn Window>) -> Vec<Screen> {
         let Some(mtm) = MainThreadMarker::new() else {
             return Vec::new();
         };
@@ -91,7 +90,7 @@ impl Screens for AppKit {
     /// The display Core Graphics numbers the monitor with, which is its screen's
     /// `NSScreenNumber`, the id Flutter's macOS embedder gives a display.
     fn screen_id(monitor: &MonitorHandle) -> ScreenId {
-        ScreenId(u64::from(monitor.native_id()))
+        ScreenId(monitor.native_id())
     }
 
     fn pointer_location() -> Option<Offset> {
