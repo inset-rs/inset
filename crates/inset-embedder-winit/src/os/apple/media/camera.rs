@@ -226,8 +226,14 @@ impl CaptureSession for AvCaptureSession {
         self.shared.changes.next()
     }
 
-    fn show_on(&self, surface: Arc<dyn Surface>) {
+    fn set_preview_surface(&self, surface: Option<Arc<dyn Surface>>) {
         let mut preview = self.preview.borrow_mut();
+        let Some(surface) = surface else {
+            if let Some(gone) = preview.take() {
+                super::in_transaction(|| gone.layer.removeFromSuperlayer());
+            }
+            return;
+        };
         let layer = match preview.take() {
             Some(Preview { layer, .. }) => layer,
             None => new_preview_layer(&self.shared.session.0),

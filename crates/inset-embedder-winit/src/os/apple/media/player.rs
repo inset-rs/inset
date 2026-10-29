@@ -243,8 +243,11 @@ impl MediaPlayer for AvMediaPlayer {
         self.changes.next()
     }
 
-    fn show_on(&self, surface: Arc<dyn Surface>) {
+    fn set_video_surface(&self, surface: Option<Arc<dyn Surface>>) {
         self.leave_destination();
+        let Some(surface) = surface else {
+            return;
+        };
         // SAFETY: a layer of the player, made on the main thread.
         let layer = unsafe { AVPlayerLayer::playerLayerWithPlayer(Some(&self.player)) };
         // SAFETY: a constant AVFoundation exports for the life of the process.
@@ -368,7 +371,7 @@ impl MediaPlayer for FailedPlayer {
         self.changes.next()
     }
 
-    fn show_on(&self, _surface: Arc<dyn Surface>) {}
+    fn set_video_surface(&self, _surface: Option<Arc<dyn Surface>>) {}
 
     fn read_frames(&self) -> Arc<dyn FrameReader> {
         Arc::new(super::frames::NoFrames)

@@ -60,20 +60,26 @@ mod windows;
 
 use inset_embedder::{EmbedderClient, PlatformRef};
 
-/// The system's players without the event loop, for a test that serves the main thread itself, as
-/// AVFoundation changes a player's state on the main queue. Not an API.
+/// The system's players and compositor without the event loop, for a test that serves the main
+/// thread itself, as AVFoundation changes a player's state on the main queue. Not an API.
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub mod test_support {
     use std::rc::Rc;
+    use std::sync::Arc;
 
-    use inset_embedder::Players;
+    use inset_embedder::{Compositor, Players};
 
-    use crate::os::{SystemMedia, ThisOs};
+    use crate::os::{NativeComposition, SystemMedia, ThisOs};
 
     /// The system's players, as `Platform::players` answers them; on the main thread.
     pub fn players() -> Option<Rc<dyn Players>> {
         ThisOs::players()
+    }
+
+    /// The system's compositor, as `Platform::compositor` answers it.
+    pub fn compositor() -> Option<Arc<dyn Compositor>> {
+        ThisOs::compositor()
     }
 }
 

@@ -7,10 +7,14 @@
 //! one use (`AVCaptureSession` with its preview layer and its photo, video data and movie file
 //! outputs, CameraX's use cases).
 //!
-//! A player or a camera's picture goes to one destination at a time: shown on a [`Surface`],
-//! where the system draws it into the surface's own layer, which is the only way protected and
-//! HDR video show at all, with no copy; or read as frames, the newest each time, for the app's
-//! GPU ([`FrameReader`]). A camera's photos are encoded by the system and its recordings encoded
+//! Every system has two levels: a view that takes a player (`AVPlayerLayer(player:)`, Media3's
+//! `PlayerView.player`), which is the framework's, and a player that puts its pictures on a
+//! surface it is given (Media3's `setVideoSurface`), which is the host's and this module's. A
+//! player or a camera's picture goes to one destination at a time: a [`Surface`] it is given
+//! ([`MediaPlayer::set_video_surface`], [`CaptureSession::set_preview_surface`]), where the system
+//! draws it into the surface's own layer, which is the only way protected and HDR video show at
+//! all, with no copy; or a frame reader, the newest picture each time, for the app's GPU
+//! ([`FrameReader`]). A camera's photos are encoded by the system and its recordings encoded
 //! and written to a file by the system: the app encodes nothing.
 //!
 //! The platform answers `None` where its system has no players or no cameras. A player or a
@@ -66,11 +70,12 @@ pub trait MediaPlayer {
     /// called, or once the player is gone.
     fn changed(&self) -> MediaChangeFuture;
 
-    /// Shows the picture on `surface` from now on, drawn by the system into the surface's
-    /// layer, and nowhere else: neither on the surface it showed on before nor to a frame
-    /// reader. The player holds the surface while it shows on it, as a producer does. A surface
-    /// no compositor of this host opened shows nothing.
-    fn show_on(&self, surface: Arc<dyn Surface>);
+    /// Puts the picture on `surface` from now on, drawn by the system into the surface's layer,
+    /// as Media3's `setVideoSurface` does, and nowhere else: neither on the surface it was on
+    /// before nor to a frame reader. `None` puts it nowhere. The player holds the surface while
+    /// it shows on it, as a producer does. A surface no compositor of this host opened shows
+    /// nothing.
+    fn set_video_surface(&self, surface: Option<Arc<dyn Surface>>);
 
     /// Hands the picture to a frame reader from now on, and to no surface; a reader asked for
     /// before reads nothing more.
@@ -180,10 +185,11 @@ pub trait CaptureSession {
     /// called, or once the session is gone.
     fn changed(&self) -> MediaChangeFuture;
 
-    /// Shows the camera's preview on `surface` from now on, drawn by the system into the
-    /// surface's layer, and on no surface it showed on before. The session holds the surface
-    /// while it shows on it. A surface no compositor of this host opened shows nothing.
-    fn show_on(&self, surface: Arc<dyn Surface>);
+    /// Puts the camera's preview on `surface` from now on, drawn by the system into the
+    /// surface's layer, and on no surface it was on before; `None` puts it nowhere. The session
+    /// holds the surface while it shows on it. A surface no compositor of this host opened shows
+    /// nothing.
+    fn set_preview_surface(&self, surface: Option<Arc<dyn Surface>>);
 
     /// The camera's frames, the newest each time.
     fn frame_output(&self) -> Arc<dyn FrameReader>;

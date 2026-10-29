@@ -11,14 +11,17 @@ use inset_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle};
 use super::{PictureSource, SurfacePicture};
 use crate::framework::{BuildContext, IntoWidget, KeyRef, StatelessWidget, WidgetRef};
 
-/// A player of one source, which loads by itself: the host's player, whose listeners hear its
-/// state change. A source the system cannot play gives a player whose state is a failure.
+/// A player of the media at one URL, which loads by itself: the host's player, whose listeners
+/// hear its state change. A URL the system cannot play gives a player whose state is a failure.
 pub struct Player {
     change_notifier: ChangeNotifierData,
     /// The host's player, until [`dispose`](Player::dispose).
     host: Option<Rc<dyn MediaPlayer>>,
     /// The host's state when it last changed.
     state: PlayerState,
+    /// The surface the video was put on last, which a [`VideoView`] puts it nowhere from only
+    /// while it is still its own.
+    video_surface: Option<Arc<dyn Surface>>,
 }
 
 impl Player {
@@ -32,6 +35,7 @@ impl Player {
             change_notifier: ChangeNotifierData::new(),
             state: host.state(),
             host: Some(host),
+            video_surface: None,
         });
         player.follow(app, changed);
         Some(player)
@@ -70,22 +74,26 @@ impl Player {
         self.host(app).set_looping(looping);
     }
 
-    /// Shows the video on `surface` from now on, and on no surface or frame reader it went to
-    /// before: what [`VideoView`] does with a surface of its own.
-    pub fn show_on(self: Handle<Self>, app: &App, surface: Arc<dyn Surface>) {
-        self.host(app).show_on(surface);
+    /// Puts the video on `surface` from now on, and on no surface or frame reader it went to
+    /// before; `None` puts it nowhere: Media3's `setVideoSurface`, which [`VideoView`] calls with
+    /// a surface of its own as it is mounted, and with `None` as it is unmounted.
+    pub fn set_video_surface(self: Handle<Self>, app: &mut App, surface: Option<Arc<dyn Surface>>) {
+        self.host(app).set_video_surface(surface.clone());
+        app.get_mut(self).video_surface = surface;
     }
 
     /// Hands the video to a frame reader from now on, and to no surface.
-    pub fn read_frames(self: Handle<Self>, app: &App) -> Arc<dyn FrameReader> {
+    pub fn read_frames(self: Handle<Self>, app: &mut App) -> Arc<dyn FrameReader> {
+        app.get_mut(self).video_surface = None;
         self.host(app).read_frames()
     }
 
-    /// Stops the player and lets go of the host's: its picture leaves the surface it showed on.
+    /// Stops the player and lets go of the host's: its picture leaves the surface it was on.
     /// Its listeners hear nothing more.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
         let player = app.get_mut(self);
         player.host = None;
+        player.video_surface = None;
         player.change_notifier.dispose();
     }
 
@@ -150,8 +158,12 @@ impl fmt::Debug for Player {
 }
 
 impl PictureSource for Player {
-    fn show_on(handle: Handle<Self>, app: &mut App, surface: Arc<dyn Surface>) {
-        handle.show_on(app, surface);
+    fn set_surface(handle: Handle<Self>, app: &mut App, surface: Option<Arc<dyn Surface>>) {
+        handle.set_video_surface(app, surface);
+    }
+
+    fn surface(handle: Handle<Self>, app: &App) -> Option<&Arc<dyn Surface>> {
+        app.get(handle).video_surface.as_ref()
     }
 
     fn picture_size(handle: Handle<Self>, app: &App) -> Option<Size> {
@@ -316,10 +328,10 @@ mod tests {
         let opened = compositor.opened();
         assert_eq!(opened.len(), 1, "one surface, of the view the video is in");
         assert!(!opened[0].opaque);
-        let shown_on = players.opened()[0]
-            .shown_on()
-            .expect("shown on the surface");
-        assert!(Arc::ptr_eq(&shown_on, &opened[0].surface));
+        let video_surface = players.opened()[0]
+            .video_surface()
+            .expect("put on the view's surface");
+        assert!(Arc::ptr_eq(&video_surface, &opened[0].surface));
         assert!(
             view.last_scene().unwrap().surfaces.is_empty(),
             "no room, and nothing placed, until the size is known"
@@ -335,5 +347,42 @@ mod tests {
             scene.surfaces[0].rect,
             inset_embedder::Rect::from_ltwh(240.0, 210.0, 320.0, 180.0)
         );
+    }
+
+    #[test]
+    fn a_video_view_puts_its_player_nowhere_as_it_goes_unless_another_took_it_since() {
+        let players = MockPlayers::new();
+        let view = Rc::new(TestView::new(800.0, 600.0));
+        let cell = app_with(&players, &MockCompositor::new(), &view);
+        let player = Player::new(&mut cell.borrow_mut(), "https://example.com/a.mp4").unwrap();
+        let host = &players.opened()[0];
+        mount(&cell, VideoView::new(player).into_widget());
+        assert!(host.video_surface().is_some());
+        mount(&cell, crate::SizedBox::new().into_widget());
+        assert!(
+            host.video_surface().is_none(),
+            "unmounted, it puts the video nowhere"
+        );
+        assert_eq!(
+            host.calls().last(),
+            Some(&PlayerCall::SetVideoSurface(false))
+        );
+
+        mount(&cell, VideoView::new(player).into_widget());
+        let elsewhere = inset_embedder::test_support::idle_surface();
+        player.set_video_surface(&mut cell.borrow_mut(), Some(Arc::clone(&elsewhere)));
+        mount(&cell, crate::SizedBox::new().into_widget());
+        assert!(
+            host.video_surface()
+                .is_some_and(|surface| Arc::ptr_eq(&surface, &elsewhere)),
+            "a view leaves alone a surface it did not set"
+        );
+    }
+
+    /// Runs `widget` as the app's content, and its first frame.
+    fn mount(cell: &AppCell, widget: crate::WidgetRef) {
+        run_app(&mut cell.borrow_mut(), widget);
+        cell.elapse(Duration::ZERO);
+        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
     }
 }

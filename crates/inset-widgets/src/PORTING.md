@@ -128,9 +128,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the host's session is the system's, whose outputs are its own, and a platform without cameras answers none.
   Affect: `CameraSession::new` answers `None` where the platform has no cameras, a photo arrives as encoded bytes and a recording at the app's path.
 
-- Change: a `VideoView` or a `CameraPreview` opens a surface under the root of the view it is in and shows its player or session there, which the system draws into.
+- Change: a `VideoView` or a `CameraPreview` opens a surface under the root of the view it is in and puts its player's or session's picture there as it is mounted, which the system draws into, and nowhere as it is unmounted, unless another view took it since.
   Reason: platform — the picture is drawn by the system into the surface's layer, which no frame of the framework's touches.
-  Affect: a player or a session shows on the view built for it last, and nothing shows where the host has no compositor.
+  Affect: a player or a session shows on the view built for it last and nowhere once its views are gone, and nothing shows where the host has no compositor.
 
 ## widgets/banner.rs → banner.dart
 
