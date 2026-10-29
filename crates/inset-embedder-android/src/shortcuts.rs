@@ -1,55 +1,30 @@
 //! Pinned shortcuts: an icon of the app's own on the home screen that opens one view, through the
-//! framework's `ShortcutManager` (API 26). Asking the launcher to pin one has the launcher ask the
-//! user (`requestPinShortcut`); the launcher answers through Inset's shortcut receiver
-//! (`rs.inset.InsetShortcutReceiver`, which inset-cli builds into the app and declares) once the
-//! user pinned it, and says nothing when the user declined. Android lets no app remove a pinned
-//! shortcut: the app changes its label or icon, or disables it, greyed out with a message, and
-//! the user removes it.
+//! framework's `ShortcutManager` (API 26). Asking the launcher to pin one hands it the request
+//! (`requestPinShortcut`), which may take seconds, so the call runs on a thread of its own; the
+//! launcher then asks the user, whose answer Android tells no app. Android lets no app remove a
+//! pinned shortcut: the app changes its label or icon, or disables it, greyed out with a message,
+//! and the user removes it.
 //!
 //! A shortcut starts Inset's document activity with the shortcut's initial data (`task`), so it
 //! finds the task that has that data, or starts one whose view the platform gives the app,
 //! carrying the data.
 
-// JNI hands the native method raw arguments; that is the `unsafe` here.
-#![allow(unsafe_code)]
-
-use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
 
 use inset_embedder::IconImage;
-use jni::errors::LogErrorAndDefault;
-use jni::objects::{JClass, JObject, JValue};
-use jni::sys::jint;
-use jni::{Env, EnvUnowned, NativeMethod, jni_sig, jni_str};
+use jni::objects::{JObject, JValue};
+use jni::{Env, jni_sig, jni_str};
 
-use crate::activity::{clear_exception, device_api_level, package_class, with_application};
-use crate::answer::{Answer, answer};
+use crate::activity::{clear_exception, device_api_level, with_application};
+use crate::answer::answer;
 use crate::bitmap::fitted_bitmap;
 use crate::log::warn_to_log;
 use crate::task::document_intent;
 
-/// Inset's shortcut receiver, which hears the launcher's answer.
-const RECEIVER: &str = "rs.inset.InsetShortcutReceiver";
-/// The extra of the launcher's answer numbering the request: the receiver's own.
-const EXTRA_REQUEST: &str = "rs.inset.shortcut.REQUEST";
 /// The first release whose launcher pins an app's shortcuts on request.
 const PINS_ON_REQUEST: i32 = 26;
-/// `PendingIntent.FLAG_IMMUTABLE`.
-const IMMUTABLE: jint = 0x0400_0000;
-/// `PendingIntent.FLAG_UPDATE_CURRENT`.
-const UPDATE_CURRENT: jint = 0x0800_0000;
-
-/// The launcher's answer to one request, on its way to the app.
-type PinAnswer = Answer<Result<(), PinError>>;
-
-/// The requests waiting for the launcher's answer, by number.
-static PENDING: LazyLock<Mutex<HashMap<jint, PinAnswer>>> = LazyLock::new(Mutex::default);
-/// The requests' numbers, counted from one.
-static NEXT_REQUEST: AtomicI32 = AtomicI32::new(1);
 
 /// A shortcut on the home screen that opens one view.
 #[derive(Clone, Debug, PartialEq)]
@@ -81,54 +56,35 @@ impl fmt::Display for PinError {
 
 impl std::error::Error for PinError {}
 
-/// The launcher's answer to a request to pin: `Ok` once the user pinned the shortcut. Android
-/// tells no app that the user declined, so then it never resolves.
+/// Whether the launcher has a request to pin: `Ok` once it has it, before the user answers, which
+/// Android tells no app.
 pub type PinFuture = Pin<Box<dyn Future<Output = Result<(), PinError>>>>;
 
-/// The app's pinned shortcuts, reached as `AndroidPlatform::pinned_shortcuts`.
-pub struct PinnedShortcuts {
-    /// Whether the receiver hands the launcher's answers on, as in a package inset-cli built.
-    answers_heard: bool,
-}
+/// The app's pinned shortcuts, reached as `AndroidPlatform::pinned_shortcuts`: the system's
+/// `ShortcutManager`, which holds them.
+pub struct PinnedShortcuts(());
 
 impl PinnedShortcuts {
-    /// The shortcuts, with the receiver's answer method registered where the package has it.
     pub(crate) fn new() -> PinnedShortcuts {
-        let registered = with_application(register_answers);
-        if registered.is_err() {
-            clear_exception();
-        }
-        PinnedShortcuts {
-            answers_heard: registered.is_ok(),
-        }
+        PinnedShortcuts(())
     }
 
-    /// Asks the launcher to pin `shortcut`; the launcher asks the user.
+    /// Asks the launcher to pin `shortcut`; the launcher asks the user. The future answers once the
+    /// launcher has the request, not when the user has answered it.
     pub fn request_pin(&self, shortcut: &PinnedShortcut) -> PinFuture {
         if device_api_level() < PINS_ON_REQUEST {
             return Box::pin(std::future::ready(Err(PinError::Unsupported)));
         }
-        if !self.answers_heard {
-            return Box::pin(std::future::ready(Err(PinError::Failed(
-                "the package has no Inset shortcut receiver to hear the answer; inset-cli declares one"
-                    .to_owned(),
-            ))));
-        }
-        let request = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed);
-        let (answer, answered) = answer(Err(PinError::Failed("no answer came".to_owned())));
-        locked(&PENDING).insert(request, answer);
-        let asked =
-            with_application(|env, application| ask_to_pin(env, application, shortcut, request))
-                .unwrap_or_else(|error| {
-                    clear_exception();
-                    Err(PinError::Failed(error.to_string()))
-                });
-        if let Err(error) = asked
-            && let Some(answer) = locked(&PENDING).remove(&request)
-        {
-            answer.give(Err(error));
-        }
-        Box::pin(answered)
+        // Answered on the thread, or, dropped with it where no thread could be made, answered
+        // that the request was not handed over.
+        let (handed, handed_over) = answer(Err(PinError::Failed(
+            "the request was not handed to the launcher".to_owned(),
+        )));
+        let shortcut = shortcut.clone();
+        let _ = std::thread::Builder::new()
+            .name("inset-shortcut-pin".into())
+            .spawn(move || handed.give(hand_over(&shortcut)));
+        Box::pin(handed_over)
     }
 
     /// Changes a pinned shortcut's label, icon or what its view carries.
@@ -187,13 +143,22 @@ impl PinnedShortcuts {
     }
 }
 
-/// Asks the launcher to pin `shortcut`, its answer to come to the receiver numbered `request`;
-/// an error where the launcher pins nothing or was not asked.
+/// Hands the launcher the request to pin `shortcut`: the launcher's word that it has it.
+fn hand_over(shortcut: &PinnedShortcut) -> Result<(), PinError> {
+    with_application(|env, application| ask_to_pin(env, application, shortcut)).unwrap_or_else(
+        |error| {
+            clear_exception();
+            Err(PinError::Failed(error.to_string()))
+        },
+    )
+}
+
+/// Asks the launcher to pin `shortcut`; an error where the launcher pins nothing or would not
+/// take the request.
 fn ask_to_pin(
     env: &mut Env<'_>,
     context: &JObject<'_>,
     shortcut: &PinnedShortcut,
-    request: jint,
 ) -> jni::errors::Result<Result<(), PinError>> {
     let manager = shortcut_manager(env, context)?;
     let supported = env
@@ -208,19 +173,21 @@ fn ask_to_pin(
         return Ok(Err(PinError::Unsupported));
     }
     let info = shortcut_info(env, context, &manager, shortcut)?;
-    let answer_to = answer_sender(env, context, request)?;
-    let asked = env
+    let no_answer_wanted = JObject::null();
+    let taken = env
         .call_method(
             &manager,
             jni_str!("requestPinShortcut"),
             jni_sig!("(Landroid/content/pm/ShortcutInfo;Landroid/content/IntentSender;)Z"),
-            &[JValue::Object(&info), JValue::Object(&answer_to)],
+            &[JValue::Object(&info), JValue::Object(&no_answer_wanted)],
         )?
         .z()?;
-    Ok(if asked {
+    Ok(if taken {
         Ok(())
     } else {
-        Err(PinError::Failed("the launcher was not asked".to_owned()))
+        Err(PinError::Failed(
+            "the launcher would not take the request".to_owned(),
+        ))
     })
 }
 
@@ -289,53 +256,6 @@ fn shortcut_info<'local>(
     .l()
 }
 
-/// Where the launcher sends its answer to request `request`: a broadcast to Inset's shortcut
-/// receiver, its number as an extra and as the pending intent's own, so that no two requests share
-/// one.
-fn answer_sender<'local>(
-    env: &mut Env<'local>,
-    context: &JObject<'_>,
-    request: jint,
-) -> jni::errors::Result<JObject<'local>> {
-    let intent = env.new_object(jni_str!("android/content/Intent"), jni_sig!("()V"), &[])?;
-    let receiver = env.new_string(RECEIVER)?;
-    env.call_method(
-        &intent,
-        jni_str!("setClassName"),
-        jni_sig!("(Landroid/content/Context;Ljava/lang/String;)Landroid/content/Intent;"),
-        &[JValue::Object(context), JValue::Object(&receiver)],
-    )?;
-    let key = env.new_string(EXTRA_REQUEST)?;
-    env.call_method(
-        &intent,
-        jni_str!("putExtra"),
-        jni_sig!("(Ljava/lang/String;I)Landroid/content/Intent;"),
-        &[JValue::Object(&key), JValue::Int(request)],
-    )?;
-    let pending = env
-        .call_static_method(
-            jni_str!("android/app/PendingIntent"),
-            jni_str!("getBroadcast"),
-            jni_sig!(
-                "(Landroid/content/Context;ILandroid/content/Intent;I)Landroid/app/PendingIntent;"
-            ),
-            &[
-                JValue::Object(context),
-                JValue::Int(request),
-                JValue::Object(&intent),
-                JValue::Int(IMMUTABLE | UPDATE_CURRENT),
-            ],
-        )?
-        .l()?;
-    env.call_method(
-        &pending,
-        jni_str!("getIntentSender"),
-        jni_sig!("()Landroid/content/IntentSender;"),
-        &[],
-    )?
-    .l()
-}
-
 fn shortcut_manager<'local>(
     env: &mut Env<'local>,
     context: &JObject<'_>,
@@ -362,43 +282,4 @@ fn one_element_list<'local>(
         &[JValue::Object(element)],
     )?
     .l()
-}
-
-/// Registers `InsetShortcutReceiver.onPinned`, which the receiver calls with the launcher's
-/// answer.
-fn register_answers(env: &mut Env<'_>, application: &JObject<'_>) -> jni::errors::Result<()> {
-    let class = package_class(env, application, RECEIVER)?;
-    let method = [
-        // SAFETY: `on_pinned` takes the arguments `(I)V` names, as a static method's native
-        // function does.
-        unsafe {
-            NativeMethod::from_raw_parts(
-                jni_str!("onPinned"),
-                jni_str!("(I)V"),
-                on_pinned as *mut std::ffi::c_void,
-            )
-        },
-    ];
-    // SAFETY: the method's function matches its signature, above.
-    unsafe { env.register_native_methods(&class, &method) }
-}
-
-/// What `InsetShortcutReceiver.onReceive` hands on, on the Java main thread: the user pinned the
-/// shortcut asked for with `request`.
-extern "system" fn on_pinned<'local>(
-    mut env: EnvUnowned<'local>,
-    _class: JClass<'local>,
-    request: jint,
-) {
-    env.with_env(|_env| -> jni::errors::Result<()> {
-        if let Some(answer) = locked(&PENDING).remove(&request) {
-            answer.give(Ok(()));
-        }
-        Ok(())
-    })
-    .resolve::<LogErrorAndDefault>();
-}
-
-fn locked<T>(shared: &Mutex<T>) -> MutexGuard<'_, T> {
-    shared.lock().unwrap_or_else(PoisonError::into_inner)
 }
