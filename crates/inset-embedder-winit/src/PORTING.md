@@ -63,7 +63,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Valo paints `.notdef` tofu unless asked not to.
   Affect: a character with no face occupies layout space and draws nothing.
 
-## trackpad.rs / main_loop/input.rs → the macOS embedder's trackpad gestures (`FlutterViewController.mm`, `dispatchGestureEvent:`)
+## trackpad.rs / main_loop/input.rs / os/macos/trackpad_touches.rs → the macOS embedder's trackpad gestures (`FlutterViewController.mm`, `dispatchGestureEvent:`, `touchesBeganWithEvent:`)
 
 - Change: the trackpad's scroll, pinch and rotation are each under way from winit's `Started` to its `Ended` or `Cancelled`, where Flutter keeps AppKit's phases and counts a gesture that may begin as not under way.
   Reason: platform — winit reports AppKit's may-begin and began both as `Started`.
@@ -72,6 +72,10 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - Change: a scroll that winit names neither the fingers' nor the system's momentum, a wheel's turn or one whose source it cannot tell, is the mouse's scroll signal, where Flutter's Windows and Linux embedders make a trackpad's scroll a pan-zoom too.
   Reason: platform — winit tells a scroll's source on macOS and Wayland alone.
   Affect: on Windows and X11 a trackpad scrolls as a wheel does, with the system's own momentum, and pinches nothing.
+
+- Change: a touch on the trackpad within 50 ms of the system's momentum moving sends the scroll-inertia cancel, timed by when the embedder hears each where Flutter compares the events' own times.
+  Reason: platform — winit reports neither a trackpad's touches nor its events' times, so the embedder hears the touches itself.
+  Affect: a fling stops when the trackpad is touched during it, unless the main thread is held up between the momentum and the touch for longer than the window.
 
 ## keyboard.rs / keys.rs
 
@@ -353,7 +357,6 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - Registering a StatusNotifierItem again when the watcher comes back on the bus, and a tray that appears after the app started. Trigger: a desktop whose panel restarts.
 - Bringing the app forward on a click on Linux, with the activation token a server sends before `ActionInvoked` (`ActivationToken`, specification 1.2): winit activates no window already shown with a token. Trigger: winit taking an `xdg_activation` token for a shown window.
 - Forwarding the editing commands macOS names for a key, which winit reports from 0.31 through `ApplicationHandlerExtMacOS::standard_key_binding`: until then `handles_editing_keys` answers no and text fields are edited by the framework's own key bindings. Trigger: a user's own key bindings, or macOS's Control-key editing bindings, in a text field.
-- The scroll-inertia cancel Flutter's macOS embedder sends when the trackpad is touched just after the system's momentum (`touchesBeganWithEvent:`). Trigger: winit reporting a trackpad's touches.
 - A pen's barrel and other buttons, as Flutter's stylus buttons. Trigger: an app that reads a stylus's secondary button.
 - A menu item's icon at the screen's scale on Windows, where it shows at its own size in pixels. Trigger: a menu with icons on a display scaled above 100%.
 - Translating the labels of macOS's and Windows' provided items, which are English. Trigger: an app localized beyond English.

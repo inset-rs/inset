@@ -4,7 +4,8 @@
 //! device, which the first of them to begin starts and the last of them to end ends, since the
 //! framework takes one `PanZoomStart` at a time. Its pan, scale and rotation are accumulated from
 //! each. The system's momentum after the fingers lift is not one of them: the framework makes its
-//! own fling, and the main loop leaves the momentum out (`main_loop/input.rs`).
+//! own fling, so the momentum only marks when a touch on the trackpad stops that fling, with the
+//! scroll-inertia cancel Flutter's `touchesBeganWithEvent:` sends.
 //!
 //! The engine's part is done here too, as the mouse's is (`pointer.rs`): the device is added
 //! before its first gesture and never removed, each gesture is a press of its own, each update
@@ -13,14 +14,21 @@
 //! (`PointerDataPacketConverter`).
 
 use std::f64::consts::PI;
+use std::time::{Duration, Instant};
 
-use inset_embedder::{PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
+use inset_embedder::{
+    PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
+};
 use winit::event::{MouseScrollDelta, TouchPhase};
 
 use crate::pointer::{PointerIds, PointerStamp};
 
 /// Flutter's macOS embedder's `kPointerPanZoomDeviceId`: the mouse is device 0.
 const PAN_ZOOM_DEVICE: i64 = 1;
+
+/// How soon after the system's momentum last moved a touch on the trackpad stops the framework's
+/// fling: Flutter's `kTrackpadTouchInertiaCancelWindowMs`.
+const INERTIA_CANCEL_WINDOW: Duration = Duration::from_millis(50);
 
 /// One of the gestures the pan-zoom is made of.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,6 +65,9 @@ pub(crate) struct Trackpad {
     reported_at: [f64; 2],
     /// Flutter's `pointerIdentifier` of the gesture under way.
     pointer_id: i64,
+    /// When the system's momentum last moved: Flutter's `last_scroll_momentum_changed_time`,
+    /// kept until a touch cancels the fling or a scroll starts.
+    momentum_moved_at: Option<Instant>,
 }
 
 impl Trackpad {
@@ -112,6 +123,36 @@ impl Trackpad {
         })
     }
 
+    /// The system's momentum after the fingers lifted, in `phase`, at `now`. The framework does not
+    /// hear it, since it makes its own fling; a move marks when a touch stops that fling. Its start
+    /// does not, as Flutter waits for the first change: macOS can report a touch between the two
+    /// in low power mode.
+    pub(crate) fn momentum(&mut self, phase: TouchPhase, now: Instant) {
+        if phase == TouchPhase::Moved {
+            self.momentum_moved_at = Some(now);
+        }
+    }
+
+    /// Fingers came down on the trackpad at `touched_at`, with the mouse at `at`: Flutter's
+    /// `touchesBeganWithEvent:`. Within `INERTIA_CANCEL_WINDOW` of the system's momentum moving,
+    /// the framework hears a scroll-inertia cancel, which stops its fling, once.
+    pub(crate) fn touched(
+        &mut self,
+        touched_at: Instant,
+        at: [f64; 2],
+        stamp: PointerStamp,
+        ids: &mut PointerIds,
+    ) -> Option<PointerDataPacket> {
+        let moved_at = self.momentum_moved_at?;
+        if touched_at.saturating_duration_since(moved_at) >= INERTIA_CANCEL_WINDOW {
+            return None;
+        }
+        self.momentum_moved_at = None;
+        let mut data: Vec<PanZoomDatum> = self.located_at(at).into_iter().collect();
+        data.push(self.inertia_cancel(at));
+        packet(data, stamp, ids)
+    }
+
     /// One event of `gesture`: `dispatchGestureEvent:`'s start, update or end, an update first
     /// applying `change`.
     fn gesture(
@@ -134,8 +175,8 @@ impl Trackpad {
     }
 
     /// `gesture` began: the pan-zoom starts, as a press of its own, unless another gesture
-    /// already started it. The device is added before its first, and hovers to where the mouse
-    /// is before a later one.
+    /// already started it, after the device is located at the mouse. A scroll starting ends what
+    /// the system's momentum marked, as Flutter's does.
     fn start(
         &mut self,
         gesture: Gesture,
@@ -143,6 +184,9 @@ impl Trackpad {
         stamp: PointerStamp,
         ids: &mut PointerIds,
     ) -> Option<PointerDataPacket> {
+        if gesture == Gesture::Pan {
+            self.momentum_moved_at = None;
+        }
         self.set_under_way(gesture, true);
         if self.started {
             return None;
@@ -150,15 +194,19 @@ impl Trackpad {
         self.started = true;
         self.pointer_id = ids.next_pointer();
         self.reported_pan = [0.0, 0.0];
-        let mut data = Vec::new();
-        if !std::mem::replace(&mut self.added, true) {
-            data.push(self.datum(PointerChange::Add, at));
-            self.reported_at = at;
-        } else if self.reported_at != at {
-            data.push(self.moved_datum(PointerChange::Hover, at).synthesized());
-        }
+        let mut data: Vec<PanZoomDatum> = self.located_at(at).into_iter().collect();
         data.push(self.datum(PointerChange::PanZoomStart, at));
         packet(data, stamp, ids)
+    }
+
+    /// The engine's part before the device acts at `at`: its add before its first act, and a hover
+    /// there before a later one away from where it was last reported.
+    fn located_at(&mut self, at: [f64; 2]) -> Option<PanZoomDatum> {
+        if !std::mem::replace(&mut self.added, true) {
+            self.reported_at = at;
+            return Some(self.datum(PointerChange::Add, at));
+        }
+        (self.reported_at != at).then(|| self.moved_datum(PointerChange::Hover, at).synthesized())
     }
 
     /// The pan-zoom changed: the framework hears its pan, scale and rotation so far. An update
@@ -211,11 +259,13 @@ impl Trackpad {
         }
     }
 
-    /// Flutter's `GestureReset`; the engine keeps where the device is.
+    /// Flutter's `GestureReset`; the engine keeps where the device is, and the momentum is no
+    /// gesture's.
     fn reset_gesture(&mut self) {
         *self = Trackpad {
             added: self.added,
             reported_at: self.reported_at,
+            momentum_moved_at: self.momentum_moved_at,
             ..Trackpad::default()
         };
     }
@@ -235,6 +285,7 @@ impl Trackpad {
     fn datum(&self, change: PointerChange, at: [f64; 2]) -> PanZoomDatum {
         let mut datum = PanZoomDatum {
             change,
+            signal_kind: None,
             at,
             delta: [0.0, 0.0],
             synthesized: change == PointerChange::Add,
@@ -259,11 +310,22 @@ impl Trackpad {
         }
         datum
     }
+
+    /// The scroll-inertia cancel at `at`: a signal of no press, its change the cancel Flutter's
+    /// macOS embedder leaves the event's phase at.
+    fn inertia_cancel(&self, at: [f64; 2]) -> PanZoomDatum {
+        PanZoomDatum {
+            signal_kind: Some(PointerSignalKind::ScrollInertiaCancel),
+            pointer_identifier: 0,
+            ..self.datum(PointerChange::Cancel, at)
+        }
+    }
 }
 
 /// One change of the pan-zoom pointer, before it is in a view.
 struct PanZoomDatum {
     change: PointerChange,
+    signal_kind: Option<PointerSignalKind>,
     at: [f64; 2],
     delta: [f64; 2],
     /// Whether the engine makes it, rather than the system's event.
@@ -299,6 +361,7 @@ fn packet(
             embedder_id: ids.next_embedder(),
             time_stamp: stamp.time_stamp,
             change: datum.change,
+            signal_kind: datum.signal_kind,
             kind: PointerDeviceKind::Trackpad,
             synthesized: datum.synthesized,
             device: PAN_ZOOM_DEVICE,
@@ -548,5 +611,114 @@ mod tests {
         fixture.pinch(TouchPhase::Started, 0.0);
         let pinched = data(fixture.pinch(TouchPhase::Moved, f64::NAN));
         assert_eq!(pinched[0].scale, 1.0);
+    }
+
+    impl Fixture {
+        fn momentum(&mut self, phase: TouchPhase, now: Instant) {
+            self.trackpad.momentum(phase, now);
+        }
+
+        fn touch(&mut self, touched_at: Instant, at: [f64; 2]) -> Option<PointerDataPacket> {
+            self.trackpad
+                .touched(touched_at, at, stamp(), &mut self.ids)
+        }
+
+        /// A fling of the fingers: a scroll from its start to its end, then the system's momentum
+        /// starting and moving at `moved_at`.
+        fn fling(&mut self, moved_at: Instant) {
+            self.scroll(TouchPhase::Started, 0.0, 0.0);
+            self.scroll(TouchPhase::Moved, 16.0, 32.0);
+            self.scroll(TouchPhase::Ended, 0.0, 0.0);
+            self.momentum(TouchPhase::Started, moved_at);
+            self.momentum(TouchPhase::Moved, moved_at);
+        }
+    }
+
+    fn is_inertia_cancel(datum: &PointerData) -> bool {
+        datum.signal_kind == Some(PointerSignalKind::ScrollInertiaCancel)
+            && datum.kind == PointerDeviceKind::Trackpad
+            && datum.device == PAN_ZOOM_DEVICE
+    }
+
+    /// Flutter's `testTrackpadGesturesAreSentToFramework`, from the system's momentum on.
+    #[test]
+    fn a_touch_soon_after_the_momentum_moved_cancels_the_fling_once() {
+        let mut fixture = Fixture::new();
+        let moved_at = Instant::now();
+        fixture.fling(moved_at);
+        assert!(
+            fixture
+                .touch(moved_at + Duration::from_millis(150), AT)
+                .is_none(),
+            "too long after the momentum"
+        );
+        let cancel = data(fixture.touch(moved_at + Duration::from_millis(5), AT));
+        assert_eq!(cancel.len(), 1);
+        assert!(is_inertia_cancel(&cancel[0]));
+        assert_eq!([cancel[0].physical_x, cancel[0].physical_y], AT);
+        assert!(
+            fixture
+                .touch(moved_at + Duration::from_millis(6), AT)
+                .is_none(),
+            "no further cancel"
+        );
+        fixture.momentum(TouchPhase::Ended, moved_at);
+        assert_eq!(
+            changes(fixture.scroll(TouchPhase::Started, 0.0, 0.0)),
+            [PointerChange::PanZoomStart],
+            "may-begin is a pan-zoom's start"
+        );
+    }
+
+    #[test]
+    fn a_touch_before_the_momentum_moves_cancels_nothing() {
+        let mut fixture = Fixture::new();
+        let started_at = Instant::now();
+        fixture.scroll(TouchPhase::Started, 0.0, 0.0);
+        fixture.scroll(TouchPhase::Ended, 0.0, 0.0);
+        fixture.momentum(TouchPhase::Started, started_at);
+        assert!(fixture.touch(started_at, AT).is_none());
+    }
+
+    #[test]
+    fn a_scroll_starting_forgets_the_momentum() {
+        let mut fixture = Fixture::new();
+        let moved_at = Instant::now();
+        fixture.fling(moved_at);
+        fixture.scroll(TouchPhase::Started, 0.0, 0.0);
+        assert!(fixture.touch(moved_at, AT).is_none());
+    }
+
+    #[test]
+    fn a_pinch_ending_keeps_the_momentum() {
+        let mut fixture = Fixture::new();
+        let moved_at = Instant::now();
+        fixture.fling(moved_at);
+        fixture.pinch(TouchPhase::Started, 0.0);
+        fixture.pinch(TouchPhase::Ended, 0.0);
+        assert!(fixture.touch(moved_at, AT).is_some());
+    }
+
+    #[test]
+    fn a_cancel_away_from_where_the_device_was_hovers_there_first() {
+        let mut fixture = Fixture::new();
+        let moved_at = Instant::now();
+        fixture.fling(moved_at);
+        let elsewhere = [30.0, 20.0];
+        let cancel = data(fixture.touch(moved_at, elsewhere));
+        assert_eq!(cancel[0].change, PointerChange::Hover);
+        assert!(cancel[0].synthesized);
+        assert_eq!(cancel[0].physical_delta_x, 20.0);
+        assert!(is_inertia_cancel(&cancel[1]));
+    }
+
+    #[test]
+    fn a_cancel_before_any_gesture_adds_the_device_first() {
+        let mut fixture = Fixture::new();
+        let moved_at = Instant::now();
+        fixture.momentum(TouchPhase::Moved, moved_at);
+        let cancel = data(fixture.touch(moved_at, AT));
+        assert_eq!(cancel[0].change, PointerChange::Add);
+        assert!(is_inertia_cancel(&cancel[1]));
     }
 }

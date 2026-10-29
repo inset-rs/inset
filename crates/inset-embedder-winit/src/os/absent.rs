@@ -43,3 +43,6 @@ impl WindowSurfaces for NoWindowSurfaces {
 
 /// No notices of a window's visibility beyond winit's events. Never made.
 pub(crate) enum NoVisibilityNotices {}
+
+/// No report of a trackpad's touches. Never made.
+pub(crate) enum NoTrackpadTouchObserver {}

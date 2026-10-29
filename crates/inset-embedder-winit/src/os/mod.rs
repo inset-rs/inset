@@ -9,7 +9,7 @@
 //! Five systems: macOS adds a window frame that animates, its menus (the menu bar, a menu at a
 //! point, the Dock icon's and the status items), its pasteboard, a display link, native surfaces,
 //! its own answers about its screens, whether a window is occluded and its notices that a window
-//! was minimized, and the requests it makes of the application and what it says changed, among
+//! was minimized, the fingers coming down on a trackpad, and the requests it makes of the application and what it says changed, among
 //! others (`macos`); iOS reports its window's size and safe area differently, and has its
 //! pasteboard and native surfaces (`ios`); Windows tells the clipboard's changes by its sequence
 //! number, and has a menu at a point, icons in the notification area and toasts (`windows`); Linux
@@ -43,7 +43,7 @@ mod winit_only;
 
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use inset_embedder::{
     Cameras, Clipboard, Compositor, DataTransferItem, DockMenu, FileDialogs, KeyData, MenuBar,
@@ -92,6 +92,9 @@ pub(crate) type ThisOsWindowSurfaces = <ThisOs as NativeComposition>::WindowSurf
 /// This system's notices that a window may have been minimized or occluded, for one window.
 pub(crate) type ThisOsVisibilityNotices = <ThisOs as WindowVisibility>::Notices;
 
+/// This system's report of the fingers coming down on a trackpad, for one window.
+pub(crate) type ThisOsTrackpadTouchObserver = <ThisOs as TrackpadTouches>::Observer;
+
 /// This system's clipboard.
 pub(crate) type ThisOsClipboard = <ThisOs as SystemClipboard>::Clipboard;
 
@@ -104,6 +107,7 @@ pub(crate) trait OperatingSystem:
     + WindowVisibility
     + Screens
     + PointerQueries
+    + TrackpadTouches
     + FramePresentation
     + NativeComposition
     + NativeMenus
@@ -242,6 +246,22 @@ pub(crate) trait PointerQueries {
     /// The mouse buttons down now, as Flutter numbers them. `None` where the system cannot
     /// be asked.
     fn pressed_buttons() -> Option<i64> {
+        None
+    }
+}
+
+/// The fingers coming down on a trackpad, which winit does not report.
+pub(crate) trait TrackpadTouches {
+    /// What reports the touches over one window, until it is dropped.
+    type Observer;
+
+    /// Calls `on_touch` with the moment fingers come down on a trackpad over `window`, until the
+    /// answer is dropped: on the main thread, from wherever the system reports it, so it must only
+    /// queue. `None` where the system reports no trackpad's touches.
+    fn observe_trackpad_touches(
+        _window: &dyn Window,
+        _on_touch: Box<dyn Fn(Instant)>,
+    ) -> Option<Self::Observer> {
         None
     }
 }

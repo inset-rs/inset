@@ -19,13 +19,13 @@ use winit::window::Window;
 
 use pasteboard::Pasteboard;
 
-use super::absent::{NoDisplayLink, NoVisibilityNotices};
+use super::absent::{NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices};
 use super::apple::{image_io_decoders, notifications};
 use super::{
     ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeMenus,
     OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard, SystemDrags,
-    SystemMedia, SystemNotifications, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility,
-    WorkQueue,
+    SystemMedia, SystemNotifications, TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion,
+    WindowVisibility, WorkQueue,
 };
 use crate::notifications::NotificationActivations;
 
@@ -73,6 +73,10 @@ impl FramePresentation for Ios {
 
 impl WindowVisibility for Ios {
     type Notices = NoVisibilityNotices;
+}
+
+impl TrackpadTouches for Ios {
+    type Observer = NoTrackpadTouchObserver;
 }
 
 /// AVFoundation's players and cameras, which macOS shares.
