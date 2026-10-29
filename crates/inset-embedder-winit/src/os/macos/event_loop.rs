@@ -6,11 +6,10 @@ use winit::event_loop::EventLoopBuilder;
 use winit::platform::macos::EventLoopBuilderExtMacOS;
 
 use super::{AppKit, menus};
-use crate::main_loop::MainLoopEvent;
 use crate::os::EventLoopSetup;
 
 impl EventLoopSetup for AppKit {
-    fn configure_event_loop(builder: &mut EventLoopBuilder<MainLoopEvent>) {
+    fn configure_event_loop(builder: &mut EventLoopBuilder) {
         menus::leave_winit_menu_out(builder);
         leave_activation_to_macos(builder);
     }
@@ -21,6 +20,6 @@ impl EventLoopSetup for AppKit {
 /// background, as another app starts it to post a notification or at login, stays behind. winit
 /// would otherwise activate the app over whatever the user is in. A bare executable run from a
 /// terminal opens behind the terminal.
-fn leave_activation_to_macos(builder: &mut EventLoopBuilder<MainLoopEvent>) {
+fn leave_activation_to_macos(builder: &mut EventLoopBuilder) {
     builder.with_activate_ignoring_other_apps(false);
 }

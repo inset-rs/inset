@@ -5,13 +5,11 @@
 
 use std::rc::Rc;
 
-use winit::event_loop::EventLoopProxy;
-
 use crate::app_requests::AppRequests;
 use crate::appearance::Appearance;
 use crate::images::{CreateImageLoader, Images};
 use crate::locales::Locales;
-use crate::main_loop::MainLoopEvent;
+use crate::main_loop::MainLoopProxy;
 use crate::os::ThisOsVisibilityNotices;
 use crate::system_requests::SystemRequestHandlers;
 use crate::view::WinitView;
@@ -38,7 +36,7 @@ impl EmbedderState {
     /// The state of an app about to start: no view yet, and the user's languages as the system
     /// lists them now. Requests reach the main loop through `proxy`.
     pub(crate) fn new(
-        proxy: EventLoopProxy<MainLoopEvent>,
+        proxy: MainLoopProxy,
         create_image_loader: Option<CreateImageLoader>,
     ) -> EmbedderState {
         EmbedderState {
@@ -46,9 +44,7 @@ impl EmbedderState {
             appearance: Appearance::default(),
             locales: Locales::read(),
             images: Images::new(create_image_loader),
-            requests: Rc::new(AppRequests::new(move |event| {
-                let _ = proxy.send_event(event);
-            })),
+            requests: Rc::new(AppRequests::new(move |event| proxy.send(event))),
             handlers: SystemRequestHandlers::default(),
         }
     }

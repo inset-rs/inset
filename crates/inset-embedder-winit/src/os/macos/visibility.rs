@@ -29,11 +29,14 @@ use crate::os::WindowVisibility;
 impl WindowVisibility for AppKit {
     type Notices = VisibilityNotices;
 
-    fn is_occluded(window: &Window) -> Option<bool> {
+    fn is_occluded(window: &dyn Window) -> Option<bool> {
         ns_window(window).map(|window| !has_visible_bit(&window))
     }
 
-    fn observe_visibility(window: &Window, on_notice: Box<dyn Fn()>) -> Option<VisibilityNotices> {
+    fn observe_visibility(
+        window: &dyn Window,
+        on_notice: Box<dyn Fn()>,
+    ) -> Option<VisibilityNotices> {
         VisibilityNotices::observe(window, on_notice)
     }
 }
@@ -53,7 +56,10 @@ pub(crate) struct VisibilityNotices {
 
 impl VisibilityNotices {
     /// `None` off the main thread, and for a window with no `NSWindow` behind it.
-    pub(crate) fn observe(window: &Window, on_notice: Box<dyn Fn()>) -> Option<VisibilityNotices> {
+    pub(crate) fn observe(
+        window: &dyn Window,
+        on_notice: Box<dyn Fn()>,
+    ) -> Option<VisibilityNotices> {
         let main_thread = MainThreadMarker::new()?;
         let ns_window = ns_window(window)?;
         let observer = NoticeObserver::new(main_thread, on_notice);

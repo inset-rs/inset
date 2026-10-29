@@ -4,7 +4,7 @@
 //! (`shortcut_keys`), and, for Windows and the DBus menu, a menu's entries numbered (`numbered`)
 //! and an icon's pixels in their layouts (`pixels`), which build and test on every system.
 //!
-//! A menu's choice reaches the main loop as a [`MenuEvent`] through winit's proxy, from wherever
+//! A menu's choice reaches the main loop as a [`MenuEvent`] through the loop's proxy, from wherever
 //! the system reports it: AppKit's action, Win32's window procedure, or DBus's thread. The loop
 //! tells the app on a turn of its own (`main_loop/`).
 
@@ -23,9 +23,8 @@ pub(crate) mod pixels;
 mod shortcut_keys;
 
 use inset_embedder::{MenuId, ProvidedItem, TrayIconEvent, TrayIconId};
-use winit::event_loop::EventLoopProxy;
 
-use crate::main_loop::MainLoopEvent;
+use crate::main_loop::{MainLoopEvent, MainLoopProxy};
 
 #[cfg(target_os = "windows")]
 pub(crate) use shortcut_keys::accelerator_text;
@@ -93,24 +92,24 @@ impl EditAction {
     }
 }
 
-/// Where a system's menus send what they tell the app: the main loop, through winit's proxy,
+/// Where a system's menus send what they tell the app: the main loop, through its proxy,
 /// from any thread.
 #[derive(Clone)]
-pub(crate) struct MenuEvents(EventLoopProxy<MainLoopEvent>);
+pub(crate) struct MenuEvents(MainLoopProxy);
 
 impl MenuEvents {
-    pub(crate) fn new(proxy: EventLoopProxy<MainLoopEvent>) -> MenuEvents {
+    pub(crate) fn new(proxy: MainLoopProxy) -> MenuEvents {
         MenuEvents(proxy)
     }
 
     pub(crate) fn send(&self, event: MenuEvent) {
-        let _ = self.0.send_event(MainLoopEvent::Menu(event));
+        self.0.send(MainLoopEvent::Menu(event));
     }
 
     /// A menu that ran its own loop closed: the buttons it kept are reconciled before the app
     /// hears what was chosen.
     pub(crate) fn closed(&self) {
-        let _ = self.0.send_event(MainLoopEvent::MenuClosed);
+        self.0.send(MainLoopEvent::MenuClosed);
     }
 }
 

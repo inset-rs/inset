@@ -25,13 +25,13 @@ impl ParentWindows {
     }
 
     /// The window `parent` is in; `None` for no parent, or one with no window.
-    pub(crate) fn window(&self, parent: Option<ViewId>) -> Option<Arc<Window>> {
+    pub(crate) fn window(&self, parent: Option<ViewId>) -> Option<Arc<dyn Window>> {
         Some(self.0.views().by_view(parent?)?.window)
     }
 
     /// The app's first window, for a system whose dialogs always show on one.
     #[cfg(target_os = "ios")]
-    pub(crate) fn first_window(&self) -> Option<Arc<Window>> {
+    pub(crate) fn first_window(&self) -> Option<Arc<dyn Window>> {
         Some(self.0.views().first_window()?.window)
     }
 }

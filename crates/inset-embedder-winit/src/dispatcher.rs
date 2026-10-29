@@ -4,23 +4,23 @@
 use std::time::Instant;
 
 use inset_embedder::Dispatcher;
-use winit::event_loop::{ControlFlow, EventLoopProxy};
+use winit::event_loop::ControlFlow;
 
-use crate::main_loop::MainLoopEvent;
+use crate::main_loop::{MainLoopEvent, MainLoopProxy};
 use crate::os::{ThisOs, WorkQueue};
 
-/// The embedder's threads as any thread reaches them: a wake is an event through winit's
+/// The embedder's threads as any thread reaches them: a wake is an event through the loop's
 /// proxy, which the loop keeps as its earliest due wake and serves when the time comes; work
 /// goes to the system's queue, or a thread where the system has none.
-pub(crate) struct WinitDispatcher(pub(crate) EventLoopProxy<MainLoopEvent>);
+pub(crate) struct WinitDispatcher(pub(crate) MainLoopProxy);
 
 impl Dispatcher for WinitDispatcher {
     fn wake_at(&self, timer_wakeup: Option<Instant>) {
-        let _ = self.0.send_event(MainLoopEvent::TimerWakeup(timer_wakeup));
+        self.0.send(MainLoopEvent::TimerWakeup(timer_wakeup));
     }
 
     fn wake_now(&self) {
-        let _ = self.0.send_event(MainLoopEvent::WakeNow);
+        self.0.send(MainLoopEvent::WakeNow);
     }
 
     fn dispatch(&self, work: Box<dyn FnOnce() + Send>) {
