@@ -10,10 +10,9 @@ use crate::appearance::Appearance;
 use crate::images::{CreateImageLoader, Images};
 use crate::locales::Locales;
 use crate::main_loop::MainLoopProxy;
-use crate::os::ThisOsVisibilityNotices;
 use crate::system_requests::SystemRequestHandlers;
 use crate::view::WinitView;
-use crate::windows::{OpenWindow, Views};
+use crate::windows::{OpenWindow, Views, WindowObservers};
 
 /// What the main loop and the platform both know.
 pub(crate) struct EmbedderState {
@@ -80,14 +79,10 @@ impl EmbedderState {
         self.views.add_screen_view(view);
     }
 
-    /// A view the app asked for, with its window and the system's notices about the window: among
-    /// the views from now on, and the image loader starts on its device if it is the first.
-    pub(crate) fn add_view_with_window(
-        &self,
-        open: OpenWindow,
-        visibility_notices: Option<ThisOsVisibilityNotices>,
-    ) {
+    /// A view the app asked for, with its window and what the embedder observes of the window:
+    /// among the views from now on, and the image loader starts on its device if it is the first.
+    pub(crate) fn add_view_with_window(&self, open: OpenWindow, observers: WindowObservers) {
         self.images.start_once(open.view.image_context());
-        self.views.add_with_window(open, visibility_notices);
+        self.views.add_with_window(open, observers);
     }
 }

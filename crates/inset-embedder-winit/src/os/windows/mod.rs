@@ -19,12 +19,14 @@ use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
 
 use crate::clipboard::{ChangeProbe, TextClipboard};
 
-use super::absent::{NoDisplayLink, NoVisibilityNotices, NoWindowSurfaces};
+use super::absent::{
+    NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices, NoWindowSurfaces,
+};
 use super::{
     ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, ImageDecoding,
     NativeComposition, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
-    SystemMedia, SystemRequests, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility,
-    WorkQueue,
+    SystemMedia, SystemRequests, TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion,
+    WindowVisibility, WorkQueue,
 };
 
 /// Windows. A type only: never made, its answers are associated functions.
@@ -61,6 +63,10 @@ impl NativeComposition for Windows {
 
 impl WindowVisibility for Windows {
     type Notices = NoVisibilityNotices;
+}
+
+impl TrackpadTouches for Windows {
+    type Observer = NoTrackpadTouchObserver;
 }
 
 impl EventLoopSetup for Windows {}

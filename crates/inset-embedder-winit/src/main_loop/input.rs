@@ -7,6 +7,8 @@
 //! when a wheel turns, and a trackpad's fingers pan as Flutter's pan-zoom pointer, with their
 //! pinches and rotations (`trackpad.rs`).
 
+use std::time::Instant;
+
 use inset_embedder::{EmbedderClient, Offset, PointerDataPacket, SystemMouseCursorKind, View};
 use winit::data_transfer::{DataTransferId, TypeHint, TypedData};
 use winit::dpi::PhysicalPosition;
@@ -130,9 +132,10 @@ impl<C: EmbedderClient> MainLoop<C> {
     }
 
     /// A scroll in `window`, by what drives it, as Flutter's macOS embedder takes a scroll event
-    /// (`dispatchGestureEvent:`): fingers on a trackpad pan, the system's momentum after they
-    /// lift is left out, since the framework makes its own fling, and a wheel's turn, or a scroll
-    /// winit cannot name the source of, is the mouse's scroll signal.
+    /// (`dispatchGestureEvent:`): fingers on a trackpad pan; the system's momentum after they lift
+    /// is left out, since the framework makes its own fling, and only marks when a touch stops
+    /// that fling; a wheel's turn, or a scroll winit cannot name the source of, is the mouse's
+    /// scroll signal.
     pub(super) fn on_mouse_wheel(
         &mut self,
         window: WindowId,
@@ -148,9 +151,21 @@ impl<C: EmbedderClient> MainLoop<C> {
                 self.trackpad
                     .scrolled(phase, delta, scale, at, stamp, &mut self.ids)
             }
-            ScrollSource::Momentum => None,
+            ScrollSource::Momentum => {
+                self.trackpad.momentum(phase, Instant::now());
+                None
+            }
             _ => self.pointer.scrolled(delta, scale, stamp, &mut self.ids),
         };
+        self.send_pointer_packets(packet);
+    }
+
+    /// Fingers came down on the trackpad over `window` at `touched_at`: soon after the system's
+    /// momentum, the framework's fling stops.
+    pub(super) fn on_trackpad_touched(&mut self, window: WindowId, touched_at: Instant) {
+        let stamp = self.pointer_stamp(window);
+        let at = self.pointer.position();
+        let packet = self.trackpad.touched(touched_at, at, stamp, &mut self.ids);
         self.send_pointer_packets(packet);
     }
 

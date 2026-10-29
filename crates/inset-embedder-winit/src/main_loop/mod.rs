@@ -163,6 +163,9 @@ pub(crate) enum MainLoopEvent {
     /// The system said a window may have been minimized or restored, occluded or shown, beyond
     /// winit's events.
     WindowVisibility(WindowId),
+    /// Fingers came down on a trackpad over a window, at the moment the system reported it,
+    /// which winit does not report.
+    TrackpadTouched(WindowId, Instant),
 }
 
 /// Where an event for the loop is sent from, on any thread: it waits in the loop's queue, after
@@ -312,6 +315,7 @@ impl<C: EmbedderClient> MainLoop<C> {
             MainLoopEvent::Lifecycle(notice) => self.on_lifecycle_notice(notice),
             MainLoopEvent::SystemChange(change) => self.on_system_change(change),
             MainLoopEvent::WindowVisibility(id) => self.sync_window_state(id),
+            MainLoopEvent::TrackpadTouched(id, at) => self.on_trackpad_touched(id, at),
         }
     }
 

@@ -6,6 +6,11 @@
 //!
 //! winit reports `Ime::Commit` only for text an input method composed (`hasMarkedText`); plain
 //! typing arrives as `KeyEvent::text`, which the text input commits itself (`type_key`).
+//!
+//! The framework starts an input again while it is open, at each `show` and each configuration
+//! update, where Flutter's macOS plugin, told to show a field already connected, leaves its input
+//! context active. So the input method stays on: winit drops the composition when it is turned off,
+//! and reports it as `Ime::Disabled`, which the framework takes as the field's connection closed.
 
 use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Weak};
@@ -37,6 +42,9 @@ pub(crate) struct TextInput {
     editing_value: RefCell<TextEditingValue>,
     /// Where the input is in the view, for placing the IME's candidates.
     transform: RefCell<Option<Matrix4>>,
+    /// Where the framework last placed the caret, which the IME's candidates keep clear of; the
+    /// input method is turned on with it, as Flutter's macOS plugin keeps its `caretRect`.
+    cursor_area: Cell<Option<CursorArea>>,
 }
 
 impl TextInput {
@@ -47,6 +55,7 @@ impl TextInput {
             active: Cell::new(None),
             editing_value: RefCell::new(TextEditingValue::EMPTY),
             transform: RefCell::new(None),
+            cursor_area: Cell::new(None),
         }
     }
 
@@ -93,23 +102,27 @@ impl TextInput {
         value
     }
 
-    /// Shows the IME's candidates at `rect`, in the input's coordinates, which its transform
-    /// takes to the view's.
+    /// Keeps the IME's candidates clear of `rect`, in the input's coordinates, which its transform
+    /// takes to the view's: now if the input method is on, and from when it is turned on.
     fn set_ime_area(&self, rect: Rect) {
+        let Some(window) = self.window() else {
+            return;
+        };
+        let area = self.cursor_area_of(rect, window.scale_factor());
+        self.cursor_area.set(Some(area));
+        let _ = window.request_ime_update(ImeRequest::Update(area.request_data()));
+    }
+
+    /// `rect`, in the input's coordinates, in the window's physical pixels at `scale`.
+    fn cursor_area_of(&self, rect: Rect, scale: f64) -> CursorArea {
         let origin = match *self.transform.borrow() {
             Some(transform) => transform3(transform, Offset::new(rect.left, rect.top)),
             None => Offset::new(rect.left, rect.top),
         };
-        let Some(window) = self.window() else {
-            return;
-        };
-        let scale = window.scale_factor();
-        let _ = window.request_ime_update(ImeRequest::Update(
-            ImeRequestData::default().with_cursor_area(
-                PhysicalPosition::new(origin.dx() * scale, origin.dy() * scale).into(),
-                PhysicalSize::new(rect.width() * scale, rect.height() * scale).into(),
-            ),
-        ));
+        CursorArea {
+            position: PhysicalPosition::new(origin.dx() * scale, origin.dy() * scale),
+            size: PhysicalSize::new(rect.width() * scale, rect.height() * scale),
+        }
     }
 }
 
@@ -120,21 +133,19 @@ impl TextInputHost for TextInput {
         ThisOs::provides_edit_commands()
     }
 
-    /// Turns the window's input method on for this input, its purpose a password's where the text
-    /// is obscured, and its candidates placed where the framework says the caret is from now on;
-    /// an input method on for another input is turned off first, as winit asks.
+    /// Opens this input on the window's input method, its purpose a password's where the text is
+    /// obscured (`start_request`).
     fn start(&self, configuration: &TextInputConfiguration) {
         self.active.set(Some(ActiveTextInput::new(configuration)));
         let Some(window) = self.window() else {
             return;
         };
-        let purpose = if configuration.obscure_text {
-            ImePurpose::Password
-        } else {
-            ImePurpose::Normal
-        };
-        let _ = window.request_ime_update(ImeRequest::Disable);
-        let _ = window.request_ime_update(ImeRequest::Enable(enable_request(purpose)));
+        let request = start_request(
+            window.ime_capabilities().is_some(),
+            purpose_of(configuration),
+            self.cursor_area.get(),
+        );
+        let _ = window.request_ime_update(request);
     }
 
     fn stop(&self) {
@@ -161,19 +172,55 @@ impl TextInputHost for TextInput {
     }
 }
 
-/// The request that turns an input method on for an input of `purpose`, with its candidates at
-/// the window's corner until the framework places them.
-fn enable_request(purpose: ImePurpose) -> ImeEnableRequest {
+/// Where the IME's candidates keep clear of, in the window's physical pixels: winit's cursor area.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CursorArea {
+    position: PhysicalPosition<f64>,
+    size: PhysicalSize<f64>,
+}
+
+impl CursorArea {
+    /// The window's corner, where the candidates show until the framework places the caret.
+    const CORNER: CursorArea = CursorArea {
+        position: PhysicalPosition::new(0.0, 0.0),
+        size: PhysicalSize::new(0.0, 0.0),
+    };
+
+    fn request_data(self) -> ImeRequestData {
+        ImeRequestData::default().with_cursor_area(self.position.into(), self.size.into())
+    }
+}
+
+/// The input method's purpose for an input configured as `configuration`.
+fn purpose_of(configuration: &TextInputConfiguration) -> ImePurpose {
+    if configuration.obscure_text {
+        ImePurpose::Password
+    } else {
+        ImePurpose::Normal
+    }
+}
+
+/// What starting an input of `purpose` asks of winit. An input method already on keeps its
+/// composition and its candidates' place, and takes the new purpose. One that is off is turned on,
+/// its candidates clear of `cursor_area`, where the framework last placed the caret, or at the
+/// window's corner before it has.
+fn start_request(ime_on: bool, purpose: ImePurpose, cursor_area: Option<CursorArea>) -> ImeRequest {
+    if ime_on {
+        return ImeRequest::Update(
+            ImeRequestData::default().with_hint_and_purpose(ImeHint::NONE, purpose),
+        );
+    }
     let capabilities = ImeCapabilities::new()
         .with_hint_and_purpose()
         .with_cursor_area();
-    let data = ImeRequestData::default()
-        .with_hint_and_purpose(ImeHint::NONE, purpose)
-        .with_cursor_area(
-            PhysicalPosition::new(0, 0).into(),
-            PhysicalSize::new(0, 0).into(),
-        );
-    ImeEnableRequest::new(capabilities, data).expect("every capability asked for has its value")
+    let data = cursor_area
+        .unwrap_or(CursorArea::CORNER)
+        .request_data()
+        .with_hint_and_purpose(ImeHint::NONE, purpose);
+    ImeRequest::Enable(
+        ImeEnableRequest::new(capabilities, data)
+            .expect("every capability asked for has its value"),
+    )
 }
 
 /// The text input a view opened with `TextInputHost::start`, kept until `TextInputHost::stop`.
@@ -323,6 +370,52 @@ mod tests {
                 insert: Some("\n".into()),
                 action: TextInputAction::Newline,
             }
+        );
+    }
+
+    const CARET: CursorArea = CursorArea {
+        position: PhysicalPosition::new(40.0, 120.0),
+        size: PhysicalSize::new(2.0, 34.0),
+    };
+
+    fn enabled_with(request: ImeRequest) -> (ImeCapabilities, ImeRequestData) {
+        let ImeRequest::Enable(enable) = request else {
+            panic!("not turned on: {request:?}");
+        };
+        enable.into_raw()
+    }
+
+    #[test]
+    fn starting_an_input_again_leaves_the_input_method_on_and_takes_the_new_purpose() {
+        let ImeRequest::Update(data) = start_request(true, ImePurpose::Password, Some(CARET))
+        else {
+            panic!("the input method was not left on");
+        };
+        assert_eq!(
+            data.hint_and_purpose,
+            Some((ImeHint::NONE, ImePurpose::Password))
+        );
+        assert_eq!(data.cursor_area, None, "the candidates stay where they are");
+    }
+
+    #[test]
+    fn an_input_method_turned_on_keeps_its_candidates_clear_of_the_last_caret() {
+        let (capabilities, data) =
+            enabled_with(start_request(false, ImePurpose::Normal, Some(CARET)));
+        assert!(capabilities.cursor_area() && capabilities.hint_and_purpose());
+        assert_eq!(data.cursor_area, CARET.request_data().cursor_area);
+        assert_eq!(
+            data.hint_and_purpose,
+            Some((ImeHint::NONE, ImePurpose::Normal))
+        );
+    }
+
+    #[test]
+    fn before_any_caret_the_candidates_show_at_the_window_corner() {
+        let (_, data) = enabled_with(start_request(false, ImePurpose::Normal, None));
+        assert_eq!(
+            data.cursor_area,
+            CursorArea::CORNER.request_data().cursor_area
         );
     }
 }
