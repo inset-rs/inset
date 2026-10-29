@@ -269,6 +269,16 @@ pub(crate) trait FramePresentation {
     /// Whether the surface presents through the system's own transaction, so a frame and the
     /// geometry it was laid out for are committed together. Nothing to join by default.
     fn present_in_transaction(_surface: &mut valo::Surface, _wanted: bool) {}
+
+    /// Whether a frame with no contents of its own reaches the display without being drawn: its
+    /// surfaces, which the compositor places, over the view's background, which the window shows
+    /// itself (`show_background`). Where it does not, every frame is drawn, its background at
+    /// least.
+    const SHOWS_FRAMES_UNDRAWN: bool = false;
+
+    /// Has `window` show `color` behind its content and its surfaces, for the frames that are not
+    /// drawn. Main thread.
+    fn show_background(_window: &Window, _color: valo::Color) {}
 }
 
 /// A display's vsyncs: a call at each vsync of one display, whether or not a window on it is

@@ -59,6 +59,10 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Valo paints `.notdef` tofu unless asked not to.
   Affect: a character with no face occupies layout space and draws nothing.
 
+- Change: on macOS the app makes no graphics device, and a view draws nothing, until one of its frames paints something of its own; a frame that only shows native surfaces is left to Core Animation, which shows them over the view's background colour, as Flutter's embedder renders no layer that paints nothing.
+  Reason: platform — macOS gives a process a large share of graphics memory the first time it draws anything, and a window that only shows surfaces drawn elsewhere has nothing of its own to draw.
+  Affect: a window that only shows native surfaces adds no graphics memory of its own, and a view that has painted once draws every frame after.
+
 ## keyboard.rs / keys.rs
 
 - Change: the embedder builds `KeyData` from winit's W3C key codes with Flutter's own tables, deriving the logical key as Flutter's web engine does.

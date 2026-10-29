@@ -21,7 +21,12 @@
 //!
 //! What draws is made at the view's first draw, not before: the renderer's context, the device
 //! every view shares (`gpu.rs`), and the surface the system gave, which is made on that device at
-//! the first draw on it. A view that never draws makes none of them.
+//! the first draw on it. A view that never draws makes none of them. On macOS a view draws
+//! nothing until a scene has contents of its own (`rendered_contents.rs`): before then a scene is
+//! its native surfaces alone, which the compositor places over the view's background, which the
+//! window shows itself. macOS gives a process a large share of graphics memory the first time it
+//! draws anything, so a window that only shows surfaces drawn elsewhere must never draw. Once a
+//! view has drawn, it draws every scene.
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -31,6 +36,7 @@ use winit::window::Window;
 
 use crate::gpu::{Gpu, LazyGpu};
 use crate::os::{FramePresentation, ThisOs, WindowGeometry};
+use crate::rendered_contents::has_rendered_contents;
 
 /// At how many vsyncs a scene is drawn again after the surface timed out on it.
 const TIMEOUT_RETRIES: u8 = 8;
@@ -48,6 +54,9 @@ pub(crate) struct Rasterizer {
     /// sees through, and from the first scene that places a native surface for any other.
     /// Kept for each surface the system gives.
     content_alpha: valo::SurfaceAlpha,
+    /// Whether the window shows the view's background, which it does from the first scene shown
+    /// without drawing.
+    background_shown: bool,
     last_scene: LastScene,
 }
 
@@ -82,6 +91,7 @@ impl Rasterizer {
             surface: WindowSurface::None,
             clear,
             content_alpha,
+            background_shown: false,
             last_scene: LastScene::default(),
         }
     }
@@ -96,14 +106,14 @@ impl Rasterizer {
     pub(crate) fn draw(&mut self, scene: &Arc<Scene>) {
         self.last_scene.hand_over(scene);
         self.keep_alpha_once_surfaces_are_placed(scene);
-        self.draw_picture(&scene.picture);
+        self.show(scene);
     }
 
     /// Draws the last scene again if the surface does not show it: an owed frame, paid
     /// without the framework.
     pub(crate) fn draw_last_scene(&mut self) {
         if let Some(owed) = self.last_scene.owed() {
-            self.draw_picture(&owed.picture);
+            self.show(&owed);
         }
     }
 
@@ -149,6 +159,7 @@ impl Rasterizer {
     /// the last scene with it, which may hold native surfaces a producer would reuse.
     pub(crate) fn window_closed(&mut self) {
         self.surface = WindowSurface::None;
+        self.background_shown = false;
         self.last_scene = LastScene::default();
     }
 
@@ -160,11 +171,35 @@ impl Rasterizer {
         }
     }
 
-    /// Renders and presents `picture`, or records why the surface refused it, so that the
-    /// picture is presented when the refusal ends.
-    fn draw_picture(&mut self, picture: &Picture) {
-        let presented = self.render_and_present(picture);
-        self.last_scene.presented(presented);
+    /// Shows `scene`, the last one handed over, drawn or not, or records why the surface refused
+    /// it, so that it is shown when the refusal ends.
+    fn show(&mut self, scene: &Scene) {
+        let shown = if self.needs_drawing(scene) {
+            self.render_and_present(&scene.picture)
+        } else {
+            self.show_background()
+        };
+        self.last_scene.presented(shown);
+    }
+
+    /// Whether `scene` is drawn: every scene once the view has drawn one, and before then one
+    /// with contents of its own, or any where the window does not show the view's background
+    /// itself.
+    fn needs_drawing(&self, scene: &Scene) -> bool {
+        self.context.is_some() || !ThisOs::SHOWS_FRAMES_UNDRAWN || has_rendered_contents(scene)
+    }
+
+    /// Has the window show the view's background behind the surfaces the compositor places, in
+    /// place of a drawn frame. `Err` without a surface given, as a draw would be refused.
+    fn show_background(&mut self) -> Result<(), valo::Refused> {
+        let WindowSurface::Given(window) = &self.surface else {
+            return Err(valo::Refused::Lost);
+        };
+        if !self.background_shown {
+            ThisOs::show_background(window, self.clear);
+            self.background_shown = true;
+        }
+        Ok(())
     }
 
     /// Renders `picture` into the surface's next drawable and presents it, making the surface

@@ -22,6 +22,8 @@ inset-embedder.workspace = true
 valo.workspace = true
 valo-codec.workspace = true
 valo-codec-software = { version = "0.13.1", optional = true }
+# What a recorded transform and a clip's path are, to tell a scene's holes from its contents.
+valo-geometry.workspace = true
 wgpu.workspace = true
 pollster.workspace = true
 winit.workspace = true
@@ -83,6 +85,8 @@ objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSMenu", "NSMenuItem", "NSEvent", "NSGraphicsContext", "NSView", "NSCell", "NSResponder", "NSWindow", "NSScreen", "NSAnimation", "NSAnimationContext", "NSVisualEffectView", "NSGlassEffectView", "NSGraphics", "NSTrackingArea", "NSPasteboard", "NSPasteboardItem", "NSFilePromiseProvider", "NSFilePromiseReceiver", "NSOpenPanel", "NSSavePanel", "NSWorkspace", "objc2-uniform-type-identifiers", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSButtonCell", "NSActionCell", "NSColorSpace", "block2", "objc2-quartz-core"] }
 objc2-quartz-core = { version = "0.3", features = ["CAMediaTimingFunction", "CADisplayLink"] }
+# The colour a window's layer shows behind its surfaces while its view draws nothing.
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGColor"] }
 
 # Each test is a program of its own, without the test harness, which runs every test on a thread
 # it spawns: winit makes AppKit's event loop on the main thread only, once per process, and a
@@ -147,6 +151,8 @@ harness = false
 # The test seam the media test reaches the system's players through.
 [dev-dependencies]
 inset-embedder-winit = { path = ".", features = ["test-support"] }
+# A surface to place in a scene.
+inset-embedder = { workspace = true, features = ["test-support"] }
 
 # What the tests ask of AppKit that the host offers no call for: minimizing, hiding the
 # application, whether a window's content has the layer a surface draws into, choosing in its

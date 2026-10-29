@@ -46,6 +46,7 @@ mod platform;
 mod pointer;
 mod popup_menus;
 mod rasterizer;
+mod rendered_contents;
 mod screens;
 mod state;
 mod system_changes;
