@@ -3,12 +3,13 @@
 //! An app asks for a view with a [`ViewRequest`] (`Platform::request_view`), and the view
 //! arrives later, as every view does, carrying the request's [`RequestId`], as iOS hands back
 //! the activity of `requestSceneSessionActivation` with the connecting scene. On a desktop the
-//! host makes a window for it; where the platform gives the app views and makes none, on a
-//! phone and when embedded, a request is refused. A view in a window the app may manage, one it
-//! asked for or one the platform gave, has a [`HostWindow`] (`View::window`): the configuration
-//! every window wants up front, whether the window is minimized or occluded, which the host
-//! reports with the window's moves (`EmbedderClient::window_changed`), the native handle for
-//! anything beyond it, and the window's closing, which is how a view closes.
+//! host makes a window for it, and on Android a task, Android's own window, with its card in
+//! Recents; where the platform gives the app views and makes none, on an iPhone and when
+//! embedded, a request is refused. A view in a window the app may manage, one it asked for or
+//! one the platform gave, has a [`HostWindow`] (`View::window`): the configuration every window
+//! wants up front, whether the window is minimized or occluded, which the host reports with the
+//! window's moves (`EmbedderClient::window_changed`), the native handle for anything beyond it,
+//! and the window's closing, which is how a view closes.
 //!
 //! Flutter's windowing API (`widgets/_window.dart`, experimental) builds window archetypes
 //! over the engine's views, each controller making its window within its constructor.
@@ -19,7 +20,7 @@ use std::time::Duration;
 
 pub use raw_window_handle::RawWindowHandle;
 
-use crate::{Rect, ViewRef};
+use crate::{IconImage, Rect, ViewRef};
 
 /// How a window is made. Sizes and positions are logical, in the host's screen space with
 /// the origin at the top left of the primary screen.
@@ -147,6 +148,11 @@ pub trait HostWindow: 'static {
     fn set_frame(&self, frame: Rect, animate: Option<Duration>);
 
     fn set_title(&self, title: &str);
+
+    /// The window's own icon, where its system shows one: in the title bar on Windows and Linux,
+    /// on the task's card in Recents on Android. `None` gives the window back the app's icon. A
+    /// system whose windows have no icon of their own, as macOS's do not, leaves it unset.
+    fn set_icon(&self, icon: Option<IconImage>);
 
     fn show(&self);
 

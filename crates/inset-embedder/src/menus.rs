@@ -135,7 +135,7 @@ pub struct ShortcutModifiers {
     pub shift: bool,
 }
 
-/// An image a menu item or a tray icon shows: RGBA pixels, row by row.
+/// An image a menu item, a tray icon or a window shows: RGBA pixels, row by row.
 #[derive(Clone, PartialEq)]
 pub struct IconImage {
     pub width: u32,

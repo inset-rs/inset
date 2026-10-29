@@ -31,6 +31,8 @@ mod app_loop;
 #[cfg(target_os = "android")]
 mod app_thread;
 #[cfg(target_os = "android")]
+mod bitmap;
+#[cfg(target_os = "android")]
 mod chrome;
 #[cfg(target_os = "android")]
 mod clipboard;
@@ -44,6 +46,8 @@ mod file_dialogs;
 mod gpu;
 #[cfg(target_os = "android")]
 mod host;
+#[cfg(target_os = "android")]
+mod host_window;
 #[cfg(target_os = "android")]
 mod images;
 #[cfg(target_os = "android")]
@@ -64,6 +68,8 @@ mod platform;
 mod refresh;
 #[cfg(target_os = "android")]
 mod surface;
+#[cfg(target_os = "android")]
+mod task;
 #[cfg(target_os = "android")]
 mod view;
 #[cfg(target_os = "android")]

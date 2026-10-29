@@ -11,9 +11,9 @@
 //!
 //! The receiver is reached through the application, so the app posts whether or not it has an
 //! activity. A post or a schedule never asks the user: it answers `Denied` unless the permission is
-//! granted, and only the app's `request` asks, from the activity in front (`permission`). Under an
-//! activity that is not Inset's, or in a package without the receiver, the app has no
-//! notifications: nothing would hear a tap.
+//! granted, and only the app's `request` asks, from the activity in front (`permission`). In a
+//! package without Inset's activity or the receiver, the app has no notifications: nothing would
+//! hear a tap.
 //!
 //! The bundle's keys, the activation's action and extras and the reply's key are the receiver's
 //! own: a change to one here is a change to the receiver.
@@ -32,6 +32,7 @@ use jni::{Env, jni_sig, jni_str};
 
 use self::permission::Permission;
 use crate::activity::{Activities, clear_exception, package_class, with_application};
+use crate::bitmap::argb_colors;
 use crate::file_dialogs::string;
 use crate::log::warn_to_log;
 
@@ -220,15 +221,6 @@ fn put_image(
     )?;
     put_int(env, bundle, "width", image.width as jint)?;
     put_int(env, bundle, "height", image.height as jint)
-}
-
-/// RGBA bytes as the platform's colours, alpha in the top byte.
-fn argb_colors(rgba: &[u8]) -> Vec<jint> {
-    let (pixels, _) = rgba.as_chunks::<4>();
-    pixels
-        .iter()
-        .map(|&[red, green, blue, alpha]| i32::from_be_bytes([alpha, red, green, blue]))
-        .collect()
 }
 
 fn put_string(

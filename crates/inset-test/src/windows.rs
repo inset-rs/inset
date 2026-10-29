@@ -5,8 +5,8 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use inset_embedder::{
-    HostWindow, RawWindowHandle, Rect, RequestId, ScreenId, ViewId, ViewRef, ViewRequest,
-    WindowConfig,
+    HostWindow, IconImage, RawWindowHandle, Rect, RequestId, ScreenId, ViewId, ViewRef,
+    ViewRequest, WindowConfig,
 };
 
 use crate::TestView;
@@ -162,6 +162,8 @@ impl HostWindow for TestWindow {
     }
 
     fn set_title(&self, _title: &str) {}
+
+    fn set_icon(&self, _icon: Option<IconImage>) {}
 
     fn show(&self) {
         self.shown.set(true);

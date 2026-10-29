@@ -28,7 +28,9 @@ use jni::objects::{JClass, JIntArray, JObject, JValue};
 use jni::sys::jint;
 use jni::{Env, EnvUnowned, NativeMethod, jni_sig, jni_str};
 
-use crate::activity::{Activities, clear_exception, device_api_level, with_application};
+use crate::activity::{
+    Activities, clear_exception, device_api_level, inset_activity_class, with_application,
+};
 use crate::answer::{Answer, answer};
 use crate::log::warn_to_log;
 
@@ -53,14 +55,13 @@ pub(super) struct Permission {
 }
 
 impl Permission {
-    /// The permission, once the activity's answer method is registered; `None` under an activity
-    /// that is not Inset's, which hands no answer on.
+    /// The permission, once the activity's answer method is registered; `None` in a package without
+    /// Inset's activity, where nothing hands an answer on.
     pub(super) fn new(activities: Activities) -> Option<Permission> {
-        let asks = activities.with_front(register_answers).and_then(|()| {
-            with_application(|env, application| {
-                Ok(device_api_level() >= ASKED_FROM
-                    && target_api_level(env, application)? >= ASKED_FROM)
-            })
+        let asks = with_application(|env, application| {
+            register_answers(env, application)?;
+            Ok(device_api_level() >= ASKED_FROM
+                && target_api_level(env, application)? >= ASKED_FROM)
         });
         match asks {
             Ok(asks) => Some(Permission { activities, asks }),
@@ -155,8 +156,8 @@ fn granted_if(enabled: bool) -> PermissionState {
 
 /// Registers `InsetActivity.onPermissionsResult`, which the activity calls from
 /// `onRequestPermissionsResult`.
-fn register_answers(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Result<()> {
-    let class = env.get_object_class(activity)?;
+fn register_answers(env: &mut Env<'_>, application: &JObject<'_>) -> jni::errors::Result<()> {
+    let class = inset_activity_class(env, application)?;
     let method = [
         // SAFETY: `on_permissions_result` takes the arguments `(I[I)V` names, as a static
         // method's native function does.

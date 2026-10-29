@@ -9,6 +9,16 @@ Host implementation. Flutter analogue: the engine's Android embedder under
   Reason: platform — Inset's platform gives one app all of its views, as a desktop gives it its windows.
   Affect: a second activity, or one created after the last was destroyed, opens a new view of the app already running, which keeps its state.
 
+## host_window.rs / task.rs → Flutter's windowing API (`widgets/_window.dart`) and `PlatformPlugin.setTaskDescription`
+
+- Change: a view's window is its activity's task: asking for a view starts a task of its own, with its own card in Recents, the window's title and icon are the card's, and closing the window ends the task; Flutter's windowing API makes windows on desktops only.
+  Reason: platform — an Android app's windows are its tasks, each with its card in Recents.
+  Affect: a view the app asks for on Android opens as another card in Recents, which the user switches to as to another app, and a task Android brings back after the app's process was gone comes back as a view carrying the same initial data.
+
+- Change: `SystemChrome.setApplicationSwitcherDescription` describes every task of the app, under the title and icon each view's window was given of its own; Flutter's describes its one activity's task.
+  Reason: platform — each view is a task of its own, whose card the app's description and the window's own share.
+  Affect: a window's own title and icon stay on its card when a `Title` widget is built again.
+
 ## view.rs
 
 - Change: the keyboard's height is taken as whatever the content rect loses at the bottom beyond the widest it has been at this window size.
@@ -108,4 +118,4 @@ Host implementation. Flutter analogue: the engine's Android embedder under
 - The keyboard, haptics, and the bars and keyboard as the system reports them. Trigger: any of them, which is a Java activity of the app's own, as Flutter's is.
 - The predictive back gesture, with its peek animation. Trigger: a Java activity that registers with the system's back callback; the plain back button already pops.
 - Deep links, which Flutter carries beside the back button. Trigger: an app that opens on a route the system names.
-- A window the app manages around the activity's view, with whether it is minimized and whether it is occluded, which the activity's stop and start would tell. Trigger: an app that manages its window on Android, as in desktop windowing.
+- Whether a view's window is minimized or occluded, which the activity's stop and start would tell, and where the window is on the screen. Trigger: an app that follows its windows on Android, as in desktop windowing.

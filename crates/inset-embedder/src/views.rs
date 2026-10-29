@@ -209,9 +209,10 @@ pub trait View: 'static {
 
     /// The window this view is in, where the platform lets the app manage it, as `NSView.window`
     /// answers: every window on a desktop, whether the app asked for it or the platform gave it,
-    /// such as WaOS's window around a program's view. `None` for a view in nothing the app may
-    /// manage: a phone's screen, a web page's element, a host app's view. Closing a view is its
-    /// window's: a view with none is not the app's to close, and its way out is to quit.
+    /// such as WaOS's window around a program's view, and every task on Android. `None` for a view
+    /// in nothing the app may manage: an iPhone's screen, a web page's element, a host app's view.
+    /// Closing a view is its window's: a view with none is not the app's to close, and its way out
+    /// is to quit.
     fn window(&self) -> Option<crate::WindowRef> {
         None
     }

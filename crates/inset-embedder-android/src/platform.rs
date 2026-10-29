@@ -15,8 +15,8 @@ use android_activity::AndroidApp;
 use inset_embedder::{
     Brightness, Clipboard, Dispatcher, FileDialogs, FontSource, ImageCodec, ImageCodecFuture,
     ImageDecodeError, ImageFrame, ImageFrameFuture, ImageRepetition, Locale, Notifications, Offset,
-    Opener, Platform, Screen, Screens, SystemChrome, SystemFontSource, TargetPlatform, View,
-    ViewId, ViewRef,
+    Opener, Platform, RequestId, Screen, Screens, SystemChrome, SystemFontSource, TargetPlatform,
+    ViewError, ViewId, ViewRef, ViewRequest,
 };
 use ndk::looper::ForeignLooper;
 
@@ -24,16 +24,23 @@ use crate::activity::Activities;
 use crate::chrome::AndroidChrome;
 use crate::clipboard::AndroidClipboard;
 use crate::file_dialogs::DocumentPickers;
+use crate::gpu::Gpu;
+use crate::host_window::AndroidWindow;
 use crate::notifications::AndroidNotifications;
 use crate::opener::IntentOpener;
+use crate::task::{TaskDescriptions, ViewRequests};
 use crate::view::AndroidView;
 
 /// The long-lived host capability held by the application.
 pub struct AndroidPlatform {
     /// The activities attached to the app, each a view.
     pub(crate) activities: Activities,
-    /// The views, one an activity, by their ids.
-    views: RefCell<BTreeMap<ViewId, Rc<AndroidView>>>,
+    /// Each view's window, its activity's task, by the view's id.
+    windows: RefCell<BTreeMap<ViewId, Rc<AndroidWindow>>>,
+    /// The views the app asked for that have not arrived.
+    requests: ViewRequests,
+    /// How Recents describes each view's task.
+    descriptions: TaskDescriptions,
     /// The views that asked for a frame since their last one.
     frames_requested: RefCell<BTreeSet<ViewId>>,
     /// When the framework asked to be woken, shared with whatever thread asked.
@@ -56,14 +63,13 @@ pub struct AndroidPlatform {
 }
 
 impl AndroidPlatform {
-    /// The platform of the app's thread, whose looper is `looper`, with `first`, the activity
-    /// that started the app, attached as `view`: what the platform asks of Java at its start
-    /// goes through it.
-    pub(crate) fn new(looper: ForeignLooper, first: AndroidApp, view: ViewId) -> AndroidPlatform {
+    /// The platform of the app's thread, whose looper is `looper`, with no view yet.
+    pub(crate) fn new(looper: ForeignLooper) -> AndroidPlatform {
         let activities = Activities::default();
-        activities.attach(view, first);
+        let descriptions = TaskDescriptions::new(activities.clone());
         AndroidPlatform {
-            views: RefCell::default(),
+            windows: RefCell::default(),
+            requests: ViewRequests::new(),
             frames_requested: RefCell::default(),
             wakes: Arc::new(Wakes {
                 timer_wakeup: Mutex::new(None),
@@ -76,41 +82,71 @@ impl AndroidPlatform {
             screen: RefCell::new(None),
             image_loader: RefCell::new(None),
             images: RefCell::new(None),
-            chrome: AndroidChrome::new(activities.clone()),
+            chrome: AndroidChrome::new(activities.clone(), descriptions.clone()),
             clipboard: AndroidClipboard::new(),
             file_dialogs: DocumentPickers::new(activities.clone()),
             opener: IntentOpener::new(activities.clone()),
             notifications: AndroidNotifications::new(activities.clone()),
             activities,
+            descriptions,
         }
     }
 
-    /// A view of the app's from now on.
-    pub(crate) fn add_view(&self, view: Rc<AndroidView>) {
-        self.views.borrow_mut().insert(view.id(), view);
+    /// The activity the system created, `activity`, attached as the view `view` of the app's
+    /// from now on, in its task, carrying what it was started with: the request it answers, or
+    /// the data of a task the platform gave.
+    pub(crate) fn attach(&self, view: ViewId, activity: AndroidApp, gpu: &Gpu) -> Rc<AndroidView> {
+        let launch = crate::task::launch_of(&activity);
+        let answered = self.requests.answered_by(&launch);
+        let request = answered.as_ref().map(|(request, _)| *request);
+        let android_view = Rc::new(AndroidView::new(view, request, launch.initial_data, gpu));
+        self.activities.attach(view, activity.clone());
+        self.descriptions.add(view);
+        let window = Rc::new(AndroidWindow::new(
+            Rc::clone(&android_view),
+            activity,
+            self.descriptions.clone(),
+        ));
+        android_view.set_window(&window);
+        if let Some((_, title)) = answered.filter(|(_, title)| !title.is_empty()) {
+            self.descriptions.set_title(view, &title);
+        }
+        self.windows.borrow_mut().insert(view, window);
+        android_view
     }
 
-    /// `view`, gone from the app, with whatever it asked for.
-    pub(crate) fn remove_view(&self, view: ViewId) -> Option<Rc<AndroidView>> {
+    /// The activity `view` is was destroyed: the view is gone from the app, with its task and
+    /// whatever it asked for.
+    pub(crate) fn detach(&self, view: ViewId) {
+        self.activities.detach(view);
+        self.descriptions.forget(view);
         self.frames_requested.borrow_mut().remove(&view);
-        self.views.borrow_mut().remove(&view)
+        if let Some(window) = self.windows.borrow_mut().remove(&view) {
+            window.android_view().activity_destroyed();
+        }
     }
 
     pub(crate) fn android_view(&self, view: ViewId) -> Option<Rc<AndroidView>> {
-        self.views.borrow().get(&view).cloned()
+        self.windows
+            .borrow()
+            .get(&view)
+            .map(|window| Rc::clone(window.android_view()))
     }
 
-    pub(crate) fn any_view_has_a_window(&self) -> bool {
-        self.views.borrow().values().any(|view| view.has_window())
+    pub(crate) fn any_view_has_a_native_window(&self) -> bool {
+        self.windows
+            .borrow()
+            .values()
+            .any(|window| window.android_view().has_native_window())
     }
 
-    /// Whether a view with a window asked for a frame. One without waits for its window.
+    /// Whether a view with a native window asked for a frame. One without waits for its window.
     pub(crate) fn frames_wanted(&self) -> bool {
         !self.frames_due().is_empty()
     }
 
-    /// The views with a window that asked for a frame, their requests answered by the frame
-    /// about to be drawn; one without a window keeps its request.
+    /// The views with a native window that asked for a frame, their requests answered by the
+    /// frame about to be drawn; one without keeps its request.
     pub(crate) fn take_frame_requests(&self) -> Vec<ViewId> {
         let due = self.frames_due();
         let mut requested = self.frames_requested.borrow_mut();
@@ -120,14 +156,18 @@ impl AndroidPlatform {
         due
     }
 
-    /// The views with a window that asked for a frame.
+    /// The views with a native window that asked for a frame.
     fn frames_due(&self) -> Vec<ViewId> {
-        let views = self.views.borrow();
+        let windows = self.windows.borrow();
         self.frames_requested
             .borrow()
             .iter()
             .copied()
-            .filter(|view| views.get(view).is_some_and(|view| view.has_window()))
+            .filter(|view| {
+                windows
+                    .get(view)
+                    .is_some_and(|window| window.android_view().has_native_window())
+            })
             .collect()
     }
 
@@ -210,7 +250,7 @@ impl Platform for AndroidPlatform {
 
     /// A view without a window keeps the request until its window arrives.
     fn request_frame(&self, view: ViewId) {
-        if self.views.borrow().contains_key(&view)
+        if self.windows.borrow().contains_key(&view)
             && self.frames_requested.borrow_mut().insert(view)
         {
             self.wakes.looper.wake();
@@ -229,15 +269,20 @@ impl Platform for AndroidPlatform {
 
     /// The activities' windows, one a view, which the system gives the app.
     fn views(&self) -> Vec<ViewRef> {
-        self.views
+        self.windows
             .borrow()
             .values()
-            .map(|view| Rc::clone(view) as ViewRef)
+            .map(|window| Rc::clone(window.android_view()) as ViewRef)
             .collect()
     }
 
     fn view(&self, id: ViewId) -> Option<ViewRef> {
         self.android_view(id).map(|view| view as ViewRef)
+    }
+
+    /// A document task of its own, whose activity arrives as the view (`task.rs`).
+    fn request_view(&self, request: ViewRequest) -> Result<RequestId, ViewError> {
+        self.requests.request(request)
     }
 
     /// The system's clipboard, as far as an app without Java code reaches it (`clipboard.rs`).
