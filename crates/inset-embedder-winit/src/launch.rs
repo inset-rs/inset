@@ -12,7 +12,6 @@ use crate::notifications::NotificationActivations;
 use crate::os::{
     ApplicationLifecycle, NativeMenus, SystemChanges, SystemNotifications, SystemRequests, ThisOs,
 };
-use crate::system_requests::SystemRequest;
 
 /// What starts the app, on the platform it is handed, and answers the client the embedder drives.
 pub(crate) type StartApp<C> = Box<dyn FnOnce(PlatformRef) -> C>;
@@ -37,11 +36,6 @@ pub(crate) fn run<C: EmbedderClient + 'static>(
 /// Sends the loop what the system asks of the application, what it says of it and what it says
 /// changed about the machine, from wherever the system makes them.
 fn forward_system_messages(proxy: &EventLoopProxy<MainLoopEvent>) {
-    if ThisOs::OPENED_BY_ARGUMENTS
-        && let Some(launch) = SystemRequest::launch()
-    {
-        let _ = proxy.send_event(MainLoopEvent::SystemRequest(launch));
-    }
     let requests = proxy.clone();
     ThisOs::send_system_requests(Box::new(move |request| {
         let _ = requests.send_event(MainLoopEvent::SystemRequest(request));

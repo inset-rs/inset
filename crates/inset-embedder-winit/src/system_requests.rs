@@ -5,9 +5,9 @@
 //!
 //! macOS asks to open through its application delegate, at launch and while the app runs
 //! (`application:openURLs:`), and iOS through the application's delegate
-//! (`application:openURL:options:`); Windows and Linux start the app with its files and links on
-//! its command line, which the launch reads and sends as a request of its own, served on the
-//! loop's first turn.
+//! (`application:openURL:options:`). Windows and Linux start the app with what it opens on its
+//! command line, which is the app's own to read: the system gives only strings there, and which of
+//! them are files the app decided when it registered its file types.
 //!
 //! The main loop calls a handler outside every framework call, so a handler may post to the app.
 
@@ -15,13 +15,17 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use inset_embedder::{NotificationActivation, Offset, OpenRequest, PickedFile};
+use inset_embedder::{NotificationActivation, Offset};
 
 /// A request the system makes of the application as a whole.
 #[derive(Debug)]
 pub(crate) enum SystemRequest {
     /// Open these files and links: documents opened from the system's file browser or dropped on
-    /// the application's icon, links whose scheme is the app's, or a launch's arguments.
+    /// the application's icon, or links whose scheme is the app's.
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "ios")),
+        allow(dead_code, reason = "only macOS and iOS ask to open")
+    )]
     Open {
         files: Vec<PathBuf>,
         links: Vec<String>,
@@ -45,30 +49,6 @@ pub(crate) enum SystemRequest {
         allow(dead_code, reason = "only macOS asks to quit")
     )]
     Quit,
-}
-
-impl SystemRequest {
-    /// The files and links a launch's arguments ask to open, as Windows and Linux start an app with
-    /// them on its command line; `None` when they ask for nothing.
-    pub(crate) fn launch() -> Option<SystemRequest> {
-        let current_dir = std::env::current_dir().unwrap_or_default();
-        let request = OpenRequest::from_arguments(std::env::args_os().skip(1), &current_dir);
-        if request.is_empty() {
-            return None;
-        }
-        let files = request
-            .files
-            .into_iter()
-            .filter_map(|file| match file {
-                PickedFile::Path(path) => Some(path),
-                PickedFile::Handle(_) | PickedFile::Stream(_) => None,
-            })
-            .collect();
-        Some(SystemRequest::Open {
-            files,
-            links: request.links,
-        })
-    }
 }
 
 /// A handler for the system asking the app to show itself again.

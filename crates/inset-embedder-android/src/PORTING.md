@@ -79,7 +79,7 @@ Host implementation. Flutter analogue: the engine's Android embedder under
 
 - Change: the permission is Android 13's `POST_NOTIFICATIONS`, which inset-cli declares, asked for with `requestPermissions` and answered through `InsetActivity.onRequestPermissionsResult`, with `shouldShowRequestPermissionRationale` telling a refusal the user may still be asked about; before Android 13, or for a package that targets an earlier release, it is `areNotificationsEnabled` alone, with no question.
   Reason: platform — Android tells no app a permission never asked from one refused for good.
-  Affect: `state` answers `NotAsked` for a permission refused for good, and asking then answers `Denied` at once, without a question.
+  Affect: `state` answers `NotAsked` for a permission refused for good, and asking then answers `Denied` at once, without a question; a post never asks, as `notify` does not, and answers `Denied` until the permission is granted.
 
 - Change: a schedule is an `AlarmManager` alarm whose intent carries the notification to the receiver, exact (`setExactAndAllowWhileIdle`) where the app may set exact alarms, and inexact (`setAndAllowWhileIdle`) where not; inset-cli declares `SCHEDULE_EXACT_ALARM`.
   Reason: platform — from Android 14 an app sets exact alarms only once the user grants it in the app's settings, and the system forgets alarms when the device restarts.

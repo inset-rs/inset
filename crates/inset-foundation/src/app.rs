@@ -323,7 +323,10 @@ impl App {
         self.set_handler(|app| &mut app.open_requests, handler);
     }
 
-    /// The system asks the app to open `request`: the handler hears it, or it waits for one.
+    /// Asks the app to open `request`: the handler hears it, or it waits for one. The host calls it
+    /// with what the system hands over (`EmbedderClient::open_requested`); the app calls it with
+    /// the files it decides its own command line names, at launch or as a later launch passes it
+    /// on (`inset-single-instance`), so every request reaches the one handler.
     pub fn open_requested(&mut self, request: OpenRequest) {
         self.hand_to_handler(|app| &mut app.open_requests, request);
     }

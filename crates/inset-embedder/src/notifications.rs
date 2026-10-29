@@ -12,6 +12,11 @@
 //! ([`NotificationScheduling`]) are capabilities, `None` where the system lacks them, as the
 //! user's permission is ([`NotificationPermission`]) where the system keeps none for the app. A
 //! host answers each from the system's own, and never stands in for one the system lacks.
+//!
+//! Only [`NotificationPermission::request`] asks the user, with the system's own question. A post
+//! or a schedule never does, as no system's own post does (`UNUserNotificationCenter`'s `add`
+//! fails with `notificationsNotAllowed`, and Android's and the web's show nothing): without the
+//! permission it answers [`NotificationError::Denied`].
 
 use std::fmt;
 use std::future::Future;
@@ -23,8 +28,9 @@ use crate::IconImage;
 /// The system's notifications.
 pub trait Notifications {
     /// Shows `notification`, in place of the one posted under its id while that is still there.
-    /// Where the system asks the user first and they have not been asked, the question comes
-    /// first; where they said no, the post answers [`NotificationError::Denied`] without asking.
+    /// It never asks the user: where the system does not let the app notify, because the user was
+    /// never asked or said no, it answers [`NotificationError::Denied`], as the systems' own posts
+    /// do, and the app asks first through [`Notifications::permission`].
     fn post(&self, notification: &Notification) -> PostFuture;
 
     /// Takes away the notification posted or scheduled under `id`.
@@ -175,7 +181,8 @@ pub trait NotificationReplies {
 /// Delivery at a later time, which the system holds whether or not the app runs.
 pub trait NotificationScheduling {
     /// Shows `notification` at `at`, or at once where `at` has passed; a later post or schedule
-    /// under its id replaces it, and [`Notifications::remove`] cancels it.
+    /// under its id replaces it, and [`Notifications::remove`] cancels it. It never asks the user,
+    /// as a post does not.
     fn schedule(&self, notification: &Notification, at: SystemTime) -> PostFuture;
 }
 

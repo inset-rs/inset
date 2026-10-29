@@ -9,7 +9,8 @@
 //! Android 15 the system shows a reply as sending until its notification changes, and from Android
 //! 15 it keeps a replied notification, showing the reply, until the user dismisses it.
 //!
-//! Each post and schedule asks the user first where they have not been asked (`permission`). Under
+//! A post or a schedule never asks the user: it answers `Denied` unless the permission is granted,
+//! and only the app's `request` asks (`permission`). Under
 //! an activity that is not Inset's, or in a package without the receiver, the app has no
 //! notifications: nothing would hear a tap.
 //!
@@ -62,15 +63,11 @@ impl AndroidNotifications {
     }
 
     /// Hands `notification` to the receiver to show now, or at `at`, in milliseconds since the
-    /// epoch, once the user lets the app notify.
+    /// epoch, where the user lets the app notify; answers `Denied` without asking where not.
     fn hand_over(&self, notification: &Notification, at: Option<i64>) -> PostFuture {
-        let permission = self.permission.clone();
-        let app = self.app.clone();
-        let notification = notification.clone();
-        Box::pin(async move {
-            permission.allowed().await?;
-            call_receiver(&app, |env, activity, receiver| {
-                let bundle = bundle(env, &notification)?;
+        let handed = self.permission.allowed().and_then(|()| {
+            call_receiver(&self.app, |env, activity, receiver| {
+                let bundle = bundle(env, notification)?;
                 match at {
                     None => env.call_static_method(
                         receiver,
@@ -91,7 +88,8 @@ impl AndroidNotifications {
                 }
                 .map(drop)
             })
-        })
+        });
+        Box::pin(std::future::ready(handed))
     }
 }
 

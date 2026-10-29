@@ -1,29 +1,29 @@
-//! Linux: D-Bus activation's way, as GTK's and Qt's single-instance apps have it. The first
-//! instance owns the app's id as its name on the session bus and serves
-//! `org.freedesktop.Application` at the path the id names; a later launch, finding the name owned,
-//! calls `Open` with its files as `file://` URIs and its links, or `Activate` with nothing to
-//! open, and quits. The object is served before the name is owned, so a later launch never calls
-//! an instance that cannot answer yet.
+//! Linux: the session bus. The first instance owns the app's id as its name on the bus and serves
+//! `rs.inset.SingleInstance` at the path the id names, as D-Bus activated apps serve
+//! `org.freedesktop.Application` there; a later launch, finding the name owned, calls its `Launch`
+//! with its arguments and folder, each as the bytes the system gave, and quits. The object is
+//! served before the name is owned, so a later launch never calls an instance that cannot answer
+//! yet.
+//!
+//! `org.freedesktop.Application`'s `Open` takes URIs, which would make every argument a file: a
+//! launch's arguments are the app's to read, so they go through an interface of Inset's own.
 
-use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io;
-use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use inset_embedder::{OpenRequest, PickedFile};
 use zbus::blocking::Connection;
 use zbus::blocking::fdo::DBusProxy;
 use zbus::fdo::{RequestNameFlags, RequestNameReply};
 use zbus::interface;
 use zbus::names::WellKnownName;
-use zbus::zvariant::{OwnedValue, Value};
 
 use crate::{Arrivals, FirstInstance, SingleInstance, this_launch};
 
-const APPLICATION: &str = "org.freedesktop.Application";
+const SINGLE_INSTANCE: &str = "rs.inset.SingleInstance";
 /// The longest a call to the bus may take.
 const PATIENCE: Duration = Duration::from_secs(3);
 
@@ -41,7 +41,7 @@ pub(crate) fn claim(id: &str) -> io::Result<SingleInstance> {
         .object_server()
         .at(
             path.as_str(),
-            Application {
+            Instance {
                 arrivals: Arc::clone(&arrivals),
             },
         )
@@ -67,78 +67,35 @@ fn object_path(id: &str) -> String {
     format!("/{}", id.replace('.', "/").replace('-', "_"))
 }
 
-/// Hands this launch's files and links to the first instance, or asks it to show itself.
+/// Hands this launch's arguments and folder to the first instance.
 fn hand_over(connection: &Connection, id: &str, path: &str) -> zbus::Result<()> {
     let (arguments, current_dir) = this_launch();
-    let uris = uris(OpenRequest::from_arguments(arguments, &current_dir));
-    let platform_data: HashMap<&str, Value<'_>> = HashMap::new();
-    if uris.is_empty() {
-        connection.call_method(
-            Some(id),
-            path,
-            Some(APPLICATION),
-            "Activate",
-            &(platform_data,),
-        )?;
-    } else {
-        connection.call_method(
-            Some(id),
-            path,
-            Some(APPLICATION),
-            "Open",
-            &(uris, platform_data),
-        )?;
-    }
+    let arguments: Vec<&[u8]> = arguments
+        .iter()
+        .map(|argument| argument.as_bytes())
+        .collect();
+    connection.call_method(
+        Some(id),
+        path,
+        Some(SINGLE_INSTANCE),
+        "Launch",
+        &(arguments, current_dir.as_os_str().as_bytes()),
+    )?;
     Ok(())
 }
 
-/// A request's files as `file://` URIs, then its links.
-fn uris(request: OpenRequest) -> Vec<String> {
-    let files = request.files.into_iter().filter_map(|file| match file {
-        PickedFile::Path(path) => Some(file_uri(&path)),
-        PickedFile::Handle(_) | PickedFile::Stream(_) => None,
-    });
-    files.chain(request.links).collect()
-}
-
-/// `path` as a `file://` URI, every byte but the unreserved ones and the slashes encoded.
-fn file_uri(path: &Path) -> String {
-    let mut uri = String::from("file://");
-    for &byte in path.as_os_str().as_bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'.' | b'_' | b'~') {
-            uri.push(char::from(byte));
-        } else {
-            uri.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    uri
-}
-
-/// The first instance's `org.freedesktop.Application`.
-struct Application {
+/// The first instance's `rs.inset.SingleInstance`.
+struct Instance {
     arrivals: Arc<Arrivals>,
 }
 
-#[interface(name = "org.freedesktop.Application")]
-impl Application {
-    /// A later launch with nothing to open: the app shows itself again.
-    fn activate(&self, _platform_data: HashMap<String, OwnedValue>) {
-        self.arrivals.arrive(Vec::new(), PathBuf::from("/"));
-    }
-
-    fn open(&self, uris: Vec<String>, _platform_data: HashMap<String, OwnedValue>) {
-        let arguments = uris.into_iter().map(OsString::from).collect();
-        self.arrivals.arrive(arguments, PathBuf::from("/"));
-    }
-
-    /// The app has no actions of its own here: an action shows it again.
-    fn activate_action(
-        &self,
-        _action_name: String,
-        _parameter: Vec<OwnedValue>,
-        _platform_data: HashMap<String, OwnedValue>,
-    ) {
-        self.arrivals.arrive(Vec::new(), PathBuf::from("/"));
+#[interface(name = "rs.inset.SingleInstance")]
+impl Instance {
+    /// A later launch, with its arguments and the folder it was started in.
+    fn launch(&self, arguments: Vec<Vec<u8>>, current_dir: Vec<u8>) {
+        let arguments = arguments.into_iter().map(OsString::from_vec).collect();
+        self.arrivals
+            .arrive(arguments, PathBuf::from(OsString::from_vec(current_dir)));
     }
 }
 
@@ -147,18 +104,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_id_names_its_object_and_a_file_its_uri() {
+    fn an_id_names_its_object() {
         assert_eq!(object_path("com.example.my-notes"), "/com/example/my_notes");
+    }
+
+    #[test]
+    #[ignore = "needs a session bus of its own: dbus-run-session -- cargo test -- --ignored"]
+    fn a_later_launch_hands_its_arguments_over_unread() {
+        let id = "rs.inset.SingleInstanceTest";
+        let Ok(SingleInstance::First(first)) = claim(id) else {
+            panic!("the first claim is the first instance");
+        };
+        let connection = zbus::blocking::connection::Builder::session()
+            .and_then(|builder| builder.build())
+            .expect("a second connection");
+        let arguments: Vec<&[u8]> = vec![b"phone", b"--verbose", b"caf\xC3\xA9 notes.txt"];
+        connection
+            .call_method(
+                Some(id),
+                object_path(id).as_str(),
+                Some(SINGLE_INSTANCE),
+                "Launch",
+                &(arguments, b"/home/me".as_slice()),
+            )
+            .expect("the first instance answers");
+        let mut launches = first.launches();
+        let launch = crate::tests::now(launches.next_launch()).expect("the launch arrived");
         assert_eq!(
-            file_uri(Path::new("/home/me/My Notes/café.txt")),
-            "file:///home/me/My%20Notes/caf%C3%A9.txt"
+            launch.arguments,
+            ["phone", "--verbose", "café notes.txt"].map(OsString::from)
         );
-        let request = OpenRequest::from_arguments(
-            [OsString::from(file_uri(Path::new("/tmp/a b")))],
-            Path::new("/"),
-        );
-        assert!(
-            matches!(&request.files[..], [PickedFile::Path(path)] if path == Path::new("/tmp/a b"))
-        );
+        assert_eq!(launch.current_dir, PathBuf::from("/home/me"));
     }
 }

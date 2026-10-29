@@ -105,11 +105,11 @@ Version comes from `[package]`. A project-root `index.html` replaces the generat
 Each `file_associations` table lets the system open the app for files with those extensions.
 
 - macOS: a document type; a type the app owns opens in it on double-click, another app's type is offered under Open With. `role` applies here only.
-- Windows: the installer registers the extensions; the app gets the file as its first argument.
+- Windows: the installer registers the extensions; the app gets the file as its first argument, which it reads itself.
 - Linux: the desktop entry lists each `mime_type`; a type without one isn't associated.
 - iOS, Android and the web: not declared.
 
-An app hears the files and links it is opened with through `App::set_open_requested_handler`, at launch on every system and while it runs on macOS, iOS and Android (see `examples/app_events`). On Windows and Linux a second launch is a new process; `inset-single-instance` hands its files to the first.
+An app hears the files and links the system itself opens it with through `App::set_open_requested_handler`, at launch and while it runs on macOS, iOS and Android, and at launch on the web. On Windows and Linux the system gives the app only its command line: the app reads it, decides which arguments are files, and hands them to the same handler with `App::open_requested` (see `examples/app_events`). There a second launch is a new process; `inset-single-instance` hands its command line to the first.
 
 ### Usage descriptions
 
@@ -155,7 +155,7 @@ The `.apk` is built without Gradle and without any Java of your own. The Java is
 - `rs.inset.InsetFileProvider`, a content provider at `<package>.inset.files`, not exported, through which the opener shares a file of the app's with the app that opens it.
 - `rs.inset.InsetNotificationReceiver`, a broadcast receiver, not exported, which builds and shows the app's notifications, and shows a scheduled one when its alarm goes off, whether or not the app runs.
 
-The manifest's `<queries>` names viewing `http`, `https` and `mailto` links, so the opener can say whether some app takes one; the application's meta-data `rs.inset.queried_schemes` lists the same schemes for it. It asks for `POST_NOTIFICATIONS`, which Android 13 asks the user for on the app's first notification, and `SCHEDULE_EXACT_ALARM`, which Android 14 leaves to the user to grant under the app's Alarms & reminders setting: without it a scheduled notification may come late. A scheduled notification does not survive a restart of the device.
+The manifest's `<queries>` names viewing `http`, `https` and `mailto` links, so the opener can say whether some app takes one; the application's meta-data `rs.inset.queried_schemes` lists the same schemes for it. It asks for `POST_NOTIFICATIONS`, which Android 13 asks the user for when the app asks (`NotificationPermission::request`), and `SCHEDULE_EXACT_ALARM`, which Android 14 leaves to the user to grant under the app's Alarms & reminders setting: without it a scheduled notification may come late. A scheduled notification does not survive a restart of the device.
 
 You need:
 

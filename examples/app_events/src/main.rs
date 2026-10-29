@@ -22,10 +22,12 @@
 //! open -a "App events" note.insetnote     # at launch or while it runs
 //! ```
 //!
-//! Windows and Linux start the app with what it opens on its command line:
+//! Windows and Linux start the app with what it opens on its command line, which is the app's
+//! own: this one reads each argument as a file, and hands them on as an open request of its own,
+//! which reaches the same handler as the system's:
 //!
 //! ```text
-//! cargo run -p app-events -- note.insetnote https://example.org
+//! cargo run -p app-events -- note.insetnote
 //! ```
 //!
 //! Click the Dock icon for a reopen, with the window on screen or minimized: each is printed
@@ -58,6 +60,7 @@ fn main() {
         Shell::new(platform, |app| {
             let requests = app.new_entity(|_cx| Requests::default());
             listen(app, &requests);
+            open_command_line(app);
             answer_quits(app, &requests);
             let window = WindowConfig {
                 title: "App events".to_owned(),
@@ -94,8 +97,9 @@ fn listen(app: &mut App, requests: &Entity<Requests>) {
     listen_for_reopens(app, requests);
 }
 
-/// The files and links the system asks the app to open: at launch, and on macOS while it runs.
-/// A request that came before the handler was set reaches it as it is set.
+/// The files and links the system asks the app to open, at launch and on macOS while it runs, and
+/// those its command line names. A request that came before the handler was set reaches it as it
+/// is set.
 fn listen_for_opens(app: &mut App, requests: &Entity<Requests>) {
     let requests = requests.clone();
     app.set_open_requested_handler(Some(Rc::new(move |app: &mut App, request: OpenRequest| {
@@ -106,6 +110,23 @@ fn listen_for_opens(app: &mut App, requests: &Entity<Requests>) {
             cx.notify();
         });
     })));
+}
+
+/// The files the app's command line names, as an open request of the app's own: this app takes
+/// every argument for a file, in the folder it was started in.
+fn open_command_line(app: &mut App) {
+    let current_dir = std::env::current_dir().unwrap_or_default();
+    let files = std::env::args_os()
+        .skip(1)
+        .map(|argument| PickedFile::Path(current_dir.join(argument)))
+        .collect();
+    let request = OpenRequest {
+        files,
+        links: Vec::new(),
+    };
+    if !request.is_empty() {
+        app.open_requested(request);
+    }
 }
 
 /// A file as the window lists it: its path, or the name the system gives it.
