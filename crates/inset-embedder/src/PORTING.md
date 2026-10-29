@@ -163,7 +163,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — every desktop toolkit reports this shape at the window, and a host is the only place it can come from.
   Affect: an app hears external drops through the widgets binding's observers; a host that reports no position, as winit does, leaves the app to treat the whole view as the target.
 
-- Change: `EmbedderClient::open_requested` hands the client what the system asks the app to open, an `OpenRequest` of files and links, at launch and while it runs; Flutter's macOS embedder hands a running app's to its plugins through `FlutterAppLifecycleDelegate.handleOpenURLs:`, iOS's through `application:openURL:options:` and `scene:openURLContexts:`, and Android's through `onNewIntent`, while a launch's arguments reach `main`.
+- Change: `EmbedderClient::open_requested` hands the client what the system asks the app to open, an `OpenRequest` of files and links, at launch and while it runs; Flutter's macOS embedder hands a running app's to its plugins through `FlutterAppLifecycleDelegate.handleOpenURLs:`, iOS's through `application:openURL:options:` and `scene:openURLContexts:`, and Android's through `onNewIntent`, while a launch's arguments reach `main`, where the app reads them as here.
   Reason: platform — there are no plugins, and the app is the only listener; one call covers every system's way, whose files are the file dialogs' `PickedFile`, as Android hands one over as a `content://` document and the web's `launchQueue` as a file handle.
   Affect: an app hears what it is asked to open in one place on every system, the launch's request included, which waits for its handler.
 

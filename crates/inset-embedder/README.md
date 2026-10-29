@@ -35,8 +35,8 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - At each notice from the system, report the state the app is now in, and let the framework fill in the states between.
 
 **Being opened, and back**
-- `EmbedderClient::open_requested`, `OpenRequest`, `OpenRequest::from_arguments`, `EmbedderClient::pop_route`, `Platform::default_route_name`; a reopen is the host's own
-- Hand on every file and link the system asks the app to open, at launch and while it runs, the launch's own once the client is there: a launch's arguments, which `from_arguments` reads, where the system starts the app with them; a path where the system gives one, and a file opened as a pick is where it gives a document or a handle. Do the system's own back when `pop_route` answers false.
+- `EmbedderClient::open_requested`, `OpenRequest`, `EmbedderClient::pop_route`, `Platform::default_route_name`; a reopen is the host's own
+- Hand on every file and link the system itself asks the app to open, at launch and while it runs, the launch's own once the client is there: a path where the system gives one, and a file opened as a pick where it gives a document or a handle. Leave the command line to the app: the system gives only strings there, and which are files is the app's to say. Do the system's own back when `pop_route` answers false.
 
 ## Windows and views
 

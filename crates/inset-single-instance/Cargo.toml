@@ -9,10 +9,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
-[dependencies]
-inset-embedder.workspace = true
-
-# The first instance's name on the session bus, and its `org.freedesktop.Application`.
+# The first instance's name on the session bus, and its `rs.inset.SingleInstance`.
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
 

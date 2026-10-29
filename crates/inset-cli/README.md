@@ -105,11 +105,11 @@ Version comes from `[package]`. A project-root `index.html` replaces the generat
 Each `file_associations` table lets the system open the app for files with those extensions.
 
 - macOS: a document type; a type the app owns opens in it on double-click, another app's type is offered under Open With. `role` applies here only.
-- Windows: the installer registers the extensions; the app gets the file as its first argument.
+- Windows: the installer registers the extensions; the app gets the file as its first argument, which it reads itself.
 - Linux: the desktop entry lists each `mime_type`; a type without one isn't associated.
 - iOS, Android and the web: not declared.
 
-An app hears the files and links it is opened with through `App::set_open_requested_handler`, at launch on every system and while it runs on macOS, iOS and Android (see `examples/app_events`). On Windows and Linux a second launch is a new process; `inset-single-instance` hands its files to the first.
+An app hears the files and links the system itself opens it with through `App::set_open_requested_handler`, at launch and while it runs on macOS, iOS and Android, and at launch on the web. On Windows and Linux the system gives the app only its command line: the app reads it, decides which arguments are files, and hands them to the same handler with `App::open_requested` (see `examples/app_events`). There a second launch is a new process; `inset-single-instance` hands its command line to the first.
 
 ### Usage descriptions
 

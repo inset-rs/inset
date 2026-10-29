@@ -1,21 +1,28 @@
-//! One instance of an app: a later launch hands the files and links it was started with to the
-//! instance already running, and quits. An app's own pattern rather than the platform's, as
-//! Electron's `requestSingleInstanceLock` and Tauri's single-instance plugin are, and opt-in.
+//! One instance of an app: a later launch hands its command line to the instance already running,
+//! and quits. An app's own pattern rather than the platform's, as Electron's
+//! `requestSingleInstanceLock` and Tauri's single-instance plugin are, and opt-in.
 //!
-//! Each system has its own way: Linux's D-Bus activation, where the first instance owns the app's
-//! name on the session bus and a later launch calls its `org.freedesktop.Application.Open`;
-//! Windows' named mutex, which tells a later launch it is second, and a named pipe it writes its
-//! arguments to; macOS keeps one instance itself, handing a later open to the running app as an
-//! open request, so every launch there is the first, as on the phones and the web.
+//! A later launch's arguments arrive as the strings they are, unread, with the folder it was
+//! started in: which of them are files is the app's to say, as it says for its own launch's.
 //!
-//! An app combines it with the platform's own open requests (`App::set_open_requested_handler`):
-//! those bring the first launch's own files and links, and on macOS every later open; the stream
-//! of [`FirstInstance::opened`] brings what later launches pass on. Both reach the same code:
+//! Each system has its own way: Linux's session bus, where the first instance owns the app's id as
+//! its name and a later launch calls it; Windows' named mutex, which tells a later launch it is
+//! second, and a named pipe it writes its arguments to; macOS keeps one instance itself, handing a
+//! later open to the running app as an open request, so every launch there is the first, as on the
+//! phones and the web.
+//!
+//! An app reads its own launch's command line, hears the later launches' through
+//! [`FirstInstance::launches`], and hands the files it decides they name to
+//! `App::open_requested`, where the platform's own open requests also arrive
+//! (`App::set_open_requested_handler`): those bring the files the system itself hands over, and on
+//! macOS every later open. All of them reach the same code:
 //!
 //! ```ignore
+//! use std::ffi::OsString;
+//! use std::path::Path;
 //! use std::rc::Rc;
 //!
-//! use inset::ui::OpenRequest;
+//! use inset::ui::{OpenRequest, PickedFile};
 //! use inset::{App, run_app};
 //! use inset_single_instance::{SingleInstance, single_instance};
 //!
@@ -23,21 +30,34 @@
 //! fn main(app: &mut App) {
 //!     let first = match single_instance("com.example.notes") {
 //!         Ok(SingleInstance::First(first)) => Some(first),
-//!         // The first instance has this launch's files.
+//!         // The first instance has this launch's command line.
 //!         Ok(SingleInstance::Second) => std::process::exit(0),
 //!         Err(_) => None,
 //!     };
 //!     app.set_open_requested_handler(Some(Rc::new(open)));
+//!     let current_dir = std::env::current_dir().unwrap_or_default();
+//!     let launch = files_named(std::env::args_os().skip(1), &current_dir);
+//!     if !launch.is_empty() {
+//!         app.open_requested(launch);
+//!     }
 //!     if let Some(first) = first {
-//!         let mut opened = first.opened();
+//!         let mut launches = first.launches();
 //!         app.spawn(async move |cx| {
 //!             loop {
-//!                 let request = opened.next_request().await;
-//!                 cx.update(|app| open(app, request));
+//!                 let launch = launches.next_launch().await;
+//!                 let request = files_named(launch.arguments, &launch.current_dir);
+//!                 cx.update(|app| app.open_requested(request));
 //!             }
 //!         });
 //!     }
 //!     run_app(app, home());
+//! }
+//!
+//! /// The files this app's command line names: each of its arguments, in the folder it was
+//! /// started in.
+//! fn files_named(arguments: impl IntoIterator<Item = OsString>, current_dir: &Path) -> OpenRequest {
+//!     let files = arguments.into_iter().map(|argument| PickedFile::Path(current_dir.join(argument)));
+//!     OpenRequest { files: files.collect(), links: Vec::new() }
 //! }
 //!
 //! /// Shows the request's files and links; an empty request asks the app to show itself.
@@ -58,8 +78,6 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll, Waker};
 
-use inset_embedder::OpenRequest;
-
 #[cfg(target_os = "linux")]
 mod dbus;
 #[cfg(target_os = "windows")]
@@ -67,9 +85,9 @@ mod windows;
 
 /// Whether this launch is the app's only instance.
 pub enum SingleInstance {
-    /// No other instance runs: this one is the app, and hears what later launches ask to open.
+    /// No other instance runs: this one is the app, and hears the later launches.
     First(FirstInstance),
-    /// Another instance runs, and has been handed this launch's files and links: this one should
+    /// Another instance runs, and has been handed this launch's command line: this one should
     /// quit.
     Second,
 }
@@ -108,36 +126,38 @@ impl FirstInstance {
         }
     }
 
-    /// What later launches ask to open, as they ask, holding the claim as long as it lives. A
-    /// launch with nothing to open asks for an empty request: the app shows itself again.
-    pub fn opened(self) -> Opened {
-        Opened { first: self }
+    /// The later launches, as they come, holding the claim as long as it lives.
+    pub fn launches(self) -> LaterLaunches {
+        LaterLaunches { first: self }
     }
 }
 
-/// The requests later launches pass on to the first instance.
-pub struct Opened {
+/// The launches after the first instance's, each passed on to it.
+pub struct LaterLaunches {
     first: FirstInstance,
 }
 
-impl Opened {
-    /// The next request a later launch passes on; it waits until one comes.
-    pub fn next_request(&mut self) -> impl Future<Output = OpenRequest> + '_ {
-        NextArrival {
+impl LaterLaunches {
+    /// The next launch passed on; it waits until one comes.
+    pub fn next_launch(&mut self) -> impl Future<Output = Launch> + '_ {
+        NextLaunch {
             arrivals: &self.first.arrivals,
         }
     }
 }
 
-/// A later launch's arguments, and the folder it was started in, which relative paths are in.
-struct Arrival {
-    arguments: Vec<OsString>,
-    current_dir: PathBuf,
+/// A later launch: its arguments, without the program's name, as the strings the system gave it,
+/// and the folder it was started in, which relative paths are in. A launch with no arguments asks
+/// the app to show itself again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Launch {
+    pub arguments: Vec<OsString>,
+    pub current_dir: PathBuf,
 }
 
-/// The arrivals waiting, and the task waiting for one.
+/// The launches waiting, and the task waiting for one.
 #[derive(Default)]
-struct Arrivals(Mutex<(VecDeque<Arrival>, Option<Waker>)>);
+struct Arrivals(Mutex<(VecDeque<Launch>, Option<Waker>)>);
 
 impl Arrivals {
     /// A later launch passed `arguments` on, from `current_dir`.
@@ -151,7 +171,7 @@ impl Arrivals {
     fn arrive(&self, arguments: Vec<OsString>, current_dir: PathBuf) {
         let waker = {
             let mut arrivals = self.locked();
-            arrivals.0.push_back(Arrival {
+            arrivals.0.push_back(Launch {
                 arguments,
                 current_dir,
             });
@@ -162,25 +182,22 @@ impl Arrivals {
         }
     }
 
-    fn locked(&self) -> MutexGuard<'_, (VecDeque<Arrival>, Option<Waker>)> {
+    fn locked(&self) -> MutexGuard<'_, (VecDeque<Launch>, Option<Waker>)> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
-struct NextArrival<'a> {
+struct NextLaunch<'a> {
     arrivals: &'a Arrivals,
 }
 
-impl Future for NextArrival<'_> {
-    type Output = OpenRequest;
+impl Future for NextLaunch<'_> {
+    type Output = Launch;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<OpenRequest> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Launch> {
         let mut arrivals = self.arrivals.locked();
         match arrivals.0.pop_front() {
-            Some(arrival) => Poll::Ready(OpenRequest::from_arguments(
-                arrival.arguments,
-                &arrival.current_dir,
-            )),
+            Some(launch) => Poll::Ready(launch),
             None => {
                 arrivals.1 = Some(cx.waker().clone());
                 Poll::Pending
@@ -208,7 +225,7 @@ fn this_launch() -> (Vec<OsString>, PathBuf) {
 mod tests {
     use super::*;
 
-    fn now<T>(future: impl Future<Output = T>) -> Option<T> {
+    pub(crate) fn now<T>(future: impl Future<Output = T>) -> Option<T> {
         let mut future = std::pin::pin!(future);
         match future
             .as_mut()
@@ -220,20 +237,21 @@ mod tests {
     }
 
     #[test]
-    fn a_later_launchs_arguments_arrive_as_a_request() {
+    fn a_later_launchs_arguments_arrive_unread() {
         let arrivals = Arc::new(Arrivals::default());
         let first = FirstInstance::new(Arc::clone(&arrivals), Box::new(()));
-        let mut opened = first.opened();
-        assert!(now(opened.next_request()).is_none(), "nothing yet");
-        arrivals.arrive(
-            vec![
-                OsString::from("notes.txt"),
-                OsString::from("https://example.org"),
-            ],
-            PathBuf::from("/home/me"),
+        let mut launches = first.launches();
+        assert!(now(launches.next_launch()).is_none(), "nothing yet");
+        let arguments = ["phone", "--verbose", "notes.txt"]
+            .map(OsString::from)
+            .to_vec();
+        arrivals.arrive(arguments.clone(), PathBuf::from("/home/me"));
+        assert_eq!(
+            now(launches.next_launch()),
+            Some(Launch {
+                arguments,
+                current_dir: PathBuf::from("/home/me"),
+            })
         );
-        let request = now(opened.next_request()).expect("the launch's request");
-        assert_eq!(request.links, ["https://example.org"]);
-        assert_eq!(request.files.len(), 1);
     }
 }

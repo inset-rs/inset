@@ -72,10 +72,8 @@ impl Screens for Linux {}
 impl PointerQueries for Linux {}
 impl ImageDecoding for Linux {}
 impl WorkQueue for Linux {}
-/// The system starts the app with the files and links it opens on its command line.
-impl SystemRequests for Linux {
-    const OPENED_BY_ARGUMENTS: bool = true;
-}
+/// The system starts the app with what it opens on its command line, which is the app's own.
+impl SystemRequests for Linux {}
 impl SystemChanges for Linux {}
 impl ApplicationControl for Linux {}
 impl ApplicationLifecycle for Linux {}

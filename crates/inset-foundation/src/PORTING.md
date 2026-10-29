@@ -44,6 +44,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — there are no plugins, and the host hands the launch's request on as soon as the client exists, which is before the app has set anything up.
   Affect: an app sets the handler during its setup and still hears the request it was launched with.
 
+- Change: an app reports the files it reads from its own command line, or that a later launch passed on, through the same `App::open_requested`, as a request it builds.
+  Reason: platform — a command line holds only strings, and which of them are files is the app's to say, so no host reads one.
+  Affect: the files a command line names reach the same handler as the system's own requests, once the app has decided they are files.
+
 - Change: `App::set_notification_activated_handler` takes the app's one handler for the clicks on its notifications, and `App::notification_activated` keeps each click that comes before a handler is set, handing them over in order as it is set, as open requests wait; Flutter's `flutter_local_notifications` hands a running app's clicks to its callback and the launch's to `getNotificationAppLaunchDetails`.
   Reason: platform — there are no plugins, and the host hands the click that started the app on as soon as the client exists, which is before the app has set anything up.
   Affect: an app sets the handler during its setup and still hears the click it was launched by.

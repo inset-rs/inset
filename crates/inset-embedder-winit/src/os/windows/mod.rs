@@ -70,10 +70,8 @@ impl Screens for Windows {}
 impl PointerQueries for Windows {}
 impl ImageDecoding for Windows {}
 impl WorkQueue for Windows {}
-/// The system starts the app with the files and links it opens on its command line.
-impl SystemRequests for Windows {
-    const OPENED_BY_ARGUMENTS: bool = true;
-}
+/// The system starts the app with what it opens on its command line, which is the app's own.
+impl SystemRequests for Windows {}
 impl SystemChanges for Windows {}
 impl ApplicationControl for Windows {}
 impl ApplicationLifecycle for Windows {}

@@ -173,9 +173,13 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 ## system_requests.rs / launch.rs / os/macos/app_delegate.rs / os/ios/open_requests.rs → the macOS embedder's `FlutterAppDelegate`, iOS's `FlutterAppDelegate` and `FlutterSceneDelegate`
 
-- Change: the files and links the system asks the app to open reach the client as `EmbedderClient::open_requested`, and a reopen, such as a click on the Dock icon, the handler the app sets through `WinitPlatform::macos`, where a Flutter app answers them in its own application delegate: macOS's `application:openURLs:`, a file URL as a path and any other as a link, at launch and while the app runs; Windows' and Linux's launch arguments, read once at launch and served on the loop's first turn.
-  Reason: platform — winit owns the application delegate, so an app cannot write its own; Windows and Linux start a new process with what it opens, so a running app hears nothing more without `inset-single-instance`.
+- Change: the files and links the system asks the app to open reach the client as `EmbedderClient::open_requested`, and a reopen, such as a click on the Dock icon, the handler the app sets through `WinitPlatform::macos`, where a Flutter app answers them in its own application delegate: macOS's `application:openURLs:`, a file URL as a path and any other as a link, at launch and while the app runs.
+  Reason: platform — winit owns the application delegate, so an app cannot write its own.
   Affect: the launch's request waits in the `App` for the app's handler, and a reopen with no handler set is dropped.
+
+- Change: on Windows and Linux the embedder reads no launch arguments: the app reads its own command line, as a Flutter app does in `main`, and hands what it decides are files to `App::open_requested`.
+  Reason: platform — the system starts the app with strings on its command line, and which of them are files the app chose when it registered its file types; Windows and Linux start a new process with what it opens, so a running app hears a later launch only through `inset-single-instance`.
+  Affect: an app's own words on its command line, such as a subcommand, are never taken for files to open.
 
 - Change: on iOS a link or a file opened with the app comes through the application delegate's `application:openURL:options:`, where Flutter's scene-based apps hear `scene:openURLContexts:`; the launch's URL is read from the launch options when the application finishes launching, and a delegate of the embedder's is set then. A file URL's security-scoped access starts as it arrives and is kept for the app's life, as a picked document's is.
   Reason: platform — winit gives `UIApplicationMain` no delegate class and runs no scenes, so the scene delegate's calls never come; the application delegate's are what UIKit sends an app without scenes.

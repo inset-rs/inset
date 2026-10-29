@@ -13,8 +13,13 @@
 //! one [`OpenRequest`] reaching the app through `EmbedderClient::open_requested`. A file is a
 //! [`PickedFile`], as a file dialog answers one: a path where the system gives one, and the
 //! system's handle where it gives none.
+//!
+//! A request is only what the system itself hands over as files and links: macOS's
+//! `application:openURLs:`, iOS's URLs, Android's intents, the web's `launchQueue`. A command line
+//! is the app's own, as Windows and Linux start an app with one: the system gives only strings,
+//! and which of them are files the app decided when it registered its file types. So no host reads
+//! it, and an app that opens what its command line names builds the request itself.
 
-use std::ffi::OsString;
 use std::fmt;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -73,46 +78,6 @@ impl OpenRequest {
     pub fn is_empty(&self) -> bool {
         self.files.is_empty() && self.links.is_empty()
     }
-
-    /// A launch's arguments as what they ask to open, as Windows and Linux start an app with its
-    /// files and links on its command line: an argument with a URI scheme of two letters or more
-    /// (`https:`, `mailto:`) is a link, a `file:` URI is the file it names, and any other argument
-    /// is a file, made absolute against `current_dir`. An argument starting with `-` is an option
-    /// of the app's own, and left out.
-    pub fn from_arguments(
-        arguments: impl IntoIterator<Item = OsString>,
-        current_dir: &Path,
-    ) -> OpenRequest {
-        let mut request = OpenRequest::default();
-        for argument in arguments {
-            match argument.to_str() {
-                Some(text) if text.starts_with('-') => {}
-                Some(text) if text.starts_with("file:") => {
-                    request
-                        .files
-                        .extend(file_uri_path(text).map(PickedFile::Path));
-                }
-                Some(text) if has_scheme(text) => request.links.push(text.to_owned()),
-                _ => request
-                    .files
-                    .push(PickedFile::Path(current_dir.join(argument))),
-            }
-        }
-        request
-    }
-}
-
-/// Whether `text` starts with a URI scheme of two letters or more, so a Windows drive (`C:`) is
-/// none.
-fn has_scheme(text: &str) -> bool {
-    let Some((scheme, _)) = text.split_once(':') else {
-        return false;
-    };
-    scheme.len() >= 2
-        && scheme.starts_with(|first: char| first.is_ascii_alphabetic())
-        && scheme
-            .chars()
-            .all(|letter| letter.is_ascii_alphanumeric() || matches!(letter, '+' | '-' | '.'))
 }
 
 /// `path` as a `file:` URI, which [`file_uri_path`] reads back: made absolute against the working
@@ -189,6 +154,7 @@ fn hex_digit(digit: u8) -> Option<u8> {
 /// before a drive dropped and the slashes turned around.
 #[cfg(unix)]
 fn path_from_bytes(bytes: Vec<u8>) -> Option<PathBuf> {
+    use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
     Some(PathBuf::from(OsString::from_vec(bytes)))
 }
@@ -207,51 +173,6 @@ fn path_from_bytes(bytes: Vec<u8>) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn paths(request: &OpenRequest) -> Vec<PathBuf> {
-        request
-            .files
-            .iter()
-            .filter_map(|file| match file {
-                PickedFile::Path(path) => Some(path.clone()),
-                PickedFile::Handle(_) | PickedFile::Stream(_) => None,
-            })
-            .collect()
-    }
-
-    #[test]
-    fn arguments_are_links_files_or_the_apps_own_options() {
-        let request = OpenRequest::from_arguments(
-            [
-                "--verbose",
-                "notes.txt",
-                "https://example.org/a",
-                "mailto:?subject=notes",
-                "/tmp/b.md",
-            ]
-            .map(OsString::from),
-            Path::new("/home/me"),
-        );
-        assert_eq!(
-            request.links,
-            ["https://example.org/a", "mailto:?subject=notes"]
-        );
-        assert_eq!(
-            paths(&request),
-            [
-                PathBuf::from("/home/me/notes.txt"),
-                PathBuf::from("/tmp/b.md")
-            ]
-        );
-        assert!(OpenRequest::from_arguments([], Path::new("/")).is_empty());
-    }
-
-    #[test]
-    fn a_drive_is_no_scheme() {
-        assert!(!has_scheme(r"C:\Users\me\a.txt"));
-        assert!(has_scheme("web+inset:open"));
-        assert!(!has_scheme("notes.txt"));
-    }
 
     #[cfg(unix)]
     #[cfg(unix)]
@@ -278,6 +199,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_file_uri_names_its_path_decoded() {
         assert_eq!(
@@ -291,8 +213,5 @@ mod tests {
         assert_eq!(file_uri_path("file://elsewhere/tmp/a"), None);
         assert_eq!(file_uri_path("https://example.org/a"), None);
         assert_eq!(file_uri_path("file:///bad%2"), None);
-        let request =
-            OpenRequest::from_arguments([OsString::from("file:///tmp/c%20d.txt")], Path::new("/"));
-        assert_eq!(paths(&request), [PathBuf::from("/tmp/c d.txt")]);
     }
 }

@@ -452,10 +452,6 @@ pub(crate) trait WorkQueue {
 /// What the system asks of the application as a whole, beyond the events winit reports
 /// (`system_requests.rs`).
 pub(crate) trait SystemRequests {
-    /// Whether the system starts the application with the files and links it opens on its
-    /// command line, rather than asking it to open them: Windows and Linux.
-    const OPENED_BY_ARGUMENTS: bool = false;
-
     /// Starts sending the system's requests to `send`, on the main thread, from wherever the
     /// system makes them, so `send` must only queue. Nothing is sent where the system makes
     /// none of these requests of an application.
