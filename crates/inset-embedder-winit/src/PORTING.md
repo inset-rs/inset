@@ -315,8 +315,8 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 ## macos.rs / os/macos → what only macOS offers beyond `Platform`
 
-- Change: `WinitPlatform::macos` slides a window in and hides the app, neither of which Flutter's framework offers.
-  Reason: platform — an app that places a window against the screen, such as a panel above its Dock icon, needs them, and `Platform` stays Flutter's.
+- Change: `WinitPlatform::macos` slides a window in, hides the app, opens native surfaces in a layer no window shows, which the app places itself, and shows a layer the system draws into on a surface, none of which Flutter's framework offers.
+  Reason: platform — an app that places a window against the screen, such as a panel above its Dock icon, or that shows its surfaces in another app's window, needs them, and `Platform` stays Flutter's.
   Affect: an app reaches them only on macOS; on other systems `macos()` is `None`.
 
 ## Deferred

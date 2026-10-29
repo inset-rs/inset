@@ -9,33 +9,38 @@
 //! layer below the `CAMetalLayer` wgpu draws the framework into (raw-window-metal makes that one a
 //! sublayer too, of an `NSView` and a `UIView` alike), so the clear rectangle the framework paints
 //! where the surface goes shows it through; a child joins its parent's content layer where its
-//! parent's present places it, below the parent's buffer, showing through its clear pixels. Every
-//! layer's coordinates are the window's physical pixels over its scale, as a scene's placements are
-//! pixels: a buffer shows whole at the scale its surface is placed at, and smaller under a
-//! transform that shrinks it. The experiments in the `experiments` folder beside this repository
-//! settled the choices here: `2026-09-22-layer-under-a-hole` the layer beneath the window's content
-//! and its contents changed off the main thread, and `2026-09-25-buffer-hold` how long the display
-//! engine holds a buffer.
+//! parent's present places it, below the parent's buffer, showing through its clear pixels; and on
+//! macOS a surface opened under a root no view shows is in that root's layer from the start, which
+//! the app places, and fills it (`detached_root`). Every layer's coordinates are the window's
+//! physical pixels over its scale, as a scene's placements are pixels: a buffer shows whole at the
+//! scale its surface is placed at, and smaller under a transform that shrinks it. The experiments
+//! in the `experiments` folder beside this repository settled the choices here:
+//! `2026-09-22-layer-under-a-hole` the layer beneath the window's content and its contents changed
+//! off the main thread, and `2026-09-25-buffer-hold` how long the display engine holds a buffer.
 //!
 //! The module holds the compositor, a view's root and the surface; `buffers` what a surface was
 //! presented and when each goes back to its producer, `placed` the surfaces a scene or a present
-//! placed last, and `window_surfaces` placing a scene's surfaces in a window.
+//! placed last, `window_surfaces` placing a scene's surfaces in a window, and `detached_root` a
+//! root no view shows.
 //!
 //! Two things touch a surface. Its producer presents a frame from its own thread, in an explicit
-//! transaction, which places the frame's children too. The main thread places it with the
-//! window's frame. A producer that paces by the screen's refreshes waits on the platform's vsync
-//! waiter, as the framework's frames do (`vsync_waiter.rs`); nothing of the surface's is driven by
-//! the screen. Core Animation says only whether the compositor still reads a buffer, not when it
-//! stops, so a surface asks at each present, of every buffer that was replaced, and a producer
-//! never waits for one to come back: it draws into one it knows is free, or a new one, as
-//! Flutter's `FlutterSurfaceManager` (`2026-09-25-surface-buffers-practice`) and Firefox's
-//! `SurfacePoolCA` do. The invariant a later editor must keep: a buffer's release callback runs
-//! only once `IOSurfaceIsInUse` answers false for it, or when its surface is gone.
+//! transaction, which places the frame's children too, and the surface itself under a root no view
+//! shows. The main thread places any other with the window's frame. A producer that paces by the
+//! screen's refreshes waits on the platform's vsync waiter, as the framework's frames do
+//! (`vsync_waiter.rs`); nothing of the surface's is driven by the screen. Core Animation says only
+//! whether the compositor still reads a buffer, not when it stops, so a surface asks at each
+//! present, of every buffer that was replaced, and a producer never waits for one to come back: it
+//! draws into one it knows is free, or a new one, as Flutter's `FlutterSurfaceManager`
+//! (`2026-09-25-surface-buffers-practice`) and Firefox's `SurfacePoolCA` do. The invariant a later
+//! editor must keep: a buffer's release callback runs only once `IOSurfaceIsInUse` answers false
+//! for it, or when its surface is gone.
 
 // Core Animation's layers and the buffers they show need `unsafe`; this module writes it for them.
 #![allow(unsafe_code)]
 
 mod buffers;
+#[cfg(target_os = "macos")]
+mod detached_root;
 mod placed;
 mod window_surfaces;
 
@@ -54,6 +59,8 @@ use objc2_quartz_core::{CALayer, CATransaction};
 use buffers::{CrossThreadBuffer, PresentedBuffers, notify_released};
 use placed::PlacedSurfaces;
 
+#[cfg(target_os = "macos")]
+pub(crate) use detached_root::detached_root;
 pub(crate) use window_surfaces::{CoreAnimationWindowSurfaces, WindowLayer};
 
 const HELD_BRIEFLY: &str = "a surface's state is never held across a panic";
@@ -77,12 +84,16 @@ impl SurfaceParent for ViewRoot {
     }
 }
 
-/// Who may place a surface: the scenes of one view, or the presents of one surface.
+/// Who may place a surface: the scenes of one view, the presents of one surface, or the
+/// surface's own presents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Placer {
     View(ViewId),
     /// The surface of this number, its parent.
     Surface(u64),
+    /// The surface itself, filling its parent's layer at each present: a surface under a root no
+    /// view shows (`detached_root`).
+    Itself,
 }
 
 /// A surface: its layers, the buffers presented to it and not yet released, and the children
@@ -210,6 +221,17 @@ impl CoreAnimationSurface {
         clip_layer.setHidden(false);
     }
 
+    /// Lays the surface out filling the layer it is in, at that layer's contents scale, which is
+    /// how many of the physical pixels of the window it shows in make a point. Inside the
+    /// caller's transaction.
+    fn fill_parent_layer(&self) {
+        let Some(parent) = self.clip_layer.0.superlayer() else {
+            return;
+        };
+        let geometry = LayerGeometry::filling(parent.bounds().size);
+        self.lay_out(&geometry, parent.contentsScale());
+    }
+
     fn hide(&self) {
         self.clip_layer.0.setHidden(true);
     }
@@ -266,13 +288,17 @@ impl CoreAnimationSurface {
 }
 
 impl Surface for CoreAnimationSurface {
-    /// Shows the frame's buffer and places its children in one transaction, and releases the
-    /// replaced buffers the compositor has finished with.
+    /// Shows the frame's buffer and places its children in one transaction, a surface that
+    /// places itself filling its parent's layer as it is now, and releases the replaced buffers
+    /// the compositor has finished with.
     fn present(&self, frame: SurfaceFrame, released: Box<dyn FnOnce() + Send + Sync>) {
         let SurfaceFrame { buffer, children } = frame;
         let buffer = CrossThreadBuffer(buffer);
         in_transaction(|| {
             buffer.set_as_contents_of(&self.buffer_layer.0);
+            if self.placer == Placer::Itself {
+                self.fill_parent_layer();
+            }
             self.place_children(&children);
         });
         self.buffers
@@ -369,6 +395,16 @@ impl LayerGeometry {
             ),
             content_scale,
         })
+    }
+
+    /// The layers of a surface filling a parent of `size` points, unscaled.
+    fn filling(size: NSSize) -> LayerGeometry {
+        LayerGeometry {
+            clip_frame: NSRect::new(NSPoint::new(0.0, 0.0), size),
+            content_origin: NSPoint::new(0.0, 0.0),
+            content_size: size,
+            content_scale: 1.0,
+        }
     }
 }
 
@@ -611,6 +647,111 @@ mod tests {
             &*sublayers.lastObject().unwrap(),
             &*layers.buffer_layer.0
         ));
+    }
+
+    /// A program's picture in a layer another process shows: the surface fills the root's layer
+    /// from its first present, at the layer's scale, and lies in it as a view's surfaces lie in
+    /// the view's layer where the layer is shown in a flipped one. It follows the layer's size at
+    /// its next present.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_surface_under_a_detached_root_fills_its_layer_from_its_first_present() {
+        let (root, layer) = detached_root();
+        layer.setBounds(NSRect::new(
+            NSPoint::new(0.0, 0.0),
+            NSSize::new(400.0, 300.0),
+        ));
+        layer.setContentsScale(2.0);
+        let shown_in = flipped_view_layer();
+        shown_in.addSublayer(&layer);
+        let surface = root.open_child(true);
+        let layers = CoreAnimationSurface::downcast_from(&surface).unwrap();
+        assert!(
+            layers.clip_layer.0.isHidden(),
+            "nothing shows before the first present"
+        );
+
+        surface.present(SurfaceFrame::new(a_buffer(800, 600)), Box::new(|| {}));
+        let buffer_layer = &layers.buffer_layer.0;
+        assert!(!layers.clip_layer.0.isHidden());
+        assert_eq!(
+            frame_in(buffer_layer, &layer),
+            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(400.0, 300.0))
+        );
+        assert_eq!(buffer_layer.contentsScale(), 2.0);
+        let directly_in_view = CALayer::new();
+        shown_in.addSublayer(&directly_in_view);
+        assert_eq!(
+            buffer_layer.contentsAreFlipped(),
+            directly_in_view.contentsAreFlipped()
+        );
+
+        layer.setBounds(NSRect::new(
+            NSPoint::new(0.0, 0.0),
+            NSSize::new(500.0, 400.0),
+        ));
+        surface.present(SurfaceFrame::new(a_buffer(1000, 800)), Box::new(|| {}));
+        assert_eq!(
+            frame_in(buffer_layer, &layer).size,
+            NSSize::new(500.0, 400.0)
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn surfaces_under_a_detached_root_lie_in_the_order_they_opened_and_no_scene_places_them() {
+        let (root, layer) = detached_root();
+        let first = root.open_child(true);
+        let second = root.open_child(true);
+        let sublayers = unsafe { layer.sublayers() }.unwrap();
+        let clip_layer_of = |surface| {
+            CoreAnimationSurface::downcast_from(surface)
+                .unwrap()
+                .clip_layer
+                .0
+                .clone()
+        };
+        assert!(std::ptr::eq(
+            &*sublayers.objectAtIndex(0),
+            &*clip_layer_of(&first)
+        ));
+        assert!(std::ptr::eq(
+            &*sublayers.objectAtIndex(1),
+            &*clip_layer_of(&second)
+        ));
+        let first = CoreAnimationSurface::downcast_from(&first).unwrap();
+        assert!(!first.may_be_placed_by(Placer::View(ViewId(0))));
+    }
+
+    /// A BGRA buffer of `width` by `height` pixels, as a producer presents.
+    #[cfg(target_os = "macos")]
+    fn a_buffer(width: isize, height: isize) -> inset_embedder::Buffer {
+        use objc2_core_foundation::{CFDictionary, CFNumber, CFString};
+        use objc2_io_surface::{
+            IOSurfaceRef, kIOSurfaceBytesPerElement, kIOSurfaceHeight, kIOSurfacePixelFormat,
+            kIOSurfaceWidth,
+        };
+
+        // SAFETY: constants IOSurface exports for the life of the process.
+        let keys: [&CFString; 4] = unsafe {
+            [
+                kIOSurfaceWidth,
+                kIOSurfaceHeight,
+                kIOSurfaceBytesPerElement,
+                kIOSurfacePixelFormat,
+            ]
+        };
+        let numbers = [
+            CFNumber::new_isize(width),
+            CFNumber::new_isize(height),
+            CFNumber::new_isize(4),
+            // 'BGRA'.
+            CFNumber::new_i32(0x4247_5241),
+        ];
+        let values: [&CFNumber; 4] = numbers.each_ref().map(|number| &**number);
+        let properties = CFDictionary::from_slices(&keys, &values);
+        // SAFETY: every value is of the type its key names.
+        unsafe { IOSurfaceRef::new(properties.as_opaque()) }.expect("an IOSurface")
     }
 
     /// A placement's own surface, which [`CoreAnimationSurface::place`] does not read.
