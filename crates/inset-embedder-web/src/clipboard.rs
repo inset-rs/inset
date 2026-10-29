@@ -20,7 +20,7 @@
 use inset_embedder::{
     Clipboard, ClipboardError, ClipboardEvent, ClipboardItem, ClipboardItemsFuture,
     ClipboardReadFuture, ClipboardWriteFuture, Content, ContentFuture, CopyOptions, CopyRequest,
-    PastedItem,
+    DataTransferItem,
 };
 use js_sys::{Array, Object, Promise, Reflect, Uint8Array};
 use wasm_bindgen::{JsCast, JsValue};
@@ -44,7 +44,7 @@ impl Clipboard for BrowserClipboard {
             Array::from(&items)
                 .iter()
                 .filter_map(|item| item.dyn_into::<web_sys::ClipboardItem>().ok())
-                .map(|item| Box::new(ReadItem::new(item)) as Box<dyn PastedItem>)
+                .map(|item| Box::new(ReadItem::new(item)) as Box<dyn DataTransferItem>)
                 .collect()
         })
     }
@@ -79,7 +79,7 @@ pub(crate) fn copy_request() -> CopyRequest {
 /// What the user pasted, as `paste`'s data has it now: its text, one item in each type the
 /// browser gives as text, and each file as an item of its own.
 pub(crate) fn pasted(data: &DataTransfer) -> ClipboardEvent {
-    let mut items: Vec<Box<dyn PastedItem>> = Vec::new();
+    let mut items: Vec<Box<dyn DataTransferItem>> = Vec::new();
     let text = PastedText::read(data);
     if !text.types.is_empty() {
         items.push(Box::new(text));
@@ -166,7 +166,7 @@ impl ReadItem {
     }
 }
 
-impl PastedItem for ReadItem {
+impl DataTransferItem for ReadItem {
     fn types(&self) -> &[String] {
         &self.types
     }
@@ -214,7 +214,7 @@ impl PastedText {
     }
 }
 
-impl PastedItem for PastedText {
+impl DataTransferItem for PastedText {
     fn types(&self) -> &[String] {
         &self.types
     }
@@ -247,7 +247,7 @@ impl PastedFile {
     }
 }
 
-impl PastedItem for PastedFile {
+impl DataTransferItem for PastedFile {
     fn types(&self) -> &[String] {
         &self.types
     }

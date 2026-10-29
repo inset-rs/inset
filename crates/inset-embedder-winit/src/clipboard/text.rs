@@ -15,7 +15,7 @@ use std::time::Instant;
 
 use inset_embedder::{
     Clipboard, ClipboardError, ClipboardItem, ClipboardItemsFuture, ClipboardReadFuture,
-    ClipboardWriteFuture, Content, CopyOptions, PastedItem,
+    ClipboardWriteFuture, Content, CopyOptions, DataTransferItem,
 };
 
 use super::ClipboardChanges;
@@ -168,7 +168,7 @@ impl Clipboard for TextClipboard {
     fn items(&self) -> ClipboardItemsFuture {
         let items = self
             .text_now()
-            .map(|text| Box::new(TextItem::new(text)) as Box<dyn PastedItem>)
+            .map(|text| Box::new(TextItem::new(text)) as Box<dyn DataTransferItem>)
             .into_iter()
             .collect();
         Box::pin(std::future::ready(items))
@@ -225,7 +225,7 @@ impl TextItem {
     }
 }
 
-impl PastedItem for TextItem {
+impl DataTransferItem for TextItem {
     fn types(&self) -> &[String] {
         &self.types
     }

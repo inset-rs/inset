@@ -5,7 +5,7 @@
 //! The shape is the one Apple's, Android's and the web's clipboards share: one clipboard holding
 //! one or more items, each with one or more forms keyed by a type. A reader lists the items and
 //! their types without reading any content ([`Clipboard::items`]), then reads one item in one
-//! form ([`PastedItem::read`]); a writer gives each form's content at once or promises it
+//! form ([`DataTransferItem::read`]); a writer gives each form's content at once or promises it
 //! ([`Content`]), and files travel as references. Where a system holds one item, as Windows and
 //! Linux do, its host writes the first.
 //!
@@ -39,7 +39,7 @@ pub trait Clipboard {
 }
 
 /// What is on the clipboard, on its way.
-pub type ClipboardItemsFuture = Pin<Box<dyn Future<Output = Vec<Box<dyn PastedItem>>>>>;
+pub type ClipboardItemsFuture = Pin<Box<dyn Future<Output = Vec<Box<dyn DataTransferItem>>>>>;
 
 /// A write of the clipboard, on its way.
 pub type ClipboardWriteFuture = Pin<Box<dyn Future<Output = Result<(), ClipboardError>>>>;
@@ -63,8 +63,9 @@ pub trait FileSink {
     ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a>>;
 }
 
-/// One item on the clipboard, as it was when the clipboard was listed.
-pub trait PastedItem {
+/// One item on the clipboard, as it was when the clipboard was listed: the web's
+/// `DataTransferItem`, the item its clipboard events and its drag and drop both hand over.
+pub trait DataTransferItem {
     /// The forms it is offered in, by MIME type, in the order its writer gave them: the most
     /// faithful first. A file is offered as [`URI_LIST`].
     fn types(&self) -> &[String];
@@ -202,7 +203,7 @@ pub enum ClipboardEvent {
     /// Write what is selected, and remove it.
     Cut(CopyRequest),
     /// The clipboard as the user pasted it.
-    Paste(Vec<Box<dyn PastedItem>>),
+    Paste(Vec<Box<dyn DataTransferItem>>),
 }
 
 impl fmt::Debug for ClipboardEvent {

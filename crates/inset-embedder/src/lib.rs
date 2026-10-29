@@ -45,7 +45,7 @@ pub use client::EmbedderClient;
 pub use clipboard::{
     Clipboard, ClipboardError, ClipboardEvent, ClipboardItem, ClipboardItemsFuture,
     ClipboardReadFuture, ClipboardWriteFuture, Content, ContentFuture, CopyOptions, CopyRequest,
-    FileSink, PastedItem, URI_LIST, WriteFuture,
+    DataTransferItem, FileSink, URI_LIST, WriteFuture,
 };
 pub use composition::{Buffer, Compositor, Surface, SurfaceFrame, SurfaceParent};
 pub use drag_drop::{DropChange, DropData};

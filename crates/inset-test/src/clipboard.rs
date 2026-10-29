@@ -14,8 +14,8 @@ use std::rc::Rc;
 
 use inset_embedder::{
     Clipboard, ClipboardError, ClipboardItem, ClipboardItemsFuture, ClipboardReadFuture,
-    ClipboardWriteFuture, Content, ContentFuture, CopyOptions, FileSink, PastedItem, URI_LIST,
-    WriteFuture,
+    ClipboardWriteFuture, Content, ContentFuture, CopyOptions, DataTransferItem, FileSink,
+    URI_LIST, WriteFuture,
 };
 
 /// A clipboard held in memory, which answers every call at once but a promise's, which answers
@@ -110,12 +110,12 @@ impl Clipboard for MockClipboard {
             .iter()
             .enumerate()
             .map(|(index, item)| {
-                Box::new(MockPastedItem {
+                Box::new(MockDataTransferItem {
                     clipboard: self.clone(),
                     change_count: contents.change_count,
                     index,
                     types: types_offered(item),
-                }) as Box<dyn PastedItem>
+                }) as Box<dyn DataTransferItem>
             })
             .collect();
         Box::pin(std::future::ready(items))
@@ -143,7 +143,7 @@ fn types_offered(item: &ClipboardItem) -> Vec<String> {
 }
 
 /// One item of a [`MockClipboard`], as it was listed.
-struct MockPastedItem {
+struct MockDataTransferItem {
     clipboard: MockClipboard,
     change_count: u64,
     index: usize,
@@ -167,7 +167,7 @@ enum File {
     },
 }
 
-impl MockPastedItem {
+impl MockDataTransferItem {
     /// The item's form in `mime`, while the clipboard still holds the item.
     fn form(&self, mime: &str) -> Result<Form, ClipboardError> {
         let contents = self.clipboard.0.borrow();
@@ -204,7 +204,7 @@ impl MockPastedItem {
     }
 }
 
-impl PastedItem for MockPastedItem {
+impl DataTransferItem for MockDataTransferItem {
     fn types(&self) -> &[String] {
         &self.types
     }
