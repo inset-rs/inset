@@ -1,6 +1,7 @@
 //! The embedder's [`View`]: a place the framework draws, as it sees it — its identity, its metrics,
-//! its text input, and the scenes it presents: drawn by its rasterizer (`rasterizer.rs`), with the
-//! native surfaces they place beneath the drawing (`os`'s `WindowSurfaces`).
+//! its text input, and the scenes it presents: their slices drawn by its rasterizer
+//! (`rasterizer.rs`), with the native surfaces they place beneath the drawing (`os`'s
+//! `WindowSurfaces`).
 //!
 //! A view is made without a window, at no size, and is given one: the screen view at winit's
 //! first call, after the app has started, as Flutter's engine has it before its window; any
@@ -20,13 +21,13 @@ use std::sync::Arc;
 
 use inset_embedder::{
     RequestId, Scene, TextInputHost, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding,
-    WindowRef,
+    WindowRef, slices,
 };
 use winit::event::{Ime, KeyEvent};
 use winit::keyboard::ModifiersState;
 use winit::window::Window;
 
-use crate::gpu::Gpu;
+use crate::gpu::LazyGpu;
 use crate::host_window::WinitWindow;
 use crate::ime::ImeOutcome;
 use crate::os::{ThisOs, ThisOsWindowSurfaces, WindowGeometry, WindowSurfaces};
@@ -56,7 +57,7 @@ impl WinitView {
     /// with a surface. A view whose window sees through gets surfaces whose alpha the compositor
     /// honours, cleared to nothing, so what the app leaves unpainted shows what is behind the
     /// window.
-    pub(crate) fn new(id: ViewId, gpu: &Gpu, sees_through: bool) -> WinitView {
+    pub(crate) fn new(id: ViewId, gpu: &LazyGpu, sees_through: bool) -> WinitView {
         WinitView {
             id,
             metrics: Cell::new(ViewMetrics::default()),
@@ -86,11 +87,6 @@ impl WinitView {
         *self.native_surfaces.borrow_mut() = Some(ThisOsWindowSurfaces::new(Arc::clone(window)));
         self.text_input.attach(window);
         self.refresh_metrics(&**window);
-    }
-
-    /// The renderer's image context, for the images decoded on this device.
-    pub(crate) fn image_context(&self) -> valo::ImageContext {
-        self.rasterizer.borrow().image_context()
     }
 
     /// Draws the last scene again if the surface does not show it: an owed frame, paid
@@ -154,8 +150,8 @@ impl WinitView {
     }
 
     /// The system gives `window`, the view's, a surface: the view draws on it from now on.
-    pub(crate) fn give_surface(&self, window: &Arc<dyn Window>) -> Result<(), String> {
-        self.rasterizer.borrow_mut().give_surface(window)
+    pub(crate) fn give_surface(&self, window: &Arc<dyn Window>) {
+        self.rasterizer.borrow_mut().give_surface(window);
     }
 
     /// The system took the window's surface away: the view keeps its scene and owes it until
@@ -221,10 +217,11 @@ impl View for WinitView {
         if rasterizer.shows(&scene) {
             return;
         }
+        let slices = slices(&scene);
         if let Some(native_surfaces) = &*self.native_surfaces.borrow() {
-            native_surfaces.place(&scene.surfaces, self.id);
+            native_surfaces.place(slices.surfaces(), self.id);
         }
-        rasterizer.draw(&scene);
+        rasterizer.draw(&scene, &slices);
     }
 
     fn text_input(&self) -> Option<&dyn TextInputHost> {

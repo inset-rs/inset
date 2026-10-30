@@ -7,9 +7,7 @@
 use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Mutex};
 
-use inset_embedder::{
-    Picture, Scene, ScreenId, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding,
-};
+use inset_embedder::{Scene, ScreenId, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding};
 use ndk::native_window::NativeWindow;
 
 use crate::gpu::Gpu;
@@ -100,16 +98,18 @@ impl AndroidView {
         }
         let latest = self.latest.borrow().clone();
         if let Some(latest) = latest {
-            self.draw(&latest.picture);
+            self.draw(&latest);
         }
     }
 
-    fn draw(&self, picture: &Picture) {
+    /// Draws `scene`'s slices; with no compositor here, no surface is placed.
+    fn draw(&self, scene: &Scene) {
+        let picture = inset_embedder::slices(scene).picture_with_room();
         let drawn = self
             .surface
             .lock()
             .expect("surface lock")
-            .draw(picture, self.clear);
+            .draw(&picture, self.clear);
         self.on_screen.set(drawn.is_ok());
     }
 
@@ -163,7 +163,7 @@ impl View for AndroidView {
             return;
         }
         *self.latest.borrow_mut() = Some(Arc::clone(&scene));
-        self.draw(&scene.picture);
+        self.draw(&scene);
     }
 }
 

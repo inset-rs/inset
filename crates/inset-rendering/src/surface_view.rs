@@ -1,19 +1,18 @@
 //! A box that shows a native surface the host composites: Flutter's platform view render
 //! object, over the `Surface` a producer feeds.
 //!
-//! It paints a clear rectangle at its place in paint order, so what the framework paints
-//! above the surface stays and what it painted beneath is gone, and adds a [`SurfaceLayer`]
-//! so the scene places the surface there. It fills what it is given: the surface's producer
-//! is told the size by whoever built this widget, not by the compositor. It always needs
-//! compositing, as Flutter's platform views do, so a transform or a clip above it is a layer
-//! the scene places the surface under rather than a change to the canvas alone. The invariant:
-//! the rectangle painted clear and the rectangle placed are the same one.
+//! It paints nothing of its own: it adds a [`SurfaceLayer`] at its place in paint order, and
+//! whoever composites the scene makes room for the surface there, so what the framework paints
+//! above the surface stays and what it painted beneath is gone. It fills what it is given: the
+//! surface's producer is told the size by whoever built this widget, not by the compositor. It
+//! always needs compositing, as Flutter's platform views do, so a transform, a clip or an opacity
+//! above it is a layer the surface is placed under rather than a change to the canvas alone. The
+//! invariant: the layer added is the box, at the offset it is painted at.
 
 use std::sync::Arc;
 
-use inset_embedder::{BlendMode, Offset, Paint, Size, Surface};
+use inset_embedder::{Offset, Size, Surface};
 use inset_foundation::App;
-use inset_painting::ClipContext;
 
 use crate::box_::{BoxConstraints, RenderBox, RenderBoxData};
 use crate::layer::{ErasedLayer, SurfaceLayer};
@@ -66,17 +65,16 @@ impl RenderObject for RenderSurfaceView {
         self.set_size(app, size);
     }
 
-    /// A clear rectangle in the picture, and the surface placed over it.
+    /// The surface placed at the box: the layer splits the picture there, so what is painted
+    /// after it lies above the surface.
     fn paint(
         self: RenderHandle<Self>,
         app: &mut App,
         context: &mut PaintingContext,
         offset: Offset,
     ) {
-        let rect = offset & self.size(app);
-        context.canvas().draw_rect(rect, &clearing_paint());
         let surface = Arc::clone(&self.get(app).surface);
-        let layer = SurfaceLayer::new(app, surface, rect);
+        let layer = SurfaceLayer::new(app, surface, offset & self.size(app));
         context.add_layer(app, layer.as_layer());
     }
 }
@@ -98,19 +96,10 @@ impl RenderBox for RenderSurfaceView {
     }
 }
 
-/// The paint that leaves a rectangle clear: nothing of the framework's beneath it, and what
-/// is painted above it stays.
-fn clearing_paint() -> Paint {
-    Paint {
-        blend_mode: BlendMode::Clear,
-        ..Paint::default()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use inset_embedder::test_support::idle_surface;
-    use inset_embedder::{Clip, Matrix4, Rect, SceneBuilder, SurfacePlacement, valo};
+    use inset_embedder::{Clip, Matrix4, Mutator, Part, Rect, SceneBuilder};
     use inset_foundation::{AppCell, Handle};
 
     use super::*;
@@ -234,33 +223,21 @@ mod tests {
     }
 
     #[test]
-    fn the_rectangle_painted_clear_is_the_rectangle_placed() {
+    fn the_box_is_placed_and_nothing_is_painted() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let surface = idle_surface();
         let (scene, _owner) =
             scene_of_one_frame(&mut app, Arc::clone(&surface), ChildPainting::AtOffset);
+        let slices = inset_embedder::slices(&scene);
+        let [Part::Surface(placement)] = slices.parts() else {
+            panic!("the surface alone: {:?}", slices.parts());
+        };
+        assert!(Arc::ptr_eq(&placement.surface, &surface));
         let placed = Rect::from_ltwh(10.0, 5.0, 30.0, 20.0);
-        assert_eq!(
-            scene.surfaces,
-            [SurfacePlacement {
-                surface,
-                rect: placed,
-                scale: 1.0,
-                clip: placed,
-            }]
-        );
-        let ops = inset_embedder::flattened_ops(&scene.picture);
-        let holes: Vec<valo::Rect> = ops
-            .iter()
-            .filter_map(|op| match op {
-                valo::Op::DrawRect { rect, paint, .. } if paint.blend_mode == BlendMode::Clear => {
-                    Some(*rect)
-                }
-                _ => None,
-            })
-            .collect();
-        assert_eq!(holes, [valo::Rect::from(placed)], "{ops:?}");
+        assert_eq!(placement.bounds(), placed);
+        assert_eq!(placement.visible_bounds(), placed);
+        assert!(!slices.paints());
     }
 
     /// A transform and a clip above a surface are layers of their own, as they are above
@@ -269,20 +246,23 @@ mod tests {
     fn a_surface_is_placed_under_the_transform_and_the_clip_above_it() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let surface = idle_surface();
-        let (scene, _owner) = scene_of_one_frame(
-            &mut app,
-            Arc::clone(&surface),
-            ChildPainting::HalvedUnderAClip,
+        let (scene, _owner) =
+            scene_of_one_frame(&mut app, idle_surface(), ChildPainting::HalvedUnderAClip);
+        let placement = inset_embedder::slices(&scene)
+            .surfaces()
+            .next()
+            .cloned()
+            .expect("placed");
+        assert!(
+            placement
+                .mutators
+                .contains(&Mutator::ClipRect(Rect::from_ltwh(0.0, 0.0, 100.0, 10.0)))
         );
+        assert_eq!(placement.scale(), 0.5);
+        assert_eq!(placement.bounds(), Rect::from_ltwh(10.0, 5.0, 15.0, 10.0));
         assert_eq!(
-            scene.surfaces,
-            [SurfacePlacement {
-                surface,
-                rect: Rect::from_ltwh(10.0, 5.0, 15.0, 10.0),
-                scale: 0.5,
-                clip: Rect::from_ltrb(10.0, 5.0, 25.0, 10.0),
-            }]
+            placement.visible_bounds(),
+            Rect::from_ltrb(10.0, 5.0, 25.0, 10.0)
         );
     }
 }

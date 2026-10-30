@@ -8,10 +8,10 @@
 //! sublayers, Wayland's subsurfaces, Android's `SurfaceControl` parents, DirectComposition's
 //! visuals), with one rule at every level: a surface is opened under a parent
 //! ([`SurfaceParent::open_child`]), and placed when that parent's next frame is applied. A view's
-//! frame is its [`Scene`](crate::Scene), whose `surfaces` place the surfaces opened under the
-//! view's root ([`Compositor::root`]); a surface's frame is its [`SurfaceFrame`], whose
+//! frame is its [`Scene`](crate::Scene), whose [`slices`](crate::slices) place the surfaces opened
+//! under the view's root ([`Compositor::root`]); a surface's frame is its [`SurfaceFrame`], whose
 //! `children` place the surfaces opened under it, in its buffer's pixels, beneath its buffer.
-//! Both list [`SurfacePlacement`]s, and the host lands each frame in the one transaction its
+//! Both are [`SurfacePlacement`]s, and the host lands each frame in the one transaction its
 //! compositor has for it (a `CATransaction`, a parent's `wl_surface.commit`,
 //! `IDCompositionDevice::Commit`, a `SurfaceControl.Transaction`). A program whose picture is
 //! itself a surface in another app's window opens its own surfaces under that picture so, and
@@ -86,8 +86,8 @@ impl SurfaceFrame {
     }
 
     /// The same frame placing a child too, above the children placed before it: a program's
-    /// placements come whole from its own scene, with the scale and the clip the transforms
-    /// and clips above each of its surfaces give it.
+    /// placements come whole from its own scene's slices, with what the containers above each
+    /// of its surfaces do to it.
     pub fn child(mut self, placement: SurfacePlacement) -> SurfaceFrame {
         self.children.push(placement);
         self

@@ -64,6 +64,10 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Valo paints `.notdef` tofu unless asked not to.
   Affect: a character with no face occupies layout space and draws nothing.
 
+- Change: on macOS a frame that paints nothing besides its native surfaces is not drawn.
+  Reason: platform — Core Animation shows the surfaces by itself, and macOS gives a process a large share of graphics memory the first time it draws.
+  Affect: a window that only shows native surfaces, such as a full-window video, draws nothing and, until it paints, holds no graphics memory.
+
 ## trackpad.rs / main_loop/input.rs / os/macos/trackpad_touches.rs → the macOS embedder's trackpad gestures (`FlutterViewController.mm`, `dispatchGestureEvent:`, `touchesBeganWithEvent:`)
 
 - Change: the trackpad's scroll, pinch and rotation are each under way from winit's `Started` to its `Ended` or `Cancelled`, where Flutter keeps AppKit's phases and counts a gesture that may begin as not under way.
@@ -146,7 +150,11 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Core Animation composites the buffers it's given, so a producer's frame needs no copy and no framework frame.
   Affect: framework content can sit above a surface but not beneath it.
 
-- Change: a surface's buffer and its children sit in one layer scaled by a transform, the children beneath the buffer, and a present shows a surface frame's buffer and places its children in one transaction.
+- Change: a native surface's layers take every transform and clip above it, a path's included.
+  Reason: platform — Core Animation turns a layer by any transform and masks it by any path.
+  Affect: a turned, rounded or path-clipped surface shows exactly where the framework places it.
+
+- Change: a surface's buffer and its children sit in one layer placed by a transform, the children beneath the buffer, and a present shows a surface frame's buffer and places its children in one transaction.
   Reason: platform — a program whose picture is itself a surface in another app's window places its own surfaces in that picture, and Core Animation moves, clips and scales a layer's sublayers with it.
   Affect: a child moves, is cut and shrinks with its parent, and shows through its parent's clear pixels.
 

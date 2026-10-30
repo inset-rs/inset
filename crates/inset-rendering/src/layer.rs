@@ -5,10 +5,10 @@
 //! object; edges are [`AnyLayer`] / [`AnyContainerLayer`] and lifetime is Flutter's
 //! [`LayerHandle`] count, which ends in `dispose` and `App::destroy`.
 //!
-//! No `EngineLayer`: valo composites a display list, so `addToScene` runs for every layer every
-//! frame and the retained-rendering bookkeeping (`_needsAddToScene`, `markNeedsAddToScene`,
-//! `alwaysNeedsAddToScene`, `addRetained`, `engineLayer`) has nothing to decide and is not
-//! ported. See `PORTING.md`.
+//! A layer keeps the [`EngineLayer`] its `add_to_scene` last made, a node of the scene's tree, and
+//! hands it to [`SceneBuilder::add_retained`] while nothing in its subtree changed, as Flutter's
+//! retained rendering does (`_needsAddToScene`, `markNeedsAddToScene`, `alwaysNeedsAddToScene`,
+//! `engineLayer`).
 
 use std::any::{Any, TypeId};
 use std::cell::Cell;
@@ -177,7 +177,7 @@ pub struct LayerData {
     /// never was. `update_subtree_needs_add_to_scene` folds the descendants' in before a scene
     /// is built.
     needs_add_to_scene: bool,
-    /// The list this layer's subtree recorded when it was last added, for
+    /// The node this layer's subtree made when it was last added to a scene, for
     /// [`SceneBuilder::add_retained`] while nothing in the subtree changed.
     engine_layer: Option<EngineLayer>,
 }
@@ -852,9 +852,9 @@ impl AnyLayer {
         (self.vtable.always_needs_add_to_scene)(app, self.id)
     }
 
-    /// The engine layer used to render this layer: the list its subtree recorded when it was
-    /// last added to a scene, which [`SceneBuilder::add_retained`] embeds again while nothing
-    /// in the subtree changed.
+    /// The engine layer used to render this layer: the node of the scene's tree its subtree made
+    /// when it was last added to a scene, which [`SceneBuilder::add_retained`] adds again while
+    /// nothing in the subtree changed.
     pub fn engine_layer(self, app: &App) -> Option<EngineLayer> {
         self.data(app).engine_layer.clone()
     }
@@ -867,7 +867,7 @@ impl AnyLayer {
         debug_assert!(!self.data(app).debug_disposed);
         self.data_mut(app).engine_layer = value;
         if !self.always_needs_add_to_scene(app) {
-            // The parent must record a new list to embed this one in, and so is marked as
+            // The parent must build a new engine layer to add this one to, and so is marked as
             // needing `add_to_scene`. When the whole tree is rendered the parent is adding
             // itself already and clears the flag when it is done; when an interior layer is
             // rendered on its own (an `OffsetLayer::to_image`) the mark waits for the frame
@@ -1155,8 +1155,8 @@ impl Layer for PictureLayer {
 
 /// A layer that places a native surface the host composites: Flutter's `PlatformViewLayer`.
 ///
-/// A leaf, like a picture layer. It is added to the scene on every frame: a scene's list of
-/// surfaces is built afresh each time, and a retained display list carries no surface.
+/// A leaf, like a picture layer, retained with its ancestors like any other: the scene keeps it
+/// as a layer of its own, and a host places the surface from the tree every frame.
 pub struct SurfaceLayer {
     layer: LayerData,
     surface: Arc<dyn Surface>,
@@ -1185,10 +1185,6 @@ impl SurfaceLayer {
 
 impl Layer for SurfaceLayer {
     crate::layer_accessors!();
-
-    fn always_needs_add_to_scene(self: Handle<Self>, _app: &App) -> bool {
-        true
-    }
 
     fn add_to_scene(self: Handle<Self>, app: &mut App, builder: &mut SceneBuilder) {
         let this = app.get(self);
@@ -4066,33 +4062,41 @@ mod tests {
         (root, opacity)
     }
 
+    /// A surface's layer is retained with its ancestors, as Flutter's `PlatformViewLayer` is:
+    /// the scene keeps it, and its placement is worked out from the tree every frame.
     #[test]
-    fn a_surface_layer_places_its_surface_under_its_offset_every_frame() {
+    fn a_surface_layer_is_retained_and_its_surface_placed_every_frame() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let root = OffsetLayer::new(&mut app, Offset::new(10.0, 5.0));
+        let inner = OffsetLayer::new(&mut app, Offset::ZERO);
         let surface = inset_embedder::test_support::idle_surface();
         let layer = SurfaceLayer::new(
             &mut app,
             Arc::clone(&surface),
             Rect::from_ltwh(1.0, 2.0, 30.0, 20.0),
         );
-        root.as_container_layer().append(&mut app, layer.as_layer());
+        inner
+            .as_container_layer()
+            .append(&mut app, layer.as_layer());
+        root.as_container_layer().append(&mut app, inner.as_layer());
+        let mut first_engine_layer = None;
         for _frame in 0..2 {
             let scene = root
                 .as_container_layer()
                 .build_scene(&mut app, SceneBuilder::new());
-            assert_eq!(
-                scene.surfaces,
-                [inset_embedder::SurfacePlacement {
-                    surface: Arc::clone(&surface),
-                    rect: Rect::from_ltwh(11.0, 7.0, 30.0, 20.0),
-                    scale: 1.0,
-                    clip: Rect::from_ltwh(11.0, 7.0, 30.0, 20.0),
-                }]
-            );
+            let placement = inset_embedder::slices(&scene)
+                .surfaces()
+                .next()
+                .cloned()
+                .expect("placed");
+            assert!(Arc::ptr_eq(&placement.surface, &surface));
+            assert_eq!(placement.bounds(), Rect::from_ltwh(11.0, 7.0, 30.0, 20.0));
+            let engine_layer = inner.as_layer().engine_layer(&app).expect("recorded");
+            let first = first_engine_layer.get_or_insert_with(|| Arc::clone(&engine_layer));
+            assert!(Arc::ptr_eq(first, &engine_layer), "retained");
         }
-        assert!(layer.as_layer().always_needs_add_to_scene(&app));
+        assert!(!layer.as_layer().always_needs_add_to_scene(&app));
     }
 
     #[test]
@@ -4109,22 +4113,22 @@ mod tests {
         let retained = opacity.as_layer().engine_layer(&app).expect("recorded");
         assert!(
             Arc::ptr_eq(&recorded, &retained),
-            "the same list is retained"
+            "the same node is retained"
         );
-        let root_list = root
+        let root_node = root
             .as_layer()
             .engine_layer(&app)
-            .expect("the root re-records");
+            .expect("the root is built again");
         assert!(
-            root_list.ops().iter().any(|op| matches!(
-                op,
-                inset_embedder::valo::Op::DrawDisplayList { list, .. } if Arc::ptr_eq(list, &retained)
+            root_node.children.iter().any(|child| matches!(
+                child,
+                inset_embedder::Layer::Container(container) if Arc::ptr_eq(container, &retained)
             )),
-            "embedded again: {:?}",
-            root_list.ops()
+            "added again: {:?}",
+            root_node.children
         );
         assert_eq!(
-            inset_embedder::flattened_ops(&scene.picture)
+            inset_embedder::flattened_ops(&inset_embedder::slices(&scene).picture_with_room())
                 .iter()
                 .filter(|op| matches!(op, inset_embedder::valo::Op::SaveLayer { .. }))
                 .count(),
@@ -4148,7 +4152,7 @@ mod tests {
         let again = opacity.as_layer().engine_layer(&app).expect("recorded");
         assert!(
             !Arc::ptr_eq(&recorded, &again),
-            "a new list for the new alpha"
+            "a new node for the new alpha"
         );
         assert!(!opacity.as_layer().needs_add_to_scene(&app));
     }

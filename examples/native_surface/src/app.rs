@@ -1,4 +1,5 @@
-//! The window: a surface in the middle, the framework's label above its bottom edge.
+//! The window: a surface in the middle, the framework's label above its bottom edge, both shown
+//! as the command line says.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -8,12 +9,13 @@ use std::time::Duration;
 use inset_embedder::{Color, PlatformRef, Surface, TextDirection, ViewId, ViewRef, WindowConfig};
 use inset_embedder_winit::WinitEmbedder;
 use inset_foundation::{App, Handle, Listenable, Listener};
-use inset_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
+use inset_painting::{BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry, TextStyle};
 use inset_scheduler::{PersistentFrameCallback, SchedulerBinding};
 use inset_shell::Shell;
 use inset_widgets::{
-    Center, DecoratedBox, Directionality, IntoWidget, Padding, Positioned, SizedBox, Stack,
-    StackFit, SurfaceView, Text, Transform, WidgetRef, Window, WindowController, run_widget,
+    Center, ClipRRect, DecoratedBox, Directionality, IntoWidget, Opacity, Padding, Positioned,
+    SizedBox, Stack, StackFit, SurfaceView, Text, Transform, WidgetRef, Window, WindowController,
+    run_widget,
 };
 
 use crate::producer::{self, Pacing, ViewScreen};
@@ -24,15 +26,30 @@ const BACKGROUND: Color = Color::from_argb(255, 245, 245, 240);
 const LABEL_BACKGROUND: Color = Color::from_argb(160, 0, 0, 0);
 const LABEL: Color = Color::from_argb(255, 255, 255, 255);
 
-/// Runs the window, the surface and its label scaled by `scale` about their middle.
-pub(crate) fn run(exit_after: Option<Duration>, scale: f64) {
-    WinitEmbedder
-        .run(move |platform| Shell::new(platform, move |app| open_window(app, exit_after, scale)));
+/// How the surface and its label are shown, together.
+#[derive(Clone, Copy)]
+pub(crate) struct Presentation {
+    /// What they are scaled by, about their middle.
+    pub(crate) scale: f64,
+    pub(crate) opacity: f64,
+    /// How far they are turned about their middle, clockwise.
+    pub(crate) turn_degrees: f64,
+    /// The radius their corners are cut round by.
+    pub(crate) corner_radius: f64,
+}
+
+/// Runs the window, the surface and its label shown as `presentation` says.
+pub(crate) fn run(exit_after: Option<Duration>, presentation: Presentation) {
+    WinitEmbedder.run(move |platform| {
+        Shell::new(platform, move |app| {
+            open_window(app, exit_after, presentation)
+        })
+    });
 }
 
 /// Asks for the window, and once its view has arrived opens the surface on it and shows both;
 /// closing the window quits.
-fn open_window(app: &mut App, exit_after: Option<Duration>, scale: f64) {
+fn open_window(app: &mut App, exit_after: Option<Duration>, presentation: Presentation) {
     let config = WindowConfig {
         title: "Inset — a native surface".to_owned(),
         size: [640.0, 480.0],
@@ -48,7 +65,7 @@ fn open_window(app: &mut App, exit_after: Option<Duration>, scale: f64) {
             if let Some(view) = WindowController::view(controller, app)
                 && !shown.replace(true)
             {
-                show(app, controller, view, exit_after, scale);
+                show(app, controller, view, exit_after, presentation);
             }
         }),
     );
@@ -59,13 +76,13 @@ fn show(
     controller: Handle<WindowController>,
     view: ViewRef,
     exit_after: Option<Duration>,
-    scale: f64,
+    presentation: Presentation,
 ) {
     let surface = open_surface(&app.platform(), view.id());
     start_producer_once_sized(app, view, Arc::clone(&surface), exit_after);
     run_widget(
         app,
-        Window::new(controller, home(surface, scale)).into_widget(),
+        Window::new(controller, home(surface, presentation)).into_widget(),
     );
 }
 
@@ -122,8 +139,13 @@ fn pixel_size(device_pixel_ratio: f64) -> [usize; 2] {
     SURFACE_SIZE.map(|side| (side * device_pixel_ratio).round() as usize)
 }
 
-fn home(surface: Arc<dyn Surface>, scale: f64) -> WidgetRef {
-    let scaled = Transform::scale(Some(scale), None, None).child(framed_surface(surface));
+fn home(surface: Arc<dyn Surface>, presentation: Presentation) -> WidgetRef {
+    let rounded = ClipRRect::new()
+        .border_radius(BorderRadiusGeometry::circular(presentation.corner_radius))
+        .child(framed_surface(surface));
+    let faded = Opacity::new(presentation.opacity).child(rounded);
+    let turned = Transform::rotate(presentation.turn_degrees.to_radians()).child(faded);
+    let scaled = Transform::scale(Some(presentation.scale), None, None).child(turned);
     Directionality::new(
         TextDirection::Ltr,
         DecoratedBox::new(BoxDecoration::new().color(BACKGROUND))

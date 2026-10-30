@@ -11,7 +11,6 @@ use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
 use crate::os::{FramePresentation, ThisOs, TrackpadTouches, WindowVisibility};
-use crate::view::WinitView;
 use crate::view_focus;
 use crate::windows::{
     OpenWindow, ViewAfterClose, WindowObservers, WindowRequest, open_screen_window,
@@ -42,7 +41,7 @@ impl<C: EmbedderClient> MainLoop<C> {
             Rc::clone(self.state.requests()),
         )?;
         if self.surfaces_given {
-            open.view.give_surface(&open.window)?;
+            open.view.give_surface(&open.window);
         }
         self.add_view(open);
         Ok(())
@@ -54,7 +53,7 @@ impl<C: EmbedderClient> MainLoop<C> {
         let view_id = open.view.id();
         let window = Arc::clone(&open.window);
         let observers = self.observe_window(&*window);
-        self.state.add_view_with_window(open, observers);
+        self.views().add_with_window(open, observers);
         self.sync_frame_scheduler(view_id);
         self.client.view_added(view_id);
         self.read_theme_of(&*window);
@@ -101,7 +100,7 @@ impl<C: EmbedderClient> MainLoop<C> {
         let window =
             open_screen_window(event_loop, &config, &view).expect("open the screen view's window");
         if self.surfaces_given {
-            give_surface(&view, &window);
+            view.give_surface(&window);
         }
         self.views().attach_screen_window(Arc::clone(&window));
         self.sync_frame_scheduler(view.id());
@@ -218,7 +217,7 @@ impl<C: EmbedderClient> MainLoop<C> {
         self.surfaces_given = true;
         let open_windows = self.views().open_windows();
         for open in &open_windows {
-            give_surface(&open.view, &open.window);
+            open.view.give_surface(&open.window);
         }
         self.sync_metrics();
         for open in open_windows {
@@ -299,15 +298,6 @@ impl<C: EmbedderClient> MainLoop<C> {
             handle.refresh_state();
             self.client.window_changed(open.view.id());
         }
-    }
-}
-
-/// Gives `view` a surface on `window`, its own; a view that gets none is reported and draws
-/// nothing. A window the app asks for answers the app with the error instead
-/// (`make_requested_window`).
-fn give_surface(view: &WinitView, window: &Arc<dyn Window>) {
-    if let Err(reason) = view.give_surface(window) {
-        eprintln!("inset: no surface on view {:?}: {reason}", view.id());
     }
 }
 
