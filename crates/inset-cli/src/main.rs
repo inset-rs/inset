@@ -7,6 +7,7 @@
 //! static web folder, a wasm component.
 
 mod android;
+mod apple;
 mod cargo;
 mod desktop;
 mod devices;
@@ -14,6 +15,7 @@ mod doctor;
 mod file_associations;
 mod icons;
 mod ios;
+mod macos;
 mod new;
 mod project;
 mod serve;
@@ -180,9 +182,7 @@ fn run_on(
     let target = devices::resolve(device)?;
     let project = Project::load(package)?;
     match target {
-        Target::Desktop if cfg!(target_os = "macos") => {
-            desktop::run_bundle(&project, profile, args)
-        }
+        Target::Desktop if cfg!(target_os = "macos") => macos::run(&project, profile, args),
         Target::Desktop => cargo::run(&project, profile, args),
         Target::Web { browser } => {
             let out = web::build(&project, profile)?;
@@ -219,8 +219,8 @@ fn build(
 ) -> Result<()> {
     let project = Project::load(package)?;
     let outputs = match target {
-        BuildTarget::Macos => desktop::build(&project, profile, Format::App)?,
-        BuildTarget::Dmg => desktop::build(&project, profile, Format::Dmg)?,
+        BuildTarget::Macos => vec![macos::build_app(&project, profile)?],
+        BuildTarget::Dmg => vec![macos::build_dmg(&project, profile)?],
         BuildTarget::Windows | BuildTarget::Linux => {
             desktop::build(&project, profile, Format::Folder)?
         }
