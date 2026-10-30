@@ -56,10 +56,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## painting_context.rs → object.dart (PaintingContext), layer.rs → layer.dart
 
-- Change: a layer's engine layer is a valo display list, the one its subtree recorded when it was last added to a scene.
-  Reason: platform — valo has no engine layer objects; a nested display list is what it retains.
-  Affect: a subtree that did not change is embedded again rather than re-recorded, as with Flutter's `addRetained`.
-
 - Change: a `LayerHandle` dropped without being cleared keeps its layer.
   Reason: language — the handle lives inside an arena object, so its setter takes the `App` (`LayerHandle::set_layer`) and its drop has none.
   Affect: that layer's entry lives until the `App` drops, where Dart's collector would take it.
@@ -78,9 +74,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## surface_view.rs, layer.rs (`SurfaceLayer`) → platform views (`PlatformViewLayer`, `RenderAndroidView` and kin)
 
-- Change: one `RenderSurfaceView` serves every platform: it paints its box clear and has the host show the surface beneath, where Flutter has a platform view render object per platform.
-  Reason: platform — a surface is a rectangle and a buffer on every compositor, and the host composites it beneath the framework's picture.
-  Affect: what the framework paints above the surface covers it, and nothing painted beneath it shows.
+- Change: one `RenderSurfaceView` shows a native surface on every platform.
+  Reason: platform — every compositor Inset targets shows a surface as a rectangle and a buffer.
+  Affect: an app shows a native surface with the same widget everywhere.
 
 ## view.rs → view.dart, binding.rs → binding.dart
 

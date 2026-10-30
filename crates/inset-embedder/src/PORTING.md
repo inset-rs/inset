@@ -104,7 +104,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 
 - Change: `Platform::compositor` hands out native surfaces that a producer feeds with the platform's own buffers from any thread, in place of Flutter's texture registry and platform-view plumbing.
   Reason: platform — the framework, the host and every producer share one process, so a buffer can go to the host's compositor directly.
-  Affect: a host without a compositor answers `None`, and a surface placed there leaves only a clear rectangle.
+  Affect: a host without a compositor answers `None`, and a surface placed there shows as an empty hole.
 
 - Change: a surface is opened under a parent, a view's root (`Compositor::root`) or another surface, with `SurfaceParent::open_child`, and placed by that parent's next frame: a view's scene, or a surface's `SurfaceFrame`, its buffer with its children placed beneath it in the buffer's pixels.
   Reason: platform — every compositor Inset targets makes a layer under a parent and places it with that parent's frame, and a host that draws programs shows each program's picture as a surface whose own surfaces go beneath it, where Flutter's platform views are always the view's own.
@@ -129,9 +129,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the native window is the source of truth; a framework-side copy would go stale.
   Affect: metrics read after a view-lifecycle notification are the window's current ones, never a cached frame behind.
 
-- Change: `View::present` takes a shared `Scene`, a valo `Picture` with the surfaces it places, where `FlutterView.render` takes a `Scene` the engine consumes.
-  Reason: platform — the host paints a valo display list, not an engine `Scene`, and keeps it: a window seen again is repainted from it without a frame, and a picture equal to the last, which valo can tell from its retained nested lists, is not drawn again.
-  Affect: what reaches the host is a recorded display list it replays itself and may hold past the call; a frame whose windows all show what they showed before draws nothing.
+- Change: `View::present` takes a shared `Scene`, which the host keeps.
+  Reason: platform — the host is the engine here, and draws a window again from its last scene.
+  Affect: a window seen again shows its last frame without the app drawing one, and a frame equal to the last draws nothing.
 
 - Change: text input is a capability a `View` hands out, and a view with no IME behind it answers `None`.
   Reason: platform — there are no method channels; the host trait is the channel.
@@ -207,18 +207,24 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — a provided Edit item acts on the focused view, as AppKit sends its action to the first responder, and copy, cut and paste already arrive as `clipboard_event`.
   Affect: a text field undoes, selects all or deletes when the user chooses it from the system's Edit menu, without the app handling the item.
 
-## scene_builder.rs → dart:ui `SceneBuilder` / `Scene`
+## scene/ → dart:ui `SceneBuilder` / `Scene`
 
-- Change: a push records into a display list of its own, which `pop` returns as the engine layer; there is no `oldLayer`, `addTexture` or the shader-mask, colour-filter and image-filter pushes.
-  Reason: platform — valo composites display lists, and a list closes at its restore.
-  Affect: the engine layer is known at `pop`, not at the push.
+- Change: `SceneBuilder::pop` returns the engine layer, not the push.
+  Reason: language — a layer that frames share cannot change, so it exists only once its children are added.
+  Affect: a layer gets its engine layer when it pops.
 
-- Change: `SceneBuilder::add_surface` places a native surface beside the picture as a rectangle, a scale and a rectangular clip, where Flutter's `addPlatformView` hands the embedder the whole stack of transforms and clips.
-  Reason: platform — a native surface cannot be part of valo's display list, and a rectangle, a scale and a rectangular clip are what every compositor Inset targets can apply to a layer.
-  Affect: a rotated surface is placed by its bounding box, a rounded clip's corners show the surface unless the picture paints over them, and an opacity above it is ignored.
+- Change: a native surface shows beneath the frame's picture, through room cut for it at its place in paint order.
+  Reason: platform — every compositor Inset targets shows a layer beneath a window's content without another buffer.
+  Affect: content painted above a surface costs nothing extra.
+
+- Change: an opacity above a native surface fades the room cut for it, not the surface.
+  Reason: platform — the surface lies beneath the window's picture, so only the picture can blend it with what was painted under it.
+  Affect: a surface under an opacity fades into what was painted beneath it, not into what lies behind the window.
 
 ## Deferred
 
+- A backdrop filter over a native surface, which shows the surface unfiltered. Trigger: an app that needs glass over a surface.
+- `SceneBuilder`'s `addTexture` and its shader-mask, colour-filter and image-filter pushes. Trigger: the framework layers that call them.
 - Decoding at any size but the file's own, which in Dart is `instantiateImageCodec`'s target width and height and the `getTargetSize` callback of `instantiateImageCodecWithSize`. Trigger: `ResizeImage`, which is what the image widget's `cacheWidth` and `cacheHeight` become.
 - Reading an image's pixels back (`Image.toByteData`). Trigger: golden tests.
 - The colour space an image carries beyond sRGB, so a photograph in a wider one is drawn as though it were sRGB. Trigger: a display that shows more colours than sRGB.

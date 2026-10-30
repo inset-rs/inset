@@ -327,7 +327,7 @@ impl View for WebView {
     }
 
     fn present(&self, scene: std::sync::Arc<inset_embedder::Scene>) {
-        self.gpu.borrow_mut().present(&scene.picture);
+        self.gpu.borrow_mut().present(&inset_embedder::slices(&scene).picture_with_room());
     }
 
     fn text_input(&self) -> Option<&dyn TextInputHost> {

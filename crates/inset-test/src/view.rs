@@ -84,7 +84,8 @@ impl TestView {
         self.presented.get()
     }
 
-    /// The scene presented last: its picture and the surfaces it places.
+    /// The scene presented last, the frame's layer tree, which `inset_embedder::slices` turns
+    /// into what it draws and the surfaces it places.
     pub fn last_scene(&self) -> Option<Arc<Scene>> {
         self.last_scene.borrow().clone()
     }

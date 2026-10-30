@@ -209,7 +209,7 @@ pub(crate) struct MainLoop<C> {
     wakeups: Wakeups,
     /// What the embedder knows, shared with the platform, which answers the app from it.
     state: Rc<EmbedderState>,
-    /// Makes the views, on the one device they all draw with, and their windows.
+    /// Makes the views, which share the one device they draw with, and their windows.
     view_maker: ViewMaker,
     /// The screen view's window, opened at winit's first call; `None` once it is open, and on
     /// a desktop, which has no screen view.
@@ -248,10 +248,12 @@ impl<C: EmbedderClient> MainLoop<C> {
     ) -> MainLoop<C> {
         let state = Rc::new(EmbedderState::new(proxy.clone(), create_image_loader));
         let platform = Rc::new(WinitPlatform::new(Rc::clone(&state), proxy.clone()));
-        let mut view_maker = ViewMaker::new();
+        let view_maker = ViewMaker::new(state.gpu().clone());
         let screen_window = screen_window_config();
         if let Some(window) = &screen_window {
-            state.add_screen_view(view_maker.make_screen_view(window));
+            state
+                .views()
+                .add_screen_view(view_maker.make_screen_view(window));
         }
         let client = start(platform.clone());
         MainLoop {

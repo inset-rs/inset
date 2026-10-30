@@ -39,7 +39,7 @@ impl<S: WindowLayer> WindowSurfaces for CoreAnimationWindowSurfaces<S> {
 
     /// Places `view`'s surfaces in the scene beneath the window's content, in paint order, and
     /// hides the ones the scene no longer places.
-    fn place(&self, placements: &[SurfacePlacement], view: ViewId) {
+    fn place<'a>(&self, placements: impl IntoIterator<Item = &'a SurfacePlacement>, view: ViewId) {
         let surfaces = surfaces_placed_by(placements, Placer::View(view));
         if surfaces.is_empty() && self.placed.borrow().is_empty() {
             return;

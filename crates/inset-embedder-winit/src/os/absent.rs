@@ -38,7 +38,12 @@ impl WindowSurfaces for NoWindowSurfaces {
         NoWindowSurfaces
     }
 
-    fn place(&self, _placements: &[SurfacePlacement], _view: ViewId) {}
+    fn place<'a>(
+        &self,
+        _placements: impl IntoIterator<Item = &'a SurfacePlacement>,
+        _view: ViewId,
+    ) {
+    }
 }
 
 /// No notices of a window's visibility beyond winit's events. Never made.

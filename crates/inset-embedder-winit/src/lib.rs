@@ -104,9 +104,8 @@ impl WinitEmbedder {
 
     /// Starts the native loop with an image loader of the application's choosing.
     ///
-    /// The factory receives the renderer's device resources once the embedder has a device: before
-    /// `start` runs where the system's window is the screen, and otherwise when the app's first
-    /// window opens. Use
+    /// The factory receives the renderer's image store when the app first decodes an image or
+    /// brings one, on the device every view draws with. Use
     /// `create_image_loader(images, DecodeExecution::Local)` to decode without a worker
     /// thread, or build a `valo_codec::ImageLoader` with decoders and an order of your own.
     pub fn run_with_image_loader<C: EmbedderClient + 'static>(

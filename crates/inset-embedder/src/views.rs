@@ -172,7 +172,7 @@ impl GestureSettings {
 /// A stable handle to one host-provided view.
 ///
 /// [`present`](View::present) is Flutter `FlutterView.render`. The host owns
-/// the surface; the framework records a [`crate::Picture`] and hands it over.
+/// the surface; the framework builds a [`crate::Scene`] and hands it over.
 pub trait View: 'static {
     fn id(&self) -> ViewId;
     fn metrics(&self) -> ViewMetrics;
@@ -182,11 +182,12 @@ pub trait View: 'static {
         GestureSettings::default()
     }
 
-    /// Renders and presents one scene, shared so the host may keep it: to present it
-    /// again when the window is seen again, and to tell a scene equal to the last from one
-    /// worth drawing. Physical pixels; the presenter applies no extra scaling. A host with
-    /// a compositor places the scene's surfaces in the same native transaction as the
-    /// picture; a host without renders the picture alone.
+    /// Renders and presents one scene, the frame's layer tree, shared so the host may keep it:
+    /// to present it again when the window is seen again, and to tell a scene equal to the last
+    /// from one worth drawing. Physical pixels; the presenter applies no extra scaling.
+    /// [`slices`](crate::slices) makes of it the picture a host draws and the surfaces a host
+    /// with a compositor places in the same native transaction; a host without one draws the
+    /// picture alone.
     fn present(&self, scene: std::sync::Arc<crate::Scene>);
 
     /// The view's text input, where the host has one.

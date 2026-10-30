@@ -87,16 +87,16 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - Take vsync from each display, or from a timer at its rate where the system gives none, so each visible window keeps ticking while others are hidden. Hand a producer that waits for a screen's refresh the same ticks the frames on that screen are drawn at, one call per wait, whether or not a window on it is in sight.
 
 **Presenting**
-- `View::present`
-- Keep the last scene, and present it again as soon as the system can take it after a refused frame, and on a surface the system gives anew: a frame presents only the views that changed.
+- `View::present`, `Scene`, `slices`
+- Keep the last scene, the frame's layer tree, and present it again as soon as the system can take it after a refused frame, and on a surface the system gives anew: a frame presents only the views that changed. Draw what `slices` makes of the tree, or walk the tree yourself where the system needs a walk of its own.
 
 **Resizing**
 - `EmbedderClient::view_metrics_changed`, then `EmbedderClient::frame`
 - Draw the new size's frame inside the system's resize callback, so the size and the picture reach the screen in one transaction.
 
 **Native surfaces**
-- `Platform::compositor`, `Compositor::root`, `SurfaceParent::open_child`, `Surface::present`, `SurfaceFrame`, `Scene::surfaces`
-- Place a scene's surfaces beneath its picture in the same native transaction, and a surface frame's children beneath its buffer in the same one as the buffer, moved, clipped and scaled with their parent; and run each buffer's `released` once the compositor is done with it: where the system only answers whether it still is, as Core Animation does, ask at the surface's next present and when it goes.
+- `Platform::compositor`, `Compositor::root`, `SurfaceParent::open_child`, `Surface::present`, `SurfaceFrame`, `slices`, `Slices::surfaces`, `Slices::picture_with_room`, `Slices::paints`, `SurfacePlacement`, `Mutator`
+- Place a scene's surfaces beneath the picture its slices make, with room made for each, in the same native transaction, applying as much of each surface's transforms and clips as the compositor can and never its opacity, which the room carries; draw nothing for a scene that paints nothing besides its surfaces where the system shows the surfaces itself, and one empty frame when such a scene follows one that painted; place a surface frame's children beneath its buffer in the same transaction as the buffer, moved, clipped and scaled with their parent; and run each buffer's `released` once the compositor is done with it: where the system only answers whether it still is, as Core Animation does, ask at the surface's next present and when it goes.
 
 ## Input
 

@@ -1,17 +1,21 @@
 //! How a frame reaches a macOS display: drawn at the vsyncs of the screen's display link, and,
 //! for the frame drawn inside a resize, presented through the window's own Core Animation
-//! transaction.
+//! transaction; or, for a frame that paints nothing besides its native surfaces, not drawn at all,
+//! its surfaces shown over the view's background, which the layer of the window's view shows.
 
 use std::sync::Arc;
 
 use inset_embedder::VsyncWaiter;
 use objc2::MainThreadMarker;
+use objc2_core_graphics::CGColor;
+use winit::window::Window;
 
 use super::AppKit;
 use super::display_links::{ScreenDisplayLink, screens_have_display_links};
 use super::vsync_waiter::DisplayLinkVsyncWaiter;
 use crate::main_loop::MainLoopProxy;
 use crate::os::FramePresentation;
+use crate::os::apple::composition::{WindowLayer, in_transaction};
 use crate::vsync_waiter::LoopVsyncWaiter;
 
 impl FramePresentation for AppKit {
@@ -38,5 +42,24 @@ impl FramePresentation for AppKit {
     /// otherwise, since it makes every present wait to be scheduled.
     fn present_in_transaction(surface: &mut valo::Surface, wanted: bool) {
         surface.set_presents_with_transaction(wanted);
+    }
+
+    /// The surfaces are layers beneath the window's content, which Core Animation composites
+    /// whether or not anything is drawn above them.
+    const SHOWS_FRAMES_UNDRAWN: bool = true;
+
+    /// The background colour of the layer of the window's view, beneath every surface placed in
+    /// it.
+    fn show_background(window: &dyn Window, color: valo::Color) {
+        let Some(layer) = AppKit::window_layer(window) else {
+            return;
+        };
+        let color = CGColor::new_srgb(
+            color.r.into(),
+            color.g.into(),
+            color.b.into(),
+            color.a.into(),
+        );
+        in_transaction(|| layer.setBackgroundColor(Some(&color)));
     }
 }

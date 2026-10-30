@@ -295,6 +295,16 @@ pub(crate) trait FramePresentation {
     /// Whether the surface presents through the system's own transaction, so a frame and the
     /// geometry it was laid out for are committed together. Nothing to join by default.
     fn present_in_transaction(_surface: &mut valo::Surface, _wanted: bool) {}
+
+    /// Whether a frame that paints nothing besides its native surfaces reaches the display without
+    /// being drawn: its surfaces, which the compositor places, over the view's background, which
+    /// the window shows itself (`show_background`). Where it does not, every frame is drawn, its
+    /// background at least.
+    const SHOWS_FRAMES_UNDRAWN: bool = false;
+
+    /// Has `window` show `color` behind its content and its surfaces, for the frames that are not
+    /// drawn and the empty ones. Main thread.
+    fn show_background(_window: &dyn Window, _color: valo::Color) {}
 }
 
 /// A display's vsyncs: a call at each vsync of one display, whether or not a window on it is
@@ -330,7 +340,7 @@ pub(crate) trait WindowSurfaces {
     fn new(window: Arc<dyn Window>) -> Self;
 
     /// Places a scene's surfaces beneath the window's content, bottom-most first. Main thread.
-    fn place(&self, placements: &[SurfacePlacement], view: ViewId);
+    fn place<'a>(&self, placements: impl IntoIterator<Item = &'a SurfacePlacement>, view: ViewId);
 }
 
 /// Menus the system draws itself (`menus/`): each place is the system's, or none where it has

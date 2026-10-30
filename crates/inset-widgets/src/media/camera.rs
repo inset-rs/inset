@@ -358,8 +358,13 @@ mod tests {
         cell.checkpoint();
         pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(16));
         let scene = view.last_scene().unwrap();
+        let placement = inset_embedder::slices(&scene)
+            .surfaces()
+            .next()
+            .cloned()
+            .unwrap();
         assert_eq!(
-            scene.surfaces[0].rect.size(),
+            placement.bounds().size(),
             Size::new(400.0, 225.0),
             "as wide as the view lets it be, at the camera's aspect"
         );
