@@ -24,8 +24,8 @@ use super::absent::{
 use super::{
     ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, ImageDecoding,
     NativeComposition, NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges,
-    SystemClipboard, SystemMedia, SystemRequests, TrackpadTouches, WindowChrome, WindowGeometry,
-    WindowMotion, WindowVisibility, WorkQueue,
+    SystemClipboard, SystemDrags, SystemMedia, SystemRequests, TrackpadTouches, WindowChrome,
+    WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
 };
 
 /// Linux. A type only: never made, its answers are associated functions.
@@ -73,6 +73,7 @@ impl TrackpadTouches for Linux {
 impl EventLoopSetup for Linux {}
 impl WindowGeometry for Linux {}
 impl SystemMedia for Linux {}
+impl SystemDrags for Linux {}
 impl WindowMotion for Linux {}
 impl WindowChrome for Linux {}
 impl Screens for Linux {}

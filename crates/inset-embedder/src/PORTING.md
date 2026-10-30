@@ -159,9 +159,13 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — there are no method channels; the host trait is the channel.
   Affect: IME edits reach `TextInput` only through these calls, in the host's own order relative to key data.
 
-- Change: `EmbedderClient::drop_data` reports files dragged from outside the application over a view as a `DropData` — the entered, moved, dropped and exited phases, a batch of paths, a physical position when the host has one — where Flutter has no drop hook and leaves it to plugins.
-  Reason: platform — every desktop toolkit reports this shape at the window, and a host is the only place it can come from.
-  Affect: an app hears external drops through the widgets binding's observers; a host that reports no position, as winit does, leaves the app to treat the whole view as the target.
+- Change: `EmbedderClient::drag_data` reports what is dragged from outside the application over a view as a `DragData` — the entered, moved, dropped and exited phases, a physical position when the host has one, and the dragged items, the same `DataTransferItem`s a paste hands over — where Flutter has no drop hook and leaves it to plugins.
+  Reason: platform — every system carries a drag's data in the model it uses for paste, and a host is the only place a drag from outside the app can come from.
+  Affect: an app hears external drags of text, links, images and files through the widgets binding's observers, and a host that reports no position, as winit does, leaves the app to treat the whole view as the target.
+
+- Change: a dragged item shows its types from the moment the drag enters, but its content is read only while the drop is reported, as on the web; a read asked for before fails as denied and one asked for after as changed.
+  Reason: platform — a drag passing over an app must not hand it what is dragged, and every system lets a drop's data go once the drop is handled.
+  Affect: an app starts every read it wants in its handler for the drop, and those reads may complete later.
 
 - Change: `EmbedderClient::open_requested` hands the client what the system asks the app to open, an `OpenRequest` of files and links, at launch and while it runs; Flutter's macOS embedder hands a running app's to its plugins through `FlutterAppLifecycleDelegate.handleOpenURLs:`, iOS's through `application:openURL:options:` and `scene:openURLContexts:`, and Android's through `onNewIntent`, while a launch's arguments reach `main`, where the app reads them as here.
   Reason: platform — there are no plugins, and the app is the only listener; one call covers every system's way, whose files are the file dialogs' `PickedFile`, as Android hands one over as a `content://` document and the web's `launchQueue` as a file handle.

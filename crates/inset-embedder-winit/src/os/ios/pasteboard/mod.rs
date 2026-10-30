@@ -35,7 +35,7 @@ use std::ptr;
 
 use inset_embedder::{
     Clipboard, ClipboardError, ClipboardItem, ClipboardItemsFuture, ClipboardReadFuture,
-    ClipboardWriteFuture, Content, CopyOptions, PastedItem,
+    ClipboardWriteFuture, Content, CopyOptions, DataTransferItem,
 };
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -222,12 +222,12 @@ fn pasteboard_item(
 
 /// `pasteboard`'s items now, each in the types it is offered in. An item with no type the
 /// framework can name is left out.
-fn listed_items(pasteboard: &Retained<UIPasteboard>) -> Vec<Box<dyn PastedItem>> {
+fn listed_items(pasteboard: &Retained<UIPasteboard>) -> Vec<Box<dyn DataTransferItem>> {
     let change_count = change_count(pasteboard);
     let Some(items) = pasteboard.pasteboardTypesForItemSet(None) else {
         return Vec::new();
     };
-    let mut listed: Vec<Box<dyn PastedItem>> = Vec::new();
+    let mut listed: Vec<Box<dyn DataTransferItem>> = Vec::new();
     for (index, utis) in items.iter().enumerate() {
         let item = ListedItem::new(pasteboard.clone(), index, change_count, &utis);
         if !item.types.is_empty() {
@@ -311,7 +311,7 @@ fn url_of(value: &AnyObject) -> Option<String> {
     first.downcast_ref::<NSString>().map(|url| url.to_string())
 }
 
-impl PastedItem for ListedItem {
+impl DataTransferItem for ListedItem {
     fn types(&self) -> &[String] {
         &self.types
     }

@@ -20,7 +20,7 @@ mod text;
 use std::task::{Context, Poll, Waker};
 use std::time::Instant;
 
-use inset_embedder::{Clipboard, PastedItem};
+use inset_embedder::{Clipboard, DataTransferItem};
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
 pub(crate) use text::{ChangeProbe, TextClipboard};
@@ -47,7 +47,7 @@ pub(crate) trait ClipboardChanges {
 /// What is on `clipboard` now, as a paste from the system's own Edit menu hands it to the app:
 /// every system's clipboard here lists its items in the call, so one listing that does not is
 /// taken as empty.
-pub(crate) fn listed_now(clipboard: &dyn Clipboard) -> Vec<Box<dyn PastedItem>> {
+pub(crate) fn listed_now(clipboard: &dyn Clipboard) -> Vec<Box<dyn DataTransferItem>> {
     let mut listing = clipboard.items();
     match listing
         .as_mut()

@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use crate::{
-    AppExitReply, AppExitResponse, AppLifecycleState, ClipboardEvent, DropData, EditCommand, Frame,
+    AppExitReply, AppExitResponse, AppLifecycleState, ClipboardEvent, DragData, EditCommand, Frame,
     KeyData, MenuId, NotificationActivation, OpenRequest, PointerDataPacket, TextEditingValue,
     TextInputAction, TrayIconEvent, TrayIconId, ViewFocusEvent, ViewId,
 };
@@ -48,9 +48,10 @@ pub trait EmbedderClient {
     /// Flutter `PlatformDispatcher.onPointerDataPacket`.
     fn pointer_data_packet(&mut self, packet: PointerDataPacket);
 
-    /// Files dragged from outside the application entered, moved over, were dropped on or
-    /// left a view. No dart:ui hook; the default drops it.
-    fn drop_data(&mut self, data: DropData) {
+    /// What is dragged from outside the application entered, moved over, was dropped on or
+    /// left a view: the dropped report is the one its items are read in. No dart:ui hook; the
+    /// default drops it.
+    fn drag_data(&mut self, data: DragData) {
         let _ = data;
     }
 

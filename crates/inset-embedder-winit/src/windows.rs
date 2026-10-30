@@ -24,7 +24,8 @@ use crate::app_requests::AppRequests;
 use crate::gpu::LazyGpu;
 use crate::host_window::WinitWindow;
 use crate::os::{
-    OperatingSystem, ThisOs, ThisOsTrackpadTouchObserver, ThisOsVisibilityNotices, WindowChrome,
+    OperatingSystem, SystemDrags, ThisOs, ThisOsTrackpadTouchObserver, ThisOsVisibilityNotices,
+    WindowChrome,
 };
 use crate::view::WinitView;
 
@@ -315,7 +316,7 @@ pub(crate) fn open_screen_window(
 }
 
 /// A window configured as `config`: winit's attributes, then what the system's module applies
-/// beyond them.
+/// beyond them, and the drags it takes beyond winit's.
 fn open_window(
     event_loop: &dyn ActiveEventLoop,
     config: &WindowConfig,
@@ -324,6 +325,7 @@ fn open_window(
         .create_window(attributes_for(config))
         .map_err(|error| error.to_string())?;
     ThisOs::configure(&*window, config);
+    ThisOs::accept_drags(&*window);
     Ok(Arc::from(window))
 }
 

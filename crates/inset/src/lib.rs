@@ -24,7 +24,7 @@ pub use inset_embedder::{
     WindowBackground, WindowConfig, WindowLevel, WindowRef,
 };
 pub use inset_embedder::{
-    Brightness, Color, DropChange, DropData, FontFeature, FontWeight, Offset, Radius, Rect, Size,
+    Brightness, Color, DragChange, DragData, FontFeature, FontWeight, Offset, Radius, Rect, Size,
     TextAlign, TextDirection,
 };
 #[cfg(target_os = "android")]

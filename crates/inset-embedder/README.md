@@ -129,13 +129,13 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - Show the last cursor asked for over the view the pointer is on, and set it again each time the system resets it.
 
 **Drag and drop**
-- `EmbedderClient::drop_data`
-- Send one `DropData` per phase, with all its files in that one report, and the position where the system gives one.
+- `EmbedderClient::drag_data`
+- Send one `DragData` per phase, with the drag's items listed as a paste's are, through `DraggedItems` so they are read only while the drop is reported, and the position where the system gives one; fetch what is read then before the system lets the drop's data go, and refuse a drag carrying nothing the app could read.
 
 ## System services
 
 **Clipboard**
-- `Platform::clipboard`, `Clipboard::items`, `write`, `PastedItem`, `ClipboardItem`, `Content`, `FileSink`, `CopyOptions`, `EmbedderClient::clipboard_changed`
+- `Platform::clipboard`, `Clipboard::items`, `write`, `DataTransferItem`, `ClipboardItem`, `Content`, `FileSink`, `CopyOptions`, `EmbedderClient::clipboard_changed`
 - List each item in the MIME types the system offers it in without reading it, fail a read once the clipboard has changed, write every form and option the system carries and refuse the forms it does not, write a promised file's bytes from its producer into the file where the receiver chose and remove it when the producer fails, clear a copy that expires where the system has no expiry of its own, waking for its time as for the app's timers, and call `clipboard_changed` whenever the system says another writer changed it or the host looks and finds such a change, or clears a copy that expired, counting the app's own writes as seen.
 
 **Copy, cut and paste**

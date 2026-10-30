@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use inset_embedder::{
     ClipboardEvent, ClipboardItem, ClipboardItemsFuture, ClipboardWriteFuture, Content,
-    CopyOptions, PastedItem,
+    CopyOptions, DataTransferItem,
 };
 use inset_foundation::{App, Handle, Task};
 
@@ -178,24 +178,24 @@ impl Readable {
 }
 
 /// The items of `paste`, a paste event.
-fn pasted_items(paste: &ClipboardEvent) -> &[Box<dyn PastedItem>] {
+fn pasted_items(paste: &ClipboardEvent) -> &[Box<dyn DataTransferItem>] {
     match paste {
         ClipboardEvent::Paste(items) => items,
         ClipboardEvent::Copy(_) | ClipboardEvent::Cut(_) => &[],
     }
 }
 
-fn offers_text(item: &dyn PastedItem) -> bool {
+fn offers_text(item: &dyn DataTransferItem) -> bool {
     item.types()
         .iter()
         .any(|mime| mime == Clipboard::K_TEXT_PLAIN)
 }
 
-fn holds_text(items: &[Box<dyn PastedItem>]) -> bool {
+fn holds_text(items: &[Box<dyn DataTransferItem>]) -> bool {
     items.iter().any(|item| offers_text(item.as_ref()))
 }
 
-async fn text_of(items: &[Box<dyn PastedItem>]) -> Option<String> {
+async fn text_of(items: &[Box<dyn DataTransferItem>]) -> Option<String> {
     let item = items.iter().find(|item| offers_text(item.as_ref()))?;
     let bytes = item.read(Clipboard::K_TEXT_PLAIN).await.ok()?;
     Some(String::from_utf8_lossy(&bytes).into_owned())
@@ -229,7 +229,7 @@ mod tests {
     }
 
     /// What is on `clipboard`, which a mock lists at once.
-    fn listed(clipboard: &MockClipboard) -> Vec<Box<dyn PastedItem>> {
+    fn listed(clipboard: &MockClipboard) -> Vec<Box<dyn DataTransferItem>> {
         let mut items = clipboard.items();
         match items.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
             Poll::Ready(items) => items,

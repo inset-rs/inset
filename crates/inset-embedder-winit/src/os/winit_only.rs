@@ -11,9 +11,9 @@ use super::absent::{
 use super::{
     ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, ImageDecoding,
     NativeComposition, NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges,
-    SystemClipboard, SystemFileDialogs, SystemMedia, SystemNotifications, SystemOpener,
-    SystemRequests, TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility,
-    WorkQueue,
+    SystemClipboard, SystemDrags, SystemFileDialogs, SystemMedia, SystemNotifications,
+    SystemOpener, SystemRequests, TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion,
+    WindowVisibility, WorkQueue,
 };
 
 /// Any system without a module of its own. A type only: never made, its answers are
@@ -60,6 +60,7 @@ impl TrackpadTouches for WinitOnly {
 impl EventLoopSetup for WinitOnly {}
 impl WindowGeometry for WinitOnly {}
 impl SystemMedia for WinitOnly {}
+impl SystemDrags for WinitOnly {}
 impl WindowMotion for WinitOnly {}
 impl WindowChrome for WinitOnly {}
 impl Screens for WinitOnly {}

@@ -223,7 +223,7 @@ pub(crate) struct MainLoop<C> {
     /// The numbers every pointer's data carries, shared so no two devices' presses collide.
     ids: PointerIds,
     keyboard: Keyboard,
-    /// The drags of files over the views, and the reports waiting for their files.
+    /// The drags over the views, and the reads of dropped ones winit has yet to answer.
     drags: Drags,
     /// Whether the application is active and visible, for its lifecycle state.
     lifecycle: AppLifecycle,
@@ -440,10 +440,10 @@ impl<C: EmbedderClient> ApplicationHandler for MainLoop<C> {
             WindowEvent::DragPosition {
                 id: drag, position, ..
             } => self.on_drag_moved(drag, position),
-            WindowEvent::DragDropped { id: drag, .. } => self.on_drag_dropped(drag),
+            WindowEvent::DragDropped { id: drag, .. } => self.on_drag_dropped(event_loop, drag),
             WindowEvent::DragLeft { id: drag } => self.on_drag_left(drag),
             WindowEvent::DataTransferReceived { serial, value, .. } => {
-                self.on_drag_files(event_loop, serial, &*value)
+                self.on_drag_fetched(serial, &*value)
             }
             _ => {}
         }
