@@ -4,7 +4,7 @@ members = ["crates/*", "examples/*"]
 
 [workspace.package]
 edition = "2024"
-version = "0.15.0"
+version = "0.16.0"
 license = "MIT"
 repository = "https://github.com/inset-rs/inset"
 homepage = "https://inset.rs"
@@ -18,34 +18,34 @@ unsafe_code = "forbid"
 arboard = "3"
 async-task = "4"
 indexmap = "2"
-inset = { version = "0.15.0", path = "crates/inset" }
-inset-animation = { version = "0.15.0", path = "crates/inset-animation" }
-inset-cupertino = { version = "0.15.0", path = "crates/inset-cupertino" }
-inset-embedder = { version = "0.15.0", path = "crates/inset-embedder" }
-inset-embedder-android = { version = "0.15.0", path = "crates/inset-embedder-android" }
-inset-embedder-default = { version = "0.15.0", path = "crates/inset-embedder-default" }
-inset-embedder-web = { version = "0.15.0", path = "crates/inset-embedder-web" }
-inset-embedder-winit = { version = "0.15.0", path = "crates/inset-embedder-winit" }
-inset-foundation = { version = "0.15.0", path = "crates/inset-foundation" }
-inset-gestures = { version = "0.15.0", path = "crates/inset-gestures" }
-inset-markdown = { version = "0.15.0", path = "crates/inset-markdown" }
-inset-macros = { version = "0.15.0", path = "crates/inset-macros" }
-inset-painting = { version = "0.15.0", path = "crates/inset-painting" }
-inset-physics = { version = "0.15.0", path = "crates/inset-physics" }
-inset-rendering = { version = "0.15.0", path = "crates/inset-rendering" }
-inset-scheduler = { version = "0.15.0", path = "crates/inset-scheduler" }
-inset-services = { version = "0.15.0", path = "crates/inset-services" }
-inset-shell = { version = "0.15.0", path = "crates/inset-shell" }
-inset-single-instance = { version = "0.15.0", path = "crates/inset-single-instance" }
-inset-test = { version = "0.15.0", path = "crates/inset-test" }
-inset-widgets = { version = "0.15.0", path = "crates/inset-widgets" }
-inset-winui = { version = "0.15.0", path = "crates/inset-winui" }
+inset = { version = "0.16.0", path = "crates/inset" }
+inset-animation = { version = "0.16.0", path = "crates/inset-animation" }
+inset-cupertino = { version = "0.16.0", path = "crates/inset-cupertino" }
+inset-embedder = { version = "0.16.0", path = "crates/inset-embedder" }
+inset-embedder-android = { version = "0.16.0", path = "crates/inset-embedder-android" }
+inset-embedder-default = { version = "0.16.0", path = "crates/inset-embedder-default" }
+inset-embedder-web = { version = "0.16.0", path = "crates/inset-embedder-web" }
+inset-embedder-winit = { version = "0.16.0", path = "crates/inset-embedder-winit" }
+inset-foundation = { version = "0.16.0", path = "crates/inset-foundation" }
+inset-gestures = { version = "0.16.0", path = "crates/inset-gestures" }
+inset-markdown = { version = "0.16.0", path = "crates/inset-markdown" }
+inset-macros = { version = "0.16.0", path = "crates/inset-macros" }
+inset-painting = { version = "0.16.0", path = "crates/inset-painting" }
+inset-physics = { version = "0.16.0", path = "crates/inset-physics" }
+inset-rendering = { version = "0.16.0", path = "crates/inset-rendering" }
+inset-scheduler = { version = "0.16.0", path = "crates/inset-scheduler" }
+inset-services = { version = "0.16.0", path = "crates/inset-services" }
+inset-shell = { version = "0.16.0", path = "crates/inset-shell" }
+inset-single-instance = { version = "0.16.0", path = "crates/inset-single-instance" }
+inset-test = { version = "0.16.0", path = "crates/inset-test" }
+inset-widgets = { version = "0.16.0", path = "crates/inset-widgets" }
+inset-winui = { version = "0.16.0", path = "crates/inset-winui" }
 inset-winui-test-support = { path = "crates/inset-winui-test-support" }
 pulldown-cmark = { version = "0.13", default-features = false }
 slotmap = "1"
 unicode-general-category = "1"
 unicode-segmentation = "1"
-winit = "0.30"
+winit = "=0.31.0-beta.4"
 raw-window-handle = "0.6"
 valo = "0.13.1"
 valo-codec = "0.13.1"

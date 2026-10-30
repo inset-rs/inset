@@ -29,7 +29,7 @@ impl NativeComposition for Ios {
 }
 
 impl WindowLayer for Ios {
-    fn window_layer(window: &Window) -> Option<Retained<CALayer>> {
+    fn window_layer(window: &dyn Window) -> Option<Retained<CALayer>> {
         MainThreadMarker::new()?;
         let RawWindowHandle::UiKit(uikit) = window.window_handle().ok()?.as_raw() else {
             return None;

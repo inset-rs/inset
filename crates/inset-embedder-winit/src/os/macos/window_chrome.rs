@@ -12,7 +12,7 @@ use objc2_app_kit::{
     NSVisualEffectState, NSVisualEffectView, NSWindowCollectionBehavior, NSWindowOrderingMode,
 };
 use objc2_foundation::NSRect;
-use winit::platform::macos::WindowAttributesExtMacOS;
+use winit::platform::macos::WindowAttributesMacOS;
 use winit::window::{Window, WindowAttributes};
 
 use super::{AppKit, menus, ns_view, ns_window};
@@ -21,13 +21,15 @@ use crate::os::WindowChrome;
 impl WindowChrome for AppKit {
     /// What winit has an AppKit attribute for: the shadow.
     fn extend_attributes(attributes: WindowAttributes, config: &WindowConfig) -> WindowAttributes {
-        attributes.with_has_shadow(config.shadow)
+        attributes.with_platform_attributes(Box::new(
+            WindowAttributesMacOS::default().with_has_shadow(config.shadow),
+        ))
     }
 
     /// The window's keys going to the framework before the menu bar, pointer tracking for a window
     /// that never activates, presence on every Space, and the blur or glass behind a see-through
     /// window.
-    fn configure(window: &Window, config: &WindowConfig) {
+    fn configure(window: &dyn Window, config: &WindowConfig) {
         menus::app_window_opened(window);
         if !config.activating {
             track_pointer_always(window);
@@ -52,7 +54,7 @@ impl WindowChrome for AppKit {
 /// pointer arrive and leave but never move: no hover, and clicks at stale positions.
 /// Flutter's macOS embedder offers the same as its `always` mouse tracking mode. The
 /// view is the owner, so winit's own handlers receive what the area reports.
-fn track_pointer_always(window: &Window) {
+fn track_pointer_always(window: &dyn Window) {
     let Some(view) = ns_view(window) else {
         return;
     };
@@ -75,7 +77,7 @@ fn track_pointer_always(window: &Window) {
 
 /// Shows the window on every Space, a full-screen app's included, and leaves it in place when
 /// Mission Control spreads the windows out.
-fn join_all_spaces(window: &Window) {
+fn join_all_spaces(window: &dyn Window) {
     let Some(ns_window) = ns_window(window) else {
         return;
     };
@@ -92,7 +94,7 @@ fn join_all_spaces(window: &Window) {
 /// subview of winit's view would draw over its Metal layer. Liquid Glass renders as its flat
 /// material there rather than as glass, which needs the view inside the content view, where
 /// winit's Metal layer did not stay above it.
-fn put_effect_behind_content(window: &Window, background: WindowBackground) {
+fn put_effect_behind_content(window: &dyn Window, background: WindowBackground) {
     if let Some(mtm) = MainThreadMarker::new()
         && let Some(ns_window) = ns_window(window)
         && let Some(content) = ns_window.contentView()

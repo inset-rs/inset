@@ -8585,7 +8585,7 @@ mod tests {
             .debug_layer(app)
             .expect("painted")
             .build_scene(app, SceneBuilder::new());
-        inset_embedder::flattened_ops(&scene.picture)
+        inset_embedder::flattened_ops(&inset_embedder::slices(&scene).picture_with_room())
     }
 
     #[test]

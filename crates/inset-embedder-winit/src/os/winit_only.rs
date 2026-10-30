@@ -5,12 +5,15 @@ use inset_embedder::TargetPlatform;
 
 use crate::clipboard::{ChangeProbe, TextClipboard};
 
-use super::absent::{NoDisplayLink, NoVisibilityNotices, NoWindowSurfaces};
+use super::absent::{
+    NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices, NoWindowSurfaces,
+};
 use super::{
-    ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeComposition,
-    NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
-    SystemFileDialogs, SystemMedia, SystemNotifications, SystemOpener, SystemRequests,
-    WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
+    ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, ImageDecoding,
+    NativeComposition, NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges,
+    SystemClipboard, SystemFileDialogs, SystemMedia, SystemNotifications, SystemOpener,
+    SystemRequests, TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility,
+    WorkQueue,
 };
 
 /// Any system without a module of its own. A type only: never made, its answers are
@@ -50,6 +53,11 @@ impl WindowVisibility for WinitOnly {
     type Notices = NoVisibilityNotices;
 }
 
+impl TrackpadTouches for WinitOnly {
+    type Observer = NoTrackpadTouchObserver;
+}
+
+impl EventLoopSetup for WinitOnly {}
 impl WindowGeometry for WinitOnly {}
 impl SystemMedia for WinitOnly {}
 impl WindowMotion for WinitOnly {}

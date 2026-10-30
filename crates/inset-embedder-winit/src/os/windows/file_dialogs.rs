@@ -119,7 +119,10 @@ impl ShellDialogs {
     /// Shows the dialog `request` asks for once the current call has returned, owned by
     /// `parent`'s window, and answers the paths chosen, none if the user cancelled.
     fn show(&self, parent: Option<ViewId>, request: Request) -> FileDialogFuture<Vec<PathBuf>> {
-        let owner = self.windows.window(parent).and_then(|window| hwnd(&window));
+        let owner = self
+            .windows
+            .window(parent)
+            .and_then(|window| hwnd(&*window));
         let (answer, answered) = dialog_answer();
         run_soon(Box::new(move || {
             let _apartment = Apartment::enter();
@@ -289,7 +292,7 @@ impl Drop for Apartment {
 }
 
 /// The window's handle; `None` for a window winit gives none.
-fn hwnd(window: &Window) -> Option<HWND> {
+fn hwnd(window: &dyn Window) -> Option<HWND> {
     let handle = window.window_handle().ok()?;
     let RawWindowHandle::Win32(win32) = handle.as_raw() else {
         return None;

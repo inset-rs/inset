@@ -6,7 +6,7 @@
 //! framework geometry with [`From`] at the call (`rect.into()`).
 
 use std::fmt::Display;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use valo::DisplayList;
 use valo::DisplayListBuilder;
@@ -15,8 +15,8 @@ use valo::Op;
 /// Flutter `Canvas` — valo records into a display list.
 pub type Canvas = DisplayListBuilder;
 
-/// Flutter `Picture` — a finished display list, what [`crate::View::present`]
-/// takes (Flutter `FlutterView.render` takes a `Scene`).
+/// Flutter `Picture` — a finished display list, what a scene's layers hold and what a host
+/// draws.
 pub type Picture = DisplayList;
 
 /// The picture's operations in replay order with every embedded list's following its embedding
@@ -244,9 +244,9 @@ pub enum ImageFilter {
     /// `outer` applied to the result of `inner`; Dart's `_ComposeImageFilter`.
     Compose {
         /// The filter that receives the filtered result of `inner`.
-        outer: Rc<ImageFilter>,
+        outer: Arc<ImageFilter>,
         /// The filter that receives the original input.
-        inner: Rc<ImageFilter>,
+        inner: Arc<ImageFilter>,
     },
 }
 
@@ -281,8 +281,8 @@ impl ImageFilter {
     /// `result = outer(inner(source))`.
     pub fn compose(outer: ImageFilter, inner: ImageFilter) -> ImageFilter {
         ImageFilter::Compose {
-            outer: Rc::new(outer),
-            inner: Rc::new(inner),
+            outer: Arc::new(outer),
+            inner: Arc::new(inner),
         }
     }
 

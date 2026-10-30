@@ -45,12 +45,14 @@ mod client {
 
     use inset_embedder::{
         Dispatcher, EmbedderClient, Frame, Instant, KeyData, MenuEntry, MenuItem, Offset,
-        PlatformRef, PointerDataPacket, PopupMenuFuture, ScreenId, ViewId, VsyncObserver,
-        VsyncWaiter,
+        PlatformRef, PointerReport, PopupMenuFuture, ScreenId, ViewId, VsyncObserver, VsyncWaiter,
     };
 
     use crate::TEST;
     use crate::support::{self, appkit};
+
+    /// The title of the test's one window, by which AppKit finds it.
+    const TITLE: &str = "drawing under a menu";
 
     /// How long the menu stays open before Escape closes it.
     const MENU_OPEN_FOR: Duration = Duration::from_millis(600);
@@ -76,7 +78,7 @@ mod client {
 
     impl MenuClient {
         pub(crate) fn new(platform: PlatformRef) -> MenuClient {
-            support::request_window(&platform, support::titled("drawing under a menu"));
+            support::request_window(&platform, support::titled(TITLE));
             MenuClient {
                 platform,
                 frames: Vec::new(),
@@ -192,13 +194,16 @@ mod client {
             let waiter = self.platform.vsync_waiter().expect("a vsync waiter");
             let (waits, stop) = (Arc::clone(&self.waits), Arc::clone(&self.stop_waiting));
             std::thread::spawn(move || wait_on(waiter, screen, waits, stop));
+            // The app is not brought forward at launch, so its window can open behind other
+            // applications' windows, where a covered window takes no frames.
+            appkit::order_in_front_of_everything(TITLE);
             self.platform.request_frame(id);
             self.open_menu(id);
         }
 
         fn view_metrics_changed(&mut self, _id: ViewId) {}
         fn view_removed(&mut self, _id: ViewId) {}
-        fn pointer_data_packet(&mut self, _packet: PointerDataPacket) {}
+        fn pointer_reports(&mut self, _reports: Vec<PointerReport>) {}
         fn key_data(&mut self, _data: KeyData) -> bool {
             false
         }

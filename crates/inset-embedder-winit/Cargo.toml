@@ -21,9 +21,13 @@ test-support = []
 inset-embedder.workspace = true
 valo.workspace = true
 valo-codec.workspace = true
+# The steps of a clip's path, handed to Core Animation as a mask.
+valo-geometry.workspace = true
 valo-codec-software = { version = "0.13.1", optional = true }
 wgpu.workspace = true
 pollster.workspace = true
+# The paths in the `file:` URIs winit lists a drag's files by.
+percent-encoding = "2"
 winit.workspace = true
 # The user's languages, as each system lists them.
 sys-locale = "0.3"
@@ -66,10 +70,12 @@ objc2-uniform-type-identifiers = { version = "0.3", features = ["UTType", "UTCor
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "bitflags", "block2", "UNError", "UNNotification", "UNNotificationAction", "UNNotificationAttachment", "UNNotificationCategory", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger", "UNUserNotificationCenter"] }
 png = "0.18"
 # Native surfaces: the layers they are, the buffer each shows and whether the compositor still
-# reads it, and the transform that scales a surface with its children.
-objc2-quartz-core = { version = "0.3", features = ["CABase", "CALayer", "CATransaction"] }
+# reads it, the transform that places a surface with its children, the shapes that clip it, and the
+# colour a window shows behind them while its view draws nothing.
+objc2-quartz-core = { version = "0.3", features = ["CABase", "CALayer", "CAShapeLayer", "CATransaction", "CATransform3D"] }
 objc2-io-surface = "0.3"
 objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGAffineTransform", "CGColor", "CGPath"] }
 # Players and cameras: AVFoundation, the times and sample buffers it speaks in, and the pixel
 # buffers a frame reader hands out.
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "dispatch2", "objc2-core-foundation", "objc2-core-media", "objc2-core-video", "objc2-quartz-core", "AVAnimation", "AVCaptureDevice", "AVCaptureFileOutput", "AVCaptureInput", "AVCaptureOutputBase", "AVCapturePhotoOutput", "AVCaptureSession", "AVCaptureSessionPreset", "AVCaptureVideoDataOutput", "AVCaptureVideoPreviewLayer", "AVError", "AVMediaFormat", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVPlayerLayer", "AVVideoSettings"] }
@@ -81,7 +87,7 @@ objc2-core-video = { version = "0.3", default-features = false, features = ["std
 objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-quartz-core", "objc2-uniform-type-identifiers", "UIPasteboard", "UIApplication", "objc2-core-foundation", "UIDocumentInteractionController", "UIDocumentPickerViewController", "UIResponder", "UIView", "UIViewController", "UIWindow"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSMenu", "NSMenuItem", "NSEvent", "NSGraphicsContext", "NSView", "NSCell", "NSResponder", "NSWindow", "NSScreen", "NSAnimation", "NSAnimationContext", "NSVisualEffectView", "NSGlassEffectView", "NSGraphics", "NSTrackingArea", "NSPasteboard", "NSPasteboardItem", "NSFilePromiseProvider", "NSFilePromiseReceiver", "NSOpenPanel", "NSSavePanel", "NSWorkspace", "objc2-uniform-type-identifiers", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSButtonCell", "NSActionCell", "NSColorSpace", "block2", "objc2-quartz-core"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSMenu", "NSMenuItem", "NSEvent", "NSGraphicsContext", "NSView", "NSCell", "NSResponder", "NSWindow", "NSScreen", "NSAnimation", "NSAnimationContext", "NSVisualEffectView", "NSGlassEffectView", "NSGraphics", "NSTrackingArea", "NSPasteboard", "NSPasteboardItem", "NSFilePromiseProvider", "NSFilePromiseReceiver", "NSOpenPanel", "NSSavePanel", "NSWorkspace", "objc2-uniform-type-identifiers", "NSTouch", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSButtonCell", "NSActionCell", "NSColorSpace", "block2", "objc2-quartz-core"] }
 objc2-quartz-core = { version = "0.3", features = ["CAMediaTimingFunction", "CADisplayLink"] }
 
 # Each test is a program of its own, without the test harness, which runs every test on a thread

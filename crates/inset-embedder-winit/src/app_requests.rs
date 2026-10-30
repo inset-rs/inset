@@ -3,9 +3,9 @@
 //! inside the framework's call, and served on a turn of the loop of its own, in the order made, as
 //! Flutter posts a task to the platform thread and Chromium a `PostTask`.
 //!
-//! winit's proxy carries only what may cross threads, since the dispatcher's wakes and the display
-//! links' vsyncs send through it from other threads, while a request may carry the framework's
-//! `Rc`s: a window's reply. So a request waits in [`AppRequests`], on the main thread,
+//! The loop's proxy carries only what may cross threads, since the dispatcher's wakes and the
+//! display links' vsyncs send through it from other threads, while a request may carry the
+//! framework's `Rc`s: a window's reply. So a request waits in [`AppRequests`], on the main thread,
 //! and the proxy carries a [`MainLoopEvent::AppRequest`] for it, which the loop answers by serving
 //! the oldest request waiting. The invariant a later editor must keep: a request is queued only
 //! together with its event, and taken only for one, so that the requests are served in the order

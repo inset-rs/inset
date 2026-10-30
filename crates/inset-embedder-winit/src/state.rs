@@ -5,17 +5,14 @@
 
 use std::rc::Rc;
 
-use winit::event_loop::EventLoopProxy;
-
 use crate::app_requests::AppRequests;
 use crate::appearance::Appearance;
+use crate::gpu::LazyGpu;
 use crate::images::{CreateImageLoader, Images};
 use crate::locales::Locales;
-use crate::main_loop::MainLoopEvent;
-use crate::os::ThisOsVisibilityNotices;
+use crate::main_loop::MainLoopProxy;
 use crate::system_requests::SystemRequestHandlers;
-use crate::view::WinitView;
-use crate::windows::{OpenWindow, Views};
+use crate::windows::Views;
 
 /// What the main loop and the platform both know.
 pub(crate) struct EmbedderState {
@@ -25,7 +22,9 @@ pub(crate) struct EmbedderState {
     appearance: Appearance,
     /// The user's languages, as the app was last told.
     locales: Locales,
-    /// The image loader and the renderer's image store, once the first view has a device.
+    /// The device every view draws with and every image belongs to, made when first needed.
+    gpu: LazyGpu,
+    /// The image loader and the renderer's image store, made at the first image.
     images: Images,
     /// What the app asked of the main loop and it has not served yet. Shared with the window
     /// maker and the app's handles on its windows, which send to it.
@@ -38,17 +37,17 @@ impl EmbedderState {
     /// The state of an app about to start: no view yet, and the user's languages as the system
     /// lists them now. Requests reach the main loop through `proxy`.
     pub(crate) fn new(
-        proxy: EventLoopProxy<MainLoopEvent>,
+        proxy: MainLoopProxy,
         create_image_loader: Option<CreateImageLoader>,
     ) -> EmbedderState {
+        let gpu = LazyGpu::default();
         EmbedderState {
             views: Views::default(),
             appearance: Appearance::default(),
             locales: Locales::read(),
-            images: Images::new(create_image_loader),
-            requests: Rc::new(AppRequests::new(move |event| {
-                let _ = proxy.send_event(event);
-            })),
+            images: Images::new(gpu.clone(), create_image_loader),
+            gpu,
+            requests: Rc::new(AppRequests::new(move |event| proxy.send(event))),
             handlers: SystemRequestHandlers::default(),
         }
     }
@@ -65,6 +64,10 @@ impl EmbedderState {
         &self.locales
     }
 
+    pub(crate) fn gpu(&self) -> &LazyGpu {
+        &self.gpu
+    }
+
     pub(crate) fn images(&self) -> &Images {
         &self.images
     }
@@ -75,23 +78,5 @@ impl EmbedderState {
 
     pub(crate) fn handlers(&self) -> &SystemRequestHandlers {
         &self.handlers
-    }
-
-    /// The screen view, made as the app starts: among the views from now on, for the app's whole
-    /// life, and the image loader starts on its device.
-    pub(crate) fn add_screen_view(&self, view: Rc<WinitView>) {
-        self.images.start_once(view.image_context());
-        self.views.add_screen_view(view);
-    }
-
-    /// A view the app asked for, with its window and the system's notices about the window: among
-    /// the views from now on, and the image loader starts on its device if it is the first.
-    pub(crate) fn add_view_with_window(
-        &self,
-        open: OpenWindow,
-        visibility_notices: Option<ThisOsVisibilityNotices>,
-    ) {
-        self.images.start_once(open.view.image_context());
-        self.views.add_with_window(open, visibility_notices);
     }
 }

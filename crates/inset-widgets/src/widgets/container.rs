@@ -715,19 +715,18 @@ mod tests {
         harness.pump(&mut app);
         let render_object = root_child::<RenderDecoratedBox>(&harness, &app);
         assert!(!render_object.as_object().debug_needs_paint(&app));
-        let ops = harness
+        let scene = harness
             .render_root(&app)
             .as_object()
             .debug_layer(&app)
             .expect("painted")
-            .build_scene(&mut app, SceneBuilder::new())
-            .picture
-            .ops()
-            .to_vec();
+            .build_scene(&mut app, SceneBuilder::new());
+        let ops =
+            inset_embedder::flattened_ops(&inset_embedder::slices(&scene).picture_with_room());
         assert!(
             ops.iter()
-                .any(|op| matches!(op, inset_embedder::valo::Op::DrawDisplayList { .. })),
-            "{ops:?}"
+                .any(|op| matches!(op, inset_embedder::valo::Op::DrawRect { .. })),
+            "the decoration's fill: {ops:?}"
         );
 
         harness.set_child(&mut app, decorated(blue));

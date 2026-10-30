@@ -11,6 +11,11 @@ pub const BACK: i64 = 1 << 3;
 /// Flutter `kFlutterPointerButtonMouseForward`.
 pub const FORWARD: i64 = 1 << 4;
 
+/// Flutter web's `_mouseDeviceId`: every mouse event, a wheel's included, is this one device,
+/// since a wheel event carries no pointer id. A touch is the device its `pointerId` names.
+#[cfg(target_arch = "wasm32")]
+pub const MOUSE_DEVICE: i64 = -1;
+
 /// DOM `MouseEvent.button` (the one that changed) as a Flutter bit.
 pub fn flutter_button(button: i16) -> Option<i64> {
     Some(match button {

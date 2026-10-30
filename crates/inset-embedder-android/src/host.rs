@@ -64,7 +64,6 @@ impl AndroidEmbedder {
             refreshed: Rc::new(Cell::new(false)),
             idle_ticks: 0,
             destroyed: false,
-            pointers: crate::input::Pointers::default(),
         };
         host.run();
     }
@@ -84,8 +83,6 @@ struct Host<C> {
     refreshed: Rc<Cell<bool>>,
     idle_ticks: u8,
     destroyed: bool,
-    /// The devices the framework has been told about.
-    pointers: crate::input::Pointers,
     /// Opens what the intents that reach the app ask to open (`open_requests.rs`).
     open_requests: OpenRequests,
 }
@@ -320,12 +317,12 @@ impl<C: EmbedderClient> Host<C> {
     }
 
     fn on_motion(&mut self, motion: &android_activity::input::MotionEvent<'_>) {
-        let packet = self.pointers.apply(motion, VIEW);
-        if packet.data.is_empty() {
+        let reports = crate::input::reports_of(motion, VIEW);
+        if reports.is_empty() {
             return;
         }
         if let Some(client) = &mut self.client {
-            client.pointer_data_packet(packet);
+            client.pointer_reports(reports);
         }
     }
 

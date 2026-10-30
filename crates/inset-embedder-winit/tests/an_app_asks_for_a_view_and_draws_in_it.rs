@@ -38,8 +38,8 @@ mod client {
     use std::time::Duration;
 
     use inset_embedder::{
-        Canvas, EmbedderClient, Frame, KeyData, Offset, Paint, PlatformRef, PointerDataPacket,
-        Rect, RequestId, Scene, SceneBuilder, ViewId, WindowRef,
+        Canvas, EmbedderClient, Frame, KeyData, Offset, Paint, PlatformRef, PointerReport, Rect,
+        RequestId, Scene, SceneBuilder, ViewId, WindowRef,
     };
 
     use crate::TEST;
@@ -84,6 +84,9 @@ mod client {
             if let Some(window) = self.windows.first()
                 && !was_made
             {
+                // The app is not brought forward at launch, so its window can open behind other
+                // applications' windows, where a covered window takes no frames.
+                appkit::order_in_front_of_everything(TITLE);
                 self.platform.request_frame(window.view().id());
             }
         }
@@ -146,7 +149,7 @@ mod client {
 
         fn view_metrics_changed(&mut self, _id: ViewId) {}
         fn view_removed(&mut self, _id: ViewId) {}
-        fn pointer_data_packet(&mut self, _packet: PointerDataPacket) {}
+        fn pointer_reports(&mut self, _reports: Vec<PointerReport>) {}
         fn key_data(&mut self, _data: KeyData) -> bool {
             false
         }

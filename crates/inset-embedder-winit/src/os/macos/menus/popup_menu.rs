@@ -33,7 +33,7 @@ pub(super) type Closed = Box<dyn FnOnce(Option<MenuId>) + Send>;
 /// Opens `menu` at `at` in `window`'s view once winit's call has returned. Off the main thread, or
 /// with no view, there is no menu to open.
 pub(super) fn open(
-    window: &Window,
+    window: &dyn Window,
     at: Offset,
     menu: Vec<MenuEntry>,
     events: MenuEvents,

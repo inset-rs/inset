@@ -21,9 +21,11 @@ use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use crate::app_requests::AppRequests;
-use crate::gpu::Gpu;
+use crate::gpu::LazyGpu;
 use crate::host_window::WinitWindow;
-use crate::os::{OperatingSystem, ThisOs, ThisOsVisibilityNotices, WindowChrome};
+use crate::os::{
+    OperatingSystem, ThisOs, ThisOsTrackpadTouchObserver, ThisOsVisibilityNotices, WindowChrome,
+};
 use crate::view::WinitView;
 
 /// The screen view's id, as in Flutter: the views the app asks for are numbered after it.
@@ -32,7 +34,7 @@ pub(crate) const SCREEN_VIEW: ViewId = ViewId(0);
 /// A view with its window, as the registry answers it.
 #[derive(Clone)]
 pub(crate) struct OpenWindow {
-    pub(crate) window: Arc<Window>,
+    pub(crate) window: Arc<dyn Window>,
     pub(crate) view: Rc<WinitView>,
     /// The app's handle on a window it asked for; the screen view's window has none.
     pub(crate) handle: Option<Rc<WinitWindow>>,
@@ -68,11 +70,26 @@ struct ViewEntry {
 }
 
 struct ViewWindow {
-    window: Arc<Window>,
+    /// Before the window, so that it is dropped first: what observes the window lets go of it
+    /// while it is still open.
+    _observers: WindowObservers,
+    window: Arc<dyn Window>,
     handle: Option<Rc<WinitWindow>>,
-    /// The system's notices that the window may have been minimized or occluded, for the app;
-    /// `None` where winit's events are all the system says, and for the screen view's window.
-    _visibility_notices: Option<ThisOsVisibilityNotices>,
+}
+
+/// What the embedder hears of one window from the system beyond winit's events, each kept until
+/// the window closes: `None` where winit's events are all the system says, and for the screen
+/// view's window.
+#[derive(Default)]
+#[expect(
+    dead_code,
+    reason = "each is kept for its drop, which ends the observing"
+)]
+pub(crate) struct WindowObservers {
+    /// The system's notices that the window may have been minimized or occluded, for the app.
+    pub(crate) visibility: Option<ThisOsVisibilityNotices>,
+    /// What reports the fingers coming down on a trackpad over the window.
+    pub(crate) trackpad_touches: Option<ThisOsTrackpadTouchObserver>,
 }
 
 impl Views {
@@ -85,21 +102,17 @@ impl Views {
         });
     }
 
-    /// A view the app asked for, with its window and the system's notices about the window,
-    /// which end as the window closes.
-    pub(crate) fn add_with_window(
-        &self,
-        open: OpenWindow,
-        visibility_notices: Option<ThisOsVisibilityNotices>,
-    ) {
+    /// A view the app asked for, with its window and what the embedder observes of the window,
+    /// which ends as the window closes.
+    pub(crate) fn add_with_window(&self, open: OpenWindow, observers: WindowObservers) {
         let window = open.window.id();
         let view = open.view.id();
         self.insert(ViewEntry {
             view: open.view,
             window: Some(ViewWindow {
+                _observers: observers,
                 window: open.window,
                 handle: open.handle,
-                _visibility_notices: visibility_notices,
             }),
             screen: false,
         });
@@ -107,7 +120,7 @@ impl Views {
     }
 
     /// `window` is the screen view's from now on.
-    pub(crate) fn attach_screen_window(&self, window: Arc<Window>) {
+    pub(crate) fn attach_screen_window(&self, window: Arc<dyn Window>) {
         let id = window.id();
         let mut entries = self.entries.borrow_mut();
         let entry = entries
@@ -115,9 +128,9 @@ impl Views {
             .find(|entry| entry.screen)
             .expect("the screen view was added");
         entry.window = Some(ViewWindow {
+            _observers: WindowObservers::default(),
             window,
             handle: None,
-            _visibility_notices: None,
         });
         self.view_of_window.borrow_mut().insert(id, entry.view.id());
     }
@@ -224,24 +237,24 @@ pub(crate) struct WindowRequest {
     pub request: ViewRequest,
 }
 
-/// Makes the views, on the one device every view draws with, and their windows.
+/// Makes the views, which share the one device they draw with, and their windows.
 pub(crate) struct ViewMaker {
-    /// One device for every view: decoded images belong to it. A device needs no window.
-    gpu: Option<Gpu>,
+    /// One device for every view, made at the first draw if no image made it before.
+    gpu: LazyGpu,
     /// The number of the next view the app asks for; the screen view is the first.
     next_view_id: u64,
 }
 
 impl ViewMaker {
-    pub(crate) fn new() -> ViewMaker {
+    pub(crate) fn new(gpu: LazyGpu) -> ViewMaker {
         ViewMaker {
-            gpu: None,
+            gpu,
             next_view_id: SCREEN_VIEW.0 + 1,
         }
     }
 
     /// The screen view, with no window yet, for a window configured as `config`.
-    pub(crate) fn make_screen_view(&mut self, config: &WindowConfig) -> Rc<WinitView> {
+    pub(crate) fn make_screen_view(&self, config: &WindowConfig) -> Rc<WinitView> {
         Rc::new(self.view(SCREEN_VIEW, config))
     }
 
@@ -250,7 +263,7 @@ impl ViewMaker {
     /// `requests`.
     pub(crate) fn make_requested(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        event_loop: &dyn ActiveEventLoop,
         window_request: &WindowRequest,
         requests: Rc<AppRequests>,
     ) -> Result<OpenWindow, String> {
@@ -277,11 +290,10 @@ impl ViewMaker {
         })
     }
 
-    /// The view numbered `id`, on the device every view draws with, for a window configured as
-    /// `config`.
-    fn view(&mut self, id: ViewId, config: &WindowConfig) -> WinitView {
-        let gpu = self.gpu.get_or_insert_with(Gpu::acquire);
-        WinitView::new(id, gpu, config.background.sees_through())
+    /// The view numbered `id`, drawing with the device every view shares, for a window
+    /// configured as `config`.
+    fn view(&self, id: ViewId, config: &WindowConfig) -> WinitView {
+        WinitView::new(id, &self.gpu, config.background.sees_through())
     }
 }
 
@@ -293,10 +305,10 @@ pub(crate) fn screen_window_config() -> Option<WindowConfig> {
 
 /// The screen view's window, configured as `config`, attached to `view`.
 pub(crate) fn open_screen_window(
-    event_loop: &ActiveEventLoop,
+    event_loop: &dyn ActiveEventLoop,
     config: &WindowConfig,
     view: &WinitView,
-) -> Result<Arc<Window>, String> {
+) -> Result<Arc<dyn Window>, String> {
     let window = open_window(event_loop, config)?;
     view.attach_window(&window);
     Ok(window)
@@ -304,12 +316,15 @@ pub(crate) fn open_screen_window(
 
 /// A window configured as `config`: winit's attributes, then what the system's module applies
 /// beyond them.
-fn open_window(event_loop: &ActiveEventLoop, config: &WindowConfig) -> Result<Arc<Window>, String> {
+fn open_window(
+    event_loop: &dyn ActiveEventLoop,
+    config: &WindowConfig,
+) -> Result<Arc<dyn Window>, String> {
     let window = event_loop
         .create_window(attributes_for(config))
         .map_err(|error| error.to_string())?;
-    ThisOs::configure(&window, config);
-    Ok(Arc::new(window))
+    ThisOs::configure(&*window, config);
+    Ok(Arc::from(window))
 }
 
 /// winit's attributes for a configuration. What winit has no attribute for, the system's
@@ -320,9 +335,9 @@ fn attributes_for(config: &WindowConfig) -> WindowAttributes {
         WindowLevel::AlwaysOnTop => winit::window::WindowLevel::AlwaysOnTop,
         WindowLevel::AlwaysOnBottom => winit::window::WindowLevel::AlwaysOnBottom,
     };
-    let mut attributes = Window::default_attributes();
+    let mut attributes = WindowAttributes::default();
     if !ThisOs::WINDOW_IS_THE_SCREEN {
-        attributes = attributes.with_inner_size(LogicalSize::new(config.size[0], config.size[1]));
+        attributes = attributes.with_surface_size(LogicalSize::new(config.size[0], config.size[1]));
     }
     attributes = attributes
         .with_title(&config.title)

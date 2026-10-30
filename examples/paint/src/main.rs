@@ -11,8 +11,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    Color, ColorSpace, RRect, Radius, Rect, RequestId, Scene, ViewMetrics, ViewRef, ViewRequest,
-    WindowConfig,
+    Color, ColorSpace, Offset, RRect, Radius, Rect, RequestId, SceneBuilder, ViewMetrics, ViewRef,
+    ViewRequest, WindowConfig,
 };
 use inset_embedder_winit::WinitEmbedder;
 use inset_foundation::App;
@@ -66,10 +66,9 @@ fn view_for(app: &App, request_id: RequestId) -> Option<ViewRef> {
 
 fn present(view: &ViewRef, elapsed: Duration) {
     let picture = record(view.metrics(), elapsed);
-    view.present(Arc::new(Scene {
-        picture: Arc::new(picture),
-        surfaces: Vec::new(),
-    }));
+    let mut scene = SceneBuilder::new();
+    scene.add_picture(Offset::ZERO, &Arc::new(picture), false, false);
+    view.present(Arc::new(scene.build()));
 }
 
 /// The only window's close button quits.

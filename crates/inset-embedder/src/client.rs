@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use crate::{
     AppExitReply, AppExitResponse, AppLifecycleState, ClipboardEvent, DropData, EditCommand, Frame,
-    KeyData, MenuId, NotificationActivation, OpenRequest, PointerDataPacket, TextEditingValue,
+    KeyData, MenuId, NotificationActivation, OpenRequest, PointerReport, TextEditingValue,
     TextInputAction, TrayIconEvent, TrayIconId, ViewFocusEvent, ViewId,
 };
 
@@ -45,8 +45,11 @@ pub trait EmbedderClient {
         let _ = event;
     }
 
-    /// Flutter `PlatformDispatcher.onPointerDataPacket`.
-    fn pointer_data_packet(&mut self, packet: PointerDataPacket);
+    /// What pointing devices did, as the system reported it, in the order it happened: the
+    /// embedder API's `FlutterEngineSendPointerEvent`. The client adds what the framework also
+    /// needs ([`PointerDataPacketConverter`](crate::PointerDataPacketConverter)) and hands the
+    /// result to `PlatformDispatcher.onPointerDataPacket`.
+    fn pointer_reports(&mut self, reports: Vec<PointerReport>);
 
     /// Files dragged from outside the application entered, moved over, were dropped on or
     /// left a view. No dart:ui hook; the default drops it.

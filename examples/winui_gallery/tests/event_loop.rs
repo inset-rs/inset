@@ -2,8 +2,8 @@
 #![feature(arbitrary_self_types)]
 use inset_embedder::valo::Context;
 use inset_embedder::{
-    Dispatcher, EmbedderClient, FontSource, Frame, Instant, Offset, Platform, PointerChange,
-    PointerData, PointerDataPacket, PointerDeviceKind, SystemFontSource, TargetPlatform, View,
+    Contact, Dispatcher, EmbedderClient, FontSource, Frame, Instant, Offset, Platform,
+    PointerDeviceKind, PointerReport, ReportedChange, SystemFontSource, TargetPlatform, View,
     ViewId, ViewRef,
 };
 use inset_rendering::RenderParagraph;
@@ -108,7 +108,6 @@ impl Platform for LoopPlatform {
 struct Driver {
     platform: Rc<LoopPlatform>,
     shell: Shell,
-    pointer_id: i64,
     log: Vec<String>,
 }
 impl Driver {
@@ -134,7 +133,6 @@ impl Driver {
         let mut driver = Driver {
             platform,
             shell,
-            pointer_id: 0,
             log: Vec::new(),
         };
         driver.run_until(Duration::from_millis(500));
@@ -169,28 +167,18 @@ impl Driver {
         }
     }
 
-    fn mouse(&mut self, change: PointerChange, point: Offset, down: bool) {
-        if change == PointerChange::Down {
-            self.pointer_id += 1;
-        }
-        let buttons = if down { 1 } else { 0 };
+    fn mouse(&mut self, change: ReportedChange, point: Offset) {
         self.log
             .push(format!("{:?} {change:?}", self.platform.clock.get()));
-        self.shell
-            .pointer_data_packet(PointerDataPacket::new(vec![PointerData {
-                change,
-                kind: PointerDeviceKind::Mouse,
-                time_stamp: self.platform.clock.get(),
-                pointer_identifier: if change == PointerChange::Hover && !down {
-                    0
-                } else {
-                    self.pointer_id
-                },
-                physical_x: point.dx(),
-                physical_y: point.dy(),
-                buttons,
-                ..Default::default()
-            }]));
+        self.shell.pointer_reports(vec![PointerReport {
+            view_id: ViewId(0),
+            time_stamp: self.platform.clock.get(),
+            device: 0,
+            kind: PointerDeviceKind::Mouse,
+            position: [point.dx(), point.dy()],
+            change,
+            contact: Contact::default(),
+        }]);
     }
 
     fn find(&self, text: &str) -> Option<Offset> {
@@ -251,11 +239,11 @@ impl Driver {
 fn repeat_button_repeats_under_the_winit_loop() {
     let mut driver = Driver::new();
     let hold_me = driver.find("Hold me").expect("Hold me");
-    driver.mouse(PointerChange::Add, hold_me - Offset::new(50.0, 50.0), false);
-    driver.mouse(PointerChange::Hover, hold_me, false);
+    driver.mouse(ReportedChange::Add, hold_me - Offset::new(50.0, 50.0));
+    driver.mouse(ReportedChange::Hover { buttons: 0 }, hold_me);
     // Idle long enough for the app clock to fall behind the platform's between frames.
     driver.run_until(Duration::from_millis(1000));
-    driver.mouse(PointerChange::Down, hold_me, true);
+    driver.mouse(ReportedChange::Down { buttons: 1 }, hold_me);
     driver.run_until(Duration::from_millis(1400));
     // `Delay` is 500 ms from the press, on the platform's clock.
     assert_eq!(driver.status("RepeatButton:"), "RepeatButton: 1 clicks");
@@ -263,7 +251,7 @@ fn repeat_button_repeats_under_the_winit_loop() {
     let after_delay = driver.status("RepeatButton:");
     driver.run_until(Duration::from_millis(2500));
     let held = driver.status("RepeatButton:");
-    driver.mouse(PointerChange::Up, hold_me, false);
+    driver.mouse(ReportedChange::Up { buttons: 0 }, hold_me);
     driver.run_until(Duration::from_millis(3000));
     let released = driver.status("RepeatButton:");
     let clicks = |status: &str| {

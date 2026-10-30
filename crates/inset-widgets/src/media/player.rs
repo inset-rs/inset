@@ -332,19 +332,20 @@ mod tests {
             .video_surface()
             .expect("put on the view's surface");
         assert!(Arc::ptr_eq(&video_surface, &opened[0].surface));
-        assert!(
-            view.last_scene().unwrap().surfaces.is_empty(),
-            "no room, and nothing placed, until the size is known"
+        assert_eq!(
+            placements(&view).len(),
+            0,
+            "nothing placed until the size is known"
         );
 
         players.opened()[0].set_state(ready(Size::new(320.0, 180.0)));
         cell.checkpoint();
         pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(16));
-        let scene = view.last_scene().unwrap();
-        assert_eq!(scene.surfaces.len(), 1);
-        assert!(Arc::ptr_eq(&scene.surfaces[0].surface, &opened[0].surface));
+        let placements = placements(&view);
+        assert_eq!(placements.len(), 1);
+        assert!(Arc::ptr_eq(&placements[0].surface, &opened[0].surface));
         assert_eq!(
-            scene.surfaces[0].rect,
+            placements[0].bounds(),
             inset_embedder::Rect::from_ltwh(240.0, 210.0, 320.0, 180.0)
         );
     }
@@ -384,5 +385,11 @@ mod tests {
         run_app(&mut cell.borrow_mut(), widget);
         cell.elapse(Duration::ZERO);
         pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
+    }
+
+    /// The surfaces `view`'s last scene places.
+    fn placements(view: &TestView) -> Vec<inset_embedder::SurfacePlacement> {
+        let scene = view.last_scene().expect("a frame was presented");
+        inset_embedder::slices(&scene).surfaces().cloned().collect()
     }
 }

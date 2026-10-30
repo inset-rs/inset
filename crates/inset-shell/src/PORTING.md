@@ -2,13 +2,17 @@
 
 No Flutter counterpart. Dart has no type — the engine owns the isolate.
 
+## Identical
+
+- lib.rs `pointer_reports` → the engine's `RuntimeController::DispatchPointerDataPacket`, which runs every host's packets through its one `PointerDataPacketConverter` before the framework sees them
+
 ## lib.rs
 
 - Change: `Shell` owns the `App` and is the `EmbedderClient` the host drives.
   Reason: platform — the host must not name `App`, and a lower crate cannot name a higher binding.
   Affect: there is no isolate-global binding a host can reach into; everything it does to the framework goes through the client it was handed.
 
-- Change: the host delivers frames, pointer packets and key data as calls on `Shell` rather than by assigning handlers onto `PlatformDispatcher` callback fields, and `key_data` returns whether a `HardwareKeyboard` handler took the key.
+- Change: the host delivers frames, pointer reports and key data as calls on `Shell` rather than by assigning handlers onto `PlatformDispatcher` callback fields, and `key_data` returns whether a `HardwareKeyboard` handler took the key.
   Reason: platform — there is no isolate-global callback table, and the host reads the key answer from the call.
   Affect: a host cannot swap the frame or pointer handler at run time, and learns from the `key_data` return whether to pass the key on.
 

@@ -4,22 +4,24 @@
 
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 
 use inset_embedder::{EmbedderClient, View, ViewError, ViewFocusEvent, ViewId};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
-use crate::os::{FramePresentation, ThisOs, WindowVisibility};
-use crate::view::WinitView;
+use crate::os::{FramePresentation, ThisOs, TrackpadTouches, WindowVisibility};
 use crate::view_focus;
-use crate::windows::{OpenWindow, ViewAfterClose, WindowRequest, open_screen_window};
+use crate::windows::{
+    OpenWindow, ViewAfterClose, WindowObservers, WindowRequest, open_screen_window,
+};
 
 use super::{MainLoop, MainLoopEvent};
 
 impl<C: EmbedderClient> MainLoop<C> {
     /// Opens a window for the view the app asked for. The app hears of the view through
     /// `view_added`, which it tells by its request's id, or of the failure.
-    pub(super) fn open_window(&mut self, event_loop: &ActiveEventLoop, request: WindowRequest) {
+    pub(super) fn open_window(&mut self, event_loop: &dyn ActiveEventLoop, request: WindowRequest) {
         if let Err(reason) = self.make_requested_window(event_loop, &request) {
             self.client
                 .view_request_failed(request.request_id, ViewError::Failed(reason));
@@ -30,7 +32,7 @@ impl<C: EmbedderClient> MainLoop<C> {
     /// now, and its view added.
     pub(super) fn make_requested_window(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        event_loop: &dyn ActiveEventLoop,
         request: &WindowRequest,
     ) -> Result<(), String> {
         let open = self.view_maker.make_requested(
@@ -39,37 +41,55 @@ impl<C: EmbedderClient> MainLoop<C> {
             Rc::clone(self.state.requests()),
         )?;
         if self.surfaces_given {
-            open.view.give_surface(&open.window)?;
+            open.view.give_surface(&open.window);
         }
         self.add_view(open);
         Ok(())
     }
 
-    /// A view the app asked for, with its window: it joins the platform's views, with the system's
-    /// notices that its window may have been minimized or occluded, and then the app hears of it.
+    /// A view the app asked for, with its window: it joins the platform's views, with what the
+    /// embedder observes of its window, and then the app hears of it.
     pub(super) fn add_view(&mut self, open: OpenWindow) {
         let view_id = open.view.id();
         let window = Arc::clone(&open.window);
-        let visibility_notices =
-            ThisOs::observe_visibility(&window, self.send_visibility_notice(window.id()));
-        self.state.add_view_with_window(open, visibility_notices);
+        let observers = self.observe_window(&*window);
+        self.views().add_with_window(open, observers);
         self.sync_frame_scheduler(view_id);
         self.client.view_added(view_id);
-        self.read_theme_of(&window);
+        self.read_theme_of(&*window);
+    }
+
+    /// What the embedder observes of `window` beyond winit's events, for as long as it is open.
+    fn observe_window(&self, window: &dyn Window) -> WindowObservers {
+        WindowObservers {
+            visibility: ThisOs::observe_visibility(
+                window,
+                self.send_visibility_notice(window.id()),
+            ),
+            trackpad_touches: ThisOs::observe_trackpad_touches(
+                window,
+                self.send_trackpad_touch(window.id()),
+            ),
+        }
+    }
+
+    /// What fingers coming down on a trackpad over the window `id` do: the moment queues for the
+    /// loop.
+    fn send_trackpad_touch(&self, id: WindowId) -> Box<dyn Fn(Instant)> {
+        let proxy = self.proxy.clone();
+        Box::new(move |at| proxy.send(MainLoopEvent::TrackpadTouched(id, at)))
     }
 
     /// What a notice that the window `id` may have been minimized or occluded does: it queues for
     /// the loop, which reads the window's state again on a turn of its own.
     fn send_visibility_notice(&self, id: WindowId) -> Box<dyn Fn()> {
         let proxy = self.proxy.clone();
-        Box::new(move || {
-            let _ = proxy.send_event(MainLoopEvent::WindowVisibility(id));
-        })
+        Box::new(move || proxy.send(MainLoopEvent::WindowVisibility(id)))
     }
 
     /// Opens the screen view's window, at winit's first call: the first moment winit lets a
     /// window be made. The app, started with the view at no size, hears its new metrics.
-    pub(super) fn open_screen_window(&mut self, event_loop: &ActiveEventLoop) {
+    pub(super) fn open_screen_window(&mut self, event_loop: &dyn ActiveEventLoop) {
         let Some(config) = self.screen_window.take() else {
             return;
         };
@@ -80,12 +100,12 @@ impl<C: EmbedderClient> MainLoop<C> {
         let window =
             open_screen_window(event_loop, &config, &view).expect("open the screen view's window");
         if self.surfaces_given {
-            give_surface(&view, &window);
+            view.give_surface(&window);
         }
         self.views().attach_screen_window(Arc::clone(&window));
         self.sync_frame_scheduler(view.id());
         self.client.view_metrics_changed(view.id());
-        self.read_theme_of(&window);
+        self.read_theme_of(&*window);
     }
 
     /// Closes a window: it is freed, and its view goes with it, but for the screen view,
@@ -129,7 +149,7 @@ impl<C: EmbedderClient> MainLoop<C> {
     /// Honours the framework's request to focus a view, or to give up its focus.
     pub(super) fn change_view_focus(&mut self, change: ViewFocusEvent) {
         if let Some(open) = self.views().by_view(change.view_id) {
-            view_focus::focus_window_if_asked(&change, &open.window);
+            view_focus::focus_window_if_asked(&change, &*open.window);
         }
     }
 
@@ -147,8 +167,8 @@ impl<C: EmbedderClient> MainLoop<C> {
         let Some(open) = self.views().by_window(id) else {
             return;
         };
-        self.read_theme_of(&open.window);
-        let Some(size) = open.view.window_resized(&open.window) else {
+        self.read_theme_of(&*open.window);
+        let Some(size) = open.view.window_resized(&*open.window) else {
             return;
         };
         self.client.view_metrics_changed(open.view.id());
@@ -166,7 +186,7 @@ impl<C: EmbedderClient> MainLoop<C> {
             .views()
             .open_windows()
             .into_iter()
-            .filter(|open| open.view.refresh_screen(&open.window))
+            .filter(|open| open.view.refresh_screen(&*open.window))
             .map(|open| open.view.id())
             .collect();
         for view_id in changed {
@@ -182,7 +202,7 @@ impl<C: EmbedderClient> MainLoop<C> {
             .views()
             .open_windows()
             .into_iter()
-            .filter(|open| open.view.refresh_metrics(&open.window))
+            .filter(|open| open.view.refresh_metrics(&*open.window))
             .map(|open| open.view.id())
             .collect();
         for view_id in changed {
@@ -197,7 +217,7 @@ impl<C: EmbedderClient> MainLoop<C> {
         self.surfaces_given = true;
         let open_windows = self.views().open_windows();
         for open in &open_windows {
-            give_surface(&open.view, &open.window);
+            open.view.give_surface(&open.window);
         }
         self.sync_metrics();
         for open in open_windows {
@@ -236,7 +256,7 @@ impl<C: EmbedderClient> MainLoop<C> {
         let Some(open) = self.views().by_window(id) else {
             return;
         };
-        if open.view.refresh_screen(&open.window) {
+        if open.view.refresh_screen(&*open.window) {
             self.client.view_metrics_changed(open.view.id());
         }
         self.report_window_changed(&open);
@@ -278,15 +298,6 @@ impl<C: EmbedderClient> MainLoop<C> {
             handle.refresh_state();
             self.client.window_changed(open.view.id());
         }
-    }
-}
-
-/// Gives `view` a surface on `window`, its own; a view that gets none is reported and draws
-/// nothing. A window the app asks for answers the app with the error instead
-/// (`make_requested_window`).
-fn give_surface(view: &WinitView, window: &Arc<Window>) {
-    if let Err(reason) = view.give_surface(window) {
-        eprintln!("inset: no surface on view {:?}: {reason}", view.id());
     }
 }
 

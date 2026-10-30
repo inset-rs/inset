@@ -34,12 +34,20 @@ pub(crate) struct NoWindowSurfaces;
 
 #[cfg(not(target_os = "ios"))]
 impl WindowSurfaces for NoWindowSurfaces {
-    fn new(_window: Arc<Window>) -> Self {
+    fn new(_window: Arc<dyn Window>) -> Self {
         NoWindowSurfaces
     }
 
-    fn place(&self, _placements: &[SurfacePlacement], _view: ViewId) {}
+    fn place<'a>(
+        &self,
+        _placements: impl IntoIterator<Item = &'a SurfacePlacement>,
+        _view: ViewId,
+    ) {
+    }
 }
 
 /// No notices of a window's visibility beyond winit's events. Never made.
 pub(crate) enum NoVisibilityNotices {}
+
+/// No report of a trackpad's touches. Never made.
+pub(crate) enum NoTrackpadTouchObserver {}

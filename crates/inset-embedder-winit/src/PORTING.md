@@ -7,11 +7,12 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - app_exit.rs → how Flutter's desktop embedders quit for a required `System.exitApplication`, and hear the framework's reply to `System.requestAppExit`
 - lifecycle.rs, os/macos/app_lifecycle.rs → the macOS embedder's lifecycle states (`FlutterEngine`)
 - os/macos/app_delegate.rs, quitting → the macOS embedder's `FlutterAppDelegate`, which asks the framework before the app quits
+- launch.rs, os/macos/event_loop.rs → a Flutter macOS app's launch, which comes forward or stays behind as macOS launched it
 - launch.rs, main_loop/ → the engine's start (`Shell` adds the implicit view with empty metrics): where the system's window is the screen, the app starts with the screen view at no size, and its window and surface come after
 - platform.rs, main_loop/windows.rs → the embedders' implicit view, here the screen view, which the framework never hears removed: it outlives its window and draws nowhere once the window closes
 - main_loop/windows.rs → the engine's window close request, which goes to the framework and closes nothing until the framework closes the window
 - main_loop/windows.rs, view.rs, rasterizer.rs → the shell's surfaces (`Shell::OnPlatformViewCreated`, `OnPlatformViewDestroyed`): the view stays while the system has taken its surface, and each surface given gets the view's last scene, as Flutter's rasterizer keeps each view's last layer tree, and a frame
-- touch.rs → the iOS embedder's touches, one pointer per finger, added before its down and removed after its up
+- touch.rs → the iOS embedder's touches, one pointer per finger, added before its down and removed after its up, each numbered apart from the mouse and the trackpad, as the Windows embedder numbers its touches, and a pen a stylus, as the iOS and Windows embedders report it, hovering where the system reports it near the screen
 - screens.rs, os/macos/screens.rs, os/macos/system_changes.rs, main_loop/app.rs → the macOS embedder's displays (`updateDisplayConfig`), every `NSScreen` numbered by its `NSScreenNumber`, sent again at `NSApplicationDidChangeScreenParametersNotification`, and a window's `display_id`, its screen's number, sent again when the window changes screen
 - locales.rs, os/macos/system_changes.rs → the macOS embedder's locales (`sendUserLocales`), its preferred languages, sent again at `NSCurrentLocaleDidChangeNotification`; the Windows and Linux embedders', the user's languages, sent at start only
 
@@ -28,6 +29,10 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - Change: on macOS a panic inside a call from AppKit aborts the process once the panic hook has printed it.
   Reason: platform — a panic cannot unwind through AppKit's frames.
   Affect: such a panic ends the process rather than coming out of `run`.
+
+- Change: on iOS the views keep their surfaces for the app's life, and their frames are held in the background, where Flutter's iOS embedder lets its surface go when the app enters the background and makes it again as it comes to the foreground.
+  Reason: platform — winit gives the surfaces at `can_create_surfaces` and takes them at `destroy_surfaces`, which it calls on iOS at launch alone, and reports the background as every window occluded.
+  Affect: an app in the background draws nothing but keeps its surface's memory, and one that is inactive but in sight, under the Control Center, goes on drawing, as Flutter's does.
 
 ## frame_scheduler.rs / vsync_source.rs / vsync_waiter.rs / os/macos/vsync_waiter.rs
 
@@ -59,6 +64,24 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Valo paints `.notdef` tofu unless asked not to.
   Affect: a character with no face occupies layout space and draws nothing.
 
+- Change: on macOS a frame that paints nothing besides its native surfaces is not drawn.
+  Reason: platform — Core Animation shows the surfaces by itself, and macOS gives a process a large share of graphics memory the first time it draws.
+  Affect: a window that only shows native surfaces, such as a full-window video, draws nothing and, until it paints, holds no graphics memory.
+
+## trackpad.rs / main_loop/input.rs / os/macos/trackpad_touches.rs → the macOS embedder's trackpad gestures (`FlutterViewController.mm`, `dispatchGestureEvent:`, `touchesBeganWithEvent:`)
+
+- Change: the trackpad's scroll, pinch and rotation are each under way from winit's `Started` to its `Ended` or `Cancelled`, where Flutter keeps AppKit's phases and counts a gesture that may begin as not under way.
+  Reason: platform — winit reports AppKit's may-begin and began both as `Started`.
+  Affect: fingers resting on the trackpad while a pinch ends hold the pan-zoom open until they lift.
+
+- Change: a scroll that winit names neither the fingers' nor the system's momentum, a wheel's turn or one whose source it cannot tell, is the mouse's scroll signal, where Flutter's Windows and Linux embedders make a trackpad's scroll a pan-zoom too.
+  Reason: platform — winit tells a scroll's source on macOS and Wayland alone.
+  Affect: on Windows and X11 a trackpad scrolls as a wheel does, with the system's own momentum, and pinches nothing.
+
+- Change: a touch on the trackpad within 50 ms of the system's momentum moving sends the scroll-inertia cancel, timed by when the embedder hears each where Flutter compares the events' own times.
+  Reason: platform — winit reports neither a trackpad's touches nor its events' times, so the embedder hears the touches itself.
+  Affect: a fling stops when the trackpad is touched during it, unless the main thread is held up between the momentum and the touch for longer than the window.
+
 ## keyboard.rs / keys.rs
 
 - Change: the embedder builds `KeyData` from winit's W3C key codes with Flutter's own tables, deriving the logical key as Flutter's web engine does.
@@ -78,10 +101,6 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - Change: a view's text input runs on winit's input method, and the embedder turns its composing text and commits into editing values.
   Reason: platform — winit's input method reports composing text and commits, not Flutter's editing state.
   Affect: a field hears composing text and commits, and the input method turning off closes its connection.
-
-- Change: the embedder answers no to `handles_editing_keys` and does not forward the editing commands macOS names for a key.
-  Reason: platform — winit keeps only the plain key press and drops the command macOS names for it.
-  Affect: text fields are edited by the framework's own key bindings, so a user's own key bindings and macOS's Control-key editing bindings do not reach them.
 
 ## mouse_cursor.rs
 
@@ -131,7 +150,11 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Core Animation composites the buffers it's given, so a producer's frame needs no copy and no framework frame.
   Affect: framework content can sit above a surface but not beneath it.
 
-- Change: a surface's buffer and its children sit in one layer scaled by a transform, the children beneath the buffer, and a present shows a surface frame's buffer and places its children in one transaction.
+- Change: a native surface's layers take every transform and clip above it, a path's included.
+  Reason: platform — Core Animation turns a layer by any transform and masks it by any path.
+  Affect: a turned, rounded or path-clipped surface shows exactly where the framework places it.
+
+- Change: a surface's buffer and its children sit in one layer placed by a transform, the children beneath the buffer, and a present shows a surface frame's buffer and places its children in one transaction.
   Reason: platform — a program whose picture is itself a surface in another app's window places its own surfaces in that picture, and Core Animation moves, clips and scales a layer's sublayers with it.
   Affect: a child moves, is cut and shrinks with its parent, and shows through its parent's clear pixels.
 
@@ -167,14 +190,14 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 ## drag_drop.rs → the macOS embedder's `draggingEntered:`/`performDragOperation:`
 
-- Change: files dragged over a window reach the app as one report per phase, with no position.
-  Reason: platform — winit reports each dragged file on its own and never says where the drag is.
-  Affect: an app hears a drag enter, drop and leave but never move, and must treat the whole window as the target.
+- Change: a drag over a window reaches the app once winit has answered the fetch of its files: it enters with them, then moves and drops where it is, and a drag whose list names no file is refused.
+  Reason: platform — winit hands a drag's data apart from its events, through a fetch it answers later, and accepts a drag only for a target that says so.
+  Affect: an app hears a drag of files a moment after it enters, never a drag of text or links alone, and on a system that answers late a drop that comes first is reported right after its enter.
 
 ## system_requests.rs / launch.rs / os/macos/app_delegate.rs / os/ios/open_requests.rs → the macOS embedder's `FlutterAppDelegate`, iOS's `FlutterAppDelegate` and `FlutterSceneDelegate`
 
 - Change: the files and links the system asks the app to open reach the client as `EmbedderClient::open_requested`, and a reopen, such as a click on the Dock icon, the handler the app sets through `WinitPlatform::macos`, where a Flutter app answers them in its own application delegate: macOS's `application:openURLs:`, a file URL as a path and any other as a link, at launch and while the app runs.
-  Reason: platform — winit owns the application delegate, so an app cannot write its own.
+  Reason: platform — the embedder's own application delegate answers AppKit, as winit leaves the delegate to it, so an app writes none.
   Affect: the launch's request waits in the `App` for the app's handler, and a reopen with no handler set is dropped.
 
 - Change: on Windows and Linux the embedder reads no launch arguments: the app reads its own command line, as a Flutter app does in `main`, and hands what it decides are files to `App::open_requested`.
@@ -207,8 +230,8 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — the host's copy and paste go through the clipboard's events, and any focused widget may act on them, not only a text field.
   Affect: Edit works on a selectable text as on a field, and with no focused view nothing happens.
 
-- Change: on macOS the Dock icon's menu is answered from `applicationDockMenu:`, which the embedder adds to winit's application delegate class, as it adds its other delegate methods; status items are `NSStatusItem`s whose button reports a click as `Activated`, a right click or a Control-click as `ContextMenuRequested` and a double click as `DoubleClicked`, at the pointer, and whose attached menu is the item's own menu.
-  Reason: platform — winit owns the application delegate, and AppKit opens a status item's menu by itself on a click.
+- Change: on macOS the Dock icon's menu is answered from `applicationDockMenu:`, by the embedder's application delegate; status items are `NSStatusItem`s whose button reports a click as `Activated`, a right click or a Control-click as `ContextMenuRequested` and a double click as `DoubleClicked`, at the pointer, and whose attached menu is the item's own menu.
+  Reason: platform — AppKit asks the application's delegate for the Dock's menu, and opens a status item's menu by itself on a click.
   Affect: a status item with an attached menu reports no click, as AppKit sends it none.
 
 - Change: on Windows a menu at a point is `TrackPopupMenuEx`, opened from a hidden window of the embedder's once the framework's call has returned, and a tray icon is `Shell_NotifyIcon`'s at version 4, reporting a click or a key as `Activated`, a right click or the menu key as `ContextMenuRequested`, a middle click as `SecondaryActivated` and a double click as `DoubleClicked`, at the point Windows gives in logical pixels; its menu is opened at the pointer by the app.
@@ -329,6 +352,8 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - Dead keys and `Key::Unidentified`. Trigger: composing input, or a key of the system's that winit cannot name.
 - Synthesizing the key ups a focus change swallowed. Trigger: `HardwareKeyboard::sync_keyboard_state` gaining a way to ask the system.
 - Registering a StatusNotifierItem again when the watcher comes back on the bus, and a tray that appears after the app started. Trigger: a desktop whose panel restarts.
-- Bringing the app forward on a click on Linux, with the activation token a server sends before `ActionInvoked` (`ActivationToken`, specification 1.2): winit 0.30 activates no window already shown with a token. Trigger: winit taking an `xdg_activation` token for a shown window.
+- Bringing the app forward on a click on Linux, with the activation token a server sends before `ActionInvoked` (`ActivationToken`, specification 1.2): winit activates no window already shown with a token. Trigger: winit taking an `xdg_activation` token for a shown window.
+- Forwarding the editing commands macOS names for a key, which winit reports from 0.31 through `ApplicationHandlerExtMacOS::standard_key_binding`: until then `handles_editing_keys` answers no and text fields are edited by the framework's own key bindings. Trigger: a user's own key bindings, or macOS's Control-key editing bindings, in a text field.
+- A pen's barrel and other buttons, as Flutter's stylus buttons. Trigger: an app that reads a stylus's secondary button.
 - A menu item's icon at the screen's scale on Windows, where it shows at its own size in pixels. Trigger: a menu with icons on a display scaled above 100%.
 - Translating the labels of macOS's and Windows' provided items, which are English. Trigger: an app localized beyond English.

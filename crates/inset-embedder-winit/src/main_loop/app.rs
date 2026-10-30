@@ -60,7 +60,7 @@ impl<C: EmbedderClient> MainLoop<C> {
 
     /// The system's appearance, read again from `window`'s theme: a window just opened brings
     /// it, and a system whose configuration carries it reports a change as a resize.
-    pub(super) fn read_theme_of(&mut self, window: &Window) {
+    pub(super) fn read_theme_of(&mut self, window: &dyn Window) {
         if let Some(theme) = window.theme() {
             self.on_theme_changed(theme);
         }

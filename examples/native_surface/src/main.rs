@@ -4,12 +4,17 @@
 //! its own content stays on top. Once a second the producer prints what it counted, so the
 //! compositor can be checked without looking. `--scale` draws the surface and its label through
 //! a transform that scales them about their middle: at 0.5 the whole buffer shows, at half its
-//! size, inside a frame half as big.
+//! size, inside a frame half as big. `--opacity` fades them together: the room the framework makes
+//! for the surface keeps that share of the background beneath it. `--turn` turns them by a number
+//! of degrees and `--rounded` cuts their corners round by a radius: Core Animation turns and masks
+//! the surface's layers as the framework turns and clips its own drawing.
 //!
 //! ```text
 //! cargo run -p native_surface
 //! cargo run -p native_surface -- --exit-after 5
 //! cargo run -p native_surface -- --scale 0.5
+//! cargo run -p native_surface -- --opacity 0.5
+//! cargo run -p native_surface -- --turn 15 --rounded 24
 //! ```
 
 #[cfg(target_os = "macos")]
@@ -21,7 +26,13 @@ mod producer;
 
 #[cfg(target_os = "macos")]
 fn main() {
-    app::run(exit_after(), scale());
+    let presentation = app::Presentation {
+        scale: number_after("--scale", 1.0),
+        opacity: number_after("--opacity", 1.0),
+        turn_degrees: number_after("--turn", 0.0),
+        corner_radius: number_after("--rounded", 0.0),
+    };
+    app::run(exit_after(), presentation);
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -38,11 +49,13 @@ fn exit_after() -> Option<std::time::Duration> {
     Some(std::time::Duration::from_secs(seconds))
 }
 
-/// `--scale FACTOR`, what the surface and its label are scaled by; 1 without it.
+/// The number after `flag` on the command line, such as `--scale 0.5`; `otherwise` without it.
 #[cfg(target_os = "macos")]
-fn scale() -> f64 {
-    argument_after("--scale").map_or(1.0, |factor| {
-        factor.parse().expect("--scale takes a number, such as 0.5")
+fn number_after(flag: &str, otherwise: f64) -> f64 {
+    argument_after(flag).map_or(otherwise, |number| {
+        number
+            .parse()
+            .unwrap_or_else(|_| panic!("{flag} takes a number, such as 0.5"))
     })
 }
 

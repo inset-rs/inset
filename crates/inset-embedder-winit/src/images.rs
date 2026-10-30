@@ -1,7 +1,7 @@
 //! Images: which decoders this build carries and where they run, the loader the platform decodes
-//! with, started on the device of the first window, and valo's codecs as the framework's.
+//! with, started at the first image, and valo's codecs as the framework's.
 
-use std::cell::RefCell;
+use std::cell::{Cell, OnceCell};
 use std::sync::Arc;
 
 use inset_embedder::{
@@ -10,6 +10,7 @@ use inset_embedder::{
 use valo::ImageContext;
 use valo_codec::{Decoder, ImageLoader};
 
+use crate::gpu::LazyGpu;
 use crate::os::{ImageDecoding, ThisOs};
 
 /// Selects where the built-in image decoders run.
@@ -61,53 +62,47 @@ fn portable_decoders() -> Vec<Box<dyn Decoder>> {
 pub(crate) type CreateImageLoader = Box<dyn FnOnce(ImageContext) -> ImageLoader>;
 
 /// The images the platform answers from: the loader that decodes for `open_image_codec`, and the
-/// renderer's image store, for images the app brings its own pixels or textures for. Neither
-/// exists until the first window has given the embedder a device.
+/// renderer's image store, for images the app brings its own pixels or textures for. Both are made
+/// at the first image the app decodes or brings, on the device every view draws with, which that
+/// makes if no view has drawn yet (`gpu.rs`).
 pub(crate) struct Images {
+    /// The device the images belong to, which every view draws with.
+    gpu: LazyGpu,
     /// The application's loader, made once the store exists; `None` for the built-in one.
-    create_loader: RefCell<Option<CreateImageLoader>>,
-    /// Decoded images belong to the device and do not retain a window surface.
-    loader: RefCell<Option<ImageLoader>>,
-    store: RefCell<Option<ImageContext>>,
+    create_loader: Cell<Option<CreateImageLoader>>,
+    started: OnceCell<StartedImages>,
+}
+
+/// The image store and the loader that decodes into it. Decoded images belong to the device and
+/// do not retain a window surface.
+struct StartedImages {
+    store: ImageContext,
+    loader: ImageLoader,
 }
 
 impl Images {
-    pub(crate) fn new(create_loader: Option<CreateImageLoader>) -> Images {
+    /// The images on `gpu`'s device, decoded by the loader `create_loader` makes, or by the
+    /// built-in one.
+    pub(crate) fn new(gpu: LazyGpu, create_loader: Option<CreateImageLoader>) -> Images {
         Images {
-            create_loader: RefCell::new(create_loader),
-            loader: RefCell::new(None),
-            store: RefCell::new(None),
+            gpu,
+            create_loader: Cell::new(create_loader),
+            started: OnceCell::new(),
         }
     }
 
-    /// Starts the loader on `store`, the image store of the first window's device; a later
-    /// window's is the same device's, and changes nothing.
-    pub(crate) fn start_once(&self, store: ImageContext) {
-        if self.loader.borrow().is_some() {
-            return;
-        }
-        let loader = match self.create_loader.take() {
-            Some(create_loader) => create_loader(store.clone()),
-            None => create_image_loader(store.clone(), DecodeExecution::default())
-                .expect("start the image decode worker"),
-        };
-        *self.loader.borrow_mut() = Some(loader);
-        *self.store.borrow_mut() = Some(store);
-    }
-
-    /// The renderer's image store; `None` until the first window has a device.
-    pub(crate) fn store(&self) -> Option<ImageContext> {
-        self.store.borrow().clone()
+    /// The renderer's image store.
+    pub(crate) fn store(&self) -> ImageContext {
+        self.started().store.clone()
     }
 
     /// Opens a codec for an encoded image, decoded with mip levels.
     pub(crate) fn open_codec(&self, bytes: Arc<[u8]>) -> ImageCodecFuture {
-        let loader = self.loader.borrow().clone();
+        if bytes.is_empty() {
+            return Box::pin(std::future::ready(Err(ImageDecodeError::Empty)));
+        }
+        let loader = self.started().loader.clone();
         Box::pin(async move {
-            if bytes.is_empty() {
-                return Err(ImageDecodeError::Empty);
-            }
-            let loader = loader.ok_or(ImageDecodeError::NoDecoder)?;
             let codec = loader
                 .open(
                     bytes,
@@ -123,6 +118,22 @@ impl Images {
                 .map_err(as_decode_error)?;
             Ok(Box::new(WinitImageCodec { codec }) as Box<dyn ImageCodec>)
         })
+    }
+
+    fn started(&self) -> &StartedImages {
+        self.started.get_or_init(|| self.start())
+    }
+
+    /// The image store on the device, and the loader decoding into it.
+    fn start(&self) -> StartedImages {
+        let gpu = self.gpu.get();
+        let store = ImageContext::new(gpu.device.clone(), gpu.queue.clone());
+        let loader = match self.create_loader.take() {
+            Some(create_loader) => create_loader(store.clone()),
+            None => create_image_loader(store.clone(), DecodeExecution::default())
+                .expect("start the image decode worker"),
+        };
+        StartedImages { store, loader }
     }
 }
 

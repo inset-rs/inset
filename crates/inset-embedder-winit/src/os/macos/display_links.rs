@@ -23,7 +23,6 @@ use objc2_app_kit::NSScreen;
 use objc2_foundation::{NSRunLoop, NSRunLoopCommonModes};
 use objc2_quartz_core::CADisplayLink;
 use winit::monitor::MonitorHandle;
-use winit::platform::macos::MonitorHandleExtMacOS;
 
 use super::abort_on_panic;
 use super::screens::display_id_of;
@@ -48,7 +47,7 @@ impl DisplayLink for ScreenDisplayLink {
     /// AppKit shows no screen for.
     fn start(display: &MonitorHandle, on_tick: Box<dyn Fn()>) -> Option<ScreenDisplayLink> {
         let main_thread = MainThreadMarker::new()?;
-        let display = display.native_id();
+        let display = u32::try_from(display.native_id()).ok()?;
         let subscription = SCREEN_CLOCKS.with(|clocks| {
             clocks.subscribe(display, on_tick, |tick| {
                 CoreAnimationLink::of_screen(display, tick, main_thread)

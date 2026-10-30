@@ -581,7 +581,7 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
-    use inset_embedder::{Color, Paint, SceneBuilder, Size, valo::Op};
+    use inset_embedder::{Color, Effect, EngineLayer, Layer, Paint, SceneBuilder, Size};
 
     use super::*;
     use crate::box_::{AnyRenderBox, BoxConstraints, RenderBox, RenderBoxData};
@@ -916,16 +916,28 @@ mod tests {
 
         let layer = tree.parent.as_object().layer(&app).expect("painted");
         let scene = layer.build_scene(&mut app, SceneBuilder::new());
-        let ops = inset_embedder::flattened_ops(&scene.picture);
-        let pictures = ops
-            .iter()
-            .filter(|op| matches!(op, Op::DrawDisplayList { .. }))
-            .count();
-        // The parent's and the child's layer scopes, and the child's picture.
-        assert_eq!(pictures, 3, "{ops:?}");
+        let parent = only_container(&scene.root.children);
+        let child = only_container(&parent.children);
         assert!(
-            ops.iter().any(|op| matches!(op, Op::SaveLayer { .. })),
-            "the child's OpacityLayer: {ops:?}"
+            matches!(child.effect, Effect::Opacity { alpha: 128, .. }),
+            "the child's OpacityLayer: {:?}",
+            child.effect
         );
+        assert!(
+            matches!(child.children.as_slice(), [Layer::DisplayList(_)]),
+            "the child's picture: {:?}",
+            child.children
+        );
+    }
+
+    /// The one container among `children`, ignoring the pictures beside it.
+    fn only_container(children: &[Layer]) -> &EngineLayer {
+        let mut containers = children.iter().filter_map(|child| match child {
+            Layer::Container(container) => Some(container),
+            _ => None,
+        });
+        let container = containers.next().expect("a container");
+        assert!(containers.next().is_none(), "one container: {children:?}");
+        container
     }
 }

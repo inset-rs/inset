@@ -34,7 +34,7 @@ mod client {
     use std::time::{Duration, Instant};
 
     use inset_embedder::{
-        EmbedderClient, Frame, KeyData, PlatformRef, PointerDataPacket, RequestId, ViewId,
+        EmbedderClient, Frame, KeyData, PlatformRef, PointerReport, RequestId, ViewId,
         WindowConfig, WindowRef,
     };
 
@@ -95,6 +95,9 @@ mod client {
                 .map(|title| (title, appkit::WeakWindow::titled(title)));
             appkit::press_close_button(CLOSED_BY_ITS_BUTTON);
             self.windows[1].close();
+            // The app is not brought forward at launch, so the window kept open can be behind
+            // other applications' windows, where a covered window takes no frames.
+            appkit::order_in_front_of_everything(KEPT_OPEN);
             self.closed = Some(closed.into());
             self.closed_at = Instant::now();
             self.request_frame_of_the_window_kept_open();
@@ -157,7 +160,7 @@ mod client {
         }
         fn view_metrics_changed(&mut self, _id: ViewId) {}
         fn view_removed(&mut self, _id: ViewId) {}
-        fn pointer_data_packet(&mut self, _packet: PointerDataPacket) {}
+        fn pointer_reports(&mut self, _reports: Vec<PointerReport>) {}
         fn key_data(&mut self, _data: KeyData) -> bool {
             false
         }

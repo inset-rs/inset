@@ -1,5 +1,5 @@
 //! What iOS reports differently from the desktop winit was written for: its window is the
-//! screen, and winit's size for it is the safe area rather than the whole layer; and what it adds,
+//! screen, which the system covers in part with its bars; and what it adds,
 //! its pasteboard (`pasteboard`), its document pickers (`file_dialogs`), opening (`opener`), what
 //! it asks the app to open (`open_requests`) and native surfaces (`composition`). Notifications are
 //! the center macOS shares (`apple/notifications`), and players and cameras its AVFoundation
@@ -19,12 +19,13 @@ use winit::window::Window;
 
 use pasteboard::Pasteboard;
 
-use super::absent::{NoDisplayLink, NoVisibilityNotices};
+use super::absent::{NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices};
 use super::apple::{image_io_decoders, notifications};
 use super::{
-    ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeMenus,
-    OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard, SystemMedia,
-    SystemNotifications, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
+    ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, ImageDecoding,
+    NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
+    SystemMedia, SystemNotifications, TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion,
+    WindowVisibility, WorkQueue,
 };
 use crate::notifications::NotificationActivations;
 
@@ -44,25 +45,14 @@ impl OperatingSystem for Ios {
 }
 
 impl WindowGeometry for Ios {
-    /// The whole window: winit's `inner_size` is the safe area there, while the layer covers
-    /// the whole window, which `outer_size` reports.
-    fn surface_size(window: &Window) -> [u32; 2] {
-        let size = window.outer_size();
-        [size.width, size.height]
-    }
-
-    /// The status bar and the home indicator: what lies between the window and the safe
-    /// area winit reports as its inner size and position.
-    fn view_padding(window: &Window, [width, height]: [f64; 2]) -> ViewPadding {
-        let safe = window.inner_size();
-        let origin = window.inner_position().unwrap_or_default();
-        let left = f64::from(origin.x);
-        let top = f64::from(origin.y);
+    /// The status bar and the home indicator: the insets of the safe area winit reports.
+    fn view_padding(window: &dyn Window) -> ViewPadding {
+        let safe = window.safe_area();
         ViewPadding {
-            left,
-            top,
-            right: (width - f64::from(safe.width) - left).max(0.0),
-            bottom: (height - f64::from(safe.height) - top).max(0.0),
+            left: f64::from(safe.left),
+            top: f64::from(safe.top),
+            right: f64::from(safe.right),
+            bottom: f64::from(safe.bottom),
         }
     }
 }
@@ -83,6 +73,10 @@ impl FramePresentation for Ios {
 
 impl WindowVisibility for Ios {
     type Notices = NoVisibilityNotices;
+}
+
+impl TrackpadTouches for Ios {
+    type Observer = NoTrackpadTouchObserver;
 }
 
 /// AVFoundation's players and cameras, which macOS shares.
@@ -113,6 +107,7 @@ impl SystemNotifications for Ios {
     }
 }
 
+impl EventLoopSetup for Ios {}
 impl WindowMotion for Ios {}
 impl WindowChrome for Ios {}
 impl Screens for Ios {}

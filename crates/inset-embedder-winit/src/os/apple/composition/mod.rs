@@ -1,27 +1,30 @@
 //! Native surfaces as Core Animation layers beneath a window's content, on macOS and iOS alike.
 //!
-//! A surface is three layers. Its clip layer cuts it to what the placement shows of it. Inside, its
-//! content layer is the surface in its own points, scaled into its parent's by a transform, so one
-//! scale moves the group: the clip layers of its children first, then a layer the system draws into
-//! where one hangs in the surface, a player's or a camera's preview, then its buffer's layer on
+//! A surface is three layers. Its clip layer cuts it to the bounds of what shows, and is masked by
+//! the shape of any clip above it that is not an upright rectangle. Inside, its content layer is
+//! the surface in its own coordinates, taken into its parent's by every transform above it, so one
+//! transform moves the group: the clip layers of its children first, then a layer the system draws
+//! into where one hangs in the surface, a player's or a camera's preview, then its buffer's layer on
 //! top, whose contents are the `IOSurface` its producer presented last. A surface opened under a
 //! view's root joins that view's layer tree once its scene places it, as a sublayer of the view's
 //! layer below the `CAMetalLayer` wgpu draws the framework into (raw-window-metal makes that one a
-//! sublayer too, of an `NSView` and a `UIView` alike), so the clear rectangle the framework paints
-//! where the surface goes shows it through; a child joins its parent's content layer where its
-//! parent's present places it, below the parent's buffer, showing through its clear pixels; and on
-//! macOS a surface opened under a root no view shows is in that root's layer from the start, which
-//! the app places, and fills it (`detached_root`). Every layer's coordinates are the window's
-//! physical pixels over its scale, as a scene's placements are pixels: a buffer shows whole at the
-//! scale its surface is placed at, and smaller under a transform that shrinks it. The experiments
-//! in the `experiments` folder beside this repository settled the choices here:
-//! `2026-09-22-layer-under-a-hole` the layer beneath the window's content and its contents changed
-//! off the main thread, and `2026-09-25-buffer-hold` how long the display engine holds a buffer.
+//! sublayer too, of an `NSView` and a `UIView` alike), so the room the scene's picture makes for it
+//! shows it through; a child joins its parent's content layer where its parent's present places
+//! it, below the parent's buffer, showing through its clear pixels; and on macOS a surface opened
+//! under a root no view shows is in that root's layer from the start, which the app places, and
+//! places itself filling it, as a view's scene places a surface that fills the view
+//! (`detached_root`). Every layer's coordinates are the window's physical pixels over its scale, as
+//! a scene's placements are pixels: a buffer shows whole at the scale its surface is placed at, and
+//! smaller under a transform that shrinks it. The experiments in the `experiments` folder beside
+//! this repository settled the choices here: `2026-09-22-layer-under-a-hole` the layer beneath the
+//! window's content and its contents changed off the main thread, and `2026-09-25-buffer-hold` how
+//! long the display engine holds a buffer.
 //!
-//! The module holds the compositor, a view's root and the surface; `buffers` what a surface was
-//! presented and when each goes back to its producer, `placed` the surfaces a scene or a present
-//! placed last, `window_surfaces` placing a scene's surfaces in a window, and `detached_root` a
-//! root no view shows.
+//! The module holds the compositor, a view's root and the surface; `layer_geometry` where a
+//! placement puts a surface's layers, `buffers` what a surface was presented and when each goes
+//! back to its producer, `placed` the surfaces a scene or a present placed last,
+//! `window_surfaces` placing a scene's surfaces in a window, and `detached_root` a root no view
+//! shows.
 //!
 //! Two things touch a surface. Its producer presents a frame from its own thread, in an explicit
 //! transaction, which places the frame's children too, and the surface itself under a root no view
@@ -41,22 +44,23 @@
 mod buffers;
 #[cfg(target_os = "macos")]
 mod detached_root;
+mod layer_geometry;
 mod placed;
 mod window_surfaces;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use inset_embedder::{
-    Compositor, Rect, Surface, SurfaceFrame, SurfaceParent, SurfacePlacement, ViewId,
-};
+use inset_embedder::{Compositor, Surface, SurfaceFrame, SurfaceParent, SurfacePlacement, ViewId};
 use objc2::Message;
 use objc2::rc::Retained;
-use objc2_core_foundation::CGAffineTransform;
-use objc2_foundation::{NSPoint, NSRect, NSSize};
-use objc2_quartz_core::{CALayer, CATransaction};
+use objc2_core_foundation::CFRetained;
+use objc2_core_graphics::CGMutablePath;
+use objc2_foundation::{NSPoint, NSRect};
+use objc2_quartz_core::{CALayer, CAShapeLayer, CATransaction};
 
 use buffers::{CrossThreadBuffer, PresentedBuffers, notify_released};
+use layer_geometry::LayerGeometry;
 use placed::PlacedSurfaces;
 
 #[cfg(target_os = "macos")]
@@ -86,14 +90,28 @@ impl SurfaceParent for ViewRoot {
 
 /// Who may place a surface: the scenes of one view, the presents of one surface, or the
 /// surface's own presents.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 enum Placer {
     View(ViewId),
     /// The surface of this number, its parent.
     Surface(u64),
-    /// The surface itself, filling its parent's layer at each present: a surface under a root no
-    /// view shows (`detached_root`).
-    Itself,
+    /// The surface itself, which its own placement names, filling the layer it is in at each of
+    /// its presents: a surface under a root no view shows (`detached_root`).
+    #[cfg(target_os = "macos")]
+    Itself(std::sync::Weak<CoreAnimationSurface>),
+}
+
+/// The same view's scenes, the same surface's presents, or the same surface itself.
+impl PartialEq for Placer {
+    fn eq(&self, other: &Placer) -> bool {
+        match (self, other) {
+            (Placer::View(view), Placer::View(other)) => view == other,
+            (Placer::Surface(number), Placer::Surface(other)) => number == other,
+            #[cfg(target_os = "macos")]
+            (Placer::Itself(surface), Placer::Itself(other)) => surface.ptr_eq(other),
+            _ => false,
+        }
+    }
 }
 
 /// A surface: its layers, the buffers presented to it and not yet released, and the children
@@ -103,10 +121,10 @@ pub(crate) struct CoreAnimationSurface {
     /// What a child names its parent by.
     number: u64,
     /// What a placement shows of the surface: the layer that joins the parent's tree, masking
-    /// [`content_layer`](Self::content_layer) to its bounds.
+    /// [`content_layer`](Self::content_layer) to its bounds and to the shapes of the clips above.
     clip_layer: CrossThreadLayer,
-    /// The surface in its own points, scaled into its parent's by a transform: its children's
-    /// clip layers, then [`buffer_layer`](Self::buffer_layer) on top.
+    /// The surface in its own coordinates, taken into the clip layer's by every transform above
+    /// it: its children's clip layers, then [`buffer_layer`](Self::buffer_layer) on top.
     content_layer: CrossThreadLayer,
     buffer_layer: CrossThreadLayer,
     /// A layer the system draws into, filling the surface beneath its buffer's layer.
@@ -139,8 +157,9 @@ impl CoreAnimationSurface {
         // SAFETY: a constant Core Animation exports for the life of the process.
         buffer_layer.setContentsGravity(unsafe { objc2_quartz_core::kCAGravityBottomLeft });
         let content_layer = CALayer::new();
-        // Laid out from its top-left corner, which the transform scales about.
+        // Laid out from its top-left corner at the clip layer's: the transform places it.
         content_layer.setAnchorPoint(NSPoint::new(0.0, 0.0));
+        content_layer.setPosition(NSPoint::new(0.0, 0.0));
         content_layer.addSublayer(&buffer_layer);
         let clip_layer = CALayer::new();
         clip_layer.setMasksToBounds(true);
@@ -171,8 +190,8 @@ impl CoreAnimationSurface {
     }
 
     /// Whether `placer` may place the surface, reporting once when it may not.
-    fn may_be_placed_by(&self, placer: Placer) -> bool {
-        if placer == self.placer {
+    fn may_be_placed_by(&self, placer: &Placer) -> bool {
+        if *placer == self.placer {
             return true;
         }
         if !self.misplacement_reported.swap(true, Ordering::Relaxed) {
@@ -205,10 +224,10 @@ impl CoreAnimationSurface {
     fn lay_out(&self, geometry: &LayerGeometry, window_scale: f64) {
         let clip_layer = &self.clip_layer.0;
         clip_layer.setFrame(geometry.clip_frame);
+        mask_to_shapes(clip_layer, &geometry.clip_shapes);
         let content_layer = &self.content_layer.0;
-        content_layer.setPosition(geometry.content_origin);
         content_layer.setBounds(NSRect::new(NSPoint::new(0.0, 0.0), geometry.content_size));
-        content_layer.setAffineTransform(scaling(geometry.content_scale));
+        content_layer.setTransform(geometry.content_transform);
         let buffer_layer = &self.buffer_layer.0;
         buffer_layer.setFrame(content_layer.bounds());
         buffer_layer.setContentsScale(window_scale);
@@ -221,15 +240,24 @@ impl CoreAnimationSurface {
         clip_layer.setHidden(false);
     }
 
-    /// Lays the surface out filling the layer it is in, at that layer's contents scale, which is
-    /// how many of the physical pixels of the window it shows in make a point. Inside the
-    /// caller's transaction.
-    fn fill_parent_layer(&self) {
-        let Some(parent) = self.clip_layer.0.superlayer() else {
+    /// Shows a surface that places itself where it fills the layer it is in now, in a window
+    /// whose scale is that layer's contents scale (`detached_root`). Inside the caller's
+    /// transaction.
+    #[cfg(target_os = "macos")]
+    fn place_itself(&self) {
+        let Placer::Itself(itself) = &self.placer else {
             return;
         };
-        let geometry = LayerGeometry::filling(parent.bounds().size);
-        self.lay_out(&geometry, parent.contentsScale());
+        let (Some(itself), Some(parent)) = (itself.upgrade(), self.clip_layer.0.superlayer())
+        else {
+            return;
+        };
+        let window_scale = parent.contentsScale();
+        let placement = detached_root::placement_filling(&parent, itself);
+        match LayerGeometry::of(&placement, window_scale) {
+            Some(geometry) => self.lay_out(&geometry, window_scale),
+            None => self.hide(),
+        }
     }
 
     fn hide(&self) {
@@ -288,17 +316,16 @@ impl CoreAnimationSurface {
 }
 
 impl Surface for CoreAnimationSurface {
-    /// Shows the frame's buffer and places its children in one transaction, a surface that
-    /// places itself filling its parent's layer as it is now, and releases the replaced buffers
-    /// the compositor has finished with.
+    /// Shows the frame's buffer, places a surface that places itself, and places the frame's
+    /// children, in one transaction, and releases the replaced buffers the compositor has
+    /// finished with.
     fn present(&self, frame: SurfaceFrame, released: Box<dyn FnOnce() + Send + Sync>) {
         let SurfaceFrame { buffer, children } = frame;
         let buffer = CrossThreadBuffer(buffer);
         in_transaction(|| {
             buffer.set_as_contents_of(&self.buffer_layer.0);
-            if self.placer == Placer::Itself {
-                self.fill_parent_layer();
-            }
+            #[cfg(target_os = "macos")]
+            self.place_itself();
             self.place_children(&children);
         });
         self.buffers
@@ -340,12 +367,12 @@ pub(crate) fn show_layer_on(surface: &Arc<dyn Surface>, layer: &CALayer) {
 
 /// This host's surfaces `placer` may place among `placements`, with their placements, in paint
 /// order.
-fn surfaces_placed_by(
-    placements: &[SurfacePlacement],
+fn surfaces_placed_by<'a>(
+    placements: impl IntoIterator<Item = &'a SurfacePlacement>,
     placer: Placer,
 ) -> Vec<(Arc<CoreAnimationSurface>, SurfacePlacement)> {
     placements
-        .iter()
+        .into_iter()
         .filter_map(|placement| {
             let surface =
                 CoreAnimationSurface::downcast_from(&placement.surface).or_else(|| {
@@ -353,59 +380,10 @@ fn surfaces_placed_by(
                     None
                 })?;
             surface
-                .may_be_placed_by(placer)
+                .may_be_placed_by(&placer)
                 .then(|| (surface, placement.clone()))
         })
         .collect()
-}
-
-/// Where one placement puts a surface's layers, in its parent layer's points.
-#[derive(Debug, PartialEq)]
-struct LayerGeometry {
-    /// The clip layer's frame: what shows.
-    clip_frame: NSRect,
-    /// The content layer's top-left corner, inside the clip layer.
-    content_origin: NSPoint,
-    /// The content layer's bounds: the surface in its own points.
-    content_size: NSSize,
-    /// How many of the parent's points one of the surface's own spans.
-    content_scale: f64,
-}
-
-impl LayerGeometry {
-    /// The layers of a surface placed by `placement` in a window `window_scale` pixels to the
-    /// point: a producer draws at the window's scale, and the transforms above the surface shrink
-    /// or grow what it drew by `placement.scale / window_scale`. `None` for a surface shrunk to
-    /// nothing.
-    fn of(placement: &SurfacePlacement, window_scale: f64) -> Option<LayerGeometry> {
-        let content_scale = placement.scale / window_scale;
-        if !(content_scale > 0.0 && content_scale.is_finite()) {
-            return None;
-        }
-        let (rect, clip) = (placement.rect, placement.clip);
-        Some(LayerGeometry {
-            clip_frame: points_of(clip, window_scale),
-            content_origin: NSPoint::new(
-                (rect.left - clip.left) / window_scale,
-                (rect.top - clip.top) / window_scale,
-            ),
-            content_size: NSSize::new(
-                rect.width() / placement.scale,
-                rect.height() / placement.scale,
-            ),
-            content_scale,
-        })
-    }
-
-    /// The layers of a surface filling a parent of `size` points, unscaled.
-    fn filling(size: NSSize) -> LayerGeometry {
-        LayerGeometry {
-            clip_frame: NSRect::new(NSPoint::new(0.0, 0.0), size),
-            content_origin: NSPoint::new(0.0, 0.0),
-            content_size: size,
-            content_scale: 1.0,
-        }
-    }
 }
 
 /// Whether `layer` is `parent`'s sublayer at `index` already.
@@ -426,24 +404,23 @@ fn is_sublayer_of(layer: &CALayer, parent: &CALayer) -> bool {
         .is_some_and(|superlayer| std::ptr::eq(&*superlayer, parent))
 }
 
-/// `rect`, in a window's physical pixels, in points: `scale` pixels each.
-fn points_of(rect: Rect, scale: f64) -> NSRect {
-    NSRect::new(
-        NSPoint::new(rect.left / scale, rect.top / scale),
-        NSSize::new(rect.width() / scale, rect.height() / scale),
-    )
-}
-
-/// A transform that scales by `scale` about the layer's anchor.
-fn scaling(scale: f64) -> CGAffineTransform {
-    CGAffineTransform {
-        a: scale,
-        b: 0.0,
-        c: 0.0,
-        d: scale,
-        tx: 0.0,
-        ty: 0.0,
+/// Masks `layer` to the intersection of `shapes`, in its own points, or to nothing beyond its
+/// bounds when there are none: each shape a shape layer, the mask of the one before, so Core
+/// Animation keeps only what lies inside every one.
+fn mask_to_shapes(layer: &CALayer, shapes: &[CFRetained<CGMutablePath>]) {
+    let bounds = NSRect::new(NSPoint::new(0.0, 0.0), layer.bounds().size);
+    let mut mask: Option<Retained<CALayer>> = None;
+    for shape in shapes.iter().rev() {
+        let shape_layer = CAShapeLayer::new();
+        shape_layer.setFrame(bounds);
+        shape_layer.setPath(Some(shape));
+        // SAFETY: a mask made here, in no layer tree, inside the caller's transaction.
+        unsafe { shape_layer.setMask(mask.as_deref()) };
+        mask = Some(Retained::into_super(shape_layer));
     }
+    // SAFETY: the mask is in no layer tree, and the layer is changed inside the caller's
+    // transaction, on the thread that places it.
+    unsafe { layer.setMask(mask.as_deref()) };
 }
 
 /// Runs `change` in a transaction of its own with implicit animations off: a layer changed
@@ -467,39 +444,11 @@ unsafe impl Sync for CrossThreadLayer {}
 
 #[cfg(test)]
 mod tests {
-    use objc2_foundation::{NSPoint, NSSize};
+    use inset_embedder::{Matrix4, Mutator, RRect, Radius, Rect};
+    use objc2::ClassType;
+    use objc2_foundation::{NSObjectProtocol, NSPoint, NSSize};
 
     use super::*;
-
-    #[test]
-    fn a_placement_in_physical_pixels_is_a_frame_in_points() {
-        let frame = points_of(Rect::from_ltwh(240.0, 180.0, 800.0, 600.0), 2.0);
-        assert_eq!(frame.origin, NSPoint::new(120.0, 90.0));
-        assert_eq!(frame.size, NSSize::new(400.0, 300.0));
-    }
-
-    #[test]
-    fn a_surface_is_scaled_as_its_placement_is() {
-        let geometry = |scale| {
-            LayerGeometry::of(
-                &unclipped(Rect::from_ltwh(0.0, 0.0, 800.0, 600.0), scale),
-                2.0,
-            )
-        };
-        let whole = geometry(2.0).unwrap();
-        assert_eq!(
-            (whole.content_size, whole.content_scale),
-            (NSSize::new(400.0, 300.0), 1.0),
-            "unscaled, a point of the surface is a point of the window"
-        );
-        let half = geometry(1.0).unwrap();
-        assert_eq!(
-            (half.content_size, half.content_scale),
-            (NSSize::new(800.0, 600.0), 0.5),
-            "at half size, the surface keeps its own points and the transform halves them"
-        );
-        assert_eq!(geometry(0.0), None);
-    }
 
     /// A card: a page 390 by 844 points, at half its size, of which a square in the middle
     /// shows. In a flipped view, as winit's `NSView` is, the buffer's layer lies where the
@@ -512,9 +461,11 @@ mod tests {
         let surface = CoreAnimationSurface::new(Placer::View(ViewId(0)), true);
         let placement = SurfacePlacement {
             surface: idle_surface(),
-            rect: Rect::from_ltwh(100.0, 200.0, 390.0, 844.0),
-            scale: 1.0,
-            clip: Rect::from_ltwh(100.0, 427.0, 390.0, 390.0),
+            rect: Rect::from_ltwh(0.0, 0.0, 390.0, 844.0),
+            mutators: vec![
+                Mutator::ClipRect(Rect::from_ltwh(100.0, 427.0, 390.0, 390.0)),
+                Mutator::Transform(Matrix4::translation(100.0, 200.0)),
+            ],
         };
         surface.place(&view_layer, 0, &placement, 2.0);
 
@@ -526,6 +477,7 @@ mod tests {
         let clip_layer = &surface.clip_layer.0;
         assert_eq!(clip_layer.frame().origin, NSPoint::new(50.0, 213.5));
         assert!(clip_layer.masksToBounds() && !clip_layer.isHidden());
+        assert!(clip_layer.mask().is_none(), "a rectangle needs no mask");
         assert_eq!(buffer_layer.contentsScale(), 2.0);
 
         let directly_in_view = CALayer::new();
@@ -536,8 +488,95 @@ mod tests {
         );
     }
 
+    /// A surface turned a quarter: its layer turns with it, about the corner the transform
+    /// turns it about, where a rectangle can only bound it.
+    #[test]
+    fn a_turned_surface_turns_its_layer() {
+        let view_layer = flipped_view_layer();
+        let surface = CoreAnimationSurface::new(Placer::View(ViewId(0)), true);
+        let placement = SurfacePlacement {
+            surface: idle_surface(),
+            rect: Rect::from_ltwh(0.0, 0.0, 200.0, 100.0),
+            mutators: vec![
+                Mutator::Transform(Matrix4::translation(300.0, 0.0)),
+                Mutator::Transform(Matrix4::rotation(std::f32::consts::FRAC_PI_2)),
+            ],
+        };
+        surface.place(&view_layer, 0, &placement, 2.0);
+        let frame = frame_in(&surface.buffer_layer.0, &view_layer);
+        let expected = NSRect::new(NSPoint::new(100.0, 0.0), NSSize::new(50.0, 100.0));
+        assert!(
+            (frame.origin.x - expected.origin.x).abs() < 1e-3
+                && (frame.origin.y - expected.origin.y).abs() < 1e-3
+                && (frame.size.width - expected.size.width).abs() < 1e-3
+                && (frame.size.height - expected.size.height).abs() < 1e-3,
+            "{frame:?}"
+        );
+    }
+
+    /// Two rounded clips that both cut the surface mask it in turn: the clip layer's mask, and
+    /// that mask's own; once neither cuts it, the mask goes.
+    #[test]
+    fn rounded_clips_that_cut_a_surface_mask_its_clip_layer_in_turn() {
+        let view_layer = flipped_view_layer();
+        let surface = CoreAnimationSurface::new(Placer::View(ViewId(0)), true);
+        let rounded = |rect, radius| RRect::from_rect_and_radius(rect, Radius::circular(radius));
+        let cut = SurfacePlacement {
+            surface: idle_surface(),
+            rect: Rect::from_ltwh(0.0, 0.0, 100.0, 100.0),
+            mutators: vec![
+                Mutator::ClipRRect(rounded(Rect::from_ltwh(0.0, 0.0, 100.0, 100.0), 40.0)),
+                Mutator::ClipRRect(rounded(Rect::from_ltwh(10.0, 10.0, 80.0, 80.0), 16.0)),
+            ],
+        };
+        surface.place(&view_layer, 0, &cut, 2.0);
+        let clip_layer = &surface.clip_layer.0;
+        let outer = clip_layer.mask().expect("the outer clip's shape");
+        let inner = outer
+            .mask()
+            .expect("the inner clip's shape, masking the outer");
+        assert!(inner.mask().is_none());
+        assert!(outer.isKindOfClass(CAShapeLayer::class()));
+        assert_eq!(outer.frame(), clip_layer.bounds());
+
+        let uncut = SurfacePlacement {
+            rect: Rect::from_ltwh(30.0, 30.0, 40.0, 40.0),
+            ..cut
+        };
+        surface.place(&view_layer, 0, &uncut, 2.0);
+        assert!(
+            clip_layer.mask().is_none(),
+            "no corner reaches the surface in the middle"
+        );
+    }
+
+    #[test]
+    fn a_surface_nothing_lets_show_is_hidden() {
+        let view_layer = flipped_view_layer();
+        let surface = CoreAnimationSurface::new(Placer::View(ViewId(0)), true);
+        let placement = SurfacePlacement {
+            surface: idle_surface(),
+            rect: Rect::from_ltwh(0.0, 0.0, 10.0, 10.0),
+            mutators: vec![Mutator::Opacity(0)],
+        };
+        surface.place(&view_layer, 0, &placement, 2.0);
+        assert!(surface.clip_layer.0.isHidden());
+        let half = SurfacePlacement {
+            mutators: vec![Mutator::Opacity(128)],
+            ..placement
+        };
+        surface.place(&view_layer, 0, &half, 2.0);
+        let clip_layer = &surface.clip_layer.0;
+        assert!(!clip_layer.isHidden());
+        assert_eq!(
+            clip_layer.opacity(),
+            1.0,
+            "the opacity is the room's, not the layer's"
+        );
+    }
+
     /// A program's picture placed at half size in a window, with its video beneath it: the
-    /// child's placement is in the parent's pixels, and the parent's scale and clip carry it.
+    /// child's placement is in the parent's pixels, and the parent's transform and clip carry it.
     #[test]
     fn a_child_lies_beneath_its_parent_where_the_parent_places_it_scaled_with_it() {
         let view_layer = flipped_view_layer();
@@ -545,7 +584,7 @@ mod tests {
         let child = parent.open_child(true);
         let child_layers = CoreAnimationSurface::downcast_from(&child).unwrap();
         in_transaction(|| {
-            parent.place_children(&[unclipped_surface(
+            parent.place_children(&[scaled(
                 Arc::clone(&child),
                 Rect::from_ltwh(200.0, 100.0, 400.0, 300.0),
                 2.0,
@@ -559,12 +598,11 @@ mod tests {
         parent.place(
             &view_layer,
             0,
-            &SurfacePlacement {
-                surface: idle_surface(),
-                rect: Rect::from_ltwh(100.0, 100.0, 1000.0, 800.0),
-                scale: 1.0,
-                clip: Rect::from_ltwh(100.0, 100.0, 1000.0, 800.0),
-            },
+            &scaled(
+                idle_surface(),
+                Rect::from_ltwh(100.0, 100.0, 1000.0, 800.0),
+                1.0,
+            ),
             2.0,
         );
         assert_eq!(
@@ -594,7 +632,7 @@ mod tests {
         let rect = Rect::from_ltwh(0.0, 0.0, 10.0, 10.0);
         in_transaction(|| {
             parent.lay_out_children_for(2.0);
-            parent.place_children(&[unclipped_surface(Arc::clone(&child), rect, 2.0)]);
+            parent.place_children(&[scaled(Arc::clone(&child), rect, 2.0)]);
         });
         assert!(!child_layers.clip_layer.0.isHidden());
         in_transaction(|| parent.place_children(&[]));
@@ -602,7 +640,7 @@ mod tests {
 
         let stranger = CoreAnimationSurface::new(Placer::View(ViewId(0)), true);
         let stranger: Arc<dyn Surface> = Arc::new(stranger);
-        in_transaction(|| parent.place_children(&[unclipped_surface(stranger.clone(), rect, 2.0)]));
+        in_transaction(|| parent.place_children(&[scaled(stranger.clone(), rect, 2.0)]));
         let stranger_layers = CoreAnimationSurface::downcast_from(&stranger).unwrap();
         assert!(
             stranger_layers.clip_layer.0.superlayer().is_none(),
@@ -614,8 +652,8 @@ mod tests {
     fn a_surface_opened_under_a_views_root_is_placed_by_that_views_scenes_alone() {
         let surface = CoreAnimationCompositor.root(ViewId(3)).open_child(true);
         let layers = CoreAnimationSurface::downcast_from(&surface).unwrap();
-        assert!(layers.may_be_placed_by(Placer::View(ViewId(3))));
-        assert!(!layers.may_be_placed_by(Placer::View(ViewId(4))));
+        assert!(layers.may_be_placed_by(&Placer::View(ViewId(3))));
+        assert!(!layers.may_be_placed_by(&Placer::View(ViewId(4))));
     }
 
     /// A player's layer fills the surface it hangs in, beneath the buffer, through every
@@ -630,7 +668,11 @@ mod tests {
         layers.place(
             &view_layer,
             0,
-            &unclipped(Rect::from_ltwh(20.0, 40.0, 640.0, 360.0), 2.0),
+            &scaled(
+                idle_surface(),
+                Rect::from_ltwh(20.0, 40.0, 640.0, 360.0),
+                2.0,
+            ),
             2.0,
         );
         assert_eq!(
@@ -697,6 +739,38 @@ mod tests {
         );
     }
 
+    /// A program's video beneath its picture, in a layer another process shows: the picture's
+    /// first present places the video where the program's placement says, in the picture's
+    /// pixels, as a parent placed by a view's scene does.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_child_of_a_surface_under_a_detached_root_lies_where_the_parents_present_places_it() {
+        let (root, layer) = detached_root();
+        layer.setBounds(NSRect::new(
+            NSPoint::new(0.0, 0.0),
+            NSSize::new(400.0, 300.0),
+        ));
+        layer.setContentsScale(2.0);
+        let picture = root.open_child(false);
+        let video = CoreAnimationSurface::downcast_from(&picture)
+            .unwrap()
+            .open_child(true);
+        let in_picture = scaled(
+            Arc::clone(&video),
+            Rect::from_ltwh(200.0, 100.0, 400.0, 300.0),
+            2.0,
+        );
+        picture.present(
+            SurfaceFrame::new(a_buffer(800, 600)).child(in_picture),
+            Box::new(|| {}),
+        );
+        let video_layers = CoreAnimationSurface::downcast_from(&video).unwrap();
+        assert_eq!(
+            frame_in(&video_layers.buffer_layer.0, &layer),
+            NSRect::new(NSPoint::new(100.0, 50.0), NSSize::new(200.0, 150.0))
+        );
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn surfaces_under_a_detached_root_lie_in_the_order_they_opened_and_no_scene_places_them() {
@@ -720,7 +794,7 @@ mod tests {
             &*clip_layer_of(&second)
         ));
         let first = CoreAnimationSurface::downcast_from(&first).unwrap();
-        assert!(!first.may_be_placed_by(Placer::View(ViewId(0))));
+        assert!(!first.may_be_placed_by(&Placer::View(ViewId(0))));
     }
 
     /// A BGRA buffer of `width` by `height` pixels, as a producer presents.
@@ -771,17 +845,21 @@ mod tests {
         layer.convertRect_toLayer(layer.bounds(), Some(ancestor))
     }
 
-    /// An idle surface at `rect`, all of it showing, at `scale`.
-    fn unclipped(rect: Rect, scale: f64) -> SurfacePlacement {
-        unclipped_surface(idle_surface(), rect, scale)
-    }
-
-    fn unclipped_surface(surface: Arc<dyn Surface>, rect: Rect, scale: f64) -> SurfacePlacement {
+    /// `surface` at `bounds` in its parent's pixels, all of it showing, under a transform that
+    /// scales its own coordinates by `scale`.
+    fn scaled(surface: Arc<dyn Surface>, bounds: Rect, scale: f64) -> SurfacePlacement {
         SurfacePlacement {
             surface,
-            rect,
-            scale,
-            clip: rect,
+            rect: Rect::from_ltrb(
+                bounds.left / scale,
+                bounds.top / scale,
+                bounds.right / scale,
+                bounds.bottom / scale,
+            ),
+            mutators: vec![Mutator::Transform(Matrix4::scale(
+                scale as f32,
+                scale as f32,
+            ))],
         }
     }
 }

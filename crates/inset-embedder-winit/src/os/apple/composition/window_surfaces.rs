@@ -18,18 +18,18 @@ use crate::os::WindowSurfaces;
 /// sublayers wgpu's `CAMetalLayer` and the surfaces beneath it are.
 pub(crate) trait WindowLayer {
     /// The layer of `window`'s view; `None` off the main thread, or for a view without one.
-    fn window_layer(window: &Window) -> Option<Retained<CALayer>>;
+    fn window_layer(window: &dyn Window) -> Option<Retained<CALayer>>;
 }
 
 /// One window's surfaces, as the main thread holds them, on the system `S`.
 pub(crate) struct CoreAnimationWindowSurfaces<S> {
-    window: Arc<Window>,
+    window: Arc<dyn Window>,
     placed: RefCell<PlacedSurfaces>,
     system: PhantomData<S>,
 }
 
 impl<S: WindowLayer> WindowSurfaces for CoreAnimationWindowSurfaces<S> {
-    fn new(window: Arc<Window>) -> Self {
+    fn new(window: Arc<dyn Window>) -> Self {
         CoreAnimationWindowSurfaces {
             window,
             placed: RefCell::new(PlacedSurfaces::new()),
@@ -39,12 +39,12 @@ impl<S: WindowLayer> WindowSurfaces for CoreAnimationWindowSurfaces<S> {
 
     /// Places `view`'s surfaces in the scene beneath the window's content, in paint order, and
     /// hides the ones the scene no longer places.
-    fn place(&self, placements: &[SurfacePlacement], view: ViewId) {
+    fn place<'a>(&self, placements: impl IntoIterator<Item = &'a SurfacePlacement>, view: ViewId) {
         let surfaces = surfaces_placed_by(placements, Placer::View(view));
         if surfaces.is_empty() && self.placed.borrow().is_empty() {
             return;
         }
-        let Some(parent) = S::window_layer(&self.window) else {
+        let Some(parent) = S::window_layer(&*self.window) else {
             eprintln!("inset: a window's view has no layer; its surfaces are not shown");
             return;
         };
