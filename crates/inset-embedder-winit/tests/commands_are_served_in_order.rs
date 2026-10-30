@@ -34,7 +34,7 @@ mod client {
     use std::time::Duration;
 
     use inset_embedder::{
-        EmbedderClient, Frame, KeyData, PlatformRef, PointerDataPacket, RequestId, ViewId,
+        EmbedderClient, Frame, KeyData, PlatformRef, PointerReport, RequestId, ViewId,
         WindowConfig, WindowRef,
     };
 
@@ -133,7 +133,7 @@ mod client {
 
         fn frame(&mut self, _views: &[ViewId], _frame: Frame) {}
         fn view_metrics_changed(&mut self, _id: ViewId) {}
-        fn pointer_data_packet(&mut self, _packet: PointerDataPacket) {}
+        fn pointer_reports(&mut self, _reports: Vec<PointerReport>) {}
         fn key_data(&mut self, _data: KeyData) -> bool {
             false
         }

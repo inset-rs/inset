@@ -29,6 +29,8 @@ mod painting;
 mod paragraph;
 mod platform;
 mod pointer;
+mod pointer_data_packet_converter;
+mod pointer_report;
 mod restoration;
 mod scene_builder;
 mod system_context_menu;
@@ -95,6 +97,8 @@ pub use platform::{
 pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
 };
+pub use pointer_data_packet_converter::PointerDataPacketConverter;
+pub use pointer_report::{Contact, PointerReport, ReportedChange};
 pub use restoration::{RestorationData, RestorationMap, RestorationUpdate};
 pub use scene_builder::{EngineLayer, Scene, SceneBuilder, SurfacePlacement};
 pub use system_context_menu::SystemContextMenuItem;

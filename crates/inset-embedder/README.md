@@ -101,16 +101,16 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 ## Input
 
 **Mouse**
-- `EmbedderClient::pointer_data_packet`
-- Complete the data as Flutter's engine does: `Add` before a device's first event, a new `pointer_identifier` for each press, deltas from the last position, and `Remove` once it leaves with its buttons up.
+- `EmbedderClient::pointer_reports`, `PointerReport`, `ReportedChange`
+- Report what the system says: `Add` when the mouse comes into a view, `Down`, `Move` and `Up` as its buttons change, each with the buttons held, and `Remove` once it leaves with its buttons up. The client adds what Flutter's engine adds (`PointerDataPacketConverter`): each press's identifier, the deltas, and the changes the system left out.
 
 **Scrolling and trackpad gestures**
-- `PointerSignalKind::Scroll`, `Scale`, `ScrollInertiaCancel`, `PointerChange::PanZoomStart`, `PanZoomUpdate`, `PanZoomEnd`
-- Send fingers on a trackpad as one pan-zoom with its pan, scale and rotation, and leave momentum to the framework.
+- `ReportedChange::Scroll`, `Scale`, `ScrollInertiaCancel`, `PanZoomStart`, `PanZoomUpdate`, `PanZoomEnd`
+- Send fingers on a trackpad as one pan-zoom with its pan, scale and rotation, each the total since it started, and leave momentum to the framework.
 
 **Touch and stylus**
-- `PointerDeviceKind::Touch`, `Stylus`, `InvertedStylus`, `View::gesture_settings`
-- Make each finger its own device, with its `Add` in the packet of its down and its `Remove` in the packet of its up or cancel.
+- `PointerDeviceKind::Touch`, `Stylus`, `InvertedStylus`, `Contact`, `View::gesture_settings`
+- Make each finger its own device, numbered apart from every other device the host reports, since the client keeps its state by that number, and remove it after its up or cancel.
 
 **Keyboard**
 - `KeyData::physical`, `logical`, `synthesized`

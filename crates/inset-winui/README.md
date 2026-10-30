@@ -19,7 +19,7 @@ Run the gallery from the [Inset repository](https://github.com/inset-rs/inset), 
 
 ```toml
 [dependencies]
-inset-winui = "0.13.0"
+inset-winui = "0.16.0"
 ```
 
 Use controls inside an Inset `WidgetsApp`, with `ThemeScope` selecting the light or dark theme. Call `install_icon_font` once during application setup. Controls that show popups need an `Overlay` ancestor.

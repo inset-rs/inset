@@ -6,21 +6,19 @@
 //! each. The system's momentum after the fingers lift is not one of them: the framework makes its
 //! own fling, and the main loop leaves the momentum out (`main_loop/input.rs`).
 //!
-//! The engine's part is done here too, as the mouse's is (`pointer.rs`): the device is added
-//! before its first gesture and never removed, each gesture is a press of its own, each update
-//! carries its pan's delta since the one before, and a gesture that starts or ends away from
-//! where the device was last reported is preceded by a hover or an update there
-//! (`PointerDataPacketConverter`).
+//! The device is reported where the mouse is. What the engine adds, the device's add, the hover
+//! to where a gesture starts, each gesture's press and its pan's deltas, the client's converter
+//! adds (`PointerDataPacketConverter`).
 
 use std::f64::consts::PI;
 
-use inset_embedder::{PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
+use inset_embedder::{Contact, PointerDeviceKind, PointerReport, ReportedChange};
 use winit::event::{MouseScrollDelta, TouchPhase};
 
-use crate::pointer::{PointerIds, PointerStamp};
+use crate::pointer::PointerStamp;
 
 /// Flutter's macOS embedder's `kPointerPanZoomDeviceId`: the mouse is device 0.
-const PAN_ZOOM_DEVICE: i64 = 1;
+pub(crate) const PAN_ZOOM_DEVICE: i64 = 1;
 
 /// One of the gestures the pan-zoom is made of.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,9 +31,6 @@ enum Gesture {
 /// The trackpad, as the pan-zoom pointer Flutter's `MouseState` keeps its gestures for.
 #[derive(Default)]
 pub(crate) struct Trackpad {
-    /// Whether the framework has been told of the device, which the engine adds before its first
-    /// gesture.
-    added: bool,
     /// Flutter's `flutter_state_is_pan_zoom_started`.
     started: bool,
     /// Which gestures are under way, between their start and their end: Flutter's
@@ -49,14 +44,6 @@ pub(crate) struct Trackpad {
     scale: f64,
     /// The accumulated rotation, in radians, clockwise: Flutter's `rotation`.
     rotation: f64,
-    /// The pan the framework was last told, which the next update's delta is from: the engine's
-    /// `PointerState.pan_x` and `pan_y`.
-    reported_pan: [f64; 2],
-    /// Where the framework was last told the device is, in physical pixels: the engine's
-    /// `PointerState.physical_x` and `physical_y`.
-    reported_at: [f64; 2],
-    /// Flutter's `pointerIdentifier` of the gesture under way.
-    pointer_id: i64,
 }
 
 impl Trackpad {
@@ -69,10 +56,9 @@ impl Trackpad {
         scale: f64,
         at: [f64; 2],
         stamp: PointerStamp,
-        ids: &mut PointerIds,
-    ) -> Option<PointerDataPacket> {
+    ) -> Option<PointerReport> {
         let [dx, dy] = pan_of(delta, scale);
-        self.gesture(Gesture::Pan, phase, at, stamp, ids, |trackpad| {
+        self.gesture(Gesture::Pan, phase, at, stamp, |trackpad| {
             trackpad.pan[0] += dx;
             trackpad.pan[1] += dy;
         })
@@ -86,14 +72,13 @@ impl Trackpad {
         magnification: f64,
         at: [f64; 2],
         stamp: PointerStamp,
-        ids: &mut PointerIds,
-    ) -> Option<PointerDataPacket> {
+    ) -> Option<PointerReport> {
         let magnification = if magnification.is_nan() {
             0.0
         } else {
             magnification
         };
-        self.gesture(Gesture::Scale, phase, at, stamp, ids, |trackpad| {
+        self.gesture(Gesture::Scale, phase, at, stamp, |trackpad| {
             trackpad.scale += magnification;
         })
     }
@@ -105,9 +90,8 @@ impl Trackpad {
         degrees: f32,
         at: [f64; 2],
         stamp: PointerStamp,
-        ids: &mut PointerIds,
-    ) -> Option<PointerDataPacket> {
-        self.gesture(Gesture::Rotate, phase, at, stamp, ids, |trackpad| {
+    ) -> Option<PointerReport> {
+        self.gesture(Gesture::Rotate, phase, at, stamp, |trackpad| {
             trackpad.rotation += f64::from(degrees) * (-PI / 180.0);
         })
     }
@@ -120,87 +104,48 @@ impl Trackpad {
         phase: TouchPhase,
         at: [f64; 2],
         stamp: PointerStamp,
-        ids: &mut PointerIds,
         change: impl FnOnce(&mut Trackpad),
-    ) -> Option<PointerDataPacket> {
-        match phase {
-            TouchPhase::Started => self.start(gesture, at, stamp, ids),
+    ) -> Option<PointerReport> {
+        let reported = match phase {
+            TouchPhase::Started => self.start(gesture),
             TouchPhase::Moved => {
                 change(self);
-                self.update(at, stamp, ids)
+                self.update()
             }
-            TouchPhase::Ended | TouchPhase::Cancelled => self.end(gesture, at, stamp, ids),
-        }
+            TouchPhase::Ended | TouchPhase::Cancelled => self.end(gesture),
+        }?;
+        report(reported, at, stamp)
     }
 
-    /// `gesture` began: the pan-zoom starts, as a press of its own, unless another gesture
-    /// already started it. The device is added before its first, and hovers to where the mouse
-    /// is before a later one.
-    fn start(
-        &mut self,
-        gesture: Gesture,
-        at: [f64; 2],
-        stamp: PointerStamp,
-        ids: &mut PointerIds,
-    ) -> Option<PointerDataPacket> {
+    /// `gesture` began: the pan-zoom starts, unless another gesture already started it.
+    fn start(&mut self, gesture: Gesture) -> Option<ReportedChange> {
         self.set_under_way(gesture, true);
-        if self.started {
+        if std::mem::replace(&mut self.started, true) {
             return None;
         }
-        self.started = true;
-        self.pointer_id = ids.next_pointer();
-        self.reported_pan = [0.0, 0.0];
-        let mut data = Vec::new();
-        if !std::mem::replace(&mut self.added, true) {
-            data.push(self.datum(PointerChange::Add, at));
-            self.reported_at = at;
-        } else if self.reported_at != at {
-            data.push(self.moved_datum(PointerChange::Hover, at).synthesized());
-        }
-        data.push(self.datum(PointerChange::PanZoomStart, at));
-        packet(data, stamp, ids)
+        Some(ReportedChange::PanZoomStart)
     }
 
-    /// The pan-zoom changed: the framework hears its pan, scale and rotation so far. An update
-    /// before any start is dropped, as the engine takes none.
-    fn update(
-        &mut self,
-        at: [f64; 2],
-        stamp: PointerStamp,
-        ids: &mut PointerIds,
-    ) -> Option<PointerDataPacket> {
-        if !self.started {
-            return None;
-        }
-        let datum = self.moved_datum(PointerChange::PanZoomUpdate, at);
-        self.reported_pan = self.pan;
-        packet(vec![datum], stamp, ids)
+    /// The pan-zoom changed: the framework hears its pan, scale and rotation so far, the scale
+    /// normalized to grow from zero to infinity. An update before any start is dropped, as the
+    /// engine takes none.
+    fn update(&self) -> Option<ReportedChange> {
+        self.started.then(|| ReportedChange::PanZoomUpdate {
+            pan: self.pan,
+            scale: 2.0_f64.powf(self.scale),
+            rotation: self.rotation,
+        })
     }
 
-    /// `gesture` ended: the pan-zoom ends once no gesture is under way, after an update to where
-    /// the mouse is if it moved, and its state is reset. An end with nothing started is dropped, as
-    /// Flutter drops a cancel AppKit sends out of turn.
-    fn end(
-        &mut self,
-        gesture: Gesture,
-        at: [f64; 2],
-        stamp: PointerStamp,
-        ids: &mut PointerIds,
-    ) -> Option<PointerDataPacket> {
+    /// `gesture` ended: the pan-zoom ends once no gesture is under way, and its state is reset.
+    /// An end with nothing started is dropped, as Flutter drops a cancel AppKit sends out of turn.
+    fn end(&mut self, gesture: Gesture) -> Option<ReportedChange> {
         self.set_under_way(gesture, false);
         if !self.started || self.panning || self.scaling || self.rotating {
             return None;
         }
-        let mut data = Vec::new();
-        if self.reported_at != at {
-            data.push(
-                self.moved_datum(PointerChange::PanZoomUpdate, at)
-                    .synthesized(),
-            );
-        }
-        data.push(self.datum(PointerChange::PanZoomEnd, at));
         self.reset_gesture();
-        packet(data, stamp, ids)
+        Some(ReportedChange::PanZoomEnd)
     }
 
     fn set_under_way(&mut self, gesture: Gesture, under_way: bool) {
@@ -211,112 +156,24 @@ impl Trackpad {
         }
     }
 
-    /// Flutter's `GestureReset`; the engine keeps where the device is.
+    /// Flutter's `GestureReset`.
     fn reset_gesture(&mut self) {
-        *self = Trackpad {
-            added: self.added,
-            reported_at: self.reported_at,
-            ..Trackpad::default()
-        };
-    }
-
-    /// The datum for `change` at `at`, carrying how far the device came since it was last
-    /// reported, which is where it is reported from now on: the engine's `UpdateDeltaAndState`.
-    fn moved_datum(&mut self, change: PointerChange, at: [f64; 2]) -> PanZoomDatum {
-        let mut datum = self.datum(change, at);
-        datum.delta = [at[0] - self.reported_at[0], at[1] - self.reported_at[1]];
-        self.reported_at = at;
-        datum
-    }
-
-    /// The pan-zoom pointer's datum for `change` at `at`, in no view yet: an update carries the
-    /// pan, its delta since the last one reported, the scale normalized to grow from zero to
-    /// infinity, and the rotation; the device's add is the engine's own.
-    fn datum(&self, change: PointerChange, at: [f64; 2]) -> PanZoomDatum {
-        let mut datum = PanZoomDatum {
-            change,
-            at,
-            delta: [0.0, 0.0],
-            synthesized: change == PointerChange::Add,
-            pointer_identifier: self.pointer_id,
-            pan: [0.0, 0.0],
-            pan_delta: [0.0, 0.0],
-            scale: 0.0,
-            rotation: 0.0,
-        };
-        match change {
-            PointerChange::Add | PointerChange::Hover => datum.pointer_identifier = 0,
-            PointerChange::PanZoomUpdate => {
-                datum.pan = self.pan;
-                datum.pan_delta = [
-                    self.pan[0] - self.reported_pan[0],
-                    self.pan[1] - self.reported_pan[1],
-                ];
-                datum.scale = 2.0_f64.powf(self.scale);
-                datum.rotation = self.rotation;
-            }
-            _ => {}
-        }
-        datum
+        *self = Trackpad::default();
     }
 }
 
-/// One change of the pan-zoom pointer, before it is in a view.
-struct PanZoomDatum {
-    change: PointerChange,
-    at: [f64; 2],
-    delta: [f64; 2],
-    /// Whether the engine makes it, rather than the system's event.
-    synthesized: bool,
-    pointer_identifier: i64,
-    pan: [f64; 2],
-    pan_delta: [f64; 2],
-    scale: f64,
-    rotation: f64,
-}
-
-impl PanZoomDatum {
-    /// The same change, made by the engine.
-    fn synthesized(self) -> PanZoomDatum {
-        PanZoomDatum {
-            synthesized: true,
-            ..self
-        }
-    }
-}
-
-/// The packet of `data` in the view `stamp` names; `None` for a window the embedder no longer has.
-fn packet(
-    data: Vec<PanZoomDatum>,
-    stamp: PointerStamp,
-    ids: &mut PointerIds,
-) -> Option<PointerDataPacket> {
-    let view_id = stamp.view?;
-    let data = data
-        .into_iter()
-        .map(|datum| PointerData {
-            view_id,
-            embedder_id: ids.next_embedder(),
-            time_stamp: stamp.time_stamp,
-            change: datum.change,
-            kind: PointerDeviceKind::Trackpad,
-            synthesized: datum.synthesized,
-            device: PAN_ZOOM_DEVICE,
-            pointer_identifier: datum.pointer_identifier,
-            physical_x: datum.at[0],
-            physical_y: datum.at[1],
-            physical_delta_x: datum.delta[0],
-            physical_delta_y: datum.delta[1],
-            pan_x: datum.pan[0],
-            pan_y: datum.pan[1],
-            pan_delta_x: datum.pan_delta[0],
-            pan_delta_y: datum.pan_delta[1],
-            scale: datum.scale,
-            rotation: datum.rotation,
-            ..PointerData::default()
-        })
-        .collect();
-    Some(PointerDataPacket::new(data))
+/// The pan-zoom pointer's report of `change` at `at`, in the view `stamp` names; `None` for a
+/// window the embedder no longer has.
+fn report(change: ReportedChange, at: [f64; 2], stamp: PointerStamp) -> Option<PointerReport> {
+    Some(PointerReport {
+        view_id: stamp.view?,
+        time_stamp: stamp.time_stamp,
+        device: PAN_ZOOM_DEVICE,
+        kind: PointerDeviceKind::Trackpad,
+        position: at,
+        change,
+        contact: Contact::default(),
+    })
 }
 
 /// The pan a scroll of the fingers adds, in physical pixels, in the direction the fingers moved:
@@ -353,87 +210,73 @@ mod tests {
         MouseScrollDelta::PixelDelta(PhysicalPosition::new(dx, dy))
     }
 
-    fn data(packet: Option<PointerDataPacket>) -> Vec<PointerData> {
-        packet.map(|packet| packet.data).unwrap_or_default()
+    fn change(report: Option<PointerReport>) -> Option<ReportedChange> {
+        report.map(|report| report.change)
     }
 
-    fn changes(packet: Option<PointerDataPacket>) -> Vec<PointerChange> {
-        data(packet).iter().map(|datum| datum.change).collect()
+    /// The pan, scale and rotation of an update.
+    fn totals(report: Option<PointerReport>) -> ([f64; 2], f64, f64) {
+        match change(report) {
+            Some(ReportedChange::PanZoomUpdate {
+                pan,
+                scale,
+                rotation,
+            }) => (pan, scale, rotation),
+            other => panic!("not an update: {other:?}"),
+        }
     }
 
+    #[derive(Default)]
     struct Fixture {
         trackpad: Trackpad,
-        ids: PointerIds,
     }
 
     impl Fixture {
-        fn new() -> Fixture {
-            Fixture {
-                trackpad: Trackpad::default(),
-                ids: PointerIds::default(),
-            }
+        fn scroll(&mut self, phase: TouchPhase, dx: f64, dy: f64) -> Option<PointerReport> {
+            self.trackpad
+                .scrolled(phase, pixels(dx, dy), 2.0, AT, stamp())
         }
 
-        fn scroll(&mut self, phase: TouchPhase, dx: f64, dy: f64) -> Option<PointerDataPacket> {
-            self.trackpad
-                .scrolled(phase, pixels(dx, dy), 2.0, AT, stamp(), &mut self.ids)
+        fn pinch(&mut self, phase: TouchPhase, magnification: f64) -> Option<PointerReport> {
+            self.trackpad.pinched(phase, magnification, AT, stamp())
         }
 
-        fn pinch(&mut self, phase: TouchPhase, magnification: f64) -> Option<PointerDataPacket> {
-            self.trackpad
-                .pinched(phase, magnification, AT, stamp(), &mut self.ids)
-        }
-
-        fn rotate(&mut self, phase: TouchPhase, degrees: f32) -> Option<PointerDataPacket> {
-            self.trackpad
-                .rotated(phase, degrees, AT, stamp(), &mut self.ids)
+        fn rotate(&mut self, phase: TouchPhase, degrees: f32) -> Option<PointerReport> {
+            self.trackpad.rotated(phase, degrees, AT, stamp())
         }
     }
 
     #[test]
-    fn a_finger_scroll_is_a_pan_zoom_from_its_start_to_its_end() {
-        let mut fixture = Fixture::new();
-        let started = data(fixture.scroll(TouchPhase::Started, 0.0, 0.0));
+    fn a_finger_scroll_is_a_pan_zoom_from_its_start_to_its_end_where_the_mouse_is() {
+        let mut fixture = Fixture::default();
+        let started = fixture.scroll(TouchPhase::Started, 0.0, 0.0).unwrap();
+        assert_eq!(started.change, ReportedChange::PanZoomStart);
+        assert_eq!(started.kind, PointerDeviceKind::Trackpad);
+        assert_eq!(started.device, PAN_ZOOM_DEVICE);
+        assert_eq!(started.position, AT);
+        assert!(matches!(
+            change(fixture.scroll(TouchPhase::Moved, 0.0, -10.0)),
+            Some(ReportedChange::PanZoomUpdate { .. })
+        ));
         assert_eq!(
-            started.iter().map(|datum| datum.change).collect::<Vec<_>>(),
-            [PointerChange::Add, PointerChange::PanZoomStart],
-            "the device is added before its first gesture"
-        );
-        assert!(
-            started
-                .iter()
-                .all(|datum| datum.kind == PointerDeviceKind::Trackpad)
-        );
-        assert!(started.iter().all(|datum| datum.device == PAN_ZOOM_DEVICE));
-        assert!(started[0].synthesized, "the add is the engine's");
-        assert_eq!(started[1].physical_x, AT[0]);
-        assert_eq!(
-            changes(fixture.scroll(TouchPhase::Moved, 0.0, -10.0)),
-            [PointerChange::PanZoomUpdate]
-        );
-        assert_eq!(
-            changes(fixture.scroll(TouchPhase::Ended, 0.0, 0.0)),
-            [PointerChange::PanZoomEnd]
-        );
-        assert_eq!(
-            changes(fixture.scroll(TouchPhase::Started, 0.0, 0.0)),
-            [PointerChange::PanZoomStart],
-            "added once"
+            change(fixture.scroll(TouchPhase::Ended, 0.0, 0.0)),
+            Some(ReportedChange::PanZoomEnd)
         );
     }
 
     #[test]
-    fn an_update_carries_the_pan_so_far_and_its_delta_since_the_last() {
-        let mut fixture = Fixture::new();
+    fn an_update_carries_the_pan_so_far() {
+        let mut fixture = Fixture::default();
         fixture.scroll(TouchPhase::Started, 0.0, -99.0);
-        let first = data(fixture.scroll(TouchPhase::Moved, 2.0, -10.0));
-        assert_eq!([first[0].pan_x, first[0].pan_y], [2.0, -10.0]);
-        assert_eq!([first[0].pan_delta_x, first[0].pan_delta_y], [2.0, -10.0]);
-        let second = data(fixture.scroll(TouchPhase::Moved, 0.0, -5.0));
-        assert_eq!([second[0].pan_x, second[0].pan_y], [2.0, -15.0]);
-        assert_eq!([second[0].pan_delta_x, second[0].pan_delta_y], [0.0, -5.0]);
-        assert_eq!(second[0].scale, 1.0, "no pinch is a scale of one");
-        assert_eq!(second[0].rotation, 0.0);
+        assert_eq!(
+            totals(fixture.scroll(TouchPhase::Moved, 2.0, -10.0)),
+            ([2.0, -10.0], 1.0, 0.0),
+            "no pinch is a scale of one"
+        );
+        assert_eq!(
+            totals(fixture.scroll(TouchPhase::Moved, 0.0, -5.0)).0,
+            [2.0, -15.0]
+        );
     }
 
     #[test]
@@ -445,88 +288,43 @@ mod tests {
     }
 
     #[test]
-    fn each_gesture_is_a_press_of_its_own() {
-        let mut fixture = Fixture::new();
-        let first = data(fixture.scroll(TouchPhase::Started, 0.0, 0.0));
-        let update = data(fixture.scroll(TouchPhase::Moved, 0.0, -1.0));
-        fixture.scroll(TouchPhase::Ended, 0.0, 0.0);
-        let second = data(fixture.scroll(TouchPhase::Started, 0.0, 0.0));
-        assert_eq!(first[0].pointer_identifier, 0, "an add is no press");
-        assert_eq!(first[1].pointer_identifier, 1);
-        assert_eq!(update[0].pointer_identifier, 1);
-        assert_eq!(second[0].pointer_identifier, 2);
-    }
-
-    #[test]
     fn a_pinch_and_a_rotation_join_the_pan_in_one_start_and_one_end() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::default();
         assert_eq!(
-            changes(fixture.scroll(TouchPhase::Started, 0.0, 0.0)),
-            [PointerChange::Add, PointerChange::PanZoomStart]
+            change(fixture.scroll(TouchPhase::Started, 0.0, 0.0)),
+            Some(ReportedChange::PanZoomStart)
         );
         assert!(
             fixture.pinch(TouchPhase::Started, 0.0).is_none(),
             "one start for every gesture"
         );
         assert!(fixture.rotate(TouchPhase::Started, 0.0).is_none());
-        let pinched = data(fixture.pinch(TouchPhase::Moved, 1.0));
         assert_eq!(
-            pinched[0].scale, 2.0,
+            totals(fixture.pinch(TouchPhase::Moved, 1.0)).1,
+            2.0,
             "two to the power of the magnification"
         );
-        let rotated = data(fixture.rotate(TouchPhase::Moved, 90.0));
-        assert!(
-            (rotated[0].rotation + PI / 2.0).abs() < 1e-9,
-            "clockwise, in radians"
-        );
-        assert_eq!(rotated[0].scale, 2.0, "the scale so far");
+        let (_, scale, rotation) = totals(fixture.rotate(TouchPhase::Moved, 90.0));
+        assert!((rotation + PI / 2.0).abs() < 1e-9, "clockwise, in radians");
+        assert_eq!(scale, 2.0, "the scale so far");
         assert!(fixture.scroll(TouchPhase::Ended, 0.0, 0.0).is_none());
         assert!(fixture.pinch(TouchPhase::Ended, 0.0).is_none());
         assert_eq!(
-            changes(fixture.rotate(TouchPhase::Ended, 0.0)),
-            [PointerChange::PanZoomEnd],
+            change(fixture.rotate(TouchPhase::Ended, 0.0)),
+            Some(ReportedChange::PanZoomEnd),
             "the last gesture to end ends the pan-zoom"
         );
         fixture.pinch(TouchPhase::Started, 0.0);
-        let fresh = data(fixture.pinch(TouchPhase::Moved, 0.0));
-        assert_eq!(fresh[0].scale, 1.0, "a new pan-zoom starts from no change");
-        assert_eq!(fresh[0].rotation, 0.0);
-        assert_eq!(fresh[0].pan_y, 0.0);
-    }
-
-    #[test]
-    fn a_gesture_away_from_where_the_device_was_hovers_there_first() {
-        let mut fixture = Fixture::new();
-        fixture.scroll(TouchPhase::Started, 0.0, 0.0);
-        fixture.scroll(TouchPhase::Ended, 0.0, 0.0);
-        let elsewhere = [30.0, 20.0];
-        let started = data(fixture.trackpad.scrolled(
-            TouchPhase::Started,
-            pixels(0.0, 0.0),
-            2.0,
-            elsewhere,
-            stamp(),
-            &mut fixture.ids,
-        ));
         assert_eq!(
-            started.iter().map(|datum| datum.change).collect::<Vec<_>>(),
-            [PointerChange::Hover, PointerChange::PanZoomStart]
+            totals(fixture.pinch(TouchPhase::Moved, 0.0)),
+            ([0.0, 0.0], 1.0, 0.0),
+            "a new pan-zoom starts from no change"
         );
-        assert!(started[0].synthesized);
-        assert_eq!(started[0].physical_delta_x, 20.0);
-        let ended = data(fixture.scroll(TouchPhase::Ended, 0.0, 0.0));
-        assert_eq!(
-            ended.iter().map(|datum| datum.change).collect::<Vec<_>>(),
-            [PointerChange::PanZoomUpdate, PointerChange::PanZoomEnd],
-            "an end away from the last update updates there first"
-        );
-        assert!(ended[0].synthesized);
-        assert_eq!(ended[0].physical_delta_x, -20.0);
     }
 
     #[test]
     fn a_second_start_of_one_gesture_starts_nothing() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::default();
         fixture.scroll(TouchPhase::Started, 0.0, 0.0);
         assert!(
             fixture.scroll(TouchPhase::Started, 0.0, 0.0).is_none(),
@@ -536,7 +334,7 @@ mod tests {
 
     #[test]
     fn an_update_or_an_end_with_nothing_started_is_dropped() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::default();
         assert!(fixture.scroll(TouchPhase::Moved, 0.0, -1.0).is_none());
         assert!(fixture.scroll(TouchPhase::Cancelled, 0.0, 0.0).is_none());
         assert!(fixture.pinch(TouchPhase::Ended, 0.0).is_none());
@@ -544,9 +342,8 @@ mod tests {
 
     #[test]
     fn a_magnification_that_is_not_a_number_changes_nothing() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::default();
         fixture.pinch(TouchPhase::Started, 0.0);
-        let pinched = data(fixture.pinch(TouchPhase::Moved, f64::NAN));
-        assert_eq!(pinched[0].scale, 1.0);
+        assert_eq!(totals(fixture.pinch(TouchPhase::Moved, f64::NAN)).1, 1.0);
     }
 }

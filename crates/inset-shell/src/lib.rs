@@ -12,9 +12,9 @@ use std::time::Duration;
 
 use inset_embedder::{
     AppExitReply, AppLifecycleState, ClipboardEvent, DropData, EditCommand, EmbedderClient, Frame,
-    Instant, KeyData, MenuId, NotificationActivation, OpenRequest, PlatformRef, PointerDataPacket,
-    RequestId, TextEditingValue, TextInputAction, TrayIconEvent, TrayIconId, ViewError,
-    ViewFocusEvent, ViewId,
+    Instant, KeyData, MenuId, NotificationActivation, OpenRequest, PlatformRef, PointerData,
+    PointerDataPacket, PointerDataPacketConverter, PointerReport, RequestId, TextEditingValue,
+    TextInputAction, TrayIconEvent, TrayIconId, ViewError, ViewFocusEvent, ViewId,
 };
 use inset_foundation::{App, AppCell};
 use inset_gestures::GestureBinding;
@@ -35,6 +35,8 @@ pub struct Shell {
     clock: Duration,
     /// The platform's `now` at its `elapsed` zero, known once a frame has reported its `elapsed`; lets every push, not only a frame or wake, move the app clock to the platform's.
     origin: Option<Instant>,
+    /// What the framework was last told of each pointing device, as `RuntimeController` keeps it.
+    pointer_data_packet_converter: PointerDataPacketConverter,
 }
 
 impl Shell {
@@ -48,6 +50,7 @@ impl Shell {
             platform,
             clock: Duration::ZERO,
             origin: None,
+            pointer_data_packet_converter: PointerDataPacketConverter::new(),
         };
         shell.handle_event(|app| {
             // Flutter's engine collects the platform's fonts before the framework runs.
@@ -214,7 +217,12 @@ impl EmbedderClient for Shell {
         self.push(|app| app.notification_activated(activation));
     }
 
-    fn pointer_data_packet(&mut self, packet: PointerDataPacket) {
+    fn pointer_reports(&mut self, reports: Vec<PointerReport>) {
+        let packet = PointerDataPacket::new(reports.into_iter().map(PointerData::from).collect());
+        let platform = &self.platform;
+        let packet = self
+            .pointer_data_packet_converter
+            .convert(&packet, |view_id| platform.view(view_id).is_some());
         self.push(|app| GestureBinding::instance(app).handle_pointer_data_packet(app, packet));
     }
 
@@ -349,8 +357,8 @@ mod tests {
     use std::time::Duration;
 
     use inset_embedder::{
-        AppLifecycleState, EmbedderClient, Frame, KeyData, KeyEventType, PointerChange,
-        PointerData, PointerDataPacket, PointerDeviceKind, ViewId,
+        AppLifecycleState, Contact, EmbedderClient, Frame, KeyData, KeyEventType,
+        PointerDeviceKind, PointerReport, ReportedChange, ViewId,
     };
     use inset_foundation::App;
     use inset_gestures::{GestureBinding, PointerRoute};
@@ -730,7 +738,7 @@ mod tests {
     }
 
     #[test]
-    fn pointer_data_packet_reaches_gesture_binding() {
+    fn a_reported_press_reaches_gesture_binding_numbered_by_the_converter() {
         let ran = Rc::new(Cell::new(false));
         let ran_flag = Rc::clone(&ran);
         let platform = Rc::new(platform_with_a_view());
@@ -746,14 +754,16 @@ mod tests {
             );
         });
 
-        shell.pointer_data_packet(PointerDataPacket::new(vec![PointerData {
-            change: PointerChange::Down,
+        shell.pointer_reports(vec![PointerReport {
+            view_id: IMPLICIT_VIEW_ID,
+            time_stamp: Duration::ZERO,
+            device: 0,
             kind: PointerDeviceKind::Mouse,
-            buttons: 1,
-            pointer_identifier: 1,
-            ..PointerData::default()
-        }]));
-        assert!(ran.get());
+            position: [0.0, 0.0],
+            change: ReportedChange::Down { buttons: 1 },
+            contact: Contact::default(),
+        }]);
+        assert!(ran.get(), "the first press is pointer 1");
     }
 
     #[test]

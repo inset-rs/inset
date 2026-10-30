@@ -7,7 +7,7 @@
 //! when a wheel turns, and a trackpad's fingers pan as Flutter's pan-zoom pointer, with their
 //! pinches and rotations (`trackpad.rs`).
 
-use inset_embedder::{EmbedderClient, Offset, PointerDataPacket, SystemMouseCursorKind, View};
+use inset_embedder::{EmbedderClient, Offset, PointerReport, SystemMouseCursorKind, View};
 use winit::data_transfer::{DataTransferId, TypeHint, TypedData};
 use winit::dpi::PhysicalPosition;
 use winit::event::{
@@ -23,7 +23,7 @@ use crate::mouse_cursor;
 use crate::os::{NativeMenus, PointerQueries, ThisOs};
 use crate::pointer::PointerStamp;
 use crate::text_input::Typed;
-use crate::touch::Contact;
+use crate::touch::Touch;
 
 use super::MainLoop;
 
@@ -49,11 +49,11 @@ impl<C: EmbedderClient> MainLoop<C> {
     ) {
         let stamp = self.pointer_stamp(window);
         let at = [position.x, position.y];
-        let packet = match Contact::of(kind) {
-            Some(contact) => self.touches.entered(contact, at, stamp, &mut self.ids),
-            None => self.pointer.entered(window, at, stamp, &mut self.ids),
+        let report = match Touch::of(kind) {
+            Some(touch) => self.touches.entered(touch, at, stamp),
+            None => self.pointer.entered(window, at, stamp),
         };
-        self.send_pointer_packets(packet);
+        self.send_pointer_reports(report);
     }
 
     /// A pointer left `window`, at `position` where winit says: the mouse, or a finger or a pen
@@ -65,14 +65,14 @@ impl<C: EmbedderClient> MainLoop<C> {
         kind: PointerKind,
     ) {
         let stamp = self.pointer_stamp(window);
-        let packet = match Contact::of(kind) {
-            Some(contact) => {
+        let report = match Touch::of(kind) {
+            Some(touch) => {
                 let at = position.map(|position| [position.x, position.y]);
-                self.touches.left(contact, at, stamp, &mut self.ids)
+                self.touches.left(touch, at, stamp)
             }
-            None => self.pointer.left(stamp, &mut self.ids),
+            None => self.pointer.left(stamp),
         };
-        self.send_pointer_packets(packet);
+        self.send_pointer_reports(report);
     }
 
     /// A pointer moved in `window` to `position`.
@@ -84,18 +84,16 @@ impl<C: EmbedderClient> MainLoop<C> {
     ) {
         let stamp = self.pointer_stamp(window);
         let at = [position.x, position.y];
-        match Contact::moved_from(&source) {
-            Some((contact, pressure)) => {
-                let packet = self
-                    .touches
-                    .moved(contact, at, pressure, stamp, &mut self.ids);
-                self.send_pointer_packets(packet);
+        match Touch::moved_from(&source) {
+            Some((touch, contact)) => {
+                let report = self.touches.moved(touch, at, contact, stamp);
+                self.send_pointer_reports(report);
             }
             None => {
-                let packets =
-                    self.pointer
-                        .moved(window, at, ThisOs::pressed_buttons(), stamp, &mut self.ids);
-                self.send_pointer_packets(packets);
+                let reports = self
+                    .pointer
+                    .moved(window, at, ThisOs::pressed_buttons(), stamp);
+                self.send_pointer_reports(reports);
             }
         }
     }
@@ -112,21 +110,18 @@ impl<C: EmbedderClient> MainLoop<C> {
         let stamp = self.pointer_stamp(window);
         let at = [position.x, position.y];
         let pressed = state == ElementState::Pressed;
-        let packet = if let Some((contact, pressure)) = Contact::pressed_by(&button) {
+        let report = if let Some((touch, contact)) = Touch::pressed_by(&button) {
             if pressed {
-                self.touches
-                    .pressed(contact, at, pressure, stamp, &mut self.ids)
+                self.touches.pressed(touch, at, contact, stamp)
             } else {
-                self.touches
-                    .released(contact, at, pressure, stamp, &mut self.ids)
+                self.touches.released(touch, at, contact, stamp)
             }
         } else if let ButtonSource::Mouse(button) = button {
-            self.pointer
-                .button(button, pressed, at, stamp, &mut self.ids)
+            self.pointer.button(button, pressed, at, stamp)
         } else {
             None
         };
-        self.send_pointer_packets(packet);
+        self.send_pointer_reports(report);
     }
 
     /// A scroll in `window`, by what drives it, as Flutter's macOS embedder takes a scroll event
@@ -142,36 +137,31 @@ impl<C: EmbedderClient> MainLoop<C> {
     ) {
         let scale = self.scale_of(window);
         let stamp = self.pointer_stamp(window);
-        let packet = match source {
+        let report = match source {
             ScrollSource::Finger => {
                 let at = self.pointer.position();
-                self.trackpad
-                    .scrolled(phase, delta, scale, at, stamp, &mut self.ids)
+                self.trackpad.scrolled(phase, delta, scale, at, stamp)
             }
             ScrollSource::Momentum => None,
-            _ => self.pointer.scrolled(delta, scale, stamp, &mut self.ids),
+            _ => self.pointer.scrolled(delta, scale, stamp),
         };
-        self.send_pointer_packets(packet);
+        self.send_pointer_reports(report);
     }
 
     /// Fingers pinched on the trackpad over `window`, which scales the pan-zoom.
     pub(super) fn on_pinch(&mut self, window: WindowId, magnification: f64, phase: TouchPhase) {
         let stamp = self.pointer_stamp(window);
         let at = self.pointer.position();
-        let packet = self
-            .trackpad
-            .pinched(phase, magnification, at, stamp, &mut self.ids);
-        self.send_pointer_packets(packet);
+        let report = self.trackpad.pinched(phase, magnification, at, stamp);
+        self.send_pointer_reports(report);
     }
 
     /// Fingers rotated on the trackpad over `window` by `degrees`, which rotates the pan-zoom.
     pub(super) fn on_rotation(&mut self, window: WindowId, degrees: f32, phase: TouchPhase) {
         let stamp = self.pointer_stamp(window);
         let at = self.pointer.position();
-        let packet = self
-            .trackpad
-            .rotated(phase, degrees, at, stamp, &mut self.ids);
-        self.send_pointer_packets(packet);
+        let report = self.trackpad.rotated(phase, degrees, at, stamp);
+        self.send_pointer_reports(report);
     }
 
     /// How many physical pixels `window`'s view has to the logical one; one for a window the
@@ -188,10 +178,8 @@ impl<C: EmbedderClient> MainLoop<C> {
     pub(super) fn on_menu_closed(&mut self) {
         if let Some(window) = self.pointer.window() {
             let stamp = self.pointer_stamp(window);
-            let packets = self
-                .pointer
-                .reconciled(ThisOs::pressed_buttons(), stamp, &mut self.ids);
-            self.send_pointer_packets(packets);
+            let reports = self.pointer.reconciled(ThisOs::pressed_buttons(), stamp);
+            self.send_pointer_reports(reports);
         }
         self.wake_client();
     }
@@ -204,12 +192,14 @@ impl<C: EmbedderClient> MainLoop<C> {
         }
     }
 
-    pub(super) fn send_pointer_packets(
+    /// Sends what one system event made of the pointers, if anything, in one call.
+    pub(super) fn send_pointer_reports(
         &mut self,
-        packets: impl IntoIterator<Item = PointerDataPacket>,
+        reports: impl IntoIterator<Item = PointerReport>,
     ) {
-        for packet in packets {
-            self.client.pointer_data_packet(packet);
+        let reports: Vec<PointerReport> = reports.into_iter().collect();
+        if !reports.is_empty() {
+            self.client.pointer_reports(reports);
         }
     }
 

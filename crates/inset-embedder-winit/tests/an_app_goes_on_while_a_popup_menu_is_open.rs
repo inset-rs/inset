@@ -45,8 +45,7 @@ mod client {
 
     use inset_embedder::{
         Dispatcher, EmbedderClient, Frame, Instant, KeyData, MenuEntry, MenuItem, Offset,
-        PlatformRef, PointerDataPacket, PopupMenuFuture, ScreenId, ViewId, VsyncObserver,
-        VsyncWaiter,
+        PlatformRef, PointerReport, PopupMenuFuture, ScreenId, ViewId, VsyncObserver, VsyncWaiter,
     };
 
     use crate::TEST;
@@ -198,7 +197,7 @@ mod client {
 
         fn view_metrics_changed(&mut self, _id: ViewId) {}
         fn view_removed(&mut self, _id: ViewId) {}
-        fn pointer_data_packet(&mut self, _packet: PointerDataPacket) {}
+        fn pointer_reports(&mut self, _reports: Vec<PointerReport>) {}
         fn key_data(&mut self, _data: KeyData) -> bool {
             false
         }

@@ -6,9 +6,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use inset_embedder::{
-    Brightness, EmbedderClient, Frame, KeyData, KeyEventType, Platform, PlatformRef, PointerChange,
-    PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind, ScreenId, View,
-    ViewConstraints, ViewMetrics, ViewPadding, ViewRef,
+    Brightness, Contact, EmbedderClient, Frame, KeyData, KeyEventType, Platform, PlatformRef,
+    PointerDeviceKind, PointerReport, ReportedChange, ScreenId, View, ViewConstraints, ViewMetrics,
+    ViewPadding, ViewRef,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::Closure;
@@ -22,7 +22,7 @@ use crate::gpu::Gpu;
 use crate::keys;
 use crate::launch_queue;
 use crate::platform::{CANVAS_VIEW, WebPlatform, WebView};
-use crate::pointer;
+use crate::pointer::{self, MOUSE_DEVICE};
 use crate::screen::read_screen;
 use crate::text_input::TextInputNotify;
 
@@ -68,10 +68,6 @@ struct Host<C> {
     timeout_id: Cell<Option<i32>>,
     timeout_callback: RefCell<Option<TimeoutCallback>>,
     cursor: Cell<[f64; 2]>,
-    last_cursor: Cell<[f64; 2]>,
-    mouse_buttons: Cell<i64>,
-    pointer_id: Cell<i64>,
-    embedder_id: Cell<i64>,
     pressing: RefCell<HashMap<u64, u64>>,
 }
 
@@ -113,10 +109,6 @@ async fn run_async<C: EmbedderClient + 'static>(
         timeout_id: Cell::new(None),
         timeout_callback: RefCell::new(None),
         cursor: Cell::new([0.0, 0.0]),
-        last_cursor: Cell::new([0.0, 0.0]),
-        mouse_buttons: Cell::new(0),
-        pointer_id: Cell::new(0),
-        embedder_id: Cell::new(0),
         pressing: RefCell::new(HashMap::new()),
     });
     install_turn_callbacks(&host);
@@ -343,12 +335,11 @@ fn dispatch_pointer<C: EmbedderClient + 'static>(
     let dpr = host.view.metrics().device_pixel_ratio;
     let x = f64::from(event.offset_x()) * dpr;
     let y = f64::from(event.offset_y()) * dpr;
-    host.last_cursor.set(host.cursor.get());
     host.cursor.set([x, y]);
-    let kind = if event.pointer_type() == "touch" {
-        PointerDeviceKind::Touch
+    let (kind, device) = if event.pointer_type() == "touch" {
+        (PointerDeviceKind::Touch, i64::from(event.pointer_id()))
     } else {
-        PointerDeviceKind::Mouse
+        (PointerDeviceKind::Mouse, MOUSE_DEVICE)
     };
     let mut buttons = pointer::flutter_buttons(event.buttons());
     if kind == PointerDeviceKind::Touch && matches!(phase, PointerPhase::Down | PointerPhase::Move)
@@ -356,26 +347,17 @@ fn dispatch_pointer<C: EmbedderClient + 'static>(
         buttons = pointer::PRIMARY;
     }
     let change = match phase {
-        PointerPhase::Down => {
-            host.mouse_buttons.set(buttons.max(pointer::PRIMARY));
-            host.pointer_id.set(host.pointer_id.get() + 1);
-            PointerChange::Down
+        PointerPhase::Down => ReportedChange::Down {
+            buttons: buttons.max(pointer::PRIMARY),
+        },
+        PointerPhase::Move if buttons == 0 && kind == PointerDeviceKind::Mouse => {
+            ReportedChange::Hover { buttons }
         }
-        PointerPhase::Move => {
-            host.mouse_buttons.set(buttons);
-            if buttons == 0 && kind == PointerDeviceKind::Mouse {
-                PointerChange::Hover
-            } else {
-                PointerChange::Move
-            }
-        }
-        PointerPhase::Up => {
-            host.mouse_buttons.set(buttons);
-            PointerChange::Up
-        }
-        PointerPhase::Cancel => PointerChange::Cancel,
+        PointerPhase::Move => ReportedChange::Move { buttons },
+        PointerPhase::Up => ReportedChange::Up { buttons },
+        PointerPhase::Cancel => ReportedChange::Cancel { buttons },
     };
-    send_pointer(host, change, kind, None);
+    send_pointer(host, change, kind, device);
 }
 
 fn bind_wheel<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
@@ -390,9 +372,9 @@ fn bind_wheel<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
         );
         send_pointer(
             &listener,
-            PointerChange::Hover,
+            ReportedChange::Scroll { delta: [dx, dy] },
             PointerDeviceKind::Mouse,
-            Some((dx, dy)),
+            MOUSE_DEVICE,
         );
     });
     let options = web_sys::AddEventListenerOptions::new();
@@ -603,47 +585,21 @@ fn bind_brightness<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
     closure.forget();
 }
 
+/// Reports `change` of `device`, a pointer of `kind`, where the page's pointer was last seen.
 fn send_pointer<C: EmbedderClient + 'static>(
     host: &Host<C>,
-    change: PointerChange,
+    change: ReportedChange,
     kind: PointerDeviceKind,
-    scroll: Option<(f64, f64)>,
+    device: i64,
 ) {
-    let [x, y] = host.cursor.get();
-    let [last_x, last_y] = host.last_cursor.get();
-    host.embedder_id.set(host.embedder_id.get() + 1);
-    let buttons = host.mouse_buttons.get();
-    let pointer_identifier = if change == PointerChange::Hover && buttons == 0 {
-        0
-    } else {
-        host.pointer_id.get()
-    };
-    let (signal_kind, scroll_delta_x, scroll_delta_y) = match scroll {
-        Some((dx, dy)) => (Some(PointerSignalKind::Scroll), dx, dy),
-        None => (None, 0.0, 0.0),
-    };
-    let data = PointerData {
+    let report = PointerReport {
         view_id: CANVAS_VIEW,
-        embedder_id: host.embedder_id.get(),
         time_stamp: host.platform.elapsed(),
-        change,
+        device,
         kind,
-        signal_kind,
-        pointer_identifier,
-        physical_x: x,
-        physical_y: y,
-        physical_delta_x: x - last_x,
-        physical_delta_y: y - last_y,
-        buttons,
-        pressure: 1.0,
-        pressure_min: 1.0,
-        pressure_max: 1.0,
-        scroll_delta_x,
-        scroll_delta_y,
-        ..PointerData::default()
+        position: host.cursor.get(),
+        change,
+        contact: Contact::default(),
     };
-    host.last_cursor.set([x, y]);
-    host.client
-        .borrow_mut()
-        .pointer_data_packet(PointerDataPacket::new(vec![data]));
+    host.client.borrow_mut().pointer_reports(vec![report]);
 }

@@ -116,7 +116,7 @@ use crate::launch::StartApp;
 use crate::lifecycle::{AppLifecycle, LifecycleNotice};
 use crate::menus::MenuEvent;
 use crate::platform::WinitPlatform;
-use crate::pointer::{Pointer, PointerIds};
+use crate::pointer::Pointer;
 use crate::state::EmbedderState;
 use crate::system_changes::SystemChange;
 use crate::system_requests::SystemRequest;
@@ -217,8 +217,6 @@ pub(crate) struct MainLoop<C> {
     touches: Touches,
     /// The trackpad's gestures, as one pan-zoom pointer.
     trackpad: Trackpad,
-    /// The numbers every pointer's data carries, shared so no two devices' presses collide.
-    ids: PointerIds,
     keyboard: Keyboard,
     /// The drags of files over the views, and the reports waiting for their files.
     drags: Drags,
@@ -267,7 +265,6 @@ impl<C: EmbedderClient> MainLoop<C> {
             pointer: Pointer::new(),
             touches: Touches::default(),
             trackpad: Trackpad::default(),
-            ids: PointerIds::default(),
             keyboard: Keyboard::new(),
             drags: Drags::default(),
             lifecycle: AppLifecycle::default(),

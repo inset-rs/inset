@@ -199,7 +199,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app-events"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "inset-embedder",
  "inset-embedder-winit",
@@ -1067,7 +1067,7 @@ dependencies = [
 
 [[package]]
 name = "cupertino-gallery"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "indexmap",
  "inset",
@@ -2012,7 +2012,7 @@ dependencies = [
 
 [[package]]
 name = "inset"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "inset-embedder",
  "inset-embedder-default",
@@ -2026,7 +2026,7 @@ dependencies = [
 
 [[package]]
 name = "inset-animation"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "inset-embedder",
  "inset-foundation",
@@ -2036,7 +2036,7 @@ dependencies = [
 
 [[package]]
 name = "inset-cli"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "anyhow",
  "brotli",
@@ -2056,7 +2056,7 @@ dependencies = [
 
 [[package]]
 name = "inset-cupertino"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "indexmap",
  "inset-animation",
@@ -2075,7 +2075,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "indexmap",
  "objc2-core-foundation",
@@ -2092,7 +2092,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder-android"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "android-activity",
  "inset-embedder",
@@ -2109,7 +2109,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder-default"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "inset-embedder",
  "inset-embedder-android",
@@ -2119,7 +2119,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder-web"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.3.4",
@@ -2135,7 +2135,7 @@ dependencies = [
 
 [[package]]
 name = "inset-embedder-winit"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "arboard",
  "block2",
@@ -2172,7 +2172,7 @@ dependencies = [
 
 [[package]]
 name = "inset-foundation"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "async-task",
  "indexmap",
@@ -2182,7 +2182,7 @@ dependencies = [
 
 [[package]]
 name = "inset-gestures"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "indexmap",
  "inset-embedder",
@@ -2193,7 +2193,7 @@ dependencies = [
 
 [[package]]
 name = "inset-macros"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2202,7 +2202,7 @@ dependencies = [
 
 [[package]]
 name = "inset-markdown"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "inset-embedder",
  "inset-foundation",
@@ -2218,7 +2218,7 @@ dependencies = [
 
 [[package]]
 name = "inset-painting"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "indexmap",
  "inset-embedder",
@@ -2232,14 +2232,14 @@ dependencies = [
 
 [[package]]
 name = "inset-physics"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "inset-embedder",
 ]
 
 [[package]]
 name = "inset-rendering"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "indexmap",
  "inset-animation",
@@ -2257,7 +2257,7 @@ dependencies = [
 
 [[package]]
 name = "inset-scheduler"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "indexmap",
  "inset-embedder",
@@ -2267,7 +2267,7 @@ dependencies = [
 
 [[package]]
 name = "inset-services"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "indexmap",
  "inset-embedder",
@@ -2280,7 +2280,7 @@ dependencies = [
 
 [[package]]
 name = "inset-shell"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "inset-embedder",
  "inset-foundation",
@@ -2294,7 +2294,7 @@ dependencies = [
 
 [[package]]
 name = "inset-single-instance"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "windows-sys 0.60.2",
  "zbus",
@@ -2302,14 +2302,14 @@ dependencies = [
 
 [[package]]
 name = "inset-test"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "inset-embedder",
 ]
 
 [[package]]
 name = "inset-widgets"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "indexmap",
  "inset-animation",
@@ -2327,7 +2327,7 @@ dependencies = [
 
 [[package]]
 name = "inset-winui"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "inset-animation",
  "inset-embedder",
@@ -2500,7 +2500,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "layout"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "inset-embedder",
  "inset-foundation",
@@ -2624,7 +2624,7 @@ checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
 
 [[package]]
 name = "media"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "inset-embedder",
  "inset-embedder-winit",
@@ -2660,7 +2660,7 @@ dependencies = [
 
 [[package]]
 name = "menus"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "inset-cupertino",
  "inset-embedder",
@@ -2782,7 +2782,7 @@ dependencies = [
 
 [[package]]
 name = "native_surface"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "inset-embedder",
  "inset-embedder-winit",
@@ -3322,7 +3322,7 @@ dependencies = [
 
 [[package]]
 name = "paint"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "inset-embedder",
  "inset-embedder-winit",
@@ -5559,7 +5559,7 @@ dependencies = [
 
 [[package]]
 name = "window"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "inset-cupertino",
  "inset-embedder",

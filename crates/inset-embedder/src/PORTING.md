@@ -137,9 +137,21 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — there are no method channels; the host trait is the channel.
   Affect: a caller sees the absent IME as a `None` it can act on, where a focused field still edits from key events but nothing composing reaches the platform.
 
+## pointer_report.rs → the embedder API's `FlutterPointerEvent` (`embedder.h`), copied into `PointerData` as `FlutterEngineSendPointerEvent` does
+
+- Change: a host reports a `PointerReport`, whose `ReportedChange` carries only the fields its change uses (buttons, a scroll's delta, a pan-zoom's totals), where `FlutterPointerEvent` is one flat struct whose phase and signal kind say which of its fields count.
+  Reason: platform — the report is all the embedder interface takes from a host about a pointer, and the enum leaves a host no field the converter fills or its change ignores.
+  Affect: a host cannot set a press's identifier, a delta or `synthesized`, nor give a press a scroll delta; it reports what the system said, and the client's converter adds the rest.
+
+## pointer_data_packet_converter.rs → engine `lib/ui/window/pointer_data_packet_converter.cc`
+
+- Change: a move, an up, a remove, or a pan-zoom's update or end for a device the converter holds no state of is dropped, and the engine's `FML_DCHECK`s on the order of changes are not checked.
+  Reason: language — the engine reads past the end of its map there, which C++ leaves undefined and Rust cannot do, and its checks run only in the engine's own unoptimized builds, where a `debug_assert!` would stop every app's debug build.
+  Affect: a host that reports a press's end, or a gesture's update, for a device it never reported loses that report in every build, as the engine drops a cancel for such a device.
+
 ## client.rs → dart:ui `hooks.dart`
 
-- Change: the isolate-global engine hooks are methods on `EmbedderClient`: one `frame` is a complete engine frame of the views one refresh names, pointer packets and key data arrive as calls, view lifecycle is a typed notification, and `key_data` returns whether the framework handled the key.
+- Change: the isolate-global engine hooks are methods on `EmbedderClient`: one `frame` is a complete engine frame of the views one refresh names, pointer reports and key data arrive as calls, view lifecycle is a typed notification, and `key_data` returns whether the framework handled the key.
   Reason: platform — there is no isolate-global hooks table; the host drives a client without naming `App`.
   Affect: the host does not run scheduler phases or build `PointerEvent` / `KeyEvent` itself, and decides from `key_data`'s answer whether to keep propagating the native event.
 
@@ -219,6 +231,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - `FontFeature` named tag constructors. Trigger: a caller that uses those factories instead of `new` / `enable` / `disable`.
 - `debugDefaultTargetPlatformOverride`. Trigger: a debug switcher that must override a live host without swapping `Platform`.
 - `PointerData.respond` / `onRespond`. Trigger: a web host, where they call `preventDefault` on the originating DOM event.
+- A report's `embedder_id`, which Flutter's Android embedder sets to the `MotionEvent`'s id so that a platform view can take back the system's touch, and every other embedder leaves at 0. Trigger: a platform view that takes back the system's touch.
 - Semantics callbacks. Trigger: semantics.
 - `PlatformDispatcher` callback setters and Zones. Trigger: a requirement to expose dart:ui callbacks independently of `Shell`.
 - `_updateFrameData` and the `frameNumber` argument to `_beginFrame`. Trigger: `FrameData`.

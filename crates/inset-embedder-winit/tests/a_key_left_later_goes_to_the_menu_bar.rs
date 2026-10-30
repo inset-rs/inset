@@ -36,7 +36,7 @@ mod client {
 
     use inset_embedder::{
         EmbedderClient, Frame, KeyData, KeyEventType, MenuEntry, MenuId, MenuItem, MenuShortcut,
-        PlatformRef, PointerDataPacket, ShortcutModifiers, ViewId,
+        PlatformRef, PointerReport, ShortcutModifiers, ViewId,
     };
 
     use crate::TEST;
@@ -139,7 +139,7 @@ mod client {
         fn frame(&mut self, _views: &[ViewId], _frame: Frame) {}
         fn view_metrics_changed(&mut self, _id: ViewId) {}
         fn view_removed(&mut self, _id: ViewId) {}
-        fn pointer_data_packet(&mut self, _packet: PointerDataPacket) {}
+        fn pointer_reports(&mut self, _reports: Vec<PointerReport>) {}
         fn platform_brightness_changed(&mut self) {}
         fn locales_changed(&mut self) {}
     }

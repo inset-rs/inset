@@ -36,8 +36,8 @@ mod client {
     use std::time::{Duration, Instant};
 
     use inset_embedder::{
-        AppExitReply, AppExitResponse, EmbedderClient, Frame, KeyData, PlatformRef,
-        PointerDataPacket, ViewId,
+        AppExitReply, AppExitResponse, EmbedderClient, Frame, KeyData, PlatformRef, PointerReport,
+        ViewId,
     };
 
     use crate::{TEST, support};
@@ -101,7 +101,7 @@ mod client {
         fn view_added(&mut self, _id: ViewId) {}
         fn view_metrics_changed(&mut self, _id: ViewId) {}
         fn view_removed(&mut self, _id: ViewId) {}
-        fn pointer_data_packet(&mut self, _packet: PointerDataPacket) {}
+        fn pointer_reports(&mut self, _reports: Vec<PointerReport>) {}
         fn key_data(&mut self, _data: KeyData) -> bool {
             false
         }
