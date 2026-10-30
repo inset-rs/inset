@@ -1,5 +1,5 @@
-//! The system's clipboard: Android's `ClipboardManager`, reached through JNI from the activity's
-//! thread, as far as an app without Java code of its own reaches it.
+//! The system's clipboard: Android's `ClipboardManager`, reached through JNI from the app's thread
+//! through the application, as far as an app without Java code of its own reaches it.
 //!
 //! A clip lists its MIME types in its description, which an app reads without reading the clip,
 //! so the clip is listed as one item in those types, and a read takes the clip's first item that
@@ -15,14 +15,13 @@
 //! since Android has no such notion; one that expires is cleared at its time by the host's loop,
 //! which wakes for it as it wakes for the app's timers, if the clip is still the same, as Android
 //! has no expiry an app can set: the time is kept only while the app runs. Android tells changes
-//! only to a listener Java code provides, so the host looks as the activity takes the focus,
+//! only to a listener Java code provides, so the host looks as an activity takes the focus,
 //! comparing the clip's time, with the app's own writes counted as seen, and after it cleared an
 //! expired copy.
 
 use std::cell::{Cell, RefCell};
 use std::time::Instant;
 
-use android_activity::AndroidApp;
 use inset_embedder::{
     Clipboard, ClipboardError, ClipboardItem, ClipboardItemsFuture, ClipboardReadFuture,
     ClipboardWriteFuture, Content, CopyOptions, PastedItem, URI_LIST,
@@ -30,7 +29,7 @@ use inset_embedder::{
 use jni::objects::{JByteArray, JObject, JString, JValue};
 use jni::{Env, jni_sig, jni_str};
 
-use crate::activity::{device_api_level, with_activity};
+use crate::activity::{device_api_level, with_application};
 
 const TEXT: &str = "text/plain";
 const HTML: &str = "text/html";
@@ -48,7 +47,6 @@ struct Expiry {
 
 /// The system's clipboard.
 pub(crate) struct AndroidClipboard {
-    app: AndroidApp,
     /// The time of the clip when the clipboard was last asked whether it changed, or the app last
     /// wrote it, whichever came last.
     seen: Cell<Option<i64>>,
@@ -57,9 +55,8 @@ pub(crate) struct AndroidClipboard {
 }
 
 impl AndroidClipboard {
-    pub(crate) fn new(app: AndroidApp) -> AndroidClipboard {
+    pub(crate) fn new() -> AndroidClipboard {
         AndroidClipboard {
-            app,
             seen: Cell::new(None),
             expiring: RefCell::default(),
         }
@@ -67,7 +64,7 @@ impl AndroidClipboard {
 
     /// Whether another writer changed the clip since this was last asked: its time is another.
     pub(crate) fn has_changed(&self) -> bool {
-        let now = with_activity(&self.app, clip_time).ok().flatten();
+        let now = with_application(clip_time).ok().flatten();
         self.seen.replace(now) != now
     }
 
@@ -86,16 +83,15 @@ impl AndroidClipboard {
         let Some(expired) = self.expiring.take() else {
             return false;
         };
-        let cleared = with_activity(&self.app, |env, activity| {
-            if clip_time(env, activity)? != Some(expired.set_at) {
+        let cleared = with_application(|env, context| {
+            if clip_time(env, context)? != Some(expired.set_at) {
                 return Ok(false);
             }
-            let manager = clipboard_manager(env, activity)?;
+            let manager = clipboard_manager(env, context)?;
             env.call_method(&manager, jni_str!("clearPrimaryClip"), jni_sig!("()V"), &[])?;
             Ok(true)
         });
-        self.seen
-            .set(with_activity(&self.app, clip_time).ok().flatten());
+        self.seen.set(with_application(clip_time).ok().flatten());
         matches!(cleared, Ok(true))
     }
 
@@ -108,12 +104,10 @@ impl AndroidClipboard {
             .iter()
             .map(text_and_html)
             .collect::<Result<Vec<_>, _>>()?;
-        with_activity(&self.app, |env, activity| {
-            set_clip(env, activity, &texts, options)
-        })
-        .map_err(|error| ClipboardError::Failed(format!("{error:?}")))?;
+        with_application(|env, context| set_clip(env, context, &texts, options))
+            .map_err(|error| ClipboardError::Failed(format!("{error:?}")))?;
         // The app made this change.
-        let set_at = with_activity(&self.app, clip_time).ok().flatten();
+        let set_at = with_application(clip_time).ok().flatten();
         self.seen.set(set_at);
         let expiry = options
             .expires_after
@@ -132,15 +126,10 @@ impl Clipboard for AndroidClipboard {
     /// The clip's description, read in the call, as one item in its types; nothing where the
     /// system would not say, as for an app without the focus.
     fn items(&self) -> ClipboardItemsFuture {
-        let listed = with_activity(&self.app, listed_clip)
+        let listed = with_application(listed_clip)
             .ok()
             .flatten()
-            .map(|clip| {
-                Box::new(ListedClip {
-                    app: self.app.clone(),
-                    clip,
-                }) as Box<dyn PastedItem>
-            });
+            .map(|clip| Box::new(ListedClip { clip }) as Box<dyn PastedItem>);
         Box::pin(std::future::ready(listed.into_iter().collect()))
     }
 
@@ -176,7 +165,6 @@ struct Listing {
 
 /// The clip on the clipboard as it was listed.
 struct ListedClip {
-    app: AndroidApp,
     clip: Listing,
 }
 
@@ -189,10 +177,8 @@ impl PastedItem for ListedClip {
         let read = if !self.clip.types.iter().any(|offered| offered == mime) {
             Err(ClipboardError::NotFound)
         } else {
-            with_activity(&self.app, |env, activity| {
-                read_clip(env, activity, &self.clip, mime)
-            })
-            .unwrap_or_else(|error| Err(ClipboardError::Failed(format!("{error:?}"))))
+            with_application(|env, context| read_clip(env, context, &self.clip, mime))
+                .unwrap_or_else(|error| Err(ClipboardError::Failed(format!("{error:?}"))))
         };
         Box::pin(std::future::ready(read))
     }
@@ -200,11 +186,11 @@ impl PastedItem for ListedClip {
 
 fn clipboard_manager<'local>(
     env: &mut Env<'local>,
-    activity: &JObject<'_>,
+    context: &JObject<'_>,
 ) -> jni::errors::Result<JObject<'local>> {
     let name = env.new_string("clipboard")?;
     env.call_method(
-        activity,
+        context,
         jni_str!("getSystemService"),
         jni_sig!("(Ljava/lang/String;)Ljava/lang/Object;"),
         &[JValue::Object(&name)],
@@ -213,8 +199,8 @@ fn clipboard_manager<'local>(
 }
 
 /// The time the clip on the clipboard was set; none without a clip.
-fn clip_time(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Result<Option<i64>> {
-    let Some(description) = clip_description(env, activity)? else {
+fn clip_time(env: &mut Env<'_>, context: &JObject<'_>) -> jni::errors::Result<Option<i64>> {
+    let Some(description) = clip_description(env, context)? else {
         return Ok(None);
     };
     let time = env
@@ -225,9 +211,9 @@ fn clip_time(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Result<O
 
 fn clip_description<'local>(
     env: &mut Env<'local>,
-    activity: &JObject<'_>,
+    context: &JObject<'_>,
 ) -> jni::errors::Result<Option<JObject<'local>>> {
-    let manager = clipboard_manager(env, activity)?;
+    let manager = clipboard_manager(env, context)?;
     let description = env
         .call_method(
             &manager,
@@ -240,8 +226,8 @@ fn clip_description<'local>(
 }
 
 /// The clip's types and time, from its description; none without a clip.
-fn listed_clip(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Result<Option<Listing>> {
-    let Some(description) = clip_description(env, activity)? else {
+fn listed_clip(env: &mut Env<'_>, context: &JObject<'_>) -> jni::errors::Result<Option<Listing>> {
+    let Some(description) = clip_description(env, context)? else {
         return Ok(None);
     };
     let count = env
@@ -271,7 +257,7 @@ fn listed_clip(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Result
     }
     Ok(Some(Listing {
         types,
-        time: clip_time(env, activity)?,
+        time: clip_time(env, context)?,
     }))
 }
 
@@ -288,14 +274,14 @@ fn offered_as(mime: &str) -> Vec<String> {
 /// The clip's first item holding `mime`, read, if the clip is still the one `listed`.
 fn read_clip(
     env: &mut Env<'_>,
-    activity: &JObject<'_>,
+    context: &JObject<'_>,
     listed: &Listing,
     mime: &str,
 ) -> jni::errors::Result<Result<Vec<u8>, ClipboardError>> {
-    if clip_time(env, activity)? != listed.time {
+    if clip_time(env, context)? != listed.time {
         return Ok(Err(ClipboardError::Changed));
     }
-    let manager = clipboard_manager(env, activity)?;
+    let manager = clipboard_manager(env, context)?;
     let clip = env
         .call_method(
             &manager,
@@ -319,7 +305,7 @@ fn read_clip(
                 &[JValue::Int(index)],
             )?
             .l()?;
-        if let Some(bytes) = read_item(env, activity, &item, mime)? {
+        if let Some(bytes) = read_item(env, context, &item, mime)? {
             return Ok(Ok(bytes));
         }
     }
@@ -329,7 +315,7 @@ fn read_clip(
 /// One item of a clip in `mime`; none when it does not hold it.
 fn read_item(
     env: &mut Env<'_>,
-    activity: &JObject<'_>,
+    context: &JObject<'_>,
     item: &JObject<'_>,
     mime: &str,
 ) -> jni::errors::Result<Option<Vec<u8>>> {
@@ -366,7 +352,7 @@ fn read_item(
             if uri.is_null() {
                 return Ok(None);
             }
-            content_of(env, activity, &uri).map(Some)
+            content_of(env, context, &uri).map(Some)
         }
     }
 }
@@ -405,13 +391,13 @@ fn string_of(env: &mut Env<'_>, object: &JObject<'_>) -> jni::errors::Result<Opt
 /// What `uri` names, read whole through the activity's content resolver.
 fn content_of(
     env: &mut Env<'_>,
-    activity: &JObject<'_>,
+    context: &JObject<'_>,
     uri: &JObject<'_>,
 ) -> jni::errors::Result<Vec<u8>> {
     const CHUNK: usize = 64 * 1024;
     let resolver = env
         .call_method(
-            activity,
+            context,
             jni_str!("getContentResolver"),
             jni_sig!("()Landroid/content/ContentResolver;"),
             &[],
@@ -450,11 +436,11 @@ fn content_of(
 /// Sets the clip to one item for each of `texts`, each text with its HTML where it has some.
 fn set_clip(
     env: &mut Env<'_>,
-    activity: &JObject<'_>,
+    context: &JObject<'_>,
     texts: &[(String, Option<String>)],
     options: CopyOptions,
 ) -> jni::errors::Result<()> {
-    let manager = clipboard_manager(env, activity)?;
+    let manager = clipboard_manager(env, context)?;
     let description = clip_description_for(env, texts, options)?;
     let mut items = Vec::new();
     for (text, html) in texts {

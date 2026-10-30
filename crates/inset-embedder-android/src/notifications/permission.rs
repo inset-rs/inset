@@ -1,6 +1,6 @@
 //! The user's permission to notify. From Android 13, for an app that targets it, posting is the
-//! runtime permission `POST_NOTIFICATIONS`, which the activity asks for with the system's question
-//! (`requestPermissions`), the answer coming back through Inset's activity
+//! runtime permission `POST_NOTIFICATIONS`, which the activity in front asks for with the system's
+//! question (`requestPermissions`), the answer coming back through Inset's activity
 //! (`onRequestPermissionsResult`, which `NativeActivity` keeps to itself). Before that there is no
 //! question: the user turns the app's notifications off in its settings, which
 //! `areNotificationsEnabled` tells, and that is the whole state.
@@ -20,7 +20,6 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
 
-use android_activity::AndroidApp;
 use inset_embedder::{
     NotificationError, NotificationPermission, PermissionFuture, PermissionState,
 };
@@ -29,7 +28,7 @@ use jni::objects::{JClass, JIntArray, JObject, JValue};
 use jni::sys::jint;
 use jni::{Env, EnvUnowned, NativeMethod, jni_sig, jni_str};
 
-use crate::activity::{device_api_level, with_activity};
+use crate::activity::{Activities, clear_exception, device_api_level, with_application};
 use crate::answer::{Answer, answer};
 use crate::log::warn_to_log;
 
@@ -47,9 +46,8 @@ static PENDING: LazyLock<Mutex<HashMap<jint, Answer<PermissionState>>>> =
 static NEXT_REQUEST: AtomicI32 = AtomicI32::new(1);
 
 /// The user's permission to notify, as the system keeps it for the app.
-#[derive(Clone)]
 pub(super) struct Permission {
-    app: AndroidApp,
+    activities: Activities,
     /// Whether the system asks the user: Android 13 and later, for an app that targets it.
     asks: bool,
 }
@@ -57,18 +55,17 @@ pub(super) struct Permission {
 impl Permission {
     /// The permission, once the activity's answer method is registered; `None` under an activity
     /// that is not Inset's, which hands no answer on.
-    pub(super) fn new(app: AndroidApp) -> Option<Permission> {
-        let asks = with_activity(&app, |env, activity| {
-            register_answers(env, activity)?;
-            Ok(device_api_level() >= ASKED_FROM && target_api_level(env, activity)? >= ASKED_FROM)
+    pub(super) fn new(activities: Activities) -> Option<Permission> {
+        let asks = activities.with_front(register_answers).and_then(|()| {
+            with_application(|env, application| {
+                Ok(device_api_level() >= ASKED_FROM
+                    && target_api_level(env, application)? >= ASKED_FROM)
+            })
         });
         match asks {
-            Ok(asks) => Some(Permission { app, asks }),
+            Ok(asks) => Some(Permission { activities, asks }),
             Err(_) => {
-                let _ = with_activity(&app, |env, _| {
-                    env.exception_clear();
-                    Ok(())
-                });
+                clear_exception();
                 None
             }
         }
@@ -82,21 +79,23 @@ impl Permission {
         }
     }
 
-    /// The permission as the system tells it now.
+    /// The permission as the system tells it now: the application's, unless it is still to be
+    /// asked for, which the activity in front tells.
     fn current(&self) -> PermissionState {
-        let current = with_activity(&self.app, |env, activity| {
-            let enabled = notifications_enabled(env, activity)?;
-            if !self.asks {
-                return Ok(granted_if(enabled));
-            }
-            if has_permission(env, activity)? {
-                return Ok(granted_if(enabled));
-            }
-            Ok(if refused_once(env, activity)? {
-                PermissionState::Denied
-            } else {
-                PermissionState::NotAsked
-            })
+        let settled = with_application(|env, application| {
+            let enabled = notifications_enabled(env, application)?;
+            let settled = !self.asks || has_permission(env, application)?;
+            Ok(settled.then(|| granted_if(enabled)))
+        });
+        let current = settled.and_then(|settled| match settled {
+            Some(state) => Ok(state),
+            None => self.activities.with_front(refused_once).map(|refused| {
+                if refused {
+                    PermissionState::Denied
+                } else {
+                    PermissionState::NotAsked
+                }
+            }),
         });
         current.unwrap_or_else(|error| {
             warn_to_log!("inset: the permission to notify could not be read: {error}");
@@ -109,7 +108,7 @@ impl Permission {
         let request = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed);
         let (answer, answered) = answer(PermissionState::NotAsked);
         locked(&PENDING).insert(request, answer);
-        let asked = with_activity(&self.app, |env, activity| {
+        let asked = self.activities.with_front(|env, activity| {
             let permissions =
                 env.new_object_array(1, jni_str!("java/lang/String"), JObject::null())?;
             let permission = env.new_string(POST_NOTIFICATIONS)?;
@@ -124,10 +123,7 @@ impl Permission {
         });
         if let Err(error) = asked {
             warn_to_log!("inset: the permission to notify could not be asked for: {error}");
-            let _ = with_activity(&self.app, |env, _| {
-                env.exception_clear();
-                Ok(())
-            });
+            clear_exception();
             if let Some(answer) = locked(&PENDING).remove(&request) {
                 answer.give(self.current());
             }
@@ -176,7 +172,7 @@ fn register_answers(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::R
     unsafe { env.register_native_methods(&class, &method) }
 }
 
-/// What `InsetActivity.onRequestPermissionsResult` hands on, on the activity's thread: the answer
+/// What `InsetActivity.onRequestPermissionsResult` hands on, on the Java main thread: the answer
 /// for the one permission asked, or none where the question was interrupted.
 extern "system" fn on_permissions_result<'local>(
     mut env: EnvUnowned<'local>,
@@ -201,11 +197,11 @@ extern "system" fn on_permissions_result<'local>(
     .resolve::<LogErrorAndDefault>();
 }
 
-fn notifications_enabled(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Result<bool> {
+fn notifications_enabled(env: &mut Env<'_>, context: &JObject<'_>) -> jni::errors::Result<bool> {
     let service = env.new_string("notification")?;
     let manager = env
         .call_method(
-            activity,
+            context,
             jni_str!("getSystemService"),
             jni_sig!("(Ljava/lang/String;)Ljava/lang/Object;"),
             &[JValue::Object(&service)],
@@ -220,11 +216,11 @@ fn notifications_enabled(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::erro
     .z()
 }
 
-fn has_permission(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Result<bool> {
+fn has_permission(env: &mut Env<'_>, context: &JObject<'_>) -> jni::errors::Result<bool> {
     let permission = env.new_string(POST_NOTIFICATIONS)?;
     let granted = env
         .call_method(
-            activity,
+            context,
             jni_str!("checkSelfPermission"),
             jni_sig!("(Ljava/lang/String;)I"),
             &[JValue::Object(&permission)],
@@ -246,10 +242,10 @@ fn refused_once(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Resul
 }
 
 /// The release the app's package targets, which decides whether the system asks for it.
-fn target_api_level(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Result<i32> {
+fn target_api_level(env: &mut Env<'_>, context: &JObject<'_>) -> jni::errors::Result<i32> {
     let info = env
         .call_method(
-            activity,
+            context,
             jni_str!("getApplicationInfo"),
             jni_sig!("()Landroid/content/pm/ApplicationInfo;"),
             &[],

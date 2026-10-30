@@ -3,6 +3,12 @@
 Host implementation. Flutter analogue: the engine's Android embedder under
 `shell/platform/android`, whose activity and view are written in Java.
 
+## host.rs / app_thread.rs → the Android embedder's `FlutterActivity` and `FlutterEngine`
+
+- Change: every activity the system creates is a view of one running app, from its creation to its destruction, and the app outlives them all; Flutter's `FlutterActivity` starts an engine of its own unless it is handed a cached one.
+  Reason: platform — Inset's platform gives one app all of its views, as a desktop gives it its windows.
+  Affect: a second activity, or one created after the last was destroyed, opens a new view of the app already running, which keeps its state.
+
 ## view.rs
 
 - Change: the keyboard's height is taken as whatever the content rect loses at the bottom beyond the widest it has been at this window size.

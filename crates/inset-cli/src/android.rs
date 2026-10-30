@@ -81,9 +81,9 @@ const JAVA_RELEASE: &str = "11";
 /// can do. Saying anything at all stops that.
 const DEFAULT_CATEGORY: &str = "productivity";
 /// Every configuration change the activity absorbs rather than being recreated for, which
-/// is every one Android names. The activity must survive them all: winit allows one event
-/// loop per process, and a recreated activity calls `android_main` a second time in the
-/// same process, where a second loop cannot be made.
+/// is every one Android names. A recreated activity is a new view of the app, whose tree the
+/// framework builds again from nothing; absorbed, the change is new metrics for the view it is,
+/// which keeps its state, as Flutter's activity absorbs the same changes.
 const CONFIG_CHANGES: &str = "colorMode|density|fontScale|grammaticalGender|keyboard|keyboardHidden|layoutDirection|locale|mcc|mnc|navigation|orientation|screenLayout|screenSize|smallestScreenSize|touchscreen|uiMode";
 /// How long an emulator gets to boot.
 const BOOT_TIMEOUT: Duration = Duration::from_secs(240);
@@ -488,9 +488,9 @@ struct Manifest<'a> {
     category: &'a str,
 }
 
-/// The manifest around Inset's activity. `configChanges` keeps the activity, and so the
-/// app's state, through a rotation or a switch to dark mode, which winit reports as a
-/// resize; `adjustResize` has the system fit the window to the keyboard, which is how
+/// The manifest around Inset's activity. `configChanges` keeps the activity, and so its
+/// view's state, through a rotation or a switch to dark mode, which the host reports as new
+/// metrics; `adjustResize` has the system fit the window to the keyboard, which is how
 /// the host learns of it. Inset's file provider is declared at `<package>.inset.files`, not
 /// exported, granting each URI it shares; its notification receiver, not exported, hears only the
 /// app's own alarms; `<queries>` names viewing the links of [`QUERIED_SCHEMES`]; the app asks for
@@ -942,8 +942,7 @@ pub fn run(apk: &Apk, device: &Device) -> Result<()> {
         command
     };
     // Stopped before it is replaced: installing over a running app has the system relaunch
-    // the old activity, and the launch below then makes a second one in that same process,
-    // which is one more than winit's single event loop can serve.
+    // the old activity, and the launch below would then open a second one beside it.
     let _ = adb(&["shell", "am", "force-stop", &apk.package]).output();
     tools::run(adb(&["install", "-r", "-t"]).arg(&apk.path), "adb install")?;
     println!("launching {} on {}", apk.package, device.model);

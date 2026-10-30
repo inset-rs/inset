@@ -1,65 +1,74 @@
 //! The host capability the framework holds: [`Platform`] and what it hands out.
 //!
-//! A request from the framework only records what was asked for and wakes the activity's
-//! looper; the loop serves it on its next pass, since the window, the keyboard and the
-//! surface all belong to that thread.
+//! A request from the framework only records what was asked for and wakes the app's looper;
+//! the app's loop serves it on its next pass (`app_loop`), since the views, their surfaces and
+//! the framework all belong to the app's thread.
 
 use std::cell::{Cell, RefCell};
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use android_activity::AndroidAppWaker;
+use android_activity::AndroidApp;
 use inset_embedder::{
     Brightness, Clipboard, Dispatcher, FileDialogs, FontSource, ImageCodec, ImageCodecFuture,
     ImageDecodeError, ImageFrame, ImageFrameFuture, ImageRepetition, Locale, Notifications, Offset,
-    Opener, Platform, Screen, Screens, SystemChrome, SystemFontSource, TargetPlatform, ViewRef,
+    Opener, Platform, Screen, Screens, SystemChrome, SystemFontSource, TargetPlatform, View,
+    ViewId, ViewRef,
 };
+use ndk::looper::ForeignLooper;
 
+use crate::activity::Activities;
 use crate::chrome::AndroidChrome;
 use crate::clipboard::AndroidClipboard;
 use crate::file_dialogs::DocumentPickers;
 use crate::notifications::AndroidNotifications;
 use crate::opener::IntentOpener;
-use crate::view::{AndroidView, VIEW};
+use crate::view::AndroidView;
 
 /// The long-lived host capability held by the application.
 pub struct AndroidPlatform {
-    pub(crate) view: Rc<AndroidView>,
-    pub(crate) frame_requested: Cell<bool>,
+    /// The activities attached to the app, each a view.
+    pub(crate) activities: Activities,
+    /// The views, one an activity, by their ids.
+    views: RefCell<BTreeMap<ViewId, Rc<AndroidView>>>,
+    /// The views that asked for a frame since their last one.
+    frames_requested: RefCell<BTreeSet<ViewId>>,
     /// When the framework asked to be woken, shared with whatever thread asked.
     pub(crate) wakes: Arc<Wakes>,
     origin: Instant,
     pub(crate) brightness: Cell<Brightness>,
     pub(crate) locales: RefCell<Vec<Locale>>,
-    /// The screen the activity is on, as the app was last told it; `None` until the system first
-    /// describes it.
+    /// The screen the activities are on, as the app was last told it; `None` until the system
+    /// first describes it.
     pub(crate) screen: RefCell<Option<Screen>>,
     pub(crate) image_loader: RefCell<Option<valo_codec::ImageLoader>>,
     pub(crate) images: RefCell<Option<valo::ImageContext>>,
     chrome: AndroidChrome,
     pub(crate) clipboard: AndroidClipboard,
-    /// The document pickers, where the activity is Inset's.
+    /// The document pickers, where the activities are Inset's.
     file_dialogs: Option<DocumentPickers>,
     opener: IntentOpener,
-    /// The system's notifications, where the activity is Inset's.
+    /// The system's notifications, where the activities are Inset's.
     notifications: Option<AndroidNotifications>,
 }
 
 impl AndroidPlatform {
-    pub(crate) fn new(
-        view: Rc<AndroidView>,
-        app: &android_activity::AndroidApp,
-    ) -> AndroidPlatform {
-        let waker = app.create_waker();
+    /// The platform of the app's thread, whose looper is `looper`, with `first`, the activity
+    /// that started the app, attached as `view`: what the platform asks of Java at its start
+    /// goes through it.
+    pub(crate) fn new(looper: ForeignLooper, first: AndroidApp, view: ViewId) -> AndroidPlatform {
+        let activities = Activities::default();
+        activities.attach(view, first);
         AndroidPlatform {
-            view,
-            frame_requested: Cell::new(false),
+            views: RefCell::default(),
+            frames_requested: RefCell::default(),
             wakes: Arc::new(Wakes {
                 timer_wakeup: Mutex::new(None),
                 wake_now_requested: AtomicBool::new(false),
-                waker,
+                looper,
             }),
             origin: Instant::now(),
             brightness: Cell::new(Brightness::Light),
@@ -67,12 +76,59 @@ impl AndroidPlatform {
             screen: RefCell::new(None),
             image_loader: RefCell::new(None),
             images: RefCell::new(None),
-            chrome: AndroidChrome::new(app.clone()),
-            clipboard: AndroidClipboard::new(app.clone()),
-            file_dialogs: DocumentPickers::new(app.clone()),
-            opener: IntentOpener::new(app.clone()),
-            notifications: AndroidNotifications::new(app.clone()),
+            chrome: AndroidChrome::new(activities.clone()),
+            clipboard: AndroidClipboard::new(),
+            file_dialogs: DocumentPickers::new(activities.clone()),
+            opener: IntentOpener::new(activities.clone()),
+            notifications: AndroidNotifications::new(activities.clone()),
+            activities,
         }
+    }
+
+    /// A view of the app's from now on.
+    pub(crate) fn add_view(&self, view: Rc<AndroidView>) {
+        self.views.borrow_mut().insert(view.id(), view);
+    }
+
+    /// `view`, gone from the app, with whatever it asked for.
+    pub(crate) fn remove_view(&self, view: ViewId) -> Option<Rc<AndroidView>> {
+        self.frames_requested.borrow_mut().remove(&view);
+        self.views.borrow_mut().remove(&view)
+    }
+
+    pub(crate) fn android_view(&self, view: ViewId) -> Option<Rc<AndroidView>> {
+        self.views.borrow().get(&view).cloned()
+    }
+
+    pub(crate) fn any_view_has_a_window(&self) -> bool {
+        self.views.borrow().values().any(|view| view.has_window())
+    }
+
+    /// Whether a view with a window asked for a frame. One without waits for its window.
+    pub(crate) fn frames_wanted(&self) -> bool {
+        !self.frames_due().is_empty()
+    }
+
+    /// The views with a window that asked for a frame, their requests answered by the frame
+    /// about to be drawn; one without a window keeps its request.
+    pub(crate) fn take_frame_requests(&self) -> Vec<ViewId> {
+        let due = self.frames_due();
+        let mut requested = self.frames_requested.borrow_mut();
+        for view in &due {
+            requested.remove(view);
+        }
+        due
+    }
+
+    /// The views with a window that asked for a frame.
+    fn frames_due(&self) -> Vec<ViewId> {
+        let views = self.views.borrow();
+        self.frames_requested
+            .borrow()
+            .iter()
+            .copied()
+            .filter(|view| views.get(view).is_some_and(|view| view.has_window()))
+            .collect()
     }
 
     pub(crate) fn elapsed(&self) -> Duration {
@@ -86,7 +142,7 @@ impl AndroidPlatform {
     }
 }
 
-/// The two reasons the loop may have to wake the framework, and the looper to wake so it
+/// The two reasons the loop may have to wake the framework, and the app's looper to wake so it
 /// does.
 ///
 /// These are two separate things. The timer wakeup waits for its own time to arrive. The
@@ -97,7 +153,7 @@ pub(crate) struct Wakes {
     timer_wakeup: Mutex<Option<Instant>>,
     /// A ready task asking for the framework to be woken.
     wake_now_requested: AtomicBool,
-    waker: AndroidAppWaker,
+    looper: ForeignLooper,
 }
 
 impl Wakes {
@@ -113,14 +169,14 @@ impl Wakes {
         *wakeup = wanted;
         drop(wakeup);
         if sooner {
-            self.waker.wake();
+            self.looper.wake();
         }
     }
 
     /// Asks for the framework to be woken as soon as the loop can.
     fn request_wake_now(&self) {
         self.wake_now_requested.store(true, Ordering::Release);
-        self.waker.wake();
+        self.looper.wake();
     }
 
     /// When the loop must next be awake for a timer, if there is such a time.
@@ -152,10 +208,12 @@ impl Platform for AndroidPlatform {
         TargetPlatform::Android
     }
 
-    /// The activity's window is the one view: a frame of any other is no frame of the app's.
-    fn request_frame(&self, view: inset_embedder::ViewId) {
-        if view == VIEW && !self.frame_requested.replace(true) {
-            self.wakes.waker.wake();
+    /// A view without a window keeps the request until its window arrives.
+    fn request_frame(&self, view: ViewId) {
+        if self.views.borrow().contains_key(&view)
+            && self.frames_requested.borrow_mut().insert(view)
+        {
+            self.wakes.looper.wake();
         }
     }
 
@@ -169,13 +227,17 @@ impl Platform for AndroidPlatform {
         })
     }
 
-    /// The activity's window, the one view the system gives the app.
+    /// The activities' windows, one a view, which the system gives the app.
     fn views(&self) -> Vec<ViewRef> {
-        vec![Rc::clone(&self.view) as ViewRef]
+        self.views
+            .borrow()
+            .values()
+            .map(|view| Rc::clone(view) as ViewRef)
+            .collect()
     }
 
-    fn view(&self, id: inset_embedder::ViewId) -> Option<ViewRef> {
-        (id == VIEW).then(|| Rc::clone(&self.view) as ViewRef)
+    fn view(&self, id: ViewId) -> Option<ViewRef> {
+        self.android_view(id).map(|view| view as ViewRef)
     }
 
     /// The system's clipboard, as far as an app without Java code reaches it (`clipboard.rs`).
@@ -206,7 +268,7 @@ impl Platform for AndroidPlatform {
         Some(&self.chrome)
     }
 
-    /// The one screen the activity is on (`display.rs`).
+    /// The one screen the activities are on (`display.rs`).
     fn screens(&self) -> Option<&dyn Screens> {
         Some(self)
     }
@@ -265,7 +327,7 @@ impl Screens for AndroidPlatform {
 }
 
 /// The host's threads as any thread reaches them: a wake is a time the loop keeps and a
-/// wake of the activity's looper; work goes to a thread of its own.
+/// wake of the app's looper; work goes to a thread of its own.
 struct AndroidDispatcher {
     wakes: Arc<Wakes>,
 }

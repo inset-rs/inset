@@ -3,7 +3,7 @@
 //! (`FlutterJNI.updateDisplayMetrics`, `setRefreshRateFPS`).
 //!
 //! `NativeActivity` hands out no `Display`, so it is read through JNI, from the activity's window
-//! manager, on the loop's thread. The whole screen and what the system's bars leave of it come
+//! manager, on the app's thread. The whole screen and what the system's bars leave of it come
 //! from the window manager's largest window, as Flutter's do, from API 30, which has it; before,
 //! the screen is the display's real size and the bars are not known.
 

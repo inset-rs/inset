@@ -2098,6 +2098,7 @@ dependencies = [
  "inset-embedder",
  "jni",
  "ndk",
+ "ndk-context",
  "ndk-sys",
  "pollster",
  "raw-window-handle",
