@@ -95,6 +95,9 @@ mod client {
                 .map(|title| (title, appkit::WeakWindow::titled(title)));
             appkit::press_close_button(CLOSED_BY_ITS_BUTTON);
             self.windows[1].close();
+            // The app is not brought forward at launch, so the window kept open can be behind
+            // other applications' windows, where a covered window takes no frames.
+            appkit::order_in_front_of_everything(KEPT_OPEN);
             self.closed = Some(closed.into());
             self.closed_at = Instant::now();
             self.request_frame_of_the_window_kept_open();

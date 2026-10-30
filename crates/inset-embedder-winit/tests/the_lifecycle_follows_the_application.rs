@@ -117,6 +117,17 @@ mod client {
             client
         }
 
+        /// Takes the window once it opens and puts it in front of every application's windows:
+        /// the app is not brought forward at launch, so its window can open behind them, where a
+        /// covered window is hidden.
+        fn take_the_window(&mut self) {
+            let had_it = !self.windows.is_empty();
+            support::take_opened_windows(&self.platform, &mut self.requested, &mut self.windows);
+            if !had_it && !self.windows.is_empty() {
+                appkit::order_in_front_of_everything(WINDOW_TITLE);
+            }
+        }
+
         fn look_again_soon(&self) {
             self.platform
                 .dispatcher()
@@ -148,7 +159,7 @@ mod client {
         }
 
         fn wake(&mut self, _elapsed: Duration) {
-            support::take_opened_windows(&self.platform, &mut self.requested, &mut self.windows);
+            self.take_the_window();
             if !self.windows.is_empty() {
                 self.go_on();
             }
@@ -157,7 +168,7 @@ mod client {
 
         fn frame(&mut self, _views: &[ViewId], _frame: Frame) {}
         fn view_added(&mut self, _id: ViewId) {
-            support::take_opened_windows(&self.platform, &mut self.requested, &mut self.windows);
+            self.take_the_window();
             if !self.windows.is_empty() {
                 self.go_on();
             }

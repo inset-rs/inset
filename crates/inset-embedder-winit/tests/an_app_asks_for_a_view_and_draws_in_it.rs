@@ -84,6 +84,9 @@ mod client {
             if let Some(window) = self.windows.first()
                 && !was_made
             {
+                // The app is not brought forward at launch, so its window can open behind other
+                // applications' windows, where a covered window takes no frames.
+                appkit::order_in_front_of_everything(TITLE);
                 self.platform.request_frame(window.view().id());
             }
         }

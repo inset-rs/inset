@@ -19,12 +19,13 @@ use winit::window::Window;
 
 use pasteboard::Pasteboard;
 
-use super::absent::{NoDisplayLink, NoVisibilityNotices};
+use super::absent::{NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices};
 use super::apple::{image_io_decoders, notifications};
 use super::{
-    ApplicationControl, ApplicationLifecycle, FramePresentation, ImageDecoding, NativeMenus,
-    OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard, SystemMedia,
-    SystemNotifications, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
+    ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, ImageDecoding,
+    NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
+    SystemMedia, SystemNotifications, TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion,
+    WindowVisibility, WorkQueue,
 };
 use crate::notifications::NotificationActivations;
 
@@ -74,6 +75,10 @@ impl WindowVisibility for Ios {
     type Notices = NoVisibilityNotices;
 }
 
+impl TrackpadTouches for Ios {
+    type Observer = NoTrackpadTouchObserver;
+}
+
 /// AVFoundation's players and cameras, which macOS shares.
 impl SystemMedia for Ios {
     fn players() -> Option<Rc<dyn Players>> {
@@ -102,6 +107,7 @@ impl SystemNotifications for Ios {
     }
 }
 
+impl EventLoopSetup for Ios {}
 impl WindowMotion for Ios {}
 impl WindowChrome for Ios {}
 impl Screens for Ios {}

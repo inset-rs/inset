@@ -1,5 +1,5 @@
-//! What AppKit adds to winit, one concern per module: how a window moves and the screens it can
-//! be on (`screens`), what its configuration asks beyond winit's attributes (`window_chrome`), how
+//! What AppKit adds to winit, one concern per module: what of the application winit's event loop
+//! leaves to it (`event_loop`), how a window moves and the screens it can be on (`screens`), what its configuration asks beyond winit's attributes (`window_chrome`), how
 //! a frame reaches the display (`frame_presentation`, `display_links`) and how a wait on a
 //! screen's vsync is served (`vsync_waiter`), the pointer (`pointer`), native surfaces in its
 //! view's layer (`composition`, over the compositor iOS shares, `apple/composition`), whether a window is visible, for the app (`visibility`), the menus: the menu
@@ -25,6 +25,7 @@ mod app_delegate;
 mod app_lifecycle;
 mod composition;
 mod display_links;
+mod event_loop;
 mod file_dialogs;
 mod frame_presentation;
 mod menus;
@@ -33,6 +34,7 @@ mod pasteboard;
 mod pointer;
 mod screens;
 mod system_changes;
+mod trackpad_touches;
 mod visibility;
 mod vsync_waiter;
 mod window_chrome;

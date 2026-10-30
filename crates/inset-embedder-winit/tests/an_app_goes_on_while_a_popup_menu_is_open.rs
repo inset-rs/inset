@@ -51,6 +51,9 @@ mod client {
     use crate::TEST;
     use crate::support::{self, appkit};
 
+    /// The title of the test's one window, by which AppKit finds it.
+    const TITLE: &str = "drawing under a menu";
+
     /// How long the menu stays open before Escape closes it.
     const MENU_OPEN_FOR: Duration = Duration::from_millis(600);
     /// The stretch of it counted: after the menu has surely opened, before Escape.
@@ -75,7 +78,7 @@ mod client {
 
     impl MenuClient {
         pub(crate) fn new(platform: PlatformRef) -> MenuClient {
-            support::request_window(&platform, support::titled("drawing under a menu"));
+            support::request_window(&platform, support::titled(TITLE));
             MenuClient {
                 platform,
                 frames: Vec::new(),
@@ -191,6 +194,9 @@ mod client {
             let waiter = self.platform.vsync_waiter().expect("a vsync waiter");
             let (waits, stop) = (Arc::clone(&self.waits), Arc::clone(&self.stop_waiting));
             std::thread::spawn(move || wait_on(waiter, screen, waits, stop));
+            // The app is not brought forward at launch, so its window can open behind other
+            // applications' windows, where a covered window takes no frames.
+            appkit::order_in_front_of_everything(TITLE);
             self.platform.request_frame(id);
             self.open_menu(id);
         }

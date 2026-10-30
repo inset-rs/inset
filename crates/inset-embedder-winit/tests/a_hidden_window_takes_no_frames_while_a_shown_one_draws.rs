@@ -83,6 +83,9 @@ mod client {
                 return;
             }
             self.windows[0].hide();
+            // The app is not brought forward at launch, so its window can open behind other
+            // applications' windows, where a covered window takes no frames.
+            support::appkit::order_in_front_of_everything("shown");
             self.hidden_at = Some(Instant::now());
             self.request_a_frame_of_each_window();
         }

@@ -10,7 +10,8 @@ use crate::images::CreateImageLoader;
 use crate::main_loop::{MainLoop, MainLoopEvent, MainLoopProxy};
 use crate::notifications::NotificationActivations;
 use crate::os::{
-    ApplicationLifecycle, NativeMenus, SystemChanges, SystemNotifications, SystemRequests, ThisOs,
+    ApplicationLifecycle, EventLoopSetup, SystemChanges, SystemNotifications, SystemRequests,
+    ThisOs,
 };
 
 /// What starts the app, on the platform it is handed, and answers the client the embedder drives.
