@@ -116,8 +116,9 @@ impl WinitPlatform {
         self.state.images().store()
     }
 
-    /// What only macOS offers an app: hearing a reopen, a window that slides in, and hiding the
-    /// app. `None` on every other system.
+    /// What only macOS offers an app: hearing a reopen, a window that slides in, hiding the app,
+    /// surfaces in a layer the app places, and a system layer on a surface. `None` on every other
+    /// system.
     pub fn macos(&self) -> Option<&MacOs> {
         self.macos.as_ref()
     }

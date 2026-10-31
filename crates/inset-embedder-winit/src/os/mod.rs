@@ -66,6 +66,10 @@ use crate::system_changes::SystemChange;
 use crate::system_requests::SystemRequest;
 use crate::vsync_waiter::LoopVsyncWaiter;
 
+/// What only macOS's compositor offers an app beyond `Compositor` (`macos.rs`).
+#[cfg(target_os = "macos")]
+pub(crate) use apple::composition::{detached_root, show_layer_on};
+
 /// The system this build targets.
 #[cfg(target_os = "macos")]
 pub(crate) type ThisOs = macos::AppKit;
