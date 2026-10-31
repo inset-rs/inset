@@ -6,6 +6,7 @@ use anyhow::{Context, Result, bail};
 use cargo_metadata::{MetadataCommand, Package, TargetKind};
 use serde::Deserialize;
 
+use crate::carried;
 use crate::file_associations;
 use crate::usage_descriptions;
 
@@ -111,6 +112,27 @@ pub struct MacosMetadata {
     /// An `.entitlements` plist, relative to the package root, that the bundle is signed with:
     /// what the hardened runtime otherwise denies, such as memory a JIT makes executable.
     pub entitlements: Option<PathBuf>,
+    /// Executables of the app's workspace the bundle carries in `Contents/Helpers`, built with
+    /// the app.
+    pub helpers: Vec<Helper>,
+    /// Libraries of the app's workspace the bundle carries in `Contents/Frameworks`, built with
+    /// the app.
+    pub libraries: Vec<Library>,
+}
+
+/// A binary target of a package of the app's workspace, which the macOS bundle carries.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Helper {
+    pub package: String,
+    pub bin: String,
+}
+
+/// A `cdylib` target of a package of the app's workspace, which the macOS bundle carries: `lib`
+/// is the target's name, as `[lib] name` gives it.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Library {
+    pub package: String,
+    pub lib: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -212,6 +234,7 @@ impl Project {
         };
         file_associations::check(&inset.file_associations)?;
         usage_descriptions::check(&inset.usage_descriptions)?;
+        carried::check(&inset.macos, &metadata)?;
         let mut macos = inset.macos;
         macos.entitlements = macos
             .entitlements
@@ -345,6 +368,27 @@ mod tests {
     }
 
     #[test]
+    fn a_macos_bundle_names_the_helpers_and_libraries_it_carries() {
+        let metadata: Metadata = serde_json::from_value(serde_json::json!({
+            "macos": {
+                "helpers": [{ "package": "waos-window", "bin": "waos-program-loader" }],
+                "libraries": [{ "package": "waos-window", "lib": "waos_window" }],
+            }
+        }))
+        .unwrap();
+        let helper = &metadata.macos.helpers[0];
+        assert_eq!(
+            (helper.package.as_str(), helper.bin.as_str()),
+            ("waos-window", "waos-program-loader")
+        );
+        let library = &metadata.macos.libraries[0];
+        assert_eq!(
+            (library.package.as_str(), library.lib.as_str()),
+            ("waos-window", "waos_window")
+        );
+    }
+
+    #[test]
     fn metadata_defaults_when_keys_are_missing() {
         let metadata: Metadata =
             serde_json::from_value(serde_json::json!({ "name": "X" })).unwrap();
@@ -352,5 +396,6 @@ mod tests {
         assert!(metadata.identifier.is_none());
         assert!(metadata.resources.is_empty());
         assert!(metadata.ios.team.is_none());
+        assert!(metadata.macos.helpers.is_empty() && metadata.macos.libraries.is_empty());
     }
 }

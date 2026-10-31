@@ -9,7 +9,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result};
 
 use crate::cargo::{self, Artifact, Build};
 use crate::project::{Profile, Project};
@@ -18,17 +18,16 @@ use crate::tools;
 const WASM_TARGET: &str = "wasm32-wasip2";
 
 pub fn build(project: &Project, profile: Profile) -> Result<PathBuf> {
-    if project.library.is_none() {
-        bail!(
-            "a wasm component is built from a library: add `crate-type = [\"cdylib\", \"rlib\"]` under [lib] in Cargo.toml"
-        );
-    }
+    let library = project.library.as_deref().context(
+        "a wasm component is built from a library: add `crate-type = [\"cdylib\", \"rlib\"]` under [lib] in Cargo.toml",
+    )?;
     tools::ensure_rust_target(&project.root, WASM_TARGET)?;
     let wasm = cargo::build(&Build {
         project,
+        package: &project.package,
         profile,
         triple: Some(WASM_TARGET),
-        artifact: Artifact::Wasm,
+        artifact: Artifact::Wasm(library),
         env: Vec::new(),
     })?;
 

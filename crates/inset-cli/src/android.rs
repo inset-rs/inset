@@ -329,9 +329,10 @@ pub fn build(project: &Project, profile: Profile, abi: Abi) -> Result<Apk> {
     tools::ensure_rust_target(&project.root, abi.triple())?;
     let shared_library = cargo::build(&Build {
         project,
+        package: &project.package,
         profile,
         triple: Some(abi.triple()),
-        artifact: Artifact::Library,
+        artifact: Artifact::Library(library),
         env: linker_env(ndk, abi, min_sdk)?,
     })?;
 

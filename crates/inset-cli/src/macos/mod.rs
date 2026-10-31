@@ -1,12 +1,13 @@
 //! macOS: the `.app`, and the disk image around it, put together and signed here as the iOS app
 //! and the Android package are, and notarized when the environment holds the credentials.
 //!
-//! The bundle holds the app's executable in `Contents/MacOS`, its `Info.plist`, and its icon and
-//! resources in `Contents/Resources`. It is signed with `APPLE_SIGNING_IDENTITY`'s identity, else
-//! the keychain's Apple Development certificate, so that permission grants such as Accessibility
-//! survive a rebuild, else ad hoc; with an identity of the keychain's, under the hardened runtime.
-//! Its entitlements are the app's own and the hardened runtime's leave to open each device it
-//! declares a usage description for. A build for distribution (`build macos`, `build dmg`) is
+//! The bundle holds the app's executable in `Contents/MacOS`, its `Info.plist`, its icon and
+//! resources in `Contents/Resources`, and the helpers and libraries it carries (`carried.rs`). It
+//! is signed with `APPLE_SIGNING_IDENTITY`'s identity, else the keychain's Apple Development
+//! certificate, so that permission grants such as Accessibility survive a rebuild, else ad hoc;
+//! with an identity of the keychain's, under the hardened runtime. It is signed inside out: each
+//! helper and library first, with no entitlements of its own, then the bundle, with the app's own
+//! and the hardened runtime's leave to open each device it declares a usage description for. A build for distribution (`build macos`, `build dmg`) is
 //! notarized when the environment holds the credentials (`notarization`); `run` never is.
 
 mod disk_image;
@@ -21,6 +22,7 @@ use plist::{Dictionary, Value};
 
 use crate::apple::{self, SigningIdentity, SigningSettings};
 use crate::cargo::{self, Artifact, Build};
+use crate::carried;
 use crate::file_associations;
 use crate::icons;
 use crate::project::{Profile, Project};
@@ -115,7 +117,8 @@ impl Signing {
         })
     }
 
-    /// How the bundle itself is signed.
+    /// How the bundle is signed, with `entitlements`, and each helper and library in it, with
+    /// none.
     fn settings<'a>(&'a self, entitlements: Option<&'a Path>) -> SigningSettings<'a> {
         SigningSettings {
             identity: &self.identity,
@@ -162,11 +165,13 @@ fn make_app(project: &Project, profile: Profile, signing: &Signing) -> Result<Pa
     }
     let executable = cargo::build(&Build {
         project,
+        package: &project.package,
         profile,
         triple: None,
-        artifact: Artifact::Executable,
+        artifact: Artifact::Executable(&project.bin),
         env: Vec::new(),
     })?;
+    let carried = carried::build(project, profile)?;
     let out = project.out_dir("macos", profile);
     let app = out.join(format!("{}.app", project.name));
     if app.exists() {
@@ -183,6 +188,9 @@ fn make_app(project: &Project, profile: Profile, signing: &Signing) -> Result<Pa
         &Value::Dictionary(info_plist(project, icon)),
     )?;
     copy_resources(project, &resources)?;
+    for placed in carried::put_in(&contents, &carried)? {
+        apple::sign(&placed, &signing.settings(None))?;
+    }
     let entitlements = write_entitlements(project, &out)?;
     apple::sign(&app, &signing.settings(entitlements.as_deref()))?;
     Ok(app)

@@ -50,9 +50,10 @@ impl Format {
 pub fn build(project: &Project, profile: Profile, format: Format) -> Result<Vec<PathBuf>> {
     let executable = cargo::build(&Build {
         project,
+        package: &project.package,
         profile,
         triple: None,
-        artifact: Artifact::Executable,
+        artifact: Artifact::Executable(&project.bin),
         env: Vec::new(),
     })?;
     let out = project.out_dir(format.dir_name(), profile);
