@@ -1,11 +1,11 @@
-//! Images, surfaces and drawn pixels for tests, without a host.
+//! Images, composition layers and drawn pixels for tests, without a host.
 //!
 //! An [`Image`](crate::Image) only exists once pixels have been uploaded to a GPU, so a test of
 //! anything above the host — a cache, a layout, a widget — would otherwise have no image to work
 //! with. This makes one directly, on a device of its own that no window is attached to, and
 //! draws a [`Picture`](crate::Picture) there to read back what it shows. A
-//! [`Surface`](crate::Surface) only exists where a host composites, so this makes one nobody
-//! feeds.
+//! [`CompositionLayer`](crate::CompositionLayer) only exists where a host composites, so this
+//! makes one nobody feeds.
 //!
 //! Behind the `test-support` feature, so an application never builds it. A test crate asks for
 //! it as a dev-dependency:
@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use valo::{Context, ImageDesc};
 
-use crate::{Image, Picture, Surface, SurfaceFrame, SurfaceParent};
+use crate::{CompositionLayer, HardwareBuffer, Image, Picture, Placement};
 
 /// One device for the whole test process, created on first use.
 ///
@@ -98,21 +98,21 @@ fn headless_context() -> Context {
     context
 }
 
-/// A surface no producer feeds, as the handle a compositor hands out. Enough to place one in
-/// a scene and compare the placement.
-pub fn idle_surface() -> Arc<dyn Surface> {
-    Arc::new(IdleSurface)
+/// A composition layer no producer feeds, as the handle a compositor hands out. Enough to place
+/// one in a scene and compare the placement.
+pub fn idle_layer() -> Arc<dyn CompositionLayer> {
+    Arc::new(IdleLayer)
 }
 
-/// What [`idle_surface`] hands out: presents go nowhere, and children are idle too.
-struct IdleSurface;
+/// What [`idle_layer`] hands out: presents go nowhere.
+struct IdleLayer;
 
-impl Surface for IdleSurface {
-    fn present(&self, _frame: SurfaceFrame, _released: Box<dyn FnOnce() + Send + Sync>) {}
-}
-
-impl SurfaceParent for IdleSurface {
-    fn open_child(&self, _opaque: bool) -> Arc<dyn Surface> {
-        idle_surface()
+impl CompositionLayer for IdleLayer {
+    fn present(
+        &self,
+        _buffer: HardwareBuffer,
+        _children: Vec<(Arc<dyn CompositionLayer>, Placement)>,
+        _released: Box<dyn FnOnce() + Send + Sync>,
+    ) {
     }
 }

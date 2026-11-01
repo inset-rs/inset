@@ -1,6 +1,6 @@
 //! The screens' refreshes, for whoever paces by them beside the framework: Flutter's
 //! `VsyncWaiter`, which a host with screen ticks hands out for every screen it has, and the
-//! observer it calls. A native surface's producer, or a host of programs that draw for their own
+//! observer it calls. A composition layer's producer, or a host of programs that draw for their own
 //! views, waits here on the same refreshes the host draws the framework's frames at.
 //!
 //! The invariant: one wait is one call, at the first refresh of its screen after it was asked,

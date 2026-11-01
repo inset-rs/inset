@@ -94,9 +94,9 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - `EmbedderClient::view_metrics_changed`, then `EmbedderClient::frame`
 - Draw the new size's frame inside the system's resize callback, so the size and the picture reach the screen in one transaction.
 
-**Native surfaces**
-- `Platform::compositor`, `Compositor::root`, `SurfaceParent::open_child`, `Surface::present`, `SurfaceFrame`, `slices`, `Slices::surfaces`, `Slices::picture_with_room`, `Slices::paints`, `SurfacePlacement`, `Mutator`
-- Place a scene's surfaces beneath the picture its slices make, with room made for each, in the same native transaction, applying as much of each surface's transforms and clips as the compositor can and never its opacity, which the room carries; draw nothing for a scene that paints nothing besides its surfaces where the system shows the surfaces itself, and one empty frame when such a scene follows one that painted; place a surface frame's children beneath its buffer in the same transaction as the buffer, moved, clipped and scaled with their parent; and run each buffer's `released` once the compositor is done with it: where the system only answers whether it still is, as Core Animation does, ask at the surface's next present and when it goes.
+**Composition layers**
+- `Platform::compositor`, `Compositor::make_layer`, `CompositionLayer::present`, `HardwareBuffer`, `slices`, `Slices::composition_layers`, `Slices::picture_with_room`, `Slices::paints`, `Placement`, `Mutator`
+- Place the composition layers a scene embeds beneath the picture its slices make, with room made for each, in the same native transaction, applying as much of each layer's transforms and clips as the compositor can and never its opacity, which the room carries; draw nothing for a scene that paints nothing besides its layers where the system shows the layers itself, and one empty frame when such a scene follows one that painted; show a present's children beneath its buffer in the same transaction as the buffer, moved, clipped and scaled with their parent, and let go of the children it no longer names; give a layer one placer at a time, the first to place it, until that placer lets it go; and run each buffer's `released` once the compositor is done with it: where the system only answers whether it still is, as Core Animation does, ask at the layer's next present and when it goes.
 
 ## Input
 
@@ -159,8 +159,8 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - Open each in the app the system gives it, and answer `NoApp` where the system says none takes it; share a file through the system where another app cannot read it by its path; answer `can_open_link` only where the system answers for every scheme, or for the schemes the app declared, and `None` otherwise; fail what the system has no counterpart for, such as revealing a file on a phone.
 
 **Players and cameras**
-- `Platform::players`, `Players::open`, `PickedFile::url`, `MediaPlayer`, `PlayerState`, `PlayerStatus`, `Platform::cameras`, `Cameras::cameras`, `Camera`, `CameraId`, `CameraFacing`, `Cameras::open_session`, `CaptureSession`, `CameraState`, `CameraStatus`, `PhotoOutput`, `Photo`, `MovieOutput`, `MovieOptions`, `FrameReader`, `PixelBuffer`, `MediaError`
-- Play and capture with the system's own media stack, answering `None` where it has none; send a picture to one destination at a time, drawn by the system into a surface's own layer, clipped and scaled with it, or handed to a frame reader as the newest GPU-importable buffer; read a player's or a session's state when asked and resolve its `changed` future at every change and when it goes; ask the user for the camera, and the microphone where a recording wants sound, at a session's start; and answer photos encoded and recordings written by the system.
+- `Platform::players`, `Players::open`, `PickedFile::url`, `MediaPlayer`, `PlayerState`, `PlayerStatus`, `Platform::cameras`, `Cameras::cameras`, `Camera`, `CameraId`, `CameraFacing`, `Cameras::open_session`, `CaptureSession`, `CameraState`, `CameraStatus`, `PhotoOutput`, `Photo`, `MovieOutput`, `MovieOptions`, `FrameReader`, `VideoFrame`, `MediaError`
+- Play and capture with the system's own media stack, answering `None` where it has none; send a picture to one destination at a time, drawn by the system into a layer that is a composition layer's content, clipped and scaled with it, or handed to a frame reader as the newest GPU-importable `VideoFrame`; read a player's or a session's state when asked and resolve its `changed` future at every change and when it goes; ask the user for the camera, and the microphone where a recording wants sound, at a session's start; and answer photos encoded and recordings written by the system.
 
 **Dialogs**
 - none yet
@@ -197,7 +197,7 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 ## Robustness
 
 **Threads**
-- `Dispatcher`, `Compositor`, `Surface` and `VsyncWaiter`, the parts other threads may call
+- `Dispatcher`, `Compositor`, `CompositionLayer` and `VsyncWaiter`, the parts other threads may call
 - Call the client only on the main thread, and reach each native window on the thread that owns it.
 
 **Re-entrancy**

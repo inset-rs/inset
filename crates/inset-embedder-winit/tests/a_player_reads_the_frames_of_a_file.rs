@@ -27,7 +27,7 @@ mod player {
     use std::task::{Context, Poll, Waker};
     use std::time::{Duration, Instant};
 
-    use inset_embedder::{MediaChangeFuture, PickedFile, PlayerStatus, Size, ViewId};
+    use inset_embedder::{MediaChangeFuture, PickedFile, PlayerStatus, Size};
     use objc2_core_video::{
         CVPixelBufferGetHeight, CVPixelBufferGetIOSurface, CVPixelBufferGetPixelFormatType,
         CVPixelBufferGetWidth, kCVPixelFormatType_32BGRA,
@@ -59,9 +59,9 @@ mod player {
 
         let compositor =
             inset_embedder_winit::test_support::compositor().expect("the system's compositor");
-        let surface = compositor.root(ViewId(0)).open_child(false);
-        player.set_video_surface(Some(surface));
-        player.set_video_surface(None);
+        let layer = compositor.make_layer(false);
+        player.set_video_layer(Some(layer));
+        player.set_video_layer(None);
 
         let frames = player.read_frames();
         player.play();

@@ -28,7 +28,7 @@ mod windows;
 pub use clipboard::MockClipboard;
 pub use file_dialogs::{AskedDialog, MemoryFile, MemoryFolder, MockFileDialogs};
 pub use media::{
-    MockCameras, MockCaptureSession, MockCompositor, MockPlayer, MockPlayers, OpenedSurface,
+    MadeLayer, MockCameras, MockCaptureSession, MockCompositor, MockPlayer, MockPlayers,
     PlayerCall, SessionCall,
 };
 pub use menus::{

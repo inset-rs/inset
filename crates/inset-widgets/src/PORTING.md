@@ -112,10 +112,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the host makes the windows behind `Platform::request_view`, so what differs between platforms is the host's, and the owner only matches arriving views to requests.
   Affect: no app or test installs a windowing owner of its own; a test stands in for windows through its platform's `request_view`.
 
-## widgets/surface_view.rs → platform views (`AndroidView`, `UiKitView`, `Texture`)
+## widgets/composition_layer_view.rs → platform views (`AndroidView`, `UiKitView`, `Texture`)
 
-- Change: one `SurfaceView` widget shows a host surface on every platform, where Flutter has a widget per platform and `Texture`.
-  Reason: platform — a surface is a rectangle and a buffer on every compositor, and only the buffer's type differs, which the surface carries.
+- Change: one `CompositionLayerView` widget shows a composition layer on every platform, where Flutter has a widget per platform and `Texture`.
+  Reason: platform — a layer is a rectangle and its content on every compositor, and only the buffer's type differs, which the layer carries.
   Affect: the widget takes no input and reports no size, so an app wraps it in a `Listener` and tells the producer the size itself.
 
 ## media/ → the `video_player` package's `VideoPlayerController` and `VideoPlayer`, and the `camera` package's `CameraController`, `CameraPreview` and `availableCameras`
@@ -128,8 +128,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the host's session is the system's, whose outputs are its own, and a platform without cameras answers none.
   Affect: `CameraSession::new` answers `None` where the platform has no cameras, a photo arrives as encoded bytes and a recording at the app's path.
 
-- Change: a `VideoView` or a `CameraPreview` opens a surface under the root of the view it is in and puts its player's or session's picture there as it is mounted, which the system draws into, and nowhere as it is unmounted, unless another view took it since.
-  Reason: platform — the picture is drawn by the system into the surface's layer, which no frame of the framework's touches.
+- Change: a `VideoView` or a `CameraPreview` makes a composition layer of its own and puts its player's or session's picture there as it is mounted, which the system draws into, and nowhere as it is unmounted, unless another view took it since; the frames of whichever view it is in place the layer.
+  Reason: platform — the picture is drawn by the system into a layer that is the composition layer's content, which no frame of the framework's touches.
   Affect: a player or a session shows on the view built for it last and nowhere once its views are gone, and nothing shows where the host has no compositor.
 
 ## widgets/banner.rs → banner.dart

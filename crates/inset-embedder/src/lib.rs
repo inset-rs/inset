@@ -49,7 +49,7 @@ pub use clipboard::{
     ClipboardReadFuture, ClipboardWriteFuture, Content, ContentFuture, CopyOptions, CopyRequest,
     FileSink, PastedItem, URI_LIST, WriteFuture,
 };
-pub use composition::{Buffer, Compositor, Surface, SurfaceFrame, SurfaceParent};
+pub use composition::{CompositionLayer, Compositor, HardwareBuffer};
 pub use drag_drop::{DropChange, DropData};
 pub use file_dialogs::{
     EntryKind, FileDialogError, FileDialogFuture, FileDialogs, FileFinishFuture, FileHandle,
@@ -70,7 +70,7 @@ pub use locale::Locale;
 pub use media::{
     Camera, CameraFacing, CameraId, CameraState, CameraStatus, Cameras, CaptureSession,
     FrameReader, MediaChangeFuture, MediaError, MediaPlayer, MovieOptions, MovieOutput, Photo,
-    PhotoFuture, PhotoOutput, PixelBuffer, PlayerState, PlayerStatus, Players, RecordingFuture,
+    PhotoFuture, PhotoOutput, PlayerState, PlayerStatus, Players, RecordingFuture, VideoFrame,
 };
 pub use menus::{
     AttachedMenu, CheckState, DockMenu, EditCommand, IconImage, MenuAtIcon, MenuBar, MenuEntry,
@@ -101,8 +101,8 @@ pub use pointer_data_packet_converter::PointerDataPacketConverter;
 pub use pointer_report::{Contact, PointerReport, ReportedChange};
 pub use restoration::{RestorationData, RestorationMap, RestorationUpdate};
 pub use scene::{
-    ContainerLayer, DisplayListLayer, Effect, EngineLayer, Layer, Mutator, Part, Scene,
-    SceneBuilder, Slices, SurfaceLayer, SurfacePlacement, slices,
+    ContainerLayer, DisplayListLayer, Effect, EmbeddedLayer, EngineLayer, Layer, Mutator, Part,
+    Placement, Scene, SceneBuilder, Slices, slices,
 };
 pub use system_context_menu::SystemContextMenuItem;
 pub use text::*;

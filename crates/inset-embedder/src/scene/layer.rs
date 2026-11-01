@@ -1,5 +1,5 @@
 //! The nodes of a frame's layer tree, after the engine's `flow/layers`: containers that do one
-//! thing to their children, the pictures the framework recorded, and the native surfaces it
+//! thing to their children, the pictures the framework recorded, and the composition layers it
 //! places.
 //!
 //! A node never changes once built: a container the framework retains is the same `Arc` in every
@@ -10,7 +10,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use crate::composition::Surface;
+use crate::composition::CompositionLayer;
 use crate::geometry::{Clip, Matrix4, Offset, RRect, Rect};
 use crate::painting::{BlendMode, ImageFilter, Path, Picture};
 
@@ -22,9 +22,9 @@ pub enum Layer {
     Container(EngineLayer),
     /// A recorded picture at an offset: flow's `DisplayListLayer`, from `add_picture`.
     DisplayList(DisplayListLayer),
-    /// A native surface at its place in paint order: flow's `PlatformViewLayer`, from
-    /// `add_surface`. It draws nothing; the host places the surface and makes room for it.
-    Surface(SurfaceLayer),
+    /// A composition layer at its place in paint order: flow's `PlatformViewLayer`, from
+    /// `add_embedded_layer`. It draws nothing; the host places the layer and makes room for it.
+    Embedded(EmbeddedLayer),
 }
 
 /// Two layers are equal when they are the same node or show the same: a container by pointer
@@ -34,7 +34,7 @@ impl PartialEq for Layer {
         match (self, other) {
             (Layer::Container(a), Layer::Container(b)) => Arc::ptr_eq(a, b) || a == b,
             (Layer::DisplayList(a), Layer::DisplayList(b)) => a == b,
-            (Layer::Surface(a), Layer::Surface(b)) => a == b,
+            (Layer::Embedded(a), Layer::Embedded(b)) => a == b,
             _ => false,
         }
     }
@@ -89,26 +89,26 @@ pub struct DisplayListLayer {
     pub picture: Arc<Picture>,
 }
 
-/// flow's `PlatformViewLayer`, with Inset's word for a platform view: a native surface the host
-/// composites, at `rect` in its container's coordinates.
+/// flow's `PlatformViewLayer`, named after Flutter's embedded views: a composition layer the
+/// host composites, embedded in the frame at `rect` in its container's coordinates.
 #[derive(Clone)]
-pub struct SurfaceLayer {
+pub struct EmbeddedLayer {
     /// The producer's own handle, so a host reaches the native object behind it directly.
-    pub surface: Arc<dyn Surface>,
+    pub layer: Arc<dyn CompositionLayer>,
     pub rect: Rect,
 }
 
-/// Two surface layers are equal when they put the same surface, by pointer, at the same place.
-impl PartialEq for SurfaceLayer {
-    fn eq(&self, other: &SurfaceLayer) -> bool {
-        Arc::ptr_eq(&self.surface, &other.surface) && self.rect == other.rect
+/// Two are equal when they put the same composition layer, by pointer, at the same place.
+impl PartialEq for EmbeddedLayer {
+    fn eq(&self, other: &EmbeddedLayer) -> bool {
+        Arc::ptr_eq(&self.layer, &other.layer) && self.rect == other.rect
     }
 }
 
-impl fmt::Debug for SurfaceLayer {
+impl fmt::Debug for EmbeddedLayer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SurfaceLayer")
-            .field("surface", &Arc::as_ptr(&self.surface).cast::<()>())
+        f.debug_struct("EmbeddedLayer")
+            .field("layer", &Arc::as_ptr(&self.layer).cast::<()>())
             .field("rect", &self.rect)
             .finish()
     }

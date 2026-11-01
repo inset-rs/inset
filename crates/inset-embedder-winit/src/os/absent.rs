@@ -1,19 +1,19 @@
 //! What a system without a display link, a compositor or notices of a window's visibility
-//! answers: no display link is made, no surface is ever placed, and no notice is observed. iOS
-//! has a compositor, Core Animation's, which it shares with macOS.
+//! answers: no display link is made, no composition layer is ever placed, and no notice is
+//! observed. iOS has a compositor, Core Animation's, which it shares with macOS.
 
 #[cfg(not(target_os = "ios"))]
 use std::sync::Arc;
 
 #[cfg(not(target_os = "ios"))]
-use inset_embedder::{SurfacePlacement, ViewId};
+use inset_embedder::{CompositionLayer, Placement, ViewId};
 use winit::monitor::MonitorHandle;
 #[cfg(not(target_os = "ios"))]
 use winit::window::Window;
 
 use super::DisplayLink;
 #[cfg(not(target_os = "ios"))]
-use super::WindowSurfaces;
+use super::WindowComposition;
 
 /// No display link: the embedder takes its vsyncs from a timer at the display's rate. Never made.
 pub(crate) enum NoDisplayLink {}
@@ -28,19 +28,19 @@ impl DisplayLink for NoDisplayLink {
     }
 }
 
-/// No compositor: no surface is opened, so a window has none to place.
+/// No compositor: no layer is made, so a window has none to place.
 #[cfg(not(target_os = "ios"))]
-pub(crate) struct NoWindowSurfaces;
+pub(crate) struct NoWindowComposition;
 
 #[cfg(not(target_os = "ios"))]
-impl WindowSurfaces for NoWindowSurfaces {
+impl WindowComposition for NoWindowComposition {
     fn new(_window: Arc<dyn Window>) -> Self {
-        NoWindowSurfaces
+        NoWindowComposition
     }
 
     fn place<'a>(
         &self,
-        _placements: impl IntoIterator<Item = &'a SurfacePlacement>,
+        _placements: impl IntoIterator<Item = (&'a Arc<dyn CompositionLayer>, &'a Placement)>,
         _view: ViewId,
     ) {
     }

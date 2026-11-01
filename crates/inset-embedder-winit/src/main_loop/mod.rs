@@ -21,7 +21,7 @@
 //! each only sends the loop an event through its proxy ([`MainLoopProxy`]) or runs where it was
 //! sent: the dispatcher's wakes and work (`dispatcher.rs`), and the vsync waiter's waits where the
 //! loop serves them (`vsync_waiter.rs`). On macOS the waits go to the main dispatch queue and are
-//! served at the display links' ticks, and native surfaces' producers present from their own
+//! served at the display links' ticks, and composition layers' producers present from their own
 //! threads straight to Core Animation: neither reaches the loop.
 //!
 //! winit's proxy carries no event, only a wake, and merges the wakes sent before the loop hears

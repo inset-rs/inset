@@ -1,20 +1,21 @@
-//! A native surface beneath the framework's content. A producer thread draws a moving stripe
+//! A composition layer beneath the framework's content. A producer thread draws a moving stripe
 //! into IOSurfaces in turn, three or a few more, one frame at each refresh of the window's screen,
-//! which it waits for on the platform's vsync waiter, and presents them to a `SurfaceView`; a label the framework paints above the surface shows that
-//! its own content stays on top. Once a second the producer prints what it counted, so the
-//! compositor can be checked without looking. `--scale` draws the surface and its label through
-//! a transform that scales them about their middle: at 0.5 the whole buffer shows, at half its
-//! size, inside a frame half as big. `--opacity` fades them together: the room the framework makes
-//! for the surface keeps that share of the background beneath it. `--turn` turns them by a number
-//! of degrees and `--rounded` cuts their corners round by a radius: Core Animation turns and masks
-//! the surface's layers as the framework turns and clips its own drawing.
+//! which it waits for on the platform's vsync waiter, and presents them to the layer a
+//! `CompositionLayerView` shows; a label the framework paints above the layer shows that its own
+//! content stays on top. Once a second the producer prints what it counted, so the compositor can
+//! be checked without looking. `--scale` draws the layer and its label through a transform that
+//! scales them about their middle: at 0.5 the whole buffer shows, at half its size, inside a frame
+//! half as big. `--opacity` fades them together: the room the framework makes for the layer keeps
+//! that share of the background beneath it. `--turn` turns them by a number of degrees and
+//! `--rounded` cuts their corners round by a radius: Core Animation turns and masks the composition
+//! layer's Core Animation layers as the framework turns and clips its own drawing.
 //!
 //! ```text
-//! cargo run -p native_surface
-//! cargo run -p native_surface -- --exit-after 5
-//! cargo run -p native_surface -- --scale 0.5
-//! cargo run -p native_surface -- --opacity 0.5
-//! cargo run -p native_surface -- --turn 15 --rounded 24
+//! cargo run -p composition_layer
+//! cargo run -p composition_layer -- --exit-after 5
+//! cargo run -p composition_layer -- --scale 0.5
+//! cargo run -p composition_layer -- --opacity 0.5
+//! cargo run -p composition_layer -- --turn 15 --rounded 24
 //! ```
 
 #[cfg(target_os = "macos")]
@@ -37,7 +38,7 @@ fn main() {
 
 #[cfg(not(target_os = "macos"))]
 fn main() {
-    eprintln!("native_surface: the compositor this shows runs on macOS only");
+    eprintln!("composition_layer: the compositor this shows runs on macOS only");
 }
 
 /// `--exit-after SECONDS`, for a smoke run nobody closes.

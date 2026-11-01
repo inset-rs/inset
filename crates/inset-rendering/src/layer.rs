@@ -19,7 +19,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use inset_embedder::Surface;
+use inset_embedder::CompositionLayer;
 use inset_embedder::{
     BlendMode, Clip, EngineLayer, FillRule, ImageFilter, Matrix4, Offset, Picture, RRect, Rect,
     Scene, SceneBuilder, Size,
@@ -1153,29 +1153,33 @@ impl Layer for PictureLayer {
     }
 }
 
-/// A layer that places a native surface the host composites: Flutter's `PlatformViewLayer`.
+/// A layer that places a composition layer the host composites: Flutter's `PlatformViewLayer`.
 ///
 /// A leaf, like a picture layer, retained with its ancestors like any other: the scene keeps it
-/// as a layer of its own, and a host places the surface from the tree every frame.
-pub struct SurfaceLayer {
+/// as a layer of its own, and a host places the composition layer from the tree every frame.
+pub struct EmbeddedLayer {
     layer: LayerData,
-    surface: Arc<dyn Surface>,
-    /// Where the surface goes, in this layer's coordinates.
+    composition_layer: Arc<dyn CompositionLayer>,
+    /// Where the composition layer goes, in this layer's coordinates.
     rect: Rect,
 }
 
-impl SurfaceLayer {
-    /// A layer placing `surface` at `rect`.
-    pub fn new(app: &mut App, surface: Arc<dyn Surface>, rect: Rect) -> Handle<SurfaceLayer> {
-        app.create(SurfaceLayer {
+impl EmbeddedLayer {
+    /// A layer placing `composition_layer` at `rect`.
+    pub fn new(
+        app: &mut App,
+        composition_layer: Arc<dyn CompositionLayer>,
+        rect: Rect,
+    ) -> Handle<EmbeddedLayer> {
+        app.create(EmbeddedLayer {
             layer: LayerData::new(),
-            surface,
+            composition_layer,
             rect,
         })
     }
 
-    pub fn surface(self: Handle<Self>, app: &App) -> &Arc<dyn Surface> {
-        &app.get(self).surface
+    pub fn composition_layer(self: Handle<Self>, app: &App) -> &Arc<dyn CompositionLayer> {
+        &app.get(self).composition_layer
     }
 
     pub fn rect(self: Handle<Self>, app: &App) -> Rect {
@@ -1183,12 +1187,12 @@ impl SurfaceLayer {
     }
 }
 
-impl Layer for SurfaceLayer {
+impl Layer for EmbeddedLayer {
     crate::layer_accessors!();
 
     fn add_to_scene(self: Handle<Self>, app: &mut App, builder: &mut SceneBuilder) {
         let this = app.get(self);
-        builder.add_surface(Arc::clone(&this.surface), this.rect);
+        builder.add_embedded_layer(Arc::clone(&this.composition_layer), this.rect);
     }
 
     fn find_annotations(
@@ -4062,18 +4066,18 @@ mod tests {
         (root, opacity)
     }
 
-    /// A surface's layer is retained with its ancestors, as Flutter's `PlatformViewLayer` is:
+    /// An embedded layer is retained with its ancestors, as Flutter's `PlatformViewLayer` is:
     /// the scene keeps it, and its placement is worked out from the tree every frame.
     #[test]
-    fn a_surface_layer_is_retained_and_its_surface_placed_every_frame() {
+    fn an_embedded_layer_is_retained_and_its_composition_layer_placed_every_frame() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let root = OffsetLayer::new(&mut app, Offset::new(10.0, 5.0));
         let inner = OffsetLayer::new(&mut app, Offset::ZERO);
-        let surface = inset_embedder::test_support::idle_surface();
-        let layer = SurfaceLayer::new(
+        let composition_layer = inset_embedder::test_support::idle_layer();
+        let layer = EmbeddedLayer::new(
             &mut app,
-            Arc::clone(&surface),
+            Arc::clone(&composition_layer),
             Rect::from_ltwh(1.0, 2.0, 30.0, 20.0),
         );
         inner
@@ -4085,12 +4089,9 @@ mod tests {
             let scene = root
                 .as_container_layer()
                 .build_scene(&mut app, SceneBuilder::new());
-            let placement = inset_embedder::slices(&scene)
-                .surfaces()
-                .next()
-                .cloned()
-                .expect("placed");
-            assert!(Arc::ptr_eq(&placement.surface, &surface));
+            let slices = inset_embedder::slices(&scene);
+            let (placed, placement) = slices.composition_layers().next().expect("placed");
+            assert!(Arc::ptr_eq(placed, &composition_layer));
             assert_eq!(placement.bounds(), Rect::from_ltwh(11.0, 7.0, 30.0, 20.0));
             let engine_layer = inner.as_layer().engine_layer(&app).expect("recorded");
             let first = first_engine_layer.get_or_insert_with(|| Arc::clone(&engine_layer));

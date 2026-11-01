@@ -947,6 +947,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "composition_layer"
+version = "0.16.0"
+dependencies = [
+ "inset-embedder",
+ "inset-embedder-winit",
+ "inset-foundation",
+ "inset-painting",
+ "inset-scheduler",
+ "inset-shell",
+ "inset-widgets",
+ "objc2-core-foundation",
+ "objc2-io-surface",
+]
+
+[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2837,21 +2852,6 @@ dependencies = [
  "indexmap",
  "rustc-hash 1.1.0",
  "thiserror 2.0.20",
-]
-
-[[package]]
-name = "native_surface"
-version = "0.16.0"
-dependencies = [
- "inset-embedder",
- "inset-embedder-winit",
- "inset-foundation",
- "inset-painting",
- "inset-scheduler",
- "inset-shell",
- "inset-widgets",
- "objc2-core-foundation",
- "objc2-io-surface",
 ]
 
 [[package]]

@@ -41,7 +41,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Affect: an animation's frames come at the display's rate but not in step with its refresh.
 
 - Change: the platform hands out Flutter's `VsyncWaiter` for any screen, served at the vsyncs the frames of the views on that screen are drawn at, whether or not a window on it is in sight.
-  Reason: platform — Flutter's waiter is the engine's own, but a producer feeding a native surface, or a host drawing for programs, paces by the same refreshes from threads of its own.
+  Reason: platform — Flutter's waiter is the engine's own, but a producer feeding a composition layer, or a host drawing for programs, paces by the same refreshes from threads of its own.
   Affect: such a producer gets one call per wait from the screen's one source, and decides for itself whether to draw for a window nobody sees.
 
 - Change: on macOS 14 and later the waiter serves each wait at the tick of its screen's display link, in the run loop's common modes, a wait from another thread starting the ticks through the main dispatch queue, as Flutter's `FlutterVSyncWaiter` hands its ticks to `FlutterRunLoop`, not through the main loop as the framework's own frames are.
@@ -64,9 +64,9 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Valo paints `.notdef` tofu unless asked not to.
   Affect: a character with no face occupies layout space and draws nothing.
 
-- Change: on macOS a frame that paints nothing besides its native surfaces is not drawn.
-  Reason: platform — Core Animation shows the surfaces by itself, and macOS gives a process a large share of graphics memory the first time it draws.
-  Affect: a window that only shows native surfaces, such as a full-window video, draws nothing and, until it paints, holds no graphics memory.
+- Change: on macOS a frame that paints nothing besides its composition layers is not drawn.
+  Reason: platform — Core Animation shows the composition layers by itself, and macOS gives a process a large share of graphics memory the first time it draws.
+  Affect: a window that only shows composition layers, such as a full-window video, draws nothing and, until it paints, holds no graphics memory.
 
 ## trackpad.rs / main_loop/input.rs / os/macos/trackpad_touches.rs → the macOS embedder's trackpad gestures (`FlutterViewController.mm`, `dispatchGestureEvent:`, `touchesBeganWithEvent:`)
 
@@ -146,19 +146,19 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 ## os/apple/composition/ → the macOS and iOS embedders' platform views (`FlutterSurfaceManager`, `FlutterMutatorView`, `FlutterPlatformViewsController`)
 
-- Change: each native surface is a Core Animation layer beneath the framework's layer, showing its producer's buffer directly, on macOS and iOS alike.
+- Change: each composition layer is a Core Animation layer beneath the framework's layer, showing its producer's buffer directly, on macOS and iOS alike.
   Reason: platform — Core Animation composites the buffers it's given, so a producer's frame needs no copy and no framework frame.
-  Affect: framework content can sit above a surface but not beneath it.
+  Affect: framework content can sit above a composition layer but not beneath it.
 
-- Change: a native surface's layers take every transform and clip above it, a path's included.
+- Change: a composition layer's Core Animation layers take every transform and clip above it, a path's included.
   Reason: platform — Core Animation turns a layer by any transform and masks it by any path.
-  Affect: a turned, rounded or path-clipped surface shows exactly where the framework places it.
+  Affect: a turned, rounded or path-clipped composition layer shows exactly where the framework places it.
 
-- Change: a surface's buffer and its children sit in one layer placed by a transform, the children beneath the buffer, and a present shows a surface frame's buffer and places its children in one transaction.
-  Reason: platform — a program whose picture is itself a surface in another app's window places its own surfaces in that picture, and Core Animation moves, clips and scales a layer's sublayers with it.
+- Change: a composition layer's buffer and its children sit in one Core Animation layer placed by a transform, the children beneath the buffer, and a present shows its buffer and places its children in one transaction; on macOS the app may place a composition layer in a `CALayer` of its own (`MacOs::place_layer_in`), such as the root of a `CAContext` another process shows.
+  Reason: platform — a program whose picture is itself a composition layer in another app's window shows its own layers as that picture's children, and Core Animation moves, clips and scales a layer's sublayers with it.
   Affect: a child moves, is cut and shrinks with its parent, and shows through its parent's clear pixels.
 
-- Change: a buffer is released once the system says it's no longer in use, checked at the surface's next present and when the surface goes.
+- Change: a buffer is released once the system says it's no longer in use, checked at the layer's next present and when the layer goes.
   Reason: platform — Core Animation gives no signal when it lets go of a buffer.
   Affect: a producer never waits for a buffer to come back, but draws into another when none is known free, as Flutter's `FlutterSurfaceManager` does.
 
@@ -168,11 +168,11 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — AVFoundation changes a player's state on the main queue, where the app reads it.
   Affect: the app's player hears its state change at once on load, play, pause, seek and end, and its position every half second while it plays.
 
-- Change: a player shown on a surface hangs an `AVPlayerLayer` in the surface's own layers, and one read as frames adds an `AVPlayerItemVideoOutput` of BGRA `IOSurface`-backed pixel buffers, where Flutter's plugin copies every frame into a texture.
-  Reason: platform — Core Animation clips and scales a layer with the surface it hangs in, and a pixel buffer backed by an `IOSurface` reaches the GPU with no copy.
+- Change: a player shown on a composition layer makes an `AVPlayerLayer` its content (`MacOs::show_system_layer` for an app's own system layer), and one read as frames adds an `AVPlayerItemVideoOutput` of BGRA `IOSurface`-backed pixel buffers, where Flutter's plugin copies every frame into a texture.
+  Reason: platform — Core Animation clips and scales a layer with the one it is the content of, and a pixel buffer backed by an `IOSurface` reaches the GPU with no copy.
   Affect: a video moves, clips and shrinks with the framework's frame, and a frame reader hands out the newest picture only.
 
-- Change: a camera session is an `AVCaptureSession` configured and run on a queue of its own, asking for the camera, and for the microphone where a recording wants sound, at its start, with its preview a layer hung in a surface and its frames, photos and recordings the system's video data, photo and movie file outputs.
+- Change: a camera session is an `AVCaptureSession` configured and run on a queue of its own, asking for the camera, and for the microphone where a recording wants sound, at its start, with its preview a layer that is a composition layer's content and its frames, photos and recordings the system's video data, photo and movie file outputs.
   Reason: platform — starting a session blocks, and each output is AVFoundation's own.
   Affect: a session reports starting, running, denied or failed, photos arrive as JPEG and recordings as QuickTime movies.
 

@@ -11,11 +11,11 @@ use winit::window::Window;
 use super::{AppKit, ns_view};
 use crate::os::NativeComposition;
 use crate::os::apple::composition::{
-    CoreAnimationCompositor, CoreAnimationWindowSurfaces, WindowLayer,
+    CoreAnimationCompositor, CoreAnimationWindowComposition, WindowLayer,
 };
 
 impl NativeComposition for AppKit {
-    type WindowSurfaces = CoreAnimationWindowSurfaces<AppKit>;
+    type WindowComposition = CoreAnimationWindowComposition<AppKit>;
 
     fn compositor() -> Option<Arc<dyn Compositor>> {
         Some(Arc::new(CoreAnimationCompositor))

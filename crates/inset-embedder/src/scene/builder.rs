@@ -12,8 +12,8 @@ use std::fmt;
 use std::sync::Arc;
 
 use super::Scene;
-use super::layer::{ContainerLayer, DisplayListLayer, Effect, EngineLayer, Layer, SurfaceLayer};
-use crate::composition::Surface;
+use super::layer::{ContainerLayer, DisplayListLayer, Effect, EmbeddedLayer, EngineLayer, Layer};
+use crate::composition::CompositionLayer;
 use crate::geometry::{Clip, Matrix4, Offset, RRect, Rect};
 use crate::painting::{BlendMode, ImageFilter, Path, Picture};
 
@@ -178,11 +178,11 @@ impl SceneBuilder {
         layer
     }
 
-    /// Places a native surface the host composites, at `rect` in the coordinates of the container
-    /// being built: Flutter's `addPlatformView`. It draws nothing; whoever composites the scene
-    /// makes room for it at its place in paint order.
-    pub fn add_surface(&mut self, surface: Arc<dyn Surface>, rect: Rect) {
-        self.add_layer(Layer::Surface(SurfaceLayer { surface, rect }));
+    /// Places a composition layer the host composites, at `rect` in the coordinates of the
+    /// container being built: Flutter's `addPlatformView`. It draws nothing; whoever composites
+    /// the scene makes room for it at its place in paint order.
+    pub fn add_embedded_layer(&mut self, layer: Arc<dyn CompositionLayer>, rect: Rect) {
+        self.add_layer(Layer::Embedded(EmbeddedLayer { layer, rect }));
     }
 
     /// Adds a retained [`EngineLayer`] subtree from a previous frame.
@@ -327,17 +327,17 @@ mod tests {
     }
 
     #[test]
-    fn a_surface_is_a_leaf_at_its_place_in_paint_order() {
-        let surface = super::super::idle_surface();
+    fn a_composition_layer_is_a_leaf_at_its_place_in_paint_order() {
+        let layer = super::super::idle_layer();
         let rect = Rect::from_ltwh(1.0, 2.0, 3.0, 4.0);
         let mut builder = SceneBuilder::new();
         builder.add_picture(Offset::ZERO, &square(), false, false);
-        builder.add_surface(Arc::clone(&surface), rect);
+        builder.add_embedded_layer(Arc::clone(&layer), rect);
         let scene = builder.build();
         assert!(matches!(scene.root.children[0], Layer::DisplayList(_)));
         assert_eq!(
             scene.root.children[1],
-            Layer::Surface(SurfaceLayer { surface, rect })
+            Layer::Embedded(EmbeddedLayer { layer, rect })
         );
     }
 

@@ -6,7 +6,7 @@
 
 use std::ptr::NonNull;
 
-use inset_embedder::Buffer;
+use inset_embedder::HardwareBuffer;
 use objc2_core_foundation::{CFDictionary, CFNumber, CFString};
 use objc2_io_surface::{
     IOSurfaceLockOptions, IOSurfaceRef, kIOSurfaceBytesPerElement, kIOSurfaceBytesPerRow,
@@ -25,7 +25,7 @@ const STRIPE_WIDTH: usize = 48;
 const STRIPE_STEP: u64 = 8;
 
 /// A BGRA surface of `width` by `height` pixels.
-pub(crate) fn allocate(width: usize, height: usize) -> Buffer {
+pub(crate) fn allocate(width: usize, height: usize) -> HardwareBuffer {
     // SAFETY: the keys are constants IOSurface exports for the life of the process.
     let keys: [&CFString; 5] = unsafe {
         [

@@ -182,11 +182,11 @@ pub trait View: 'static {
         GestureSettings::default()
     }
 
-    /// Renders and presents one scene, the frame's layer tree, shared so the host may keep it:
-    /// to present it again when the window is seen again, and to tell a scene equal to the last
-    /// from one worth drawing. Physical pixels; the presenter applies no extra scaling.
-    /// [`slices`](crate::slices) makes of it the picture a host draws and the surfaces a host
-    /// with a compositor places in the same native transaction; a host without one draws the
+    /// Renders and presents one scene, the frame's layer tree, shared so the host may keep it: to
+    /// present it again when the window is seen again, and to tell a scene equal to the last from
+    /// one worth drawing. Physical pixels; the presenter applies no extra scaling.
+    /// [`slices`](crate::slices) makes of it the picture a host draws and the composition layers a
+    /// host with a compositor places in the same native transaction; a host without one draws the
     /// picture alone.
     fn present(&self, scene: std::sync::Arc<crate::Scene>);
 

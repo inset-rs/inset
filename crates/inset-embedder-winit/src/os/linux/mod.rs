@@ -19,7 +19,7 @@ use crate::clipboard::{ChangeProbe, TextClipboard};
 use crate::menus::MenuEvents;
 
 use super::absent::{
-    NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices, NoWindowSurfaces,
+    NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices, NoWindowComposition,
 };
 use super::{
     ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, ImageDecoding,
@@ -59,7 +59,7 @@ impl FramePresentation for Linux {
 }
 
 impl NativeComposition for Linux {
-    type WindowSurfaces = NoWindowSurfaces;
+    type WindowComposition = NoWindowComposition;
 }
 
 impl WindowVisibility for Linux {

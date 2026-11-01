@@ -6,7 +6,7 @@ use inset_embedder::TargetPlatform;
 use crate::clipboard::{ChangeProbe, TextClipboard};
 
 use super::absent::{
-    NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices, NoWindowSurfaces,
+    NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices, NoWindowComposition,
 };
 use super::{
     ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, ImageDecoding,
@@ -46,7 +46,7 @@ impl FramePresentation for WinitOnly {
 }
 
 impl NativeComposition for WinitOnly {
-    type WindowSurfaces = NoWindowSurfaces;
+    type WindowComposition = NoWindowComposition;
 }
 
 impl WindowVisibility for WinitOnly {

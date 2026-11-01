@@ -1,8 +1,8 @@
 //! A player: AVFoundation's `AVPlayer` over one `AVPlayerItem`, controlled on the main thread,
 //! whose state is read from them when asked and whose changes AVFoundation tells by key-value
-//! observing, a periodic time observer and its end-of-item notification. Its picture goes either
-//! to an `AVPlayerLayer` hung in a surface, or to an `AVPlayerItemVideoOutput` a frame reader
-//! reads.
+//! observing, a periodic time observer and its end-of-item notification. Its picture goes either to
+//! an `AVPlayerLayer` shown as a composition layer's content, or to an `AVPlayerItemVideoOutput` a
+//! frame reader reads.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -11,7 +11,8 @@ use std::time::Duration;
 
 use block2::RcBlock;
 use inset_embedder::{
-    FrameReader, MediaChangeFuture, MediaPlayer, PlayerState, PlayerStatus, Players, Size, Surface,
+    CompositionLayer, FrameReader, MediaChangeFuture, MediaPlayer, PlayerState, PlayerStatus,
+    Players, Size,
 };
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -26,7 +27,7 @@ use objc2_foundation::{NSString, NSURL};
 
 use super::frames::PlayerFrames;
 use super::observing::{NotificationObservation, PropertyObservation};
-use super::show_layer_on;
+use super::show_system_layer;
 use crate::media::Changes;
 
 /// How often a playing player tells its position: every half second, as Flutter's
@@ -90,10 +91,11 @@ struct End {
 /// Where a player's picture goes.
 enum Destination {
     Nowhere,
-    /// Its layer hangs in this surface, which the player holds as a producer does.
-    Surface {
+    /// Its layer is this composition layer's content, which the player holds as a producer
+    /// does.
+    Layer {
         layer: Retained<AVPlayerLayer>,
-        _surface: Arc<dyn Surface>,
+        _shown_on: Arc<dyn CompositionLayer>,
     },
     Frames(Arc<PlayerFrames>),
 }
@@ -147,13 +149,13 @@ impl AvMediaPlayer {
         }
     }
 
-    /// Lets go of where the picture went: its layer leaves its surface, and its frame reader
-    /// reads nothing more.
+    /// Lets go of where the picture went: its layer leaves the composition layer it was shown on,
+    /// and its frame reader reads nothing more.
     fn leave_destination(&self) {
         match self.destination.replace(Destination::Nowhere) {
             Destination::Nowhere => {}
-            Destination::Surface { layer, .. } => {
-                // SAFETY: on the main thread, where the layer was hung.
+            Destination::Layer { layer, .. } => {
+                // SAFETY: on the main thread, where the layer was shown.
                 unsafe { layer.setPlayer(None) };
                 super::in_transaction(|| layer.removeFromSuperlayer());
             }
@@ -243,9 +245,9 @@ impl MediaPlayer for AvMediaPlayer {
         self.changes.next()
     }
 
-    fn set_video_surface(&self, surface: Option<Arc<dyn Surface>>) {
+    fn set_video_layer(&self, shown_on: Option<Arc<dyn CompositionLayer>>) {
         self.leave_destination();
-        let Some(surface) = surface else {
+        let Some(shown_on) = shown_on else {
             return;
         };
         // SAFETY: a layer of the player, made on the main thread.
@@ -254,10 +256,10 @@ impl MediaPlayer for AvMediaPlayer {
         if let Some(gravity) = unsafe { AVLayerVideoGravityResizeAspect } {
             unsafe { layer.setVideoGravity(gravity) };
         }
-        show_layer_on(&surface, &layer);
-        *self.destination.borrow_mut() = Destination::Surface {
+        show_system_layer(&shown_on, &layer);
+        *self.destination.borrow_mut() = Destination::Layer {
             layer,
-            _surface: surface,
+            _shown_on: shown_on,
         };
     }
 
@@ -371,7 +373,7 @@ impl MediaPlayer for FailedPlayer {
         self.changes.next()
     }
 
-    fn set_video_surface(&self, _surface: Option<Arc<dyn Surface>>) {}
+    fn set_video_layer(&self, _layer: Option<Arc<dyn CompositionLayer>>) {}
 
     fn read_frames(&self) -> Arc<dyn FrameReader> {
         Arc::new(super::frames::NoFrames)

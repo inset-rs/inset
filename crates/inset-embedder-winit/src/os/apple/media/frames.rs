@@ -7,7 +7,7 @@ use std::ptr::NonNull;
 use std::sync::{Mutex, PoisonError};
 
 use dispatch2::{DispatchQueue, DispatchQueueAttr, DispatchRetained};
-use inset_embedder::{FrameReader, PixelBuffer};
+use inset_embedder::{FrameReader, VideoFrame};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
@@ -52,7 +52,7 @@ impl PlayerFrames {
 }
 
 impl FrameReader for PlayerFrames {
-    fn newest(&self) -> Option<PixelBuffer> {
+    fn newest(&self) -> Option<VideoFrame> {
         let output = &self.output.0;
         // SAFETY: the output answers from any thread, as a display link's thread reads it.
         unsafe {
@@ -62,7 +62,7 @@ impl FrameReader for PlayerFrames {
             }
             output
                 .copyPixelBufferForItemTime_itemTimeForDisplay(time, std::ptr::null_mut())
-                .map(pixel_buffer_of)
+                .map(video_frame_of)
         }
     }
 }
@@ -77,7 +77,7 @@ unsafe impl Sync for CrossThreadOutput {}
 
 /// A camera's frames: the newest picture its video data output delivered, kept until read.
 pub(super) struct CameraFrames {
-    newest: std::sync::Arc<Mutex<Option<CrossThreadPixelBuffer>>>,
+    newest: std::sync::Arc<Mutex<Option<CrossThreadVideoFrame>>>,
     output: CrossThreadVideoDataOutput,
     /// The delegate the output calls, which it holds weakly.
     _delegate: CrossThreadDelegate,
@@ -122,7 +122,7 @@ impl CameraFrames {
 }
 
 impl FrameReader for CameraFrames {
-    fn newest(&self) -> Option<PixelBuffer> {
+    fn newest(&self) -> Option<VideoFrame> {
         let newest = self
             .newest
             .lock()
@@ -138,7 +138,7 @@ define_class!(
     // SAFETY: NSObject has no subclassing requirements, and the delegate has no `Drop`.
     #[unsafe(super(NSObject))]
     #[name = "InsetCameraFramesDelegate"]
-    #[ivars = std::sync::Arc<Mutex<Option<CrossThreadPixelBuffer>>>]
+    #[ivars = std::sync::Arc<Mutex<Option<CrossThreadVideoFrame>>>]
     struct SampleBufferDelegate;
 
     unsafe impl NSObjectProtocol for SampleBufferDelegate {}
@@ -158,7 +158,7 @@ define_class!(
                     return;
                 };
                 *self.ivars().lock().unwrap_or_else(PoisonError::into_inner) =
-                    Some(CrossThreadPixelBuffer(image));
+                    Some(CrossThreadVideoFrame(image));
             });
         }
     }
@@ -168,7 +168,7 @@ define_class!(
 pub(super) struct NoFrames;
 
 impl FrameReader for NoFrames {
-    fn newest(&self) -> Option<PixelBuffer> {
+    fn newest(&self) -> Option<VideoFrame> {
         None
     }
 }
@@ -206,18 +206,18 @@ fn as_ns_string(string: &objc2_core_foundation::CFString) -> &NSString {
 }
 
 /// A pixel buffer AVFoundation answered retained, as the CF type the app is handed.
-fn pixel_buffer_of(buffer: Retained<CVPixelBuffer>) -> PixelBuffer {
+fn video_frame_of(buffer: Retained<CVPixelBuffer>) -> VideoFrame {
     let pointer = NonNull::new(Retained::into_raw(buffer)).expect("a retained buffer");
     // SAFETY: the pointer carries the +1 retain `Retained` gave up.
     unsafe { CFRetained::from_raw(pointer) }
 }
 
 /// A camera's picture, handed from the output's queue to the reader's thread.
-pub(super) struct CrossThreadPixelBuffer(PixelBuffer);
+pub(super) struct CrossThreadVideoFrame(VideoFrame);
 
 // SAFETY: a pixel buffer is made to be shared between threads: its retain count is atomic, and
 // nothing here writes its pixels. The binding cannot say so.
-unsafe impl Send for CrossThreadPixelBuffer {}
+unsafe impl Send for CrossThreadVideoFrame {}
 
 /// A camera's video data output handed between threads.
 struct CrossThreadVideoDataOutput(Retained<AVCaptureVideoDataOutput>);

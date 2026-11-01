@@ -19,16 +19,16 @@
 //! same window when the system gives it back. Without a surface nothing is drawn: every draw is
 //! refused as lost, and the last scene is owed until a surface is given.
 //!
-//! What draws is made at the first frame that draws, not before: the renderer's context, the
-//! device every view shares (`gpu.rs`), and the surface the system gave, which is made on that
-//! device then. A frame whose scene paints nothing besides its native surfaces is not drawn where
-//! the window shows its surfaces itself, as on macOS: the compositor places them over the
+//! What draws is made at the first frame that draws, not before: the renderer's context, the device
+//! every view shares (`gpu.rs`), and the surface the system gave, which is made on that device
+//! then. A frame whose scene paints nothing besides its composition layers is not drawn where the
+//! window shows its composition layers itself, as on macOS: the compositor places them over the
 //! window's background, the view's clear colour, which the window shows from the moment it has a
 //! surface. macOS gives a process a large share of graphics memory the first time it draws
-//! anything, so a window that only shows surfaces drawn elsewhere never draws. When such a frame
+//! anything, so a window that only shows layers drawn elsewhere never draws. When such a frame
 //! follows one that painted, one empty frame is drawn, so the painted one does not stay over the
-//! surfaces. The invariant a later editor must keep: a frame left undrawn looks the same as if it
-//! had been drawn.
+//! layers. The invariant a later editor must keep: a frame left undrawn looks the same as if it had
+//! been drawn.
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -52,7 +52,7 @@ pub(crate) struct Rasterizer {
     /// What a frame starts from: white, or nothing for a window that shows what is behind it.
     clear: valo::Color,
     /// Whether the compositor honours the content's alpha: from the start for a window that
-    /// sees through, and from the first scene that places a native surface for any other.
+    /// sees through, and from the first scene that places a composition layer for any other.
     /// Kept for each surface the system gives.
     content_alpha: valo::SurfaceAlpha,
     /// Whether the surface shows a frame that painted, which the next frame that paints nothing
@@ -106,7 +106,7 @@ impl Rasterizer {
     /// surface does not show it.
     pub(crate) fn draw(&mut self, scene: &Arc<Scene>, slices: &Slices) {
         self.last_scene.hand_over(scene);
-        self.keep_alpha_once_surfaces_are_placed(slices);
+        self.keep_alpha_once_layers_are_placed(slices);
         self.show(slices);
     }
 
@@ -158,7 +158,7 @@ impl Rasterizer {
     }
 
     /// The window closed: its surface goes, which is the rasterizer's hold on the window, and
-    /// the last scene with it, which may hold native surfaces a producer would reuse.
+    /// the last scene with it, which may hold composition layers a producer would reuse.
     pub(crate) fn window_closed(&mut self) {
         self.surface = WindowSurface::None;
         self.shows_painted_frame = false;
@@ -194,8 +194,8 @@ impl Rasterizer {
     }
 
     /// What an empty frame is cleared to: nothing where the compositor honours the content's
-    /// alpha, so the window's background shows behind the surfaces as when nothing is drawn, and
-    /// the clear colour, which is that background, where it does not.
+    /// alpha, so the window's background shows behind the composition layers as when nothing is
+    /// drawn, and the clear colour, which is that background, where it does not.
     fn empty_clear(&self) -> valo::Color {
         match self.content_alpha {
             valo::SurfaceAlpha::Transparent => valo::Color::TRANSPARENT,
@@ -203,8 +203,8 @@ impl Rasterizer {
         }
     }
 
-    /// Shows a frame without drawing it: the compositor places its surfaces over the window's
-    /// background. Refused as lost while the window has no surface, as a draw would be.
+    /// Shows a frame without drawing it: the compositor places its composition layers over the
+    /// window's background. Refused as lost while the window has no surface, as a draw would be.
     fn leave_undrawn(&self) -> Result<(), valo::Refused> {
         match self.surface {
             WindowSurface::None => Err(valo::Refused::Lost),
@@ -230,14 +230,14 @@ impl Rasterizer {
         Ok(())
     }
 
-    /// The first scene that places a native surface in the window makes its content keep its
-    /// alpha from then on, so the surfaces beneath show through the room made for them. The
-    /// window itself stays opaque, and a window that never shows a surface keeps an opaque
-    /// content layer the compositor need not blend. It does not switch back when the surfaces
+    /// The first scene that places a composition layer in the window makes its content keep its
+    /// alpha from then on, so the composition layers beneath show through the room made for them.
+    /// The window itself stays opaque, and a window that never shows one keeps an opaque content
+    /// layer the compositor need not blend. It does not switch back when the composition layers
     /// go: a launcher's tabs come and go, and each switch reconfigures the surface.
-    fn keep_alpha_once_surfaces_are_placed(&mut self, slices: &Slices) {
-        let places_surfaces = slices.surfaces().next().is_some();
-        if !places_surfaces || self.content_alpha == valo::SurfaceAlpha::Transparent {
+    fn keep_alpha_once_layers_are_placed(&mut self, slices: &Slices) {
+        let places_layers = slices.composition_layers().next().is_some();
+        if !places_layers || self.content_alpha == valo::SurfaceAlpha::Transparent {
             return;
         }
         self.content_alpha = valo::SurfaceAlpha::Transparent;
@@ -275,19 +275,21 @@ impl WindowSurface {
 /// How a frame reaches the window, decided by what it paints and what the surface shows.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum FrameDrawing {
-    /// Drawn: its slices, with room made at each surface.
+    /// Drawn: its slices, with room made at each composition layer.
     Drawn,
-    /// Drawn empty: the frame paints nothing besides its surfaces, which the window shows over
-    /// its background, and the surface shows a frame that painted, which must not stay over them.
+    /// Drawn empty: the frame paints nothing besides its composition layers, which the window
+    /// shows over its background, and the surface shows a frame that painted, which must not stay
+    /// over them.
     Emptied,
-    /// Not drawn: the compositor places the frame's surfaces over the window's background.
+    /// Not drawn: the compositor places the frame's composition layers over the window's
+    /// background.
     Undrawn,
 }
 
 impl FrameDrawing {
     /// How a frame that `paints` or not reaches a window whose surface `shows_painted_frame` or
-    /// not, on a system where the window `shows_frames_undrawn`, its surfaces over its background,
-    /// or shows only what is drawn on it.
+    /// not, on a system where the window `shows_frames_undrawn`, its composition layers over its
+    /// background, or shows only what is drawn on it.
     fn of(paints: bool, shows_painted_frame: bool, shows_frames_undrawn: bool) -> FrameDrawing {
         if paints || !shows_frames_undrawn {
             FrameDrawing::Drawn
@@ -449,13 +451,13 @@ mod tests {
     }
 
     #[test]
-    fn a_frame_of_surfaces_alone_is_left_undrawn_where_the_window_shows_them_itself() {
+    fn a_frame_of_composition_layers_alone_is_left_undrawn_where_the_window_shows_them_itself() {
         assert_eq!(FrameDrawing::of(false, false, true), FrameDrawing::Undrawn);
         for shows_painted_frame in [false, true] {
             assert_eq!(
                 FrameDrawing::of(false, shows_painted_frame, false),
                 FrameDrawing::Drawn,
-                "elsewhere a window shows only what is drawn, room made for its surfaces"
+                "elsewhere a window shows only what is drawn, room made for its layers"
             );
         }
     }

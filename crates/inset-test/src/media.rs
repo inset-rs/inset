@@ -12,23 +12,21 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use inset_embedder::{
-    Camera, CameraState, Cameras, CaptureSession, Compositor, FrameReader, MediaChangeFuture,
-    MediaError, MediaPlayer, MovieOptions, MovieOutput, Photo, PhotoFuture, PhotoOutput,
-    PixelBuffer, PlayerState, Players, RecordingFuture, Surface, SurfaceFrame, SurfaceParent,
-    ViewId,
+    Camera, CameraState, Cameras, CaptureSession, CompositionLayer, Compositor, FrameReader,
+    HardwareBuffer, MediaChangeFuture, MediaError, MediaPlayer, MovieOptions, MovieOutput, Photo,
+    PhotoFuture, PhotoOutput, Placement, PlayerState, Players, RecordingFuture, VideoFrame,
 };
 
-/// A compositor whose surfaces show nowhere, and which keeps each surface opened under a view's
-/// root. Every clone is the same compositor.
+/// A compositor whose layers show nowhere, and which keeps each layer it made. Every clone is the
+/// same compositor.
 #[derive(Clone, Default)]
-pub struct MockCompositor(Arc<Mutex<Vec<OpenedSurface>>>);
+pub struct MockCompositor(Arc<Mutex<Vec<MadeLayer>>>);
 
-/// A surface the app opened under a view's root.
+/// A layer the app made.
 #[derive(Clone)]
-pub struct OpenedSurface {
-    pub view: ViewId,
+pub struct MadeLayer {
     pub opaque: bool,
-    pub surface: Arc<dyn Surface>,
+    pub layer: Arc<dyn CompositionLayer>,
 }
 
 impl MockCompositor {
@@ -36,55 +34,37 @@ impl MockCompositor {
         MockCompositor::default()
     }
 
-    /// The surfaces opened under the views' roots, in order.
-    pub fn opened(&self) -> Vec<OpenedSurface> {
+    /// The layers made, in order.
+    pub fn made(&self) -> Vec<MadeLayer> {
         self.0.lock().expect("never held across a panic").clone()
     }
 }
 
 impl Compositor for MockCompositor {
-    fn root(&self, view: ViewId) -> Arc<dyn SurfaceParent> {
-        Arc::new(MockRoot {
-            view,
-            opened: self.clone(),
-        })
-    }
-}
-
-/// A view's root, which keeps each surface opened under it in its compositor.
-struct MockRoot {
-    view: ViewId,
-    opened: MockCompositor,
-}
-
-impl SurfaceParent for MockRoot {
-    fn open_child(&self, opaque: bool) -> Arc<dyn Surface> {
-        let surface: Arc<dyn Surface> = Arc::new(MockSurface);
-        self.opened
-            .0
+    fn make_layer(&self, opaque: bool) -> Arc<dyn CompositionLayer> {
+        let layer: Arc<dyn CompositionLayer> = Arc::new(MockLayer);
+        self.0
             .lock()
             .expect("never held across a panic")
-            .push(OpenedSurface {
-                view: self.view,
+            .push(MadeLayer {
                 opaque,
-                surface: Arc::clone(&surface),
+                layer: Arc::clone(&layer),
             });
-        surface
+        layer
     }
 }
 
-/// A surface that shows nothing: presents release their buffers at once.
-struct MockSurface;
+/// A layer that shows nothing: presents release their buffers at once.
+struct MockLayer;
 
-impl Surface for MockSurface {
-    fn present(&self, _frame: SurfaceFrame, released: Box<dyn FnOnce() + Send + Sync>) {
+impl CompositionLayer for MockLayer {
+    fn present(
+        &self,
+        _buffer: HardwareBuffer,
+        _children: Vec<(Arc<dyn CompositionLayer>, Placement)>,
+        released: Box<dyn FnOnce() + Send + Sync>,
+    ) {
         released();
-    }
-}
-
-impl SurfaceParent for MockSurface {
-    fn open_child(&self, _opaque: bool) -> Arc<dyn Surface> {
-        Arc::new(MockSurface)
     }
 }
 
@@ -110,7 +90,7 @@ impl Players for MockPlayers {
             url: url.to_owned(),
             state: RefCell::new(PlayerState::loading()),
             calls: RefCell::default(),
-            video_surface: RefCell::default(),
+            video_layer: RefCell::default(),
             changes: Changes::default(),
             dropped: Cell::new(false),
         }));
@@ -128,8 +108,8 @@ pub enum PlayerCall {
     SetRate(f64),
     SetVolume(f64),
     SetLooping(bool),
-    /// Whether a surface was given, or none.
-    SetVideoSurface(bool),
+    /// Whether a layer was given, or none.
+    SetVideoLayer(bool),
     ReadFrames,
 }
 
@@ -141,7 +121,7 @@ struct PlayerShared {
     url: String,
     state: RefCell<PlayerState>,
     calls: RefCell<Vec<PlayerCall>>,
-    video_surface: RefCell<Option<Arc<dyn Surface>>>,
+    video_layer: RefCell<Option<Arc<dyn CompositionLayer>>>,
     changes: Changes,
     dropped: Cell<bool>,
 }
@@ -157,10 +137,10 @@ impl MockPlayer {
         self.0.calls.borrow().clone()
     }
 
-    /// The surface the player's picture is on; `None` once it is put nowhere, or handed to a
+    /// The layer the player's picture is on; `None` once it is put nowhere, or handed to a
     /// frame reader.
-    pub fn video_surface(&self) -> Option<Arc<dyn Surface>> {
-        self.0.video_surface.borrow().clone()
+    pub fn video_layer(&self) -> Option<Arc<dyn CompositionLayer>> {
+        self.0.video_layer.borrow().clone()
     }
 
     /// Whether the app let go of the player.
@@ -215,14 +195,14 @@ impl MediaPlayer for OpenedPlayer {
         self.0.0.changes.next()
     }
 
-    fn set_video_surface(&self, surface: Option<Arc<dyn Surface>>) {
-        self.0.call(PlayerCall::SetVideoSurface(surface.is_some()));
-        *self.0.0.video_surface.borrow_mut() = surface;
+    fn set_video_layer(&self, layer: Option<Arc<dyn CompositionLayer>>) {
+        self.0.call(PlayerCall::SetVideoLayer(layer.is_some()));
+        *self.0.0.video_layer.borrow_mut() = layer;
     }
 
     fn read_frames(&self) -> Arc<dyn FrameReader> {
         self.0.call(PlayerCall::ReadFrames);
-        *self.0.0.video_surface.borrow_mut() = None;
+        *self.0.0.video_layer.borrow_mut() = None;
         Arc::new(NoFrames)
     }
 }
@@ -270,7 +250,7 @@ impl Cameras for MockCameras {
             camera: camera.clone(),
             state: RefCell::new(CameraState::stopped()),
             calls: RefCell::default(),
-            preview_surface: RefCell::default(),
+            preview_layer: RefCell::default(),
             photo: RefCell::default(),
             recordings: RefCell::default(),
             changes: Changes::default(),
@@ -286,8 +266,8 @@ impl Cameras for MockCameras {
 pub enum SessionCall {
     Start,
     Stop,
-    /// Whether a surface was given, or none.
-    SetPreviewSurface(bool),
+    /// Whether a layer was given, or none.
+    SetPreviewLayer(bool),
     FrameOutput,
     PhotoOutput,
     MovieOutput(MovieOptions),
@@ -303,7 +283,7 @@ struct SessionShared {
     camera: Camera,
     state: RefCell<CameraState>,
     calls: RefCell<Vec<SessionCall>>,
-    preview_surface: RefCell<Option<Arc<dyn Surface>>>,
+    preview_layer: RefCell<Option<Arc<dyn CompositionLayer>>>,
     photo: RefCell<Option<Photo>>,
     /// The paths recorded to, the last one first to answer when stopped.
     recordings: RefCell<Vec<PathBuf>>,
@@ -321,9 +301,9 @@ impl MockCaptureSession {
         self.0.calls.borrow().clone()
     }
 
-    /// The surface the session's preview is on; `None` once it is put nowhere.
-    pub fn preview_surface(&self) -> Option<Arc<dyn Surface>> {
-        self.0.preview_surface.borrow().clone()
+    /// The layer the session's preview is on; `None` once it is put nowhere.
+    pub fn preview_layer(&self) -> Option<Arc<dyn CompositionLayer>> {
+        self.0.preview_layer.borrow().clone()
     }
 
     /// The paths the app recorded to, in order.
@@ -371,10 +351,9 @@ impl CaptureSession for OpenedSession {
         self.0.0.changes.next()
     }
 
-    fn set_preview_surface(&self, surface: Option<Arc<dyn Surface>>) {
-        self.0
-            .call(SessionCall::SetPreviewSurface(surface.is_some()));
-        *self.0.0.preview_surface.borrow_mut() = surface;
+    fn set_preview_layer(&self, layer: Option<Arc<dyn CompositionLayer>>) {
+        self.0.call(SessionCall::SetPreviewLayer(layer.is_some()));
+        *self.0.0.preview_layer.borrow_mut() = layer;
     }
 
     fn frame_output(&self) -> Arc<dyn FrameReader> {
@@ -474,7 +453,7 @@ impl Future for RecordingEnd {
 struct NoFrames;
 
 impl FrameReader for NoFrames {
-    fn newest(&self) -> Option<PixelBuffer> {
+    fn newest(&self) -> Option<VideoFrame> {
         None
     }
 }

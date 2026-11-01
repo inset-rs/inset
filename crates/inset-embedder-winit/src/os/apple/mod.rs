@@ -1,4 +1,4 @@
-//! What macOS and iOS share: ImageIO; Core Animation's compositor of native surfaces
+//! What macOS and iOS share: ImageIO; Core Animation's compositor of composition layers
 //! (`composition`); AVFoundation's players and cameras (`media`); the notification center
 //! (`notifications`); and for their pasteboards, the UTIs the framework's MIME types are named by
 //! (`pasteboard_types`), the app's futures run on its main thread on behalf of the system

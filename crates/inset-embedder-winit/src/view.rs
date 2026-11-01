@@ -1,7 +1,7 @@
 //! The embedder's [`View`]: a place the framework draws, as it sees it — its identity, its metrics,
 //! its text input, and the scenes it presents: their slices drawn by its rasterizer
-//! (`rasterizer.rs`), with the native surfaces they place beneath the drawing (`os`'s
-//! `WindowSurfaces`).
+//! (`rasterizer.rs`), with the composition layers they place beneath the drawing (`os`'s
+//! `WindowComposition`).
 //!
 //! A view is made without a window, at no size, and is given one: the screen view at winit's
 //! first call, after the app has started, as Flutter's engine has it before its window; any
@@ -11,7 +11,7 @@
 //!
 //! The registry of views owns each window (`windows.rs`); the framework and the app may hold
 //! a view for a while after its window closes. The invariant a later editor must keep: a view
-//! holds its window only through its rasterizer's surface and its native surfaces, and weakly
+//! holds its window only through its rasterizer's surface and its composition layers, and weakly
 //! for its text input and the app's handle on the window, and lets go of them when the window
 //! closes (`window_closed`), so that closing a window frees it.
 
@@ -30,7 +30,7 @@ use winit::window::Window;
 use crate::gpu::LazyGpu;
 use crate::host_window::WinitWindow;
 use crate::ime::ImeOutcome;
-use crate::os::{ThisOs, ThisOsWindowSurfaces, WindowGeometry, WindowSurfaces};
+use crate::os::{ThisOs, ThisOsWindowComposition, WindowComposition, WindowGeometry};
 use crate::rasterizer::{PresentingInTransaction, Rasterizer};
 use crate::screens::screen_of;
 use crate::text_input::{TextInput, Typed};
@@ -40,9 +40,9 @@ pub(crate) struct WinitView {
     id: ViewId,
     metrics: Cell<ViewMetrics>,
     rasterizer: RefCell<Rasterizer>,
-    /// The native surfaces the window's scenes place beneath its content; `None` while the view
+    /// The composition layers the window's scenes place beneath its content; `None` while the view
     /// has no window.
-    native_surfaces: RefCell<Option<ThisOsWindowSurfaces>>,
+    composition: RefCell<Option<ThisOsWindowComposition>>,
     text_input: TextInput,
     /// The request the view arrived for; `None` for the screen view, which the system gave.
     request_id: Option<RequestId>,
@@ -61,7 +61,7 @@ impl WinitView {
         WinitView {
             id,
             metrics: Cell::new(ViewMetrics::default()),
-            native_surfaces: RefCell::new(None),
+            composition: RefCell::new(None),
             rasterizer: RefCell::new(Rasterizer::new(gpu, sees_through)),
             text_input: TextInput::new(),
             request_id: None,
@@ -81,10 +81,10 @@ impl WinitView {
         self
     }
 
-    /// `window` is the view's from now on: its native surfaces and text input are on it, and
+    /// `window` is the view's from now on: its composition layers and text input are on it, and
     /// the view takes its metrics. Its surface comes when the system gives the windows theirs.
     pub(crate) fn attach_window(&self, window: &Arc<dyn Window>) {
-        *self.native_surfaces.borrow_mut() = Some(ThisOsWindowSurfaces::new(Arc::clone(window)));
+        *self.composition.borrow_mut() = Some(ThisOsWindowComposition::new(Arc::clone(window)));
         self.text_input.attach(window);
         self.refresh_metrics(&**window);
     }
@@ -117,11 +117,11 @@ impl WinitView {
         *self.window_handle.borrow_mut() = Rc::downgrade(handle);
     }
 
-    /// The window closed: its surface and its native surfaces go, and with them the last hold
+    /// The window closed: its surface and its composition layers go, and with them the last hold
     /// on the window, while the framework may still hold the view, which is in no window from
     /// now on. A scene presented from now on is drawn nowhere.
     pub(crate) fn window_closed(&self) {
-        self.native_surfaces.take();
+        self.composition.take();
         self.rasterizer.borrow_mut().window_closed();
         *self.window_handle.borrow_mut() = Weak::new();
     }
@@ -218,8 +218,8 @@ impl View for WinitView {
             return;
         }
         let slices = slices(&scene);
-        if let Some(native_surfaces) = &*self.native_surfaces.borrow() {
-            native_surfaces.place(slices.surfaces(), self.id);
+        if let Some(composition) = &*self.composition.borrow() {
+            composition.place(slices.composition_layers(), self.id);
         }
         rasterizer.draw(&scene, &slices);
     }

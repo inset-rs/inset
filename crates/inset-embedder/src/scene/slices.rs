@@ -1,30 +1,33 @@
 //! A frame's layer tree turned into what a host composites, in paint order: the drawing between
-//! surfaces, its slices, and each surface with what the containers above it do to it.
+//! composition layers, its slices, and each composition layer with what the containers above it
+//! do to it.
 //!
 //! Flutter's rasterizer walks its tree with a stack of the containers open and, at each platform
-//! view, has its embedder hand it a new canvas (`PlatformViewLayer::Paint`): the stack restores
-//! the old canvas to where it started, so what was painted is a slice of its own, and reapplies
-//! every open container on the new one (`LayerStateStack::set_delegate`). This walk does the
-//! same, and hands the host the slices and the placements as data instead of calling it at each
-//! surface, since a host here gets the tree itself. A host that shows every surface beneath one
-//! buffer draws [`Slices::picture_with_room`]; one that wants a buffer above a surface, as
-//! Flutter's iOS overlays are, draws each slice into its own, or walks the tree itself.
+//! view, has its embedder hand it a new canvas (`PlatformViewLayer::Paint`): the stack restores the
+//! old canvas to where it started, so what was painted is a slice of its own, and reapplies every
+//! open container on the new one (`LayerStateStack::set_delegate`). This walk does the same, and
+//! hands the host the slices and the placements as data instead of calling it at each composition
+//! layer, since a host here gets the tree itself. A host that shows every composition layer beneath
+//! one buffer draws [`Slices::picture_with_room`]; one that wants a buffer above a composition
+//! layer, as Flutter's iOS overlays are, draws each slice into its own, or walks the tree itself.
 //!
 //! The invariant a later editor must keep: a slice is a whole recording, every container open at
 //! its ends closed in it, so the slices drawn in order draw what the tree paints; and a slice is
-//! kept only when it paints, so a scene of surfaces alone has none.
+//! kept only when it paints, so a scene of composition layers alone has none.
 
+use std::fmt;
 use std::sync::Arc;
 
 use super::Scene;
-use super::layer::{ContainerLayer, DisplayListLayer, Effect, Layer, SurfaceLayer};
-use super::placement::{Mutator, SurfacePlacement};
+use super::layer::{ContainerLayer, DisplayListLayer, Effect, EmbeddedLayer, Layer};
+use super::placement::{Mutator, Placement};
+use crate::composition::CompositionLayer;
 use crate::geometry::{Clip, Color, Matrix4, Offset, rrect_radii_elliptical};
 use crate::painting::{
     Backdrop, BlendMode, Canvas, ClipOp, FillRule, ImageFilter, Paint, Picture, valo,
 };
 
-/// The scene's slices and surfaces, in paint order: what Flutter's embedder hands its
+/// The scene's slices and composition layers, in paint order: what Flutter's embedder hands its
 /// compositor as `FlutterLayer`s, before any slice is rendered.
 pub fn slices(scene: &Scene) -> Slices {
     let mut slicer = Slicer::new();
@@ -39,14 +42,29 @@ pub struct Slices {
 }
 
 /// One part of a scene, in paint order.
-#[derive(Debug)]
 pub enum Part {
-    /// What the scene paints between two surfaces, or before the first or after the last, every
-    /// container open at its ends closed in it: flow's `EmbedderViewSlice`. A stretch that paints
-    /// nothing has none, as Flutter's embedder renders no slice without contents.
+    /// What the scene paints between two composition layers, or before the first or after the
+    /// last, every container open at its ends closed in it: flow's `EmbedderViewSlice`. A stretch
+    /// that paints nothing has none, as Flutter's embedder renders no slice without contents.
     Slice(Arc<Picture>),
-    /// A surface, with the transforms, clips and opacities above it.
-    Surface(SurfacePlacement),
+    /// A composition layer, placed under the transforms, clips and opacities above it.
+    CompositionLayer {
+        layer: Arc<dyn CompositionLayer>,
+        placement: Placement,
+    },
+}
+
+impl fmt::Debug for Part {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Part::Slice(picture) => f.debug_tuple("Slice").field(picture).finish(),
+            Part::CompositionLayer { layer, placement } => f
+                .debug_struct("CompositionLayer")
+                .field("layer", &Arc::as_ptr(layer).cast::<()>())
+                .field("placement", placement)
+                .finish(),
+        }
+    }
 }
 
 impl Slices {
@@ -54,31 +72,34 @@ impl Slices {
         &self.parts
     }
 
-    /// The surfaces the scene places, the bottom-most first.
-    pub fn surfaces(&self) -> impl Iterator<Item = &SurfacePlacement> {
+    /// The composition layers the scene places, each with its placement, the bottom-most first.
+    pub fn composition_layers(
+        &self,
+    ) -> impl Iterator<Item = (&Arc<dyn CompositionLayer>, &Placement)> {
         self.parts.iter().filter_map(|part| match part {
-            Part::Surface(placement) => Some(placement),
+            Part::CompositionLayer { layer, placement } => Some((layer, placement)),
             Part::Slice(_) => None,
         })
     }
 
-    /// Whether the scene paints anything besides its surfaces. One that does not changes no
-    /// pixel of a buffer the surfaces show beneath.
+    /// Whether the scene paints anything besides its composition layers. One that does not changes
+    /// no pixel of a buffer the composition layers show beneath.
     pub fn paints(&self) -> bool {
         self.parts.iter().any(|part| matches!(part, Part::Slice(_)))
     }
 
-    /// The slices as one picture with room made at each surface between them: what a host draws
-    /// that shows every surface beneath its one buffer. The room is the surface's rectangle
-    /// cleared under the transforms and clips above it, by the opacity above it, so the buffer
-    /// keeps that share of what was painted beneath and the surface shows through the rest. It is
-    /// cleared between slices, in no layer of theirs, so it reaches the buffer.
+    /// The slices as one picture with room made at each composition layer between them: what a host
+    /// draws that shows every composition layer beneath its one buffer. The room is the composition
+    /// layer's rectangle cleared under the transforms and clips above it, by the opacity above it,
+    /// so the buffer keeps that share of what was painted beneath and the composition layer shows
+    /// through the rest. It is cleared between slices, in no layer of theirs, so it reaches the
+    /// buffer.
     pub fn picture_with_room(&self) -> Picture {
         let mut canvas = Canvas::new();
         for part in &self.parts {
             match part {
                 Part::Slice(picture) => canvas.draw_display_list(picture),
-                Part::Surface(placement) => make_room(&mut canvas, placement),
+                Part::CompositionLayer { placement, .. } => make_room(&mut canvas, placement),
             }
         }
         canvas.build()
@@ -106,7 +127,7 @@ impl<'a> Slicer<'a> {
         match layer {
             Layer::Container(container) => self.visit_container(container),
             Layer::DisplayList(picture) => self.slice.draw_picture(picture),
-            Layer::Surface(surface) => self.place_surface(surface),
+            Layer::Embedded(embedded) => self.place_composition_layer(embedded),
         }
     }
 
@@ -120,15 +141,17 @@ impl<'a> Slicer<'a> {
         self.slice.close();
     }
 
-    /// What was painted so far becomes a slice of its own, and the surface is placed above it
-    /// with what the open containers do.
-    fn place_surface(&mut self, surface: &SurfaceLayer) {
+    /// What was painted so far becomes a slice of its own, and the composition layer is placed
+    /// above it with what the open containers do.
+    fn place_composition_layer(&mut self, embedded: &EmbeddedLayer) {
         self.end_slice();
-        self.parts.push(Part::Surface(SurfacePlacement {
-            surface: Arc::clone(&surface.surface),
-            rect: surface.rect,
-            mutators: mutators_of(&self.open),
-        }));
+        self.parts.push(Part::CompositionLayer {
+            layer: Arc::clone(&embedded.layer),
+            placement: Placement {
+                rect: embedded.rect,
+                mutators: mutators_of(&self.open),
+            },
+        });
     }
 
     /// Closes the open containers on the slice being recorded, keeps it if it paints, and goes on
@@ -264,10 +287,10 @@ impl SliceRecording {
     }
 }
 
-/// What the containers whose effects are `open` do to a surface placed in them, the outermost
-/// first. An offset opacity moves before it fades, as flow's `OpacityLayer` translates before
-/// it applies its opacity. A backdrop filter does nothing to a surface beneath the buffer it
-/// reads.
+/// What the containers whose effects are `open` do to a composition layer placed in them, the
+/// outermost first. An offset opacity moves before it fades, as flow's `OpacityLayer` translates
+/// before it applies its opacity. A backdrop filter does nothing to a composition layer beneath the
+/// buffer it reads.
 fn mutators_of(open: &[&Effect]) -> Vec<Mutator> {
     let mut mutators = Vec::new();
     for effect in open {
@@ -289,8 +312,8 @@ fn mutators_of(open: &[&Effect]) -> Vec<Mutator> {
 }
 
 /// Clears `placement`'s rectangle under the transforms and clips above it, by the opacity above
-/// it. A surface nothing lets show gets no room.
-fn make_room(canvas: &mut Canvas, placement: &SurfacePlacement) {
+/// it. A composition layer nothing lets show gets no room.
+fn make_room(canvas: &mut Canvas, placement: &Placement) {
     let opacity = placement.opacity();
     if opacity <= 0.0 {
         return;
@@ -365,9 +388,9 @@ fn valo_backdrop(filter: &ImageFilter, backdrop_id: Option<u64>) -> Backdrop {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SceneBuilder;
     use crate::geometry::{RRect, Radius, Rect};
     use crate::painting::{ColorFilter, flattened_ops};
-    use crate::{SceneBuilder, Surface};
 
     fn square() -> Arc<Picture> {
         let mut canvas = Canvas::new();
@@ -375,13 +398,13 @@ mod tests {
         Arc::new(canvas.build())
     }
 
-    fn idle_surface() -> Arc<dyn Surface> {
-        super::super::idle_surface()
+    fn idle_layer() -> Arc<dyn CompositionLayer> {
+        super::super::idle_layer()
     }
 
     #[test]
-    fn a_surface_carries_the_transforms_clips_and_opacity_above_it() {
-        let surface = idle_surface();
+    fn a_composition_layer_carries_the_transforms_clips_and_opacity_above_it() {
+        let layer = idle_layer();
         let rrect = RRect::from_rect_and_radius(
             Rect::from_ltwh(0.0, 0.0, 50.0, 50.0),
             Radius::circular(8.0),
@@ -392,16 +415,18 @@ mod tests {
         builder.push_opacity(128, Offset::new(5.0, 6.0));
         builder.push_backdrop_filter(&ImageFilter::blur(2.0, 2.0), BlendMode::SrcOver, None);
         builder.push_clip_rrect(rrect, Clip::AntiAlias);
-        builder.add_surface(Arc::clone(&surface), Rect::from_ltwh(1.0, 2.0, 30.0, 20.0));
+        builder.add_embedded_layer(Arc::clone(&layer), Rect::from_ltwh(1.0, 2.0, 30.0, 20.0));
         for _ in 0..5 {
             builder.pop();
         }
         let slices = slices(&builder.build());
-        let placements: Vec<&SurfacePlacement> = slices.surfaces().collect();
+        let [(placed, placement)] = slices.composition_layers().collect::<Vec<_>>()[..] else {
+            panic!("one layer: {:?}", slices.parts());
+        };
+        assert!(Arc::ptr_eq(placed, &layer));
         assert_eq!(
-            placements,
-            [&SurfacePlacement {
-                surface,
+            placement,
+            &Placement {
                 rect: Rect::from_ltwh(1.0, 2.0, 30.0, 20.0),
                 mutators: vec![
                     Mutator::Transform(Matrix4::scale(2.0, 2.0)),
@@ -410,17 +435,16 @@ mod tests {
                     Mutator::Opacity(128),
                     Mutator::ClipRRect(rrect),
                 ],
-            }],
-            "the backdrop filter does nothing to the surface"
+            },
+            "the backdrop filter does nothing to the layer"
         );
     }
 
     #[test]
-    fn a_surface_in_a_retained_container_is_placed_again() {
-        let surface = idle_surface();
+    fn a_composition_layer_in_a_retained_container_is_placed_again() {
         let mut builder = SceneBuilder::new();
         builder.push_offset(10.0, 0.0);
-        builder.add_surface(Arc::clone(&surface), Rect::from_ltwh(0.0, 0.0, 4.0, 4.0));
+        builder.add_embedded_layer(idle_layer(), Rect::from_ltwh(0.0, 0.0, 4.0, 4.0));
         let retained = builder.pop();
         let _first = builder.build();
 
@@ -428,21 +452,30 @@ mod tests {
         builder.push_offset(0.0, 20.0);
         builder.add_retained(&retained);
         builder.pop();
-        let placement = slices(&builder.build()).surfaces().next().cloned().unwrap();
+        let slices = slices(&builder.build());
+        let (_, placement) = slices.composition_layers().next().unwrap();
         assert_eq!(placement.bounds(), Rect::from_ltwh(10.0, 20.0, 4.0, 4.0));
     }
 
     #[test]
-    fn a_surface_ends_the_slice_and_the_next_opens_under_the_same_containers() {
+    fn a_composition_layer_ends_the_slice_and_the_next_opens_under_the_same_containers() {
         let mut builder = SceneBuilder::new();
         builder.push_opacity(128, Offset::ZERO);
         builder.add_picture(Offset::ZERO, &square(), false, false);
-        builder.add_surface(idle_surface(), Rect::from_ltwh(0.0, 0.0, 4.0, 4.0));
+        builder.add_embedded_layer(idle_layer(), Rect::from_ltwh(0.0, 0.0, 4.0, 4.0));
         builder.add_picture(Offset::new(20.0, 0.0), &square(), false, false);
         builder.pop();
         let slices = slices(&builder.build());
-        let [Part::Slice(beneath), Part::Surface(_), Part::Slice(above)] = slices.parts() else {
-            panic!("a slice, the surface, a slice: {:?}", slices.parts());
+        let [
+            Part::Slice(beneath),
+            Part::CompositionLayer { .. },
+            Part::Slice(above),
+        ] = slices.parts()
+        else {
+            panic!(
+                "a slice, the composition layer, a slice: {:?}",
+                slices.parts()
+            );
         };
         for slice in [beneath, above] {
             let layers = slice
@@ -462,16 +495,16 @@ mod tests {
     }
 
     #[test]
-    fn a_scene_of_surfaces_alone_paints_nothing() {
+    fn a_scene_of_composition_layers_alone_paints_nothing() {
         let mut builder = SceneBuilder::new();
         builder.push_opacity(128, Offset::ZERO);
         builder.push_clip_rect(
             Rect::from_ltwh(0.0, 0.0, 9.0, 9.0),
             Clip::AntiAliasWithSaveLayer,
         );
-        builder.add_surface(idle_surface(), Rect::from_ltwh(0.0, 0.0, 4.0, 4.0));
+        builder.add_embedded_layer(idle_layer(), Rect::from_ltwh(0.0, 0.0, 4.0, 4.0));
         builder.add_picture(Offset::ZERO, &Arc::new(Canvas::new().build()), false, false);
-        builder.add_surface(idle_surface(), Rect::from_ltwh(4.0, 0.0, 4.0, 4.0));
+        builder.add_embedded_layer(idle_layer(), Rect::from_ltwh(4.0, 0.0, 4.0, 4.0));
         builder.pop();
         builder.pop();
         let slices = slices(&builder.build());
@@ -479,12 +512,12 @@ mod tests {
             slices
                 .parts()
                 .iter()
-                .all(|part| matches!(part, Part::Surface(_))),
+                .all(|part| matches!(part, Part::CompositionLayer { .. })),
             "{:?}",
             slices.parts()
         );
         assert!(!slices.paints());
-        assert_eq!(slices.surfaces().count(), 2);
+        assert_eq!(slices.composition_layers().count(), 2);
     }
 
     #[test]
@@ -496,12 +529,12 @@ mod tests {
     }
 
     #[test]
-    fn room_is_cleared_under_the_surfaces_transforms_and_clips_between_the_slices() {
+    fn room_is_cleared_under_the_composition_layers_transforms_and_clips_between_the_slices() {
         let mut builder = SceneBuilder::new();
         builder.add_picture(Offset::ZERO, &square(), false, false);
         builder.push_transform(&Matrix4::scale(2.0, 2.0));
         builder.push_clip_rect(Rect::from_ltwh(0.0, 0.0, 3.0, 3.0), Clip::HardEdge);
-        builder.add_surface(idle_surface(), Rect::from_ltwh(1.0, 1.0, 4.0, 4.0));
+        builder.add_embedded_layer(idle_layer(), Rect::from_ltwh(1.0, 1.0, 4.0, 4.0));
         builder.pop();
         builder.pop();
         let picture = slices(&builder.build()).picture_with_room();
@@ -532,11 +565,11 @@ mod tests {
     }
 
     #[test]
-    fn a_surface_nothing_lets_show_gets_no_room() {
+    fn a_composition_layer_nothing_lets_show_gets_no_room() {
         let mut builder = SceneBuilder::new();
         builder.add_picture(Offset::ZERO, &square(), false, false);
         builder.push_opacity(0, Offset::ZERO);
-        builder.add_surface(idle_surface(), Rect::from_ltwh(1.0, 1.0, 4.0, 4.0));
+        builder.add_embedded_layer(idle_layer(), Rect::from_ltwh(1.0, 1.0, 4.0, 4.0));
         builder.pop();
         let picture = slices(&builder.build()).picture_with_room();
         assert!(
@@ -584,13 +617,14 @@ mod tests {
         );
     }
 
-    /// A backdrop filter over a surface opens its backdrop in the slice beneath the surface
-    /// only: above it, it is a plain layer, as flow's reapplied backdrop entry is.
+    /// A backdrop filter over a composition layer opens its backdrop in the slice beneath the
+    /// composition layer only: above it, it is a plain layer, as flow's reapplied backdrop entry
+    /// is.
     #[test]
-    fn a_backdrop_filter_reads_the_backdrop_once_across_a_surface() {
+    fn a_backdrop_filter_reads_the_backdrop_once_across_a_composition_layer() {
         let mut builder = SceneBuilder::new();
         builder.push_backdrop_filter(&ImageFilter::blur(2.0, 2.0), BlendMode::SrcOver, None);
-        builder.add_surface(idle_surface(), Rect::from_ltwh(0.0, 0.0, 4.0, 4.0));
+        builder.add_embedded_layer(idle_layer(), Rect::from_ltwh(0.0, 0.0, 4.0, 4.0));
         builder.add_picture(Offset::ZERO, &square(), false, false);
         builder.pop();
         let picture = slices(&builder.build()).picture_with_room();
@@ -601,7 +635,7 @@ mod tests {
             .count();
         assert_eq!(
             layers, 2,
-            "the backdrop's, and the plain one above the surface"
+            "the backdrop's, and the plain one above the composition layer"
         );
     }
 
@@ -676,28 +710,28 @@ mod tests {
             );
         }
 
-        /// A surface under glass shows through it, unfiltered: the room is made after the
+        /// A composition layer under glass shows through it, unfiltered: the room is made after the
         /// backdrop's layer closes, so it reaches the buffer.
         #[test]
-        fn a_surface_under_a_backdrop_filter_shows_through_it() {
+        fn a_composition_layer_under_a_backdrop_filter_shows_through_it() {
             let mut builder = SceneBuilder::new();
             builder.add_picture(Offset::ZERO, &filled(Color::new(0xFFFFFFFF)), false, false);
             builder.push_backdrop_filter(&ImageFilter::blur(2.0, 2.0), BlendMode::SrcOver, None);
-            builder.add_surface(idle_surface(), Rect::from_ltwh(0.0, 0.0, 16.0, 32.0));
+            builder.add_embedded_layer(idle_layer(), Rect::from_ltwh(0.0, 0.0, 16.0, 32.0));
             builder.pop();
             let pixels = drawn(&builder.build());
-            assert_eq!(pixel_at(&pixels, 8, 16)[3], 0, "over the surface");
+            assert_eq!(pixel_at(&pixels, 8, 16)[3], 0, "over the composition layer");
             assert_near(pixel_at(&pixels, 28, 16), [255, 255, 255, 255], "beside it");
         }
 
-        /// The hole keeps half of what was painted beneath a surface at half opacity, and what
-        /// the same opacity paints above the surface stays.
+        /// The hole keeps half of what was painted beneath a composition layer at half opacity, and
+        /// what the same opacity paints above the composition layer stays.
         #[test]
-        fn a_surface_under_an_opacity_shows_through_by_that_opacity() {
+        fn a_composition_layer_under_an_opacity_shows_through_by_that_opacity() {
             let mut builder = SceneBuilder::new();
             builder.add_picture(Offset::ZERO, &filled(Color::new(0xFFFFFFFF)), false, false);
             builder.push_opacity(128, Offset::ZERO);
-            builder.add_surface(idle_surface(), Rect::from_ltwh(0.0, 0.0, 16.0, 32.0));
+            builder.add_embedded_layer(idle_layer(), Rect::from_ltwh(0.0, 0.0, 16.0, 32.0));
             builder.add_picture(
                 Offset::ZERO,
                 &square_of(Color::new(0xFF0000FF), 4.0),
@@ -709,17 +743,17 @@ mod tests {
             assert_near(
                 pixel_at(&pixels, 24, 16),
                 [255, 255, 255, 255],
-                "beside the surface",
+                "beside the composition layer",
             );
             assert_near(
                 pixel_at(&pixels, 8, 16),
                 [255, 255, 255, 127],
-                "over the surface",
+                "over the composition layer",
             );
             let above = pixel_at(&pixels, 1, 1);
             assert!(
                 above[2] > above[0] && above[3] > 127,
-                "the blue square painted above the surface: {above:?}"
+                "the blue square painted above the composition layer: {above:?}"
             );
         }
 
@@ -734,8 +768,8 @@ mod tests {
                 ),
                 Clip::AntiAlias,
             );
-            builder.add_surface(
-                idle_surface(),
+            builder.add_embedded_layer(
+                idle_layer(),
                 Rect::from_ltwh(0.0, 0.0, SIZE.into(), SIZE.into()),
             );
             builder.pop();

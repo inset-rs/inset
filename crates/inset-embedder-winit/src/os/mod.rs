@@ -1,21 +1,21 @@
 //! What an operating system adds beyond winit, as one small trait per concern.
 //!
-//! Every method has the answer of a system that adds nothing, so a system implements only
-//! what it has, and the embedder calls through [`ThisOs`], the one system this build targets. The
-//! exceptions are the target platform and the associated types: the display link and the
-//! window's native surfaces, which `absent` answers for a system that has neither, and the
-//! clipboard, which is arboard's plain text on a system without code of its own for one. What a
-//! system lets the app do is answered in one place, on [`OperatingSystem`].
-//! Five systems: macOS adds a window frame that animates, its menus (the menu bar, a menu at a
-//! point, the Dock icon's and the status items), its pasteboard, a display link, native surfaces,
-//! its own answers about its screens, whether a window is occluded and its notices that a window
-//! was minimized, the fingers coming down on a trackpad, and the requests it makes of the application and what it says changed, among
+//! Every method has the answer of a system that adds nothing, so a system implements only what it
+//! has, and the embedder calls through [`ThisOs`], the one system this build targets. The
+//! exceptions are the target platform and the associated types: the display link and the window's
+//! composition layers, which `absent` answers for a system that has neither, and the clipboard,
+//! which is arboard's plain text on a system without code of its own for one. What a system lets
+//! the app do is answered in one place, on [`OperatingSystem`]. Five systems: macOS adds a window
+//! frame that animates, its menus (the menu bar, a menu at a point, the Dock icon's and the status
+//! items), its pasteboard, a display link, composition layers, its own answers about its screens,
+//! whether a window is occluded and its notices that a window was minimized, the fingers coming
+//! down on a trackpad, and the requests it makes of the application and what it says changed, among
 //! others (`macos`); iOS reports its window's size and safe area differently, and has its
-//! pasteboard and native surfaces (`ios`); Windows tells the clipboard's changes by its sequence
+//! pasteboard and composition layers (`ios`); Windows tells the clipboard's changes by its sequence
 //! number, and has a menu at a point, icons in the notification area and toasts (`windows`); Linux
 //! has the desktop's tray and its notification server (`linux`); every other system winit covers by
-//! itself (`winit_only`). What macOS and iOS share, their notification center and the compositor
-//! of native surfaces among it, is in `apple`.
+//! itself (`winit_only`). What macOS and iOS share, their notification center and the compositor of
+//! composition layers among it, is in `apple`.
 //!
 //! A system's module is compiled for its own target only, so a change to a trait is checked
 //! against that system's answers only when building for it: build every target a change
@@ -25,6 +25,8 @@
 mod absent;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod apple;
+#[cfg(target_os = "macos")]
+pub(crate) use apple::composition::{place_layer_in, show_system_layer};
 #[cfg(target_os = "ios")]
 mod ios;
 #[cfg(target_os = "linux")]
@@ -46,8 +48,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use inset_embedder::{
-    Cameras, Clipboard, Compositor, DockMenu, FileDialogs, KeyData, MenuBar, MenuEntry, MenuId,
-    Notifications, Offset, Opener, Players, Rect, Screen, ScreenId, SurfacePlacement,
+    Cameras, Clipboard, CompositionLayer, Compositor, DockMenu, FileDialogs, KeyData, MenuBar,
+    MenuEntry, MenuId, Notifications, Offset, Opener, Placement, Players, Rect, Screen, ScreenId,
     TargetPlatform, TrayIcons, ViewId, ViewPadding, VsyncWaiter, WindowConfig,
 };
 use valo_codec::Decoder;
@@ -87,7 +89,7 @@ pub(crate) type ThisOs = winit_only::WinitOnly;
 pub(crate) type ThisOsDisplayLink = <ThisOs as FramePresentation>::DisplayLink;
 
 /// This system's share of its compositor for one window.
-pub(crate) type ThisOsWindowSurfaces = <ThisOs as NativeComposition>::WindowSurfaces;
+pub(crate) type ThisOsWindowComposition = <ThisOs as NativeComposition>::WindowComposition;
 
 /// This system's notices that a window may have been minimized or occluded, for one window.
 pub(crate) type ThisOsVisibilityNotices = <ThisOs as WindowVisibility>::Notices;
@@ -296,14 +298,14 @@ pub(crate) trait FramePresentation {
     /// geometry it was laid out for are committed together. Nothing to join by default.
     fn present_in_transaction(_surface: &mut valo::Surface, _wanted: bool) {}
 
-    /// Whether a frame that paints nothing besides its native surfaces reaches the display without
-    /// being drawn: its surfaces, which the compositor places, over the view's background, which
-    /// the window shows itself (`show_background`). Where it does not, every frame is drawn, its
-    /// background at least.
+    /// Whether a frame that paints nothing besides its composition layers reaches the display
+    /// without being drawn: its layers, which the compositor places, over the view's background,
+    /// which the window shows itself (`show_background`). Where it does not, every frame is drawn,
+    /// its background at least.
     const SHOWS_FRAMES_UNDRAWN: bool = false;
 
-    /// Has `window` show `color` behind its content and its surfaces, for the frames that are not
-    /// drawn and the empty ones. Main thread.
+    /// Has `window` show `color` behind its content and its composition layers, for the frames
+    /// that are not drawn and the empty ones. Main thread.
     fn show_background(_window: &dyn Window, _color: valo::Color) {}
 }
 
@@ -321,26 +323,31 @@ pub(crate) trait DisplayLink: Sized {
     fn set_wanted(&self, wanted: bool);
 }
 
-/// The system's compositor for native surfaces: Core Animation's on macOS and iOS, and why it is
-/// shaped as it is, in `apple/composition`.
+/// The system's compositor for composition layers: Core Animation's on macOS and iOS, and why it
+/// is shaped as it is, in `apple/composition`.
 pub(crate) trait NativeComposition {
     /// One window's share of the compositor.
-    type WindowSurfaces: WindowSurfaces;
+    type WindowComposition: WindowComposition;
 
-    /// The compositor producers open surfaces on. `None` where the embedder hands the system
-    /// no surfaces.
+    /// The compositor producers make layers on. `None` where the embedder hands the system no
+    /// layers.
     fn compositor() -> Option<Arc<dyn Compositor>> {
         None
     }
 }
 
-/// One window's share of the compositor: it places a scene's native surfaces beneath the
+/// One window's share of the compositor: it places a scene's composition layers beneath the
 /// window's content.
-pub(crate) trait WindowSurfaces {
+pub(crate) trait WindowComposition {
     fn new(window: Arc<dyn Window>) -> Self;
 
-    /// Places a scene's surfaces beneath the window's content, bottom-most first. Main thread.
-    fn place<'a>(&self, placements: impl IntoIterator<Item = &'a SurfacePlacement>, view: ViewId);
+    /// Places a scene's layers beneath the window's content, bottom-most first, and lets go of
+    /// the ones it no longer places. Main thread.
+    fn place<'a>(
+        &self,
+        placements: impl IntoIterator<Item = (&'a Arc<dyn CompositionLayer>, &'a Placement)>,
+        view: ViewId,
+    );
 }
 
 /// Menus the system draws itself (`menus/`): each place is the system's, or none where it has

@@ -5,12 +5,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use inset_embedder::{
-    Camera, CameraState, CaptureSession, FrameReader, MediaChangeFuture, MovieOptions, MovieOutput,
-    PhotoOutput, Size, Surface,
+    Camera, CameraState, CaptureSession, CompositionLayer, FrameReader, MediaChangeFuture,
+    MovieOptions, MovieOutput, PhotoOutput, Size,
 };
 use inset_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle};
 
-use super::{PictureSource, SurfacePicture};
+use super::{CompositionLayerPicture, PictureSource};
 use crate::framework::{BuildContext, IntoWidget, KeyRef, StatelessWidget, WidgetRef};
 
 /// The cameras attached now, in the system's order; none where the platform has no cameras:
@@ -31,9 +31,9 @@ pub struct CameraSession {
     host: Option<Rc<dyn CaptureSession>>,
     /// The host's state when it last changed.
     state: CameraState,
-    /// The surface the preview was put on last, which a [`CameraPreview`] puts it nowhere from
+    /// The layer the preview was put on last, which a [`CameraPreview`] puts it nowhere from
     /// only while it is still its own.
-    preview_surface: Option<Arc<dyn Surface>>,
+    preview_layer: Option<Arc<dyn CompositionLayer>>,
 }
 
 impl CameraSession {
@@ -46,7 +46,7 @@ impl CameraSession {
             change_notifier: ChangeNotifierData::new(),
             state: host.state(),
             host: Some(host),
-            preview_surface: None,
+            preview_layer: None,
         });
         session.follow(app, changed);
         Some(session)
@@ -66,16 +66,16 @@ impl CameraSession {
         self.host(app).stop();
     }
 
-    /// Puts the preview on `surface` from now on, and on no surface it went to before; `None`
-    /// puts it nowhere: what [`CameraPreview`] does with a surface of its own as it is mounted,
+    /// Puts the preview on `layer` from now on, and on no layer it went to before; `None` puts it
+    /// nowhere: what [`CameraPreview`] does with a composition layer of its own as it is mounted,
     /// and with `None` as it is unmounted.
-    pub fn set_preview_surface(
+    pub fn set_preview_layer(
         self: Handle<Self>,
         app: &mut App,
-        surface: Option<Arc<dyn Surface>>,
+        layer: Option<Arc<dyn CompositionLayer>>,
     ) {
-        self.host(app).set_preview_surface(surface.clone());
-        app.get_mut(self).preview_surface = surface;
+        self.host(app).set_preview_layer(layer.clone());
+        app.get_mut(self).preview_layer = layer;
     }
 
     /// The camera's frames, the newest each time.
@@ -97,12 +97,12 @@ impl CameraSession {
         self.host(app).movie_output(options)
     }
 
-    /// Stops the camera and lets go of the host's session: its preview leaves the surface it
+    /// Stops the camera and lets go of the host's session: its preview leaves the layer it
     /// was on, and its listeners hear nothing more.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
         let session = app.get_mut(self);
         session.host = None;
-        session.preview_surface = None;
+        session.preview_layer = None;
         session.change_notifier.dispose();
     }
 
@@ -167,12 +167,12 @@ impl fmt::Debug for CameraSession {
 }
 
 impl PictureSource for CameraSession {
-    fn set_surface(handle: Handle<Self>, app: &mut App, surface: Option<Arc<dyn Surface>>) {
-        handle.set_preview_surface(app, surface);
+    fn set_layer(handle: Handle<Self>, app: &mut App, layer: Option<Arc<dyn CompositionLayer>>) {
+        handle.set_preview_layer(app, layer);
     }
 
-    fn surface(handle: Handle<Self>, app: &App) -> Option<&Arc<dyn Surface>> {
-        app.get(handle).preview_surface.as_ref()
+    fn layer(handle: Handle<Self>, app: &App) -> Option<&Arc<dyn CompositionLayer>> {
+        app.get(handle).preview_layer.as_ref()
     }
 
     fn picture_size(handle: Handle<Self>, app: &App) -> Option<Size> {
@@ -182,7 +182,8 @@ impl PictureSource for CameraSession {
 
 /// A camera session's preview, laid out at the camera's picture size in logical pixels, or as
 /// large as the constraints let it be at that aspect; no room until the session has the camera.
-/// It shows the session on a surface of its own, which the system draws the preview into.
+/// It shows the session on a composition layer of its own, whose content is a layer the system
+/// draws the preview into.
 #[derive(Clone)]
 pub struct CameraPreview {
     pub key: Option<KeyRef>,
@@ -212,7 +213,7 @@ impl StatelessWidget for CameraPreview {
     }
 
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
-        SurfacePicture {
+        CompositionLayerPicture {
             source: self.session,
         }
         .into_widget()
@@ -333,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn a_camera_preview_shows_its_session_on_a_surface_placed_at_the_cameras_size() {
+    fn a_camera_preview_shows_its_session_on_a_layer_placed_at_the_cameras_size() {
         let cameras = MockCameras::new(vec![front_camera()]);
         let compositor = MockCompositor::new();
         let view = Rc::new(TestView::new(400.0, 800.0));
@@ -348,21 +349,15 @@ mod tests {
         cell.elapse(Duration::ZERO);
         pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
         let host = &cameras.sessions()[0];
-        let opened = compositor.opened();
-        assert!(Arc::ptr_eq(
-            &host.preview_surface().unwrap(),
-            &opened[0].surface
-        ));
+        let made = compositor.made();
+        assert!(Arc::ptr_eq(&host.preview_layer().unwrap(), &made[0].layer));
 
         host.set_state(running(Size::new(1920.0, 1080.0)));
         cell.checkpoint();
         pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(16));
         let scene = view.last_scene().unwrap();
-        let placement = inset_embedder::slices(&scene)
-            .surfaces()
-            .next()
-            .cloned()
-            .unwrap();
+        let slices = inset_embedder::slices(&scene);
+        let (_, placement) = slices.composition_layers().next().unwrap();
         assert_eq!(
             placement.bounds().size(),
             Size::new(400.0, 225.0),
@@ -373,7 +368,7 @@ mod tests {
         cell.elapse(Duration::ZERO);
         pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(32));
         assert!(
-            host.preview_surface().is_none(),
+            host.preview_layer().is_none(),
             "unmounted, it puts the preview nowhere"
         );
     }

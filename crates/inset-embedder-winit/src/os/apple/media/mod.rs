@@ -1,7 +1,7 @@
 //! Players and cameras on macOS and iOS: AVFoundation, the system's own media stack. A player is
 //! an `AVPlayer` (`player`), a camera session an `AVCaptureSession` (`camera`) with its photo and
-//! movie outputs (`outputs`); a picture goes to a surface as a layer the system draws into, hung in
-//! the surface's own layers so that Core Animation clips and scales it with them
+//! movie outputs (`outputs`); a picture goes to a composition layer as a layer the system draws
+//! into, shown as its content so that Core Animation clips and scales it with it
 //! (`apple/composition`), or to a frame reader as `IOSurface`-backed pixel buffers (`frames`).
 //! AVFoundation tells changes by key-value observing and notifications (`observing`).
 //!
@@ -27,7 +27,7 @@ use std::rc::Rc;
 use inset_embedder::{Cameras, Players};
 use objc2::MainThreadMarker;
 
-pub(super) use super::composition::{in_transaction, show_layer_on};
+pub(super) use super::composition::{in_transaction, show_system_layer};
 use camera::AvCameras;
 use player::AvPlayers;
 

@@ -56,7 +56,7 @@ pub struct WinitPlatform {
     proxy: MainLoopProxy,
     /// The id of the next request for a view.
     next_request_id: Cell<u64>,
-    /// The system's compositor for native surfaces, where it has one.
+    /// The system's compositor for composition layers, where it has one.
     compositor: Option<Arc<dyn Compositor>>,
     /// Where any thread waits for a screen's next vsync.
     vsync_waiter: Arc<dyn VsyncWaiter>,

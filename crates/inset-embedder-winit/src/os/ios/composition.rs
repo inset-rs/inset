@@ -17,11 +17,11 @@ use winit::window::Window;
 use super::Ios;
 use crate::os::NativeComposition;
 use crate::os::apple::composition::{
-    CoreAnimationCompositor, CoreAnimationWindowSurfaces, WindowLayer,
+    CoreAnimationCompositor, CoreAnimationWindowComposition, WindowLayer,
 };
 
 impl NativeComposition for Ios {
-    type WindowSurfaces = CoreAnimationWindowSurfaces<Ios>;
+    type WindowComposition = CoreAnimationWindowComposition<Ios>;
 
     fn compositor() -> Option<Arc<dyn Compositor>> {
         Some(Arc::new(CoreAnimationCompositor))

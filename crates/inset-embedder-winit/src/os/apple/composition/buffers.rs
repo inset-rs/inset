@@ -1,7 +1,7 @@
-//! The buffers a producer presented to a surface, and when each goes back to it: once
-//! `IOSurfaceIsInUse` answers false for a buffer that was replaced, or when the surface goes.
+//! The buffers a producer presented to a composition layer, and when each goes back to it: once
+//! `IOSurfaceIsInUse` answers false for a buffer that was replaced, or when the layer goes.
 
-use inset_embedder::Buffer;
+use inset_embedder::HardwareBuffer;
 use objc2::runtime::AnyObject;
 use objc2_io_surface::IOSurfaceRef;
 use objc2_quartz_core::CALayer;
@@ -14,7 +14,7 @@ pub(super) fn notify_released(callbacks: Vec<OnReleased>) {
 }
 
 /// A producer's buffer, handed between threads.
-pub(super) struct CrossThreadBuffer(pub(super) Buffer);
+pub(super) struct CrossThreadBuffer(pub(super) HardwareBuffer);
 
 // SAFETY: an `IOSurface` is made to be shared between threads and processes: its retain count
 // and use count are atomic. The binding cannot say so.
@@ -33,14 +33,14 @@ impl CrossThreadBuffer {
 /// What a producer asked to run once the compositor has released its buffer.
 pub(super) type OnReleased = Box<dyn FnOnce() + Send + Sync>;
 
-/// The buffers presented to a surface and not yet released: the one on screen, and the ones it
+/// The buffers presented to a layer and not yet released: the one on screen, and the ones it
 /// replaced, which the compositor may still be reading.
 pub(super) struct PresentedBuffers<B> {
     on_screen: Option<PresentedBuffer<B>>,
     replaced: Vec<PresentedBuffer<B>>,
 }
 
-/// A buffer presented to a surface, with what its producer asked to run once it is released.
+/// A buffer presented to a layer, with what its producer asked to run once it is released.
 struct PresentedBuffer<B> {
     buffer: B,
     on_released: OnReleased,
@@ -63,6 +63,11 @@ impl<B> PresentedBuffers<B> {
         self.replaced.extend(previous);
     }
 
+    /// The one on screen is replaced by nothing: something else is the layer's content now.
+    pub(super) fn take_off_screen(&mut self) {
+        self.replaced.extend(self.on_screen.take());
+    }
+
     /// Releases the replaced buffers `in_use` no longer answers true for, and answers their
     /// callbacks for the caller to run.
     pub(super) fn release_unused(&mut self, in_use: impl Fn(&B) -> bool) -> Vec<OnReleased> {
@@ -76,7 +81,7 @@ impl<B> PresentedBuffers<B> {
             .collect()
     }
 
-    /// Releases every buffer, for a surface that is going, and answers their callbacks.
+    /// Releases every buffer, for a layer that is going, and answers their callbacks.
     pub(super) fn release_all(&mut self) -> Vec<OnReleased> {
         self.replaced
             .drain(..)
@@ -122,7 +127,17 @@ mod tests {
     }
 
     #[test]
-    fn a_surface_that_goes_releases_every_buffer_it_holds() {
+    fn a_buffer_taken_off_screen_is_released_once_no_longer_in_use() {
+        let released = Arc::new(AtomicUsize::new(0));
+        let mut buffers = PresentedBuffers::new();
+        buffers.present("shown", counting(&released));
+        buffers.take_off_screen();
+        notify_released(buffers.release_unused(|_| false));
+        assert_eq!(released.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_layer_that_goes_releases_every_buffer_it_holds() {
         let released = Arc::new(AtomicUsize::new(0));
         let mut buffers = PresentedBuffers::new();
         buffers.present(1, counting(&released));

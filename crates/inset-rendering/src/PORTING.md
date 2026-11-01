@@ -72,11 +72,11 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Dart's GC keeps a link alive while a detached layer still names it.
   Affect: the link's entry lingers until those layers are disposed, past the `dispose` of the state that owns it.
 
-## surface_view.rs, layer.rs (`SurfaceLayer`) → platform views (`PlatformViewLayer`, `RenderAndroidView` and kin)
+## composition_layer_view.rs, layer.rs (`EmbeddedLayer`) → platform views (`PlatformViewLayer`, `RenderAndroidView` and kin)
 
-- Change: one `RenderSurfaceView` shows a native surface on every platform.
-  Reason: platform — every compositor Inset targets shows a surface as a rectangle and a buffer.
-  Affect: an app shows a native surface with the same widget everywhere.
+- Change: one `RenderCompositionLayerView` shows a composition layer on every platform, through an `EmbeddedLayer`, named after Flutter's embedded views.
+  Reason: platform — every compositor Inset targets shows a layer as a rectangle and its content.
+  Affect: an app shows a composition layer with the same widget everywhere.
 
 ## view.rs → view.dart, binding.rs → binding.dart
 

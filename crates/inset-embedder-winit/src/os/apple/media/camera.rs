@@ -1,8 +1,9 @@
-//! Cameras: AVFoundation's capture devices, listed by a discovery session, and a session on one,
-//! an `AVCaptureSession` configured and run on a serial queue of its own, as Apple asks, since
+//! Cameras: AVFoundation's capture devices, listed by a discovery session, and a session on one, an
+//! `AVCaptureSession` configured and run on a serial queue of its own, as Apple asks, since
 //! starting it blocks. The session asks the user for the camera, and for the microphone where a
-//! recording wants sound, at its start; its preview is an `AVCaptureVideoPreviewLayer` hung in a
-//! surface, and its other outputs (`outputs`, `frames`) are added to it as they are asked for.
+//! recording wants sound, at its start; its preview is an `AVCaptureVideoPreviewLayer` shown as a
+//! composition layer's content, and its other outputs (`outputs`, `frames`) are added to it as they
+//! are asked for.
 //!
 //! The state is written where the system answers, the session's queue and the access requests'
 //! handlers, and read on the main thread, so it lives behind a mutex shared with them.
@@ -15,7 +16,7 @@ use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchQueueAttr, DispatchRetained};
 use inset_embedder::{
     Camera, CameraFacing, CameraId, CameraState, CameraStatus, Cameras, CaptureSession,
-    FrameReader, MediaChangeFuture, MovieOptions, MovieOutput, PhotoOutput, Size, Surface,
+    CompositionLayer, FrameReader, MediaChangeFuture, MovieOptions, MovieOutput, PhotoOutput, Size,
 };
 use objc2::Message;
 use objc2::rc::Retained;
@@ -34,7 +35,7 @@ use objc2_foundation::{NSArray, NSError, NSString};
 use super::frames::CameraFrames;
 use super::observing::NotificationObservation;
 use super::outputs::{MovieRecorder, PhotoTaker};
-use super::show_layer_on;
+use super::show_system_layer;
 use crate::media::Changes;
 
 /// AVFoundation's cameras.
@@ -134,10 +135,11 @@ struct AvCaptureSession {
     _notifications: NotificationObservation,
 }
 
-/// The preview layer and the surface it hangs in, which the session holds as a producer does.
+/// The preview layer and the composition layer it is the content of, which the session holds as
+/// a producer does.
 struct Preview {
     layer: Retained<AVCaptureVideoPreviewLayer>,
-    _surface: Arc<dyn Surface>,
+    _shown_on: Arc<dyn CompositionLayer>,
 }
 
 /// What the session's queue, the system's answers and the main thread share.
@@ -226,9 +228,9 @@ impl CaptureSession for AvCaptureSession {
         self.shared.changes.next()
     }
 
-    fn set_preview_surface(&self, surface: Option<Arc<dyn Surface>>) {
+    fn set_preview_layer(&self, shown_on: Option<Arc<dyn CompositionLayer>>) {
         let mut preview = self.preview.borrow_mut();
-        let Some(surface) = surface else {
+        let Some(shown_on) = shown_on else {
             if let Some(gone) = preview.take() {
                 super::in_transaction(|| gone.layer.removeFromSuperlayer());
             }
@@ -238,10 +240,10 @@ impl CaptureSession for AvCaptureSession {
             Some(Preview { layer, .. }) => layer,
             None => new_preview_layer(&self.shared.session.0),
         };
-        show_layer_on(&surface, &layer);
+        show_system_layer(&shown_on, &layer);
         *preview = Some(Preview {
             layer,
-            _surface: surface,
+            _shown_on: shown_on,
         });
     }
 
@@ -287,7 +289,7 @@ impl CaptureSession for AvCaptureSession {
 }
 
 impl Drop for AvCaptureSession {
-    /// The camera stops, its preview leaves the surface it showed on, and the app hears the
+    /// The camera stops, its preview leaves the layer it showed on, and the app hears the
     /// session gone.
     fn drop(&mut self) {
         if let Some(preview) = self.preview.get_mut().take() {

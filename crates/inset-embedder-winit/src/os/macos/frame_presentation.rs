@@ -1,7 +1,7 @@
-//! How a frame reaches a macOS display: drawn at the vsyncs of the screen's display link, and,
-//! for the frame drawn inside a resize, presented through the window's own Core Animation
-//! transaction; or, for a frame that paints nothing besides its native surfaces, not drawn at all,
-//! its surfaces shown over the view's background, which the layer of the window's view shows.
+//! How a frame reaches a macOS display: drawn at the vsyncs of the screen's display link, and, for
+//! the frame drawn inside a resize, presented through the window's own Core Animation transaction;
+//! or, for a frame that paints nothing besides its composition layers, not drawn at all, its
+//! layers shown over the view's background, which the layer of the window's view shows.
 
 use std::sync::Arc;
 
@@ -44,12 +44,12 @@ impl FramePresentation for AppKit {
         surface.set_presents_with_transaction(wanted);
     }
 
-    /// The surfaces are layers beneath the window's content, which Core Animation composites
-    /// whether or not anything is drawn above them.
+    /// The composition layers are Core Animation layers beneath the window's content, which it
+    /// composites whether or not anything is drawn above them.
     const SHOWS_FRAMES_UNDRAWN: bool = true;
 
-    /// The background colour of the layer of the window's view, beneath every surface placed in
-    /// it.
+    /// The background colour of the layer of the window's view, beneath every composition layer
+    /// placed in it.
     fn show_background(window: &dyn Window, color: valo::Color) {
         let Some(layer) = AppKit::window_layer(window) else {
             return;

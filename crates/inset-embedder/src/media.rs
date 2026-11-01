@@ -8,12 +8,12 @@
 //! outputs, CameraX's use cases).
 //!
 //! Every system has two levels: a view that takes a player (`AVPlayerLayer(player:)`, Media3's
-//! `PlayerView.player`), which is the framework's, and a player that puts its pictures on a
-//! surface it is given (Media3's `setVideoSurface`), which is the host's and this module's. A
-//! player or a camera's picture goes to one destination at a time: a [`Surface`] it is given
-//! ([`MediaPlayer::set_video_surface`], [`CaptureSession::set_preview_surface`]), where the system
-//! draws it into the surface's own layer, which is the only way protected and HDR video show at
-//! all, with no copy; or a frame reader, the newest picture each time, for the app's GPU
+//! `PlayerView.player`), which is the framework's, and a player that puts its pictures where it
+//! is given (Media3's `setVideoSurface`), which is the host's and this module's. A player or a
+//! camera's picture goes to one destination at a time: a [`CompositionLayer`] it is given
+//! ([`MediaPlayer::set_video_layer`], [`CaptureSession::set_preview_layer`]), whose content
+//! becomes a layer the system draws it into, which is the only way protected and HDR video show
+//! at all, with no copy; or a frame reader, the newest picture each time, for the app's GPU
 //! ([`FrameReader`]). A camera's photos are encoded by the system and its recordings encoded
 //! and written to a file by the system: the app encodes nothing.
 //!
@@ -30,7 +30,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::{Size, Surface};
+use crate::{CompositionLayer, Size};
 
 /// The system's players, or `None` from [`Platform::players`](crate::Platform::players) where it
 /// has none.
@@ -44,7 +44,7 @@ pub trait Players {
 }
 
 /// One player, controlled on the app's main thread. Dropped, it stops, and its picture leaves
-/// the surface it showed on.
+/// the layer it showed on.
 pub trait MediaPlayer {
     /// Plays from where it is, at the rate last set: from the start once it has ended.
     fn play(&self);
@@ -70,14 +70,14 @@ pub trait MediaPlayer {
     /// called, or once the player is gone.
     fn changed(&self) -> MediaChangeFuture;
 
-    /// Puts the picture on `surface` from now on, drawn by the system into the surface's layer,
-    /// as Media3's `setVideoSurface` does, and nowhere else: neither on the surface it was on
-    /// before nor to a frame reader. `None` puts it nowhere. The player holds the surface while
-    /// it shows on it, as a producer does. A surface no compositor of this host opened shows
-    /// nothing.
-    fn set_video_surface(&self, surface: Option<Arc<dyn Surface>>);
+    /// Puts the picture on `layer` from now on, drawn by the system into a layer of its own that
+    /// is `layer`'s content, as Media3's `setVideoSurface` does, and nowhere else: neither on the
+    /// layer it was on before nor to a frame reader. `None` puts it nowhere. The player holds the
+    /// layer while it shows on it, as a producer does. A layer no compositor of this host made
+    /// shows nothing.
+    fn set_video_layer(&self, layer: Option<Arc<dyn CompositionLayer>>);
 
-    /// Hands the picture to a frame reader from now on, and to no surface; a reader asked for
+    /// Hands the picture to a frame reader from now on, and to no layer; a reader asked for
     /// before reads nothing more.
     fn read_frames(&self) -> Arc<dyn FrameReader>;
 }
@@ -170,7 +170,7 @@ pub enum CameraFacing {
 
 /// A session on one camera, controlled on the app's main thread. Each output is the system's
 /// own, made at its first asking and the same one after; the session runs every output it has.
-/// Dropped, it stops, and its preview leaves the surface it showed on.
+/// Dropped, it stops, and its preview leaves the layer it showed on.
 pub trait CaptureSession {
     /// Starts the camera: asking the user for it first where the system asks and the user has
     /// not answered, then running, or failing, as the state says.
@@ -185,11 +185,11 @@ pub trait CaptureSession {
     /// called, or once the session is gone.
     fn changed(&self) -> MediaChangeFuture;
 
-    /// Puts the camera's preview on `surface` from now on, drawn by the system into the
-    /// surface's layer, and on no surface it was on before; `None` puts it nowhere. The session
-    /// holds the surface while it shows on it. A surface no compositor of this host opened shows
-    /// nothing.
-    fn set_preview_surface(&self, surface: Option<Arc<dyn Surface>>);
+    /// Puts the camera's preview on `layer` from now on, drawn by the system into a layer of its
+    /// own that is `layer`'s content, and on no layer it was on before; `None` puts it nowhere.
+    /// The session holds the layer while it shows on it. A layer no compositor of this host made
+    /// shows nothing.
+    fn set_preview_layer(&self, layer: Option<Arc<dyn CompositionLayer>>);
 
     /// The camera's frames, the newest each time.
     fn frame_output(&self) -> Arc<dyn FrameReader>;
@@ -269,18 +269,19 @@ pub trait MovieOutput {
 /// newest: one not read before the next arrives is dropped.
 pub trait FrameReader: Send + Sync {
     /// The newest picture since the last read; `None` when none came since.
-    fn newest(&self) -> Option<PixelBuffer>;
+    fn newest(&self) -> Option<VideoFrame>;
 }
 
-/// A picture of a player or a camera: the platform's own type, which the GPU reads with no copy.
-/// On Apple platforms a `CVPixelBuffer` backed by an `IOSurface`, in 32-bit BGRA.
+/// A picture of a player or a camera, as WebCodecs' `VideoFrame`: the platform's own type, which
+/// the GPU reads with no copy. On Apple platforms a `CVPixelBuffer` backed by an `IOSurface`, in
+/// 32-bit BGRA.
 #[cfg(target_vendor = "apple")]
-pub type PixelBuffer = objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>;
+pub type VideoFrame = objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>;
 
 /// A platform with no players and no cameras: no picture can exist, so a reader never answers
 /// one.
 #[cfg(not(target_vendor = "apple"))]
-pub enum PixelBuffer {}
+pub enum VideoFrame {}
 
 /// Why a camera's output answered nothing.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -20,7 +20,7 @@ use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use crate::clipboard::{ChangeProbe, TextClipboard};
 
 use super::absent::{
-    NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices, NoWindowSurfaces,
+    NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices, NoWindowComposition,
 };
 use super::{
     ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, ImageDecoding,
@@ -58,7 +58,7 @@ impl FramePresentation for Windows {
 }
 
 impl NativeComposition for Windows {
-    type WindowSurfaces = NoWindowSurfaces;
+    type WindowComposition = NoWindowComposition;
 }
 
 impl WindowVisibility for Windows {

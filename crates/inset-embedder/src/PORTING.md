@@ -102,13 +102,13 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the host owns the event loop and knows its system's work queues, and a task completed on another thread has no other way to give the app a turn.
   Affect: a spawned task can await a future completed on any thread and runs at the next checkpoint instead of at the next input, and `run_in_background` work lands on the system's queue where there is one.
 
-- Change: `Platform::compositor` hands out native surfaces that a producer feeds with the platform's own buffers from any thread, in place of Flutter's texture registry and platform-view plumbing.
+- Change: `Platform::compositor` makes composition layers (`Compositor::make_layer`), nodes of the system compositor's tree that a producer feeds with the platform's own `HardwareBuffer`s from any thread, in place of Flutter's texture registry and platform-view plumbing.
   Reason: platform — the framework, the host and every producer share one process, so a buffer can go to the host's compositor directly.
-  Affect: a host without a compositor answers `None`, and a surface placed there shows as an empty hole.
+  Affect: a host without a compositor answers `None`, and a layer embedded in a frame there shows as an empty hole.
 
-- Change: a surface is opened under a parent, a view's root (`Compositor::root`) or another surface, with `SurfaceParent::open_child`, and placed by that parent's next frame: a view's scene, or a surface's `SurfaceFrame`, its buffer with its children placed beneath it in the buffer's pixels.
-  Reason: platform — every compositor Inset targets makes a layer under a parent and places it with that parent's frame, and a host that draws programs shows each program's picture as a surface whose own surfaces go beneath it, where Flutter's platform views are always the view's own.
-  Affect: a child shows only where its parent's last present placed it, and moves, is clipped and is scaled with its parent.
+- Change: a composition layer is made on its own and adopted by whoever places it: a view's frame, whose scene embeds it (`SceneBuilder::add_embedded_layer`), or another layer, whose `CompositionLayer::present` names its children with their placements beside its buffer, as Chromium's `SubmitCompositorFrame` names the surfaces a frame embeds.
+  Reason: platform — a host that draws programs shows each program's picture as a composition layer whose own layers go beneath it, where Flutter's platform views are always the view's own.
+  Affect: a layer has one parent at a time; a child shows only where its parent's last present placed it, and moves, is clipped and is scaled with its parent.
 
 ## image.rs → dart:ui `instantiateImageCodec` / `Codec` / `FrameInfo`
 
@@ -213,17 +213,17 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: language — a layer that frames share cannot change, so it exists only once its children are added.
   Affect: a layer gets its engine layer when it pops.
 
-- Change: a native surface shows beneath the frame's picture, through room cut for it at its place in paint order.
+- Change: a composition layer embedded in a frame shows beneath the frame's picture, through room cut for it at its place in paint order.
   Reason: platform — every compositor Inset targets shows a layer beneath a window's content without another buffer.
-  Affect: content painted above a surface costs nothing extra.
+  Affect: content painted above a composition layer costs nothing extra.
 
-- Change: an opacity above a native surface fades the room cut for it, not the surface.
-  Reason: platform — the surface lies beneath the window's picture, so only the picture can blend it with what was painted under it.
-  Affect: a surface under an opacity fades into what was painted beneath it, not into what lies behind the window.
+- Change: an opacity above a composition layer fades the room cut for it, not the layer.
+  Reason: platform — the layer lies beneath the window's picture, so only the picture can blend it with what was painted under it.
+  Affect: a layer under an opacity fades into what was painted beneath it, not into what lies behind the window.
 
 ## Deferred
 
-- A backdrop filter over a native surface, which shows the surface unfiltered. Trigger: an app that needs glass over a surface.
+- A backdrop filter over a composition layer, which shows the layer unfiltered. Trigger: an app that needs glass over a video.
 - `SceneBuilder`'s `addTexture` and its shader-mask, colour-filter and image-filter pushes. Trigger: the framework layers that call them.
 - Decoding at any size but the file's own, which in Dart is `instantiateImageCodec`'s target width and height and the `getTargetSize` callback of `instantiateImageCodecWithSize`. Trigger: `ResizeImage`, which is what the image widget's `cacheWidth` and `cacheHeight` become.
 - Reading an image's pixels back (`Image.toByteData`). Trigger: golden tests.
@@ -359,9 +359,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the host is the system's media stack, and its players and capture sessions are that model on every system Inset targets.
   Affect: an app makes a player and calls it at once, without awaiting an initialization, and a system without players or cameras answers `None`.
 
-- Change: a player's or a camera's picture goes to one destination at a time, a surface it is given and the system draws into (`set_video_surface`, `set_preview_surface`, as Media3's `setVideoSurface`; `None` for none), or a frame reader handing out the platform's own pixel buffers, where Flutter's plugins register a texture the engine copies from.
+- Change: a player's or a camera's picture goes to one destination at a time, a composition layer it is given, whose content becomes a layer the system draws into (`set_video_layer`, `set_preview_layer`, as Media3's `setVideoSurface`; `None` for none), or a frame reader handing out the platform's own `VideoFrame`s, where Flutter's plugins register a texture the engine copies from.
   Reason: platform — protected and HDR video show only where the system draws them itself, and Windows' and Android's decoders feed one output.
-  Affect: a player shown on a surface has no frames to read, and one read as frames shows on no surface.
+  Affect: a player shown on a layer has no frames to read, and one read as frames shows on no layer.
 
 - Change: a camera's photos are answered encoded by the system, as bytes and their MIME type, and its recordings written by the system to a path the app gives, where the `camera` plugin answers an `XFile` in a folder of its own.
   Reason: platform — the system encodes and writes them, and an app chooses where its files go.

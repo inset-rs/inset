@@ -1,11 +1,12 @@
 //! The app's views and their windows: the one registry of them, which the event loop and the
 //! platform share, and how they are made.
 //!
-//! Where the system's window is the screen, the screen view is made when the app starts, before
-//! it has a window, as Flutter's engine adds it with empty metrics; its window opens at winit's
-//! first call, the first moment winit lets one be made. A desktop has no screen view. A view the app asks for is made with its window, on a turn of the loop:
-//! winit hands out its `ActiveEventLoop` only inside its calls, so the request goes to the loop
-//! as a command, and the window arrives through the future the request returned.
+//! Where the system's window is the screen, the screen view is made when the app starts, before it
+//! has a window, as Flutter's engine adds it with empty metrics; its window opens at winit's first
+//! call, the first moment winit lets one be made. A desktop has no screen view. A view the app asks
+//! for is made with its window, on a turn of the loop: winit hands out its `ActiveEventLoop` only
+//! inside its calls, so the request goes to the loop as a command, and the window arrives through
+//! the future the request returned.
 //!
 //! A window is made with no surface; the embedder gives it one while the system gives the windows
 //! theirs (`main_loop/`).
@@ -53,7 +54,8 @@ pub(crate) enum ViewAfterClose {
 /// with what it got, and the client may reach the registry through the platform meanwhile.
 ///
 /// The registry owns each window; nothing else holds one for longer than a call, but the
-/// surfaces its view draws into, which the view lets go of when the window closes. Closing a
+/// surface its view draws into and its composition layers, which the view lets go of when the
+/// window closes. Closing a
 /// window here is what frees it.
 #[derive(Default)]
 pub(crate) struct Views {

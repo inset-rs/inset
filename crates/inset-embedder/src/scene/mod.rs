@@ -2,9 +2,10 @@
 //! build (`flow/layers`).
 //!
 //! A frame's scene keeps its layers. The framework's layers build a tree of containers, pictures
-//! and native surfaces through the builder (`builder.rs`, `layer.rs`), and a host gets that tree
-//! itself in [`View::present`](crate::View::present). What a host composites, the drawing between
-//! surfaces and each surface with the transforms, clips and opacity above it (`placement.rs`), is
+//! and composition layers through the builder (`builder.rs`, `layer.rs`), and a host gets that
+//! tree itself in [`View::present`](crate::View::present). What a host composites, the drawing
+//! between composition layers and each of them with the transforms, clips and opacity above it
+//! (`placement.rs`), is
 //! what [`slices`] makes of the tree (`slices.rs`): a utility every host calls today, which a
 //! host needing a walk of its own does without. valo only draws: what a container does to its
 //! children is replayed into valo's lists by the walk, and nothing of compositing enters them.
@@ -18,8 +19,8 @@ mod placement;
 mod slices;
 
 pub use builder::SceneBuilder;
-pub use layer::{ContainerLayer, DisplayListLayer, Effect, EngineLayer, Layer, SurfaceLayer};
-pub use placement::{Mutator, SurfacePlacement};
+pub use layer::{ContainerLayer, DisplayListLayer, Effect, EmbeddedLayer, EngineLayer, Layer};
+pub use placement::{Mutator, Placement};
 pub use slices::{Part, Slices, slices};
 
 /// Flutter `Scene`: what [`SceneBuilder::build`] produces and [`crate::View::present`] takes, the
@@ -35,24 +36,26 @@ pub struct Scene {
     pub root: ContainerLayer,
 }
 
-/// A surface no producer feeds, for the tests of this module. The crates above the embedder use
-/// `test_support`'s, which this crate's own tests are built without.
+/// A composition layer no producer feeds, for the tests of this module. The crates above the
+/// embedder use `test_support`'s, which this crate's own tests are built without.
 #[cfg(test)]
-fn idle_surface() -> std::sync::Arc<dyn crate::Surface> {
-    struct IdleSurface;
+fn idle_layer() -> std::sync::Arc<dyn crate::CompositionLayer> {
+    struct IdleLayer;
 
-    impl crate::Surface for IdleSurface {
-        fn present(&self, _frame: crate::SurfaceFrame, _released: Box<dyn FnOnce() + Send + Sync>) {
+    impl crate::CompositionLayer for IdleLayer {
+        fn present(
+            &self,
+            _buffer: crate::HardwareBuffer,
+            _children: Vec<(
+                std::sync::Arc<dyn crate::CompositionLayer>,
+                crate::Placement,
+            )>,
+            _released: Box<dyn FnOnce() + Send + Sync>,
+        ) {
         }
     }
 
-    impl crate::SurfaceParent for IdleSurface {
-        fn open_child(&self, _opaque: bool) -> std::sync::Arc<dyn crate::Surface> {
-            idle_surface()
-        }
-    }
-
-    std::sync::Arc::new(IdleSurface)
+    std::sync::Arc::new(IdleLayer)
 }
 
 #[cfg(test)]

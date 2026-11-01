@@ -1,9 +1,8 @@
-//! What iOS reports differently from the desktop winit was written for: its window is the
-//! screen, which the system covers in part with its bars; and what it adds,
-//! its pasteboard (`pasteboard`), its document pickers (`file_dialogs`), opening (`opener`), what
-//! it asks the app to open (`open_requests`) and native surfaces (`composition`). Notifications are
-//! the center macOS shares (`apple/notifications`), and players and cameras its AVFoundation
-//! (`apple/media`).
+//! What iOS reports differently from the desktop winit was written for: its window is the screen,
+//! which the system covers in part with its bars; and what it adds, its pasteboard (`pasteboard`),
+//! its document pickers (`file_dialogs`), opening (`opener`), what it asks the app to open
+//! (`open_requests`) and composition layers (`composition`). Notifications are the center macOS
+//! shares (`apple/notifications`), and players and cameras its AVFoundation (`apple/media`).
 
 mod composition;
 mod file_dialogs;

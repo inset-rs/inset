@@ -533,11 +533,11 @@ pub trait Platform: Any {
     /// Looks up one of the app's views.
     fn view(&self, id: ViewId) -> Option<ViewRef>;
 
-    /// Asks for a view. A desktop makes a window for it; a platform that gives the app its
-    /// views and makes none, a phone or an embedder, answers [`ViewError::Unsupported`](crate::ViewError::Unsupported).
-    /// The view arrives later, through `EmbedderClient::view_added`, carrying the id answered
-    /// here; a request that fails on the way is reported through
-    /// `EmbedderClient::view_request_failed`.
+    /// Asks for a view. A desktop makes a window for it; a platform that gives the app its views
+    /// and makes none, a phone or an embedder, answers
+    /// [`ViewError::Unsupported`](crate::ViewError::Unsupported). The view arrives later, through
+    /// `EmbedderClient::view_added`, carrying the id answered here; a request that fails on the way
+    /// is reported through `EmbedderClient::view_request_failed`.
     fn request_view(
         &self,
         request: crate::ViewRequest,
@@ -641,7 +641,7 @@ pub trait Platform: Any {
         None
     }
 
-    /// The host's compositor, where it has one: native surfaces shown beside the
+    /// The host's compositor, where it has one: composition layers shown beside the
     /// framework's picture. `None` on the web, on X11, on the inert host, and on an
     /// embedder that chose not to have one.
     fn compositor(&self) -> Option<Arc<dyn crate::Compositor>> {
@@ -649,7 +649,7 @@ pub trait Platform: Any {
     }
 
     /// Flutter's `VsyncWaiter`, for any screen: the refreshes the host draws the framework's
-    /// frames at, for a producer that paces by them, as a native surface's does. `None` for a
+    /// frames at, for a producer that paces by them, as a composition layer's does. `None` for a
     /// host without screen ticks.
     fn vsync_waiter(&self) -> Option<Arc<dyn crate::VsyncWaiter>> {
         None

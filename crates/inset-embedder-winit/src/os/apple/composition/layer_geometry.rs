@@ -1,14 +1,14 @@
-//! Where one placement puts a surface's layers: the clip layer's frame and the shapes that mask it,
-//! the content layer's size and transform.
+//! Where one placement puts a composition layer's `CALayer`s: the clip layer's frame and the
+//! shapes that mask it, the content layer's size and transform.
 //!
-//! Core Animation applies what is above a surface as Flutter's macOS embedder does
+//! Core Animation applies what is above a composition layer as Flutter's macOS embedder does
 //! (`FlutterMutatorView.mm`): every transform in one, on the content layer; the bounds of every
 //! clip as the clip layer's frame, which masks to its bounds; and, where a clip is not an upright
 //! rectangle, its shape as a mask, a rounded rectangle only where a corner cuts into what shows.
 //! Several shapes mask in turn, each the mask of the one before, which Core Animation intersects.
-//! The opacity above a surface is not the layers': the room the scene makes for the surface is
-//! cleared by that opacity, and the surface shows whole through it, so a surface nothing lets
-//! show is hidden and any other is opaque.
+//! The opacity above a composition layer is not its `CALayer`s': the room the scene makes for it
+//! is cleared by that opacity, and the layer shows whole through it, so a layer nothing lets show
+//! is hidden and any other is opaque.
 //!
 //! The invariant a later editor must keep: every length here is in the parent layer's points, the
 //! window's physical pixels over its scale, as a placement's are in pixels.
@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use inset_embedder::{
-    Matrix4, Mutator, Path, PathBuilder, RRect, Rect, SurfacePlacement, rrect_radii_elliptical,
+    Matrix4, Mutator, Path, PathBuilder, Placement, RRect, Rect, rrect_radii_elliptical,
 };
 use objc2_core_foundation::{CFRetained, CGFloat};
 use objc2_core_graphics::CGMutablePath;
@@ -24,27 +24,27 @@ use objc2_foundation::{NSPoint, NSRect, NSSize};
 use objc2_quartz_core::CATransform3D;
 use valo_geometry::{PathElement, Point};
 
-/// Where one placement puts a surface's layers, in its parent layer's points.
+/// Where one placement puts a composition layer's `CALayer`s, in its parent layer's points.
 pub(super) struct LayerGeometry {
     /// The clip layer's frame: the bounds of what shows.
     pub(super) clip_frame: NSRect,
-    /// The shapes that clip the surface within the clip layer's bounds, in its points, the
+    /// The shapes that clip the layer within the clip layer's bounds, in its points, the
     /// outermost first: rounded and path clips, and rectangles under a turn. Empty when the
     /// bounds are all of it.
     pub(super) clip_shapes: Vec<CFRetained<CGMutablePath>>,
-    /// The content layer's bounds: the surface in its own coordinates.
+    /// The content layer's bounds: the composition layer in its own coordinates.
     pub(super) content_size: NSSize,
     /// What takes the content layer's coordinates to the clip layer's: every transform above the
-    /// surface, laid out from the content layer's top-left corner.
+    /// composition layer, laid out from the content layer's top-left corner.
     pub(super) content_transform: CATransform3D,
 }
 
 impl LayerGeometry {
-    /// The layers of a surface placed by `placement` in a window `window_scale` pixels to the
-    /// point. A producer draws at the window's scale, so the transforms above the surface show
-    /// what it drew larger or smaller as they scale it. `None` for a surface nothing lets show:
-    /// shrunk to nothing, or at no opacity.
-    pub(super) fn of(placement: &SurfacePlacement, window_scale: f64) -> Option<LayerGeometry> {
+    /// The `CALayer`s of a composition layer placed by `placement` in a window `window_scale`
+    /// pixels to the point. A producer draws at the window's scale, so the transforms above the
+    /// layer show what it drew larger or smaller as they scale it. `None` for a layer nothing
+    /// lets show: shrunk to nothing, or at no opacity.
+    pub(super) fn of(placement: &Placement, window_scale: f64) -> Option<LayerGeometry> {
         let to_points = Matrix4::scale(window_scale.recip() as f32, window_scale.recip() as f32);
         let to_view_points = to_points.then(&placement.transform());
         if placement.opacity() <= 0.0 || to_view_points.invert().is_none() {
@@ -69,10 +69,7 @@ impl LayerGeometry {
 
 /// The clips above `placement` whose shape its clip layer's bounds do not make, in the clip
 /// layer's points, to which `to_clip_layer` takes the view's pixels.
-fn clip_shapes(
-    placement: &SurfacePlacement,
-    to_clip_layer: &Matrix4,
-) -> Vec<CFRetained<CGMutablePath>> {
+fn clip_shapes(placement: &Placement, to_clip_layer: &Matrix4) -> Vec<CFRetained<CGMutablePath>> {
     let visible = placement.visible_bounds();
     let mut transform = Matrix4::IDENTITY;
     let mut shapes = Vec::new();
@@ -326,7 +323,7 @@ fn rect_of(rect: valo::Rect) -> Rect {
 
 #[cfg(test)]
 mod tests {
-    use inset_embedder::{Radius, Surface, SurfaceFrame, SurfaceParent};
+    use inset_embedder::Radius;
     use objc2_core_graphics::CGPath;
 
     use super::*;
@@ -338,10 +335,10 @@ mod tests {
         assert_eq!(frame.size, NSSize::new(400.0, 300.0));
     }
 
-    /// The surface keeps its own coordinates, and the transform takes them to the window's
-    /// points: unscaled at two pixels a point a point of the surface is a point of the window.
+    /// The layer keeps its own coordinates, and the transform takes them to the window's
+    /// points: unscaled at two pixels a point a point of the layer is a point of the window.
     #[test]
-    fn a_surface_keeps_its_own_size_and_is_scaled_by_its_transform() {
+    fn a_layer_keeps_its_own_size_and_is_scaled_by_its_transform() {
         let geometry = |scale: f32| {
             LayerGeometry::of(
                 &placement(
@@ -366,7 +363,7 @@ mod tests {
         );
     }
 
-    /// The whole transform reaches the layer, from the clip layer's corner: a surface turned a
+    /// The whole transform reaches the layer, from the clip layer's corner: a layer turned a
     /// quarter about its own corner and moved right lies to the left of where it is moved to.
     #[test]
     fn the_whole_transform_reaches_the_content_layer() {
@@ -384,19 +381,19 @@ mod tests {
         assert_eq!(
             turned.clip_frame.size,
             NSSize::new(50.0, 100.0),
-            "the turned surface's bounds"
+            "the turned layer's bounds"
         );
         let t = turned.content_transform;
         assert!(t.m11.abs() < 1e-6 && (t.m12 - 0.5).abs() < 1e-6, "{t:?}");
         assert!((t.m21 + 0.5).abs() < 1e-6 && t.m22.abs() < 1e-6, "{t:?}");
         assert!(
             (t.m41 - 50.0).abs() < 1e-4 && t.m42.abs() < 1e-4,
-            "the corner the surface turns about, at the clip layer's right edge: {t:?}"
+            "the corner the layer turns about, at the clip layer's right edge: {t:?}"
         );
     }
 
     #[test]
-    fn a_surface_nothing_lets_show_has_no_layers() {
+    fn a_layer_nothing_lets_show_has_no_geometry() {
         let rect = Rect::from_ltwh(0.0, 0.0, 10.0, 10.0);
         assert!(LayerGeometry::of(&placement(rect, vec![Mutator::Opacity(0)]), 2.0).is_none());
         assert!(
@@ -424,9 +421,9 @@ mod tests {
     }
 
     /// A rounded rectangle masks only where a corner reaches what shows, in the clip layer's
-    /// points: a surface in its middle needs the bounds alone.
+    /// points: a layer in its middle needs the bounds alone.
     #[test]
-    fn a_rounded_clip_masks_only_where_a_corner_cuts_into_the_surface() {
+    fn a_rounded_clip_masks_only_where_a_corner_cuts_into_the_layer() {
         let card = Mutator::ClipRRect(RRect::from_rect_and_radius(
             Rect::from_ltwh(20.0, 20.0, 100.0, 100.0),
             Radius::circular(10.0),
@@ -488,24 +485,7 @@ mod tests {
         );
     }
 
-    fn placement(rect: Rect, mutators: Vec<Mutator>) -> SurfacePlacement {
-        SurfacePlacement {
-            surface: Arc::new(NoSurface),
-            rect,
-            mutators,
-        }
-    }
-
-    /// A surface a placement names and the geometry never reads.
-    struct NoSurface;
-
-    impl Surface for NoSurface {
-        fn present(&self, _frame: SurfaceFrame, _released: Box<dyn FnOnce() + Send + Sync>) {}
-    }
-
-    impl SurfaceParent for NoSurface {
-        fn open_child(&self, _opaque: bool) -> Arc<dyn Surface> {
-            Arc::new(NoSurface)
-        }
+    fn placement(rect: Rect, mutators: Vec<Mutator>) -> Placement {
+        Placement { rect, mutators }
     }
 }

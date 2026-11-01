@@ -1,5 +1,5 @@
 [package]
-name = "native_surface"
+name = "composition_layer"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -5,10 +5,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use inset_embedder::{FrameReader, MediaChangeFuture, MediaPlayer, PlayerState, Size, Surface};
+use inset_embedder::{
+    CompositionLayer, FrameReader, MediaChangeFuture, MediaPlayer, PlayerState, Size,
+};
 use inset_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle};
 
-use super::{PictureSource, SurfacePicture};
+use super::{CompositionLayerPicture, PictureSource};
 use crate::framework::{BuildContext, IntoWidget, KeyRef, StatelessWidget, WidgetRef};
 
 /// A player of the media at one URL, which loads by itself: the host's player, whose listeners
@@ -19,9 +21,9 @@ pub struct Player {
     host: Option<Rc<dyn MediaPlayer>>,
     /// The host's state when it last changed.
     state: PlayerState,
-    /// The surface the video was put on last, which a [`VideoView`] puts it nowhere from only
+    /// The layer the video was put on last, which a [`VideoView`] puts it nowhere from only
     /// while it is still its own.
-    video_surface: Option<Arc<dyn Surface>>,
+    video_layer: Option<Arc<dyn CompositionLayer>>,
 }
 
 impl Player {
@@ -35,7 +37,7 @@ impl Player {
             change_notifier: ChangeNotifierData::new(),
             state: host.state(),
             host: Some(host),
-            video_surface: None,
+            video_layer: None,
         });
         player.follow(app, changed);
         Some(player)
@@ -74,26 +76,30 @@ impl Player {
         self.host(app).set_looping(looping);
     }
 
-    /// Puts the video on `surface` from now on, and on no surface or frame reader it went to
-    /// before; `None` puts it nowhere: Media3's `setVideoSurface`, which [`VideoView`] calls with
-    /// a surface of its own as it is mounted, and with `None` as it is unmounted.
-    pub fn set_video_surface(self: Handle<Self>, app: &mut App, surface: Option<Arc<dyn Surface>>) {
-        self.host(app).set_video_surface(surface.clone());
-        app.get_mut(self).video_surface = surface;
+    /// Puts the video on `layer` from now on, and on no layer or frame reader it went to before;
+    /// `None` puts it nowhere: Media3's `setVideoSurface`, which [`VideoView`] calls with a
+    /// composition layer of its own as it is mounted, and with `None` as it is unmounted.
+    pub fn set_video_layer(
+        self: Handle<Self>,
+        app: &mut App,
+        layer: Option<Arc<dyn CompositionLayer>>,
+    ) {
+        self.host(app).set_video_layer(layer.clone());
+        app.get_mut(self).video_layer = layer;
     }
 
-    /// Hands the video to a frame reader from now on, and to no surface.
+    /// Hands the video to a frame reader from now on, and to no layer.
     pub fn read_frames(self: Handle<Self>, app: &mut App) -> Arc<dyn FrameReader> {
-        app.get_mut(self).video_surface = None;
+        app.get_mut(self).video_layer = None;
         self.host(app).read_frames()
     }
 
-    /// Stops the player and lets go of the host's: its picture leaves the surface it was on.
+    /// Stops the player and lets go of the host's: its picture leaves the layer it was on.
     /// Its listeners hear nothing more.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
         let player = app.get_mut(self);
         player.host = None;
-        player.video_surface = None;
+        player.video_layer = None;
         player.change_notifier.dispose();
     }
 
@@ -158,12 +164,12 @@ impl fmt::Debug for Player {
 }
 
 impl PictureSource for Player {
-    fn set_surface(handle: Handle<Self>, app: &mut App, surface: Option<Arc<dyn Surface>>) {
-        handle.set_video_surface(app, surface);
+    fn set_layer(handle: Handle<Self>, app: &mut App, layer: Option<Arc<dyn CompositionLayer>>) {
+        handle.set_video_layer(app, layer);
     }
 
-    fn surface(handle: Handle<Self>, app: &App) -> Option<&Arc<dyn Surface>> {
-        app.get(handle).video_surface.as_ref()
+    fn layer(handle: Handle<Self>, app: &App) -> Option<&Arc<dyn CompositionLayer>> {
+        app.get(handle).video_layer.as_ref()
     }
 
     fn picture_size(handle: Handle<Self>, app: &App) -> Option<Size> {
@@ -171,9 +177,10 @@ impl PictureSource for Player {
     }
 }
 
-/// A player's video, laid out at its size in logical pixels, or as large as the constraints let
-/// it be at that aspect; no room until the size is known. It shows the player on a surface of its
-/// own, which the system draws the video into: the player shows on the view built for it last.
+/// A player's video, laid out at its size in logical pixels, or as large as the constraints let it
+/// be at that aspect; no room until the size is known. It shows the player on a composition layer
+/// of its own, which the system draws the video into: the player shows on the view built for it
+/// last.
 #[derive(Clone)]
 pub struct VideoView {
     pub key: Option<KeyRef>,
@@ -203,7 +210,7 @@ impl StatelessWidget for VideoView {
     }
 
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
-        SurfacePicture {
+        CompositionLayerPicture {
             source: self.player,
         }
         .into_widget()
@@ -310,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    fn a_video_view_shows_its_player_on_a_surface_it_places_at_the_videos_size() {
+    fn a_video_view_shows_its_player_on_a_layer_it_places_at_the_videos_size() {
         let players = MockPlayers::new();
         let compositor = MockCompositor::new();
         let view = Rc::new(TestView::new(800.0, 600.0));
@@ -325,13 +332,13 @@ mod tests {
         cell.elapse(Duration::ZERO);
         pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
 
-        let opened = compositor.opened();
-        assert_eq!(opened.len(), 1, "one surface, of the view the video is in");
-        assert!(!opened[0].opaque);
-        let video_surface = players.opened()[0]
-            .video_surface()
-            .expect("put on the view's surface");
-        assert!(Arc::ptr_eq(&video_surface, &opened[0].surface));
+        let made = compositor.made();
+        assert_eq!(made.len(), 1, "one layer, of the view's own");
+        assert!(!made[0].opaque);
+        let video_layer = players.opened()[0]
+            .video_layer()
+            .expect("put on the view's layer");
+        assert!(Arc::ptr_eq(&video_layer, &made[0].layer));
         assert_eq!(
             placements(&view).len(),
             0,
@@ -343,9 +350,10 @@ mod tests {
         pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(16));
         let placements = placements(&view);
         assert_eq!(placements.len(), 1);
-        assert!(Arc::ptr_eq(&placements[0].surface, &opened[0].surface));
+        let (placed, placement) = &placements[0];
+        assert!(Arc::ptr_eq(placed, &made[0].layer));
         assert_eq!(
-            placements[0].bounds(),
+            placement.bounds(),
             inset_embedder::Rect::from_ltwh(240.0, 210.0, 320.0, 180.0)
         );
     }
@@ -358,25 +366,22 @@ mod tests {
         let player = Player::new(&mut cell.borrow_mut(), "https://example.com/a.mp4").unwrap();
         let host = &players.opened()[0];
         mount(&cell, VideoView::new(player).into_widget());
-        assert!(host.video_surface().is_some());
+        assert!(host.video_layer().is_some());
         mount(&cell, crate::SizedBox::new().into_widget());
         assert!(
-            host.video_surface().is_none(),
+            host.video_layer().is_none(),
             "unmounted, it puts the video nowhere"
         );
-        assert_eq!(
-            host.calls().last(),
-            Some(&PlayerCall::SetVideoSurface(false))
-        );
+        assert_eq!(host.calls().last(), Some(&PlayerCall::SetVideoLayer(false)));
 
         mount(&cell, VideoView::new(player).into_widget());
-        let elsewhere = inset_embedder::test_support::idle_surface();
-        player.set_video_surface(&mut cell.borrow_mut(), Some(Arc::clone(&elsewhere)));
+        let elsewhere = inset_embedder::test_support::idle_layer();
+        player.set_video_layer(&mut cell.borrow_mut(), Some(Arc::clone(&elsewhere)));
         mount(&cell, crate::SizedBox::new().into_widget());
         assert!(
-            host.video_surface()
-                .is_some_and(|surface| Arc::ptr_eq(&surface, &elsewhere)),
-            "a view leaves alone a surface it did not set"
+            host.video_layer()
+                .is_some_and(|layer| Arc::ptr_eq(&layer, &elsewhere)),
+            "a view leaves alone a layer it did not set"
         );
     }
 
@@ -387,9 +392,17 @@ mod tests {
         pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
     }
 
-    /// The surfaces `view`'s last scene places.
-    fn placements(view: &TestView) -> Vec<inset_embedder::SurfacePlacement> {
+    /// The composition layers `view`'s last scene places, with their placements.
+    fn placements(
+        view: &TestView,
+    ) -> Vec<(
+        Arc<dyn inset_embedder::CompositionLayer>,
+        inset_embedder::Placement,
+    )> {
         let scene = view.last_scene().expect("a frame was presented");
-        inset_embedder::slices(&scene).surfaces().cloned().collect()
+        inset_embedder::slices(&scene)
+            .composition_layers()
+            .map(|(layer, placement)| (Arc::clone(layer), placement.clone()))
+            .collect()
     }
 }

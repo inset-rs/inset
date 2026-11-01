@@ -1,19 +1,18 @@
 //! The producer: a thread of its own that waits for a refresh of its view's screen on the
 //! platform's vsync waiter, draws the next frame into a free buffer, and presents it, as a video
 //! decoder or a program in a launcher would. It starts with three buffers and never waits for one
-//! to come back: the host learns that the compositor has let go of a buffer only at the surface's
+//! to come back: the host learns that the compositor has let go of a buffer only at the layer's
 //! next present, so when none is free the producer makes another, as Flutter's surface manager
 //! does (the Apple host's `os/apple/composition` says why). It counts what happened so a run can
 //! be judged from its output: among it, how often the buffer on screen was in use by the system's
-//! compositor at a refresh, which it is only while the compositor really shows the surface's
-//! layer.
+//! compositor at a refresh, which it is only while the compositor really shows the layer.
 
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use inset_embedder::{Buffer, ScreenId, Surface, SurfaceFrame, VsyncObserver, VsyncWaiter};
+use inset_embedder::{CompositionLayer, HardwareBuffer, ScreenId, VsyncObserver, VsyncWaiter};
 
 use crate::iosurface;
 
@@ -24,7 +23,7 @@ const STARTING_BUFFERS: usize = 3;
 /// at 60 Hz.
 const PATIENCE: Duration = Duration::from_millis(20);
 
-/// The screen the surface's view is on, which the app keeps current and the producer paces by.
+/// The screen the layer's view is on, which the app keeps current and the producer paces by.
 #[derive(Default)]
 pub(crate) struct ViewScreen(Mutex<Option<ScreenId>>);
 
@@ -40,7 +39,7 @@ impl ViewScreen {
 
 /// What the producer draws on, and what it paces by.
 pub(crate) struct Pacing {
-    pub(crate) surface: Arc<dyn Surface>,
+    pub(crate) layer: Arc<dyn CompositionLayer>,
     pub(crate) waiter: Arc<dyn VsyncWaiter>,
     pub(crate) screen: Arc<ViewScreen>,
 }
@@ -55,7 +54,7 @@ pub(crate) fn start(pacing: Pacing, size: [usize; 2], exit_after: Option<Duratio
 struct Producer {
     pacing: Pacing,
     size: [usize; 2],
-    buffers: Vec<Buffer>,
+    buffers: Vec<HardwareBuffer>,
     /// Where a buffer's release callback hands its index back, and where the producer takes
     /// the next one to draw into.
     hand_back: Sender<usize>,
@@ -64,7 +63,7 @@ struct Producer {
     vsyncs: Receiver<Instant>,
     counts: Counts,
     frame: u64,
-    /// The buffer presented last, which the surface shows now.
+    /// The buffer presented last, which the layer shows now.
     on_screen: Option<usize>,
 }
 
@@ -153,7 +152,7 @@ impl Producer {
         }
     }
 
-    /// Counts whether the compositor holds the buffer the surface shows.
+    /// Counts whether the compositor holds the buffer the layer shows.
     fn count_on_screen_in_use(&mut self) {
         if let Some(on_screen) = self.on_screen
             && self.buffers[on_screen].is_in_use()
@@ -168,8 +167,9 @@ impl Producer {
         let index = self.take_free_buffer();
         iosurface::fill(&self.buffers[index], self.frame);
         let hand_back = self.hand_back.clone();
-        self.pacing.surface.present(
-            SurfaceFrame::new(self.buffers[index].clone()),
+        self.pacing.layer.present(
+            self.buffers[index].clone(),
+            Vec::new(),
             Box::new(move || {
                 let _ = hand_back.send(index);
             }),
@@ -192,7 +192,7 @@ impl Producer {
         index
     }
 
-    /// A buffer more, at the surface's size; its index.
+    /// A buffer more, at the layer's size; its index.
     fn allocate_buffer(&mut self) -> usize {
         let [width, height] = self.size;
         self.buffers.push(iosurface::allocate(width, height));
