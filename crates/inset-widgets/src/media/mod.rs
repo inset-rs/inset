@@ -5,7 +5,9 @@
 //! [`CameraSession`] is a session on one camera with outputs, each the system's own. Each is a
 //! listenable over the host's object, whose listeners hear its state change, and each is shown by
 //! a widget that takes it, [`PlayerView`] and [`CameraPreview`], as Media3's `PlayerView` and
-//! `AVPlayerLayer(player:)` take a player and CameraX's `PreviewView` a camera.
+//! `AVPlayerLayer(player:)` take a player and CameraX's `PreviewView` a camera. An app that draws
+//! the frames itself makes a reader from the platform's `video_frame_readers`, gives it to the
+//! player or the session, and draws it with a `VideoFrameView`.
 //!
 //! A view shows its picture through a composition layer of its own (`CompositionLayerView`): the
 //! framework leaves its rectangle clear, the frames of the view it is in place the layer there,

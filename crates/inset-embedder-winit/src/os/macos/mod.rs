@@ -46,7 +46,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::process;
 use std::rc::Rc;
 
-use inset_embedder::{Cameras, Notifications, Players, TargetPlatform};
+use inset_embedder::{Cameras, Notifications, Players, TargetPlatform, VideoFrameReaders};
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2_app_kit::{NSView, NSWindow};
@@ -80,6 +80,10 @@ impl SystemMedia for AppKit {
 
     fn cameras() -> Option<Rc<dyn Cameras>> {
         super::apple::media::cameras()
+    }
+
+    fn video_frame_readers() -> Option<Rc<dyn VideoFrameReaders>> {
+        super::apple::media::video_frame_readers()
     }
 }
 

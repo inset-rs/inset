@@ -12,7 +12,9 @@ mod pasteboard;
 
 use std::rc::Rc;
 
-use inset_embedder::{Cameras, Notifications, Players, TargetPlatform, ViewPadding};
+use inset_embedder::{
+    Cameras, Notifications, Players, TargetPlatform, VideoFrameReaders, ViewPadding,
+};
 use valo_codec::Decoder;
 use winit::window::Window;
 
@@ -88,6 +90,10 @@ impl SystemMedia for Ios {
 
     fn cameras() -> Option<Rc<dyn Cameras>> {
         super::apple::media::cameras()
+    }
+
+    fn video_frame_readers() -> Option<Rc<dyn VideoFrameReaders>> {
+        super::apple::media::video_frame_readers()
     }
 }
 

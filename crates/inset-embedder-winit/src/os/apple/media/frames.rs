@@ -1,14 +1,21 @@
-//! Frame readers: a player's newest picture from an `AVPlayerItemVideoOutput`, and a camera's from
-//! an `AVCaptureVideoDataOutput`'s sample buffers, each a `CVPixelBuffer` backed by an `IOSurface`
-//! in 32-bit BGRA, which the system converts the video into on the GPU, so the app's GPU reads it
-//! with no copy.
+//! Frame readers: a reader the app makes on its own reads the output AVFoundation has for the kind
+//! of source it is given to, a player's frames from an `AVPlayerItemVideoOutput` added to its item,
+//! a camera's from an `AVCaptureVideoDataOutput`'s sample buffers. Each frame is a `CVPixelBuffer`
+//! backed by an `IOSurface` in 32-bit BGRA, which the system converts the video into on the GPU,
+//! so the app's GPU reads it with no copy.
+//!
+//! AVFoundation has no output that both kinds of source feed, as Android's `ImageReader` is fed by
+//! a decoder and a camera alike, so the source makes its own output and hands it to the reader.
+//! The invariant: a reader reads one source's output at a time, as an `ImageReader` takes one
+//! producer, and a source that stops feeding it takes away only its own output.
 
 use std::ptr::NonNull;
-use std::sync::{Mutex, PoisonError};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
 use dispatch2::{DispatchQueue, DispatchQueueAttr, DispatchRetained};
-use inset_embedder::{VideoFrame, VideoFrameReader};
+use inset_embedder::{VideoFrame, VideoFrameReader, VideoFrameReaders};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
@@ -26,6 +33,88 @@ use objc2_foundation::{NSDictionary, NSNumber, NSString};
 
 use super::abort_on_panic;
 use crate::os::apple::media_time::media_time_of;
+
+/// The readers AVFoundation's players and cameras feed.
+pub(super) struct AvFrameReaders;
+
+impl VideoFrameReaders for AvFrameReaders {
+    fn make_reader(&self) -> Arc<dyn VideoFrameReader> {
+        Arc::new(AvFrameReader::default())
+    }
+}
+
+/// A reader made on its own, which reads the output of the one source feeding it.
+#[derive(Default)]
+pub(super) struct AvFrameReader {
+    /// `None` until a source feeds it, and once the source that fed it stops.
+    output: Mutex<Option<Arc<dyn FrameOutput>>>,
+}
+
+impl AvFrameReader {
+    /// `reader` as this host's own; `None` for a reader no `AvFrameReaders` made.
+    pub(super) fn downcast_from(reader: Arc<dyn VideoFrameReader>) -> Option<Arc<AvFrameReader>> {
+        let any: Arc<dyn std::any::Any + Send + Sync> = reader;
+        any.downcast().ok()
+    }
+
+    /// Reads `output` from now on; false, reading on as before, while another source's output
+    /// feeds it.
+    pub(super) fn read(&self, output: Arc<dyn FrameOutput>) -> bool {
+        let mut read = self.output();
+        if read.is_some() {
+            return false;
+        }
+        *read = Some(output);
+        true
+    }
+
+    /// Reads `output` no more; a reader fed by another source reads on.
+    pub(super) fn stop_reading(&self, output: &Arc<dyn FrameOutput>) {
+        let mut read = self.output();
+        if read.as_ref().is_some_and(|read| Arc::ptr_eq(read, output)) {
+            *read = None;
+        }
+    }
+
+    fn output(&self) -> MutexGuard<'_, Option<Arc<dyn FrameOutput>>> {
+        self.output.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl VideoFrameReader for AvFrameReader {
+    fn frame_for(&self, display_time: Instant) -> Option<VideoFrame> {
+        let output = self.output().clone()?;
+        output.frame_for(display_time)
+    }
+}
+
+/// Says once that a reader this host did not make was given to a source, which feeds it nothing.
+pub(super) fn report_foreign_reader() {
+    static REPORTED: AtomicBool = AtomicBool::new(false);
+    if !REPORTED.swap(true, Ordering::Relaxed) {
+        eprintln!(
+            "inset: a frame reader this host did not make was given to a source; it reads nothing"
+        );
+    }
+}
+
+/// Says once that a reader another source feeds was given to a second one, which sends its frames
+/// nowhere.
+pub(super) fn report_reader_in_use() {
+    static REPORTED: AtomicBool = AtomicBool::new(false);
+    if !REPORTED.swap(true, Ordering::Relaxed) {
+        eprintln!(
+            "inset: a frame reader another source feeds was given to a second; the second sends \
+             its frames nowhere"
+        );
+    }
+}
+
+/// An AVFoundation output of one source's frames, which a reader reads from any thread.
+pub(super) trait FrameOutput: Send + Sync {
+    /// The frame to show at `display_time`, as [`VideoFrameReader::frame_for`] answers it.
+    fn frame_for(&self, display_time: Instant) -> Option<VideoFrame>;
+}
 
 /// A player's frames: the newest picture its item's output has for now.
 pub(super) struct PlayerFrames {
@@ -52,7 +141,7 @@ impl PlayerFrames {
     }
 }
 
-impl VideoFrameReader for PlayerFrames {
+impl FrameOutput for PlayerFrames {
     /// The item's frame for the moment `display_time` is in the video, as Apple's display link
     /// pattern asks for its target time.
     fn frame_for(&self, display_time: Instant) -> Option<VideoFrame> {
@@ -80,7 +169,7 @@ unsafe impl Sync for CrossThreadOutput {}
 
 /// A camera's frames: the newest picture its video data output delivered, kept until read.
 pub(super) struct CameraFrames {
-    newest: std::sync::Arc<Mutex<Option<CrossThreadVideoFrame>>>,
+    newest: Arc<Mutex<Option<CrossThreadVideoFrame>>>,
     output: CrossThreadVideoDataOutput,
     /// The delegate the output calls, which it holds weakly.
     _delegate: CrossThreadDelegate,
@@ -91,8 +180,8 @@ pub(super) struct CameraFrames {
 impl CameraFrames {
     /// An output delivering pixel buffers on a queue of its own, kept here as they come.
     pub(super) fn new() -> CameraFrames {
-        let newest = std::sync::Arc::new(Mutex::new(None));
-        let delegate = SampleBufferDelegate::alloc().set_ivars(std::sync::Arc::clone(&newest));
+        let newest = Arc::new(Mutex::new(None));
+        let delegate = SampleBufferDelegate::alloc().set_ivars(Arc::clone(&newest));
         // SAFETY: plain NSObject initialisation of an allocated instance.
         let delegate: Retained<SampleBufferDelegate> = unsafe { msg_send![super(delegate), init] };
         let queue = DispatchQueue::new("rs.inset.camera-frames", DispatchQueueAttr::SERIAL);
@@ -124,7 +213,7 @@ impl CameraFrames {
     }
 }
 
-impl VideoFrameReader for CameraFrames {
+impl FrameOutput for CameraFrames {
     /// The newest frame: a camera's frames are live, so each is for now.
     fn frame_for(&self, _display_time: Instant) -> Option<VideoFrame> {
         let newest = self
@@ -142,7 +231,7 @@ define_class!(
     // SAFETY: NSObject has no subclassing requirements, and the delegate has no `Drop`.
     #[unsafe(super(NSObject))]
     #[name = "InsetCameraFramesDelegate"]
-    #[ivars = std::sync::Arc<Mutex<Option<CrossThreadVideoFrame>>>]
+    #[ivars = Arc<Mutex<Option<CrossThreadVideoFrame>>>]
     struct SampleBufferDelegate;
 
     unsafe impl NSObjectProtocol for SampleBufferDelegate {}
@@ -167,15 +256,6 @@ define_class!(
         }
     }
 );
-
-/// What a frame reader of nothing answers: a player that failed has no pictures.
-pub(super) struct NoFrames;
-
-impl VideoFrameReader for NoFrames {
-    fn frame_for(&self, _display_time: Instant) -> Option<VideoFrame> {
-        None
-    }
-}
 
 /// The attributes every frame reader asks its pictures in: 32-bit BGRA, backed by an
 /// `IOSurface` a Metal texture can be made of.
@@ -240,3 +320,67 @@ struct CrossThreadDelegate {
 // SAFETY: the delegate's one state is behind a mutex; the output calls it on its queue.
 unsafe impl Send for CrossThreadDelegate {}
 unsafe impl Sync for CrossThreadDelegate {}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicUsize;
+
+    use super::*;
+
+    /// An output with no frame yet, which counts how often it is read.
+    #[derive(Default)]
+    struct CountedOutput(AtomicUsize);
+
+    impl FrameOutput for CountedOutput {
+        fn frame_for(&self, _display_time: Instant) -> Option<VideoFrame> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            None
+        }
+    }
+
+    impl CountedOutput {
+        fn reads(&self) -> usize {
+            self.0.load(Ordering::Relaxed)
+        }
+    }
+
+    /// A reader takes one source at a time: a second is refused while the first feeds it, and
+    /// taken once the first stops.
+    #[test]
+    fn a_reader_takes_one_source_at_a_time() {
+        let reader = AvFrameReader::default();
+        let (first, second) = (
+            Arc::new(CountedOutput::default()),
+            Arc::new(CountedOutput::default()),
+        );
+        assert!(reader.read(Arc::clone(&first) as Arc<dyn FrameOutput>));
+        assert!(!reader.read(Arc::clone(&second) as Arc<dyn FrameOutput>));
+        reader.frame_for(Instant::now());
+        assert_eq!((first.reads(), second.reads()), (1, 0));
+
+        reader.stop_reading(&(Arc::clone(&first) as Arc<dyn FrameOutput>));
+        assert!(reader.read(Arc::clone(&second) as Arc<dyn FrameOutput>));
+        reader.frame_for(Instant::now());
+        assert_eq!((first.reads(), second.reads()), (1, 1));
+
+        reader.stop_reading(&(Arc::clone(&second) as Arc<dyn FrameOutput>));
+        reader.frame_for(Instant::now());
+        assert_eq!(second.reads(), 1, "fed by nothing, it reads nothing");
+    }
+
+    /// A source feeds a reader this host made, and not one made elsewhere.
+    #[test]
+    fn only_a_reader_this_host_made_is_its_own() {
+        assert!(AvFrameReader::downcast_from(AvFrameReaders.make_reader()).is_some());
+        let foreign: Arc<dyn VideoFrameReader> = Arc::new(ForeignReader);
+        assert!(AvFrameReader::downcast_from(foreign).is_none());
+    }
+
+    struct ForeignReader;
+
+    impl VideoFrameReader for ForeignReader {
+        fn frame_for(&self, _display_time: Instant) -> Option<VideoFrame> {
+            None
+        }
+    }
+}

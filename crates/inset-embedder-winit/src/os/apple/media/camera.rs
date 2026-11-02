@@ -3,7 +3,7 @@
 //! starting it blocks. The session asks the user for the camera, and for the microphone where a
 //! recording wants sound, at its start; its preview is an `AVCaptureVideoPreviewLayer` shown as a
 //! composition layer's content, and its other outputs (`outputs`, `frames`) are added to it as they
-//! are asked for.
+//! are asked for: its video data output at the first reader it is given, which reads it.
 //!
 //! The state is written where the system answers, the session's queue and the access requests'
 //! handlers, and read on the main thread, so it lives behind a mutex shared with them.
@@ -33,7 +33,9 @@ use objc2_av_foundation::{
 use objc2_core_media::CMVideoFormatDescriptionGetDimensions;
 use objc2_foundation::{NSArray, NSError, NSString};
 
-use super::frames::CameraFrames;
+use super::frames::{
+    AvFrameReader, CameraFrames, FrameOutput, report_foreign_reader, report_reader_in_use,
+};
 use super::observing::NotificationObservation;
 use super::outputs::{MovieRecorder, PhotoTaker};
 use super::show_system_layer;
@@ -130,7 +132,10 @@ fn facing_of(position: AVCaptureDevicePosition, built_in: bool) -> CameraFacing 
 struct AvCaptureSession {
     shared: Arc<SessionShared>,
     preview: RefCell<Option<Preview>>,
+    /// The video data output, made at the first reader given, and the session's from then on.
     frames: RefCell<Option<Arc<CameraFrames>>>,
+    /// The reader that reads the video data output now.
+    frame_reader: RefCell<Option<Arc<AvFrameReader>>>,
     photos: RefCell<Option<PhotoTaker>>,
     movies: RefCell<Option<MovieRecorder>>,
     _notifications: NotificationObservation,
@@ -175,9 +180,32 @@ impl AvCaptureSession {
             shared,
             preview: RefCell::new(None),
             frames: RefCell::new(None),
+            frame_reader: RefCell::new(None),
             photos: RefCell::new(None),
             movies: RefCell::new(None),
             _notifications: notifications,
+        }
+    }
+
+    /// The session's video data output, added to it at the first asking.
+    fn video_data_output(&self) -> Arc<dyn FrameOutput> {
+        self.frames
+            .borrow_mut()
+            .get_or_insert_with(|| {
+                let frames = Arc::new(CameraFrames::new());
+                self.shared.add_output(frames.output());
+                frames
+            })
+            .clone()
+    }
+
+    /// The reader given last reads the video data output no more.
+    fn stop_feeding_reader(&self) {
+        let Some(reader) = self.frame_reader.take() else {
+            return;
+        };
+        if let Some(frames) = self.frames.borrow().clone() {
+            reader.stop_reading(&(frames as Arc<dyn FrameOutput>));
         }
     }
 }
@@ -248,15 +276,20 @@ impl CaptureSession for AvCaptureSession {
         });
     }
 
-    fn frame_output(&self) -> Arc<dyn VideoFrameReader> {
-        self.frames
-            .borrow_mut()
-            .get_or_insert_with(|| {
-                let frames = Arc::new(CameraFrames::new());
-                self.shared.add_output(frames.output());
-                frames
-            })
-            .clone()
+    fn set_frame_reader(&self, reader: Option<Arc<dyn VideoFrameReader>>) {
+        self.stop_feeding_reader();
+        let Some(reader) = reader else {
+            return;
+        };
+        let Some(reader) = AvFrameReader::downcast_from(reader) else {
+            report_foreign_reader();
+            return;
+        };
+        if !reader.read(self.video_data_output()) {
+            report_reader_in_use();
+            return;
+        }
+        *self.frame_reader.borrow_mut() = Some(reader);
     }
 
     fn photo_output(&self) -> Box<dyn PhotoOutput> {
@@ -290,12 +323,13 @@ impl CaptureSession for AvCaptureSession {
 }
 
 impl Drop for AvCaptureSession {
-    /// The camera stops, its preview leaves the layer it showed on, and the app hears the
-    /// session gone.
+    /// The camera stops, its preview leaves the layer it showed on, its reader reads nothing
+    /// more, and the app hears the session gone.
     fn drop(&mut self) {
         if let Some(preview) = self.preview.get_mut().take() {
             super::in_transaction(|| preview.layer.removeFromSuperlayer());
         }
+        self.stop_feeding_reader();
         let shared = Arc::clone(&self.shared);
         // SAFETY: stopping the session on its own queue.
         self.shared
@@ -531,6 +565,9 @@ unsafe impl Send for CrossThreadOutput {}
 
 #[cfg(test)]
 mod tests {
+    use inset_embedder::VideoFrameReaders;
+
+    use super::super::frames::AvFrameReaders;
     use super::*;
 
     #[test]
@@ -567,7 +604,7 @@ mod tests {
     fn a_session_is_stopped_until_it_starts() {
         let session = AvCaptureSession::new(None);
         let _photos = session.photo_output();
-        let _frames = session.frame_output();
+        session.set_frame_reader(Some(AvFrameReaders.make_reader()));
         assert_eq!(session.state(), CameraState::stopped());
         session.start();
         assert!(matches!(session.state().status, CameraStatus::Failed(_)));

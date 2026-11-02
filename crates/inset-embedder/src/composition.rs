@@ -31,8 +31,8 @@ use crate::Placement;
 pub trait Compositor: Send + Sync {
     /// A layer placed nowhere yet, fed by a producer from any thread, and shown wherever the one
     /// that places it says: a view's scenes, or another layer's presents. `opaque` says whether
-    /// its buffers carry alpha the compositor must blend; a layer shows its children through the
-    /// clear pixels of its own buffer, so one with children is made not opaque.
+    /// its buffers carry no alpha the compositor must blend; a present that gives it children,
+    /// which show through the clear pixels of its buffer, has that buffer blended all the same.
     /// The layer goes when its last handle does: its producer's, and those of the frames that
     /// place it.
     fn make_layer(&self, opaque: bool) -> Arc<dyn CompositionLayer>;

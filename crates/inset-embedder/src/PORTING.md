@@ -363,9 +363,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the host is the system's media stack, and its players and capture sessions are that model on every system Inset targets.
   Affect: an app makes a player and calls it at once, without awaiting an initialization, and a system without players or cameras answers `None`.
 
-- Change: a player's or a camera's picture goes to one destination at a time, a composition layer it is given, whose content becomes a layer the system draws into (`set_video_layer`, `set_preview_layer`, as Media3's `setVideoSurface`; `None` for none), or a frame reader handing out the platform's own `VideoFrame`s, where Flutter's plugins register a texture the engine copies from.
-  Reason: platform — protected and HDR video show only where the system draws them itself, and Windows' and Android's decoders feed one output.
-  Affect: a player shown on a layer has no frames to read, and one read as frames shows on no layer.
+- Change: a player's picture goes to one destination at a time, which the app makes and gives it with `set_video_output`, as Media3's `setVideoSurface`: a composition layer, whose content becomes a layer the system draws into, or a frame reader made on its own from `Platform::video_frame_readers`, handing out the platform's own `VideoFrame`s; a camera session takes a layer for its preview and a reader for its frames the same way, where Flutter's plugins register a texture the engine copies from.
+  Reason: platform — protected and HDR video show only where the system draws them itself, Windows' and Android's decoders feed one output, and an app makes the reader itself as it makes Android's `ImageReader` or Apple's `AVPlayerItemVideoOutput`.
+  Affect: a player shown on a layer has no frames to read, one sent to a reader shows on no layer, and a reader given to a second source reads that one alone.
 
 - Change: a camera's photos are answered encoded by the system, as bytes and their MIME type, and its recordings written by the system to a path the app gives, where the `camera` plugin answers an `XFile` in a folder of its own.
   Reason: platform — the system encodes and writes them, and an app chooses where its files go.

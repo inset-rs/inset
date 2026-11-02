@@ -120,7 +120,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## widgets/video_frame_view.rs → `Texture`
 
-- Change: `VideoFrameView::new(reader)` draws a player's or a camera session's frames from their `VideoFrameReader`, where Flutter's `Texture(textureId:)` draws a texture a plugin registered.
+- Change: `VideoFrameView::new(reader)` draws the frames of a `VideoFrameReader` the app made and gave a player or a camera session, where Flutter's `Texture(textureId:)` draws a texture a plugin registered.
   Reason: platform — the reader is the frame source, as Android's `TextureView` draws its `SurfaceTexture`, beside `CompositionLayerView` as `TextureView` is beside `SurfaceView`.
   Affect: a video drawn by the framework clips, turns, fades and takes effects like anything painted, where a `PlayerView` has the system show it on a layer, the cheaper way and the only one for protected or HDR video.
 

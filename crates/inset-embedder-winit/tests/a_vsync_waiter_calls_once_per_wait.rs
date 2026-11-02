@@ -1,6 +1,7 @@
 //! The platform's vsync waiter, asked from another thread, calls an observer once per wait, on
 //! the main thread, at a refresh of the screen it names, however often the wait was asked before
-//! that refresh came; a wait on a screen that is not connected is never served.
+//! that refresh came, each with a later display time than the one before; a wait on a screen that
+//! is not connected is never served.
 //!
 //! Its own binary, without the test harness: AppKit's event loop runs on the main thread only. It
 //! opens a window for about a second, and needs a login session's window server.
@@ -72,23 +73,24 @@ mod client {
         }
     }
 
-    /// Tells the waiting thread the thread each call came on.
-    struct Calls(Sender<ThreadId>);
+    /// Tells the waiting thread the thread each call came on, and its display time.
+    struct Calls(Sender<(ThreadId, Instant)>);
 
     impl VsyncObserver for Calls {
-        fn vsync(&self, _at: Instant) {
-            let _ = self.0.send(std::thread::current().id());
+        fn vsync(&self, _at: Instant, display_time: Instant) {
+            let _ = self.0.send((std::thread::current().id(), display_time));
         }
     }
 
     /// An observer and the calls it hears.
-    fn observer() -> (Arc<Calls>, Receiver<ThreadId>) {
+    fn observer() -> (Arc<Calls>, Receiver<(ThreadId, Instant)>) {
         let (sender, calls) = channel();
         (Arc::new(Calls(sender)), calls)
     }
 
     /// Waits `WAITS` times on `screen`, asking twice each time, and checks each wait is served
-    /// once, on `main_thread`, and that a wait on no screen never is.
+    /// once, on `main_thread`, at a later refresh than the one before, and that a wait on no
+    /// screen never is.
     fn wait_on(waiter: Arc<dyn VsyncWaiter>, screen: ScreenId, main_thread: ThreadId) {
         let (unserved, unserved_calls) = observer();
         waiter.next_vsync(
@@ -97,14 +99,19 @@ mod client {
         );
         let (served, calls) = observer();
         let weak = Arc::downgrade(&served) as Weak<dyn VsyncObserver>;
+        let mut last_display_time = None;
         for wait in 0..WAITS {
             waiter.next_vsync(screen, weak.clone());
             waiter.next_vsync(screen, weak.clone());
-            match calls.recv_timeout(PATIENCE) {
-                Ok(thread) if thread == main_thread => {}
+            let display_time = match calls.recv_timeout(PATIENCE) {
+                Ok((thread, display_time)) if thread == main_thread => display_time,
                 Ok(_) => support::fail(TEST, "a wait was served off the main thread"),
                 Err(_) => support::fail(TEST, &format!("wait {wait} was not served")),
+            };
+            if last_display_time.is_some_and(|last| display_time <= last) {
+                support::fail(TEST, "a later refresh reaches the screen no later");
             }
+            last_display_time = Some(display_time);
         }
         std::thread::sleep(QUIET);
         if calls.try_recv().is_ok() {

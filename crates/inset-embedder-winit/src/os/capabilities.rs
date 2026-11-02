@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use inset_embedder::{
     Cameras, Clipboard, CompositionLayer, Compositor, DockMenu, FileDialogs, Image, KeyData,
     MenuBar, MenuEntry, MenuId, Notifications, Offset, Opener, Placement, Players, Rect, Screen,
-    ScreenId, TargetPlatform, TrayIcons, VideoFrame, ViewId, ViewPadding, VsyncWaiter,
-    WindowConfig,
+    ScreenId, TargetPlatform, TrayIcons, VideoFrame, VideoFrameReaders, ViewId, ViewPadding,
+    VsyncWaiter, WindowConfig,
 };
 use valo_codec::Decoder;
 use winit::event_loop::{ActiveEventLoop, EventLoopBuilder};
@@ -370,7 +370,8 @@ pub(crate) trait SystemFileDialogs {
     }
 }
 
-/// The system's media stack: its players and its cameras (`apple/media` on macOS and iOS).
+/// The system's media stack: its players, its cameras and the frame readers they feed
+/// (`apple/media` on macOS and iOS).
 pub(crate) trait SystemMedia {
     /// What makes images of a video's frames for valo to draw (`video_frames.rs`).
     type VideoFrameImages: VideoFrameImages;
@@ -382,6 +383,12 @@ pub(crate) trait SystemMedia {
 
     /// The system's cameras, or `None` where the embedder has none.
     fn cameras() -> Option<Rc<dyn Cameras>> {
+        None
+    }
+
+    /// The readers the system's players and cameras feed, or `None` where it hands out no
+    /// frames.
+    fn video_frame_readers() -> Option<Rc<dyn VideoFrameReaders>> {
         None
     }
 }

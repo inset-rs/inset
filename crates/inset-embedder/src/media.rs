@@ -9,20 +9,25 @@
 //!
 //! Every system has two levels: a view that takes a player (`AVPlayerLayer(player:)`, Media3's
 //! `PlayerView.player`), which is the framework's, and a player that puts its pictures where it
-//! is given (Media3's `setVideoSurface`), which is the host's and this module's. A player or a
-//! camera's picture goes to one destination at a time: a [`CompositionLayer`] it is given
-//! ([`MediaPlayer::set_video_layer`], [`CaptureSession::set_preview_layer`]), whose content
-//! becomes a layer the system draws it into, which is the only way protected and HDR video show
-//! at all, with no copy; or a frame reader, the newest picture each time, for the app's GPU
-//! ([`VideoFrameReader`]). A camera's photos are encoded by the system and its recordings encoded
-//! and written to a file by the system: the app encodes nothing.
+//! is given (Media3's `setVideoSurface`), which is the host's and this module's. A player's
+//! picture goes to one destination at a time, which the app makes and gives it
+//! ([`MediaPlayer::set_video_output`]): a [`CompositionLayer`], whose content becomes a layer the
+//! system draws the picture into, which is the only way protected and HDR video show at all, with
+//! no copy; or a [`VideoFrameReader`], made on its own ([`VideoFrameReaders::make_reader`]), which
+//! hands the frames to the app's GPU, as an Android app makes an `ImageReader` and an Apple app an
+//! `AVPlayerItemVideoOutput` and gives it to its player. A camera session shows its preview on a
+//! layer ([`CaptureSession::set_preview_layer`]) and hands its frames to a reader
+//! ([`CaptureSession::set_frame_reader`]) the same way. A camera's photos are encoded by the
+//! system and its recordings encoded and written to a file by the system: the app encodes
+//! nothing.
 //!
-//! The platform answers `None` where its system has no players or no cameras. A player or a
-//! session reports its state through [`MediaPlayer::state`] and [`CaptureSession::state`], read
-//! when the future from `changed` resolves: the invariant a host keeps is that such a future
+//! The platform answers `None` where its system has no players, no cameras or no frames. A player
+//! or a session reports its state through [`MediaPlayer::state`] and [`CaptureSession::state`],
+//! read when the future from `changed` resolves: the invariant a host keeps is that such a future
 //! resolves at every change of what the state answers, and when the player or session goes, so
 //! the app never waits on one for ever.
 
+use std::any::Any;
 use std::fmt;
 use std::future::Future;
 use std::path::PathBuf;
@@ -43,8 +48,8 @@ pub trait Players {
     fn open(&self, url: &str) -> Box<dyn MediaPlayer>;
 }
 
-/// One player, controlled on the app's main thread. Dropped, it stops, and its picture leaves
-/// the layer it showed on.
+/// One player, controlled on the app's main thread. Dropped, it stops, and its picture goes
+/// nowhere: it leaves the layer it showed on, and its reader reads nothing more.
 pub trait MediaPlayer {
     /// Plays from where it is, at the rate last set: from the start once it has ended.
     fn play(&self);
@@ -70,16 +75,20 @@ pub trait MediaPlayer {
     /// called, or once the player is gone.
     fn changed(&self) -> MediaChangeFuture;
 
-    /// Puts the picture on `layer` from now on, drawn by the system into a layer of its own that
-    /// is `layer`'s content, as Media3's `setVideoSurface` does, and nowhere else: neither on the
-    /// layer it was on before nor to a frame reader. `None` puts it nowhere. The player holds the
-    /// layer while it shows on it, as a producer does. A layer no compositor of this host made
-    /// shows nothing.
-    fn set_video_layer(&self, layer: Option<Arc<dyn CompositionLayer>>);
+    /// Sends the picture to `output` from now on, and nowhere it went before; `None` sends it
+    /// nowhere, as Media3's `setVideoSurface` does. The player holds the output while it sends
+    /// the picture there, as a producer holds its layer. A layer no compositor of this host made
+    /// shows nothing, and a reader no [`VideoFrameReaders`] of this host made reads nothing.
+    fn set_video_output(&self, output: Option<VideoOutput>);
+}
 
-    /// Hands the picture to a frame reader from now on, and to no layer; a reader asked for
-    /// before reads nothing more.
-    fn read_frames(&self) -> Arc<dyn VideoFrameReader>;
+/// Where a player sends its picture, one destination at a time.
+#[derive(Clone)]
+pub enum VideoOutput {
+    /// The system draws the picture into a layer of its own that is this layer's content.
+    Layer(Arc<dyn CompositionLayer>),
+    /// The app draws the frames this reader hands out.
+    Frames(Arc<dyn VideoFrameReader>),
 }
 
 /// What a player is doing.
@@ -170,7 +179,8 @@ pub enum CameraFacing {
 
 /// A session on one camera, controlled on the app's main thread. Each output is the system's
 /// own, made at its first asking and the same one after; the session runs every output it has.
-/// Dropped, it stops, and its preview leaves the layer it showed on.
+/// Dropped, it stops, its preview leaves the layer it showed on, and its reader reads nothing
+/// more.
 pub trait CaptureSession {
     /// Starts the camera: asking the user for it first where the system asks and the user has
     /// not answered, then running, or failing, as the state says.
@@ -191,8 +201,10 @@ pub trait CaptureSession {
     /// shows nothing.
     fn set_preview_layer(&self, layer: Option<Arc<dyn CompositionLayer>>);
 
-    /// The camera's frames, the newest each time.
-    fn frame_output(&self) -> Arc<dyn VideoFrameReader>;
+    /// Hands the camera's frames to `reader` from now on, and to no reader it handed them to
+    /// before; `None` hands them to none. A reader no [`VideoFrameReaders`] of this host made
+    /// reads nothing.
+    fn set_frame_reader(&self, reader: Option<Arc<dyn VideoFrameReader>>);
 
     /// Photos, each captured, processed and encoded by the system.
     fn photo_output(&self) -> Box<dyn PhotoOutput>;
@@ -265,9 +277,24 @@ pub trait MovieOutput {
     fn stop(&self);
 }
 
-/// The pictures of a player or a camera, read from any thread as they are drawn. A reader keeps
-/// no frame for later: one not read before the next arrives is dropped.
-pub trait VideoFrameReader: Send + Sync {
+/// The system's frame readers, or `None` from
+/// [`Platform::video_frame_readers`](crate::Platform::video_frame_readers) where it hands out no
+/// frames.
+pub trait VideoFrameReaders {
+    /// A reader fed by nothing yet, which reads the frames of the source it is given to: a
+    /// player's [`set_video_output`](MediaPlayer::set_video_output), a capture session's
+    /// [`set_frame_reader`](CaptureSession::set_frame_reader). The reader goes when its last
+    /// handle does: the app's, and its source's.
+    fn make_reader(&self) -> Arc<dyn VideoFrameReader>;
+}
+
+/// The pictures of the one source a reader is given to, read from any thread as they are drawn.
+/// It takes one source at a time, as Android's `ImageReader` takes one producer: given to a second
+/// while the first still feeds it, it is refused, and the second sends its frames nowhere. A
+/// reader keeps no frame for later: one not read before the next arrives is dropped.
+///
+/// A host gets its own type back from a reader it is given by downcasting through `Any`.
+pub trait VideoFrameReader: Any + Send + Sync {
     /// The frame to show at `display_time`, the moment the picture being drawn reaches the
     /// screen: a player's frame for that moment of the video, as a display link asks
     /// AVFoundation's video output for each refresh's target time, and a camera's newest. `None`

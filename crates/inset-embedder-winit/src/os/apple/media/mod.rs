@@ -2,7 +2,8 @@
 //! an `AVPlayer` (`player`), a camera session an `AVCaptureSession` (`camera`) with its photo and
 //! movie outputs (`outputs`); a picture goes to a composition layer as a layer the system draws
 //! into, shown as its content so that Core Animation clips and scales it with it
-//! (`apple/composition`), or to a frame reader as `IOSurface`-backed pixel buffers (`frames`).
+//! (`apple/composition`), or to a frame reader the app made, as `IOSurface`-backed pixel buffers
+//! (`frames`).
 //! AVFoundation tells changes by key-value observing and notifications (`observing`).
 //!
 //! A player and a session are controlled on the main thread, as AVFoundation asks of a player and
@@ -25,7 +26,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::process;
 use std::rc::Rc;
 
-use inset_embedder::{Cameras, Players};
+use inset_embedder::{Cameras, Players, VideoFrameReaders};
 use objc2::MainThreadMarker;
 
 pub(super) use super::composition::{in_transaction, show_system_layer};
@@ -33,6 +34,7 @@ use camera::AvCameras;
 pub(crate) use frame_images::CoreVideoFrameImages;
 #[cfg(test)]
 pub(crate) use frame_images::TestFrames;
+use frames::AvFrameReaders;
 use player::AvPlayers;
 
 /// AVFoundation's players; `None` off the main thread, where none is controlled.
@@ -43,6 +45,11 @@ pub(crate) fn players() -> Option<Rc<dyn Players>> {
 /// AVFoundation's cameras.
 pub(crate) fn cameras() -> Option<Rc<dyn Cameras>> {
     Some(Rc::new(AvCameras))
+}
+
+/// The readers AVFoundation's players and cameras feed.
+pub(crate) fn video_frame_readers() -> Option<Rc<dyn VideoFrameReaders>> {
+    Some(Rc::new(AvFrameReaders))
 }
 
 /// Runs `body`, the body of a method AVFoundation calls, and aborts the process if it panics,

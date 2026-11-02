@@ -71,6 +71,7 @@ pub use media::{
     Camera, CameraFacing, CameraId, CameraState, CameraStatus, Cameras, CaptureSession,
     MediaChangeFuture, MediaError, MediaPlayer, MovieOptions, MovieOutput, Photo, PhotoFuture,
     PhotoOutput, PlayerState, PlayerStatus, Players, RecordingFuture, VideoFrame, VideoFrameReader,
+    VideoFrameReaders, VideoOutput,
 };
 pub use menus::{
     AttachedMenu, CheckState, DockMenu, EditCommand, IconImage, MenuAtIcon, MenuBar, MenuEntry,

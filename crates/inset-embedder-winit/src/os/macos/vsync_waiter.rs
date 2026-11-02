@@ -1,6 +1,7 @@
 //! The platform's vsync waiter on macOS: a wait is served at the next tick of its screen's display
-//! link, on the main thread in the run loop's common modes, never through the main loop. Flutter's
-//! `FlutterVSyncWaiter` hands its ticks to the main run loop's common modes the same way
+//! link, on the main thread in the run loop's common modes, never through the main loop, with the
+//! link's `targetTimestamp` as the moment the picture drawn for the tick reaches the screen.
+//! Flutter's `FlutterVSyncWaiter` hands its ticks to the main run loop's common modes the same way
 //! (`FlutterRunLoop`), so a producer is served at the tick itself, whatever loop AppKit runs and
 //! whether or not winit calls the main loop meanwhile. The waiter subscribes to each screen's one display link, which the
 //! frames of the views on that screen share (`display_links.rs`), and wants its ticks while a wait
@@ -22,6 +23,7 @@ use inset_embedder::{ScreenId, VsyncObserver, VsyncWaiter};
 use objc2::MainThreadMarker;
 
 use super::display_links::{DisplayId, ScreenDisplayLink};
+use crate::os::capabilities::DisplayLink as _;
 
 const HELD_BRIEFLY: &str = "the waits are never held across a panic";
 
@@ -101,9 +103,19 @@ impl Waiting {
             return;
         }
         let at = Instant::now();
+        // A link has a target time from its first tick on, so `at` never stands in.
+        let display_time = self.target_time(screen).unwrap_or(at);
         for observer in due.iter().filter_map(Weak::upgrade) {
-            observer.vsync(at);
+            observer.vsync(at, display_time);
         }
+    }
+
+    /// When the picture drawn at `screen`'s latest tick reaches the screen: its display link's
+    /// target time. Main thread.
+    fn target_time(&self, screen: ScreenId) -> Option<Instant> {
+        let main_thread = MainThreadMarker::new().expect("a display link ticks on the main thread");
+        let links = self.links.get(main_thread).borrow();
+        links.get(&screen).and_then(|link| link.target_time())
     }
 
     fn pause_ticks(&self, screen: ScreenId) {
@@ -149,7 +161,7 @@ mod tests {
     struct Observer;
 
     impl VsyncObserver for Observer {
-        fn vsync(&self, _at: Instant) {}
+        fn vsync(&self, _at: Instant, _display_time: Instant) {}
     }
 
     #[test]

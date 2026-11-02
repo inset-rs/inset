@@ -9,8 +9,8 @@ use inset_embedder::{
     AppExit, AppLifecycleState, Brightness, Cameras, Clipboard, Compositor, Dispatcher, DockMenu,
     FileDialogs, FontSource, Haptics, Image, ImageCodecFuture, ImageDecodeError, Instant, MenuBar,
     MouseCursor, Notifications, Opener, Platform, Players, PopupMenus, RequestId, Restoration,
-    SystemChrome, SystemContextMenu, TargetPlatform, TextServices, TrayIcons, View, ViewError,
-    ViewId, ViewRef, ViewRequest,
+    SystemChrome, SystemContextMenu, TargetPlatform, TextServices, TrayIcons, VideoFrameReaders,
+    View, ViewError, ViewId, ViewRef, ViewRequest,
 };
 
 use inset_embedder::valo;
@@ -54,6 +54,7 @@ pub struct TestPlatform {
     compositor: Option<Arc<dyn Compositor>>,
     players: Option<Rc<dyn Players>>,
     cameras: Option<Rc<dyn Cameras>>,
+    video_frame_readers: Option<Rc<dyn VideoFrameReaders>>,
     dock_menu: Option<Rc<dyn DockMenu>>,
     text_services: Option<Rc<dyn TextServices>>,
     mouse_cursor: Option<Rc<dyn MouseCursor>>,
@@ -91,6 +92,7 @@ impl TestPlatform {
             compositor: None,
             players: None,
             cameras: None,
+            video_frame_readers: None,
             dock_menu: None,
             text_services: None,
             mouse_cursor: None,
@@ -258,6 +260,14 @@ impl TestPlatform {
 
     pub fn with_cameras(mut self, cameras: Rc<dyn Cameras>) -> TestPlatform {
         self.cameras = Some(cameras);
+        self
+    }
+
+    pub fn with_video_frame_readers(
+        mut self,
+        video_frame_readers: Rc<dyn VideoFrameReaders>,
+    ) -> TestPlatform {
+        self.video_frame_readers = Some(video_frame_readers);
         self
     }
 
@@ -457,6 +467,10 @@ impl Platform for TestPlatform {
 
     fn cameras(&self) -> Option<&dyn Cameras> {
         self.cameras.as_deref()
+    }
+
+    fn video_frame_readers(&self) -> Option<&dyn VideoFrameReaders> {
+        self.video_frame_readers.as_deref()
     }
 
     fn dock_menu(&self) -> Option<&dyn DockMenu> {

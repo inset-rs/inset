@@ -717,6 +717,12 @@ pub trait Platform: Any {
         None
     }
 
+    /// The system's frame readers, which a player or a camera hands its frames to, or `None`
+    /// where the system hands out no frames.
+    fn video_frame_readers(&self) -> Option<&dyn crate::VideoFrameReaders> {
+        None
+    }
+
     /// The menu of the app's Dock icon, or `None` where the system has no Dock.
     fn dock_menu(&self) -> Option<&dyn DockMenu> {
         None

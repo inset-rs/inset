@@ -36,9 +36,9 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 ## frame_scheduler.rs / vsync_source.rs / vsync_waiter.rs / os/macos/vsync_waiter.rs
 
-- Change: without a screen's display link, on macOS before 14 and on the other desktops, frames follow a timer at the display's refresh rate.
-  Reason: platform — winit offers no vsync, and only macOS 14 and later gives a screen's display link.
-  Affect: an animation's frames come at the display's rate but not in step with its refresh.
+- Change: without a screen's display link, on macOS before 14 and on the other desktops, frames follow a timer at the display's refresh rate, and a refresh's picture is taken to reach the screen one interval after the timer fires.
+  Reason: platform — winit offers no vsync, and only macOS 14 and later gives a screen's display link, with its target time.
+  Affect: an animation's frames come at the display's rate but not in step with its refresh, and the moment a refresh's picture reaches the screen, which a vsync wait is told and a video's frame is picked for, is estimated.
 
 - Change: the platform hands out Flutter's `VsyncWaiter` for any screen, served at the vsyncs the frames of the views on that screen are drawn at, whether or not a window on it is in sight.
   Reason: platform — Flutter's waiter is the engine's own, but a producer feeding a composition layer, or a host drawing for programs, paces by the same refreshes from threads of its own.
@@ -168,9 +168,13 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — AVFoundation changes a player's state on the main queue, where the app reads it.
   Affect: the app's player hears its state change at once on load, play, pause, seek and end, and its position every half second while it plays.
 
-- Change: a player shown on a composition layer makes an `AVPlayerLayer` its content (`MacOs::show_system_layer` for an app's own system layer), and one read as frames adds an `AVPlayerItemVideoOutput` of BGRA `IOSurface`-backed pixel buffers, where Flutter's plugin copies every frame into a texture.
+- Change: a player shown on a composition layer makes an `AVPlayerLayer` its content (`MacOs::show_system_layer` for an app's own system layer), and one given a frame reader adds an `AVPlayerItemVideoOutput` of BGRA `IOSurface`-backed pixel buffers to its item, which the reader reads, where Flutter's plugin copies every frame into a texture.
   Reason: platform — Core Animation clips and scales a layer with the one it is the content of, and a pixel buffer backed by an `IOSurface` reaches the GPU with no copy.
   Affect: a video moves, clips and shrinks with the framework's frame, and a frame reader hands out the frame for the moment the picture reaches the screen, keeping none for later.
+
+- Change: a frame reader is made empty and reads the output of the source it was given to last, a player item's video output or a capture session's video data output, which that source makes and adds when it is given the reader.
+  Reason: platform — AVFoundation has no one output that a player and a camera both feed, as Android's `ImageReader` is fed by a decoder and a camera alike.
+  Affect: one reader serves a player or a camera, it reads nothing until it is given to one, and a reader the host did not make reads nothing, which the host says once.
 
 - Change: a camera session is an `AVCaptureSession` configured and run on a queue of its own, asking for the camera, and for the microphone where a recording wants sound, at its start, with its preview a layer that is a composition layer's content and its frames, photos and recordings the system's video data, photo and movie file outputs.
   Reason: platform — starting a session blocks, and each output is AVFoundation's own.

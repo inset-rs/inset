@@ -23,7 +23,7 @@ use crate::framework::{BuildContext, KeyRef, LeafRenderObjectWidget, RenderObjec
 pub struct VideoFrameView {
     /// See [`Widget::key`](crate::Widget::key).
     pub key: Option<KeyRef>,
-    /// The frames drawn: a player's `read_frames`, a camera session's `frame_output`.
+    /// The frames drawn: a reader the app made and gave a player or a camera session.
     pub reader: Arc<dyn VideoFrameReader>,
 }
 

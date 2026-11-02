@@ -147,7 +147,7 @@ mod client {
     struct Calls(Sender<()>);
 
     impl VsyncObserver for Calls {
-        fn vsync(&self, _at: Instant) {
+        fn vsync(&self, _at: Instant, _display_time: Instant) {
             let _ = self.0.send(());
         }
     }

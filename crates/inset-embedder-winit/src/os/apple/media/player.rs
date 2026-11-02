@@ -1,8 +1,8 @@
 //! A player: AVFoundation's `AVPlayer` over one `AVPlayerItem`, controlled on the main thread,
 //! whose state is read from them when asked and whose changes AVFoundation tells by key-value
 //! observing, a periodic time observer and its end-of-item notification. Its picture goes either to
-//! an `AVPlayerLayer` shown as a composition layer's content, or to an `AVPlayerItemVideoOutput` a
-//! frame reader reads.
+//! an `AVPlayerLayer` shown as a composition layer's content, or to an `AVPlayerItemVideoOutput`
+//! added to its item, which the reader it was given reads.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -12,7 +12,7 @@ use std::time::Duration;
 use block2::RcBlock;
 use inset_embedder::{
     CompositionLayer, MediaChangeFuture, MediaPlayer, PlayerState, PlayerStatus, Players, Size,
-    VideoFrameReader,
+    VideoFrameReader, VideoOutput,
 };
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -25,7 +25,9 @@ use objc2_av_foundation::{
 use objc2_core_media::{CMTime, CMTimeFlags, kCMTimeZero};
 use objc2_foundation::{NSString, NSURL};
 
-use super::frames::PlayerFrames;
+use super::frames::{
+    AvFrameReader, FrameOutput, PlayerFrames, report_foreign_reader, report_reader_in_use,
+};
 use super::observing::{NotificationObservation, PropertyObservation};
 use super::show_system_layer;
 use crate::media::Changes;
@@ -97,7 +99,11 @@ enum Destination {
         layer: Retained<AVPlayerLayer>,
         _shown_on: Arc<dyn CompositionLayer>,
     },
-    Frames(Arc<PlayerFrames>),
+    /// Its item's video output, which this reader reads.
+    Frames {
+        reader: Arc<AvFrameReader>,
+        output: Arc<PlayerFrames>,
+    },
 }
 
 impl AvMediaPlayer {
@@ -149,8 +155,40 @@ impl AvMediaPlayer {
         }
     }
 
+    /// The picture on a layer of the player's own, which is `shown_on`'s content.
+    fn show_on(&self, shown_on: Arc<dyn CompositionLayer>) -> Destination {
+        // SAFETY: a layer of the player, made on the main thread.
+        let layer = unsafe { AVPlayerLayer::playerLayerWithPlayer(Some(&self.player)) };
+        // SAFETY: a constant AVFoundation exports for the life of the process.
+        if let Some(gravity) = unsafe { AVLayerVideoGravityResizeAspect } {
+            unsafe { layer.setVideoGravity(gravity) };
+        }
+        show_system_layer(&shown_on, &layer);
+        Destination::Layer {
+            layer,
+            _shown_on: shown_on,
+        }
+    }
+
+    /// The picture to a video output added to the item, which `reader` reads; nowhere for a
+    /// reader this host did not make, or one another source feeds.
+    fn feed(&self, reader: Arc<dyn VideoFrameReader>) -> Destination {
+        let Some(reader) = AvFrameReader::downcast_from(reader) else {
+            report_foreign_reader();
+            return Destination::Nowhere;
+        };
+        let output = Arc::new(PlayerFrames::new());
+        if !reader.read(Arc::clone(&output) as Arc<dyn FrameOutput>) {
+            report_reader_in_use();
+            return Destination::Nowhere;
+        }
+        // SAFETY: adding an output to the item on the main thread.
+        unsafe { self.item.addOutput(output.output()) };
+        Destination::Frames { reader, output }
+    }
+
     /// Lets go of where the picture went: its layer leaves the composition layer it was shown on,
-    /// and its frame reader reads nothing more.
+    /// and its reader reads nothing more from it.
     fn leave_destination(&self) {
         match self.destination.replace(Destination::Nowhere) {
             Destination::Nowhere => {}
@@ -159,8 +197,11 @@ impl AvMediaPlayer {
                 unsafe { layer.setPlayer(None) };
                 super::in_transaction(|| layer.removeFromSuperlayer());
             }
-            // SAFETY: removing the item's output on the main thread.
-            Destination::Frames(frames) => unsafe { self.item.removeOutput(frames.output()) },
+            Destination::Frames { reader, output } => {
+                // SAFETY: removing the item's output on the main thread.
+                unsafe { self.item.removeOutput(output.output()) };
+                reader.stop_reading(&(output as Arc<dyn FrameOutput>));
+            }
         }
     }
 }
@@ -245,31 +286,14 @@ impl MediaPlayer for AvMediaPlayer {
         self.changes.next()
     }
 
-    fn set_video_layer(&self, shown_on: Option<Arc<dyn CompositionLayer>>) {
+    fn set_video_output(&self, output: Option<VideoOutput>) {
         self.leave_destination();
-        let Some(shown_on) = shown_on else {
-            return;
+        let destination = match output {
+            None => Destination::Nowhere,
+            Some(VideoOutput::Layer(layer)) => self.show_on(layer),
+            Some(VideoOutput::Frames(reader)) => self.feed(reader),
         };
-        // SAFETY: a layer of the player, made on the main thread.
-        let layer = unsafe { AVPlayerLayer::playerLayerWithPlayer(Some(&self.player)) };
-        // SAFETY: a constant AVFoundation exports for the life of the process.
-        if let Some(gravity) = unsafe { AVLayerVideoGravityResizeAspect } {
-            unsafe { layer.setVideoGravity(gravity) };
-        }
-        show_system_layer(&shown_on, &layer);
-        *self.destination.borrow_mut() = Destination::Layer {
-            layer,
-            _shown_on: shown_on,
-        };
-    }
-
-    fn read_frames(&self) -> Arc<dyn VideoFrameReader> {
-        self.leave_destination();
-        let frames = Arc::new(PlayerFrames::new());
-        // SAFETY: adding an output to the item on the main thread.
-        unsafe { self.item.addOutput(frames.output()) };
-        *self.destination.borrow_mut() = Destination::Frames(Arc::clone(&frames));
-        frames
+        *self.destination.borrow_mut() = destination;
     }
 }
 
@@ -373,11 +397,7 @@ impl MediaPlayer for FailedPlayer {
         self.changes.next()
     }
 
-    fn set_video_layer(&self, _layer: Option<Arc<dyn CompositionLayer>>) {}
-
-    fn read_frames(&self) -> Arc<dyn VideoFrameReader> {
-        Arc::new(super::frames::NoFrames)
-    }
+    fn set_video_output(&self, _output: Option<VideoOutput>) {}
 }
 
 impl Drop for FailedPlayer {

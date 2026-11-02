@@ -24,6 +24,9 @@ pub trait VsyncWaiter: Send + Sync {
 
 /// What a [`VsyncWaiter`] calls at the refresh it was asked for.
 pub trait VsyncObserver: Send + Sync {
-    /// `at` is the host's clock when the refresh was served.
-    fn vsync(&self, at: Instant);
+    /// `at` is the host's clock when the refresh was served, and `display_time` when the picture
+    /// drawn for this refresh is expected to reach the screen, as Flutter's waiter hands on a
+    /// frame's start and target times: a macOS display link's `targetTimestamp`, the moment a
+    /// [`VideoFrameReader`](crate::VideoFrameReader) is asked for the frame of.
+    fn vsync(&self, at: Instant, display_time: Instant);
 }

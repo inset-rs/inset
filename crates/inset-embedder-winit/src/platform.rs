@@ -33,8 +33,8 @@ use inset_embedder::{
     AppExit, Brightness, Cameras, Clipboard, Compositor, Dispatcher, DockMenu, FileDialogs,
     FontSource, ImageCodecFuture, Locale, MenuBar, MouseCursor, Notifications, Opener, Platform,
     Players, PopupMenus, RequestId, Screens, SystemFontSource, TargetPlatform, TrayIcons,
-    ViewError, ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId, ViewRef, ViewRequest,
-    VsyncWaiter,
+    VideoFrameReaders, ViewError, ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId,
+    ViewRef, ViewRequest, VsyncWaiter,
 };
 
 /// The long-lived embedder capability held by `App`.
@@ -74,9 +74,11 @@ pub struct WinitPlatform {
     opener: Option<Rc<dyn Opener>>,
     /// The system's notifications, where the app has them (`os/*/notifications`).
     notifications: Option<Rc<dyn Notifications>>,
-    /// The system's players and cameras, where it has them (`media.rs`).
+    /// The system's players and cameras, and the frame readers they feed, where it has them
+    /// (`media.rs`).
     players: Option<Rc<dyn Players>>,
     cameras: Option<Rc<dyn Cameras>>,
+    video_frame_readers: Option<Rc<dyn VideoFrameReaders>>,
     /// What only macOS offers; `None` elsewhere.
     macos: Option<MacOs>,
 }
@@ -97,6 +99,7 @@ impl WinitPlatform {
             notifications: System::notifications(NotificationActivations::new(proxy.clone())),
             players: System::players(),
             cameras: System::cameras(),
+            video_frame_readers: System::video_frame_readers(),
             state,
             compositor: System::compositor(),
             vsync_waiter: System::vsync_waiter(&proxy),
@@ -291,6 +294,10 @@ impl Platform for WinitPlatform {
 
     fn cameras(&self) -> Option<&dyn Cameras> {
         self.cameras.as_deref()
+    }
+
+    fn video_frame_readers(&self) -> Option<&dyn VideoFrameReaders> {
+        self.video_frame_readers.as_deref()
     }
 
     fn mouse_cursor(&self) -> Option<&dyn MouseCursor> {

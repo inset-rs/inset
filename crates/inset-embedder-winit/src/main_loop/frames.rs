@@ -66,19 +66,19 @@ impl<C: EmbedderClient> MainLoop<C> {
     /// A vsync of `screen`: the waits on it are served, then one refresh of the views on it whose
     /// frames are due, unless none is, and the scenes their surfaces timed out on.
     pub(super) fn on_vsync(&mut self, screen: ScreenId) {
-        self.tell_display_time(screen);
+        let display_time = self.frame_scheduler.display_time(screen);
+        self.tell_display_time(screen, display_time);
         let refresh = self.frame_scheduler.on_vsync(screen);
-        serve_waits(&refresh.waiting, Instant::now());
+        serve_waits(&refresh.waiting, Instant::now(), display_time);
         if !refresh.views.is_empty() {
             self.draw_frame(&refresh.views);
         }
         self.redraw_without_the_framework(screen);
     }
 
-    /// Tells the views on `screen` when the picture they draw at this vsync reaches the screen,
-    /// the moment their videos' frames are asked for.
-    fn tell_display_time(&mut self, screen: ScreenId) {
-        let display_time = self.frame_scheduler.display_time(screen);
+    /// Tells the views on `screen` that the picture they draw at this vsync reaches the screen at
+    /// `display_time`, the moment their videos' frames are asked for.
+    fn tell_display_time(&mut self, screen: ScreenId, display_time: Instant) {
         for view_id in self.frame_scheduler.views_on(screen) {
             if let Some(view) = self.views().get(view_id) {
                 view.set_display_time(display_time);
@@ -154,11 +154,11 @@ impl<C: EmbedderClient> MainLoop<C> {
     }
 }
 
-/// Calls everyone who waited for a vsync served `at`, in the order they asked; one that is gone is
-/// not called.
-fn serve_waits(waiting: &[Weak<dyn VsyncObserver>], at: Instant) {
+/// Calls everyone who waited for a vsync served `at`, whose picture reaches the screen at
+/// `display_time`, in the order they asked; one that is gone is not called.
+fn serve_waits(waiting: &[Weak<dyn VsyncObserver>], at: Instant, display_time: Instant) {
     for observer in waiting.iter().filter_map(Weak::upgrade) {
-        observer.vsync(at);
+        observer.vsync(at, display_time);
     }
 }
 

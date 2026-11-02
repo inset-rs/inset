@@ -3,9 +3,12 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
-use inset_embedder::{Color, PlayerState, PlayerStatus, TextDirection, ViewId, WindowConfig};
+use inset_embedder::{
+    Color, PlayerState, PlayerStatus, TextDirection, VideoOutput, ViewId, WindowConfig,
+};
 use inset_embedder_winit::WinitEmbedder;
 use inset_foundation::{App, Handle, Listenable, Listener};
 use inset_painting::{BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry, TextStyle};
@@ -63,7 +66,13 @@ fn open_window(app: &mut App, presentation: Presentation) {
 fn show(app: &mut App, controller: Handle<WindowController>, presentation: &Presentation) {
     let player = Player::new(app, &presentation.url).expect("macOS has players");
     Player::set_looping(player, app, true);
-    let video = VideoFrameView::new(Player::read_frames(player, app)).into_widget();
+    let reader = app
+        .platform()
+        .video_frame_readers()
+        .expect("macOS hands out frames")
+        .make_reader();
+    Player::set_video_output(player, app, Some(VideoOutput::Frames(Arc::clone(&reader))));
+    let video = VideoFrameView::new(reader).into_widget();
     Player::play(player, app);
     let presentation = presentation.clone();
     let listenable: Rc<dyn Listenable> = Rc::new(player);

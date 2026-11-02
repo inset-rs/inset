@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    CompositionLayer, MediaChangeFuture, MediaPlayer, PlayerState, Size, VideoFrameReader,
+    CompositionLayer, MediaChangeFuture, MediaPlayer, PlayerState, Size, VideoOutput,
 };
 use inset_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle};
 
@@ -21,9 +21,9 @@ pub struct Player {
     host: Option<Rc<dyn MediaPlayer>>,
     /// The host's state when it last changed.
     state: PlayerState,
-    /// The layer the video was put on last, which a [`PlayerView`] puts it nowhere from only
-    /// while it is still its own.
-    video_layer: Option<Arc<dyn CompositionLayer>>,
+    /// Where the video was sent last, which a [`PlayerView`] sends it nowhere from only while
+    /// it is still the view's own layer.
+    video_output: Option<VideoOutput>,
 }
 
 impl Player {
@@ -37,7 +37,7 @@ impl Player {
             change_notifier: ChangeNotifierData::new(),
             state: host.state(),
             host: Some(host),
-            video_layer: None,
+            video_output: None,
         });
         player.follow(app, changed);
         Some(player)
@@ -76,22 +76,13 @@ impl Player {
         self.host(app).set_looping(looping);
     }
 
-    /// Puts the video on `layer` from now on, and on no layer or frame reader it went to before;
-    /// `None` puts it nowhere: Media3's `setVideoSurface`, which [`PlayerView`] calls with a
-    /// composition layer of its own as it is mounted, and with `None` as it is unmounted.
-    pub fn set_video_layer(
-        self: Handle<Self>,
-        app: &mut App,
-        layer: Option<Arc<dyn CompositionLayer>>,
-    ) {
-        self.host(app).set_video_layer(layer.clone());
-        app.get_mut(self).video_layer = layer;
-    }
-
-    /// Hands the video to a frame reader from now on, and to no layer.
-    pub fn read_frames(self: Handle<Self>, app: &mut App) -> Arc<dyn VideoFrameReader> {
-        app.get_mut(self).video_layer = None;
-        self.host(app).read_frames()
+    /// Sends the video to `output` from now on, and nowhere it went before; `None` sends it
+    /// nowhere: Media3's `setVideoSurface`. A [`PlayerView`] sends it to a composition layer of
+    /// its own as it is mounted, and nowhere as it is unmounted; an app that draws the frames
+    /// itself sends it to a reader it made, which a `VideoFrameView` draws.
+    pub fn set_video_output(self: Handle<Self>, app: &mut App, output: Option<VideoOutput>) {
+        self.host(app).set_video_output(output.clone());
+        app.get_mut(self).video_output = output;
     }
 
     /// Stops the player and lets go of the host's: its picture leaves the layer it was on.
@@ -99,7 +90,7 @@ impl Player {
     pub fn dispose(self: Handle<Self>, app: &mut App) {
         let player = app.get_mut(self);
         player.host = None;
-        player.video_layer = None;
+        player.video_output = None;
         player.change_notifier.dispose();
     }
 
@@ -165,11 +156,14 @@ impl fmt::Debug for Player {
 
 impl PictureSource for Player {
     fn set_layer(handle: Handle<Self>, app: &mut App, layer: Option<Arc<dyn CompositionLayer>>) {
-        handle.set_video_layer(app, layer);
+        handle.set_video_output(app, layer.map(VideoOutput::Layer));
     }
 
     fn layer(handle: Handle<Self>, app: &App) -> Option<&Arc<dyn CompositionLayer>> {
-        app.get(handle).video_layer.as_ref()
+        match &app.get(handle).video_output {
+            Some(VideoOutput::Layer(layer)) => Some(layer),
+            _ => None,
+        }
     }
 
     fn picture_size(handle: Handle<Self>, app: &App) -> Option<Size> {
@@ -225,7 +219,10 @@ mod tests {
 
     use inset_embedder::{PickedFile, PlayerStatus, TargetPlatform};
     use inset_foundation::AppCell;
-    use inset_test::{MockCompositor, MockPlayers, PlayerCall, TestPlatform, TestView};
+    use inset_test::{
+        MockCompositor, MockPlayers, MockVideoFrameReaders, PlayerCall, TestPlatform, TestView,
+        VideoOutputKind,
+    };
 
     use super::*;
     use crate::binding::run_app;
@@ -373,16 +370,63 @@ mod tests {
             host.video_layer().is_none(),
             "unmounted, it puts the video nowhere"
         );
-        assert_eq!(host.calls().last(), Some(&PlayerCall::SetVideoLayer(false)));
+        assert_eq!(host.calls().last(), Some(&PlayerCall::SetVideoOutput(None)));
 
         mount(&cell, PlayerView::new(player).into_widget());
         let elsewhere = inset_embedder::test_support::idle_layer();
-        player.set_video_layer(&mut cell.borrow_mut(), Some(Arc::clone(&elsewhere)));
+        player.set_video_output(
+            &mut cell.borrow_mut(),
+            Some(VideoOutput::Layer(Arc::clone(&elsewhere))),
+        );
         mount(&cell, crate::SizedBox::new().into_widget());
         assert!(
             host.video_layer()
                 .is_some_and(|layer| Arc::ptr_eq(&layer, &elsewhere)),
             "a view leaves alone a layer it did not set"
+        );
+    }
+
+    #[test]
+    fn a_reader_the_app_made_takes_the_video_from_a_view_which_leaves_it_alone() {
+        let players = MockPlayers::new();
+        let readers = MockVideoFrameReaders::new();
+        let view = Rc::new(TestView::new(800.0, 600.0));
+        let platform = TestPlatform::new()
+            .on(TargetPlatform::MacOS)
+            .with_view(Rc::clone(&view) as inset_embedder::ViewRef)
+            .with_players(Rc::new(players.clone()))
+            .with_compositor(Arc::new(MockCompositor::new()))
+            .with_video_frame_readers(Rc::new(readers.clone()));
+        let cell = AppCell::with_platform(Rc::new(platform));
+        let player = Player::new(&mut cell.borrow_mut(), "https://example.com/a.mp4").unwrap();
+        let host = &players.opened()[0];
+        mount(&cell, PlayerView::new(player).into_widget());
+
+        let reader = cell
+            .borrow()
+            .platform()
+            .video_frame_readers()
+            .expect("the platform's readers")
+            .make_reader();
+        assert!(Arc::ptr_eq(&reader, &readers.made()[0]));
+        player.set_video_output(
+            &mut cell.borrow_mut(),
+            Some(VideoOutput::Frames(Arc::clone(&reader))),
+        );
+        assert_eq!(
+            host.calls().last(),
+            Some(&PlayerCall::SetVideoOutput(Some(VideoOutputKind::Frames)))
+        );
+        assert!(host.video_layer().is_none(), "one destination at a time");
+
+        mount(
+            &cell,
+            crate::VideoFrameView::new(Arc::clone(&reader)).into_widget(),
+        );
+        assert!(
+            host.frame_reader()
+                .is_some_and(|read_by| Arc::ptr_eq(&read_by, &reader)),
+            "an unmounted view leaves alone a reader it did not set"
         );
     }
 

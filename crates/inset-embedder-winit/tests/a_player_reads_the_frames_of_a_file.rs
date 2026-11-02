@@ -1,7 +1,8 @@
 //! A player of a small movie, opened by a picked file's URL at a path the URL must encode, loads it
-//! by itself, says its size and length, plays it, hands its frames to a reader as BGRA pixel
-//! buffers backed by IOSurfaces, ends, and plays on past its end once it loops: all without a
-//! window or a sound. On its way it is put on a surface, not in any window, and nowhere again.
+//! by itself, says its size and length, plays it, hands its frames to a reader made on its own as
+//! BGRA pixel buffers backed by IOSurfaces, ends, and plays on past its end once it loops: all
+//! without a window or a sound. On its way it is put on a surface, not in any window, and nowhere
+//! again; sent nowhere at the end, it feeds the reader no more.
 //!
 //! Its own binary, without the test harness: AVFoundation changes a player's state on the main
 //! queue, which only the main thread serves, so this one serves it while it waits. On iOS it runs
@@ -24,10 +25,11 @@ fn main() {}
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod player {
     use std::path::PathBuf;
+    use std::sync::Arc;
     use std::task::{Context, Poll, Waker};
     use std::time::{Duration, Instant};
 
-    use inset_embedder::{MediaChangeFuture, PickedFile, PlayerStatus, Size};
+    use inset_embedder::{MediaChangeFuture, PickedFile, PlayerStatus, Size, VideoOutput};
     use objc2_core_video::{
         CVPixelBufferGetHeight, CVPixelBufferGetIOSurface, CVPixelBufferGetPixelFormatType,
         CVPixelBufferGetWidth, kCVPixelFormatType_32BGRA,
@@ -60,14 +62,17 @@ mod player {
         let compositor =
             inset_embedder_winit::test_support::compositor().expect("the system's compositor");
         let layer = compositor.make_layer(false);
-        player.set_video_layer(Some(layer));
-        player.set_video_layer(None);
+        player.set_video_output(Some(VideoOutput::Layer(layer)));
+        player.set_video_output(None);
 
-        let frames = player.read_frames();
+        let readers = inset_embedder_winit::test_support::video_frame_readers()
+            .expect("the system's frame readers");
+        let reader = readers.make_reader();
+        player.set_video_output(Some(VideoOutput::Frames(Arc::clone(&reader))));
         player.play();
         let mut frame = None;
         serve_until("a frame arrives", || {
-            frame = frames.frame_for(Instant::now());
+            frame = reader.frame_for(Instant::now());
             frame.is_some()
         });
         let frame = frame.expect("a frame");
@@ -92,6 +97,14 @@ mod player {
         assert!(
             state.playing && !state.ended,
             "a looping player plays on past its end"
+        );
+
+        player.set_video_output(None);
+        let unfed_since = Instant::now();
+        serve_until("a while", || unfed_since.elapsed() > LOOPED / 4);
+        assert!(
+            reader.frame_for(Instant::now()).is_none(),
+            "a player sent nowhere feeds its reader no more"
         );
 
         let mut gone = player.changed();

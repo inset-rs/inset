@@ -105,6 +105,8 @@ pub(crate) struct CoreAnimationLayer {
     children: Mutex<Children>,
     /// Whether a placement by a second placer was reported already.
     misplacement_reported: AtomicBool,
+    /// Whether it was made opaque: its buffer is drawn so while no children lie beneath it.
+    opaque: bool,
 }
 
 /// The children a layer's last present showed, and the scale of the window they were laid out
@@ -117,40 +119,45 @@ struct Children {
 }
 
 impl CoreAnimationLayer {
+    /// A layer placed nowhere, made in a transaction of its own: a compositor is asked for layers
+    /// on any thread.
     fn new(opaque: bool) -> CoreAnimationLayer {
-        static NEXT_NUMBER: AtomicU64 = AtomicU64::new(0);
-        let buffer_layer = CALayer::new();
-        buffer_layer.setOpaque(opaque);
-        // A view's layer is flipped (winit's `NSView`) or laid out from the top-left (a
-        // `UIView`'s): a sublayer's frame is laid out from the top-left, but its contents gravity
-        // is not flipped with it, so bottom-left is the visual top-left. A buffer smaller than the
-        // layer, drawn before a resize reached the producer, shows at its own size from there
-        // rather than stretched. SAFETY: a constant Core Animation exports for the life of the
-        // process.
-        buffer_layer.setContentsGravity(unsafe { objc2_quartz_core::kCAGravityBottomLeft });
-        let content_layer = CALayer::new();
-        // Laid out from its top-left corner at the clip layer's: the transform places it.
-        content_layer.setAnchorPoint(NSPoint::new(0.0, 0.0));
-        content_layer.setPosition(NSPoint::new(0.0, 0.0));
-        content_layer.addSublayer(&buffer_layer);
-        let clip_layer = CALayer::new();
-        clip_layer.setMasksToBounds(true);
-        clip_layer.addSublayer(&content_layer);
-        clip_layer.setHidden(true);
-        CoreAnimationLayer {
-            number: NEXT_NUMBER.fetch_add(1, Ordering::Relaxed),
-            placer: Mutex::new(None),
-            clip_layer: CrossThreadLayer(clip_layer),
-            content_layer: CrossThreadLayer(content_layer),
-            buffer_layer: CrossThreadLayer(buffer_layer),
-            system_layer: Mutex::new(None),
-            buffers: Mutex::new(PresentedBuffers::new()),
-            children: Mutex::new(Children {
-                placed: PlacedLayers::new(),
-                window_scale: None,
-            }),
-            misplacement_reported: AtomicBool::new(false),
-        }
+        in_transaction(|| {
+            static NEXT_NUMBER: AtomicU64 = AtomicU64::new(0);
+            let buffer_layer = CALayer::new();
+            buffer_layer.setOpaque(opaque);
+            // A view's layer is flipped (winit's `NSView`) or laid out from the top-left (a
+            // `UIView`'s): a sublayer's frame is laid out from the top-left, but its contents
+            // gravity is not flipped with it, so bottom-left is the visual top-left. A buffer
+            // smaller than the layer, drawn before a resize reached the producer, shows at its own
+            // size from there rather than stretched. SAFETY: a constant Core Animation exports for
+            // the life of the process.
+            buffer_layer.setContentsGravity(unsafe { objc2_quartz_core::kCAGravityBottomLeft });
+            let content_layer = CALayer::new();
+            // Laid out from its top-left corner at the clip layer's: the transform places it.
+            content_layer.setAnchorPoint(NSPoint::new(0.0, 0.0));
+            content_layer.setPosition(NSPoint::new(0.0, 0.0));
+            content_layer.addSublayer(&buffer_layer);
+            let clip_layer = CALayer::new();
+            clip_layer.setMasksToBounds(true);
+            clip_layer.addSublayer(&content_layer);
+            clip_layer.setHidden(true);
+            CoreAnimationLayer {
+                number: NEXT_NUMBER.fetch_add(1, Ordering::Relaxed),
+                placer: Mutex::new(None),
+                clip_layer: CrossThreadLayer(clip_layer),
+                content_layer: CrossThreadLayer(content_layer),
+                buffer_layer: CrossThreadLayer(buffer_layer),
+                system_layer: Mutex::new(None),
+                buffers: Mutex::new(PresentedBuffers::new()),
+                children: Mutex::new(Children {
+                    placed: PlacedLayers::new(),
+                    window_scale: None,
+                }),
+                misplacement_reported: AtomicBool::new(false),
+                opaque,
+            }
+        })
     }
 
     /// The host's own layer behind a placed one; `None` for a layer no compositor of this host
@@ -258,8 +265,12 @@ impl CoreAnimationLayer {
     }
 
     /// Makes `children` the ones shown, laid out where the layer has been placed in a window,
-    /// and lets go of the ones no longer shown. Inside the caller's transaction.
+    /// and lets go of the ones no longer shown; the buffer above them is blended while there are
+    /// any, since beneath an opaque one they would never show. Inside the caller's transaction.
     fn place_children(&self, children: Vec<(Arc<CoreAnimationLayer>, Placement)>) {
+        self.buffer_layer
+            .0
+            .setOpaque(self.opaque && children.is_empty());
         let adopted = adopted_by(children, Placer::Layer(self.number));
         let mut shown = self.children.lock().expect(HELD_BRIEFLY);
         let window_scale = shown.window_scale;
@@ -427,11 +438,12 @@ fn mask_to_shapes(layer: &CALayer, shapes: &[CFRetained<CGMutablePath>]) {
 
 /// Runs `change` in a transaction of its own with implicit animations off: a layer changed
 /// off the main thread must be in one, and a layer the framework moves must not animate.
-pub(crate) fn in_transaction(change: impl FnOnce()) {
+pub(crate) fn in_transaction<T>(change: impl FnOnce() -> T) -> T {
     CATransaction::begin();
     CATransaction::setDisableActions(true);
-    change();
+    let changed = change();
     CATransaction::commit();
+    changed
 }
 
 /// A `CALayer` handed between threads.
@@ -618,6 +630,18 @@ mod tests {
 
     /// A present shows exactly the children it names: one it no longer names is let go, free for
     /// another placer, and one another placer holds never shows.
+    #[test]
+    fn an_opaque_layer_blends_its_buffer_while_it_has_children() {
+        let parent = CoreAnimationLayer::new(true);
+        let video = Arc::new(CoreAnimationLayer::new(true));
+        let child = vec![(video, scaled(Rect::from_ltwh(0.0, 0.0, 10.0, 10.0), 2.0))];
+        in_transaction(|| parent.place_children(child));
+        assert!(!parent.buffer_layer.0.isOpaque());
+
+        in_transaction(|| parent.place_children(Vec::new()));
+        assert!(parent.buffer_layer.0.isOpaque());
+    }
+
     #[test]
     fn a_present_lets_go_of_the_children_it_no_longer_names_and_shows_no_one_elses() {
         let parent = CoreAnimationLayer::new(false);

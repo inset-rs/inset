@@ -78,9 +78,15 @@ impl CameraSession {
         app.get_mut(self).preview_layer = layer;
     }
 
-    /// The camera's frames, the newest each time.
-    pub fn frame_output(self: Handle<Self>, app: &App) -> Arc<dyn VideoFrameReader> {
-        self.host(app).frame_output()
+    /// Hands the camera's frames to `reader` from now on, a reader the app made, which a
+    /// `VideoFrameView` draws, and to no reader it handed them to before; `None` hands them to
+    /// none.
+    pub fn set_frame_reader(
+        self: Handle<Self>,
+        app: &App,
+        reader: Option<Arc<dyn VideoFrameReader>>,
+    ) {
+        self.host(app).set_frame_reader(reader);
     }
 
     /// Photos, each captured, processed and encoded by the system.
@@ -225,9 +231,12 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
+    use inset_embedder::VideoFrameReaders;
     use inset_embedder::{CameraFacing, CameraId, CameraStatus, MediaError, Photo, TargetPlatform};
     use inset_foundation::AppCell;
-    use inset_test::{MockCameras, MockCompositor, SessionCall, TestPlatform, TestView};
+    use inset_test::{
+        MockCameras, MockCompositor, MockVideoFrameReaders, SessionCall, TestPlatform, TestView,
+    };
 
     use super::*;
     use crate::binding::run_app;
@@ -297,7 +306,8 @@ mod tests {
         let session = CameraSession::new(&mut cell.borrow_mut(), &front_camera()).unwrap();
         let photos = session.photo_output(&cell.borrow());
         let movies = session.movie_output(&cell.borrow(), MovieOptions { sound: true });
-        let _frames = session.frame_output(&cell.borrow());
+        let reader = MockVideoFrameReaders::new().make_reader();
+        session.set_frame_reader(&cell.borrow(), Some(Arc::clone(&reader)));
         session.start(&cell.borrow());
         let host = &cameras.sessions()[0];
         assert_eq!(host.camera(), front_camera());
@@ -306,10 +316,11 @@ mod tests {
             vec![
                 SessionCall::PhotoOutput,
                 SessionCall::MovieOutput(MovieOptions { sound: true }),
-                SessionCall::FrameOutput,
+                SessionCall::SetFrameReader(true),
                 SessionCall::Start
             ]
         );
+        assert!(Arc::ptr_eq(&host.frame_reader().unwrap(), &reader));
         assert_eq!(now(photos.capture()), Err(MediaError::NotRunning));
 
         host.set_state(running(Size::new(1920.0, 1080.0)));

@@ -1,5 +1,5 @@
-//! A compositor, players and cameras in memory, as a host shows nothing: each keeps what the app
-//! asked of it, and reports the state the test gives it.
+//! A compositor, frame readers, players and cameras in memory, as a host shows nothing: each
+//! keeps what the app asked of it, and reports the state the test gives it.
 
 use std::cell::{Cell, RefCell};
 use std::future::Future;
@@ -15,6 +15,7 @@ use inset_embedder::{
     Camera, CameraState, Cameras, CaptureSession, CompositionLayer, Compositor, HardwareBuffer,
     MediaChangeFuture, MediaError, MediaPlayer, MovieOptions, MovieOutput, Photo, PhotoFuture,
     PhotoOutput, Placement, PlayerState, Players, RecordingFuture, VideoFrame, VideoFrameReader,
+    VideoFrameReaders, VideoOutput,
 };
 
 /// A compositor whose layers show nowhere, and which keeps each layer it made. Every clone is the
@@ -68,6 +69,30 @@ impl CompositionLayer for MockLayer {
     }
 }
 
+/// Frame readers that never have a frame, and which keep each reader made. Every clone is the
+/// same readers.
+#[derive(Clone, Default)]
+pub struct MockVideoFrameReaders(Rc<RefCell<Vec<Arc<dyn VideoFrameReader>>>>);
+
+impl MockVideoFrameReaders {
+    pub fn new() -> MockVideoFrameReaders {
+        MockVideoFrameReaders::default()
+    }
+
+    /// The readers made, in order.
+    pub fn made(&self) -> Vec<Arc<dyn VideoFrameReader>> {
+        self.0.borrow().clone()
+    }
+}
+
+impl VideoFrameReaders for MockVideoFrameReaders {
+    fn make_reader(&self) -> Arc<dyn VideoFrameReader> {
+        let reader: Arc<dyn VideoFrameReader> = Arc::new(NoFrames);
+        self.0.borrow_mut().push(Arc::clone(&reader));
+        reader
+    }
+}
+
 /// Players that keep each player opened, which reports the state the test gives it. Every clone
 /// is the same players.
 #[derive(Clone, Default)]
@@ -90,7 +115,7 @@ impl Players for MockPlayers {
             url: url.to_owned(),
             state: RefCell::new(PlayerState::loading()),
             calls: RefCell::default(),
-            video_layer: RefCell::default(),
+            video_output: RefCell::default(),
             changes: Changes::default(),
             dropped: Cell::new(false),
         }));
@@ -108,9 +133,24 @@ pub enum PlayerCall {
     SetRate(f64),
     SetVolume(f64),
     SetLooping(bool),
-    /// Whether a layer was given, or none.
-    SetVideoLayer(bool),
-    ReadFrames,
+    /// What kind of output was given, or none.
+    SetVideoOutput(Option<VideoOutputKind>),
+}
+
+/// The kind of a [`VideoOutput`], which a [`PlayerCall`] records.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VideoOutputKind {
+    Layer,
+    Frames,
+}
+
+impl VideoOutputKind {
+    fn of(output: &VideoOutput) -> VideoOutputKind {
+        match output {
+            VideoOutput::Layer(_) => VideoOutputKind::Layer,
+            VideoOutput::Frames(_) => VideoOutputKind::Frames,
+        }
+    }
 }
 
 /// A player the app opened, as the test sees it. Every clone is the same player.
@@ -121,7 +161,7 @@ struct PlayerShared {
     url: String,
     state: RefCell<PlayerState>,
     calls: RefCell<Vec<PlayerCall>>,
-    video_layer: RefCell<Option<Arc<dyn CompositionLayer>>>,
+    video_output: RefCell<Option<VideoOutput>>,
     changes: Changes,
     dropped: Cell<bool>,
 }
@@ -137,10 +177,22 @@ impl MockPlayer {
         self.0.calls.borrow().clone()
     }
 
-    /// The layer the player's picture is on; `None` once it is put nowhere, or handed to a
-    /// frame reader.
+    /// The layer the player's picture is on; `None` once it is sent nowhere, or to a frame
+    /// reader.
     pub fn video_layer(&self) -> Option<Arc<dyn CompositionLayer>> {
-        self.0.video_layer.borrow().clone()
+        match &*self.0.video_output.borrow() {
+            Some(VideoOutput::Layer(layer)) => Some(Arc::clone(layer)),
+            _ => None,
+        }
+    }
+
+    /// The reader the player's frames go to; `None` once its picture is sent nowhere, or to a
+    /// layer.
+    pub fn frame_reader(&self) -> Option<Arc<dyn VideoFrameReader>> {
+        match &*self.0.video_output.borrow() {
+            Some(VideoOutput::Frames(reader)) => Some(Arc::clone(reader)),
+            _ => None,
+        }
     }
 
     /// Whether the app let go of the player.
@@ -195,15 +247,11 @@ impl MediaPlayer for OpenedPlayer {
         self.0.0.changes.next()
     }
 
-    fn set_video_layer(&self, layer: Option<Arc<dyn CompositionLayer>>) {
-        self.0.call(PlayerCall::SetVideoLayer(layer.is_some()));
-        *self.0.0.video_layer.borrow_mut() = layer;
-    }
-
-    fn read_frames(&self) -> Arc<dyn VideoFrameReader> {
-        self.0.call(PlayerCall::ReadFrames);
-        *self.0.0.video_layer.borrow_mut() = None;
-        Arc::new(NoFrames)
+    fn set_video_output(&self, output: Option<VideoOutput>) {
+        self.0.call(PlayerCall::SetVideoOutput(
+            output.as_ref().map(VideoOutputKind::of),
+        ));
+        *self.0.0.video_output.borrow_mut() = output;
     }
 }
 
@@ -251,6 +299,7 @@ impl Cameras for MockCameras {
             state: RefCell::new(CameraState::stopped()),
             calls: RefCell::default(),
             preview_layer: RefCell::default(),
+            frame_reader: RefCell::default(),
             photo: RefCell::default(),
             recordings: RefCell::default(),
             changes: Changes::default(),
@@ -268,7 +317,8 @@ pub enum SessionCall {
     Stop,
     /// Whether a layer was given, or none.
     SetPreviewLayer(bool),
-    FrameOutput,
+    /// Whether a reader was given, or none.
+    SetFrameReader(bool),
     PhotoOutput,
     MovieOutput(MovieOptions),
 }
@@ -284,6 +334,7 @@ struct SessionShared {
     state: RefCell<CameraState>,
     calls: RefCell<Vec<SessionCall>>,
     preview_layer: RefCell<Option<Arc<dyn CompositionLayer>>>,
+    frame_reader: RefCell<Option<Arc<dyn VideoFrameReader>>>,
     photo: RefCell<Option<Photo>>,
     /// The paths recorded to, the last one first to answer when stopped.
     recordings: RefCell<Vec<PathBuf>>,
@@ -304,6 +355,11 @@ impl MockCaptureSession {
     /// The layer the session's preview is on; `None` once it is put nowhere.
     pub fn preview_layer(&self) -> Option<Arc<dyn CompositionLayer>> {
         self.0.preview_layer.borrow().clone()
+    }
+
+    /// The reader the session's frames go to; `None` once they go to none.
+    pub fn frame_reader(&self) -> Option<Arc<dyn VideoFrameReader>> {
+        self.0.frame_reader.borrow().clone()
     }
 
     /// The paths the app recorded to, in order.
@@ -356,9 +412,9 @@ impl CaptureSession for OpenedSession {
         *self.0.0.preview_layer.borrow_mut() = layer;
     }
 
-    fn frame_output(&self) -> Arc<dyn VideoFrameReader> {
-        self.0.call(SessionCall::FrameOutput);
-        Arc::new(NoFrames)
+    fn set_frame_reader(&self, reader: Option<Arc<dyn VideoFrameReader>>) {
+        self.0.call(SessionCall::SetFrameReader(reader.is_some()));
+        *self.0.0.frame_reader.borrow_mut() = reader;
     }
 
     fn photo_output(&self) -> Box<dyn PhotoOutput> {

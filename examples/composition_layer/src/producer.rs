@@ -239,7 +239,7 @@ impl VsyncSignal {
 }
 
 impl VsyncObserver for VsyncSignal {
-    fn vsync(&self, at: Instant) {
+    fn vsync(&self, at: Instant, _display_time: Instant) {
         let _ = self.vsyncs.send(at);
     }
 }
