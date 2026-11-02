@@ -21,10 +21,11 @@ use crate::macos::MacOs;
 use crate::main_loop::MainLoopProxy;
 use crate::menus::MenuEvents;
 use crate::notifications::NotificationActivations;
-use crate::os::{
+use crate::os::capabilities::{
     FramePresentation, NativeComposition, NativeMenus, OperatingSystem, SystemClipboard,
-    SystemFileDialogs, SystemMedia, SystemNotifications, SystemOpener, ThisOs, ThisOsClipboard,
+    SystemFileDialogs, SystemMedia, SystemNotifications, SystemOpener,
 };
+use crate::os::{self, System};
 use crate::popup_menus::NativePopupMenus;
 use crate::state::EmbedderState;
 use crate::windows::WindowRequest;
@@ -61,7 +62,7 @@ pub struct WinitPlatform {
     /// Where any thread waits for a screen's next vsync.
     vsync_waiter: Arc<dyn VsyncWaiter>,
     origin: Instant,
-    clipboard: ThisOsClipboard,
+    clipboard: os::Clipboard,
     popup_menus: NativePopupMenus,
     /// The system's own menus, each where it has one (`menus/`).
     menu_bar: Option<Rc<dyn MenuBar>>,
@@ -82,7 +83,7 @@ pub struct WinitPlatform {
 
 impl WinitPlatform {
     pub(crate) fn new(state: Rc<EmbedderState>, proxy: MainLoopProxy) -> WinitPlatform {
-        let clipboard = ThisOs::clipboard(Box::new({
+        let clipboard = System::clipboard(Box::new({
             let requests = Rc::clone(state.requests());
             move || requests.send(AppRequest::LookAtClipboard)
         }));
@@ -91,20 +92,20 @@ impl WinitPlatform {
         WinitPlatform {
             next_request_id: Cell::new(1),
             macos: cfg!(target_os = "macos").then(|| MacOs::new(Rc::clone(&state))),
-            file_dialogs: ThisOs::file_dialogs(ParentWindows::new(Rc::clone(&state))),
-            opener: ThisOs::opener(ParentWindows::new(Rc::clone(&state))),
-            notifications: ThisOs::notifications(NotificationActivations::new(proxy.clone())),
-            players: ThisOs::players(),
-            cameras: ThisOs::cameras(),
+            file_dialogs: System::file_dialogs(ParentWindows::new(Rc::clone(&state))),
+            opener: System::opener(ParentWindows::new(Rc::clone(&state))),
+            notifications: System::notifications(NotificationActivations::new(proxy.clone())),
+            players: System::players(),
+            cameras: System::cameras(),
             state,
-            compositor: ThisOs::compositor(),
-            vsync_waiter: ThisOs::vsync_waiter(&proxy),
+            compositor: System::compositor(),
+            vsync_waiter: System::vsync_waiter(&proxy),
             origin: Instant::now(),
             clipboard,
             popup_menus,
-            menu_bar: ThisOs::menu_bar(menu_events.clone()),
-            dock_menu: ThisOs::dock_menu(menu_events.clone()),
-            tray_icons: ThisOs::tray_icons(menu_events),
+            menu_bar: System::menu_bar(menu_events.clone()),
+            dock_menu: System::dock_menu(menu_events.clone()),
+            tray_icons: System::tray_icons(menu_events),
             proxy,
         }
     }
@@ -156,7 +157,7 @@ impl Platform for WinitPlatform {
     /// The embedder this binary was built for — the platform adapter is where embedder detection
     /// belongs, as Flutter's `defaultTargetPlatform` bottoms out in `dart:io`.
     fn target_platform(&self) -> TargetPlatform {
-        ThisOs::TARGET_PLATFORM
+        System::TARGET_PLATFORM
     }
 
     fn platform_brightness(&self) -> Brightness {
@@ -233,7 +234,7 @@ impl Platform for WinitPlatform {
     /// A window for the view, made on a turn of the main loop, where the app may open windows:
     /// none on iOS.
     fn request_view(&self, request: ViewRequest) -> Result<RequestId, ViewError> {
-        if !ThisOs::APP_MAY_OPEN_WINDOWS {
+        if !System::APP_MAY_OPEN_WINDOWS {
             return Err(ViewError::Unsupported);
         }
         let request_id = RequestId(self.next_request_id.get());
@@ -269,7 +270,7 @@ impl Platform for WinitPlatform {
 
     /// The system's menus at a point in a view, where it has them: macOS's and Windows'.
     fn popup_menus(&self) -> Option<&dyn PopupMenus> {
-        ThisOs::POPUP_MENUS.then_some(&self.popup_menus as &dyn PopupMenus)
+        System::POPUP_MENUS.then_some(&self.popup_menus as &dyn PopupMenus)
     }
 
     fn tray_icons(&self) -> Option<&dyn TrayIcons> {
@@ -297,7 +298,7 @@ impl Platform for WinitPlatform {
     }
 
     fn app_exit(&self) -> Option<&dyn AppExit> {
-        ThisOs::APP_MAY_QUIT.then_some(self)
+        System::APP_MAY_QUIT.then_some(self)
     }
 
     fn opener(&self) -> Option<&dyn Opener> {

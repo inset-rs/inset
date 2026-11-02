@@ -72,16 +72,17 @@ pub mod test_support {
 
     use inset_embedder::{Compositor, Players};
 
-    use crate::os::{NativeComposition, SystemMedia, ThisOs};
+    use crate::os::System;
+    use crate::os::capabilities::{NativeComposition, SystemMedia};
 
     /// The system's players, as `Platform::players` answers them; on the main thread.
     pub fn players() -> Option<Rc<dyn Players>> {
-        ThisOs::players()
+        System::players()
     }
 
     /// The system's compositor, as `Platform::compositor` answers it.
     pub fn compositor() -> Option<Arc<dyn Compositor>> {
-        ThisOs::compositor()
+        System::compositor()
     }
 }
 

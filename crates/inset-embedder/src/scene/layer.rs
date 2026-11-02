@@ -26,8 +26,8 @@ pub enum Layer {
     /// A composition layer at its place in paint order: flow's `PlatformViewLayer`, from
     /// `add_embedded_layer`. It draws nothing; the host places the layer and makes room for it.
     Embedded(EmbeddedLayer),
-    /// The newest frame of a video, drawn as part of the picture at its place in paint order,
-    /// from `add_video`: the host supplies the frame when it draws.
+    /// A video, drawn as part of the picture at its place in paint order: Chromium's
+    /// `cc::VideoLayer`, from `add_video`. The host supplies the frame when it draws.
     Video(VideoLayer),
 }
 
@@ -119,9 +119,10 @@ impl fmt::Debug for EmbeddedLayer {
     }
 }
 
-/// A video's frames, drawn into `rect` in its container's coordinates. The layer holds the
-/// reader, never a frame: whoever draws the scene takes the reader's newest frame then, so a frame
-/// is held only while it is on screen.
+/// A video, drawn into `rect` in its container's coordinates: Chromium's `cc::VideoLayer` over its
+/// frame provider. The layer holds the reader, never a frame: whoever draws the scene asks the
+/// reader then for the frame of the moment the picture reaches the screen, so a frame is held only
+/// while it is on screen.
 #[derive(Clone)]
 pub struct VideoLayer {
     pub reader: Arc<dyn VideoFrameReader>,

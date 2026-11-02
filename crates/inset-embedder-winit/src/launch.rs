@@ -9,9 +9,9 @@ use winit::event_loop::EventLoop;
 use crate::images::CreateImageLoader;
 use crate::main_loop::{MainLoop, MainLoopEvent, MainLoopProxy};
 use crate::notifications::NotificationActivations;
-use crate::os::{
+use crate::os::System;
+use crate::os::capabilities::{
     ApplicationLifecycle, EventLoopSetup, SystemChanges, SystemNotifications, SystemRequests,
-    ThisOs,
 };
 
 /// What starts the app, on the platform it is handed, and answers the client the embedder drives.
@@ -23,7 +23,7 @@ pub(crate) fn run<C: EmbedderClient + 'static>(
     create_image_loader: Option<CreateImageLoader>,
 ) {
     let mut builder = EventLoop::builder();
-    ThisOs::configure_event_loop(&mut builder);
+    System::configure_event_loop(&mut builder);
     let event_loop = builder.build().expect("create winit event loop");
     let (proxy, events) = MainLoopProxy::new(event_loop.create_proxy());
     // Before the loop runs: AppKit hands over the files a launch opens before winit's first call.
@@ -36,16 +36,16 @@ pub(crate) fn run<C: EmbedderClient + 'static>(
 /// changed about the machine, from wherever the system makes them.
 fn forward_system_messages(proxy: &MainLoopProxy) {
     let requests = proxy.clone();
-    ThisOs::send_system_requests(Box::new(move |request| {
+    System::send_system_requests(Box::new(move |request| {
         requests.send(MainLoopEvent::SystemRequest(request));
     }));
     let notices = proxy.clone();
-    ThisOs::send_lifecycle_notices(Box::new(move |notice| {
+    System::send_lifecycle_notices(Box::new(move |notice| {
         notices.send(MainLoopEvent::Lifecycle(notice));
     }));
     let changes = proxy.clone();
-    ThisOs::send_system_changes(Box::new(move |change| {
+    System::send_system_changes(Box::new(move |change| {
         changes.send(MainLoopEvent::SystemChange(change));
     }));
-    ThisOs::hear_notification_activations(NotificationActivations::new(proxy.clone()));
+    System::hear_notification_activations(NotificationActivations::new(proxy.clone()));
 }

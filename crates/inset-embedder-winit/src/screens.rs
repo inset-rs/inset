@@ -16,18 +16,19 @@ use winit::monitor::MonitorHandle;
 use winit::window::Window;
 
 use crate::WinitPlatform;
-use crate::os::{Screens as _, ThisOs};
+use crate::os::System;
+use crate::os::capabilities::Screens as _;
 
 /// The system's answers where it has its own, and otherwise winit's monitors, listed through the
 /// app's first window.
 impl Screens for WinitPlatform {
     fn screens(&self) -> Vec<Screen> {
         let first = self.state().views().first_window();
-        ThisOs::screens(first.as_ref().map(|open| &*open.window))
+        System::screens(first.as_ref().map(|open| &*open.window))
     }
 
     fn pointer_location(&self) -> Option<Offset> {
-        ThisOs::pointer_location()
+        System::pointer_location()
     }
 }
 
@@ -36,7 +37,7 @@ impl Screens for WinitPlatform {
 pub(crate) fn screen_of(window: &dyn Window) -> Option<ScreenId> {
     window
         .current_monitor()
-        .map(|monitor| ThisOs::screen_id(&monitor))
+        .map(|monitor| System::screen_id(&monitor))
 }
 
 /// The monitors winit lists through `window`, the primary one first, as screens.
@@ -70,7 +71,7 @@ fn monitor_screen(monitor: &MonitorHandle) -> Screen {
         .to_logical::<f64>(scale);
     let frame = Rect::from_ltwh(position.x, position.y, size.width, size.height);
     Screen {
-        id: ThisOs::screen_id(monitor),
+        id: System::screen_id(monitor),
         name: monitor.name().map(String::from).unwrap_or_default(),
         frame,
         visible_frame: frame,

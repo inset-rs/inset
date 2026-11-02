@@ -28,7 +28,8 @@ use winit::window::{
 
 use crate::ime::{ImeOutcome, apply_commit, apply_ime};
 use crate::keys;
-use crate::os::{NativeMenus, ThisOs};
+use crate::os::System;
+use crate::os::capabilities::NativeMenus;
 
 /// One view's text input: winit's IME on the view's window, and the editing value both sides
 /// change.
@@ -130,7 +131,7 @@ impl TextInputHost for TextInput {
     /// While the system's menus send Edit's cut, copy and paste, as macOS's menu bar does while it
     /// holds those items, which a key the framework leaves reaches (`menus/`).
     fn provides_edit_commands(&self) -> bool {
-        ThisOs::provides_edit_commands()
+        System::provides_edit_commands()
     }
 
     /// Opens this input on the window's input method, its purpose a password's where the text is

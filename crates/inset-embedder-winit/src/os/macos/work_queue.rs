@@ -9,7 +9,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use dispatch2::{DispatchQueue, DispatchQueueGlobalPriority, GlobalQueueIdentifier};
 
 use super::AppKit;
-use crate::os::WorkQueue;
+use crate::os::capabilities::WorkQueue;
 
 impl WorkQueue for AppKit {
     /// On the system's default-priority global queue: Grand Central Dispatch's worker pool,

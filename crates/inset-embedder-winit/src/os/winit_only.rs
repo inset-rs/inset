@@ -8,7 +8,7 @@ use crate::clipboard::{ChangeProbe, TextClipboard};
 use super::absent::{
     NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices, NoWindowComposition,
 };
-use super::{
+use super::capabilities::{
     ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, ImageDecoding,
     NativeComposition, NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges,
     SystemClipboard, SystemFileDialogs, SystemMedia, SystemNotifications, SystemOpener,

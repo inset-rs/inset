@@ -13,7 +13,7 @@ use winit::window::Window;
 
 use super::placed::PlacedLayers;
 use super::{Placer, adopted_by, in_transaction, own_layers};
-use crate::os::WindowComposition;
+use crate::os::capabilities::WindowComposition;
 
 /// Where a system's window keeps the layers of its content: the layer of winit's view, whose
 /// sublayers wgpu's `CAMetalLayer` and the composition layers beneath it are.

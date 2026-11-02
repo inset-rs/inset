@@ -7,7 +7,8 @@ use inset_embedder::{AppExitResponse, EmbedderClient};
 use winit::event_loop::ActiveEventLoop;
 
 use crate::app_exit::exit_reply;
-use crate::os::{ApplicationControl, ThisOs};
+use crate::os::System;
+use crate::os::capabilities::ApplicationControl;
 
 use super::MainLoop;
 
@@ -35,6 +36,6 @@ impl<C: EmbedderClient> MainLoop<C> {
     /// Quits the way the system quits an application: on the framework's answer, or for the
     /// application's own required exit.
     pub(super) fn quit(&mut self, event_loop: &dyn ActiveEventLoop) {
-        ThisOs::quit(event_loop);
+        System::quit(event_loop);
     }
 }

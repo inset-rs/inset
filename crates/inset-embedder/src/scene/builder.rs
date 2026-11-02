@@ -188,9 +188,9 @@ impl SceneBuilder {
         self.add_layer(Layer::Embedded(EmbeddedLayer { layer, rect }));
     }
 
-    /// Draws the newest frame of `reader` into `rect`, in the coordinates of the container being
-    /// built, at its place in paint order: what Flutter's `addTexture` does for a texture id.
-    /// Whoever draws the scene takes the frame then.
+    /// Draws `reader`'s video into `rect`, in the coordinates of the container being built, at its
+    /// place in paint order: what Flutter's `addTexture` does for a texture id. Whoever draws the
+    /// scene asks the reader for the frame then.
     pub fn add_video(&mut self, reader: Arc<dyn VideoFrameReader>, rect: Rect) {
         self.add_layer(Layer::Video(VideoLayer { reader, rect }));
     }

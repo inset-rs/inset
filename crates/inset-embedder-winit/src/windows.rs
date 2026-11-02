@@ -24,9 +24,8 @@ use winit::window::{Window, WindowAttributes, WindowId};
 use crate::app_requests::AppRequests;
 use crate::gpu::LazyGpu;
 use crate::host_window::WinitWindow;
-use crate::os::{
-    OperatingSystem, ThisOs, ThisOsTrackpadTouchObserver, ThisOsVisibilityNotices, WindowChrome,
-};
+use crate::os::capabilities::{OperatingSystem, WindowChrome};
+use crate::os::{System, TrackpadTouchObserver, VisibilityNotices};
 use crate::view::WinitView;
 
 /// The screen view's id, as in Flutter: the views the app asks for are numbered after it.
@@ -89,9 +88,9 @@ struct ViewWindow {
 )]
 pub(crate) struct WindowObservers {
     /// The system's notices that the window may have been minimized or occluded, for the app.
-    pub(crate) visibility: Option<ThisOsVisibilityNotices>,
+    pub(crate) visibility: Option<VisibilityNotices>,
     /// What reports the fingers coming down on a trackpad over the window.
-    pub(crate) trackpad_touches: Option<ThisOsTrackpadTouchObserver>,
+    pub(crate) trackpad_touches: Option<TrackpadTouchObserver>,
 }
 
 impl Views {
@@ -302,7 +301,7 @@ impl ViewMaker {
 /// The screen view's window, where the system's window is the screen, as on iOS. A desktop
 /// has none: the app opens every window it has, as Flutter's multi-window apps do.
 pub(crate) fn screen_window_config() -> Option<WindowConfig> {
-    ThisOs::WINDOW_IS_THE_SCREEN.then(WindowConfig::default)
+    System::WINDOW_IS_THE_SCREEN.then(WindowConfig::default)
 }
 
 /// The screen view's window, configured as `config`, attached to `view`.
@@ -325,7 +324,7 @@ fn open_window(
     let window = event_loop
         .create_window(attributes_for(config))
         .map_err(|error| error.to_string())?;
-    ThisOs::configure(&*window, config);
+    System::configure(&*window, config);
     Ok(Arc::from(window))
 }
 
@@ -338,7 +337,7 @@ fn attributes_for(config: &WindowConfig) -> WindowAttributes {
         WindowLevel::AlwaysOnBottom => winit::window::WindowLevel::AlwaysOnBottom,
     };
     let mut attributes = WindowAttributes::default();
-    if !ThisOs::WINDOW_IS_THE_SCREEN {
+    if !System::WINDOW_IS_THE_SCREEN {
         attributes = attributes.with_surface_size(LogicalSize::new(config.size[0], config.size[1]));
     }
     attributes = attributes
@@ -352,5 +351,5 @@ fn attributes_for(config: &WindowConfig) -> WindowAttributes {
     if let Some([x, y]) = config.position {
         attributes = attributes.with_position(LogicalPosition::new(x, y));
     }
-    ThisOs::extend_attributes(attributes, config)
+    System::extend_attributes(attributes, config)
 }

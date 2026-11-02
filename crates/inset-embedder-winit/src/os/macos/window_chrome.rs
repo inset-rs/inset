@@ -16,7 +16,7 @@ use winit::platform::macos::WindowAttributesMacOS;
 use winit::window::{Window, WindowAttributes};
 
 use super::{AppKit, menus, ns_view, ns_window};
-use crate::os::WindowChrome;
+use crate::os::capabilities::WindowChrome;
 
 impl WindowChrome for AppKit {
     /// What winit has an AppKit attribute for: the shadow.

@@ -13,7 +13,8 @@ use winit::raw_window_handle::HasWindowHandle;
 use winit::window::{Window, WindowId};
 
 use crate::app_requests::{AppRequest, AppRequests};
-use crate::os::{ThisOs, WindowMotion, WindowVisibility};
+use crate::os::System;
+use crate::os::capabilities::{WindowMotion, WindowVisibility};
 use crate::view::WinitView;
 
 /// A created window as the app holds it. Holds the window weakly: the embedder's registry owns it,
@@ -101,11 +102,11 @@ impl HostWindow for WinitWindow {
             return;
         };
         if let Some(duration) = animate
-            && ThisOs::animate_frame(&*window, frame, duration)
+            && System::animate_frame(&*window, frame, duration)
         {
             return;
         }
-        if ThisOs::set_frame(&*window, frame) {
+        if System::set_frame(&*window, frame) {
             return;
         }
         // Size before position: a system that anchors a window at its bottom-left, as
@@ -146,7 +147,7 @@ impl HostWindow for WinitWindow {
         let Some(window) = self.window.upgrade() else {
             return false;
         };
-        ThisOs::is_occluded(&*window).unwrap_or(self.occluded.get())
+        System::is_occluded(&*window).unwrap_or(self.occluded.get())
     }
 
     fn close(&self) {

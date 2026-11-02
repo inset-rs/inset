@@ -26,7 +26,7 @@ use objc2_uniform_type_identifiers::UTType;
 
 use super::{AppKit, ns_window};
 use crate::file_dialogs::{DialogAnswer, ParentWindows, dialog_answer};
-use crate::os::SystemFileDialogs;
+use crate::os::capabilities::SystemFileDialogs;
 
 impl SystemFileDialogs for AppKit {
     fn file_dialogs(windows: ParentWindows) -> Option<Rc<dyn FileDialogs>> {

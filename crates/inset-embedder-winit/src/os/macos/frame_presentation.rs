@@ -14,8 +14,8 @@ use super::AppKit;
 use super::display_links::{ScreenDisplayLink, screens_have_display_links};
 use super::vsync_waiter::DisplayLinkVsyncWaiter;
 use crate::main_loop::MainLoopProxy;
-use crate::os::FramePresentation;
 use crate::os::apple::composition::{WindowLayer, in_transaction};
+use crate::os::capabilities::FramePresentation;
 use crate::vsync_waiter::LoopVsyncWaiter;
 
 impl FramePresentation for AppKit {

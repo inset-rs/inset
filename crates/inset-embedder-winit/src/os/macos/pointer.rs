@@ -4,7 +4,7 @@
 use objc2_app_kit::NSEvent;
 
 use super::AppKit;
-use crate::os::PointerQueries;
+use crate::os::capabilities::PointerQueries;
 
 impl PointerQueries for AppKit {
     /// The same bits AppKit reports. A native menu swallows the release of the button that

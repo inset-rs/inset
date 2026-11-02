@@ -1206,8 +1206,8 @@ impl Layer for EmbeddedLayer {
     }
 }
 
-/// A layer that draws a video's newest frame as part of the picture: Flutter's `TextureLayer`,
-/// over the reader itself in place of a texture id.
+/// A layer that draws a video as part of the picture: Flutter's `TextureLayer` and Chromium's
+/// `cc::VideoLayer`, over the reader itself in place of a texture id or a frame provider.
 ///
 /// A leaf, like a picture layer, retained with its ancestors like any other: it holds the reader,
 /// never a frame, and whoever draws the scene takes the frame then.

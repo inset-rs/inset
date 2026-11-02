@@ -22,7 +22,7 @@ use crate::clipboard::{ChangeProbe, TextClipboard};
 use super::absent::{
     NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices, NoWindowComposition,
 };
-use super::{
+use super::capabilities::{
     ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, ImageDecoding,
     NativeComposition, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
     SystemMedia, SystemRequests, TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion,

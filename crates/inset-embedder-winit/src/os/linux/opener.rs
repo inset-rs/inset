@@ -16,7 +16,7 @@ use super::Linux;
 use super::portal::{self, Response, owned};
 use crate::answer::answer;
 use crate::file_dialogs::ParentWindows;
-use crate::os::SystemOpener;
+use crate::os::capabilities::SystemOpener;
 
 const OPEN_URI: &str = "org.freedesktop.portal.OpenURI";
 

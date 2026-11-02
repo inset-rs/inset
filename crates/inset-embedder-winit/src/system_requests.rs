@@ -42,7 +42,7 @@ pub(crate) enum SystemRequest {
     NotificationActivated(NotificationActivation),
     /// Quit if the application agrees: the user chose Quit, or is logging out. The framework is
     /// asked, and an exit is carried out with
-    /// [`ApplicationControl::quit`](crate::os::ApplicationControl::quit); a cancel changes
+    /// [`ApplicationControl::quit`](crate::os::capabilities::ApplicationControl::quit); a cancel changes
     /// nothing.
     #[cfg_attr(
         not(target_os = "macos"),

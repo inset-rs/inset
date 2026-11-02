@@ -24,7 +24,7 @@ use objc2_foundation::{NSNotification, NSNotificationCenter};
 use winit::window::Window;
 
 use super::{AppKit, abort_on_panic, ns_window};
-use crate::os::WindowVisibility;
+use crate::os::capabilities::WindowVisibility;
 
 impl WindowVisibility for AppKit {
     type Notices = VisibilityNotices;

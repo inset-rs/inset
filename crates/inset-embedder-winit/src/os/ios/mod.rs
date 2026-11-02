@@ -20,7 +20,7 @@ use pasteboard::Pasteboard;
 
 use super::absent::{NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices};
 use super::apple::{image_io_decoders, notifications};
-use super::{
+use super::capabilities::{
     ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, ImageDecoding,
     NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges, SystemClipboard,
     SystemMedia, SystemNotifications, TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion,

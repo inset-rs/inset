@@ -33,7 +33,7 @@ use objc2_foundation::{NSArray, NSURL};
 use winit::event_loop::ActiveEventLoop;
 
 use super::{AppKit, abort_on_panic, menus, screens};
-use crate::os::{ApplicationControl, SystemRequests};
+use crate::os::capabilities::{ApplicationControl, SystemRequests};
 use crate::system_requests::{Reopen, SystemRequest};
 
 impl SystemRequests for AppKit {

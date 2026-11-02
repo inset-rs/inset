@@ -17,7 +17,8 @@ use objc2_quartz_core::CALayer;
 
 #[cfg(target_os = "macos")]
 use crate::os;
-use crate::os::{ApplicationControl, ThisOs, WindowMotion};
+use crate::os::System;
+use crate::os::capabilities::{ApplicationControl, WindowMotion};
 use crate::state::EmbedderState;
 use crate::system_requests::ReopenHandler;
 
@@ -48,7 +49,7 @@ impl MacOs {
         let Some(open) = self.state.views().by_view(window.view().id()) else {
             return;
         };
-        if !ThisOs::show_sliding_in(&*open.window, from, duration) {
+        if !System::show_sliding_in(&*open.window, from, duration) {
             window.show();
         }
     }
@@ -57,7 +58,7 @@ impl MacOs {
     /// application menu's Hide does; showing the app again, from its Dock icon or the app
     /// switcher, shows the windows that were visible.
     pub fn hide_application(&self) {
-        ThisOs::hide_application();
+        System::hide_application();
     }
 
     /// Places `layer` in `parent`, a `CALayer` the app holds, such as the root of a `CAContext`

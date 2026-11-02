@@ -26,7 +26,7 @@ use zbus::zvariant::OwnedValue;
 use super::Linux;
 use super::portal::{self, owned};
 use crate::file_dialogs::{ParentWindows, dialog_answer, portal_filters};
-use crate::os::SystemFileDialogs;
+use crate::os::capabilities::SystemFileDialogs;
 
 const FILE_CHOOSER: &str = "org.freedesktop.portal.FileChooser";
 

@@ -8,7 +8,8 @@ use inset_embedder::{EmbedderClient, Frame, HostWindow, ScreenId, View, ViewId, 
 use winit::event_loop::ActiveEventLoop;
 use winit::monitor::MonitorHandle;
 
-use crate::os::{Screens, ThisOs, WindowVisibility};
+use crate::os::System;
+use crate::os::capabilities::{Screens, WindowVisibility};
 use crate::view::WinitView;
 use crate::vsync_source::monitor_of;
 use crate::windows::OpenWindow;
@@ -165,7 +166,7 @@ fn serve_waits(waiting: &[Weak<dyn VsyncObserver>], at: Instant) {
 fn monitor_numbered(event_loop: &dyn ActiveEventLoop, screen: ScreenId) -> Option<MonitorHandle> {
     event_loop
         .available_monitors()
-        .find(|monitor| ThisOs::screen_id(monitor) == screen)
+        .find(|monitor| System::screen_id(monitor) == screen)
 }
 
 /// Whether the window of `open` is in sight: neither minimized nor occluded, as the app's handle
@@ -174,6 +175,6 @@ fn monitor_numbered(event_loop: &dyn ActiveEventLoop, screen: ScreenId) -> Optio
 fn is_in_sight(open: &OpenWindow) -> bool {
     match &open.handle {
         Some(handle) => !handle.is_minimized() && !handle.is_occluded(),
-        None => ThisOs::is_occluded(&*open.window) != Some(true),
+        None => System::is_occluded(&*open.window) != Some(true),
     }
 }

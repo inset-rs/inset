@@ -6,7 +6,7 @@ use winit::event_loop::EventLoopBuilder;
 use winit::platform::macos::EventLoopBuilderExtMacOS;
 
 use super::{AppKit, menus};
-use crate::os::EventLoopSetup;
+use crate::os::capabilities::EventLoopSetup;
 
 impl EventLoopSetup for AppKit {
     fn configure_event_loop(builder: &mut EventLoopBuilder) {

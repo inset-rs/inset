@@ -38,7 +38,8 @@ use inset_embedder::{Canvas, Picture, Scene, Slices, slices};
 use winit::window::Window;
 
 use crate::gpu::{Gpu, LazyGpu};
-use crate::os::{FramePresentation, ThisOs, WindowGeometry};
+use crate::os::System;
+use crate::os::capabilities::{FramePresentation, WindowGeometry};
 use crate::video_frames::ShownVideoFrames;
 
 /// At how many vsyncs a scene is drawn again after the surface timed out on it.
@@ -197,7 +198,7 @@ impl Rasterizer {
     /// The system gives `window` a surface, owed the last scene, which is made at the next draw,
     /// at the size the window has then.
     pub(crate) fn give_surface(&mut self, window: &Arc<dyn Window>) {
-        ThisOs::show_background(&**window, self.clear);
+        System::show_background(&**window, self.clear);
         self.surface = WindowSurface::Given(Arc::clone(window));
         self.last_scene.surface_reset();
     }
@@ -222,7 +223,7 @@ impl Rasterizer {
     /// and the geometry it was laid out for are committed together.
     fn set_presents_in_transaction(&mut self, wanted: bool) {
         if let WindowSurface::Made(surface) = &mut self.surface {
-            ThisOs::present_in_transaction(surface, wanted);
+            System::present_in_transaction(surface, wanted);
         }
     }
 
@@ -232,7 +233,7 @@ impl Rasterizer {
         let drawing = FrameDrawing::of(
             slices.paints(),
             self.shows_painted_frame,
-            ThisOs::SHOWS_FRAMES_UNDRAWN,
+            System::SHOWS_FRAMES_UNDRAWN,
         );
         let shown = match drawing {
             FrameDrawing::Drawn => self
@@ -472,7 +473,7 @@ fn make_surface(
         &gpu.adapter,
         &gpu.device,
         Arc::clone(window),
-        ThisOs::surface_size(&**window),
+        System::surface_size(&**window),
         valo::SurfaceOptions::default().with_alpha(alpha),
     )
     .map_err(|error| error.to_string())

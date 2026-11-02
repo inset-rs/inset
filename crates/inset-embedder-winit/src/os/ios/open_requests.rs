@@ -32,7 +32,7 @@ use objc2_ui_kit::{
 };
 
 use super::Ios;
-use crate::os::SystemRequests;
+use crate::os::capabilities::SystemRequests;
 use crate::system_requests::SystemRequest;
 
 thread_local! {

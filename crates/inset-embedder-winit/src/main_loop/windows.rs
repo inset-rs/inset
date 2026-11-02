@@ -10,7 +10,8 @@ use inset_embedder::{EmbedderClient, View, ViewError, ViewFocusEvent, ViewId};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
-use crate::os::{FramePresentation, ThisOs, TrackpadTouches, WindowVisibility};
+use crate::os::System;
+use crate::os::capabilities::{FramePresentation, TrackpadTouches, WindowVisibility};
 use crate::view_focus;
 use crate::windows::{
     OpenWindow, ViewAfterClose, WindowObservers, WindowRequest, open_screen_window,
@@ -62,11 +63,11 @@ impl<C: EmbedderClient> MainLoop<C> {
     /// What the embedder observes of `window` beyond winit's events, for as long as it is open.
     fn observe_window(&self, window: &dyn Window) -> WindowObservers {
         WindowObservers {
-            visibility: ThisOs::observe_visibility(
+            visibility: System::observe_visibility(
                 window,
                 self.send_visibility_notice(window.id()),
             ),
-            trackpad_touches: ThisOs::observe_trackpad_touches(
+            trackpad_touches: System::observe_trackpad_touches(
                 window,
                 self.send_trackpad_touch(window.id()),
             ),
@@ -174,7 +175,7 @@ impl<C: EmbedderClient> MainLoop<C> {
         self.client.view_metrics_changed(open.view.id());
         // Present the resized layout before the system commits the window geometry, rather
         // than stretching the old frame.
-        if ThisOs::FRAME_ON_RESIZE && has_area(size) {
+        if System::FRAME_ON_RESIZE && has_area(size) {
             self.draw_resize_frame(&open.view);
         }
     }

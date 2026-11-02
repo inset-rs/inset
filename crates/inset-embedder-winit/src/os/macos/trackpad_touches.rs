@@ -17,7 +17,7 @@ use objc2_app_kit::{NSEvent, NSResponder, NSTouchTypeMask, NSView};
 use winit::window::Window;
 
 use super::{AppKit, abort_on_panic, ns_view};
-use crate::os::TrackpadTouches;
+use crate::os::capabilities::TrackpadTouches;
 
 impl TrackpadTouches for AppKit {
     type Observer = TouchObserver;

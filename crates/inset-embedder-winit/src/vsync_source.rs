@@ -1,5 +1,5 @@
 //! One display's vsyncs, one call for each vsync asked for: from the system's display link for
-//! it where it has one ([`ThisOsDisplayLink`]), which comes whether or not a window on the display
+//! it where it has one ([`DisplayLink`]), which comes whether or not a window on the display
 //! is shown, and from a timer at the display's rate elsewhere. Every view whose window is on the
 //! display shares its source, and so does every wait on it where the loop serves the platform's
 //! vsync waiter (`frame_scheduler.rs`); on macOS the waiter subscribes to the display's link
@@ -16,14 +16,15 @@ use std::time::{Duration, Instant};
 use winit::monitor::MonitorHandle;
 use winit::window::Window;
 
-use crate::os::{DisplayLink, ThisOsDisplayLink};
+use crate::os::DisplayLink;
+use crate::os::capabilities::DisplayLink as _;
 
 /// The time between vsyncs assumed where the display reports no rate.
 const DEFAULT_INTERVAL: Duration = Duration::from_micros(16_667);
 
 pub(crate) struct VsyncSource {
     /// The system's display link for the display; `None` where it has none.
-    display_link: Option<ThisOsDisplayLink>,
+    display_link: Option<DisplayLink>,
     /// The vsyncs where there is no display link.
     timer: VsyncTimer,
     /// Whether a vsync was asked for that has not come yet.
@@ -35,7 +36,7 @@ impl VsyncSource {
     /// and a timer's vsyncs are the loop's to notice, by [`timer_due`](Self::timer_due).
     pub(crate) fn on(display: &MonitorHandle, on_vsync: impl Fn() + 'static) -> VsyncSource {
         let mut source = VsyncSource {
-            display_link: ThisOsDisplayLink::start(display, Box::new(on_vsync)),
+            display_link: DisplayLink::start(display, Box::new(on_vsync)),
             timer: VsyncTimer::new(interval_of(display)),
             requested: false,
         };

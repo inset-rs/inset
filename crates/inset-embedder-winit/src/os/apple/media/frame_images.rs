@@ -21,7 +21,7 @@ use objc2_core_video::{
 use objc2_metal::{MTLPixelFormat, MTLTexture, MTLTextureType};
 
 use crate::gpu::Gpu;
-use crate::os::VideoFrameImages;
+use crate::os::capabilities::VideoFrameImages;
 
 /// CoreVideo's texture cache on the device valo draws with.
 pub(crate) struct CoreVideoFrameImages {

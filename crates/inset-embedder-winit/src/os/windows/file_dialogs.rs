@@ -32,7 +32,7 @@ use winit::window::Window;
 use super::Windows;
 use super::hidden_window::run_soon;
 use crate::file_dialogs::{ParentWindows, dialog_answer, extension_patterns};
-use crate::os::SystemFileDialogs;
+use crate::os::capabilities::SystemFileDialogs;
 
 impl SystemFileDialogs for Windows {
     fn file_dialogs(windows: ParentWindows) -> Option<Rc<dyn FileDialogs>> {

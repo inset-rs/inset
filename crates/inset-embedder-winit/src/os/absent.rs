@@ -11,9 +11,9 @@ use winit::monitor::MonitorHandle;
 #[cfg(not(target_os = "ios"))]
 use winit::window::Window;
 
-use super::DisplayLink;
+use super::capabilities::DisplayLink;
 #[cfg(not(target_os = "ios"))]
-use super::WindowComposition;
+use super::capabilities::WindowComposition;
 
 /// No display link: the embedder takes its vsyncs from a timer at the display's rate. Never made.
 pub(crate) enum NoDisplayLink {}
@@ -61,7 +61,7 @@ pub(crate) enum NoTrackpadTouchObserver {}
 pub(crate) enum NoVideoFrameImages {}
 
 #[cfg(not(target_vendor = "apple"))]
-impl super::VideoFrameImages for NoVideoFrameImages {
+impl super::capabilities::VideoFrameImages for NoVideoFrameImages {
     fn on(_gpu: &crate::gpu::Gpu) -> Option<NoVideoFrameImages> {
         None
     }

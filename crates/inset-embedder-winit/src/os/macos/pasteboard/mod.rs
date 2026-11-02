@@ -40,8 +40,8 @@ use objc2_foundation::{NSArray, NSData, NSInteger, NSString, NSURL};
 
 use super::AppKit;
 use crate::clipboard::ClipboardChanges;
-use crate::os::SystemClipboard;
 use crate::os::apple::pasteboard_types as types;
+use crate::os::capabilities::SystemClipboard;
 use promises::{PromisedFile, PromisedForms};
 
 /// The type macOS's clipboard managers leave out of their history, previews and sync.

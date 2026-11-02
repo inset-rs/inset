@@ -12,7 +12,7 @@ use objc2_foundation::{NSArray, NSString, NSURL};
 
 use super::AppKit;
 use crate::file_dialogs::ParentWindows;
-use crate::os::SystemOpener;
+use crate::os::capabilities::SystemOpener;
 
 impl SystemOpener for AppKit {
     fn opener(_windows: ParentWindows) -> Option<Rc<dyn Opener>> {

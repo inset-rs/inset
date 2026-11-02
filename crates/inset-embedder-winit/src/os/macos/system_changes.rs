@@ -18,7 +18,7 @@ use objc2_foundation::{
 };
 
 use super::{AppKit, abort_on_panic};
-use crate::os::SystemChanges;
+use crate::os::capabilities::SystemChanges;
 use crate::system_changes::SystemChange;
 
 impl SystemChanges for AppKit {

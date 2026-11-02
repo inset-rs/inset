@@ -21,7 +21,7 @@ use winit::window::Window;
 
 use super::Windows;
 use crate::menus::MenuEvents;
-use crate::os::NativeMenus;
+use crate::os::capabilities::NativeMenus;
 
 impl NativeMenus for Windows {
     const POPUP_MENUS: bool = true;

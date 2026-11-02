@@ -30,7 +30,8 @@ use std::time::Instant;
 use inset_embedder::{ScreenId, ViewId, VsyncObserver};
 use winit::monitor::MonitorHandle;
 
-use crate::os::{Screens, ThisOs};
+use crate::os::System;
+use crate::os::capabilities::Screens;
 use crate::vsync_source::VsyncSource;
 
 /// When each view's frame is drawn, and each wait on a screen served; owned by the loop.
@@ -238,7 +239,7 @@ impl FrameScheduler {
 
     /// The screen `monitor` is, whose vsyncs are followed from now on if they were not.
     fn follow_screen(&mut self, monitor: &MonitorHandle) -> ScreenId {
-        let screen = ThisOs::screen_id(monitor);
+        let screen = System::screen_id(monitor);
         if self.screen_vsyncs(screen).is_none() {
             let send_vsync = Rc::clone(&self.send_vsync);
             self.screens.push(ScreenVsyncs {

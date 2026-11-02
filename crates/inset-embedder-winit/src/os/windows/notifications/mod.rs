@@ -40,7 +40,7 @@ use windows::core::{HSTRING, IInspectable, Interface, Ref};
 use self::identity::{AppIdentity, group};
 use super::Windows;
 use crate::notifications::NotificationActivations;
-use crate::os::SystemNotifications;
+use crate::os::capabilities::SystemNotifications;
 
 impl SystemNotifications for Windows {
     /// Registers the app's toast activator, where its registration names one, before the loop

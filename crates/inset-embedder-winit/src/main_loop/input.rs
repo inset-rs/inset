@@ -22,7 +22,8 @@ use winit::window::WindowId;
 use crate::drag_drop::file_path;
 use crate::ime::ImeOutcome;
 use crate::mouse_cursor;
-use crate::os::{NativeMenus, PointerQueries, ThisOs};
+use crate::os::System;
+use crate::os::capabilities::{NativeMenus, PointerQueries};
 use crate::pointer::PointerStamp;
 use crate::text_input::Typed;
 use crate::touch::Touch;
@@ -94,7 +95,7 @@ impl<C: EmbedderClient> MainLoop<C> {
             None => {
                 let reports = self
                     .pointer
-                    .moved(window, at, ThisOs::pressed_buttons(), stamp);
+                    .moved(window, at, System::pressed_buttons(), stamp);
                 self.send_pointer_reports(reports);
             }
         }
@@ -193,7 +194,7 @@ impl<C: EmbedderClient> MainLoop<C> {
     pub(super) fn on_menu_closed(&mut self) {
         if let Some(window) = self.pointer.window() {
             let stamp = self.pointer_stamp(window);
-            let reports = self.pointer.reconciled(ThisOs::pressed_buttons(), stamp);
+            let reports = self.pointer.reconciled(System::pressed_buttons(), stamp);
             self.send_pointer_reports(reports);
         }
         self.wake_client();
@@ -233,10 +234,10 @@ impl<C: EmbedderClient> MainLoop<C> {
         // Flutter's macOS `FlutterKeyboardManager`: the system's menus see a key only after the
         // framework declined it, as a key equivalent it redispatches, and the text input plugin
         // after those. The key's own event is kept for an app that declines it later.
-        ThisOs::keep_key_event(&data);
+        System::keep_key_event(&data);
         if !self.client.key_data(data)
             && event.state == ElementState::Pressed
-            && !ThisOs::perform_key_equivalent()
+            && !System::perform_key_equivalent()
         {
             self.type_into_text_input(id, event);
         }

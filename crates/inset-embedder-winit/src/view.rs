@@ -31,7 +31,8 @@ use winit::window::Window;
 use crate::gpu::LazyGpu;
 use crate::host_window::WinitWindow;
 use crate::ime::ImeOutcome;
-use crate::os::{ThisOs, ThisOsWindowComposition, WindowComposition, WindowGeometry};
+use crate::os::capabilities::{WindowComposition as _, WindowGeometry};
+use crate::os::{System, WindowComposition};
 use crate::rasterizer::{PresentingInTransaction, Rasterizer};
 use crate::screens::screen_of;
 use crate::text_input::{TextInput, Typed};
@@ -43,7 +44,7 @@ pub(crate) struct WinitView {
     rasterizer: RefCell<Rasterizer>,
     /// The composition layers the window's scenes place beneath its content; `None` while the view
     /// has no window.
-    composition: RefCell<Option<ThisOsWindowComposition>>,
+    composition: RefCell<Option<WindowComposition>>,
     text_input: TextInput,
     /// The request the view arrived for; `None` for the screen view, which the system gave.
     request_id: Option<RequestId>,
@@ -85,7 +86,7 @@ impl WinitView {
     /// `window` is the view's from now on: its composition layers and text input are on it, and
     /// the view takes its metrics. Its surface comes when the system gives the windows theirs.
     pub(crate) fn attach_window(&self, window: &Arc<dyn Window>) {
-        *self.composition.borrow_mut() = Some(ThisOsWindowComposition::new(Arc::clone(window)));
+        *self.composition.borrow_mut() = Some(WindowComposition::new(Arc::clone(window)));
         self.text_input.attach(window);
         self.refresh_metrics(&**window);
     }
@@ -204,8 +205,8 @@ impl WinitView {
 
 /// The metrics of `window` as the framework takes them.
 fn read_metrics(window: &dyn Window) -> ViewMetrics {
-    let [width, height] = ThisOs::surface_size(window).map(f64::from);
-    let padding = ThisOs::view_padding(window);
+    let [width, height] = System::surface_size(window).map(f64::from);
+    let padding = System::view_padding(window);
     ViewMetrics {
         physical_size: [width, height],
         physical_constraints: ViewConstraints::tight(width, height),

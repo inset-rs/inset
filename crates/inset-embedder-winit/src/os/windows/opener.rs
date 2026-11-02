@@ -23,7 +23,7 @@ use super::Windows;
 use super::hidden_window::wide;
 use crate::answer::answer;
 use crate::file_dialogs::ParentWindows;
-use crate::os::SystemOpener;
+use crate::os::capabilities::SystemOpener;
 
 impl SystemOpener for Windows {
     fn opener(_windows: ParentWindows) -> Option<Rc<dyn Opener>> {

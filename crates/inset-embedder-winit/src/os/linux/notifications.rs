@@ -32,7 +32,7 @@ use super::Linux;
 use super::session_bus;
 use crate::answer::{Answer, answer};
 use crate::notifications::NotificationActivations;
-use crate::os::SystemNotifications;
+use crate::os::capabilities::SystemNotifications;
 
 const SERVER: &str = "org.freedesktop.Notifications";
 const SERVER_PATH: &str = "/org/freedesktop/Notifications";

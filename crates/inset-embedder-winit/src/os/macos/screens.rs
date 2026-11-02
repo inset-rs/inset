@@ -15,7 +15,7 @@ use winit::window::Window;
 
 use super::display_links::DisplayId;
 use super::{AppKit, ns_window};
-use crate::os::{Screens, WindowMotion};
+use crate::os::capabilities::{Screens, WindowMotion};
 
 impl WindowMotion for AppKit {
     fn set_frame(window: &dyn Window, frame: Rect) -> bool {

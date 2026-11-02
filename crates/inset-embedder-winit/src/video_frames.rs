@@ -15,14 +15,15 @@ use std::time::Instant;
 use inset_embedder::{Image, VideoFrameReader};
 
 use crate::gpu::Gpu;
-use crate::os::{ThisOsVideoFrameImages, VideoFrameImages};
+use crate::os::VideoFrameImages;
+use crate::os::capabilities::VideoFrameImages as _;
 
 /// The videos one view shows, and the frame each shows now.
 #[derive(Default)]
 pub(crate) struct ShownVideoFrames {
     /// What makes the images, on the device the view draws with: made when a frame first needs
     /// it, `None` on a system that hands out no frames.
-    images: OnceCell<Option<ThisOsVideoFrameImages>>,
+    images: OnceCell<Option<VideoFrameImages>>,
     shown: RefCell<Vec<ShownVideo>>,
 }
 
@@ -105,7 +106,7 @@ impl ShownVideoFrames {
         display_time: Instant,
     ) -> Option<Image> {
         let frame = reader.frame_for(display_time)?;
-        let images = self.images.get_or_init(|| ThisOsVideoFrameImages::on(gpu));
+        let images = self.images.get_or_init(|| VideoFrameImages::on(gpu));
         images.as_ref()?.image_of(&frame)
     }
 }

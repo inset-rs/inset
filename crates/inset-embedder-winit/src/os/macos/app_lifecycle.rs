@@ -19,7 +19,7 @@ use objc2_foundation::{NSNotification, NSNotificationCenter};
 
 use super::{AppKit, abort_on_panic};
 use crate::lifecycle::LifecycleNotice;
-use crate::os::ApplicationLifecycle;
+use crate::os::capabilities::ApplicationLifecycle;
 
 impl ApplicationLifecycle for AppKit {
     /// Observes the three notices for the life of the process, as Flutter's registrar does from

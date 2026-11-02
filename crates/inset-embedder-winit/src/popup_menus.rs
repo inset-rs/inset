@@ -16,7 +16,8 @@ use std::task::{Context, Poll, Waker};
 use inset_embedder::{MenuEntry, MenuId, Offset, PopupMenuFuture, PopupMenus, ViewId};
 
 use crate::menus::MenuEvents;
-use crate::os::{NativeMenus, ThisOs};
+use crate::os::System;
+use crate::os::capabilities::NativeMenus;
 use crate::state::EmbedderState;
 
 const HELD_BRIEFLY: &str = "a menu's answer is never held across a panic";
@@ -42,7 +43,7 @@ impl PopupMenus for NativePopupMenus {
             return Box::pin(chosen);
         };
         let events = self.events.clone();
-        ThisOs::open_popup_menu(
+        System::open_popup_menu(
             &*open.window,
             at,
             menu.to_vec(),

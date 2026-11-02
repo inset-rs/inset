@@ -15,10 +15,10 @@ use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
 use super::Ios;
-use crate::os::NativeComposition;
 use crate::os::apple::composition::{
     CoreAnimationCompositor, CoreAnimationWindowComposition, WindowLayer,
 };
+use crate::os::capabilities::NativeComposition;
 
 impl NativeComposition for Ios {
     type WindowComposition = CoreAnimationWindowComposition<Ios>;

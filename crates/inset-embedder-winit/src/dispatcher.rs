@@ -7,7 +7,8 @@ use inset_embedder::Dispatcher;
 use winit::event_loop::ControlFlow;
 
 use crate::main_loop::{MainLoopEvent, MainLoopProxy};
-use crate::os::{ThisOs, WorkQueue};
+use crate::os::System;
+use crate::os::capabilities::WorkQueue;
 
 /// The embedder's threads as any thread reaches them: a wake is an event through the loop's
 /// proxy, which the loop keeps as its earliest due wake and serves when the time comes; work
@@ -24,7 +25,7 @@ impl Dispatcher for WinitDispatcher {
     }
 
     fn dispatch(&self, work: Box<dyn FnOnce() + Send>) {
-        ThisOs::run_off_main(work);
+        System::run_off_main(work);
     }
 }
 

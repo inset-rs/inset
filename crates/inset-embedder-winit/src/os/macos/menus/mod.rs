@@ -40,7 +40,7 @@ use winit::window::Window;
 
 use super::{AppKit, abort_on_panic};
 use crate::menus::{EditAction, MenuEvent, MenuEvents};
-use crate::os::NativeMenus;
+use crate::os::capabilities::NativeMenus;
 
 pub(super) use key_equivalents::app_window_opened;
 pub(super) use menu_bar::leave_winit_menu_out;

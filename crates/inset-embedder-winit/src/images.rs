@@ -11,7 +11,8 @@ use valo::ImageContext;
 use valo_codec::{Decoder, ImageLoader};
 
 use crate::gpu::LazyGpu;
-use crate::os::{ImageDecoding, ThisOs};
+use crate::os::System;
+use crate::os::capabilities::ImageDecoding;
 
 /// Selects where the built-in image decoders run.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -39,7 +40,7 @@ pub fn create_image_loader(
     images: ImageContext,
     execution: DecodeExecution,
 ) -> std::io::Result<ImageLoader> {
-    let decoders: Vec<Box<dyn Decoder>> = ThisOs::system_decoders()
+    let decoders: Vec<Box<dyn Decoder>> = System::system_decoders()
         .into_iter()
         .chain(portable_decoders())
         .collect();

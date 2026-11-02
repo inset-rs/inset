@@ -41,7 +41,7 @@ use winit::window::Window;
 
 use super::Ios;
 use crate::file_dialogs::{DialogAnswer, ParentWindows, dialog_answer};
-use crate::os::SystemFileDialogs;
+use crate::os::capabilities::SystemFileDialogs;
 
 impl SystemFileDialogs for Ios {
     fn file_dialogs(windows: ParentWindows) -> Option<Rc<dyn FileDialogs>> {

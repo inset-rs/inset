@@ -55,7 +55,9 @@ use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
 use super::apple::{image_io_decoders, notifications};
-use super::{ImageDecoding, OperatingSystem, SystemMedia, SystemNotifications, WindowGeometry};
+use super::capabilities::{
+    ImageDecoding, OperatingSystem, SystemMedia, SystemNotifications, WindowGeometry,
+};
 use crate::notifications::NotificationActivations;
 
 /// macOS, as AppKit answers. A type only: never made, its answers are associated functions.

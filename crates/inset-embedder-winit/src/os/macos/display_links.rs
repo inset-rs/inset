@@ -27,8 +27,8 @@ use winit::monitor::MonitorHandle;
 
 use super::abort_on_panic;
 use super::screens::display_id_of;
-use crate::os::DisplayLink;
 use crate::os::apple::media_time::instant_of;
+use crate::os::capabilities::DisplayLink;
 
 /// A display as Core Graphics numbers it, its `CGDirectDisplayID`: a screen's `NSScreenNumber`
 /// in AppKit, and a monitor's native id in winit.

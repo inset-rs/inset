@@ -9,10 +9,10 @@ use objc2_quartz_core::CALayer;
 use winit::window::Window;
 
 use super::{AppKit, ns_view};
-use crate::os::NativeComposition;
 use crate::os::apple::composition::{
     CoreAnimationCompositor, CoreAnimationWindowComposition, WindowLayer,
 };
+use crate::os::capabilities::NativeComposition;
 
 impl NativeComposition for AppKit {
     type WindowComposition = CoreAnimationWindowComposition<AppKit>;

@@ -23,7 +23,7 @@ use super::Ios;
 use super::file_dialogs::view_controller;
 use crate::answer::answer;
 use crate::file_dialogs::ParentWindows;
-use crate::os::SystemOpener;
+use crate::os::capabilities::SystemOpener;
 
 impl SystemOpener for Ios {
     fn opener(windows: ParentWindows) -> Option<Rc<dyn Opener>> {
