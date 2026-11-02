@@ -180,13 +180,21 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Apple's legible output gives every subtitle AVPlayer would draw, styled at its default resolution with the user's caption settings, as text with markup.
   Affect: the app draws subtitles in the user's caption style, placed where Core Media places them, with black edges as WebKit draws Apple's, and the cues go at a seek or a change of text track until the next arrive.
 
-- Change: a frame reader is made empty and reads the output of the source it was given to last, a player item's video output or a capture session's video data output, which that source makes and adds when it is given the reader.
+- Change: a frame reader is made empty and reads the output of the source it was given to last, a player item's video output or a capture session's video data output, which that source makes and adds when it is given the reader, a camera as it starts.
   Reason: platform — AVFoundation has no one output that a player and a camera both feed, as Android's `ImageReader` is fed by a decoder and a camera alike.
   Affect: one reader serves a player or a camera, it reads nothing until it is given to one, and a reader the host did not make reads nothing, which the host says once.
 
-- Change: a camera session is an `AVCaptureSession` configured and run on a queue of its own, asking for the camera, and for the microphone where a recording wants sound, at its start, with its preview a layer that is a composition layer's content and its frames, photos and recordings the system's video data, photo and movie file outputs.
-  Reason: platform — starting a session blocks, and each output is AVFoundation's own.
-  Affect: a session reports starting, running, denied or failed, photos arrive as JPEG and recordings as QuickTime movies.
+- Change: a camera opens once the user lets the app use the cameras, lists its device's own formats, and runs as an `AVCaptureSession` given its camera, format and outputs at once, asking for the microphone first where a recording wants sound, with its preview a layer that is a composition layer's content.
+  Reason: platform — AVFoundation configures a session's inputs and outputs together, and each output is AVFoundation's own.
+  Affect: a session reports running, interrupted or ended as AVFoundation tells it, photos arrive as JPEG at the size asked for, and recordings as QuickTime movies.
+
+- Change: the first session in the process on a camera sets the format it picked and keeps the camera locked while any session in the process runs it, and a later session runs in that format; where another process holds the lock, a session runs in the format the camera has.
+  Reason: platform — a camera has one active format for every session using it, two sessions in one process share one camera, and Apple gives locking a camera as the way to keep its settings unchanged.
+  Affect: a second session on a camera reports the first one's format, and other apps cannot change the camera's settings while the app runs it.
+
+- Change: an interrupted session takes the reason iOS gives, any but the background and system pressure read as another app having the camera, and on macOS, whose notice gives none, another app having the camera.
+  Reason: platform — macOS's interruption notice carries no reason, and Apple documents the notice for another application taking the hardware a session needs.
+  Affect: on a Mac every interruption reads as another app having the camera.
 
 ## video_frames.rs, os/apple/media/frame_images.rs → the macOS embedder's `FlutterExternalTexture` (`copyPixelBuffer`, `CVMetalTextureCache`)
 

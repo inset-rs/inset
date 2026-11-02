@@ -29,7 +29,7 @@ pub use clipboard::MockClipboard;
 pub use file_dialogs::{AskedDialog, MemoryFile, MemoryFolder, MockFileDialogs};
 pub use media::{
     MadeLayer, MockCameras, MockCaptureSession, MockCompositor, MockPlayer, MockPlayers,
-    MockVideoFrameReaders, PlayerCall, SessionCall, VideoOutputKind,
+    MockVideoFrameReaders, PlayerCall, VideoOutputKind,
 };
 pub use menus::{
     MockDockMenu, MockMenuBar, MockPopupMenus, MockTrayIcons, ShownMenu, ShownTrayIcon,

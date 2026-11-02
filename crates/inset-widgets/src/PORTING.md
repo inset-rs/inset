@@ -130,13 +130,13 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the host's player is the system's, which loads by itself and reports its state, and a host without players answers none.
   Affect: an app calls `play` on a new player, `Player::new` answers `None` where the platform has no players, a URL the system cannot play reports a failure, and a `PlayerView` takes the video's size in logical pixels, or none until it is known.
 
-- Change: `CameraSession` is a listenable over the host's session on one camera, with an output per use, `start` and `stop`, and `CameraPreview::new(session)` shows its preview, where Flutter's `CameraController` initializes a camera with a resolution preset and takes pictures and videos itself.
-  Reason: platform — the host's session is the system's, whose outputs are its own, and a platform without cameras answers none.
-  Affect: `CameraSession::new` answers `None` where the platform has no cameras, a photo arrives as encoded bytes and a recording at the app's path.
+- Change: `open_camera` opens a camera, asking the user the first time, and `CameraSession::start` starts it in one of its formats with all its outputs at once, a listenable that tells the format it runs in and whether it runs, is interrupted or ended, and `CameraPreview::new(session)` shows its preview, where Flutter's `CameraController` initializes a camera with a resolution preset and takes pictures and videos itself.
+  Reason: platform — the host's session is the system's, which configures all its outputs together, and a platform without cameras answers none.
+  Affect: `open_camera` answers `None` where the platform has no cameras, an app gives the preview's layer, a frame reader, a photo size and recordings as the session starts, a photo arrives as encoded bytes and a recording at the app's path.
 
-- Change: a `PlayerView` or a `CameraPreview` makes a composition layer of its own and puts its player's or session's picture there as it is mounted, which the system draws into, and nowhere as it is unmounted, unless another view took it since; the frames of whichever view it is in place the layer.
-  Reason: platform — the picture is drawn by the system into a layer that is the composition layer's content, which no frame of the framework's touches.
-  Affect: a player or a session shows on the view built for it last and nowhere once its views are gone, and nothing shows where the host has no compositor.
+- Change: a `PlayerView` makes a composition layer of its own and puts its player's picture there as it is mounted, which the system draws into, and nowhere as it is unmounted, unless another view took it since, and a `CameraPreview` places the layer its session started with; the frames of whichever view it is in place the layer.
+  Reason: platform — the picture is drawn by the system into a layer that is the composition layer's content, which no frame of the framework's touches, and a camera's outputs are given as it starts.
+  Affect: a player shows on the view built for it last and nowhere once its views are gone, a camera's preview shows where its `CameraPreview` is, and nothing shows where the host has no compositor.
 
 - Change: a `Player` lists its media's tracks in its state, selects an audio track and a text track or none, and tells the media's metadata and the cues to show now, and a `PlayerView` draws those cues over the video with a `SubtitleView`, as Media3's `PlayerView` does, where Flutter's `VideoPlayer` shows no subtitles and an app puts a `ClosedCaption` of a caption file it parsed over it.
   Reason: platform — the system draws no subtitles: the host's player hands out the cues of the media's own text tracks, with the user's caption settings merged in.

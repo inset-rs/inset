@@ -1,10 +1,11 @@
 //! Players and cameras on macOS and iOS: AVFoundation, the system's own media stack. A player is
 //! an `AVPlayer` (`player`) with its media's tracks (`tracks`), tags (`metadata`) and subtitles as
-//! cues (`cues`, `cue_markup`), a camera session an `AVCaptureSession` (`camera`) with its photo
-//! and movie outputs (`outputs`); a picture goes to a composition layer as a layer the system draws
-//! into, shown as its content so that Core Animation clips and scales it with it
-//! (`apple/composition`), or to a frame reader the app made, as `IOSurface`-backed pixel buffers
-//! (`frames`).
+//! cues (`cues`, `cue_markup`); a camera a capture device (`camera`) with its formats
+//! (`camera_formats`), shared in one format by this process's sessions (`camera_sharing`), and a
+//! session an `AVCaptureSession` (`capture_session`) with its photo and movie outputs
+//! (`outputs`); a picture goes to a composition layer as a layer the system draws into, shown as
+//! its content so that Core Animation clips and scales it with it (`apple/composition`), or to a
+//! frame reader the app made, as `IOSurface`-backed pixel buffers (`frames`).
 //! AVFoundation tells changes by key-value observing and notifications (`observing`).
 //!
 //! A player and a session are controlled on the main thread, as AVFoundation asks of a player and
@@ -17,6 +18,9 @@
 #![allow(unsafe_code)]
 
 mod camera;
+mod camera_formats;
+mod camera_sharing;
+mod capture_session;
 mod cue_markup;
 mod cues;
 mod frame_images;

@@ -6,13 +6,19 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    CompositionLayer, Cue, MediaChangeFuture, MediaMetadata, MediaPlayer, PlayerState, Size,
-    VideoOutput,
+    CompositionLayer, Cue, MediaChangeFuture, MediaMetadata, MediaPlayer, PlayerState, VideoOutput,
 };
-use inset_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Listenable};
+use inset_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, ListenableObject, Listener,
+};
+use inset_painting::AlignmentGeometry;
 
-use super::{CompositionLayerPicture, PictureSource, SubtitleView};
-use crate::framework::{BuildContext, IntoWidget, KeyRef, StatelessWidget, WidgetRef};
+use super::{SubtitleView, at_size};
+use crate::framework::{
+    BuildContext, IntoWidget, KeyRef, State, StateData, StatefulWidget, StatelessWidget, WidgetRef,
+};
+use crate::widgets::basic::{Positioned, SizedBox, Stack};
+use crate::widgets::composition_layer_view::CompositionLayerView;
 use crate::widgets::transitions::ListenableBuilder;
 
 /// A player of the media at one URL, which loads by itself: the host's player, whose listeners
@@ -189,20 +195,23 @@ impl fmt::Debug for Player {
     }
 }
 
-impl PictureSource for Player {
-    fn set_layer(handle: Handle<Self>, app: &mut App, layer: Option<Arc<dyn CompositionLayer>>) {
-        handle.set_video_output(app, layer.map(VideoOutput::Layer));
+impl Player {
+    /// Puts the video on `layer` from now on; `None` sends it nowhere.
+    fn set_video_layer(
+        self: Handle<Self>,
+        app: &mut App,
+        layer: Option<Arc<dyn CompositionLayer>>,
+    ) {
+        self.set_video_output(app, layer.map(VideoOutput::Layer));
     }
 
-    fn layer(handle: Handle<Self>, app: &App) -> Option<&Arc<dyn CompositionLayer>> {
-        match &app.get(handle).video_output {
+    /// The layer the video was sent to last; `None` once sent nowhere or to a reader, or
+    /// disposed.
+    fn video_layer(self: Handle<Self>, app: &App) -> Option<&Arc<dyn CompositionLayer>> {
+        match &app.get(self).video_output {
             Some(VideoOutput::Layer(layer)) => Some(layer),
             _ => None,
         }
-    }
-
-    fn picture_size(handle: Handle<Self>, app: &App) -> Option<Size> {
-        handle.state(app).size
     }
 }
 
@@ -241,12 +250,126 @@ impl StatelessWidget for PlayerView {
     }
 
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
-        CompositionLayerPicture {
-            source: self.player,
-            overlay: Some(subtitles_of(self.player)),
+        PlayerPicture {
+            player: self.player,
+            overlay: subtitles_of(self.player),
         }
         .into_widget()
     }
+}
+
+/// `player`'s video on a composition layer of the widget's own, laid out at the video's size in
+/// logical pixels, as large as the constraints let it be at that aspect, with `overlay` over the
+/// video's rectangle, as Media3's content frame holds its subtitle view over the surface.
+struct PlayerPicture {
+    player: Handle<Player>,
+    overlay: WidgetRef,
+}
+
+impl fmt::Debug for PlayerPicture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PlayerPicture").finish_non_exhaustive()
+    }
+}
+
+impl StatefulWidget for PlayerPicture {
+    type State = PlayerPictureState;
+
+    fn create_state(&self) -> PlayerPictureState {
+        PlayerPictureState {
+            state: StateData::new(),
+            layer: None,
+        }
+    }
+}
+
+struct PlayerPictureState {
+    state: StateData<PlayerPicture>,
+    /// The layer the player shows on, made as the widget is mounted; `None` where the host has
+    /// no compositor.
+    layer: Option<Arc<dyn CompositionLayer>>,
+}
+
+impl PlayerPictureState {
+    fn player_changed(self: Handle<Self>, app: &mut App) {
+        self.set_state(app, |_| {});
+    }
+
+    /// Puts `player`'s video on the widget's layer.
+    fn show(self: Handle<Self>, app: &mut App, player: Handle<Player>) {
+        if let Some(layer) = app.get(self).layer.clone() {
+            player.set_video_layer(app, Some(layer));
+        }
+    }
+
+    /// Sends `player`'s video nowhere, if it is still on this widget's layer: a later view may
+    /// have taken the player since.
+    fn release(self: Handle<Self>, app: &mut App, player: Handle<Player>) {
+        let Some(ours) = &app.get(self).layer else {
+            return;
+        };
+        let still_ours = player
+            .video_layer(app)
+            .is_some_and(|shown| Arc::ptr_eq(shown, ours));
+        if still_ours {
+            player.set_video_layer(app, None);
+        }
+    }
+}
+
+impl State for PlayerPictureState {
+    type Widget = PlayerPicture;
+    crate::state_accessors!();
+
+    fn init_state(self: Handle<Self>, app: &mut App) {
+        let player = self.widget(app).player;
+        player.add_listener(app, Listener::handle_method(self, Self::player_changed));
+        let layer = app
+            .platform()
+            .compositor()
+            .map(|compositor| compositor.make_layer(false));
+        app.get_mut(self).layer = layer;
+        self.show(app, player);
+    }
+
+    fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &PlayerPicture) {
+        let player = self.widget(app).player;
+        if player == old_widget.player {
+            return;
+        }
+        let listener = Listener::handle_method(self, Self::player_changed);
+        old_widget.player.remove_listener(app, &listener);
+        player.add_listener(app, listener);
+        self.release(app, old_widget.player);
+        self.show(app, player);
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        let player = self.widget(app).player;
+        self.release(app, player);
+        player.remove_listener(app, &Listener::handle_method(self, Self::player_changed));
+    }
+
+    fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+        let player = self.widget(app).player;
+        let Some(size) = player.state(app).size else {
+            return SizedBox::shrink().into_widget();
+        };
+        let video = match app.get(self).layer.clone() {
+            Some(layer) => CompositionLayerView::new(layer).into_widget(),
+            None => SizedBox::expand().into_widget(),
+        };
+        let overlay = self.widget(app).overlay.clone();
+        at_size(size, with_overlay(video, overlay))
+    }
+}
+
+/// `video` with `overlay` filling its rectangle above it.
+fn with_overlay(video: WidgetRef, overlay: WidgetRef) -> WidgetRef {
+    Stack::new()
+        .alignment(AlignmentGeometry::TOP_LEFT)
+        .children([video, Positioned::fill(overlay).into_widget()])
+        .into_widget()
 }
 
 /// A [`SubtitleView`] of `player`'s cues, built again each time they change: Media3's
@@ -266,7 +389,7 @@ mod tests {
 
     use inset_embedder::{
         CueContent, CueTextRun, EncodedImage, MediaTrack, MediaTrackKind, PickedFile, PlayerStatus,
-        TargetPlatform,
+        Size, TargetPlatform,
     };
     use inset_foundation::AppCell;
     use inset_test::{

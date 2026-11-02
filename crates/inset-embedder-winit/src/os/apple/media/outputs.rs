@@ -1,27 +1,26 @@
 //! A camera session's photos and recordings: `AVCapturePhotoOutput`, which captures, processes
-//! and encodes a photo, and `AVCaptureMovieFileOutput`, which encodes and writes a movie, each
-//! answering through a delegate. An output holds its delegate only weakly, so each answer's future
-//! keeps its delegate until it is answered.
+//! and encodes a photo at the size the app asked for, and `AVCaptureMovieFileOutput`, which
+//! encodes and writes a movie, each answering through a delegate. An output holds its delegate
+//! only weakly, so each answer's future keeps its delegate until it is answered.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use inset_embedder::{
-    CameraStatus, MediaError, MovieOutput, Photo, PhotoFuture, PhotoOutput, RecordingFuture,
-};
+use inset_embedder::{CaptureState, MediaError, Photo, PhotoFuture, RecordingFuture};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
-use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
+use objc2::{AllocAnyThread, ClassType, DefinedClass, define_class, msg_send, sel};
 use objc2_av_foundation::{
     AVCaptureConnection, AVCaptureFileOutput, AVCaptureFileOutputRecordingDelegate,
     AVCaptureMovieFileOutput, AVCaptureOutput, AVCapturePhoto, AVCapturePhotoCaptureDelegate,
     AVCapturePhotoOutput, AVCapturePhotoSettings, AVErrorRecordingSuccessfullyFinishedKey,
     AVVideoCodecKey, AVVideoCodecTypeJPEG,
 };
+use objc2_core_media::CMVideoDimensions;
 use objc2_foundation::{NSArray, NSDictionary, NSError, NSNumber, NSString, NSURL};
 
 use super::abort_on_panic;
-use super::camera::SessionShared;
+use super::capture_session::SessionShared;
 use crate::media::{MediaAnswer, media_answer};
 
 /// A session's photos, in JPEG, which every system reads. Every clone is the same output.
@@ -31,26 +30,43 @@ pub(super) struct PhotoTaker(Arc<PhotoTakerShared>);
 struct PhotoTakerShared {
     session: Arc<SessionShared>,
     output: CrossThreadPhotoOutput,
+    /// The size each photo is taken at; `None` for the system's own.
+    dimensions: Option<CMVideoDimensions>,
 }
 
 impl PhotoTaker {
-    pub(super) fn new(session: Arc<SessionShared>) -> PhotoTaker {
+    /// Photos of `session` at `dimensions`, or the system's own size.
+    pub(super) fn new(
+        session: Arc<SessionShared>,
+        dimensions: Option<CMVideoDimensions>,
+    ) -> PhotoTaker {
         // SAFETY: a new photo output, which the session takes on its queue.
         let output = unsafe { AVCapturePhotoOutput::new() };
         PhotoTaker(Arc::new(PhotoTakerShared {
             session,
             output: CrossThreadPhotoOutput(output),
+            dimensions,
         }))
     }
 
     pub(super) fn output(&self) -> &AVCaptureOutput {
         &self.0.output.0
     }
-}
 
-impl PhotoOutput for PhotoTaker {
-    fn capture(&self) -> PhotoFuture {
-        if self.0.session.state().status != CameraStatus::Running {
+    /// Readies the output for photos at its size, once the session has its format. On the
+    /// session's queue.
+    pub(super) fn prepare(&self) {
+        let Some(dimensions) = self.0.dimensions.filter(|_| takes_photo_sizes()) else {
+            return;
+        };
+        // SAFETY: one of the format's photo sizes, set on the session's queue before it runs, as
+        // Apple's documentation of `maxPhotoDimensions` recommends.
+        unsafe { self.0.output.0.setMaxPhotoDimensions(dimensions) };
+    }
+
+    /// Takes a photo while the session runs, answering it once the system has encoded it.
+    pub(super) fn take(&self) -> PhotoFuture {
+        if self.0.session.state() != CaptureState::Running {
             return Box::pin(std::future::ready(Err(MediaError::NotRunning)));
         }
         let (answer, answered) = media_answer();
@@ -90,10 +106,13 @@ impl CrossThreadPhotoCapture {
         };
         let format =
             NSDictionary::<NSString, AnyObject>::from_slices(&[codec_key], &[jpeg.as_ref()]);
-        // SAFETY: settings for one JPEG photo, captured on the session's queue with a delegate
-        // the answer's future keeps.
+        // SAFETY: settings for one JPEG photo at the output's size, captured on the session's queue
+        // with a delegate the answer's future keeps.
         unsafe {
             let settings = AVCapturePhotoSettings::photoSettingsWithFormat(Some(&format));
+            if let Some(dimensions) = self.taker.0.dimensions.filter(|_| takes_photo_sizes()) {
+                settings.setMaxPhotoDimensions(dimensions);
+            }
             self.taker.0.output.0.capturePhotoWithSettings_delegate(
                 &settings,
                 ProtocolObject::from_ref(&*self.delegate),
@@ -140,6 +159,12 @@ impl PhotoDelegate {
     }
 }
 
+/// Whether the system takes photos at a size asked for: macOS 13 and iOS 16 on, which list a
+/// format's photo sizes.
+fn takes_photo_sizes() -> bool {
+    AVCapturePhotoSettings::class().responds_to(sel!(setMaxPhotoDimensions:))
+}
+
 /// The photo the system finished, or why it did not.
 fn photo_of(photo: &AVCapturePhoto, error: Option<&NSError>) -> Result<Photo, MediaError> {
     if let Some(error) = error {
@@ -180,11 +205,11 @@ impl MovieRecorder {
     pub(super) fn output(&self) -> &AVCaptureOutput {
         &self.0.output.0
     }
-}
 
-impl MovieOutput for MovieRecorder {
-    fn start(&self, path: PathBuf) -> RecordingFuture {
-        if self.0.session.state().status != CameraStatus::Running {
+    /// Records to a new file at `path` while the session runs, until [`stop`](Self::stop);
+    /// answers once the file is written whole, or why it was not.
+    pub(super) fn start(&self, path: PathBuf) -> RecordingFuture {
+        if self.0.session.state() != CaptureState::Running {
             return Box::pin(std::future::ready(Err(MediaError::NotRunning)));
         }
         let (answer, answered) = media_answer();
@@ -209,7 +234,8 @@ impl MovieOutput for MovieRecorder {
         })
     }
 
-    fn stop(&self) {
+    /// Ends the recording, whose future then answers.
+    pub(super) fn stop(&self) {
         let recorder = self.clone();
         self.0.session.queue().exec_async(move || {
             // SAFETY: stopping the recording on the session's queue.

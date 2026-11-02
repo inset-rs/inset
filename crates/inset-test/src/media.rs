@@ -1,6 +1,6 @@
 //! A compositor, frame readers, players and cameras in memory, as a host shows nothing: each
-//! keeps what the app asked of it, and reports the state the test gives it, a player its
-//! metadata and cues too.
+//! keeps what the app asked of it or gave it, and reports the state the test gives it, a player
+//! its metadata and cues too.
 
 use std::cell::{Cell, RefCell};
 use std::future::Future;
@@ -13,10 +13,11 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use inset_embedder::{
-    Camera, CameraState, Cameras, CaptureSession, CompositionLayer, Compositor, Cue,
-    HardwareBuffer, MediaChangeFuture, MediaError, MediaMetadata, MediaPlayer, MovieOptions,
-    MovieOutput, Photo, PhotoFuture, PhotoOutput, Placement, PlayerState, Players, RecordingFuture,
-    VideoFrame, VideoFrameReader, VideoFrameReaders, VideoOutput,
+    Camera, CameraDevice, CameraError, CameraFormat, CameraOpenFuture, CameraOutputs, Cameras,
+    CaptureSession, CaptureState, CompositionLayer, Compositor, Cue, HardwareBuffer,
+    MediaChangeFuture, MediaError, MediaMetadata, MediaPlayer, MovieOptions, Photo, PhotoFuture,
+    Placement, PlayerState, Players, RecordingFuture, Size, VideoFrame, VideoFrameReader,
+    VideoFrameReaders, VideoOutput,
 };
 
 /// A compositor whose layers show nowhere, and which keeps each layer it made. Every clone is the
@@ -298,29 +299,56 @@ impl Drop for OpenedPlayer {
     }
 }
 
-/// Cameras that list what the test gave, and keep each session opened, which reports the state
-/// the test gives it. Every clone is the same cameras.
+/// Cameras that list what the test gave, each running in the formats the test gave, and keep each
+/// session started, which reports the state the test gives it. A session started on a camera
+/// another session still runs joins that one's format, as a system that runs a camera in one
+/// format at a time does. Every clone is the same cameras.
 #[derive(Clone, Default)]
 pub struct MockCameras(Rc<CamerasShared>);
 
 #[derive(Default)]
 struct CamerasShared {
     cameras: Vec<Camera>,
+    formats: RefCell<Vec<CameraFormat>>,
+    /// Whether the user does not let the app use the cameras.
+    denied: Cell<bool>,
     sessions: RefCell<Vec<MockCaptureSession>>,
 }
 
 impl MockCameras {
-    /// Cameras listing `cameras`.
+    /// Cameras listing `cameras`, which run in no format until [`with_formats`](Self::with_formats).
     pub fn new(cameras: Vec<Camera>) -> MockCameras {
         MockCameras(Rc::new(CamerasShared {
             cameras,
-            sessions: RefCell::default(),
+            ..CamerasShared::default()
         }))
     }
 
-    /// The sessions opened, in order.
+    /// Each camera runs in `formats`.
+    pub fn with_formats(self, formats: Vec<CameraFormat>) -> MockCameras {
+        *self.0.formats.borrow_mut() = formats;
+        self
+    }
+
+    /// The user does not let the app use the cameras: opening one fails.
+    pub fn denying(self) -> MockCameras {
+        self.0.denied.set(true);
+        self
+    }
+
+    /// The sessions started, in order.
     pub fn sessions(&self) -> Vec<MockCaptureSession> {
         self.0.sessions.borrow().clone()
+    }
+
+    /// The format a session still running `camera` runs it in.
+    fn running_format(&self, camera: &Camera) -> Option<CameraFormat> {
+        self.0
+            .sessions
+            .borrow()
+            .iter()
+            .find(|session| session.camera() == *camera && !session.is_dropped())
+            .map(MockCaptureSession::format)
     }
 }
 
@@ -329,37 +357,59 @@ impl Cameras for MockCameras {
         self.0.cameras.clone()
     }
 
-    fn open_session(&self, camera: &Camera) -> Box<dyn CaptureSession> {
-        let session = MockCaptureSession(Rc::new(SessionShared {
-            camera: camera.clone(),
-            state: RefCell::new(CameraState::stopped()),
-            calls: RefCell::default(),
-            preview_layer: RefCell::default(),
-            frame_reader: RefCell::default(),
-            photo: RefCell::default(),
-            recordings: RefCell::default(),
-            changes: Changes::default(),
-            dropped: Cell::new(false),
-        }));
-        self.0.sessions.borrow_mut().push(session.clone());
-        Box::new(OpenedSession(session))
+    fn open(&self, camera: &Camera) -> CameraOpenFuture {
+        let opened: Result<Box<dyn CameraDevice>, CameraError> = if self.0.denied.get() {
+            Err(CameraError::NotAllowed)
+        } else {
+            Ok(Box::new(OpenedCamera {
+                cameras: self.clone(),
+                camera: camera.clone(),
+            }))
+        };
+        Box::pin(std::future::ready(opened))
     }
 }
 
-/// What a camera session was asked to do.
-#[derive(Clone, Debug, PartialEq)]
-pub enum SessionCall {
-    Start,
-    Stop,
-    /// Whether a layer was given, or none.
-    SetPreviewLayer(bool),
-    /// Whether a reader was given, or none.
-    SetFrameReader(bool),
-    PhotoOutput,
-    MovieOutput(MovieOptions),
+/// A camera the app opened.
+struct OpenedCamera {
+    cameras: MockCameras,
+    camera: Camera,
 }
 
-/// A camera session the app opened, as the test sees it. Its photos answer what the test gave,
+impl CameraDevice for OpenedCamera {
+    fn formats(&self) -> Vec<CameraFormat> {
+        self.cameras.0.formats.borrow().clone()
+    }
+
+    fn start(
+        &self,
+        format: &CameraFormat,
+        outputs: CameraOutputs,
+    ) -> Result<Box<dyn CaptureSession>, CameraError> {
+        if !self.cameras.0.formats.borrow().contains(format) {
+            return Err(CameraError::Failed(
+                "the camera does not list this format".to_owned(),
+            ));
+        }
+        let running = self.cameras.running_format(&self.camera);
+        let session = MockCaptureSession(Rc::new(SessionShared {
+            camera: self.camera.clone(),
+            picked: format.clone(),
+            format: running.unwrap_or_else(|| format.clone()),
+            outputs,
+            state: RefCell::new(CaptureState::Running),
+            photo: RefCell::default(),
+            recordings: RefCell::default(),
+            recording: RefCell::default(),
+            changes: Changes::default(),
+            dropped: Cell::new(false),
+        }));
+        self.cameras.0.sessions.borrow_mut().push(session.clone());
+        Ok(Box::new(StartedSession(session)))
+    }
+}
+
+/// A camera session the app started, as the test sees it. Its photos answer what the test gave,
 /// or that the session does not run; its recordings answer when they are stopped, writing
 /// nothing. Every clone is the same session.
 #[derive(Clone)]
@@ -367,13 +417,15 @@ pub struct MockCaptureSession(Rc<SessionShared>);
 
 struct SessionShared {
     camera: Camera,
-    state: RefCell<CameraState>,
-    calls: RefCell<Vec<SessionCall>>,
-    preview_layer: RefCell<Option<Arc<dyn CompositionLayer>>>,
-    frame_reader: RefCell<Option<Arc<dyn VideoFrameReader>>>,
+    picked: CameraFormat,
+    format: CameraFormat,
+    outputs: CameraOutputs,
+    state: RefCell<CaptureState>,
     photo: RefCell<Option<Photo>>,
-    /// The paths recorded to, the last one first to answer when stopped.
+    /// The paths recorded to, in order.
     recordings: RefCell<Vec<PathBuf>>,
+    /// The recording under way, which answers when stopped.
+    recording: RefCell<Option<Rc<Recording>>>,
     changes: Changes,
     dropped: Cell<bool>,
 }
@@ -383,19 +435,34 @@ impl MockCaptureSession {
         self.0.camera.clone()
     }
 
-    /// What the session was asked, in order.
-    pub fn calls(&self) -> Vec<SessionCall> {
-        self.0.calls.borrow().clone()
+    /// The format the app picked.
+    pub fn picked(&self) -> CameraFormat {
+        self.0.picked.clone()
     }
 
-    /// The layer the session's preview is on; `None` once it is put nowhere.
+    /// The format it runs in: the one picked, or the one of the session it joined.
+    pub fn format(&self) -> CameraFormat {
+        self.0.format.clone()
+    }
+
+    /// The layer the preview shows on, among the outputs given.
     pub fn preview_layer(&self) -> Option<Arc<dyn CompositionLayer>> {
-        self.0.preview_layer.borrow().clone()
+        self.0.outputs.preview.clone()
     }
 
-    /// The reader the session's frames go to; `None` once they go to none.
+    /// The reader the frames go to, among the outputs given.
     pub fn frame_reader(&self) -> Option<Arc<dyn VideoFrameReader>> {
-        self.0.frame_reader.borrow().clone()
+        self.0.outputs.frames.clone()
+    }
+
+    /// The size photos are taken at, among the outputs given.
+    pub fn photo_size(&self) -> Option<Size> {
+        self.0.outputs.photos
+    }
+
+    /// What recordings ask for, among the outputs given.
+    pub fn movie_options(&self) -> Option<MovieOptions> {
+        self.0.outputs.movies
     }
 
     /// The paths the app recorded to, in order.
@@ -407,35 +474,31 @@ impl MockCaptureSession {
         self.0.dropped.get()
     }
 
-    /// Answers each capture with `photo` from now on, while the session runs.
+    /// Answers each photo with `photo` from now on, while the session runs.
     pub fn answering_photo(&self, photo: Photo) {
         *self.0.photo.borrow_mut() = Some(photo);
     }
 
     /// Reports `state` from now on, as the system would have changed it.
-    pub fn set_state(&self, state: CameraState) {
+    pub fn set_state(&self, state: CaptureState) {
         *self.0.state.borrow_mut() = state;
         self.0.changes.notify();
     }
 
-    fn call(&self, call: SessionCall) {
-        self.0.calls.borrow_mut().push(call);
+    fn runs(&self) -> bool {
+        *self.0.state.borrow() == CaptureState::Running
     }
 }
 
 /// The session the app holds; dropping it ends the session's changes.
-struct OpenedSession(MockCaptureSession);
+struct StartedSession(MockCaptureSession);
 
-impl CaptureSession for OpenedSession {
-    fn start(&self) {
-        self.0.call(SessionCall::Start);
+impl CaptureSession for StartedSession {
+    fn format(&self) -> CameraFormat {
+        self.0.format()
     }
 
-    fn stop(&self) {
-        self.0.call(SessionCall::Stop);
-    }
-
-    fn state(&self) -> CameraState {
+    fn state(&self) -> CaptureState {
         self.0.0.state.borrow().clone()
     }
 
@@ -443,47 +506,17 @@ impl CaptureSession for OpenedSession {
         self.0.0.changes.next()
     }
 
-    fn set_preview_layer(&self, layer: Option<Arc<dyn CompositionLayer>>) {
-        self.0.call(SessionCall::SetPreviewLayer(layer.is_some()));
-        *self.0.0.preview_layer.borrow_mut() = layer;
-    }
-
-    fn set_frame_reader(&self, reader: Option<Arc<dyn VideoFrameReader>>) {
-        self.0.call(SessionCall::SetFrameReader(reader.is_some()));
-        *self.0.0.frame_reader.borrow_mut() = reader;
-    }
-
-    fn photo_output(&self) -> Box<dyn PhotoOutput> {
-        self.0.call(SessionCall::PhotoOutput);
-        Box::new(MockPhotos(self.0.clone()))
-    }
-
-    fn movie_output(&self, options: MovieOptions) -> Box<dyn MovieOutput> {
-        self.0.call(SessionCall::MovieOutput(options));
-        Box::new(MockMovies {
-            session: self.0.clone(),
-            recording: RefCell::default(),
-        })
-    }
-}
-
-impl Drop for OpenedSession {
-    fn drop(&mut self) {
-        self.0.0.dropped.set(true);
-        self.0.0.changes.end();
-    }
-}
-
-/// A session's photos: what the test gave, while the session runs.
-struct MockPhotos(MockCaptureSession);
-
-impl PhotoOutput for MockPhotos {
-    fn capture(&self) -> PhotoFuture {
-        let session = &self.0.0;
-        let answer = if session.state.borrow().status != inset_embedder::CameraStatus::Running {
+    fn take_photo(&self) -> PhotoFuture {
+        let session = &self.0;
+        let answer = if session.photo_size().is_none() {
+            Err(MediaError::Failed(
+                "photos were not among the outputs".to_owned(),
+            ))
+        } else if !session.runs() {
             Err(MediaError::NotRunning)
         } else {
             session
+                .0
                 .photo
                 .borrow()
                 .clone()
@@ -491,12 +524,37 @@ impl PhotoOutput for MockPhotos {
         };
         Box::pin(std::future::ready(answer))
     }
+
+    fn start_recording(&self, path: PathBuf) -> RecordingFuture {
+        let session = &self.0;
+        if session.movie_options().is_none() {
+            let reason = "movies were not among the outputs".to_owned();
+            return Box::pin(std::future::ready(Err(MediaError::Failed(reason))));
+        }
+        if !session.runs() {
+            return Box::pin(std::future::ready(Err(MediaError::NotRunning)));
+        }
+        session.0.recordings.borrow_mut().push(path);
+        let recording = Rc::new(Recording::default());
+        *session.0.recording.borrow_mut() = Some(Rc::clone(&recording));
+        Box::pin(RecordingEnd(recording))
+    }
+
+    fn stop_recording(&self) {
+        if let Some(recording) = self.0.0.recording.borrow_mut().take() {
+            recording.stopped.set(true);
+            if let Some(waker) = recording.waker.borrow_mut().take() {
+                waker.wake();
+            }
+        }
+    }
 }
 
-/// A session's recordings: each answers when stopped.
-struct MockMovies {
-    session: MockCaptureSession,
-    recording: RefCell<Option<Rc<Recording>>>,
+impl Drop for StartedSession {
+    fn drop(&mut self) {
+        self.0.0.dropped.set(true);
+        self.0.0.changes.end();
+    }
 }
 
 /// A recording under way, which answers once stopped.
@@ -504,27 +562,6 @@ struct MockMovies {
 struct Recording {
     stopped: Cell<bool>,
     waker: RefCell<Option<Waker>>,
-}
-
-impl MovieOutput for MockMovies {
-    fn start(&self, path: PathBuf) -> RecordingFuture {
-        if self.session.0.state.borrow().status != inset_embedder::CameraStatus::Running {
-            return Box::pin(std::future::ready(Err(MediaError::NotRunning)));
-        }
-        self.session.0.recordings.borrow_mut().push(path);
-        let recording = Rc::new(Recording::default());
-        *self.recording.borrow_mut() = Some(Rc::clone(&recording));
-        Box::pin(RecordingEnd(recording))
-    }
-
-    fn stop(&self) {
-        if let Some(recording) = self.recording.borrow_mut().take() {
-            recording.stopped.set(true);
-            if let Some(waker) = recording.waker.borrow_mut().take() {
-                waker.wake();
-            }
-        }
-    }
 }
 
 struct RecordingEnd(Rc<Recording>);

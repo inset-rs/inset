@@ -73,11 +73,11 @@ pub use image::{
 pub use key::{KeyData, KeyEventDeviceType, KeyEventType};
 pub use locale::Locale;
 pub use media::{
-    Camera, CameraFacing, CameraId, CameraState, CameraStatus, Cameras, CaptureSession,
-    EncodedImage, MediaChangeFuture, MediaError, MediaMetadata, MediaPlayer, MediaTrack,
-    MediaTrackKind, MovieOptions, MovieOutput, Photo, PhotoFuture, PhotoOutput, PlayerState,
-    PlayerStatus, Players, RecordingFuture, VideoFrame, VideoFrameReader, VideoFrameReaders,
-    VideoOutput,
+    Camera, CameraDevice, CameraError, CameraFacing, CameraFormat, CameraId, CameraInterruption,
+    CameraOpenFuture, CameraOutputs, Cameras, CaptureSession, CaptureState, EncodedImage,
+    MediaChangeFuture, MediaError, MediaMetadata, MediaPlayer, MediaTrack, MediaTrackKind,
+    MovieOptions, Photo, PhotoFuture, PlayerState, PlayerStatus, Players, RecordingFuture,
+    VideoFrame, VideoFrameReader, VideoFrameReaders, VideoOutput,
 };
 pub use menus::{
     AttachedMenu, CheckState, DockMenu, EditCommand, IconImage, MenuAtIcon, MenuBar, MenuEntry,

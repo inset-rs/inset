@@ -15,11 +15,13 @@
 //! system draws the picture into, which is the only way protected and HDR video show at all, with
 //! no copy; or a [`VideoFrameReader`], made on its own ([`VideoFrameReaders::make_reader`]), which
 //! hands the frames to the app's GPU, as an Android app makes an `ImageReader` and an Apple app an
-//! `AVPlayerItemVideoOutput` and gives it to its player. A camera session shows its preview on a
-//! layer ([`CaptureSession::set_preview_layer`]) and hands its frames to a reader
-//! ([`CaptureSession::set_frame_reader`]) the same way. A camera's photos are encoded by the
-//! system and its recordings encoded and written to a file by the system: the app encodes
-//! nothing.
+//! `AVPlayerItemVideoOutput` and gives it to its player. A camera, once opened, lists the formats
+//! it runs in, and starts in one of them with its outputs given whole ([`CameraOutputs`]): a layer
+//! for its preview and a reader for its frames, made the same way, beside its photos and
+//! recordings, all of which the system configures together, as Apple configures an
+//! `AVCaptureSession` between `beginConfiguration` and `commitConfiguration` and Android binds
+//! CameraX's use cases at once. A camera's photos are encoded by the system and its recordings
+//! encoded and written to a file by the system: the app encodes nothing.
 //!
 //! A player tells its media's tracks, plays one audio track and shows one text track or none, as
 //! every system's player does (Apple's media selection groups, Media3's track overrides); it tells
@@ -212,12 +214,14 @@ pub struct EncodedImage {
 /// The system's cameras, or `None` from [`Platform::cameras`](crate::Platform::cameras) where it
 /// has none.
 pub trait Cameras {
-    /// The cameras attached now, in the system's order.
+    /// The cameras attached now, in the system's order. Listing asks the user nothing.
     fn cameras(&self) -> Vec<Camera>;
 
-    /// A session on `camera`, stopped. It asks the user for the camera at its first start, where
-    /// the system asks.
-    fn open_session(&self, camera: &Camera) -> Box<dyn CaptureSession>;
+    /// Opens `camera`, asking the user for the cameras first where the system asks and the user
+    /// has not answered, as an Android app opens Camera2's `CameraDevice` once it holds the
+    /// camera permission: [`CameraError::NotAllowed`] where the user or the system's policy does
+    /// not let the app use them, and [`CameraError::Unplugged`] for a camera no longer attached.
+    fn open(&self, camera: &Camera) -> CameraOpenFuture;
 }
 
 /// A camera, as the system lists it.
@@ -244,80 +248,159 @@ pub enum CameraFacing {
     External,
 }
 
-/// A session on one camera, controlled on the app's main thread. Each output is the system's
-/// own, made at its first asking and the same one after; the session runs every output it has.
-/// Dropped, it stops, its preview leaves the layer it showed on, and its reader reads nothing
-/// more.
-pub trait CaptureSession {
-    /// Starts the camera: asking the user for it first where the system asks and the user has
-    /// not answered, then running, or failing, as the state says.
-    fn start(&self);
+/// A camera the app opened, controlled on the app's main thread: Camera2's `CameraDevice`. A
+/// session started on it runs on after it is dropped.
+pub trait CameraDevice {
+    /// The formats the camera runs in, in the system's order, each with all its outputs: Apple's
+    /// `AVCaptureDevice.formats`, Android's stream configuration map.
+    fn formats(&self) -> Vec<CameraFormat>;
 
-    fn stop(&self);
+    /// Starts the camera in `format`, one of [`formats`](Self::formats), feeding `outputs`, which
+    /// the system configures together. Where the camera already runs for another session and the
+    /// system runs a camera in one format at a time, the session joins that format instead, and
+    /// its [`format`](CaptureSession::format) says so. It fails for what can happen at any time:
+    /// the camera in use, unplugged, or not allowed; and for a format the camera does not list.
+    fn start(
+        &self,
+        format: &CameraFormat,
+        outputs: CameraOutputs,
+    ) -> Result<Box<dyn CaptureSession>, CameraError>;
+}
+
+/// One way a camera runs, with all its outputs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CameraFormat {
+    /// The size of its frames and its preview, in the camera's own pixels.
+    pub size: Size,
+    /// The slowest frame rate it keeps at that size, in frames a second.
+    pub min_frame_rate: f64,
+    /// The fastest frame rate it keeps at that size, in frames a second.
+    pub max_frame_rate: f64,
+    /// The sizes it takes photos at while it runs so, in pixels.
+    pub photo_sizes: Vec<Size>,
+}
+
+/// What a camera feeds, given whole to [`CameraDevice::start`]: each output the system's own, for
+/// one use. An output left out is not fed.
+#[derive(Clone, Default)]
+pub struct CameraOutputs {
+    /// The layer the preview shows on, drawn by the system into a layer of its own that is this
+    /// layer's content. The session holds it while it runs. A layer no compositor of this host
+    /// made shows nothing.
+    pub preview: Option<Arc<dyn CompositionLayer>>,
+    /// The reader the frames go to, for the app to draw. A reader no [`VideoFrameReaders`] of this
+    /// host made reads nothing.
+    pub frames: Option<Arc<dyn VideoFrameReader>>,
+    /// The size photos are taken at, one of the format's
+    /// [`photo_sizes`](CameraFormat::photo_sizes), each captured, processed and encoded by the
+    /// system. In a joined format that does not list it, photos come at the system's own size
+    /// for that format.
+    pub photos: Option<Size>,
+    /// Recordings, each encoded and written to a file by the system, with sound where `options`
+    /// ask for it, which asks the user for the microphone as the session starts.
+    pub movies: Option<MovieOptions>,
+}
+
+impl CameraOutputs {
+    /// Outputs that feed nothing.
+    pub fn new() -> CameraOutputs {
+        CameraOutputs::default()
+    }
+
+    pub fn preview(mut self, layer: Arc<dyn CompositionLayer>) -> CameraOutputs {
+        self.preview = Some(layer);
+        self
+    }
+
+    pub fn frames(mut self, reader: Arc<dyn VideoFrameReader>) -> CameraOutputs {
+        self.frames = Some(reader);
+        self
+    }
+
+    pub fn photos(mut self, size: Size) -> CameraOutputs {
+        self.photos = Some(size);
+        self
+    }
+
+    pub fn movies(mut self, options: MovieOptions) -> CameraOutputs {
+        self.movies = Some(options);
+        self
+    }
+}
+
+/// A camera running for the app, controlled on the app's main thread. Dropped, it stops for the
+/// app: its preview leaves the layer it showed on, and its reader reads nothing more.
+pub trait CaptureSession {
+    /// The format it runs in: the one picked, unless it joined the format the camera ran in for
+    /// another session.
+    fn format(&self) -> CameraFormat;
 
     /// The session's state now.
-    fn state(&self) -> CameraState;
+    fn state(&self) -> CaptureState;
 
     /// Resolves once [`state`](Self::state) may answer something else than when this was
     /// called, or once the session is gone.
     fn changed(&self) -> MediaChangeFuture;
 
-    /// Puts the camera's preview on `layer` from now on, drawn by the system into a layer of its
-    /// own that is `layer`'s content, and on no layer it was on before; `None` puts it nowhere.
-    /// The session holds the layer while it shows on it. A layer no compositor of this host made
-    /// shows nothing.
-    fn set_preview_layer(&self, layer: Option<Arc<dyn CompositionLayer>>);
+    /// Takes a photo while the session runs with photos among its outputs, answering it once the
+    /// system has encoded it.
+    fn take_photo(&self) -> PhotoFuture;
 
-    /// Hands the camera's frames to `reader` from now on, and to no reader it handed them to
-    /// before; `None` hands them to none. A reader no [`VideoFrameReaders`] of this host made
-    /// reads nothing.
-    fn set_frame_reader(&self, reader: Option<Arc<dyn VideoFrameReader>>);
+    /// Records to a new file at `path`, as a QuickTime movie, while the session runs with movies
+    /// among its outputs, until [`stop_recording`](Self::stop_recording); answers once the file is
+    /// written whole, or why it was not.
+    fn start_recording(&self, path: PathBuf) -> RecordingFuture;
 
-    /// Photos, each captured, processed and encoded by the system.
-    fn photo_output(&self) -> Box<dyn PhotoOutput>;
-
-    /// Recordings, each encoded and written to a file by the system, with sound where `options`
-    /// ask for it, which asks the user for the microphone at the session's next start.
-    fn movie_output(&self, options: MovieOptions) -> Box<dyn MovieOutput>;
+    /// Ends the recording, whose future then answers.
+    fn stop_recording(&self);
 }
 
 /// What a camera session is doing.
-#[derive(Clone, Debug, PartialEq)]
-pub struct CameraState {
-    pub status: CameraStatus,
-    /// The size of the camera's pictures, in its own pixels; `None` until the session has the
-    /// camera.
-    pub size: Option<Size>,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CaptureState {
+    Running,
+    /// No frames for now, for this reason; it resumes by itself.
+    Interrupted(CameraInterruption),
+    /// For good, for this reason.
+    Ended(CameraError),
 }
 
-impl CameraState {
-    /// A session not started.
-    pub fn stopped() -> CameraState {
-        CameraState {
-            status: CameraStatus::Stopped,
-            size: None,
+/// Why a camera session gives no frames for now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CameraInterruption {
+    /// Another app has the camera, as a phone allows one at a time.
+    InUseByAnotherApp,
+    /// The app is in the background.
+    Background,
+    /// The system is too hot or too busy.
+    SystemPressure,
+}
+
+/// Why a camera did not open, start or run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CameraError {
+    /// The user did not let the app use the cameras, or the system's policy does not.
+    NotAllowed,
+    /// Another app has the camera, and the system does not share it.
+    InUse,
+    /// The camera is no longer attached.
+    Unplugged,
+    /// The system failed, for its reason.
+    Failed(String),
+}
+
+impl fmt::Display for CameraError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CameraError::NotAllowed => f.write_str("the app may not use the camera"),
+            CameraError::InUse => f.write_str("another app has the camera"),
+            CameraError::Unplugged => f.write_str("the camera is no longer attached"),
+            CameraError::Failed(reason) => write!(f, "the camera failed: {reason}"),
         }
     }
 }
 
-/// How far a camera session got.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CameraStatus {
-    Stopped,
-    /// Asking the user for the camera, or starting it.
-    Starting,
-    Running,
-    /// The user did not let the app use the camera, or the system's policy does not.
-    Denied,
-    /// The camera could not run, for the system's reason.
-    Failed(String),
-}
-
-/// A session's photos.
-pub trait PhotoOutput {
-    /// Captures a photo while the session runs, answering it once the system has encoded it.
-    fn capture(&self) -> PhotoFuture;
-}
+impl std::error::Error for CameraError {}
 
 /// A photo, as the system encoded it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -334,24 +417,14 @@ pub struct MovieOptions {
     pub sound: bool,
 }
 
-/// A session's recordings.
-pub trait MovieOutput {
-    /// Records to a new file at `path`, as a QuickTime movie, while the session runs, until
-    /// [`stop`](Self::stop); answers once the file is written whole, or why it was not.
-    fn start(&self, path: PathBuf) -> RecordingFuture;
-
-    /// Ends the recording, whose future then answers.
-    fn stop(&self);
-}
-
 /// The system's frame readers, or `None` from
 /// [`Platform::video_frame_readers`](crate::Platform::video_frame_readers) where it hands out no
 /// frames.
 pub trait VideoFrameReaders {
     /// A reader fed by nothing yet, which reads the frames of the source it is given to: a
-    /// player's [`set_video_output`](MediaPlayer::set_video_output), a capture session's
-    /// [`set_frame_reader`](CaptureSession::set_frame_reader). The reader goes when its last
-    /// handle does: the app's, and its source's.
+    /// player's [`set_video_output`](MediaPlayer::set_video_output), a camera's outputs
+    /// ([`CameraOutputs::frames`]). The reader goes when its last handle does: the app's, and its
+    /// source's.
     fn make_reader(&self) -> Arc<dyn VideoFrameReader>;
 }
 
@@ -380,10 +453,10 @@ pub type VideoFrame = objc2_core_foundation::CFRetained<objc2_core_video::CVPixe
 #[cfg(not(target_vendor = "apple"))]
 pub enum VideoFrame {}
 
-/// Why a camera's output answered nothing.
+/// Why a camera session's photo or recording answered nothing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MediaError {
-    /// The session does not run.
+    /// The session is interrupted or ended.
     NotRunning,
     /// The system failed, for its reason.
     Failed(String),
@@ -402,7 +475,10 @@ impl std::error::Error for MediaError {}
 
 /// What a player's or a session's `changed` answers.
 pub type MediaChangeFuture = Pin<Box<dyn Future<Output = ()>>>;
-/// What a photo capture answers.
+/// What opening a camera answers.
+pub type CameraOpenFuture =
+    Pin<Box<dyn Future<Output = Result<Box<dyn CameraDevice>, CameraError>>>>;
+/// What taking a photo answers.
 pub type PhotoFuture = Pin<Box<dyn Future<Output = Result<Photo, MediaError>>>>;
 /// What a recording answers once it ends.
 pub type RecordingFuture = Pin<Box<dyn Future<Output = Result<(), MediaError>>>>;

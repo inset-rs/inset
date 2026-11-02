@@ -359,11 +359,11 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 
 ## media.rs → the `video_player` package's `VideoPlayerController` and the `camera` package's `CameraController`, through their platform interfaces
 
-- Change: players and cameras are host capabilities, `Platform::players` and `Platform::cameras`: a player is one host object made from a URL, a link or a pick's `PickedFile::url`, loading by itself, controlled and observed through its state, and a camera a session on one device with an output per use, where Flutter's plugins have controllers that are initialized over method channels.
+- Change: players and cameras are host capabilities, `Platform::players` and `Platform::cameras`: a player is one host object made from a URL, a link or a pick's `PickedFile::url`, loading by itself, controlled and observed through its state, and a camera is opened, asking the user, then started as a session with an output per use, where Flutter's plugins have controllers that are initialized over method channels.
   Reason: platform — the host is the system's media stack, and its players and capture sessions are that model on every system Inset targets.
-  Affect: an app makes a player and calls it at once, without awaiting an initialization, and a system without players or cameras answers `None`.
+  Affect: an app makes a player and calls it at once, without awaiting an initialization, awaits a camera's opening, which asks the user the first time, and a system without players or cameras answers `None`.
 
-- Change: a player's picture goes to one destination at a time, which the app makes and gives it with `set_video_output`, as Media3's `setVideoSurface`: a composition layer, whose content becomes a layer the system draws into, or a frame reader made on its own from `Platform::video_frame_readers`, handing out the platform's own `VideoFrame`s; a camera session takes a layer for its preview and a reader for its frames the same way, where Flutter's plugins register a texture the engine copies from.
+- Change: a player's picture goes to one destination at a time, which the app makes and gives it with `set_video_output`, as Media3's `setVideoSurface`: a composition layer, whose content becomes a layer the system draws into, or a frame reader made on its own from `Platform::video_frame_readers`, handing out the platform's own `VideoFrame`s; a camera takes a layer for its preview and a reader for its frames the same way, among its outputs, where Flutter's plugins register a texture the engine copies from.
   Reason: platform — protected and HDR video show only where the system draws them itself, Windows' and Android's decoders feed one output, and an app makes the reader itself as it makes Android's `ImageReader` or Apple's `AVPlayerItemVideoOutput`.
   Affect: a player shown on a layer has no frames to read, one sent to a reader shows on no layer, and a reader given to a second source reads that one alone.
 
@@ -371,7 +371,11 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — every system's player lists tracks and selects one audio and one text track or none, and gives the subtitles it would draw as data with their styling and place, the user's caption settings applied by Apple's legible output at its default styling.
   Affect: an app shows the media's own subtitles in the user's caption style, and knows a media without a video track has no picture.
 
-- Change: a camera's photos are answered encoded by the system, as bytes and their MIME type, and its recordings written by the system to a path the app gives, where the `camera` plugin answers an `XFile` in a folder of its own.
+- Change: a camera lists its formats, each a picture size with the frame rates it keeps and the sizes it takes photos at, and starts in one of them with all its outputs given at once as `CameraOutputs`, its session telling the format it runs in and whether it runs, is interrupted for a reason, or ended for an error, where the `camera` plugin takes a resolution preset and adds outputs to a controller it has initialized.
+  Reason: platform — every system configures a camera's outputs together and describes what a camera can run before it runs (Apple's device formats, Android's stream configuration map), and a system that runs a camera in one format at a time runs every session on it in that format.
+  Affect: an app picks a format from the camera's own list and gives every output as it starts, a session on a camera another session already runs reports that session's format, and an interruption, such as another app taking the camera, ends by itself.
+
+- Change: a camera's photos are answered encoded by the system at a size from the format's list, as bytes and their MIME type, and its recordings written by the system to a path the app gives, where the `camera` plugin answers an `XFile` in a folder of its own.
   Reason: platform — the system encodes and writes them, and an app chooses where its files go.
-  Affect: a photo arrives as JPEG bytes, and a recording is a QuickTime movie at the app's path.
+  Affect: a photo arrives as JPEG bytes at the size asked for, and a recording is a QuickTime movie at the app's path.
 
