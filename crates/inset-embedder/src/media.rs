@@ -21,11 +21,17 @@
 //! system and its recordings encoded and written to a file by the system: the app encodes
 //! nothing.
 //!
+//! A player tells its media's tracks, plays one audio track and shows one text track or none, as
+//! every system's player does (Apple's media selection groups, Media3's track overrides); it tells
+//! what the media's tags say ([`MediaMetadata`]); and it hands the app the [`Cue`]s of its text
+//! track to draw, the system drawing none, as most players draw their own (Media3's
+//! `SubtitleView`, Safari over AVFoundation's legible output).
+//!
 //! The platform answers `None` where its system has no players, no cameras or no frames. A player
 //! or a session reports its state through [`MediaPlayer::state`] and [`CaptureSession::state`],
 //! read when the future from `changed` resolves: the invariant a host keeps is that such a future
-//! resolves at every change of what the state answers, and when the player or session goes, so
-//! the app never waits on one for ever.
+//! resolves at every change of what the state answers, a player's metadata and cues included, and
+//! when the player or session goes, so the app never waits on one for ever.
 
 use std::any::Any;
 use std::fmt;
@@ -35,7 +41,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::{CompositionLayer, Size};
+use crate::{CompositionLayer, Cue, Size};
 
 /// The system's players, or `None` from [`Platform::players`](crate::Platform::players) where it
 /// has none.
@@ -80,6 +86,21 @@ pub trait MediaPlayer {
     /// the picture there, as a producer holds its layer. A layer no compositor of this host made
     /// shows nothing, and a reader no [`VideoFrameReaders`] of this host made reads nothing.
     fn set_video_output(&self, output: Option<VideoOutput>);
+
+    /// Plays the audio track `id`, one of the state's [`tracks`](PlayerState::tracks), in place
+    /// of the one playing.
+    fn select_audio_track(&self, id: &str);
+
+    /// Shows the text track `id`, one of the state's [`tracks`](PlayerState::tracks), or none:
+    /// subtitles off. Its cues are what [`cues`](Self::cues) answers.
+    fn select_text_track(&self, id: Option<&str>);
+
+    /// What the media's tags say about it; empty until the player has read them.
+    fn metadata(&self) -> MediaMetadata;
+
+    /// The cues of the text track shown, to show now, with the user's caption settings merged
+    /// in; empty while no text track is shown.
+    fn cues(&self) -> Vec<Cue>;
 }
 
 /// Where a player sends its picture, one destination at a time.
@@ -106,6 +127,8 @@ pub struct PlayerState {
     /// The picture's size, in its own pixels, as it is presented: its aspect corrected; `None`
     /// until it is known, and for media without a picture.
     pub size: Option<Size>,
+    /// The media's tracks; empty until it is ready.
+    pub tracks: Vec<MediaTrack>,
     /// Whether it reached the end of media it does not loop, until it plays or seeks again.
     pub ended: bool,
 }
@@ -119,6 +142,7 @@ impl PlayerState {
             position: Duration::ZERO,
             duration: None,
             size: None,
+            tracks: Vec::new(),
             ended: false,
         }
     }
@@ -140,6 +164,49 @@ pub enum PlayerStatus {
     Ready,
     /// It cannot play, for the system's reason.
     Failed(String),
+}
+
+/// One of a player's media's tracks.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MediaTrack {
+    /// Names the track for this player's run.
+    pub id: String,
+    pub kind: MediaTrackKind,
+    /// A BCP 47 language tag; empty where the media gives none.
+    pub language: String,
+    /// Its name as the media gives it; empty where it gives none.
+    pub label: String,
+    /// Whether it plays now: one audio track at a time, and one text track or none.
+    pub selected: bool,
+}
+
+/// What a track carries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MediaTrackKind {
+    Audio,
+    Video,
+    /// Subtitles or captions.
+    Text,
+}
+
+/// What a player's media says about itself, from its tags; a field is `None` where it does not
+/// say.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MediaMetadata {
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    /// The cover image, encoded as the media holds it.
+    pub artwork: Option<EncodedImage>,
+}
+
+/// An image as its file format encodes it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EncodedImage {
+    /// Its format's MIME type, such as `image/jpeg`.
+    pub mime_type: String,
+    /// Shared, so that a player hands the same image out again without copying it.
+    pub data: Arc<[u8]>,
 }
 
 /// The system's cameras, or `None` from [`Platform::cameras`](crate::Platform::cameras) where it

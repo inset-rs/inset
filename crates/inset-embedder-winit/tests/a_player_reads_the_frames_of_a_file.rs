@@ -1,5 +1,5 @@
 //! A player of a small movie, opened by a picked file's URL at a path the URL must encode, loads it
-//! by itself, says its size and length, plays it, hands its frames to a reader made on its own as
+//! by itself, says its size, length and one video track, plays it, hands its frames to a reader made on its own as
 //! BGRA pixel buffers backed by IOSurfaces, ends, and plays on past its end once it loops: all
 //! without a window or a sound. On its way it is put on a surface, not in any window, and nowhere
 //! again; sent nowhere at the end, it feeds the reader no more.
@@ -29,7 +29,9 @@ mod player {
     use std::task::{Context, Poll, Waker};
     use std::time::{Duration, Instant};
 
-    use inset_embedder::{MediaChangeFuture, PickedFile, PlayerStatus, Size, VideoOutput};
+    use inset_embedder::{
+        MediaChangeFuture, MediaTrackKind, PickedFile, PlayerStatus, Size, VideoOutput,
+    };
     use objc2_core_video::{
         CVPixelBufferGetHeight, CVPixelBufferGetIOSurface, CVPixelBufferGetPixelFormatType,
         CVPixelBufferGetWidth, kCVPixelFormatType_32BGRA,
@@ -58,6 +60,14 @@ mod player {
         assert_eq!(state.size, Some(Size::new(64.0, 48.0)));
         assert_eq!(state.duration, Some(Duration::from_secs(1)));
         assert!(!state.playing && !state.ended);
+        serve_until("its tracks are listed", || {
+            !player.state().tracks.is_empty()
+        });
+        let tracks = player.state().tracks;
+        assert_eq!(tracks.len(), 1, "one video track and no sound: {tracks:?}");
+        assert_eq!(tracks[0].kind, MediaTrackKind::Video);
+        assert!(tracks[0].selected);
+        assert!(player.cues().is_empty(), "no text track, no cues");
 
         let compositor =
             inset_embedder_winit::test_support::compositor().expect("the system's compositor");

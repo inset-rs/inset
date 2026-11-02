@@ -62,7 +62,7 @@ valo-codec-apple = { version = "0.13.1", optional = true }
 block2 = "0.6"
 dispatch2 = "0.3"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSString", "NSObject", "NSGeometry", "NSArray", "NSBundle", "NSCalendar", "NSData", "NSDate", "NSDictionary", "NSError", "NSSet", "NSIndexSet", "NSItemProvider", "NSKeyValueObserving", "NSNotification", "NSOperation", "NSProgress", "NSPropertyList", "NSRunLoop", "NSURL", "NSValue", "NSProcessInfo", "NSTimeZone", "block2"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSObject", "NSGeometry", "NSArray", "NSAttributedString", "NSBundle", "NSCalendar", "NSData", "NSDate", "NSDictionary", "NSError", "NSSet", "NSIndexSet", "NSItemProvider", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSOperation", "NSProgress", "NSPropertyList", "NSRange", "NSRunLoop", "NSURL", "NSValue", "NSProcessInfo", "NSTimeZone", "block2"] }
 # The UTI a pasteboard names a MIME type by.
 objc2-uniform-type-identifiers = { version = "0.3", features = ["UTType", "UTCoreTypes"] }
 # Notifications, a notification's time as a calendar date, and its image as the PNG file an
@@ -76,10 +76,10 @@ objc2-quartz-core = { version = "0.3", features = ["CABase", "CALayer", "CAShape
 objc2-io-surface = "0.3"
 objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGAffineTransform", "CGColor", "CGPath"] }
-# Players and cameras: AVFoundation, the times and sample buffers it speaks in, and the pixel
-# buffers a frame reader hands out.
-objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "dispatch2", "objc2-core-foundation", "objc2-core-media", "objc2-core-video", "objc2-quartz-core", "AVAnimation", "AVCaptureDevice", "AVCaptureFileOutput", "AVCaptureInput", "AVCaptureOutputBase", "AVCapturePhotoOutput", "AVCaptureSession", "AVCaptureSessionPreset", "AVCaptureVideoDataOutput", "AVCaptureVideoPreviewLayer", "AVError", "AVMediaFormat", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVPlayerLayer", "AVVideoSettings"] }
-objc2-core-media = { version = "0.3", default-features = false, features = ["std", "objc2-core-video", "CMBase", "CMFormatDescription", "CMSampleBuffer", "CMSync", "CMTime"] }
+# Players and cameras: AVFoundation, the times and sample buffers it speaks in, the markup of the
+# subtitles it hands out, and the pixel buffers a frame reader hands out.
+objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "dispatch2", "objc2-core-foundation", "objc2-core-media", "objc2-core-video", "objc2-quartz-core", "AVAnimation", "AVAsset", "AVAssetTrack", "AVAsynchronousKeyValueLoading", "AVCaptureDevice", "AVCaptureFileOutput", "AVCaptureInput", "AVCaptureOutputBase", "AVCapturePhotoOutput", "AVCaptureSession", "AVCaptureSessionPreset", "AVCaptureVideoDataOutput", "AVCaptureVideoPreviewLayer", "AVError", "AVMediaFormat", "AVMediaSelection", "AVMediaSelectionGroup", "AVMetadataIdentifiers", "AVMetadataItem", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVPlayerItemTrack", "AVPlayerLayer", "AVVideoSettings"] }
+objc2-core-media = { version = "0.3", default-features = false, features = ["std", "objc2-core-video", "CMBase", "CMFormatDescription", "CMSampleBuffer", "CMSync", "CMTextMarkup", "CMTime"] }
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-metal", "CVBase", "CVBuffer", "CVImageBuffer", "CVMetalTexture", "CVMetalTextureCache", "CVPixelBuffer", "CVReturn"] }
 # A video's frames drawn by valo: a Metal texture made on each frame through CoreVideo's texture
 # cache, wrapped as a wgpu texture.

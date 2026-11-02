@@ -1,5 +1,6 @@
 //! A compositor, frame readers, players and cameras in memory, as a host shows nothing: each
-//! keeps what the app asked of it, and reports the state the test gives it.
+//! keeps what the app asked of it, and reports the state the test gives it, a player its
+//! metadata and cues too.
 
 use std::cell::{Cell, RefCell};
 use std::future::Future;
@@ -12,10 +13,10 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use inset_embedder::{
-    Camera, CameraState, Cameras, CaptureSession, CompositionLayer, Compositor, HardwareBuffer,
-    MediaChangeFuture, MediaError, MediaPlayer, MovieOptions, MovieOutput, Photo, PhotoFuture,
-    PhotoOutput, Placement, PlayerState, Players, RecordingFuture, VideoFrame, VideoFrameReader,
-    VideoFrameReaders, VideoOutput,
+    Camera, CameraState, Cameras, CaptureSession, CompositionLayer, Compositor, Cue,
+    HardwareBuffer, MediaChangeFuture, MediaError, MediaMetadata, MediaPlayer, MovieOptions,
+    MovieOutput, Photo, PhotoFuture, PhotoOutput, Placement, PlayerState, Players, RecordingFuture,
+    VideoFrame, VideoFrameReader, VideoFrameReaders, VideoOutput,
 };
 
 /// A compositor whose layers show nowhere, and which keeps each layer it made. Every clone is the
@@ -93,8 +94,8 @@ impl VideoFrameReaders for MockVideoFrameReaders {
     }
 }
 
-/// Players that keep each player opened, which reports the state the test gives it. Every clone
-/// is the same players.
+/// Players that keep each player opened, which reports the state, metadata and cues the test
+/// gives it. Every clone is the same players.
 #[derive(Clone, Default)]
 pub struct MockPlayers(Rc<RefCell<Vec<MockPlayer>>>);
 
@@ -114,6 +115,8 @@ impl Players for MockPlayers {
         let player = MockPlayer(Rc::new(PlayerShared {
             url: url.to_owned(),
             state: RefCell::new(PlayerState::loading()),
+            metadata: RefCell::default(),
+            cues: RefCell::default(),
             calls: RefCell::default(),
             video_output: RefCell::default(),
             changes: Changes::default(),
@@ -135,6 +138,8 @@ pub enum PlayerCall {
     SetLooping(bool),
     /// What kind of output was given, or none.
     SetVideoOutput(Option<VideoOutputKind>),
+    SelectAudioTrack(String),
+    SelectTextTrack(Option<String>),
 }
 
 /// The kind of a [`VideoOutput`], which a [`PlayerCall`] records.
@@ -160,6 +165,8 @@ pub struct MockPlayer(Rc<PlayerShared>);
 struct PlayerShared {
     url: String,
     state: RefCell<PlayerState>,
+    metadata: RefCell<MediaMetadata>,
+    cues: RefCell<Vec<Cue>>,
     calls: RefCell<Vec<PlayerCall>>,
     video_output: RefCell<Option<VideoOutput>>,
     changes: Changes,
@@ -203,6 +210,18 @@ impl MockPlayer {
     /// Reports `state` from now on, as the system would have changed it.
     pub fn set_state(&self, state: PlayerState) {
         *self.0.state.borrow_mut() = state;
+        self.0.changes.notify();
+    }
+
+    /// Reports `metadata` from now on, as the system would have read it from the media.
+    pub fn set_metadata(&self, metadata: MediaMetadata) {
+        *self.0.metadata.borrow_mut() = metadata;
+        self.0.changes.notify();
+    }
+
+    /// Reports `cues` from now on, as the system would have reached them in the text track.
+    pub fn set_cues(&self, cues: Vec<Cue>) {
+        *self.0.cues.borrow_mut() = cues;
         self.0.changes.notify();
     }
 
@@ -252,6 +271,23 @@ impl MediaPlayer for OpenedPlayer {
             output.as_ref().map(VideoOutputKind::of),
         ));
         *self.0.0.video_output.borrow_mut() = output;
+    }
+
+    fn select_audio_track(&self, id: &str) {
+        self.0.call(PlayerCall::SelectAudioTrack(id.to_owned()));
+    }
+
+    fn select_text_track(&self, id: Option<&str>) {
+        self.0
+            .call(PlayerCall::SelectTextTrack(id.map(str::to_owned)));
+    }
+
+    fn metadata(&self) -> MediaMetadata {
+        self.0.0.metadata.borrow().clone()
+    }
+
+    fn cues(&self) -> Vec<Cue> {
+        self.0.0.cues.borrow().clone()
     }
 }
 

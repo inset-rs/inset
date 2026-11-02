@@ -13,6 +13,7 @@
 mod client;
 mod clipboard;
 mod composition;
+mod cue;
 mod drag_drop;
 mod file_dialogs;
 mod fonts;
@@ -50,6 +51,10 @@ pub use clipboard::{
     FileSink, PastedItem, URI_LIST, WriteFuture,
 };
 pub use composition::{CompositionLayer, Compositor, HardwareBuffer};
+pub use cue::{
+    Cue, CueAnchor, CueContent, CueImage, CueLine, CueTextAlignment, CueTextEdge, CueTextRun,
+    CueVertical,
+};
 pub use drag_drop::{DropChange, DropData};
 pub use file_dialogs::{
     EntryKind, FileDialogError, FileDialogFuture, FileDialogs, FileFinishFuture, FileHandle,
@@ -69,9 +74,10 @@ pub use key::{KeyData, KeyEventDeviceType, KeyEventType};
 pub use locale::Locale;
 pub use media::{
     Camera, CameraFacing, CameraId, CameraState, CameraStatus, Cameras, CaptureSession,
-    MediaChangeFuture, MediaError, MediaPlayer, MovieOptions, MovieOutput, Photo, PhotoFuture,
-    PhotoOutput, PlayerState, PlayerStatus, Players, RecordingFuture, VideoFrame, VideoFrameReader,
-    VideoFrameReaders, VideoOutput,
+    EncodedImage, MediaChangeFuture, MediaError, MediaMetadata, MediaPlayer, MediaTrack,
+    MediaTrackKind, MovieOptions, MovieOutput, Photo, PhotoFuture, PhotoOutput, PlayerState,
+    PlayerStatus, Players, RecordingFuture, VideoFrame, VideoFrameReader, VideoFrameReaders,
+    VideoOutput,
 };
 pub use menus::{
     AttachedMenu, CheckState, DockMenu, EditCommand, IconImage, MenuAtIcon, MenuBar, MenuEntry,

@@ -6,21 +6,28 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    CompositionLayer, MediaChangeFuture, MediaPlayer, PlayerState, Size, VideoOutput,
+    CompositionLayer, Cue, MediaChangeFuture, MediaMetadata, MediaPlayer, PlayerState, Size,
+    VideoOutput,
 };
-use inset_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle};
+use inset_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Listenable};
 
-use super::{CompositionLayerPicture, PictureSource};
+use super::{CompositionLayerPicture, PictureSource, SubtitleView};
 use crate::framework::{BuildContext, IntoWidget, KeyRef, StatelessWidget, WidgetRef};
+use crate::widgets::transitions::ListenableBuilder;
 
 /// A player of the media at one URL, which loads by itself: the host's player, whose listeners
-/// hear its state change. A URL the system cannot play gives a player whose state is a failure.
+/// hear its state, its metadata or its cues change. A URL the system cannot play gives a player
+/// whose state is a failure.
 pub struct Player {
     change_notifier: ChangeNotifierData,
     /// The host's player, until [`dispose`](Player::dispose).
     host: Option<Rc<dyn MediaPlayer>>,
     /// The host's state when it last changed.
     state: PlayerState,
+    /// The host's metadata when it last changed.
+    metadata: MediaMetadata,
+    /// The host's cues when they last changed.
+    cues: Vec<Cue>,
     /// Where the video was sent last, which a [`PlayerView`] sends it nowhere from only while
     /// it is still the view's own layer.
     video_output: Option<VideoOutput>,
@@ -36,6 +43,8 @@ impl Player {
         let player = app.create(Player {
             change_notifier: ChangeNotifierData::new(),
             state: host.state(),
+            metadata: host.metadata(),
+            cues: host.cues(),
             host: Some(host),
             video_output: None,
         });
@@ -46,6 +55,18 @@ impl Player {
     /// The player's state when it last changed.
     pub fn state(self: Handle<Self>, app: &App) -> &PlayerState {
         &app.get(self).state
+    }
+
+    /// What the media's tags say about it, when that last changed: Media3's `getMediaMetadata`.
+    pub fn metadata(self: Handle<Self>, app: &App) -> &MediaMetadata {
+        &app.get(self).metadata
+    }
+
+    /// The cues to show now, with the user's caption settings merged in: Media3's
+    /// `getCurrentCues`. A [`PlayerView`] draws them over the video; an app that draws the
+    /// frames itself puts a `SubtitleView` of them over its video.
+    pub fn cues(self: Handle<Self>, app: &App) -> &[Cue] {
+        &app.get(self).cues
     }
 
     pub fn play(self: Handle<Self>, app: &App) {
@@ -74,6 +95,16 @@ impl Player {
     /// Whether it starts again from the beginning when it reaches the end.
     pub fn set_looping(self: Handle<Self>, app: &App, looping: bool) {
         self.host(app).set_looping(looping);
+    }
+
+    /// Plays the audio track `id`, one of the state's `tracks`, in place of the one playing.
+    pub fn select_audio_track(self: Handle<Self>, app: &App, id: &str) {
+        self.host(app).select_audio_track(id);
+    }
+
+    /// Shows the text track `id`, one of the state's `tracks`, or none: subtitles off.
+    pub fn select_text_track(self: Handle<Self>, app: &App, id: Option<&str>) {
+        self.host(app).select_text_track(id);
     }
 
     /// Sends the video to `output` from now on, and nowhere it went before; `None` sends it
@@ -121,15 +152,19 @@ impl Player {
         });
     }
 
-    /// Takes the host's state, telling the listeners if it changed; answers the future of the
-    /// host's next change, asked before the state is read so that no change goes unheard, or
-    /// `None` once the player is disposed.
+    /// Takes the host's state, metadata and cues, telling the listeners if any changed; answers
+    /// the future of the host's next change, asked before they are read so that no change goes
+    /// unheard, or `None` once the player is disposed.
     fn take_host_state(self: Handle<Self>, app: &mut App) -> Option<MediaChangeFuture> {
         let host = app.get(self).host.clone()?;
         let next = host.changed();
-        let state = host.state();
-        if state != app.get(self).state {
-            app.get_mut(self).state = state;
+        let (state, metadata, cues) = (host.state(), host.metadata(), host.cues());
+        let player = app.get_mut(self);
+        let changed = state != player.state || metadata != player.metadata || cues != player.cues;
+        if changed {
+            player.state = state;
+            player.metadata = metadata;
+            player.cues = cues;
             self.notify_listeners(app);
         }
         Some(next)
@@ -175,7 +210,8 @@ impl PictureSource for Player {
 /// the constraints let it be at that aspect; no room until the size is known. It shows the player
 /// on a composition layer of its own, which the system draws the video into: the cheapest way, and
 /// the only one protected and HDR video show in. The player shows on the view built for it last.
-/// For a video the framework draws, under effects a layer cannot take, see `VideoFrameView`.
+/// Over the video a [`SubtitleView`] draws the player's cues. For a video the framework draws,
+/// under effects a layer cannot take, see `VideoFrameView`.
 #[derive(Clone)]
 pub struct PlayerView {
     pub key: Option<KeyRef>,
@@ -207,9 +243,20 @@ impl StatelessWidget for PlayerView {
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
         CompositionLayerPicture {
             source: self.player,
+            overlay: Some(subtitles_of(self.player)),
         }
         .into_widget()
     }
+}
+
+/// A [`SubtitleView`] of `player`'s cues, built again each time they change: Media3's
+/// `PlayerView` setting its subtitle view's cues at each `onCues`.
+fn subtitles_of(player: Handle<Player>) -> WidgetRef {
+    let listenable: Rc<dyn Listenable> = Rc::new(player);
+    ListenableBuilder::new(listenable, move |app, _, _| {
+        SubtitleView::new(Player::cues(player, app).to_vec()).into_widget()
+    })
+    .into_widget()
 }
 
 #[cfg(test)]
@@ -217,7 +264,10 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use inset_embedder::{PickedFile, PlayerStatus, TargetPlatform};
+    use inset_embedder::{
+        CueContent, CueTextRun, EncodedImage, MediaTrack, MediaTrackKind, PickedFile, PlayerStatus,
+        TargetPlatform,
+    };
     use inset_foundation::AppCell;
     use inset_test::{
         MockCompositor, MockPlayers, MockVideoFrameReaders, PlayerCall, TestPlatform, TestView,
@@ -305,6 +355,105 @@ mod tests {
             1,
             "a disposed player's listeners hear nothing more"
         );
+    }
+
+    #[test]
+    fn a_player_hears_its_tracks_metadata_and_cues_and_asks_its_host_to_select_tracks() {
+        let players = MockPlayers::new();
+        let cell = app_with(
+            &players,
+            &MockCompositor::new(),
+            &Rc::new(TestView::new(800.0, 600.0)),
+        );
+        let player = Player::new(&mut cell.borrow_mut(), "https://example.com/a.m3u8").unwrap();
+        let host = &players.opened()[0];
+        let heard = Rc::new(std::cell::Cell::new(0));
+        {
+            let heard = Rc::clone(&heard);
+            let listenable: Rc<dyn inset_foundation::Listenable> = Rc::new(player);
+            listenable.add_listener(
+                &mut cell.borrow_mut(),
+                inset_foundation::Listener::new(move |_app| heard.set(heard.get() + 1)),
+            );
+        }
+
+        let english = MediaTrack {
+            id: "legible:0".to_owned(),
+            kind: MediaTrackKind::Text,
+            language: "en".to_owned(),
+            label: "English".to_owned(),
+            selected: false,
+        };
+        host.set_state(PlayerState {
+            tracks: vec![english.clone()],
+            ..ready(Size::new(640.0, 360.0))
+        });
+        cell.checkpoint();
+        assert_eq!(player.state(&cell.borrow()).tracks, vec![english]);
+
+        player.select_text_track(&cell.borrow(), Some("legible:0"));
+        player.select_audio_track(&cell.borrow(), "audible:1");
+        assert_eq!(
+            host.calls(),
+            vec![
+                PlayerCall::SelectTextTrack(Some("legible:0".to_owned())),
+                PlayerCall::SelectAudioTrack("audible:1".to_owned()),
+            ]
+        );
+
+        let metadata = MediaMetadata {
+            title: Some("Bip Bop".to_owned()),
+            artwork: Some(EncodedImage {
+                mime_type: "image/png".to_owned(),
+                data: Arc::from([0x89, b'P', b'N', b'G'].as_slice()),
+            }),
+            ..MediaMetadata::default()
+        };
+        host.set_metadata(metadata.clone());
+        cell.checkpoint();
+        assert_eq!(player.metadata(&cell.borrow()), &metadata);
+
+        let cues = vec![Cue::new(CueContent::Text(vec![CueTextRun::new("Hello")]))];
+        host.set_cues(cues.clone());
+        cell.checkpoint();
+        assert_eq!(player.cues(&cell.borrow()), cues.as_slice());
+        assert_eq!(heard.get(), 3, "each change heard once");
+    }
+
+    #[test]
+    fn a_player_view_draws_its_players_cues_over_the_video() {
+        let players = MockPlayers::new();
+        let view = Rc::new(TestView::new(800.0, 600.0));
+        let platform = TestPlatform::new()
+            .on(TargetPlatform::MacOS)
+            .with_view(Rc::clone(&view) as inset_embedder::ViewRef)
+            .with_players(Rc::new(players.clone()))
+            .with_compositor(Arc::new(MockCompositor::new()))
+            .with_font_source(|| Box::new(inset_embedder::SystemFontSource::platform()));
+        let cell = AppCell::with_platform(Rc::new(platform));
+        {
+            let mut app = cell.borrow_mut();
+            inset_painting::PaintingBinding::instance(&mut app).install_platform_fonts(&mut app);
+        }
+        let player = Player::new(&mut cell.borrow_mut(), "https://example.com/a.mp4").unwrap();
+        let host = &players.opened()[0];
+        mount(&cell, PlayerView::new(player).into_widget());
+        host.set_state(ready(Size::new(320.0, 180.0)));
+        cell.checkpoint();
+        pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(16));
+        assert!(glyph_runs(&view).is_empty(), "no cues, no text");
+
+        host.set_cues(vec![Cue::new(CueContent::Text(vec![CueTextRun::new(
+            "Hello",
+        )]))]);
+        cell.checkpoint();
+        pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(32));
+        assert!(!glyph_runs(&view).is_empty(), "the cue's text is drawn");
+
+        host.set_cues(Vec::new());
+        cell.checkpoint();
+        pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(48));
+        assert!(glyph_runs(&view).is_empty(), "a cue gone is drawn no more");
     }
 
     #[test]
@@ -435,6 +584,15 @@ mod tests {
         run_app(&mut cell.borrow_mut(), widget);
         cell.elapse(Duration::ZERO);
         pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
+    }
+
+    /// The glyph runs `view`'s last scene draws.
+    fn glyph_runs(view: &TestView) -> Vec<inset_embedder::valo::Op> {
+        let scene = view.last_scene().expect("a frame was presented");
+        inset_embedder::flattened_ops(&inset_embedder::slices(&scene, |_| None).picture_with_room())
+            .into_iter()
+            .filter(|op| matches!(op, inset_embedder::valo::Op::GlyphRun { .. }))
+            .collect()
     }
 
     /// The composition layers `view`'s last scene places, with their placements.

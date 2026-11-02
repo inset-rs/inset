@@ -16,22 +16,29 @@
 //! it is mounted, and nowhere as it is unmounted. The invariant: a player or a session shows on
 //! the layer of the view built last for it, a view puts nowhere only the picture still on its own
 //! layer, and a view laid out before its picture's size is known takes no room.
+//!
+//! The system draws no subtitles: a player hands its cues to the app, and a [`SubtitleView`],
+//! Media3's, draws them over the picture's rectangle, as `PlayerView` puts one over its video.
 
 mod camera;
 mod player;
+mod subtitle_painter;
+mod subtitle_view;
 
 use std::sync::Arc;
 
 use inset_embedder::{CompositionLayer, Size};
 use inset_foundation::{App, Handle, ListenableObject};
+use inset_painting::AlignmentGeometry;
 use inset_rendering::BoxConstraints;
 
 use crate::framework::{BuildContext, IntoWidget, State, StateData, StatefulWidget, WidgetRef};
-use crate::widgets::basic::{AspectRatio, ConstrainedBox, SizedBox};
+use crate::widgets::basic::{AspectRatio, ConstrainedBox, Positioned, SizedBox, Stack};
 use crate::widgets::composition_layer_view::CompositionLayerView;
 
 pub use camera::{CameraPreview, CameraSession, available_cameras};
 pub use player::{Player, PlayerView};
+pub use subtitle_view::SubtitleView;
 
 /// What puts its picture on a composition layer it is given: a player or a camera session.
 trait PictureSource: ListenableObject {
@@ -46,9 +53,11 @@ trait PictureSource: ListenableObject {
 }
 
 /// `source`'s picture on a composition layer of the widget's own, laid out at the picture's size
-/// in logical pixels, as large as the constraints let it be at that aspect.
+/// in logical pixels, as large as the constraints let it be at that aspect, with `overlay` over
+/// the picture's rectangle, as Media3's content frame holds its subtitle view over the surface.
 struct CompositionLayerPicture<S: PictureSource> {
     source: Handle<S>,
+    overlay: Option<WidgetRef>,
 }
 
 impl<S: PictureSource> std::fmt::Debug for CompositionLayerPicture<S> {
@@ -146,16 +155,27 @@ impl<S: PictureSource> State for CompositionLayerPictureState<S> {
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         let source = self.widget(app).source;
-        let size = S::picture_size(source, app);
-        let layer = app.get(self).layer.clone();
-        match (size, layer) {
-            (Some(size), Some(layer)) => {
-                at_size(size, CompositionLayerView::new(layer).into_widget())
-            }
-            (Some(size), None) => at_size(size, SizedBox::expand().into_widget()),
-            (None, _) => SizedBox::shrink().into_widget(),
-        }
+        let Some(size) = S::picture_size(source, app) else {
+            return SizedBox::shrink().into_widget();
+        };
+        let picture = match app.get(self).layer.clone() {
+            Some(layer) => CompositionLayerView::new(layer).into_widget(),
+            None => SizedBox::expand().into_widget(),
+        };
+        let overlay = self.widget(app).overlay.clone();
+        at_size(size, with_overlay(picture, overlay))
     }
+}
+
+/// `picture` with `overlay`, if any, filling its rectangle above it.
+fn with_overlay(picture: WidgetRef, overlay: Option<WidgetRef>) -> WidgetRef {
+    let Some(overlay) = overlay else {
+        return picture;
+    };
+    Stack::new()
+        .alignment(AlignmentGeometry::TOP_LEFT)
+        .children([picture, Positioned::fill(overlay).into_widget()])
+        .into_widget()
 }
 
 /// `child` at `size`, or as large as the constraints let it be at that aspect.

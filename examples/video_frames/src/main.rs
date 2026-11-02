@@ -1,13 +1,17 @@
 //! A video player whose frames the framework draws: the app makes a frame reader and gives it to a
 //! player, and a `VideoFrameView` draws the reader's frame at each refresh as part of the picture,
-//! at the video's aspect, its corners cut round and turned if asked, like anything painted. A
-//! click plays or pauses it, and a line under it says how far it is and what size its frames are.
+//! at the video's aspect, its corners cut round and turned if asked, like anything painted, with a
+//! `SubtitleView` of the player's cues over it. A click plays or pauses it, and a line under it
+//! says how far it is and what size its frames are. The player's tracks are printed each time
+//! they change.
 //!
 //! Without an argument it plays Apple's HLS example stream, 1080p at 60 frames a second with a
-//! running clock in the picture; `--url` plays another link, `--movie` a file.
+//! running clock in the picture and subtitle tracks; `--url` plays another link, `--movie` a file,
+//! and `--subtitles` shows the first text track in a language, such as `en`.
 //!
 //! ```sh
 //! cargo run -p video_frames
+//! cargo run -p video_frames -- --subtitles en
 //! cargo run -p video_frames -- --turn 8 --rounded 32
 //! cargo run -p video_frames -- --movie ~/Movies/clip.mov
 //! ```
@@ -28,6 +32,7 @@ fn main() {
         url: source_url(),
         turn_degrees: number_after("--turn", 0.0),
         corner_radius: number_after("--rounded", 16.0),
+        subtitles: argument_after("--subtitles"),
     });
 }
 

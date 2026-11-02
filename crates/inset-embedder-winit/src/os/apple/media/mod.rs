@@ -1,6 +1,7 @@
 //! Players and cameras on macOS and iOS: AVFoundation, the system's own media stack. A player is
-//! an `AVPlayer` (`player`), a camera session an `AVCaptureSession` (`camera`) with its photo and
-//! movie outputs (`outputs`); a picture goes to a composition layer as a layer the system draws
+//! an `AVPlayer` (`player`) with its media's tracks (`tracks`), tags (`metadata`) and subtitles as
+//! cues (`cues`, `cue_markup`), a camera session an `AVCaptureSession` (`camera`) with its photo
+//! and movie outputs (`outputs`); a picture goes to a composition layer as a layer the system draws
 //! into, shown as its content so that Core Animation clips and scales it with it
 //! (`apple/composition`), or to a frame reader the app made, as `IOSurface`-backed pixel buffers
 //! (`frames`).
@@ -16,11 +17,15 @@
 #![allow(unsafe_code)]
 
 mod camera;
+mod cue_markup;
+mod cues;
 mod frame_images;
 mod frames;
+mod metadata;
 mod observing;
 mod outputs;
 mod player;
+mod tracks;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::process;
@@ -50,6 +55,13 @@ pub(crate) fn cameras() -> Option<Rc<dyn Cameras>> {
 /// The readers AVFoundation's players and cameras feed.
 pub(crate) fn video_frame_readers() -> Option<Rc<dyn VideoFrameReaders>> {
     Some(Rc::new(AvFrameReaders))
+}
+
+/// A CF string as the NSString it is toll-free bridged to.
+fn as_ns_string(string: &objc2_core_foundation::CFString) -> &objc2_foundation::NSString {
+    let pointer: *const objc2_core_foundation::CFString = string;
+    // SAFETY: a CFString is an NSString.
+    unsafe { &*pointer.cast::<objc2_foundation::NSString>() }
 }
 
 /// Runs `body`, the body of a method AVFoundation calls, and aborts the process if it panics,

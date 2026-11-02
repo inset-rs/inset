@@ -1,8 +1,10 @@
 //! A player: AVFoundation's `AVPlayer` over one `AVPlayerItem`, controlled on the main thread,
 //! whose state is read from them when asked and whose changes AVFoundation tells by key-value
-//! observing, a periodic time observer and its end-of-item notification. Its picture goes either to
-//! an `AVPlayerLayer` shown as a composition layer's content, or to an `AVPlayerItemVideoOutput`
-//! added to its item, which the reader it was given reads.
+//! observing, a periodic time observer, its end-of-item and media selection notifications, and the
+//! loading of its tracks, tags and subtitles. Its picture goes either to an `AVPlayerLayer` shown
+//! as a composition layer's content, or to an `AVPlayerItemVideoOutput` added to its item, which
+//! the reader it was given reads; its subtitles go to a legible output added to its item, which
+//! hands them over as cues.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -11,8 +13,8 @@ use std::time::Duration;
 
 use block2::RcBlock;
 use inset_embedder::{
-    CompositionLayer, MediaChangeFuture, MediaPlayer, PlayerState, PlayerStatus, Players, Size,
-    VideoFrameReader, VideoOutput,
+    CompositionLayer, Cue, MediaChangeFuture, MediaMetadata, MediaPlayer, PlayerState,
+    PlayerStatus, Players, Size, VideoFrameReader, VideoOutput,
 };
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -20,16 +22,20 @@ use objc2::runtime::AnyObject;
 use objc2_av_foundation::{
     AVLayerVideoGravityResizeAspect, AVPlayer, AVPlayerActionAtItemEnd, AVPlayerItem,
     AVPlayerItemDidPlayToEndTimeNotification, AVPlayerItemFailedToPlayToEndTimeNotification,
-    AVPlayerItemStatus, AVPlayerLayer, AVPlayerTimeControlStatus,
+    AVPlayerItemMediaSelectionDidChangeNotification, AVPlayerItemStatus, AVPlayerLayer,
+    AVPlayerTimeControlStatus, AVURLAsset,
 };
 use objc2_core_media::{CMTime, CMTimeFlags, kCMTimeZero};
 use objc2_foundation::{NSString, NSURL};
 
+use super::cues::LegibleCues;
 use super::frames::{
     AvFrameReader, FrameOutput, PlayerFrames, report_foreign_reader, report_reader_in_use,
 };
+use super::metadata::AssetMetadata;
 use super::observing::{NotificationObservation, PropertyObservation};
 use super::show_system_layer;
+use super::tracks::MediaTracks;
 use crate::media::Changes;
 
 /// How often a playing player tells its position: every half second, as Flutter's
@@ -78,8 +84,13 @@ struct AvMediaPlayer {
     end: Rc<End>,
     /// Where the picture goes now.
     destination: RefCell<Destination>,
+    tracks: MediaTracks,
+    metadata: AssetMetadata,
+    /// The subtitles, which its item's legible output hands over.
+    cues: LegibleCues,
     _properties: [PropertyObservation; 2],
     _notifications: NotificationObservation,
+    _selection_changes: NotificationObservation,
     /// The periodic time observer's token, which `Drop` removes.
     time_observer: Retained<AnyObject>,
 }
@@ -108,9 +119,14 @@ enum Destination {
 
 impl AvMediaPlayer {
     fn new(main_thread: MainThreadMarker, url: &NSURL) -> AvMediaPlayer {
-        // SAFETY: a player item and a player of it, made on the main thread.
-        let item = unsafe { AVPlayerItem::playerItemWithURL(url, main_thread) };
-        let player = unsafe { AVPlayer::playerWithPlayerItem(Some(&item), main_thread) };
+        // SAFETY: an asset of the URL, and a player item of it and a player of that, made on the
+        // main thread.
+        let (asset, item, player) = unsafe {
+            let asset = AVURLAsset::URLAssetWithURL_options(url, None);
+            let item = AVPlayerItem::playerItemWithAsset(&asset, main_thread);
+            let player = AVPlayer::playerWithPlayerItem(Some(&item), main_thread);
+            (asset, item, player)
+        };
         let changes = Changes::default();
         let end = Rc::new(End {
             looping: Cell::new(false),
@@ -119,14 +135,21 @@ impl AvMediaPlayer {
         let properties = [
             PropertyObservation::new(
                 &item,
-                &["status", "duration", "presentationSize"],
+                &["status", "duration", "presentationSize", "tracks"],
                 changes.clone(),
             ),
             PropertyObservation::new(&player, &["timeControlStatus", "rate"], changes.clone()),
         ];
         let notifications = observe_end(&player, &item, Rc::clone(&end), changes.clone());
+        let selection_changes = observe_selection(&item, changes.clone());
         let time_observer = observe_time(&player, changes.clone());
+        let cues = LegibleCues::new(changes.clone());
+        // SAFETY: adding an output to the item on the main thread.
+        unsafe { item.addOutput(cues.output()) };
         AvMediaPlayer {
+            tracks: MediaTracks::load(&asset, &changes),
+            metadata: AssetMetadata::load(&asset, changes.clone()),
+            cues,
             player,
             item,
             changes,
@@ -135,6 +158,7 @@ impl AvMediaPlayer {
             destination: RefCell::new(Destination::Nowhere),
             _properties: properties,
             _notifications: notifications,
+            _selection_changes: selection_changes,
             time_observer,
         }
     }
@@ -278,6 +302,7 @@ impl MediaPlayer for AvMediaPlayer {
             duration: duration_of(duration),
             size: (size.width > 0.0 && size.height > 0.0)
                 .then(|| Size::new(size.width, size.height)),
+            tracks: self.tracks.tracks(&self.item),
             ended,
         }
     }
@@ -294,6 +319,26 @@ impl MediaPlayer for AvMediaPlayer {
             Some(VideoOutput::Frames(reader)) => self.feed(reader),
         };
         *self.destination.borrow_mut() = destination;
+    }
+
+    fn select_audio_track(&self, id: &str) {
+        self.tracks.select_audio(&self.item, id);
+        self.changes.notify();
+    }
+
+    /// The cues of the text track shown before go with it.
+    fn select_text_track(&self, id: Option<&str>) {
+        self.tracks.select_text(&self.item, id);
+        self.cues.clear();
+        self.changes.notify();
+    }
+
+    fn metadata(&self) -> MediaMetadata {
+        self.metadata.get()
+    }
+
+    fn cues(&self) -> Vec<Cue> {
+        self.cues.cues()
     }
 }
 
@@ -337,6 +382,13 @@ fn observe_end(
         }
         changes.notify();
     })
+}
+
+/// Tells `changes` whenever a media selection group of `item` changes its selected option.
+fn observe_selection(item: &AVPlayerItem, changes: Changes) -> NotificationObservation {
+    // SAFETY: a constant AVFoundation exports for the life of the process.
+    let changed = unsafe { AVPlayerItemMediaSelectionDidChangeNotification };
+    NotificationObservation::new(item, &[changed], move |_notification| changes.notify())
 }
 
 /// Tells `changes` every half second while `player` plays, and whenever its time jumps, it
@@ -398,6 +450,18 @@ impl MediaPlayer for FailedPlayer {
     }
 
     fn set_video_output(&self, _output: Option<VideoOutput>) {}
+
+    fn select_audio_track(&self, _id: &str) {}
+
+    fn select_text_track(&self, _id: Option<&str>) {}
+
+    fn metadata(&self) -> MediaMetadata {
+        MediaMetadata::default()
+    }
+
+    fn cues(&self) -> Vec<Cue> {
+        Vec::new()
+    }
 }
 
 impl Drop for FailedPlayer {

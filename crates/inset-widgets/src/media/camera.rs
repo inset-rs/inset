@@ -221,6 +221,7 @@ impl StatelessWidget for CameraPreview {
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
         CompositionLayerPicture {
             source: self.session,
+            overlay: None,
         }
         .into_widget()
     }

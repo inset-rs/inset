@@ -138,6 +138,20 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the picture is drawn by the system into a layer that is the composition layer's content, which no frame of the framework's touches.
   Affect: a player or a session shows on the view built for it last and nowhere once its views are gone, and nothing shows where the host has no compositor.
 
+- Change: a `Player` lists its media's tracks in its state, selects an audio track and a text track or none, and tells the media's metadata and the cues to show now, and a `PlayerView` draws those cues over the video with a `SubtitleView`, as Media3's `PlayerView` does, where Flutter's `VideoPlayer` shows no subtitles and an app puts a `ClosedCaption` of a caption file it parsed over it.
+  Reason: platform — the system draws no subtitles: the host's player hands out the cues of the media's own text tracks, with the user's caption settings merged in.
+  Affect: a `PlayerView` shows the subtitles of the text track selected, in the user's caption style, with no code of the app's, and an app that draws the frames itself puts a `SubtitleView` of `Player::cues` over its video.
+
+## media/subtitle_view.rs, media/subtitle_painter.rs → Media3's `SubtitleView`, `CanvasSubtitleOutput` and `SubtitlePainter` (androidx/media at 8c6678b, Apache 2.0)
+
+- Change: `SubtitleView` draws cues whose runs each carry their colour, background, size, font, edge and edge colour, and whose window colour is the cue's own, where Media3's applies one `CaptionStyleCompat` and a default text size to every cue, and can drop the cues' embedded styles and sizes.
+  Reason: platform — the host merges the user's caption settings into each cue, as Apple's legible output does at its default styling, so the view has no style of its own to apply.
+  Affect: an app sets no caption style or text size on the view, the runs of one cue can have different edges, and the space each side of a cue's lines follows its largest text.
+
+- Change: a run's background and an outline edge are set on its paragraph's text style as Media3 sets its spans, a background and a stroked foreground, and do not show.
+  Reason: platform — Inset's paragraphs draw no background or stroked foreground, since valo's spans carry neither.
+  Affect: subtitles show no colour behind their characters and no outline round them; a drop shadow, a raised or depressed edge and the window behind the cue show.
+
 ## widgets/banner.rs → banner.dart
 
 - Change: `BannerPainter` answers no `repaint` listenable, where Dart repaints on `PaintingBinding.systemFonts`.
@@ -586,6 +600,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 
 ## Deferred
 
+- media/subtitle_painter.rs: Media3's `BidiUtils` wrapping of each right-to-left line of a cue before it is laid out. Trigger: the first right-to-left subtitles.
 - image.rs: `Image.network` and `Image.file`. Trigger: an HTTP client; a file system.
 - image.rs: `Image.asset`'s bundle lookup, and the bundle `createLocalImageConfiguration` would carry, without which `AssetImage` cannot resolve from a widget. Trigger: `DefaultAssetBundle`.
 - image.rs: the frame, loading and error builders, and `gaplessPlayback`. Trigger: a caller that wants to show something while an image loads or after it fails.

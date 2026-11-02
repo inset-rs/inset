@@ -367,6 +367,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — protected and HDR video show only where the system draws them itself, Windows' and Android's decoders feed one output, and an app makes the reader itself as it makes Android's `ImageReader` or Apple's `AVPlayerItemVideoOutput`.
   Affect: a player shown on a layer has no frames to read, one sent to a reader shows on no layer, and a reader given to a second source reads that one alone.
 
+- Change: a player lists its media's tracks in its state, plays the audio track and shows the text track the app selects, tells the media's tags as `MediaMetadata`, and hands out the `Cue`s of its text track, Media3's `Cue` with the user's caption settings merged in, for the app to draw, where the `video_player` plugin has no tracks or tags and reads captions only from a file the app supplies.
+  Reason: platform — every system's player lists tracks and selects one audio and one text track or none, and gives the subtitles it would draw as data with their styling and place, the user's caption settings applied by Apple's legible output at its default styling.
+  Affect: an app shows the media's own subtitles in the user's caption style, and knows a media without a video track has no picture.
+
 - Change: a camera's photos are answered encoded by the system, as bytes and their MIME type, and its recordings written by the system to a path the app gives, where the `camera` plugin answers an `XFile` in a folder of its own.
   Reason: platform — the system encodes and writes them, and an app chooses where its files go.
   Affect: a photo arrives as JPEG bytes, and a recording is a QuickTime movie at the app's path.

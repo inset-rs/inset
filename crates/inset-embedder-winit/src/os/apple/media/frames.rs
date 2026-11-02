@@ -31,7 +31,7 @@ use objc2_core_video::{
 };
 use objc2_foundation::{NSDictionary, NSNumber, NSString};
 
-use super::abort_on_panic;
+use super::{abort_on_panic, as_ns_string};
 use crate::os::apple::media_time::media_time_of;
 
 /// The readers AVFoundation's players and cameras feed.
@@ -280,13 +280,6 @@ pub(super) fn pixel_buffer_attributes() -> Retained<NSDictionary<NSString, AnyOb
             metal.as_ref(),
         ],
     )
-}
-
-/// A CF string as the NSString it is toll-free bridged to.
-fn as_ns_string(string: &objc2_core_foundation::CFString) -> &NSString {
-    let pointer: *const objc2_core_foundation::CFString = string;
-    // SAFETY: a CFString is an NSString.
-    unsafe { &*pointer.cast::<NSString>() }
 }
 
 /// A pixel buffer AVFoundation answered retained, as the CF type the app is handed.

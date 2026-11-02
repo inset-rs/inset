@@ -172,6 +172,14 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Core Animation clips and scales a layer with the one it is the content of, and a pixel buffer backed by an `IOSurface` reaches the GPU with no copy.
   Affect: a video moves, clips and shrinks with the framework's frame, and a frame reader hands out the frame for the moment the picture reaches the screen, keeping none for later.
 
+- Change: a player's audio and text tracks are the options of its asset's audible and legible media selection groups, selected with the item's `selectMediaOption:inMediaSelectionGroup:`, and media without such a group, such as an MP3, lists that kind from its item's tracks, enabling the one selected, beside the item's video tracks, where Flutter's plugin lists no tracks.
+  Reason: platform — AVFoundation offers a choice of audio and subtitles through selection groups, and plays the tracks outside any group while they are enabled.
+  Affect: a stream lists its renditions under ids that stay for the player's run, a file lists its own tracks, and a stream's video track is listed again under a new id each time it switches variant.
+
+- Change: a player's tags are its asset's common metadata, read once AVFoundation has loaded them, its artwork named by the image format its bytes start with, and its subtitles come from an `AVPlayerItemLegibleOutput` that keeps AVPlayer from drawing them, its attributed strings and their Core Media markup made into cues, where Flutter's plugin reads neither.
+  Reason: platform — Apple's legible output gives every subtitle AVPlayer would draw, styled at its default resolution with the user's caption settings, as text with markup.
+  Affect: the app draws subtitles in the user's caption style, placed where Core Media places them, with black edges as WebKit draws Apple's, and the cues go at a seek or a change of text track until the next arrive.
+
 - Change: a frame reader is made empty and reads the output of the source it was given to last, a player item's video output or a capture session's video data output, which that source makes and adds when it is given the reader.
   Reason: platform — AVFoundation has no one output that a player and a camera both feed, as Android's `ImageReader` is fed by a decoder and a camera alike.
   Affect: one reader serves a player or a camera, it reads nothing until it is given to one, and a reader the host did not make reads nothing, which the host says once.
