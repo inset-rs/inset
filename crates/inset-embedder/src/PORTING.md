@@ -221,10 +221,14 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the layer lies beneath the window's picture, so only the picture can blend it with what was painted under it.
   Affect: a layer under an opacity fades into what was painted beneath it, not into what lies behind the window.
 
+- Change: `SceneBuilder::add_video` puts a video's `VideoFrameReader` itself in the scene, where Flutter's `addTexture` puts the id of a texture in the engine's registry; `slices` takes the image of each reader's frame from the host as it draws, as flow's `TextureLayer` paints from the registry its context carries.
+  Reason: platform — the framework, the host and the reader share one process, so the reader needs no registry, and a frame taken only when the host draws holds a decoder's buffer no longer than it is on screen.
+  Affect: the framework never holds a frame; a host without video passes no images, and the video draws nothing there.
+
 ## Deferred
 
 - A backdrop filter over a composition layer, which shows the layer unfiltered. Trigger: an app that needs glass over a video.
-- `SceneBuilder`'s `addTexture` and its shader-mask, colour-filter and image-filter pushes. Trigger: the framework layers that call them.
+- `SceneBuilder`'s shader-mask, colour-filter and image-filter pushes. Trigger: the framework layers that call them.
 - Decoding at any size but the file's own, which in Dart is `instantiateImageCodec`'s target width and height and the `getTargetSize` callback of `instantiateImageCodecWithSize`. Trigger: `ResizeImage`, which is what the image widget's `cacheWidth` and `cacheHeight` become.
 - Reading an image's pixels back (`Image.toByteData`). Trigger: golden tests.
 - The colour space an image carries beyond sRGB, so a photograph in a wider one is drawn as though it were sRGB. Trigger: a display that shows more colours than sRGB.

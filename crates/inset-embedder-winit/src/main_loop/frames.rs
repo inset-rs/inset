@@ -65,12 +65,24 @@ impl<C: EmbedderClient> MainLoop<C> {
     /// A vsync of `screen`: the waits on it are served, then one refresh of the views on it whose
     /// frames are due, unless none is, and the scenes their surfaces timed out on.
     pub(super) fn on_vsync(&mut self, screen: ScreenId) {
+        self.tell_display_time(screen);
         let refresh = self.frame_scheduler.on_vsync(screen);
         serve_waits(&refresh.waiting, Instant::now());
         if !refresh.views.is_empty() {
             self.draw_frame(&refresh.views);
         }
-        self.retry_owed_scenes(screen);
+        self.redraw_without_the_framework(screen);
+    }
+
+    /// Tells the views on `screen` when the picture they draw at this vsync reaches the screen,
+    /// the moment their videos' frames are asked for.
+    fn tell_display_time(&mut self, screen: ScreenId) {
+        let display_time = self.frame_scheduler.display_time(screen);
+        for view_id in self.frame_scheduler.views_on(screen) {
+            if let Some(view) = self.views().get(view_id) {
+                view.set_display_time(display_time);
+            }
+        }
     }
 
     /// The frame of `view` a resize draws before it returns, presented through the window's own
@@ -89,13 +101,14 @@ impl<C: EmbedderClient> MainLoop<C> {
         };
         self.client.frame(views, frame);
         for &view in views {
-            self.request_vsync_if_owed(view);
+            self.request_vsync_if_wanted(view);
         }
     }
 
-    /// Draws again the scenes the surfaces of the views on `screen` timed out on, and asks for
-    /// the next vsync while a view still owes one.
-    fn retry_owed_scenes(&mut self, screen: ScreenId) {
+    /// Draws again, without the framework, the views on `screen` whose surfaces timed out on
+    /// their scene and those in sight whose videos have new frames, and asks for the next vsync
+    /// while a view still wants one.
+    fn redraw_without_the_framework(&mut self, screen: ScreenId) {
         for view_id in self.frame_scheduler.views_on(screen) {
             let Some(view) = self.views().get(view_id) else {
                 continue;
@@ -103,24 +116,30 @@ impl<C: EmbedderClient> MainLoop<C> {
             if view.retries_at_vsync() {
                 view.retry_owed_scene();
             }
-            self.request_vsync_if_owed(view_id);
+            if view.shows_video() && self.frame_scheduler.is_in_sight(view_id) {
+                view.draw_new_video_frames();
+            }
+            self.request_vsync_if_wanted(view_id);
         }
     }
 
-    /// Asks for a vsync of the screen `view`'s window is on while the view owes its surface a
-    /// scene it draws again then.
-    pub(super) fn request_vsync_if_owed(&mut self, view: ViewId) {
+    /// Asks for a vsync of the screen `view`'s window is on while the view draws something then
+    /// without the framework: a scene its surface timed out on, or, while it is in sight, a
+    /// video's next frame.
+    pub(super) fn request_vsync_if_wanted(&mut self, view_id: ViewId) {
+        let in_sight = self.frame_scheduler.is_in_sight(view_id);
         if self
             .views()
-            .get(view)
-            .is_some_and(|view| view.retries_at_vsync())
+            .get(view_id)
+            .is_some_and(|view| view.retries_at_vsync() || (view.shows_video() && in_sight))
         {
-            self.frame_scheduler.request_vsync(view);
+            self.frame_scheduler.request_vsync(view_id);
         }
     }
 
     /// Tells the frame scheduler which screen `view`'s window is on now and whether it is in
-    /// sight, at each event that can change either; a view without a window takes no vsyncs.
+    /// sight, at each event that can change either; a view without a window takes no vsyncs, and
+    /// one that comes into sight takes its videos' frames again.
     pub(super) fn sync_frame_scheduler(&mut self, view: ViewId) {
         match self.views().by_view(view) {
             Some(open) => {
@@ -130,6 +149,7 @@ impl<C: EmbedderClient> MainLoop<C> {
             }
             None => self.frame_scheduler.follow_window(view, None, false),
         }
+        self.request_vsync_if_wanted(view);
     }
 }
 

@@ -721,8 +721,9 @@ mod tests {
             .debug_layer(&app)
             .expect("painted")
             .build_scene(&mut app, SceneBuilder::new());
-        let ops =
-            inset_embedder::flattened_ops(&inset_embedder::slices(&scene).picture_with_room());
+        let ops = inset_embedder::flattened_ops(
+            &inset_embedder::slices(&scene, |_| None).picture_with_room(),
+        );
         assert!(
             ops.iter()
                 .any(|op| matches!(op, inset_embedder::valo::Op::DrawRect { .. })),

@@ -59,7 +59,9 @@ impl TrackpadTouches for WinitOnly {
 
 impl EventLoopSetup for WinitOnly {}
 impl WindowGeometry for WinitOnly {}
-impl SystemMedia for WinitOnly {}
+impl SystemMedia for WinitOnly {
+    type VideoFrameImages = super::absent::NoVideoFrameImages;
+}
 impl WindowMotion for WinitOnly {}
 impl WindowChrome for WinitOnly {}
 impl Screens for WinitOnly {}

@@ -98,7 +98,8 @@ impl RenderBox for RenderCompositionLayerView {
         constraints.biggest()
     }
 
-    /// A composition layer takes a hit anywhere in its box, so a listener around it hears the pointer.
+    /// A composition layer takes a hit anywhere in its box, so a listener around it hears the
+    /// pointer.
     fn hit_test_self(self: RenderHandle<Self>, _app: &App, _position: Offset) -> bool {
         true
     }
@@ -240,7 +241,7 @@ mod tests {
             Arc::clone(&composition_layer),
             ChildPainting::AtOffset,
         );
-        let slices = inset_embedder::slices(&scene);
+        let slices = inset_embedder::slices(&scene, |_| None);
         let [Part::CompositionLayer { layer, placement }] = slices.parts() else {
             panic!("the composition layer alone: {:?}", slices.parts());
         };
@@ -259,7 +260,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let (scene, _owner) =
             scene_of_one_frame(&mut app, idle_layer(), ChildPainting::HalvedUnderAClip);
-        let slices = inset_embedder::slices(&scene);
+        let slices = inset_embedder::slices(&scene, |_| None);
         let (_, placement) = slices.composition_layers().next().expect("placed");
         assert!(
             placement

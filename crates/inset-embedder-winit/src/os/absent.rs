@@ -26,6 +26,10 @@ impl DisplayLink for NoDisplayLink {
     fn set_wanted(&self, _wanted: bool) {
         match *self {}
     }
+
+    fn target_time(&self) -> Option<std::time::Instant> {
+        match *self {}
+    }
 }
 
 /// No compositor: no layer is made, so a window has none to place.
@@ -51,3 +55,18 @@ pub(crate) enum NoVisibilityNotices {}
 
 /// No report of a trackpad's touches. Never made.
 pub(crate) enum NoTrackpadTouchObserver {}
+
+/// No video frames: the system hands out none, so none is ever turned into an image. Never made.
+#[cfg(not(target_vendor = "apple"))]
+pub(crate) enum NoVideoFrameImages {}
+
+#[cfg(not(target_vendor = "apple"))]
+impl super::VideoFrameImages for NoVideoFrameImages {
+    fn on(_gpu: &crate::gpu::Gpu) -> Option<NoVideoFrameImages> {
+        None
+    }
+
+    fn image_of(&self, _frame: &inset_embedder::VideoFrame) -> Option<inset_embedder::Image> {
+        match *self {}
+    }
+}

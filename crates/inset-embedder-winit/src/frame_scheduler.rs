@@ -180,6 +180,19 @@ impl FrameScheduler {
         }
     }
 
+    /// Whether `view`'s window is in sight, so what it shows changes the screen.
+    pub(crate) fn is_in_sight(&self, view: ViewId) -> bool {
+        self.views.get(&view).is_some_and(|frames| frames.in_sight)
+    }
+
+    /// When the picture drawn at `screen`'s vsync that came reaches the screen.
+    pub(crate) fn display_time(&self, screen: ScreenId) -> Instant {
+        self.screens
+            .iter()
+            .find(|vsyncs| vsyncs.screen == screen)
+            .map_or_else(Instant::now, |vsyncs| vsyncs.vsync.display_time())
+    }
+
     /// The views whose windows are on `screen`, in the order they came.
     pub(crate) fn views_on(&self, screen: ScreenId) -> Vec<ViewId> {
         self.views

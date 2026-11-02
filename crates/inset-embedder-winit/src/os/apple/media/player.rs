@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use block2::RcBlock;
 use inset_embedder::{
-    CompositionLayer, FrameReader, MediaChangeFuture, MediaPlayer, PlayerState, PlayerStatus,
-    Players, Size,
+    CompositionLayer, MediaChangeFuture, MediaPlayer, PlayerState, PlayerStatus, Players, Size,
+    VideoFrameReader,
 };
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -263,7 +263,7 @@ impl MediaPlayer for AvMediaPlayer {
         };
     }
 
-    fn read_frames(&self) -> Arc<dyn FrameReader> {
+    fn read_frames(&self) -> Arc<dyn VideoFrameReader> {
         self.leave_destination();
         let frames = Arc::new(PlayerFrames::new());
         // SAFETY: adding an output to the item on the main thread.
@@ -375,7 +375,7 @@ impl MediaPlayer for FailedPlayer {
 
     fn set_video_layer(&self, _layer: Option<Arc<dyn CompositionLayer>>) {}
 
-    fn read_frames(&self) -> Arc<dyn FrameReader> {
+    fn read_frames(&self) -> Arc<dyn VideoFrameReader> {
         Arc::new(super::frames::NoFrames)
     }
 }

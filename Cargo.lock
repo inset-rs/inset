@@ -2223,6 +2223,7 @@ dependencies = [
  "objc2-core-video",
  "objc2-foundation",
  "objc2-io-surface",
+ "objc2-metal",
  "objc2-quartz-core",
  "objc2-ui-kit",
  "objc2-uniform-type-identifiers",
@@ -5242,6 +5243,18 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "video_frames"
+version = "0.16.0"
+dependencies = [
+ "inset-embedder",
+ "inset-embedder-winit",
+ "inset-foundation",
+ "inset-painting",
+ "inset-shell",
+ "inset-widgets",
+]
 
 [[package]]
 name = "walkdir"

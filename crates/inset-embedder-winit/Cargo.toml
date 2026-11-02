@@ -69,9 +69,9 @@ objc2-uniform-type-identifiers = { version = "0.3", features = ["UTType", "UTCor
 # attachment is made from.
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "bitflags", "block2", "UNError", "UNNotification", "UNNotificationAction", "UNNotificationAttachment", "UNNotificationCategory", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger", "UNUserNotificationCenter"] }
 png = "0.18"
-# Native surfaces: the layers they are, the buffer each shows and whether the compositor still
-# reads it, the transform that places a surface with its children, the shapes that clip it, and the
-# colour a window shows behind them while its view draws nothing.
+# Composition layers: the Core Animation layers they are, the buffer each shows and whether the
+# compositor still reads it, the transform that places a layer with its children, the shapes that
+# clip it, and the colour a window shows behind them while its view draws nothing.
 objc2-quartz-core = { version = "0.3", features = ["CABase", "CALayer", "CAShapeLayer", "CATransaction", "CATransform3D"] }
 objc2-io-surface = "0.3"
 objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
@@ -80,7 +80,10 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = ["
 # buffers a frame reader hands out.
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "dispatch2", "objc2-core-foundation", "objc2-core-media", "objc2-core-video", "objc2-quartz-core", "AVAnimation", "AVCaptureDevice", "AVCaptureFileOutput", "AVCaptureInput", "AVCaptureOutputBase", "AVCapturePhotoOutput", "AVCaptureSession", "AVCaptureSessionPreset", "AVCaptureVideoDataOutput", "AVCaptureVideoPreviewLayer", "AVError", "AVMediaFormat", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVPlayerLayer", "AVVideoSettings"] }
 objc2-core-media = { version = "0.3", default-features = false, features = ["std", "objc2-core-video", "CMBase", "CMFormatDescription", "CMSampleBuffer", "CMSync", "CMTime"] }
-objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer"] }
+objc2-core-video = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-metal", "CVBase", "CVBuffer", "CVImageBuffer", "CVMetalTexture", "CVMetalTextureCache", "CVPixelBuffer", "CVReturn"] }
+# A video's frames drawn by valo: a Metal texture made on each frame through CoreVideo's texture
+# cache, wrapped as a wgpu texture.
+objc2-metal = { version = "0.3", default-features = false, features = ["std", "MTLDevice", "MTLPixelFormat", "MTLResource", "MTLTexture", "MTLTypes"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 # The general pasteboard, and the notices that it changed or the application became active.

@@ -1,9 +1,11 @@
-//! A composition layer the host composites, in the widget tree: Android's `SurfaceView`,
-//! Flutter's platform view, over [`RenderCompositionLayerView`].
+//! A composition layer the host composites, in the widget tree: Android's `SurfaceView`, over
+//! [`RenderCompositionLayerView`].
 //!
-//! The widget fills the box it is given and tells nobody its size: whoever holds the layer knows
-//! the layout and tells the producer. Put a `Listener` or a `MouseRegion` around it for the input
-//! a composition layer takes none of itself.
+//! A composition layer carries pixels only: it takes no input, focus or accessibility, so it is
+//! not a native view such as a web view or a map, which Flutter's platform views embed. The widget
+//! fills the box it is given and tells nobody its size: whoever holds the layer knows the layout
+//! and tells the producer. Put a `Listener` or a `MouseRegion` around it for the input it takes
+//! none of itself.
 
 use std::fmt::{self, Debug};
 use std::sync::Arc;

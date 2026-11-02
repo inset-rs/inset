@@ -245,7 +245,7 @@ impl<C: EmbedderClient> MainLoop<C> {
             return;
         };
         open.view.draw_last_scene();
-        self.request_vsync_if_owed(open.view.id());
+        self.request_vsync_if_wanted(open.view.id());
     }
 
     /// A window moved, and may be on another screen now: the app hears of its view's new

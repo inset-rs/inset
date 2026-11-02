@@ -19,7 +19,9 @@ mod placement;
 mod slices;
 
 pub use builder::SceneBuilder;
-pub use layer::{ContainerLayer, DisplayListLayer, Effect, EmbeddedLayer, EngineLayer, Layer};
+pub use layer::{
+    ContainerLayer, DisplayListLayer, Effect, EmbeddedLayer, EngineLayer, Layer, VideoLayer,
+};
 pub use placement::{Mutator, Placement};
 pub use slices::{Part, Slices, slices};
 

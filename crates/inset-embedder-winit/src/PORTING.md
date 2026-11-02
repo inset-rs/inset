@@ -170,11 +170,21 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 - Change: a player shown on a composition layer makes an `AVPlayerLayer` its content (`MacOs::show_system_layer` for an app's own system layer), and one read as frames adds an `AVPlayerItemVideoOutput` of BGRA `IOSurface`-backed pixel buffers, where Flutter's plugin copies every frame into a texture.
   Reason: platform — Core Animation clips and scales a layer with the one it is the content of, and a pixel buffer backed by an `IOSurface` reaches the GPU with no copy.
-  Affect: a video moves, clips and shrinks with the framework's frame, and a frame reader hands out the newest picture only.
+  Affect: a video moves, clips and shrinks with the framework's frame, and a frame reader hands out the frame for the moment the picture reaches the screen, keeping none for later.
 
 - Change: a camera session is an `AVCaptureSession` configured and run on a queue of its own, asking for the camera, and for the microphone where a recording wants sound, at its start, with its preview a layer that is a composition layer's content and its frames, photos and recordings the system's video data, photo and movie file outputs.
   Reason: platform — starting a session blocks, and each output is AVFoundation's own.
   Affect: a session reports starting, running, denied or failed, photos arrive as JPEG and recordings as QuickTime movies.
+
+## video_frames.rs, os/apple/media/frame_images.rs → the macOS embedder's `FlutterExternalTexture` (`copyPixelBuffer`, `CVMetalTextureCache`)
+
+- Change: at each vsync a view asks each reader its scene draws for the frame of the display link's target time, when the picture reaches the screen, and draws its last scene again when a new one came, where Flutter's engine draws a texture's frame when its plugin calls `markTextureFrameAvailable`.
+  Reason: platform — AVFoundation tells no player's frame as it comes; a display link asks the video output for the frame of each refresh's `targetTimestamp`, as `frame_for` does, so a frame shows at its moment of the video, in step with the sound.
+  Affect: a view that shows a video takes every vsync while it does and is in sight, paused or not, none while its window is hidden or covered, and a reader the scene no longer draws is let go with its frame.
+
+- Change: a frame becomes an image through CoreVideo's texture cache, wrapped as a wgpu texture whose drop callback holds the frame until wgpu frees it.
+  Reason: platform — a CoreVideo pool hands a frame's surface out again once nothing holds the frame, whatever still reads the surface (`experiments/2026-11-01-corevideo-pool-reuse`).
+  Affect: a frame is drawn with no copy and is not overwritten while the GPU reads it.
 
 ## host_window.rs / main_loop/windows.rs / os/macos/visibility.rs → Flutter's desktop window controllers (`_window_macos.dart`, `_window_win32.dart`, `_window_linux.dart`)
 

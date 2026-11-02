@@ -55,7 +55,9 @@ pub trait CompositionLayer: Any + Send + Sync {
     /// it again, as Wayland's `wl_buffer.release`. On Apple platforms the host learns that from
     /// `IOSurfaceIsInUse` at the layer's next present, or when the layer goes, so a producer
     /// there never waits for a buffer to come back: it draws into one it knows is free, or a new
-    /// one.
+    /// one. Core Animation takes no fence, so a producer that draws the buffer on the GPU
+    /// presents it once that work is scheduled (`waitUntilScheduled`), as Chromium does before
+    /// it hands Core Animation a surface.
     fn present(
         &self,
         buffer: HardwareBuffer,
@@ -71,7 +73,7 @@ pub trait CompositionLayer: Any + Send + Sync {
 pub type HardwareBuffer = objc2_core_foundation::CFRetained<objc2_io_surface::IOSurfaceRef>;
 
 /// A platform with no host that composites: no buffer can exist, so
-/// [`CompositionLayer::present`] cannot be called, and [`Platform::compositor`](crate::Platform::compositor)
-/// answers `None`.
+/// [`CompositionLayer::present`] cannot be called, and
+/// [`Platform::compositor`](crate::Platform::compositor) answers `None`.
 #[cfg(not(target_vendor = "apple"))]
 pub enum HardwareBuffer {}

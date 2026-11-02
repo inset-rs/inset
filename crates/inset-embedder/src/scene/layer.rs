@@ -1,6 +1,6 @@
 //! The nodes of a frame's layer tree, after the engine's `flow/layers`: containers that do one
-//! thing to their children, the pictures the framework recorded, and the composition layers it
-//! places.
+//! thing to their children, the pictures the framework recorded, the composition layers it
+//! places, and the video frames it draws.
 //!
 //! A node never changes once built: a container the framework retains is the same `Arc` in every
 //! scene that holds it, so a host compares it by pointer and a later frame walks it again. The
@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use crate::composition::CompositionLayer;
 use crate::geometry::{Clip, Matrix4, Offset, RRect, Rect};
+use crate::media::VideoFrameReader;
 use crate::painting::{BlendMode, ImageFilter, Path, Picture};
 
 /// One node of a frame's layer tree: the engine's `flow::Layer`.
@@ -25,6 +26,9 @@ pub enum Layer {
     /// A composition layer at its place in paint order: flow's `PlatformViewLayer`, from
     /// `add_embedded_layer`. It draws nothing; the host places the layer and makes room for it.
     Embedded(EmbeddedLayer),
+    /// The newest frame of a video, drawn as part of the picture at its place in paint order,
+    /// from `add_video`: the host supplies the frame when it draws.
+    Video(VideoLayer),
 }
 
 /// Two layers are equal when they are the same node or show the same: a container by pointer
@@ -35,6 +39,7 @@ impl PartialEq for Layer {
             (Layer::Container(a), Layer::Container(b)) => Arc::ptr_eq(a, b) || a == b,
             (Layer::DisplayList(a), Layer::DisplayList(b)) => a == b,
             (Layer::Embedded(a), Layer::Embedded(b)) => a == b,
+            (Layer::Video(a), Layer::Video(b)) => a == b,
             _ => false,
         }
     }
@@ -109,6 +114,32 @@ impl fmt::Debug for EmbeddedLayer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("EmbeddedLayer")
             .field("layer", &Arc::as_ptr(&self.layer).cast::<()>())
+            .field("rect", &self.rect)
+            .finish()
+    }
+}
+
+/// A video's frames, drawn into `rect` in its container's coordinates. The layer holds the
+/// reader, never a frame: whoever draws the scene takes the reader's newest frame then, so a frame
+/// is held only while it is on screen.
+#[derive(Clone)]
+pub struct VideoLayer {
+    pub reader: Arc<dyn VideoFrameReader>,
+    pub rect: Rect,
+}
+
+/// Two are equal when they draw the same reader, by pointer, into the same place: a new frame of
+/// the reader is not a change of the scene.
+impl PartialEq for VideoLayer {
+    fn eq(&self, other: &VideoLayer) -> bool {
+        Arc::ptr_eq(&self.reader, &other.reader) && self.rect == other.rect
+    }
+}
+
+impl fmt::Debug for VideoLayer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VideoLayer")
+            .field("reader", &Arc::as_ptr(&self.reader).cast::<()>())
             .field("rect", &self.rect)
             .finish()
     }

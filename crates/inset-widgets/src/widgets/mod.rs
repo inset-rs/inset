@@ -92,6 +92,7 @@ pub mod title;
 pub mod transitions;
 pub mod undo_history;
 pub mod value_listenable_builder;
+pub mod video_frame_view;
 pub mod viewport;
 pub mod visibility;
 pub mod widget_span;

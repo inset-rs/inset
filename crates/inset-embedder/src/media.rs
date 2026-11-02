@@ -14,7 +14,7 @@
 //! ([`MediaPlayer::set_video_layer`], [`CaptureSession::set_preview_layer`]), whose content
 //! becomes a layer the system draws it into, which is the only way protected and HDR video show
 //! at all, with no copy; or a frame reader, the newest picture each time, for the app's GPU
-//! ([`FrameReader`]). A camera's photos are encoded by the system and its recordings encoded
+//! ([`VideoFrameReader`]). A camera's photos are encoded by the system and its recordings encoded
 //! and written to a file by the system: the app encodes nothing.
 //!
 //! The platform answers `None` where its system has no players or no cameras. A player or a
@@ -28,7 +28,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::{CompositionLayer, Size};
 
@@ -79,7 +79,7 @@ pub trait MediaPlayer {
 
     /// Hands the picture to a frame reader from now on, and to no layer; a reader asked for
     /// before reads nothing more.
-    fn read_frames(&self) -> Arc<dyn FrameReader>;
+    fn read_frames(&self) -> Arc<dyn VideoFrameReader>;
 }
 
 /// What a player is doing.
@@ -192,7 +192,7 @@ pub trait CaptureSession {
     fn set_preview_layer(&self, layer: Option<Arc<dyn CompositionLayer>>);
 
     /// The camera's frames, the newest each time.
-    fn frame_output(&self) -> Arc<dyn FrameReader>;
+    fn frame_output(&self) -> Arc<dyn VideoFrameReader>;
 
     /// Photos, each captured, processed and encoded by the system.
     fn photo_output(&self) -> Box<dyn PhotoOutput>;
@@ -265,11 +265,14 @@ pub trait MovieOutput {
     fn stop(&self);
 }
 
-/// The newest pictures of a player or a camera, read from any thread. A host keeps only the
-/// newest: one not read before the next arrives is dropped.
-pub trait FrameReader: Send + Sync {
-    /// The newest picture since the last read; `None` when none came since.
-    fn newest(&self) -> Option<VideoFrame>;
+/// The pictures of a player or a camera, read from any thread as they are drawn. A reader keeps
+/// no frame for later: one not read before the next arrives is dropped.
+pub trait VideoFrameReader: Send + Sync {
+    /// The frame to show at `display_time`, the moment the picture being drawn reaches the
+    /// screen: a player's frame for that moment of the video, as a display link asks
+    /// AVFoundation's video output for each refresh's target time, and a camera's newest. `None`
+    /// when it is the frame handed out last, or none came.
+    fn frame_for(&self, display_time: Instant) -> Option<VideoFrame>;
 }
 
 /// A picture of a player or a camera, as WebCodecs' `VideoFrame`: the platform's own type, which

@@ -5,8 +5,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use inset_embedder::{
-    Camera, CameraState, CaptureSession, CompositionLayer, FrameReader, MediaChangeFuture,
-    MovieOptions, MovieOutput, PhotoOutput, Size,
+    Camera, CameraState, CaptureSession, CompositionLayer, MediaChangeFuture, MovieOptions,
+    MovieOutput, PhotoOutput, Size, VideoFrameReader,
 };
 use inset_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle};
 
@@ -79,7 +79,7 @@ impl CameraSession {
     }
 
     /// The camera's frames, the newest each time.
-    pub fn frame_output(self: Handle<Self>, app: &App) -> Arc<dyn FrameReader> {
+    pub fn frame_output(self: Handle<Self>, app: &App) -> Arc<dyn VideoFrameReader> {
         self.host(app).frame_output()
     }
 
@@ -356,7 +356,7 @@ mod tests {
         cell.checkpoint();
         pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(16));
         let scene = view.last_scene().unwrap();
-        let slices = inset_embedder::slices(&scene);
+        let slices = inset_embedder::slices(&scene, |_| None);
         let (_, placement) = slices.composition_layers().next().unwrap();
         assert_eq!(
             placement.bounds().size(),

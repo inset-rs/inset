@@ -15,6 +15,7 @@
 #![allow(unsafe_code)]
 
 mod camera;
+mod frame_images;
 mod frames;
 mod observing;
 mod outputs;
@@ -29,6 +30,9 @@ use objc2::MainThreadMarker;
 
 pub(super) use super::composition::{in_transaction, show_system_layer};
 use camera::AvCameras;
+pub(crate) use frame_images::CoreVideoFrameImages;
+#[cfg(test)]
+pub(crate) use frame_images::TestFrames;
 use player::AvPlayers;
 
 /// AVFoundation's players; `None` off the main thread, where none is controlled.

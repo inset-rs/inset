@@ -16,7 +16,8 @@ use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchQueueAttr, DispatchRetained};
 use inset_embedder::{
     Camera, CameraFacing, CameraId, CameraState, CameraStatus, Cameras, CaptureSession,
-    CompositionLayer, FrameReader, MediaChangeFuture, MovieOptions, MovieOutput, PhotoOutput, Size,
+    CompositionLayer, MediaChangeFuture, MovieOptions, MovieOutput, PhotoOutput, Size,
+    VideoFrameReader,
 };
 use objc2::Message;
 use objc2::rc::Retained;
@@ -247,7 +248,7 @@ impl CaptureSession for AvCaptureSession {
         });
     }
 
-    fn frame_output(&self) -> Arc<dyn FrameReader> {
+    fn frame_output(&self) -> Arc<dyn VideoFrameReader> {
         self.frames
             .borrow_mut()
             .get_or_insert_with(|| {

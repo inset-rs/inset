@@ -13,6 +13,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
+use std::time::Instant;
 
 use objc2::rc::Retained;
 use objc2::runtime::NSObject;
@@ -27,6 +28,7 @@ use winit::monitor::MonitorHandle;
 use super::abort_on_panic;
 use super::screens::display_id_of;
 use crate::os::DisplayLink;
+use crate::os::apple::media_time::instant_of;
 
 /// A display as Core Graphics numbers it, its `CGDirectDisplayID`: a screen's `NSScreenNumber`
 /// in AppKit, and a monitor's native id in winit.
@@ -60,6 +62,10 @@ impl DisplayLink for ScreenDisplayLink {
     fn set_wanted(&self, wanted: bool) {
         self.set_ticks_wanted(wanted);
     }
+
+    fn target_time(&self) -> Option<Instant> {
+        self.clock.link.target_time()
+    }
 }
 
 impl ScreenDisplayLink {
@@ -87,6 +93,9 @@ pub(crate) fn screens_have_display_links() -> bool {
 /// What a screen's clock needs of the link it runs on.
 pub(crate) trait PausableLink: 'static {
     fn set_paused(&self, paused: bool);
+
+    /// When the picture drawn at the latest refresh reaches the screen; `None` before the first.
+    fn target_time(&self) -> Option<Instant>;
 }
 
 /// The screens' clocks, one per screen, each shared by the subscriptions to it. Generic over the
@@ -268,6 +277,12 @@ impl PausableLink for CoreAnimationLink {
     fn set_paused(&self, paused: bool) {
         self.link.setPaused(paused);
     }
+
+    /// The link's `targetTimestamp`: the refresh the picture drawn at its latest tick shows at.
+    fn target_time(&self) -> Option<Instant> {
+        let target = self.link.targetTimestamp();
+        (target > 0.0).then(|| instant_of(target))
+    }
 }
 
 impl Drop for CoreAnimationLink {
@@ -334,6 +349,10 @@ mod tests {
     impl PausableLink for FakeLink {
         fn set_paused(&self, paused: bool) {
             self.0.paused.set(paused);
+        }
+
+        fn target_time(&self) -> Option<Instant> {
+            None
         }
     }
 

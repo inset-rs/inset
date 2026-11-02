@@ -67,7 +67,7 @@ mod player {
         player.play();
         let mut frame = None;
         serve_until("a frame arrives", || {
-            frame = frames.newest();
+            frame = frames.frame_for(Instant::now());
             frame.is_some()
         });
         let frame = frame.expect("a frame");

@@ -18,10 +18,11 @@
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
+use std::time::Instant;
 
 use inset_embedder::{
     RequestId, Scene, TextInputHost, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding,
-    WindowRef, slices,
+    WindowRef,
 };
 use winit::event::{Ime, KeyEvent};
 use winit::keyboard::ModifiersState;
@@ -103,6 +104,21 @@ impl WinitView {
     /// Draws the owed scene again, at a vsync.
     pub(crate) fn retry_owed_scene(&self) {
         self.rasterizer.borrow_mut().retry_owed_scene();
+    }
+
+    /// The picture the view draws now reaches the screen at `display_time`.
+    pub(crate) fn set_display_time(&self, display_time: Instant) {
+        self.rasterizer.borrow_mut().set_display_time(display_time);
+    }
+
+    /// Whether the view draws a video, whose new frames it takes at each vsync.
+    pub(crate) fn shows_video(&self) -> bool {
+        self.rasterizer.borrow().shows_video()
+    }
+
+    /// Draws the last scene again with its videos' new frames, at a vsync, where any came.
+    pub(crate) fn draw_new_video_frames(&self) {
+        self.rasterizer.borrow_mut().draw_new_video_frames();
     }
 
     /// Presents through the window's own transaction until the answer is dropped: for the
@@ -217,7 +233,7 @@ impl View for WinitView {
         if rasterizer.shows(&scene) {
             return;
         }
-        let slices = slices(&scene);
+        let slices = rasterizer.slices_of(&scene);
         if let Some(composition) = &*self.composition.borrow() {
             composition.place(slices.composition_layers(), self.id);
         }

@@ -5,9 +5,10 @@
 
 use std::ptr::NonNull;
 use std::sync::{Mutex, PoisonError};
+use std::time::Instant;
 
 use dispatch2::{DispatchQueue, DispatchQueueAttr, DispatchRetained};
-use inset_embedder::{FrameReader, VideoFrame};
+use inset_embedder::{VideoFrame, VideoFrameReader};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
@@ -22,9 +23,9 @@ use objc2_core_video::{
     kCVPixelBufferPixelFormatTypeKey, kCVPixelFormatType_32BGRA,
 };
 use objc2_foundation::{NSDictionary, NSNumber, NSString};
-use objc2_quartz_core::CACurrentMediaTime;
 
 use super::abort_on_panic;
+use crate::os::apple::media_time::media_time_of;
 
 /// A player's frames: the newest picture its item's output has for now.
 pub(super) struct PlayerFrames {
@@ -51,12 +52,14 @@ impl PlayerFrames {
     }
 }
 
-impl FrameReader for PlayerFrames {
-    fn newest(&self) -> Option<VideoFrame> {
+impl VideoFrameReader for PlayerFrames {
+    /// The item's frame for the moment `display_time` is in the video, as Apple's display link
+    /// pattern asks for its target time.
+    fn frame_for(&self, display_time: Instant) -> Option<VideoFrame> {
         let output = &self.output.0;
         // SAFETY: the output answers from any thread, as a display link's thread reads it.
         unsafe {
-            let time = output.itemTimeForHostTime(CACurrentMediaTime());
+            let time = output.itemTimeForHostTime(media_time_of(display_time));
             if !output.hasNewPixelBufferForItemTime(time) {
                 return None;
             }
@@ -121,8 +124,9 @@ impl CameraFrames {
     }
 }
 
-impl FrameReader for CameraFrames {
-    fn newest(&self) -> Option<VideoFrame> {
+impl VideoFrameReader for CameraFrames {
+    /// The newest frame: a camera's frames are live, so each is for now.
+    fn frame_for(&self, _display_time: Instant) -> Option<VideoFrame> {
         let newest = self
             .newest
             .lock()
@@ -167,15 +171,15 @@ define_class!(
 /// What a frame reader of nothing answers: a player that failed has no pictures.
 pub(super) struct NoFrames;
 
-impl FrameReader for NoFrames {
-    fn newest(&self) -> Option<VideoFrame> {
+impl VideoFrameReader for NoFrames {
+    fn frame_for(&self, _display_time: Instant) -> Option<VideoFrame> {
         None
     }
 }
 
 /// The attributes every frame reader asks its pictures in: 32-bit BGRA, backed by an
 /// `IOSurface` a Metal texture can be made of.
-fn pixel_buffer_attributes() -> Retained<NSDictionary<NSString, AnyObject>> {
+pub(super) fn pixel_buffer_attributes() -> Retained<NSDictionary<NSString, AnyObject>> {
     // SAFETY: CoreVideo's constants, which it exports for the life of the process, are CF
     // strings, which are NSStrings.
     let (format_key, surface_key, metal_key) = unsafe {

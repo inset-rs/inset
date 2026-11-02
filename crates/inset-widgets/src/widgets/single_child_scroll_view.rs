@@ -1184,7 +1184,7 @@ mod tests {
             .debug_layer(app)
             .expect("painted")
             .build_scene(app, SceneBuilder::new());
-        inset_embedder::flattened_ops(&inset_embedder::slices(&scene).picture_with_room())
+        inset_embedder::flattened_ops(&inset_embedder::slices(&scene, |_| None).picture_with_room())
     }
 
     #[test]

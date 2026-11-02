@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    CompositionLayer, FrameReader, MediaChangeFuture, MediaPlayer, PlayerState, Size,
+    CompositionLayer, MediaChangeFuture, MediaPlayer, PlayerState, Size, VideoFrameReader,
 };
 use inset_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle};
 
@@ -21,7 +21,7 @@ pub struct Player {
     host: Option<Rc<dyn MediaPlayer>>,
     /// The host's state when it last changed.
     state: PlayerState,
-    /// The layer the video was put on last, which a [`VideoView`] puts it nowhere from only
+    /// The layer the video was put on last, which a [`PlayerView`] puts it nowhere from only
     /// while it is still its own.
     video_layer: Option<Arc<dyn CompositionLayer>>,
 }
@@ -77,7 +77,7 @@ impl Player {
     }
 
     /// Puts the video on `layer` from now on, and on no layer or frame reader it went to before;
-    /// `None` puts it nowhere: Media3's `setVideoSurface`, which [`VideoView`] calls with a
+    /// `None` puts it nowhere: Media3's `setVideoSurface`, which [`PlayerView`] calls with a
     /// composition layer of its own as it is mounted, and with `None` as it is unmounted.
     pub fn set_video_layer(
         self: Handle<Self>,
@@ -89,7 +89,7 @@ impl Player {
     }
 
     /// Hands the video to a frame reader from now on, and to no layer.
-    pub fn read_frames(self: Handle<Self>, app: &mut App) -> Arc<dyn FrameReader> {
+    pub fn read_frames(self: Handle<Self>, app: &mut App) -> Arc<dyn VideoFrameReader> {
         app.get_mut(self).video_layer = None;
         self.host(app).read_frames()
     }
@@ -177,34 +177,35 @@ impl PictureSource for Player {
     }
 }
 
-/// A player's video, laid out at its size in logical pixels, or as large as the constraints let it
-/// be at that aspect; no room until the size is known. It shows the player on a composition layer
-/// of its own, which the system draws the video into: the player shows on the view built for it
-/// last.
+/// A player's video, Media3's `PlayerView`, laid out at its size in logical pixels, or as large as
+/// the constraints let it be at that aspect; no room until the size is known. It shows the player
+/// on a composition layer of its own, which the system draws the video into: the cheapest way, and
+/// the only one protected and HDR video show in. The player shows on the view built for it last.
+/// For a video the framework draws, under effects a layer cannot take, see `VideoFrameView`.
 #[derive(Clone)]
-pub struct VideoView {
+pub struct PlayerView {
     pub key: Option<KeyRef>,
     pub player: Handle<Player>,
 }
 
-impl VideoView {
-    pub fn new(player: Handle<Player>) -> VideoView {
-        VideoView { key: None, player }
+impl PlayerView {
+    pub fn new(player: Handle<Player>) -> PlayerView {
+        PlayerView { key: None, player }
     }
 
-    pub fn key(mut self, key: KeyRef) -> VideoView {
+    pub fn key(mut self, key: KeyRef) -> PlayerView {
         self.key = Some(key);
         self
     }
 }
 
-impl fmt::Debug for VideoView {
+impl fmt::Debug for PlayerView {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("VideoView").finish_non_exhaustive()
+        f.debug_struct("PlayerView").finish_non_exhaustive()
     }
 }
 
-impl StatelessWidget for VideoView {
+impl StatelessWidget for PlayerView {
     fn key(&self) -> Option<&KeyRef> {
         self.key.as_ref()
     }
@@ -317,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn a_video_view_shows_its_player_on_a_layer_it_places_at_the_videos_size() {
+    fn a_player_view_shows_its_player_on_a_layer_it_places_at_the_videos_size() {
         let players = MockPlayers::new();
         let compositor = MockCompositor::new();
         let view = Rc::new(TestView::new(800.0, 600.0));
@@ -326,7 +327,7 @@ mod tests {
         run_app(
             &mut cell.borrow_mut(),
             crate::Center::new()
-                .child(VideoView::new(player))
+                .child(PlayerView::new(player))
                 .into_widget(),
         );
         cell.elapse(Duration::ZERO);
@@ -359,13 +360,13 @@ mod tests {
     }
 
     #[test]
-    fn a_video_view_puts_its_player_nowhere_as_it_goes_unless_another_took_it_since() {
+    fn a_player_view_puts_its_player_nowhere_as_it_goes_unless_another_took_it_since() {
         let players = MockPlayers::new();
         let view = Rc::new(TestView::new(800.0, 600.0));
         let cell = app_with(&players, &MockCompositor::new(), &view);
         let player = Player::new(&mut cell.borrow_mut(), "https://example.com/a.mp4").unwrap();
         let host = &players.opened()[0];
-        mount(&cell, VideoView::new(player).into_widget());
+        mount(&cell, PlayerView::new(player).into_widget());
         assert!(host.video_layer().is_some());
         mount(&cell, crate::SizedBox::new().into_widget());
         assert!(
@@ -374,7 +375,7 @@ mod tests {
         );
         assert_eq!(host.calls().last(), Some(&PlayerCall::SetVideoLayer(false)));
 
-        mount(&cell, VideoView::new(player).into_widget());
+        mount(&cell, PlayerView::new(player).into_widget());
         let elsewhere = inset_embedder::test_support::idle_layer();
         player.set_video_layer(&mut cell.borrow_mut(), Some(Arc::clone(&elsewhere)));
         mount(&cell, crate::SizedBox::new().into_widget());
@@ -400,7 +401,7 @@ mod tests {
         inset_embedder::Placement,
     )> {
         let scene = view.last_scene().expect("a frame was presented");
-        inset_embedder::slices(&scene)
+        inset_embedder::slices(&scene, |_| None)
             .composition_layers()
             .map(|(layer, placement)| (Arc::clone(layer), placement.clone()))
             .collect()

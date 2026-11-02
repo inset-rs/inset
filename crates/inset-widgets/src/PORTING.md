@@ -118,17 +118,23 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — a layer is a rectangle and its content on every compositor, and only the buffer's type differs, which the layer carries.
   Affect: the widget takes no input and reports no size, so an app wraps it in a `Listener` and tells the producer the size itself.
 
+## widgets/video_frame_view.rs → `Texture`
+
+- Change: `VideoFrameView::new(reader)` draws a player's or a camera session's frames from their `VideoFrameReader`, where Flutter's `Texture(textureId:)` draws a texture a plugin registered.
+  Reason: platform — the reader is the frame source, as Android's `TextureView` draws its `SurfaceTexture`, beside `CompositionLayerView` as `TextureView` is beside `SurfaceView`.
+  Affect: a video drawn by the framework clips, turns, fades and takes effects like anything painted, where a `PlayerView` has the system show it on a layer, the cheaper way and the only one for protected or HDR video.
+
 ## media/ → the `video_player` package's `VideoPlayerController` and `VideoPlayer`, and the `camera` package's `CameraController`, `CameraPreview` and `availableCameras`
 
-- Change: `Player` is a listenable over the host's player, made from a URL and loading by itself, with no `initialize` and no copied value, and `VideoView::new(player)` shows it, where Flutter's `VideoPlayerController` is initialized and `VideoPlayer` takes the controller.
+- Change: `Player` is a listenable over the host's player, made from a URL and loading by itself, with no `initialize` and no copied value, and `PlayerView::new(player)` shows it, where Flutter's `VideoPlayerController` is initialized and `VideoPlayer` takes the controller.
   Reason: platform — the host's player is the system's, which loads by itself and reports its state, and a host without players answers none.
-  Affect: an app calls `play` on a new player, `Player::new` answers `None` where the platform has no players, a URL the system cannot play reports a failure, and a `VideoView` takes the video's size in logical pixels, or none until it is known.
+  Affect: an app calls `play` on a new player, `Player::new` answers `None` where the platform has no players, a URL the system cannot play reports a failure, and a `PlayerView` takes the video's size in logical pixels, or none until it is known.
 
 - Change: `CameraSession` is a listenable over the host's session on one camera, with an output per use, `start` and `stop`, and `CameraPreview::new(session)` shows its preview, where Flutter's `CameraController` initializes a camera with a resolution preset and takes pictures and videos itself.
   Reason: platform — the host's session is the system's, whose outputs are its own, and a platform without cameras answers none.
   Affect: `CameraSession::new` answers `None` where the platform has no cameras, a photo arrives as encoded bytes and a recording at the app's path.
 
-- Change: a `VideoView` or a `CameraPreview` makes a composition layer of its own and puts its player's or session's picture there as it is mounted, which the system draws into, and nowhere as it is unmounted, unless another view took it since; the frames of whichever view it is in place the layer.
+- Change: a `PlayerView` or a `CameraPreview` makes a composition layer of its own and puts its player's or session's picture there as it is mounted, which the system draws into, and nowhere as it is unmounted, unless another view took it since; the frames of whichever view it is in place the layer.
   Reason: platform — the picture is drawn by the system into a layer that is the composition layer's content, which no frame of the framework's touches.
   Affect: a player or a session shows on the view built for it last and nowhere once its views are gone, and nothing shows where the host has no compositor.
 

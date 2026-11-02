@@ -12,9 +12,9 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use inset_embedder::{
-    Camera, CameraState, Cameras, CaptureSession, CompositionLayer, Compositor, FrameReader,
-    HardwareBuffer, MediaChangeFuture, MediaError, MediaPlayer, MovieOptions, MovieOutput, Photo,
-    PhotoFuture, PhotoOutput, Placement, PlayerState, Players, RecordingFuture, VideoFrame,
+    Camera, CameraState, Cameras, CaptureSession, CompositionLayer, Compositor, HardwareBuffer,
+    MediaChangeFuture, MediaError, MediaPlayer, MovieOptions, MovieOutput, Photo, PhotoFuture,
+    PhotoOutput, Placement, PlayerState, Players, RecordingFuture, VideoFrame, VideoFrameReader,
 };
 
 /// A compositor whose layers show nowhere, and which keeps each layer it made. Every clone is the
@@ -200,7 +200,7 @@ impl MediaPlayer for OpenedPlayer {
         *self.0.0.video_layer.borrow_mut() = layer;
     }
 
-    fn read_frames(&self) -> Arc<dyn FrameReader> {
+    fn read_frames(&self) -> Arc<dyn VideoFrameReader> {
         self.0.call(PlayerCall::ReadFrames);
         *self.0.0.video_layer.borrow_mut() = None;
         Arc::new(NoFrames)
@@ -356,7 +356,7 @@ impl CaptureSession for OpenedSession {
         *self.0.0.preview_layer.borrow_mut() = layer;
     }
 
-    fn frame_output(&self) -> Arc<dyn FrameReader> {
+    fn frame_output(&self) -> Arc<dyn VideoFrameReader> {
         self.0.call(SessionCall::FrameOutput);
         Arc::new(NoFrames)
     }
@@ -452,8 +452,8 @@ impl Future for RecordingEnd {
 /// A frame reader that never has a picture.
 struct NoFrames;
 
-impl FrameReader for NoFrames {
-    fn newest(&self) -> Option<VideoFrame> {
+impl VideoFrameReader for NoFrames {
+    fn frame_for(&self, _display_time: std::time::Instant) -> Option<VideoFrame> {
         None
     }
 }

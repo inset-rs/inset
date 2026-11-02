@@ -18,7 +18,7 @@ use inset_painting::{BoxDecoration, TextStyle};
 use inset_shell::Shell;
 use inset_widgets::{
     CameraPreview, CameraSession, Center, DecoratedBox, Directionality, Expanded, GestureDetector,
-    IntoWidget, Player, Row, Text, VideoView, WidgetRef, available_cameras, run_app_with,
+    IntoWidget, Player, PlayerView, Row, Text, WidgetRef, available_cameras, run_app_with,
 };
 
 const BACKGROUND: Color = Color::from_argb(255, 20, 20, 24);
@@ -87,7 +87,7 @@ fn clickable(player: Handle<Player>) -> WidgetRef {
                 Player::play(player, app);
             }
         }))
-        .child(VideoView::new(player))
+        .child(PlayerView::new(player))
         .into_widget()
 }
 

@@ -69,8 +69,8 @@ pub use key::{KeyData, KeyEventDeviceType, KeyEventType};
 pub use locale::Locale;
 pub use media::{
     Camera, CameraFacing, CameraId, CameraState, CameraStatus, Cameras, CaptureSession,
-    FrameReader, MediaChangeFuture, MediaError, MediaPlayer, MovieOptions, MovieOutput, Photo,
-    PhotoFuture, PhotoOutput, PlayerState, PlayerStatus, Players, RecordingFuture, VideoFrame,
+    MediaChangeFuture, MediaError, MediaPlayer, MovieOptions, MovieOutput, Photo, PhotoFuture,
+    PhotoOutput, PlayerState, PlayerStatus, Players, RecordingFuture, VideoFrame, VideoFrameReader,
 };
 pub use menus::{
     AttachedMenu, CheckState, DockMenu, EditCommand, IconImage, MenuAtIcon, MenuBar, MenuEntry,
@@ -102,7 +102,7 @@ pub use pointer_report::{Contact, PointerReport, ReportedChange};
 pub use restoration::{RestorationData, RestorationMap, RestorationUpdate};
 pub use scene::{
     ContainerLayer, DisplayListLayer, Effect, EmbeddedLayer, EngineLayer, Layer, Mutator, Part,
-    Placement, Scene, SceneBuilder, Slices, slices,
+    Placement, Scene, SceneBuilder, Slices, VideoLayer, slices,
 };
 pub use system_context_menu::SystemContextMenuItem;
 pub use text::*;

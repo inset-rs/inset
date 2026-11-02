@@ -27,6 +27,8 @@ mod absent;
 mod apple;
 #[cfg(target_os = "macos")]
 pub(crate) use apple::composition::{place_layer_in, show_system_layer};
+#[cfg(all(test, target_vendor = "apple"))]
+pub(crate) use apple::media::TestFrames;
 #[cfg(target_os = "ios")]
 mod ios;
 #[cfg(target_os = "linux")]
@@ -48,9 +50,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use inset_embedder::{
-    Cameras, Clipboard, CompositionLayer, Compositor, DockMenu, FileDialogs, KeyData, MenuBar,
-    MenuEntry, MenuId, Notifications, Offset, Opener, Placement, Players, Rect, Screen, ScreenId,
-    TargetPlatform, TrayIcons, ViewId, ViewPadding, VsyncWaiter, WindowConfig,
+    Cameras, Clipboard, CompositionLayer, Compositor, DockMenu, FileDialogs, Image, KeyData,
+    MenuBar, MenuEntry, MenuId, Notifications, Offset, Opener, Placement, Players, Rect, Screen,
+    ScreenId, TargetPlatform, TrayIcons, VideoFrame, ViewId, ViewPadding, VsyncWaiter,
+    WindowConfig,
 };
 use valo_codec::Decoder;
 use winit::event_loop::{ActiveEventLoop, EventLoopBuilder};
@@ -59,6 +62,7 @@ use winit::window::{Window, WindowAttributes};
 
 use crate::clipboard::ClipboardChanges;
 use crate::file_dialogs::ParentWindows;
+use crate::gpu::Gpu;
 use crate::lifecycle::LifecycleNotice;
 use crate::main_loop::MainLoopProxy;
 use crate::menus::MenuEvents;
@@ -90,6 +94,8 @@ pub(crate) type ThisOsDisplayLink = <ThisOs as FramePresentation>::DisplayLink;
 
 /// This system's share of its compositor for one window.
 pub(crate) type ThisOsWindowComposition = <ThisOs as NativeComposition>::WindowComposition;
+/// This system's maker of images of video frames.
+pub(crate) type ThisOsVideoFrameImages = <ThisOs as SystemMedia>::VideoFrameImages;
 
 /// This system's notices that a window may have been minimized or occluded, for one window.
 pub(crate) type ThisOsVisibilityNotices = <ThisOs as WindowVisibility>::Notices;
@@ -321,6 +327,10 @@ pub(crate) trait DisplayLink: Sized {
     /// Whether the calls are wanted: they stop while they are not, and start again once they
     /// are.
     fn set_wanted(&self, wanted: bool);
+
+    /// When the picture drawn at the latest vsync reaches the screen, as the system's display
+    /// link says; `None` before the first vsync.
+    fn target_time(&self) -> Option<Instant>;
 }
 
 /// The system's compositor for composition layers: Core Animation's on macOS and iOS, and why it
@@ -443,6 +453,9 @@ pub(crate) trait SystemFileDialogs {
 
 /// The system's media stack: its players and its cameras (`apple/media` on macOS and iOS).
 pub(crate) trait SystemMedia {
+    /// What makes images of a video's frames for valo to draw (`video_frames.rs`).
+    type VideoFrameImages: VideoFrameImages;
+
     /// The system's players, or `None` where the embedder has none.
     fn players() -> Option<Rc<dyn Players>> {
         None
@@ -452,6 +465,18 @@ pub(crate) trait SystemMedia {
     fn cameras() -> Option<Rc<dyn Cameras>> {
         None
     }
+}
+
+/// What turns a video's frame into an image valo draws, sharing its memory: CoreVideo's texture
+/// cache on Apple's systems (`apple/media/frame_images.rs`), none where the system hands out no
+/// frames.
+pub(crate) trait VideoFrameImages: Sized {
+    /// The maker on `gpu`'s device; `None` where the system has none.
+    fn on(gpu: &Gpu) -> Option<Self>;
+
+    /// The image of `frame`, which holds the frame until the GPU is done with it; `None` for a
+    /// frame valo cannot sample.
+    fn image_of(&self, frame: &VideoFrame) -> Option<Image>;
 }
 
 /// The system's clipboard (`clipboard/`).

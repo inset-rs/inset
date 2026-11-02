@@ -12,9 +12,12 @@ use std::fmt;
 use std::sync::Arc;
 
 use super::Scene;
-use super::layer::{ContainerLayer, DisplayListLayer, Effect, EmbeddedLayer, EngineLayer, Layer};
+use super::layer::{
+    ContainerLayer, DisplayListLayer, Effect, EmbeddedLayer, EngineLayer, Layer, VideoLayer,
+};
 use crate::composition::CompositionLayer;
 use crate::geometry::{Clip, Matrix4, Offset, RRect, Rect};
+use crate::media::VideoFrameReader;
 use crate::painting::{BlendMode, ImageFilter, Path, Picture};
 
 /// Builds a [`Scene`] containing the given visuals.
@@ -183,6 +186,13 @@ impl SceneBuilder {
     /// the scene makes room for it at its place in paint order.
     pub fn add_embedded_layer(&mut self, layer: Arc<dyn CompositionLayer>, rect: Rect) {
         self.add_layer(Layer::Embedded(EmbeddedLayer { layer, rect }));
+    }
+
+    /// Draws the newest frame of `reader` into `rect`, in the coordinates of the container being
+    /// built, at its place in paint order: what Flutter's `addTexture` does for a texture id.
+    /// Whoever draws the scene takes the frame then.
+    pub fn add_video(&mut self, reader: Arc<dyn VideoFrameReader>, rect: Rect) {
+        self.add_layer(Layer::Video(VideoLayer { reader, rect }));
     }
 
     /// Adds a retained [`EngineLayer`] subtree from a previous frame.

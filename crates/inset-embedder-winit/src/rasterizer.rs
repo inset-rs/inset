@@ -32,12 +32,14 @@
 
 use std::cell::RefCell;
 use std::sync::Arc;
+use std::time::Instant;
 
 use inset_embedder::{Canvas, Picture, Scene, Slices, slices};
 use winit::window::Window;
 
 use crate::gpu::{Gpu, LazyGpu};
 use crate::os::{FramePresentation, ThisOs, WindowGeometry};
+use crate::video_frames::ShownVideoFrames;
 
 /// At how many vsyncs a scene is drawn again after the surface timed out on it.
 const TIMEOUT_RETRIES: u8 = 8;
@@ -59,6 +61,11 @@ pub(crate) struct Rasterizer {
     /// replaces with an empty one.
     shows_painted_frame: bool,
     last_scene: LastScene,
+    /// The videos the view's scenes draw, and the frame each shows now.
+    video_frames: ShownVideoFrames,
+    /// When the picture drawn now reaches the screen, as the latest vsync said: the moment the
+    /// videos' frames are asked for. `None` before the view's first vsync.
+    display_time: Option<Instant>,
 }
 
 /// The window's surface, as the system gives it and the view draws on it.
@@ -94,6 +101,8 @@ impl Rasterizer {
             content_alpha,
             shows_painted_frame: false,
             last_scene: LastScene::default(),
+            video_frames: ShownVideoFrames::default(),
+            display_time: None,
         }
     }
 
@@ -114,7 +123,50 @@ impl Rasterizer {
     /// the framework.
     pub(crate) fn draw_last_scene(&mut self) {
         if let Some(owed) = self.last_scene.owed() {
-            self.show(&slices(&owed));
+            self.show(&self.slices_of(&owed));
+        }
+    }
+
+    /// `scene`'s slices, each video in it drawn with the frame it shows now: a reader drawn for
+    /// the first time shows its newest frame, and a reader the scene no longer draws is let go.
+    pub(crate) fn slices_of(&self, scene: &Scene) -> Slices {
+        let display_time = self.display_time();
+        self.video_frames.begin_draw();
+        let slices = slices(scene, |reader| {
+            self.video_frames
+                .image_of(self.gpu.get(), reader, display_time)
+        });
+        self.video_frames.end_draw();
+        slices
+    }
+
+    /// The picture drawn now reaches the screen at `display_time`, as the latest vsync said.
+    pub(crate) fn set_display_time(&mut self, display_time: Instant) {
+        self.display_time = Some(display_time);
+    }
+
+    /// When the picture drawn now reaches the screen: as the latest vsync said, or now before
+    /// the first.
+    fn display_time(&self) -> Instant {
+        self.display_time.unwrap_or_else(Instant::now)
+    }
+
+    /// Whether the last scene draws a video, whose new frames are taken at each vsync.
+    pub(crate) fn shows_video(&self) -> bool {
+        self.video_frames.shows_video()
+    }
+
+    /// Takes the new frames of the videos the last scene draws, at a vsync, and draws the scene
+    /// again with them when any came.
+    pub(crate) fn draw_new_video_frames(&mut self) {
+        if !self
+            .video_frames
+            .take_new_frames(self.gpu.get(), self.display_time())
+        {
+            return;
+        }
+        if let Some(scene) = self.last_scene.scene() {
+            self.show(&self.slices_of(&scene));
         }
     }
 
@@ -163,6 +215,7 @@ impl Rasterizer {
         self.surface = WindowSurface::None;
         self.shows_painted_frame = false;
         self.last_scene = LastScene::default();
+        self.video_frames.forget_all();
     }
 
     /// Whether the surface presents through the window's own transaction, so that a frame
@@ -362,6 +415,11 @@ impl LastScene {
                 self.refused = Some(refused);
             }
         }
+    }
+
+    /// The last scene handed over, shown or not.
+    fn scene(&self) -> Option<Arc<Scene>> {
+        self.scene.clone()
     }
 
     /// The last scene, if one was handed over and the surface does not show it.

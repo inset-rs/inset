@@ -60,6 +60,15 @@ impl VsyncSource {
         }
     }
 
+    /// When the picture drawn at the vsync that came reaches the screen: the display link's
+    /// target time, or one interval on where a timer stands in for a link.
+    pub(crate) fn display_time(&self) -> Instant {
+        self.display_link
+            .as_ref()
+            .and_then(|display_link| display_link.target_time())
+            .unwrap_or_else(|| Instant::now() + self.timer.interval)
+    }
+
     /// When the timer's next vsync is due, for the loop to wait until; `None` on a display link.
     pub(crate) fn timer_due(&self) -> Option<Instant> {
         self.timer.due

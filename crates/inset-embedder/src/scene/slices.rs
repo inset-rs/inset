@@ -11,6 +11,10 @@
 //! one buffer draws [`Slices::picture_with_room`]; one that wants a buffer above a composition
 //! layer, as Flutter's iOS overlays are, draws each slice into its own, or walks the tree itself.
 //!
+//! A video's frames are drawn into the slice they lie in, under the containers open there, as
+//! flow's `TextureLayer` paints from the registry its context carries: the host hands the walk
+//! the image of each reader's frame as it draws, so the scene itself never holds a frame.
+//!
 //! The invariant a later editor must keep: a slice is a whole recording, every container open at
 //! its ends closed in it, so the slices drawn in order draw what the tree paints; and a slice is
 //! kept only when it paints, so a scene of composition layers alone has none.
@@ -22,15 +26,21 @@ use super::Scene;
 use super::layer::{ContainerLayer, DisplayListLayer, Effect, EmbeddedLayer, Layer};
 use super::placement::{Mutator, Placement};
 use crate::composition::CompositionLayer;
-use crate::geometry::{Clip, Color, Matrix4, Offset, rrect_radii_elliptical};
+use crate::geometry::{Clip, Color, Matrix4, Offset, Rect, rrect_radii_elliptical};
+use crate::media::VideoFrameReader;
 use crate::painting::{
-    Backdrop, BlendMode, Canvas, ClipOp, FillRule, ImageFilter, Paint, Picture, valo,
+    Backdrop, BlendMode, Canvas, ClipOp, FillRule, Image, ImageFilter, Paint, Picture, valo,
 };
 
 /// The scene's slices and composition layers, in paint order: what Flutter's embedder hands its
-/// compositor as `FlutterLayer`s, before any slice is rendered.
-pub fn slices(scene: &Scene) -> Slices {
-    let mut slicer = Slicer::new();
+/// compositor as `FlutterLayer`s, before any slice is rendered. `frame_image` answers the image
+/// of the frame each video's reader shows in this draw, `None` for one with nothing to show; a
+/// host without video answers `None` for all.
+pub fn slices(
+    scene: &Scene,
+    frame_image: impl Fn(&Arc<dyn VideoFrameReader>) -> Option<Image>,
+) -> Slices {
+    let mut slicer = Slicer::new(&frame_image);
     slicer.visit_container(&scene.root);
     slicer.finish()
 }
@@ -106,20 +116,23 @@ impl Slices {
     }
 }
 
-/// The walk: the parts so far, the slice being recorded, and the containers open.
+/// The walk: the parts so far, the slice being recorded, the containers open, and where the
+/// frames of videos come from.
 struct Slicer<'a> {
     parts: Vec<Part>,
     slice: SliceRecording,
     /// The effects of the containers the walk is in, the root's first.
     open: Vec<&'a Effect>,
+    frame_image: &'a dyn Fn(&Arc<dyn VideoFrameReader>) -> Option<Image>,
 }
 
 impl<'a> Slicer<'a> {
-    fn new() -> Slicer<'a> {
+    fn new(frame_image: &'a dyn Fn(&Arc<dyn VideoFrameReader>) -> Option<Image>) -> Slicer<'a> {
         Slicer {
             parts: Vec::new(),
             slice: SliceRecording::new(),
             open: Vec::new(),
+            frame_image,
         }
     }
 
@@ -128,6 +141,11 @@ impl<'a> Slicer<'a> {
             Layer::Container(container) => self.visit_container(container),
             Layer::DisplayList(picture) => self.slice.draw_picture(picture),
             Layer::Embedded(embedded) => self.place_composition_layer(embedded),
+            Layer::Video(video) => {
+                if let Some(image) = (self.frame_image)(&video.reader) {
+                    self.slice.draw_image(&image, video.rect);
+                }
+            }
         }
     }
 
@@ -278,6 +296,13 @@ impl SliceRecording {
         self.paints |= layer.picture.draw_count() > 0;
     }
 
+    /// The whole of `image` drawn into `rect`, sampled linearly.
+    fn draw_image(&mut self, image: &Image, rect: Rect) {
+        self.canvas
+            .draw_image(image, rect.into(), &Paint::default());
+        self.paints = true;
+    }
+
     /// The slice, its `open` scopes closed; `None` when it paints nothing.
     fn finish(mut self, open: usize) -> Option<Arc<Picture>> {
         for _ in 0..open {
@@ -419,7 +444,7 @@ mod tests {
         for _ in 0..5 {
             builder.pop();
         }
-        let slices = slices(&builder.build());
+        let slices = slices(&builder.build(), |_| None);
         let [(placed, placement)] = slices.composition_layers().collect::<Vec<_>>()[..] else {
             panic!("one layer: {:?}", slices.parts());
         };
@@ -452,7 +477,7 @@ mod tests {
         builder.push_offset(0.0, 20.0);
         builder.add_retained(&retained);
         builder.pop();
-        let slices = slices(&builder.build());
+        let slices = slices(&builder.build(), |_| None);
         let (_, placement) = slices.composition_layers().next().unwrap();
         assert_eq!(placement.bounds(), Rect::from_ltwh(10.0, 20.0, 4.0, 4.0));
     }
@@ -465,7 +490,7 @@ mod tests {
         builder.add_embedded_layer(idle_layer(), Rect::from_ltwh(0.0, 0.0, 4.0, 4.0));
         builder.add_picture(Offset::new(20.0, 0.0), &square(), false, false);
         builder.pop();
-        let slices = slices(&builder.build());
+        let slices = slices(&builder.build(), |_| None);
         let [
             Part::Slice(beneath),
             Part::CompositionLayer { .. },
@@ -507,7 +532,7 @@ mod tests {
         builder.add_embedded_layer(idle_layer(), Rect::from_ltwh(4.0, 0.0, 4.0, 4.0));
         builder.pop();
         builder.pop();
-        let slices = slices(&builder.build());
+        let slices = slices(&builder.build(), |_| None);
         assert!(
             slices
                 .parts()
@@ -525,7 +550,7 @@ mod tests {
         let mut builder = SceneBuilder::new();
         builder.push_backdrop_filter(&ImageFilter::blur(2.0, 2.0), BlendMode::SrcOver, None);
         builder.pop();
-        assert!(slices(&builder.build()).paints());
+        assert!(slices(&builder.build(), |_| None).paints());
     }
 
     #[test]
@@ -537,7 +562,7 @@ mod tests {
         builder.add_embedded_layer(idle_layer(), Rect::from_ltwh(1.0, 1.0, 4.0, 4.0));
         builder.pop();
         builder.pop();
-        let picture = slices(&builder.build()).picture_with_room();
+        let picture = slices(&builder.build(), |_| None).picture_with_room();
         let ops = picture.ops();
         assert!(
             matches!(ops[0], valo::Op::DrawDisplayList { .. }),
@@ -571,7 +596,7 @@ mod tests {
         builder.push_opacity(0, Offset::ZERO);
         builder.add_embedded_layer(idle_layer(), Rect::from_ltwh(1.0, 1.0, 4.0, 4.0));
         builder.pop();
-        let picture = slices(&builder.build()).picture_with_room();
+        let picture = slices(&builder.build(), |_| None).picture_with_room();
         assert!(
             !flattened_ops(&picture)
                 .iter()
@@ -627,7 +652,7 @@ mod tests {
         builder.add_embedded_layer(idle_layer(), Rect::from_ltwh(0.0, 0.0, 4.0, 4.0));
         builder.add_picture(Offset::ZERO, &square(), false, false);
         builder.pop();
-        let picture = slices(&builder.build()).picture_with_room();
+        let picture = slices(&builder.build(), |_| None).picture_with_room();
         assert_eq!(picture.backdrop_reads(), 1);
         let layers = flattened_ops(&picture)
             .into_iter()
@@ -652,7 +677,7 @@ mod tests {
         let mut builder = SceneBuilder::new();
         builder.push_backdrop_filter(filter, BlendMode::SrcOver, backdrop_id);
         builder.pop();
-        flattened_ops(&slices(&builder.build()).picture_with_room())
+        flattened_ops(&slices(&builder.build(), |_| None).picture_with_room())
             .into_iter()
             .find_map(|op| match op {
                 valo::Op::SaveLayer {
@@ -671,12 +696,63 @@ mod tests {
 
     /// Checks of what a scene shows once drawn. They need `test_support`'s GPU device, so they
     /// run where the `test-support` feature is on, as it is in a test run of the workspace.
+    /// A reader with no frame of its own: what a video shows before its first frame.
+    struct NoFrames;
+
+    impl VideoFrameReader for NoFrames {
+        fn frame_for(&self, _display_time: std::time::Instant) -> Option<crate::VideoFrame> {
+            None
+        }
+    }
+
+    /// The walk asks the host for each video's frame as it draws it, which is how a host knows
+    /// the readers it shows; one with nothing to show draws nothing.
+    #[test]
+    fn a_video_asks_for_its_frame_and_draws_nothing_without_one() {
+        let reader: Arc<dyn VideoFrameReader> = Arc::new(NoFrames);
+        let mut builder = SceneBuilder::new();
+        builder.add_video(Arc::clone(&reader), Rect::from_ltwh(0.0, 0.0, 4.0, 4.0));
+        let asked = std::cell::Cell::new(0);
+        let slices = slices(&builder.build(), |asked_for| {
+            assert!(Arc::ptr_eq(asked_for, &reader));
+            asked.set(asked.get() + 1);
+            None
+        });
+        assert_eq!(asked.get(), 1);
+        assert!(!slices.paints(), "{:?}", slices.parts());
+    }
+
     #[cfg(feature = "test-support")]
     mod drawn {
         use super::*;
         use crate::test_support::drawn_pixels;
 
         const SIZE: u32 = 32;
+
+        /// A video's frame is part of the picture: drawn into its rectangle, cut by the clip
+        /// above it like anything painted there.
+        #[test]
+        fn a_video_frame_is_drawn_in_its_slice_under_the_containers_above_it() {
+            let reader: Arc<dyn VideoFrameReader> = Arc::new(NoFrames);
+            let whole = Rect::from_ltwh(0.0, 0.0, SIZE as f64, SIZE as f64);
+            let mut builder = SceneBuilder::new();
+            builder.push_clip_rect(
+                Rect::from_ltwh(0.0, 0.0, SIZE as f64 / 2.0, SIZE as f64),
+                Clip::HardEdge,
+            );
+            builder.add_video(reader, whole);
+            builder.pop();
+            let frame = crate::test_support::solid_image([4, 4], [255, 0, 0, 255]);
+            let slices = slices(&builder.build(), |_| Some(frame.clone()));
+            assert!(slices.paints());
+            let pixels = drawn_pixels(&slices.picture_with_room(), [SIZE, SIZE]);
+            assert_near(
+                pixel_at(&pixels, 8, 16),
+                [255, 0, 0, 255],
+                "inside the clip",
+            );
+            assert_eq!(pixel_at(&pixels, 24, 16)[3], 0, "outside the clip");
+        }
 
         #[test]
         fn a_colour_filter_composed_over_a_blur_recolours_the_backdrop() {
@@ -783,7 +859,7 @@ mod tests {
         }
 
         fn drawn(scene: &Scene) -> Vec<u8> {
-            drawn_pixels(&slices(scene).picture_with_room(), [SIZE, SIZE])
+            drawn_pixels(&slices(scene, |_| None).picture_with_room(), [SIZE, SIZE])
         }
 
         /// A picture that covers the whole scene in `color`.

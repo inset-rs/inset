@@ -19,11 +19,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use inset_embedder::CompositionLayer;
 use inset_embedder::{
     BlendMode, Clip, EngineLayer, FillRule, ImageFilter, Matrix4, Offset, Picture, RRect, Rect,
     Scene, SceneBuilder, Size,
 };
+use inset_embedder::{CompositionLayer, VideoFrameReader};
 use inset_foundation::{App, Handle, HandleId, RetainedHandle};
 use inset_gestures::remove_perspective_transform;
 use inset_scheduler::{FrameCallback, SchedulerBinding};
@@ -1193,6 +1193,56 @@ impl Layer for EmbeddedLayer {
     fn add_to_scene(self: Handle<Self>, app: &mut App, builder: &mut SceneBuilder) {
         let this = app.get(self);
         builder.add_embedded_layer(Arc::clone(&this.composition_layer), this.rect);
+    }
+
+    fn find_annotations(
+        self: Handle<Self>,
+        _app: &App,
+        _result: &mut AnnotationSearch,
+        _local_position: Offset,
+        _only_first: bool,
+    ) -> bool {
+        false
+    }
+}
+
+/// A layer that draws a video's newest frame as part of the picture: Flutter's `TextureLayer`,
+/// over the reader itself in place of a texture id.
+///
+/// A leaf, like a picture layer, retained with its ancestors like any other: it holds the reader,
+/// never a frame, and whoever draws the scene takes the frame then.
+pub struct VideoLayer {
+    layer: LayerData,
+    reader: Arc<dyn VideoFrameReader>,
+    /// Where the frames are drawn, in this layer's coordinates.
+    rect: Rect,
+}
+
+impl VideoLayer {
+    /// A layer drawing `reader`'s frames into `rect`.
+    pub fn new(app: &mut App, reader: Arc<dyn VideoFrameReader>, rect: Rect) -> Handle<VideoLayer> {
+        app.create(VideoLayer {
+            layer: LayerData::new(),
+            reader,
+            rect,
+        })
+    }
+
+    pub fn reader(self: Handle<Self>, app: &App) -> &Arc<dyn VideoFrameReader> {
+        &app.get(self).reader
+    }
+
+    pub fn rect(self: Handle<Self>, app: &App) -> Rect {
+        app.get(self).rect
+    }
+}
+
+impl Layer for VideoLayer {
+    crate::layer_accessors!();
+
+    fn add_to_scene(self: Handle<Self>, app: &mut App, builder: &mut SceneBuilder) {
+        let this = app.get(self);
+        builder.add_video(Arc::clone(&this.reader), this.rect);
     }
 
     fn find_annotations(
@@ -4089,7 +4139,7 @@ mod tests {
             let scene = root
                 .as_container_layer()
                 .build_scene(&mut app, SceneBuilder::new());
-            let slices = inset_embedder::slices(&scene);
+            let slices = inset_embedder::slices(&scene, |_| None);
             let (placed, placement) = slices.composition_layers().next().expect("placed");
             assert!(Arc::ptr_eq(placed, &composition_layer));
             assert_eq!(placement.bounds(), Rect::from_ltwh(11.0, 7.0, 30.0, 20.0));
@@ -4129,10 +4179,12 @@ mod tests {
             root_node.children
         );
         assert_eq!(
-            inset_embedder::flattened_ops(&inset_embedder::slices(&scene).picture_with_room())
-                .iter()
-                .filter(|op| matches!(op, inset_embedder::valo::Op::SaveLayer { .. }))
-                .count(),
+            inset_embedder::flattened_ops(
+                &inset_embedder::slices(&scene, |_| None).picture_with_room()
+            )
+            .iter()
+            .filter(|op| matches!(op, inset_embedder::valo::Op::SaveLayer { .. }))
+            .count(),
             1,
             "the retained opacity layer still draws"
         );

@@ -27,7 +27,7 @@ impl View for CaptureView {
     }
     fn present(&self, scene: Arc<Scene>) {
         *self.pixels.borrow_mut() = self.renderer.borrow_mut().render_to_rgba(
-            &inset_embedder::slices(&scene).picture_with_room(),
+            &inset_embedder::slices(&scene, |_| None).picture_with_room(),
             self.size,
             Some(Color::WHITE),
         );

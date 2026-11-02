@@ -4,8 +4,8 @@
 //! model, which these follow. A [`Player`] is made from a source and loads by itself; a
 //! [`CameraSession`] is a session on one camera with outputs, each the system's own. Each is a
 //! listenable over the host's object, whose listeners hear its state change, and each is shown by
-//! a widget that takes it, [`VideoView`] and [`CameraPreview`], as `AVPlayerLayer(player:)` and
-//! `PlayerView` take a player.
+//! a widget that takes it, [`PlayerView`] and [`CameraPreview`], as Media3's `PlayerView` and
+//! `AVPlayerLayer(player:)` take a player and CameraX's `PreviewView` a camera.
 //!
 //! A view shows its picture through a composition layer of its own (`CompositionLayerView`): the
 //! framework leaves its rectangle clear, the frames of the view it is in place the layer there,
@@ -29,7 +29,7 @@ use crate::widgets::basic::{AspectRatio, ConstrainedBox, SizedBox};
 use crate::widgets::composition_layer_view::CompositionLayerView;
 
 pub use camera::{CameraPreview, CameraSession, available_cameras};
-pub use player::{Player, VideoView};
+pub use player::{Player, PlayerView};
 
 /// What puts its picture on a composition layer it is given: a player or a camera session.
 trait PictureSource: ListenableObject {

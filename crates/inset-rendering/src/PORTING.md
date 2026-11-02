@@ -78,6 +78,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — every compositor Inset targets shows a layer as a rectangle and its content.
   Affect: an app shows a composition layer with the same widget everywhere.
 
+## video_frame_view.rs, layer.rs (`VideoLayer`) → `TextureBox`, `TextureLayer`
+
+- Change: `RenderVideoFrameView` and its `VideoLayer` hold a video's `VideoFrameReader`, where Flutter's `TextureBox` and `TextureLayer` hold a texture id, and have no `freeze` or filter quality.
+  Reason: platform — the reader is the frame source itself, with no registry between, and the host takes the frame for the moment the picture reaches the screen when it draws, sampled linearly.
+  Affect: a video draws as part of the picture, under the clips, transforms and opacity above it.
+
 ## view.rs → view.dart, binding.rs → binding.dart
 
 - Change: a frame lays out every view's render tree, then paints and composites only its own views, each without the views a `ViewAnchor` places in it.
@@ -230,7 +236,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `RenderImage`'s `centerSlice`. Trigger: an image drawn as a resizable frame.
 - `RenderImage`'s `filterQuality` and `isAntiAlias`. Trigger: a caller that needs to choose how an image is sampled.
 - `RenderImage`'s semantics label. Trigger: accessibility.
-- `TextureLayer`, `PlatformViewLayer`, `PerformanceOverlayLayer`, `ClipRSuperellipseLayer`, `ColorFilterLayer`, `ImageFilterLayer`, `ShaderMaskLayer`, `OffsetLayer.toImage` / `toImageSync`, `PaintingContext.pushColorFilter`. Trigger: a texture or platform view, a superellipse clip, a colour/image/shader filter widget, `RepaintBoundary.toImage`.
+- `PlatformViewLayer`, `PerformanceOverlayLayer`, `ClipRSuperellipseLayer`, `ColorFilterLayer`, `ImageFilterLayer`, `ShaderMaskLayer`, `OffsetLayer.toImage` / `toImageSync`, `PaintingContext.pushColorFilter`. Trigger: a platform view, a superellipse clip, a colour/image/shader filter widget, `RepaintBoundary.toImage`.
 - `PaintingContext.addCompositionCallback`. Trigger: a caller that needs composition callbacks on the painting context (layers already have them).
 - Debug paint overlays on boxes, slivers and the viewport, and the overflow indicators of `RenderFlex` and `RenderConstraintsTransformBox` (an overflowing box clips but paints no striped hint); with them, `paintsChild` as a virtual. Trigger: inspector.
 - Semantics on `PipelineOwner`, `RenderObject`, `RenderCustomPaint`, the ignore- and absorb-pointer boxes, `RenderOffstage`, the opacity boxes' `alwaysIncludeSemantics`, `RenderTable`, the viewport and the slivers. Trigger: a11y; do not stub.

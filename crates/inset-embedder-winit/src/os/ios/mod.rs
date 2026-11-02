@@ -80,6 +80,8 @@ impl TrackpadTouches for Ios {
 
 /// AVFoundation's players and cameras, which macOS shares.
 impl SystemMedia for Ios {
+    type VideoFrameImages = super::apple::media::CoreVideoFrameImages;
+
     fn players() -> Option<Rc<dyn Players>> {
         super::apple::media::players()
     }
