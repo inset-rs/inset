@@ -49,6 +49,10 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - Give every view a surface whenever the system gives them and ask for a frame to draw on them, take every surface when the system takes them, and keep the app and its views throughout.
 - Make every view's surface from one source per system: where the compositor shows a view's drawing as a composition layer's content, as Core Animation does, from a layer of the view's own, which the view's window places to fill it and places again in the transaction that changes the bounds or scale of the window's view; elsewhere from the window (native-surfaces decision 34, `waos/docs/proposals/2026-10-30-native-surfaces.md`).
 
+**What a view asks of the system**
+- `View::host`, `ViewHost`
+- Give every view a host that takes what it asks of the system, its input methods, its cursor and its focus requests: a window's view its window's (native-surfaces decision 35, `waos/docs/proposals/2026-10-30-native-surfaces.md`).
+
 **Views the app asks for**
 - `Platform::request_view`, `View::request_id`, `View::window`, `HostWindow`, `EmbedderClient::view_close_requested`, `view_request_failed`
 - Make a window for each request on a turn of the loop, add its view carrying the request's id and initial data, or report the failure, and give each `WindowConfig` option the system's nearest equivalent. Refuse requests where the platform gives the app its views. Report the user's request to close a view and close nothing until the app does.
@@ -74,7 +78,7 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - A window nobody can see draws nothing, and draws again as soon as any part shows.
 
 **Focus**
-- `Platform::request_view_focus_change`, `EmbedderClient::view_focus_changed`
+- `ViewHost::request_focus_change`, `EmbedderClient::view_focus_changed`
 - Serve a focus request on a later turn of the loop, and report each native focus change with the system's direction, or `Undefined`.
 
 ## Frames
@@ -122,12 +126,12 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - A composing input method gets each key first, then the framework, and a key the framework declines goes on to text input and the system.
 
 **Text input**
-- `TextInputHost`, `EmbedderClient::text_input_*`
+- `ViewHost::text_input`, `TextInputHost`, `EmbedderClient::text_input_*`
 - Input methods can read and change the text around the caret, so composing, dead keys and accents work.
 
 **Cursor**
-- `Platform::mouse_cursor`, `MouseCursor::activate_system_cursor`
-- Show the last cursor asked for over the view the pointer is on, and set it again each time the system resets it.
+- `ViewHost::activate_system_cursor`
+- Show the last cursor a view's host is asked for while the pointer is over that view, and set it again each time the system resets it.
 
 **Drag and drop**
 - `EmbedderClient::drag_report`

@@ -845,7 +845,7 @@ impl TextInput {
 
     fn set_editing_state(self: Handle<Self>, app: &App, value: TextEditingValue) {
         if let Some(view) = self.target_view(app)
-            && let Some(text_input) = view.text_input()
+            && let Some(text_input) = view.host().text_input()
         {
             text_input.set_editing_state(&value);
         }
@@ -858,7 +858,7 @@ impl TextInput {
         transform: Matrix4,
     ) {
         if let Some(view) = self.target_view(app)
-            && let Some(text_input) = view.text_input()
+            && let Some(text_input) = view.host().text_input()
         {
             text_input.set_client_geometry(editable_box_size, &transform);
         }
@@ -866,7 +866,7 @@ impl TextInput {
 
     fn set_composing_text_rect(self: Handle<Self>, app: &App, rect: Rect) {
         if let Some(view) = self.target_view(app)
-            && let Some(text_input) = view.text_input()
+            && let Some(text_input) = view.host().text_input()
         {
             text_input.set_composing_rect(rect);
         }
@@ -874,7 +874,7 @@ impl TextInput {
 
     fn set_caret_rect(self: Handle<Self>, app: &App, rect: Rect) {
         if let Some(view) = self.target_view(app)
-            && let Some(text_input) = view.text_input()
+            && let Some(text_input) = view.host().text_input()
         {
             text_input.set_caret_rect(rect);
         }
@@ -949,7 +949,7 @@ fn target_view(app: &App, configuration: &TextInputConfiguration) -> Option<View
 
 fn platform_attach(app: &App, configuration: &TextInputConfiguration) {
     if let Some(view) = target_view(app, configuration)
-        && let Some(text_input) = view.text_input()
+        && let Some(text_input) = view.host().text_input()
     {
         text_input.start(configuration);
     }
@@ -957,7 +957,7 @@ fn platform_attach(app: &App, configuration: &TextInputConfiguration) {
 
 fn platform_detach(app: &App, input: Handle<TextInput>) {
     if let Some(view) = input.target_view(app)
-        && let Some(text_input) = view.text_input()
+        && let Some(text_input) = view.host().text_input()
     {
         text_input.stop();
     }

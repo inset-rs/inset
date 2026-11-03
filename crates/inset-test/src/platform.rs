@@ -8,9 +8,9 @@ use std::sync::{Arc, Mutex};
 use inset_embedder::{
     AppExit, AppLifecycleState, Brightness, Cameras, Clipboard, Compositor, Dispatcher, DockMenu,
     FileDialogs, FontSource, Haptics, Image, ImageCodecFuture, ImageDecodeError, Instant, MenuBar,
-    MouseCursor, Notifications, Opener, Platform, Players, PopupMenus, RequestId, Restoration,
-    SystemChrome, SystemContextMenu, TargetPlatform, TextServices, TrayIcons, VideoFrameReaders,
-    View, ViewError, ViewId, ViewRef, ViewRequest,
+    Notifications, Opener, Platform, Players, PopupMenus, RequestId, Restoration, SystemChrome,
+    SystemContextMenu, TargetPlatform, TextServices, TrayIcons, VideoFrameReaders, View, ViewError,
+    ViewId, ViewRef, ViewRequest,
 };
 
 use inset_embedder::valo;
@@ -57,7 +57,6 @@ pub struct TestPlatform {
     video_frame_readers: Option<Rc<dyn VideoFrameReaders>>,
     dock_menu: Option<Rc<dyn DockMenu>>,
     text_services: Option<Rc<dyn TextServices>>,
-    mouse_cursor: Option<Rc<dyn MouseCursor>>,
     restoration: Option<Rc<dyn Restoration>>,
     app_exit: Option<Rc<dyn AppExit>>,
     initial_lifecycle_state: Option<AppLifecycleState>,
@@ -95,7 +94,6 @@ impl TestPlatform {
             video_frame_readers: None,
             dock_menu: None,
             text_services: None,
-            mouse_cursor: None,
             restoration: None,
             app_exit: None,
             initial_lifecycle_state: None,
@@ -278,11 +276,6 @@ impl TestPlatform {
 
     pub fn with_text_services(mut self, services: Rc<dyn TextServices>) -> TestPlatform {
         self.text_services = Some(services);
-        self
-    }
-
-    pub fn with_mouse_cursor(mut self, cursor: Rc<dyn MouseCursor>) -> TestPlatform {
-        self.mouse_cursor = Some(cursor);
         self
     }
 
@@ -479,10 +472,6 @@ impl Platform for TestPlatform {
 
     fn text_services(&self) -> Option<&dyn TextServices> {
         self.text_services.as_deref()
-    }
-
-    fn mouse_cursor(&self) -> Option<&dyn MouseCursor> {
-        self.mouse_cursor.as_deref()
     }
 
     fn restoration(&self) -> Option<&dyn Restoration> {

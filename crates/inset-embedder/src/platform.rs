@@ -16,12 +16,11 @@ use crate::file_dialogs::FileDialogs;
 use crate::fonts::FontSource;
 use crate::geometry::{Color, Offset, Rect};
 use crate::menus::{DockMenu, MenuBar, PopupMenus, TrayIcons};
-use crate::mouse_cursor::SystemMouseCursorKind;
 use crate::notifications::Notifications;
 use crate::opener::Opener;
 use crate::restoration::{RestorationMap, RestorationUpdate};
 use crate::system_context_menu::SystemContextMenuItem;
-use crate::{View, ViewFocusDirection, ViewFocusState, ViewId};
+use crate::{View, ViewId};
 
 pub type PlatformRef = Rc<dyn Platform>;
 
@@ -546,17 +545,6 @@ pub trait Platform: Any {
         Err(crate::ViewError::Unsupported)
     }
 
-    /// Flutter `PlatformDispatcher.requestViewFocusChange`: asks the host to move view focus.
-    /// A host without native focus support ignores the request.
-    fn request_view_focus_change(
-        &self,
-        view_id: ViewId,
-        state: ViewFocusState,
-        direction: ViewFocusDirection,
-    ) {
-        let _ = (view_id, state, direction);
-    }
-
     /// The full system-reported supported locales of the device (Flutter
     /// `PlatformDispatcher.locales`), in order of preference; empty until the host
     /// reports them.
@@ -733,11 +721,6 @@ pub trait Platform: Any {
         None
     }
 
-    /// The system cursor shown for a pointing device, or `None` where the host has none.
-    fn mouse_cursor(&self) -> Option<&dyn MouseCursor> {
-        None
-    }
-
     /// Application state kept across relaunches, or `None` where the host has none.
     fn restoration(&self) -> Option<&dyn Restoration> {
         None
@@ -851,15 +834,6 @@ pub trait TextServices {
 
     /// Shares the given text (Flutter's `Share.invoke`).
     fn share(&self, text: &str);
-}
-
-/// Flutter's mouse cursor channel.
-pub trait MouseCursor {
-    /// Shows a system cursor for a pointing device on `view`, the one the device is over
-    /// (Flutter's `activateSystemCursor` message on `SystemChannels.mouseCursor`, which
-    /// carries no view: its embedders map the device to one themselves). A host with one
-    /// cursor for the whole process ignores the view.
-    fn activate_system_cursor(&self, view: ViewId, device: i64, kind: SystemMouseCursorKind);
 }
 
 /// Flutter's restoration channel: state kept across relaunches.

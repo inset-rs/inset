@@ -11,7 +11,7 @@ use inset_foundation::{AppCell, Listener};
 use inset_gestures::GestureBinding;
 use inset_rendering::RendererBinding;
 use inset_scheduler::SchedulerBinding;
-use inset_test::TestPlatform;
+use inset_test::{TestPlatform, TestViewHost};
 use inset_widgets::*;
 use inset_winui::*;
 use std::{
@@ -25,6 +25,7 @@ pub struct CaptureView {
     pub size: Cell<[u32; 2]>,
     pub renderer: RefCell<Context>,
     pub pixels: RefCell<Vec<u8>>,
+    pub host: TestViewHost,
 }
 impl View for CaptureView {
     fn id(&self) -> ViewId {
@@ -47,6 +48,9 @@ impl View for CaptureView {
             self.size.get(),
             Some(Color::WHITE),
         );
+    }
+    fn host(&self) -> &dyn inset_embedder::ViewHost {
+        &self.host
     }
 }
 
@@ -73,6 +77,7 @@ fn real_window_resize_relayouts_navigation_overlay() {
         size: Cell::new([1200, 800]),
         renderer: RefCell::new(Context::new(device, queue)),
         pixels: RefCell::new(Vec::new()),
+        host: TestViewHost::default(),
     });
     let cell = AppCell::with_platform(Rc::new(host(&view)));
     let tooltip_opened = Rc::new(Cell::new(false));
@@ -167,6 +172,7 @@ fn real_gallery_window_resize_keeps_overlay_parent_data() {
         size: Cell::new([1200, 800]),
         renderer: RefCell::new(Context::new(device, queue)),
         pixels: RefCell::new(Vec::new()),
+        host: TestViewHost::default(),
     });
     let cell = AppCell::with_platform(Rc::new(host(&view)));
     {

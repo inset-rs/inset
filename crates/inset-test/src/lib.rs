@@ -1,5 +1,5 @@
 //! Test scaffolding: a [`TestPlatform`] to run an `App` on, a [`TestView`] for it to draw
-//! into, a [`MockClipboard`] for it to copy to and paste from, the system's menus
+//! into, whose [`TestViewHost`] records what it asks of the system, a [`MockClipboard`] for it to copy to and paste from, the system's menus
 //! ([`MockMenuBar`], [`MockPopupMenus`], [`MockDockMenu`], [`MockTrayIcons`]) for it to set and
 //! choose in, file dialogs ([`MockFileDialogs`], with [`MemoryFile`] and [`MemoryFolder`])
 //! for it to open and save through, and a compositor, frame readers, players and cameras
@@ -23,6 +23,7 @@ mod notifications;
 mod opener;
 mod platform;
 mod view;
+mod view_host;
 mod windows;
 
 pub use clipboard::MockClipboard;
@@ -38,4 +39,5 @@ pub use notifications::MockNotifications;
 pub use opener::{MockOpener, Opened};
 pub use platform::{TestDispatcher, TestPlatform};
 pub use view::{IMPLICIT_VIEW_ID, TestView};
+pub use view_host::{TestViewHost, TextInputCall};
 pub use windows::{TestWindow, TestWindows};

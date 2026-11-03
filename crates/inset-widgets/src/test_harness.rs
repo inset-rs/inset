@@ -21,7 +21,10 @@ pub(crate) const VIEW_WIDTH: f64 = 300.0;
 pub(crate) const VIEW_HEIGHT: f64 = 200.0;
 
 /// A fixed-size view at pixel ratio 1 that drops what it is given to present.
-struct TestView;
+#[derive(Default)]
+struct TestView {
+    host: inset_test::TestViewHost,
+}
 
 impl EmbedderView for TestView {
     fn id(&self) -> ViewId {
@@ -38,6 +41,10 @@ impl EmbedderView for TestView {
     }
 
     fn present(&self, _scene: std::sync::Arc<inset_embedder::Scene>) {}
+
+    fn host(&self) -> &dyn inset_embedder::ViewHost {
+        &self.host
+    }
 }
 
 #[derive(Debug)]
@@ -49,7 +56,7 @@ impl RenderObjectWidget for TestRoot {
     type RenderObject = RenderView;
 
     fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
-        let view = Rc::new(TestView);
+        let view = Rc::new(TestView::default());
         let configuration = ViewConfiguration::from_view(&*view);
         RenderView::new(app, None, Some(configuration), view).as_object()
     }
@@ -439,7 +446,7 @@ pub(crate) fn mount_scroll_harness(app: &mut App) -> ScrollHarness {
 pub(crate) fn binding_cell() -> Rc<AppCell> {
     let platform = TestPlatform::new()
         .on(inset_embedder::TargetPlatform::MacOS)
-        .with_view(Rc::new(TestView));
+        .with_view(Rc::new(TestView::default()));
     AppCell::with_platform(Rc::new(platform))
 }
 

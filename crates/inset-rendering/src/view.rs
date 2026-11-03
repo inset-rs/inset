@@ -558,11 +558,14 @@ mod tests {
     use crate::pipeline_owner::PipelineOwner;
     use crate::proxy_box::RenderConstrainedBox;
     use crate::shifted_box::RenderPadding;
+    use inset_embedder::ViewHost;
     use inset_painting::EdgeInsetsGeometry;
+    use inset_test::TestViewHost;
 
     struct TestView {
         metrics: ViewMetrics,
         presented: Rc<Cell<u32>>,
+        host: TestViewHost,
     }
 
     impl View for TestView {
@@ -577,12 +580,17 @@ mod tests {
         fn present(&self, _scene: std::sync::Arc<inset_embedder::Scene>) {
             self.presented.set(self.presented.get() + 1);
         }
+
+        fn host(&self) -> &dyn ViewHost {
+            &self.host
+        }
     }
 
     fn test_view(presented: &Rc<Cell<u32>>) -> ViewRef {
         Rc::new(TestView {
             metrics: ViewMetrics::default(),
             presented: Rc::clone(presented),
+            host: TestViewHost::default(),
         })
     }
 

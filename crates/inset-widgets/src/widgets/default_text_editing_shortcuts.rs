@@ -108,7 +108,7 @@ impl DefaultTextEditingShortcuts {
     fn get_disabling_shortcut(app: &mut App, context: BuildContext) -> Option<ShortcutMap> {
         let platform = app.platform().target_platform();
         let view = crate::view::View::maybe_of(app, context);
-        let text_input = view.as_ref().and_then(|view| view.text_input());
+        let text_input = view.as_ref().and_then(|view| view.host().text_input());
         let host_edits = text_input.is_some_and(|input| input.handles_editing_keys());
         let host_commands = text_input.is_some_and(|input| input.provides_edit_commands());
         let mut shortcuts = disabling_shortcuts_for(platform, host_edits);

@@ -102,9 +102,9 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — winit's input method reports composing text and commits, not Flutter's editing state.
   Affect: a field hears composing text and commits, and the input method turning off closes its connection.
 
-## mouse_cursor.rs
+## mouse_cursor.rs / view_host.rs
 
-- Change: the embedder's `MouseCursor` capability sets the winit cursor icon on the window the pointer was last seen in; `None` hides the cursor and kinds winit lacks show the arrow.
+- Change: a window's view's host sets the winit cursor icon it is asked for on its own window, which shows it while the pointer is over the window; `None` hides the cursor and kinds winit lacks show the arrow.
   Reason: platform — winit has one cursor per window where Flutter's engine maps cursor kinds per embedder.
   Affect: a `MouseRegion` cursor shows on hover, the device id is ignored (one mouse), and an unsupported kind is silently the arrow.
 

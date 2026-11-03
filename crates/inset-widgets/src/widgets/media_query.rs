@@ -2345,7 +2345,10 @@ mod tests {
     use crate::widgets::basic::SizedBox;
 
     /// An 800x600 physical view at 2x with a status bar, a home indicator, and a keyboard.
-    struct TestView;
+    #[derive(Default)]
+    struct TestView {
+        host: inset_test::TestViewHost,
+    }
 
     impl EmbedderView for TestView {
         fn id(&self) -> ViewId {
@@ -2376,6 +2379,10 @@ mod tests {
         }
 
         fn present(&self, _scene: std::sync::Arc<inset_embedder::Scene>) {}
+
+        fn host(&self) -> &dyn inset_embedder::ViewHost {
+            &self.host
+        }
     }
 
     /// What a [`Reader`] does with its context on every build.
@@ -2445,7 +2452,7 @@ mod tests {
     fn from_view_computes_logical_size_and_padding() {
         let cell = AppCell::new();
         let app = cell.borrow();
-        let data = MediaQueryData::from_view(&app, &TestView, None);
+        let data = MediaQueryData::from_view(&app, &TestView::default(), None);
         assert_eq!(data.size, Size::new(400.0, 300.0));
         assert_eq!(data.device_pixel_ratio, 2.0);
         assert_eq!(data.padding, EdgeInsets::from_ltrb(0.0, 20.0, 0.0, 34.0));
@@ -2469,7 +2476,7 @@ mod tests {
             .bold_text(true)
             .text_scaler(TextScaler::linear(2.0))
             .size(Size::new(1.0, 1.0));
-        let data = MediaQueryData::from_view(&app, &TestView, Some(&platform_data));
+        let data = MediaQueryData::from_view(&app, &TestView::default(), Some(&platform_data));
         assert_eq!(data.platform_brightness, Brightness::Dark);
         assert!(data.bold_text);
         assert_eq!(data.text_scaler, TextScaler::linear(2.0));
@@ -2659,7 +2666,7 @@ mod tests {
     fn from_view_yields_the_views_metrics_and_takes_platform_data_from_the_ambient_query() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let view: ViewRef = Rc::new(TestView);
+        let view: ViewRef = Rc::new(TestView::default());
         let (reader, seen) = data_reader();
         let from_view = MediaQuery::from_view(None, Rc::clone(&view), reader);
 
@@ -2700,7 +2707,7 @@ mod tests {
 
     #[test]
     fn from_view_under_a_view_yields_the_views_metrics() {
-        let view: ViewRef = Rc::new(TestView);
+        let view: ViewRef = Rc::new(TestView::default());
         // A dark-themed host, so the view's own data and the platform's can be told apart.
         let platform = TestPlatform::new()
             .on(TargetPlatform::IOS)

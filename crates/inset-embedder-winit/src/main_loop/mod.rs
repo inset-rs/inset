@@ -36,11 +36,11 @@
 //! running: what AppKit reports meanwhile, winit queues and delivers once the call returns. The
 //! handler calls the client, and the client calls the platform, its views and its windows from
 //! inside that call. None of those calls the client back. What needs the event loop, or the
-//! client, is sent to the loop for a turn of its own: a frame, a window, an exit, the cursor, a
-//! focus change, handing files to the app's handler. The rest acts at once, inside the
-//! framework's call: showing, hiding, moving or retitling a window, and hiding one that closes
-//! (the loop lets go of it on its next turn), sliding one in, hiding the application, the
-//! clipboard, a view's present and its text input, and what the screens and the pointer are.
+//! client, is sent to the loop for a turn of its own: a frame, a window, an exit, a focus change,
+//! handing files to the app's handler. The rest acts at once, inside the framework's call:
+//! showing, hiding, moving or retitling a window, and hiding one that closes (the loop lets go of
+//! it on its next turn), sliding one in, hiding the application, the clipboard, a view's present,
+//! its text input and its cursor, and what the screens and the pointer are.
 //!
 //! A popup menu runs a loop of the system's own while it tracks the pointer. `PopupMenus::show`
 //! only asks for it: on macOS a perform request on the main run loop opens the menu once winit's
@@ -251,12 +251,11 @@ impl<C: EmbedderClient> MainLoop<C> {
     ) -> MainLoop<C> {
         let state = Rc::new(EmbedderState::new(proxy.clone(), create_image_loader));
         let platform = Rc::new(WinitPlatform::new(Rc::clone(&state), proxy.clone()));
-        let view_maker = ViewMaker::new(state.gpu().clone());
+        let view_maker = ViewMaker::new(state.gpu().clone(), Rc::clone(state.requests()));
         let screen_window = screen_window_config();
         if let Some(window) = &screen_window {
-            state
-                .views()
-                .add_screen_view(view_maker.make_screen_view(window));
+            let (view, host) = view_maker.make_screen_view(window);
+            state.views().add_screen_view(view, host);
         }
         let client = start(platform.clone());
         MainLoop {
@@ -336,7 +335,6 @@ impl<C: EmbedderClient> MainLoop<C> {
             AppRequest::CloseWindow(id) => self.close_window(id),
             AppRequest::Quit => self.quit(event_loop),
             AppRequest::AnswerExit(response) => self.on_exit_answered(event_loop, response),
-            AppRequest::ShowCursor(kind) => self.show_cursor(kind),
             AppRequest::ChangeViewFocus(change) => self.change_view_focus(change),
             AppRequest::LookAtClipboard => self.look_at_clipboard(),
         }

@@ -1,5 +1,5 @@
-//! What the framework and the app ask of the embedder through the platform, a window or the window
-//! maker, on its way to the main loop: each request is an [`AppRequest`], sent as it is made, from
+//! What the framework and the app ask of the embedder through the platform, a window, a view's host
+//! or the window maker, on its way to the main loop: each request is an [`AppRequest`], sent as it is made, from
 //! inside the framework's call, and served on a turn of the loop of its own, in the order made, as
 //! Flutter posts a task to the platform thread and Chromium a `PostTask`.
 //!
@@ -14,7 +14,7 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 
-use inset_embedder::{AppExitResponse, SystemMouseCursorKind, ViewFocusEvent, ViewId};
+use inset_embedder::{AppExitResponse, ViewFocusEvent, ViewId};
 use winit::window::WindowId;
 
 use crate::main_loop::MainLoopEvent;
@@ -32,8 +32,6 @@ pub(crate) enum AppRequest {
     Quit,
     /// The framework's answer to a request to exit: quit on exit.
     AnswerExit(AppExitResponse),
-    /// Show this cursor on the window the pointer is in.
-    ShowCursor(SystemMouseCursorKind),
     /// Focus a view's window, or give up its focus.
     ChangeViewFocus(ViewFocusEvent),
     /// Look at the clipboard, and tell the app if it changed: the system cleared a copy of the

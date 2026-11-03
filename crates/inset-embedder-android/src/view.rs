@@ -7,7 +7,10 @@
 use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Mutex};
 
-use inset_embedder::{Scene, ScreenId, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding};
+use inset_embedder::{
+    Scene, ScreenId, SystemMouseCursorKind, TextInputHost, View, ViewConstraints,
+    ViewFocusDirection, ViewFocusState, ViewHost, ViewId, ViewMetrics, ViewPadding,
+};
 use ndk::native_window::NativeWindow;
 
 use crate::gpu::Gpu;
@@ -165,6 +168,22 @@ impl View for AndroidView {
         *self.latest.borrow_mut() = Some(Arc::clone(&scene));
         self.draw(&scene);
     }
+
+    fn host(&self) -> &dyn ViewHost {
+        self
+    }
+}
+
+/// The view is its own host, which takes nothing: this embedder has no input methods, no cursor
+/// and no focus to move yet.
+impl ViewHost for AndroidView {
+    fn text_input(&self) -> Option<&dyn TextInputHost> {
+        None
+    }
+
+    fn activate_system_cursor(&self, _device: i64, _kind: SystemMouseCursorKind) {}
+
+    fn request_focus_change(&self, _state: ViewFocusState, _direction: ViewFocusDirection) {}
 }
 
 /// What the system says about the window this turn.

@@ -70,9 +70,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — each window is on a screen with its own refresh rate and can be minimized or occluded, and a host that paces every view by one screen stops them all while that one is out of sight.
   Affect: each window draws at its own screen's refresh rate, and a minimized or occluded window draws nothing until it shows while the others keep drawing.
 
-- Change: `MouseCursor::activate_system_cursor` also takes the view the pointer is over.
-  Reason: platform — where each window has its own cursor, the host must know which window to change.
-  Affect: in an app with several windows, a cursor change reaches only the window under the pointer.
+- Change: what a view asks of the system, its text input, its cursor and its focus, goes to the view's own host (`View::host`, `ViewHost`), where Flutter's framework sends it to the platform as a whole through its text input and mouse cursor channels and `PlatformDispatcher.requestViewFocusChange`.
+  Reason: platform — what a view asks of the system is served by what holds that view, a window or another app's view as in WaOS, and not by the application as a whole.
+  Affect: a cursor, a focus request or an input method reaches the host of the view it is for, and every view has one, a test's view one that records what it is asked.
 
 - Change: `PlatformDispatcher.displays` is a host's `Screens` capability, whose `Screen` is Flutter's `Display` with a name, a frame placed on the desktop in points in place of a size in pixels, and what the system's bars leave free, and which also says where the pointer is.
   Reason: platform — a desktop app that places a window against a screen's edge or its own icon needs to know where the screens are, in the points its window frames are in.

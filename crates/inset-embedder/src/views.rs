@@ -1,7 +1,9 @@
 //! Flutter counterpart: dart:ui `FlutterView`. The host owns the native
 //! window; this stable handle exposes its identity and current configuration.
 
-use crate::{Matrix4, Rect, ScreenId, Size, TextEditingValue, TextInputConfiguration};
+use crate::{
+    Matrix4, Rect, ScreenId, Size, SystemMouseCursorKind, TextEditingValue, TextInputConfiguration,
+};
 
 /// Opaque id for one [`View`] (`FlutterView.viewId`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -190,10 +192,8 @@ pub trait View: 'static {
     /// picture alone.
     fn present(&self, scene: std::sync::Arc<crate::Scene>);
 
-    /// The view's text input, where the host has one.
-    fn text_input(&self) -> Option<&dyn TextInputHost> {
-        None
-    }
+    /// What the view asks of the system: its input methods, its cursor and its focus.
+    fn host(&self) -> &dyn ViewHost;
 
     /// What whoever gave or asked for this view attached to it, such as which screen to show:
     /// a request's [`ViewRequest::initial_data`](crate::ViewRequest::initial_data), or what an
@@ -216,6 +216,25 @@ pub trait View: 'static {
     fn window(&self) -> Option<crate::WindowRef> {
         None
     }
+}
+
+/// What one view asks of the system, provided by whoever hosts the view: a window's view gets its
+/// window's. Chromium's `RenderWidgetHostView` and Android's `SurfaceControlViewHost` are this
+/// piece; where Flutter's embedders take the same requests on the platform as a whole, through
+/// `SystemChannels.textInput`, `SystemChannels.mouseCursor` and
+/// `PlatformDispatcher.requestViewFocusChange`, here each view's own host takes them.
+pub trait ViewHost {
+    /// The input methods that edit text in this view; none where it takes no text.
+    fn text_input(&self) -> Option<&dyn TextInputHost>;
+
+    /// Shows a system cursor for a pointing device over this view: Flutter's
+    /// `activateSystemCursor` message on `SystemChannels.mouseCursor`. A host with one cursor for
+    /// every view shows it wherever the pointer is.
+    fn activate_system_cursor(&self, device: i64, kind: SystemMouseCursorKind);
+
+    /// Flutter's `PlatformDispatcher.requestViewFocusChange` for this view: asks the system to move
+    /// the focus to it, or away from it. A host whose system has no focus to move ignores it.
+    fn request_focus_change(&self, state: ViewFocusState, direction: ViewFocusDirection);
 }
 
 /// The host side of Flutter's text input connection for one view.

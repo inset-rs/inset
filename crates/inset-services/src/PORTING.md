@@ -130,9 +130,9 @@ The key constants and the four tables are machine-written from the Dart, as Flut
 
 ## mouse_cursor.rs → mouse_cursor.dart
 
-- Change: a session's `activate` calls the host's `MouseCursor` capability with a `SystemMouseCursorKind` and returns nothing.
+- Change: a session's `activate` asks the host of the view the pointer is over (`ViewHost::activate_system_cursor`) for a `SystemMouseCursorKind`, and returns nothing.
   Reason: platform — the host trait is the channel; there is no channel reply to await and nothing needs the string encoding.
-  Affect: the cursor changes without waiting a frame, and a host with no such capability leaves the cursor as it was.
+  Affect: the cursor changes without waiting a frame, and a view with no host leaves the cursor as it was.
 
 - Change: `MouseCursorSession::activate` and `MouseCursorManager::handle_device_cursor_update` also take the view the pointer is over.
   Reason: platform — where each window has its own cursor, the host must know which window to change.

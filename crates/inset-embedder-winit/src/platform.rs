@@ -31,10 +31,9 @@ use crate::state::EmbedderState;
 use crate::windows::WindowRequest;
 use inset_embedder::{
     AppExit, Brightness, Cameras, Clipboard, Compositor, Dispatcher, DockMenu, FileDialogs,
-    FontSource, ImageCodecFuture, Locale, MenuBar, MouseCursor, Notifications, Opener, Platform,
-    Players, PopupMenus, RequestId, Screens, SystemFontSource, TargetPlatform, TrayIcons,
-    VideoFrameReaders, ViewError, ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId,
-    ViewRef, ViewRequest, VsyncWaiter,
+    FontSource, ImageCodecFuture, Locale, MenuBar, Notifications, Opener, Platform, Players,
+    PopupMenus, RequestId, Screens, SystemFontSource, TargetPlatform, TrayIcons, VideoFrameReaders,
+    ViewError, ViewId, ViewRef, ViewRequest, VsyncWaiter,
 };
 
 /// The long-lived embedder capability held by `App`.
@@ -205,19 +204,6 @@ impl Platform for WinitPlatform {
         self.state.images().open_codec(bytes)
     }
 
-    fn request_view_focus_change(
-        &self,
-        view_id: ViewId,
-        state: ViewFocusState,
-        direction: ViewFocusDirection,
-    ) {
-        self.send(AppRequest::ChangeViewFocus(ViewFocusEvent {
-            view_id,
-            state,
-            direction,
-        }));
-    }
-
     /// The OS font database, scanned on request; the shell asks once at start-up.
     fn font_source(&self) -> Option<Box<dyn FontSource>> {
         Some(Box::new(SystemFontSource::platform()))
@@ -298,10 +284,6 @@ impl Platform for WinitPlatform {
 
     fn video_frame_readers(&self) -> Option<&dyn VideoFrameReaders> {
         self.video_frame_readers.as_deref()
-    }
-
-    fn mouse_cursor(&self) -> Option<&dyn MouseCursor> {
-        Some(self)
     }
 
     fn app_exit(&self) -> Option<&dyn AppExit> {

@@ -10,7 +10,7 @@ use inset_foundation::{App, AppCell};
 use inset_gestures::GestureBinding;
 use inset_rendering::RenderParagraph;
 use inset_scheduler::SchedulerBinding;
-use inset_test::{MockClipboard, TestPlatform};
+use inset_test::{MockClipboard, TestPlatform, TestViewHost};
 use inset_widgets::{AnyElement, WidgetRef, WidgetsBinding};
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
@@ -39,6 +39,7 @@ impl Fixture {
             size,
             renderer: RefCell::new(Context::new(device, queue)),
             pixels: RefCell::new(Vec::new()),
+            host: TestViewHost::default(),
         });
         // Images made from pixels go to the capture view's renderer, which draws them.
         let renderer = view.clone();

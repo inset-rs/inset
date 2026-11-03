@@ -9,7 +9,7 @@
 
 use std::time::Instant;
 
-use inset_embedder::{EmbedderClient, Offset, PointerReport, SystemMouseCursorKind, View};
+use inset_embedder::{EmbedderClient, Offset, PointerReport, View};
 use winit::data_transfer::{DataTransferId, TypedData};
 use winit::dpi::PhysicalPosition;
 use winit::event::{
@@ -21,7 +21,6 @@ use winit::window::WindowId;
 
 use crate::drag_drop::Carried;
 use crate::ime::ImeOutcome;
-use crate::mouse_cursor;
 use crate::os::System;
 use crate::os::capabilities::{NativeMenus, PointerQueries};
 use crate::pointer::PointerStamp;
@@ -31,18 +30,6 @@ use crate::touch::Touch;
 use super::MainLoop;
 
 impl<C: EmbedderClient> MainLoop<C> {
-    /// Shows `kind` on the window the pointer was last seen in; before the pointer was seen in
-    /// any window, nowhere.
-    pub(super) fn show_cursor(&self, kind: SystemMouseCursorKind) {
-        let pointer_window = self
-            .pointer
-            .window()
-            .and_then(|id| self.views().by_window(id));
-        if let Some(open) = pointer_window {
-            mouse_cursor::show(&*open.window, kind);
-        }
-    }
-
     /// A pointer came into `window` at `position`: the mouse, or a finger or a pen arriving.
     pub(super) fn on_pointer_entered(
         &mut self,
@@ -249,7 +236,7 @@ impl<C: EmbedderClient> MainLoop<C> {
             return;
         };
         let view = open.view.id();
-        match open.view.type_key(event, self.keyboard.modifiers()) {
+        match open.host.type_key(event, self.keyboard.modifiers()) {
             Typed::Nothing => {}
             Typed::Edited(value) => self.client.text_input_editing_value(view, value),
             Typed::Entered { edited, action } => {
@@ -266,7 +253,7 @@ impl<C: EmbedderClient> MainLoop<C> {
             return;
         };
         let view_id = open.view.id();
-        match open.view.take_ime(&ime) {
+        match open.host.take_ime(&ime) {
             ImeOutcome::None => {}
             ImeOutcome::Closed => self.client.text_input_closed(view_id),
             ImeOutcome::Value(value) => self.client.text_input_editing_value(view_id, value),

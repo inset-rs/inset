@@ -1,7 +1,8 @@
 //! Headless rendering output shared by test drivers.
 
 use inset_embedder::valo::{Color, Context};
-use inset_embedder::{Scene, View, ViewConstraints, ViewId, ViewMetrics};
+use inset_embedder::{Scene, View, ViewConstraints, ViewHost, ViewId, ViewMetrics};
+use inset_test::TestViewHost;
 use std::{cell::RefCell, sync::Arc};
 
 /// A headless view that retains the last rendered RGBA frame.
@@ -12,6 +13,8 @@ pub struct CaptureView {
     pub renderer: RefCell<Context>,
     /// Last frame as tightly packed RGBA bytes.
     pub pixels: RefCell<Vec<u8>>,
+    /// What the view asks of the system, recorded.
+    pub host: TestViewHost,
 }
 impl View for CaptureView {
     fn id(&self) -> ViewId {
@@ -31,5 +34,8 @@ impl View for CaptureView {
             self.size,
             Some(Color::WHITE),
         );
+    }
+    fn host(&self) -> &dyn ViewHost {
+        &self.host
     }
 }

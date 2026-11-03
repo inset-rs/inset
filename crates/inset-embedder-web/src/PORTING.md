@@ -40,7 +40,7 @@ Host implementation. Flutter analogue: the web engine under `engine/lib/web_ui`.
 
 ## text_input.rs / platform.rs
 
-- Change: `View` text input is a transparent DOM `input` or `textarea`, styled and placed like Flutter web's editing element, with `input` / composition / Enter forwarded as `TextEditingValue` and `TextInputAction`. While composition is in progress, `set_editing_state` does not write the DOM value or selection.
+- Change: the view's host's text input is a transparent DOM `input` or `textarea`, styled and placed like Flutter web's editing element, with `input` / composition / Enter forwarded as `TextEditingValue` and `TextInputAction`. While composition is in progress, `set_editing_state` does not write the DOM value or selection.
   Reason: platform — the browser IME talks to a focused HTML field, not winit's preedit events, and assigning `input.value` cancels composition.
   Affect: a field that has called `TextInput::attach` accepts typing and composition, a composing CJK cluster is not wiped by a caret update, the candidate window sits at the caret, and autofill / delta-model / a visible overlay field are absent.
 

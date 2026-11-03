@@ -6,10 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    Brightness, Clipboard, Dispatcher, FileDialogs, ImageCodecFuture, Matrix4, MouseCursor,
+    Brightness, Clipboard, Dispatcher, FileDialogs, ImageCodecFuture, Matrix4,
     NotificationActivation, Notifications, Offset, Opener, Platform, Rect, Screen, Screens, Size,
     SystemMouseCursorKind, TargetPlatform, TextEditingValue, TextInputConfiguration, TextInputHost,
-    View, ViewId, ViewMetrics, ViewRef,
+    View, ViewFocusDirection, ViewFocusState, ViewHost, ViewId, ViewMetrics, ViewRef,
 };
 use web_sys::HtmlCanvasElement;
 use web_time::Instant;
@@ -29,7 +29,6 @@ pub const CANVAS_VIEW: ViewId = ViewId(0);
 pub(crate) type OnSchedule = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
 
 pub struct WebPlatform {
-    pub canvas: HtmlCanvasElement,
     pub origin: Instant,
     frame_requested: Rc<Cell<bool>>,
     fonts_changed: Rc<Cell<bool>>,
@@ -51,13 +50,8 @@ pub struct WebPlatform {
 }
 
 impl WebPlatform {
-    pub fn new(
-        canvas: HtmlCanvasElement,
-        brightness: Brightness,
-        screen: Option<Screen>,
-    ) -> WebPlatform {
+    pub fn new(brightness: Brightness, screen: Option<Screen>) -> WebPlatform {
         let platform = WebPlatform {
-            canvas,
             origin: Instant::now(),
             frame_requested: Rc::new(Cell::new(false)),
             fonts_changed: Rc::new(Cell::new(false)),
@@ -236,10 +230,6 @@ impl Platform for WebPlatform {
         Some(self)
     }
 
-    fn mouse_cursor(&self) -> Option<&dyn MouseCursor> {
-        Some(self)
-    }
-
     fn open_image_codec(&self, bytes: std::sync::Arc<[u8]>) -> ImageCodecFuture {
         let Some(images) = self.images.borrow().clone() else {
             return Box::pin(std::future::ready(Err(
@@ -267,15 +257,10 @@ impl Screens for WebPlatform {
     }
 }
 
-impl MouseCursor for WebPlatform {
-    /// One canvas, one cursor: the view and the device do not pick anything.
-    fn activate_system_cursor(&self, _view: ViewId, _device: i64, kind: SystemMouseCursorKind) {
-        let css = cursor_css(kind);
-        let _ = self.canvas.style().set_property("cursor", css);
-    }
-}
-
+/// The page's canvas's view, and its own host: the canvas shows its cursor, and the page's field
+/// edits its text (`text_input.rs`).
 pub struct WebView {
+    canvas: HtmlCanvasElement,
     metrics: Cell<ViewMetrics>,
     gpu: RefCell<Gpu>,
     text_input: RefCell<Option<WebTextInput>>,
@@ -283,8 +268,9 @@ pub struct WebView {
 }
 
 impl WebView {
-    pub fn new(metrics: ViewMetrics, gpu: Gpu) -> WebView {
+    pub fn new(canvas: HtmlCanvasElement, metrics: ViewMetrics, gpu: Gpu) -> WebView {
         WebView {
+            canvas,
             metrics: Cell::new(metrics),
             gpu: RefCell::new(gpu),
             text_input: RefCell::new(None),
@@ -332,9 +318,24 @@ impl View for WebView {
             .present(&inset_embedder::slices(&scene, |_| None).picture_with_room());
     }
 
+    fn host(&self) -> &dyn ViewHost {
+        self
+    }
+}
+
+impl ViewHost for WebView {
     fn text_input(&self) -> Option<&dyn TextInputHost> {
         Some(self)
     }
+
+    /// One canvas, one cursor: the device does not pick anything.
+    fn activate_system_cursor(&self, _device: i64, kind: SystemMouseCursorKind) {
+        let css = cursor_css(kind);
+        let _ = self.canvas.style().set_property("cursor", css);
+    }
+
+    /// The canvas takes the focus the browser gives the page; a request moves nothing.
+    fn request_focus_change(&self, _state: ViewFocusState, _direction: ViewFocusDirection) {}
 }
 
 impl TextInputHost for WebView {

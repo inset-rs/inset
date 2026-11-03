@@ -5,15 +5,18 @@ use std::rc::Weak;
 use std::sync::Arc;
 
 use inset_embedder::{
-    HostWindow, RequestId, Scene, ScreenId, View, ViewConstraints, ViewId, ViewMetrics, WindowRef,
+    HostWindow, RequestId, Scene, ScreenId, View, ViewConstraints, ViewHost, ViewId, ViewMetrics,
+    WindowRef,
 };
+
+use crate::view_host::TestViewHost;
 
 /// The id of a [`TestView`] given none: the view of a test with one, as the engine numbers
 /// Flutter's implicit view.
 pub const IMPLICIT_VIEW_ID: ViewId = ViewId(0);
 
 /// A view of a fixed physical size and pixel ratio that counts the scenes presented to it, keeps
-/// the last, and shows none. `flutter_test`'s `TestFlutterView` in its two settable dimensions.
+/// the last, shows none, and records what it asks of the system in its host. `flutter_test`'s `TestFlutterView` in its two settable dimensions.
 pub struct TestView {
     id: ViewId,
     size: Cell<[f64; 2]>,
@@ -26,6 +29,8 @@ pub struct TestView {
     initial_data: Option<String>,
     /// The window the view is in, until it closes; held weakly, since the window holds the view.
     window: RefCell<Option<Weak<dyn HostWindow>>>,
+    /// What the view asks of the system, recorded.
+    host: TestViewHost,
 }
 
 impl TestView {
@@ -46,6 +51,7 @@ impl TestView {
             request_id: None,
             initial_data: None,
             window: RefCell::new(None),
+            host: TestViewHost::default(),
         }
     }
 
@@ -90,6 +96,12 @@ impl TestView {
         self.last_scene.borrow().clone()
     }
 
+    /// The view's host, which records the cursors shown over the view, the focus requested for it
+    /// and what its text input was asked.
+    pub fn test_host(&self) -> &TestViewHost {
+        &self.host
+    }
+
     /// The view is in `window` from now on, or in none.
     pub(crate) fn set_window(&self, window: Option<Weak<dyn HostWindow>>) {
         *self.window.borrow_mut() = window;
@@ -115,6 +127,10 @@ impl View for TestView {
     fn present(&self, scene: Arc<Scene>) {
         self.presented.set(self.presented.get() + 1);
         *self.last_scene.borrow_mut() = Some(scene);
+    }
+
+    fn host(&self) -> &dyn ViewHost {
+        &self.host
     }
 
     fn initial_data(&self) -> Option<String> {

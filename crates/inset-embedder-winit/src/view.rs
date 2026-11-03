@@ -1,7 +1,7 @@
 //! The embedder's [`View`]: a place the framework draws, as it sees it — its identity, its metrics,
-//! its text input, and the scenes it presents: their slices drawn by its rasterizer
-//! (`rasterizer.rs`) into the layer the view shows into (`os`'s `ViewLayer`), with the composition
-//! layers they place beneath the drawing.
+//! its host, which takes what the view asks of the system (`ViewHost`), and the scenes it presents:
+//! their slices drawn by its rasterizer (`rasterizer.rs`) into the layer the view shows into
+//! (`os`'s `ViewLayer`), with the composition layers they place beneath the drawing.
 //!
 //! Whoever holds a view controls it as Flutter's embedder controls a view: it adds the view on a
 //! layer with its metrics ([`WinitView::add`], `AddView`), gives it new metrics
@@ -11,33 +11,29 @@
 //! places in the window and keeps filling it (`windows.rs`), gives the view its metrics from the
 //! window as the window resizes or moves to another screen, and removes it as the window closes.
 //!
-//! A view is made at no size, on no layer, and is added on one: the screen view at winit's first
+//! A view is made with its host, which its holder gives it, at no size, on no layer, and is added on
+//! one: the screen view at winit's first
 //! call, after the app has started, as Flutter's engine has it before its window; any other view as
 //! soon as it is made. A view on no layer, and one whose window has no surface, draws nothing; the
 //! system gives the views their surfaces and takes them away (`main_loop/`).
 //!
 //! The registry of views owns each window (`windows.rs`); the framework and the app may hold
 //! a view for a while after its window closes. The invariant: a view holds its window only through
-//! its layer, where that is the window, and weakly for its text input and the app's handle on the
-//! window, and lets go of them when the window closes (`window_closed`), so that closing a window
-//! frees it.
+//! its layer, where that is the window, and weakly through its host's text input and the app's
+//! handle on the window, and lets go of the layer and the handle when the window closes
+//! (`window_closed`), so that closing a window frees it.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Instant;
 
-use inset_embedder::{RequestId, Scene, TextInputHost, View, ViewId, ViewMetrics, WindowRef};
-use winit::event::{Ime, KeyEvent};
-use winit::keyboard::ModifiersState;
-use winit::window::Window;
+use inset_embedder::{RequestId, Scene, View, ViewHost, ViewId, ViewMetrics, WindowRef};
 
 use crate::gpu::LazyGpu;
 use crate::host_window::WinitWindow;
-use crate::ime::ImeOutcome;
 use crate::os::ViewLayer;
 use crate::rasterizer::{PresentingInTransaction, Rasterizer};
-use crate::text_input::{TextInput, Typed};
 
 /// Stable view identity, the metrics its holder gave it, and what presents its scenes.
 pub(crate) struct WinitView {
@@ -45,7 +41,8 @@ pub(crate) struct WinitView {
     metrics: Cell<ViewMetrics>,
     /// The view's layer, the surface made from it, and the scenes drawn there.
     rasterizer: RefCell<Rasterizer>,
-    text_input: TextInput,
+    /// What the view asks of the system, which its holder gave it.
+    host: Rc<dyn ViewHost>,
     /// The request the view arrived for; `None` for the screen view, which the system gave.
     request_id: Option<RequestId>,
     initial_data: Option<String>,
@@ -55,16 +52,21 @@ pub(crate) struct WinitView {
 }
 
 impl WinitView {
-    /// A view on no layer yet, at no size, drawing with `gpu`'s device once it is on a layer and
-    /// has a surface. A view whose window sees through gets surfaces whose alpha the compositor
-    /// honours, cleared to nothing, so what the app leaves unpainted shows what is behind the
-    /// window.
-    pub(crate) fn new(id: ViewId, gpu: &LazyGpu, sees_through: bool) -> WinitView {
+    /// A view on no layer yet, at no size, asking what it asks of the system of `host`, and
+    /// drawing with `gpu`'s device once it is on a layer and has a surface. A view whose window
+    /// sees through gets surfaces whose alpha the compositor honours, cleared to nothing, so what
+    /// the app leaves unpainted shows what is behind the window.
+    pub(crate) fn new(
+        id: ViewId,
+        gpu: &LazyGpu,
+        sees_through: bool,
+        host: Rc<dyn ViewHost>,
+    ) -> WinitView {
         WinitView {
             id,
             metrics: Cell::new(ViewMetrics::default()),
             rasterizer: RefCell::new(Rasterizer::new(gpu, sees_through)),
-            text_input: TextInput::new(),
+            host,
             request_id: None,
             initial_data: None,
             window_handle: RefCell::new(Weak::new()),
@@ -115,11 +117,6 @@ impl WinitView {
     /// the framework may still hold the view, which draws nowhere from now on.
     pub(crate) fn remove(&self) {
         self.rasterizer.borrow_mut().remove_layer();
-    }
-
-    /// The view's text input is on `window` from now on.
-    pub(crate) fn attach_text_input(&self, window: &Arc<dyn Window>) {
-        self.text_input.attach(window);
     }
 
     /// Draws the last scene again if the surface does not show it: an owed frame, paid
@@ -173,16 +170,6 @@ impl WinitView {
         *self.window_handle.borrow_mut() = Weak::new();
     }
 
-    /// What a key the framework did not handle does to the view's active text input.
-    pub(crate) fn type_key(&self, event: &KeyEvent, modifiers: ModifiersState) -> Typed {
-        self.text_input.type_key(event, modifiers)
-    }
-
-    /// What an IME event makes of the editing value of the view's text input.
-    pub(crate) fn take_ime(&self, ime: &Ime) -> ImeOutcome {
-        self.text_input.take_ime(ime)
-    }
-
     /// The system gives the view a surface, made from its layer: the view draws on it from now
     /// on.
     pub(crate) fn give_surface(&self) {
@@ -221,8 +208,8 @@ impl View for WinitView {
         rasterizer.draw(&scene, &slices);
     }
 
-    fn text_input(&self) -> Option<&dyn TextInputHost> {
-        Some(&self.text_input)
+    fn host(&self) -> &dyn ViewHost {
+        &*self.host
     }
 
     fn initial_data(&self) -> Option<String> {

@@ -22,8 +22,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use inset_embedder::{
-    RequestId, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding, ViewRequest, WindowConfig,
-    WindowLevel,
+    RequestId, View, ViewConstraints, ViewHost, ViewId, ViewMetrics, ViewPadding, ViewRequest,
+    WindowConfig, WindowLevel,
 };
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event_loop::ActiveEventLoop;
@@ -38,6 +38,7 @@ use crate::os::capabilities::{
 use crate::os::{System, TrackpadTouchObserver, VisibilityNotices, WindowHold};
 use crate::screens::screen_of;
 use crate::view::WinitView;
+use crate::view_host::WindowViewHost;
 
 /// The screen view's id, as in Flutter: the views the app asks for are numbered after it.
 pub(crate) const SCREEN_VIEW: ViewId = ViewId(0);
@@ -47,6 +48,8 @@ pub(crate) const SCREEN_VIEW: ViewId = ViewId(0);
 pub(crate) struct OpenWindow {
     pub(crate) window: Arc<dyn Window>,
     pub(crate) view: Rc<WinitView>,
+    /// The view's host, the window's: it takes the window's keys and input methods.
+    pub(crate) host: Rc<WindowViewHost>,
     /// The app's handle on a window it asked for; the screen view's window has none.
     pub(crate) handle: Option<Rc<WinitWindow>>,
 }
@@ -75,6 +78,8 @@ pub(crate) struct Views {
 
 struct ViewEntry {
     view: Rc<WinitView>,
+    /// The view's host, which the window's code made with the view.
+    host: Rc<WindowViewHost>,
     window: Option<ViewWindow>,
     /// Whether the view stays once its window closes: the screen view.
     screen: bool,
@@ -108,10 +113,11 @@ pub(crate) struct WindowObservers {
 }
 
 impl Views {
-    /// The screen view, with no window yet.
-    pub(crate) fn add_screen_view(&self, view: Rc<WinitView>) {
+    /// The screen view, with its host and no window yet.
+    pub(crate) fn add_screen_view(&self, view: Rc<WinitView>, host: Rc<WindowViewHost>) {
         self.insert(ViewEntry {
             view,
+            host,
             window: None,
             screen: true,
         });
@@ -129,6 +135,7 @@ impl Views {
         let view = open.view.id();
         self.insert(ViewEntry {
             view: open.view,
+            host: open.host,
             window: Some(ViewWindow {
                 _view_layer: view_layer,
                 _observers: observers,
@@ -226,12 +233,13 @@ impl Views {
             .map(|entry| Rc::clone(&entry.view))
     }
 
-    pub(crate) fn screen_view(&self) -> Option<Rc<WinitView>> {
+    /// The screen view, with its host.
+    pub(crate) fn screen_view(&self) -> Option<(Rc<WinitView>, Rc<WindowViewHost>)> {
         self.entries
             .borrow()
             .values()
             .find(|entry| entry.screen)
-            .map(|entry| Rc::clone(&entry.view))
+            .map(|entry| (Rc::clone(&entry.view), Rc::clone(&entry.host)))
     }
 
     fn insert(&self, entry: ViewEntry) {
@@ -249,6 +257,7 @@ impl ViewEntry {
         Some(OpenWindow {
             window: Arc::clone(&window.window),
             view: Rc::clone(&self.view),
+            host: Rc::clone(&self.host),
             handle: window.handle.clone(),
         })
     }
@@ -260,64 +269,78 @@ pub(crate) struct WindowRequest {
     pub request: ViewRequest,
 }
 
-/// Makes the views, which share the one device they draw with, and their windows.
+/// Makes the views, which share the one device they draw with, their hosts and their windows.
 pub(crate) struct ViewMaker {
     /// One device for every view, made at the first draw if no image made it before.
     gpu: LazyGpu,
+    /// Where the views' hosts and the windows' handles send their requests, to the loop.
+    requests: Rc<AppRequests>,
     /// The number of the next view the app asks for; the screen view is the first.
     next_view_id: u64,
 }
 
 impl ViewMaker {
-    pub(crate) fn new(gpu: LazyGpu) -> ViewMaker {
+    pub(crate) fn new(gpu: LazyGpu, requests: Rc<AppRequests>) -> ViewMaker {
         ViewMaker {
             gpu,
+            requests,
             next_view_id: SCREEN_VIEW.0 + 1,
         }
     }
 
-    /// The screen view, with no window yet, for a window configured as `config`.
-    pub(crate) fn make_screen_view(&self, config: &WindowConfig) -> Rc<WinitView> {
-        Rc::new(self.view(SCREEN_VIEW, config))
+    /// The screen view, with its host and no window yet, for a window configured as `config`.
+    pub(crate) fn make_screen_view(
+        &self,
+        config: &WindowConfig,
+    ) -> (Rc<WinitView>, Rc<WindowViewHost>) {
+        let (view, host) = self.view(SCREEN_VIEW, config);
+        (Rc::new(view), host)
     }
 
     /// The view `window_request` asked for, carrying its request's id and initial data, with
-    /// its window and the window's handle, which sends its `close` to the loop through
-    /// `requests`, and the window's hold on the view's layer.
+    /// its host, its window and the window's handle, which sends its `close` to the loop, and the
+    /// window's hold on the view's layer.
     pub(crate) fn make_requested(
         &mut self,
         event_loop: &dyn ActiveEventLoop,
         window_request: &WindowRequest,
-        requests: Rc<AppRequests>,
     ) -> Result<(OpenWindow, WindowHold), String> {
         let config = &window_request.request.config;
         let window = open_window(event_loop, config)?;
-        let view = self.view(ViewId(self.next_view_id), config).with_request(
+        let (view, host) = self.view(ViewId(self.next_view_id), config);
+        let view = Rc::new(view.with_request(
             window_request.request_id,
             window_request.request.initial_data.clone(),
-        );
-        let view = Rc::new(view);
+        ));
         self.next_view_id += 1;
-        let view_layer = add_view_in_window(&view, &window);
+        let view_layer = add_view_in_window(&view, &host, &window);
         let handle = Rc::new(WinitWindow::new(
             window.id(),
             Arc::downgrade(&window),
             Rc::clone(&view),
-            requests,
+            Rc::clone(&self.requests),
         ));
         view.set_window_handle(&handle);
         let open = OpenWindow {
             window,
             view,
+            host,
             handle: Some(handle),
         };
         Ok((open, view_layer))
     }
 
     /// The view numbered `id`, drawing with the device every view shares, for a window
-    /// configured as `config`.
-    fn view(&self, id: ViewId, config: &WindowConfig) -> WinitView {
-        WinitView::new(id, &self.gpu, config.background.sees_through())
+    /// configured as `config`, with the host the window's code makes for it.
+    fn view(&self, id: ViewId, config: &WindowConfig) -> (WinitView, Rc<WindowViewHost>) {
+        let host = Rc::new(WindowViewHost::new(id, Rc::clone(&self.requests)));
+        let view = WinitView::new(
+            id,
+            &self.gpu,
+            config.background.sees_through(),
+            Rc::clone(&host) as Rc<dyn ViewHost>,
+        );
+        (view, host)
     }
 }
 
@@ -327,25 +350,30 @@ pub(crate) fn screen_window_config() -> Option<WindowConfig> {
     System::WINDOW_IS_THE_SCREEN.then(WindowConfig::default)
 }
 
-/// The screen view's window, configured as `config`, holding `view`, with its hold on the view's
-/// layer.
+/// The screen view's window, configured as `config`, holding `view`, whose host is `host`, with
+/// its hold on the view's layer.
 pub(crate) fn open_screen_window(
     event_loop: &dyn ActiveEventLoop,
     config: &WindowConfig,
     view: &WinitView,
+    host: &WindowViewHost,
 ) -> Result<(Arc<dyn Window>, WindowHold), String> {
     let window = open_window(event_loop, config)?;
-    let view_layer = add_view_in_window(view, &window);
+    let view_layer = add_view_in_window(view, host, &window);
     Ok((window, view_layer))
 }
 
 /// `window` holds `view` from now on: the view is added on a layer the window's code makes and
-/// places in the window, at the window's metrics, and its text input is on the window. Answers
-/// the window's hold on the layer.
-fn add_view_in_window(view: &WinitView, window: &Arc<dyn Window>) -> WindowHold {
+/// places in the window, at the window's metrics, and its host's input methods are the window's.
+/// Answers the window's hold on the layer.
+fn add_view_in_window(
+    view: &WinitView,
+    host: &WindowViewHost,
+    window: &Arc<dyn Window>,
+) -> WindowHold {
     let (view_layer, hold) = System::view_layer_in(window);
     view.add(view_layer, window_metrics(&**window));
-    view.attach_text_input(window);
+    host.attach(window);
     hold
 }
 

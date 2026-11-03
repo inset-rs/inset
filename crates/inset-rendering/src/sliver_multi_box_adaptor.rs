@@ -1247,8 +1247,12 @@ pub(crate) mod viewport_test_support {
     use crate::view::{RenderView, ViewConfiguration};
     use crate::viewport::RenderViewport;
     use crate::viewport_offset::{FixedViewportOffset, ViewportOffset};
+    use inset_test::TestViewHost;
 
-    struct TestView;
+    #[derive(Default)]
+    struct TestView {
+        host: TestViewHost,
+    }
 
     impl View for TestView {
         fn id(&self) -> ViewId {
@@ -1260,6 +1264,10 @@ pub(crate) mod viewport_test_support {
         }
 
         fn present(&self, _scene: std::sync::Arc<inset_embedder::Scene>) {}
+
+        fn host(&self) -> &dyn inset_embedder::ViewHost {
+            &self.host
+        }
     }
 
     /// The scrolling machinery a lazy sliver needs: a viewport inside a [`RenderView`] rooted in
@@ -1287,7 +1295,7 @@ pub(crate) mod viewport_test_support {
                 app,
                 Some(viewport.as_box()),
                 Some(configuration),
-                Rc::new(TestView) as ViewRef,
+                Rc::new(TestView::default()) as ViewRef,
             );
             let owner = PipelineOwner::new(app, None, None);
             owner.set_root_node(app, Some(view.as_object()));

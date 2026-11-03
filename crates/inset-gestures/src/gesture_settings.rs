@@ -62,10 +62,14 @@ impl Display for DeviceGestureSettings {
 
 #[cfg(test)]
 mod tests {
-    use inset_embedder::{GestureSettings, View, ViewId, ViewMetrics};
+    use inset_embedder::{
+        GestureSettings, SystemMouseCursorKind, TextInputHost, View, ViewFocusDirection,
+        ViewFocusState, ViewHost, ViewId, ViewMetrics,
+    };
 
     use super::DeviceGestureSettings;
 
+    /// A view with gesture settings, its own host, which takes nothing.
     struct SettingsView {
         metrics: ViewMetrics,
         gesture_settings: GestureSettings,
@@ -85,6 +89,20 @@ mod tests {
         }
 
         fn present(&self, _scene: std::sync::Arc<inset_embedder::Scene>) {}
+
+        fn host(&self) -> &dyn ViewHost {
+            self
+        }
+    }
+
+    impl ViewHost for SettingsView {
+        fn text_input(&self) -> Option<&dyn TextInputHost> {
+            None
+        }
+
+        fn activate_system_cursor(&self, _device: i64, _kind: SystemMouseCursorKind) {}
+
+        fn request_focus_change(&self, _state: ViewFocusState, _direction: ViewFocusDirection) {}
     }
 
     #[test]

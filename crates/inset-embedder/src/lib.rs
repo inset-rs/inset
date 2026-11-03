@@ -97,9 +97,8 @@ pub use paragraph::*;
 pub use platform::{
     AppExit, AppExitReply, AppExitResponse, AppExitType, AppLifecycleState,
     ApplicationSwitcherDescription, Brightness, Dispatcher, Frame, HapticFeedbackType, Haptics,
-    InertDispatcher, InertPlatform, MouseCursor, Platform, PlatformRef, Restoration, Screen,
-    ScreenId, Screens, SystemChrome, SystemContextMenu, SystemUiOverlayStyle, TargetPlatform,
-    TextServices, ViewRef,
+    InertDispatcher, InertPlatform, Platform, PlatformRef, Restoration, Screen, ScreenId, Screens,
+    SystemChrome, SystemContextMenu, SystemUiOverlayStyle, TargetPlatform, TextServices, ViewRef,
 };
 pub use pointer::{
     PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
@@ -117,7 +116,7 @@ pub use text_editing::*;
 pub use text_input::*;
 pub use views::{
     GestureSettings, TextInputHost, View, ViewConstraints, ViewFocusDirection, ViewFocusEvent,
-    ViewFocusState, ViewId, ViewMetrics, ViewPadding,
+    ViewFocusState, ViewHost, ViewId, ViewMetrics, ViewPadding,
 };
 pub use vsync::{VsyncObserver, VsyncWaiter};
 pub use web_time::Instant;

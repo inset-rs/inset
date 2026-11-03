@@ -93,9 +93,9 @@ async fn run_async<C: EmbedderClient + 'static>(
     let (metrics, size) = fit_canvas(&window, &canvas, screen.as_ref().map(|screen| screen.id));
     let gpu = Gpu::attach(canvas.clone(), size).await;
     let images = gpu.context.image_context();
-    let platform = Rc::new(WebPlatform::new(canvas.clone(), brightness, screen));
+    let platform = Rc::new(WebPlatform::new(brightness, screen));
     platform.set_images(images);
-    let view = Rc::new(WebView::new(metrics, gpu));
+    let view = Rc::new(WebView::new(canvas.clone(), metrics, gpu));
     platform.set_view(Rc::clone(&view) as ViewRef);
     let client = start(Rc::clone(&platform) as PlatformRef);
     let host = Rc::new(Host {

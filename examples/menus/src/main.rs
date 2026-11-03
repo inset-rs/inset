@@ -223,11 +223,8 @@ fn bring_window_forward(app: &mut App) {
         if let Some(window) = view.window() {
             window.show();
         }
-        platform.request_view_focus_change(
-            view.id(),
-            ViewFocusState::Focused,
-            ViewFocusDirection::Undefined,
-        );
+        view.host()
+            .request_focus_change(ViewFocusState::Focused, ViewFocusDirection::Undefined);
     }
 }
 

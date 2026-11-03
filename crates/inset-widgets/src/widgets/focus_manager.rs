@@ -2657,8 +2657,9 @@ pub(crate) mod tests {
     use std::time::Duration;
 
     use inset_embedder::{
-        Matrix4, Rect, Size, TextEditingValue, TextInputConfiguration, TextInputHost,
-        View as EmbedderView, ViewId, ViewMetrics,
+        Matrix4, Rect, Size, SystemMouseCursorKind, TextEditingValue, TextInputConfiguration,
+        TextInputHost, View as EmbedderView, ViewFocusDirection, ViewFocusState, ViewHost, ViewId,
+        ViewMetrics,
     };
     use inset_gestures::{PointerDownEvent, PointerEvent};
     use inset_services::{KeyDownEvent, LogicalKeyboardKey, PhysicalKeyboardKey, ServicesBinding};
@@ -2670,8 +2671,8 @@ pub(crate) mod tests {
     use crate::test_harness::pump_every_view;
     use crate::widgets::basic::{Builder, SizedBox};
 
-    /// A view whose text input answers whether its host edits keys itself, and whether it
-    /// provides Edit's commands.
+    /// A view, its own host, whose text input answers whether its host edits keys itself, and
+    /// whether it provides Edit's commands.
     struct TestView {
         handles_editing_keys: bool,
         provides_edit_commands: bool,
@@ -2715,9 +2716,19 @@ pub(crate) mod tests {
 
         fn present(&self, _scene: std::sync::Arc<inset_embedder::Scene>) {}
 
+        fn host(&self) -> &dyn ViewHost {
+            self
+        }
+    }
+
+    impl ViewHost for TestView {
         fn text_input(&self) -> Option<&dyn TextInputHost> {
             Some(self)
         }
+
+        fn activate_system_cursor(&self, _device: i64, _kind: SystemMouseCursorKind) {}
+
+        fn request_focus_change(&self, _state: ViewFocusState, _direction: ViewFocusDirection) {}
     }
 
     /// An [`App`] with a single view, ready for [`run_app`].

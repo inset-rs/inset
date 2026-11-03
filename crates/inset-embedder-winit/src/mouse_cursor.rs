@@ -1,22 +1,11 @@
-//! The framework's [`MouseCursor`]: the cursor it asks for goes to the event loop, which shows
-//! it on the window the pointer is in.
+//! The system cursors as winit shows them, on the window of the view whose host is asked for one
+//! (`view_host.rs`).
 
-use inset_embedder::{MouseCursor, SystemMouseCursorKind, ViewId};
+use inset_embedder::SystemMouseCursorKind;
 use winit::cursor::CursorIcon;
 use winit::window::Window;
 
-use crate::WinitPlatform;
-use crate::app_requests::AppRequest;
-
-impl MouseCursor for WinitPlatform {
-    /// One mouse: the window the pointer was last seen in shows the cursor, and the loop
-    /// already knows that window, so neither the view nor the device is needed to pick it.
-    fn activate_system_cursor(&self, _view: ViewId, _device: i64, kind: SystemMouseCursorKind) {
-        self.send(AppRequest::ShowCursor(kind));
-    }
-}
-
-/// Shows `kind` on `window`, the one the pointer was last seen in.
+/// Shows `kind` on `window`, where the pointer shows it whenever it is over the window.
 pub(crate) fn show(window: &dyn Window, kind: SystemMouseCursorKind) {
     match cursor_icon_of(kind) {
         Some(icon) => {

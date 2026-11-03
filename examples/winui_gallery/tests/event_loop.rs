@@ -118,6 +118,7 @@ impl Driver {
             size: [900, 2000],
             renderer: RefCell::new(Context::new(device, queue)),
             pixels: RefCell::new(Vec::new()),
+            host: inset_test::TestViewHost::default(),
         });
         let platform = Rc::new(LoopPlatform {
             view,

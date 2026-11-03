@@ -2,7 +2,6 @@
 //! closing, focus, resizing, moving, being minimized or occluded, and the surfaces the system
 //! gives and takes.
 
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -37,11 +36,7 @@ impl<C: EmbedderClient> MainLoop<C> {
         event_loop: &dyn ActiveEventLoop,
         request: &WindowRequest,
     ) -> Result<(), String> {
-        let (open, view_layer) = self.view_maker.make_requested(
-            event_loop,
-            request,
-            Rc::clone(self.state.requests()),
-        )?;
+        let (open, view_layer) = self.view_maker.make_requested(event_loop, request)?;
         if self.surfaces_given {
             open.view.give_surface();
         }
@@ -96,12 +91,12 @@ impl<C: EmbedderClient> MainLoop<C> {
         let Some(config) = self.screen_window.take() else {
             return;
         };
-        let view = self
+        let (view, host) = self
             .views()
             .screen_view()
             .expect("the screen view was made with the app");
-        let (window, view_layer) =
-            open_screen_window(event_loop, &config, &view).expect("open the screen view's window");
+        let (window, view_layer) = open_screen_window(event_loop, &config, &view, &host)
+            .expect("open the screen view's window");
         if self.surfaces_given {
             view.give_surface();
         }

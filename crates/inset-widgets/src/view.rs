@@ -194,11 +194,10 @@ impl ViewState {
         if app.get(self).view_has_focus == has_focus || !has_focus {
             return;
         }
-        app.platform().request_view_focus_change(
-            self.widget(app).view.id(),
-            ViewFocusState::Focused,
-            ViewFocusDirection::Forward,
-        );
+        self.widget(app)
+            .view
+            .host()
+            .request_focus_change(ViewFocusState::Focused, ViewFocusDirection::Forward);
     }
 }
 
