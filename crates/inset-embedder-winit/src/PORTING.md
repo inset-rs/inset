@@ -196,15 +196,15 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — macOS's interruption notice carries no reason, and Apple documents the notice for another application taking the hardware a session needs.
   Affect: on a Mac every interruption reads as another app having the camera.
 
-## video_frames.rs, os/apple/media/frame_images.rs → the macOS embedder's `FlutterExternalTexture` (`copyPixelBuffer`, `CVMetalTextureCache`)
+## video_frames.rs, os/apple/media/video_frame.rs, os/apple/media/frame_textures.rs → the macOS embedder's `FlutterExternalTexture` (`copyPixelBuffer`, `CVMetalTextureCache`)
 
 - Change: at each vsync a view asks each reader its scene draws for the frame of the display link's target time, when the picture reaches the screen, and draws its last scene again when a new one came, where Flutter's engine draws a texture's frame when its plugin calls `markTextureFrameAvailable`.
   Reason: platform — AVFoundation tells no player's frame as it comes; a display link asks the video output for the frame of each refresh's `targetTimestamp`, as `frame_for` does, so a frame shows at its moment of the video, in step with the sound.
   Affect: a view that shows a video takes every vsync while it does and is in sight, paused or not, none while its window is hidden or covered, and a reader the scene no longer draws is let go with its frame.
 
-- Change: a frame becomes an image through CoreVideo's texture cache, wrapped as a wgpu texture whose drop callback holds the frame until wgpu frees it.
-  Reason: platform — a CoreVideo pool hands a frame's surface out again once nothing holds the frame, whatever still reads the surface (`experiments/2026-11-01-corevideo-pool-reuse`).
-  Affect: a frame is drawn with no copy and is not overwritten while the GPU reads it.
+- Change: on macOS and iOS a frame is a `CoreVideoFrame`, whose pixel buffer platform code reaches by downcasting, and its texture is made through CoreVideo's texture cache on the device's Metal device, holding the frame until wgpu frees it, where Flutter's embedder makes a texture of the pixel buffer a plugin hands it for each frame it draws.
+  Reason: platform — a CoreVideo pool hands a frame's surface out again once nothing holds the frame, whatever still reads the surface, and Apple documents the texture cache for a BGRA pixel buffer.
+  Affect: a frame is drawn with no copy, on the view's device or any other the app made, and is not overwritten while the GPU reads it.
 
 ## host_window.rs / main_loop/windows.rs / os/macos/visibility.rs → Flutter's desktop window controllers (`_window_macos.dart`, `_window_win32.dart`, `_window_linux.dart`)
 

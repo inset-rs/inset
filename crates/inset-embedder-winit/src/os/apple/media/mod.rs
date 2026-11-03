@@ -5,7 +5,8 @@
 //! session an `AVCaptureSession` (`capture_session`) with its photo and movie outputs
 //! (`outputs`); a picture goes to a composition layer as a layer the system draws into, shown as
 //! its content so that Core Animation clips and scales it with it (`apple/composition`), or to a
-//! frame reader the app made, as `IOSurface`-backed pixel buffers (`frames`).
+//! frame reader the app made (`frames`), each frame an `IOSurface`-backed pixel buffer
+//! (`video_frame`) whose texture CoreVideo's texture cache makes (`frame_textures`).
 //! AVFoundation tells changes by key-value observing and notifications (`observing`).
 //!
 //! A player and a session are controlled on the main thread, as AVFoundation asks of a player and
@@ -23,13 +24,14 @@ mod camera_sharing;
 mod capture_session;
 mod cue_markup;
 mod cues;
-mod frame_images;
+mod frame_textures;
 mod frames;
 mod metadata;
 mod observing;
 mod outputs;
 mod player;
 mod tracks;
+mod video_frame;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::process;
@@ -40,11 +42,9 @@ use objc2::MainThreadMarker;
 
 pub(super) use super::composition::{in_transaction, show_system_layer};
 use camera::AvCameras;
-pub(crate) use frame_images::CoreVideoFrameImages;
-#[cfg(test)]
-pub(crate) use frame_images::TestFrames;
 use frames::AvFrameReaders;
 use player::AvPlayers;
+pub use video_frame::CoreVideoFrame;
 
 /// AVFoundation's players; `None` off the main thread, where none is controlled.
 pub(crate) fn players() -> Option<Rc<dyn Players>> {

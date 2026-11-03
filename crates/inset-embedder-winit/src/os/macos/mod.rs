@@ -72,8 +72,6 @@ impl WindowGeometry for AppKit {}
 
 /// AVFoundation's players and cameras, which iOS shares.
 impl SystemMedia for AppKit {
-    type VideoFrameImages = super::apple::media::CoreVideoFrameImages;
-
     fn players() -> Option<Rc<dyn Players>> {
         super::apple::media::players()
     }

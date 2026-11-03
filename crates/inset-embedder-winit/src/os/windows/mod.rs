@@ -71,9 +71,7 @@ impl TrackpadTouches for Windows {
 
 impl EventLoopSetup for Windows {}
 impl WindowGeometry for Windows {}
-impl SystemMedia for Windows {
-    type VideoFrameImages = super::absent::NoVideoFrameImages;
-}
+impl SystemMedia for Windows {}
 impl WindowMotion for Windows {}
 impl WindowChrome for Windows {}
 impl Screens for Windows {}

@@ -1,8 +1,9 @@
 //! The frames of the videos a view shows, as its rasterizer draws them: for each reader a draw
-//! asked for, the image of the frame on screen. A reader is asked for the frame of the moment the
-//! picture reaches the screen when a draw first asks for it, and at each vsync after that, which
-//! redraws the view when a new one came, as Apple's display link asks a player's video output for
-//! the frame of each refresh's target time.
+//! asked for, the image of the frame on screen, the frame's texture on the view's device imported
+//! by valo. A reader is asked for the frame of the moment the picture reaches the screen when a
+//! draw first asks for it, and at each vsync after that, which redraws the view when a new one
+//! came, as Apple's display link asks a player's video output for the frame of each refresh's
+//! target time.
 //!
 //! The invariant a later editor must keep: a reader's frame is held only while the view's draws
 //! ask for the reader. Once a draw no longer does, its entry goes, and with it the frame's place
@@ -15,15 +16,13 @@ use std::time::Instant;
 use inset_embedder::{Image, VideoFrameReader};
 
 use crate::gpu::Gpu;
-use crate::os::VideoFrameImages;
-use crate::os::capabilities::VideoFrameImages as _;
 
 /// The videos one view shows, and the frame each shows now.
 #[derive(Default)]
 pub(crate) struct ShownVideoFrames {
-    /// What makes the images, on the device the view draws with: made when a frame first needs
-    /// it, `None` on a system that hands out no frames.
-    images: OnceCell<Option<VideoFrameImages>>,
+    /// What imports the frames' textures as images, on the device the view draws with: made when
+    /// a frame first needs it.
+    images: OnceCell<valo::ImageContext>,
     shown: RefCell<Vec<ShownVideo>>,
 }
 
@@ -98,7 +97,8 @@ impl ShownVideoFrames {
         self.shown.borrow_mut().clear();
     }
 
-    /// The image of `reader`'s frame for `display_time`, if it is a new one.
+    /// The image of `reader`'s frame for `display_time`, if it is a new one; `None` for a
+    /// texture valo does not sample.
     fn frame_image(
         &self,
         gpu: &Gpu,
@@ -106,8 +106,13 @@ impl ShownVideoFrames {
         display_time: Instant,
     ) -> Option<Image> {
         let frame = reader.frame_for(display_time)?;
-        let images = self.images.get_or_init(|| VideoFrameImages::on(gpu));
-        images.as_ref()?.image_of(&frame)
+        let texture = frame.texture(&gpu.device);
+        self.images(gpu).import_texture(texture, false).ok()
+    }
+
+    fn images(&self, gpu: &Gpu) -> &valo::ImageContext {
+        self.images
+            .get_or_init(|| valo::ImageContext::new(gpu.device.clone(), gpu.queue.clone()))
     }
 }
 
@@ -126,9 +131,57 @@ mod tests {
     struct NoFrames(Mutex<Vec<Instant>>);
 
     impl VideoFrameReader for NoFrames {
-        fn frame_for(&self, display_time: Instant) -> Option<VideoFrame> {
+        fn frame_for(&self, display_time: Instant) -> Option<Arc<dyn VideoFrame>> {
             self.0.lock().unwrap().push(display_time);
             None
+        }
+    }
+
+    /// A reader handing out a new frame each time a test puts one in.
+    #[derive(Default)]
+    struct NewFrames(Mutex<Option<Arc<dyn VideoFrame>>>);
+
+    impl NewFrames {
+        /// A new frame for the reader's next read.
+        fn put_new(&self) {
+            *self.0.lock().unwrap() = Some(Arc::new(PlainFrame));
+        }
+    }
+
+    impl VideoFrameReader for NewFrames {
+        fn frame_for(&self, _display_time: Instant) -> Option<Arc<dyn VideoFrame>> {
+            self.0.lock().unwrap().take()
+        }
+    }
+
+    /// A 4 by 4 frame whose texture is a new one on the device, as a host whose frames are not
+    /// the system's makes it.
+    struct PlainFrame;
+
+    impl VideoFrame for PlainFrame {
+        fn width(&self) -> u32 {
+            4
+        }
+
+        fn height(&self) -> u32 {
+            4
+        }
+
+        fn texture(&self, device: &wgpu::Device) -> wgpu::Texture {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("plain frame"),
+                size: wgpu::Extent3d {
+                    width: self.width(),
+                    height: self.height(),
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Bgra8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
         }
     }
 
@@ -171,12 +224,11 @@ mod tests {
 
     /// A reader's frame is taken at its first draw, and at a vsync only once a new one came,
     /// which is when the view is drawn again.
-    #[cfg(target_vendor = "apple")]
     #[test]
     fn a_vsync_takes_a_frame_only_when_a_new_one_came() {
         let gpu = LazyGpu::default();
         let shown = ShownVideoFrames::default();
-        let frames = Arc::new(crate::os::TestFrames::default());
+        let frames = Arc::new(NewFrames::default());
         let reader: Arc<dyn VideoFrameReader> = frames.clone();
         frames.put_new();
         shown.begin_draw();

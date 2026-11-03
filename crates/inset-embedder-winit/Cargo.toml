@@ -81,8 +81,8 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = ["
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "dispatch2", "objc2-core-foundation", "objc2-core-media", "objc2-core-video", "objc2-quartz-core", "AVAnimation", "AVAsset", "AVAssetTrack", "AVAsynchronousKeyValueLoading", "AVCaptureDevice", "AVCaptureFileOutput", "AVCaptureInput", "AVCaptureOutputBase", "AVCapturePhotoOutput", "AVCaptureSession", "AVCaptureSessionPreset", "AVCaptureVideoDataOutput", "AVCaptureVideoPreviewLayer", "AVError", "AVMediaFormat", "AVMediaSelection", "AVMediaSelectionGroup", "AVMetadataIdentifiers", "AVMetadataItem", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVPlayerItemTrack", "AVPlayerLayer", "AVVideoSettings"] }
 objc2-core-media = { version = "0.3", default-features = false, features = ["std", "objc2-core-video", "CMBase", "CMFormatDescription", "CMSampleBuffer", "CMSync", "CMTextMarkup", "CMTime"] }
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-metal", "CVBase", "CVBuffer", "CVImageBuffer", "CVMetalTexture", "CVMetalTextureCache", "CVPixelBuffer", "CVReturn"] }
-# A video's frames drawn by valo: a Metal texture made on each frame through CoreVideo's texture
-# cache, wrapped as a wgpu texture.
+# A video frame's texture: a Metal texture CoreVideo's texture cache makes on the frame, on the
+# Metal device behind the wgpu device it is made for.
 objc2-metal = { version = "0.3", default-features = false, features = ["std", "MTLDevice", "MTLPixelFormat", "MTLResource", "MTLTexture", "MTLTypes"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]

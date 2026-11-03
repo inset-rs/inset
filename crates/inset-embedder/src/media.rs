@@ -439,19 +439,27 @@ pub trait VideoFrameReader: Any + Send + Sync {
     /// screen: a player's frame for that moment of the video, as a display link asks
     /// AVFoundation's video output for each refresh's target time, and a camera's newest. `None`
     /// when it is the frame handed out last, or none came.
-    fn frame_for(&self, display_time: Instant) -> Option<VideoFrame>;
+    fn frame_for(&self, display_time: Instant) -> Option<Arc<dyn VideoFrame>>;
 }
 
-/// A picture of a player or a camera, as WebCodecs' `VideoFrame`: the platform's own type, which
-/// the GPU reads with no copy. On Apple platforms a `CVPixelBuffer` backed by an `IOSurface`, in
-/// 32-bit BGRA.
-#[cfg(target_vendor = "apple")]
-pub type VideoFrame = objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>;
+/// One picture of a video as the system hands it out, as WebCodecs' `VideoFrame`. It holds its
+/// slot in the decoder's pool until it, and every texture made of it, are dropped.
+///
+/// Each host implements it over the frames its system hands out. Platform code reaches the
+/// system's own frame by downcasting through `Any` to the type of the host that handed it out:
+/// on Apple's systems `inset-embedder-winit`'s `CoreVideoFrame`, whose `pixel_buffer` is the
+/// `CVPixelBuffer` AVFoundation handed out.
+pub trait VideoFrame: Any + Send + Sync {
+    /// The picture's width, in its own pixels.
+    fn width(&self) -> u32;
 
-/// A platform with no players and no cameras: no picture can exist, so a reader never answers
-/// one.
-#[cfg(not(target_vendor = "apple"))]
-pub enum VideoFrame {}
+    /// The picture's height, in its own pixels.
+    fn height(&self) -> u32;
+
+    /// A texture of the frame on `device`, for sampling, sharing its memory where the system can.
+    /// The texture holds the frame.
+    fn texture(&self, device: &wgpu::Device) -> wgpu::Texture;
+}
 
 /// Why a camera session's photo or recording answered nothing.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -2,7 +2,7 @@
 //! of source it is given to, a player's frames from an `AVPlayerItemVideoOutput` added to its item,
 //! a camera's from an `AVCaptureVideoDataOutput`'s sample buffers. Each frame is a `CVPixelBuffer`
 //! backed by an `IOSurface` in 32-bit BGRA, which the system converts the video into on the GPU,
-//! so the app's GPU reads it with no copy.
+//! so the app's GPU reads it with no copy (`video_frame`).
 //!
 //! AVFoundation has no output that both kinds of source feed, as Android's `ImageReader` is fed by
 //! a decoder and a camera alike, so the source makes its own output and hands it to the reader.
@@ -31,6 +31,7 @@ use objc2_core_video::{
 };
 use objc2_foundation::{NSDictionary, NSNumber, NSString};
 
+use super::video_frame::CoreVideoFrame;
 use super::{abort_on_panic, as_ns_string};
 use crate::os::apple::media_time::media_time_of;
 
@@ -82,7 +83,7 @@ impl AvFrameReader {
 }
 
 impl VideoFrameReader for AvFrameReader {
-    fn frame_for(&self, display_time: Instant) -> Option<VideoFrame> {
+    fn frame_for(&self, display_time: Instant) -> Option<Arc<dyn VideoFrame>> {
         let output = self.output().clone()?;
         output.frame_for(display_time)
     }
@@ -113,7 +114,7 @@ pub(super) fn report_reader_in_use() {
 /// An AVFoundation output of one source's frames, which a reader reads from any thread.
 pub(super) trait FrameOutput: Send + Sync {
     /// The frame to show at `display_time`, as [`VideoFrameReader::frame_for`] answers it.
-    fn frame_for(&self, display_time: Instant) -> Option<VideoFrame>;
+    fn frame_for(&self, display_time: Instant) -> Option<Arc<dyn VideoFrame>>;
 }
 
 /// A player's frames: the newest picture its item's output has for now.
@@ -144,18 +145,17 @@ impl PlayerFrames {
 impl FrameOutput for PlayerFrames {
     /// The item's frame for the moment `display_time` is in the video, as Apple's display link
     /// pattern asks for its target time.
-    fn frame_for(&self, display_time: Instant) -> Option<VideoFrame> {
+    fn frame_for(&self, display_time: Instant) -> Option<Arc<dyn VideoFrame>> {
         let output = &self.output.0;
         // SAFETY: the output answers from any thread, as a display link's thread reads it.
-        unsafe {
+        let buffer = unsafe {
             let time = output.itemTimeForHostTime(media_time_of(display_time));
             if !output.hasNewPixelBufferForItemTime(time) {
                 return None;
             }
-            output
-                .copyPixelBufferForItemTime_itemTimeForDisplay(time, std::ptr::null_mut())
-                .map(video_frame_of)
-        }
+            output.copyPixelBufferForItemTime_itemTimeForDisplay(time, std::ptr::null_mut())?
+        };
+        Some(Arc::new(CoreVideoFrame::new(cf_pixel_buffer_of(buffer))))
     }
 }
 
@@ -169,7 +169,7 @@ unsafe impl Sync for CrossThreadOutput {}
 
 /// A camera's frames: the newest picture its video data output delivered, kept until read.
 pub(super) struct CameraFrames {
-    newest: Arc<Mutex<Option<CrossThreadVideoFrame>>>,
+    newest: Arc<Mutex<Option<CoreVideoFrame>>>,
     output: CrossThreadVideoDataOutput,
     /// The delegate the output calls, which it holds weakly.
     _delegate: CrossThreadDelegate,
@@ -215,13 +215,13 @@ impl CameraFrames {
 
 impl FrameOutput for CameraFrames {
     /// The newest frame: a camera's frames are live, so each is for now.
-    fn frame_for(&self, _display_time: Instant) -> Option<VideoFrame> {
+    fn frame_for(&self, _display_time: Instant) -> Option<Arc<dyn VideoFrame>> {
         let newest = self
             .newest
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take()?;
-        Some(newest.0)
+        Some(Arc::new(newest))
     }
 }
 
@@ -231,7 +231,7 @@ define_class!(
     // SAFETY: NSObject has no subclassing requirements, and the delegate has no `Drop`.
     #[unsafe(super(NSObject))]
     #[name = "InsetCameraFramesDelegate"]
-    #[ivars = Arc<Mutex<Option<CrossThreadVideoFrame>>>]
+    #[ivars = Arc<Mutex<Option<CoreVideoFrame>>>]
     struct SampleBufferDelegate;
 
     unsafe impl NSObjectProtocol for SampleBufferDelegate {}
@@ -251,7 +251,7 @@ define_class!(
                     return;
                 };
                 *self.ivars().lock().unwrap_or_else(PoisonError::into_inner) =
-                    Some(CrossThreadVideoFrame(image));
+                    Some(CoreVideoFrame::new(image));
             });
         }
     }
@@ -282,19 +282,12 @@ pub(super) fn pixel_buffer_attributes() -> Retained<NSDictionary<NSString, AnyOb
     )
 }
 
-/// A pixel buffer AVFoundation answered retained, as the CF type the app is handed.
-fn video_frame_of(buffer: Retained<CVPixelBuffer>) -> VideoFrame {
+/// A pixel buffer AVFoundation answered retained, as the CF type a frame holds.
+fn cf_pixel_buffer_of(buffer: Retained<CVPixelBuffer>) -> CFRetained<CVPixelBuffer> {
     let pointer = NonNull::new(Retained::into_raw(buffer)).expect("a retained buffer");
     // SAFETY: the pointer carries the +1 retain `Retained` gave up.
     unsafe { CFRetained::from_raw(pointer) }
 }
-
-/// A camera's picture, handed from the output's queue to the reader's thread.
-pub(super) struct CrossThreadVideoFrame(VideoFrame);
-
-// SAFETY: a pixel buffer is made to be shared between threads: its retain count is atomic, and
-// nothing here writes its pixels. The binding cannot say so.
-unsafe impl Send for CrossThreadVideoFrame {}
 
 /// A camera's video data output handed between threads.
 struct CrossThreadVideoDataOutput(Retained<AVCaptureVideoDataOutput>);
@@ -325,7 +318,7 @@ mod tests {
     struct CountedOutput(AtomicUsize);
 
     impl FrameOutput for CountedOutput {
-        fn frame_for(&self, _display_time: Instant) -> Option<VideoFrame> {
+        fn frame_for(&self, _display_time: Instant) -> Option<Arc<dyn VideoFrame>> {
             self.0.fetch_add(1, Ordering::Relaxed);
             None
         }
@@ -372,7 +365,7 @@ mod tests {
     struct ForeignReader;
 
     impl VideoFrameReader for ForeignReader {
-        fn frame_for(&self, _display_time: Instant) -> Option<VideoFrame> {
+        fn frame_for(&self, _display_time: Instant) -> Option<Arc<dyn VideoFrame>> {
             None
         }
     }

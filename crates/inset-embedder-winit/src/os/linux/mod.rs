@@ -72,9 +72,7 @@ impl TrackpadTouches for Linux {
 
 impl EventLoopSetup for Linux {}
 impl WindowGeometry for Linux {}
-impl SystemMedia for Linux {
-    type VideoFrameImages = super::absent::NoVideoFrameImages;
-}
+impl SystemMedia for Linux {}
 impl WindowMotion for Linux {}
 impl WindowChrome for Linux {}
 impl Screens for Linux {}

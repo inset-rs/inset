@@ -29,8 +29,8 @@ mod absent;
 mod apple;
 #[cfg(target_os = "macos")]
 pub(crate) use apple::composition::{place_layer_in, show_system_layer};
-#[cfg(all(test, target_vendor = "apple"))]
-pub(crate) use apple::media::TestFrames;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub use apple::media::CoreVideoFrame;
 pub(crate) mod capabilities;
 #[cfg(target_os = "ios")]
 mod ios;
@@ -49,8 +49,8 @@ mod windows;
 mod winit_only;
 
 use capabilities::{
-    FramePresentation, NativeComposition, OperatingSystem, SystemClipboard, SystemMedia,
-    TrackpadTouches, WindowVisibility,
+    FramePresentation, NativeComposition, OperatingSystem, SystemClipboard, TrackpadTouches,
+    WindowVisibility,
 };
 
 /// The system this build targets.
@@ -75,9 +75,6 @@ pub(crate) type DisplayLink = <System as FramePresentation>::DisplayLink;
 
 /// This system's share of its compositor for one window.
 pub(crate) type WindowComposition = <System as NativeComposition>::WindowComposition;
-
-/// This system's maker of images of video frames.
-pub(crate) type VideoFrameImages = <System as SystemMedia>::VideoFrameImages;
 
 /// This system's notices that a window may have been minimized or occluded, for one window.
 pub(crate) type VisibilityNotices = <System as WindowVisibility>::Notices;

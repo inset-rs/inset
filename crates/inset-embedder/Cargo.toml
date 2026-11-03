@@ -11,23 +11,23 @@ categories.workspace = true
 
 [features]
 # Images and drawn pixels for tests, which need a GPU device to exist at all.
-test-support = ["dep:pollster", "dep:wgpu"]
+test-support = ["dep:pollster"]
 
 [dependencies]
 indexmap.workspace = true
 raw-window-handle.workspace = true
 pollster = { workspace = true, optional = true }
-wgpu = { workspace = true, optional = true }
 valo.workspace = true
 valo-geometry.workspace = true
 valo-system-fonts.workspace = true
 web-time.workspace = true
+# The device a video frame is made a texture on, and the texture: wgpu's own types, which valo
+# takes without re-exporting them.
+wgpu.workspace = true
 
-# The buffer a producer hands a composited surface, and the picture a player or a camera hands a
-# frame reader, are the platform's own types.
+# The buffer a producer hands a composited surface is the platform's own type.
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2-core-foundation = "0.3"
-objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVBuffer", "CVImageBuffer", "CVPixelBuffer"] }
 objc2-io-surface = "0.3"
 
 [dev-dependencies]

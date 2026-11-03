@@ -94,6 +94,8 @@ pub mod test_support {
 
 pub use images::{DecodeExecution, create_image_loader};
 pub use macos::MacOs;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub use os::CoreVideoFrame;
 pub use platform::WinitPlatform;
 pub use system_requests::{Reopen, ReopenHandler};
 

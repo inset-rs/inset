@@ -1,7 +1,7 @@
 //! A player of a small movie, opened by a picked file's URL at a path the URL must encode, loads it
-//! by itself, says its size, length and one video track, plays it, hands its frames to a reader made on its own as
-//! BGRA pixel buffers backed by IOSurfaces, ends, and plays on past its end once it loops: all
-//! without a window or a sound. On its way it is put on a surface, not in any window, and nowhere
+//! by itself, says its size, length and one video track, plays it, hands its frames to a reader
+//! made on its own, each the host's `CoreVideoFrame` over a BGRA pixel buffer backed by an
+//! IOSurface, ends, and plays on past its end once it loops: all without a window or a sound. On its way it is put on a surface, not in any window, and nowhere
 //! again; sent nowhere at the end, it feeds the reader no more.
 //!
 //! Its own binary, without the test harness: AVFoundation changes a player's state on the main
@@ -32,9 +32,9 @@ mod player {
     use inset_embedder::{
         MediaChangeFuture, MediaTrackKind, PickedFile, PlayerStatus, Size, VideoOutput,
     };
+    use inset_embedder_winit::CoreVideoFrame;
     use objc2_core_video::{
-        CVPixelBufferGetHeight, CVPixelBufferGetIOSurface, CVPixelBufferGetPixelFormatType,
-        CVPixelBufferGetWidth, kCVPixelFormatType_32BGRA,
+        CVPixelBufferGetIOSurface, CVPixelBufferGetPixelFormatType, kCVPixelFormatType_32BGRA,
     };
     use objc2_foundation::{NSDate, NSDefaultRunLoopMode, NSRunLoop};
 
@@ -86,13 +86,17 @@ mod player {
             frame.is_some()
         });
         let frame = frame.expect("a frame");
-        assert_eq!(CVPixelBufferGetWidth(&frame), 64);
-        assert_eq!(CVPixelBufferGetHeight(&frame), 48);
+        assert_eq!([frame.width(), frame.height()], [64, 48]);
+        let frame: &dyn std::any::Any = &*frame;
+        let buffer = frame
+            .downcast_ref::<CoreVideoFrame>()
+            .expect("the host's own frame")
+            .pixel_buffer();
         assert_eq!(
-            CVPixelBufferGetPixelFormatType(&frame),
+            CVPixelBufferGetPixelFormatType(buffer),
             kCVPixelFormatType_32BGRA
         );
-        assert!(CVPixelBufferGetIOSurface(Some(&frame)).is_some());
+        assert!(CVPixelBufferGetIOSurface(Some(buffer)).is_some());
         assert!(player.state().playing);
 
         serve_until("the movie ends", || player.state().ended);

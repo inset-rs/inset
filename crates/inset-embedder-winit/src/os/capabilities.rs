@@ -8,10 +8,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use inset_embedder::{
-    Cameras, Clipboard, CompositionLayer, Compositor, DockMenu, FileDialogs, Image, KeyData,
-    MenuBar, MenuEntry, MenuId, Notifications, Offset, Opener, Placement, Players, Rect, Screen,
-    ScreenId, TargetPlatform, TrayIcons, VideoFrame, VideoFrameReaders, ViewId, ViewPadding,
-    VsyncWaiter, WindowConfig,
+    Cameras, Clipboard, CompositionLayer, Compositor, DockMenu, FileDialogs, KeyData, MenuBar,
+    MenuEntry, MenuId, Notifications, Offset, Opener, Placement, Players, Rect, Screen, ScreenId,
+    TargetPlatform, TrayIcons, VideoFrameReaders, ViewId, ViewPadding, VsyncWaiter, WindowConfig,
 };
 use valo_codec::Decoder;
 use winit::event_loop::{ActiveEventLoop, EventLoopBuilder};
@@ -20,7 +19,6 @@ use winit::window::{Window, WindowAttributes};
 
 use crate::clipboard::ClipboardChanges;
 use crate::file_dialogs::ParentWindows;
-use crate::gpu::Gpu;
 use crate::lifecycle::LifecycleNotice;
 use crate::main_loop::MainLoopProxy;
 use crate::menus::MenuEvents;
@@ -373,9 +371,6 @@ pub(crate) trait SystemFileDialogs {
 /// The system's media stack: its players, its cameras and the frame readers they feed
 /// (`apple/media` on macOS and iOS).
 pub(crate) trait SystemMedia {
-    /// What makes images of a video's frames for valo to draw (`video_frames.rs`).
-    type VideoFrameImages: VideoFrameImages;
-
     /// The system's players, or `None` where the embedder has none.
     fn players() -> Option<Rc<dyn Players>> {
         None
@@ -391,18 +386,6 @@ pub(crate) trait SystemMedia {
     fn video_frame_readers() -> Option<Rc<dyn VideoFrameReaders>> {
         None
     }
-}
-
-/// What turns a video's frame into an image valo draws, sharing its memory: CoreVideo's texture
-/// cache on Apple's systems (`apple/media/frame_images.rs`), none where the system hands out no
-/// frames.
-pub(crate) trait VideoFrameImages: Sized {
-    /// The maker on `gpu`'s device; `None` where the system has none.
-    fn on(gpu: &Gpu) -> Option<Self>;
-
-    /// The image of `frame`, which holds the frame until the GPU is done with it; `None` for a
-    /// frame valo cannot sample.
-    fn image_of(&self, frame: &VideoFrame) -> Option<Image>;
 }
 
 /// The system's clipboard (`clipboard/`).

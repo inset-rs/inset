@@ -582,7 +582,7 @@ impl Future for RecordingEnd {
 struct NoFrames;
 
 impl VideoFrameReader for NoFrames {
-    fn frame_for(&self, _display_time: std::time::Instant) -> Option<VideoFrame> {
+    fn frame_for(&self, _display_time: std::time::Instant) -> Option<Arc<dyn VideoFrame>> {
         None
     }
 }
