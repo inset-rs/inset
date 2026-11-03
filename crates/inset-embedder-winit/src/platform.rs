@@ -185,12 +185,12 @@ impl Platform for WinitPlatform {
         Arc::new(WinitDispatcher(self.proxy.clone()))
     }
 
-    /// Every view, with a window or not, in the order they came: the screen view first, where
-    /// there is one.
+    /// Every view, whoever holds it, in the order they came: the screen view first, where there is
+    /// one.
     fn views(&self) -> Vec<ViewRef> {
         self.state
             .views()
-            .views()
+            .all()
             .into_iter()
             .map(|view| view as ViewRef)
             .collect()

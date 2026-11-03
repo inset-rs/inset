@@ -46,7 +46,7 @@ impl MacOs {
     /// over `duration`, as a panel opens from the edge it belongs to. The window keeps its
     /// size, so its surface is not configured again while it moves.
     pub fn show_window_sliding_in(&self, window: &WindowRef, from: Offset, duration: Duration) {
-        let Some(open) = self.state.views().by_view(window.view().id()) else {
+        let Some(open) = self.state.windows().by_view(window.view().id()) else {
             return;
         };
         if !System::show_sliding_in(&*open.window, from, duration) {

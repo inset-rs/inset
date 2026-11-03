@@ -1,5 +1,6 @@
-//! The app's views and their windows: the one registry of them, which the event loop and the
-//! platform share, and how they are made.
+//! The app's windows: the registry of what is a window's, which the event loop and the platform
+//! share, and how a window and its view are made. The views themselves, a window's among them, are
+//! in the registry of views (`views.rs`).
 //!
 //! Where the system's window is the screen, the screen view is made when the app starts, before it
 //! has a window, as Flutter's engine adds it with empty metrics; its window opens at winit's first
@@ -8,13 +9,11 @@
 //! inside its calls, so the request goes to the loop as a command, and the window arrives through
 //! the future the request returned.
 //!
-//! A window's code holds its view as an app holds a view it adds (`view.rs`): it adds the view on
-//! the layer the view shows into, which on macOS it makes and places in the window and keeps
-//! filling the window through a hold of its own on it, kept here with the window (`os`'s
-//! `ViewLayer` and `WindowHold`), with the window's metrics; gives the view the window's metrics
-//! again as the window resizes or moves (`main_loop/windows.rs`); and removes it as the window
-//! closes. A view is added with no surface; the embedder gives it one while the system gives the
-//! views theirs (`main_loop/`).
+//! A window holds its view as an app holds a view it adds (`view.rs`): it places in itself the
+//! layer its view shows into, which on macOS it makes and keeps filling the window through a hold
+//! of its own on it, kept here with the window (`os`'s `ViewLayer` and `WindowHold`); the loop adds
+//! the view on that layer with the window's metrics, gives the view the window's metrics again as
+//! the window resizes or moves, and removes it as the window closes (`main_loop/windows.rs`).
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -35,57 +34,49 @@ use crate::host_window::WinitWindow;
 use crate::os::capabilities::{
     NativeComposition, OperatingSystem, SystemDrags, WindowChrome, WindowGeometry,
 };
-use crate::os::{System, TrackpadTouchObserver, VisibilityNotices, WindowHold};
+use crate::os::{System, TrackpadTouchObserver, ViewLayer, VisibilityNotices, WindowHold};
 use crate::screens::screen_of;
 use crate::view::WinitView;
 use crate::view_host::WindowViewHost;
+use crate::views::{SCREEN_VIEW, Views};
 
-/// The screen view's id, as in Flutter: the views the app asks for are numbered after it.
-pub(crate) const SCREEN_VIEW: ViewId = ViewId(0);
-
-/// A view with its window, as the registry answers it.
+/// A window with its view, as the registry answers it.
 #[derive(Clone)]
 pub(crate) struct OpenWindow {
     pub(crate) window: Arc<dyn Window>,
     pub(crate) view: Rc<WinitView>,
     /// The view's host, the window's: it takes the window's keys and input methods.
     pub(crate) host: Rc<WindowViewHost>,
-    /// The app's handle on a window it asked for; the screen view's window has none.
+    /// The app's handle on a window it asked for, through which it closes it; the screen view's
+    /// window has none, and lasts as long as the app.
     pub(crate) handle: Option<Rc<WinitWindow>>,
 }
 
-/// What a window's closing did to its view.
-pub(crate) enum ViewAfterClose {
-    /// The view went with its window, as every view but the screen view does.
-    Removed(ViewId),
-    /// The screen view stays, with no window, as in Flutter's embedders.
-    Stays,
+/// A window just opened, holding a view that is yet to be added on the layer the window placed
+/// in itself for it.
+pub(crate) struct OpenedWindow {
+    pub(crate) open: OpenWindow,
+    /// The layer the window placed for its view.
+    pub(crate) view_layer: ViewLayer,
+    /// The window's hold on that layer.
+    pub(crate) hold: WindowHold,
 }
 
-/// The app's views, each with its window while it has one, in the order they came. Every call
+/// The app's windows, each with what is a window's, in the order their views came. Every call
 /// borrows the registry for itself alone and answers copies, so a caller may call the client
 /// with what it got, and the client may reach the registry through the platform meanwhile.
 ///
 /// The registry owns each window; nothing else holds one for longer than a call, but the layer its
-/// view shows into where that is the window, which the view lets go of when the window closes.
-/// Closing a window here is what frees it.
+/// view shows into where that is the window, which the view lets go of as it is removed. Closing a
+/// window here and removing its view is what frees it.
 #[derive(Default)]
-pub(crate) struct Views {
-    /// By view: views are numbered as they come, so this is the order they came in.
-    entries: RefCell<BTreeMap<ViewId, ViewEntry>>,
+pub(crate) struct Windows {
+    /// By view: views are numbered as they come, so this is the order their windows came in.
+    entries: RefCell<BTreeMap<ViewId, WindowEntry>>,
     view_of_window: RefCell<HashMap<WindowId, ViewId>>,
 }
 
-struct ViewEntry {
-    view: Rc<WinitView>,
-    /// The view's host, which the window's code made with the view.
-    host: Rc<WindowViewHost>,
-    window: Option<ViewWindow>,
-    /// Whether the view stays once its window closes: the screen view.
-    screen: bool,
-}
-
-struct ViewWindow {
+struct WindowEntry {
     /// The window's hold on the layer its view shows into, which places the layer in the window
     /// until the window closes. Before the window, so that it is dropped first, while the window
     /// is still open.
@@ -94,6 +85,9 @@ struct ViewWindow {
     /// while it is still open.
     _observers: WindowObservers,
     window: Arc<dyn Window>,
+    view: Rc<WinitView>,
+    /// The view's host, which the window's code made with the view.
+    host: Rc<WindowViewHost>,
     handle: Option<Rc<WinitWindow>>,
 }
 
@@ -112,80 +106,33 @@ pub(crate) struct WindowObservers {
     pub(crate) trackpad_touches: Option<TrackpadTouchObserver>,
 }
 
-impl Views {
-    /// The screen view, with its host and no window yet.
-    pub(crate) fn add_screen_view(&self, view: Rc<WinitView>, host: Rc<WindowViewHost>) {
-        self.insert(ViewEntry {
-            view,
-            host,
-            window: None,
-            screen: true,
-        });
-    }
-
-    /// A view the app asked for, with its window, the window's hold on the view's layer and what
-    /// the embedder observes of the window, which end as the window closes.
-    pub(crate) fn add_with_window(
-        &self,
-        open: OpenWindow,
-        view_layer: WindowHold,
-        observers: WindowObservers,
-    ) {
+impl Windows {
+    /// The window of `open` is one of the app's, with its hold on its view's layer and what the
+    /// embedder observes of it, which end as it closes.
+    pub(crate) fn add(&self, open: OpenWindow, view_layer: WindowHold, observers: WindowObservers) {
         let window = open.window.id();
         let view = open.view.id();
-        self.insert(ViewEntry {
+        let entry = WindowEntry {
+            _view_layer: view_layer,
+            _observers: observers,
+            window: open.window,
             view: open.view,
             host: open.host,
-            window: Some(ViewWindow {
-                _view_layer: view_layer,
-                _observers: observers,
-                window: open.window,
-                handle: open.handle,
-            }),
-            screen: false,
-        });
+            handle: open.handle,
+        };
+        assert!(
+            self.entries.borrow_mut().insert(view, entry).is_none(),
+            "a second window for view {view:?}"
+        );
         self.view_of_window.borrow_mut().insert(window, view);
     }
 
-    /// `window` is the screen view's from now on, with its hold on the view's layer.
-    pub(crate) fn attach_screen_window(&self, window: Arc<dyn Window>, view_layer: WindowHold) {
-        let id = window.id();
-        let mut entries = self.entries.borrow_mut();
-        let entry = entries
-            .values_mut()
-            .find(|entry| entry.screen)
-            .expect("the screen view was added");
-        entry.window = Some(ViewWindow {
-            _view_layer: view_layer,
-            _observers: WindowObservers::default(),
-            window,
-            handle: None,
-        });
-        self.view_of_window.borrow_mut().insert(id, entry.view.id());
-    }
-
-    /// Closes `window`: its view is removed from the layer it shows into there, and the window is
-    /// freed once the caller's copies of it are dropped. The view goes with it, but for the screen
-    /// view, which stays.
-    pub(crate) fn close(&self, window: WindowId) -> Option<ViewAfterClose> {
-        let view_id = self.view_of_window.borrow_mut().remove(&window)?;
-        let (view, after_close) = self.detach_window(view_id)?;
-        view.window_closed();
-        Some(after_close)
-    }
-
-    /// Takes `view_id`'s window from its entry, and the entry too unless it is the screen
-    /// view's; answers the view, for the caller to tell once the registry is let go of.
-    fn detach_window(&self, view_id: ViewId) -> Option<(Rc<WinitView>, ViewAfterClose)> {
-        let mut entries = self.entries.borrow_mut();
-        let entry = entries.get_mut(&view_id)?;
-        entry.window = None;
-        let view = Rc::clone(&entry.view);
-        if entry.screen {
-            return Some((view, ViewAfterClose::Stays));
-        }
-        entries.remove(&view_id);
-        Some((view, ViewAfterClose::Removed(view_id)))
+    /// Closes `window`: it is freed once the caller's copies of it are dropped and its view, which
+    /// this answers for the caller to remove, has let go of its layer.
+    pub(crate) fn close(&self, window: WindowId) -> Option<ViewId> {
+        let view = self.view_of_window.borrow_mut().remove(&window)?;
+        self.entries.borrow_mut().remove(&view)?;
+        Some(view)
     }
 
     pub(crate) fn by_window(&self, window: WindowId) -> Option<OpenWindow> {
@@ -193,73 +140,38 @@ impl Views {
         self.by_view(view)
     }
 
-    /// The view `view` with its window; `None` for a view without one.
+    /// The window of view `view`; `None` for a view in no window.
     pub(crate) fn by_view(&self, view: ViewId) -> Option<OpenWindow> {
-        self.entries.borrow().get(&view).and_then(ViewEntry::open)
+        self.entries.borrow().get(&view).map(WindowEntry::open)
     }
 
     pub(crate) fn view_id_of(&self, window: WindowId) -> Option<ViewId> {
         self.view_of_window.borrow().get(&window).copied()
     }
 
-    /// Every view with its window, in the order they came.
+    /// Every open window, in the order their views came.
     pub(crate) fn open_windows(&self) -> Vec<OpenWindow> {
         self.entries
             .borrow()
             .values()
-            .filter_map(ViewEntry::open)
+            .map(WindowEntry::open)
             .collect()
     }
 
     /// The window that came first of those still open.
     pub(crate) fn first_window(&self) -> Option<OpenWindow> {
-        self.entries.borrow().values().find_map(ViewEntry::open)
-    }
-
-    /// Every view, with a window or not, in the order they came.
-    pub(crate) fn views(&self) -> Vec<Rc<WinitView>> {
-        self.entries
-            .borrow()
-            .values()
-            .map(|entry| Rc::clone(&entry.view))
-            .collect()
-    }
-
-    /// The view numbered `id`, with a window or not.
-    pub(crate) fn get(&self, id: ViewId) -> Option<Rc<WinitView>> {
-        self.entries
-            .borrow()
-            .get(&id)
-            .map(|entry| Rc::clone(&entry.view))
-    }
-
-    /// The screen view, with its host.
-    pub(crate) fn screen_view(&self) -> Option<(Rc<WinitView>, Rc<WindowViewHost>)> {
-        self.entries
-            .borrow()
-            .values()
-            .find(|entry| entry.screen)
-            .map(|entry| (Rc::clone(&entry.view), Rc::clone(&entry.host)))
-    }
-
-    fn insert(&self, entry: ViewEntry) {
-        let id = entry.view.id();
-        assert!(
-            self.entries.borrow_mut().insert(id, entry).is_none(),
-            "duplicate view id {id:?}"
-        );
+        self.entries.borrow().values().next().map(WindowEntry::open)
     }
 }
 
-impl ViewEntry {
-    fn open(&self) -> Option<OpenWindow> {
-        let window = self.window.as_ref()?;
-        Some(OpenWindow {
-            window: Arc::clone(&window.window),
+impl WindowEntry {
+    fn open(&self) -> OpenWindow {
+        OpenWindow {
+            window: Arc::clone(&self.window),
             view: Rc::clone(&self.view),
             host: Rc::clone(&self.host),
-            handle: window.handle.clone(),
-        })
+            handle: self.handle.clone(),
+        }
     }
 }
 
@@ -269,51 +181,58 @@ pub(crate) struct WindowRequest {
     pub request: ViewRequest,
 }
 
-/// Makes the views, which share the one device they draw with, their hosts and their windows.
+/// The screen view's window, which opens at winit's first call: its configuration, and the view
+/// and its host, made with the app.
+pub(crate) struct ScreenWindow {
+    config: WindowConfig,
+    pub(crate) view: Rc<WinitView>,
+    host: Rc<WindowViewHost>,
+}
+
+/// Makes the windows' views, which share the one device they draw with, their hosts and their
+/// windows.
 pub(crate) struct ViewMaker {
     /// One device for every view, made at the first draw if no image made it before.
     gpu: LazyGpu,
     /// Where the views' hosts and the windows' handles send their requests, to the loop.
     requests: Rc<AppRequests>,
-    /// The number of the next view the app asks for; the screen view is the first.
-    next_view_id: u64,
 }
 
 impl ViewMaker {
     pub(crate) fn new(gpu: LazyGpu, requests: Rc<AppRequests>) -> ViewMaker {
-        ViewMaker {
-            gpu,
-            requests,
-            next_view_id: SCREEN_VIEW.0 + 1,
-        }
+        ViewMaker { gpu, requests }
     }
 
-    /// The screen view, with its host and no window yet, for a window configured as `config`.
-    pub(crate) fn make_screen_view(
-        &self,
-        config: &WindowConfig,
-    ) -> (Rc<WinitView>, Rc<WindowViewHost>) {
-        let (view, host) = self.view(SCREEN_VIEW, config);
-        (Rc::new(view), host)
+    /// The screen view, with its host and its window to open, where the system's window is the
+    /// screen, as on iOS. A desktop has none: the app opens every window it has, as Flutter's
+    /// multi-window apps do.
+    pub(crate) fn make_screen_view(&self) -> Option<ScreenWindow> {
+        let config = System::WINDOW_IS_THE_SCREEN.then(WindowConfig::default)?;
+        let (view, host) = self.view(SCREEN_VIEW, &config);
+        Some(ScreenWindow {
+            config,
+            view: Rc::new(view),
+            host,
+        })
     }
 
-    /// The view `window_request` asked for, carrying its request's id and initial data, with
-    /// its host, its window and the window's handle, which sends its `close` to the loop, and the
-    /// window's hold on the view's layer.
+    /// The window `window_request` asked for, with its view, numbered by `views`, carrying its
+    /// request's id and initial data, the view's host, and the window's handle, which sends its
+    /// `close` to the loop.
     pub(crate) fn make_requested(
-        &mut self,
+        &self,
         event_loop: &dyn ActiveEventLoop,
         window_request: &WindowRequest,
-    ) -> Result<(OpenWindow, WindowHold), String> {
+        views: &Views,
+    ) -> Result<OpenedWindow, String> {
         let config = &window_request.request.config;
         let window = open_window(event_loop, config)?;
-        let (view, host) = self.view(ViewId(self.next_view_id), config);
+        let (view, host) = self.view(views.take_id(), config);
         let view = Rc::new(view.with_request(
             window_request.request_id,
             window_request.request.initial_data.clone(),
         ));
-        self.next_view_id += 1;
-        let view_layer = add_view_in_window(&view, &host, &window);
+        let (view_layer, hold) = hold_view(&window, &host);
         let handle = Rc::new(WinitWindow::new(
             window.id(),
             Arc::downgrade(&window),
@@ -327,7 +246,11 @@ impl ViewMaker {
             host,
             handle: Some(handle),
         };
-        Ok((open, view_layer))
+        Ok(OpenedWindow {
+            open,
+            view_layer,
+            hold,
+        })
     }
 
     /// The view numbered `id`, drawing with the device every view shares, for a window
@@ -344,37 +267,33 @@ impl ViewMaker {
     }
 }
 
-/// The screen view's window, where the system's window is the screen, as on iOS. A desktop
-/// has none: the app opens every window it has, as Flutter's multi-window apps do.
-pub(crate) fn screen_window_config() -> Option<WindowConfig> {
-    System::WINDOW_IS_THE_SCREEN.then(WindowConfig::default)
-}
-
-/// The screen view's window, configured as `config`, holding `view`, whose host is `host`, with
-/// its hold on the view's layer.
+/// Opens the screen view's window, `screen`, holding the screen view.
 pub(crate) fn open_screen_window(
     event_loop: &dyn ActiveEventLoop,
-    config: &WindowConfig,
-    view: &WinitView,
-    host: &WindowViewHost,
-) -> Result<(Arc<dyn Window>, WindowHold), String> {
-    let window = open_window(event_loop, config)?;
-    let view_layer = add_view_in_window(view, host, &window);
-    Ok((window, view_layer))
+    screen: ScreenWindow,
+) -> Result<OpenedWindow, String> {
+    let window = open_window(event_loop, &screen.config)?;
+    let (view_layer, hold) = hold_view(&window, &screen.host);
+    let open = OpenWindow {
+        window,
+        view: screen.view,
+        host: screen.host,
+        handle: None,
+    };
+    Ok(OpenedWindow {
+        open,
+        view_layer,
+        hold,
+    })
 }
 
-/// `window` holds `view` from now on: the view is added on a layer the window's code makes and
-/// places in the window, at the window's metrics, and its host's input methods are the window's.
-/// Answers the window's hold on the layer.
-fn add_view_in_window(
-    view: &WinitView,
-    host: &WindowViewHost,
-    window: &Arc<dyn Window>,
-) -> WindowHold {
-    let (view_layer, hold) = System::view_layer_in(window);
-    view.add(view_layer, window_metrics(&**window));
+/// `window` holds the view whose host is `host` from now on: it makes the layer the view is to
+/// draw into and places it in itself, and its input methods are the host's. Answers the layer and
+/// the window's hold on it.
+fn hold_view(window: &Arc<dyn Window>, host: &WindowViewHost) -> (ViewLayer, WindowHold) {
+    let layer_and_hold = System::view_layer_in(window);
     host.attach(window);
-    hold
+    layer_and_hold
 }
 
 /// The metrics of `window` as its view takes them: its surface's size, its scale and safe area,

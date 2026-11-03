@@ -1,20 +1,24 @@
-//! The main loop's windows and views: opening one the app asks for and the screen view's,
-//! closing, focus, resizing, moving, being minimized or occluded, and the surfaces the system
-//! gives and takes.
+//! The main loop's windows: opening one the app asks for and the screen view's, closing, focus,
+//! resizing, moving, being minimized or occluded. A window holds its view (`main_loop/views.rs`):
+//! its opening adds the view on the layer it placed for it, a resize or a move to another screen
+//! gives the view the window's metrics, its being minimized or occluded has the view out of sight,
+//! and its closing removes the view. What is a window's alone, its state as the app's handle on it
+//! answers it, stays here.
 
-use std::sync::Arc;
+use std::rc::Rc;
 use std::time::Instant;
 
-use inset_embedder::{EmbedderClient, View, ViewError, ViewFocusEvent, ViewId, ViewMetrics};
+use inset_embedder::{EmbedderClient, HostWindow, View, ViewError, ViewFocusEvent, ViewMetrics};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
+use crate::os::System;
 use crate::os::capabilities::{FramePresentation, TrackpadTouches, WindowVisibility};
-use crate::os::{System, WindowHold};
 use crate::screens::screen_of;
 use crate::view_focus;
+use crate::views::SCREEN_VIEW;
 use crate::windows::{
-    OpenWindow, ViewAfterClose, WindowObservers, WindowRequest, open_screen_window, window_metrics,
+    OpenWindow, OpenedWindow, WindowObservers, WindowRequest, open_screen_window, window_metrics,
 };
 
 use super::{MainLoop, MainLoopEvent};
@@ -23,38 +27,32 @@ impl<C: EmbedderClient> MainLoop<C> {
     /// Opens a window for the view the app asked for. The app hears of the view through
     /// `view_added`, which it tells by its request's id, or of the failure.
     pub(super) fn open_window(&mut self, event_loop: &dyn ActiveEventLoop, request: WindowRequest) {
-        if let Err(reason) = self.make_requested_window(event_loop, &request) {
-            self.client
-                .view_request_failed(request.request_id, ViewError::Failed(reason));
+        let opened = self
+            .view_maker
+            .make_requested(event_loop, &request, self.state.views());
+        match opened {
+            Ok(opened) => self.add_requested_window(event_loop, opened),
+            Err(reason) => self
+                .client
+                .view_request_failed(request.request_id, ViewError::Failed(reason)),
         }
     }
 
-    /// The window `request` asked for, with a surface if the system gives the windows theirs
-    /// now, and its view added.
-    pub(super) fn make_requested_window(
-        &mut self,
-        event_loop: &dyn ActiveEventLoop,
-        request: &WindowRequest,
-    ) -> Result<(), String> {
-        let (open, view_layer) = self.view_maker.make_requested(event_loop, request)?;
-        if self.surfaces_given {
-            open.view.give_surface();
-        }
-        self.add_view(open, view_layer);
-        Ok(())
-    }
-
-    /// A view the app asked for, with its window and the window's hold on the view's layer: it
-    /// joins the platform's views, with what the embedder observes of its window, and then the
-    /// app hears of it.
-    pub(super) fn add_view(&mut self, open: OpenWindow, view_layer: WindowHold) {
-        let view_id = open.view.id();
-        let window = Arc::clone(&open.window);
-        let observers = self.observe_window(&*window);
-        self.views().add_with_window(open, view_layer, observers);
-        self.sync_frame_scheduler(view_id);
-        self.client.view_added(view_id);
-        self.read_theme_of(&*window);
+    /// A window the app asked for opened: it joins the app's windows, with what the embedder
+    /// observes of it, and its view is added on the layer it placed for it, at its metrics, in
+    /// sight as it is.
+    fn add_requested_window(&mut self, event_loop: &dyn ActiveEventLoop, opened: OpenedWindow) {
+        let OpenedWindow {
+            open,
+            view_layer,
+            hold,
+        } = opened;
+        let observers = self.observe_window(&*open.window);
+        self.windows().add(open.clone(), hold, observers);
+        let metrics = window_metrics(&*open.window);
+        self.add_view(event_loop, Rc::clone(&open.view), view_layer, metrics);
+        self.set_view_in_sight(open.view.id(), is_in_sight(&open));
+        self.read_theme_of(&*open.window);
     }
 
     /// What the embedder observes of `window` beyond winit's events, for as long as it is open.
@@ -86,42 +84,29 @@ impl<C: EmbedderClient> MainLoop<C> {
     }
 
     /// Opens the screen view's window, at winit's first call: the first moment winit lets a
-    /// window be made. The app, started with the view at no size, hears its new metrics.
+    /// window be made. The screen view draws into the layer the window placed for it, and the
+    /// app, started with the view at no size, hears its new metrics.
     pub(super) fn open_screen_window(&mut self, event_loop: &dyn ActiveEventLoop) {
-        let Some(config) = self.screen_window.take() else {
+        let Some(screen) = self.screen_window.take() else {
             return;
         };
-        let (view, host) = self
-            .views()
-            .screen_view()
-            .expect("the screen view was made with the app");
-        let (window, view_layer) = open_screen_window(event_loop, &config, &view, &host)
-            .expect("open the screen view's window");
-        if self.surfaces_given {
-            view.give_surface();
-        }
-        self.views()
-            .attach_screen_window(Arc::clone(&window), view_layer);
-        self.sync_frame_scheduler(view.id());
-        self.client.view_metrics_changed(view.id());
-        self.read_theme_of(&*window);
+        let OpenedWindow {
+            open,
+            view_layer,
+            hold,
+        } = open_screen_window(event_loop, screen).expect("open the screen view's window");
+        self.views().place_screen_view(view_layer);
+        self.windows()
+            .add(open.clone(), hold, WindowObservers::default());
+        self.set_view_metrics(event_loop, SCREEN_VIEW, window_metrics(&*open.window));
+        self.set_view_in_sight(SCREEN_VIEW, is_in_sight(&open));
+        self.read_theme_of(&*open.window);
     }
 
-    /// Closes a window: it is freed, and its view goes with it, but for the screen view,
-    /// which outlives its window and takes no frames until it has one again.
+    /// Closes a window: it is freed, and its view removed.
     pub(super) fn close_window(&mut self, id: WindowId) {
-        let Some(closing) = self.view_id_of(id) else {
-            return;
-        };
-        let Some(after_close) = self.views().close(id) else {
-            return;
-        };
-        match after_close {
-            ViewAfterClose::Removed(view) => {
-                self.frame_scheduler.remove_view(view);
-                self.client.view_removed(view);
-            }
-            ViewAfterClose::Stays => self.sync_frame_scheduler(closing),
+        if let Some(view) = self.windows().close(id) {
+            self.remove_view(view);
         }
     }
 
@@ -147,33 +132,32 @@ impl<C: EmbedderClient> MainLoop<C> {
 
     /// Honours the framework's request to focus a view, or to give up its focus.
     pub(super) fn change_view_focus(&mut self, change: ViewFocusEvent) {
-        if let Some(open) = self.views().by_view(change.view_id) {
+        if let Some(open) = self.windows().by_view(change.view_id) {
             view_focus::focus_window_if_asked(&change, &*open.window);
         }
     }
 
     /// A window was resized, which may come with its being minimized or restored: its view takes
     /// the new size.
-    pub(super) fn on_resized(&mut self, id: WindowId) {
-        self.resize_view(id);
+    pub(super) fn on_resized(&mut self, event_loop: &dyn ActiveEventLoop, id: WindowId) {
+        self.resize_view(event_loop, id);
         self.sync_window_state(id);
     }
 
-    /// The view of window `id` takes the window's new size: the window's code gives the view the
-    /// window's metrics, the app hears of its new metrics, and of the system's theme, which some
-    /// systems report as a resize, and where the system needs it the resized layout is drawn at
-    /// once. The layer the view draws into was placed again as the window's view changed
-    /// (`os`'s `WindowHold`). winit reports a resize for more than one of the system's notices:
-    /// the same metrics again draw nothing.
-    fn resize_view(&mut self, id: WindowId) {
-        let Some(open) = self.views().by_window(id) else {
+    /// The view of window `id` takes the window's new metrics, and the app hears of the system's
+    /// theme, which some systems report as a resize; where the system needs it, the resized layout
+    /// is drawn at once. The layer the view draws into was placed again as the window's view
+    /// changed (`os`'s `WindowHold`). winit reports a resize for more than one of the system's
+    /// notices: the same metrics again draw nothing.
+    fn resize_view(&mut self, event_loop: &dyn ActiveEventLoop, id: WindowId) {
+        let Some(open) = self.windows().by_window(id) else {
             return;
         };
         self.read_theme_of(&*open.window);
-        if !open.view.set_metrics(window_metrics(&*open.window)) {
+        let metrics = window_metrics(&*open.window);
+        if !self.set_view_metrics(event_loop, open.view.id(), metrics) {
             return;
         }
-        self.client.view_metrics_changed(open.view.id());
         // Present the resized layout before the system commits the window geometry, rather
         // than stretching the old frame.
         if System::FRAME_ON_RESIZE && has_area(open.view.metrics().physical_size) {
@@ -181,60 +165,20 @@ impl<C: EmbedderClient> MainLoop<C> {
         }
     }
 
-    /// Reads again which screen each window is on, and tells the client and the frame scheduler
-    /// of the views whose screen changed.
-    pub(super) fn sync_screens(&mut self) {
-        let changed: Vec<ViewId> = self
-            .views()
-            .open_windows()
-            .into_iter()
-            .filter(give_window_screen)
-            .map(|open| open.view.id())
-            .collect();
-        for view_id in changed {
-            self.client.view_metrics_changed(view_id);
-            self.sync_frame_scheduler(view_id);
+    /// Reads again which screen each window is on: the view of each window on another screen
+    /// takes it.
+    pub(super) fn sync_screens(&mut self, event_loop: &dyn ActiveEventLoop) {
+        for open in self.windows().open_windows() {
+            self.set_view_metrics(event_loop, open.view.id(), metrics_on_screen_of(&open));
         }
     }
 
-    /// Reads every view's metrics again, for a system that reports no event for a change
-    /// of the safe area, and tells the client of the views whose metrics moved.
-    pub(super) fn sync_metrics(&mut self) {
-        let changed: Vec<ViewId> = self
-            .views()
-            .open_windows()
-            .into_iter()
-            .filter(|open| open.view.set_metrics(window_metrics(&*open.window)))
-            .map(|open| open.view.id())
-            .collect();
-        for view_id in changed {
-            self.client.view_metrics_changed(view_id);
-        }
-    }
-
-    /// The system gives the views surfaces, at launch and each time it gives them back: every
-    /// view with a window gets one, at the metrics its window has now, and draws its last scene on
-    /// it, since the framework presents only what changed; and the framework is asked for a frame
-    /// of each.
-    pub(super) fn give_surfaces(&mut self) {
-        self.surfaces_given = true;
-        let open_windows = self.views().open_windows();
-        for open in &open_windows {
-            open.view.give_surface();
-        }
-        self.sync_metrics();
-        for open in open_windows {
-            open.view.draw_last_scene();
-            self.request_frame(open.view.id());
-        }
-    }
-
-    /// The system takes every view's surface away: the app and its views stay, and each view
-    /// keeps its last scene, owed until it is given a surface again.
-    pub(super) fn take_surfaces(&mut self) {
-        self.surfaces_given = false;
-        for view in self.views().views() {
-            view.take_surface();
+    /// Reads every window's metrics again, as the system gives the views surfaces, for a system
+    /// that reports no event for a change of the safe area: the view of each window whose metrics
+    /// moved takes them.
+    pub(super) fn sync_metrics(&mut self, event_loop: &dyn ActiveEventLoop) {
+        for open in self.windows().open_windows() {
+            self.set_view_metrics(event_loop, open.view.id(), window_metrics(&*open.window));
         }
     }
 
@@ -244,33 +188,30 @@ impl<C: EmbedderClient> MainLoop<C> {
     /// presented again if it is not on the surface; otherwise the content is current and
     /// nothing is drawn.
     pub(super) fn on_redraw_requested(&mut self, id: WindowId) {
-        let Some(open) = self.views().by_window(id) else {
+        let Some(open) = self.windows().by_window(id) else {
             return;
         };
         open.view.draw_last_scene();
         self.request_vsync_if_wanted(open.view.id());
     }
 
-    /// A window moved, and may be on another screen now: the app hears of its view's new
-    /// screen, as Flutter's macOS embedder sends a window's metrics again when its screen changes,
-    /// and of the move, and its view's frames follow it to that screen's vsyncs. AppKit moves the windows off a screen that goes away, so this is also how their
-    /// vsyncs leave it.
-    pub(super) fn on_moved(&mut self, id: WindowId) {
-        let Some(open) = self.views().by_window(id) else {
+    /// A window moved, and may be on another screen now: its view takes that screen, as Flutter's
+    /// macOS embedder sends a window's metrics again when its screen changes, and the app hears of
+    /// the move. AppKit moves the windows off a screen that goes away, so this is also how their
+    /// views' vsyncs leave it.
+    pub(super) fn on_moved(&mut self, event_loop: &dyn ActiveEventLoop, id: WindowId) {
+        let Some(open) = self.windows().by_window(id) else {
             return;
         };
-        if give_window_screen(&open) {
-            self.client.view_metrics_changed(open.view.id());
-        }
+        self.set_view_metrics(event_loop, open.view.id(), metrics_on_screen_of(&open));
         self.report_window_changed(&open);
-        self.sync_frame_scheduler(open.view.id());
     }
 
     /// winit says a window is occluded, or shown: the app hears of it once the window answers so,
     /// and a window seen again is when a picture its surface refused while occluded is presented
     /// (wgpu issue 8309, `rasterizer.rs`).
     pub(super) fn on_occluded(&mut self, id: WindowId, occluded: bool) {
-        if let Some(handle) = self.views().by_window(id).and_then(|open| open.handle) {
+        if let Some(handle) = self.windows().by_window(id).and_then(|open| open.handle) {
             handle.set_occluded(occluded);
         }
         self.sync_window_state(id);
@@ -279,13 +220,13 @@ impl<C: EmbedderClient> MainLoop<C> {
         }
     }
 
-    /// Reads again whether window `id` is minimized and whether it is occluded: its view's frames
-    /// are held while it is either, and the app hears if either changed since it last heard.
+    /// Reads again whether window `id` is minimized and whether it is occluded: its view is out of
+    /// sight while it is either, and the app hears if either changed since it last heard.
     pub(super) fn sync_window_state(&mut self, id: WindowId) {
-        let Some(open) = self.views().by_window(id) else {
+        let Some(open) = self.windows().by_window(id) else {
             return;
         };
-        self.sync_frame_scheduler(open.view.id());
+        self.set_view_in_sight(open.view.id(), is_in_sight(&open));
         let Some(handle) = &open.handle else {
             return;
         };
@@ -308,12 +249,21 @@ fn has_area([width, height]: [f64; 2]) -> bool {
     width > 0.0 && height > 0.0
 }
 
-/// Gives the view of `open` the screen its window is on now, and answers whether that changed: a
-/// window that moved to another screen has new metrics, though its size stays as it is.
-fn give_window_screen(open: &OpenWindow) -> bool {
-    let metrics = ViewMetrics {
+/// The metrics of the view of `open` on the screen its window is on now: a window that moved to
+/// another screen has new metrics, though its size stays as it is.
+fn metrics_on_screen_of(open: &OpenWindow) -> ViewMetrics {
+    ViewMetrics {
         screen: screen_of(&*open.window),
         ..open.view.metrics()
-    };
-    open.view.set_metrics(metrics)
+    }
+}
+
+/// Whether the window of `open` is in sight: neither minimized nor occluded, as the app's handle
+/// on it answers. The screen view's window, which the app has no handle on, as the system answers
+/// where it can be asked.
+fn is_in_sight(open: &OpenWindow) -> bool {
+    match &open.handle {
+        Some(handle) => !handle.is_minimized() && !handle.is_occluded(),
+        None => System::is_occluded(&*open.window) != Some(true),
+    }
 }

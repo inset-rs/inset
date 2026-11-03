@@ -4,15 +4,13 @@
 use std::sync::Weak;
 use std::time::Instant;
 
-use inset_embedder::{EmbedderClient, Frame, HostWindow, ScreenId, View, ViewId, VsyncObserver};
+use inset_embedder::{EmbedderClient, Frame, ScreenId, View, ViewId, VsyncObserver};
 use winit::event_loop::ActiveEventLoop;
 use winit::monitor::MonitorHandle;
 
 use crate::os::System;
-use crate::os::capabilities::{Screens, WindowVisibility};
+use crate::os::capabilities::Screens;
 use crate::view::WinitView;
-use crate::vsync_source::monitor_of;
-use crate::windows::OpenWindow;
 
 use super::MainLoop;
 
@@ -44,8 +42,8 @@ impl<C: EmbedderClient> MainLoop<C> {
     }
 
     /// A frame of `view` is asked for, by the framework or for a surface just given: drawn at the
-    /// next vsync of its window's screen while the window is in sight, and held until it is.
-    /// One asked of a view that is gone is dropped.
+    /// next vsync of its screen while it is in sight, and held until it is. One asked of a view
+    /// that is gone is dropped.
     pub(super) fn request_frame(&mut self, view: ViewId) {
         if self.views().get(view).is_some() {
             self.frame_scheduler.request_frame(view);
@@ -124,9 +122,8 @@ impl<C: EmbedderClient> MainLoop<C> {
         }
     }
 
-    /// Asks for a vsync of the screen `view`'s window is on while the view draws something then
-    /// without the framework: a scene its surface timed out on, or, while it is in sight, a
-    /// video's next frame.
+    /// Asks for a vsync of the screen `view` is on while the view draws something then without the
+    /// framework: a scene its surface timed out on, or, while it is in sight, a video's next frame.
     pub(super) fn request_vsync_if_wanted(&mut self, view_id: ViewId) {
         let in_sight = self.frame_scheduler.is_in_sight(view_id);
         if self
@@ -136,21 +133,6 @@ impl<C: EmbedderClient> MainLoop<C> {
         {
             self.frame_scheduler.request_vsync(view_id);
         }
-    }
-
-    /// Tells the frame scheduler which screen `view`'s window is on now and whether it is in
-    /// sight, at each event that can change either; a view without a window takes no vsyncs, and
-    /// one that comes into sight takes its videos' frames again.
-    pub(super) fn sync_frame_scheduler(&mut self, view: ViewId) {
-        match self.views().by_view(view) {
-            Some(open) => {
-                let monitor = monitor_of(&*open.window);
-                self.frame_scheduler
-                    .follow_window(view, monitor.as_ref(), is_in_sight(&open));
-            }
-            None => self.frame_scheduler.follow_window(view, None, false),
-        }
-        self.request_vsync_if_wanted(view);
     }
 }
 
@@ -169,12 +151,16 @@ fn monitor_numbered(event_loop: &dyn ActiveEventLoop, screen: ScreenId) -> Optio
         .find(|monitor| System::screen_id(monitor) == screen)
 }
 
-/// Whether the window of `open` is in sight: neither minimized nor occluded, as the app's handle
-/// on it answers. The screen view's window, which the app has no handle on, as the system answers
-/// where it can be asked.
-fn is_in_sight(open: &OpenWindow) -> bool {
-    match &open.handle {
-        Some(handle) => !handle.is_minimized() && !handle.is_occluded(),
-        None => System::is_occluded(&*open.window) != Some(true),
-    }
+/// The monitor whose vsyncs the frames of a view on `screen` take: the one that is `screen`; the
+/// primary monitor where `screen` is none that is connected, as for a window the system names no
+/// screen for, and any monitor where the system names no primary one; `None` where it knows no
+/// monitor at all.
+pub(super) fn monitor_of_screen(
+    event_loop: &dyn ActiveEventLoop,
+    screen: Option<ScreenId>,
+) -> Option<MonitorHandle> {
+    screen
+        .and_then(|screen| monitor_numbered(event_loop, screen))
+        .or_else(|| event_loop.primary_monitor())
+        .or_else(|| event_loop.available_monitors().next())
 }

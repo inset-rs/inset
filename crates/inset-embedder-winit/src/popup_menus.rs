@@ -38,7 +38,7 @@ impl NativePopupMenus {
 impl PopupMenus for NativePopupMenus {
     fn show(&self, view: ViewId, at: Offset, menu: &[MenuEntry]) -> PopupMenuFuture {
         let (answer, chosen) = menu_answer();
-        let Some(open) = self.state.views().by_view(view) else {
+        let Some(open) = self.state.windows().by_view(view) else {
             answer.give(None);
             return Box::pin(chosen);
         };

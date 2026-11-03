@@ -23,7 +23,7 @@ use crate::os::capabilities::Screens as _;
 /// app's first window.
 impl Screens for WinitPlatform {
     fn screens(&self) -> Vec<Screen> {
-        let first = self.state().views().first_window();
+        let first = self.state().windows().first_window();
         System::screens(first.as_ref().map(|open| &*open.window))
     }
 

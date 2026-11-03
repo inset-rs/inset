@@ -5,6 +5,7 @@
 use std::time::Instant;
 
 use inset_embedder::{EmbedderClient, OpenRequest, PickedFile};
+use winit::event_loop::ActiveEventLoop;
 use winit::window::{Theme, Window};
 
 use crate::lifecycle::LifecycleNotice;
@@ -75,18 +76,22 @@ impl<C: EmbedderClient> MainLoop<C> {
 
     /// The system said the screens or the user's languages changed: the app hears of it, as
     /// Flutter's macOS embedder tells the engine's displays and locales.
-    pub(super) fn on_system_change(&mut self, change: SystemChange) {
+    pub(super) fn on_system_change(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        change: SystemChange,
+    ) {
         match change {
-            SystemChange::Screens => self.on_screens_changed(),
+            SystemChange::Screens => self.on_screens_changed(event_loop),
             SystemChange::Locales => self.on_locales_changed(),
         }
     }
 
     /// The app hears the screens changed, and then of each view whose window is on another
     /// screen now, as a screen it was on can be gone, or have become the mirror of another.
-    fn on_screens_changed(&mut self) {
+    fn on_screens_changed(&mut self, event_loop: &dyn ActiveEventLoop) {
         self.client.screens_changed();
-        self.sync_screens();
+        self.sync_screens(event_loop);
     }
 
     /// The user's languages, read again: the app hears of them when they differ from what it

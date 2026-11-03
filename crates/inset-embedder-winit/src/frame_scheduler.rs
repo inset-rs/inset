@@ -1,5 +1,5 @@
-//! When each view's frames are drawn: at a vsync of the screen its window is on, after the
-//! framework asks for a frame of it, as Flutter's `Animator` asks its `VsyncWaiter` for the next
+//! When each view's frames are drawn: at a vsync of the screen it is on, after the framework asks
+//! for a frame of it, as Flutter's `Animator` asks its `VsyncWaiter` for the next
 //! vsync when a frame is requested and draws at it. Every view on a screen shares one vsync
 //! source, and a vsync draws one refresh of the views on that screen that are due. Where the loop
 //! serves the platform's vsync waiter (`vsync_waiter.rs`), whoever waits on a screen is served by
@@ -7,10 +7,10 @@
 //!
 //! A screen's vsyncs do not stop for its windows
 //! (`2026-09-29-view-display-link-unseen` in the `experiments` folder beside this repository), so a
-//! view whose window is minimized or occluded is never due: a frame asked of it is held, and drawn
-//! at the first vsync once the window is in sight again, as a browser pauses
-//! `requestAnimationFrame` in a hidden tab. A frame asked of a view with no window yet is held the
-//! same way.
+//! view out of sight, as its holder says, such as a view whose window is minimized or occluded, is
+//! never due: a frame asked of it is held, and drawn at the first vsync once it is in sight again,
+//! as a browser pauses `requestAnimationFrame` in a hidden tab. A frame asked of a view on no
+//! screen yet is held the same way.
 //!
 //! A resize draws its view's frame inline, so that the picture and the geometry it was laid out
 //! for reach the window together; that frame stands for the vsync's, and the view's next vsync
@@ -19,8 +19,8 @@
 //! The rule a later editor could break: a frame asked of a view in sight is drawn once and no more
 //! than once between two vsyncs of its screen, so every view that owes a frame, and every wait on
 //! a screen, has asked its screen's source for the vsync it is served at. The scheduler learns a
-//! window's screen and whether it is in sight only from the window's events
-//! ([`FrameScheduler::follow_window`]).
+//! view's screen and whether it is in sight from the main loop, as the view's metrics and its
+//! holder say them ([`FrameScheduler::set_screen`], [`FrameScheduler::set_in_sight`]).
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -38,13 +38,13 @@ use crate::vsync_source::VsyncSource;
 pub(crate) struct FrameScheduler {
     /// Each view's frames, in the order the views came.
     views: BTreeMap<ViewId, ViewFrames>,
-    /// The vsyncs of each screen a view's window is on, or someone waits on.
+    /// The vsyncs of each screen a view is on, or someone waits on.
     screens: Vec<ScreenVsyncs>,
     /// What a screen's vsync sends the loop.
     send_vsync: Rc<dyn Fn(ScreenId)>,
 }
 
-/// One screen's vsyncs, shared by every view whose window is on it and everyone who waits on it.
+/// One screen's vsyncs, shared by every view on it and everyone who waits on it.
 struct ScreenVsyncs {
     screen: ScreenId,
     vsync: VsyncSource,
@@ -61,13 +61,14 @@ pub(crate) struct ScreenRefresh {
     pub(crate) waiting: Vec<Weak<dyn VsyncObserver>>,
 }
 
-/// One view's frames: whether one is asked for, and whether its window takes vsyncs.
+/// One view's frames: whether one is asked for, and whether the view takes vsyncs.
 #[derive(Debug)]
 struct ViewFrames {
     state: FrameState,
-    /// The screen its window is on; `None` while it has no window.
+    /// The screen the view is on; `None` while it is on none.
     screen: Option<ScreenId>,
-    /// Whether its window is in sight: neither minimized nor occluded.
+    /// Whether the view is in sight, as its holder says: a window's view while the window is
+    /// neither minimized nor occluded.
     in_sight: bool,
 }
 
@@ -75,7 +76,7 @@ struct ViewFrames {
 enum FrameState {
     /// No frame asked for.
     Idle,
-    /// A frame is asked for, to be drawn at the next vsync once the window is in sight.
+    /// A frame is asked for, to be drawn at the next vsync once the view is in sight.
     WaitingForVsync,
     /// A resize drew this vsync's frame already, so the next vsync draws none; a frame asked
     /// for since is drawn at the vsync after it.
@@ -93,25 +94,27 @@ impl FrameScheduler {
         }
     }
 
-    /// The framework asked for a frame of `view`: drawn at the next vsync of its window's screen
-    /// while the window is in sight, and held until then.
+    /// The framework asked for a frame of `view`: drawn at the next vsync of its screen while it
+    /// is in sight, and held until then.
     pub(crate) fn request_frame(&mut self, view: ViewId) {
         self.view_frames(view).frame_asked();
         self.request_vsync_if_waiting(view);
     }
 
-    /// The window of `view` is on `monitor` now, `None` for a view without a window, and is in
-    /// sight or not: a frame held for it is drawn at the next vsync once it is in sight.
-    pub(crate) fn follow_window(
-        &mut self,
-        view: ViewId,
-        monitor: Option<&MonitorHandle>,
-        in_sight: bool,
-    ) {
+    /// `view` is on the screen that is `monitor` from now on, `None` for a view on no screen: its
+    /// frames are drawn at that screen's vsyncs.
+    pub(crate) fn set_screen(&mut self, view: ViewId, monitor: Option<&MonitorHandle>) {
         let screen = monitor.map(|monitor| self.follow_screen(monitor));
-        self.view_frames(view).follow_window(screen, in_sight);
+        self.view_frames(view).screen = screen;
         self.request_vsync_if_waiting(view);
         self.drop_unused_screens();
+    }
+
+    /// `view` is in sight or not from now on, as its holder says: a frame held for it is drawn at
+    /// the next vsync once it is in sight.
+    pub(crate) fn set_in_sight(&mut self, view: ViewId, in_sight: bool) {
+        self.view_frames(view).in_sight = in_sight;
+        self.request_vsync_if_waiting(view);
     }
 
     /// `view` is gone: no frame is drawn for it again.
@@ -121,7 +124,7 @@ impl FrameScheduler {
     }
 
     /// `observer` waits for the next vsync of `screen`, and is called once then however often it
-    /// asks before. A screen no view's window is on is followed from now on, `monitor` finding
+    /// asks before. A screen no view is on is followed from now on, `monitor` finding
     /// it; one that is not connected has no vsync, and the wait is dropped.
     pub(crate) fn wait_for_vsync(
         &mut self,
@@ -170,7 +173,7 @@ impl FrameScheduler {
         self.request_vsync(view);
     }
 
-    /// Asks for a vsync of the screen `view`'s window is on that draws no frame: for a scene the
+    /// Asks for a vsync of the screen `view` is on that draws no frame: for a scene the
     /// view owes its surface, which it draws again then.
     pub(crate) fn request_vsync(&mut self, view: ViewId) {
         let Some(screen) = self.views.get(&view).and_then(|frames| frames.screen) else {
@@ -181,7 +184,7 @@ impl FrameScheduler {
         }
     }
 
-    /// Whether `view`'s window is in sight, so what it shows changes the screen.
+    /// Whether `view` is in sight, so what it shows changes the screen.
     pub(crate) fn is_in_sight(&self, view: ViewId) -> bool {
         self.views.get(&view).is_some_and(|frames| frames.in_sight)
     }
@@ -194,7 +197,7 @@ impl FrameScheduler {
             .map_or_else(Instant::now, |vsyncs| vsyncs.vsync.display_time())
     }
 
-    /// The views whose windows are on `screen`, in the order they came.
+    /// The views on `screen`, in the order they came.
     pub(crate) fn views_on(&self, screen: ScreenId) -> Vec<ViewId> {
         self.views
             .iter()
@@ -221,7 +224,8 @@ impl FrameScheduler {
             .collect()
     }
 
-    /// The frames of `view`, as a view with none asked for and no window when it is new.
+    /// The frames of `view`, as a view with none asked for, on no screen and in sight when it is
+    /// new.
     fn view_frames(&mut self, view: ViewId) -> &mut ViewFrames {
         self.views.entry(view).or_insert_with(ViewFrames::new)
     }
@@ -257,7 +261,7 @@ impl FrameScheduler {
             .find(|vsyncs| vsyncs.screen == screen)
     }
 
-    /// Lets go of the vsyncs of every screen no view's window is on and nobody waits on.
+    /// Lets go of the vsyncs of every screen no view is on and nobody waits on.
     fn drop_unused_screens(&mut self) {
         let views = &self.views;
         self.screens.retain(|vsyncs| {
@@ -284,22 +288,17 @@ impl ScreenVsyncs {
 }
 
 impl ViewFrames {
-    /// A view with no frame asked for, and no window yet.
+    /// A view with no frame asked for, on no screen yet, and in sight until its holder says
+    /// otherwise.
     fn new() -> ViewFrames {
         ViewFrames {
             state: FrameState::Idle,
             screen: None,
-            in_sight: false,
+            in_sight: true,
         }
     }
 
-    /// The view's window is on `screen` now, `None` without a window, and in sight or not.
-    fn follow_window(&mut self, screen: Option<ScreenId>, in_sight: bool) {
-        self.screen = screen;
-        self.in_sight = in_sight;
-    }
-
-    /// A frame is asked for: it is drawn at the next vsync once the window is in sight, or after a
+    /// A frame is asked for: it is drawn at the next vsync once the view is in sight, or after a
     /// resize at the one after.
     fn frame_asked(&mut self) {
         self.state = match self.state {
@@ -319,7 +318,7 @@ impl ViewFrames {
     }
 
     /// A vsync of the view's screen came: answers whether its frame is drawn now. A frame held
-    /// for a window out of sight stays held; one asked for since a resize waits for the vsync
+    /// for a view out of sight stays held; one asked for since a resize waits for the vsync
     /// after.
     fn vsync_came(&mut self) -> bool {
         match self.state {
@@ -348,10 +347,10 @@ mod tests {
 
     const SCREEN: ScreenId = ScreenId(1);
 
-    /// A view whose window is in sight on a screen.
+    /// A view in sight on a screen.
     fn shown() -> ViewFrames {
         let mut frames = ViewFrames::new();
-        frames.follow_window(Some(SCREEN), true);
+        frames.screen = Some(SCREEN);
         frames
     }
 
@@ -394,29 +393,28 @@ mod tests {
     }
 
     #[test]
-    fn a_frame_asked_of_a_window_out_of_sight_is_held_until_it_shows() {
+    fn a_frame_asked_of_a_view_out_of_sight_is_held_until_it_shows() {
         let mut frames = shown();
-        frames.follow_window(Some(SCREEN), false);
+        frames.in_sight = false;
         frames.frame_asked();
         assert!(!frames.waits_for_vsync(), "no vsync is asked for it");
         assert!(
             !frames.vsync_came(),
-            "a vsync another window asked for draws nothing"
+            "a vsync another view asked for draws nothing"
         );
 
-        frames.follow_window(Some(SCREEN), true);
+        frames.in_sight = true;
         assert!(frames.waits_for_vsync(), "in sight, it asks for the next");
         assert!(frames.vsync_came());
     }
 
     #[test]
-    fn a_frame_asked_of_a_view_without_a_window_is_held() {
+    fn a_frame_asked_of_a_view_on_no_screen_is_held() {
         let mut frames = ViewFrames::new();
-        frames.follow_window(None, true);
         frames.frame_asked();
         assert!(!frames.waits_for_vsync());
 
-        frames.follow_window(Some(SCREEN), true);
+        frames.screen = Some(SCREEN);
         assert!(frames.waits_for_vsync());
     }
 }

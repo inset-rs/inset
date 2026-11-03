@@ -57,6 +57,7 @@ mod video_frames;
 mod view;
 mod view_focus;
 mod view_host;
+mod views;
 mod vsync_source;
 mod vsync_waiter;
 mod windows;

@@ -170,7 +170,7 @@ impl<C: EmbedderClient> MainLoop<C> {
     /// How many physical pixels `window`'s view has to the logical one; one for a window the
     /// embedder no longer has.
     fn scale_of(&self, window: WindowId) -> f64 {
-        self.views()
+        self.windows()
             .by_window(window)
             .map(|open| open.view.metrics().device_pixel_ratio)
             .unwrap_or(1.0)
@@ -232,7 +232,7 @@ impl<C: EmbedderClient> MainLoop<C> {
 
     /// `FlutterTextInputPlugin.handleKeyEvent` for the view's active text input, if any.
     pub(super) fn type_into_text_input(&mut self, id: WindowId, event: &KeyEvent) {
-        let Some(open) = self.views().by_window(id) else {
+        let Some(open) = self.windows().by_window(id) else {
             return;
         };
         let view = open.view.id();
@@ -249,7 +249,7 @@ impl<C: EmbedderClient> MainLoop<C> {
     }
 
     pub(super) fn on_ime(&mut self, id: WindowId, ime: Ime) {
-        let Some(open) = self.views().by_window(id) else {
+        let Some(open) = self.windows().by_window(id) else {
             return;
         };
         let view_id = open.view.id();

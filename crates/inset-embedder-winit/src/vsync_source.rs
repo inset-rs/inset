@@ -14,7 +14,6 @@
 use std::time::{Duration, Instant};
 
 use winit::monitor::MonitorHandle;
-use winit::window::Window;
 
 use crate::os::DisplayLink;
 use crate::os::capabilities::DisplayLink as _;
@@ -136,17 +135,6 @@ impl VsyncTimer {
     fn pause(&mut self) {
         self.due = None;
     }
-}
-
-/// The monitor `window` is on, whose vsyncs its view's frames take: on macOS, for a hidden or
-/// minimized window, the one it was last shown on. The primary monitor for a window the system
-/// names none for, and any monitor where it names no primary one; `None` where the system knows
-/// no monitor at all.
-pub(crate) fn monitor_of(window: &dyn Window) -> Option<MonitorHandle> {
-    window
-        .current_monitor()
-        .or_else(|| window.primary_monitor())
-        .or_else(|| window.available_monitors().next())
 }
 
 /// The time between `display`'s vsyncs, from its rate as winit reports it; the default where it

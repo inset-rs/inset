@@ -12,12 +12,15 @@ use crate::images::{CreateImageLoader, Images};
 use crate::locales::Locales;
 use crate::main_loop::MainLoopProxy;
 use crate::system_requests::SystemRequestHandlers;
-use crate::windows::Views;
+use crate::views::Views;
+use crate::windows::Windows;
 
 /// What the main loop and the platform both know.
 pub(crate) struct EmbedderState {
-    /// The app's views and their windows.
+    /// The app's views, whoever holds them.
     views: Views,
+    /// The app's windows, with what is a window's.
+    windows: Windows,
     /// Light or dark, as the app was last told.
     appearance: Appearance,
     /// The user's languages, as the app was last told.
@@ -43,6 +46,7 @@ impl EmbedderState {
         let gpu = LazyGpu::default();
         EmbedderState {
             views: Views::default(),
+            windows: Windows::default(),
             appearance: Appearance::default(),
             locales: Locales::read(),
             images: Images::new(gpu.clone(), create_image_loader),
@@ -54,6 +58,10 @@ impl EmbedderState {
 
     pub(crate) fn views(&self) -> &Views {
         &self.views
+    }
+
+    pub(crate) fn windows(&self) -> &Windows {
+        &self.windows
     }
 
     pub(crate) fn appearance(&self) -> &Appearance {

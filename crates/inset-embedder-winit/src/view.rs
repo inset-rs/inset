@@ -3,25 +3,26 @@
 //! their slices drawn by its rasterizer (`rasterizer.rs`) into the layer the view shows into
 //! (`os`'s `ViewLayer`), with the composition layers they place beneath the drawing.
 //!
-//! Whoever holds a view controls it as Flutter's embedder controls a view: it adds the view on a
-//! layer with its metrics ([`WinitView::add`], `AddView`), gives it new metrics
+//! A view is controlled as Flutter's embedder controls a view, whoever holds it: the main loop adds
+//! it on a layer with its metrics ([`WinitView::add`], `AddView`), gives it new metrics
 //! ([`WinitView::set_metrics`], `SendWindowMetricsEvent`) and removes it from its layer
-//! ([`WinitView::remove`], `RemoveView`). The holder places the layer itself, through a hold of its
-//! own on it. A window's code is the holder of its window's view: it adds the view on a layer it
-//! places in the window and keeps filling it (`windows.rs`), gives the view its metrics from the
-//! window as the window resizes or moves to another screen, and removes it as the window closes.
+//! ([`WinitView::remove`], `RemoveView`), for its holder (`main_loop/views.rs`). The holder places
+//! the layer itself, through a hold of its own on it. A window's code is the holder of its window's
+//! view: the view is added on a layer the window places in itself and keeps filling (`windows.rs`),
+//! takes the window's metrics as the window resizes or moves to another screen, and is removed as
+//! the window closes.
 //!
-//! A view is made with its host, which its holder gives it, at no size, on no layer, and is added on
-//! one: the screen view at winit's first
-//! call, after the app has started, as Flutter's engine has it before its window; any other view as
-//! soon as it is made. A view on no layer, and one whose window has no surface, draws nothing; the
-//! system gives the views their surfaces and takes them away (`main_loop/`).
+//! A view is made by its holder's code with its host, at no size, on no layer, and is added on
+//! one: the screen view at winit's first call, after the app has started, as Flutter's engine has
+//! it before its window; any other view as soon as it is made. A view on no layer, and one without
+//! a surface, draws nothing; the system gives the views their surfaces and takes them away
+//! (`views.rs`).
 //!
-//! The registry of views owns each window (`windows.rs`); the framework and the app may hold
+//! The registry of windows owns each window (`windows.rs`); the framework and the app may hold
 //! a view for a while after its window closes. The invariant: a view holds its window only through
 //! its layer, where that is the window, and weakly through its host's text input and the app's
-//! handle on the window, and lets go of the layer and the handle when the window closes
-//! (`window_closed`), so that closing a window frees it.
+//! handle on the window, and lets go of the layer and the handle as it is removed (`remove`), so
+//! that closing a window and removing its view frees it.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -113,10 +114,12 @@ impl WinitView {
         true
     }
 
-    /// Flutter's `RemoveView`: the view lets go of its layer and the surface made from it, while
-    /// the framework may still hold the view, which draws nowhere from now on.
+    /// Flutter's `RemoveView`: the view lets go of its layer and the surface made from it, and of
+    /// the app's handle on its window, while the framework may still hold the view, which is in no
+    /// window from now on: a scene presented from now on is drawn nowhere.
     pub(crate) fn remove(&self) {
         self.rasterizer.borrow_mut().remove_layer();
+        *self.window_handle.borrow_mut() = Weak::new();
     }
 
     /// Draws the last scene again if the surface does not show it: an owed frame, paid
@@ -157,17 +160,9 @@ impl WinitView {
     }
 
     /// `handle` is the app's handle on the view's window from now on: the view answers it as its
-    /// window until the window closes.
+    /// window until it is removed.
     pub(crate) fn set_window_handle(&self, handle: &Rc<WinitWindow>) {
         *self.window_handle.borrow_mut() = Rc::downgrade(handle);
-    }
-
-    /// The window closed: the view is removed from its layer, and with it goes the last hold on
-    /// the window, while the framework may still hold the view, which is in no window from now on.
-    /// A scene presented from now on is drawn nowhere.
-    pub(crate) fn window_closed(&self) {
-        self.remove();
-        *self.window_handle.borrow_mut() = Weak::new();
     }
 
     /// The system gives the view a surface, made from its layer: the view draws on it from now

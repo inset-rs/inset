@@ -1,19 +1,19 @@
 //! The main loop: the one place that hears every event, winit's and each [`MainLoopEvent`], and
 //! the only one that tells the app or asks the OS. Each event goes to the helper that owns its
 //! concern, which decides what it means, and the loop delivers what the helper answers. Its
-//! reactions live in files by concern: `windows`, `frames`, `input`, `quitting` and `app`; this
-//! one holds the loop's state and routes each event.
+//! reactions live in files by concern: `views`, `windows`, `frames`, `input`, `quitting` and
+//! `app`; this one holds the loop's state and routes each event.
 //!
 //! winit hands out its `ActiveEventLoop` only inside these callbacks, so this is where
 //! windows are created and dropped, and where what the framework asks through the platform is
 //! served: each request (`app_requests.rs`) is served on a turn of its own in the order
 //! asked. A frame it asks of a view goes to the frame scheduler, which the loop owns and which
-//! says at which vsync of the view's screen it is drawn, holding it while the view's window is
-//! minimized or occluded (`frame_scheduler.rs`); the loop draws it then, in one refresh with the
-//! other views of that screen that are due. Where the system's display links serve the waits on
-//! a screen's vsync through the platform's waiter themselves, as macOS's do
-//! (`os/macos/vsync_waiter.rs`), those never reach the loop; elsewhere the loop serves them at
-//! the same vsync, before the refresh (`vsync_waiter.rs`).
+//! says at which vsync of the view's screen it is drawn, holding it while the view is out of
+//! sight, as when its window is minimized or occluded (`frame_scheduler.rs`); the loop draws it
+//! then, in one refresh with the other views of that screen that are due. Where the system's
+//! display links serve the waits on a screen's vsync through the platform's waiter themselves, as
+//! macOS's do (`os/macos/vsync_waiter.rs`), those never reach the loop; elsewhere the loop serves
+//! them at the same vsync, before the refresh (`vsync_waiter.rs`).
 //!
 //! # Who calls whom
 //!
@@ -79,23 +79,26 @@
 //! in that view; the view's window opens at winit's first call, the first moment winit
 //! lets one be made, and the app hears its new metrics. Views come and go while the app runs,
 //! each with its window: one the app opens reaches it through `view_added`, and one that closes
-//! through `view_removed`. The screen view alone outlives its window, as in Flutter's
-//! embedders. A window closes only when the app closes it: the user's asking only reports it
-//! (`view_close_requested`), and what the last window's closing means is the app's to decide.
+//! through `view_removed`. The screen view's window lasts as long as the app, which has no handle
+//! on it to close it. A window closes only when the app closes it: the user's asking only reports
+//! it (`view_close_requested`), and what the last window's closing means is the app's to decide.
 //!
-//! A window holds its view as an app holds a view it adds, as Flutter's embedder API has it: the
-//! window's code adds the view on the layer it shows into, gives it the window's metrics as the
-//! window resizes or moves, and removes it as the window closes (`windows.rs`, `view.rs`). The view
-//! draws on a surface made from that layer, which the system gives and takes away: winit's
-//! `can_create_surfaces` gives every view one and asks for a frame, at launch and each time after,
-//! and `destroy_surfaces` takes them all while the app and its views stay. A view made while the
-//! system gives surfaces gets its own at once.
+//! A view comes, changes and goes as Flutter's embedder API has it, whoever holds it: it is added
+//! on the layer its holder gives it, given new metrics and removed (`views`), and its holder says
+//! whether it is in sight. A window holds its view as an app holds a view it adds: the window's
+//! code adds the view on the layer it placed for it, gives it the window's metrics as the window
+//! resizes or moves, has it out of sight while the window is minimized or occluded, and removes it
+//! as the window closes (`windows`). The view draws on a surface made from that layer, which the
+//! system gives and takes away: winit's `can_create_surfaces` gives every view one and asks for a
+//! frame, at launch and each time after, and `destroy_surfaces` takes them all while the app and
+//! its views stay. A view added while the system gives surfaces gets its own at once.
 
 mod app;
 mod frames;
 mod input;
 mod menus;
 mod quitting;
+mod views;
 mod windows;
 
 use std::rc::Rc;
@@ -103,7 +106,7 @@ use std::sync::Weak;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Instant;
 
-use inset_embedder::{EmbedderClient, ScreenId, ViewId, VsyncObserver, WindowConfig};
+use inset_embedder::{EmbedderClient, ScreenId, ViewId, VsyncObserver};
 use winit::application::ApplicationHandler;
 use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
@@ -125,7 +128,8 @@ use crate::system_changes::SystemChange;
 use crate::system_requests::SystemRequest;
 use crate::touch::Touches;
 use crate::trackpad::Trackpad;
-use crate::windows::{ViewMaker, Views, screen_window_config};
+use crate::views::Views;
+use crate::windows::{ScreenWindow, ViewMaker, Windows};
 
 /// What reaches the loop through its proxy: the framework's requests, wakes asked for from
 /// other threads, and the system's requests of the application.
@@ -205,18 +209,18 @@ pub(crate) struct MainLoop<C> {
     /// The app, as the embedder drives it.
     client: C,
     platform: Rc<WinitPlatform>,
-    /// When each view's frames are drawn: at the vsync of its window's screen after the framework
-    /// asks for one.
+    /// When each view's frames are drawn: at the vsync of its screen after the framework asks for
+    /// one.
     frame_scheduler: FrameScheduler,
     /// When the framework is to be woken, as it asked.
     wakeups: Wakeups,
     /// What the embedder knows, shared with the platform, which answers the app from it.
     state: Rc<EmbedderState>,
-    /// Makes the views, which share the one device they draw with, and their windows.
+    /// Makes the windows' views, which share the one device they draw with, and their windows.
     view_maker: ViewMaker,
     /// The screen view's window, opened at winit's first call; `None` once it is open, and on
     /// a desktop, which has no screen view.
-    screen_window: Option<WindowConfig>,
+    screen_window: Option<ScreenWindow>,
     /// The mouse, as Flutter's pointer.
     pointer: Pointer,
     /// The fingers and pens on the screen, each as a pointer of its own.
@@ -228,9 +232,6 @@ pub(crate) struct MainLoop<C> {
     drags: Drags,
     /// Whether the application is active and visible, for its lifecycle state.
     lifecycle: AppLifecycle,
-    /// Whether the system gives the windows surfaces now: from winit's `can_create_surfaces`
-    /// until its `destroy_surfaces`.
-    surfaces_given: bool,
     /// The events sent to the loop and not heard yet, oldest first.
     events: Receiver<MainLoopEvent>,
     /// Whether winit has made its first call, from which on the loop hears its events.
@@ -252,10 +253,9 @@ impl<C: EmbedderClient> MainLoop<C> {
         let state = Rc::new(EmbedderState::new(proxy.clone(), create_image_loader));
         let platform = Rc::new(WinitPlatform::new(Rc::clone(&state), proxy.clone()));
         let view_maker = ViewMaker::new(state.gpu().clone(), Rc::clone(state.requests()));
-        let screen_window = screen_window_config();
-        if let Some(window) = &screen_window {
-            let (view, host) = view_maker.make_screen_view(window);
-            state.views().add_screen_view(view, host);
+        let screen_window = view_maker.make_screen_view();
+        if let Some(screen) = &screen_window {
+            state.views().add_screen_view(Rc::clone(&screen.view));
         }
         let client = start(platform.clone());
         MainLoop {
@@ -275,7 +275,6 @@ impl<C: EmbedderClient> MainLoop<C> {
             keyboard: Keyboard::new(),
             drags: Drags::default(),
             lifecycle: AppLifecycle::default(),
-            surfaces_given: false,
             events,
             started: false,
             proxy,
@@ -295,9 +294,14 @@ impl<C: EmbedderClient> MainLoop<C> {
         self.client.wake(self.platform.elapsed());
     }
 
-    /// The app's views and their windows.
+    /// The app's views, whoever holds them.
     fn views(&self) -> &Views {
         self.state.views()
+    }
+
+    /// The app's windows, with what is a window's.
+    fn windows(&self) -> &Windows {
+        self.state.windows()
     }
 
     /// Hears one event sent to the loop.
@@ -314,7 +318,7 @@ impl<C: EmbedderClient> MainLoop<C> {
             }
             MainLoopEvent::SystemRequest(request) => self.on_system_request(request),
             MainLoopEvent::Lifecycle(notice) => self.on_lifecycle_notice(notice),
-            MainLoopEvent::SystemChange(change) => self.on_system_change(change),
+            MainLoopEvent::SystemChange(change) => self.on_system_change(event_loop, change),
             MainLoopEvent::WindowVisibility(id) => self.sync_window_state(id),
             MainLoopEvent::TrackpadTouched(id, at) => self.on_trackpad_touched(id, at),
         }
@@ -342,7 +346,7 @@ impl<C: EmbedderClient> MainLoop<C> {
 
     /// The view of `window`, if the embedder has it.
     fn view_id_of(&self, window: WindowId) -> Option<ViewId> {
-        self.views().view_id_of(window)
+        self.windows().view_id_of(window)
     }
 }
 
@@ -372,12 +376,15 @@ impl<C: EmbedderClient> ApplicationHandler for MainLoop<C> {
         event_loop.set_control_flow(self.wakeups.control_flow(loop_due));
     }
 
-    fn can_create_surfaces(&mut self, _event_loop: &dyn ActiveEventLoop) {
+    /// The windows read their metrics again, which may have changed while the views had no
+    /// surfaces, and then the views get theirs, at those metrics.
+    fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
+        self.sync_metrics(event_loop);
         self.give_surfaces();
     }
 
     fn destroy_surfaces(&mut self, _event_loop: &dyn ActiveEventLoop) {
-        self.take_surfaces();
+        self.views().take_surfaces();
     }
 
     /// Hears every event waiting, and those sent while it hears them: winit merges the wakes
@@ -396,9 +403,9 @@ impl<C: EmbedderClient> ApplicationHandler for MainLoop<C> {
             WindowEvent::Focused(focused) => self.on_focused(id, focused),
             WindowEvent::CloseRequested => self.on_close_requested(id),
             WindowEvent::SurfaceResized(_) | WindowEvent::ScaleFactorChanged { .. } => {
-                self.on_resized(id)
+                self.on_resized(event_loop, id)
             }
-            WindowEvent::Moved(_) => self.on_moved(id),
+            WindowEvent::Moved(_) => self.on_moved(event_loop, id),
             WindowEvent::Occluded(occluded) => self.on_occluded(id, occluded),
             WindowEvent::RedrawRequested => self.on_redraw_requested(id),
             WindowEvent::ThemeChanged(theme) => self.on_theme_changed(theme),

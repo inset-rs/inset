@@ -69,14 +69,10 @@ impl<C: EmbedderClient> MainLoop<C> {
 
     /// The view whose window has the focus, if one has.
     fn focused_view(&self) -> Option<ViewId> {
-        self.views()
-            .views()
+        self.windows()
+            .open_windows()
             .into_iter()
-            .find(|view| {
-                self.views()
-                    .by_view(view.id())
-                    .is_some_and(|open| open.window.has_focus())
-            })
-            .map(|view| view.id())
+            .find(|open| open.window.has_focus())
+            .map(|open| open.view.id())
     }
 }
