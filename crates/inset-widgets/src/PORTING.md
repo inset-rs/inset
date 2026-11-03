@@ -152,10 +152,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the host merges the user's caption settings into each cue, as Apple's legible output does at its default styling, so the view has no style of its own to apply.
   Affect: an app sets no caption style or text size on the view, the runs of one cue can have different edges, and the space each side of a cue's lines follows its largest text.
 
-- Change: a run's background and an outline edge are set on its paragraph's text style as Media3 sets its spans, a background and a stroked foreground, and do not show.
-  Reason: platform — Inset's paragraphs draw no background or stroked foreground, since valo's spans carry neither.
-  Affect: subtitles show no colour behind their characters and no outline round them; a drop shadow, a raised or depressed edge and the window behind the cue show.
-
 ## widgets/banner.rs → banner.dart
 
 - Change: `BannerPainter` answers no `repaint` listenable, where Dart repaints on `PaintingBinding.systemFonts`.

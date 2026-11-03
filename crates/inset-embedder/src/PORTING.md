@@ -36,7 +36,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — valo's paragraph has no box styles, per-box direction for a range or ideographic metrics.
   Affect: a range's `TextBox::direction` is the paragraph's rather than the run's (a placeholder's is its run's), and `BoxHeightStyle::Strut` and `Max` measure as `Tight`.
 
-- Change: a run carries no decoration style, background paint, font features or variations, baseline or leading distribution; a combined decoration paints underline, else overline, else line-through, and an unset `font_size` shapes at valo's 14.
+- Change: a run carries no decoration style, font features or variations, baseline or leading distribution; a combined decoration paints underline, else overline, else line-through, and an unset `font_size` shapes at valo's 14.
   Reason: platform — those are not valo span fields.
   Affect: setting them on a `TextStyle` changes nothing on screen.
 

@@ -5099,14 +5099,15 @@ dependencies = [
 
 [[package]]
 name = "valo"
-version = "0.13.1"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40ecffc34445fc57c862e7c94037a7fe96ca227a35eb4ff7eed19fc1cc23a2b6"
+checksum = "b8605ef77489b64bb7442912fb83a3ed16005eaaac3c921a7b9ecea1ef446b3b"
 dependencies = [
  "objc2",
  "objc2-metal",
  "valo-dl",
  "valo-geometry",
+ "valo-paragraph",
  "valo-renderer",
  "valo-text",
  "web-sys",
@@ -5115,9 +5116,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec"
-version = "0.13.1"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb63660550f00890a57401e8ae3affd9c8f05957a4a332950909a24f8df02408"
+checksum = "c7cb37331a76d8cd6284eeb19ab6cfbee5ce6fcf62b0a2625749ca25715158b8"
 dependencies = [
  "valo",
  "wgpu",
@@ -5125,9 +5126,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec-apple"
-version = "0.13.1"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afc4f97970d29bf37b755c7b1fe7c0496d6c49d37d88f368e44385e3fa5268dd"
+checksum = "69054115f2b456ca6e1309f9dc7e31a4b37d1d37bddece8107ffa28c4e72ae2f"
 dependencies = [
  "core-foundation",
  "core-foundation-sys",
@@ -5144,9 +5145,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec-software"
-version = "0.13.1"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5b86d41467c86c51be62c164bc0c14e198c9636e42c0d42d6cd33253512fe64"
+checksum = "9b05a4adeae698e275a4d7391c8d8a095fcf0842ae51067ad4f3841319f7aeef"
 dependencies = [
  "gif",
  "image",
@@ -5159,9 +5160,9 @@ dependencies = [
 
 [[package]]
 name = "valo-dl"
-version = "0.13.1"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4497c2c6c27ead2292f092b13aac9d4e69103bad75d0132bc4dac5309a220453"
+checksum = "e87531ca50f8a01273aecc50a10b1af0c6044fa02a320fabc70e49e5fb8eacf6"
 dependencies = [
  "naga",
  "valo-geometry",
@@ -5171,9 +5172,9 @@ dependencies = [
 
 [[package]]
 name = "valo-fontmgr"
-version = "0.13.1"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6bed026f6f7a0d243be4fa1416551cd761ad24970dc8c2b76f4bee4c67760b5"
+checksum = "56400dc5393af19a0ea757797c56b9d27181b8013e93ec28f1d69ba25466318c"
 dependencies = [
  "core-foundation",
  "core-foundation-sys",
@@ -5185,18 +5186,32 @@ dependencies = [
 
 [[package]]
 name = "valo-geometry"
-version = "0.13.1"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c0f618d2679733cd0cb5939fec415f2bfc99232852b3d6c146c0743a6588e48"
+checksum = "e51eb22e3e7d69abdab919dc6d0e5bf913e19a383de2fb6ac780369dcd2ad5b1"
 dependencies = [
  "glam",
 ]
 
 [[package]]
-name = "valo-renderer"
-version = "0.13.1"
+name = "valo-paragraph"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2c930e80f8bff1427437bf87e1bbdec861337f9abfbb37ae802eaa7e67cd3c1"
+checksum = "75eb408026188f62779f412b484695556f60d5bb2c0291d34b33c37b39b89cd4"
+dependencies = [
+ "unicode-bidi",
+ "unicode-linebreak",
+ "unicode-segmentation",
+ "valo-dl",
+ "valo-geometry",
+ "valo-text",
+]
+
+[[package]]
+name = "valo-renderer"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33488fe4ed2b873ebb78491fda38359cffebb981b6cc32732d55795965348852"
 dependencies = [
  "bytemuck",
  "etagere",
@@ -5212,9 +5227,9 @@ dependencies = [
 
 [[package]]
 name = "valo-system-fonts"
-version = "0.13.1"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66cebcacf8c417e7d1a5c33248d35284490aba240c17cba89d78e95566c5fa87"
+checksum = "b00104c0d3c75faaff9a354fe00be0303139163a319eb3f8f9f219efe5e513f4"
 dependencies = [
  "valo-fontmgr",
  "valo-text",
@@ -5222,18 +5237,15 @@ dependencies = [
 
 [[package]]
 name = "valo-text"
-version = "0.13.1"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "006472ea4481784eb3336b0568248a1822dc9c33dd788627580eb86acca9e8fa"
+checksum = "178e8021637b91a0241c70618660c3c18820a0cd43caf51f5b8b8a2861fec49d"
 dependencies = [
  "allsorts",
  "harfrust",
  "skrifa 0.35.0",
  "swash",
  "tiny-skia 0.11.4",
- "unicode-bidi",
- "unicode-linebreak",
- "unicode-segmentation",
  "valo-geometry",
 ]
 

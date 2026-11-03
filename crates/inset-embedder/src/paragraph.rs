@@ -379,6 +379,8 @@ impl TextStyle {
         } else if let Some(color) = self.color {
             style.color = color.into();
         }
+        style.foreground = self.foreground.clone();
+        style.background = self.background.clone();
         if let Some(letter_spacing) = self.letter_spacing {
             style.letter_spacing = letter_spacing as f32;
         }
@@ -1173,6 +1175,28 @@ mod tests {
         assert_eq!(units.byte(4), 6);
         assert_eq!(units.code_unit(5), 3);
         assert_eq!(units.code_unit(6), 4);
+    }
+
+    /// A span's foreground and background paints reach valo whole, as Flutter's paragraph builder
+    /// hands its `TextStyle`'s paints to Skia's; the colour stays the foreground's, for a
+    /// decoration with no colour of its own.
+    #[test]
+    fn a_spans_paints_reach_valo() {
+        let outline = Paint {
+            color: Color::from_argb(255, 0, 0, 0).into(),
+            style: valo::PaintStyle::Stroke(valo::Stroke::new(2.0)),
+            ..Paint::default()
+        };
+        let box_behind = Paint::from_color(Color::from_argb(160, 0, 0, 0).into());
+        let style = TextStyle {
+            foreground: Some(outline.clone()),
+            background: Some(box_behind.clone()),
+            ..TextStyle::default()
+        };
+        let native = style.to_native();
+        assert_eq!(native.foreground, Some(outline.clone()));
+        assert_eq!(native.background, Some(box_behind));
+        assert_eq!(native.color, outline.color);
     }
 
     #[test]
