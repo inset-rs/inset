@@ -1,9 +1,10 @@
-//! Drawing a view's scenes on its window's surface, as Flutter's `Rasterizer` draws its layer
-//! trees: the last scene the framework handed over, whether the surface shows it or is owed it,
-//! and what to do when the surface refuses one.
+//! Drawing a view's scenes on the surface made from the layer it shows into (`os`'s `ViewLayer`),
+//! as Flutter's `Rasterizer` draws its layer trees: the layer, with the composition layers each
+//! scene places in it, the last scene the framework handed over, whether the surface shows it or
+//! is owed it, and what to do when the surface refuses one.
 //!
-//! On macOS wgpu asks AppKit whether the window is visible, its occlusion state, before
-//! it asks the layer for a drawable, and refuses with `Occluded` while it is not (wgpu
+//! On macOS wgpu asks AppKit whether the window its layer is in is visible, its occlusion state,
+//! before it asks the layer for a drawable, and refuses with `Occluded` while it is not (wgpu
 //! issue 8309). A window just ordered on screen counts as occluded until AppKit reports
 //! otherwise, which it does through `NSWindowDidChangeOcclusionState`, winit's
 //! `Occluded(false)`: that event is when a refused picture is presented, as wgpu's own
@@ -15,16 +16,17 @@
 //! system says the window can take it, as Flutter's `DrawLastLayerTree` does.
 //!
 //! The surface is the system's to give and take, winit's `can_create_surfaces` and
-//! `destroy_surfaces`: a rasterizer starts without one, and one taken away is made again on the
-//! same window when the system gives it back. Without a surface nothing is drawn: every draw is
-//! refused as lost, and the last scene is owed until a surface is given.
+//! `destroy_surfaces`: a rasterizer starts without one, and one taken away is made again from the
+//! same layer when the system gives it back. Without a surface, or without a layer, nothing is
+//! drawn: every draw is refused as lost, and the last scene is owed until there are both.
 //!
 //! What draws is made at the first frame that draws, not before: the renderer's context, the device
-//! every view shares (`gpu.rs`), and the surface the system gave, which is made on that device
-//! then. A frame whose scene paints nothing besides its composition layers is not drawn where the
-//! window shows its composition layers itself, as on macOS: the compositor places them over the
-//! window's background, the view's clear colour, which the window shows from the moment it has a
-//! surface. macOS gives a process a large share of graphics memory the first time it draws
+//! every view shares (`gpu.rs`), and the surface the system gave, which is made from the view's
+//! layer on that device then, at the view's size. A frame whose scene paints nothing besides its
+//! composition layers is not drawn where the view's layer shows its composition layers itself, as
+//! on macOS: the compositor places them over the layer's background, the view's clear colour,
+//! which the layer shows from the moment the view has it. macOS gives a process a large share of
+//! graphics memory the first time it draws
 //! anything, so a window that only shows layers drawn elsewhere never draws. When such a frame
 //! follows one that painted, one empty frame is drawn, so the painted one does not stay over the
 //! layers. The invariant a later editor must keep: a frame left undrawn looks the same as if it had
@@ -34,24 +36,27 @@ use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::Instant;
 
-use inset_embedder::{Canvas, Picture, Scene, Slices, slices};
-use winit::window::Window;
+use inset_embedder::{Canvas, CompositionLayer, Picture, Placement, Scene, Slices, ViewId, slices};
 
 use crate::gpu::{Gpu, LazyGpu};
-use crate::os::System;
-use crate::os::capabilities::{FramePresentation, WindowGeometry};
+use crate::os::capabilities::{FramePresentation, ViewLayer as _};
+use crate::os::{System, ViewLayer};
 use crate::video_frames::ShownVideoFrames;
 
 /// At how many vsyncs a scene is drawn again after the surface timed out on it.
 const TIMEOUT_RETRIES: u8 = 8;
 
-/// One window's surface and what the framework last drew on it.
+/// One view's layer, the surface made from it, and what the framework last drew on it.
 pub(crate) struct Rasterizer {
     /// The device every view draws with, made at the first draw that needs it.
     gpu: LazyGpu,
     /// What renders the scenes, made at the view's first draw.
     context: Option<valo::Context>,
-    surface: WindowSurface,
+    /// What the view shows into; `None` while it is in no window.
+    layer: Option<ViewLayer>,
+    /// The view's size in physical pixels, which its surface is made at.
+    size: [u32; 2],
+    surface: ViewSurface,
     /// What a frame starts from: white, or nothing for a window that shows what is behind it.
     clear: valo::Color,
     /// Whether the compositor honours the content's alpha: from the start for a window that
@@ -69,20 +74,21 @@ pub(crate) struct Rasterizer {
     display_time: Option<Instant>,
 }
 
-/// The window's surface, as the system gives it and the view draws on it.
-enum WindowSurface {
-    /// The system has not given the window one, or has taken it away, or the window closed.
+/// The view's surface, as the system gives it and the view draws on it.
+enum ViewSurface {
+    /// The system has not given the view one, or has taken it away, or the view was removed from
+    /// its layer.
     None,
-    /// The system gives the window one, which is made at the view's next draw.
-    Given(Arc<dyn Window>),
-    /// Made on the device, and drawn on.
+    /// The system gives the view one, which is made from its layer at its next draw.
+    Given,
+    /// Made from the view's layer on the device, and drawn on.
     Made(valo::Surface),
 }
 
 impl Rasterizer {
-    /// A rasterizer drawing with `gpu`'s device, with no surface until the system gives one. A
-    /// window that sees through gets surfaces whose alpha the compositor honours, cleared to
-    /// nothing, so what the app leaves unpainted shows what is behind the window.
+    /// A rasterizer drawing with `gpu`'s device, with no layer and no surface until it is given
+    /// both. A view whose window sees through gets surfaces whose alpha the compositor honours,
+    /// cleared to nothing, so what the app leaves unpainted shows what is behind the window.
     pub(crate) fn new(gpu: &LazyGpu, sees_through: bool) -> Rasterizer {
         let content_alpha = if sees_through {
             valo::SurfaceAlpha::Transparent
@@ -97,7 +103,9 @@ impl Rasterizer {
         Rasterizer {
             gpu: gpu.clone(),
             context: None,
-            surface: WindowSurface::None,
+            layer: None,
+            size: [0, 0],
+            surface: ViewSurface::None,
             clear,
             content_alpha,
             shows_painted_frame: false,
@@ -184,45 +192,80 @@ impl Rasterizer {
         self.draw_last_scene();
     }
 
-    /// The surface was reconfigured to `size`: whatever it showed is gone, and whatever it
-    /// refused is forgotten with it. A surface not made yet is made at the size the window has
-    /// then.
+    /// The view draws into `layer` from now on, `size` pixels large at `scale`: the layer shows
+    /// the view's background at once, and the view's surface is made from it, a surface made from
+    /// another layer included.
+    pub(crate) fn draw_into(&mut self, layer: ViewLayer, size: [u32; 2], scale: f64) {
+        layer.show_background(self.clear);
+        layer.set_scale(scale);
+        self.layer = Some(layer);
+        self.size = size;
+        if let ViewSurface::Made(_) = self.surface {
+            self.surface = ViewSurface::Given;
+            self.last_scene.surface_reset();
+        }
+    }
+
+    /// The view's device pixel ratio is `scale` from now on.
+    pub(crate) fn set_scale(&self, scale: f64) {
+        if let Some(layer) = &self.layer {
+            layer.set_scale(scale);
+        }
+    }
+
+    /// The view is `size` pixels large from now on, and its surface is reconfigured to it:
+    /// whatever it showed is gone, and whatever it refused is forgotten with it. A surface not
+    /// made yet is made at that size.
     pub(crate) fn resized(&mut self, size: [u32; 2]) {
-        let WindowSurface::Made(surface) = &mut self.surface else {
+        self.size = size;
+        let ViewSurface::Made(surface) = &mut self.surface else {
             return;
         };
         surface.resize(size);
         self.last_scene.surface_reset();
     }
 
-    /// The system gives `window` a surface, owed the last scene, which is made at the next draw,
-    /// at the size the window has then.
-    pub(crate) fn give_surface(&mut self, window: &Arc<dyn Window>) {
-        System::show_background(&**window, self.clear);
-        self.surface = WindowSurface::Given(Arc::clone(window));
+    /// Places the composition layers a scene of `view` places, `placements`, in the view's layer,
+    /// beneath its drawing; nothing while the view has no layer.
+    pub(crate) fn place_composition_layers<'a>(
+        &self,
+        placements: impl IntoIterator<Item = (&'a Arc<dyn CompositionLayer>, &'a Placement)>,
+        view: ViewId,
+    ) {
+        if let Some(layer) = &self.layer {
+            layer.place(placements, view);
+        }
+    }
+
+    /// The system gives the view a surface, owed the last scene, which is made from its layer at
+    /// the next draw, at the size the view has then.
+    pub(crate) fn give_surface(&mut self) {
+        self.surface = ViewSurface::Given;
         self.last_scene.surface_reset();
     }
 
-    /// The system took the window's surface away: the last scene is kept and owed until a
-    /// surface is given again.
+    /// The system took the view's surface away: the last scene is kept and owed until a surface
+    /// is given again.
     pub(crate) fn take_surface(&mut self) {
-        self.surface = WindowSurface::None;
+        self.surface = ViewSurface::None;
         self.last_scene.surface_taken();
     }
 
-    /// The window closed: its surface goes, which is the rasterizer's hold on the window, and
-    /// the last scene with it, which may hold composition layers a producer would reuse.
-    pub(crate) fn window_closed(&mut self) {
-        self.surface = WindowSurface::None;
+    /// The view is removed from its layer: its surface goes, and its layer with it, which a holder
+    /// may still hold, and the last scene, which may hold composition layers a producer would
+    /// reuse.
+    pub(crate) fn remove_layer(&mut self) {
+        self.surface = ViewSurface::None;
+        self.layer = None;
         self.shows_painted_frame = false;
         self.last_scene = LastScene::default();
         self.video_frames.forget_all();
     }
 
-    /// Whether the surface presents through the window's own transaction, so that a frame
+    /// Whether the surface presents through the system's own transaction, so that a frame
     /// and the geometry it was laid out for are committed together.
     fn set_presents_in_transaction(&mut self, wanted: bool) {
-        if let WindowSurface::Made(surface) = &mut self.surface {
+        if let ViewSurface::Made(surface) = &mut self.surface {
             System::present_in_transaction(surface, wanted);
         }
     }
@@ -233,7 +276,7 @@ impl Rasterizer {
         let drawing = FrameDrawing::of(
             slices.paints(),
             self.shows_painted_frame,
-            System::SHOWS_FRAMES_UNDRAWN,
+            ViewLayer::SHOWS_FRAMES_UNDRAWN,
         );
         let shown = match drawing {
             FrameDrawing::Drawn => self
@@ -248,7 +291,7 @@ impl Rasterizer {
     }
 
     /// What an empty frame is cleared to: nothing where the compositor honours the content's
-    /// alpha, so the window's background shows behind the composition layers as when nothing is
+    /// alpha, so the layer's background shows behind the composition layers as when nothing is
     /// drawn, and the clear colour, which is that background, where it does not.
     fn empty_clear(&self) -> valo::Color {
         match self.content_alpha {
@@ -258,11 +301,12 @@ impl Rasterizer {
     }
 
     /// Shows a frame without drawing it: the compositor places its composition layers over the
-    /// window's background. Refused as lost while the window has no surface, as a draw would be.
+    /// layer's background. Refused as lost while the view has no surface or no layer, as a draw
+    /// would be.
     fn leave_undrawn(&self) -> Result<(), valo::Refused> {
-        match self.surface {
-            WindowSurface::None => Err(valo::Refused::Lost),
-            WindowSurface::Given(_) | WindowSurface::Made(_) => Ok(()),
+        match (&self.surface, &self.layer) {
+            (ViewSurface::None, _) | (_, None) => Err(valo::Refused::Lost),
+            (ViewSurface::Given | ViewSurface::Made(_), Some(_)) => Ok(()),
         }
     }
 
@@ -274,7 +318,12 @@ impl Rasterizer {
         picture: &Picture,
         clear: valo::Color,
     ) -> Result<(), valo::Refused> {
-        let surface = self.surface.made(&self.gpu, self.content_alpha)?;
+        let surface = self.surface.made(
+            &self.gpu,
+            self.layer.as_ref(),
+            self.size,
+            self.content_alpha,
+        )?;
         let context = self
             .context
             .get_or_insert_with(|| context_on(self.gpu.get()));
@@ -284,44 +333,49 @@ impl Rasterizer {
         Ok(())
     }
 
-    /// The first scene that places a composition layer in the window makes its content keep its
+    /// The first scene that places a composition layer in the view makes its drawing keep its
     /// alpha from then on, so the composition layers beneath show through the room made for them.
-    /// The window itself stays opaque, and a window that never shows one keeps an opaque content
-    /// layer the compositor need not blend. It does not switch back when the composition layers
-    /// go: a launcher's tabs come and go, and each switch reconfigures the surface.
+    /// The window itself stays opaque, and a view that never shows one keeps an opaque drawing
+    /// the compositor need not blend. It does not switch back when the composition layers go: a
+    /// launcher's tabs come and go, and each switch reconfigures the surface. The drawing's
+    /// opacity is the surface's to set, since wgpu sets it from the surface's alpha at every
+    /// configuration, a resize's included.
     fn keep_alpha_once_layers_are_placed(&mut self, slices: &Slices) {
         let places_layers = slices.composition_layers().next().is_some();
         if !places_layers || self.content_alpha == valo::SurfaceAlpha::Transparent {
             return;
         }
         self.content_alpha = valo::SurfaceAlpha::Transparent;
-        if let WindowSurface::Made(surface) = &mut self.surface {
+        if let ViewSurface::Made(surface) = &mut self.surface {
             surface.set_alpha(valo::SurfaceAlpha::Transparent);
         }
     }
 }
 
-impl WindowSurface {
-    /// The surface, made now on `gpu`'s device with the compositor honouring its alpha or not if
-    /// it was only given. Without one, or where the system refuses to make it, every draw is
-    /// refused as lost until the system gives one again.
+impl ViewSurface {
+    /// The surface, made now from `layer` on `gpu`'s device, `size` pixels large, with the
+    /// compositor honouring its alpha or not, if it was only given. Without one or without a
+    /// layer, or where the system refuses to make it, every draw is refused as lost until the
+    /// system gives one again.
     fn made(
         &mut self,
         gpu: &LazyGpu,
+        layer: Option<&ViewLayer>,
+        size: [u32; 2],
         alpha: valo::SurfaceAlpha,
     ) -> Result<&mut valo::Surface, valo::Refused> {
-        if let WindowSurface::Given(window) = self {
-            *self = make_surface(gpu.get(), window, alpha).map_or_else(
+        if let (ViewSurface::Given, Some(layer)) = (&*self, layer) {
+            *self = layer.make_surface(gpu.get(), size, alpha).map_or_else(
                 |reason| {
-                    eprintln!("inset: no surface on window {:?}: {reason}", window.id());
-                    WindowSurface::None
+                    eprintln!("inset: no surface on a view's layer: {reason}");
+                    ViewSurface::None
                 },
-                WindowSurface::Made,
+                ViewSurface::Made,
             );
         }
         match self {
-            WindowSurface::Made(surface) => Ok(surface),
-            WindowSurface::None | WindowSurface::Given(_) => Err(valo::Refused::Lost),
+            ViewSurface::Made(surface) => Ok(surface),
+            ViewSurface::None | ViewSurface::Given => Err(valo::Refused::Lost),
         }
     }
 }
@@ -459,24 +513,6 @@ fn context_on(gpu: &Gpu) -> valo::Context {
     let mut context = valo::Context::new(gpu.device.clone(), gpu.queue.clone());
     context.set_hide_missing_glyphs(true);
     context
-}
-
-/// A surface on `gpu`'s device for `window`, as it is presented to, with the compositor
-/// honouring its alpha or not.
-fn make_surface(
-    gpu: &Gpu,
-    window: &Arc<dyn Window>,
-    alpha: valo::SurfaceAlpha,
-) -> Result<valo::Surface, String> {
-    valo::Surface::new_with_options(
-        &gpu.instance,
-        &gpu.adapter,
-        &gpu.device,
-        Arc::clone(window),
-        System::surface_size(&**window),
-        valo::SurfaceOptions::default().with_alpha(alpha),
-    )
-    .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

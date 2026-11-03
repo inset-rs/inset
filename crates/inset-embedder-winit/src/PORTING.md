@@ -150,6 +150,10 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Core Animation composites the buffers it's given, so a producer's frame needs no copy and no framework frame.
   Affect: framework content can sit above a composition layer but not beneath it.
 
+- Change: on macOS each view draws into a `CAMetalLayer` Inset makes as the content of a composition layer of the view's own, which its window places to fill the window's view as that view's bounds and scale change, with the composition layers the view's scenes place beneath it, where Flutter's macOS embedder shows buffers it draws itself in layers it adds to its view's layer.
+  Reason: platform — wgpu presents a frame through a `CAMetalLayer`'s drawables, not as a buffer the host hands Core Animation, and a view on a layer of its own draws alike wherever that layer is placed.
+  Affect: a picture that has not caught up with its window's new size shows stretched over the window, where Flutter's shows at its own size until the next frame.
+
 - Change: a composition layer's Core Animation layers take every transform and clip above it, a path's included.
   Reason: platform — Core Animation turns a layer by any transform and masks it by any path.
   Affect: a turned, rounded or path-clipped composition layer shows exactly where the framework places it.

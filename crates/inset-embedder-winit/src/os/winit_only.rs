@@ -1,7 +1,10 @@
 //! A system winit covers by itself, the BSDs among them: nothing to add, and nothing to ask, so
 //! every answer is the trait's own but the clipboard's, arboard's plain text.
 
+use std::sync::Arc;
+
 use inset_embedder::TargetPlatform;
+use winit::window::Window;
 
 use crate::clipboard::{ChangeProbe, TextClipboard};
 
@@ -15,6 +18,7 @@ use super::capabilities::{
     SystemOpener, SystemRequests, TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion,
     WindowVisibility, WorkQueue,
 };
+use super::window_handle_layer::{NoWindowHold, WindowHandleLayer};
 
 /// Any system without a module of its own. A type only: never made, its answers are
 /// associated functions.
@@ -46,7 +50,12 @@ impl FramePresentation for WinitOnly {
 }
 
 impl NativeComposition for WinitOnly {
-    type WindowComposition = NoWindowComposition;
+    type ViewLayer = WindowHandleLayer<NoWindowComposition>;
+    type WindowHold = NoWindowHold;
+
+    fn view_layer_in(window: &Arc<dyn Window>) -> (Self::ViewLayer, NoWindowHold) {
+        WindowHandleLayer::in_window(window)
+    }
 }
 
 impl WindowVisibility for WinitOnly {

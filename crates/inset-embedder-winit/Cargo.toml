@@ -89,7 +89,8 @@ objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSMenu", "NSMenuItem", "NSEvent", "NSGraphicsContext", "NSView", "NSCell", "NSResponder", "NSWindow", "NSScreen", "NSAnimation", "NSAnimationContext", "NSVisualEffectView", "NSGlassEffectView", "NSGraphics", "NSTrackingArea", "NSPasteboard", "NSPasteboardItem", "NSFilePromiseProvider", "NSFilePromiseReceiver", "NSOpenPanel", "NSSavePanel", "NSWorkspace", "objc2-uniform-type-identifiers", "NSTouch", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSButtonCell", "NSActionCell", "NSColorSpace", "block2", "objc2-quartz-core"] }
-objc2-quartz-core = { version = "0.3", features = ["CAMediaTimingFunction", "CADisplayLink"] }
+# The display links' timing, and the `CAMetalLayer` a view draws into.
+objc2-quartz-core = { version = "0.3", features = ["CAMediaTimingFunction", "CADisplayLink", "CAMetalLayer"] }
 
 # Each test is a program of its own, without the test harness, which runs every test on a thread
 # it spawns: winit makes AppKit's event loop on the main thread only, once per process, and a
@@ -162,7 +163,7 @@ inset-embedder-winit = { path = ".", features = ["test-support"] }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "NSWindow", "NSView", "NSMenu", "NSMenuItem", "NSEvent", "block2", "objc2-quartz-core"] }
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSGeometry"] }
-objc2-quartz-core = { version = "0.3", features = ["CALayer", "CAMetalLayer"] }
+objc2-quartz-core = { version = "0.3", features = ["CALayer", "CAMetalLayer", "objc2-metal"] }
 
 # What the media test asks of the system that the host offers no call for: serving the main run
 # loop, and reading a frame's pixel buffer.

@@ -6,13 +6,15 @@
 //! transform above it, so one transform moves the group: the clip layers of its children first,
 //! then its content on top, either its buffer's layer, whose contents are the `IOSurface` its
 //! producer presented last, or a layer the system draws into, a player's or a camera's preview. A
-//! layer a view's scene places joins that view's layer tree, as a sublayer of the view's layer
-//! below the `CAMetalLayer` wgpu draws the framework into (raw-window-metal makes that one a
-//! sublayer too, of an `NSView` and a `UIView` alike), so the room the scene's picture makes for it
-//! shows it through; a child joins its parent's content layer where its parent's present places
-//! it, below the parent's buffer, showing through its clear pixels; and on macOS a layer the app
-//! places goes into a `CALayer` the app holds, such as the root of a `CAContext` another process
-//! shows. Every layer's coordinates are the window's physical pixels over its scale, as a scene's
+//! layer a view's scene places lies below the `CAMetalLayer` the view draws into, so the room the
+//! scene's picture makes for it shows it through: on macOS in the content of the view's own
+//! composition layer, whose content that `CAMetalLayer` is (`view_layer`), and on iOS in the layer
+//! of winit's `UIView`, where wgpu makes the `CAMetalLayer` from the window's handle
+//! (`window_composition`). A child joins its parent's content layer where its parent's present
+//! places it, below the parent's buffer, showing through its clear pixels; and on macOS a layer the
+//! app places goes into a `CALayer` the app holds, such as the root of a `CAContext` another process
+//! shows, as a window places its view's layer in the layer of winit's `NSView`. Every layer's
+//! coordinates are the window's physical pixels over its scale, as a scene's
 //! placements are pixels: a buffer shows whole at the scale its layer is placed at, and smaller
 //! under a transform that shrinks it. The experiments in the `experiments` folder beside this
 //! repository settled the choices here: `2026-09-22-layer-under-a-hole` the layer beneath the
@@ -21,8 +23,9 @@
 //!
 //! The module holds the compositor and the composition layer; `layer_geometry` where a placement
 //! puts a layer's `CALayer`s, `buffers` what a layer was presented and when each goes back to its
-//! producer, `placed` the layers a scene or a present placed last, and `window_composition` placing
-//! a scene's layers in a window.
+//! producer, `placed` the layers a scene or a present placed last, `view_layer` the composition
+//! layer a view draws into on macOS, and `window_composition` placing a scene's layers in a window
+//! on iOS.
 //!
 //! Two things touch a layer. Its producer presents it from its own thread, with its children, in
 //! an explicit transaction. The main thread places it with the
@@ -42,6 +45,9 @@
 mod buffers;
 mod layer_geometry;
 mod placed;
+#[cfg(target_os = "macos")]
+mod view_layer;
+#[cfg(target_os = "ios")]
 mod window_composition;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -54,12 +60,16 @@ use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::CGMutablePath;
 use objc2_foundation::{NSPoint, NSRect};
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATransaction};
+use winit::window::Window;
 
 use buffers::{CrossThreadBuffer, PresentedBuffers, notify_released};
 use layer_geometry::LayerGeometry;
 use placed::PlacedLayers;
 
-pub(crate) use window_composition::{CoreAnimationWindowComposition, WindowLayer};
+#[cfg(target_os = "macos")]
+pub(crate) use view_layer::CoreAnimationViewLayer;
+#[cfg(target_os = "ios")]
+pub(crate) use window_composition::CoreAnimationWindowComposition;
 
 const HELD_BRIEFLY: &str = "a layer's state is never held across a panic";
 
@@ -73,8 +83,14 @@ impl Compositor for CoreAnimationCompositor {
     }
 }
 
-/// Who places a layer: the scenes of one view, the presents of one layer, or the app, in a
-/// `CALayer` of its own.
+/// Where a system's window keeps the layers of its content: the layer of winit's view.
+pub(crate) trait WindowLayer {
+    /// The layer of `window`'s view; `None` off the main thread, or for a view without one.
+    fn window_layer(window: &dyn Window) -> Option<Retained<CALayer>>;
+}
+
+/// Who places a layer: the scenes of one view, the presents of one layer, the app, in a `CALayer`
+/// of its own, or a window, the layer its view draws into in the layer of winit's view.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Placer {
     View(ViewId),
@@ -82,6 +98,8 @@ enum Placer {
     Layer(u64),
     #[cfg(target_os = "macos")]
     App,
+    #[cfg(target_os = "macos")]
+    Window,
 }
 
 /// A composition layer: its `CALayer`s, who places it, the buffers presented to it and not yet
@@ -349,7 +367,47 @@ pub(crate) fn place_layer_in(
         placed::report_foreign_layer();
         return;
     };
-    if !layer.adopted_by(Placer::App) {
+    place_on_top(parent, &layer, placement, scale, Placer::App);
+}
+
+/// Places `layer` in `parent`, the layer of a window's view, filling the bounds AppKit gives it, at
+/// `scale` pixels to its point: how a window places the layer its view draws into. The rectangle is
+/// in the view's logical pixels under a transform by `scale`, as a scene's root places what it
+/// draws, so the layer's content is in the view's logical pixels, as `parent` is. A layer no
+/// compositor of this host made, or one another placer holds, shows nothing. Main thread.
+#[cfg(target_os = "macos")]
+pub(crate) fn place_filling(parent: &CALayer, layer: &Arc<dyn CompositionLayer>, scale: f64) {
+    let Some(layer) = CoreAnimationLayer::downcast_from(layer) else {
+        placed::report_foreign_layer();
+        return;
+    };
+    let bounds = parent.bounds();
+    let filling = Placement {
+        rect: inset_embedder::Rect::from_ltwh(
+            bounds.origin.x,
+            bounds.origin.y,
+            bounds.size.width,
+            bounds.size.height,
+        ),
+        mutators: vec![inset_embedder::Mutator::Transform(
+            inset_embedder::Matrix4::scale(scale as f32, scale as f32),
+        )],
+    };
+    place_on_top(parent, &layer, &filling, scale, Placer::Window);
+}
+
+/// Places `layer` in `parent`, a `CALayer` outside every composition layer, above its sublayers,
+/// where `placement` says, in pixels `scale` of which make one of `parent`'s points, if `placer`
+/// holds it or nothing does. Main thread.
+#[cfg(target_os = "macos")]
+fn place_on_top(
+    parent: &CALayer,
+    layer: &CoreAnimationLayer,
+    placement: &Placement,
+    scale: f64,
+    placer: Placer,
+) {
+    if !layer.adopted_by(placer) {
         return;
     }
     let index = index_on_top(parent, &layer.clip_layer.0);

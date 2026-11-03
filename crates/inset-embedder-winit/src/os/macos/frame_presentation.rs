@@ -1,20 +1,18 @@
 //! How a frame reaches a macOS display: drawn at the vsyncs of the screen's display link, and, for
-//! the frame drawn inside a resize, presented through the window's own Core Animation transaction;
-//! or, for a frame that paints nothing besides its composition layers, not drawn at all, its
-//! layers shown over the view's background, which the layer of the window's view shows.
+//! the frame drawn inside a resize, presented through the window's own Core Animation transaction,
+//! the one the view's layer was placed again in as the window's view changed (`composition`). A
+//! frame that paints nothing besides its composition layers is not drawn at all: the view's layer
+//! shows them over its background.
 
 use std::sync::Arc;
 
 use inset_embedder::VsyncWaiter;
 use objc2::MainThreadMarker;
-use objc2_core_graphics::CGColor;
-use winit::window::Window;
 
 use super::AppKit;
 use super::display_links::{ScreenDisplayLink, screens_have_display_links};
 use super::vsync_waiter::DisplayLinkVsyncWaiter;
 use crate::main_loop::MainLoopProxy;
-use crate::os::apple::composition::{WindowLayer, in_transaction};
 use crate::os::capabilities::FramePresentation;
 use crate::vsync_waiter::LoopVsyncWaiter;
 
@@ -42,24 +40,5 @@ impl FramePresentation for AppKit {
     /// otherwise, since it makes every present wait to be scheduled.
     fn present_in_transaction(surface: &mut valo::Surface, wanted: bool) {
         surface.set_presents_with_transaction(wanted);
-    }
-
-    /// The composition layers are Core Animation layers beneath the window's content, which it
-    /// composites whether or not anything is drawn above them.
-    const SHOWS_FRAMES_UNDRAWN: bool = true;
-
-    /// The background colour of the layer of the window's view, beneath every composition layer
-    /// placed in it.
-    fn show_background(window: &dyn Window, color: valo::Color) {
-        let Some(layer) = AppKit::window_layer(window) else {
-            return;
-        };
-        let color = CGColor::new_srgb(
-            color.r.into(),
-            color.g.into(),
-            color.b.into(),
-            color.a.into(),
-        );
-        in_transaction(|| layer.setBackgroundColor(Some(&color)));
     }
 }

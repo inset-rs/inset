@@ -83,10 +83,13 @@
 //! embedders. A window closes only when the app closes it: the user's asking only reports it
 //! (`view_close_requested`), and what the last window's closing means is the app's to decide.
 //!
-//! A view draws on a surface the system gives and takes away: winit's `can_create_surfaces` gives
-//! every view one and asks for a frame, at launch and each time after, and `destroy_surfaces`
-//! takes them all while the app and its views stay. A view made while the system gives surfaces
-//! gets its own at once.
+//! A window holds its view as an app holds a view it adds, as Flutter's embedder API has it: the
+//! window's code adds the view on the layer it shows into, gives it the window's metrics as the
+//! window resizes or moves, and removes it as the window closes (`windows.rs`, `view.rs`). The view
+//! draws on a surface made from that layer, which the system gives and takes away: winit's
+//! `can_create_surfaces` gives every view one and asks for a frame, at launch and each time after,
+//! and `destroy_surfaces` takes them all while the app and its views stay. A view made while the
+//! system gives surfaces gets its own at once.
 
 mod app;
 mod frames;

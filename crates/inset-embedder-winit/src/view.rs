@@ -1,29 +1,33 @@
 //! The embedder's [`View`]: a place the framework draws, as it sees it — its identity, its metrics,
 //! its text input, and the scenes it presents: their slices drawn by its rasterizer
-//! (`rasterizer.rs`), with the composition layers they place beneath the drawing (`os`'s
-//! `WindowComposition`).
+//! (`rasterizer.rs`) into the layer the view shows into (`os`'s `ViewLayer`), with the composition
+//! layers they place beneath the drawing.
 //!
-//! A view is made without a window, at no size, and is given one: the screen view at winit's
-//! first call, after the app has started, as Flutter's engine has it before its window; any
-//! other view as soon as it is made. A view without a window, and one whose window has no
-//! surface, draws nothing; the system gives a window its surface and takes it away
-//! (`main_loop/`).
+//! Whoever holds a view controls it as Flutter's embedder controls a view: it adds the view on a
+//! layer with its metrics ([`WinitView::add`], `AddView`), gives it new metrics
+//! ([`WinitView::set_metrics`], `SendWindowMetricsEvent`) and removes it from its layer
+//! ([`WinitView::remove`], `RemoveView`). The holder places the layer itself, through a hold of its
+//! own on it. A window's code is the holder of its window's view: it adds the view on a layer it
+//! places in the window and keeps filling it (`windows.rs`), gives the view its metrics from the
+//! window as the window resizes or moves to another screen, and removes it as the window closes.
+//!
+//! A view is made at no size, on no layer, and is added on one: the screen view at winit's first
+//! call, after the app has started, as Flutter's engine has it before its window; any other view as
+//! soon as it is made. A view on no layer, and one whose window has no surface, draws nothing; the
+//! system gives the views their surfaces and takes them away (`main_loop/`).
 //!
 //! The registry of views owns each window (`windows.rs`); the framework and the app may hold
-//! a view for a while after its window closes. The invariant a later editor must keep: a view
-//! holds its window only through its rasterizer's surface and its composition layers, and weakly
-//! for its text input and the app's handle on the window, and lets go of them when the window
-//! closes (`window_closed`), so that closing a window frees it.
+//! a view for a while after its window closes. The invariant: a view holds its window only through
+//! its layer, where that is the window, and weakly for its text input and the app's handle on the
+//! window, and lets go of them when the window closes (`window_closed`), so that closing a window
+//! frees it.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Instant;
 
-use inset_embedder::{
-    RequestId, Scene, TextInputHost, View, ViewConstraints, ViewId, ViewMetrics, ViewPadding,
-    WindowRef,
-};
+use inset_embedder::{RequestId, Scene, TextInputHost, View, ViewId, ViewMetrics, WindowRef};
 use winit::event::{Ime, KeyEvent};
 use winit::keyboard::ModifiersState;
 use winit::window::Window;
@@ -31,20 +35,16 @@ use winit::window::Window;
 use crate::gpu::LazyGpu;
 use crate::host_window::WinitWindow;
 use crate::ime::ImeOutcome;
-use crate::os::capabilities::{WindowComposition as _, WindowGeometry};
-use crate::os::{System, WindowComposition};
+use crate::os::ViewLayer;
 use crate::rasterizer::{PresentingInTransaction, Rasterizer};
-use crate::screens::screen_of;
 use crate::text_input::{TextInput, Typed};
 
-/// Stable view identity, current winit geometry, and what presents its scenes.
+/// Stable view identity, the metrics its holder gave it, and what presents its scenes.
 pub(crate) struct WinitView {
     id: ViewId,
     metrics: Cell<ViewMetrics>,
+    /// The view's layer, the surface made from it, and the scenes drawn there.
     rasterizer: RefCell<Rasterizer>,
-    /// The composition layers the window's scenes place beneath its content; `None` while the view
-    /// has no window.
-    composition: RefCell<Option<WindowComposition>>,
     text_input: TextInput,
     /// The request the view arrived for; `None` for the screen view, which the system gave.
     request_id: Option<RequestId>,
@@ -55,15 +55,14 @@ pub(crate) struct WinitView {
 }
 
 impl WinitView {
-    /// A view with no window yet, at no size, drawing with `gpu`'s device once it has a window
-    /// with a surface. A view whose window sees through gets surfaces whose alpha the compositor
+    /// A view on no layer yet, at no size, drawing with `gpu`'s device once it is on a layer and
+    /// has a surface. A view whose window sees through gets surfaces whose alpha the compositor
     /// honours, cleared to nothing, so what the app leaves unpainted shows what is behind the
     /// window.
     pub(crate) fn new(id: ViewId, gpu: &LazyGpu, sees_through: bool) -> WinitView {
         WinitView {
             id,
             metrics: Cell::new(ViewMetrics::default()),
-            composition: RefCell::new(None),
             rasterizer: RefCell::new(Rasterizer::new(gpu, sees_through)),
             text_input: TextInput::new(),
             request_id: None,
@@ -83,12 +82,44 @@ impl WinitView {
         self
     }
 
-    /// `window` is the view's from now on: its composition layers and text input are on it, and
-    /// the view takes its metrics. Its surface comes when the system gives the windows theirs.
-    pub(crate) fn attach_window(&self, window: &Arc<dyn Window>) {
-        *self.composition.borrow_mut() = Some(WindowComposition::new(Arc::clone(window)));
+    /// Flutter's `AddView`: the view draws into `layer` from now on, at `metrics`. Its surface
+    /// comes when the system gives the views theirs.
+    pub(crate) fn add(&self, layer: ViewLayer, metrics: ViewMetrics) {
+        self.metrics.set(metrics);
+        self.rasterizer.borrow_mut().draw_into(
+            layer,
+            physical_size_of(&metrics),
+            metrics.device_pixel_ratio,
+        );
+    }
+
+    /// Flutter's `SendWindowMetricsEvent`: the view takes `metrics`, and fits its drawing to
+    /// their scale and size. Answers whether they changed: the same metrics again are nothing to
+    /// lay out for.
+    pub(crate) fn set_metrics(&self, metrics: ViewMetrics) -> bool {
+        let previous = self.metrics.replace(metrics);
+        if previous == metrics {
+            return false;
+        }
+        let mut rasterizer = self.rasterizer.borrow_mut();
+        if previous.device_pixel_ratio != metrics.device_pixel_ratio {
+            rasterizer.set_scale(metrics.device_pixel_ratio);
+        }
+        if previous.physical_size != metrics.physical_size {
+            rasterizer.resized(physical_size_of(&metrics));
+        }
+        true
+    }
+
+    /// Flutter's `RemoveView`: the view lets go of its layer and the surface made from it, while
+    /// the framework may still hold the view, which draws nowhere from now on.
+    pub(crate) fn remove(&self) {
+        self.rasterizer.borrow_mut().remove_layer();
+    }
+
+    /// The view's text input is on `window` from now on.
+    pub(crate) fn attach_text_input(&self, window: &Arc<dyn Window>) {
         self.text_input.attach(window);
-        self.refresh_metrics(&**window);
     }
 
     /// Draws the last scene again if the surface does not show it: an owed frame, paid
@@ -134,26 +165,12 @@ impl WinitView {
         *self.window_handle.borrow_mut() = Rc::downgrade(handle);
     }
 
-    /// The window closed: its surface and its composition layers go, and with them the last hold
-    /// on the window, while the framework may still hold the view, which is in no window from
-    /// now on. A scene presented from now on is drawn nowhere.
+    /// The window closed: the view is removed from its layer, and with it goes the last hold on
+    /// the window, while the framework may still hold the view, which is in no window from now on.
+    /// A scene presented from now on is drawn nowhere.
     pub(crate) fn window_closed(&self) {
-        self.composition.take();
-        self.rasterizer.borrow_mut().window_closed();
+        self.remove();
         *self.window_handle.borrow_mut() = Weak::new();
-    }
-
-    /// Reads the window's metrics again; when they changed, fits the surface to the new size and
-    /// answers it. `None` for the same geometry again: winit reports a resize for more than one
-    /// of the system's notices.
-    pub(crate) fn window_resized(&self, window: &dyn Window) -> Option<[u32; 2]> {
-        if !self.refresh_metrics(window) {
-            return None;
-        }
-        let [width, height] = self.metrics.get().physical_size;
-        let size = [width as u32, height as u32];
-        self.rasterizer.borrow_mut().resized(size);
-        Some(size)
     }
 
     /// What a key the framework did not handle does to the view's active text input.
@@ -166,58 +183,23 @@ impl WinitView {
         self.text_input.take_ime(ime)
     }
 
-    /// The system gives `window`, the view's, a surface: the view draws on it from now on.
-    pub(crate) fn give_surface(&self, window: &Arc<dyn Window>) {
-        self.rasterizer.borrow_mut().give_surface(window);
+    /// The system gives the view a surface, made from its layer: the view draws on it from now
+    /// on.
+    pub(crate) fn give_surface(&self) {
+        self.rasterizer.borrow_mut().give_surface();
     }
 
-    /// The system took the window's surface away: the view keeps its scene and owes it until
+    /// The system took the view's surface away: the view keeps its scene and owes it until
     /// it is given a surface again.
     pub(crate) fn take_surface(&self) {
         self.rasterizer.borrow_mut().take_surface();
     }
-
-    /// Reads the window's metrics again and answers whether they changed. winit reports a
-    /// resize for more than one of the system's notices, and some systems report none for
-    /// a change of the safe area; the same geometry again is nothing to lay out for.
-    pub(crate) fn refresh_metrics(&self, window: &dyn Window) -> bool {
-        let metrics = read_metrics(window);
-        if self.metrics.get() == metrics {
-            return false;
-        }
-        self.metrics.set(metrics);
-        true
-    }
-
-    /// Reads again which screen the window is on, and answers whether that changed: a window
-    /// that moved to another screen has new metrics, though its surface stays as it is.
-    pub(crate) fn refresh_screen(&self, window: &dyn Window) -> bool {
-        let screen = screen_of(window);
-        let mut metrics = self.metrics.get();
-        if metrics.screen == screen {
-            return false;
-        }
-        metrics.screen = screen;
-        self.metrics.set(metrics);
-        true
-    }
 }
 
-/// The metrics of `window` as the framework takes them.
-fn read_metrics(window: &dyn Window) -> ViewMetrics {
-    let [width, height] = System::surface_size(window).map(f64::from);
-    let padding = System::view_padding(window);
-    ViewMetrics {
-        physical_size: [width, height],
-        physical_constraints: ViewConstraints::tight(width, height),
-        device_pixel_ratio: window.scale_factor(),
-        // No system winit serves reports a keyboard, so the safe area is the whole of
-        // the padding and nothing covers it.
-        padding,
-        view_padding: padding,
-        view_insets: ViewPadding::ZERO,
-        screen: screen_of(window),
-    }
+/// The size `metrics` give, in the whole pixels a surface is made of.
+fn physical_size_of(metrics: &ViewMetrics) -> [u32; 2] {
+    let [width, height] = metrics.physical_size;
+    [width as u32, height as u32]
 }
 
 impl View for WinitView {
@@ -235,9 +217,7 @@ impl View for WinitView {
             return;
         }
         let slices = rasterizer.slices_of(&scene);
-        if let Some(composition) = &*self.composition.borrow() {
-            composition.place(slices.composition_layers(), self.id);
-        }
+        rasterizer.place_composition_layers(slices.composition_layers(), self.id);
         rasterizer.draw(&scene, &slices);
     }
 

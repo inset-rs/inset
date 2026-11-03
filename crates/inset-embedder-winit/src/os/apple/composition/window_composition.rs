@@ -1,26 +1,17 @@
-//! One window's composition layers as the main thread holds them: placing a scene's layers in the
-//! layer of the window's view, beneath its content, and letting go of the ones it no longer
-//! places.
+//! One window's composition layers on iOS, where a view draws through its window's handle, as the
+//! main thread holds them: placing a scene's layers in the layer of the window's view, beneath the
+//! `CAMetalLayer` wgpu draws the view into, and letting go of the ones it no longer places.
 
 use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
 use inset_embedder::{CompositionLayer, Placement, ViewId};
-use objc2::rc::Retained;
-use objc2_quartz_core::CALayer;
 use winit::window::Window;
 
 use super::placed::PlacedLayers;
-use super::{Placer, adopted_by, in_transaction, own_layers};
-use crate::os::capabilities::WindowComposition;
-
-/// Where a system's window keeps the layers of its content: the layer of winit's view, whose
-/// sublayers wgpu's `CAMetalLayer` and the composition layers beneath it are.
-pub(crate) trait WindowLayer {
-    /// The layer of `window`'s view; `None` off the main thread, or for a view without one.
-    fn window_layer(window: &dyn Window) -> Option<Retained<CALayer>>;
-}
+use super::{Placer, WindowLayer, adopted_by, in_transaction, own_layers};
+use crate::os::window_handle_layer::WindowComposition;
 
 /// One window's composition layers, as the main thread holds them, on the system `S`.
 pub(crate) struct CoreAnimationWindowComposition<S> {

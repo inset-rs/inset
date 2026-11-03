@@ -1,6 +1,6 @@
 //! What a system without a display link, a compositor or notices of a window's visibility
-//! answers: no display link is made, no composition layer is ever placed, and no notice is
-//! observed. iOS has a compositor, Core Animation's, which it shares with macOS.
+//! answers: no display link is made, no composition layer is ever placed in a window, and no
+//! notice is observed. iOS has a compositor, Core Animation's, which it shares with macOS.
 
 #[cfg(not(target_os = "ios"))]
 use std::sync::Arc;
@@ -13,7 +13,7 @@ use winit::window::Window;
 
 use super::capabilities::DisplayLink;
 #[cfg(not(target_os = "ios"))]
-use super::capabilities::WindowComposition;
+use super::window_handle_layer::WindowComposition;
 
 /// No display link: the embedder takes its vsyncs from a timer at the display's rate. Never made.
 pub(crate) enum NoDisplayLink {}

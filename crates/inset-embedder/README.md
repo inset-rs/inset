@@ -47,6 +47,7 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 **Surfaces**
 - none: a view's surface is the host's own; `EmbedderClient::frame`
 - Give every view a surface whenever the system gives them and ask for a frame to draw on them, take every surface when the system takes them, and keep the app and its views throughout.
+- Make every view's surface from one source per system: where the compositor shows a view's drawing as a composition layer's content, as Core Animation does, from a layer of the view's own, which the view's window places to fill it and places again in the transaction that changes the bounds or scale of the window's view; elsewhere from the window (native-surfaces decision 34, `waos/docs/proposals/2026-10-30-native-surfaces.md`).
 
 **Views the app asks for**
 - `Platform::request_view`, `View::request_id`, `View::window`, `HostWindow`, `EmbedderClient::view_close_requested`, `view_request_failed`

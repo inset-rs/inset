@@ -12,8 +12,10 @@ mod session_bus;
 mod status_notifier_items;
 
 use std::rc::Rc;
+use std::sync::Arc;
 
 use inset_embedder::{TargetPlatform, TrayIcons};
+use winit::window::Window;
 
 use crate::clipboard::{ChangeProbe, TextClipboard};
 use crate::menus::MenuEvents;
@@ -27,6 +29,7 @@ use super::capabilities::{
     SystemClipboard, SystemDrags, SystemMedia, SystemRequests, TrackpadTouches, WindowChrome,
     WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
 };
+use super::window_handle_layer::{NoWindowHold, WindowHandleLayer};
 
 /// Linux. A type only: never made, its answers are associated functions.
 pub(crate) enum Linux {}
@@ -59,7 +62,12 @@ impl FramePresentation for Linux {
 }
 
 impl NativeComposition for Linux {
-    type WindowComposition = NoWindowComposition;
+    type ViewLayer = WindowHandleLayer<NoWindowComposition>;
+    type WindowHold = NoWindowHold;
+
+    fn view_layer_in(window: &Arc<dyn Window>) -> (Self::ViewLayer, NoWindowHold) {
+        WindowHandleLayer::in_window(window)
+    }
 }
 
 impl WindowVisibility for Linux {

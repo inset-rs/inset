@@ -104,7 +104,7 @@ mod client {
             if window.view().request_id() != Some(self.request_id) {
                 wrong.push("the view does not carry its request's id");
             }
-            if !appkit::has_a_metal_layer(TITLE) {
+            if !appkit::draws_into_a_metal_layer(TITLE) {
                 wrong.push("the view has no surface");
             }
             wrong

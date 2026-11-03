@@ -20,6 +20,7 @@ use winit::window::{Window, WindowAttributes};
 
 use crate::clipboard::ClipboardChanges;
 use crate::file_dialogs::ParentWindows;
+use crate::gpu::Gpu;
 use crate::lifecycle::LifecycleNotice;
 use crate::main_loop::MainLoopProxy;
 use crate::menus::MenuEvents;
@@ -222,16 +223,6 @@ pub(crate) trait FramePresentation {
     /// Whether the surface presents through the system's own transaction, so a frame and the
     /// geometry it was laid out for are committed together. Nothing to join by default.
     fn present_in_transaction(_surface: &mut valo::Surface, _wanted: bool) {}
-
-    /// Whether a frame that paints nothing besides its composition layers reaches the display
-    /// without being drawn: its layers, which the compositor places, over the view's background,
-    /// which the window shows itself (`show_background`). Where it does not, every frame is drawn,
-    /// its background at least.
-    const SHOWS_FRAMES_UNDRAWN: bool = false;
-
-    /// Has `window` show `color` behind its content and its composition layers, for the frames
-    /// that are not drawn and the empty ones. Main thread.
-    fn show_background(_window: &dyn Window, _color: valo::Color) {}
 }
 
 /// A display's vsyncs: a call at each vsync of one display, whether or not a window on it is
@@ -252,31 +243,73 @@ pub(crate) trait DisplayLink: Sized {
     fn target_time(&self) -> Option<Instant>;
 }
 
-/// The system's compositor for composition layers: Core Animation's on macOS and iOS, and why it
-/// is shaped as it is, in `apple/composition`.
+/// The system's compositor for composition layers, Core Animation's on macOS and iOS, and why it
+/// is shaped as it is, in `apple/composition`; and what a view shows into on this system, one kind
+/// for every view.
 pub(crate) trait NativeComposition {
-    /// One window's share of the compositor.
-    type WindowComposition: WindowComposition;
+    /// What every view shows into on this system.
+    type ViewLayer: ViewLayer;
+
+    /// A window's hold on the layer its view shows into, kept while the window is open: on macOS
+    /// the composition layer the window placed in itself and keeps filling it; nothing where the
+    /// view draws into the window itself.
+    type WindowHold;
 
     /// The compositor producers make layers on. `None` where the embedder hands the system no
     /// layers.
     fn compositor() -> Option<Arc<dyn Compositor>> {
         None
     }
+
+    /// What a window's code does for its view as `window` opens, as an app does for a view it
+    /// adds: makes the layer the view shows into and places it in the window, filling it. Answers
+    /// the layer, which the view is added on, and the window's hold on it. Main thread.
+    fn view_layer_in(window: &Arc<dyn Window>) -> (Self::ViewLayer, Self::WindowHold);
 }
 
-/// One window's share of the compositor: it places a scene's composition layers beneath the
-/// window's content.
-pub(crate) trait WindowComposition {
-    fn new(window: Arc<dyn Window>) -> Self;
+/// What a view shows into: the source of the surface it draws on, and the place of the composition
+/// layers its scenes place, beneath its drawing. On macOS a composition layer of the view's own,
+/// whose content is a `CAMetalLayer` the view draws into (`apple/composition/view_layer.rs`);
+/// elsewhere the view's window, which the view draws into through the window's handle
+/// (`window_handle_layer.rs`).
+///
+/// Whoever holds a view places its layer, as Flutter's embedder holds a view it adds with
+/// `AddView`: a window's code makes its view's layer with the window and keeps a hold of its own on
+/// it while the window is open, through which it places the layer in the window and keeps it
+/// filling the window (`NativeComposition::view_layer_in`); the view lets go of its layer when the
+/// window closes. The view sets on its layer what its own metrics say: its scale here, and its size
+/// through the surface.
+pub(crate) trait ViewLayer {
+    /// Whether a frame that paints nothing besides its composition layers reaches the display
+    /// without being drawn: its layers, which the compositor places, over the background the layer
+    /// shows itself (`show_background`). Where it does not, every frame is drawn, its background
+    /// at least.
+    const SHOWS_FRAMES_UNDRAWN: bool = false;
 
-    /// Places a scene's layers beneath the window's content, bottom-most first, and lets go of
-    /// the ones it no longer places. Main thread.
+    /// The view's device pixel ratio is `scale` from now on: its drawing and the composition
+    /// layers its scenes place are laid out at it. Main thread.
+    fn set_scale(&self, _scale: f64) {}
+
+    /// A surface on `gpu`'s device that draws into the layer, `size` pixels large, with the
+    /// compositor honouring its alpha or not. Main thread.
+    fn make_surface(
+        &self,
+        gpu: &Gpu,
+        size: [u32; 2],
+        alpha: valo::SurfaceAlpha,
+    ) -> Result<valo::Surface, String>;
+
+    /// Places a scene's composition layers beneath the view's drawing, bottom-most first, and
+    /// lets go of the ones it no longer places. Main thread.
     fn place<'a>(
         &self,
         placements: impl IntoIterator<Item = (&'a Arc<dyn CompositionLayer>, &'a Placement)>,
         view: ViewId,
     );
+
+    /// Shows `color` behind the view's drawing and its composition layers, for the frames that
+    /// are not drawn and the empty ones. Main thread.
+    fn show_background(&self, _color: valo::Color) {}
 }
 
 /// Menus the system draws itself (`menus/`): each place is the system's, or none where it has

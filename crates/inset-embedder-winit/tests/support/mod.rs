@@ -91,13 +91,13 @@ pub mod appkit {
 
     use block2::RcBlock;
     use dispatch2::{DispatchQueue, DispatchTime};
+    use objc2::MainThreadMarker;
     use objc2::rc::{Retained, Weak};
-    use objc2::{ClassType, MainThreadMarker};
     use objc2_app_kit::{
         NSApplication, NSApplicationDelegate, NSEvent, NSEventMask, NSEventModifierFlags,
         NSEventType, NSMenu, NSMenuItem, NSView, NSWindow,
     };
-    use objc2_foundation::{NSObjectProtocol, NSPoint, NSString};
+    use objc2_foundation::{NSPoint, NSString};
     use objc2_quartz_core::CAMetalLayer;
 
     /// The virtual key code of Escape (`kVK_Escape`).
@@ -122,10 +122,10 @@ pub mod appkit {
         window_titled(title).is_some()
     }
 
-    /// Whether a Metal layer covers the content of the window titled `title`: the layer wgpu
-    /// draws a view's surface into, which it adds to the content view's layer as it makes the
-    /// surface.
-    pub fn has_a_metal_layer(title: &str) -> bool {
+    /// Whether a Metal layer with a device to draw with covers the content of the window titled
+    /// `title`: the layer a view draws into, which wgpu gives its device as it makes the view's
+    /// surface from it.
+    pub fn draws_into_a_metal_layer(title: &str) -> bool {
         let Some(content) = window_titled(title)
             .and_then(|window| window.contentView())
             .and_then(|view| view.layer())
@@ -139,7 +139,8 @@ pub mod appkit {
         );
         content
             .hitTest(centre)
-            .is_some_and(|layer| layer.isKindOfClass(CAMetalLayer::class()))
+            .and_then(|layer| layer.downcast::<CAMetalLayer>().ok())
+            .is_some_and(|metal_layer| metal_layer.device().is_some())
     }
 
     /// Clicks the close button of the window titled `title`, as a person would.

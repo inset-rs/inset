@@ -14,8 +14,11 @@ mod menus;
 mod notifications;
 mod opener;
 
+use std::sync::Arc;
+
 use inset_embedder::TargetPlatform;
 use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
+use winit::window::Window;
 
 use crate::clipboard::{ChangeProbe, TextClipboard};
 
@@ -28,6 +31,7 @@ use super::capabilities::{
     SystemDrags, SystemMedia, SystemRequests, TrackpadTouches, WindowChrome, WindowGeometry,
     WindowMotion, WindowVisibility, WorkQueue,
 };
+use super::window_handle_layer::{NoWindowHold, WindowHandleLayer};
 
 /// Windows. A type only: never made, its answers are associated functions.
 pub(crate) enum Windows {}
@@ -58,7 +62,12 @@ impl FramePresentation for Windows {
 }
 
 impl NativeComposition for Windows {
-    type WindowComposition = NoWindowComposition;
+    type ViewLayer = WindowHandleLayer<NoWindowComposition>;
+    type WindowHold = NoWindowHold;
+
+    fn view_layer_in(window: &Arc<dyn Window>) -> (Self::ViewLayer, NoWindowHold) {
+        WindowHandleLayer::in_window(window)
+    }
 }
 
 impl WindowVisibility for Windows {
