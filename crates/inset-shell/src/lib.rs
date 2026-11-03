@@ -11,8 +11,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use inset_embedder::{
-    AppExitReply, AppLifecycleState, ClipboardEvent, DropData, EditCommand, EmbedderClient, Frame,
-    Instant, KeyData, MenuId, NotificationActivation, OpenRequest, PlatformRef, PointerData,
+    AppExitReply, AppLifecycleState, ClipboardEvent, DragReport, EditCommand, EmbedderClient,
+    Frame, Instant, KeyData, MenuId, NotificationActivation, OpenRequest, PlatformRef, PointerData,
     PointerDataPacket, PointerDataPacketConverter, PointerReport, RequestId, TextEditingValue,
     TextInputAction, TrayIconEvent, TrayIconId, ViewError, ViewFocusEvent, ViewId,
 };
@@ -155,11 +155,11 @@ impl EmbedderClient for Shell {
         });
     }
 
-    fn drop_data(&mut self, data: DropData) {
+    fn drag_report(&mut self, report: DragReport) {
         self.push(|app| {
-            let callback = app.platform_callbacks().on_drop.clone();
+            let callback = app.platform_callbacks().on_drag.clone();
             if let Some(callback) = callback {
-                callback(app, data);
+                callback(app, report);
             }
         });
     }
@@ -374,30 +374,47 @@ mod tests {
     }
 
     #[test]
-    fn drop_data_reaches_the_platform_callback() {
+    fn a_read_started_by_a_task_the_drop_spawns_is_in_time() {
         use std::cell::RefCell;
-        use std::path::PathBuf;
 
-        use inset_embedder::{DropChange, DropData};
+        use inset_embedder::{
+            ClipboardReadFuture, DataTransferItem, DragChange, DragReport, DraggedItems,
+        };
 
-        let seen = Rc::new(RefCell::new(None));
-        let seen_slot = Rc::clone(&seen);
+        struct Text([String; 1]);
+
+        impl DataTransferItem for Text {
+            fn types(&self) -> &[String] {
+                &self.0
+            }
+
+            fn read(&self, _mime: &str) -> ClipboardReadFuture {
+                Box::pin(std::future::ready(Ok(b"hi".to_vec())))
+            }
+        }
+
+        let read = Rc::new(RefCell::new(None));
+        let read_slot = Rc::clone(&read);
         let platform = Rc::new(platform_with_a_view());
         let mut shell = Shell::new(platform, move |app: &mut App| {
-            app.platform_callbacks_mut().on_drop = Some(Rc::new(move |_app, data| {
-                *seen_slot.borrow_mut() = Some(data);
+            app.platform_callbacks_mut().on_drag = Some(Rc::new(move |app, report| {
+                let read_slot = Rc::clone(&read_slot);
+                let item = Rc::clone(&report.items[0]);
+                // Dropping the task lets it run, as a Dart future does.
+                let _reading = app.spawn(async move |_cx| {
+                    *read_slot.borrow_mut() = Some(item.read("text/plain").await);
+                });
             }));
         });
-        shell.drop_data(DropData {
+        let dragged = DraggedItems::new(vec![Box::new(Text(["text/plain".to_owned()]))]);
+        let drop = DragReport {
             view_id: IMPLICIT_VIEW_ID,
-            change: DropChange::Dropped,
+            change: DragChange::Dropped,
             physical_position: None,
-            paths: vec![PathBuf::from("/a.wasm")],
-        });
-        let seen = seen.borrow();
-        let seen = seen.as_ref().expect("the callback ran");
-        assert_eq!(seen.change, DropChange::Dropped);
-        assert_eq!(seen.paths, [PathBuf::from("/a.wasm")]);
+            items: dragged.items(),
+        };
+        dragged.report_drop(|| shell.drag_report(drop));
+        assert_eq!(*read.borrow(), Some(Ok(b"hi".to_vec())));
     }
 
     #[test]

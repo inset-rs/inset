@@ -25,7 +25,7 @@ use std::time::Instant;
 use android_activity::AndroidApp;
 use inset_embedder::{
     Clipboard, ClipboardError, ClipboardItem, ClipboardItemsFuture, ClipboardReadFuture,
-    ClipboardWriteFuture, Content, CopyOptions, PastedItem, URI_LIST,
+    ClipboardWriteFuture, Content, CopyOptions, DataTransferItem, URI_LIST,
 };
 use jni::objects::{JByteArray, JObject, JString, JValue};
 use jni::{Env, jni_sig, jni_str};
@@ -139,7 +139,7 @@ impl Clipboard for AndroidClipboard {
                 Box::new(ListedClip {
                     app: self.app.clone(),
                     clip,
-                }) as Box<dyn PastedItem>
+                }) as Box<dyn DataTransferItem>
             });
         Box::pin(std::future::ready(listed.into_iter().collect()))
     }
@@ -180,7 +180,7 @@ struct ListedClip {
     clip: Listing,
 }
 
-impl PastedItem for ListedClip {
+impl DataTransferItem for ListedClip {
     fn types(&self) -> &[String] {
         &self.clip.types
     }

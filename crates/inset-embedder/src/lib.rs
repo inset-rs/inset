@@ -48,14 +48,14 @@ pub use client::EmbedderClient;
 pub use clipboard::{
     Clipboard, ClipboardError, ClipboardEvent, ClipboardItem, ClipboardItemsFuture,
     ClipboardReadFuture, ClipboardWriteFuture, Content, ContentFuture, CopyOptions, CopyRequest,
-    FileSink, PastedItem, URI_LIST, WriteFuture,
+    DataTransferItem, FileSink, URI_LIST, WriteFuture,
 };
 pub use composition::{CompositionLayer, Compositor, HardwareBuffer};
 pub use cue::{
     Cue, CueAnchor, CueContent, CueImage, CueLine, CueTextAlignment, CueTextEdge, CueTextRun,
     CueVertical,
 };
-pub use drag_drop::{DropChange, DropData};
+pub use drag_drop::{DragChange, DragReport, DraggedItems};
 pub use file_dialogs::{
     EntryKind, FileDialogError, FileDialogFuture, FileDialogs, FileFinishFuture, FileHandle,
     FileOpenFuture, FileReadFuture, FileSizeFuture, FileStream, FileType, FileWriteFuture,

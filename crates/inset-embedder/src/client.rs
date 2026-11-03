@@ -6,8 +6,8 @@
 use std::time::Duration;
 
 use crate::{
-    AppExitReply, AppExitResponse, AppLifecycleState, ClipboardEvent, DropData, EditCommand, Frame,
-    KeyData, MenuId, NotificationActivation, OpenRequest, PointerReport, TextEditingValue,
+    AppExitReply, AppExitResponse, AppLifecycleState, ClipboardEvent, DragReport, EditCommand,
+    Frame, KeyData, MenuId, NotificationActivation, OpenRequest, PointerReport, TextEditingValue,
     TextInputAction, TrayIconEvent, TrayIconId, ViewFocusEvent, ViewId,
 };
 
@@ -51,10 +51,11 @@ pub trait EmbedderClient {
     /// result to `PlatformDispatcher.onPointerDataPacket`.
     fn pointer_reports(&mut self, reports: Vec<PointerReport>);
 
-    /// Files dragged from outside the application entered, moved over, were dropped on or
-    /// left a view. No dart:ui hook; the default drops it.
-    fn drop_data(&mut self, data: DropData) {
-        let _ = data;
+    /// What is dragged from outside the application entered, moved over, was dropped on or
+    /// left a view: the dropped report is the one its items are read in. No dart:ui hook; the
+    /// default drops it.
+    fn drag_report(&mut self, report: DragReport) {
+        let _ = report;
     }
 
     /// The user copied, cut or pasted in `view` through the platform's own command: the

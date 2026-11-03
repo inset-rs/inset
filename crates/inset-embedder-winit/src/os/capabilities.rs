@@ -8,9 +8,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use inset_embedder::{
-    Cameras, Clipboard, CompositionLayer, Compositor, DockMenu, FileDialogs, KeyData, MenuBar,
-    MenuEntry, MenuId, Notifications, Offset, Opener, Placement, Players, Rect, Screen, ScreenId,
-    TargetPlatform, TrayIcons, VideoFrameReaders, ViewId, ViewPadding, VsyncWaiter, WindowConfig,
+    Cameras, Clipboard, CompositionLayer, Compositor, DataTransferItem, DockMenu, FileDialogs,
+    KeyData, MenuBar, MenuEntry, MenuId, Notifications, Offset, Opener, Placement, Players, Rect,
+    Screen, ScreenId, TargetPlatform, TrayIcons, VideoFrameReaders, ViewId, ViewPadding,
+    VsyncWaiter, WindowConfig,
 };
 use valo_codec::Decoder;
 use winit::event_loop::{ActiveEventLoop, EventLoopBuilder};
@@ -47,6 +48,7 @@ pub(crate) trait OperatingSystem:
     + SystemNotifications
     + SystemMedia
     + SystemClipboard
+    + SystemDrags
     + ImageDecoding
     + WorkQueue
     + SystemRequests
@@ -397,6 +399,20 @@ pub(crate) trait SystemClipboard {
     /// loop look at it, where the system says it changed or the clipboard clears an expired copy
     /// itself, on the main thread, from the system's own dispatch, so `look` must only queue.
     fn clipboard(look: Box<dyn Fn()>) -> Self::Clipboard;
+}
+
+/// What a drag over a window carries, where the embedder reads it as the system's clipboard reads
+/// a paste rather than through winit's data transfer (`drag_drop`).
+pub(crate) trait SystemDrags {
+    /// What is being dragged over the app now, listed as the clipboard lists a paste; `None` where
+    /// the embedder reads a drag through winit.
+    fn dragged_items() -> Option<Vec<Box<dyn DataTransferItem>>> {
+        None
+    }
+
+    /// Lets every drag the system's reader takes reach `window`, beyond the forms winit registers
+    /// it for.
+    fn accept_drags(_window: &dyn Window) {}
 }
 
 /// The system's own image decoders.

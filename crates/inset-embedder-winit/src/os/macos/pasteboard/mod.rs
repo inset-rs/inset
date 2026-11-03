@@ -2,7 +2,8 @@
 //! each offered in several types, which AppKit names by UTI and the framework by MIME type
 //! (`types`); a form produced when someone pastes it, and a file that exists only once pasted
 //! (`promises`); a file another application promised, received when it is read
-//! (`received_files`); and the options a copy is treated with.
+//! (`received_files`); and the options a copy is treated with. What is dragged over a window is
+//! read from the dragging pasteboard as the general one is read (`dragging`).
 //!
 //! What a copy may hold follows AppKit's items: each item an `NSPasteboardItem` with a form for
 //! each type, but an item carrying a file, given or promised, which is that file alone, as
@@ -17,6 +18,7 @@
 //! The invariant: an item read is the pasteboard's as listed. Listing notes the pasteboard's count
 //! of changes, and a read once it has moved fails, since AppKit answers a stale item with nothing.
 
+mod dragging;
 mod promises;
 mod received_files;
 mod waiting;
@@ -28,7 +30,7 @@ use std::time::Duration;
 use dispatch2::{DispatchQueue, DispatchTime, MainThreadBound};
 use inset_embedder::{
     Clipboard, ClipboardError, ClipboardItem, ClipboardItemsFuture, ClipboardReadFuture,
-    ClipboardWriteFuture, Content, CopyOptions, PastedItem, URI_LIST,
+    ClipboardWriteFuture, Content, CopyOptions, DataTransferItem, URI_LIST,
 };
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -245,13 +247,13 @@ fn pasteboard_item(
 
 /// `pasteboard`'s items now, each in the types it is offered in: a promised file as
 /// `text/uri-list`. An item with no type the framework can name is left out.
-fn listed_items(pasteboard: &Retained<NSPasteboard>) -> Vec<Box<dyn PastedItem>> {
+fn listed_items(pasteboard: &Retained<NSPasteboard>) -> Vec<Box<dyn DataTransferItem>> {
     let change_count = pasteboard.changeCount();
     let Some(items) = pasteboard.pasteboardItems() else {
         return Vec::new();
     };
     let mut promised_files = 0;
-    let mut listed: Vec<Box<dyn PastedItem>> = Vec::new();
+    let mut listed: Vec<Box<dyn DataTransferItem>> = Vec::new();
     for item in items.iter() {
         let promise = received_files::is_promised_file(&item).then(|| {
             promised_files += 1;
@@ -325,7 +327,7 @@ impl ListedItem {
     }
 }
 
-impl PastedItem for ListedItem {
+impl DataTransferItem for ListedItem {
     fn types(&self) -> &[String] {
         &self.types
     }

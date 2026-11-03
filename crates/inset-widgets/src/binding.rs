@@ -15,8 +15,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use inset_embedder::{
-    AppExitResponse, AppExitType, AppLifecycleState, ClipboardEvent, DropData, EditCommand, Locale,
-    RequestId, TrayIconEvent, TrayIconId, ViewError, ViewFocusEvent, ViewId, ViewRef, WindowConfig,
+    AppExitResponse, AppExitType, AppLifecycleState, ClipboardEvent, DragReport, EditCommand,
+    Locale, RequestId, TrayIconEvent, TrayIconId, ViewError, ViewFocusEvent, ViewId, ViewRef,
+    WindowConfig,
 };
 use inset_foundation::{App, Handle, Listenable, Listener, Task, Timer};
 use inset_rendering::{RendererBinding, RendererBindingOverridesObject};
@@ -99,10 +100,10 @@ pub trait WidgetsBindingObserver {
         let _ = (app, event);
     }
 
-    /// Called when files dragged from outside the application enter, move over, are dropped
-    /// on or leave a view. Flutter has no counterpart: external drops are a plugin there.
-    fn did_change_drop(&self, app: &mut App, data: &DropData) {
-        let _ = (app, data);
+    /// Called when what is dragged from outside the application enters, moves over, is dropped
+    /// on or leaves a view. Flutter has no counterpart: external drops are a plugin there.
+    fn did_change_drag(&self, app: &mut App, report: &DragReport) {
+        let _ = (app, report);
     }
 
     /// Called when the platform's text scale factor changes.
@@ -206,9 +207,9 @@ pub trait WidgetsBindingObserverObject: Sized + 'static {
         let _ = (app, event);
     }
 
-    /// See [`WidgetsBindingObserver::did_change_drop`].
-    fn did_change_drop(self: Handle<Self>, app: &mut App, data: &DropData) {
-        let _ = (app, data);
+    /// See [`WidgetsBindingObserver::did_change_drag`].
+    fn did_change_drag(self: Handle<Self>, app: &mut App, report: &DragReport) {
+        let _ = (app, report);
     }
 
     /// See [`WidgetsBindingObserver::did_change_text_scale_factor`].
@@ -273,8 +274,8 @@ impl<T: WidgetsBindingObserverObject> WidgetsBindingObserver for Handle<T> {
         T::did_change_view_focus(*self, app, event);
     }
 
-    fn did_change_drop(&self, app: &mut App, data: &DropData) {
-        T::did_change_drop(*self, app, data);
+    fn did_change_drag(&self, app: &mut App, report: &DragReport) {
+        T::did_change_drag(*self, app, report);
     }
 
     fn did_change_text_scale_factor(&self, app: &mut App) {
@@ -394,8 +395,8 @@ impl WidgetsBinding {
         callbacks.on_view_focus_change = Some(Rc::new(|app, event| {
             WidgetsBinding::instance(app).handle_view_focus_changed(app, event)
         }));
-        callbacks.on_drop = Some(Rc::new(|app, data| {
-            WidgetsBinding::instance(app).handle_drop(app, &data)
+        callbacks.on_drag = Some(Rc::new(|app, report| {
+            WidgetsBinding::instance(app).handle_drag(app, &report)
         }));
         callbacks.on_clipboard_event = Some(Rc::new(|app, _view, event| {
             WidgetsBinding::instance(app).handle_clipboard_event(app, event)
@@ -634,9 +635,9 @@ impl WidgetsBinding {
     }
 
     /// Tells the observers of an external drag over a view.
-    pub fn handle_drop(self: Handle<Self>, app: &mut App, data: &DropData) {
+    pub fn handle_drag(self: Handle<Self>, app: &mut App, report: &DragReport) {
         for observer in app.get(self).observers.clone() {
-            observer.did_change_drop(app, data);
+            observer.did_change_drag(app, report);
         }
     }
 
