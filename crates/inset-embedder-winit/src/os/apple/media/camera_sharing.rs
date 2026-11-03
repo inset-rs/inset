@@ -3,11 +3,15 @@
 //! active format. The first session on a camera sets the format it picked, and the process holds
 //! the device's lock while any of its sessions runs it, which Apple's documentation of
 //! `lockForConfiguration` gives as the way to keep a device's settings unchanged; a later session
-//! joins that format. A camera whose lock another process holds keeps the format it runs in, and
-//! the session joins that one.
+//! joins that format. The lock keeps a later session's preset from changing the format, but this
+//! process's own `lockForConfiguration` is granted again, and a format set under it changes every
+//! session's frames, so what keeps the format is that a joining session sets none of its own
+//! (`experiments/2026-11-03-camera-format-sharing`). A camera whose lock another process holds
+//! keeps the format it runs in, and the session joins that one.
 //!
 //! The invariant: a camera's entry lives exactly as long as a session here holds a share of it,
-//! and the lock taken for it is given back with the last share.
+//! the lock taken for it is given back with the last share, and a share that joined a camera sets
+//! no format.
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 

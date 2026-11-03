@@ -6,11 +6,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use inset_embedder::{
-    Camera, CameraDevice, CameraError, CameraFormat, CameraOpenFuture, CameraOutputs,
-    CaptureSession, CaptureState, CompositionLayer, MediaChangeFuture, PhotoFuture,
+    Camera, CameraDevice, CameraError, CameraFormat, CameraListFuture, CameraOpenFuture,
+    CameraOutputs, CaptureSession, CaptureState, CompositionLayer, MediaChangeFuture, PhotoFuture,
     RecordingFuture,
 };
-use inset_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle};
+use inset_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Task};
 
 use super::at_size;
 use crate::framework::{BuildContext, IntoWidget, KeyRef, StatelessWidget, WidgetRef};
@@ -19,11 +19,17 @@ use crate::widgets::composition_layer_view::CompositionLayerView;
 
 /// The cameras attached now, in the system's order; none where the platform has no cameras:
 /// Flutter's `availableCameras`. Listing asks the user nothing.
-pub fn available_cameras(app: &App) -> Vec<Camera> {
-    app.platform()
-        .cameras()
-        .map(|cameras| cameras.cameras())
-        .unwrap_or_default()
+pub fn available_cameras(app: &App) -> CameraListFuture {
+    match app.platform().cameras() {
+        Some(cameras) => cameras.cameras(),
+        None => Box::pin(std::future::ready(Vec::new())),
+    }
+}
+
+/// Resolves once [`available_cameras`] may answer something else than when this was called: a
+/// camera plugged in or out; `None` where the platform has no cameras.
+pub fn available_cameras_changed(app: &App) -> Option<MediaChangeFuture> {
+    Some(app.platform().cameras()?.changed())
 }
 
 /// Opens `camera`, asking the user for the cameras first where the system asks and the user has
@@ -50,18 +56,32 @@ pub struct CameraSession {
 
 impl CameraSession {
     /// Starts `camera` in `format`, one of its formats, feeding `outputs`, which the system
-    /// configures together; where the camera already runs for another session in a format of its
+    /// configures together, and answers the session once it runs, or is interrupted, from which
+    /// it resumes by itself; where the camera already runs for another session in a format of its
     /// own, the session joins that one, which [`format`](CameraSession::format) says. It fails
     /// for what can happen at any time: the camera in use, unplugged, or not allowed; and for a
     /// format the camera does not list.
     pub fn start(
-        app: &mut App,
+        app: &App,
         camera: &dyn CameraDevice,
         format: &CameraFormat,
         outputs: CameraOutputs,
-    ) -> Result<Handle<CameraSession>, CameraError> {
+    ) -> Task<Result<Handle<CameraSession>, CameraError>> {
         let preview_layer = outputs.preview.clone();
-        let host: Rc<dyn CaptureSession> = Rc::from(camera.start(format, outputs)?);
+        let starting = camera.start(format, outputs);
+        app.spawn(async move |cx| {
+            let host = starting.await?;
+            Ok(cx.update(|app| CameraSession::of_host(app, Rc::from(host), preview_layer)))
+        })
+    }
+
+    /// The session over `host`, which started with its preview on `preview_layer`, following its
+    /// state from now on.
+    fn of_host(
+        app: &mut App,
+        host: Rc<dyn CaptureSession>,
+        preview_layer: Option<Arc<dyn CompositionLayer>>,
+    ) -> Handle<CameraSession> {
         let changed = host.changed();
         let session = app.create(CameraSession {
             change_notifier: ChangeNotifierData::new(),
@@ -71,7 +91,7 @@ impl CameraSession {
             preview_layer,
         });
         session.follow(app, changed);
-        Ok(session)
+        session
     }
 
     /// The format the camera runs in: the one picked, unless the session joined another.
@@ -283,6 +303,18 @@ mod tests {
         }
     }
 
+    /// Starts `camera` as an app does, running the app's tasks until the start answers.
+    fn start(
+        cell: &AppCell,
+        camera: &dyn CameraDevice,
+        format: &CameraFormat,
+        outputs: CameraOutputs,
+    ) -> Result<Handle<CameraSession>, CameraError> {
+        let starting = CameraSession::start(&cell.borrow(), camera, format, outputs);
+        cell.checkpoint();
+        now(starting)
+    }
+
     fn opened(cell: &AppCell) -> Box<dyn CameraDevice> {
         let opening =
             open_camera(&cell.borrow(), &front_camera()).expect("a platform with cameras");
@@ -293,11 +325,43 @@ mod tests {
     fn the_cameras_are_the_platforms_and_none_where_it_has_none() {
         let cameras = cameras();
         let cell = app_with(&cameras, &MockCompositor::new());
-        assert_eq!(available_cameras(&cell.borrow()), vec![front_camera()]);
+        assert_eq!(now(available_cameras(&cell.borrow())), vec![front_camera()]);
 
         let without = AppCell::with_platform(Rc::new(TestPlatform::new()));
-        assert!(available_cameras(&without.borrow()).is_empty());
+        assert!(now(available_cameras(&without.borrow())).is_empty());
+        assert!(available_cameras_changed(&without.borrow()).is_none());
         assert!(open_camera(&without.borrow(), &front_camera()).is_none());
+    }
+
+    #[test]
+    fn the_cameras_change_as_one_comes_or_goes() {
+        let cameras = cameras();
+        let cell = app_with(&cameras, &MockCompositor::new());
+        let mut changed =
+            available_cameras_changed(&cell.borrow()).expect("a platform with cameras");
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(changed.as_mut().poll(&mut context).is_pending());
+
+        let plugged_in = Camera {
+            id: CameraId("usb".to_owned()),
+            name: "USB camera".to_owned(),
+            facing: CameraFacing::External,
+        };
+        cameras.set_cameras(vec![front_camera(), plugged_in.clone()]);
+        assert!(changed.as_mut().poll(&mut context).is_ready());
+        assert_eq!(
+            now(available_cameras(&cell.borrow())),
+            vec![front_camera(), plugged_in]
+        );
+
+        let mut changed = available_cameras_changed(&cell.borrow()).unwrap();
+        assert!(
+            changed.as_mut().poll(&mut context).is_pending(),
+            "a change before the future was asked for is not one after it"
+        );
+        cameras.set_cameras(vec![front_camera()]);
+        assert!(changed.as_mut().poll(&mut context).is_ready());
+        assert_eq!(now(available_cameras(&cell.borrow())), vec![front_camera()]);
     }
 
     #[test]
@@ -320,8 +384,7 @@ mod tests {
             .frames(Arc::clone(&reader))
             .photos(Size::new(640.0, 480.0))
             .movies(MovieOptions { sound: true });
-        let session =
-            CameraSession::start(&mut cell.borrow_mut(), &*camera, &formats[1], outputs).unwrap();
+        let session = start(&cell, &*camera, &formats[1], outputs).unwrap();
         let host = &cameras.sessions()[0];
         assert_eq!(host.camera(), front_camera());
         assert_eq!(*session.format(&cell.borrow()), format(640.0, 480.0));
@@ -332,12 +395,7 @@ mod tests {
 
         let unlisted = format(320.0, 240.0);
         assert!(matches!(
-            CameraSession::start(
-                &mut cell.borrow_mut(),
-                &*camera,
-                &unlisted,
-                CameraOutputs::new()
-            ),
+            start(&cell, &*camera, &unlisted, CameraOutputs::new()),
             Err(CameraError::Failed(_))
         ));
 
@@ -351,32 +409,14 @@ mod tests {
         let cell = app_with(&cameras, &MockCompositor::new());
         let camera = opened(&cell);
         let formats = camera.formats();
-        let first = CameraSession::start(
-            &mut cell.borrow_mut(),
-            &*camera,
-            &formats[0],
-            CameraOutputs::new(),
-        )
-        .unwrap();
-        let joined = CameraSession::start(
-            &mut cell.borrow_mut(),
-            &*camera,
-            &formats[1],
-            CameraOutputs::new(),
-        )
-        .unwrap();
+        let first = start(&cell, &*camera, &formats[0], CameraOutputs::new()).unwrap();
+        let joined = start(&cell, &*camera, &formats[1], CameraOutputs::new()).unwrap();
         assert_eq!(cameras.sessions()[1].picked(), format(640.0, 480.0));
         assert_eq!(*joined.format(&cell.borrow()), format(1920.0, 1080.0));
 
         first.dispose(&mut cell.borrow_mut());
         joined.dispose(&mut cell.borrow_mut());
-        let alone = CameraSession::start(
-            &mut cell.borrow_mut(),
-            &*camera,
-            &formats[1],
-            CameraOutputs::new(),
-        )
-        .unwrap();
+        let alone = start(&cell, &*camera, &formats[1], CameraOutputs::new()).unwrap();
         assert_eq!(
             *alone.format(&cell.borrow()),
             format(640.0, 480.0),
@@ -390,13 +430,7 @@ mod tests {
         let cell = app_with(&cameras, &MockCompositor::new());
         let camera = opened(&cell);
         let outputs = CameraOutputs::new().photos(Size::new(1920.0, 1080.0));
-        let session = CameraSession::start(
-            &mut cell.borrow_mut(),
-            &*camera,
-            &camera.formats()[0],
-            outputs,
-        )
-        .unwrap();
+        let session = start(&cell, &*camera, &camera.formats()[0], outputs).unwrap();
         let heard = Rc::new(std::cell::Cell::new(0));
         let hearing = Rc::clone(&heard);
         session.add_listener(
@@ -418,7 +452,7 @@ mod tests {
             "movies were not among its outputs"
         );
 
-        let interrupted = CaptureState::Interrupted(CameraInterruption::InUseByAnotherApp);
+        let interrupted = CaptureState::Interrupted(Some(CameraInterruption::InUseByAnotherApp));
         host.set_state(interrupted.clone());
         cell.checkpoint();
         assert_eq!(*session.state(&cell.borrow()), interrupted);
@@ -444,13 +478,7 @@ mod tests {
         let cell = app_with(&cameras, &MockCompositor::new());
         let camera = opened(&cell);
         let outputs = CameraOutputs::new().movies(MovieOptions::default());
-        let session = CameraSession::start(
-            &mut cell.borrow_mut(),
-            &*camera,
-            &camera.formats()[0],
-            outputs,
-        )
-        .unwrap();
+        let session = start(&cell, &*camera, &camera.formats()[0], outputs).unwrap();
         let mut recording = session.start_recording(&cell.borrow(), PathBuf::from("/tmp/clip.mov"));
         let mut context = std::task::Context::from_waker(std::task::Waker::noop());
         assert!(recording.as_mut().poll(&mut context).is_pending());
@@ -476,13 +504,7 @@ mod tests {
             .expect("a platform with a compositor")
             .make_layer(false);
         let outputs = CameraOutputs::new().preview(Arc::clone(&layer));
-        let session = CameraSession::start(
-            &mut cell.borrow_mut(),
-            &*camera,
-            &camera.formats()[0],
-            outputs,
-        )
-        .unwrap();
+        let session = start(&cell, &*camera, &camera.formats()[0], outputs).unwrap();
         assert!(Arc::ptr_eq(
             &cameras.sessions()[0].preview_layer().unwrap(),
             &layer

@@ -32,17 +32,13 @@ use objc2_metal::{MTLDevice, MTLPixelFormat};
 static TEXTURE_CACHES: TextureCaches = TextureCaches(Mutex::new(Vec::new()));
 
 /// The texture of `frame`, a BGRA pixel buffer backed by an `IOSurface` as the readers ask their
-/// pictures in, on `device`, holding the frame until wgpu frees it.
-///
-/// # Panics
-///
-/// On a device that is not Metal's, and where CoreVideo makes no texture of the frame, as wgpu's
-/// default error handler panics on a texture wgpu cannot make.
+/// pictures in, on `device`, holding the frame until wgpu frees it; `None` on a device not on
+/// Metal, and where CoreVideo makes no texture of the frame on it.
 pub(super) fn texture_of(
     frame: &CFRetained<CVPixelBuffer>,
     device: &wgpu::Device,
-) -> wgpu::Texture {
-    let texture = TEXTURE_CACHES.texture_of(frame, metal_device_of(device));
+) -> Option<wgpu::Texture> {
+    let texture = TEXTURE_CACHES.texture_of(frame, metal_device_of(device)?)?;
     import(
         device,
         HeldFrame {
@@ -52,25 +48,25 @@ pub(super) fn texture_of(
     )
 }
 
-/// The Metal device `device` was made on.
-fn metal_device_of(device: &wgpu::Device) -> Retained<ProtocolObject<dyn MTLDevice>> {
+/// The Metal device `device` was made on; `None` for a device not on Metal.
+fn metal_device_of(device: &wgpu::Device) -> Option<Retained<ProtocolObject<dyn MTLDevice>>> {
     // SAFETY: the device is only read, to name the Metal device behind it.
-    let metal = unsafe { device.as_hal::<wgpu::hal::api::Metal>() }
-        .expect("a video frame's texture is made on a Metal device");
-    metal.raw_device().clone()
+    let metal = unsafe { device.as_hal::<wgpu::hal::api::Metal>() }?;
+    Some(metal.raw_device().clone())
 }
 
 /// The Metal texture `held` holds, as a wgpu texture on `device` that holds `held` until wgpu
-/// frees it.
-fn import(device: &wgpu::Device, held: HeldFrame) -> wgpu::Texture {
-    let metal = CVMetalTextureGetTexture(&held.texture.0).expect("CoreVideo's Metal texture");
+/// frees it; `None` where CoreVideo's texture has no Metal texture.
+fn import(device: &wgpu::Device, held: HeldFrame) -> Option<wgpu::Texture> {
+    let metal = CVMetalTextureGetTexture(&held.texture.0)?;
     let raw = NonNull::from(&*metal).cast::<c_void>();
     // SAFETY: a live texture on the device's Metal device, whose pixels the decoder finished
     // writing before it handed the frame out, and which stay as they are while `held` holds the
     // frame: its pool does not hand out the surface of a frame something holds
     // (`experiments/2026-11-01-corevideo-pool-reuse`).
-    unsafe { valo::import_metal_texture(device, raw, Box::new(move || drop(held))) }
-        .expect("valo samples a frame's BGRA texture")
+    let texture = unsafe { valo::import_metal_texture(device, raw, Box::new(move || drop(held))) }
+        .expect("valo samples a frame's BGRA texture");
+    Some(texture)
 }
 
 /// CoreVideo's texture caches, one for each Metal device.
@@ -78,17 +74,18 @@ struct TextureCaches(Mutex<Vec<DeviceCache>>);
 
 impl TextureCaches {
     /// CoreVideo's texture of `frame` on `device`, through the device's cache, which is made now
-    /// if no frame was made a texture on the device before.
+    /// if no frame was made a texture on the device before; `None` where CoreVideo makes no cache
+    /// or no texture.
     fn texture_of(
         &self,
         frame: &CVPixelBuffer,
         device: Retained<ProtocolObject<dyn MTLDevice>>,
-    ) -> CoreVideoTexture {
+    ) -> Option<CoreVideoTexture> {
         let mut caches = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         let index = match caches.iter().position(|cache| cache.is_on(&device)) {
             Some(index) => index,
             None => {
-                caches.push(DeviceCache::on(device));
+                caches.push(DeviceCache::on(device)?);
                 caches.len() - 1
             }
         };
@@ -108,30 +105,28 @@ struct DeviceCache {
 unsafe impl Send for DeviceCache {}
 
 impl DeviceCache {
-    /// A new cache on `device`.
-    fn on(device: Retained<ProtocolObject<dyn MTLDevice>>) -> DeviceCache {
+    /// A new cache on `device`; `None` where CoreVideo makes none.
+    fn on(device: Retained<ProtocolObject<dyn MTLDevice>>) -> Option<DeviceCache> {
         let mut cache: *mut CVMetalTextureCache = std::ptr::null_mut();
         // SAFETY: no attributes, and `cache` a valid place for the answer.
         let status = unsafe {
             CVMetalTextureCache::create(None, None, &device, None, NonNull::from(&mut cache))
         };
-        let cache = NonNull::new(cache)
-            .filter(|_| status == kCVReturnSuccess)
-            .expect("CoreVideo's texture cache on the Metal device");
-        DeviceCache {
+        let cache = NonNull::new(cache).filter(|_| status == kCVReturnSuccess)?;
+        Some(DeviceCache {
             device,
             // SAFETY: a cache made just now, handed over with its one retain.
             cache: unsafe { CFRetained::from_raw(cache) },
-        }
+        })
     }
 
     fn is_on(&self, device: &ProtocolObject<dyn MTLDevice>) -> bool {
         std::ptr::eq(&*self.device, device)
     }
 
-    /// The texture of `frame`'s whole picture. The cache is flushed after, as CoreVideo's header
-    /// asks to be done periodically.
-    fn texture_of(&self, frame: &CVPixelBuffer) -> CoreVideoTexture {
+    /// The texture of `frame`'s whole picture; `None` where CoreVideo makes none. The cache is
+    /// flushed after, as CoreVideo's header asks to be done periodically.
+    fn texture_of(&self, frame: &CVPixelBuffer) -> Option<CoreVideoTexture> {
         debug_assert_eq!(
             CVPixelBufferGetPixelFormatType(frame),
             kCVPixelFormatType_32BGRA,
@@ -154,11 +149,9 @@ impl DeviceCache {
             )
         };
         self.cache.flush(0);
-        let texture = NonNull::new(texture)
-            .filter(|_| status == kCVReturnSuccess)
-            .expect("CoreVideo's texture of the frame");
+        let texture = NonNull::new(texture).filter(|_| status == kCVReturnSuccess)?;
         // SAFETY: a texture made just now, handed over with its one retain.
-        CoreVideoTexture(unsafe { CFRetained::from_raw(texture) })
+        Some(CoreVideoTexture(unsafe { CFRetained::from_raw(texture) }))
     }
 }
 
@@ -218,7 +211,7 @@ mod tests {
         let device = &gpu.get().device;
         let frame = test_frame();
         let surface = CVPixelBufferGetIOSurface(Some(&frame)).expect("the frame's surface");
-        let texture = texture_of(&frame, device);
+        let texture = texture_of(&frame, device).expect("a Metal device takes the frame");
         assert_eq!([texture.width(), texture.height()], [64, 48]);
         assert_eq!(texture.format(), wgpu::TextureFormat::Bgra8Unorm);
 

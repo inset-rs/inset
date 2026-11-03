@@ -184,17 +184,21 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — AVFoundation has no one output that a player and a camera both feed, as Android's `ImageReader` is fed by a decoder and a camera alike.
   Affect: one reader serves a player or a camera, it reads nothing until it is given to one, and a reader the host did not make reads nothing, which the host says once.
 
-- Change: a camera opens once the user lets the app use the cameras, lists its device's own formats, and runs as an `AVCaptureSession` given its camera, format and outputs at once, asking for the microphone first where a recording wants sound, with its preview a layer that is a composition layer's content.
-  Reason: platform — AVFoundation configures a session's inputs and outputs together, and each output is AVFoundation's own.
-  Affect: a session reports running, interrupted or ended as AVFoundation tells it, photos arrive as JPEG at the size asked for, and recordings as QuickTime movies.
+- Change: the cameras are the devices of one discovery session the host keeps, whose `devices` it key-value observes to tell the app the list changed, where Flutter's plugin makes a discovery session for each `availableCameras` and observes none.
+  Reason: platform — Apple's header gives key-value observing a discovery session's `devices` as the way to hear its list change, and gives `AVCaptureDeviceWasConnectedNotification` and `AVCaptureDeviceWasDisconnectedNotification` for `AVCaptureDevice.devices`, which it deprecated.
+  Affect: on a Mac, an app hears the cameras change as one is plugged in or out.
+
+- Change: a camera opens once the user lets the app use the cameras, lists its device's own formats, and runs as an `AVCaptureSession` given its camera, format and outputs at once and started on a serial queue of its own, its start answering once it runs, is interrupted or fails, asking for the microphone first where a recording wants sound, with its preview a layer that is a composition layer's content.
+  Reason: platform — AVFoundation configures a session's inputs and outputs together, each output is AVFoundation's own, and Apple's documentation of `AVCaptureSession` starts a session on a serial queue, since `startRunning` blocks until it runs or fails.
+  Affect: the app's thread goes on while a camera starts, a session reports running, interrupted or ended as AVFoundation tells it, photos arrive as JPEG at the size asked for, and recordings as QuickTime movies.
 
 - Change: the first session in the process on a camera sets the format it picked and keeps the camera locked while any session in the process runs it, and a later session runs in that format; where another process holds the lock, a session runs in the format the camera has.
   Reason: platform — a camera has one active format for every session using it, two sessions in one process share one camera, and Apple gives locking a camera as the way to keep its settings unchanged.
   Affect: a second session on a camera reports the first one's format, and other apps cannot change the camera's settings while the app runs it.
 
-- Change: an interrupted session takes the reason iOS gives, any but the background and system pressure read as another app having the camera, and on macOS, whose notice gives none, another app having the camera.
-  Reason: platform — macOS's interruption notice carries no reason, and Apple documents the notice for another application taking the hardware a session needs.
-  Affect: on a Mac every interruption reads as another app having the camera.
+- Change: an interrupted session takes the reason iOS gives, any but the background and system pressure read as another app having the camera, and on macOS none.
+  Reason: platform — Apple marks the interruption notice's reason key unavailable on macOS, and documents the notice for another application taking the hardware a session needs.
+  Affect: on a Mac an interruption has no reason.
 
 ## video_frames.rs, os/apple/media/video_frame.rs, os/apple/media/frame_textures.rs → the macOS embedder's `FlutterExternalTexture` (`copyPixelBuffer`, `CVMetalTextureCache`)
 
@@ -205,6 +209,10 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - Change: on macOS and iOS a frame is a `CoreVideoFrame`, whose pixel buffer platform code reaches by downcasting, and its texture is made through CoreVideo's texture cache on the device's Metal device, holding the frame until wgpu frees it, where Flutter's embedder makes a texture of the pixel buffer a plugin hands it for each frame it draws.
   Reason: platform — a CoreVideo pool hands a frame's surface out again once nothing holds the frame, whatever still reads the surface, and Apple documents the texture cache for a BGRA pixel buffer.
   Affect: a frame is drawn with no copy, on the view's device or any other the app made, and is not overwritten while the GPU reads it.
+
+- Change: a frame has no texture on a device not on Metal, nor where CoreVideo makes none, and a view skips such a frame, keeping the one it shows, where Flutter's engine draws nothing for a texture its embedder could not make.
+  Reason: platform — CoreVideo's texture cache makes textures on a Metal device, and can fail to make one.
+  Affect: a video drawn on a device its frames cannot reach shows nothing, and a frame CoreVideo fails on leaves the one before on screen.
 
 ## host_window.rs / main_loop/windows.rs / os/macos/visibility.rs → Flutter's desktop window controllers (`_window_macos.dart`, `_window_win32.dart`, `_window_linux.dart`)
 

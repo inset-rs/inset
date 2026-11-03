@@ -1,16 +1,20 @@
 //! A camera running for the app: an `AVCaptureSession` given its camera, the camera's format and
 //! every output at once, between `beginConfiguration` and `commitConfiguration`, then run, on a
-//! serial queue of its own, since starting it blocks; it first asks for the microphone where a
-//! recording wants sound. Its preview is an `AVCaptureVideoPreviewLayer` shown as a composition
-//! layer's content, its frames a video data output a reader reads (`frames`), its photos and
-//! recordings the system's outputs (`outputs`). Its state follows AVFoundation's notices: an
-//! interruption, its end, and a runtime error, which ends the session as a configuration the
-//! system refuses does.
+//! serial queue of its own, where Apple's documentation of `AVCaptureSession` starts a session,
+//! since `startRunning` blocks; it first asks for the microphone where a recording wants sound.
+//! The app is answered the session once it runs, or is interrupted, or why it did not start: a
+//! configuration the system refuses, or the runtime error Apple's documentation of
+//! `startRunning` posts for a session that fails to start. Its preview is an
+//! `AVCaptureVideoPreviewLayer` shown as a composition layer's content, its frames a video data
+//! output a reader reads (`frames`), its photos and recordings the system's outputs (`outputs`).
+//! Its state follows AVFoundation's notices: an interruption, its end, and a runtime error, which
+//! ends the session as a configuration the system refuses does.
 //!
 //! The state is written where the system answers, the session's queue and the main queue's
 //! notices, and read on the main thread, so it lives behind a mutex shared with them. The
-//! invariant: an ended session stays ended, and a session the app let go of before its queue
-//! configured it never runs.
+//! invariant: an ended session stays ended, the start is answered once, at the first of a run,
+//! an interruption or an end, and a session the app let go of before its queue configured it
+//! never runs.
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -20,9 +24,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use dispatch2::{DispatchQueue, DispatchQueueAttr, DispatchRetained};
 use inset_embedder::{
-    CameraError, CameraFormat, CameraInterruption, CameraOutputs, CaptureSession, CaptureState,
-    CompositionLayer, MediaChangeFuture, MediaError, PhotoFuture, RecordingFuture, Size,
-    VideoFrameReader,
+    CameraError, CameraFormat, CameraInterruption, CameraOutputs, CameraStartFuture,
+    CaptureSession, CaptureState, CompositionLayer, MediaChangeFuture, MediaError, PhotoFuture,
+    RecordingFuture, Size, VideoFrameReader,
 };
 use objc2::rc::Retained;
 use objc2::{ClassType, Message};
@@ -36,7 +40,7 @@ use objc2_av_foundation::{
 use objc2_core_media::CMVideoDimensions;
 use objc2_foundation::{NSError, NSNotification};
 
-use super::camera::{CrossThreadDevice, ask_for, audio};
+use super::camera::{CrossThreadDevice, ask_for, audio, camera_error_of_unanswered};
 use super::camera_formats::{device_format_for, photo_dimensions_of};
 use super::camera_sharing::CameraShare;
 use super::frames::{
@@ -45,7 +49,7 @@ use super::frames::{
 use super::observing::NotificationObservation;
 use super::outputs::{MovieRecorder, PhotoTaker};
 use super::{in_transaction, show_system_layer};
-use crate::media::Changes;
+use crate::media::{Changes, MediaAnswer, media_answer};
 
 /// A session running one device.
 pub(super) struct AvCaptureSession {
@@ -77,9 +81,14 @@ pub(super) struct SessionShared {
     queue: DispatchRetained<DispatchQueue>,
     state: Mutex<CaptureState>,
     changes: Changes,
+    /// The start's answer, until it is given.
+    started: Mutex<Option<StartAnswer>>,
     /// Whether the app let go of the session.
     stopped: AtomicBool,
 }
+
+/// Whether the session started: it runs or is interrupted, or why it did not.
+type StartAnswer = MediaAnswer<Result<(), CameraError>>;
 
 /// What the session's queue gives the session, all at once.
 struct Configuration {
@@ -91,13 +100,29 @@ struct Configuration {
 }
 
 impl AvCaptureSession {
-    /// Starts `device` in `share`'s format, feeding `outputs`.
+    /// Starts `device` in `share`'s format, feeding `outputs`; answers the session once it runs
+    /// or is interrupted, or why it did not start.
     pub(super) fn start(
         device: Retained<AVCaptureDevice>,
         share: CameraShare,
         outputs: CameraOutputs,
+    ) -> CameraStartFuture {
+        let (started, answered) = media_answer();
+        let session = AvCaptureSession::run(device, share, outputs, started);
+        Box::pin(async move {
+            let started = answered.await.map_err(camera_error_of_unanswered)?;
+            started.map(|()| Box::new(session) as Box<dyn CaptureSession>)
+        })
+    }
+
+    /// Runs `device` in `share`'s format, feeding `outputs`, telling `started` whether it started.
+    fn run(
+        device: Retained<AVCaptureDevice>,
+        share: CameraShare,
+        outputs: CameraOutputs,
+        started: StartAnswer,
     ) -> AvCaptureSession {
-        let shared = Arc::new(SessionShared::new());
+        let shared = Arc::new(SessionShared::new(started));
         let notices = observe_notices(&shared);
         let preview = outputs
             .preview
@@ -245,13 +270,15 @@ fn not_an_output<T: 'static>(
 }
 
 impl SessionShared {
-    fn new() -> SessionShared {
+    /// A session not yet configured, which tells `started` whether it started.
+    fn new(started: StartAnswer) -> SessionShared {
         SessionShared {
             // SAFETY: a new capture session, not yet running.
             session: CrossThreadSession(unsafe { AVCaptureSession::new() }),
             queue: DispatchQueue::new("rs.inset.camera-session", DispatchQueueAttr::SERIAL),
             state: Mutex::new(CaptureState::Running),
             changes: Changes::default(),
+            started: Mutex::new(Some(started)),
             stopped: AtomicBool::new(false),
         }
     }
@@ -267,16 +294,31 @@ impl SessionShared {
         &self.queue
     }
 
-    fn interrupt(&self, interruption: CameraInterruption) {
+    fn interrupt(&self, interruption: Option<CameraInterruption>) {
         self.change_unless_ended(CaptureState::Interrupted(interruption));
+        self.answer_start(Ok(()));
     }
 
     fn resume(&self) {
         self.change_unless_ended(CaptureState::Running);
+        self.answer_start(Ok(()));
     }
 
     fn end(&self, error: CameraError) {
+        self.answer_start(Err(error.clone()));
         self.change_unless_ended(CaptureState::Ended(error));
+    }
+
+    /// Answers the start with `started`, unless it was answered already.
+    fn answer_start(&self, started: Result<(), CameraError>) {
+        let answer = self
+            .started
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(answer) = answer {
+            answer.give(Ok(started));
+        }
     }
 
     fn change_unless_ended(&self, next: CaptureState) {
@@ -325,8 +367,15 @@ impl SessionShared {
             return;
         }
         // SAFETY: running the session on its own queue, which this blocks until it runs; a
-        // failure to start comes as a runtime error notice, as Apple documents `startRunning`.
-        unsafe { self.session.0.startRunning() };
+        // failure to start comes as a runtime error notice, as Apple documents `startRunning`, and
+        // a start iOS defers as an interruption notice, as Apple documents its reasons.
+        let running = unsafe {
+            self.session.0.startRunning();
+            self.session.0.isRunning()
+        };
+        if running {
+            self.answer_start(Ok(()));
+        }
     }
 
     /// Gives the session its camera, the camera's format, its outputs and, where `sound` asks, the
@@ -455,9 +504,9 @@ fn observe_notices(shared: &Arc<SessionShared>) -> NotificationObservation {
     )
 }
 
-/// Why an interruption notice says the session gives no frames.
-fn interruption_of(notice: &NSNotification) -> CameraInterruption {
-    interruption_for(interruption_reason_of(notice))
+/// Why an interruption notice says the session gives no frames, where it says.
+fn interruption_of(notice: &NSNotification) -> Option<CameraInterruption> {
+    interruption_reason_of(notice).and_then(interruption_for)
 }
 
 /// The reason an interruption notice gives, on iOS.
@@ -481,19 +530,20 @@ fn interruption_reason_of(_notice: &NSNotification) -> Option<AVCaptureSessionIn
     None
 }
 
-/// The interruption Apple's `reason` is. Its reasons the app knows no counterpart of, another
-/// client having the audio device, a multi-app layout and sensitive content, and a notice that
-/// gives none, as macOS's, are the camera in use by another app, which Apple's documentation of
-/// the notice names beside phone calls and alarms, neither of which a Mac has.
-fn interruption_for(reason: Option<AVCaptureSessionInterruptionReason>) -> CameraInterruption {
+/// The interruption Apple's `reason` is; none for a reason the app has no counterpart of, such as
+/// another client having the audio device, a multi-app layout or sensitive content.
+fn interruption_for(reason: AVCaptureSessionInterruptionReason) -> Option<CameraInterruption> {
     match reason {
-        Some(AVCaptureSessionInterruptionReason::VideoDeviceNotAvailableInBackground) => {
-            CameraInterruption::Background
+        AVCaptureSessionInterruptionReason::VideoDeviceInUseByAnotherClient => {
+            Some(CameraInterruption::InUseByAnotherApp)
         }
-        Some(AVCaptureSessionInterruptionReason::VideoDeviceNotAvailableDueToSystemPressure) => {
-            CameraInterruption::SystemPressure
+        AVCaptureSessionInterruptionReason::VideoDeviceNotAvailableInBackground => {
+            Some(CameraInterruption::Background)
         }
-        _ => CameraInterruption::InUseByAnotherApp,
+        AVCaptureSessionInterruptionReason::VideoDeviceNotAvailableDueToSystemPressure => {
+            Some(CameraInterruption::SystemPressure)
+        }
+        _ => None,
     }
 }
 
@@ -552,49 +602,90 @@ mod tests {
 
     use super::*;
 
+    fn poll<F: Future + ?Sized>(future: Pin<&mut F>) -> std::task::Poll<F::Output> {
+        future.poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+    }
+
     /// A session runs from its start, an interruption and its end come and go, and an end is for
     /// good.
     #[test]
     fn a_session_runs_is_interrupted_and_resumes_until_it_ends() {
-        let shared = SessionShared::new();
+        let shared = SessionShared::new(media_answer().0);
         assert_eq!(shared.state(), CaptureState::Running);
-        shared.interrupt(CameraInterruption::SystemPressure);
+        shared.interrupt(Some(CameraInterruption::SystemPressure));
         assert_eq!(
             shared.state(),
-            CaptureState::Interrupted(CameraInterruption::SystemPressure)
+            CaptureState::Interrupted(Some(CameraInterruption::SystemPressure))
         );
         shared.resume();
         assert_eq!(shared.state(), CaptureState::Running);
         shared.end(CameraError::Unplugged);
         shared.resume();
-        shared.interrupt(CameraInterruption::Background);
+        shared.interrupt(None);
         assert_eq!(shared.state(), CaptureState::Ended(CameraError::Unplugged));
+    }
+
+    /// The start answers at the first of a run, an interruption or an end, and only then.
+    #[test]
+    fn the_start_answers_once_the_session_is_interrupted_or_ends() {
+        let (started, mut answered) = media_answer();
+        let shared = SessionShared::new(started);
+        assert!(poll(answered.as_mut()).is_pending());
+        shared.interrupt(None);
+        shared.end(CameraError::Unplugged);
+        assert_eq!(
+            poll(answered.as_mut()),
+            std::task::Poll::Ready(Ok(Ok(()))),
+            "interrupted, it started, and resumes by itself"
+        );
+
+        let (started, mut answered) = media_answer();
+        let shared = SessionShared::new(started);
+        shared.end(CameraError::InUse);
+        assert_eq!(
+            poll(answered.as_mut()),
+            std::task::Poll::Ready(Ok(Err(CameraError::InUse)))
+        );
     }
 
     #[test]
     fn apples_interruption_reasons_are_the_apps() {
         assert_eq!(
-            interruption_for(Some(
+            interruption_for(
                 AVCaptureSessionInterruptionReason::VideoDeviceNotAvailableInBackground
-            )),
-            CameraInterruption::Background
+            ),
+            Some(CameraInterruption::Background)
         );
         assert_eq!(
-            interruption_for(Some(
+            interruption_for(
                 AVCaptureSessionInterruptionReason::VideoDeviceNotAvailableDueToSystemPressure
-            )),
-            CameraInterruption::SystemPressure
+            ),
+            Some(CameraInterruption::SystemPressure)
         );
         assert_eq!(
-            interruption_for(Some(
-                AVCaptureSessionInterruptionReason::VideoDeviceInUseByAnotherClient
-            )),
-            CameraInterruption::InUseByAnotherApp
+            interruption_for(AVCaptureSessionInterruptionReason::VideoDeviceInUseByAnotherClient),
+            Some(CameraInterruption::InUseByAnotherApp)
         );
         assert_eq!(
-            interruption_for(None),
-            CameraInterruption::InUseByAnotherApp
+            interruption_for(AVCaptureSessionInterruptionReason::AudioDeviceInUseByAnotherClient),
+            None,
+            "a reason the app has no counterpart of"
         );
+    }
+
+    /// macOS's interruption notice gives no reason, and the interruption has none.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_macos_interruption_has_no_reason() {
+        // SAFETY: AVFoundation's constant, which it exports for the life of the process, and a
+        // notice of it about nothing.
+        let notice = unsafe {
+            NSNotification::notificationWithName_object(
+                AVCaptureSessionWasInterruptedNotification,
+                None,
+            )
+        };
+        assert_eq!(interruption_of(&notice), None);
     }
 
     #[test]

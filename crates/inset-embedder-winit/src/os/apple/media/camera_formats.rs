@@ -106,7 +106,7 @@ fn size_of_dimensions(dimensions: CMVideoDimensions) -> Size {
 
 #[cfg(test)]
 mod tests {
-    use super::super::camera::discovered_devices;
+    use super::super::camera::discovery_session;
     use super::*;
 
     /// Reading a camera's formats asks the user nothing; this Mac's cameras, if it has any, each
@@ -114,7 +114,9 @@ mod tests {
     /// format again.
     #[test]
     fn a_cameras_formats_are_listed_without_asking_and_find_their_device_formats() {
-        for device in discovered_devices().iter() {
+        // SAFETY: reading the devices a discovery session found.
+        let devices = unsafe { discovery_session().devices() };
+        for device in devices.iter() {
             let formats = formats_of(&device);
             assert!(!formats.is_empty());
             for format in &formats {

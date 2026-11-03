@@ -1,13 +1,14 @@
 //! Players and cameras on macOS and iOS: AVFoundation, the system's own media stack. A player is
 //! an `AVPlayer` (`player`) with its media's tracks (`tracks`), tags (`metadata`) and subtitles as
-//! cues (`cues`, `cue_markup`); a camera a capture device (`camera`) with its formats
-//! (`camera_formats`), shared in one format by this process's sessions (`camera_sharing`), and a
-//! session an `AVCaptureSession` (`capture_session`) with its photo and movie outputs
-//! (`outputs`); a picture goes to a composition layer as a layer the system draws into, shown as
-//! its content so that Core Animation clips and scales it with it (`apple/composition`), or to a
-//! frame reader the app made (`frames`), each frame an `IOSurface`-backed pixel buffer
-//! (`video_frame`) whose texture CoreVideo's texture cache makes (`frame_textures`).
-//! AVFoundation tells changes by key-value observing and notifications (`observing`).
+//! cues (`cues`, `cue_markup`); the cameras are a discovery session's devices, and a camera a
+//! capture device (`camera`) with its formats (`camera_formats`), shared in one format by this
+//! process's sessions (`camera_sharing`), and a session an `AVCaptureSession` (`capture_session`)
+//! with its photo and movie outputs (`outputs`); a picture goes to a composition layer as a layer
+//! the system draws into, shown as its content so that Core Animation clips and scales it with it
+//! (`apple/composition`), or to a frame reader the app made (`frames`), each frame an
+//! `IOSurface`-backed pixel buffer (`video_frame`) whose texture CoreVideo's texture cache makes
+//! (`frame_textures`). AVFoundation tells changes by key-value observing and notifications
+//! (`observing`).
 //!
 //! A player and a session are controlled on the main thread, as AVFoundation asks of a player and
 //! the framework asks of everything; a session runs on a queue of its own, since starting it
@@ -53,7 +54,7 @@ pub(crate) fn players() -> Option<Rc<dyn Players>> {
 
 /// AVFoundation's cameras.
 pub(crate) fn cameras() -> Option<Rc<dyn Cameras>> {
-    Some(Rc::new(AvCameras))
+    Some(Rc::new(AvCameras::default()))
 }
 
 /// The readers AVFoundation's players and cameras feed.

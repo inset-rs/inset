@@ -1,6 +1,6 @@
 //! A compositor, frame readers, players and cameras in memory, as a host shows nothing: each
 //! keeps what the app asked of it or gave it, and reports the state the test gives it, a player
-//! its metadata and cues too.
+//! its metadata and cues too, and the cameras their list.
 
 use std::cell::{Cell, RefCell};
 use std::future::Future;
@@ -13,11 +13,11 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use inset_embedder::{
-    Camera, CameraDevice, CameraError, CameraFormat, CameraOpenFuture, CameraOutputs, Cameras,
-    CaptureSession, CaptureState, CompositionLayer, Compositor, Cue, HardwareBuffer,
-    MediaChangeFuture, MediaError, MediaMetadata, MediaPlayer, MovieOptions, Photo, PhotoFuture,
-    Placement, PlayerState, Players, RecordingFuture, Size, VideoFrame, VideoFrameReader,
-    VideoFrameReaders, VideoOutput,
+    Camera, CameraDevice, CameraError, CameraFormat, CameraListFuture, CameraOpenFuture,
+    CameraOutputs, CameraStartFuture, Cameras, CaptureSession, CaptureState, CompositionLayer,
+    Compositor, Cue, HardwareBuffer, MediaChangeFuture, MediaError, MediaMetadata, MediaPlayer,
+    MovieOptions, Photo, PhotoFuture, Placement, PlayerState, Players, RecordingFuture, Size,
+    VideoFrame, VideoFrameReader, VideoFrameReaders, VideoOutput,
 };
 
 /// A compositor whose layers show nowhere, and which keeps each layer it made. Every clone is the
@@ -299,16 +299,18 @@ impl Drop for OpenedPlayer {
     }
 }
 
-/// Cameras that list what the test gave, each running in the formats the test gave, and keep each
-/// session started, which reports the state the test gives it. A session started on a camera
-/// another session still runs joins that one's format, as a system that runs a camera in one
-/// format at a time does. Every clone is the same cameras.
+/// Cameras that list what the test gave, telling the app each time the test changes the list,
+/// each running in the formats the test gave, and keep each session started, which reports the
+/// state the test gives it. A session started on a camera another session still runs joins that
+/// one's format, as a system that runs a camera in one format at a time does. Every clone is the
+/// same cameras.
 #[derive(Clone, Default)]
 pub struct MockCameras(Rc<CamerasShared>);
 
 #[derive(Default)]
 struct CamerasShared {
-    cameras: Vec<Camera>,
+    cameras: RefCell<Vec<Camera>>,
+    changes: Changes,
     formats: RefCell<Vec<CameraFormat>>,
     /// Whether the user does not let the app use the cameras.
     denied: Cell<bool>,
@@ -319,9 +321,15 @@ impl MockCameras {
     /// Cameras listing `cameras`, which run in no format until [`with_formats`](Self::with_formats).
     pub fn new(cameras: Vec<Camera>) -> MockCameras {
         MockCameras(Rc::new(CamerasShared {
-            cameras,
+            cameras: RefCell::new(cameras),
             ..CamerasShared::default()
         }))
+    }
+
+    /// Lists `cameras` from now on, as the system would once a camera was plugged in or out.
+    pub fn set_cameras(&self, cameras: Vec<Camera>) {
+        *self.0.cameras.borrow_mut() = cameras;
+        self.0.changes.notify();
     }
 
     /// Each camera runs in `formats`.
@@ -353,8 +361,12 @@ impl MockCameras {
 }
 
 impl Cameras for MockCameras {
-    fn cameras(&self) -> Vec<Camera> {
-        self.0.cameras.clone()
+    fn cameras(&self) -> CameraListFuture {
+        Box::pin(std::future::ready(self.0.cameras.borrow().clone()))
+    }
+
+    fn changed(&self) -> MediaChangeFuture {
+        self.0.changes.next()
     }
 
     fn open(&self, camera: &Camera) -> CameraOpenFuture {
@@ -381,7 +393,14 @@ impl CameraDevice for OpenedCamera {
         self.cameras.0.formats.borrow().clone()
     }
 
-    fn start(
+    /// Answers at once: the session runs as it starts.
+    fn start(&self, format: &CameraFormat, outputs: CameraOutputs) -> CameraStartFuture {
+        Box::pin(std::future::ready(self.started(format, outputs)))
+    }
+}
+
+impl OpenedCamera {
+    fn started(
         &self,
         format: &CameraFormat,
         outputs: CameraOutputs,

@@ -1,7 +1,7 @@
 //! Players and cameras as the framework's (`inset_embedder`'s `media`): what each system plays and
 //! captures with is `os/`'s; here is what the systems share: telling the app that a player's or a
-//! session's state changed, from whatever thread the system says so on, and answering a photo or
-//! a recording once.
+//! session's state, or the cameras' list, changed, from whatever thread the system says so on, and
+//! answering a photo or a recording once.
 //!
 //! The invariant: a change future resolves at every change after it was made and once its player
 //! or session is gone, and an answer is given exactly once, a failure when the system drops it, so
@@ -14,7 +14,7 @@ use std::task::{Context, Poll, Waker};
 
 use inset_embedder::{MediaChangeFuture, MediaError};
 
-/// The changes of one player's or session's state, told from any thread.
+/// The changes of one player's or session's state, or of the cameras' list, told from any thread.
 #[derive(Clone, Default)]
 pub(crate) struct Changes(Arc<Mutex<ChangesState>>);
 

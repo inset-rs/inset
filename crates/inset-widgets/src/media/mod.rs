@@ -2,10 +2,11 @@
 //! Not in Flutter's framework: Flutter's `video_player` and `camera` plugins have controllers to
 //! initialize and values copied over their method channels, where the systems share a simpler
 //! model, which these follow. A [`Player`] is made from a source and loads by itself; a
-//! [`CameraSession`] is a camera, once opened ([`open_camera`]), running in one of its formats
-//! with its outputs, each the system's own, given whole as it starts. Each is a listenable over
-//! the host's object, whose listeners hear its state change, and each is shown by a widget that
-//! takes it, [`PlayerView`] and [`CameraPreview`], as Media3's `PlayerView` and
+//! [`CameraSession`] is a camera, listed by [`available_cameras`] and listed again once
+//! [`available_cameras_changed`] resolves, then opened ([`open_camera`]), running in one of its
+//! formats with its outputs, each the system's own, given whole as it starts. Each is a
+//! listenable over the host's object, whose listeners hear its state change, and each is shown by
+//! a widget that takes it, [`PlayerView`] and [`CameraPreview`], as Media3's `PlayerView` and
 //! `AVPlayerLayer(player:)` take a player and CameraX's `PreviewView` a camera. An app that draws
 //! the frames itself makes a reader from the platform's `video_frame_readers`, gives it to the
 //! player or among the session's outputs, and draws it with a `VideoFrameView`.
@@ -34,7 +35,9 @@ use inset_rendering::BoxConstraints;
 use crate::framework::{IntoWidget, WidgetRef};
 use crate::widgets::basic::{AspectRatio, ConstrainedBox, SizedBox};
 
-pub use camera::{CameraPreview, CameraSession, available_cameras, open_camera};
+pub use camera::{
+    CameraPreview, CameraSession, available_cameras, available_cameras_changed, open_camera,
+};
 pub use player::{Player, PlayerView};
 pub use subtitle_view::SubtitleView;
 

@@ -130,9 +130,13 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the host's player is the system's, which loads by itself and reports its state, and a host without players answers none.
   Affect: an app calls `play` on a new player, `Player::new` answers `None` where the platform has no players, a URL the system cannot play reports a failure, and a `PlayerView` takes the video's size in logical pixels, or none until it is known.
 
-- Change: `open_camera` opens a camera, asking the user the first time, and `CameraSession::start` starts it in one of its formats with all its outputs at once, a listenable that tells the format it runs in and whether it runs, is interrupted or ended, and `CameraPreview::new(session)` shows its preview, where Flutter's `CameraController` initializes a camera with a resolution preset and takes pictures and videos itself.
+- Change: `open_camera` opens a camera, asking the user the first time, and `CameraSession::start` starts it in one of its formats with all its outputs at once, answering once it runs or is interrupted, a listenable that tells the format it runs in and whether it runs, is interrupted or ended, and `CameraPreview::new(session)` shows its preview, where Flutter's `CameraController` initializes a camera with a resolution preset and takes pictures and videos itself.
   Reason: platform — the host's session is the system's, which configures all its outputs together, and a platform without cameras answers none.
   Affect: `open_camera` answers `None` where the platform has no cameras, an app gives the preview's layer, a frame reader, a photo size and recordings as the session starts, a photo arrives as encoded bytes and a recording at the app's path.
+
+- Change: `available_cameras_changed` answers a future that resolves at the next change of what `available_cameras` answers, such as a camera plugged in or out, where Flutter's `availableCameras` tells no change.
+  Reason: platform — the host's cameras tell when their list changes, as every system tells an app.
+  Affect: an app lists the cameras again each time one comes or goes, asking for a new future after each, and gets `None` where the platform has no cameras.
 
 - Change: a `PlayerView` makes a composition layer of its own and puts its player's picture there as it is mounted, which the system draws into, and nowhere as it is unmounted, unless another view took it since, and a `CameraPreview` places the layer its session started with; the frames of whichever view it is in place the layer.
   Reason: platform — the picture is drawn by the system into a layer that is the composition layer's content, which no frame of the framework's touches, and a camera's outputs are given as it starts.

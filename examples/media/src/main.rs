@@ -1,8 +1,9 @@
 //! A video beside a camera's preview, each on a native surface the system draws into: the movie
 //! given, looped, and the first camera the platform lists, opened at once, which asks the user for
 //! the cameras the first time, then started with its preview in its largest format up to 1920 by
-//! 1080. The camera's formats, the one it runs in and its state as it changes are printed. A click
-//! on the video pauses or plays it.
+//! 1080. The cameras the platform lists are printed, and again each time one is plugged in or out;
+//! the camera's formats, the one it runs in and its state as it changes too. A click on the video
+//! pauses or plays it.
 //!
 //! ```text
 //! cargo inset run -p media -- <a movie's path or link>
@@ -19,13 +20,13 @@ use inset_embedder::{
     TextDirection, WindowConfig,
 };
 use inset_embedder_winit::WinitEmbedder;
-use inset_foundation::{App, Entity, Handle, Listenable, Listener};
+use inset_foundation::{App, AsyncApp, Entity, Handle, Listenable, Listener};
 use inset_painting::{BoxDecoration, TextStyle};
 use inset_shell::Shell;
 use inset_widgets::{
     BuildContext, CameraPreview, CameraSession, Center, DecoratedBox, Directionality, Expanded,
     GestureDetector, IntoWidget, Player, PlayerView, Row, StatelessWidget, Text, WidgetRef,
-    available_cameras, open_camera, run_app_with,
+    available_cameras, available_cameras_changed, open_camera, run_app_with,
 };
 
 const BACKGROUND: Color = Color::from_argb(255, 20, 20, 24);
@@ -54,6 +55,7 @@ fn start(app: &mut App, url: Option<String>) {
         Player::set_looping(player, app, true);
         Player::play(player, app);
     }
+    print_cameras(app);
     let camera = app.new_entity(|_cx| CameraPane::Opening);
     open_first_camera(app, &camera);
     let window = WindowConfig {
@@ -62,6 +64,29 @@ fn start(app: &mut App, url: Option<String>) {
         ..WindowConfig::default()
     };
     run_app_with(app, home(player, camera), window);
+}
+
+/// Prints the cameras the platform lists now, and again each time one is plugged in or out.
+fn print_cameras(app: &mut App) {
+    let _printing = app.spawn(async move |cx| {
+        loop {
+            // The next change is asked for before the cameras are listed, so none goes unheard.
+            let (changed, listing) =
+                cx.update(|app| (available_cameras_changed(app), available_cameras(app)));
+            print_camera_list(&listing.await);
+            let Some(changed) = changed else {
+                return;
+            };
+            changed.await;
+        }
+    });
+}
+
+fn print_camera_list(cameras: &[Camera]) {
+    println!("cameras: {}", cameras.len());
+    for camera in cameras {
+        println!("  {}, {:?}", camera.name, camera.facing);
+    }
 }
 
 /// Where the camera's side of the window stands.
@@ -76,27 +101,31 @@ enum CameraPane {
 /// Opens the first camera the platform lists, and once the user lets the app use it, starts it
 /// with its preview.
 fn open_first_camera(app: &mut App, pane: &Entity<CameraPane>) {
-    let first = available_cameras(app).into_iter().next();
-    let Some(camera) = first else {
-        show(app, pane, CameraPane::NoCamera);
-        return;
-    };
-    let Some(opening) = open_camera(app, &camera) else {
-        show(app, pane, CameraPane::NoCamera);
-        return;
-    };
+    let listing = available_cameras(app);
     let pane = pane.clone();
     let _opening = app.spawn(async move |cx| {
-        let opened = opening.await;
-        cx.update(|app| {
-            let started = opened.and_then(|device| start_preview(app, &camera, &*device));
-            let next = match started {
-                Ok(session) => CameraPane::Running(session),
-                Err(error) => CameraPane::Failed(error),
-            };
-            show(app, &pane, next);
-        });
+        let next = match listing.await.into_iter().next() {
+            Some(camera) => run_camera(cx, &camera).await,
+            None => CameraPane::NoCamera,
+        };
+        cx.update(|app| show(app, &pane, next));
     });
+}
+
+/// Opens `camera` and starts it with its preview: the pane that shows it running, or what kept it
+/// from running.
+async fn run_camera(cx: &AsyncApp, camera: &Camera) -> CameraPane {
+    let Some(opening) = cx.update(|app| open_camera(app, camera)) else {
+        return CameraPane::NoCamera;
+    };
+    let started = match opening.await {
+        Ok(device) => start_preview(cx, camera, &*device).await,
+        Err(error) => Err(error),
+    };
+    match started {
+        Ok(session) => CameraPane::Running(session),
+        Err(error) => CameraPane::Failed(error),
+    }
 }
 
 fn show(app: &mut App, pane: &Entity<CameraPane>, next: CameraPane) {
@@ -108,8 +137,8 @@ fn show(app: &mut App, pane: &Entity<CameraPane>, next: CameraPane) {
 
 /// Starts `device` in its preferred format with its preview, printing its formats, the one it runs
 /// in and its state as it changes.
-fn start_preview(
-    app: &mut App,
+async fn start_preview(
+    cx: &AsyncApp,
     camera: &Camera,
     device: &dyn CameraDevice,
 ) -> Result<Handle<CameraSession>, CameraError> {
@@ -120,17 +149,22 @@ fn start_preview(
     }
     let format = preferred(&formats)
         .ok_or_else(|| CameraError::Failed("the camera lists no format".to_owned()))?;
-    let mut outputs = CameraOutputs::new();
-    if let Some(compositor) = app.platform().compositor() {
-        outputs = outputs.preview(compositor.make_layer(false));
-    }
-    let session = CameraSession::start(app, device, format, outputs)?;
-    println!("  picked {}", described(format));
-    println!(
-        "  runs in {}",
-        described(CameraSession::format(session, app))
-    );
-    print_states(app, session);
+    let starting = cx.update(|app| {
+        let mut outputs = CameraOutputs::new();
+        if let Some(compositor) = app.platform().compositor() {
+            outputs = outputs.preview(compositor.make_layer(false));
+        }
+        CameraSession::start(app, device, format, outputs)
+    });
+    let session = starting.await?;
+    cx.update(|app| {
+        println!("  picked {}", described(format));
+        println!(
+            "  runs in {}",
+            described(CameraSession::format(session, app))
+        );
+        print_states(app, session);
+    });
     Ok(session)
 }
 

@@ -97,8 +97,8 @@ impl ShownVideoFrames {
         self.shown.borrow_mut().clear();
     }
 
-    /// The image of `reader`'s frame for `display_time`, if it is a new one; `None` for a
-    /// texture valo does not sample.
+    /// The image of `reader`'s frame for `display_time`, if it is a new one; `None`, skipping the
+    /// frame, for one the view's device cannot take, and for a texture valo does not sample.
     fn frame_image(
         &self,
         gpu: &Gpu,
@@ -106,7 +106,7 @@ impl ShownVideoFrames {
         display_time: Instant,
     ) -> Option<Image> {
         let frame = reader.frame_for(display_time)?;
-        let texture = frame.texture(&gpu.device);
+        let texture = frame.texture(&gpu.device)?;
         self.images(gpu).import_texture(texture, false).ok()
     }
 
@@ -146,6 +146,11 @@ mod tests {
         fn put_new(&self) {
             *self.0.lock().unwrap() = Some(Arc::new(PlainFrame));
         }
+
+        /// A new frame for the reader's next read, which no device takes.
+        fn put_untakeable(&self) {
+            *self.0.lock().unwrap() = Some(Arc::new(UntakeableFrame));
+        }
     }
 
     impl VideoFrameReader for NewFrames {
@@ -167,8 +172,8 @@ mod tests {
             4
         }
 
-        fn texture(&self, device: &wgpu::Device) -> wgpu::Texture {
-            device.create_texture(&wgpu::TextureDescriptor {
+        fn texture(&self, device: &wgpu::Device) -> Option<wgpu::Texture> {
+            Some(device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("plain frame"),
                 size: wgpu::Extent3d {
                     width: self.width(),
@@ -181,7 +186,24 @@ mod tests {
                 format: wgpu::TextureFormat::Bgra8Unorm,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
-            })
+            }))
+        }
+    }
+
+    /// A 4 by 4 frame whose memory no device takes.
+    struct UntakeableFrame;
+
+    impl VideoFrame for UntakeableFrame {
+        fn width(&self) -> u32 {
+            4
+        }
+
+        fn height(&self) -> u32 {
+            4
+        }
+
+        fn texture(&self, _device: &wgpu::Device) -> Option<wgpu::Texture> {
+            None
         }
     }
 
@@ -240,5 +262,28 @@ mod tests {
         );
         frames.put_new();
         assert!(shown.take_new_frames(gpu.get(), Instant::now()));
+    }
+
+    /// A frame the view's device cannot take is skipped: the frame on screen stays.
+    #[test]
+    fn a_frame_the_device_cannot_take_is_skipped() {
+        let gpu = LazyGpu::default();
+        let shown = ShownVideoFrames::default();
+        let frames = Arc::new(NewFrames::default());
+        let reader: Arc<dyn VideoFrameReader> = frames.clone();
+        frames.put_untakeable();
+        shown.begin_draw();
+        assert!(shown.image_of(gpu.get(), &reader, Instant::now()).is_none());
+        shown.end_draw();
+        frames.put_new();
+        assert!(shown.take_new_frames(gpu.get(), Instant::now()));
+        frames.put_untakeable();
+        assert!(!shown.take_new_frames(gpu.get(), Instant::now()));
+        shown.begin_draw();
+        assert!(
+            shown.image_of(gpu.get(), &reader, Instant::now()).is_some(),
+            "the last frame the device took stays on screen"
+        );
+        shown.end_draw();
     }
 }

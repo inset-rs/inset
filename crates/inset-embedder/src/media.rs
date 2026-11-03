@@ -23,6 +23,11 @@
 //! CameraX's use cases at once. A camera's photos are encoded by the system and its recordings
 //! encoded and written to a file by the system: the app encodes nothing.
 //!
+//! Listing the cameras, opening one and starting it answer futures, as systems that answer them
+//! later do: the web's `enumerateDevices` and `getUserMedia` answer promises, and Apple's
+//! documentation of `AVCaptureSession` has a session started on a serial queue of its own, since
+//! `startRunning` blocks until the session runs or fails.
+//!
 //! A player tells its media's tracks, plays one audio track and shows one text track or none, as
 //! every system's player does (Apple's media selection groups, Media3's track overrides); it tells
 //! what the media's tags say ([`MediaMetadata`]); and it hands the app the [`Cue`]s of its text
@@ -31,9 +36,10 @@
 //!
 //! The platform answers `None` where its system has no players, no cameras or no frames. A player
 //! or a session reports its state through [`MediaPlayer::state`] and [`CaptureSession::state`],
-//! read when the future from `changed` resolves: the invariant a host keeps is that such a future
-//! resolves at every change of what the state answers, a player's metadata and cues included, and
-//! when the player or session goes, so the app never waits on one for ever.
+//! and the cameras their list through [`Cameras::cameras`], each read when the future from its
+//! `changed` resolves: the invariant a host keeps is that such a future resolves at every change
+//! of what it reads, a player's metadata and cues included, and when the player or session goes,
+//! so the app never waits on one for ever.
 
 use std::any::Any;
 use std::fmt;
@@ -215,7 +221,13 @@ pub struct EncodedImage {
 /// has none.
 pub trait Cameras {
     /// The cameras attached now, in the system's order. Listing asks the user nothing.
-    fn cameras(&self) -> Vec<Camera>;
+    fn cameras(&self) -> CameraListFuture;
+
+    /// Resolves once [`cameras`](Self::cameras) may answer something else than when this was
+    /// called: a camera plugged in or out, as Apple's discovery session, Android's
+    /// `CameraManager.AvailabilityCallback`, the web's `devicechange` event and Windows'
+    /// `DeviceWatcher` tell it.
+    fn changed(&self) -> MediaChangeFuture;
 
     /// Opens `camera`, asking the user for the cameras first where the system asks and the user
     /// has not answered, as an Android app opens Camera2's `CameraDevice` once it holds the
@@ -256,15 +268,12 @@ pub trait CameraDevice {
     fn formats(&self) -> Vec<CameraFormat>;
 
     /// Starts the camera in `format`, one of [`formats`](Self::formats), feeding `outputs`, which
-    /// the system configures together. Where the camera already runs for another session and the
+    /// the system configures together, and answers the session once it runs, or is interrupted,
+    /// from which it resumes by itself. Where the camera already runs for another session and the
     /// system runs a camera in one format at a time, the session joins that format instead, and
     /// its [`format`](CaptureSession::format) says so. It fails for what can happen at any time:
     /// the camera in use, unplugged, or not allowed; and for a format the camera does not list.
-    fn start(
-        &self,
-        format: &CameraFormat,
-        outputs: CameraOutputs,
-    ) -> Result<Box<dyn CaptureSession>, CameraError>;
+    fn start(&self, format: &CameraFormat, outputs: CameraOutputs) -> CameraStartFuture;
 }
 
 /// One way a camera runs, with all its outputs.
@@ -359,8 +368,9 @@ pub trait CaptureSession {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CaptureState {
     Running,
-    /// No frames for now, for this reason; it resumes by itself.
-    Interrupted(CameraInterruption),
+    /// No frames for now, for this reason where the system gives one; it resumes by itself.
+    /// macOS gives none: Apple marks the interruption's reason unavailable there.
+    Interrupted(Option<CameraInterruption>),
     /// For good, for this reason.
     Ended(CameraError),
 }
@@ -457,8 +467,9 @@ pub trait VideoFrame: Any + Send + Sync {
     fn height(&self) -> u32;
 
     /// A texture of the frame on `device`, for sampling, sharing its memory where the system can.
-    /// The texture holds the frame.
-    fn texture(&self, device: &wgpu::Device) -> wgpu::Texture;
+    /// The texture holds the frame. `None` for a device that cannot take the frame's memory: on
+    /// macOS a wgpu device not on Metal, or one Core Video makes no texture of the frame on.
+    fn texture(&self, device: &wgpu::Device) -> Option<wgpu::Texture>;
 }
 
 /// Why a camera session's photo or recording answered nothing.
@@ -481,11 +492,16 @@ impl fmt::Display for MediaError {
 
 impl std::error::Error for MediaError {}
 
-/// What a player's or a session's `changed` answers.
+/// What a player's, a session's or the cameras' `changed` answers.
 pub type MediaChangeFuture = Pin<Box<dyn Future<Output = ()>>>;
+/// What listing the cameras answers.
+pub type CameraListFuture = Pin<Box<dyn Future<Output = Vec<Camera>>>>;
 /// What opening a camera answers.
 pub type CameraOpenFuture =
     Pin<Box<dyn Future<Output = Result<Box<dyn CameraDevice>, CameraError>>>>;
+/// What starting a camera answers.
+pub type CameraStartFuture =
+    Pin<Box<dyn Future<Output = Result<Box<dyn CaptureSession>, CameraError>>>>;
 /// What taking a photo answers.
 pub type PhotoFuture = Pin<Box<dyn Future<Output = Result<Photo, MediaError>>>>;
 /// What a recording answers once it ends.

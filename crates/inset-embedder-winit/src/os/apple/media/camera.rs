@@ -1,15 +1,16 @@
 //! Cameras: AVFoundation's capture devices, listed by a discovery session, which asks the user
-//! nothing, and opened once the user lets the app use the cameras, asking where the user has not
-//! answered. An opened device lists its formats (`camera_formats`) and starts a session
-//! (`capture_session`) in the format it shares with this process's other sessions on it
-//! (`camera_sharing`).
+//! nothing and tells when its list changes, and opened once the user lets the app use the
+//! cameras, asking where the user has not answered. An opened device lists its formats
+//! (`camera_formats`) and starts a session (`capture_session`) in the format it shares with this
+//! process's other sessions on it (`camera_sharing`).
 
+use std::cell::OnceCell;
 use std::sync::{Mutex, PoisonError};
 
 use block2::RcBlock;
 use inset_embedder::{
-    Camera, CameraDevice, CameraError, CameraFacing, CameraFormat, CameraId, CameraOpenFuture,
-    CameraOutputs, Cameras, CaptureSession, MediaError,
+    Camera, CameraDevice, CameraError, CameraFacing, CameraFormat, CameraId, CameraListFuture,
+    CameraOpenFuture, CameraOutputs, CameraStartFuture, Cameras, MediaChangeFuture, MediaError,
 };
 use objc2::rc::Retained;
 use objc2::runtime::Bool;
@@ -23,17 +24,52 @@ use objc2_foundation::{NSArray, NSString};
 use super::camera_formats::formats_of;
 use super::camera_sharing::CameraShare;
 use super::capture_session::AvCaptureSession;
-use crate::media::media_answer;
+use super::observing::PropertyObservation;
+use crate::media::{Changes, media_answer};
 
-/// AVFoundation's cameras.
-pub(crate) struct AvCameras;
+/// AVFoundation's cameras: the devices of one discovery session, made at the first use, since the
+/// first in a process takes about a fifth of a second to make, which every app would otherwise
+/// spend at launch.
+#[derive(Default)]
+pub(crate) struct AvCameras(OnceCell<Discovery>);
+
+/// A discovery session, whose changes are its devices'.
+struct Discovery {
+    session: Retained<AVCaptureDeviceDiscoverySession>,
+    changes: Changes,
+    _devices_observed: PropertyObservation,
+}
+
+impl Discovery {
+    fn new() -> Discovery {
+        let session = discovery_session();
+        let changes = Changes::default();
+        // Apple's header gives key-value observing `devices` as the way to hear it change.
+        let devices_observed = PropertyObservation::new(&session, &["devices"], changes.clone());
+        Discovery {
+            session,
+            changes,
+            _devices_observed: devices_observed,
+        }
+    }
+}
+
+impl AvCameras {
+    fn discovery(&self) -> &Discovery {
+        self.0.get_or_init(Discovery::new)
+    }
+}
 
 impl Cameras for AvCameras {
-    fn cameras(&self) -> Vec<Camera> {
-        discovered_devices()
-            .iter()
-            .map(|device| camera_of(&device))
-            .collect()
+    fn cameras(&self) -> CameraListFuture {
+        // SAFETY: reading the devices a discovery session found.
+        let devices = unsafe { self.discovery().session.devices() };
+        let cameras = devices.iter().map(|device| camera_of(&device)).collect();
+        Box::pin(std::future::ready(cameras))
+    }
+
+    fn changed(&self) -> MediaChangeFuture {
+        self.discovery().changes.next()
     }
 
     fn open(&self, camera: &Camera) -> CameraOpenFuture {
@@ -55,8 +91,7 @@ impl Cameras for AvCameras {
             match answered.await {
                 Ok(true) => Ok(Box::new(AvCameraDevice(device)) as Box<dyn CameraDevice>),
                 Ok(false) => Err(CameraError::NotAllowed),
-                Err(MediaError::Failed(reason)) => Err(CameraError::Failed(reason)),
-                Err(other) => Err(CameraError::Failed(other.to_string())),
+                Err(unanswered) => Err(camera_error_of_unanswered(unanswered)),
             }
         })
     }
@@ -70,11 +105,19 @@ impl CameraDevice for AvCameraDevice {
         formats_of(&self.0)
     }
 
-    fn start(
-        &self,
-        format: &CameraFormat,
-        outputs: CameraOutputs,
-    ) -> Result<Box<dyn CaptureSession>, CameraError> {
+    fn start(&self, format: &CameraFormat, outputs: CameraOutputs) -> CameraStartFuture {
+        if let Err(error) = self.startable_in(format) {
+            return Box::pin(std::future::ready(Err(error)));
+        }
+        let share = CameraShare::take(&self.0, format);
+        AvCaptureSession::start(self.0.clone(), share, outputs)
+    }
+}
+
+impl AvCameraDevice {
+    /// Whether the camera can start in `format` now: the app may use it, it is attached, and it
+    /// lists the format.
+    fn startable_in(&self, format: &CameraFormat) -> Result<(), CameraError> {
         if !is_allowed(video()) {
             return Err(CameraError::NotAllowed);
         }
@@ -87,18 +130,21 @@ impl CameraDevice for AvCameraDevice {
                 "the camera does not list this format".to_owned(),
             ));
         }
-        let share = CameraShare::take(&self.0, format);
-        Ok(Box::new(AvCaptureSession::start(
-            self.0.clone(),
-            share,
-            outputs,
-        )))
+        Ok(())
     }
 }
 
-/// The video devices an app may use as cameras: a device's built-in ones, and on macOS the ones
-/// plugged in or on another device.
-pub(super) fn discovered_devices() -> Retained<NSArray<AVCaptureDevice>> {
+/// What a camera's opening or start answers where the system answered nothing.
+pub(super) fn camera_error_of_unanswered(error: MediaError) -> CameraError {
+    match error {
+        MediaError::Failed(reason) => CameraError::Failed(reason),
+        other => CameraError::Failed(other.to_string()),
+    }
+}
+
+/// A discovery session of the video devices an app may use as cameras: a device's built-in ones,
+/// and on macOS the ones plugged in or on another device.
+pub(super) fn discovery_session() -> Retained<AVCaptureDeviceDiscoverySession> {
     // SAFETY: AVFoundation's constant, which it exports for the life of the process.
     let built_in = unsafe { AVCaptureDeviceTypeBuiltInWideAngleCamera };
     let types: Vec<&AVCaptureDeviceType> = std::iter::once(built_in)
@@ -112,7 +158,6 @@ pub(super) fn discovered_devices() -> Retained<NSArray<AVCaptureDevice>> {
             AVMediaTypeVideo,
             AVCaptureDevicePosition::Unspecified,
         )
-        .devices()
     }
 }
 
@@ -232,13 +277,28 @@ mod tests {
         );
     }
 
-    /// Listing asks the user nothing; this Mac's cameras, if it has any, each have an id and a
-    /// name.
+    /// Listing asks the user nothing, and answers at once; this Mac's cameras, if it has any, each
+    /// have an id and a name.
     #[test]
     fn the_cameras_are_listed_without_asking() {
-        for camera in AvCameras.cameras() {
+        let mut listing = AvCameras::default().cameras();
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        let std::task::Poll::Ready(cameras) = listing.as_mut().poll(&mut context) else {
+            panic!("the discovery session answers at once");
+        };
+        for camera in cameras {
             assert!(!camera.id.0.is_empty() && !camera.name.is_empty());
         }
+    }
+
+    /// Hearing the cameras change asks the user nothing, and hears nothing while no camera comes
+    /// or goes.
+    #[test]
+    fn hearing_the_cameras_change_asks_nothing() {
+        let cameras = AvCameras::default();
+        let mut changed = cameras.changed();
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(changed.as_mut().poll(&mut context).is_pending());
     }
 
     /// A camera no longer attached does not open, and opening it asks nothing.
@@ -249,7 +309,7 @@ mod tests {
             name: "Gone".to_owned(),
             facing: CameraFacing::External,
         };
-        let mut opening = AvCameras.open(&gone);
+        let mut opening = AvCameras::default().open(&gone);
         let mut context = std::task::Context::from_waker(std::task::Waker::noop());
         assert!(matches!(
             opening.as_mut().poll(&mut context),

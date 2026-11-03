@@ -1,7 +1,7 @@
 //! Hearing AVFoundation say something changed: key-value observing of an object's properties, and
-//! notifications about an object, each telling a player's or a session's [`Changes`] and nothing
-//! more, from whatever thread AVFoundation says so on. The app reads the state itself when it
-//! hears.
+//! notifications about an object, each telling a player's, a session's or the cameras' [`Changes`]
+//! and nothing more, from whatever thread AVFoundation says so on. The app reads the state itself
+//! when it hears.
 
 use std::ffi::c_void;
 use std::ptr::NonNull;

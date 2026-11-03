@@ -46,13 +46,9 @@ impl VideoFrame for CoreVideoFrame {
         CVPixelBufferGetHeight(&self.0) as u32
     }
 
-    /// A Metal texture on the frame's `IOSurface`, through CoreVideo's texture cache.
-    ///
-    /// # Panics
-    ///
-    /// On a device that is not Metal's, and where CoreVideo makes no texture of the frame, as
-    /// wgpu's default error handler panics on a texture wgpu cannot make.
-    fn texture(&self, device: &wgpu::Device) -> wgpu::Texture {
+    /// A Metal texture on the frame's `IOSurface`, through CoreVideo's texture cache; `None` on a
+    /// device not on Metal, and where CoreVideo makes no texture of the frame on it.
+    fn texture(&self, device: &wgpu::Device) -> Option<wgpu::Texture> {
         texture_of(&self.0, device)
     }
 }
