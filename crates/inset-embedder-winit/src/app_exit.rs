@@ -14,18 +14,20 @@ use std::rc::Rc;
 use inset_embedder::{AppExit, AppExitReply};
 
 use crate::WinitPlatform;
-use crate::app_requests::{AppRequest, AppRequests};
+use crate::app_requests::{AppRequest, AppRequests, ExitRequest};
 
 impl AppExit for WinitPlatform {
     /// The exit code is ignored, as Flutter's macOS and Linux embedders ignore it.
     fn quit(&self, _exit_code: i32) {
-        self.send(AppRequest::Quit);
+        self.send(AppRequest::Exit(ExitRequest::Quit));
     }
 }
 
 /// The reply to one request to exit: its answer goes to the loop through `requests`.
 pub(crate) fn exit_reply(requests: Rc<AppRequests>) -> AppExitReply {
-    AppExitReply::new(move |response| requests.send(AppRequest::AnswerExit(response)))
+    AppExitReply::new(move |response| {
+        requests.send(AppRequest::Exit(ExitRequest::Answer(response)))
+    })
 }
 
 #[cfg(test)]
@@ -40,7 +42,7 @@ mod tests {
 
     fn answer_sent(requests: &AppRequests) -> Option<AppExitResponse> {
         match requests.take_next() {
-            Some(AppRequest::AnswerExit(response)) => Some(response),
+            Some(AppRequest::Exit(ExitRequest::Answer(response))) => Some(response),
             _ => None,
         }
     }

@@ -335,12 +335,9 @@ impl<C: EmbedderClient> MainLoop<C> {
     fn on_app_request(&mut self, event_loop: &dyn ActiveEventLoop, request: AppRequest) {
         match request {
             AppRequest::RequestFrame(view) => self.request_frame(view),
-            AppRequest::OpenWindow(request) => self.open_window(event_loop, request),
-            AppRequest::CloseWindow(id) => self.close_window(id),
+            AppRequest::Window(request) => self.on_window_request(event_loop, request),
             AppRequest::Embedder(request) => self.on_embedder_request(event_loop, request),
-            AppRequest::Quit => self.quit(event_loop),
-            AppRequest::AnswerExit(response) => self.on_exit_answered(event_loop, response),
-            AppRequest::ChangeViewFocus(change) => self.change_view_focus(change),
+            AppRequest::Exit(request) => self.on_exit_request(event_loop, request),
             AppRequest::LookAtClipboard => self.look_at_clipboard(),
         }
     }

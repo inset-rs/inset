@@ -7,12 +7,25 @@ use inset_embedder::{AppExitResponse, EmbedderClient};
 use winit::event_loop::ActiveEventLoop;
 
 use crate::app_exit::exit_reply;
+use crate::app_requests::ExitRequest;
 use crate::os::System;
 use crate::os::capabilities::ApplicationControl;
 
 use super::MainLoop;
 
 impl<C: EmbedderClient> MainLoop<C> {
+    /// Serves the app's exit: its own quit, or its answer to the system's request to quit.
+    pub(super) fn on_exit_request(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        request: ExitRequest,
+    ) {
+        match request {
+            ExitRequest::Quit => self.quit(event_loop),
+            ExitRequest::Answer(response) => self.on_exit_answered(event_loop, response),
+        }
+    }
+
     /// The system asks the application to quit: Cmd-Q, Quit from the Dock, logging out. Every
     /// request reaches the framework, a second one while the first is being decided included, so
     /// the application decides each, such as quitting only at a second Cmd-Q.

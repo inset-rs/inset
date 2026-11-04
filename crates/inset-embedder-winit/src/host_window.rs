@@ -12,7 +12,7 @@ use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::{Window, WindowId};
 
-use crate::app_requests::{AppRequest, AppRequests};
+use crate::app_requests::{AppRequest, AppRequests, WindowRequest};
 use crate::os::System;
 use crate::os::capabilities::{WindowMotion, WindowVisibility};
 use crate::view::WinitView;
@@ -156,7 +156,8 @@ impl HostWindow for WinitWindow {
         if let Some(window) = self.window.upgrade() {
             window.set_visible(false);
         }
-        self.requests.send(AppRequest::CloseWindow(self.id));
+        self.requests
+            .send(AppRequest::Window(WindowRequest::Close(self.id)));
     }
 
     fn native_handle(&self) -> Option<RawWindowHandle> {

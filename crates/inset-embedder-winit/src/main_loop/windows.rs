@@ -12,21 +12,39 @@ use inset_embedder::{EmbedderClient, HostWindow, View, ViewError, ViewFocusEvent
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
+use crate::app_requests::WindowRequest;
 use crate::os::System;
 use crate::os::capabilities::{FramePresentation, TrackpadTouches, WindowVisibility};
 use crate::screens::screen_of;
 use crate::view_focus;
 use crate::views::{Holder, SCREEN_VIEW};
 use crate::windows::{
-    OpenWindow, OpenedWindow, WindowObservers, WindowRequest, open_screen_window, window_metrics,
+    OpenWindow, OpenedWindow, RequestedWindow, WindowObservers, open_screen_window, window_metrics,
 };
 
 use super::{MainLoop, MainLoopEvent};
 
 impl<C: EmbedderClient> MainLoop<C> {
+    /// Serves what the framework asks of the windows: opening one, closing one, focusing one.
+    pub(super) fn on_window_request(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        request: WindowRequest,
+    ) {
+        match request {
+            WindowRequest::Open(requested) => self.open_window(event_loop, requested),
+            WindowRequest::Close(id) => self.close_window(id),
+            WindowRequest::ChangeFocus(change) => self.change_view_focus(change),
+        }
+    }
+
     /// Opens a window for the view the app asked for. The app hears of the view through
     /// `view_added`, which it tells by its request's id, or of the failure.
-    pub(super) fn open_window(&mut self, event_loop: &dyn ActiveEventLoop, request: WindowRequest) {
+    pub(super) fn open_window(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        request: RequestedWindow,
+    ) {
         let opened = self
             .view_maker
             .make_requested(event_loop, &request, self.state.views());

@@ -13,7 +13,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::app_requests::{AppRequest, EmbedderRequest};
+use crate::app_requests::{AppRequest, EmbedderRequest, WindowRequest};
 use crate::clipboard::ClipboardChanges;
 use crate::dispatcher::WinitDispatcher;
 use crate::file_dialogs::ParentWindows;
@@ -29,7 +29,7 @@ use crate::os::{self, System};
 use crate::popup_menus::NativePopupMenus;
 use crate::state::EmbedderState;
 use crate::view::WinitView;
-use crate::windows::WindowRequest;
+use crate::windows::RequestedWindow;
 use inset_embedder::{
     AppExit, Brightness, Cameras, Clipboard, CompositionLayer, Compositor, Dispatcher, DockMenu,
     FileDialogs, FontSource, ImageCodecFuture, Locale, MenuBar, Notifications, Opener, Platform,
@@ -245,11 +245,11 @@ impl Platform for WinitPlatform {
             return Err(ViewError::Unsupported);
         }
         let request_id = self.take_request_id();
-        self.send(AppRequest::OpenWindow(WindowRequest {
+        self.send(AppRequest::Window(WindowRequest::Open(RequestedWindow {
             request_id,
             config,
             initial_data,
-        }));
+        })));
         Ok(request_id)
     }
 

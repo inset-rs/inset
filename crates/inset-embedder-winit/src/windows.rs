@@ -175,8 +175,9 @@ impl WindowEntry {
     }
 }
 
-/// A request for a view, on its way to the loop, which makes a window for it.
-pub(crate) struct WindowRequest {
+/// A window the app asked for, on its way to the loop, which makes it: the request, its
+/// configuration, and what its view carries when it arrives.
+pub(crate) struct RequestedWindow {
     pub request_id: RequestId,
     pub config: WindowConfig,
     /// What the view carries when it arrives.
@@ -224,7 +225,7 @@ impl ViewMaker {
     pub(crate) fn make_requested(
         &self,
         event_loop: &dyn ActiveEventLoop,
-        window_request: &WindowRequest,
+        window_request: &RequestedWindow,
         views: &Views,
     ) -> Result<OpenedWindow, String> {
         let config = &window_request.config;

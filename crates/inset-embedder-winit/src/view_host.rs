@@ -19,7 +19,7 @@ use winit::event::{Ime, KeyEvent};
 use winit::keyboard::ModifiersState;
 use winit::window::Window;
 
-use crate::app_requests::{AppRequest, AppRequests};
+use crate::app_requests::{AppRequest, AppRequests, WindowRequest};
 use crate::ime::ImeOutcome;
 use crate::mouse_cursor;
 use crate::text_input::{TextInput, Typed};
@@ -81,10 +81,12 @@ impl ViewHost for WindowViewHost {
 
     fn request_focus_change(&self, state: ViewFocusState, direction: ViewFocusDirection) {
         self.requests
-            .send(AppRequest::ChangeViewFocus(ViewFocusEvent {
-                view_id: self.view,
-                state,
-                direction,
-            }));
+            .send(AppRequest::Window(WindowRequest::ChangeFocus(
+                ViewFocusEvent {
+                    view_id: self.view,
+                    state,
+                    direction,
+                },
+            )));
     }
 }

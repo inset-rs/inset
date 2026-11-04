@@ -21,27 +21,39 @@ use winit::window::WindowId;
 use crate::main_loop::MainLoopEvent;
 use crate::os::ViewLayer;
 use crate::view::WinitView;
-use crate::windows::WindowRequest;
+use crate::windows::RequestedWindow;
 
 /// A request the framework or the app makes of the embedder, for the main loop to serve.
 pub(crate) enum AppRequest {
     /// Draw a frame of this view at the next vsync of its window's screen.
     RequestFrame(ViewId),
-    /// Open a window for a view the app asked for; the view arrives through `view_added`.
-    OpenWindow(WindowRequest),
-    /// A created window's `close`: the window is freed, and its view goes.
-    CloseWindow(WindowId),
+    /// What the framework asks of the windows: opening, closing and focusing them.
+    Window(WindowRequest),
     /// What the app asks of the views it embeds, through the platform's `ViewEmbedder`.
     Embedder(EmbedderRequest),
-    /// Quit: the app's required exit.
-    Quit,
-    /// The framework's answer to a request to exit: quit on exit.
-    AnswerExit(AppExitResponse),
-    /// Focus a view's window, or give up its focus.
-    ChangeViewFocus(ViewFocusEvent),
+    /// The app's exit: its own, or its answer to the system's request.
+    Exit(ExitRequest),
     /// Look at the clipboard, and tell the app if it changed: the system cleared a copy of the
     /// app's that expired, or says the clipboard changed.
     LookAtClipboard,
+}
+
+/// What the framework asks of the windows the embedder makes.
+pub(crate) enum WindowRequest {
+    /// Open a window for a view the app asked for; the view arrives through `view_added`.
+    Open(RequestedWindow),
+    /// A created window's `close`: the window is freed, and its view goes.
+    Close(WindowId),
+    /// Focus a view's window, or give up its focus.
+    ChangeFocus(ViewFocusEvent),
+}
+
+/// The app's exit.
+pub(crate) enum ExitRequest {
+    /// Quit: the app's required exit.
+    Quit,
+    /// The framework's answer to a request to exit: quit on exit.
+    Answer(AppExitResponse),
 }
 
 /// What the app asks, through the platform's `ViewEmbedder`, of the views it embeds: what a window
@@ -99,16 +111,16 @@ mod tests {
     use super::*;
 
     fn focus(view: u64) -> AppRequest {
-        AppRequest::ChangeViewFocus(ViewFocusEvent {
+        AppRequest::Window(WindowRequest::ChangeFocus(ViewFocusEvent {
             view_id: ViewId(view),
             state: ViewFocusState::Focused,
             direction: ViewFocusDirection::Undefined,
-        })
+        }))
     }
 
     fn focused_view(request: Option<AppRequest>) -> Option<u64> {
         match request? {
-            AppRequest::ChangeViewFocus(change) => Some(change.view_id.0),
+            AppRequest::Window(WindowRequest::ChangeFocus(change)) => Some(change.view_id.0),
             _ => None,
         }
     }
