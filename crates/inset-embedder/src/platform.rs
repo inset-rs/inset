@@ -807,6 +807,7 @@ pub trait Screens {
 /// `FlutterEngineDisplayId`. Each host numbers its screens its own way; a screen keeps its
 /// number while it stays connected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ScreenId(pub u64);
 
 /// A monitor: where it is (the frames, for placing windows) and what drawing on it needs

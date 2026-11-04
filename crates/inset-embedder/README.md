@@ -225,6 +225,10 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - none yet
 - A panic in a platform callback aborts after printing its message, and background work drops its own panic.
 
+## The `serde` feature
+
+Off by default. With it, the values a host gives a view and takes from it derive serde's `Serialize` and `Deserialize`: `PointerReport` and what it holds, `KeyData` and its kinds, `ViewFocusEvent` and its state and direction, `ViewMetrics` and what it holds, `ViewId`, `ScreenId` and `SystemMouseCursorKind`. It is for an app that sends a view's input, and what the view asks of its host, between processes, as WaOS does for a view it shows in a program's window: the app sends Inset's own types rather than copies of them.
+
 ## References
 
 Paths start at each repository's root.

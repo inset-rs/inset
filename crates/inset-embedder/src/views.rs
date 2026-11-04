@@ -7,11 +7,13 @@ use crate::{
 
 /// Opaque id for one [`View`] (`FlutterView.viewId`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ViewId(pub u64);
 
 /// An event for the engine to communicate view focus changes to the app.
 /// Flutter counterpart: `ViewFocusEvent` in `dart:ui/platform_dispatcher.dart`.
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ViewFocusEvent {
     /// The ID of the view that experienced a focus change.
     pub view_id: ViewId,
@@ -23,6 +25,7 @@ pub struct ViewFocusEvent {
 
 /// Represents the focus state of a given view.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ViewFocusState {
     /// The view does not have platform focus.
     Unfocused,
@@ -32,6 +35,7 @@ pub enum ViewFocusState {
 
 /// Represents the direction in which focus transitioned across views.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ViewFocusDirection {
     /// The transition did not have a direction, such as a programmatic request or focus loss.
     Undefined,
@@ -43,6 +47,7 @@ pub enum ViewFocusDirection {
 
 /// Physical padding on each side of a view (`dart:ui` `ViewPadding`).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ViewPadding {
     pub left: f64,
     pub top: f64,
@@ -62,6 +67,7 @@ impl ViewPadding {
 
 /// Immutable layout constraints for a view (`dart:ui` `ViewConstraints`).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ViewConstraints {
     pub min_width: f64,
     pub max_width: f64,
@@ -108,6 +114,7 @@ impl Default for ViewConstraints {
 
 /// Per-view geometry the host reports (`_ViewConfiguration` fields we use).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ViewMetrics {
     pub physical_size: [f64; 2],
     pub physical_constraints: ViewConstraints,

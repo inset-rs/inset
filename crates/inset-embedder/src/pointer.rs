@@ -55,6 +55,7 @@ pub enum PointerChange {
 
 /// The kind of pointer device.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PointerDeviceKind {
     /// A touch-based pointer device.
     ///

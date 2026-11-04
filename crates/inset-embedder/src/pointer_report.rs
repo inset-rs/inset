@@ -12,6 +12,7 @@ use crate::{PointerChange, PointerData, PointerDeviceKind, PointerSignalKind, Vi
 /// how far the device came since the framework last heard of it, and the changes the system left
 /// out, the client adds ([`PointerDataPacketConverter`](crate::PointerDataPacketConverter)).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PointerReport {
     /// The view the device is over.
     pub view_id: ViewId,
@@ -38,6 +39,7 @@ pub struct PointerReport {
 
 /// How a device changed, with what the framework takes of that change.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ReportedChange {
     /// The device started being tracked, such as the mouse coming into the view.
     Add,
@@ -88,6 +90,7 @@ pub enum ReportedChange {
 /// How a finger or a pen meets the surface: [`PointerData`]'s fields of the same names. The
 /// default is a device that detects none of it, such as a mouse, whose pressure reads 1.0.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Contact {
     pub pressure: f64,
     pub pressure_min: f64,

@@ -5,6 +5,7 @@
 /// A system cursor kind (`SystemMouseCursor.kind`). The host maps each to its native cursor and
 /// shows the basic arrow for one it lacks; [`None`](Self::None) hides the cursor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SystemMouseCursorKind {
     None,
     Basic,

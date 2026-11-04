@@ -5,6 +5,7 @@ use std::time::Duration;
 
 /// The type of a key event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum KeyEventType {
     /// The key is pressed.
     Down,
@@ -31,6 +32,7 @@ impl KeyEventType {
 ///
 /// Not all platforms supply an accurate type.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum KeyEventDeviceType {
     /// The device is a keyboard.
     #[default]
@@ -65,6 +67,7 @@ impl KeyEventDeviceType {
 
 /// Information about a key event.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct KeyData {
     /// Time of event dispatch, relative to an arbitrary timeline.
     ///

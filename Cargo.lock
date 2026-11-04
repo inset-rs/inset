@@ -2154,6 +2154,8 @@ dependencies = [
  "objc2-io-surface",
  "pollster",
  "raw-window-handle",
+ "serde",
+ "serde_json",
  "valo",
  "valo-geometry",
  "valo-system-fonts",

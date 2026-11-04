@@ -12,11 +12,15 @@ categories.workspace = true
 [features]
 # Images and drawn pixels for tests, which need a GPU device to exist at all.
 test-support = ["dep:pollster"]
+# Serde's derives for the values a host gives a view and takes from it, for an app that sends them
+# between processes.
+serde = ["dep:serde"]
 
 [dependencies]
 indexmap.workspace = true
 raw-window-handle.workspace = true
 pollster = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
 valo.workspace = true
 valo-geometry.workspace = true
 valo-system-fonts.workspace = true
@@ -31,6 +35,12 @@ objc2-core-foundation = "0.3"
 objc2-io-surface = "0.3"
 
 [dev-dependencies]
+serde_json.workspace = true
+
+# Built only with the derives it tests.
+[[test]]
+name = "view_values_come_back_from_json_as_they_went"
+required-features = ["serde"]
 
 [lints]
 workspace = true
