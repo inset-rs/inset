@@ -337,6 +337,7 @@ impl<C: EmbedderClient> MainLoop<C> {
             AppRequest::RequestFrame(view) => self.request_frame(view),
             AppRequest::OpenWindow(request) => self.open_window(event_loop, request),
             AppRequest::CloseWindow(id) => self.close_window(id),
+            AppRequest::Embedder(request) => self.on_embedder_request(event_loop, request),
             AppRequest::Quit => self.quit(event_loop),
             AppRequest::AnswerExit(response) => self.on_exit_answered(event_loop, response),
             AppRequest::ChangeViewFocus(change) => self.change_view_focus(change),

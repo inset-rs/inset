@@ -115,12 +115,12 @@ pub use text::*;
 pub use text_editing::*;
 pub use text_input::*;
 pub use views::{
-    GestureSettings, TextInputHost, View, ViewConstraints, ViewFocusDirection, ViewFocusEvent,
-    ViewFocusState, ViewHost, ViewId, ViewMetrics, ViewPadding,
+    GestureSettings, TextInputHost, View, ViewConstraints, ViewEmbedder, ViewFocusDirection,
+    ViewFocusEvent, ViewFocusState, ViewHost, ViewId, ViewMetrics, ViewPadding,
 };
 pub use vsync::{VsyncObserver, VsyncWaiter};
 pub use web_time::Instant;
 pub use window::{
-    HostWindow, RawWindowHandle, RequestId, ViewError, ViewRequest, WindowBackground, WindowConfig,
-    WindowLevel, WindowRef,
+    HostWindow, RawWindowHandle, RequestId, ViewError, WindowBackground, WindowConfig, WindowLevel,
+    WindowRef,
 };

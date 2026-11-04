@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use inset_embedder::{Instant, PlatformRef, RequestId, ViewRequest, WindowConfig, WindowRef};
+use inset_embedder::{Instant, PlatformRef, RequestId, WindowConfig, WindowRef};
 
 /// How long a test that steps through time waits between its steps' checks.
 pub const TICK: Duration = Duration::from_millis(16);
@@ -45,10 +45,7 @@ pub fn pass(test: &str) -> ! {
 /// Asks for a window configured as `config`; its view arrives through `view_added`.
 pub fn request_window(platform: &PlatformRef, config: WindowConfig) -> RequestId {
     platform
-        .request_view(ViewRequest {
-            config,
-            initial_data: None,
-        })
+        .request_view(config, None)
         .expect("a desktop host makes windows")
 }
 
@@ -98,7 +95,7 @@ pub mod appkit {
         NSEventType, NSMenu, NSMenuItem, NSView, NSWindow,
     };
     use objc2_foundation::{NSPoint, NSString};
-    use objc2_quartz_core::CAMetalLayer;
+    use objc2_quartz_core::{CALayer, CAMetalLayer};
 
     /// The virtual key code of Escape (`kVK_Escape`).
     const ESCAPE_KEY_CODE: u16 = 0x35;
@@ -126,18 +123,21 @@ pub mod appkit {
     /// `title`: the layer a view draws into, which wgpu gives its device as it makes the view's
     /// surface from it.
     pub fn draws_into_a_metal_layer(title: &str) -> bool {
-        let Some(content) = window_titled(title)
+        window_titled(title)
             .and_then(|window| window.contentView())
             .and_then(|view| view.layer())
-        else {
-            return false;
-        };
-        let frame = content.frame();
+            .is_some_and(|content| draws_into_a_metal_layer_in(&content))
+    }
+
+    /// Whether a Metal layer with a device to draw with is at the middle of `layer`: the layer a
+    /// view draws into, whose composition layer is placed in `layer`, covering its middle.
+    pub fn draws_into_a_metal_layer_in(layer: &CALayer) -> bool {
+        let frame = layer.frame();
         let centre = NSPoint::new(
             frame.origin.x + frame.size.width / 2.0,
             frame.origin.y + frame.size.height / 2.0,
         );
-        content
+        layer
             .hitTest(centre)
             .and_then(|layer| layer.downcast::<CAMetalLayer>().ok())
             .is_some_and(|metal_layer| metal_layer.device().is_some())

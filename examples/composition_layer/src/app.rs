@@ -16,8 +16,8 @@ use inset_scheduler::{PersistentFrameCallback, SchedulerBinding};
 use inset_shell::Shell;
 use inset_widgets::{
     Center, ClipRRect, CompositionLayerView, DecoratedBox, Directionality, IntoWidget, Opacity,
-    Padding, Positioned, SizedBox, Stack, StackFit, Text, Transform, WidgetRef, Window,
-    WindowController, run_widget,
+    Padding, Positioned, SizedBox, Stack, StackFit, Text, Transform, ViewRequestState, WidgetRef,
+    Window, WindowController, run_widget,
 };
 
 use crate::producer::{self, Pacing, ViewScreen};
@@ -58,15 +58,16 @@ fn open_window(app: &mut App, exit_after: Option<Duration>, presentation: Presen
         ..WindowConfig::default()
     };
     let controller = WindowController::new(app, config);
-    WindowController::on_close_requested(controller, app, Rc::new(quit));
+    controller.on_close_requested(app, Rc::new(quit));
     let shown = Cell::new(false);
     let listenable: Rc<dyn Listenable> = Rc::new(controller);
     listenable.add_listener(
         app,
         Listener::new(move |app| {
-            if let Some(view) = WindowController::view(controller, app)
+            if let ViewRequestState::Arrived(view) = controller.request(app).state(app)
                 && !shown.replace(true)
             {
+                let view = Rc::clone(view);
                 show(app, controller, view, exit_after, presentation);
             }
         }),

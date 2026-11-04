@@ -6,15 +6,17 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use inset_embedder::{
-    AppExit, AppLifecycleState, Brightness, Cameras, Clipboard, Compositor, Dispatcher, DockMenu,
-    FileDialogs, FontSource, Haptics, Image, ImageCodecFuture, ImageDecodeError, Instant, MenuBar,
-    Notifications, Opener, Platform, Players, PopupMenus, RequestId, Restoration, SystemChrome,
-    SystemContextMenu, TargetPlatform, TextServices, TrayIcons, VideoFrameReaders, View, ViewError,
-    ViewId, ViewRef, ViewRequest,
+    AppExit, AppLifecycleState, Brightness, Cameras, Clipboard, CompositionLayer, Compositor,
+    Dispatcher, DockMenu, FileDialogs, FontSource, Haptics, Image, ImageCodecFuture,
+    ImageDecodeError, Instant, MenuBar, Notifications, Opener, Platform, Players, PointerReport,
+    PopupMenus, RequestId, Restoration, SystemChrome, SystemContextMenu, TargetPlatform,
+    TextServices, TrayIcons, VideoFrameReaders, View, ViewEmbedder, ViewError, ViewFocusEvent,
+    ViewHost, ViewId, ViewMetrics, ViewRef, WindowConfig,
 };
 
 use inset_embedder::valo;
 
+use crate::windows::view_of_request;
 use crate::{TestView, TestWindows};
 
 type FontSourceMaker = Rc<dyn Fn() -> Box<dyn FontSource>>;
@@ -25,6 +27,12 @@ type PixelImporter = Rc<dyn Fn(valo::PixelBuffer) -> Option<Image>>;
 /// capability as the test's own implementation or absent. It keeps the frames the framework asks
 /// for and the deadlines it asks to be woken at, so a test can assert on them; the test itself
 /// pumps the app, since there is no loop to run it.
+///
+/// With a compositor it has a view embedder, which adds a view on any layer the app asks it to
+/// (`ViewEmbedder::add_view`), at once: a [`TestView`] at the request's metrics, carrying its id
+/// and asking what it asks of the system of the app's host, listed among the views until the app
+/// removes it. The test tells the framework of each view's coming and going itself, as a host
+/// would through `EmbedderClient::view_added` and `view_removed`.
 pub struct TestPlatform {
     target: Cell<TargetPlatform>,
     brightness: Cell<Brightness>,
@@ -34,6 +42,10 @@ pub struct TestPlatform {
     /// The [`TestView`]s among them that [`with_views`](Self::with_views) made, which
     /// [`test_view`](Self::test_view) answers.
     test_views: Vec<Rc<TestView>>,
+    /// The number the next request for a view takes, a window's or one on a layer.
+    next_request: Cell<u64>,
+    /// The views the app added on layers and has not removed, in the order it added them.
+    added_views: RefCell<Vec<Rc<TestView>>>,
     /// The view of each frame asked for since the test last took them, in the order asked.
     frame_requests: RefCell<Vec<ViewId>>,
     dispatcher: Arc<TestDispatcher>,
@@ -72,6 +84,8 @@ impl TestPlatform {
             default_route: "/".into(),
             views: RefCell::default(),
             test_views: Vec::new(),
+            next_request: Cell::new(1),
+            added_views: RefCell::default(),
             frame_requests: RefCell::default(),
             dispatcher: Arc::new(TestDispatcher::default()),
             font_source: None,
@@ -132,6 +146,11 @@ impl TestPlatform {
     pub fn test_view(&self, id: ViewId) -> Rc<TestView> {
         let view = self.test_views.iter().find(|view| view.id() == id);
         Rc::clone(view.expect("a view with_views gave"))
+    }
+
+    /// The views the app added on layers and has not removed, in the order it added them.
+    pub fn added_views(&self) -> Vec<Rc<TestView>> {
+        self.added_views.borrow().clone()
     }
 
     /// Gives the app `view` while it runs, as an embedder adds one; the test tells the
@@ -341,6 +360,13 @@ impl TestPlatform {
     pub fn wake_now_requests(&self) -> usize {
         self.dispatcher.wake_now_requests()
     }
+
+    /// The number of a new request for a view.
+    fn take_request_id(&self) -> RequestId {
+        let id = RequestId(self.next_request.get());
+        self.next_request.set(id.0 + 1);
+        id
+    }
 }
 
 impl Default for TestPlatform {
@@ -367,20 +393,25 @@ impl Platform for TestPlatform {
     }
 
     fn views(&self) -> Vec<ViewRef> {
-        let requested = self.windows.iter().flat_map(|windows| windows.open_views());
+        let windows = self.windows.iter().flat_map(|windows| windows.open_views());
+        let added = self.added_views().into_iter().map(|view| view as ViewRef);
         let given = self.views.borrow().clone();
-        given.into_iter().chain(requested).collect()
+        given.into_iter().chain(windows).chain(added).collect()
     }
 
     fn view(&self, id: ViewId) -> Option<ViewRef> {
         self.views().into_iter().find(|view| view.id() == id)
     }
 
-    fn request_view(&self, request: ViewRequest) -> Result<RequestId, ViewError> {
-        match &self.windows {
-            Some(windows) => Ok(windows.request(request)),
-            None => Err(ViewError::Unsupported),
-        }
+    fn request_view(
+        &self,
+        config: WindowConfig,
+        initial_data: Option<String>,
+    ) -> Result<RequestId, ViewError> {
+        let windows = self.windows.as_ref().ok_or(ViewError::Unsupported)?;
+        let id = self.take_request_id();
+        windows.request(id, config, initial_data);
+        Ok(id)
     }
 
     fn platform_brightness(&self) -> Brightness {
@@ -466,6 +497,10 @@ impl Platform for TestPlatform {
         self.video_frame_readers.as_deref()
     }
 
+    fn view_embedder(&self) -> Option<&dyn ViewEmbedder> {
+        self.compositor.as_ref().map(|_| self as &dyn ViewEmbedder)
+    }
+
     fn dock_menu(&self) -> Option<&dyn DockMenu> {
         self.dock_menu.as_deref()
     }
@@ -481,6 +516,43 @@ impl Platform for TestPlatform {
     fn app_exit(&self) -> Option<&dyn AppExit> {
         self.app_exit.as_deref()
     }
+}
+
+/// The views the app adds on layers, made at once. The metrics, sight and input the app sends them
+/// go nowhere: a test hands the framework what a host would make of them itself.
+impl ViewEmbedder for TestPlatform {
+    fn add_view(
+        &self,
+        _layer: &Arc<dyn CompositionLayer>,
+        metrics: ViewMetrics,
+        host: Rc<dyn ViewHost>,
+    ) -> Result<RequestId, ViewError> {
+        let id = self.take_request_id();
+        let [width, height] = metrics.physical_size;
+        let mut view = TestView::with_pixel_ratio(width, height, metrics.device_pixel_ratio)
+            .with_id(view_of_request(id))
+            .with_request(id, None)
+            .with_host(host);
+        if let Some(screen) = metrics.screen {
+            view = view.on_screen(screen);
+        }
+        self.added_views.borrow_mut().push(Rc::new(view));
+        Ok(id)
+    }
+
+    fn set_view_metrics(&self, _view: ViewId, _metrics: ViewMetrics) {}
+
+    fn set_view_in_sight(&self, _view: ViewId, _in_sight: bool) {}
+
+    fn remove_view(&self, view: ViewId) {
+        self.added_views
+            .borrow_mut()
+            .retain(|added| added.id() != view);
+    }
+
+    fn send_pointer_reports(&self, _reports: Vec<PointerReport>) {}
+
+    fn send_view_focus_event(&self, _event: ViewFocusEvent) {}
 }
 
 /// A host that records what it was asked for and never wakes the app. The test pumps the app

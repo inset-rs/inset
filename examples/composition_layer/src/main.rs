@@ -17,6 +17,7 @@
 //! cargo run -p composition_layer -- --opacity 0.5
 //! cargo run -p composition_layer -- --turn 15 --rounded 24
 //! ```
+#![feature(arbitrary_self_types)]
 
 #[cfg(target_os = "macos")]
 mod app;

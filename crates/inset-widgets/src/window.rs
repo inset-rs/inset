@@ -16,7 +16,7 @@ use crate::framework::{
 };
 use crate::view::{View, ViewCollection};
 use crate::widgets::transitions::ListenableBuilder;
-use crate::windowing::WindowController;
+use crate::windowing::{ViewRequestState, WindowController};
 
 /// A widget that renders its `child` into the window of a [`WindowController`].
 ///
@@ -65,9 +65,11 @@ impl StatelessWidget for Window {
             let child = child
                 .cloned()
                 .expect("the window's content is passed as the child");
-            match controller.view(app) {
-                Some(view) => WindowScope::new(controller, View::new(view, child)).into_widget(),
-                None => ViewCollection::new(Vec::new()).into_widget(),
+            match controller.request(app).state(app) {
+                ViewRequestState::Arrived(view) => {
+                    WindowScope::new(controller, View::new(Rc::clone(view), child)).into_widget()
+                }
+                _ => ViewCollection::new(Vec::new()).into_widget(),
             }
         })
         .child(self.child.clone())

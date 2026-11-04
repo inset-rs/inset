@@ -58,6 +58,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the common configuration and the raw handle cover what a Rust app configures itself, as winit and wgpu expose theirs.
   Affect: an app names its windows' properties directly rather than choosing an archetype; a property the config lacks is set through the native handle; a host without windows refuses requests.
 
+- Change: an app adds a view on a composition layer of its own through the platform's view embedder (`Platform::view_embedder`, `ViewEmbedder::add_view`), which arrives carrying its request's id as a window's view does, gives it its metrics, says whether it is in sight and removes it (`set_view_metrics`, `set_view_in_sight`, `remove_view`), and sends any view pointer reports and focus changes (`send_pointer_reports`, `send_view_focus_event`), where these are Flutter's embedder API (`FlutterEngineAddView`, `SendWindowMetricsEvent`, `RemoveView`, `SendPointerEvent`, `SendViewFocusEvent`), which no Dart code calls.
+  Reason: platform — an app that shows a view in a place it makes itself, as WaOS shows a prompt in a program's window, is that view's embedder, and places its layer and passes it input as Flutter's embedder does.
+  Affect: the view shows only where the app places its layer, at the size and in the sight the app says, takes the input the app forwards, under device numbers no other stream uses; a host that cannot draw a view into a layer the app places has no view embedder.
+
 - Change: a view the platform gave may be in a window the app manages (`View::window`), and a view closes only through its window, where Flutter's implicit view has no window and its windows close through their controllers.
   Reason: platform — a host such as WaOS shows a given view in a window the app may move, title and close, as an iPad scene and an Android desktop window are, while a phone's screen, a web page's element and a host app's view are in nothing the app may close.
   Affect: closing a given view in a window closes the window; a view with no window is not the app's to close, and its way out is to quit.

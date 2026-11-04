@@ -62,6 +62,11 @@ impl CoreAnimationViewLayer {
             scale: Cell::new(None),
         })
     }
+
+    /// Whether the composition layer was made opaque (`Compositor::make_layer`).
+    pub(crate) fn is_opaque(&self) -> bool {
+        self.layer.opaque
+    }
 }
 
 impl ViewLayer for CoreAnimationViewLayer {

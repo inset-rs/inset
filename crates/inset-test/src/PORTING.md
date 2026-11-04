@@ -43,9 +43,13 @@ No Flutter crate in this shape. Closest analogue: `flutter_test`'s `TestPlatform
   Reason: platform — there is no real dispatcher under a test to wrap; the `Platform` the test hands to `AppCell` is the whole host.
   Affect: a test asserts on the frame requests and `wakes` instead of pumping a real engine, background work runs at once so a checkpoint sees its result, and a capability the test did not plug in answers `None`.
 
+- Change: a `TestPlatform` with a compositor has a view embedder, which adds a view on any layer the app asks it to, at once, as a `TestView` at the request's metrics asking what it asks of the system of the app's host, lists it until the app removes it, and numbers every request, a window's or one on a layer, from one count.
+  Reason: platform — it stands in for a host that draws a view into a layer the app made, as `TestWindows` stands in for one that makes windows.
+  Affect: a test drives a view the app adds on a layer without a host, and tells the framework of its coming and going itself; the metrics, sight and input the app sends it go nowhere.
+
 ## view_host.rs → flutter_test `TestTextInput`
 
-- Change: every `TestView` has a `TestViewHost`, which records the cursors shown over the view, the focus requested for it and what its text input was asked, where `flutter_test` logs the text input channel in `TestTextInput` and leaves the mouse cursor channel to each test's own mock.
+- Change: every `TestView` has a `TestViewHost`, which records the cursors shown over the view, the focus requested for it and what its text input was asked, unless the app added the view on a layer and gave it a host of its own, where `flutter_test` logs the text input channel in `TestTextInput` and leaves the mouse cursor channel to each test's own mock.
   Reason: platform — what a view asks of the system goes to that view's host, and every view has one.
   Affect: a test reads what a view asked of the system from the view, and a text field under test talks to a text input that answers nothing and edits nothing itself.
 

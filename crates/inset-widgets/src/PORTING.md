@@ -96,21 +96,25 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 - Change: `MultiViewApp` is a framework widget, where Flutter shows it as a sample in its web embedding guide, and it answers close requests on its views.
   Reason: platform — there is no implicit view, so every app that is given views builds them this way.
-  Affect: it builds only the views the platform gave, never one a `WindowController` asked for; an app's root is a `MultiViewApp`, its own `Window`s, or both in a `ViewCollection`.
+  Affect: it builds only the views the platform gave, never one the app asked for, a window's or one on a layer; an app's root is a `MultiViewApp`, its own `Window`s, or both in a `ViewCollection`.
 
 ## windowing.rs → _window.dart (`WindowController`, `WindowControllerDelegate`)
 
 - Change: `WindowController::new` asks the platform for a window and gets its view when the view arrives, where Flutter's controller makes the window within its constructor; a close request goes to its handler, or closes it, as Flutter's delegate does by default.
   Reason: platform — the host makes a window on its own loop, and the view arrives later, carrying the request's id.
-  Affect: a controller has no view at first, and its listeners hear the view arrive and go; one closed before its view arrives closes the window as it arrives, unseen.
+  Affect: a controller has no view at first, and its listeners hear the view arrive and go; one closed before its view arrives closes the window as it arrives, unseen, and its listeners hear its request end with no view.
 
 - Change: a window controller answers whether its window is minimized and whether it is occluded, and its listeners hear each time the host says either changed or the window moved, where Flutter's controller asks the platform whether its window is minimized, has no answer for a covered one, and is notified by each platform's own windowing, on Windows at every resize and activation too.
   Reason: platform — the host hears a window's changes and reports them by view, and a resize already reaches the app as the view's metrics.
   Affect: a controller with no window answers no to both, its listeners hear the window minimized, covered, shown again or moved but not resized, and the window of a view no controller asked for changes unheard.
 
-- Change: `WidgetsBinding::windowing_owner` is one `WindowingOwner` that keeps the controllers by their requests and hears every view event first, claiming the views they asked for, where Flutter's is an abstract factory with an implementation per platform, which `createWindowingOwner` and a setter replace.
-  Reason: platform — the host makes the windows behind `Platform::request_view`, so what differs between platforms is the host's, and the owner only matches arriving views to requests.
-  Affect: no app or test installs a windowing owner of its own; a test stands in for windows through its platform's `request_view`.
+- Change: `ViewRequest` is a view the app asked for, a window's, which a `WindowController` holds and adds a window's closing to, or one on a composition layer of the app's own (`ViewRequest::on_layer`), whose one state is pending, arrived with its view, refused or ended, and whose listeners hear each change, where Flutter's framework has no object for a view its embedder adds.
+  Reason: platform — the host adds a view on a layer on its own loop, as it makes a window, so either view arrives later carrying its request's id.
+  Affect: an app has a view on its layer once the request's listeners hear it arrive, gives it its size and sight and removes it through the platform's view embedder, and no `MultiViewApp` builds it; `on_layer` answers no request where the platform has no view embedder; a request ends when its view goes or its window is closed before the view came, so nothing waits for a view that will not come.
+
+- Change: `WidgetsBinding::windowing_owner` is one `WindowingOwner` that keeps the requests and the window controllers by their ids and hears every view event first, claiming the views the app asked for, where Flutter's is an abstract factory with an implementation per platform, which `createWindowingOwner` and a setter replace.
+  Reason: platform — the host makes the windows behind `Platform::request_view` and the views behind `ViewEmbedder::add_view`, so what differs between platforms is the host's, and the owner only matches arriving views to requests.
+  Affect: no app or test installs a windowing owner of its own; a test stands in for windows and for views on layers through its platform's `request_view` and its view embedder.
 
 ## widgets/composition_layer_view.rs → platform views (`AndroidView`, `UiKitView`, `Texture`)
 

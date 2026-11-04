@@ -196,14 +196,14 @@ pub trait View: 'static {
     fn host(&self) -> &dyn ViewHost;
 
     /// What whoever gave or asked for this view attached to it, such as which screen to show:
-    /// a request's [`ViewRequest::initial_data`](crate::ViewRequest::initial_data), or what an
-    /// embedder said, as Flutter web's `initialData` does. `None` for a view with none.
+    /// what the app asked for it with ([`crate::Platform::request_view`]), or what an embedder
+    /// said, as Flutter web's `initialData` does. `None` for a view with none.
     fn initial_data(&self) -> Option<String> {
         None
     }
 
-    /// The request this view arrived for ([`crate::Platform::request_view`]); `None` for a view
-    /// the platform gave the app unasked.
+    /// The request this view arrived for ([`crate::Platform::request_view`],
+    /// [`crate::Platform::add_view`]); `None` for a view the platform gave the app unasked.
     fn request_id(&self) -> Option<crate::RequestId> {
         None
     }
@@ -284,4 +284,56 @@ pub trait TextInputHost {
     fn provides_edit_commands(&self) -> bool {
         false
     }
+}
+
+/// What the app uses to embed views of its own, as Flutter's embedder does: adding one on a layer
+/// it makes and places, giving its metrics and its being in sight, handing it input, and removing
+/// it ([`Platform::view_embedder`](crate::Platform::view_embedder)).
+pub trait ViewEmbedder {
+    /// Flutter's `AddView`, for the app: asks for a view that draws into `layer`, which the app
+    /// made with the platform's [`compositor`](crate::Platform::compositor), opaque or not, and
+    /// places itself, at `metrics`, asking what it asks of the system of `host`. The view arrives
+    /// as a window's does, through `EmbedderClient::view_added`, carrying the id answered here
+    /// ([`View::request_id`]); it is in sight until the app says otherwise
+    /// ([`set_view_in_sight`](Self::set_view_in_sight)), and its frames follow the screen its
+    /// metrics name. Refused at once, with
+    /// [`ViewError::Unsupported`](crate::ViewError::Unsupported), where the host cannot draw a
+    /// view into `layer`.
+    fn add_view(
+        &self,
+        layer: &std::sync::Arc<dyn crate::CompositionLayer>,
+        metrics: ViewMetrics,
+        host: std::rc::Rc<dyn ViewHost>,
+    ) -> Result<crate::RequestId, crate::ViewError>;
+
+    /// Flutter's `SendWindowMetricsEvent`, for a view the app added with
+    /// [`add_view`](Self::add_view), which the framework hears of through
+    /// `EmbedderClient::view_metrics_changed`; refused for any other view, whose holder gives it
+    /// its metrics.
+    fn set_view_metrics(&self, view: ViewId, metrics: ViewMetrics);
+
+    /// Whether a view the app added is in sight, as only the app knows where it placed the view's
+    /// layer: its frames are held while it is not, as a window's are while the window is
+    /// minimized or occluded. Refused for any other view, as its metrics are.
+    fn set_view_in_sight(&self, view: ViewId, in_sight: bool);
+
+    /// Flutter's `RemoveView`, for a view the app added, refused for any other as its metrics
+    /// are: the view lets go of its layer, and the framework hears of it through
+    /// `EmbedderClient::view_removed`.
+    fn remove_view(&self, view: ViewId);
+
+    /// Flutter's `SendPointerEvent`, for the app: what pointing devices did over any view, a
+    /// window's included, which the framework hears as it hears the host's own reports
+    /// (`EmbedderClient::pointer_reports`), through the one converter that numbers every pointer.
+    /// Each device of a forwarded stream (its mouse, trackpad and pen, and each touch from landing
+    /// to lifting) takes a device number no other stream uses, a random 64-bit one for now, since
+    /// the converter keeps one state per device number, a forwarding app's own host numbers its
+    /// devices as this one does, 0, 1, 2 upward, and two streams with no order between them would
+    /// mix their devices' states in one (native-surfaces decision 36).
+    fn send_pointer_reports(&self, reports: Vec<crate::PointerReport>);
+
+    /// Flutter's `SendViewFocusEvent`, for the app: a view's focus change, which the framework
+    /// hears as it hears the host's own (`EmbedderClient::view_focus_changed`), so that the keys
+    /// the host reports go where the framework's focus is.
+    fn send_view_focus_event(&self, event: ViewFocusEvent);
 }

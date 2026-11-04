@@ -15,6 +15,7 @@
 //! cargo run -p video_frames -- --turn 8 --rounded 32
 //! cargo run -p video_frames -- --movie ~/Movies/clip.mov
 //! ```
+#![feature(arbitrary_self_types)]
 
 #[cfg(target_os = "macos")]
 mod app;

@@ -532,16 +532,18 @@ pub trait Platform: Any {
     /// Looks up one of the app's views.
     fn view(&self, id: ViewId) -> Option<ViewRef>;
 
-    /// Asks for a view. A desktop makes a window for it; a platform that gives the app its views
-    /// and makes none, a phone or an embedder, answers
-    /// [`ViewError::Unsupported`](crate::ViewError::Unsupported). The view arrives later, through
-    /// `EmbedderClient::view_added`, carrying the id answered here; a request that fails on the way
-    /// is reported through `EmbedderClient::view_request_failed`.
+    /// Asks for a view in a window configured as `config`, carrying `initial_data`
+    /// ([`View::initial_data`](crate::View::initial_data)), such as which screen to show. A
+    /// desktop makes the window; a platform that gives the app its views and makes none, a phone
+    /// or an embedder, answers [`ViewError::Unsupported`](crate::ViewError::Unsupported). The view
+    /// arrives later, through `EmbedderClient::view_added`, carrying the id answered here; a
+    /// request that fails on the way is reported through `EmbedderClient::view_request_failed`.
     fn request_view(
         &self,
-        request: crate::ViewRequest,
+        config: crate::WindowConfig,
+        initial_data: Option<String>,
     ) -> Result<crate::RequestId, crate::ViewError> {
-        let _ = request;
+        let _ = (config, initial_data);
         Err(crate::ViewError::Unsupported)
     }
 
@@ -708,6 +710,12 @@ pub trait Platform: Any {
     /// The system's frame readers, which a player or a camera hands its frames to, or `None`
     /// where the system hands out no frames.
     fn video_frame_readers(&self) -> Option<&dyn crate::VideoFrameReaders> {
+        None
+    }
+
+    /// What the app embeds views of its own with, on layers it makes and places, or `None` where
+    /// the host cannot draw a view into such a layer: everywhere but macOS today.
+    fn view_embedder(&self) -> Option<&dyn crate::ViewEmbedder> {
         None
     }
 

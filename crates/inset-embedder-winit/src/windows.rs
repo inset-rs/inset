@@ -21,8 +21,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use inset_embedder::{
-    RequestId, View, ViewConstraints, ViewHost, ViewId, ViewMetrics, ViewPadding, ViewRequest,
-    WindowConfig, WindowLevel,
+    RequestId, View, ViewConstraints, ViewHost, ViewId, ViewMetrics, ViewPadding, WindowConfig,
+    WindowLevel,
 };
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event_loop::ActiveEventLoop;
@@ -178,7 +178,9 @@ impl WindowEntry {
 /// A request for a view, on its way to the loop, which makes a window for it.
 pub(crate) struct WindowRequest {
     pub request_id: RequestId,
-    pub request: ViewRequest,
+    pub config: WindowConfig,
+    /// What the view carries when it arrives.
+    pub initial_data: Option<String>,
 }
 
 /// The screen view's window, which opens at winit's first call: its configuration, and the view
@@ -225,12 +227,12 @@ impl ViewMaker {
         window_request: &WindowRequest,
         views: &Views,
     ) -> Result<OpenedWindow, String> {
-        let config = &window_request.request.config;
+        let config = &window_request.config;
         let window = open_window(event_loop, config)?;
         let (view, host) = self.view(views.take_id(), config);
         let view = Rc::new(view.with_request(
             window_request.request_id,
-            window_request.request.initial_data.clone(),
+            window_request.initial_data.clone(),
         ));
         let (view_layer, hold) = hold_view(&window, &host);
         let handle = Rc::new(WinitWindow::new(

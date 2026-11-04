@@ -1,14 +1,15 @@
 //! Asking for views, and the windows around them. Not a Flutter file.
 //!
-//! An app asks for a view with a [`ViewRequest`] (`Platform::request_view`), and the view
-//! arrives later, as every view does, carrying the request's [`RequestId`], as iOS hands back
-//! the activity of `requestSceneSessionActivation` with the connecting scene. On a desktop the
-//! host makes a window for it; where the platform gives the app views and makes none, on a
-//! phone and when embedded, a request is refused. A view in a window the app may manage, one it
-//! asked for or one the platform gave, has a [`HostWindow`] (`View::window`): the configuration
-//! every window wants up front, whether the window is minimized or occluded, which the host
-//! reports with the window's moves (`EmbedderClient::window_changed`), the native handle for
-//! anything beyond it, and the window's closing, which is how a view closes.
+//! An app asks for a view in a window configured as a [`WindowConfig`]
+//! (`Platform::request_view`), and the view arrives later, as every view does, carrying the
+//! request's [`RequestId`], as iOS hands back the activity of `requestSceneSessionActivation` with
+//! the connecting scene. On a desktop the host makes the window; where the platform gives the app
+//! views and makes none, on a phone and when embedded, a request is refused. A view in a window
+//! the app may manage, one it asked for or one the platform gave, has a [`HostWindow`]
+//! (`View::window`): the configuration every window wants up front, whether the window is
+//! minimized or occluded, which the host reports with the window's moves
+//! (`EmbedderClient::window_changed`), the native handle for anything beyond it, and the window's
+//! closing, which is how a view closes.
 //!
 //! Flutter's windowing API (`widgets/_window.dart`, experimental) builds window archetypes
 //! over the engine's views, each controller making its window within its constructor.
@@ -96,16 +97,6 @@ impl WindowBackground {
     pub fn sees_through(self) -> bool {
         self != WindowBackground::Solid
     }
-}
-
-/// What an app asks for when it asks for a view.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ViewRequest {
-    /// The window a desktop makes for the view.
-    pub config: WindowConfig,
-    /// What the view carries when it arrives ([`View::initial_data`](crate::View::initial_data)),
-    /// such as which screen to show.
-    pub initial_data: Option<String>,
 }
 
 /// The number of a request for a view, which the view carries when it arrives

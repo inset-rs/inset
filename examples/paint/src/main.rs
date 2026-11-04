@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use inset_embedder::{
     Color, ColorSpace, Offset, RRect, Radius, Rect, RequestId, SceneBuilder, ViewMetrics, ViewRef,
-    ViewRequest, WindowConfig,
+    WindowConfig,
 };
 use inset_embedder_winit::WinitEmbedder;
 use inset_foundation::App;
@@ -29,14 +29,14 @@ fn main() {
 fn open_window(app: &mut App) {
     let request_id = app
         .platform()
-        .request_view(ViewRequest {
-            config: WindowConfig {
+        .request_view(
+            WindowConfig {
                 title: "Inset — paint".to_owned(),
                 size: [900.0, 600.0],
                 ..WindowConfig::default()
             },
-            initial_data: None,
-        })
+            None,
+        )
         .expect("a desktop host makes windows");
     app.platform_callbacks_mut().on_view_close_requested = Some(Rc::new(|app, _view| quit(app)));
     app.platform_callbacks_mut().on_view_added = Some(Rc::new(|app, view| {

@@ -16,7 +16,7 @@ use crate::os::System;
 use crate::os::capabilities::{FramePresentation, TrackpadTouches, WindowVisibility};
 use crate::screens::screen_of;
 use crate::view_focus;
-use crate::views::SCREEN_VIEW;
+use crate::views::{Holder, SCREEN_VIEW};
 use crate::windows::{
     OpenWindow, OpenedWindow, WindowObservers, WindowRequest, open_screen_window, window_metrics,
 };
@@ -50,7 +50,8 @@ impl<C: EmbedderClient> MainLoop<C> {
         let observers = self.observe_window(&*open.window);
         self.windows().add(open.clone(), hold, observers);
         let metrics = window_metrics(&*open.window);
-        self.add_view(event_loop, Rc::clone(&open.view), view_layer, metrics);
+        let view = Rc::clone(&open.view);
+        self.add_view(event_loop, view, view_layer, metrics, Holder::Window);
         self.set_view_in_sight(open.view.id(), is_in_sight(&open));
         self.read_theme_of(&*open.window);
     }

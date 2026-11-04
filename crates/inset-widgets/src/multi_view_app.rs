@@ -184,7 +184,10 @@ mod tests {
         Quits, report_view_added, report_view_removed, report_windows_made, request_view_close,
         views_cell,
     };
-    use crate::{AppLifecycleListener, SizedBox, Window, WindowController, run_app, run_app_with};
+    use crate::{
+        AppLifecycleListener, SizedBox, ViewRequestState, Window, WindowController, run_app,
+        run_app_with,
+    };
 
     struct Platform {
         cell: Rc<AppCell>,
@@ -333,7 +336,10 @@ mod tests {
             WindowController::new(&mut platform.cell.borrow_mut(), WindowConfig::default());
         run_app_titled(&platform.cell, "unused");
         report_windows_made(&platform.cell, &platform.windows, Duration::from_millis(16));
-        assert!(controller.view(&platform.cell.borrow()).is_some());
+        let app = platform.cell.borrow();
+        let state = controller.request(&app).state(&app);
+        assert!(matches!(state, ViewRequestState::Arrived(_)), "{state:?}");
+        drop(app);
 
         request_view_close(&platform.cell, ViewId(1));
         assert_eq!(platform.quits.count(), 0, "not the last view");

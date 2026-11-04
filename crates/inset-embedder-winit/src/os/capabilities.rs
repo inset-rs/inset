@@ -265,6 +265,17 @@ pub(crate) trait NativeComposition {
     /// adds: makes the layer the view shows into and places it in the window, filling it. Answers
     /// the layer, which the view is added on, and the window's hold on it. Main thread.
     fn view_layer_in(window: &Arc<dyn Window>) -> (Self::ViewLayer, Self::WindowHold);
+
+    /// Whether a view the app adds can draw into a composition layer the app places, which
+    /// `view_layer_on` then answers for every layer this host's compositor made.
+    const DRAWS_VIEWS_INTO_LAYERS: bool = false;
+
+    /// What a view the app adds on `layer` shows into, and whether `layer` was made opaque; `None`
+    /// where the system cannot draw a view into a composition layer, and for a layer another host
+    /// made. Main thread.
+    fn view_layer_on(_layer: &Arc<dyn CompositionLayer>) -> Option<(Self::ViewLayer, bool)> {
+        None
+    }
 }
 
 /// What a view shows into: the source of the surface it draws on, and the place of the composition

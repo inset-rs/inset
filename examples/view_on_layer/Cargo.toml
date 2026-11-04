@@ -1,0 +1,30 @@
+[package]
+name = "view_on_layer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+inset-embedder.workspace = true
+inset-embedder-winit.workspace = true
+inset-foundation.workspace = true
+inset-gestures.workspace = true
+inset-painting.workspace = true
+inset-rendering.workspace = true
+inset-scheduler.workspace = true
+inset-shell.workspace = true
+inset-widgets.workspace = true
+
+# The layer of the window's view, which the added view's layer is placed in.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSResponder", "NSView", "objc2-quartz-core"] }
+objc2-quartz-core = { version = "0.3", features = ["CALayer"] }
+
+# Reaching the window's view through its native handle needs `unsafe`, which the workspace
+# forbids; here it is denied instead, and `window_layer.rs` alone allows it.
+[lints.rust]
+unsafe_code = "deny"

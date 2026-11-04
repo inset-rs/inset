@@ -1,7 +1,7 @@
 //! A view that draws nowhere.
 
 use std::cell::{Cell, RefCell};
-use std::rc::Weak;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use inset_embedder::{
@@ -31,6 +31,9 @@ pub struct TestView {
     window: RefCell<Option<Weak<dyn HostWindow>>>,
     /// What the view asks of the system, recorded.
     host: TestViewHost,
+    /// The host the app gave a view it added, which takes what the view asks of the system in
+    /// place of `host`.
+    app_host: Option<Rc<dyn ViewHost>>,
 }
 
 impl TestView {
@@ -52,6 +55,7 @@ impl TestView {
             initial_data: None,
             window: RefCell::new(None),
             host: TestViewHost::default(),
+            app_host: None,
         }
     }
 
@@ -65,6 +69,13 @@ impl TestView {
     pub fn with_request(mut self, id: RequestId, initial_data: Option<String>) -> TestView {
         self.request_id = Some(id);
         self.initial_data = initial_data;
+        self
+    }
+
+    /// The same view asking what it asks of the system of `host`, as a view the app adds on a
+    /// layer does; its own [`test_host`](Self::test_host) hears nothing then.
+    pub fn with_host(mut self, host: Rc<dyn ViewHost>) -> TestView {
+        self.app_host = Some(host);
         self
     }
 
@@ -130,7 +141,7 @@ impl View for TestView {
     }
 
     fn host(&self) -> &dyn ViewHost {
-        &self.host
+        self.app_host.as_deref().unwrap_or(&self.host)
     }
 
     fn initial_data(&self) -> Option<String> {

@@ -146,4 +146,6 @@ pub use widgets::visibility::*;
 pub use widgets::widget_span::*;
 pub use widgets::widget_state::*;
 pub use window::*;
-pub use windowing::{ViewCloseHandler, WindowController, WindowingOwner};
+pub use windowing::{
+    ViewCloseHandler, ViewRequest, ViewRequestState, WindowController, WindowingOwner,
+};

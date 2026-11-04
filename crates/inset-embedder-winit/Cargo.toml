@@ -129,6 +129,10 @@ name = "an_app_asks_for_a_view_and_draws_in_it"
 harness = false
 
 [[test]]
+name = "an_app_adds_a_view_on_a_layer_and_controls_it"
+harness = false
+
+[[test]]
 name = "a_window_stays_open_until_the_app_closes_it"
 harness = false
 

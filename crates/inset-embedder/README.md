@@ -57,6 +57,10 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - `Platform::request_view`, `View::request_id`, `View::window`, `HostWindow`, `EmbedderClient::view_close_requested`, `view_request_failed`
 - Make a window for each request on a turn of the loop, add its view carrying the request's id and initial data, or report the failure, and give each `WindowConfig` option the system's nearest equivalent. Refuse requests where the platform gives the app its views. Report the user's request to close a view and close nothing until the app does.
 
+**Views the app adds on layers**
+- `Platform::view_embedder`, `ViewEmbedder::add_view`, `set_view_metrics`, `set_view_in_sight`, `remove_view`, `send_pointer_reports`, `send_view_focus_event`
+- Where the compositor shows a view's drawing as a composition layer's content, give the app a view embedder, and elsewhere none. Add a view on a layer of the app's own on a turn of the loop, as a window's view is added, carrying the request's id and asking the app's host what it asks of the system, and refuse at once a layer the view cannot draw into. Give the view the metrics, the sight and the end the app says, refusing them for any other view and reporting the first refusal, and hand the client the pointer reports and focus changes the app sends as the host's own (native-surfaces decisions 33 and 36, `waos/docs/proposals/2026-10-30-native-surfaces.md`).
+
 **Minimized, occluded and moved**
 - `HostWindow::is_minimized`, `is_occluded`, `frame`, `EmbedderClient::window_changed`
 - Answer whether each window is minimized and whether it is occluded as the system says, `false` where it does not say, and call `window_changed` once the window answers the new state, each time either changes or the window moves. A resize is reported as a metrics change alone.

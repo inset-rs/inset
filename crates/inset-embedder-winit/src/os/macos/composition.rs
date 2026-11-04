@@ -52,6 +52,14 @@ impl NativeComposition for AppKit {
             CoreAnimationViewLayer::on(&layer).expect("a layer this host's compositor made");
         (view_layer, filling)
     }
+
+    const DRAWS_VIEWS_INTO_LAYERS: bool = true;
+
+    fn view_layer_on(layer: &Arc<dyn CompositionLayer>) -> Option<(CoreAnimationViewLayer, bool)> {
+        let view_layer = CoreAnimationViewLayer::on(layer)?;
+        let opaque = view_layer.is_opaque();
+        Some((view_layer, opaque))
+    }
 }
 
 impl WindowLayer for AppKit {

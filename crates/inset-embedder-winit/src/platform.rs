@@ -13,7 +13,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::app_requests::AppRequest;
+use crate::app_requests::{AppRequest, EmbedderRequest};
 use crate::clipboard::ClipboardChanges;
 use crate::dispatcher::WinitDispatcher;
 use crate::file_dialogs::ParentWindows;
@@ -28,12 +28,14 @@ use crate::os::capabilities::{
 use crate::os::{self, System};
 use crate::popup_menus::NativePopupMenus;
 use crate::state::EmbedderState;
+use crate::view::WinitView;
 use crate::windows::WindowRequest;
 use inset_embedder::{
-    AppExit, Brightness, Cameras, Clipboard, Compositor, Dispatcher, DockMenu, FileDialogs,
-    FontSource, ImageCodecFuture, Locale, MenuBar, Notifications, Opener, Platform, Players,
-    PopupMenus, RequestId, Screens, SystemFontSource, TargetPlatform, TrayIcons, VideoFrameReaders,
-    ViewError, ViewId, ViewRef, ViewRequest, VsyncWaiter,
+    AppExit, Brightness, Cameras, Clipboard, CompositionLayer, Compositor, Dispatcher, DockMenu,
+    FileDialogs, FontSource, ImageCodecFuture, Locale, MenuBar, Notifications, Opener, Platform,
+    Players, PointerReport, PopupMenus, RequestId, Screens, SystemFontSource, TargetPlatform,
+    TrayIcons, VideoFrameReaders, ViewEmbedder, ViewError, ViewFocusEvent, ViewHost, ViewId,
+    ViewMetrics, ViewRef, VsyncWaiter, WindowConfig,
 };
 
 /// The long-lived embedder capability held by `App`.
@@ -130,6 +132,11 @@ impl WinitPlatform {
         self.state.requests().send(request);
     }
 
+    /// Sends the main loop what the app asks of the views it embeds, in order with the rest.
+    fn send_to_embedder(&self, request: EmbedderRequest) {
+        self.send(AppRequest::Embedder(request));
+    }
+
     pub(crate) fn elapsed(&self) -> Duration {
         self.now().saturating_duration_since(self.origin)
     }
@@ -147,6 +154,13 @@ impl WinitPlatform {
     /// Clears the app's copy whose time has come by `now`; answers whether it cleared one.
     pub(crate) fn clear_expired_clipboard(&self, now: Instant) -> bool {
         self.clipboard.clear_expired(now)
+    }
+
+    /// The id of a new request for a view: a window's, or one on a layer of the app's.
+    fn take_request_id(&self) -> RequestId {
+        let request_id = RequestId(self.next_request_id.get());
+        self.next_request_id.set(request_id.0 + 1);
+        request_id
     }
 
     /// What the embedder knows, for the parts of the platform in other files.
@@ -222,15 +236,19 @@ impl Platform for WinitPlatform {
 
     /// A window for the view, made on a turn of the main loop, where the app may open windows:
     /// none on iOS.
-    fn request_view(&self, request: ViewRequest) -> Result<RequestId, ViewError> {
+    fn request_view(
+        &self,
+        config: WindowConfig,
+        initial_data: Option<String>,
+    ) -> Result<RequestId, ViewError> {
         if !System::APP_MAY_OPEN_WINDOWS {
             return Err(ViewError::Unsupported);
         }
-        let request_id = RequestId(self.next_request_id.get());
-        self.next_request_id.set(request_id.0 + 1);
+        let request_id = self.take_request_id();
         self.send(AppRequest::OpenWindow(WindowRequest {
             request_id,
-            request,
+            config,
+            initial_data,
         }));
         Ok(request_id)
     }
@@ -286,6 +304,11 @@ impl Platform for WinitPlatform {
         self.video_frame_readers.as_deref()
     }
 
+    /// On macOS, where a view draws into a composition layer of its own (`os/capabilities.rs`).
+    fn view_embedder(&self) -> Option<&dyn ViewEmbedder> {
+        System::DRAWS_VIEWS_INTO_LAYERS.then_some(self)
+    }
+
     fn app_exit(&self) -> Option<&dyn AppExit> {
         System::APP_MAY_QUIT.then_some(self)
     }
@@ -297,5 +320,57 @@ impl Platform for WinitPlatform {
     /// The system's notifications (`os/*/notifications`).
     fn notifications(&self) -> Option<&dyn Notifications> {
         self.notifications.as_deref()
+    }
+}
+
+/// The views the app adds on layers of its own, which only macOS draws (`view_embedder`).
+impl ViewEmbedder for WinitPlatform {
+    /// A view made now, drawing into `layer`'s content and seeing through where `layer` is not
+    /// opaque, and added on a turn of the main loop as a window's view is (`main_loop/views.rs`);
+    /// refused for a layer another host made.
+    fn add_view(
+        &self,
+        layer: &Arc<dyn CompositionLayer>,
+        metrics: ViewMetrics,
+        host: Rc<dyn ViewHost>,
+    ) -> Result<RequestId, ViewError> {
+        let (view_layer, opaque) = System::view_layer_on(layer).ok_or(ViewError::Unsupported)?;
+        let request_id = self.take_request_id();
+        let view = WinitView::new(
+            self.state.views().take_id(),
+            self.state.gpu(),
+            !opaque,
+            host,
+        )
+        .with_request(request_id, None);
+        self.send_to_embedder(EmbedderRequest::AddView(Rc::new(view), view_layer, metrics));
+        Ok(request_id)
+    }
+
+    /// On a turn of the main loop, as a window's code gives its view metrics, unless the registry
+    /// refuses a view the app did not add (`views.rs`).
+    fn set_view_metrics(&self, view: ViewId, metrics: ViewMetrics) {
+        self.send_to_embedder(EmbedderRequest::SetViewMetrics(view, metrics));
+    }
+
+    /// On a turn of the main loop, as a window's code says its view is in sight, refused as
+    /// metrics are.
+    fn set_view_in_sight(&self, view: ViewId, in_sight: bool) {
+        self.send_to_embedder(EmbedderRequest::SetViewInSight(view, in_sight));
+    }
+
+    /// On a turn of the main loop, refused as metrics are.
+    fn remove_view(&self, view: ViewId) {
+        self.send_to_embedder(EmbedderRequest::RemoveView(view));
+    }
+
+    /// On a turn of the main loop, as the host's own reports are sent.
+    fn send_pointer_reports(&self, reports: Vec<PointerReport>) {
+        self.send_to_embedder(EmbedderRequest::SendPointerReports(reports));
+    }
+
+    /// On a turn of the main loop, as a window's own focus changes are reported.
+    fn send_view_focus_event(&self, event: ViewFocusEvent) {
+        self.send_to_embedder(EmbedderRequest::SendViewFocusEvent(event));
     }
 }

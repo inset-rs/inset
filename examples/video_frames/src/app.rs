@@ -20,7 +20,8 @@ use inset_shell::Shell;
 use inset_widgets::{
     AspectRatio, Center, ClipRRect, Column, DecoratedBox, Directionality, GestureDetector,
     IntoWidget, ListenableBuilder, MainAxisSize, Padding, Player, Positioned, SizedBox, Stack,
-    SubtitleView, Text, Transform, VideoFrameView, WidgetRef, Window, WindowController, run_widget,
+    SubtitleView, Text, Transform, VideoFrameView, ViewRequestState, WidgetRef, Window,
+    WindowController, run_widget,
 };
 
 /// The video's width in logical pixels; its height follows its aspect.
@@ -57,13 +58,17 @@ fn open_window(app: &mut App, presentation: Presentation) {
         ..WindowConfig::default()
     };
     let controller = WindowController::new(app, config);
-    WindowController::on_close_requested(controller, app, Rc::new(quit));
+    controller.on_close_requested(app, Rc::new(quit));
     let shown = Cell::new(false);
     let listenable: Rc<dyn Listenable> = Rc::new(controller);
     listenable.add_listener(
         app,
         Listener::new(move |app| {
-            if WindowController::view(controller, app).is_some() && !shown.replace(true) {
+            let arrived = matches!(
+                controller.request(app).state(app),
+                ViewRequestState::Arrived(_)
+            );
+            if arrived && !shown.replace(true) {
                 show(app, controller, &presentation);
             }
         }),

@@ -13,11 +13,14 @@
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::rc::Rc;
 
-use inset_embedder::{AppExitResponse, ViewFocusEvent, ViewId};
+use inset_embedder::{AppExitResponse, PointerReport, ViewFocusEvent, ViewId, ViewMetrics};
 use winit::window::WindowId;
 
 use crate::main_loop::MainLoopEvent;
+use crate::os::ViewLayer;
+use crate::view::WinitView;
 use crate::windows::WindowRequest;
 
 /// A request the framework or the app makes of the embedder, for the main loop to serve.
@@ -28,6 +31,8 @@ pub(crate) enum AppRequest {
     OpenWindow(WindowRequest),
     /// A created window's `close`: the window is freed, and its view goes.
     CloseWindow(WindowId),
+    /// What the app asks of the views it embeds, through the platform's `ViewEmbedder`.
+    Embedder(EmbedderRequest),
     /// Quit: the app's required exit.
     Quit,
     /// The framework's answer to a request to exit: quit on exit.
@@ -37,6 +42,23 @@ pub(crate) enum AppRequest {
     /// Look at the clipboard, and tell the app if it changed: the system cleared a copy of the
     /// app's that expired, or says the clipboard changed.
     LookAtClipboard,
+}
+
+/// What the app asks, through the platform's `ViewEmbedder`, of the views it embeds: what a window
+/// does for its own view, and what the system tells the framework of one.
+pub(crate) enum EmbedderRequest {
+    /// Add this view the app asked for on its layer, at these metrics: Flutter's `AddView`.
+    AddView(Rc<WinitView>, ViewLayer, ViewMetrics),
+    /// Give a view the app added these metrics: Flutter's `SendWindowMetricsEvent`.
+    SetViewMetrics(ViewId, ViewMetrics),
+    /// A view the app added is in sight, or not, as the app says.
+    SetViewInSight(ViewId, bool),
+    /// Remove a view the app added: Flutter's `RemoveView`.
+    RemoveView(ViewId),
+    /// Hand the framework what the app says pointing devices did: Flutter's `SendPointerEvent`.
+    SendPointerReports(Vec<PointerReport>),
+    /// Hand the framework a view's focus change the app reports: Flutter's `SendViewFocusEvent`.
+    SendViewFocusEvent(ViewFocusEvent),
 }
 
 /// The requests sent and not served yet, oldest first. Main thread.

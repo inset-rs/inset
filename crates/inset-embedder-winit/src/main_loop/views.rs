@@ -11,21 +11,56 @@
 //!
 //! A window's code is a holder: it turns its window's opening, resizing, moving to another screen
 //! and closing into these calls, and its being minimized or occluded into its view's being out of
-//! sight (`main_loop/windows.rs`).
+//! sight (`main_loop/windows.rs`). The app is another, for the views it adds on layers of its own,
+//! through the platform's view embedder (`platform.rs`).
 
 use std::rc::Rc;
 
 use inset_embedder::{EmbedderClient, View, ViewId, ViewMetrics};
 use winit::event_loop::ActiveEventLoop;
 
+use crate::app_requests::EmbedderRequest;
 use crate::os::ViewLayer;
 use crate::view::WinitView;
+use crate::views::Holder;
 
 use super::MainLoop;
 use super::frames::monitor_of_screen;
 
 impl<C: EmbedderClient> MainLoop<C> {
-    /// Flutter's `AddView`: `view`, which its holder made, draws into `layer` at `metrics` from now
+    /// Serves what the app asks of the views it embeds: what a window's code does for its own
+    /// view, for one the app holds, the registry refusing a view the app does not; and the input
+    /// the app reports, as the host's own.
+    pub(super) fn on_embedder_request(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        request: EmbedderRequest,
+    ) {
+        match request {
+            EmbedderRequest::AddView(view, layer, metrics) => {
+                self.add_view(event_loop, view, layer, metrics, Holder::App)
+            }
+            EmbedderRequest::SetViewMetrics(view, metrics) => {
+                if self.views().app_may_change(view) {
+                    self.set_view_metrics(event_loop, view, metrics);
+                }
+            }
+            EmbedderRequest::SetViewInSight(view, in_sight) => {
+                if self.views().app_may_change(view) {
+                    self.set_view_in_sight(view, in_sight);
+                }
+            }
+            EmbedderRequest::RemoveView(view) => {
+                if self.views().app_may_change(view) {
+                    self.remove_view(view);
+                }
+            }
+            EmbedderRequest::SendPointerReports(reports) => self.send_pointer_reports(reports),
+            EmbedderRequest::SendViewFocusEvent(event) => self.client.view_focus_changed(event),
+        }
+    }
+
+    /// Flutter's `AddView`: `view`, which `holder` made, draws into `layer` at `metrics` from now
     /// on, on a surface while the system gives the views theirs; its frames follow the screen its
     /// metrics name, and the framework hears of it.
     pub(super) fn add_view(
@@ -34,8 +69,9 @@ impl<C: EmbedderClient> MainLoop<C> {
         view: Rc<WinitView>,
         layer: ViewLayer,
         metrics: ViewMetrics,
+        holder: Holder,
     ) {
-        self.views().add(Rc::clone(&view), layer, metrics);
+        self.views().add(Rc::clone(&view), layer, metrics, holder);
         self.follow_screen(event_loop, &view);
         self.client.view_added(view.id());
     }

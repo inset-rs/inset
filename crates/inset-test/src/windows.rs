@@ -5,8 +5,7 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use inset_embedder::{
-    HostWindow, RawWindowHandle, Rect, RequestId, ScreenId, ViewId, ViewRef, ViewRequest,
-    WindowConfig,
+    HostWindow, RawWindowHandle, Rect, RequestId, ScreenId, ViewId, ViewRef, WindowConfig,
 };
 
 use crate::TestView;
@@ -14,13 +13,17 @@ use crate::TestView;
 /// The number of the first view made on request, out of the way of the views a test gives.
 const FIRST_VIEW_ID: u64 = 1000;
 
+/// The number of the view made for request `id`: a window's, or one added on a layer.
+pub(crate) fn view_of_request(id: RequestId) -> ViewId {
+    ViewId(FIRST_VIEW_ID + id.0)
+}
+
 /// A desktop's answer to requests for views: each request makes a window at once, over a view
 /// that carries the request's id and initial data. A test hands it to a platform
 /// ([`TestPlatform::with_windows`](crate::TestPlatform::with_windows)), which lists the views
 /// of the windows still open; the test tells the framework of each new view itself, as a host
 /// would through `EmbedderClient::view_added`.
 pub struct TestWindows {
-    next_request: Cell<u64>,
     made: RefCell<Vec<Rc<TestWindow>>>,
     /// The screen every window is made on; none by default.
     screen: Option<ScreenId>,
@@ -29,7 +32,6 @@ pub struct TestWindows {
 impl TestWindows {
     pub fn new() -> TestWindows {
         TestWindows {
-            next_request: Cell::new(1),
             made: RefCell::default(),
             screen: None,
         }
@@ -46,21 +48,24 @@ impl TestWindows {
         self.made.borrow().clone()
     }
 
-    /// Makes the window `request` asks for, and answers the request's id.
-    pub(crate) fn request(&self, request: ViewRequest) -> RequestId {
-        let id = RequestId(self.next_request.get());
-        self.next_request.set(id.0 + 1);
-        let [width, height] = request.config.size;
+    /// Makes the window configured as `config` that request `id` asks for, over a view carrying
+    /// `initial_data`.
+    pub(crate) fn request(
+        &self,
+        id: RequestId,
+        config: WindowConfig,
+        initial_data: Option<String>,
+    ) {
+        let [width, height] = config.size;
         let mut view = TestView::new(width, height)
-            .with_id(ViewId(FIRST_VIEW_ID + id.0))
-            .with_request(id, request.initial_data);
+            .with_id(view_of_request(id))
+            .with_request(id, initial_data);
         if let Some(screen) = self.screen {
             view = view.on_screen(screen);
         }
         self.made
             .borrow_mut()
-            .push(TestWindow::around(view, request.config));
-        id
+            .push(TestWindow::around(view, config));
     }
 
     /// The views of the windows still open.

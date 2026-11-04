@@ -40,7 +40,7 @@ use crate::widgets::text_editing_intents::{
     SelectAllTextIntent, UndoTextIntent,
 };
 use crate::window::Window;
-use crate::windowing::{WindowController, WindowingOwner};
+use crate::windowing::{ViewRequestState, WindowController, WindowingOwner};
 
 /// The glue between the widgets layer and the Flutter engine.
 ///
@@ -915,23 +915,25 @@ pub fn run_app_with(app: &mut App, content: WidgetRef, window: WindowConfig) {
 /// rule's, and a platform that refuses or fails to make it leaves the app nothing to show.
 fn request_main_window(app: &mut App, config: WindowConfig) -> Handle<WindowController> {
     let controller = WindowController::new(app, config);
-    if let Some(error) = controller.error(app) {
-        no_window_for_the_app(error);
-    }
+    panic_if_refused(app, controller);
     controller.on_close_requested(app, Rc::new(close_or_ask_to_quit));
     let listenable: Rc<dyn Listenable> = Rc::new(controller);
     listenable.add_listener(
         app,
-        Listener::new(move |app| {
-            if let Some(error) = controller.error(app) {
-                no_window_for_the_app(error);
-            }
-        }),
+        Listener::new(move |app| panic_if_refused(app, controller)),
     );
     controller
 }
 
-fn no_window_for_the_app(error: ViewError) -> ! {
+/// Ends the app where the platform refused `window`, the app's own, which leaves it nothing to
+/// show.
+fn panic_if_refused(app: &App, window: Handle<WindowController>) {
+    if let ViewRequestState::Refused(error) = window.request(app).state(app) {
+        no_window_for_the_app(error);
+    }
+}
+
+fn no_window_for_the_app(error: &ViewError) -> ! {
     panic!(
         "run_app: the platform gave the app no view and made no window for it ({error}); an app \
          embedded where views come later starts with MultiViewApp"

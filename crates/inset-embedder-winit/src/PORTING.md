@@ -11,6 +11,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - launch.rs, main_loop/ → the engine's start (`Shell` adds the implicit view with empty metrics): where the system's window is the screen, the app starts with the screen view at no size, and its window and surface come after
 - platform.rs, views.rs, main_loop/windows.rs → the embedders' implicit view, here the screen view, which the framework never hears added or removed: the app has it from its start, and has no handle to close its window
 - views.rs, main_loop/views.rs, main_loop/windows.rs → the embedder API's `AddView`, `SendWindowMetricsEvent` and `RemoveView`, which a window's code calls for its view as the window opens, resizes or changes screen, and closes
+- platform.rs, app_requests.rs, main_loop/views.rs → the embedder API's `AddView`, `SendWindowMetricsEvent`, `RemoveView`, `SendPointerEvent` and `SendViewFocusEvent` for a view the app adds on a composition layer of its own, through the view embedder macOS gives, served on a turn of the loop by the calls a window's code makes for its view
 - main_loop/windows.rs → the engine's window close request, which goes to the framework and closes nothing until the framework closes the window
 - views.rs, main_loop/views.rs, view.rs, rasterizer.rs → the shell's surfaces (`Shell::OnPlatformViewCreated`, `OnPlatformViewDestroyed`): the view stays while the system has taken its surface, and each surface given gets the view's last scene, as Flutter's rasterizer keeps each view's last layer tree, and a frame
 - touch.rs → the iOS embedder's touches, one pointer per finger, added before its down and removed after its up, each numbered apart from the mouse and the trackpad, as the Windows embedder numbers its touches, and a pen a stylus, as the iOS and Windows embedders report it, hovering where the system reports it near the screen
@@ -18,6 +19,14 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - locales.rs, os/macos/system_changes.rs → the macOS embedder's locales (`sendUserLocales`), its preferred languages, sent again at `NSCurrentLocaleDidChangeNotification`; the Windows and Linux embedders', the user's languages, sent at start only
 
 ## lib.rs / main_loop/
+
+- Change: the app's metrics, sight and removal of a view are refused for a view it did not add, the screen view or a window's, and the first refusal is printed, where Flutter's embedder API takes them for any view.
+  Reason: platform — a window's view takes its size, its sight and its end from its window, which the host holds.
+  Affect: an app that resizes or removes a window's view sees nothing change.
+
+- Change: the app says whether a view it added is in sight, and the host holds the view's frames while it is not, where Flutter's embedder API has no such call and an embedder stops its own vsync for what nobody sees.
+  Reason: platform — only the app knows where it placed the view's layer and whether anything shows it, as only a window's code knows its window is minimized or covered.
+  Affect: a view the app hides draws nothing until the app says it is in sight again, and one it never hides draws at its screen's refresh.
 
 - Change: a desktop app has no view until it asks for one: the host makes a window for each request and adds its view carrying the request's id, where Flutter's runners make the implicit view's window and only its multi-window apps make their own (`[win32] Multi-window should never have implicit view`).
   Reason: platform — the app owns its windows and decides every window's close, the last one's included, so the host makes no window the app did not ask for and has no rule for the last one.
