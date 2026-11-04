@@ -64,6 +64,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the host reports the drag at the window, and the binding's observers are where window-level events reach the tree.
   Affect: any observer hears every drag over any view, an `on_dropped` callback starts each read it wants before it returns, as the HTML spec's drag data store is protected until the drop, and with a host that reports no position the whole view is the target.
 
+- Change: `WidgetsBinding` follows the platform's caption settings itself and tells its observers each change through `WidgetsBindingObserver::did_change_caption_style`, which Flutter has no counterpart of.
+  Reason: platform — the caption settings tell their changes by a future of their own, where the other system settings reach the binding through the dispatcher.
+  Affect: every observer hears each change of the user's caption style, for as long as the app runs.
+
 - Change: `run_app` builds its content in every view the platform gives the app, and where it gives none at start, as on a desktop, asks for a window through a `WindowController` configured as `run_app_with` says and panics if the platform refuses, where Flutter's `runApp` draws into the implicit view.
   Reason: platform — there is no implicit view: the platform gives the app its views or makes them on request.
   Affect: an app given several views shows its content in each, with its own state; a request to close the app's last view asks to quit, as Cmd-Q does; an app embedded where views come later starts with `run_widget` over a `MultiViewApp`, as Flutter's web multi-view apps start with `runWidget`.
@@ -147,14 +151,22 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: a player shows on the view built for it last and nowhere once its views are gone, a camera's preview shows where its `CameraPreview` is, and nothing shows where the host has no compositor.
 
 - Change: a `Player` lists its media's tracks in its state, selects an audio track and a text track or none, and tells the media's metadata and the cues to show now, and a `PlayerView` draws those cues over the video with a `SubtitleView`, as Media3's `PlayerView` does, where Flutter's `VideoPlayer` shows no subtitles and an app puts a `ClosedCaption` of a caption file it parsed over it.
-  Reason: platform — the system draws no subtitles: the host's player hands out the cues of the media's own text tracks, with the user's caption settings merged in.
+  Reason: platform — the system draws no subtitles: the host's player hands out the cues of the media's own text tracks, as the media styles them.
   Affect: a `PlayerView` shows the subtitles of the text track selected, in the user's caption style, with no code of the app's, and an app that draws the frames itself puts a `SubtitleView` of `Player::cues` over its video.
+
+- Change: `Player::position` reads the host's player's position at each call and a `Player`'s listeners hear it only when it jumps, at every change its host tells, where Flutter's `VideoPlayerValue.position` is a copy its controller refreshes on a timer and tells at each refresh.
+  Reason: platform — the host's player is read when the app needs its position and tells only its jumps, as every system's player does.
+  Affect: a widget that shows the position while the player plays reads it at each frame, ticking with a `Ticker` from its state's ticker provider while the state says it plays, and a `Player`'s listeners also hear a change that left its state, metadata and cues as they were.
 
 ## media/subtitle_view.rs, media/subtitle_painter.rs → Media3's `SubtitleView`, `CanvasSubtitleOutput` and `SubtitlePainter` (androidx/media at 8c6678b, Apache 2.0)
 
-- Change: `SubtitleView` draws cues whose runs each carry their colour, background, size, font, edge and edge colour, and whose window colour is the cue's own, where Media3's applies one `CaptionStyleCompat` and a default text size to every cue, and can drop the cues' embedded styles and sizes.
-  Reason: platform — the host merges the user's caption settings into each cue, as Apple's legible output does at its default styling, so the view has no style of its own to apply.
-  Affect: an app sets no caption style or text size on the view, the runs of one cue can have different edges, and the space each side of a cue's lines follows its largest text.
+- Change: `SubtitleView` always draws in the user's caption style, which it reads from the ambient `MediaQuery`, merged into each cue setting by setting, a setting that applies always over the media's styling and one that applies where the media says nothing beneath it, colours and their opacities on their own, where Media3's draws in the style an app sets, the user's only after `setUserDefaultStyle`, which it reads once, with every embedded style over it or, with `setApplyEmbeddedStyles(false)`, none.
+  Reason: platform — the user's caption style is a system setting beside the cues, and Apple's settings each say whether they apply always or only where the media says nothing, which Chromium's and WebKit's cue style sheets honour.
+  Affect: an app sets no caption style, text size or embedded-style switch on the view, the user's style changes the subtitles shown at once, a platform without caption settings shows the media's own style, and the runs of one cue can have different edges.
+
+- Change: `SubtitleView` rounds the box behind a cue by the style's corner radius, draws a kind of font the style names in the family Chromium draws it in, and draws an edge whose colour neither the media nor the style says in black, where Media3's style has no corner radius or kind of font and its default edge colour is white.
+  Reason: platform — Apple's style gives a corner radius and an edge with no colour, which Chromium and WebKit draw black, and Windows gives a kind of font rather than a family.
+  Affect: subtitles on a Mac show the rounded box and the black edges the user set, and small capitals are drawn in their family's own letters, since a run takes no font features.
 
 ## widgets/banner.rs → banner.dart
 
@@ -219,13 +231,13 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## widgets/media_query.rs → media_query.dart
 
-- Change: `MediaQueryData::from_view` reads the platform's brightness and leaves the accessibility, text-scaling, gesture-inset and corner-radius fields at their defaults.
-  Reason: platform — `Platform` exposes `platform_brightness` only, and `ViewMetrics` has no gesture insets or corner radii.
+- Change: `MediaQueryData::from_view` reads the platform's brightness, its system context menu and the user's caption style, and leaves the accessibility, text-scaling, gesture-inset and corner-radius fields at their defaults.
+  Reason: platform — `Platform` exposes `platform_brightness`, `system_context_menu` and `caption_settings` only, and `ViewMetrics` has no gesture insets or corner radii.
   Affect: those fields are only non-default when an ambient `MediaQuery` supplies `platform_data`.
 
-- Change: `MediaQuery::from_view` re-derives its data on dependency, widget and metrics changes only.
-  Reason: platform — the text scale factor, brightness and accessibility flags have no host events yet.
-  Affect: a platform brightness change after mount is not reflected until the shell forwards it.
+- Change: `MediaQueryData` carries the user's caption style, which `MediaQuery::from_view` takes again at each change, where Flutter's carries no caption style.
+  Reason: platform — the caption style is a system accessibility setting, as bold text and the text scale are, and the systems that keep one tell when the user changes it.
+  Affect: a widget that reads `MediaQuery::caption_style_of` is built again when the user changes their caption style, which is `None` where the platform keeps no caption settings.
 
 ## widgets/image.rs → image.dart
 

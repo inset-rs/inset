@@ -10,6 +10,7 @@
 // default limit.
 #![recursion_limit = "256"]
 
+mod caption_style;
 mod client;
 mod clipboard;
 mod composition;
@@ -44,6 +45,10 @@ mod views;
 mod vsync;
 mod window;
 
+pub use caption_style::{
+    CaptionBehavior, CaptionSetting, CaptionSettings, CaptionStyle, CaptionTypeface,
+    GenericCaptionFont,
+};
 pub use client::EmbedderClient;
 pub use clipboard::{
     Clipboard, ClipboardError, ClipboardEvent, ClipboardItem, ClipboardItemsFuture,

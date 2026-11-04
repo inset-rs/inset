@@ -1,23 +1,27 @@
 // Ported from Media3's `SubtitlePainter.java` (https://github.com/androidx/media), Copyright (C)
 // 2016 The Android Open Source Project, licensed under the Apache License, Version 2.0
-// (http://www.apache.org/licenses/LICENSE-2.0). Changed: it paints Inset's `Cue`, whose runs carry
-// the caption style the host merged in, on Inset's canvas, and keeps no layout between draws.
+// (http://www.apache.org/licenses/LICENSE-2.0). Changed: it paints Inset's `Cue`, with the user's
+// caption style merged into each run setting by setting (`cue_style`), on Inset's canvas, rounds
+// the window's corners as the style says, and keeps no layout between draws.
 
 //! Media3's `SubtitlePainter`: where one cue's box goes over the picture, and how its text, the
-//! edges round its characters and the window behind it, or its picture, are painted.
+//! edges round its characters and the window behind it, or its picture, are painted, in the
+//! media's own style with the user's caption style merged in (`cue_style`).
 //!
 //! The invariant: a text cue is laid out twice at the same width with the same runs, once for its
 //! edges and once for its text, so the edge pass lands under every glyph of the text pass.
 
 use inset_embedder::valo::{AlphaType, PixelBuffer, PixelFormat, PixelLayout};
 use inset_embedder::{
-    Canvas, CanvasText, Color, Cue, CueAnchor, CueContent, CueImage, CueLine, CueTextAlignment,
-    CueTextEdge, CueTextRun, FontCollection, FontStyle, FontWeight, Image, Offset, Paint,
-    PaintStyle, Paragraph, ParagraphBuilder, ParagraphConstraints, ParagraphStyle, Rect, Shadow,
-    Stroke, TextAlign, TextDecoration, TextDirection, TextStyle,
+    Canvas, CanvasText, CaptionStyle, Color, Cue, CueAnchor, CueContent, CueImage, CueLine,
+    CueTextAlignment, CueTextEdge, CueTextRun, FontCollection, FontStyle, FontWeight, Image,
+    Offset, Paint, PaintStyle, Paragraph, ParagraphBuilder, ParagraphConstraints, ParagraphStyle,
+    RRect, Radius, Rect, Shadow, Stroke, TextAlign, TextDecoration, TextDirection, TextStyle,
 };
 use inset_foundation::App;
-use inset_painting::PaintingBinding;
+use inset_painting::{PaintingBinding, draw_rrect};
+
+use super::cue_style::{StyledRun, styled_runs, window_color, window_corner_radius};
 
 /// Ratio of inner padding to font size.
 const INNER_PADDING_RATIO: f64 = 0.125;
@@ -29,19 +33,27 @@ const EDGE_EXTENT: f64 = 2.0;
 const WHITE: Color = Color::new(0xFFFF_FFFF);
 const TRANSPARENT: Color = Color::new(0x0000_0000);
 
-/// Draws `cue` into `canvas` over `parent`, the picture's rectangle. `bottom_padding_fraction`
-/// is the space left under a cue with no `line`, as a fraction of the picture's height.
+/// Draws `cue` into `canvas` over `parent`, the picture's rectangle, with `style` merged in.
+/// `bottom_padding_fraction` is the space left under a cue with no `line`, as a fraction of the
+/// picture's height.
 pub(super) fn draw(
     app: &mut App,
     canvas: &mut Canvas,
     cue: &Cue,
+    style: &CaptionStyle,
     bottom_padding_fraction: f64,
     parent: Rect,
 ) {
     match &cue.content {
-        CueContent::Text(runs) => {
-            draw_text_cue(app, canvas, cue, runs, bottom_padding_fraction, parent)
-        }
+        CueContent::Text(runs) => draw_text_cue(
+            app,
+            canvas,
+            cue,
+            runs,
+            style,
+            bottom_padding_fraction,
+            parent,
+        ),
         CueContent::Image(image) => draw_bitmap_cue(app, canvas, cue, image, parent),
     }
 }
@@ -52,6 +64,7 @@ fn draw_text_cue(
     canvas: &mut Canvas,
     cue: &Cue,
     runs: &[CueTextRun],
+    style: &CaptionStyle,
     bottom_padding_fraction: f64,
     parent: Rect,
 ) {
@@ -59,10 +72,15 @@ fn draw_text_cue(
         // Nothing to draw.
         return;
     }
+    let runs = styled_runs(runs, style);
     let fonts = PaintingBinding::instance(app).fonts(app);
     let fonts = app.get_mut(fonts);
-    if let Some(layout) = setup_text_layout(cue, runs, bottom_padding_fraction, parent, fonts) {
-        draw_text_layout(canvas, &layout, cue.window_color);
+    if let Some(layout) = setup_text_layout(cue, &runs, bottom_padding_fraction, parent, fonts) {
+        let window = Window {
+            color: window_color(cue, style),
+            corner_radius: window_corner_radius(style),
+        };
+        draw_text_layout(canvas, &layout, &window);
     }
 }
 
@@ -74,6 +92,13 @@ fn draw_bitmap_cue(app: &App, canvas: &mut Canvas, cue: &Cue, image: &CueImage, 
     if let Some(bitmap) = image_of(app, image) {
         draw_bitmap_layout(canvas, &bitmap, bitmap_rect);
     }
+}
+
+/// The box behind a text cue.
+struct Window {
+    color: Color,
+    /// In logical pixels.
+    corner_radius: f64,
 }
 
 /// A text cue laid out where it goes: Media3's derived drawing variables.
@@ -89,7 +114,7 @@ struct TextLayout {
 /// Lays `runs` out where `cue` places them in `parent`; `None` where there is no room.
 fn setup_text_layout(
     cue: &Cue,
-    runs: &[CueTextRun],
+    runs: &[StyledRun],
     bottom_padding_fraction: f64,
     parent: Rect,
     fonts: &mut FontCollection,
@@ -236,20 +261,22 @@ fn anchored(anchor_position: f64, extent: f64, anchor: CueAnchor) -> f64 {
 }
 
 /// Paints a laid out text cue: the window behind it, its edges, then its text.
-fn draw_text_layout(canvas: &mut Canvas, layout: &TextLayout, window_color: Option<Color>) {
+fn draw_text_layout(canvas: &mut Canvas, layout: &TextLayout, window: &Window) {
     canvas.save();
     canvas.translate(layout.text_left as f32, layout.text_top as f32);
 
-    if let Some(window_color) = window_color.filter(|color| color.a > 0.0) {
+    if window.color.a > 0.0 {
         let text_layout = &layout.text_layout;
-        canvas.draw_rect(
-            Rect::from_ltrb(
-                -layout.text_padding_x,
-                0.0,
-                text_layout.width() + layout.text_padding_x,
-                text_layout.height(),
-            ),
-            &Paint::from_color(window_color.into()),
+        let bounds = Rect::from_ltrb(
+            -layout.text_padding_x,
+            0.0,
+            text_layout.width() + layout.text_padding_x,
+            text_layout.height(),
+        );
+        draw_rrect(
+            canvas,
+            RRect::from_rect_and_radius(bounds, Radius::circular(window.corner_radius)),
+            &Paint::from_color(window.color.into()),
         );
     }
 
@@ -268,10 +295,10 @@ fn draw_bitmap_layout(canvas: &mut Canvas, bitmap: &Image, bitmap_rect: Rect) {
 
 /// `runs` as one paragraph, each in the style `style_of` gives it.
 fn paragraph(
-    runs: &[CueTextRun],
+    runs: &[StyledRun],
     text_align: TextAlign,
     parent_height: f64,
-    style_of: fn(&CueTextRun, f64) -> TextStyle,
+    style_of: fn(&StyledRun, f64) -> TextStyle,
     fonts: &mut FontCollection,
 ) -> Paragraph {
     let mut builder = ParagraphBuilder::new(ParagraphStyle {
@@ -281,7 +308,7 @@ fn paragraph(
     });
     for run in runs {
         builder.push_style(style_of(run, parent_height));
-        builder.add_text(&run.text);
+        builder.add_text(run.text);
         builder.pop();
     }
     builder.build(fonts)
@@ -289,7 +316,7 @@ fn paragraph(
 
 /// The style `run`'s text is painted in, above its edges: Media3's text layout, whose paint
 /// casts a drop shadow, or the lower shadow of a raised or depressed edge.
-fn text_style(run: &CueTextRun, parent_height: f64) -> TextStyle {
+fn text_style(run: &StyledRun, parent_height: f64) -> TextStyle {
     let shadow = match run.edge {
         CueTextEdge::DropShadow => Some(Shadow::new(
             run.edge_color,
@@ -316,9 +343,9 @@ fn text_style(run: &CueTextRun, parent_height: f64) -> TextStyle {
 
 /// The style `run`'s edges are painted in, beneath its text: Media3's edge layout. A run whose
 /// edge the text layout draws, or that has none, is clear here.
-fn edge_style(run: &CueTextRun, parent_height: f64) -> TextStyle {
+fn edge_style(run: &StyledRun, parent_height: f64) -> TextStyle {
     let font = run_font(run, parent_height);
-    let background = run.background.map(paint_of);
+    let background = visible_background(run).map(paint_of);
     match run.edge {
         CueTextEdge::Outline => TextStyle {
             foreground: Some(outline_paint(run.edge_color)),
@@ -346,7 +373,7 @@ fn edge_style(run: &CueTextRun, parent_height: f64) -> TextStyle {
 }
 
 /// `run`'s size, weight, slant, underline and font, which both of its layouts share.
-fn run_font(run: &CueTextRun, parent_height: f64) -> TextStyle {
+fn run_font(run: &StyledRun, parent_height: f64) -> TextStyle {
     TextStyle {
         font_size: Some(text_size(run, parent_height)),
         font_weight: run.bold.then_some(FontWeight::BOLD),
@@ -358,7 +385,7 @@ fn run_font(run: &CueTextRun, parent_height: f64) -> TextStyle {
 }
 
 /// Whether `run` has an edge painted beneath its text.
-fn has_edge_layout(run: &CueTextRun) -> bool {
+fn has_edge_layout(run: &StyledRun) -> bool {
     matches!(
         run.edge,
         CueTextEdge::Outline | CueTextEdge::Raised | CueTextEdge::Depressed
@@ -367,12 +394,17 @@ fn has_edge_layout(run: &CueTextRun) -> bool {
 
 /// `run`'s background where its text layout paints it: in front of an edge that has no layout of
 /// its own, and behind the edge layout otherwise, so the background never covers an edge.
-fn background_in_text_layout(run: &CueTextRun) -> Option<Color> {
-    run.background.filter(|_| !has_edge_layout(run))
+fn background_in_text_layout(run: &StyledRun) -> Option<Color> {
+    visible_background(run).filter(|_| !has_edge_layout(run))
+}
+
+/// `run`'s background where it shows at all: Media3 paints none that is wholly transparent.
+fn visible_background(run: &StyledRun) -> Option<Color> {
+    Some(run.background).filter(|color| color.a > 0.0)
 }
 
 /// The light, upper-left shadow of a raised edge, or the dark one of a depressed edge.
-fn upper_shadow_color(run: &CueTextRun) -> Color {
+fn upper_shadow_color(run: &StyledRun) -> Color {
     if run.edge == CueTextEdge::Raised {
         WHITE
     } else {
@@ -381,7 +413,7 @@ fn upper_shadow_color(run: &CueTextRun) -> Color {
 }
 
 /// The dark, lower-right shadow of a raised edge, or the light one of a depressed edge.
-fn lower_shadow_color(run: &CueTextRun) -> Color {
+fn lower_shadow_color(run: &StyledRun) -> Color {
     if run.edge == CueTextEdge::Raised {
         run.edge_color
     } else {
@@ -404,13 +436,13 @@ fn paint_of(color: Color) -> Paint {
 }
 
 /// `run`'s text size in logical pixels.
-fn text_size(run: &CueTextRun, parent_height: f64) -> f64 {
+fn text_size(run: &StyledRun, parent_height: f64) -> f64 {
     f64::from(run.font_size) * parent_height
 }
 
 /// The size of the largest text among `runs`, in logical pixels, which the space each side of
 /// the lines follows.
-fn largest_text_size(runs: &[CueTextRun], parent_height: f64) -> f64 {
+fn largest_text_size(runs: &[StyledRun], parent_height: f64) -> f64 {
     runs.iter()
         .map(|run| text_size(run, parent_height))
         .fold(0.0, f64::max)
@@ -440,6 +472,7 @@ fn image_of(app: &App, image: &CueImage) -> Option<Image> {
 
 #[cfg(test)]
 mod tests {
+    use inset_embedder::CaptionSetting;
     use inset_embedder::valo::Op;
     use inset_foundation::AppCell;
 
@@ -462,11 +495,15 @@ mod tests {
     }
 
     fn painted(cue: &Cue) -> Vec<Op> {
+        painted_in(cue, &CaptionStyle::default())
+    }
+
+    fn painted_in(cue: &Cue, style: &CaptionStyle) -> Vec<Op> {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         install_fonts(&mut app);
         let mut canvas = Canvas::new();
-        draw(&mut app, &mut canvas, cue, 0.08, PICTURE);
+        draw(&mut app, &mut canvas, cue, style, 0.08, PICTURE);
         canvas.build().ops().to_vec()
     }
 
@@ -553,13 +590,32 @@ mod tests {
     }
 
     #[test]
+    fn the_window_takes_the_users_colour_and_rounded_corners_where_the_media_gives_none() {
+        let style = CaptionStyle {
+            window_color: Some(CaptionSetting::where_media_says_nothing(Color::new(
+                0xFF20_4060,
+            ))),
+            window_opacity: Some(CaptionSetting::where_media_says_nothing(0.5)),
+            window_corner_radius: Some(CaptionSetting::where_media_says_nothing(6.0)),
+            ..CaptionStyle::default()
+        };
+        let ops = painted_in(&one_line("Hello"), &style);
+        let window = Color::new(0xFF20_4060).with_values(Some(0.5), None, None, None, None);
+        assert!(
+            ops.iter()
+                .any(|op| matches!(op, Op::DrawPath { paint, .. } if paint.color == window.into())),
+            "a rounded window in the user's colour: {ops:?}"
+        );
+    }
+
+    #[test]
     fn a_drop_shadow_is_cast_in_the_edge_colour_and_a_cue_without_text_paints_nothing() {
         let mut cue = one_line("Hello");
         let CueContent::Text(runs) = &mut cue.content else {
             unreachable!()
         };
-        runs[0].edge = CueTextEdge::DropShadow;
-        runs[0].edge_color = Color::new(0xFF10_2030);
+        runs[0].edge = Some(CueTextEdge::DropShadow);
+        runs[0].edge_color = Some(Color::new(0xFF10_2030));
         let ops = painted(&cue);
         assert!(
             ops.iter().any(|op| matches!(op, Op::GlyphRun { paint, .. } if paint.color == Color::new(0xFF10_2030).into())),

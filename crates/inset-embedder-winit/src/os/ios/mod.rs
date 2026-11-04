@@ -13,7 +13,8 @@ mod pasteboard;
 use std::rc::Rc;
 
 use inset_embedder::{
-    Cameras, Notifications, Players, TargetPlatform, VideoFrameReaders, ViewPadding,
+    Cameras, CaptionSettings, Notifications, Players, TargetPlatform, VideoFrameReaders,
+    ViewPadding,
 };
 use valo_codec::Decoder;
 use winit::window::Window;
@@ -80,7 +81,8 @@ impl TrackpadTouches for Ios {
     type Observer = NoTrackpadTouchObserver;
 }
 
-/// AVFoundation's players and cameras, which macOS shares.
+/// AVFoundation's players and cameras, and Media Accessibility's caption settings, which macOS
+/// shares.
 impl SystemMedia for Ios {
     fn players() -> Option<Rc<dyn Players>> {
         super::apple::media::players()
@@ -92,6 +94,11 @@ impl SystemMedia for Ios {
 
     fn video_frame_readers() -> Option<Rc<dyn VideoFrameReaders>> {
         super::apple::media::video_frame_readers()
+    }
+
+    /// Media Accessibility's.
+    fn caption_settings() -> Option<Rc<dyn CaptionSettings>> {
+        super::apple::caption_appearance::caption_settings()
     }
 }
 

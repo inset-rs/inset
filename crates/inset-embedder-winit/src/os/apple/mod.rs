@@ -1,11 +1,13 @@
 //! What macOS and iOS share: ImageIO; Core Animation's compositor of composition layers
 //! (`composition`) and its clock beside the host's (`media_time`); AVFoundation's players and
-//! cameras (`media`); the notification center
+//! cameras (`media`), and Media Accessibility's caption settings (`caption_appearance`); the
+//! notification center
 //! (`notifications`); and for their pasteboards, the UTIs the framework's MIME types are named by
 //! (`pasteboard_types`), the app's futures run on its main thread on behalf of the system
 //! (`app_futures`), and the file a promised file's bytes are written into (`promised_files`).
 
 pub(crate) mod app_futures;
+pub(crate) mod caption_appearance;
 pub(crate) mod composition;
 pub(crate) mod media;
 pub(crate) mod media_time;

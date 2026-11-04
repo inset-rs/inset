@@ -73,12 +73,15 @@ png = "0.18"
 objc2-quartz-core = { version = "0.3", features = ["CABase", "CALayer", "CAShapeLayer", "CATransaction", "CATransform3D"] }
 objc2-io-surface = "0.3"
 objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
-objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGAffineTransform", "CGColor", "CGPath"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGAffineTransform", "CGColor", "CGColorSpace", "CGPath"] }
 # Players and cameras: AVFoundation, the times and sample buffers it speaks in, the markup of the
 # subtitles it hands out, and the pixel buffers a frame reader hands out.
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "dispatch2", "objc2-core-foundation", "objc2-core-media", "objc2-core-video", "objc2-quartz-core", "AVAnimation", "AVAsset", "AVAssetTrack", "AVAsynchronousKeyValueLoading", "AVCaptureDevice", "AVCaptureFileOutput", "AVCaptureInput", "AVCaptureOutputBase", "AVCapturePhotoOutput", "AVCaptureSession", "AVCaptureSessionPreset", "AVCaptureVideoDataOutput", "AVCaptureVideoPreviewLayer", "AVError", "AVMediaFormat", "AVMediaSelection", "AVMediaSelectionGroup", "AVMetadataIdentifiers", "AVMetadataItem", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVPlayerItemTrack", "AVPlayerLayer", "AVVideoSettings"] }
 objc2-core-media = { version = "0.3", default-features = false, features = ["std", "objc2-core-video", "CMBase", "CMFormatDescription", "CMSampleBuffer", "CMSync", "CMTextMarkup", "CMTime"] }
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-metal", "CVBase", "CVBuffer", "CVImageBuffer", "CVMetalTexture", "CVMetalTextureCache", "CVPixelBuffer", "CVReturn"] }
+# The user's caption style, its colours matched to sRGB above, and the family of the font it names.
+objc2-media-accessibility = { version = "0.3", default-features = false, features = ["std", "MACaptionAppearance", "objc2-core-graphics", "objc2-core-text"] }
+objc2-core-text = { version = "0.3", default-features = false, features = ["std", "CTFontDescriptor"] }
 # A video frame's texture: a Metal texture CoreVideo's texture cache makes on the frame, on the
 # Metal device behind the wgpu device it is made for.
 objc2-metal = { version = "0.3", default-features = false, features = ["std", "MTLDevice", "MTLPixelFormat", "MTLResource", "MTLTexture", "MTLTypes"] }
@@ -177,10 +180,10 @@ objc2-core-video = { version = "0.3", default-features = false, features = ["std
 
 # AppKit's selectors and view hierarchy, UIKit's pasteboard, document picker and view, the
 # notification center's delegate and completion handlers, Core Animation's layers, AVFoundation,
-# and Win32 and COM, the toast activator's included, need `unsafe`, which the workspace forbids;
-# here it is denied instead, and `os/macos`, `os/apple/composition`, `os/apple/media`,
-# `os/apple/notifications`, `os/ios/pasteboard`, `os/ios/file_dialogs`, `os/ios/opener`,
-# `os/ios/open_requests`, `os/ios/composition`, `os/windows` and the tests' AppKit support, for a
-# local event monitor, alone allow it.
+# Media Accessibility, and Win32 and COM, the toast activator's included, need `unsafe`, which the
+# workspace forbids; here it is denied instead, and `os/macos`, `os/apple/composition`,
+# `os/apple/media`, `os/apple/caption_appearance`, `os/apple/notifications`, `os/ios/pasteboard`,
+# `os/ios/file_dialogs`, `os/ios/opener`, `os/ios/open_requests`, `os/ios/composition`,
+# `os/windows` and the tests' AppKit support, for a local event monitor, alone allow it.
 [lints.rust]
 unsafe_code = "deny"

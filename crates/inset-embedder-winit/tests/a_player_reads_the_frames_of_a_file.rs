@@ -1,7 +1,8 @@
 //! A player of a small movie, opened by a picked file's URL at a path the URL must encode, loads it
 //! by itself, says its size, length and one video track, plays it, hands its frames to a reader
 //! made on its own, each the host's `CoreVideoFrame` over a BGRA pixel buffer backed by an
-//! IOSurface, ends, and plays on past its end once it loops: all without a window or a sound. On its way it is put on a surface, not in any window, and nowhere
+//! IOSurface, ends, tells a seek's landing and is read where it landed, and plays on past its end
+//! once it loops: all without a window or a sound. On its way it is put on a surface, not in any window, and nowhere
 //! again; sent nowhere at the end, it feeds the reader no more.
 //!
 //! Its own binary, without the test harness: AVFoundation changes a player's state on the main
@@ -42,6 +43,8 @@ mod player {
     const PATIENCE: Duration = Duration::from_secs(20);
     /// Past the end of the one-second movie, played from its start.
     const LOOPED: Duration = Duration::from_millis(1600);
+    /// A moment inside the movie a paused player seeks to.
+    const SOUGHT: Duration = Duration::from_millis(300);
 
     pub(crate) fn reads_the_frames_of_a_file() {
         let players = inset_embedder_winit::test_support::players()
@@ -101,7 +104,16 @@ mod player {
 
         serve_until("the movie ends", || player.state().ended);
         assert!(!player.state().playing);
-        assert!(player.state().position >= Duration::from_millis(900));
+        assert!(player.position() >= Duration::from_millis(900));
+
+        player.seek(SOUGHT);
+        let mut landed = player.changed();
+        serve_until("the seek lands", || is_ready(&mut landed));
+        assert_eq!(
+            player.position(),
+            SOUGHT,
+            "a paused player is read where its seek landed"
+        );
 
         player.set_looping(true);
         player.play();

@@ -22,8 +22,8 @@ use crate::widgets::composition_layer_view::CompositionLayerView;
 use crate::widgets::transitions::ListenableBuilder;
 
 /// A player of the media at one URL, which loads by itself: the host's player, whose listeners
-/// hear its state, its metadata or its cues change. A URL the system cannot play gives a player
-/// whose state is a failure.
+/// hear its state, its metadata or its cues change and its position jump, at each change its host
+/// tells. A URL the system cannot play gives a player whose state is a failure.
 pub struct Player {
     change_notifier: ChangeNotifierData,
     /// The host's player, until [`dispose`](Player::dispose).
@@ -68,11 +68,23 @@ impl Player {
         &app.get(self).metadata
     }
 
-    /// The cues to show now, with the user's caption settings merged in: Media3's
-    /// `getCurrentCues`. A [`PlayerView`] draws them over the video; an app that draws the
-    /// frames itself puts a `SubtitleView` of them over its video.
+    /// The cues to show now, as the media styles them: Media3's `getCurrentCues`. A
+    /// [`PlayerView`] draws them over the video in the user's caption style; an app that draws
+    /// the frames itself puts a `SubtitleView` of them over its video.
     pub fn cues(self: Handle<Self>, app: &App) -> &[Cue] {
         &app.get(self).cues
+    }
+
+    /// Where the player is in the media now, read from the host's player at each call: Media3's
+    /// `getCurrentPosition`. It moves on by itself while the player plays, which its listeners do
+    /// not hear; they hear it jump. A widget that shows it while it plays reads it at each frame,
+    /// with a ticker running while the state says it plays.
+    ///
+    /// # Panics
+    ///
+    /// Once disposed.
+    pub fn position(self: Handle<Self>, app: &App) -> Duration {
+        self.host(app).position()
     }
 
     pub fn play(self: Handle<Self>, app: &App) {
@@ -158,21 +170,19 @@ impl Player {
         });
     }
 
-    /// Takes the host's state, metadata and cues, telling the listeners if any changed; answers
-    /// the future of the host's next change, asked before they are read so that no change goes
-    /// unheard, or `None` once the player is disposed.
+    /// Takes the host's state, metadata and cues and tells the listeners, since the host's
+    /// change may have been a jump of the position, which nothing taken shows; answers the future
+    /// of the host's next change, asked before they are read so that no change goes unheard, or
+    /// `None` once the player is disposed.
     fn take_host_state(self: Handle<Self>, app: &mut App) -> Option<MediaChangeFuture> {
         let host = app.get(self).host.clone()?;
         let next = host.changed();
         let (state, metadata, cues) = (host.state(), host.metadata(), host.cues());
         let player = app.get_mut(self);
-        let changed = state != player.state || metadata != player.metadata || cues != player.cues;
-        if changed {
-            player.state = state;
-            player.metadata = metadata;
-            player.cues = cues;
-            self.notify_listeners(app);
-        }
+        player.state = state;
+        player.metadata = metadata;
+        player.cues = cues;
+        self.notify_listeners(app);
         Some(next)
     }
 }
@@ -478,6 +488,42 @@ mod tests {
             1,
             "a disposed player's listeners hear nothing more"
         );
+    }
+
+    #[test]
+    fn a_player_reads_its_position_from_its_host_and_its_listeners_hear_it_jump() {
+        let players = MockPlayers::new();
+        let cell = app_with(
+            &players,
+            &MockCompositor::new(),
+            &Rc::new(TestView::new(800.0, 600.0)),
+        );
+        let player = Player::new(&mut cell.borrow_mut(), "https://example.com/a.mp4").unwrap();
+        let host = &players.opened()[0];
+        let heard = Rc::new(std::cell::Cell::new(0));
+        {
+            let heard = Rc::clone(&heard);
+            let listenable: Rc<dyn inset_foundation::Listenable> = Rc::new(player);
+            listenable.add_listener(
+                &mut cell.borrow_mut(),
+                inset_foundation::Listener::new(move |_app| heard.set(heard.get() + 1)),
+            );
+        }
+        assert_eq!(player.position(&cell.borrow()), Duration::ZERO);
+
+        host.move_to(Duration::from_millis(1500));
+        cell.checkpoint();
+        assert_eq!(
+            player.position(&cell.borrow()),
+            Duration::from_millis(1500),
+            "read from the host as it moves on"
+        );
+        assert_eq!(heard.get(), 0, "moving on is not told");
+
+        host.jump_to(Duration::from_secs(7));
+        cell.checkpoint();
+        assert_eq!(player.position(&cell.borrow()), Duration::from_secs(7));
+        assert_eq!(heard.get(), 1, "a jump is heard");
     }
 
     #[test]

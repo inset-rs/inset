@@ -12,5 +12,6 @@ inset-embedder.workspace = true
 inset-embedder-winit.workspace = true
 inset-foundation.workspace = true
 inset-painting.workspace = true
+inset-scheduler.workspace = true
 inset-shell.workspace = true
 inset-widgets.workspace = true

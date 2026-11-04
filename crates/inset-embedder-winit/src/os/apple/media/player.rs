@@ -1,6 +1,6 @@
 //! A player: AVFoundation's `AVPlayer` over one `AVPlayerItem`, controlled on the main thread,
-//! whose state is read from them when asked and whose changes AVFoundation tells by key-value
-//! observing, a periodic time observer, its end-of-item and media selection notifications, and the
+//! whose state and position are read from them when asked and whose changes AVFoundation tells by
+//! key-value observing, its end-of-item, time-jumped and media selection notifications, and the
 //! loading of its tracks, tags and subtitles. Its picture goes either to an `AVPlayerLayer` shown
 //! as a composition layer's content, or to an `AVPlayerItemVideoOutput` added to its item, which
 //! the reader it was given reads; its subtitles go to a legible output added to its item, which
@@ -11,19 +11,17 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use block2::RcBlock;
 use inset_embedder::{
     CompositionLayer, Cue, MediaChangeFuture, MediaMetadata, MediaPlayer, PlayerState,
     PlayerStatus, Players, Size, VideoFrameReader, VideoOutput,
 };
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
-use objc2::runtime::AnyObject;
 use objc2_av_foundation::{
     AVLayerVideoGravityResizeAspect, AVPlayer, AVPlayerActionAtItemEnd, AVPlayerItem,
     AVPlayerItemDidPlayToEndTimeNotification, AVPlayerItemFailedToPlayToEndTimeNotification,
-    AVPlayerItemMediaSelectionDidChangeNotification, AVPlayerItemStatus, AVPlayerLayer,
-    AVPlayerTimeControlStatus, AVURLAsset,
+    AVPlayerItemMediaSelectionDidChangeNotification, AVPlayerItemStatus,
+    AVPlayerItemTimeJumpedNotification, AVPlayerLayer, AVPlayerTimeControlStatus, AVURLAsset,
 };
 use objc2_core_media::{CMTime, CMTimeFlags, kCMTimeZero};
 use objc2_foundation::{NSString, NSURL};
@@ -38,9 +36,6 @@ use super::show_system_layer;
 use super::tracks::MediaTracks;
 use crate::media::Changes;
 
-/// How often a playing player tells its position: every half second, as Flutter's
-/// `video_player` polls it.
-const POSITION_INTERVAL_SECONDS: f64 = 0.5;
 /// The timescale a time this host gives AVFoundation is in: nanoseconds.
 const NANOSECONDS: i32 = 1_000_000_000;
 
@@ -90,9 +85,7 @@ struct AvMediaPlayer {
     cues: LegibleCues,
     _properties: [PropertyObservation; 2],
     _notifications: NotificationObservation,
-    _selection_changes: NotificationObservation,
-    /// The periodic time observer's token, which `Drop` removes.
-    time_observer: Retained<AnyObject>,
+    _item_changes: NotificationObservation,
 }
 
 /// What the end of the item does, and whether it was reached.
@@ -141,8 +134,7 @@ impl AvMediaPlayer {
             PropertyObservation::new(&player, &["timeControlStatus", "rate"], changes.clone()),
         ];
         let notifications = observe_end(&player, &item, Rc::clone(&end), changes.clone());
-        let selection_changes = observe_selection(&item, changes.clone());
-        let time_observer = observe_time(&player, changes.clone());
+        let item_changes = observe_selection_and_jumps(&item, changes.clone());
         let cues = LegibleCues::new(changes.clone());
         // SAFETY: adding an output to the item on the main thread.
         unsafe { item.addOutput(cues.output()) };
@@ -158,8 +150,7 @@ impl AvMediaPlayer {
             destination: RefCell::new(Destination::Nowhere),
             _properties: properties,
             _notifications: notifications,
-            _selection_changes: selection_changes,
-            time_observer,
+            _item_changes: item_changes,
         }
     }
 
@@ -285,10 +276,9 @@ impl MediaPlayer for AvMediaPlayer {
 
     fn state(&self) -> PlayerState {
         // SAFETY: reading the player and its item on the main thread.
-        let (playing, position, duration, size) = unsafe {
+        let (playing, duration, size) = unsafe {
             (
                 self.player.timeControlStatus() != AVPlayerTimeControlStatus::Paused,
-                self.player.currentTime(),
                 self.item.duration(),
                 self.item.presentationSize(),
             )
@@ -298,13 +288,18 @@ impl MediaPlayer for AvMediaPlayer {
             status: self.status(),
             // AVFoundation tells the end before it pauses there.
             playing: playing && !ended,
-            position: duration_of(position).unwrap_or_default(),
             duration: duration_of(duration),
             size: (size.width > 0.0 && size.height > 0.0)
                 .then(|| Size::new(size.width, size.height)),
             tracks: self.tracks.tracks(&self.item),
             ended,
         }
+    }
+
+    /// AVPlayer's `currentTime`.
+    fn position(&self) -> Duration {
+        // SAFETY: reading the player's time on the main thread.
+        duration_of(unsafe { self.player.currentTime() }).unwrap_or_default()
     }
 
     fn changed(&self) -> MediaChangeFuture {
@@ -346,10 +341,7 @@ impl Drop for AvMediaPlayer {
     /// The player stops, its picture leaves where it went, and the app hears it gone.
     fn drop(&mut self) {
         // SAFETY: on the main thread, where the player is controlled.
-        unsafe {
-            self.player.pause();
-            self.player.removeTimeObserver(&self.time_observer);
-        }
+        unsafe { self.player.pause() };
         self.leave_destination();
         self.changes.end();
     }
@@ -384,26 +376,17 @@ fn observe_end(
     })
 }
 
-/// Tells `changes` whenever a media selection group of `item` changes its selected option.
-fn observe_selection(item: &AVPlayerItem, changes: Changes) -> NotificationObservation {
-    // SAFETY: a constant AVFoundation exports for the life of the process.
-    let changed = unsafe { AVPlayerItemMediaSelectionDidChangeNotification };
-    NotificationObservation::new(item, &[changed], move |_notification| changes.notify())
-}
-
-/// Tells `changes` every half second while `player` plays, and whenever its time jumps, it
-/// starts or it stops; answers the observer's token.
-fn observe_time(player: &AVPlayer, changes: Changes) -> Retained<AnyObject> {
-    let block = RcBlock::new(move |_time: CMTime| changes.notify());
-    // SAFETY: the main queue (`None`) calls the block, which only tells the changes; the
-    // observer is removed in the player's `Drop`.
-    unsafe {
-        player.addPeriodicTimeObserverForInterval_queue_usingBlock(
-            CMTime::with_seconds(POSITION_INTERVAL_SECONDS, NANOSECONDS),
-            None,
-            &block,
-        )
-    }
+/// Tells `changes` whenever a media selection group of `item` changes its selected option, and
+/// whenever its time jumps, as a seek landing or a loop makes it (`AVPlayerItemTimeJumped`).
+fn observe_selection_and_jumps(item: &AVPlayerItem, changes: Changes) -> NotificationObservation {
+    // SAFETY: constants AVFoundation exports for the life of the process.
+    let names = unsafe {
+        [
+            AVPlayerItemMediaSelectionDidChangeNotification,
+            AVPlayerItemTimeJumpedNotification,
+        ]
+    };
+    NotificationObservation::new(item, &names, move |_notification| changes.notify())
 }
 
 /// `time` as a duration; `None` for an invalid or indefinite time, as a live stream's duration
@@ -443,6 +426,10 @@ impl MediaPlayer for FailedPlayer {
 
     fn state(&self) -> PlayerState {
         PlayerState::failed(self.reason.clone())
+    }
+
+    fn position(&self) -> Duration {
+        Duration::ZERO
     }
 
     fn changed(&self) -> MediaChangeFuture {

@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use inset_embedder::{
-    AppExit, AppLifecycleState, Brightness, Cameras, Clipboard, CompositionLayer, Compositor,
-    Dispatcher, DockMenu, FileDialogs, FontSource, Haptics, Image, ImageCodecFuture,
+    AppExit, AppLifecycleState, Brightness, Cameras, CaptionSettings, Clipboard, CompositionLayer,
+    Compositor, Dispatcher, DockMenu, FileDialogs, FontSource, Haptics, Image, ImageCodecFuture,
     ImageDecodeError, Instant, MenuBar, Notifications, Opener, Platform, Players, PointerReport,
     PopupMenus, RequestId, Restoration, SystemChrome, SystemContextMenu, TargetPlatform,
     TextServices, TrayIcons, VideoFrameReaders, View, ViewEmbedder, ViewError, ViewFocusEvent,
@@ -67,6 +67,7 @@ pub struct TestPlatform {
     players: Option<Rc<dyn Players>>,
     cameras: Option<Rc<dyn Cameras>>,
     video_frame_readers: Option<Rc<dyn VideoFrameReaders>>,
+    caption_settings: Option<Rc<dyn CaptionSettings>>,
     dock_menu: Option<Rc<dyn DockMenu>>,
     text_services: Option<Rc<dyn TextServices>>,
     restoration: Option<Rc<dyn Restoration>>,
@@ -106,6 +107,7 @@ impl TestPlatform {
             players: None,
             cameras: None,
             video_frame_readers: None,
+            caption_settings: None,
             dock_menu: None,
             text_services: None,
             restoration: None,
@@ -285,6 +287,14 @@ impl TestPlatform {
         video_frame_readers: Rc<dyn VideoFrameReaders>,
     ) -> TestPlatform {
         self.video_frame_readers = Some(video_frame_readers);
+        self
+    }
+
+    pub fn with_caption_settings(
+        mut self,
+        caption_settings: Rc<dyn CaptionSettings>,
+    ) -> TestPlatform {
+        self.caption_settings = Some(caption_settings);
         self
     }
 
@@ -495,6 +505,10 @@ impl Platform for TestPlatform {
 
     fn video_frame_readers(&self) -> Option<&dyn VideoFrameReaders> {
         self.video_frame_readers.as_deref()
+    }
+
+    fn caption_settings(&self) -> Option<&dyn CaptionSettings> {
+        self.caption_settings.as_deref()
     }
 
     fn view_embedder(&self) -> Option<&dyn ViewEmbedder> {

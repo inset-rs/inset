@@ -1,7 +1,9 @@
 //! Subtitles and captions as a player hands them to the app: Media3's `Cue`, field for field, since
 //! Media3 turns every subtitle format it reads into one, and each system's player gives the same
-//! as data (Apple's legible output, Windows' timed text cues). The app draws them; the host merges
-//! the user's caption settings into each cue first, so every field here is what to draw.
+//! as data (Apple's legible output, Windows' timed text cues). A cue carries the media's own
+//! styling alone, as Media3's does and as Apple's legible output gives it at its
+//! `SourceAndRulesOnly` styling: a field the media says nothing of is `None`, and the app fills it
+//! in from the user's caption style ([`CaptionStyle`](crate::CaptionStyle)) as it draws the cue.
 //!
 //! Sizes and places are fractions of the picture the cue is drawn over, so a cue reads the same
 //! at any size the picture is shown at.
@@ -27,13 +29,14 @@ pub struct Cue {
     pub text_alignment: CueTextAlignment,
     /// Whether its text runs in columns, and which way they follow each other; `None` for rows.
     pub vertical: Option<CueVertical>,
-    /// The colour of the box behind it; `None` for no box.
+    /// The colour of the box behind it; `None` where the media says none, Media3's
+    /// `windowColorSet` false.
     pub window_color: Option<Color>,
 }
 
 impl Cue {
     /// A cue showing `content` where Media3's `Cue.Builder` puts one by default: centred at the
-    /// bottom, its text centred, with no box behind it.
+    /// bottom, its text centred, its box's colour unsaid.
     pub fn new(content: CueContent) -> Cue {
         Cue {
             content,
@@ -58,22 +61,21 @@ pub enum CueContent {
     Image(CueImage),
 }
 
-/// Text of one style.
+/// Text of one style. Each field the media may leave unsaid is `None` where it does.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CueTextRun {
     pub text: String,
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
-    pub color: Color,
-    /// The colour behind these characters; `None` for none.
+    pub color: Option<Color>,
+    /// The colour behind these characters.
     pub background: Option<Color>,
     /// The text's height as a fraction of the picture's.
-    pub font_size: f32,
-    /// `None` for the system's caption font.
+    pub font_size: Option<f32>,
     pub font_family: Option<String>,
-    pub edge: CueTextEdge,
-    pub edge_color: Color,
+    pub edge: Option<CueTextEdge>,
+    pub edge_color: Option<Color>,
 }
 
 impl CueTextRun {
@@ -81,21 +83,20 @@ impl CueTextRun {
     /// fraction of the picture's.
     pub const DEFAULT_FONT_SIZE: f32 = 0.0533;
 
-    /// `text` as Media3's default caption style draws it (`CaptionStyleCompat.DEFAULT`): white,
-    /// at [`DEFAULT_FONT_SIZE`](Self::DEFAULT_FONT_SIZE), in the system's caption font, with
-    /// nothing behind it and no edge; its edge colour is the black WebKit draws Apple's edges in.
+    /// `text` in no style of its own: neither bold, italic nor underlined, and every other field
+    /// unsaid.
     pub fn new(text: impl Into<String>) -> CueTextRun {
         CueTextRun {
             text: text.into(),
             bold: false,
             italic: false,
             underline: false,
-            color: Color::new(0xFFFF_FFFF),
+            color: None,
             background: None,
-            font_size: CueTextRun::DEFAULT_FONT_SIZE,
+            font_size: None,
             font_family: None,
-            edge: CueTextEdge::None,
-            edge_color: Color::new(0xFF00_0000),
+            edge: None,
+            edge_color: None,
         }
     }
 }

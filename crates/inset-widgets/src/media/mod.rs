@@ -21,10 +21,17 @@
 //! the picture still on its own layer, and a view laid out before its picture's size is known
 //! takes no room.
 //!
-//! The system draws no subtitles: a player hands its cues to the app, and a [`SubtitleView`],
-//! Media3's, draws them over the picture's rectangle, as `PlayerView` puts one over its video.
+//! The system draws no subtitles: a player hands its cues to the app, as the media styles them,
+//! and a [`SubtitleView`], Media3's, draws them over the picture's rectangle with the user's
+//! caption style merged in, as `PlayerView` puts one over its video.
+//!
+//! A player's position is read, not told ([`Player::position`]): its listeners hear it jump, and
+//! a widget that shows it while it plays reads it at each frame, ticking with a `Ticker` from its
+//! state's ticker provider while the player's state says it plays, as a widget ticks through an
+//! animation.
 
 mod camera;
+mod cue_style;
 mod player;
 mod subtitle_painter;
 mod subtitle_view;

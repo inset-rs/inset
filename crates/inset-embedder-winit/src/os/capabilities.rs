@@ -8,10 +8,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use inset_embedder::{
-    Cameras, Clipboard, CompositionLayer, Compositor, DataTransferItem, DockMenu, FileDialogs,
-    KeyData, MenuBar, MenuEntry, MenuId, Notifications, Offset, Opener, Placement, Players, Rect,
-    Screen, ScreenId, TargetPlatform, TrayIcons, VideoFrameReaders, ViewId, ViewPadding,
-    VsyncWaiter, WindowConfig,
+    Cameras, CaptionSettings, Clipboard, CompositionLayer, Compositor, DataTransferItem, DockMenu,
+    FileDialogs, KeyData, MenuBar, MenuEntry, MenuId, Notifications, Offset, Opener, Placement,
+    Players, Rect, Screen, ScreenId, TargetPlatform, TrayIcons, VideoFrameReaders, ViewId,
+    ViewPadding, VsyncWaiter, WindowConfig,
 };
 use valo_codec::Decoder;
 use winit::event_loop::{ActiveEventLoop, EventLoopBuilder};
@@ -415,7 +415,7 @@ pub(crate) trait SystemFileDialogs {
 }
 
 /// The system's media stack: its players, its cameras and the frame readers they feed
-/// (`apple/media` on macOS and iOS).
+/// (`apple/media` on macOS and iOS), and the user's caption settings (`apple/caption_appearance`).
 pub(crate) trait SystemMedia {
     /// The system's players, or `None` where the embedder has none.
     fn players() -> Option<Rc<dyn Players>> {
@@ -430,6 +430,11 @@ pub(crate) trait SystemMedia {
     /// The readers the system's players and cameras feed, or `None` where it hands out no
     /// frames.
     fn video_frame_readers() -> Option<Rc<dyn VideoFrameReaders>> {
+        None
+    }
+
+    /// The user's caption settings, or `None` where the system keeps none.
+    fn caption_settings() -> Option<Rc<dyn CaptionSettings>> {
         None
     }
 }

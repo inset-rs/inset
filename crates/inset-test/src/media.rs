@@ -1,6 +1,6 @@
 //! A compositor, frame readers, players and cameras in memory, as a host shows nothing: each
 //! keeps what the app asked of it or gave it, and reports the state the test gives it, a player
-//! its metadata and cues too, and the cameras their list.
+//! its position, metadata and cues too, and the cameras their list.
 
 use std::cell::{Cell, RefCell};
 use std::future::Future;
@@ -95,8 +95,8 @@ impl VideoFrameReaders for MockVideoFrameReaders {
     }
 }
 
-/// Players that keep each player opened, which reports the state, metadata and cues the test
-/// gives it. Every clone is the same players.
+/// Players that keep each player opened, which reports the state, position, metadata and cues
+/// the test gives it. Every clone is the same players.
 #[derive(Clone, Default)]
 pub struct MockPlayers(Rc<RefCell<Vec<MockPlayer>>>);
 
@@ -116,6 +116,7 @@ impl Players for MockPlayers {
         let player = MockPlayer(Rc::new(PlayerShared {
             url: url.to_owned(),
             state: RefCell::new(PlayerState::loading()),
+            position: Cell::new(Duration::ZERO),
             metadata: RefCell::default(),
             cues: RefCell::default(),
             calls: RefCell::default(),
@@ -166,6 +167,7 @@ pub struct MockPlayer(Rc<PlayerShared>);
 struct PlayerShared {
     url: String,
     state: RefCell<PlayerState>,
+    position: Cell<Duration>,
     metadata: RefCell<MediaMetadata>,
     cues: RefCell<Vec<Cue>>,
     calls: RefCell<Vec<PlayerCall>>,
@@ -211,6 +213,18 @@ impl MockPlayer {
     /// Reports `state` from now on, as the system would have changed it.
     pub fn set_state(&self, state: PlayerState) {
         *self.0.state.borrow_mut() = state;
+        self.0.changes.notify();
+    }
+
+    /// Answers `position` from now on, telling the app nothing, as a playing player moves on.
+    pub fn move_to(&self, position: Duration) {
+        self.0.position.set(position);
+    }
+
+    /// Answers `position` from now on, telling the app it jumped, as a seek landing or a loop
+    /// does.
+    pub fn jump_to(&self, position: Duration) {
+        self.0.position.set(position);
         self.0.changes.notify();
     }
 
@@ -261,6 +275,10 @@ impl MediaPlayer for OpenedPlayer {
 
     fn state(&self) -> PlayerState {
         self.0.0.state.borrow().clone()
+    }
+
+    fn position(&self) -> Duration {
+        self.0.0.position.get()
     }
 
     fn changed(&self) -> MediaChangeFuture {
@@ -608,7 +626,7 @@ impl VideoFrameReader for NoFrames {
 
 /// Each `next` future resolves at the next change, or once the changes end.
 #[derive(Default)]
-struct Changes(Rc<ChangesShared>);
+pub(crate) struct Changes(Rc<ChangesShared>);
 
 #[derive(Default)]
 struct ChangesShared {
@@ -618,14 +636,14 @@ struct ChangesShared {
 }
 
 impl Changes {
-    fn next(&self) -> MediaChangeFuture {
+    pub(crate) fn next(&self) -> MediaChangeFuture {
         Box::pin(NextChange {
             changes: Rc::clone(&self.0),
             seen: self.0.count.get(),
         })
     }
 
-    fn notify(&self) {
+    pub(crate) fn notify(&self) {
         self.0.count.set(self.0.count.get() + 1);
         self.wake();
     }

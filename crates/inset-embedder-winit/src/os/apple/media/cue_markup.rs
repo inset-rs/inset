@@ -2,8 +2,9 @@
 //! Core Media's text markup (`CMTextMarkup.h`), as the framework's [`Cue`]. A run of the string
 //! with one set of attributes is a [`CueTextRun`]; the attributes `CMTextMarkup.h` says cover the
 //! whole string (alignment, places, size, vertical layout, the box's colour) are read from its
-//! first character. Where the markup gives no value, the field keeps its default: `Cue::new`'s
-//! and `CueTextRun::new`'s.
+//! first character. Where the markup gives no value, the field is left unsaid, as `Cue::new` and
+//! `CueTextRun::new` leave it, for the app to fill in from the user's caption style: the legible
+//! output hands over the media's own styling alone (`cues`).
 //!
 //! Core Media gives a cue's place as the centre of its text across and of the cue down
 //! (`TextPositionPercentageRelativeToWritingDirection`,
@@ -29,8 +30,9 @@ use objc2_core_media::{
     kCMTextMarkupAttribute_UnderlineStyle, kCMTextMarkupAttribute_VerticalLayout,
     kCMTextMarkupAttribute_WritingDirectionSizePercentage,
     kCMTextMarkupCharacterEdgeStyle_Depressed, kCMTextMarkupCharacterEdgeStyle_DropShadow,
-    kCMTextMarkupCharacterEdgeStyle_Raised, kCMTextMarkupCharacterEdgeStyle_Uniform,
-    kCMTextVerticalLayout_LeftToRight, kCMTextVerticalLayout_RightToLeft,
+    kCMTextMarkupCharacterEdgeStyle_None, kCMTextMarkupCharacterEdgeStyle_Raised,
+    kCMTextMarkupCharacterEdgeStyle_Uniform, kCMTextVerticalLayout_LeftToRight,
+    kCMTextVerticalLayout_RightToLeft,
 };
 use objc2_foundation::{NSArray, NSAttributedString, NSDictionary, NSNumber, NSRange, NSString};
 
@@ -85,12 +87,10 @@ fn run_of(text: String, attributes: &Attributes) -> CueTextRun {
     run.bold = flag(attributes, markup!(kCMTextMarkupAttribute_BoldStyle));
     run.italic = flag(attributes, markup!(kCMTextMarkupAttribute_ItalicStyle));
     run.underline = flag(attributes, markup!(kCMTextMarkupAttribute_UnderlineStyle));
-    if let Some(color) = color(
+    run.color = color(
         attributes,
         markup!(kCMTextMarkupAttribute_ForegroundColorARGB),
-    ) {
-        run.color = color;
-    }
+    );
     run.background = color(
         attributes,
         markup!(kCMTextMarkupAttribute_CharacterBackgroundColorARGB),
@@ -123,18 +123,21 @@ fn place(cue: &mut Cue, whole: &Attributes) {
 }
 
 /// The text's height as a fraction of the picture's: the base size, a percentage of the video's
-/// height, times the relative size, a percentage of the base.
-fn font_size_of(attributes: &Attributes) -> f32 {
+/// height, times the relative size, a percentage of the base, which is the default height where
+/// the markup gives none; `None` where it gives neither.
+fn font_size_of(attributes: &Attributes) -> Option<f32> {
     let base = number(
         attributes,
         markup!(kCMTextMarkupAttribute_BaseFontSizePercentageRelativeToVideoHeight),
     )
-    .map_or(f64::from(CueTextRun::DEFAULT_FONT_SIZE), |percent| {
-        percent / 100.0
-    });
+    .map(|percent| percent / 100.0);
     let relative = number(attributes, markup!(kCMTextMarkupAttribute_RelativeFontSize))
-        .map_or(1.0, |percent| percent / 100.0);
-    (base * relative) as f32
+        .map(|percent| percent / 100.0);
+    if base.is_none() && relative.is_none() {
+        return None;
+    }
+    let base = base.unwrap_or(f64::from(CueTextRun::DEFAULT_FONT_SIZE));
+    Some((base * relative.unwrap_or(1.0)) as f32)
 }
 
 /// The cue's alignment; the middle where the markup gives none, as `CMTextMarkup.h` says. Left
@@ -167,25 +170,26 @@ fn vertical_of(whole: &Attributes) -> Option<CueVertical> {
     }
 }
 
-/// The edge round a run's characters; a uniform edge is an outline.
-fn edge_of(attributes: &Attributes) -> CueTextEdge {
-    let Some(edge) = string(
+/// The edge round a run's characters; a uniform edge is an outline. `None` where the markup
+/// names none it knows.
+fn edge_of(attributes: &Attributes) -> Option<CueTextEdge> {
+    let edge = string(
         attributes,
         markup!(kCMTextMarkupAttribute_CharacterEdgeStyle),
-    ) else {
-        return CueTextEdge::None;
-    };
+    )?;
     let is = |value: &NSString| &*edge == value;
-    if is(markup!(kCMTextMarkupCharacterEdgeStyle_Uniform)) {
-        CueTextEdge::Outline
+    if is(markup!(kCMTextMarkupCharacterEdgeStyle_None)) {
+        Some(CueTextEdge::None)
+    } else if is(markup!(kCMTextMarkupCharacterEdgeStyle_Uniform)) {
+        Some(CueTextEdge::Outline)
     } else if is(markup!(kCMTextMarkupCharacterEdgeStyle_DropShadow)) {
-        CueTextEdge::DropShadow
+        Some(CueTextEdge::DropShadow)
     } else if is(markup!(kCMTextMarkupCharacterEdgeStyle_Raised)) {
-        CueTextEdge::Raised
+        Some(CueTextEdge::Raised)
     } else if is(markup!(kCMTextMarkupCharacterEdgeStyle_Depressed)) {
-        CueTextEdge::Depressed
+        Some(CueTextEdge::Depressed)
     } else {
-        CueTextEdge::None
+        None
     }
 }
 
@@ -336,26 +340,38 @@ mod tests {
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0].text, "Hello ");
         assert!(runs[0].italic && !runs[0].bold);
-        assert_eq!(runs[0].color, Color::new(0xFFFF_0000));
-        assert_eq!(runs[0].font_size, 0.05);
-        assert_eq!(runs[0].edge, CueTextEdge::None);
+        assert_eq!(runs[0].color, Some(Color::new(0xFFFF_0000)));
+        assert_eq!(runs[0].font_size, Some(0.05));
+        assert_eq!(runs[0].edge, None);
         assert_eq!(runs[1].text, "world");
         assert!(runs[1].bold && !runs[1].italic);
-        assert_eq!(
-            runs[1].color,
-            Color::new(0xFFFF_FFFF),
-            "white where none is given"
-        );
-        assert_eq!(runs[1].font_size, 0.06);
-        assert_eq!(runs[1].edge, CueTextEdge::DropShadow);
-        assert_eq!(runs[1].edge_color, Color::new(0xFF00_0000));
+        assert_eq!(runs[1].color, None, "unsaid where none is given");
+        assert_eq!(runs[1].font_size, Some(0.06));
+        assert_eq!(runs[1].edge, Some(CueTextEdge::DropShadow));
+        assert_eq!(runs[1].edge_color, None, "Core Media gives no edge colour");
     }
 
     #[test]
-    fn a_string_without_markup_is_a_cue_in_the_default_place_and_style() {
+    fn a_string_without_markup_is_a_cue_in_the_default_place_that_says_no_style() {
         let cue = cue_of(&NSAttributedString::from_nsstring(&NSString::from_str(
             "Hi",
         )));
         assert_eq!(cue, Cue::new(CueContent::Text(vec![CueTextRun::new("Hi")])));
+        assert_eq!(cue.window_color, None);
+    }
+
+    #[test]
+    fn a_relative_size_alone_is_of_the_default_height() {
+        let string = run(
+            "Hi",
+            &[(
+                markup!(kCMTextMarkupAttribute_RelativeFontSize),
+                number(200.0),
+            )],
+        );
+        let CueContent::Text(runs) = cue_of(&string).content else {
+            panic!("a text cue");
+        };
+        assert_eq!(runs[0].font_size, Some(CueTextRun::DEFAULT_FONT_SIZE * 2.0));
     }
 }

@@ -1,6 +1,12 @@
 # inset-test/src
 No Flutter crate in this shape. Closest analogue: `flutter_test`'s `TestPlatformDispatcher` and `TestFlutterView`.
 
+## caption_style.rs → no Flutter counterpart
+
+- Change: `MockCaptionSettings` answers the caption style the test gives, and each change the test makes wakes the app's watch of it.
+  Reason: platform — it stands in for the system's caption settings, which Flutter's tests never reach.
+  Affect: a test draws subtitles in a user's style and changes that style without a host.
+
 ## clipboard.rs → `MockClipboard` in Flutter's `test/widgets/clipboard_utils.dart`
 
 - Change: `MockClipboard` is the host's full clipboard in memory: items in several types, promises produced at each read, files and promised files, a promised file's bytes written into a folder as a host writes them where the receiver chose and removed when its producer fails, how the last copy is to be treated, and a count of its changes, where Flutter's holds one text.
@@ -15,7 +21,7 @@ No Flutter crate in this shape. Closest analogue: `flutter_test`'s `TestPlatform
 
 ## media.rs → `FakeController` in `video_player`'s tests and `FakeCameraPlatform` in `camera`'s
 
-- Change: `MockCompositor` makes composition layers that show nothing and keeps each it made, and `MockVideoFrameReaders` frame readers that never have a frame; `MockPlayers` keeps each player opened, what it was asked, the tracks selected included, and the layer or reader its picture goes to, and `MockCameras` lists the cameras the test sets, at once, waking the app's watch of the list, opens a camera unless the test denies it, lists the formats the test gave, and keeps each session started, answering its start at once, with the format picked and the outputs given, a session on a camera another still runs joining its format; each reports the state the test sets, a player's metadata and cues too, waking the app's watch of it; a session's photos answer what the test gave while it runs, and its recordings answer when stopped, writing nothing.
+- Change: `MockCompositor` makes composition layers that show nothing and keeps each it made, and `MockVideoFrameReaders` frame readers that never have a frame; `MockPlayers` keeps each player opened, what it was asked, the tracks selected included, and the layer or reader its picture goes to, and `MockCameras` lists the cameras the test sets, at once, waking the app's watch of the list, opens a camera unless the test denies it, lists the formats the test gave, and keeps each session started, answering its start at once, with the format picked and the outputs given, a session on a camera another still runs joining its format; each reports the state the test sets, a player's metadata and cues too, waking the app's watch of it, and a player the position the test moves it to, waking the watch only at a jump; a session's photos answer what the test gave while it runs, and its recordings answer when stopped, writing nothing.
   Reason: platform — they stand in for the host's compositor and media stack, which Flutter's tests reach only as plugin channel calls.
   Affect: a test drives a player or a camera and its views without a host, and checks what the app asked of them.
 

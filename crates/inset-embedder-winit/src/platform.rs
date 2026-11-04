@@ -31,11 +31,11 @@ use crate::state::EmbedderState;
 use crate::view::WinitView;
 use crate::windows::RequestedWindow;
 use inset_embedder::{
-    AppExit, Brightness, Cameras, Clipboard, CompositionLayer, Compositor, Dispatcher, DockMenu,
-    FileDialogs, FontSource, ImageCodecFuture, Locale, MenuBar, Notifications, Opener, Platform,
-    Players, PointerReport, PopupMenus, RequestId, Screens, SystemFontSource, TargetPlatform,
-    TrayIcons, VideoFrameReaders, ViewEmbedder, ViewError, ViewFocusEvent, ViewHost, ViewId,
-    ViewMetrics, ViewRef, VsyncWaiter, WindowConfig,
+    AppExit, Brightness, Cameras, CaptionSettings, Clipboard, CompositionLayer, Compositor,
+    Dispatcher, DockMenu, FileDialogs, FontSource, ImageCodecFuture, Locale, MenuBar,
+    Notifications, Opener, Platform, Players, PointerReport, PopupMenus, RequestId, Screens,
+    SystemFontSource, TargetPlatform, TrayIcons, VideoFrameReaders, ViewEmbedder, ViewError,
+    ViewFocusEvent, ViewHost, ViewId, ViewMetrics, ViewRef, VsyncWaiter, WindowConfig,
 };
 
 /// The long-lived embedder capability held by `App`.
@@ -80,6 +80,8 @@ pub struct WinitPlatform {
     players: Option<Rc<dyn Players>>,
     cameras: Option<Rc<dyn Cameras>>,
     video_frame_readers: Option<Rc<dyn VideoFrameReaders>>,
+    /// The user's caption settings, where the system keeps them.
+    caption_settings: Option<Rc<dyn CaptionSettings>>,
     /// What only macOS offers; `None` elsewhere.
     macos: Option<MacOs>,
 }
@@ -101,6 +103,7 @@ impl WinitPlatform {
             players: System::players(),
             cameras: System::cameras(),
             video_frame_readers: System::video_frame_readers(),
+            caption_settings: System::caption_settings(),
             state,
             compositor: System::compositor(),
             vsync_waiter: System::vsync_waiter(&proxy),
@@ -302,6 +305,11 @@ impl Platform for WinitPlatform {
 
     fn video_frame_readers(&self) -> Option<&dyn VideoFrameReaders> {
         self.video_frame_readers.as_deref()
+    }
+
+    /// Media Accessibility's on macOS and iOS, and none elsewhere.
+    fn caption_settings(&self) -> Option<&dyn CaptionSettings> {
+        self.caption_settings.as_deref()
     }
 
     /// On macOS, where a view draws into a composition layer of its own (`os/capabilities.rs`).

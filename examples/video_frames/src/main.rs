@@ -1,9 +1,9 @@
 //! A video player whose frames the framework draws: the app makes a frame reader and gives it to a
 //! player, and a `VideoFrameView` draws the reader's frame at each refresh as part of the picture,
 //! at the video's aspect, its corners cut round and turned if asked, like anything painted, with a
-//! `SubtitleView` of the player's cues over it. A click plays or pauses it, and a line under it
-//! says how far it is and what size its frames are. The player's tracks are printed each time
-//! they change.
+//! `SubtitleView` of the player's cues over it, drawn in the user's caption style. A click plays or
+//! pauses it, and a line under it says how far it is, read from the player at each frame while it
+//! plays, and what size its frames are. The player's tracks are printed each time they change.
 //!
 //! Without an argument it plays Apple's HLS example stream, 1080p at 60 frames a second with a
 //! running clock in the picture and subtitle tracks; `--url` plays another link, `--movie` a file,

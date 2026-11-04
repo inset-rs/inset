@@ -32,14 +32,24 @@
 //! every system's player does (Apple's media selection groups, Media3's track overrides); it tells
 //! what the media's tags say ([`MediaMetadata`]); and it hands the app the [`Cue`]s of its text
 //! track to draw, the system drawing none, as most players draw their own (Media3's
-//! `SubtitleView`, Safari over AVFoundation's legible output).
+//! `SubtitleView`, Safari over AVFoundation's legible output). A cue carries the media's own
+//! styling, and the user's caption style is a system setting beside it, which the platform's
+//! caption settings answer ([`Platform::caption_settings`](crate::Platform::caption_settings))
+//! and the app merges in as it draws, as Media3's `SubtitleView` and WebKit's cue style sheet do.
+//!
+//! A player's position is read when the app needs it ([`MediaPlayer::position`]), as every
+//! system lets an app read it (AVPlayer's `currentTime()`, Media3's `getCurrentPosition()`,
+//! Windows' `PlaybackSession.Position`, the web's `currentTime`), and told only when it jumps (a
+//! seek landing, a loop), as the systems tell it (Apple's `AVPlayerItemTimeJumped`, Media3's
+//! `onPositionDiscontinuity`, the web's `seeked`): while it plays it moves on by itself, and an
+//! app that shows it reads it at each frame it draws.
 //!
 //! The platform answers `None` where its system has no players, no cameras or no frames. A player
 //! or a session reports its state through [`MediaPlayer::state`] and [`CaptureSession::state`],
 //! and the cameras their list through [`Cameras::cameras`], each read when the future from its
 //! `changed` resolves: the invariant a host keeps is that such a future resolves at every change
-//! of what it reads, a player's metadata and cues included, and when the player or session goes,
-//! so the app never waits on one for ever.
+//! of what it reads, a player's metadata and cues included, at every jump of a player's position,
+//! and when the player or session goes, so the app never waits on one for ever.
 
 use std::any::Any;
 use std::fmt;
@@ -85,8 +95,14 @@ pub trait MediaPlayer {
     /// The player's state now.
     fn state(&self) -> PlayerState;
 
-    /// Resolves once [`state`](Self::state) may answer something else than when this was
-    /// called, or once the player is gone.
+    /// Where it is in the media now, read from the system at each call; it moves on by itself
+    /// while the player plays.
+    fn position(&self) -> Duration;
+
+    /// Resolves once [`state`](Self::state), [`metadata`](Self::metadata) or
+    /// [`cues`](Self::cues) may answer something else than when this was called, once the
+    /// [`position`](Self::position) jumped, as a seek landing or a loop makes it, or once the
+    /// player is gone; not as the position moves on while the player plays.
     fn changed(&self) -> MediaChangeFuture;
 
     /// Sends the picture to `output` from now on, and nowhere it went before; `None` sends it
@@ -106,8 +122,8 @@ pub trait MediaPlayer {
     /// What the media's tags say about it; empty until the player has read them.
     fn metadata(&self) -> MediaMetadata;
 
-    /// The cues of the text track shown, to show now, with the user's caption settings merged
-    /// in; empty while no text track is shown.
+    /// The cues of the text track shown, to show now, as the media styles them: the user's
+    /// caption style is not merged in. Empty while no text track is shown.
     fn cues(&self) -> Vec<Cue>;
 }
 
@@ -127,9 +143,6 @@ pub struct PlayerState {
     /// Whether it plays, or waits for media to play on: true from `play` until `pause`, or the
     /// end of media it does not loop.
     pub playing: bool,
-    /// Where it is in the media. While it plays the host updates it as the system reports time,
-    /// every half second, as Flutter's `video_player` polls it, and at every jump.
-    pub position: Duration,
     /// How long the media is; `None` until it is known, and for a live stream.
     pub duration: Option<Duration>,
     /// The picture's size, in its own pixels, as it is presented: its aspect corrected; `None`
@@ -147,7 +160,6 @@ impl PlayerState {
         PlayerState {
             status: PlayerStatus::Loading,
             playing: false,
-            position: Duration::ZERO,
             duration: None,
             size: None,
             tracks: Vec::new(),
@@ -492,7 +504,7 @@ impl fmt::Display for MediaError {
 
 impl std::error::Error for MediaError {}
 
-/// What a player's, a session's or the cameras' `changed` answers.
+/// What a player's, a session's, the cameras' or the caption settings' `changed` answers.
 pub type MediaChangeFuture = Pin<Box<dyn Future<Output = ()>>>;
 /// What listing the cameras answers.
 pub type CameraListFuture = Pin<Box<dyn Future<Output = Vec<Camera>>>>;

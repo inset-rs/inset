@@ -1,5 +1,7 @@
 //! The window: the video in the middle, drawn by the framework at its aspect with the player's
-//! subtitles over it, and a line of status under it; a click on the video plays or pauses it. The
+//! subtitles over it in the user's caption style, and a line of status under it, whose position
+//! is read from the player at each frame while it plays, as a widget follows an animation, with a
+//! ticker its state's ticker provider makes; a click on the video plays or pauses it. The
 //! player's tracks are printed each time they change.
 
 use std::cell::{Cell, RefCell};
@@ -16,11 +18,14 @@ use inset_foundation::{App, Handle, Listenable, Listener};
 use inset_painting::{
     AlignmentGeometry, BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry, TextStyle,
 };
+use inset_scheduler::{FrameCallback, Ticker};
 use inset_shell::Shell;
 use inset_widgets::{
-    AspectRatio, Center, ClipRRect, Column, DecoratedBox, Directionality, GestureDetector,
-    IntoWidget, ListenableBuilder, MainAxisSize, Padding, Player, Positioned, SizedBox, Stack,
-    SubtitleView, Text, Transform, VideoFrameView, ViewRequestState, WidgetRef, Window,
+    AspectRatio, BuildContext, Center, ClipRRect, Column, DecoratedBox, Directionality,
+    GestureDetector, IntoWidget, ListenableBuilder, MainAxisSize, Padding, Player, Positioned,
+    SingleTickerProviderStateMixin, SingleTickerProviderStateMixinData, SizedBox, Stack, State,
+    StateData, StatefulWidget, SubtitleView, Text, Transform, VideoFrameView, ViewRequestState,
+    WidgetRef, Window,
     WindowController, run_widget,
 };
 
@@ -193,7 +198,7 @@ fn page(
     let column = Column::new().main_axis_size(MainAxisSize::Min).children([
         clickable.into_widget(),
         Padding::new(EdgeInsetsGeometry::only(0.0, 16.0, 0.0, 0.0))
-            .child(Text::new(status(state)).style(TextStyle::new().font_size(14.0).color(STATUS)))
+            .child(StatusLine { player })
             .into_widget(),
     ]);
     Directionality::new(
@@ -204,8 +209,126 @@ fn page(
     .into_widget()
 }
 
-/// What the player is doing, how far it is, and what size its frames are.
-fn status(state: &PlayerState) -> String {
+/// What the player is doing, how far it is, and what size its frames are, its position read at
+/// each frame while it plays.
+#[derive(Debug)]
+struct StatusLine {
+    player: Handle<Player>,
+}
+
+impl StatefulWidget for StatusLine {
+    type State = StatusLineState;
+
+    fn create_state(&self) -> StatusLineState {
+        StatusLineState {
+            state: StateData::new(),
+            single_ticker_provider: SingleTickerProviderStateMixinData::default(),
+            ticker: None,
+            shown: String::new(),
+        }
+    }
+}
+
+struct StatusLineState {
+    state: StateData<StatusLine>,
+    single_ticker_provider: SingleTickerProviderStateMixinData,
+    /// Ticks at each frame while the player plays; made in `init_state`.
+    ticker: Option<Handle<Ticker>>,
+    /// The line as it was built last.
+    shown: String,
+}
+
+impl StatusLineState {
+    fn ticker(self: Handle<Self>, app: &App) -> Handle<Ticker> {
+        app.get(self).ticker.expect("made in init_state")
+    }
+
+    /// The player's state changed, or its position jumped: the line is built again.
+    fn player_changed(self: Handle<Self>, app: &mut App) {
+        self.tick_while_playing(app);
+        self.set_state(app, |_| {});
+    }
+
+    /// Runs the ticker while the player plays, and stops it otherwise.
+    fn tick_while_playing(self: Handle<Self>, app: &mut App) {
+        let playing = Player::state(self.widget(app).player, app).playing;
+        let ticker = self.ticker(app);
+        if playing && !ticker.is_active(app) {
+            let _ticking = ticker.start(app);
+        } else if !playing && ticker.is_active(app) {
+            ticker.stop(app, true);
+        }
+    }
+
+    /// A frame while the player plays: the line is built again once what it shows changed.
+    fn tick(self: Handle<Self>, app: &mut App) {
+        if status_line(app, self.widget(app).player) != app.get(self).shown {
+            self.set_state(app, |_| {});
+        }
+    }
+}
+
+impl SingleTickerProviderStateMixin for StatusLineState {
+    fn single_ticker_provider_data(
+        self: Handle<Self>,
+        app: &App,
+    ) -> &SingleTickerProviderStateMixinData {
+        &app.get(self).single_ticker_provider
+    }
+
+    fn single_ticker_provider_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut SingleTickerProviderStateMixinData {
+        &mut app.get_mut(self).single_ticker_provider
+    }
+}
+
+impl State for StatusLineState {
+    type Widget = StatusLine;
+    inset_widgets::state_accessors!();
+
+    fn init_state(self: Handle<Self>, app: &mut App) {
+        let ticker = SingleTickerProviderStateMixin::create_ticker(
+            self,
+            app,
+            FrameCallback::new(move |app, _elapsed| self.tick(app)),
+        );
+        app.get_mut(self).ticker = Some(ticker);
+        let player = self.widget(app).player;
+        player.add_listener(app, Listener::handle_method(self, Self::player_changed));
+        self.tick_while_playing(app);
+    }
+
+    fn activate(self: Handle<Self>, app: &mut App) {
+        SingleTickerProviderStateMixin::activate(self, app);
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        let player = self.widget(app).player;
+        player.remove_listener(app, &Listener::handle_method(self, Self::player_changed));
+        if let Some(ticker) = app.get_mut(self).ticker.take() {
+            ticker.dispose(app);
+        }
+        SingleTickerProviderStateMixin::dispose(self, app);
+    }
+
+    fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+        let line = status_line(app, self.widget(app).player);
+        app.get_mut(self).shown = line.clone();
+        Text::new(line)
+            .style(TextStyle::new().font_size(14.0).color(STATUS))
+            .into_widget()
+    }
+}
+
+/// `player`'s status, its position read now.
+fn status_line(app: &App, player: Handle<Player>) -> String {
+    status(Player::state(player, app), Player::position(player, app))
+}
+
+/// What the player is doing, how far it is, at `position`, and what size its frames are.
+fn status(state: &PlayerState, position: Duration) -> String {
     let doing = match &state.status {
         PlayerStatus::Loading => return "Loading…".to_owned(),
         PlayerStatus::Failed(reason) => return format!("Failed: {reason}"),
@@ -218,7 +341,7 @@ fn status(state: &PlayerState) -> String {
     });
     format!(
         "{doing} · {} / {length}{size} · drawn by Inset · click to play or pause",
-        clock(state.position)
+        clock(position)
     )
 }
 

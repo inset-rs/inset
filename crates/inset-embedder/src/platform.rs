@@ -713,6 +713,12 @@ pub trait Platform: Any {
         None
     }
 
+    /// The user's caption settings, or `None` where the system keeps none, as Linux and the web
+    /// keep none.
+    fn caption_settings(&self) -> Option<&dyn crate::CaptionSettings> {
+        None
+    }
+
     /// What the app embeds views of its own with, on layers it makes and places, or `None` where
     /// the host cannot draw a view into such a layer: everywhere but macOS today.
     fn view_embedder(&self) -> Option<&dyn crate::ViewEmbedder> {

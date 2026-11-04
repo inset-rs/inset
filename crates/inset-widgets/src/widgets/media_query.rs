@@ -1,9 +1,9 @@
 //! Flutter counterpart: `widgets/media_query.dart`.
 //!
 //! [`MediaQuery::from_view`] derives its data from the view when its dependencies or its
-//! widget change: the `WidgetsBindingObserver` hooks (`didChangeMetrics`,
-//! `didChangeAccessibilityFeatures`, `didChangeTextScaleFactor`,
-//! `didChangePlatformBrightness`) wait with the observer. `DisplayFeature`,
+//! widget change, and again at each change of the platform its `WidgetsBindingObserver` hears:
+//! the metrics, the accessibility features, the text scale factor, the brightness, and the
+//! user's caption style, which Flutter's data has no counterpart of. `DisplayFeature`,
 //! `SystemTextScaler`, `debugBrightnessOverride`, and the deprecated `textScaleFactor`
 //! members are absent; see `PORTING.md`.
 
@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
-use inset_embedder::{Brightness, Size, View as EmbedderView, ViewPadding, ViewRef};
+use inset_embedder::{Brightness, CaptionStyle, Size, View as EmbedderView, ViewPadding, ViewRef};
 use inset_foundation::{App, Handle};
 use inset_gestures::{DeviceGestureSettings, K_TOUCH_SLOP};
 use inset_painting::{BorderRadius, EdgeInsets, TextScaler};
@@ -129,6 +129,9 @@ pub enum MediaQueryAspect {
 
     /// Specifies the aspect corresponding to [`MediaQueryData::display_corner_radii`].
     DisplayCornerRadii,
+
+    /// Specifies the aspect corresponding to [`MediaQueryData::caption_style`].
+    CaptionStyle,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -489,6 +492,20 @@ pub struct MediaQueryData {
     /// This is currently populated only on Android API 31+. On earlier Android versions,
     /// iOS, and other platforms, this value is `None`.
     pub display_corner_radii: Option<BorderRadius>,
+
+    /// How the user's system-wide settings say subtitles and captions look, which a
+    /// `SubtitleView` merges into each cue it draws.
+    ///
+    /// If this [`MediaQueryData`] is created by the [`from_view`](Self::from_view)
+    /// constructor, this property is the platform's caption settings' style, and changes as
+    /// the user changes them; `None` where the platform keeps no caption settings, as Linux
+    /// and the web keep none.
+    ///
+    /// See also:
+    ///
+    ///  * [`MediaQuery::maybe_caption_style_of`], a method to find and depend on the caption
+    ///    style defined for a [`BuildContext`].
+    pub caption_style: Option<CaptionStyle>,
 }
 
 impl MediaQueryData {
@@ -525,6 +542,7 @@ impl MediaQueryData {
             word_spacing_override: None,
             paragraph_spacing_override: None,
             display_corner_radii: None,
+            caption_style: None,
         }
     }
 
@@ -546,10 +564,11 @@ impl MediaQueryData {
     /// provided. If `platform_data` is provided, callers should ensure to call this method
     /// again when it changes to keep the constructed [`MediaQueryData`] updated.
     ///
-    /// The platform here reports its brightness only: the accessibility features, the
-    /// 24-hour format, the text scale factor, the system context menu support, and the text
-    /// style overrides, as well as the view's system gesture insets and display corner
-    /// radii, keep their defaults until the embedder exposes them (see `PORTING.md`).
+    /// The platform here reports its brightness, its system context menu support, and the
+    /// user's caption style: the accessibility features, the 24-hour format, the text scale
+    /// factor, and the text style overrides, as well as the view's system gesture insets and
+    /// display corner radii, keep their defaults until the embedder exposes them (see
+    /// `PORTING.md`).
     ///
     /// In general, [`MediaQuery::of`], and its associated "...Of" methods, are the
     /// appropriate way to obtain [`MediaQueryData`] from a widget. This `from_view`
@@ -604,7 +623,17 @@ impl MediaQueryData {
             paragraph_spacing_override: platform_data
                 .and_then(|data| data.paragraph_spacing_override),
             display_corner_radii: None,
+            caption_style: platform_data.map_or_else(
+                || Self::caption_style_from_platform(app),
+                |data| data.caption_style.clone(),
+            ),
         }
+    }
+
+    /// The style of the platform's caption settings, or `None` where it keeps none.
+    fn caption_style_from_platform(app: &App) -> Option<CaptionStyle> {
+        let platform = app.platform();
+        Some(platform.caption_settings()?.style())
     }
 
     /// Dart's `_textScalerFromView`: the parent's scaler, else the platform's.
@@ -749,6 +778,12 @@ impl MediaQueryData {
     /// Dart `MediaQueryData(letterSpacingOverride:)`.
     pub fn letter_spacing_override(mut self, letter_spacing_override: f64) -> MediaQueryData {
         self.letter_spacing_override = Some(letter_spacing_override);
+        self
+    }
+
+    /// The user's caption style; [`MediaQueryData`] has no counterpart in Dart.
+    pub fn caption_style(mut self, caption_style: CaptionStyle) -> MediaQueryData {
+        self.caption_style = Some(caption_style);
         self
     }
 
@@ -989,6 +1024,7 @@ impl PartialEq for MediaQueryData {
             && other.word_spacing_override == self.word_spacing_override
             && other.paragraph_spacing_override == self.paragraph_spacing_override
             && other.display_corner_radii == self.display_corner_radii
+            && other.caption_style == self.caption_style
     }
 }
 
@@ -1037,6 +1073,7 @@ impl Debug for MediaQueryData {
                 "displayCornerRadii: {}",
                 nullable(self.display_corner_radii.as_ref())
             ),
+            format!("captionStyle: {}", nullable(self.caption_style.as_ref())),
         ];
         write!(f, "MediaQueryData({})", properties.join(", "))
     }
@@ -1300,8 +1337,7 @@ impl MediaQuery {
     /// view-specific.
     ///
     /// The injected [`MediaQuery`] updates when the surrounding [`MediaQuery`] or the `view`
-    /// changes; updates to the view's own metrics wait with the `WidgetsBindingObserver`
-    /// (see `PORTING.md`).
+    /// changes, and when the platform tells the binding's observers its data changed.
     pub fn from_view<K>(
         key: Option<KeyRef>,
         view: ViewRef,
@@ -2054,6 +2090,25 @@ impl MediaQuery {
         Self::maybe_of_aspect(app, context, Some(MediaQueryAspect::DisplayCornerRadii))
             .and_then(|data| data.display_corner_radii)
     }
+
+    /// Returns [`MediaQueryData::caption_style`] for the nearest [`MediaQuery`] ancestor or
+    /// panics, if no such ancestor exists.
+    ///
+    /// Use of this method will cause the given `context` to rebuild any time that the
+    /// [`MediaQueryData::caption_style`] property of the ancestor [`MediaQuery`] changes.
+    pub fn caption_style_of(app: &mut App, context: BuildContext) -> Option<CaptionStyle> {
+        Self::of_aspect(app, context, Some(MediaQueryAspect::CaptionStyle)).caption_style
+    }
+
+    /// Returns [`MediaQueryData::caption_style`] for the nearest [`MediaQuery`] ancestor or
+    /// `None`, if no such ancestor exists.
+    ///
+    /// Use of this method will cause the given `context` to rebuild any time that the
+    /// [`MediaQueryData::caption_style`] property of the ancestor [`MediaQuery`] changes.
+    pub fn maybe_caption_style_of(app: &mut App, context: BuildContext) -> Option<CaptionStyle> {
+        Self::maybe_of_aspect(app, context, Some(MediaQueryAspect::CaptionStyle))
+            .and_then(|data| data.caption_style)
+    }
 }
 
 impl InheritedWidget for MediaQuery {
@@ -2133,6 +2188,7 @@ impl InheritedModel for MediaQuery {
             MediaQueryAspect::DisplayCornerRadii => {
                 data.display_corner_radii != old.display_corner_radii
             }
+            MediaQueryAspect::CaptionStyle => data.caption_style != old.caption_style,
         })
     }
 }
@@ -2221,8 +2277,8 @@ impl StatefulWidget for MediaQueryFromView {
     }
 }
 
-/// Dart's `_MediaQueryFromViewState`. Its `WidgetsBindingObserver` registration and hooks
-/// wait with the observer: the data is re-derived when a dependency or the widget changes.
+/// Dart's `_MediaQueryFromViewState`: the data is re-derived when a dependency or the widget
+/// changes, and at each change of the platform the binding's observers hear.
 struct MediaQueryFromViewState {
     state: StateData<MediaQueryFromView>,
     parent_data: Option<MediaQueryData>,
@@ -2271,6 +2327,10 @@ impl WidgetsBindingObserverObject for MediaQueryFromViewState {
     }
 
     fn did_change_platform_brightness(self: Handle<Self>, app: &mut App) {
+        self.update_data(app);
+    }
+
+    fn did_change_caption_style(self: Handle<Self>, app: &mut App) {
         self.update_data(app);
     }
 }

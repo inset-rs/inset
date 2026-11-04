@@ -1,8 +1,9 @@
 //! A player's subtitles as cues: an `AVPlayerItemLegibleOutput` added to its item, set to suppress
 //! the player's own rendering of them, so AVPlayer draws no subtitles (`suppressesPlayerRendering`).
-//! At its default text styling resolution, which `AVPlayerItemOutput.h` says "will accommodate
-//! user-level Media Accessibility settings", it hands over the attributed strings to show from each
-//! moment on, which become the cues the app draws (`cue_markup`).
+//! At its `SourceAndRulesOnly` text styling resolution, which leaves out the user's Media
+//! Accessibility settings, as WebKit sets its own legible output, it hands over the attributed
+//! strings to show from each moment on with the media's own styling alone, which become the cues
+//! the app draws (`cue_markup`); the user's settings are read on their own (`caption_appearance`).
 //!
 //! The delegate is called on the main queue, where the player is controlled, so the cues shown and
 //! a selection's clearing them take turns.
@@ -15,7 +16,8 @@ use objc2::rc::Retained;
 use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
 use objc2_av_foundation::{
-    AVPlayerItemLegibleOutput, AVPlayerItemLegibleOutputPushDelegate, AVPlayerItemOutput,
+    AVPlayerItemLegibleOutput, AVPlayerItemLegibleOutputPushDelegate,
+    AVPlayerItemLegibleOutputTextStylingResolutionSourceAndRulesOnly, AVPlayerItemOutput,
     AVPlayerItemOutputPushDelegate,
 };
 use objc2_core_media::CMTime;
@@ -41,11 +43,15 @@ impl LegibleCues {
         });
         // SAFETY: plain NSObject initialisation of an allocated instance.
         let delegate: Retained<LegibleDelegate> = unsafe { msg_send![super(delegate), init] };
-        // SAFETY: an output of attributed strings, which the player does not draw, calling the
-        // delegate on the main queue.
+        // SAFETY: an output of attributed strings in the media's own styling, which the player
+        // does not draw, calling the delegate on the main queue; the resolution is a constant
+        // AVFoundation exports for the life of the process.
         let output = unsafe {
             let output = AVPlayerItemLegibleOutput::new();
             output.setSuppressesPlayerRendering(true);
+            output.setTextStylingResolution(
+                AVPlayerItemLegibleOutputTextStylingResolutionSourceAndRulesOnly,
+            );
             output.setDelegate_queue(
                 Some(ProtocolObject::from_ref(&*delegate)),
                 Some(DispatchQueue::main()),

@@ -178,9 +178,9 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 ## media.rs, os/apple/media/ → `video_player_avfoundation` and `camera_avfoundation`
 
-- Change: a player is an `AVPlayer` whose state is read from it on the main thread when the app hears it changed, its changes told by key-value observing, a periodic time observer every half second and its end-of-item notification, where Flutter's plugin copies events over an event channel.
-  Reason: platform — AVFoundation changes a player's state on the main queue, where the app reads it.
-  Affect: the app's player hears its state change at once on load, play, pause, seek and end, and its position every half second while it plays.
+- Change: a player is an `AVPlayer` whose state and position are read from it on the main thread when the app asks, its changes told by key-value observing and its end-of-item and time-jumped notifications, where Flutter's plugin copies events over an event channel and polls the position on a timer.
+  Reason: platform — AVFoundation changes a player's state on the main queue, where the app reads it, keeps its current time for the app to read, and tells when that time jumps.
+  Affect: the app's player hears its state change at once on load, play, pause and end, and its position jump at a seek's landing and a loop, and nothing as it plays on.
 
 - Change: a player shown on a composition layer makes an `AVPlayerLayer` its content (`MacOs::show_system_layer` for an app's own system layer), and one given a frame reader adds an `AVPlayerItemVideoOutput` of BGRA `IOSurface`-backed pixel buffers to its item, which the reader reads, where Flutter's plugin copies every frame into a texture.
   Reason: platform — Core Animation clips and scales a layer with the one it is the content of, and a pixel buffer backed by an `IOSurface` reaches the GPU with no copy.
@@ -190,9 +190,13 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — AVFoundation offers a choice of audio and subtitles through selection groups, and plays the tracks outside any group while they are enabled.
   Affect: a stream lists its renditions under ids that stay for the player's run, a file lists its own tracks, and a stream's video track is listed again under a new id each time it switches variant.
 
-- Change: a player's tags are its asset's common metadata, read once AVFoundation has loaded them, its artwork named by the image format its bytes start with, and its subtitles come from an `AVPlayerItemLegibleOutput` that keeps AVPlayer from drawing them, its attributed strings and their Core Media markup made into cues, where Flutter's plugin reads neither.
-  Reason: platform — Apple's legible output gives every subtitle AVPlayer would draw, styled at its default resolution with the user's caption settings, as text with markup.
-  Affect: the app draws subtitles in the user's caption style, placed where Core Media places them, with black edges as WebKit draws Apple's, and the cues go at a seek or a change of text track until the next arrive.
+- Change: a player's tags are its asset's common metadata, read once AVFoundation has loaded them, its artwork named by the image format its bytes start with, and its subtitles come from an `AVPlayerItemLegibleOutput` at its `SourceAndRulesOnly` styling that keeps AVPlayer from drawing them, its attributed strings and their Core Media markup made into cues, a field the markup gives no value for left unsaid, where Flutter's plugin reads neither.
+  Reason: platform — Apple's legible output gives every subtitle AVPlayer would draw as text with markup, with the media's own styling alone at that resolution, as WebKit asks for it.
+  Affect: the app gets subtitles placed where Core Media places them in the media's own style, to draw in the user's caption style, and the cues go at a seek or a change of text track until the next arrive.
+
+- Change: on macOS and iOS the user's caption settings are Media Accessibility's, the style read from the user's domain each time the app asks and the change future resolved at its settings-changed notice, a setting applying always where Apple's behaviour is `UseValue` in a style the user customized, as WebKit has it, its colours matched to sRGB with their opacities apart, and its font the family of the one it gives for the default style; Flutter reads none.
+  Reason: platform — Media Accessibility gives each caption setting with whether content may override it, and tells when the user changes one.
+  Affect: the app draws subtitles in the user's caption style and follows its changes, a style the user never customized giving way to the media's own, and a style whose font is the system's hidden one leaves the family to the framework.
 
 - Change: a frame reader is made empty and reads the output of the source it was given to last, a player item's video output or a capture session's video data output, which that source makes and adds when it is given the reader, a camera as it starts.
   Reason: platform — AVFoundation has no one output that a player and a camera both feed, as Android's `ImageReader` is fed by a decoder and a camera alike.

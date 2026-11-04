@@ -46,7 +46,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::process;
 use std::rc::Rc;
 
-use inset_embedder::{Cameras, Notifications, Players, TargetPlatform, VideoFrameReaders};
+use inset_embedder::{
+    Cameras, CaptionSettings, Notifications, Players, TargetPlatform, VideoFrameReaders,
+};
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2_app_kit::{NSView, NSWindow};
@@ -70,7 +72,8 @@ impl OperatingSystem for AppKit {
 /// winit's sizes are AppKit's, and a desktop window has no safe area.
 impl WindowGeometry for AppKit {}
 
-/// AVFoundation's players and cameras, which iOS shares.
+/// AVFoundation's players and cameras, and Media Accessibility's caption settings, which iOS
+/// shares.
 impl SystemMedia for AppKit {
     fn players() -> Option<Rc<dyn Players>> {
         super::apple::media::players()
@@ -82,6 +85,11 @@ impl SystemMedia for AppKit {
 
     fn video_frame_readers() -> Option<Rc<dyn VideoFrameReaders>> {
         super::apple::media::video_frame_readers()
+    }
+
+    /// Media Accessibility's.
+    fn caption_settings() -> Option<Rc<dyn CaptionSettings>> {
+        super::apple::caption_appearance::caption_settings()
     }
 }
 

@@ -7,8 +7,11 @@
 //! the app to quit. The windowing owner, which keeps the window controllers and hears every view
 //! event first, is here (`windowing.rs`); a view it does not claim goes to the observers.
 //! `run_app` builds its content in every view the app is given (`multi_view_app.rs`), and asks
-//! for a window where it is given none. The host's copy, cut and paste, which Flutter's engines
-//! never send, go to the primary focus as text editing intents.
+//! for a window where it is given none. The binding follows the platform's caption settings
+//! itself, for as long as the app runs, since they tell their changes by a future where the
+//! other settings call the dispatcher, and tells the observers each change. The host's copy,
+//! cut and paste, which Flutter's engines never send, go to the primary focus as text editing
+//! intents.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -16,8 +19,8 @@ use std::time::Duration;
 
 use inset_embedder::{
     AppExitResponse, AppExitType, AppLifecycleState, ClipboardEvent, DragReport, EditCommand,
-    Locale, RequestId, TrayIconEvent, TrayIconId, ViewError, ViewFocusEvent, ViewId, ViewRef,
-    WindowConfig,
+    Locale, MediaChangeFuture, RequestId, TrayIconEvent, TrayIconId, ViewError, ViewFocusEvent,
+    ViewId, ViewRef, WindowConfig,
 };
 use inset_foundation::{App, Handle, Listenable, Listener, Task, Timer};
 use inset_rendering::{RendererBinding, RendererBindingOverridesObject};
@@ -113,6 +116,12 @@ pub trait WidgetsBindingObserver {
 
     /// Called when the platform brightness changes.
     fn did_change_platform_brightness(&self, app: &mut App) {
+        let _ = app;
+    }
+
+    /// Called when the user changes their caption style in the system's settings. Flutter has
+    /// no counterpart: it reads no caption settings.
+    fn did_change_caption_style(&self, app: &mut App) {
         let _ = app;
     }
 
@@ -222,6 +231,11 @@ pub trait WidgetsBindingObserverObject: Sized + 'static {
         let _ = app;
     }
 
+    /// See [`WidgetsBindingObserver::did_change_caption_style`].
+    fn did_change_caption_style(self: Handle<Self>, app: &mut App) {
+        let _ = app;
+    }
+
     /// See [`WidgetsBindingObserver::did_change_app_lifecycle_state`].
     fn did_change_app_lifecycle_state(self: Handle<Self>, app: &mut App, state: AppLifecycleState) {
         let _ = (app, state);
@@ -286,6 +300,10 @@ impl<T: WidgetsBindingObserverObject> WidgetsBindingObserver for Handle<T> {
         T::did_change_platform_brightness(*self, app);
     }
 
+    fn did_change_caption_style(&self, app: &mut App) {
+        T::did_change_caption_style(*self, app);
+    }
+
     fn did_change_app_lifecycle_state(&self, app: &mut App, state: AppLifecycleState) {
         T::did_change_app_lifecycle_state(*self, app, state);
     }
@@ -334,7 +352,7 @@ impl WidgetsBinding {
 
     /// Flutter's `initInstances`: the bindings below first, as Dart's `super.initInstances()`
     /// runs first, then the [`BuildOwner`], whose focus manager registers with this binding,
-    /// then the dispatcher callbacks.
+    /// then the dispatcher callbacks and the caption settings followed.
     ///
     /// The bindings below come before the build owner so that the focus manager does not hear
     /// the lifecycle state the host started in, which the services binding reads when it is
@@ -351,6 +369,7 @@ impl WidgetsBinding {
         let windowing_owner = WindowingOwner::new(app);
         app.get_mut(self).windowing_owner = Some(windowing_owner);
         WidgetsBinding::assign_dispatcher_callbacks(app);
+        self.follow_caption_settings(app);
         let platform_menu_delegate: PlatformMenuDelegateRef = DefaultPlatformMenuDelegate::new(app);
         app.get_mut(self).platform_menu_delegate = Some(platform_menu_delegate);
     }
@@ -428,6 +447,42 @@ impl WidgetsBinding {
         callbacks.on_view_request_failed = Some(Rc::new(|app, request_id, error| {
             WidgetsBinding::instance(app).handle_view_request_failed(app, request_id, error)
         }));
+    }
+
+    /// Tells the observers each change of the platform's caption settings, for as long as the
+    /// app runs; a platform that keeps none has none to tell.
+    fn follow_caption_settings(self: Handle<Self>, app: &mut App) {
+        let Some(changed) = WidgetsBinding::caption_settings_changed(app) else {
+            return;
+        };
+        let _following = app.spawn(async move |cx| {
+            let mut changed = changed;
+            loop {
+                changed.await;
+                match cx.update(|app| self.take_caption_settings_change(app)) {
+                    Some(next) => changed = next,
+                    None => return,
+                }
+            }
+        });
+    }
+
+    /// Resolves at the next change of the platform's caption settings; `None` where it keeps
+    /// none.
+    fn caption_settings_changed(app: &App) -> Option<MediaChangeFuture> {
+        let platform = app.platform();
+        Some(platform.caption_settings()?.changed())
+    }
+
+    /// Tells the observers the caption settings changed, and answers the future of their next
+    /// change, asked before the observers read the style so that no change goes unheard.
+    fn take_caption_settings_change(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> Option<MediaChangeFuture> {
+        let next = WidgetsBinding::caption_settings_changed(app)?;
+        self.handle_caption_style_changed(app);
+        Some(next)
     }
 
     /// The object in charge of the focus tree.
@@ -708,6 +763,13 @@ impl WidgetsBinding {
     pub fn handle_platform_brightness_changed(self: Handle<Self>, app: &mut App) {
         for observer in app.get(self).observers.clone() {
             observer.did_change_platform_brightness(app);
+        }
+    }
+
+    /// Called when the user's caption style changes: tells the observers.
+    pub fn handle_caption_style_changed(self: Handle<Self>, app: &mut App) {
+        for observer in app.get(self).observers.clone() {
+            observer.did_change_caption_style(app);
         }
     }
 
@@ -1612,5 +1674,67 @@ mod tests {
             *sizes.borrow(),
             vec![Size::new(400.0, 300.0), Size::new(500.0, 200.0)]
         );
+    }
+
+    #[test]
+    fn a_change_of_the_caption_settings_reaches_the_media_query() {
+        let text_scaled = |scale: f64| inset_embedder::CaptionStyle {
+            text_scale: Some(inset_embedder::CaptionSetting::always(scale)),
+            ..inset_embedder::CaptionStyle::default()
+        };
+        let settings = inset_test::MockCaptionSettings::new(text_scaled(1.5));
+        let view = Rc::new(TestView::new(400.0, 300.0));
+        let platform = TestPlatform::new()
+            .on(TargetPlatform::MacOS)
+            .with_view(view)
+            .with_caption_settings(Rc::new(settings.clone()));
+        let cell = AppCell::with_platform(Rc::new(platform));
+        let styles = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let probe = crate::widgets::basic::Builder::new({
+            let styles = Rc::clone(&styles);
+            move |app, context| {
+                styles
+                    .borrow_mut()
+                    .push(crate::MediaQuery::caption_style_of(app, context));
+                Sized {
+                    size: Size::new(1.0, 1.0),
+                }
+                .into_widget()
+            }
+        });
+        run_app(&mut cell.borrow_mut(), probe.into_widget());
+        cell.elapse(Duration::ZERO);
+        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
+        assert_eq!(*styles.borrow(), vec![Some(text_scaled(1.5))]);
+
+        settings.set_style(text_scaled(2.0));
+        cell.checkpoint();
+        pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(16));
+        assert_eq!(
+            *styles.borrow(),
+            vec![Some(text_scaled(1.5)), Some(text_scaled(2.0))]
+        );
+    }
+
+    #[test]
+    fn the_media_query_has_no_caption_style_where_the_platform_keeps_no_caption_settings() {
+        let (cell, _view, _platform) = app_with_view();
+        let styles = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let probe = crate::widgets::basic::Builder::new({
+            let styles = Rc::clone(&styles);
+            move |app, context| {
+                styles
+                    .borrow_mut()
+                    .push(crate::MediaQuery::caption_style_of(app, context));
+                Sized {
+                    size: Size::new(1.0, 1.0),
+                }
+                .into_widget()
+            }
+        });
+        run_app(&mut cell.borrow_mut(), probe.into_widget());
+        cell.elapse(Duration::ZERO);
+        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
+        assert_eq!(*styles.borrow(), vec![None]);
     }
 }

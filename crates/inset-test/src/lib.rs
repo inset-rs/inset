@@ -4,7 +4,8 @@
 //! choose in, file dialogs ([`MockFileDialogs`], with [`MemoryFile`] and [`MemoryFolder`])
 //! for it to open and save through, and a compositor, frame readers, players and cameras
 //! ([`MockCompositor`], [`MockVideoFrameReaders`], [`MockPlayers`], [`MockCameras`]) for it to
-//! show media through, so a test supplies only the piece it is about. The shape of `flutter_test`'s `TestPlatformDispatcher` and
+//! show media through, with the user's caption settings ([`MockCaptionSettings`]) to draw subtitles
+//! in, so a test supplies only the piece it is about. The shape of `flutter_test`'s `TestPlatformDispatcher` and
 //! `TestFlutterView`: real implementations of the host traits that answer what a test
 //! configures and record what the framework asks of them.
 //!
@@ -15,6 +16,7 @@
 //! inset-test = "0.4"
 //! ```
 
+mod caption_style;
 mod clipboard;
 mod file_dialogs;
 mod media;
@@ -26,6 +28,7 @@ mod view;
 mod view_host;
 mod windows;
 
+pub use caption_style::MockCaptionSettings;
 pub use clipboard::MockClipboard;
 pub use file_dialogs::{AskedDialog, MemoryFile, MemoryFolder, MockFileDialogs};
 pub use media::{

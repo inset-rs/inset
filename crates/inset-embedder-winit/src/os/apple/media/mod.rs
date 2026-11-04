@@ -63,7 +63,9 @@ pub(crate) fn video_frame_readers() -> Option<Rc<dyn VideoFrameReaders>> {
 }
 
 /// A CF string as the NSString it is toll-free bridged to.
-fn as_ns_string(string: &objc2_core_foundation::CFString) -> &objc2_foundation::NSString {
+pub(in crate::os::apple) fn as_ns_string(
+    string: &objc2_core_foundation::CFString,
+) -> &objc2_foundation::NSString {
     let pointer: *const objc2_core_foundation::CFString = string;
     // SAFETY: a CFString is an NSString.
     unsafe { &*pointer.cast::<objc2_foundation::NSString>() }
@@ -72,6 +74,6 @@ fn as_ns_string(string: &objc2_core_foundation::CFString) -> &objc2_foundation::
 /// Runs `body`, the body of a method AVFoundation calls, and aborts the process if it panics,
 /// once the panic hook has printed the panic: AVFoundation's frames were never built to be
 /// unwound.
-fn abort_on_panic<R>(body: impl FnOnce() -> R) -> R {
+pub(in crate::os::apple) fn abort_on_panic<R>(body: impl FnOnce() -> R) -> R {
     catch_unwind(AssertUnwindSafe(body)).unwrap_or_else(|_| process::abort())
 }

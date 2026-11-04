@@ -2221,9 +2221,11 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-core-media",
+ "objc2-core-text",
  "objc2-core-video",
  "objc2-foundation",
  "objc2-io-surface",
+ "objc2-media-accessibility",
  "objc2-metal",
  "objc2-quartz-core",
  "objc2-ui-kit",
@@ -3220,6 +3222,17 @@ dependencies = [
  "objc2",
  "objc2-core-foundation",
  "objc2-foundation",
+]
+
+[[package]]
+name = "objc2-media-accessibility"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "877e3d724d9e734d89def9abaf4e60110d149184c48558f19c0cbabc1cb81602"
+dependencies = [
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-core-text",
 ]
 
 [[package]]
@@ -5264,6 +5277,7 @@ dependencies = [
  "inset-embedder-winit",
  "inset-foundation",
  "inset-painting",
+ "inset-scheduler",
  "inset-shell",
  "inset-widgets",
 ]
