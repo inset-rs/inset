@@ -75,8 +75,15 @@ pub fn image_from_pixels(size: [u32; 2], pixels: &[u8]) -> Image {
 /// # Panics
 ///
 /// Panics if no GPU adapter is available.
-pub fn drawn_pixels(picture: &Picture, size: [u32; 2]) -> Vec<u8> {
-    gpu().render_to_rgba(picture, size, Some(valo::Color::TRANSPARENT))
+pub fn drawn_pixels(picture: Picture, size: [u32; 2]) -> Vec<u8> {
+    let mut gpu = gpu();
+    let request = gpu.request_pixels(&Arc::new(picture), size, Some(valo::Color::TRANSPARENT));
+    gpu.device()
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("the test GPU device answers");
+    pollster::block_on(request)
+        .expect("the picture reads back")
+        .into_bytes()
 }
 
 fn gpu() -> MutexGuard<'static, Context> {

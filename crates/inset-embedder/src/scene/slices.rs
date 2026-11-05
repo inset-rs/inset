@@ -748,7 +748,7 @@ mod tests {
             let frame = crate::test_support::solid_image([4, 4], [255, 0, 0, 255]);
             let slices = slices(&builder.build(), |_| Some(frame.clone()));
             assert!(slices.paints());
-            let pixels = drawn_pixels(&slices.picture_with_room(), [SIZE, SIZE]);
+            let pixels = drawn_pixels(slices.picture_with_room(), [SIZE, SIZE]);
             assert_near(
                 pixel_at(&pixels, 8, 16),
                 [255, 0, 0, 255],
@@ -862,7 +862,7 @@ mod tests {
         }
 
         fn drawn(scene: &Scene) -> Vec<u8> {
-            drawn_pixels(&slices(scene, |_| None).picture_with_room(), [SIZE, SIZE])
+            drawn_pixels(slices(scene, |_| None).picture_with_room(), [SIZE, SIZE])
         }
 
         /// A picture that covers the whole scene in `color`.

@@ -25,6 +25,25 @@ pub fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
     })
 }
 
+/// `render_to_rgba` draws `picture` into `size` pixels over `clear` and waits for them, as
+/// valo-harness's helper does: the request, the device waited on, its answer. The rows are packed
+/// RGBA8 with straight alpha.
+pub fn render_to_rgba(
+    context: &mut inset_embedder::valo::Context,
+    picture: inset_embedder::valo::DisplayList,
+    size: [u32; 2],
+    clear: Option<inset_embedder::valo::Color>,
+) -> Vec<u8> {
+    let request = context.request_pixels(&std::sync::Arc::new(picture), size, clear);
+    context
+        .device()
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("the test GPU device answers");
+    pollster::block_on(request)
+        .expect("the picture reads back")
+        .into_bytes()
+}
+
 /// Writes a captured RGBA image.
 pub fn write_png(path: &Path, size: [u32; 2], rgba: &[u8]) {
     let file = std::fs::File::create(path).expect("create png");
