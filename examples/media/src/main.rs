@@ -17,7 +17,7 @@ use std::rc::Rc;
 
 use inset_embedder::{
     Camera, CameraDevice, CameraError, CameraFormat, CameraOutputs, Color, PickedFile,
-    TextDirection, WindowConfig,
+    PlayerActivity, TextDirection, WindowConfig,
 };
 use inset_embedder_winit::WinitEmbedder;
 use inset_foundation::{App, AsyncApp, Entity, Handle, Listenable, Listener};
@@ -247,10 +247,13 @@ impl StatelessWidget for CameraSide {
 fn clickable(player: Handle<Player>) -> WidgetRef {
     GestureDetector::new()
         .on_tap(Listener::new(move |app| {
-            if Player::state(player, app).playing {
-                Player::pause(player, app);
-            } else {
+            if matches!(
+                Player::state(player, app).activity,
+                PlayerActivity::Paused(_)
+            ) {
                 Player::play(player, app);
+            } else {
+                Player::pause(player, app);
             }
         }))
         .child(PlayerView::new(player))

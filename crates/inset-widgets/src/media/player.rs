@@ -6,7 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    CompositionLayer, Cue, MediaChangeFuture, MediaMetadata, MediaPlayer, PlayerState, VideoOutput,
+    CompositionLayer, Cue, MediaChangeFuture, MediaMetadata, MediaPlayer, PlayerState,
+    SeekTolerance, VideoOutput,
 };
 use inset_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, ListenableObject, Listener,
@@ -95,9 +96,11 @@ impl Player {
         self.host(app).pause();
     }
 
-    /// Moves to `position`, playing on from there if it was playing.
-    pub fn seek_to(self: Handle<Self>, app: &App, position: Duration) {
-        self.host(app).seek(position);
+    /// Moves to `position`, or as near it as `tolerance` lets the system land for speed,
+    /// playing on from there if it was playing; the state tells the seek under way until it
+    /// lands.
+    pub fn seek_to(self: Handle<Self>, app: &App, position: Duration, tolerance: SeekTolerance) {
+        self.host(app).seek(position, tolerance);
     }
 
     /// How fast it plays, `1.0` the media's own speed.
@@ -108,6 +111,11 @@ impl Player {
     /// How loud it plays, from `0.0` to `1.0`.
     pub fn set_volume(self: Handle<Self>, app: &App, volume: f64) {
         self.host(app).set_volume(volume);
+    }
+
+    /// Whether its sound is off, apart from its volume.
+    pub fn set_muted(self: Handle<Self>, app: &App, muted: bool) {
+        self.host(app).set_muted(muted);
     }
 
     /// Whether it starts again from the beginning when it reaches the end.
@@ -465,13 +473,15 @@ mod tests {
         );
 
         player.play(&cell.borrow());
-        player.seek_to(&cell.borrow(), Duration::from_secs(3));
+        player.seek_to(&cell.borrow(), Duration::from_secs(3), SeekTolerance::EXACT);
+        player.set_muted(&cell.borrow(), true);
         player.set_looping(&cell.borrow(), true);
         assert_eq!(
             opened[0].calls(),
             vec![
                 PlayerCall::Play,
-                PlayerCall::Seek(Duration::from_secs(3)),
+                PlayerCall::Seek(Duration::from_secs(3), SeekTolerance::EXACT),
+                PlayerCall::SetMuted(true),
                 PlayerCall::SetLooping(true)
             ]
         );

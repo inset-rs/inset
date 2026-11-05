@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inset_embedder::{
-    Color, MediaTrack, MediaTrackKind, PlayerState, PlayerStatus, TextDirection, VideoOutput,
-    ViewId, WindowConfig,
+    Color, MediaTrack, MediaTrackKind, PauseReason, PlayerActivity, PlayerState, PlayerStatus,
+    TextDirection, VideoOutput, ViewId, WaitReason, WindowConfig,
 };
 use inset_embedder_winit::WinitEmbedder;
 use inset_foundation::{App, Handle, Listenable, Listener};
@@ -25,8 +25,7 @@ use inset_widgets::{
     GestureDetector, IntoWidget, ListenableBuilder, MainAxisSize, Padding, Player, Positioned,
     SingleTickerProviderStateMixin, SingleTickerProviderStateMixinData, SizedBox, Stack, State,
     StateData, StatefulWidget, SubtitleView, Text, Transform, VideoFrameView, ViewRequestState,
-    WidgetRef, Window,
-    WindowController, run_widget,
+    WidgetRef, Window, WindowController, run_widget,
 };
 
 /// The video's width in logical pixels; its height follows its aspect.
@@ -185,13 +184,13 @@ fn page(
         .border_radius(BorderRadiusGeometry::circular(presentation.corner_radius))
         .child(framed);
     let turned = Transform::rotate(presentation.turn_degrees.to_radians()).child(rounded);
-    let playing = state.playing;
+    let paused = matches!(state.activity, PlayerActivity::Paused(_));
     let clickable = GestureDetector::new()
         .on_tap(Listener::new(move |app| {
-            if playing {
-                Player::pause(player, app);
-            } else {
+            if paused {
                 Player::play(player, app);
+            } else {
+                Player::pause(player, app);
             }
         }))
         .child(turned);
@@ -251,7 +250,8 @@ impl StatusLineState {
 
     /// Runs the ticker while the player plays, and stops it otherwise.
     fn tick_while_playing(self: Handle<Self>, app: &mut App) {
-        let playing = Player::state(self.widget(app).player, app).playing;
+        let playing =
+            Player::state(self.widget(app).player, app).activity == PlayerActivity::Playing;
         let ticker = self.ticker(app);
         if playing && !ticker.is_active(app) {
             let _ticking = ticker.start(app);
@@ -331,9 +331,11 @@ fn status_line(app: &App, player: Handle<Player>) -> String {
 fn status(state: &PlayerState, position: Duration) -> String {
     let doing = match &state.status {
         PlayerStatus::Loading => return "Loading…".to_owned(),
-        PlayerStatus::Failed(reason) => return format!("Failed: {reason}"),
-        PlayerStatus::Ready if state.playing => "Playing",
-        PlayerStatus::Ready => "Paused",
+        PlayerStatus::Failed(error) => {
+            return format!("Failed: {:?} ({})", error.kind, error.message);
+        }
+        PlayerStatus::Ready if state.seeking.is_some() => "Seeking…",
+        PlayerStatus::Ready => doing(state.activity),
     };
     let length = state.duration.map_or("live".to_owned(), clock);
     let size = state.size.map_or(String::new(), |size| {
@@ -343,6 +345,20 @@ fn status(state: &PlayerState, position: Duration) -> String {
         "{doing} · {} / {length}{size} · drawn by Inset · click to play or pause",
         clock(position)
     )
+}
+
+/// What `activity` shows: no waiting while the system is still judging whether data comes fast
+/// enough, as Apple advises.
+fn doing(activity: PlayerActivity) -> &'static str {
+    match activity {
+        PlayerActivity::Playing | PlayerActivity::Waiting(Some(WaitReason::EvaluatingData)) => {
+            "Playing"
+        }
+        PlayerActivity::Waiting(_) => "Waiting for the media…",
+        PlayerActivity::Paused(Some(PauseReason::End)) => "Ended",
+        PlayerActivity::Paused(Some(PauseReason::Interrupted)) => "Paused by the system",
+        PlayerActivity::Paused(_) => "Paused",
+    }
 }
 
 /// `duration` as minutes and seconds.

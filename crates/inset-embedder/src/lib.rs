@@ -81,8 +81,10 @@ pub use media::{
     Camera, CameraDevice, CameraError, CameraFacing, CameraFormat, CameraId, CameraInterruption,
     CameraListFuture, CameraOpenFuture, CameraOutputs, CameraStartFuture, Cameras, CaptureSession,
     CaptureState, EncodedImage, MediaChangeFuture, MediaError, MediaMetadata, MediaPlayer,
-    MediaTrack, MediaTrackKind, MovieOptions, Photo, PhotoFuture, PlayerState, PlayerStatus,
-    Players, RecordingFuture, VideoFrame, VideoFrameReader, VideoFrameReaders, VideoOutput,
+    MediaTrack, MediaTrackKind, MovieOptions, PauseReason, Photo, PhotoFuture, PlayerActivity,
+    PlayerError, PlayerErrorKind, PlayerState, PlayerStatus, Players, RecordingFuture,
+    SeekTolerance, TimeRange, VideoFrame, VideoFrameReader, VideoFrameReaders, VideoOutput,
+    WaitReason,
 };
 pub use menus::{
     AttachedMenu, CheckState, DockMenu, EditCommand, IconImage, MenuAtIcon, MenuBar, MenuEntry,

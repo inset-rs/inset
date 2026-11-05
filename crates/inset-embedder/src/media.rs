@@ -37,12 +37,17 @@
 //! caption settings answer ([`Platform::caption_settings`](crate::Platform::caption_settings))
 //! and the app merges in as it draws, as Media3's `SubtitleView` and WebKit's cue style sheet do.
 //!
-//! A player's position is read when the app needs it ([`MediaPlayer::position`]), as every
-//! system lets an app read it (AVPlayer's `currentTime()`, Media3's `getCurrentPosition()`,
-//! Windows' `PlaybackSession.Position`, the web's `currentTime`), and told only when it jumps (a
-//! seek landing, a loop), as the systems tell it (Apple's `AVPlayerItemTimeJumped`, Media3's
-//! `onPositionDiscontinuity`, the web's `seeked`): while it plays it moves on by itself, and an
-//! app that shows it reads it at each frame it draws.
+//! A player's state tells what the system's player does, not what the app asked of it: whether
+//! it is paused, waiting or playing, and why, as Apple's `timeControlStatus` and Windows'
+//! `PlaybackState` tell it, since the system pauses a player itself (a call takes the sound,
+//! headphones are unplugged); a seek under way; what is loaded and where it can seek; the rate,
+//! volume and mute it plays with, which the system can change; and a failure with its kind, at
+//! any time. A player's position is read when the app needs it ([`MediaPlayer::position`]), as
+//! every system lets an app read it (AVPlayer's `currentTime()`, Media3's
+//! `getCurrentPosition()`, Windows' `PlaybackSession.Position`, the web's `currentTime`), and told
+//! only when it jumps (a seek landing, a loop), as the systems tell it (Apple's
+//! `AVPlayerItemTimeJumped`, Media3's `onPositionDiscontinuity`, the web's `seeked`): while it
+//! plays it moves on by itself, and an app that shows it reads it at each frame it draws.
 //!
 //! The platform answers `None` where its system has no players, no cameras or no frames. A player
 //! or a session reports its state through [`MediaPlayer::state`] and [`CaptureSession::state`],
@@ -80,14 +85,19 @@ pub trait MediaPlayer {
 
     fn pause(&self);
 
-    /// Moves to `position`, exactly, playing on from there if it was playing.
-    fn seek(&self, position: Duration);
+    /// Moves to `position`, or as near it as `tolerance` lets the system land for speed,
+    /// playing on from there if it was playing. The state tells the seek under way until it
+    /// lands; a seek outside the seekable ranges moves nothing.
+    fn seek(&self, position: Duration, tolerance: SeekTolerance);
 
     /// How fast it plays, `1.0` the media's own speed; kept while paused, for the next play.
     fn set_rate(&self, rate: f64);
 
     /// How loud it plays, from `0.0`, silent, to `1.0`, the media's own volume.
     fn set_volume(&self, volume: f64);
+
+    /// Whether its sound is off, apart from its volume.
+    fn set_muted(&self, muted: bool);
 
     /// Whether it starts again from the beginning when it reaches the end, rather than ending.
     fn set_looping(&self, looping: bool);
@@ -96,7 +106,8 @@ pub trait MediaPlayer {
     fn state(&self) -> PlayerState;
 
     /// Where it is in the media now, read from the system at each call; it moves on by itself
-    /// while the player plays.
+    /// while the player plays, and is the target while a seek is under way, as the web's and
+    /// Media3's are.
     fn position(&self) -> Duration;
 
     /// Resolves once [`state`](Self::state), [`metadata`](Self::metadata) or
@@ -136,41 +147,59 @@ pub enum VideoOutput {
     Frames(Arc<dyn VideoFrameReader>),
 }
 
-/// What a player is doing.
+/// What a player's media is, and what the system's player does with it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayerState {
     pub status: PlayerStatus,
-    /// Whether it plays, or waits for media to play on: true from `play` until `pause`, or the
-    /// end of media it does not loop.
-    pub playing: bool,
+    /// Whether it is paused, waiting or playing, as the system reports it.
+    pub activity: PlayerActivity,
+    /// Where a seek is taking it, until it lands; `None` while no seek is under way. A later
+    /// seek replaces the target.
+    pub seeking: Option<Duration>,
+    /// The rate it plays at while it plays, `1.0` the media's own speed, kept while paused for
+    /// the next play; as the system reports it, which can differ from the rate asked for.
+    pub rate: f64,
+    /// How loud it plays, from `0.0`, silent, to `1.0`, the media's own volume.
+    pub volume: f64,
+    /// Whether its sound is off, apart from its volume.
+    pub muted: bool,
     /// How long the media is; `None` until it is known, and for a live stream.
     pub duration: Option<Duration>,
+    /// The parts of the media loaded now, in order.
+    pub loaded: Vec<TimeRange>,
+    /// The parts it can seek into, in order: the whole media for a file, a moving window for a
+    /// live stream, none where it cannot seek.
+    pub seekable: Vec<TimeRange>,
     /// The picture's size, in its own pixels, as it is presented: its aspect corrected; `None`
     /// until it is known, and for media without a picture.
     pub size: Option<Size>,
     /// The media's tracks; empty until it is ready.
     pub tracks: Vec<MediaTrack>,
-    /// Whether it reached the end of media it does not loop, until it plays or seeks again.
-    pub ended: bool,
 }
 
 impl PlayerState {
-    /// A player that is loading: nothing known yet.
+    /// A player that is loading, paused as the app has not played it: nothing known yet.
     pub fn loading() -> PlayerState {
         PlayerState {
             status: PlayerStatus::Loading,
-            playing: false,
+            activity: PlayerActivity::Paused(Some(PauseReason::Requested)),
+            seeking: None,
+            rate: 1.0,
+            volume: 1.0,
+            muted: false,
             duration: None,
+            loaded: Vec::new(),
+            seekable: Vec::new(),
             size: None,
             tracks: Vec::new(),
-            ended: false,
         }
     }
 
-    /// A player that failed for `reason`.
-    pub fn failed(reason: impl Into<String>) -> PlayerState {
+    /// A player that failed with `error`, and does nothing more.
+    pub fn failed(error: PlayerError) -> PlayerState {
         PlayerState {
-            status: PlayerStatus::Failed(reason.into()),
+            status: PlayerStatus::Failed(error),
+            activity: PlayerActivity::Paused(None),
             ..PlayerState::loading()
         }
     }
@@ -182,8 +211,111 @@ pub enum PlayerStatus {
     Loading,
     /// It can play.
     Ready,
-    /// It cannot play, for the system's reason.
-    Failed(String),
+    /// It cannot play, from the start or partway through, and does nothing more: Apple's failed
+    /// item and its failure to play to the end, Media3's player error, the web's `error`. It is
+    /// opened again to try again.
+    Failed(PlayerError),
+}
+
+/// What a player is doing: Apple's `timeControlStatus`, Windows' `PlaybackState`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlayerActivity {
+    /// Not playing, and not trying to; the reason is `None` where the system does not say.
+    Paused(Option<PauseReason>),
+    /// Trying to play, and waiting; the reason is `None` where the system does not say.
+    Waiting(Option<WaitReason>),
+    Playing,
+}
+
+/// Why a player is paused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PauseReason {
+    /// The app paused it, or has not played it yet.
+    Requested,
+    /// It reached the end of media it does not loop: Apple's played-to-end, Media3's end of the
+    /// media item, the web's `ended`.
+    End,
+    /// The system took the sound for something else, a call or another app: Apple's audio
+    /// session interruption, Android's audio focus loss.
+    Interrupted,
+    /// The sound's output went, such as headphones unplugged: Android's audio becoming noisy.
+    OutputRemoved,
+    /// The app went to the background, where the system pauses its video: Apple's app
+    /// backgrounded.
+    Backgrounded,
+}
+
+/// Why a player waits to play.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WaitReason {
+    /// For media data: Apple's waiting to minimize stalls, Media3's buffering, the web's
+    /// `waiting`, Windows' buffering.
+    Data,
+    /// The system judges whether data comes fast enough to play on, and Apple advises showing
+    /// no waiting yet: Apple's waiting while evaluating the buffering rate.
+    EvaluatingData,
+    /// The system holds it back for a moment: Android's playback suppressed by a short loss of
+    /// audio focus.
+    HeldBySystem,
+}
+
+/// Why a player failed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlayerError {
+    pub kind: PlayerErrorKind,
+    /// The system's own words, for logs: not for showing as they are.
+    pub message: String,
+}
+
+/// The kind of a player's failure, which an app words for its user and acts on: the web's
+/// `MediaError` and Windows' `MediaPlayerError` share the first three, and Apple's `AVError` and
+/// Media3's error codes fall into them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlayerErrorKind {
+    /// Reaching the media failed: a connection, a timeout, an HTTP error, a file that is not
+    /// there.
+    Network,
+    /// The media is damaged, or decoding it failed.
+    Decode,
+    /// A format or codec the system cannot play.
+    Unsupported,
+    /// The media is protected, and the system may not play it here.
+    Protected,
+    /// The system or the host does not let the player reach the source: a sandbox's rules, a
+    /// file it may not read, a link it may not fetch.
+    Refused,
+    /// Anything else the system reports.
+    Other,
+}
+
+/// A span of a player's media, from `start` to `end`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TimeRange {
+    pub start: Duration,
+    pub end: Duration,
+}
+
+/// How far from its target a seek may land, before and after it, for the system to land
+/// sooner: Apple's tolerances, Media3's `SeekParameters`. A system that seeks only exactly keeps
+/// any tolerance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SeekTolerance {
+    pub before: Duration,
+    pub after: Duration,
+}
+
+impl SeekTolerance {
+    /// Exactly at the target, which may take longer to decode to.
+    pub const EXACT: SeekTolerance = SeekTolerance {
+        before: Duration::ZERO,
+        after: Duration::ZERO,
+    };
+
+    /// Wherever the system lands soonest, such as the nearest keyframe.
+    pub const ANY: SeekTolerance = SeekTolerance {
+        before: Duration::MAX,
+        after: Duration::MAX,
+    };
 }
 
 /// One of a player's media's tracks.

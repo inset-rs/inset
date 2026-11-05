@@ -1,8 +1,9 @@
 //! A player of a small movie, opened by a picked file's URL at a path the URL must encode, loads it
-//! by itself, says its size, length and one video track, plays it, hands its frames to a reader
-//! made on its own, each the host's `CoreVideoFrame` over a BGRA pixel buffer backed by an
-//! IOSurface, ends, tells a seek's landing and is read where it landed, and plays on past its end
-//! once it loops: all without a window or a sound. On its way it is put on a surface, not in any window, and nowhere
+//! by itself, says its size, length, what it can seek into and one video track, paused as it was
+//! never played, plays it, hands its frames to a reader made on its own, each the host's
+//! `CoreVideoFrame` over a BGRA pixel buffer backed by an IOSurface, ends, paused at its end,
+//! tells a seek under way until it lands and is read where it landed, mutes, and plays on past
+//! its end once it loops: all without a window or a sound. On its way it is put on a surface, not in any window, and nowhere
 //! again; sent nowhere at the end, it feeds the reader no more.
 //!
 //! Its own binary, without the test harness: AVFoundation changes a player's state on the main
@@ -31,7 +32,8 @@ mod player {
     use std::time::{Duration, Instant};
 
     use inset_embedder::{
-        MediaChangeFuture, MediaTrackKind, PickedFile, PlayerStatus, Size, VideoOutput,
+        MediaChangeFuture, MediaTrackKind, PauseReason, PickedFile, PlayerActivity,
+        PlayerErrorKind, PlayerStatus, SeekTolerance, Size, TimeRange, VideoOutput,
     };
     use inset_embedder_winit::CoreVideoFrame;
     use objc2_core_video::{
@@ -62,7 +64,20 @@ mod player {
         assert_eq!(state.status, PlayerStatus::Ready);
         assert_eq!(state.size, Some(Size::new(64.0, 48.0)));
         assert_eq!(state.duration, Some(Duration::from_secs(1)));
-        assert!(!state.playing && !state.ended);
+        assert_eq!(
+            state.activity,
+            PlayerActivity::Paused(Some(PauseReason::Requested)),
+            "never played"
+        );
+        assert_eq!(state.rate, 1.0);
+        assert_eq!(
+            state.seekable,
+            vec![TimeRange {
+                start: Duration::ZERO,
+                end: Duration::from_secs(1)
+            }],
+            "a file seeks anywhere in it"
+        );
         serve_until("its tracks are listed", || {
             !player.state().tracks.is_empty()
         });
@@ -100,28 +115,39 @@ mod player {
             kCVPixelFormatType_32BGRA
         );
         assert!(CVPixelBufferGetIOSurface(Some(buffer)).is_some());
-        assert!(player.state().playing);
+        serve_until("it plays", || {
+            player.state().activity == PlayerActivity::Playing
+        });
+        assert!(
+            !player.state().loaded.is_empty(),
+            "a file being played is loaded"
+        );
 
-        serve_until("the movie ends", || player.state().ended);
-        assert!(!player.state().playing);
+        serve_until("the movie ends", || {
+            player.state().activity == PlayerActivity::Paused(Some(PauseReason::End))
+        });
         assert!(player.position() >= Duration::from_millis(900));
 
-        player.seek(SOUGHT);
-        let mut landed = player.changed();
-        serve_until("the seek lands", || is_ready(&mut landed));
+        player.seek(SOUGHT, SeekTolerance::EXACT);
+        assert_eq!(player.state().seeking, Some(SOUGHT), "under way");
+        assert_eq!(player.position(), SOUGHT, "read at its target meanwhile");
+        serve_until("the seek lands", || player.state().seeking.is_none());
         assert_eq!(
             player.position(),
             SOUGHT,
             "a paused player is read where its seek landed"
         );
 
+        player.set_muted(true);
+        serve_until("it mutes", || player.state().muted);
+
         player.set_looping(true);
         player.play();
         let looping_since = Instant::now();
         serve_until("a loop", || looping_since.elapsed() > LOOPED);
-        let state = player.state();
-        assert!(
-            state.playing && !state.ended,
+        assert_eq!(
+            player.state().activity,
+            PlayerActivity::Playing,
             "a looping player plays on past its end"
         );
 
@@ -140,6 +166,31 @@ mod player {
             "a player let go of tells the app it is gone"
         );
         std::fs::remove_dir_all(movie.parent().expect("the copy's folder")).expect("cleaned up");
+        fails_on_what_is_not_media(&*players);
+    }
+
+    /// A player of a file that is no movie fails, paused for good, with the kind of its failure.
+    fn fails_on_what_is_not_media(players: &dyn inset_embedder::Players) {
+        let folder = std::env::temp_dir().join(format!("inset not media {}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder for the file");
+        let text = folder.join("words.mp4");
+        std::fs::write(&text, "these are words, not frames").expect("the file written");
+        let player = players.open(&PickedFile::Path(text).url());
+        serve_until("it fails", || {
+            matches!(player.state().status, PlayerStatus::Failed(_))
+        });
+        let state = player.state();
+        let PlayerStatus::Failed(error) = state.status else {
+            unreachable!("served until it failed")
+        };
+        assert_eq!(
+            error.kind,
+            PlayerErrorKind::Unsupported,
+            "what AVFoundation cannot parse it cannot play: {error:?}"
+        );
+        assert_eq!(state.activity, PlayerActivity::Paused(None));
+        drop(player);
+        std::fs::remove_dir_all(folder).expect("cleaned up");
     }
 
     /// The movie, copied into a folder of its own whose name and the copy's need encoding in a

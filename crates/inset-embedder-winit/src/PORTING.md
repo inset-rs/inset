@@ -178,9 +178,9 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 ## media.rs, os/apple/media/ → `video_player_avfoundation` and `camera_avfoundation`
 
-- Change: a player is an `AVPlayer` whose state and position are read from it on the main thread when the app asks, its changes told by key-value observing and its end-of-item and time-jumped notifications, where Flutter's plugin copies events over an event channel and polls the position on a timer.
-  Reason: platform — AVFoundation changes a player's state on the main queue, where the app reads it, keeps its current time for the app to read, and tells when that time jumps.
-  Affect: the app's player hears its state change at once on load, play, pause and end, and its position jump at a seek's landing and a loop, and nothing as it plays on.
+- Change: a player is an `AVPlayer` whose state and position are read from it on the main thread when the app asks, its changes told by key-value observing, its end-of-item, time-jumped and rate notifications and each seek's completion, where Flutter's plugin copies events over an event channel and polls the position on a timer.
+  Reason: platform — AVFoundation changes a player's state on the main queue, where the app reads it, keeps its current time for the app to read, tells when that time jumps and why its rate fell to zero, and completes each seek.
+  Affect: the app's player hears its state change at once on load, play, pause, a wait for data and end, a seek's landing and a loop, and nothing as it plays on; before macOS 12 and iOS 15, which tell no reason for a fall of the rate, a pause the app did not ask for has none.
 
 - Change: a player shown on a composition layer makes an `AVPlayerLayer` its content (`MacOs::show_system_layer` for an app's own system layer), and one given a frame reader adds an `AVPlayerItemVideoOutput` of BGRA `IOSurface`-backed pixel buffers to its item, which the reader reads, where Flutter's plugin copies every frame into a texture.
   Reason: platform — Core Animation clips and scales a layer with the one it is the content of, and a pixel buffer backed by an `IOSurface` reaches the GPU with no copy.

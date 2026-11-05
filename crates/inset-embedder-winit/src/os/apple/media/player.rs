@@ -1,30 +1,42 @@
 //! A player: AVFoundation's `AVPlayer` over one `AVPlayerItem`, controlled on the main thread,
 //! whose state and position are read from them when asked and whose changes AVFoundation tells by
-//! key-value observing, its end-of-item, time-jumped and media selection notifications, and the
-//! loading of its tracks, tags and subtitles. Its picture goes either to an `AVPlayerLayer` shown
-//! as a composition layer's content, or to an `AVPlayerItemVideoOutput` added to its item, which
-//! the reader it was given reads; its subtitles go to a legible output added to its item, which
-//! hands them over as cues.
+//! key-value observing, its end-of-item, time-jumped, rate and media selection notifications, each
+//! seek's completion, and the loading of its tracks, tags and subtitles. Its picture goes either
+//! to an `AVPlayerLayer` shown as a composition layer's content, or to an
+//! `AVPlayerItemVideoOutput` added to its item, which the reader it was given reads; its subtitles
+//! go to a legible output added to its item, which hands them over as cues.
+//!
+//! What it does is AVFoundation's `timeControlStatus`; why it paused is the reason AVFoundation
+//! gave for its rate's last fall to zero, from macOS 12 and iOS 15, or the player's own pause,
+//! and none for a pause it was not told the reason of. A seek is under way from its call until
+//! AVFoundation completes it, which it does on a thread of its own; a later seek replaces it.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use block2::RcBlock;
 use inset_embedder::{
-    CompositionLayer, Cue, MediaChangeFuture, MediaMetadata, MediaPlayer, PlayerState,
-    PlayerStatus, Players, Size, VideoFrameReader, VideoOutput,
+    CompositionLayer, Cue, MediaChangeFuture, MediaMetadata, MediaPlayer, PauseReason,
+    PlayerActivity, PlayerError, PlayerErrorKind, PlayerState, PlayerStatus, Players,
+    SeekTolerance, Size, TimeRange, VideoFrameReader, VideoOutput, WaitReason,
 };
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
+use objc2::runtime::Bool;
 use objc2_av_foundation::{
-    AVLayerVideoGravityResizeAspect, AVPlayer, AVPlayerActionAtItemEnd, AVPlayerItem,
-    AVPlayerItemDidPlayToEndTimeNotification, AVPlayerItemFailedToPlayToEndTimeNotification,
-    AVPlayerItemMediaSelectionDidChangeNotification, AVPlayerItemStatus,
-    AVPlayerItemTimeJumpedNotification, AVPlayerLayer, AVPlayerTimeControlStatus, AVURLAsset,
+    AVError, AVLayerVideoGravityResizeAspect, AVPlayer, AVPlayerActionAtItemEnd, AVPlayerItem,
+    AVPlayerItemDidPlayToEndTimeNotification, AVPlayerItemFailedToPlayToEndTimeErrorKey,
+    AVPlayerItemFailedToPlayToEndTimeNotification, AVPlayerItemMediaSelectionDidChangeNotification,
+    AVPlayerItemStatus, AVPlayerItemTimeJumpedNotification, AVPlayerLayer,
+    AVPlayerTimeControlStatus, AVPlayerWaitingToMinimizeStallsReason,
+    AVPlayerWaitingWhileEvaluatingBufferingRateReason, AVURLAsset, NSValueAVFoundationExtensions,
 };
-use objc2_core_media::{CMTime, CMTimeFlags, kCMTimeZero};
-use objc2_foundation::{NSString, NSURL};
+use objc2_core_media::{CMTime, CMTimeFlags, kCMTimePositiveInfinity, kCMTimeZero};
+use objc2_foundation::{
+    NSArray, NSError, NSNotification, NSString, NSURL, NSUnderlyingErrorKey, NSValue,
+};
 
 use super::cues::LegibleCues;
 use super::frames::{
@@ -34,7 +46,7 @@ use super::metadata::AssetMetadata;
 use super::observing::{NotificationObservation, PropertyObservation};
 use super::show_system_layer;
 use super::tracks::MediaTracks;
-use crate::media::Changes;
+use crate::media::{Changes, lock};
 
 /// The timescale a time this host gives AVFoundation is in: nanoseconds.
 const NANOSECONDS: i32 = 1_000_000_000;
@@ -55,7 +67,10 @@ impl Players for AvPlayers {
         match url_of(url) {
             Ok(url) => Box::new(AvMediaPlayer::new(self.main_thread, &url)),
             Err(reason) => Box::new(FailedPlayer {
-                reason,
+                error: PlayerError {
+                    kind: PlayerErrorKind::Unsupported,
+                    message: reason,
+                },
                 changes: Changes::default(),
             }),
         }
@@ -77,6 +92,13 @@ struct AvMediaPlayer {
     rate: Cell<f32>,
     /// Shared with the end-of-item notification's handler.
     end: Rc<End>,
+    /// Why it paused last, as the player's own pause or AVFoundation's rate notification says;
+    /// `None` once it played, until it is told why it stopped.
+    pause_reason: Rc<Cell<Option<PauseReason>>>,
+    /// The seek under way, which each seek's completion handler ends.
+    seek: Arc<SeekUnderWay>,
+    /// Why it failed partway through, as its failure to play to the end said.
+    failure: Rc<RefCell<Option<PlayerError>>>,
     /// Where the picture goes now.
     destination: RefCell<Destination>,
     tracks: MediaTracks,
@@ -86,6 +108,7 @@ struct AvMediaPlayer {
     _properties: [PropertyObservation; 2],
     _notifications: NotificationObservation,
     _item_changes: NotificationObservation,
+    _rate_changes: NotificationObservation,
 }
 
 /// What the end of the item does, and whether it was reached.
@@ -128,13 +151,39 @@ impl AvMediaPlayer {
         let properties = [
             PropertyObservation::new(
                 &item,
-                &["status", "duration", "presentationSize", "tracks"],
+                &[
+                    "status",
+                    "duration",
+                    "presentationSize",
+                    "tracks",
+                    "loadedTimeRanges",
+                    "seekableTimeRanges",
+                ],
                 changes.clone(),
             ),
-            PropertyObservation::new(&player, &["timeControlStatus", "rate"], changes.clone()),
+            PropertyObservation::new(
+                &player,
+                &[
+                    "timeControlStatus",
+                    "reasonForWaitingToPlay",
+                    "rate",
+                    "volume",
+                    "muted",
+                ],
+                changes.clone(),
+            ),
         ];
-        let notifications = observe_end(&player, &item, Rc::clone(&end), changes.clone());
+        let failure = Rc::new(RefCell::new(None));
+        let notifications = observe_end(
+            &player,
+            &item,
+            Rc::clone(&end),
+            Rc::clone(&failure),
+            changes.clone(),
+        );
         let item_changes = observe_selection_and_jumps(&item, changes.clone());
+        let pause_reason = Rc::new(Cell::new(Some(PauseReason::Requested)));
+        let rate_changes = observe_rate(&player, Rc::clone(&pause_reason), changes.clone());
         let cues = LegibleCues::new(changes.clone());
         // SAFETY: adding an output to the item on the main thread.
         unsafe { item.addOutput(cues.output()) };
@@ -147,26 +196,80 @@ impl AvMediaPlayer {
             changes,
             rate: Cell::new(1.0),
             end,
+            pause_reason,
+            seek: Arc::default(),
+            failure,
             destination: RefCell::new(Destination::Nowhere),
             _properties: properties,
             _notifications: notifications,
             _item_changes: item_changes,
+            _rate_changes: rate_changes,
         }
     }
 
+    /// The item's status, failed too once it failed to play to its end.
     fn status(&self) -> PlayerStatus {
         // SAFETY: reading the item's status on the main thread.
         let status = unsafe { self.item.status() };
+        if status == AVPlayerItemStatus::Failed {
+            // SAFETY: as above.
+            return PlayerStatus::Failed(error_of(unsafe { self.item.error() }.as_deref()));
+        }
+        if let Some(failure) = self.failure.borrow().clone() {
+            return PlayerStatus::Failed(failure);
+        }
         if status == AVPlayerItemStatus::ReadyToPlay {
             PlayerStatus::Ready
-        } else if status == AVPlayerItemStatus::Failed {
-            // SAFETY: as above.
-            let reason = unsafe { self.item.error() }
-                .map(|error| error.localizedDescription().to_string())
-                .unwrap_or_else(|| "the system could not play the media".to_owned());
-            PlayerStatus::Failed(reason)
         } else {
             PlayerStatus::Loading
+        }
+    }
+
+    /// What the player does: paused at the end once it reached it, as AVFoundation tells the end
+    /// before it pauses there, and paused with no reason once it failed.
+    fn activity(&self, status: &PlayerStatus) -> PlayerActivity {
+        if matches!(status, PlayerStatus::Failed(_)) {
+            return PlayerActivity::Paused(None);
+        }
+        if self.end.reached.get() {
+            return PlayerActivity::Paused(Some(PauseReason::End));
+        }
+        // SAFETY: reading the player on the main thread.
+        let time_control = unsafe { self.player.timeControlStatus() };
+        if time_control == AVPlayerTimeControlStatus::Playing {
+            PlayerActivity::Playing
+        } else if time_control == AVPlayerTimeControlStatus::WaitingToPlayAtSpecifiedRate {
+            PlayerActivity::Waiting(self.wait_reason())
+        } else {
+            PlayerActivity::Paused(self.pause_reason.get())
+        }
+    }
+
+    /// Why AVFoundation waits to play.
+    fn wait_reason(&self) -> Option<WaitReason> {
+        // SAFETY: reading the player on the main thread, and constants AVFoundation exports for
+        // the life of the process.
+        unsafe {
+            let reason = self.player.reasonForWaitingToPlay()?;
+            if &*reason == AVPlayerWaitingToMinimizeStallsReason {
+                Some(WaitReason::Data)
+            } else if &*reason == AVPlayerWaitingWhileEvaluatingBufferingRateReason {
+                Some(WaitReason::EvaluatingData)
+            } else {
+                None
+            }
+        }
+    }
+
+    /// The rate it plays at while it plays: AVFoundation's while it plays or waits to, which it
+    /// may have changed, and the one `play` plays at while it is paused.
+    fn playing_rate(&self, activity: PlayerActivity) -> f64 {
+        match activity {
+            // SAFETY: reading the rate on the main thread.
+            PlayerActivity::Playing | PlayerActivity::Waiting(_) => {
+                f64::from(unsafe { self.player.rate() })
+            }
+            PlayerActivity::Paused(_) => f64::from(self.rate.get()),
         }
     }
 
@@ -227,23 +330,39 @@ impl MediaPlayer for AvMediaPlayer {
             // SAFETY: seeking on the main thread.
             unsafe { self.player.seekToTime(kCMTimeZero) };
         }
+        self.pause_reason.set(None);
         // SAFETY: playing on the main thread.
         unsafe { self.player.setRate(self.rate.get()) };
         self.changes.notify();
     }
 
     fn pause(&self) {
+        self.pause_reason.set(Some(PauseReason::Requested));
         // SAFETY: pausing on the main thread.
         unsafe { self.player.pause() };
+        self.changes.notify();
     }
 
-    fn seek(&self, position: Duration) {
+    fn seek(&self, position: Duration, tolerance: SeekTolerance) {
         self.end.reached.set(false);
-        let time = cm_time_of(position);
-        // SAFETY: an exact seek on the main thread.
+        let number = self.seek.start(position);
+        let seek = Arc::clone(&self.seek);
+        let changes = self.changes.clone();
+        let landed = RcBlock::new(move |_finished: Bool| {
+            if seek.land(number) {
+                changes.notify();
+            }
+        });
+        // SAFETY: a seek on the main thread. AVFoundation may call its handler on any thread,
+        // and the handler holds only what any thread may use.
         unsafe {
             self.player
-                .seekToTime_toleranceBefore_toleranceAfter(time, kCMTimeZero, kCMTimeZero)
+                .seekToTime_toleranceBefore_toleranceAfter_completionHandler(
+                    cm_time_of(position),
+                    tolerance_time(tolerance.before),
+                    tolerance_time(tolerance.after),
+                    &landed,
+                )
         };
         self.changes.notify();
     }
@@ -263,6 +382,11 @@ impl MediaPlayer for AvMediaPlayer {
         unsafe { self.player.setVolume(volume.clamp(0.0, 1.0) as f32) };
     }
 
+    fn set_muted(&self, muted: bool) {
+        // SAFETY: on the main thread.
+        unsafe { self.player.setMuted(muted) };
+    }
+
     fn set_looping(&self, looping: bool) {
         self.end.looping.set(looping);
         let action = if looping {
@@ -275,29 +399,40 @@ impl MediaPlayer for AvMediaPlayer {
     }
 
     fn state(&self) -> PlayerState {
+        let status = self.status();
+        let activity = self.activity(&status);
         // SAFETY: reading the player and its item on the main thread.
-        let (playing, duration, size) = unsafe {
+        let (volume, muted, duration, size, loaded, seekable) = unsafe {
             (
-                self.player.timeControlStatus() != AVPlayerTimeControlStatus::Paused,
+                self.player.volume(),
+                self.player.isMuted(),
                 self.item.duration(),
                 self.item.presentationSize(),
+                self.item.loadedTimeRanges(),
+                self.item.seekableTimeRanges(),
             )
         };
-        let ended = self.end.reached.get();
         PlayerState {
-            status: self.status(),
-            // AVFoundation tells the end before it pauses there.
-            playing: playing && !ended,
+            status,
+            activity,
+            seeking: self.seek.target(),
+            rate: self.playing_rate(activity),
+            volume: f64::from(volume),
+            muted,
             duration: duration_of(duration),
+            loaded: ranges_of(&loaded),
+            seekable: ranges_of(&seekable),
             size: (size.width > 0.0 && size.height > 0.0)
                 .then(|| Size::new(size.width, size.height)),
             tracks: self.tracks.tracks(&self.item),
-            ended,
         }
     }
 
-    /// AVPlayer's `currentTime`.
+    /// AVPlayer's `currentTime`, or the target while a seek is under way.
     fn position(&self) -> Duration {
+        if let Some(target) = self.seek.target() {
+            return target;
+        }
         // SAFETY: reading the player's time on the main thread.
         duration_of(unsafe { self.player.currentTime() }).unwrap_or_default()
     }
@@ -348,11 +483,12 @@ impl Drop for AvMediaPlayer {
 }
 
 /// Hears the end of `item`: a looping player starts again, and one that does not has ended. A
-/// failure to reach the end is a change of the item's error, which the state reads.
+/// failure to reach the end is kept in `failure`, with the error AVFoundation gave.
 fn observe_end(
     player: &Retained<AVPlayer>,
     item: &AVPlayerItem,
     end: Rc<End>,
+    failure: Rc<RefCell<Option<PlayerError>>>,
     changes: Changes,
 ) -> NotificationObservation {
     let player = player.clone();
@@ -371,9 +507,195 @@ fn observe_end(
             } else {
                 end.reached.set(true);
             }
+        } else {
+            *failure.borrow_mut() = Some(error_of(failure_to_end(notification).as_deref()));
         }
         changes.notify();
     })
+}
+
+/// The error a failure to play to the end carries.
+fn failure_to_end(notification: &NSNotification) -> Option<Retained<NSError>> {
+    // SAFETY: a constant AVFoundation exports for the life of the process.
+    let key = unsafe { AVPlayerItemFailedToPlayToEndTimeErrorKey };
+    notification
+        .userInfo()
+        .and_then(|info| info.objectForKey(key))
+        .and_then(|error| error.downcast::<NSError>().ok())
+}
+
+/// Hears the player's rate change, from macOS 12 and iOS 15, and keeps in `pause_reason` why it
+/// fell to zero, when it did. The notification and its keys are named by their text, which is
+/// their value, so a system before them, which posts none, still starts the app.
+fn observe_rate(
+    player: &Retained<AVPlayer>,
+    pause_reason: Rc<Cell<Option<PauseReason>>>,
+    changes: Changes,
+) -> NotificationObservation {
+    let rate_changed = NSString::from_str("AVPlayerRateDidChangeNotification");
+    let paused = player.clone();
+    NotificationObservation::new(player, &[&rate_changed], move |notification| {
+        // SAFETY: the main queue runs the handler on the main thread.
+        if unsafe { paused.rate() } == 0.0 {
+            pause_reason.set(pause_reason_of(notification));
+        }
+        changes.notify();
+    })
+}
+
+/// Why AVFoundation's rate fell to zero, from its notification's reason.
+fn pause_reason_of(notification: &NSNotification) -> Option<PauseReason> {
+    let key = NSString::from_str("AVPlayerRateDidChangeReasonKey");
+    let reason = notification
+        .userInfo()?
+        .objectForKey(&key)?
+        .downcast::<NSString>()
+        .ok()?
+        .to_string();
+    match reason.as_str() {
+        "AVPlayerRateDidChangeReasonSetRateCalled" => Some(PauseReason::Requested),
+        "AVPlayerRateDidChangeReasonAudioSessionInterrupted" => Some(PauseReason::Interrupted),
+        "AVPlayerRateDidChangeReasonAppBackgrounded" => Some(PauseReason::Backgrounded),
+        _ => None,
+    }
+}
+
+/// The seek under way, shared with each seek's completion handler, which AVFoundation calls on a
+/// thread of its own; a later seek replaces the target, and only its own completion ends it.
+#[derive(Default)]
+struct SeekUnderWay(Mutex<LatestSeek>);
+
+#[derive(Default)]
+struct LatestSeek {
+    /// Counts the seeks started.
+    number: u64,
+    /// Where the last of them goes, until it lands.
+    target: Option<Duration>,
+}
+
+impl SeekUnderWay {
+    /// A seek to `target` starts, replacing any under way; answers its number.
+    fn start(&self, target: Duration) -> u64 {
+        let mut latest = lock(&self.0);
+        latest.number += 1;
+        latest.target = Some(target);
+        latest.number
+    }
+
+    /// Seek `number` landed, or was given up; answers whether it was the one under way, which no
+    /// longer is.
+    fn land(&self, number: u64) -> bool {
+        let mut latest = lock(&self.0);
+        if latest.number != number {
+            return false;
+        }
+        latest.target = None;
+        true
+    }
+
+    fn target(&self) -> Option<Duration> {
+        lock(&self.0).target
+    }
+}
+
+/// `error` as a player's failure: its kind, and AVFoundation's words for it.
+fn error_of(error: Option<&NSError>) -> PlayerError {
+    match error {
+        Some(error) => PlayerError {
+            kind: kind_of(error),
+            message: error.localizedDescription().to_string(),
+        },
+        None => PlayerError {
+            kind: PlayerErrorKind::Other,
+            message: "the system could not play the media".to_owned(),
+        },
+    }
+}
+
+/// The kind of `error`: by its own domain and code, or, where they say nothing more, by the error
+/// it wraps, as AVFoundation wraps a connection's error.
+fn kind_of(error: &NSError) -> PlayerErrorKind {
+    let domain = error.domain().to_string();
+    let kind = match domain.as_str() {
+        "NSURLErrorDomain" => Some(url_error_kind(error.code())),
+        "AVFoundationErrorDomain" => av_error_kind(AVError(error.code())),
+        _ => None,
+    };
+    kind.or_else(|| underlying_error(error).map(|cause| kind_of(&cause)))
+        .unwrap_or(PlayerErrorKind::Other)
+}
+
+/// The error `error` wraps.
+fn underlying_error(error: &NSError) -> Option<Retained<NSError>> {
+    // SAFETY: a constant Foundation exports for the life of the process.
+    let key = unsafe { NSUnderlyingErrorKey };
+    error
+        .userInfo()
+        .objectForKey(key)
+        .and_then(|cause| cause.downcast::<NSError>().ok())
+}
+
+/// The kind of a loading system's error: refused where the system does not let the player read
+/// a file or fetch a link insecurely (`NSURLErrorNoPermissionsToReadFile`,
+/// `NSURLErrorAppTransportSecurityRequiresSecureConnection`), reaching the media otherwise.
+fn url_error_kind(code: isize) -> PlayerErrorKind {
+    const NO_PERMISSIONS_TO_READ_FILE: isize = -1102;
+    const APP_TRANSPORT_SECURITY_REQUIRES_SECURE_CONNECTION: isize = -1022;
+    match code {
+        NO_PERMISSIONS_TO_READ_FILE | APP_TRANSPORT_SECURITY_REQUIRES_SECURE_CONNECTION => {
+            PlayerErrorKind::Refused
+        }
+        _ => PlayerErrorKind::Network,
+    }
+}
+
+/// The kind of an AVFoundation error, or `None` for one that says no more than that something
+/// failed.
+fn av_error_kind(error: AVError) -> Option<PlayerErrorKind> {
+    match error {
+        AVError::DecodeFailed | AVError::FailedToParse | AVError::UndecodableMediaData => {
+            Some(PlayerErrorKind::Decode)
+        }
+        AVError::FileFormatNotRecognized
+        | AVError::FileFailedToParse
+        | AVError::DecoderNotFound
+        | AVError::FormatUnsupported
+        | AVError::IncompatibleAsset => Some(PlayerErrorKind::Unsupported),
+        AVError::ContentIsProtected | AVError::ContentIsNotAuthorized => {
+            Some(PlayerErrorKind::Protected)
+        }
+        AVError::FailedToLoadMediaData | AVError::ServerIncorrectlyConfigured => {
+            Some(PlayerErrorKind::Network)
+        }
+        _ => None,
+    }
+}
+
+/// `ranges` as spans of the media, leaving out any whose start or length is not a time.
+fn ranges_of(ranges: &NSArray<NSValue>) -> Vec<TimeRange> {
+    ranges
+        .iter()
+        .filter_map(|range| {
+            // SAFETY: AVFoundation's time ranges are values of `CMTimeRange`.
+            let range = unsafe { range.CMTimeRangeValue() };
+            let start = duration_of(range.start)?;
+            let length = duration_of(range.duration)?;
+            Some(TimeRange {
+                start,
+                end: start + length,
+            })
+        })
+        .collect()
+}
+
+/// A seek's tolerance on one side as AVFoundation takes it: infinite where it is unbounded.
+fn tolerance_time(tolerance: Duration) -> CMTime {
+    if tolerance == Duration::MAX {
+        // SAFETY: a constant Core Media exports for the life of the process.
+        unsafe { kCMTimePositiveInfinity }
+    } else {
+        cm_time_of(tolerance)
+    }
 }
 
 /// Tells `changes` whenever a media selection group of `item` changes its selected option, and
@@ -407,7 +729,7 @@ fn cm_time_of(position: Duration) -> CMTime {
 
 /// A player of a source the system cannot play: failed from the start.
 struct FailedPlayer {
-    reason: String,
+    error: PlayerError,
     changes: Changes,
 }
 
@@ -416,16 +738,18 @@ impl MediaPlayer for FailedPlayer {
 
     fn pause(&self) {}
 
-    fn seek(&self, _position: Duration) {}
+    fn seek(&self, _position: Duration, _tolerance: SeekTolerance) {}
 
     fn set_rate(&self, _rate: f64) {}
 
     fn set_volume(&self, _volume: f64) {}
 
+    fn set_muted(&self, _muted: bool) {}
+
     fn set_looping(&self, _looping: bool) {}
 
     fn state(&self) -> PlayerState {
-        PlayerState::failed(self.reason.clone())
+        PlayerState::failed(self.error.clone())
     }
 
     fn position(&self) -> Duration {
@@ -480,6 +804,45 @@ mod tests {
             duration_of(time(0, CMTimeFlags::Valid | CMTimeFlags::Indefinite)),
             None
         );
+    }
+
+    /// An error of `domain` and `code`, wrapping `cause`.
+    fn error(domain: &str, code: isize, cause: Option<&NSError>) -> Retained<NSError> {
+        let domain = NSString::from_str(domain);
+        let info = cause.map(|cause| {
+            // SAFETY: a constant Foundation exports for the life of the process.
+            let key = unsafe { NSUnderlyingErrorKey };
+            let cause: &objc2::runtime::AnyObject = cause.as_ref();
+            objc2_foundation::NSDictionary::from_slices(&[key], &[cause])
+        });
+        // SAFETY: a plain error, with plain values.
+        unsafe { NSError::errorWithDomain_code_userInfo(&domain, code, info.as_deref()) }
+    }
+
+    #[test]
+    fn a_failure_has_the_kind_of_its_error_or_of_the_error_it_wraps() {
+        let offline = error("NSURLErrorDomain", -1009, None);
+        assert_eq!(kind_of(&offline), PlayerErrorKind::Network);
+        let unreadable = error("NSURLErrorDomain", -1102, None);
+        assert_eq!(kind_of(&unreadable), PlayerErrorKind::Refused);
+        let unauthorized = error(
+            "AVFoundationErrorDomain",
+            AVError::ContentIsNotAuthorized.0,
+            None,
+        );
+        assert_eq!(kind_of(&unauthorized), PlayerErrorKind::Protected);
+        let wrapped = error(
+            "AVFoundationErrorDomain",
+            AVError::Unknown.0,
+            Some(&offline),
+        );
+        assert_eq!(
+            kind_of(&wrapped),
+            PlayerErrorKind::Network,
+            "the cause's kind"
+        );
+        let unexplained = error("NSOSStatusErrorDomain", -12848, None);
+        assert_eq!(kind_of(&unexplained), PlayerErrorKind::Other);
     }
 
     #[test]

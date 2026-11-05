@@ -16,8 +16,8 @@ use inset_embedder::{
     Camera, CameraDevice, CameraError, CameraFormat, CameraListFuture, CameraOpenFuture,
     CameraOutputs, CameraStartFuture, Cameras, CaptureSession, CaptureState, CompositionLayer,
     Compositor, Cue, HardwareBuffer, MediaChangeFuture, MediaError, MediaMetadata, MediaPlayer,
-    MovieOptions, Photo, PhotoFuture, Placement, PlayerState, Players, RecordingFuture, Size,
-    VideoFrame, VideoFrameReader, VideoFrameReaders, VideoOutput,
+    MovieOptions, Photo, PhotoFuture, Placement, PlayerState, Players, RecordingFuture,
+    SeekTolerance, Size, VideoFrame, VideoFrameReader, VideoFrameReaders, VideoOutput,
 };
 
 /// A compositor whose layers show nowhere, and which keeps each layer it made. Every clone is the
@@ -134,9 +134,10 @@ impl Players for MockPlayers {
 pub enum PlayerCall {
     Play,
     Pause,
-    Seek(Duration),
+    Seek(Duration, SeekTolerance),
     SetRate(f64),
     SetVolume(f64),
+    SetMuted(bool),
     SetLooping(bool),
     /// What kind of output was given, or none.
     SetVideoOutput(Option<VideoOutputKind>),
@@ -257,8 +258,8 @@ impl MediaPlayer for OpenedPlayer {
         self.0.call(PlayerCall::Pause);
     }
 
-    fn seek(&self, position: Duration) {
-        self.0.call(PlayerCall::Seek(position));
+    fn seek(&self, position: Duration, tolerance: SeekTolerance) {
+        self.0.call(PlayerCall::Seek(position, tolerance));
     }
 
     fn set_rate(&self, rate: f64) {
@@ -267,6 +268,10 @@ impl MediaPlayer for OpenedPlayer {
 
     fn set_volume(&self, volume: f64) {
         self.0.call(PlayerCall::SetVolume(volume));
+    }
+
+    fn set_muted(&self, muted: bool) {
+        self.0.call(PlayerCall::SetMuted(muted));
     }
 
     fn set_looping(&self, looping: bool) {

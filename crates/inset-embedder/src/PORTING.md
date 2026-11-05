@@ -391,6 +391,14 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — every system lets an app read the position (AVPlayer's `currentTime()`, Media3's `getCurrentPosition()`, Windows' `PlaybackSession.Position`, the web's `currentTime`) and tells it when the position jumps (Apple's `AVPlayerItemTimeJumped`, Media3's `onPositionDiscontinuity`, the web's `seeked`), and none sends it on a timer.
   Affect: an app that shows the position reads it at each frame it draws, as exact as the system's own clock, and hears nothing from the player while it plays on.
 
+- Change: a player's state says what the system's player does, paused, waiting or playing, with the reason where the system gives one, where the `video_player` plugin's value has `isPlaying`, which says what the app asked, and `isBuffering`.
+  Reason: platform — the system pauses a player itself and tells why (Apple's `timeControlStatus` and rate change reasons, Android's audio focus and noisy audio), so what the app asked for is not what plays.
+  Affect: an app shows a play button once a call pauses its video, a spinner only while the player waits for data, and a replay button at the end.
+
+- Change: the state also tells a seek under way until it lands, the parts it can seek into, the mute it plays with, and a failure's kind at any time, a seek takes how far from its target it may land, and the state's rate and volume are the system's, where the plugin's value has the buffered ranges, an error description, a rate and a volume, and its seeks are exact.
+  Reason: platform — every system's player tells these, the systems change the rate and the mute themselves, and Apple's and Media3's seeks take a tolerance.
+  Affect: an app greys its scrubber where the media cannot seek, shows a seek until it lands, words a failure in its own language, and seeks quickly while the user drags.
+
 - Change: `Cameras::changed` answers a future that resolves at the next change of what `Cameras::cameras` answers, such as a camera plugged in or out, after which the app lists the cameras again and asks for a new future, where the `camera` plugin's `availableCameras` answers the list once and tells no change.
   Reason: platform — every system Inset targets tells an app when its cameras change: Apple's discovery session, Android's `CameraManager.AvailabilityCallback`, the web's `devicechange` event and Windows' `DeviceWatcher`.
   Affect: an app keeps its list of cameras current as cameras are plugged in and out.
