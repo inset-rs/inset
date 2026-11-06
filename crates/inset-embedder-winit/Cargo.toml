@@ -69,14 +69,16 @@ objc2-user-notifications = { version = "0.3", default-features = false, features
 png = "0.18"
 # Composition layers: the Core Animation layers they are, the buffer each shows and whether the
 # compositor still reads it, the transform that places a layer with its children, the shapes that
-# clip it, and the colour a window shows behind them while its view draws nothing.
+# clip it, and the colour a window shows behind them while its view draws nothing; and the bitmap a
+# media asset's picture is drawn into a frame's pixel buffer through.
 objc2-quartz-core = { version = "0.3", features = ["CABase", "CALayer", "CAShapeLayer", "CATransaction", "CATransform3D"] }
 objc2-io-surface = "0.3"
 objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
-objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGAffineTransform", "CGColor", "CGColorSpace", "CGPath"] }
-# Players and cameras: AVFoundation, the times and sample buffers it speaks in, the markup of the
-# subtitles it hands out, and the pixel buffers a frame reader hands out.
-objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "dispatch2", "objc2-core-foundation", "objc2-core-media", "objc2-core-video", "objc2-quartz-core", "AVAnimation", "AVAsset", "AVAssetTrack", "AVAsynchronousKeyValueLoading", "AVCaptureDevice", "AVCaptureFileOutput", "AVCaptureInput", "AVCaptureOutputBase", "AVCapturePhotoOutput", "AVCaptureSession", "AVCaptureSessionPreset", "AVCaptureVideoDataOutput", "AVCaptureVideoPreviewLayer", "AVError", "AVMediaFormat", "AVMediaSelection", "AVMediaSelectionGroup", "AVMetadataIdentifiers", "AVMetadataItem", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVPlayerItemTrack", "AVPlayerLayer", "AVTime", "AVVideoSettings"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGAffineTransform", "CGBitmapContext", "CGColor", "CGColorSpace", "CGContext", "CGImage", "CGPath"] }
+# Players, media assets and cameras: AVFoundation, the times and sample buffers it speaks in, the
+# markup of the subtitles it hands out, the pixel buffers a frame reader hands out, and the images
+# an asset's pictures come as, drawn into such buffers.
+objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "dispatch2", "objc2-core-foundation", "objc2-core-graphics", "objc2-core-media", "objc2-core-video", "objc2-quartz-core", "AVAnimation", "AVAsset", "AVAssetImageGenerator", "AVAssetTrack", "AVAsynchronousKeyValueLoading", "AVCaptureDevice", "AVCaptureFileOutput", "AVCaptureInput", "AVCaptureOutputBase", "AVCapturePhotoOutput", "AVCaptureSession", "AVCaptureSessionPreset", "AVCaptureVideoDataOutput", "AVCaptureVideoPreviewLayer", "AVError", "AVMediaFormat", "AVMediaSelection", "AVMediaSelectionGroup", "AVMetadataIdentifiers", "AVMetadataItem", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVPlayerItemTrack", "AVPlayerLayer", "AVTime", "AVVideoSettings"] }
 objc2-core-media = { version = "0.3", default-features = false, features = ["std", "objc2-core-video", "CMBase", "CMFormatDescription", "CMSampleBuffer", "CMSync", "CMTextMarkup", "CMTime"] }
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-metal", "CVBase", "CVBuffer", "CVImageBuffer", "CVMetalTexture", "CVMetalTextureCache", "CVPixelBuffer", "CVReturn"] }
 # The user's caption style, its colours matched to sRGB above, and the family of the font it names.
@@ -163,7 +165,11 @@ harness = false
 name = "a_player_reads_the_frames_of_a_file"
 harness = false
 
-# The test seam the media test reaches the system's players through.
+[[test]]
+name = "an_asset_reads_its_length_tracks_and_pictures"
+harness = false
+
+# The test seam the media tests reach the system's players and media assets through.
 [dev-dependencies]
 inset-embedder-winit = { path = ".", features = ["test-support"] }
 
@@ -176,7 +182,7 @@ objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSGeometry"] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer", "CAMetalLayer", "objc2-metal"] }
 
-# What the media test asks of the system that the host offers no call for: serving the main run
+# What the media tests ask of the system that the host offers no call for: serving the main run
 # loop, and reading a frame's pixel buffer.
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dev-dependencies]
 objc2-foundation = { version = "0.3", features = ["NSDate", "NSRunLoop", "NSString"] }

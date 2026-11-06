@@ -28,6 +28,13 @@
 //! documentation of `AVCaptureSession` has a session started on a serial queue of its own, since
 //! `startRunning` blocks until the session runs or fails.
 //!
+//! Beside the player, every system reads media without playing it ([`MediaAssets`]), as a library
+//! reads its videos' lengths, titles and thumbnails: Apple's `AVAsset` and
+//! `AVAssetImageGenerator`, Android's `MediaMetadataRetriever`, Windows' `MediaClip`. An asset
+//! answers with the player's own types, its tracks, its tags and a failure's kind, and its
+//! pictures as the [`VideoFrame`]s a reader hands out, so the app draws one as it draws any frame;
+//! each answer is a future, since the system reads in the background.
+//!
 //! A player tells its media's tracks, plays one audio track and shows one text track or none, as
 //! every system's player does (Apple's media selection groups, Media3's track overrides); it tells
 //! what the media's tags say ([`MediaMetadata`]); and it hands the app the [`Cue`]s of its text
@@ -361,6 +368,43 @@ pub struct EncodedImage {
     pub data: Arc<[u8]>,
 }
 
+/// The system's reading of media without playing it, or `None` from
+/// [`Platform::media_assets`](crate::Platform::media_assets) where it has none: a library's
+/// lengths, titles and thumbnails before anything plays. Every system has this beside its player:
+/// Apple's `AVAsset` and `AVAssetImageGenerator`, Android's `MediaMetadataRetriever`, Windows'
+/// `MediaClip`.
+pub trait MediaAssets {
+    /// The media at `url`, as a player opens it ([`Players::open`]): a link the system fetches,
+    /// or a picked file's [`PickedFile::url`](crate::PickedFile::url). It reads nothing until
+    /// asked.
+    fn open(&self, url: &str) -> Box<dyn MediaAsset>;
+}
+
+/// One piece of media, read on the app's main thread. Each answer is a future of its own, which
+/// resolves once the system has read what it asks, with a player's failure where the system could
+/// not; dropping the asset leaves each future to resolve.
+pub trait MediaAsset {
+    /// How long it is; `None` for a live stream, as a player's state has none.
+    fn duration(&self) -> MediaAssetFuture<Option<Duration>>;
+
+    /// Its tracks, as a player would list them, `selected` the ones a player would play
+    /// unless asked otherwise.
+    fn tracks(&self) -> MediaAssetFuture<Vec<MediaTrack>>;
+
+    /// What its tags say about it.
+    fn metadata(&self) -> MediaAssetFuture<MediaMetadata>;
+
+    /// Its picture at `time`, or as near it as `tolerance` lets the system land for speed, as a
+    /// seek does, presented as a player presents it, its track's rotation applied, and scaled down
+    /// to fit `max_size`, in pixels, where given.
+    fn frame_at(
+        &self,
+        time: Duration,
+        tolerance: SeekTolerance,
+        max_size: Option<Size>,
+    ) -> MediaAssetFuture<Arc<dyn VideoFrame>>;
+}
+
 /// The system's cameras, or `None` from [`Platform::cameras`](crate::Platform::cameras) where it
 /// has none.
 pub trait Cameras {
@@ -638,6 +682,8 @@ impl std::error::Error for MediaError {}
 
 /// What a player's, a session's, the cameras' or the caption settings' `changed` answers.
 pub type MediaChangeFuture = Pin<Box<dyn Future<Output = ()>>>;
+/// What reading a media asset answers.
+pub type MediaAssetFuture<T> = Pin<Box<dyn Future<Output = Result<T, PlayerError>>>>;
 /// What listing the cameras answers.
 pub type CameraListFuture = Pin<Box<dyn Future<Output = Vec<Camera>>>>;
 /// What opening a camera answers.

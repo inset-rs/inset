@@ -11,6 +11,8 @@ categories.workspace = true
 
 [dependencies]
 inset-embedder.workspace = true
+# The device a video frame's texture is made on, which a mock frame names to make none.
+wgpu.workspace = true
 
 [lints]
 workspace = true

@@ -47,7 +47,8 @@ use std::process;
 use std::rc::Rc;
 
 use inset_embedder::{
-    Cameras, CaptionSettings, Notifications, Players, TargetPlatform, VideoFrameReaders,
+    Cameras, CaptionSettings, MediaAssets, Notifications, Players, TargetPlatform,
+    VideoFrameReaders,
 };
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -77,6 +78,10 @@ impl WindowGeometry for AppKit {}
 impl SystemMedia for AppKit {
     fn players() -> Option<Rc<dyn Players>> {
         super::apple::media::players()
+    }
+
+    fn media_assets() -> Option<Rc<dyn MediaAssets>> {
+        super::apple::media::media_assets()
     }
 
     fn cameras() -> Option<Rc<dyn Cameras>> {

@@ -32,7 +32,7 @@ use crate::view::WinitView;
 use crate::windows::RequestedWindow;
 use inset_embedder::{
     AppExit, Brightness, Cameras, CaptionSettings, Clipboard, CompositionLayer, Compositor,
-    Dispatcher, DockMenu, FileDialogs, FontSource, ImageCodecFuture, Locale, MenuBar,
+    Dispatcher, DockMenu, FileDialogs, FontSource, ImageCodecFuture, Locale, MediaAssets, MenuBar,
     Notifications, Opener, Platform, Players, PointerReport, PopupMenus, RequestId, Screens,
     SystemFontSource, TargetPlatform, TrayIcons, VideoFrameReaders, ViewEmbedder, ViewError,
     ViewFocusEvent, ViewHost, ViewId, ViewMetrics, ViewRef, VsyncWaiter, WindowConfig,
@@ -75,9 +75,10 @@ pub struct WinitPlatform {
     opener: Option<Rc<dyn Opener>>,
     /// The system's notifications, where the app has them (`os/*/notifications`).
     notifications: Option<Rc<dyn Notifications>>,
-    /// The system's players and cameras, and the frame readers they feed, where it has them
-    /// (`media.rs`).
+    /// The system's players, its reading of media without playing it and its cameras, and the
+    /// frame readers they feed, where it has them (`media.rs`).
     players: Option<Rc<dyn Players>>,
+    media_assets: Option<Rc<dyn MediaAssets>>,
     cameras: Option<Rc<dyn Cameras>>,
     video_frame_readers: Option<Rc<dyn VideoFrameReaders>>,
     /// The user's caption settings, where the system keeps them.
@@ -101,6 +102,7 @@ impl WinitPlatform {
             opener: System::opener(ParentWindows::new(Rc::clone(&state))),
             notifications: System::notifications(NotificationActivations::new(proxy.clone())),
             players: System::players(),
+            media_assets: System::media_assets(),
             cameras: System::cameras(),
             video_frame_readers: System::video_frame_readers(),
             caption_settings: System::caption_settings(),
@@ -297,6 +299,10 @@ impl Platform for WinitPlatform {
 
     fn players(&self) -> Option<&dyn Players> {
         self.players.as_deref()
+    }
+
+    fn media_assets(&self) -> Option<&dyn MediaAssets> {
+        self.media_assets.as_deref()
     }
 
     fn cameras(&self) -> Option<&dyn Cameras> {

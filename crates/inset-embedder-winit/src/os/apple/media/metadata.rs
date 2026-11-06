@@ -52,7 +52,7 @@ impl AssetMetadata {
 }
 
 /// The title, artist, album and artwork among `items`.
-fn media_metadata_of(items: &NSArray<AVMetadataItem>) -> MediaMetadata {
+pub(super) fn media_metadata_of(items: &NSArray<AVMetadataItem>) -> MediaMetadata {
     // SAFETY: constants AVFoundation exports for the life of the process.
     let (title, artist, album, artwork) = unsafe {
         (

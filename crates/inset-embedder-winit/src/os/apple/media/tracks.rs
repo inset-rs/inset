@@ -2,7 +2,9 @@
 //! media selection groups, of which an item plays one at a time, a legible group allowing none
 //! where it says so (`allowsEmptySelection`); and its item's video tracks. Media without a group of
 //! a kind, such as an MP3 with its one sound, lists that kind's tracks from the item's tracks,
-//! which play while enabled.
+//! which play while enabled. An asset read without playing lists its tracks the same way, each
+//! selected as a player of it would play it before anything is chosen: a group's default option,
+//! and a track the media enables.
 //!
 //! A track's id is `audible:<n>` or `legible:<n>` for its group's option `n`, and `track:<id>` for
 //! an item's track with that track id. The groups load in the background, and a kind lists no
@@ -10,6 +12,7 @@
 //! id for the run; a stream's video track is a new item track, with a new id, at each variant
 //! AVFoundation switches to.
 
+use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use block2::RcBlock;
@@ -23,7 +26,20 @@ use objc2_av_foundation::{
 };
 use objc2_foundation::{NSArray, NSError, NSLocale, NSString};
 
+use crate::answer::answer;
 use crate::media::Changes;
+
+/// The audible group's options, as a player's audio tracks.
+const AUDIBLE: GroupKind = GroupKind {
+    kind: MediaTrackKind::Audio,
+    name: "audible",
+};
+
+/// The legible group's options, as a player's text tracks.
+const LEGIBLE: GroupKind = GroupKind {
+    kind: MediaTrackKind::Text,
+    name: "legible",
+};
 
 /// A player's tracks: its video tracks, and the audio and text tracks it plays one of at a time.
 pub(super) struct MediaTracks {
@@ -39,13 +55,11 @@ impl MediaTracks {
             unsafe { (AVMediaCharacteristicAudible, AVMediaCharacteristicLegible) };
         MediaTracks {
             audio: SelectableTracks {
-                kind: MediaTrackKind::Audio,
-                group_name: "audible",
+                of: AUDIBLE,
                 group: LoadedGroup::load(asset, audible, changes.clone()),
             },
             text: SelectableTracks {
-                kind: MediaTrackKind::Text,
-                group_name: "legible",
+                of: LEGIBLE,
                 group: LoadedGroup::load(asset, legible, changes.clone()),
             },
         }
@@ -70,44 +84,31 @@ impl MediaTracks {
     }
 }
 
-/// The tracks of one kind an item plays one of at a time: its group's options, or the item's own
-/// tracks of the kind where the media has no group.
-struct SelectableTracks {
+/// The tracks of one kind a group's options are, and what their ids start with.
+#[derive(Clone, Copy)]
+struct GroupKind {
     kind: MediaTrackKind,
-    /// What its options' ids start with.
-    group_name: &'static str,
-    group: LoadedGroup,
+    name: &'static str,
 }
 
-impl SelectableTracks {
-    fn tracks(&self, item: &AVPlayerItem) -> Vec<MediaTrack> {
-        match &*self.group.state() {
-            GroupState::Loading => Vec::new(),
-            GroupState::Loaded(group) => self.option_tracks(item, &group.0),
-            GroupState::Absent => item_tracks(item, self.kind),
-        }
+impl GroupKind {
+    fn option_id(self, index: usize) -> String {
+        format!("{}:{index}", self.name)
     }
 
-    /// Plays the track `id` in place of the one playing, or none where `id` is `None` and the
-    /// media allows it. An id this player did not give is ignored.
-    fn select(&self, item: &AVPlayerItem, id: Option<&str>) {
-        match &*self.group.state() {
-            GroupState::Loading => {}
-            GroupState::Loaded(group) => self.select_option(item, &group.0, id),
-            GroupState::Absent => select_item_track(item, self.kind, id),
-        }
+    /// The option `id` names; `None` for an id of anything else.
+    fn option_index(self, id: &str) -> Option<usize> {
+        id.strip_prefix(self.name)?.strip_prefix(':')?.parse().ok()
     }
 
-    /// `group`'s options as tracks, the one the item plays selected.
-    fn option_tracks(&self, item: &AVPlayerItem, group: &AVMediaSelectionGroup) -> Vec<MediaTrack> {
-        // SAFETY: reading the item's selection and the group's options on the main thread.
-        let (selected, options) = unsafe {
-            (
-                item.currentMediaSelection()
-                    .selectedMediaOptionInMediaSelectionGroup(group),
-                group.options(),
-            )
-        };
+    /// `group`'s options as tracks, `chosen` selected.
+    fn option_tracks(
+        self,
+        group: &AVMediaSelectionGroup,
+        chosen: Option<&AVMediaSelectionOption>,
+    ) -> Vec<MediaTrack> {
+        // SAFETY: reading the group's options, which load with it.
+        let options = unsafe { group.options() };
         options
             .iter()
             .enumerate()
@@ -117,9 +118,46 @@ impl SelectableTracks {
                 language: option_language(&option),
                 // SAFETY: an option's metadata, which loads with its group.
                 label: title_of(&*unsafe { option.commonMetadata() }),
-                selected: selected.as_ref() == Some(&option),
+                selected: chosen == Some(&*option),
             })
             .collect()
+    }
+}
+
+/// The tracks of one kind an item plays one of at a time: its group's options, or the item's own
+/// tracks of the kind where the media has no group.
+struct SelectableTracks {
+    of: GroupKind,
+    group: LoadedGroup,
+}
+
+impl SelectableTracks {
+    fn tracks(&self, item: &AVPlayerItem) -> Vec<MediaTrack> {
+        match &*self.group.state() {
+            GroupState::Loading => Vec::new(),
+            GroupState::Loaded(group) => self.option_tracks(item, &group.0),
+            GroupState::Absent => item_tracks(item, self.of.kind),
+        }
+    }
+
+    /// Plays the track `id` in place of the one playing, or none where `id` is `None` and the
+    /// media allows it. An id this player did not give is ignored.
+    fn select(&self, item: &AVPlayerItem, id: Option<&str>) {
+        match &*self.group.state() {
+            GroupState::Loading => {}
+            GroupState::Loaded(group) => self.select_option(item, &group.0, id),
+            GroupState::Absent => select_item_track(item, self.of.kind, id),
+        }
+    }
+
+    /// `group`'s options as tracks, the one the item plays selected.
+    fn option_tracks(&self, item: &AVPlayerItem, group: &AVMediaSelectionGroup) -> Vec<MediaTrack> {
+        // SAFETY: reading the item's selection on the main thread.
+        let selected = unsafe {
+            item.currentMediaSelection()
+                .selectedMediaOptionInMediaSelectionGroup(group)
+        };
+        self.of.option_tracks(group, selected.as_deref())
     }
 
     /// Selects `group`'s option `id`, or none where `id` is `None` and the group allows it.
@@ -129,7 +167,7 @@ impl SelectableTracks {
             let option = match id {
                 Some(id) => {
                     let options = group.options();
-                    match self.option_index(id) {
+                    match self.of.option_index(id) {
                         Some(index) if index < options.count() => {
                             Some(options.objectAtIndex(index))
                         }
@@ -141,18 +179,6 @@ impl SelectableTracks {
             };
             item.selectMediaOption_inMediaSelectionGroup(option.as_deref(), group);
         }
-    }
-
-    fn option_id(&self, index: usize) -> String {
-        format!("{}:{index}", self.group_name)
-    }
-
-    /// The option `id` names; `None` for an id of anything else.
-    fn option_index(&self, id: &str) -> Option<usize> {
-        id.strip_prefix(self.group_name)?
-            .strip_prefix(':')?
-            .parse()
-            .ok()
     }
 }
 
@@ -207,6 +233,37 @@ impl LoadedGroup {
     }
 }
 
+/// The group of `characteristic` once AVFoundation has loaded it; `None` where the media has none,
+/// it could not be loaded, or the system names no such characteristic.
+fn group_of(
+    asset: &AVAsset,
+    characteristic: Option<&AVMediaCharacteristic>,
+) -> impl Future<Output = Option<CrossThreadGroup>> + use<> {
+    let (given, loaded) = answer(None);
+    if let Some(characteristic) = characteristic {
+        let given = Mutex::new(Some(given));
+        let handler = RcBlock::new(
+            move |group: *mut AVMediaSelectionGroup, _error: *mut NSError| {
+                // SAFETY: AVFoundation hands the group, or none, for the call; retaining it keeps
+                // it past.
+                let group = unsafe { Retained::retain(group) };
+                let given = given.lock().unwrap_or_else(PoisonError::into_inner).take();
+                if let Some(given) = given {
+                    given.give(group.map(CrossThreadGroup));
+                }
+            },
+        );
+        // SAFETY: the handler only hands the group over, behind a mutex.
+        unsafe {
+            asset.loadMediaSelectionGroupForMediaCharacteristic_completionHandler(
+                characteristic,
+                &handler,
+            )
+        };
+    }
+    loaded
+}
+
 /// A group handed from AVFoundation's loading queue to the main thread.
 struct CrossThreadGroup(Retained<AVMediaSelectionGroup>);
 
@@ -224,17 +281,67 @@ fn item_tracks(item: &AVPlayerItem, kind: MediaTrackKind) -> Vec<MediaTrack> {
         .filter_map(|track| {
             // SAFETY: an item's track and its asset's track, read on the main thread.
             let (asset_track, enabled) = unsafe { (track.assetTrack()?, track.isEnabled()) };
-            is_of_kind(&asset_track, kind).then(|| MediaTrack {
-                // SAFETY: as above.
-                id: item_track_id(unsafe { asset_track.trackID() }),
-                kind,
-                language: track_language(&asset_track),
-                // SAFETY: as above.
-                label: title_of(&*unsafe { asset_track.commonMetadata() }),
-                selected: enabled,
-            })
+            is_of_kind(&asset_track, kind).then(|| track_of(&asset_track, kind, enabled))
         })
         .collect()
+}
+
+/// `asset`'s tracks as a player of it lists them before anything is chosen: its video tracks,
+/// then its audio and its text, each kind its group's options with the default one selected,
+/// where it has the group, and else its tracks of the kind, those the media enables selected.
+/// Once its tracks have loaded; its groups load here.
+pub(super) async fn asset_tracks(asset: &AVAsset) -> Vec<MediaTrack> {
+    // SAFETY: constants AVFoundation exports for the life of the process.
+    let (audible, legible) =
+        unsafe { (AVMediaCharacteristicAudible, AVMediaCharacteristicLegible) };
+    let audible = group_of(asset, audible).await;
+    let legible = group_of(asset, legible).await;
+    // SAFETY: the asset's tracks, which have loaded.
+    let tracks = unsafe { asset.tracks() };
+    let mut listed = asset_tracks_of(&tracks, MediaTrackKind::Video);
+    listed.extend(default_tracks(AUDIBLE, audible.as_ref(), &tracks));
+    listed.extend(default_tracks(LEGIBLE, legible.as_ref(), &tracks));
+    listed
+}
+
+/// `group`'s options with its default one selected, where there is the group; `tracks` of its
+/// kind otherwise.
+fn default_tracks(
+    of: GroupKind,
+    group: Option<&CrossThreadGroup>,
+    tracks: &NSArray<AVAssetTrack>,
+) -> Vec<MediaTrack> {
+    match group {
+        Some(group) => {
+            // SAFETY: the group's default option, which loads with it.
+            let chosen = unsafe { group.0.defaultOption() };
+            of.option_tracks(&group.0, chosen.as_deref())
+        }
+        None => asset_tracks_of(tracks, of.kind),
+    }
+}
+
+/// `tracks` of `kind`, those the media enables selected.
+fn asset_tracks_of(tracks: &NSArray<AVAssetTrack>, kind: MediaTrackKind) -> Vec<MediaTrack> {
+    tracks
+        .iter()
+        .filter(|track| is_of_kind(track, kind))
+        // SAFETY: whether a loaded track is enabled, as its container says.
+        .map(|track| track_of(&track, kind, unsafe { track.isEnabled() }))
+        .collect()
+}
+
+/// `track`, of `kind`, as a track listed.
+fn track_of(track: &AVAssetTrack, kind: MediaTrackKind, selected: bool) -> MediaTrack {
+    MediaTrack {
+        // SAFETY: a track's id and metadata, loaded with it.
+        id: item_track_id(unsafe { track.trackID() }),
+        kind,
+        language: track_language(track),
+        // SAFETY: as above.
+        label: title_of(&*unsafe { track.commonMetadata() }),
+        selected,
+    }
 }
 
 /// Enables the item's track `id` of `kind` and disables its others of that kind; disables all of
@@ -338,19 +445,10 @@ mod tests {
 
     #[test]
     fn an_id_names_a_groups_option_or_an_items_track_and_nothing_of_another_kind() {
-        let tracks = |kind, group_name| SelectableTracks {
-            kind,
-            group_name,
-            group: LoadedGroup(Arc::new(Mutex::new(GroupState::Loading))),
-        };
-        let (audio, text) = (
-            tracks(MediaTrackKind::Audio, "audible"),
-            tracks(MediaTrackKind::Text, "legible"),
-        );
-        assert_eq!(audio.option_id(2), "audible:2");
-        assert_eq!(audio.option_index("audible:2"), Some(2));
-        assert_eq!(text.option_index("audible:2"), None);
-        assert_eq!(text.option_index("legible:x"), None);
+        assert_eq!(AUDIBLE.option_id(2), "audible:2");
+        assert_eq!(AUDIBLE.option_index("audible:2"), Some(2));
+        assert_eq!(LEGIBLE.option_index("audible:2"), None);
+        assert_eq!(LEGIBLE.option_index("legible:x"), None);
         assert_eq!(item_track_number(&item_track_id(7)), Some(7));
         assert_eq!(item_track_number("legible:7"), None);
     }

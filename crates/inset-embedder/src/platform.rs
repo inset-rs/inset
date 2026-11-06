@@ -701,6 +701,11 @@ pub trait Platform: Any {
         None
     }
 
+    /// The system's reading of media without playing it, or `None` where the host has none.
+    fn media_assets(&self) -> Option<&dyn crate::MediaAssets> {
+        None
+    }
+
     /// The system's cameras, or `None` where the host has none. A host with cameras answers
     /// one with none attached as an empty list.
     fn cameras(&self) -> Option<&dyn crate::Cameras> {

@@ -1,6 +1,7 @@
-//! A compositor, frame readers, players and cameras in memory, as a host shows nothing: each
-//! keeps what the app asked of it or gave it, and reports the state the test gives it, a player
-//! its position, metadata and cues too, and the cameras their list.
+//! A compositor, frame readers, players, media assets and cameras in memory, as a host shows
+//! nothing: each keeps what the app asked of it or gave it, and reports the state the test gives
+//! it, a player its position, metadata and cues too, an asset what it reads, and the cameras their
+//! list.
 
 use std::cell::{Cell, RefCell};
 use std::future::Future;
@@ -15,9 +16,10 @@ use std::time::Duration;
 use inset_embedder::{
     Camera, CameraDevice, CameraError, CameraFormat, CameraListFuture, CameraOpenFuture,
     CameraOutputs, CameraStartFuture, Cameras, CaptureSession, CaptureState, CompositionLayer,
-    Compositor, Cue, HardwareBuffer, MediaChangeFuture, MediaError, MediaMetadata, MediaPlayer,
-    MovieOptions, Photo, PhotoFuture, Placement, PlayerState, Players, RecordingFuture,
-    SeekTolerance, Size, VideoFrame, VideoFrameReader, VideoFrameReaders, VideoOutput,
+    Compositor, Cue, HardwareBuffer, MediaAsset, MediaAssetFuture, MediaAssets, MediaChangeFuture,
+    MediaError, MediaMetadata, MediaPlayer, MediaTrack, MovieOptions, Photo, PhotoFuture,
+    Placement, PlayerError, PlayerState, Players, RecordingFuture, SeekTolerance, Size, VideoFrame,
+    VideoFrameReader, VideoFrameReaders, VideoOutput,
 };
 
 /// A compositor whose layers show nowhere, and which keeps each layer it made. Every clone is the
@@ -319,6 +321,171 @@ impl Drop for OpenedPlayer {
     fn drop(&mut self) {
         self.0.0.dropped.set(true);
         self.0.0.changes.end();
+    }
+}
+
+/// Media assets that each answer what the test set, at once, and keep each asset opened with the
+/// pictures asked of it. Every clone is the same assets.
+#[derive(Clone)]
+pub struct MockMediaAssets(Rc<AssetsShared>);
+
+struct AssetsShared {
+    answers: RefCell<AssetAnswers>,
+    opened: RefCell<Vec<MockMediaAsset>>,
+}
+
+/// What every asset answers: its length, `None` for a live stream, its tracks, its tags, and the
+/// size of its pictures, each or a failure.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AssetAnswers {
+    pub duration: Result<Option<Duration>, PlayerError>,
+    pub tracks: Result<Vec<MediaTrack>, PlayerError>,
+    pub metadata: Result<MediaMetadata, PlayerError>,
+    /// The size of each picture, which answers a [`MockVideoFrame`] of it.
+    pub frame_size: Result<Size, PlayerError>,
+}
+
+impl MockMediaAssets {
+    /// Assets that each answer `answers`.
+    pub fn new(answers: AssetAnswers) -> MockMediaAssets {
+        MockMediaAssets(Rc::new(AssetsShared {
+            answers: RefCell::new(answers),
+            opened: RefCell::default(),
+        }))
+    }
+
+    /// Each asset answers `answers` from now on.
+    pub fn set_answers(&self, answers: AssetAnswers) {
+        *self.0.answers.borrow_mut() = answers;
+    }
+
+    /// The assets opened, in order.
+    pub fn opened(&self) -> Vec<MockMediaAsset> {
+        self.0.opened.borrow().clone()
+    }
+}
+
+impl MediaAssets for MockMediaAssets {
+    fn open(&self, url: &str) -> Box<dyn MediaAsset> {
+        let asset = MockMediaAsset(Rc::new(AssetShared {
+            url: url.to_owned(),
+            frames_asked: RefCell::default(),
+            dropped: Cell::new(false),
+        }));
+        self.0.opened.borrow_mut().push(asset.clone());
+        Box::new(OpenedAsset {
+            assets: self.clone(),
+            asset,
+        })
+    }
+}
+
+/// An asset the app opened, as the test sees it. Every clone is the same asset.
+#[derive(Clone)]
+pub struct MockMediaAsset(Rc<AssetShared>);
+
+struct AssetShared {
+    url: String,
+    frames_asked: RefCell<Vec<FrameAsked>>,
+    dropped: Cell<bool>,
+}
+
+/// A picture the app asked an asset for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameAsked {
+    pub time: Duration,
+    pub tolerance: SeekTolerance,
+    pub max_size: Option<Size>,
+}
+
+impl MockMediaAsset {
+    /// The URL the asset was opened from.
+    pub fn url(&self) -> String {
+        self.0.url.clone()
+    }
+
+    /// The pictures asked of it, in order.
+    pub fn frames_asked(&self) -> Vec<FrameAsked> {
+        self.0.frames_asked.borrow().clone()
+    }
+
+    /// Whether the app let go of the asset.
+    pub fn is_dropped(&self) -> bool {
+        self.0.dropped.get()
+    }
+}
+
+/// The asset the app holds.
+struct OpenedAsset {
+    assets: MockMediaAssets,
+    asset: MockMediaAsset,
+}
+
+impl OpenedAsset {
+    fn answers(&self) -> AssetAnswers {
+        self.assets.0.answers.borrow().clone()
+    }
+}
+
+impl MediaAsset for OpenedAsset {
+    fn duration(&self) -> MediaAssetFuture<Option<Duration>> {
+        Box::pin(std::future::ready(self.answers().duration))
+    }
+
+    fn tracks(&self) -> MediaAssetFuture<Vec<MediaTrack>> {
+        Box::pin(std::future::ready(self.answers().tracks))
+    }
+
+    fn metadata(&self) -> MediaAssetFuture<MediaMetadata> {
+        Box::pin(std::future::ready(self.answers().metadata))
+    }
+
+    fn frame_at(
+        &self,
+        time: Duration,
+        tolerance: SeekTolerance,
+        max_size: Option<Size>,
+    ) -> MediaAssetFuture<Arc<dyn VideoFrame>> {
+        self.asset.0.frames_asked.borrow_mut().push(FrameAsked {
+            time,
+            tolerance,
+            max_size,
+        });
+        let frame = self.answers().frame_size.map(|size| {
+            Arc::new(MockVideoFrame {
+                width: size.width() as u32,
+                height: size.height() as u32,
+            }) as Arc<dyn VideoFrame>
+        });
+        Box::pin(std::future::ready(frame))
+    }
+}
+
+impl Drop for OpenedAsset {
+    fn drop(&mut self) {
+        self.asset.0.dropped.set(true);
+    }
+}
+
+/// A picture of a size, with no pixels on any GPU: it makes no texture, as a frame a device cannot
+/// take, which a drawing skips.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MockVideoFrame {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl VideoFrame for MockVideoFrame {
+    fn width(&self) -> u32 {
+        self.width
+    }
+
+    fn height(&self) -> u32 {
+        self.height
+    }
+
+    fn texture(&self, _device: &wgpu::Device) -> Option<wgpu::Texture> {
+        None
     }
 }
 
@@ -679,5 +846,78 @@ impl Future for NextChange {
         }
         self.changes.wakers.borrow_mut().push(cx.waker().clone());
         Poll::Pending
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+    use std::task::{Context, Poll, Waker};
+
+    use inset_embedder::{MediaTrackKind, PlayerErrorKind};
+
+    use super::*;
+
+    fn now<T>(future: impl Future<Output = T>) -> T {
+        let mut future = std::pin::pin!(future);
+        match future
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+        {
+            Poll::Ready(output) => output,
+            Poll::Pending => panic!("answers at once"),
+        }
+    }
+
+    fn answers() -> AssetAnswers {
+        AssetAnswers {
+            duration: Ok(Some(Duration::from_secs(90))),
+            tracks: Ok(vec![MediaTrack {
+                id: "track:1".to_owned(),
+                kind: MediaTrackKind::Video,
+                language: String::new(),
+                label: String::new(),
+                selected: true,
+            }]),
+            metadata: Ok(MediaMetadata {
+                title: Some("Bip Bop".to_owned()),
+                ..MediaMetadata::default()
+            }),
+            frame_size: Ok(Size::new(320.0, 180.0)),
+        }
+    }
+
+    #[test]
+    fn an_asset_answers_what_the_test_set_and_keeps_the_pictures_asked() {
+        let assets = MockMediaAssets::new(answers());
+        let asset = assets.open("file:///data/clip.mp4");
+        assert_eq!(now(asset.duration()), Ok(Some(Duration::from_secs(90))));
+        assert_eq!(now(asset.tracks()).unwrap()[0].id, "track:1");
+        assert_eq!(
+            now(asset.metadata()).unwrap().title.as_deref(),
+            Some("Bip Bop")
+        );
+        let asked = FrameAsked {
+            time: Duration::from_secs(9),
+            tolerance: SeekTolerance::ANY,
+            max_size: Some(Size::new(320.0, 320.0)),
+        };
+        let frame = now(asset.frame_at(asked.time, asked.tolerance, asked.max_size)).unwrap();
+        assert_eq!([frame.width(), frame.height()], [320, 180]);
+        let opened = &assets.opened()[0];
+        assert_eq!(opened.url(), "file:///data/clip.mp4");
+        assert_eq!(opened.frames_asked(), [asked]);
+
+        let refused = PlayerError {
+            kind: PlayerErrorKind::Refused,
+            message: "no".to_owned(),
+        };
+        assets.set_answers(AssetAnswers {
+            duration: Err(refused.clone()),
+            ..answers()
+        });
+        assert_eq!(now(asset.duration()), Err(refused));
+        drop(asset);
+        assert!(opened.is_dropped());
     }
 }

@@ -8,10 +8,10 @@ use std::sync::{Arc, Mutex};
 use inset_embedder::{
     AppExit, AppLifecycleState, Brightness, Cameras, CaptionSettings, Clipboard, CompositionLayer,
     Compositor, Dispatcher, DockMenu, FileDialogs, FontSource, Haptics, Image, ImageCodecFuture,
-    ImageDecodeError, Instant, MenuBar, Notifications, Opener, Platform, Players, PointerReport,
-    PopupMenus, RequestId, Restoration, SystemChrome, SystemContextMenu, TargetPlatform,
-    TextServices, TrayIcons, VideoFrameReaders, View, ViewEmbedder, ViewError, ViewFocusEvent,
-    ViewHost, ViewId, ViewMetrics, ViewRef, WindowConfig,
+    ImageDecodeError, Instant, MediaAssets, MenuBar, Notifications, Opener, Platform, Players,
+    PointerReport, PopupMenus, RequestId, Restoration, SystemChrome, SystemContextMenu,
+    TargetPlatform, TextServices, TrayIcons, VideoFrameReaders, View, ViewEmbedder, ViewError,
+    ViewFocusEvent, ViewHost, ViewId, ViewMetrics, ViewRef, WindowConfig,
 };
 
 use inset_embedder::valo;
@@ -65,6 +65,7 @@ pub struct TestPlatform {
     notifications: Option<Rc<dyn Notifications>>,
     compositor: Option<Arc<dyn Compositor>>,
     players: Option<Rc<dyn Players>>,
+    media_assets: Option<Rc<dyn MediaAssets>>,
     cameras: Option<Rc<dyn Cameras>>,
     video_frame_readers: Option<Rc<dyn VideoFrameReaders>>,
     caption_settings: Option<Rc<dyn CaptionSettings>>,
@@ -105,6 +106,7 @@ impl TestPlatform {
             notifications: None,
             compositor: None,
             players: None,
+            media_assets: None,
             cameras: None,
             video_frame_readers: None,
             caption_settings: None,
@@ -274,6 +276,11 @@ impl TestPlatform {
 
     pub fn with_players(mut self, players: Rc<dyn Players>) -> TestPlatform {
         self.players = Some(players);
+        self
+    }
+
+    pub fn with_media_assets(mut self, media_assets: Rc<dyn MediaAssets>) -> TestPlatform {
+        self.media_assets = Some(media_assets);
         self
     }
 
@@ -497,6 +504,10 @@ impl Platform for TestPlatform {
 
     fn players(&self) -> Option<&dyn Players> {
         self.players.as_deref()
+    }
+
+    fn media_assets(&self) -> Option<&dyn MediaAssets> {
+        self.media_assets.as_deref()
     }
 
     fn cameras(&self) -> Option<&dyn Cameras> {

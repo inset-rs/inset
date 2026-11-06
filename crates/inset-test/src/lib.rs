@@ -2,9 +2,9 @@
 //! into, whose [`TestViewHost`] records what it asks of the system, a [`MockClipboard`] for it to copy to and paste from, the system's menus
 //! ([`MockMenuBar`], [`MockPopupMenus`], [`MockDockMenu`], [`MockTrayIcons`]) for it to set and
 //! choose in, file dialogs ([`MockFileDialogs`], with [`MemoryFile`] and [`MemoryFolder`])
-//! for it to open and save through, and a compositor, frame readers, players and cameras
-//! ([`MockCompositor`], [`MockVideoFrameReaders`], [`MockPlayers`], [`MockCameras`]) for it to
-//! show media through, with the user's caption settings ([`MockCaptionSettings`]) to draw subtitles
+//! for it to open and save through, and a compositor, frame readers, players, media assets and
+//! cameras ([`MockCompositor`], [`MockVideoFrameReaders`], [`MockPlayers`], [`MockMediaAssets`],
+//! [`MockCameras`]) for it to show and read media through, with the user's caption settings ([`MockCaptionSettings`]) to draw subtitles
 //! in, so a test supplies only the piece it is about. The shape of `flutter_test`'s `TestPlatformDispatcher` and
 //! `TestFlutterView`: real implementations of the host traits that answer what a test
 //! configures and record what the framework asks of them.
@@ -32,7 +32,8 @@ pub use caption_style::MockCaptionSettings;
 pub use clipboard::MockClipboard;
 pub use file_dialogs::{AskedDialog, MemoryFile, MemoryFolder, MockFileDialogs};
 pub use media::{
-    MadeLayer, MockCameras, MockCaptureSession, MockCompositor, MockPlayer, MockPlayers,
+    AssetAnswers, FrameAsked, MadeLayer, MockCameras, MockCaptureSession, MockCompositor,
+    MockMediaAsset, MockMediaAssets, MockPlayer, MockPlayers, MockVideoFrame,
     MockVideoFrameReaders, PlayerCall, VideoOutputKind,
 };
 pub use menus::{

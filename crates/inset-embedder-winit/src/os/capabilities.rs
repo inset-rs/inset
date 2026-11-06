@@ -9,9 +9,9 @@ use std::time::{Duration, Instant};
 
 use inset_embedder::{
     Cameras, CaptionSettings, Clipboard, CompositionLayer, Compositor, DataTransferItem, DockMenu,
-    FileDialogs, KeyData, MenuBar, MenuEntry, MenuId, Notifications, Offset, Opener, Placement,
-    Players, Rect, Screen, ScreenId, TargetPlatform, TrayIcons, VideoFrameReaders, ViewId,
-    ViewPadding, VsyncWaiter, WindowConfig,
+    FileDialogs, KeyData, MediaAssets, MenuBar, MenuEntry, MenuId, Notifications, Offset, Opener,
+    Placement, Players, Rect, Screen, ScreenId, TargetPlatform, TrayIcons, VideoFrameReaders,
+    ViewId, ViewPadding, VsyncWaiter, WindowConfig,
 };
 use valo_codec::Decoder;
 use winit::event_loop::{ActiveEventLoop, EventLoopBuilder};
@@ -414,11 +414,17 @@ pub(crate) trait SystemFileDialogs {
     }
 }
 
-/// The system's media stack: its players, its cameras and the frame readers they feed
-/// (`apple/media` on macOS and iOS), and the user's caption settings (`apple/caption_appearance`).
+/// The system's media stack: its players, its reading of media without playing it, its cameras
+/// and the frame readers they feed (`apple/media` on macOS and iOS), and the user's caption
+/// settings (`apple/caption_appearance`).
 pub(crate) trait SystemMedia {
     /// The system's players, or `None` where the embedder has none.
     fn players() -> Option<Rc<dyn Players>> {
+        None
+    }
+
+    /// The system's reading of media without playing it, or `None` where the embedder has none.
+    fn media_assets() -> Option<Rc<dyn MediaAssets>> {
         None
     }
 

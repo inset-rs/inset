@@ -26,30 +26,27 @@ use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2::runtime::Bool;
 use objc2_av_foundation::{
-    AVError, AVLayerVideoGravityResizeAspect, AVPlayer, AVPlayerActionAtItemEnd, AVPlayerItem,
+    AVLayerVideoGravityResizeAspect, AVPlayer, AVPlayerActionAtItemEnd, AVPlayerItem,
     AVPlayerItemDidPlayToEndTimeNotification, AVPlayerItemFailedToPlayToEndTimeErrorKey,
     AVPlayerItemFailedToPlayToEndTimeNotification, AVPlayerItemMediaSelectionDidChangeNotification,
     AVPlayerItemStatus, AVPlayerItemTimeJumpedNotification, AVPlayerLayer,
     AVPlayerTimeControlStatus, AVPlayerWaitingToMinimizeStallsReason,
     AVPlayerWaitingWhileEvaluatingBufferingRateReason, AVURLAsset, NSValueAVFoundationExtensions,
 };
-use objc2_core_media::{CMTime, CMTimeFlags, kCMTimePositiveInfinity, kCMTimeZero};
-use objc2_foundation::{
-    NSArray, NSError, NSNotification, NSString, NSURL, NSUnderlyingErrorKey, NSValue,
-};
+use objc2_core_media::kCMTimeZero;
+use objc2_foundation::{NSArray, NSError, NSNotification, NSString, NSURL, NSValue};
 
 use super::cues::LegibleCues;
 use super::frames::{
     AvFrameReader, FrameOutput, PlayerFrames, report_foreign_reader, report_reader_in_use,
 };
+use super::media_times::{cm_time_of, duration_of, tolerance_time};
 use super::metadata::AssetMetadata;
 use super::observing::{NotificationObservation, PropertyObservation};
+use super::player_errors::error_of;
 use super::show_system_layer;
 use super::tracks::MediaTracks;
 use crate::media::{Changes, lock};
-
-/// The timescale a time this host gives AVFoundation is in: nanoseconds.
-const NANOSECONDS: i32 = 1_000_000_000;
 
 /// AVFoundation's players.
 pub(crate) struct AvPlayers {
@@ -78,7 +75,7 @@ impl Players for AvPlayers {
 }
 
 /// `url` as AVFoundation takes it, or why it is none.
-fn url_of(url: &str) -> Result<Retained<NSURL>, String> {
+pub(super) fn url_of(url: &str) -> Result<Retained<NSURL>, String> {
     NSURL::URLWithString(&NSString::from_str(url)).ok_or_else(|| format!("`{url}` is not a URL"))
 }
 
@@ -598,79 +595,6 @@ impl SeekUnderWay {
     }
 }
 
-/// `error` as a player's failure: its kind, and AVFoundation's words for it.
-fn error_of(error: Option<&NSError>) -> PlayerError {
-    match error {
-        Some(error) => PlayerError {
-            kind: kind_of(error),
-            message: error.localizedDescription().to_string(),
-        },
-        None => PlayerError {
-            kind: PlayerErrorKind::Other,
-            message: "the system could not play the media".to_owned(),
-        },
-    }
-}
-
-/// The kind of `error`: by its own domain and code, or, where they say nothing more, by the error
-/// it wraps, as AVFoundation wraps a connection's error.
-fn kind_of(error: &NSError) -> PlayerErrorKind {
-    let domain = error.domain().to_string();
-    let kind = match domain.as_str() {
-        "NSURLErrorDomain" => Some(url_error_kind(error.code())),
-        "AVFoundationErrorDomain" => av_error_kind(AVError(error.code())),
-        _ => None,
-    };
-    kind.or_else(|| underlying_error(error).map(|cause| kind_of(&cause)))
-        .unwrap_or(PlayerErrorKind::Other)
-}
-
-/// The error `error` wraps.
-fn underlying_error(error: &NSError) -> Option<Retained<NSError>> {
-    // SAFETY: a constant Foundation exports for the life of the process.
-    let key = unsafe { NSUnderlyingErrorKey };
-    error
-        .userInfo()
-        .objectForKey(key)
-        .and_then(|cause| cause.downcast::<NSError>().ok())
-}
-
-/// The kind of a loading system's error: refused where the system does not let the player read
-/// a file or fetch a link insecurely (`NSURLErrorNoPermissionsToReadFile`,
-/// `NSURLErrorAppTransportSecurityRequiresSecureConnection`), reaching the media otherwise.
-fn url_error_kind(code: isize) -> PlayerErrorKind {
-    const NO_PERMISSIONS_TO_READ_FILE: isize = -1102;
-    const APP_TRANSPORT_SECURITY_REQUIRES_SECURE_CONNECTION: isize = -1022;
-    match code {
-        NO_PERMISSIONS_TO_READ_FILE | APP_TRANSPORT_SECURITY_REQUIRES_SECURE_CONNECTION => {
-            PlayerErrorKind::Refused
-        }
-        _ => PlayerErrorKind::Network,
-    }
-}
-
-/// The kind of an AVFoundation error, or `None` for one that says no more than that something
-/// failed.
-fn av_error_kind(error: AVError) -> Option<PlayerErrorKind> {
-    match error {
-        AVError::DecodeFailed | AVError::FailedToParse | AVError::UndecodableMediaData => {
-            Some(PlayerErrorKind::Decode)
-        }
-        AVError::FileFormatNotRecognized
-        | AVError::FileFailedToParse
-        | AVError::DecoderNotFound
-        | AVError::FormatUnsupported
-        | AVError::IncompatibleAsset => Some(PlayerErrorKind::Unsupported),
-        AVError::ContentIsProtected | AVError::ContentIsNotAuthorized => {
-            Some(PlayerErrorKind::Protected)
-        }
-        AVError::FailedToLoadMediaData | AVError::ServerIncorrectlyConfigured => {
-            Some(PlayerErrorKind::Network)
-        }
-        _ => None,
-    }
-}
-
 /// `ranges` as spans of the media, leaving out any whose start or length is not a time.
 fn ranges_of(ranges: &NSArray<NSValue>) -> Vec<TimeRange> {
     ranges
@@ -688,16 +612,6 @@ fn ranges_of(ranges: &NSArray<NSValue>) -> Vec<TimeRange> {
         .collect()
 }
 
-/// A seek's tolerance on one side as AVFoundation takes it: infinite where it is unbounded.
-fn tolerance_time(tolerance: Duration) -> CMTime {
-    if tolerance == Duration::MAX {
-        // SAFETY: a constant Core Media exports for the life of the process.
-        unsafe { kCMTimePositiveInfinity }
-    } else {
-        cm_time_of(tolerance)
-    }
-}
-
 /// Tells `changes` whenever a media selection group of `item` changes its selected option, and
 /// whenever its time jumps, as a seek landing or a loop makes it (`AVPlayerItemTimeJumped`).
 fn observe_selection_and_jumps(item: &AVPlayerItem, changes: Changes) -> NotificationObservation {
@@ -709,22 +623,6 @@ fn observe_selection_and_jumps(item: &AVPlayerItem, changes: Changes) -> Notific
         ]
     };
     NotificationObservation::new(item, &names, move |_notification| changes.notify())
-}
-
-/// `time` as a duration; `None` for an invalid or indefinite time, as a live stream's duration
-/// is.
-fn duration_of(time: CMTime) -> Option<Duration> {
-    let usable =
-        time.flags.contains(CMTimeFlags::Valid) && !time.flags.contains(CMTimeFlags::Indefinite);
-    if !usable || time.timescale <= 0 {
-        return None;
-    }
-    Duration::try_from_secs_f64(time.value as f64 / f64::from(time.timescale)).ok()
-}
-
-fn cm_time_of(position: Duration) -> CMTime {
-    // SAFETY: a plain value constructor.
-    unsafe { CMTime::with_seconds(position.as_secs_f64(), NANOSECONDS) }
 }
 
 /// A player of a source the system cannot play: failed from the start.
@@ -786,64 +684,6 @@ mod tests {
     use inset_embedder::PickedFile;
 
     use super::*;
-
-    #[test]
-    fn a_time_is_a_duration_only_while_it_is_valid_and_definite() {
-        let time = |value, flags| CMTime {
-            value,
-            timescale: 600,
-            flags,
-            epoch: 0,
-        };
-        assert_eq!(
-            duration_of(time(900, CMTimeFlags::Valid)),
-            Some(Duration::from_millis(1500))
-        );
-        assert_eq!(duration_of(time(900, CMTimeFlags::empty())), None);
-        assert_eq!(
-            duration_of(time(0, CMTimeFlags::Valid | CMTimeFlags::Indefinite)),
-            None
-        );
-    }
-
-    /// An error of `domain` and `code`, wrapping `cause`.
-    fn error(domain: &str, code: isize, cause: Option<&NSError>) -> Retained<NSError> {
-        let domain = NSString::from_str(domain);
-        let info = cause.map(|cause| {
-            // SAFETY: a constant Foundation exports for the life of the process.
-            let key = unsafe { NSUnderlyingErrorKey };
-            let cause: &objc2::runtime::AnyObject = cause.as_ref();
-            objc2_foundation::NSDictionary::from_slices(&[key], &[cause])
-        });
-        // SAFETY: a plain error, with plain values.
-        unsafe { NSError::errorWithDomain_code_userInfo(&domain, code, info.as_deref()) }
-    }
-
-    #[test]
-    fn a_failure_has_the_kind_of_its_error_or_of_the_error_it_wraps() {
-        let offline = error("NSURLErrorDomain", -1009, None);
-        assert_eq!(kind_of(&offline), PlayerErrorKind::Network);
-        let unreadable = error("NSURLErrorDomain", -1102, None);
-        assert_eq!(kind_of(&unreadable), PlayerErrorKind::Refused);
-        let unauthorized = error(
-            "AVFoundationErrorDomain",
-            AVError::ContentIsNotAuthorized.0,
-            None,
-        );
-        assert_eq!(kind_of(&unauthorized), PlayerErrorKind::Protected);
-        let wrapped = error(
-            "AVFoundationErrorDomain",
-            AVError::Unknown.0,
-            Some(&offline),
-        );
-        assert_eq!(
-            kind_of(&wrapped),
-            PlayerErrorKind::Network,
-            "the cause's kind"
-        );
-        let unexplained = error("NSOSStatusErrorDomain", -12848, None);
-        assert_eq!(kind_of(&unexplained), PlayerErrorKind::Other);
-    }
 
     #[test]
     fn a_link_and_a_picked_files_url_are_urls_avfoundation_takes() {

@@ -13,8 +13,8 @@ mod pasteboard;
 use std::rc::Rc;
 
 use inset_embedder::{
-    Cameras, CaptionSettings, Notifications, Players, TargetPlatform, VideoFrameReaders,
-    ViewPadding,
+    Cameras, CaptionSettings, MediaAssets, Notifications, Players, TargetPlatform,
+    VideoFrameReaders, ViewPadding,
 };
 use valo_codec::Decoder;
 use winit::window::Window;
@@ -86,6 +86,10 @@ impl TrackpadTouches for Ios {
 impl SystemMedia for Ios {
     fn players() -> Option<Rc<dyn Players>> {
         super::apple::media::players()
+    }
+
+    fn media_assets() -> Option<Rc<dyn MediaAssets>> {
+        super::apple::media::media_assets()
     }
 
     fn cameras() -> Option<Rc<dyn Cameras>> {

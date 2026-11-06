@@ -64,16 +64,16 @@ mod windows;
 
 use inset_embedder::{EmbedderClient, PlatformRef};
 
-/// The system's players, frame readers and compositor without the event loop, for a test that
-/// serves the main thread itself, as AVFoundation changes a player's state on the main queue. Not
-/// an API.
+/// The system's players, media assets, frame readers and compositor without the event loop, for a
+/// test that serves the main thread itself, as AVFoundation changes a player's state on the main
+/// queue. Not an API.
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub mod test_support {
     use std::rc::Rc;
     use std::sync::Arc;
 
-    use inset_embedder::{Compositor, Players, VideoFrameReaders};
+    use inset_embedder::{Compositor, MediaAssets, Players, VideoFrameReaders};
 
     use crate::os::System;
     use crate::os::capabilities::{NativeComposition, SystemMedia};
@@ -81,6 +81,11 @@ pub mod test_support {
     /// The system's players, as `Platform::players` answers them; on the main thread.
     pub fn players() -> Option<Rc<dyn Players>> {
         System::players()
+    }
+
+    /// The system's reading of media without playing it, as `Platform::media_assets` answers it.
+    pub fn media_assets() -> Option<Rc<dyn MediaAssets>> {
+        System::media_assets()
     }
 
     /// The system's frame readers, as `Platform::video_frame_readers` answers them.

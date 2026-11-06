@@ -1,6 +1,9 @@
 //! Players and cameras on macOS and iOS: AVFoundation, the system's own media stack. A player is
 //! an `AVPlayer` (`player`) with its media's tracks (`tracks`), tags (`metadata`) and subtitles as
-//! cues (`cues`, `cue_markup`); the cameras are a discovery session's devices, and a camera a
+//! cues (`cues`, `cue_markup`), failing with the kinds of AVFoundation's errors (`player_errors`)
+//! and timed in Core Media's times (`media_times`); media read without playing it is an
+//! `AVURLAsset` (`asset`), listing its tracks and tags as a player does, its pictures an image
+//! generator's, drawn into frames as a reader hands them out (`asset_frames`); the cameras are a discovery session's devices, and a camera a
 //! capture device (`camera`) with its formats (`camera_formats`), shared in one format by this
 //! process's sessions (`camera_sharing`), and a session an `AVCaptureSession` (`capture_session`)
 //! with its photo and movie outputs (`outputs`); a picture goes to a composition layer as a layer
@@ -19,6 +22,8 @@
 // AVFoundation's classes and their delegates need `unsafe`; this module writes it for them.
 #![allow(unsafe_code)]
 
+mod asset;
+mod asset_frames;
 mod camera;
 mod camera_formats;
 mod camera_sharing;
@@ -27,10 +32,12 @@ mod cue_markup;
 mod cues;
 mod frame_textures;
 mod frames;
+mod media_times;
 mod metadata;
 mod observing;
 mod outputs;
 mod player;
+mod player_errors;
 mod tracks;
 mod video_frame;
 
@@ -38,10 +45,11 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::process;
 use std::rc::Rc;
 
-use inset_embedder::{Cameras, Players, VideoFrameReaders};
+use inset_embedder::{Cameras, MediaAssets, Players, VideoFrameReaders};
 use objc2::MainThreadMarker;
 
 pub(super) use super::composition::{in_transaction, show_system_layer};
+use asset::AvMediaAssets;
 use camera::AvCameras;
 use frames::AvFrameReaders;
 use player::AvPlayers;
@@ -50,6 +58,11 @@ pub use video_frame::CoreVideoFrame;
 /// AVFoundation's players; `None` off the main thread, where none is controlled.
 pub(crate) fn players() -> Option<Rc<dyn Players>> {
     Some(Rc::new(AvPlayers::new(MainThreadMarker::new()?)))
+}
+
+/// AVFoundation's reading of media without playing it.
+pub(crate) fn media_assets() -> Option<Rc<dyn MediaAssets>> {
+    Some(Rc::new(AvMediaAssets))
 }
 
 /// AVFoundation's cameras.

@@ -2381,6 +2381,7 @@ name = "inset-test"
 version = "0.19.0"
 dependencies = [
  "inset-embedder",
+ "wgpu",
 ]
 
 [[package]]
@@ -3062,6 +3063,7 @@ dependencies = [
  "dispatch2",
  "objc2",
  "objc2-core-foundation",
+ "objc2-core-graphics",
  "objc2-core-media",
  "objc2-core-video",
  "objc2-foundation",
