@@ -62,9 +62,10 @@ impl MacOs {
     }
 
     /// Places `layer` in `parent`, a `CALayer` the app holds, such as the root of a `CAContext`
-    /// another process shows, above `parent`'s sublayers: where `placement` says, in pixels
-    /// `scale` of which make one of `parent`'s points, as a view's frame places a layer in its
-    /// window. Call it again when `parent`'s size or scale changes. The app holds `layer` from
+    /// another process shows, above `parent`'s sublayers, where `placement` says, as a view's
+    /// scene places a layer: its rectangle in the layer's own coordinates, logical pixels for a
+    /// layer that fills a view, under transforms that take them to pixels, `scale` of which make
+    /// one of `parent`'s points, as a scene's root scales by its device pixel ratio. Call it again when `parent`'s size or scale changes. The app holds `layer` from
     /// then on, so no view or other layer places it, until it goes. A layer no compositor of this
     /// host made, or one a view or another layer holds, shows nothing. Main thread.
     #[cfg(target_os = "macos")]

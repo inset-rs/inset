@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::sync::Weak;
 use std::time::Duration;
 
-use inset_embedder::{HostWindow, RawWindowHandle, Rect, ViewRef};
+use inset_embedder::{HostWindow, RawWindowHandle, Rect, Size, ViewRef, WindowSizeLimits};
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::{Window, WindowId};
@@ -160,8 +160,33 @@ impl HostWindow for WinitWindow {
             .send(AppRequest::Window(WindowRequest::Close(self.id)));
     }
 
+    /// Every window the app asks for is a desktop's, which its user resizes.
+    fn size_limits(&self) -> Option<&dyn WindowSizeLimits> {
+        Some(self)
+    }
+
     fn native_handle(&self) -> Option<RawWindowHandle> {
         let window = self.window.upgrade()?;
         window.window_handle().ok().map(|handle| handle.as_raw())
     }
+}
+
+/// winit's limits on the window's surface, which every desktop it serves keeps: AppKit's content
+/// minimum and maximum, Windows' tracking sizes, X11's size hints and Wayland's toplevel's.
+impl WindowSizeLimits for WinitWindow {
+    fn set_min_size(&self, size: Option<Size>) {
+        if let Some(window) = self.window.upgrade() {
+            window.set_min_surface_size(size.map(logical_size));
+        }
+    }
+
+    fn set_max_size(&self, size: Option<Size>) {
+        if let Some(window) = self.window.upgrade() {
+            window.set_max_surface_size(size.map(logical_size));
+        }
+    }
+}
+
+fn logical_size(size: Size) -> winit::dpi::Size {
+    LogicalSize::new(size.width(), size.height()).into()
 }

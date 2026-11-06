@@ -119,6 +119,19 @@ pub mod appkit {
         window_titled(title).is_some()
     }
 
+    /// The smallest content AppKit lets a window be resized to when it has no minimum.
+    pub const NO_MIN_SIZE: [f64; 2] = [0.0, 0.0];
+    /// The largest content AppKit lets a window be resized to when it has no maximum.
+    pub const NO_MAX_SIZE: [f64; 2] = [f32::MAX as f64, f32::MAX as f64];
+
+    /// The smallest and the largest content AppKit lets the user resize the window titled `title`
+    /// to, in points.
+    pub fn content_size_limits(title: &str) -> ([f64; 2], [f64; 2]) {
+        let window = window_titled(title).expect("the window");
+        let [min, max] = [window.contentMinSize(), window.contentMaxSize()];
+        ([min.width, min.height], [max.width, max.height])
+    }
+
     /// Whether a Metal layer with a device to draw with covers the content of the window titled
     /// `title`: the layer a view draws into, which wgpu gives its device as it makes the view's
     /// surface from it.

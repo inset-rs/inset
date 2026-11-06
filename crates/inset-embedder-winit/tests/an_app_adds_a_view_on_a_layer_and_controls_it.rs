@@ -42,10 +42,11 @@ mod client {
     use std::time::{Duration, Instant};
 
     use inset_embedder::{
-        Canvas, CompositionLayer, Contact, EmbedderClient, Frame, KeyData, Offset, Paint,
-        Placement, PlatformRef, PointerDeviceKind, PointerReport, Rect, ReportedChange, RequestId,
-        Scene, SceneBuilder, SystemMouseCursorKind, TextInputHost, ViewConstraints, ViewEmbedder,
-        ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewHost, ViewId, ViewMetrics,
+        Canvas, CompositionLayer, Contact, EmbedderClient, Frame, KeyData, Matrix4, Mutator,
+        Offset, Paint, Placement, PlatformRef, PointerDeviceKind, PointerReport, Rect,
+        ReportedChange, RequestId, Scene, SceneBuilder, SystemMouseCursorKind, TextInputHost,
+        ViewConstraints, ViewEmbedder, ViewFocusDirection, ViewFocusEvent, ViewFocusState,
+        ViewHost, ViewId, ViewMetrics,
     };
     use inset_embedder_winit::WinitPlatform;
     use objc2::rc::Retained;
@@ -298,15 +299,20 @@ mod client {
         layer
     }
 
-    /// A composition layer of the platform's, which sees through, placed in `parent` filling it.
+    /// A composition layer of the platform's, which sees through, placed in `parent` filling it:
+    /// at its logical size, under a transform by `SCALE` to its pixels, as a view's scene places a
+    /// layer.
     fn place_layer_in(platform: &PlatformRef, parent: &CALayer) -> Arc<dyn CompositionLayer> {
         let layer = platform
             .compositor()
             .expect("the macOS host has a compositor")
             .make_layer(false);
         let placement = Placement {
-            rect: Rect::from_ltwh(0.0, 0.0, SIZE[0], SIZE[1]),
-            mutators: Vec::new(),
+            rect: Rect::from_ltwh(0.0, 0.0, SIZE[0] / SCALE, SIZE[1] / SCALE),
+            mutators: vec![Mutator::Transform(Matrix4::scale(
+                SCALE as f32,
+                SCALE as f32,
+            ))],
         };
         platform
             .downcast_ref::<WinitPlatform>()

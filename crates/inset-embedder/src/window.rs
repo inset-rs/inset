@@ -8,7 +8,8 @@
 //! the app may manage, one it asked for or one the platform gave, has a [`HostWindow`]
 //! (`View::window`): the configuration every window wants up front, whether the window is
 //! minimized or occluded, which the host reports with the window's moves
-//! (`EmbedderClient::window_changed`), the native handle for anything beyond it, and the window's
+//! (`EmbedderClient::window_changed`), the limits the user resizes it within where users resize
+//! windows ([`WindowSizeLimits`]), the native handle for anything beyond it, and the window's
 //! closing, which is how a view closes.
 //!
 //! Flutter's windowing API (`widgets/_window.dart`, experimental) builds window archetypes
@@ -20,7 +21,7 @@ use std::time::Duration;
 
 pub use raw_window_handle::RawWindowHandle;
 
-use crate::{Rect, ViewRef};
+use crate::{Rect, Size, ViewRef};
 
 /// How a window is made. Sizes and positions are logical, in the host's screen space with
 /// the origin at the top left of the primary screen.
@@ -157,8 +158,22 @@ pub trait HostWindow: 'static {
     /// this closes it.
     fn close(&self);
 
+    /// The smallest and largest size the user may resize this window to; none where users don't
+    /// resize windows (phones). Flutter `WindowController.setConstraints`.
+    fn size_limits(&self) -> Option<&dyn WindowSizeLimits>;
+
     /// The native window, for configuration this interface does not carry.
     fn native_handle(&self) -> Option<RawWindowHandle>;
+}
+
+/// The limits a window the user resizes keeps its view within, its content without the system's
+/// title bar and border, in logical points: Flutter's `BoxConstraints` on a window, its minimum
+/// and maximum apart. A limit holds from when it is set until it is set again, and `None` removes
+/// it.
+pub trait WindowSizeLimits {
+    fn set_min_size(&self, size: Option<Size>);
+
+    fn set_max_size(&self, size: Option<Size>);
 }
 
 #[cfg(test)]

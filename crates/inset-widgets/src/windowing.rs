@@ -425,7 +425,7 @@ mod tests {
     use std::rc::Rc;
     use std::time::Duration;
 
-    use inset_embedder::{Compositor, View as _, ViewError, WindowConfig};
+    use inset_embedder::{Compositor, Size, View as _, ViewError, WindowConfig};
     use inset_foundation::{AppCell, Listenable, Listener};
     use inset_test::{MockCompositor, TestPlatform, TestView, TestViewHost, TestWindows};
 
@@ -588,6 +588,27 @@ mod tests {
 
         report_window_changed(&desktop.cell, view);
         assert_eq!(heard.get(), 3, "a move is heard as a change too");
+    }
+
+    #[test]
+    fn a_controllers_window_keeps_the_size_limits_the_app_sets_until_it_clears_them() {
+        let desktop = desktop();
+        let controller = new_controller(&desktop.cell, "Inspector");
+        report_windows_made(&desktop.cell, &desktop.windows, Duration::ZERO);
+        let window = controller
+            .window(&desktop.cell.borrow())
+            .expect("its view arrived");
+        let limits = window.size_limits().expect("a desktop's window has limits");
+
+        limits.set_min_size(Some(Size::new(320.0, 240.0)));
+        limits.set_max_size(Some(Size::new(1280.0, 960.0)));
+        let made = &desktop.windows.made()[0];
+        assert_eq!(made.min_size(), Some(Size::new(320.0, 240.0)));
+        assert_eq!(made.max_size(), Some(Size::new(1280.0, 960.0)));
+
+        limits.set_max_size(None);
+        assert_eq!(made.min_size(), Some(Size::new(320.0, 240.0)));
+        assert_eq!(made.max_size(), None, "cleared on its own");
     }
 
     #[test]

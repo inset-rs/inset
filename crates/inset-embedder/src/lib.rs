@@ -129,5 +129,5 @@ pub use vsync::{VsyncObserver, VsyncWaiter};
 pub use web_time::Instant;
 pub use window::{
     HostWindow, RawWindowHandle, RequestId, ViewError, WindowBackground, WindowConfig, WindowLevel,
-    WindowRef,
+    WindowRef, WindowSizeLimits,
 };

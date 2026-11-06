@@ -21,7 +21,7 @@
 pub use inset_embedder as ui;
 pub use inset_embedder::{
     BlurStyle, HostWindow, MenuEntry, MenuItem, Platform, RequestId, ViewError, WindowBackground,
-    WindowConfig, WindowLevel, WindowRef,
+    WindowConfig, WindowLevel, WindowRef, WindowSizeLimits,
 };
 pub use inset_embedder::{
     Brightness, Color, DragChange, DragReport, FontFeature, FontWeight, Offset, Radius, Rect, Size,

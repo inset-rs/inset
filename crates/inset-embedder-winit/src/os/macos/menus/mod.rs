@@ -35,7 +35,7 @@ use objc2_app_kit::{
     NSControlStateValueMixed, NSControlStateValueOff, NSControlStateValueOn, NSEventModifierFlags,
     NSMenu, NSMenuItem,
 };
-use objc2_foundation::{NSObject, NSProcessInfo, NSString};
+use objc2_foundation::{NSBundle, NSObject, NSProcessInfo, NSString};
 use winit::window::Window;
 
 use super::{AppKit, abort_on_panic};
@@ -380,8 +380,19 @@ fn titled_item(
     }
 }
 
-/// The application's name, which the app's provided items carry: the process's, as AppKit titles
-/// the application menu with it.
+/// The application's name, which the app's provided items carry: its bundle's display name, else
+/// its bundle's name, as macOS shows a bundled app's name, and the process's for an executable run
+/// outside a bundle, whose loader may be named otherwise than the app it loads.
 fn application_name() -> String {
-    NSProcessInfo::processInfo().processName().to_string()
+    let bundle = NSBundle::mainBundle();
+    ["CFBundleDisplayName", "CFBundleName"]
+        .into_iter()
+        .find_map(|key| {
+            bundle
+                .objectForInfoDictionaryKey(&NSString::from_str(key))
+                .and_then(|name| name.downcast::<NSString>().ok())
+                .map(|name| name.to_string())
+                .filter(|name| !name.is_empty())
+        })
+        .unwrap_or_else(|| NSProcessInfo::processInfo().processName().to_string())
 }

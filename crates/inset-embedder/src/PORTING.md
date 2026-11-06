@@ -70,6 +70,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — the host is what hears a window minimized, covered or moved, and an app that stops drawing what nobody sees must know it of each window rather than of the whole application.
   Affect: an app tells a minimized or covered window from a shown one while its other windows show, and where the system does not say, as Windows does not say a window is covered and Wayland says neither, the window answers no.
 
+- Change: a window has limits on its content's smallest and largest size only where its users resize windows, each set or cleared after the window opens, where Flutter's `WindowController` takes `BoxConstraints` as it is made and in `setConstraints`, which a platform may ignore.
+  Reason: platform — only a system whose users resize windows holds them to limits, and on a phone, whose system sizes every window itself, a limit would be a request it drops.
+  Affect: an app sees whether a window takes limits before it sets any, and a window opens with none until the app sets them.
+
 - Change: the framework asks the host for a frame of one view, and the host gives one refresh of a screen at a time with the views on it that asked, where Flutter asks for and gets one frame of every view.
   Reason: platform — each window is on a screen with its own refresh rate and can be minimized or occluded, and a host that paces every view by one screen stops them all while that one is out of sight.
   Affect: each window draws at its own screen's refresh rate, and a minimized or occluded window draws nothing until it shows while the others keep drawing.

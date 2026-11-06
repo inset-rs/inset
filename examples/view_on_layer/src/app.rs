@@ -7,9 +7,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use inset_embedder::{
-    Color, CompositionLayer, Contact, Placement, PointerReport, Rect, ReportedChange,
-    SystemMouseCursorKind, TextDirection, TextInputHost, ViewConstraints, ViewFocusDirection,
-    ViewFocusState, ViewHost, ViewId, ViewMetrics, ViewRef, WindowConfig,
+    Color, CompositionLayer, Contact, Matrix4, Mutator, Placement, PointerReport, Rect,
+    ReportedChange, SystemMouseCursorKind, TextDirection, TextInputHost, ViewConstraints,
+    ViewFocusDirection, ViewFocusState, ViewHost, ViewId, ViewMetrics, ViewRef, WindowConfig,
 };
 use inset_embedder_winit::{WinitEmbedder, WinitPlatform};
 use inset_foundation::{App, Handle, Listenable, Listener, ValueListenable, ValueNotifier};
@@ -114,7 +114,8 @@ fn added_metrics(window: &ViewMetrics) -> ViewMetrics {
 }
 
 /// Places `layer` in the window of `window_view`, above the window's own drawing, `MARGIN` from
-/// its top-left corner, at the size of the added view's `metrics`.
+/// its top-left corner, at the size of the added view's `metrics`: in its logical pixels, under a
+/// transform by its scale, as a view's scene places a layer.
 fn place_in_window(
     app: &App,
     window_view: &ViewRef,
@@ -125,10 +126,13 @@ fn place_in_window(
         return;
     };
     let scale = metrics.device_pixel_ratio;
-    let [width, height] = metrics.physical_size;
+    let [width, height] = metrics.physical_size.map(|side| side / scale);
     let placement = Placement {
-        rect: Rect::from_ltwh(MARGIN * scale, MARGIN * scale, width, height),
-        mutators: Vec::new(),
+        rect: Rect::from_ltwh(MARGIN, MARGIN, width, height),
+        mutators: vec![Mutator::Transform(Matrix4::scale(
+            scale as f32,
+            scale as f32,
+        ))],
     };
     app.platform()
         .downcast_ref::<WinitPlatform>()

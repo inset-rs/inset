@@ -352,9 +352,9 @@ pub(crate) fn show_system_layer(layer: &Arc<dyn CompositionLayer>, system_layer:
     }
 }
 
-/// Places `layer` in `parent`, a `CALayer` the app holds, above its sublayers, as a view's frame
-/// places one in its view's layer: where `placement` says, in pixels `scale` of which make one of
-/// `parent`'s points. The app holds the layer from then on, until the layer goes. A layer no
+/// Places `layer` in `parent`, a `CALayer` the app holds, above its sublayers, where `placement`
+/// says, as a view's scene places a layer: its rectangle in the layer's own coordinates under
+/// transforms that take them to pixels, `scale` of which make one of `parent`'s points. The app holds the layer from then on, until the layer goes. A layer no
 /// compositor of this host made, or one another placer holds, shows nothing. Main thread.
 #[cfg(target_os = "macos")]
 pub(crate) fn place_layer_in(
@@ -796,9 +796,11 @@ mod tests {
         root.addSublayer(&CALayer::new());
         let picture = made_layer();
         let picture_layers = CoreAnimationLayer::downcast_from(&picture).unwrap();
+        // A view 800 by 600 points at 2 pixels to the point, placed as its scene places a layer:
+        // at its logical size, under a transform by its scale.
         let filling = Placement {
-            rect: Rect::from_ltwh(0.0, 0.0, 1600.0, 1200.0),
-            mutators: Vec::new(),
+            rect: Rect::from_ltwh(0.0, 0.0, 800.0, 600.0),
+            mutators: vec![Mutator::Transform(Matrix4::scale(2.0, 2.0))],
         };
         place_layer_in(&root, &picture, &filling, 2.0);
         let sublayers = unsafe { root.sublayers() }.unwrap();
@@ -810,6 +812,11 @@ mod tests {
         assert_eq!(
             frame_in(&picture_layers.buffer_layer.0, &root),
             NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(800.0, 600.0))
+        );
+        assert_eq!(
+            picture_layers.content_layer.0.bounds().size,
+            NSSize::new(800.0, 600.0),
+            "a buffer drawn at the view's 1600 by 1200 pixels fills it, at the window's scale"
         );
 
         place_layer_in(&root, &picture, &filling, 2.0);

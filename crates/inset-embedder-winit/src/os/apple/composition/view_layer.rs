@@ -10,9 +10,10 @@
 //! say of its drawing: the `CAMetalLayer`'s scale here, and its drawable's size through its
 //! surface, which wgpu configures. A window's code places it in the layer of winit's view, filling
 //! it, and keeps it filling that layer as its bounds and scale change (`os/macos/composition.rs`).
-//! The `CAMetalLayer` fills the composition layer, with Core Animation's default gravity: a
-//! drawable of another size shows stretched over it until the frame a resize draws reaches the
-//! screen with the resize (`frame_presentation.rs`).
+//! The `CAMetalLayer` fills the composition layer, its drawable anchored at the visual top-left as
+//! the composition layer's own buffers are (`mod.rs`): a drawable of another size, one a resize's
+//! frame did not replace in time, as during a window's zoom, shows at its own size rather than
+//! stretched, as Chromium shows its frames (`display_ca_layer_tree.mm`, `kCAGravityTopLeft`).
 //!
 //! The invariant: the `CAMetalLayer` is the topmost sublayer of the composition layer's content,
 //! above every composition layer the view's scenes place there, as `inset-embedder`'s README asks
@@ -54,6 +55,9 @@ impl CoreAnimationViewLayer {
     pub(crate) fn on(layer: &Arc<dyn CompositionLayer>) -> Option<CoreAnimationViewLayer> {
         let layer = CoreAnimationLayer::downcast_from(layer)?;
         let drawing = CAMetalLayer::new();
+        // Bottom-left is the visual top-left in a flipped view's layer, as for the buffer layer.
+        // SAFETY: a constant Core Animation exports for the life of the process.
+        drawing.setContentsGravity(unsafe { objc2_quartz_core::kCAGravityBottomLeft });
         layer.show_system_layer(&drawing);
         Some(CoreAnimationViewLayer {
             layer,
@@ -194,6 +198,16 @@ mod tests {
             layer.drawing.contentsAreFlipped(),
             directly_in_view.contentsAreFlipped()
         );
+    }
+
+    /// A drawable of another size than the layer, as during a window's zoom, shows at its own size
+    /// from the visual top-left, as the composition layer's buffers do, not stretched over it.
+    #[test]
+    fn a_drawable_of_another_size_shows_at_its_own_size() {
+        let (_made, layer) = made_view_layer();
+        // SAFETY: a constant Core Animation exports for the life of the process.
+        let anchored = unsafe { objc2_quartz_core::kCAGravityBottomLeft };
+        assert_eq!(&*layer.drawing.contentsGravity(), anchored);
     }
 
     /// A video a scene places lies where it lay in the layer of the window's view, beneath the

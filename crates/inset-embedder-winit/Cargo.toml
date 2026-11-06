@@ -148,6 +148,10 @@ name = "a_window_tells_the_app_it_was_minimized_occluded_or_moved"
 harness = false
 
 [[test]]
+name = "a_window_keeps_its_view_within_its_size_limits"
+harness = false
+
+[[test]]
 name = "the_menus_report_what_is_chosen"
 harness = false
 

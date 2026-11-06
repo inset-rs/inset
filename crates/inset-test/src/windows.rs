@@ -5,7 +5,8 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use inset_embedder::{
-    HostWindow, RawWindowHandle, Rect, RequestId, ScreenId, ViewId, ViewRef, WindowConfig,
+    HostWindow, RawWindowHandle, Rect, RequestId, ScreenId, Size, ViewId, ViewRef, WindowConfig,
+    WindowSizeLimits,
 };
 
 use crate::TestView;
@@ -85,9 +86,9 @@ impl Default for TestWindows {
     }
 }
 
-/// A window that shows nothing, keeps the frame it was last given and whether it was last shown
-/// or hidden, and counts how often it was closed: one of [`TestWindows`], or one a test gives the
-/// app a view in. A closed window's view is in no window any more, and is no longer among the
+/// A window that shows nothing, keeps the frame it was last given, whether it was last shown or
+/// hidden and the size limits it was last given, and counts how often it was closed: one of
+/// [`TestWindows`], or one a test gives the app a view in. A closed window's view is in no window any more, and is no longer among the
 /// views of [`TestWindows`]. It is neither minimized nor occluded until a test says so, and the
 /// test then reports the change itself, as a host would through `EmbedderClient::window_changed`.
 pub struct TestWindow {
@@ -98,6 +99,8 @@ pub struct TestWindow {
     closes: Cell<u32>,
     minimized: Cell<bool>,
     occluded: Cell<bool>,
+    min_size: Cell<Option<Size>>,
+    max_size: Cell<Option<Size>>,
 }
 
 impl TestWindow {
@@ -118,6 +121,8 @@ impl TestWindow {
                 closes: Cell::new(0),
                 minimized: Cell::new(false),
                 occluded: Cell::new(false),
+                min_size: Cell::new(None),
+                max_size: Cell::new(None),
             }
         })
     }
@@ -150,6 +155,16 @@ impl TestWindow {
     /// The window is occluded, or shown, from now on.
     pub fn set_occluded(&self, occluded: bool) {
         self.occluded.set(occluded);
+    }
+
+    /// The smallest size the window was last given for its view; none until one is set.
+    pub fn min_size(&self) -> Option<Size> {
+        self.min_size.get()
+    }
+
+    /// The largest size the window was last given for its view; none until one is set.
+    pub fn max_size(&self) -> Option<Size> {
+        self.max_size.get()
     }
 }
 
@@ -189,7 +204,21 @@ impl HostWindow for TestWindow {
         self.view.set_window(None);
     }
 
+    fn size_limits(&self) -> Option<&dyn WindowSizeLimits> {
+        Some(self)
+    }
+
     fn native_handle(&self) -> Option<RawWindowHandle> {
         None
+    }
+}
+
+impl WindowSizeLimits for TestWindow {
+    fn set_min_size(&self, size: Option<Size>) {
+        self.min_size.set(size);
+    }
+
+    fn set_max_size(&self, size: Option<Size>) {
+        self.max_size.set(size);
     }
 }
