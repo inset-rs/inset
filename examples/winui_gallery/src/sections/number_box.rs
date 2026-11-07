@@ -2,9 +2,9 @@
 //! validation, a formatter of its own and a disabled box, with the values they keep.
 
 use crate::{column, example, example_row, label, section};
-use inset_foundation::{App, Handle, Listener};
-use inset_widgets::*;
-use inset_winui::*;
+use waft_foundation::{App, Handle, Listener};
+use waft_widgets::*;
+use waft_winui::*;
 
 /// Builds the NumberBox feature page.
 pub fn build(resources: &ThemeResources) -> Vec<WidgetRef> {
@@ -108,7 +108,7 @@ impl NumberBoxDemoState {
 
 impl State for NumberBoxDemoState {
     type Widget = NumberBoxDemo;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let r = ThemeResources::of(app, context);

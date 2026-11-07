@@ -6,15 +6,15 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use inset_embedder::{
+use waft_embedder::{
     Color, CompositionLayer, PlatformRef, TextDirection, ViewId, ViewRef, WindowConfig,
 };
-use inset_embedder_winit::WinitEmbedder;
-use inset_foundation::{App, Handle, Listenable, Listener};
-use inset_painting::{BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry, TextStyle};
-use inset_scheduler::{PersistentFrameCallback, SchedulerBinding};
-use inset_shell::Shell;
-use inset_widgets::{
+use waft_embedder_winit::WinitEmbedder;
+use waft_foundation::{App, Handle, Listenable, Listener};
+use waft_painting::{BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry, TextStyle};
+use waft_scheduler::{PersistentFrameCallback, SchedulerBinding};
+use waft_shell::Shell;
+use waft_widgets::{
     Center, ClipRRect, CompositionLayerView, DecoratedBox, Directionality, IntoWidget, Opacity,
     Padding, Positioned, SizedBox, Stack, StackFit, Text, Transform, ViewRequestState, WidgetRef,
     Window, WindowController, run_widget,
@@ -53,7 +53,7 @@ pub(crate) fn run(exit_after: Option<Duration>, presentation: Presentation) {
 /// closing the window quits.
 fn open_window(app: &mut App, exit_after: Option<Duration>, presentation: Presentation) {
     let config = WindowConfig {
-        title: "Inset — a composition layer".to_owned(),
+        title: "Waft — a composition layer".to_owned(),
         size: [640.0, 480.0],
         ..WindowConfig::default()
     };
@@ -179,7 +179,7 @@ fn label() -> WidgetRef {
     DecoratedBox::new(BoxDecoration::new().color(LABEL_BACKGROUND))
         .child(
             Padding::new(EdgeInsetsGeometry::all(8.0)).child(
-                Text::new("Inset paints this label above the layer")
+                Text::new("Waft paints this label above the layer")
                     .style(TextStyle::new().font_size(15.0).color(LABEL)),
             ),
         )

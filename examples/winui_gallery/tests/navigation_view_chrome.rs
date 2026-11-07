@@ -1,13 +1,13 @@
 //! NavigationView's back, toggle, title and header chrome through GPU layout and input.
 #![feature(arbitrary_self_types)]
 
-use inset_embedder::{Offset, Rect};
-use inset_foundation::{App, Handle, Listener, ValueKey};
-use inset_rendering::{RenderBox, RenderParagraph};
-use inset_widgets::*;
-use inset_winui::*;
-use inset_winui_test_support::Fixture;
 use std::{cell::Cell, rc::Rc};
+use waft_embedder::{Offset, Rect};
+use waft_foundation::{App, Handle, Listener, ValueKey};
+use waft_rendering::{RenderBox, RenderParagraph};
+use waft_widgets::*;
+use waft_winui::*;
+use waft_winui_test_support::Fixture;
 
 #[derive(Clone, Debug, Default)]
 struct Probe(Rc<Cell<Option<Handle<PageState>>>>);
@@ -41,7 +41,7 @@ impl StatefulWidget for Page {
 
 impl State for PageState {
     type Widget = Page;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         self.widget(app).0.0.set(Some(self));
@@ -159,8 +159,8 @@ fn tap_key(f: &mut Fixture, key: &'static str) {
     let point = key_bounds(f, key)
         .unwrap_or_else(|| panic!("missing onstage keyed control {key}"))
         .center();
-    f.send(inset_embedder::PointerChange::Down, point);
-    f.send(inset_embedder::PointerChange::Up, point);
+    f.send(waft_embedder::PointerChange::Down, point);
+    f.send(waft_embedder::PointerChange::Up, point);
     f.pump();
 }
 

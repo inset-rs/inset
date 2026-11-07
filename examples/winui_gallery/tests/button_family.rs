@@ -3,8 +3,8 @@
 mod common;
 use common::Fixture;
 use common::GalleryFixtureExt;
-use inset_embedder::{Offset, PointerChange};
 use std::time::Duration;
+use waft_embedder::{Offset, PointerChange};
 
 /// Lets `duration` pass on the App clock in 20 ms steps (the timers fire from `AppCell::elapse`, not from frames), pumping frames between steps so what the timers changed is built and painted.
 fn hold(fixture: &mut Fixture, duration: Duration) {
@@ -103,10 +103,10 @@ fn repeat_button_repeats_under_a_mouse() {
 /// The width of a button showing a 16 px square with `padding`, or the style's own.
 fn button_width(padding: Option<[f64; 4]>) -> f64 {
     use common::mount;
-    use inset_foundation::{App, Listener};
-    use inset_widgets::*;
-    use inset_winui::*;
     use std::rc::Rc;
+    use waft_foundation::{App, Listener};
+    use waft_widgets::*;
+    use waft_winui::*;
 
     let key = Rc::new(GlobalKey::new());
     let button_key = key.clone();

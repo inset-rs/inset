@@ -7,17 +7,17 @@
 mod common;
 
 use common::{Fixture, GalleryFixtureExt};
-use inset_embedder::{Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
-use inset_foundation::{App, Handle};
-use inset_gestures::GestureBinding;
-use inset_rendering::RenderParagraph;
-use inset_services::{
+use std::{cell::Cell, rc::Rc, time::Duration};
+use waft_embedder::{Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
+use waft_foundation::{App, Handle};
+use waft_gestures::GestureBinding;
+use waft_rendering::RenderParagraph;
+use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey as Key,
     PhysicalKeyboardKey as Physical,
 };
-use inset_widgets::*;
-use inset_winui::*;
-use std::{cell::Cell, rc::Rc, time::Duration};
+use waft_widgets::*;
+use waft_winui::*;
 use winui_gallery::Feature;
 
 /// A node of the page's tree.
@@ -169,7 +169,7 @@ impl PageState {
 
 impl State for PageState {
     type Widget = Page;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         self.widget(app).0.0.set(Some(self));
@@ -238,7 +238,7 @@ impl State for PageState {
             state.theme,
             ColoredBox::new(background).child(
                 Align::new()
-                    .alignment(inset_painting::Alignment::TOP_LEFT.into())
+                    .alignment(waft_painting::Alignment::TOP_LEFT.into())
                     .child(SizedBox::new().width(320.0).height(400.0).child(tree)),
             ),
         )

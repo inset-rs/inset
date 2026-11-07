@@ -3,9 +3,9 @@
 mod common;
 use common::Fixture;
 use common::GalleryFixtureExt;
-use inset_embedder::Size;
-use inset_widgets::*;
-use inset_winui::*;
+use waft_embedder::Size;
+use waft_widgets::*;
+use waft_winui::*;
 
 #[test]
 fn radio_button_checks_once_per_group_and_switches_theme() {

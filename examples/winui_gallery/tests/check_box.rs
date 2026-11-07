@@ -3,12 +3,12 @@
 mod common;
 use common::Fixture;
 use common::GalleryFixtureExt;
-use inset_embedder::{Color, PointerChange, Size};
-use inset_foundation::{App, Handle};
-use inset_painting::EdgeInsetsGeometry;
-use inset_widgets::*;
-use inset_winui::*;
 use std::time::Duration;
+use waft_embedder::{Color, PointerChange, Size};
+use waft_foundation::{App, Handle};
+use waft_painting::EdgeInsetsGeometry;
+use waft_widgets::*;
+use waft_winui::*;
 
 /// Taps `text` and then runs only `frames` 20 ms frames, to catch an animation in flight.
 fn tap_and_pump(fixture: &mut Fixture, text: &str, frames: u32) {
@@ -74,7 +74,7 @@ impl StatefulWidget for Lone {
 }
 impl State for LoneState {
     type Widget = Lone;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         let is_checked = app.get(self).is_checked;
         let page = ColoredBox::new(Color::from_argb(255, 255, 255, 255)).child(

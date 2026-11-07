@@ -5,16 +5,16 @@ mod common;
 use common::GalleryFixtureExt;
 
 use common::Fixture;
-use inset_foundation::{App, CompleterFuture, Handle};
-use inset_services::{
-    HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
-};
-use inset_widgets::*;
-use inset_winui::*;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
+use waft_foundation::{App, CompleterFuture, Handle};
+use waft_services::{
+    HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
+};
+use waft_widgets::*;
+use waft_winui::*;
 use winui_gallery::Feature;
 
 /// A window with one page whose context shows the dialogs, and what they reported.
@@ -139,7 +139,7 @@ fn shows(f: &Fixture, text: &str) -> bool {
     elements.into_iter().any(|element| {
         element
             .render_object(&app)
-            .and_then(|object| object.downcast::<inset_rendering::RenderParagraph>(&app))
+            .and_then(|object| object.downcast::<waft_rendering::RenderParagraph>(&app))
             .is_some_and(|paragraph| paragraph.text(&app).to_plain_text(true, true) == text)
     })
 }
@@ -180,13 +180,13 @@ fn the_content_takes_the_initial_focus_and_closing_can_keep_the_dialog_open() {
     tap(&mut f, "Create a collection");
     {
         let mut app = f.cell.borrow_mut();
-        let focused = inset_widgets::primary_focus(&mut app).expect("a focused element");
+        let focused = waft_widgets::primary_focus(&mut app).expect("a focused element");
         let context = focused.context(&app).expect("a mounted focus node");
         assert!(
             context
                 .find_ancestor_widget_of_exact_type::<EditableText>(&app)
                 .is_some()
-                || inset_widgets::downcast_widget::<EditableText>(context.widget(&app).as_ref())
+                || waft_widgets::downcast_widget::<EditableText>(context.widget(&app).as_ref())
                     .is_some(),
             "the name field takes the initial focus"
         );

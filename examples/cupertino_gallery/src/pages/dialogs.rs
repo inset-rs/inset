@@ -6,16 +6,16 @@
 use std::any::Any;
 use std::rc::Rc;
 
-use inset_cupertino::{
+use waft_cupertino::{
     CupertinoActionSheet, CupertinoActionSheetAction, CupertinoAlertDialog, CupertinoButton,
     CupertinoDialogAction, CupertinoNavigationBar, CupertinoPopupSurface,
     K_CUPERTINO_MODAL_BARRIER_COLOR, show_cupertino_dialog, show_cupertino_modal_popup,
     show_cupertino_sheet,
 };
-use inset_foundation::{App, Handle, Listener};
-use inset_painting::EdgeInsetsGeometry;
-use inset_rendering::{CrossAxisAlignment, MainAxisAlignment, MainAxisSize};
-use inset_widgets::{
+use waft_foundation::{App, Handle, Listener};
+use waft_painting::EdgeInsetsGeometry;
+use waft_rendering::{CrossAxisAlignment, MainAxisAlignment, MainAxisSize};
+use waft_widgets::{
     BuildContext, Column, IntoWidget, Navigator, Padding, Row, State, StateData, StatefulWidget,
     Text, WidgetBuilder, WidgetRef,
 };
@@ -51,7 +51,7 @@ impl StatefulWidget for DialogsDemo {
 
 impl State for LastAnswer {
     type Widget = DialogsDemo;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let answer = app.get(self).text.clone();

@@ -3,11 +3,11 @@
 //! The sample files are embedded in the binary so the gallery runs without external assets.
 //! Static pictures and animation use the same image-provider, codec and cache path.
 
-use inset_cupertino::CupertinoColors;
-use inset_foundation::App;
-use inset_painting::{Alignment, BoxFit, ImageRepeat};
-use inset_rendering::MainAxisAlignment;
-use inset_widgets::{BuildContext, ColoredBox, Image, IntoWidget, Row, SizedBox, WidgetRef};
+use waft_cupertino::CupertinoColors;
+use waft_foundation::App;
+use waft_painting::{Alignment, BoxFit, ImageRepeat};
+use waft_rendering::MainAxisAlignment;
+use waft_widgets::{BuildContext, ColoredBox, Image, IntoWidget, Row, SizedBox, WidgetRef};
 
 use crate::support::{screen, scrolling_body, section_with_footer, showcase};
 

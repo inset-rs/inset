@@ -10,14 +10,14 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use inset_cupertino::{CupertinoButton, CupertinoTheme, CupertinoThemeData};
-use inset_embedder::{Brightness, Color, TextDirection, WindowConfig};
-use inset_embedder_winit::WinitEmbedder;
-use inset_foundation::Listener;
-use inset_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
-use inset_services::SystemMouseCursors;
-use inset_shell::Shell;
-use inset_widgets::{
+use waft_cupertino::{CupertinoButton, CupertinoTheme, CupertinoThemeData};
+use waft_embedder::{Brightness, Color, TextDirection, WindowConfig};
+use waft_embedder_winit::WinitEmbedder;
+use waft_foundation::Listener;
+use waft_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
+use waft_services::SystemMouseCursors;
+use waft_shell::Shell;
+use waft_widgets::{
     Center, DecoratedBox, Directionality, IntoWidget, MouseRegion, Padding, SizedBox, Text,
     WidgetRef, run_app_with,
 };
@@ -30,7 +30,7 @@ fn main() {
     WinitEmbedder.run(|platform| {
         Shell::new(platform, |app| {
             let window = WindowConfig {
-                title: "Inset — widgets".to_owned(),
+                title: "Waft — widgets".to_owned(),
                 size: [600.0, 400.0],
                 ..WindowConfig::default()
             };

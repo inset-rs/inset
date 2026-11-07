@@ -1,8 +1,8 @@
 //! `RadioButton`: a group of three with one checked, and a disabled checked one.
 use crate::{column, example, example_row, label, section};
-use inset_foundation::{App, Handle};
-use inset_widgets::*;
-use inset_winui::*;
+use waft_foundation::{App, Handle};
+use waft_widgets::*;
+use waft_winui::*;
 
 /// Builds the examples for this feature destination.
 pub fn build(resources: &ThemeResources) -> Vec<WidgetRef> {
@@ -51,7 +51,7 @@ const OPTIONS: [&str; 3] = ["Option 1", "Option 2", "Option 3"];
 
 impl State for RadioButtonSectionState {
     type Widget = RadioButtonSection;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     /// Builds the examples from their current property choices.
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {

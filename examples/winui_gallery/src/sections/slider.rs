@@ -1,10 +1,10 @@
 //! `Slider`: horizontal with a header and a value label, stepped with tick marks, disabled, and vertical.
 use crate::{column, example, example_row, label, row, section};
-use inset_foundation::{App, Handle, Listener};
-use inset_widgets::*;
-// `Orientation` is also a `inset_widgets` name (the media query's); the slider's is XAML's.
-use inset_winui::Orientation;
-use inset_winui::*;
+use waft_foundation::{App, Handle, Listener};
+use waft_widgets::*;
+// `Orientation` is also a `waft_widgets` name (the media query's); the slider's is XAML's.
+use waft_winui::Orientation;
+use waft_winui::*;
 
 /// The track height for the vertical orientation example.
 const VERTICAL_DEMO_HEIGHT: f64 = 184.0;
@@ -73,7 +73,7 @@ impl StatefulWidget for SliderDemo {
 
 impl State for SliderDemoState {
     type Widget = SliderDemo;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     /// Builds the examples from their current property choices.
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {

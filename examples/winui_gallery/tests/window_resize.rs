@@ -1,25 +1,25 @@
 //! Actual platform metrics changes exercise OverlayPortal layout during adaptive resizing.
 #![feature(arbitrary_self_types)]
-use inset_winui_test_support::gpu;
+use waft_winui_test_support::gpu;
 
-use inset_embedder::valo::{Color, Context};
-use inset_embedder::{PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
-use inset_embedder::{
-    Scene, SystemFontSource, TargetPlatform, View, ViewConstraints, ViewId, ViewMetrics,
-};
-use inset_foundation::{AppCell, Listener};
-use inset_gestures::GestureBinding;
-use inset_rendering::RendererBinding;
-use inset_scheduler::SchedulerBinding;
-use inset_test::{TestPlatform, TestViewHost};
-use inset_widgets::*;
-use inset_winui::*;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
     sync::Arc,
     time::Duration,
 };
+use waft_embedder::valo::{Color, Context};
+use waft_embedder::{PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
+use waft_embedder::{
+    Scene, SystemFontSource, TargetPlatform, View, ViewConstraints, ViewId, ViewMetrics,
+};
+use waft_foundation::{AppCell, Listener};
+use waft_gestures::GestureBinding;
+use waft_rendering::RendererBinding;
+use waft_scheduler::SchedulerBinding;
+use waft_test::{TestPlatform, TestViewHost};
+use waft_widgets::*;
+use waft_winui::*;
 
 pub struct CaptureView {
     pub size: Cell<[u32; 2]>,
@@ -45,12 +45,12 @@ impl View for CaptureView {
     fn present(&self, scene: Arc<Scene>) {
         *self.pixels.borrow_mut() = gpu::render_to_rgba(
             &mut self.renderer.borrow_mut(),
-            inset_embedder::slices(&scene, |_| None).picture_with_room(),
+            waft_embedder::slices(&scene, |_| None).picture_with_room(),
             self.size.get(),
             Some(Color::WHITE),
         );
     }
-    fn host(&self) -> &dyn inset_embedder::ViewHost {
+    fn host(&self) -> &dyn waft_embedder::ViewHost {
         &self.host
     }
 }

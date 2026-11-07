@@ -1,9 +1,9 @@
 //! Command buttons, results, initial focus and cancelable closing of ContentDialog.
 
 use crate::{column, example, label, section};
-use inset_foundation::{App, Handle, Listener};
-use inset_widgets::*;
-use inset_winui::*;
+use waft_foundation::{App, Handle, Listener};
+use waft_widgets::*;
+use waft_winui::*;
 
 /// Builds the dialog examples.
 pub fn build(resources: &ThemeResources) -> Vec<WidgetRef> {
@@ -48,7 +48,7 @@ impl StatefulWidget for ContentDialogDemo {
 
 impl State for ContentDialogDemoState {
     type Widget = ContentDialogDemo;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let save = ContentDialog::new(app)

@@ -1,9 +1,9 @@
 //! The gallery's index: one entry per feature, and where each one's screen is built.
 
-use inset_cupertino::{CupertinoColors, CupertinoIcons};
-use inset_foundation::App;
-use inset_painting::AnyColor;
-use inset_widgets::{BuildContext, IconData, WidgetRef};
+use waft_cupertino::{CupertinoColors, CupertinoIcons};
+use waft_foundation::App;
+use waft_painting::AnyColor;
+use waft_widgets::{BuildContext, IconData, WidgetRef};
 
 use crate::pages;
 

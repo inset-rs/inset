@@ -2,13 +2,13 @@
 //! last arranged to a cell of fixed size.
 #![feature(arbitrary_self_types)]
 
-use inset_embedder::Size;
-use inset_foundation::{App, ValueNotifier};
-use inset_painting::AlignmentGeometry;
-use inset_widgets::*;
-use inset_winui::{ColumnDefinition, Grid, GridCell, GridLength, RowDefinition};
-use inset_winui_test_support::Fixture;
 use std::rc::Rc;
+use waft_embedder::Size;
+use waft_foundation::{App, ValueNotifier};
+use waft_painting::AlignmentGeometry;
+use waft_widgets::*;
+use waft_winui::{ColumnDefinition, Grid, GridCell, GridLength, RowDefinition};
+use waft_winui_test_support::Fixture;
 
 /// The size of the render object of the widget with `key`.
 fn size_of(fixture: &Fixture, key: &Rc<GlobalKey>) -> Size {

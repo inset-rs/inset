@@ -9,18 +9,18 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use inset_embedder::{
+use waft_embedder::{
     Color, MediaTrack, MediaTrackKind, PauseReason, PlayerActivity, PlayerState, PlayerStatus,
     TextDirection, VideoOutput, ViewId, WaitReason, WindowConfig,
 };
-use inset_embedder_winit::WinitEmbedder;
-use inset_foundation::{App, Handle, Listenable, Listener};
-use inset_painting::{
+use waft_embedder_winit::WinitEmbedder;
+use waft_foundation::{App, Handle, Listenable, Listener};
+use waft_painting::{
     AlignmentGeometry, BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry, TextStyle,
 };
-use inset_scheduler::{FrameCallback, Ticker};
-use inset_shell::Shell;
-use inset_widgets::{
+use waft_scheduler::{FrameCallback, Ticker};
+use waft_shell::Shell;
+use waft_widgets::{
     AspectRatio, BuildContext, Center, ClipRRect, Column, DecoratedBox, Directionality,
     GestureDetector, IntoWidget, ListenableBuilder, MainAxisSize, Padding, Player, Positioned,
     SingleTickerProviderStateMixin, SingleTickerProviderStateMixinData, SizedBox, Stack, State,
@@ -57,7 +57,7 @@ pub(crate) fn run(presentation: Presentation) {
 /// window quits.
 fn open_window(app: &mut App, presentation: Presentation) {
     let config = WindowConfig {
-        title: "Inset — a video player".to_owned(),
+        title: "Waft — a video player".to_owned(),
         size: [800.0, 560.0],
         ..WindowConfig::default()
     };
@@ -156,7 +156,7 @@ fn quit(app: &mut App, _view: ViewId) {
 }
 
 /// `video` with a subtitle view of `cues` over it, the size of its picture.
-fn with_subtitles(video: WidgetRef, cues: Vec<inset_embedder::Cue>) -> WidgetRef {
+fn with_subtitles(video: WidgetRef, cues: Vec<waft_embedder::Cue>) -> WidgetRef {
     Stack::new()
         .alignment(AlignmentGeometry::TOP_LEFT)
         .children([
@@ -286,7 +286,7 @@ impl SingleTickerProviderStateMixin for StatusLineState {
 
 impl State for StatusLineState {
     type Widget = StatusLine;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let ticker = SingleTickerProviderStateMixin::create_ticker(
@@ -342,7 +342,7 @@ fn status(state: &PlayerState, position: Duration) -> String {
         format!(" · {}×{}", size.width(), size.height())
     });
     format!(
-        "{doing} · {} / {length}{size} · drawn by Inset · click to play or pause",
+        "{doing} · {} / {length}{size} · drawn by Waft · click to play or pause",
         clock(position)
     )
 }

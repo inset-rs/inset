@@ -4,14 +4,14 @@ mod common;
 use common::GalleryFixtureExt;
 
 use common::Fixture;
-use inset_foundation::{Handle, Listener};
-use inset_painting::Alignment;
-use inset_widgets::*;
-use inset_winui::*;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
+use waft_foundation::{Handle, Listener};
+use waft_painting::Alignment;
+use waft_widgets::*;
+use waft_winui::*;
 
 #[derive(Clone, Default)]
 struct Probe {
@@ -244,7 +244,7 @@ fn gallery_pages_open_retained_content() {
         for element in f.elements() {
             let app = f.cell.borrow();
             if let Some(object) = element.render_object(&app)
-                && let Some(paragraph) = object.downcast::<inset_rendering::RenderParagraph>(&app)
+                && let Some(paragraph) = object.downcast::<waft_rendering::RenderParagraph>(&app)
                 && paragraph
                     .text(&app)
                     .to_plain_text(true, true)

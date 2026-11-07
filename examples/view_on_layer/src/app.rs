@@ -6,19 +6,19 @@ use std::hash::{BuildHasher, RandomState};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use inset_embedder::{
+use waft_embedder::{
     Color, CompositionLayer, Contact, Matrix4, Mutator, Placement, PointerReport, Rect,
     ReportedChange, SystemMouseCursorKind, TextDirection, TextInputHost, ViewConstraints,
     ViewFocusDirection, ViewFocusState, ViewHost, ViewId, ViewMetrics, ViewRef, WindowConfig,
 };
-use inset_embedder_winit::{WinitEmbedder, WinitPlatform};
-use inset_foundation::{App, Handle, Listenable, Listener, ValueListenable, ValueNotifier};
-use inset_gestures::PointerEvent;
-use inset_painting::{BoxDecoration, TextStyle};
-use inset_rendering::HitTestBehavior;
-use inset_scheduler::{PersistentFrameCallback, SchedulerBinding};
-use inset_shell::Shell;
-use inset_widgets::{
+use waft_embedder_winit::{WinitEmbedder, WinitPlatform};
+use waft_foundation::{App, Handle, Listenable, Listener, ValueListenable, ValueNotifier};
+use waft_gestures::PointerEvent;
+use waft_painting::{BoxDecoration, TextStyle};
+use waft_rendering::HitTestBehavior;
+use waft_scheduler::{PersistentFrameCallback, SchedulerBinding};
+use waft_shell::Shell;
+use waft_widgets::{
     Center, DecoratedBox, Directionality, GestureDetector, IntoWidget, ListenableBuilder,
     Positioned, SizedBox, Stack, Text, ValueListenableBuilder, View, ViewCollection, ViewRequest,
     ViewRequestState, WidgetRef, Window, WindowController, run_widget,
@@ -46,7 +46,7 @@ pub(crate) fn run() {
 /// shows both; closing the window quits.
 fn open_window(app: &mut App) {
     let config = WindowConfig {
-        title: "Inset — a view on a layer".to_owned(),
+        title: "Waft — a view on a layer".to_owned(),
         size: [480.0, 300.0],
         ..WindowConfig::default()
     };
@@ -268,7 +268,7 @@ fn forwarded_presses(forwarding: Rc<Forwarding>) -> WidgetRef {
         Rc::clone(&forwarding),
         Rc::clone(&forwarding),
     );
-    inset_widgets::Listener::new()
+    waft_widgets::Listener::new()
         .behavior(HitTestBehavior::Opaque)
         .on_pointer_down(Rc::new(move |app, event| {
             down.forward(app, PointerEvent::Down(event));

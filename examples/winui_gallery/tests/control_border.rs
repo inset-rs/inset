@@ -1,14 +1,14 @@
 //! WinUI's absent-brush hit area and rounded child clipping.
 #![feature(arbitrary_self_types)]
 
-use inset_embedder::{Color, Offset, PointerChange};
-use inset_foundation::Listener;
-use inset_painting::Alignment;
-use inset_rendering::HitTestBehavior;
-use inset_widgets::*;
-use inset_winui::*;
-use inset_winui_test_support::Fixture;
 use std::{cell::Cell, rc::Rc};
+use waft_embedder::{Color, Offset, PointerChange};
+use waft_foundation::Listener;
+use waft_painting::Alignment;
+use waft_rendering::HitTestBehavior;
+use waft_widgets::*;
+use waft_winui::*;
+use waft_winui_test_support::Fixture;
 
 fn fixture(background: Option<Brush>, rounded_child: bool) -> (Fixture, Rc<Cell<usize>>) {
     let clicks = Rc::new(Cell::new(0));

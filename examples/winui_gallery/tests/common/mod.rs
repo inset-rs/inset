@@ -1,13 +1,13 @@
 //! Gallery setup and page navigation layered on reusable test support.
 #![allow(dead_code, unused_imports)]
 
-pub use inset_winui_test_support::{Fixture, mount};
+pub use waft_winui_test_support::{Fixture, mount};
 
-use inset_embedder::Size;
-use inset_foundation::App;
-use inset_widgets::*;
-use inset_winui::{AccentPalette, Theme, ThemeScope};
 use std::rc::Rc;
+use waft_embedder::Size;
+use waft_foundation::App;
+use waft_widgets::*;
+use waft_winui::{AccentPalette, Theme, ThemeScope};
 
 /// Gallery-only entry points; the shared fixture has no dependency on gallery code.
 pub trait GalleryFixtureExt: Sized {

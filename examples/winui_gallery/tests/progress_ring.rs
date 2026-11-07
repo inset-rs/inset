@@ -5,11 +5,11 @@ mod common;
 use common::GalleryFixtureExt;
 
 use common::{Fixture, mount};
-use inset_embedder::{Color, TextDirection};
-use inset_painting::AlignmentGeometry;
-use inset_widgets::*;
-use inset_winui::*;
 use std::time::Duration;
+use waft_embedder::{Color, TextDirection};
+use waft_painting::AlignmentGeometry;
+use waft_widgets::*;
+use waft_winui::*;
 
 const VIEW: [u32; 2] = [64, 64];
 const ACCENT: Color = Color::from_argb(255, 0, 103, 192);
@@ -282,9 +282,9 @@ fn reactivating_a_determinate_ring_shows_its_requested_value() {
 
 #[test]
 fn the_ring_does_not_intercept_pointer_input() {
-    use inset_embedder::{Offset, PointerChange};
-    use inset_foundation::Listener;
     use std::{cell::Cell, rc::Rc};
+    use waft_embedder::{Offset, PointerChange};
+    use waft_foundation::Listener;
 
     let clicks = Rc::new(Cell::new(0));
     let shared = clicks.clone();
@@ -298,7 +298,7 @@ fn the_ring_does_not_intercept_pointer_input() {
                     Stack::new().children([
                         Positioned::fill(
                             GestureDetector::new()
-                                .behavior(inset_rendering::HitTestBehavior::Opaque)
+                                .behavior(waft_rendering::HitTestBehavior::Opaque)
                                 .on_tap(Listener::new(move |_| shared.set(shared.get() + 1)))
                                 .child(SizedBox::expand()),
                         )

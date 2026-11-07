@@ -7,30 +7,30 @@ repository.workspace = true
 homepage.workspace = true
 publish = false
 
-[package.metadata.inset]
-identifier = "rs.inset.app-events"
+[package.metadata.waft]
+identifier = "rs.waft.app-events"
 name = "App events"
 
 # A type of this app's own, which the bundle declares and ranks it the owner of.
-[[package.metadata.inset.file_associations]]
-extensions = ["insetnote"]
-name = "Inset note"
+[[package.metadata.waft.file_associations]]
+extensions = ["waftnote"]
+name = "Waft note"
 owner = true
 role = "editor"
 
 # Another app's type, which the bundle only imports and opens.
-[[package.metadata.inset.file_associations]]
-extensions = ["insetpeer"]
+[[package.metadata.waft.file_associations]]
+extensions = ["waftpeer"]
 name = "Peer document"
 identifier = "org.example.peer-document"
 
 [dependencies]
-inset-embedder.workspace = true
-inset-embedder-winit.workspace = true
-inset-foundation.workspace = true
-inset-painting.workspace = true
-inset-shell.workspace = true
-inset-widgets.workspace = true
+waft-embedder.workspace = true
+waft-embedder-winit.workspace = true
+waft-foundation.workspace = true
+waft-painting.workspace = true
+waft-shell.workspace = true
+waft-widgets.workspace = true
 
 [lints]
 workspace = true

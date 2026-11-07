@@ -3,11 +3,11 @@
 mod common;
 
 use common::{Fixture, mount};
-use inset_embedder::{Color, TextDirection};
-use inset_painting::AlignmentGeometry;
-use inset_widgets::*;
-use inset_winui::*;
 use std::{cell::RefCell, rc::Rc};
+use waft_embedder::{Color, TextDirection};
+use waft_painting::AlignmentGeometry;
+use waft_widgets::*;
+use waft_winui::*;
 
 const RED: Color = Color::from_argb(255, 255, 0, 0);
 

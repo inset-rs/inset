@@ -1,10 +1,10 @@
 //! TabView selection, close, width modes, in-window transfer and owner-managed reorder.
 
 use crate::{column, example, example_row, label, section};
-use inset_foundation::{App, Handle, Listener};
-use inset_widgets::*;
-use inset_winui::*;
 use std::rc::Rc;
+use waft_foundation::{App, Handle, Listener};
+use waft_widgets::*;
+use waft_winui::*;
 
 /// Builds the interactive tab gallery beneath the current theme.
 pub fn build(resources: &ThemeResources) -> Vec<WidgetRef> {
@@ -78,7 +78,7 @@ impl StatefulWidget for TabViewDemo {
 
 impl State for TabViewDemoState {
     type Widget = TabViewDemo;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let resources = ThemeResources::of(app, context);

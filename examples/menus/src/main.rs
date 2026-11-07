@@ -1,4 +1,4 @@
-//! The system's menus through Inset's widgets: a `PlatformMenuBar` with the application menu's
+//! The system's menus through Waft's widgets: a `PlatformMenuBar` with the application menu's
 //! provided About, Hide and Quit, a File menu whose New has ⌘N, a View menu whose checkbox
 //! follows the app's state, and the provided Edit items, which act on the text field; a
 //! `PlatformTrayIcon` whose menu shows the window or quits, opened on each system's own trigger,
@@ -16,18 +16,18 @@
 
 use std::rc::Rc;
 
-use inset_cupertino::{CupertinoApp, CupertinoTextField};
-use inset_embedder::{
+use waft_cupertino::{CupertinoApp, CupertinoTextField};
+use waft_embedder::{
     AppExitType, CheckState, Color, IconImage, MenuEntry, MenuItem, MenuItemCheck, Offset,
     ViewFocusDirection, ViewFocusState, ViewId, WindowConfig,
 };
-use inset_embedder_winit::WinitEmbedder;
-use inset_foundation::{App, Entity, VoidCallback};
-use inset_gestures::TapUpDetails;
-use inset_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
-use inset_services::{LogicalKeyboardKey, ServicesBinding};
-use inset_shell::Shell;
-use inset_widgets::{
+use waft_embedder_winit::WinitEmbedder;
+use waft_foundation::{App, Entity, VoidCallback};
+use waft_gestures::TapUpDetails;
+use waft_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
+use waft_services::{LogicalKeyboardKey, ServicesBinding};
+use waft_shell::Shell;
+use waft_widgets::{
     BuildContext, Column, DecoratedBox, GestureDetector, IntoWidget, Padding,
     PlainPlatformMenuItem, PlatformMenu, PlatformMenuBar, PlatformMenuItemGroup,
     PlatformMenuItemRef, PlatformProvidedMenuItem, PlatformProvidedMenuItemType, PlatformTrayIcon,
@@ -53,7 +53,7 @@ fn main() {
                 show_hints: true,
             });
             let window = WindowConfig {
-                title: "Inset — menus".to_owned(),
+                title: "Waft — menus".to_owned(),
                 size: [520.0, 360.0],
                 ..WindowConfig::default()
             };
@@ -101,7 +101,7 @@ impl StatelessWidget for Menus {
                 .child(Column::new().spacing(12.0).children(lines)),
         );
         let tray_icon = PlatformTrayIcon::new(dot())
-            .tooltip("Inset menus")
+            .tooltip("Waft menus")
             .menus(vec![
                 item("Show Window", Rc::new(bring_window_forward)),
                 item("Quit", Rc::new(quit)),

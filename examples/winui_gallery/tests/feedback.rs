@@ -4,8 +4,8 @@ mod common;
 use common::GalleryFixtureExt;
 
 use common::Fixture;
-use inset_widgets::downcast_widget;
-use inset_winui::{InfoBar, ProgressBar};
+use waft_widgets::downcast_widget;
+use waft_winui::{InfoBar, ProgressBar};
 use winui_gallery::Feature;
 
 #[test]
@@ -107,16 +107,16 @@ fn info_bar_narrow_layout_renders() {
     fixture.find("Resume requested");
 }
 
-use inset_foundation::{App, Handle, Listener};
-use inset_painting::Alignment;
-use inset_rendering::MainAxisSize;
-use inset_widgets::*;
-use inset_winui::{AccentPalette, ExpandDirection, Expander};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
     time::Duration,
 };
+use waft_foundation::{App, Handle, Listener};
+use waft_painting::Alignment;
+use waft_rendering::MainAxisSize;
+use waft_widgets::*;
+use waft_winui::{AccentPalette, ExpandDirection, Expander};
 
 /// A fixture owner lets tests change properties between exact animation frames.
 #[derive(Debug)]
@@ -157,7 +157,7 @@ impl StatefulWidget for LifecyclePage {
 
 impl State for LifecycleState {
     type Widget = LifecyclePage;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         self.widget(app).probe.set(Some(self));
@@ -332,10 +332,8 @@ fn determinate_progress_clamps_to_the_range_and_handles_a_zero_span() {
                                         .maximum(maximum)
                                         .value(value)
                                         .corner_radius(0.0)
-                                        .foreground(inset_embedder::Color::from_argb(
-                                            255, 255, 0, 0,
-                                        ))
-                                        .background(inset_embedder::Color::from_argb(
+                                        .foreground(waft_embedder::Color::from_argb(255, 255, 0, 0))
+                                        .background(waft_embedder::Color::from_argb(
                                             255, 0, 0, 255,
                                         )),
                                 ),
@@ -376,15 +374,15 @@ fn info_bar_status_glyphs_keep_their_natural_line_height() {
         let Some(object) = element.render_object(&app) else {
             continue;
         };
-        let Some(paragraph) = object.downcast::<inset_rendering::RenderParagraph>(&app) else {
+        let Some(paragraph) = object.downcast::<waft_rendering::RenderParagraph>(&app) else {
             continue;
         };
         let text = paragraph.text(&app).to_plain_text(true, true);
         if ![
-            inset_winui::FluentSymbol::Info,
-            inset_winui::FluentSymbol::CheckmarkCircle,
-            inset_winui::FluentSymbol::ErrorCircle,
-            inset_winui::FluentSymbol::DismissCircle,
+            waft_winui::FluentSymbol::Info,
+            waft_winui::FluentSymbol::CheckmarkCircle,
+            waft_winui::FluentSymbol::ErrorCircle,
+            waft_winui::FluentSymbol::DismissCircle,
         ]
         .iter()
         .any(|symbol| text == symbol.glyph().to_string())
@@ -395,7 +393,7 @@ fn info_bar_status_glyphs_keep_their_natural_line_height() {
         let actual = render_box.size(&app);
         let natural = render_box.get_dry_layout(
             &mut app,
-            inset_rendering::BoxConstraints::new().max_width(actual.width()),
+            waft_rendering::BoxConstraints::new().max_width(actual.width()),
         );
         assert!(
             actual.height() >= natural.height(),
@@ -410,9 +408,9 @@ fn info_bar_status_glyphs_keep_their_natural_line_height() {
 /// needs keeps its own: a narrow header leaves it at the style's `MinWidth`.
 #[test]
 fn an_expander_given_spare_width_keeps_its_own() {
-    let r = inset_winui::ThemeResources::new(
-        inset_winui::Theme::Light,
-        inset_winui::AccentPalette::default(),
+    let r = waft_winui::ThemeResources::new(
+        waft_winui::Theme::Light,
+        waft_winui::AccentPalette::default(),
     );
     let size = common::size_under_center([300, 300], |_| {
         Expander::new(false, |_, _| {})
@@ -421,7 +419,7 @@ fn an_expander_given_spare_width_keeps_its_own() {
     });
     assert_eq!(
         size,
-        inset_embedder::Size::new(r.flyout_theme_min_width, r.expander_min_height)
+        waft_embedder::Size::new(r.flyout_theme_min_width, r.expander_min_height)
     );
 }
 

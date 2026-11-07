@@ -1,11 +1,11 @@
 //! Top navigation measures custom chrome and hidden items through the native layout tree.
 #![feature(arbitrary_self_types)]
-use inset_foundation::{App, Handle};
-use inset_rendering::{RenderBox, RenderParagraph};
-use inset_widgets::*;
-use inset_winui::*;
-use inset_winui_test_support::Fixture;
 use std::{cell::Cell, rc::Rc};
+use waft_foundation::{App, Handle};
+use waft_rendering::{RenderBox, RenderParagraph};
+use waft_widgets::*;
+use waft_winui::*;
+use waft_winui_test_support::Fixture;
 
 #[derive(Debug)]
 struct Page(Rc<Cell<Option<Handle<PageState>>>>);
@@ -30,7 +30,7 @@ impl StatefulWidget for Page {
 }
 impl State for PageState {
     type Widget = Page;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         self.widget(app).0.set(Some(self));
         let s = app.get(self);
@@ -61,7 +61,7 @@ impl State for PageState {
         ThemeScope::new(
             Theme::Light,
             Align::new()
-                .alignment(inset_painting::Alignment::TOP_LEFT.into())
+                .alignment(waft_painting::Alignment::TOP_LEFT.into())
                 .child(SizedBox::new().width(s.width).height(200.0).child(nav)),
         )
         .into_widget()

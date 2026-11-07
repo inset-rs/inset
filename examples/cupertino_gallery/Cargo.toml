@@ -7,8 +7,8 @@ repository.workspace = true
 homepage.workspace = true
 publish = false
 
-[package.metadata.inset]
-identifier = "rs.inset.cupertino-gallery"
+[package.metadata.waft]
+identifier = "rs.waft.cupertino-gallery"
 name = "Cupertino gallery"
 
 # Named apart from the binary: on Windows a cdylib and a binary of one name write the same
@@ -19,27 +19,27 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 indexmap.workspace = true
-inset.workspace = true
-inset-animation.workspace = true
-inset-cupertino.workspace = true
-inset-embedder.workspace = true
-inset-embedder-default.workspace = true
-inset-foundation.workspace = true
-inset-painting.workspace = true
+waft.workspace = true
+waft-animation.workspace = true
+waft-cupertino.workspace = true
+waft-embedder.workspace = true
+waft-embedder-default.workspace = true
+waft-foundation.workspace = true
+waft-painting.workspace = true
 # The flex enums (`MainAxisAlignment`, `CrossAxisAlignment`) live here, as Flutter's do in
-# `rendering/`; inset-widgets re-exports the widget half only.
-inset-rendering.workspace = true
-inset-shell.workspace = true
-inset-widgets.workspace = true
+# `rendering/`; waft-widgets re-exports the widget half only.
+waft-rendering.workspace = true
+waft-shell.workspace = true
+waft-widgets.workspace = true
 
 [[bin]]
 name = "cupertino-gallery"
 path = "src/main.rs"
 
 [dev-dependencies]
-inset-test.workspace = true
-inset-gestures.workspace = true
-inset-scheduler.workspace = true
+waft-test.workspace = true
+waft-gestures.workspace = true
+waft-scheduler.workspace = true
 valo-system-fonts.workspace = true
 
 [lints]

@@ -1,10 +1,10 @@
 //! Independent text and password examples with retained native controllers.
 
 use crate::{column, example, example_row, label, section};
-use inset_embedder::TextSelection;
-use inset_foundation::{App, Handle, Listener};
-use inset_widgets::*;
-use inset_winui::*;
+use waft_embedder::TextSelection;
+use waft_foundation::{App, Handle, Listener};
+use waft_widgets::*;
+use waft_winui::*;
 
 /// Builds the TextBox feature page.
 pub fn text_box(resources: &ThemeResources) -> Vec<WidgetRef> {
@@ -69,7 +69,7 @@ impl StatefulWidget for TextExamples {
 
 impl State for TextExamplesState {
     type Widget = TextExamples;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let initial = if self.widget(app).password {

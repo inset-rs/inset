@@ -1,12 +1,12 @@
 //! Selection must not paint its settled target before its first animation frame.
 #![feature(arbitrary_self_types)]
 
-use inset_embedder::PointerChange;
-use inset_foundation::{App, Handle};
-use inset_widgets::*;
-use inset_winui::*;
-use inset_winui_test_support::Fixture;
 use std::{cell::Cell, rc::Rc, time::Duration};
+use waft_embedder::PointerChange;
+use waft_foundation::{App, Handle};
+use waft_widgets::*;
+use waft_winui::*;
+use waft_winui_test_support::Fixture;
 
 #[derive(Debug)]
 struct Page {
@@ -40,7 +40,7 @@ impl StatefulWidget for Page {
 
 impl State for PageState {
     type Widget = Page;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         self.widget(app).probe.set(Some(self));
@@ -313,7 +313,7 @@ fn collapse_and_expand_transfer_selection_between_actual_ancestor_and_child() {
     }
     let child = indicator_pixels(&f);
     assert_ne!(ancestor, child);
-    let chevron = inset_embedder::Offset::new(292.0, f.find("First").dy());
+    let chevron = waft_embedder::Offset::new(292.0, f.find("First").dy());
     f.send(PointerChange::Down, chevron);
     f.send(PointerChange::Up, chevron);
     for _ in 0..20 {

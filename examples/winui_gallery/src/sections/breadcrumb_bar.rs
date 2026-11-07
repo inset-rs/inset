@@ -1,10 +1,10 @@
 //! BreadcrumbBar navigation, overflow, live collection updates and custom item content.
 
 use crate::{column, example, row, section};
-use inset_embedder::TextDirection;
-use inset_foundation::{App, Handle, Listener};
-use inset_widgets::*;
-use inset_winui::*;
+use waft_embedder::TextDirection;
+use waft_foundation::{App, Handle, Listener};
+use waft_widgets::*;
+use waft_winui::*;
 
 /// Builds the feature page.
 pub fn page(resources: &ThemeResources) -> Vec<WidgetRef> {
@@ -49,11 +49,11 @@ impl StatefulWidget for BreadcrumbDemo {
 
 impl State for BreadcrumbDemoState {
     type Widget = BreadcrumbDemo;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let resources = ThemeResources::of(app, context);
-        let names = ["Home", "Documents", "Projects", "Inset", "Examples"];
+        let names = ["Home", "Documents", "Projects", "Waft", "Examples"];
         let items = names
             .iter()
             .take(app.get(self).count)

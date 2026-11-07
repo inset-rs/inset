@@ -4,12 +4,12 @@
 use crate::{column, example, example_row, label, section};
 use std::sync::Arc;
 
-use inset_embedder::valo::{Point, Rect as ValoRect};
-use inset_embedder::{FillRule, Path, PathBuilder, TextDirection};
-use inset_foundation::{App, Handle, Listener};
-use inset_rendering::{CrossAxisAlignment, MainAxisSize};
-use inset_widgets::*;
-use inset_winui::*;
+use waft_embedder::valo::{Point, Rect as ValoRect};
+use waft_embedder::{FillRule, Path, PathBuilder, TextDirection};
+use waft_foundation::{App, Handle, Listener};
+use waft_rendering::{CrossAxisAlignment, MainAxisSize};
+use waft_widgets::*;
+use waft_winui::*;
 
 /// Named symbols available to controls and gallery navigation.
 const SYMBOLS: [(FluentSymbol, &str); 28] = [
@@ -90,7 +90,7 @@ impl StatefulWidget for IconDemo {
 
 impl State for IconDemoState {
     type Widget = IconDemo;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let r = ThemeResources::of(app, context);

@@ -5,10 +5,10 @@
 //! registered by `install_cupertino_icon_font`, and the two arrows at the bottom mirror under a
 //! right-to-left `Directionality` because their `IconData` sets `match_text_direction`.
 
-use inset_cupertino::{CupertinoColors, CupertinoDynamicColor, CupertinoIcons, CupertinoListTile};
-use inset_embedder::TextDirection;
-use inset_foundation::App;
-use inset_widgets::{BuildContext, Directionality, Icon, IconData, IntoWidget, Text, WidgetRef};
+use waft_cupertino::{CupertinoColors, CupertinoDynamicColor, CupertinoIcons, CupertinoListTile};
+use waft_embedder::TextDirection;
+use waft_foundation::App;
+use waft_widgets::{BuildContext, Directionality, Icon, IconData, IntoWidget, Text, WidgetRef};
 
 use crate::support::{screen, scrolling_body, secondary, section_with_footer};
 

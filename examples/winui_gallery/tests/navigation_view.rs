@@ -1,10 +1,10 @@
 //! Adaptive and top navigation use the real native layout, input and overlay stack.
 #![feature(arbitrary_self_types)]
-use inset_foundation::{App, Handle, Listener};
-use inset_widgets::*;
-use inset_winui::*;
-use inset_winui_test_support::Fixture;
 use std::{cell::Cell, rc::Rc};
+use waft_foundation::{App, Handle, Listener};
+use waft_widgets::*;
+use waft_winui::*;
+use waft_winui_test_support::Fixture;
 
 #[derive(Clone, Debug, Default)]
 struct Probe(Rc<Cell<Option<Handle<PageState>>>>);
@@ -42,7 +42,7 @@ impl StatefulWidget for Page {
 
 impl State for PageState {
     type Widget = Page;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         self.widget(app).0.0.set(Some(self));
@@ -72,7 +72,7 @@ impl State for PageState {
         ThemeScope::new(
             state.theme,
             Align::new()
-                .alignment(inset_painting::Alignment::TOP_LEFT.into())
+                .alignment(waft_painting::Alignment::TOP_LEFT.into())
                 .child(SizedBox::new().width(state.width).height(440.0).child(nav)),
         )
         .into_widget()
@@ -148,12 +148,12 @@ fn adaptive_thresholds_and_force_closed_pane() {
     assert_eq!(split(&f), (SplitViewDisplayMode::CompactInline, true));
     f.capture("navigation_expanded_dark");
     f.send(
-        inset_embedder::PointerChange::Down,
-        inset_embedder::Offset::new(24.0, 24.0),
+        waft_embedder::PointerChange::Down,
+        waft_embedder::Offset::new(24.0, 24.0),
     );
     f.send(
-        inset_embedder::PointerChange::Up,
-        inset_embedder::Offset::new(24.0, 24.0),
+        waft_embedder::PointerChange::Up,
+        waft_embedder::Offset::new(24.0, 24.0),
     );
     f.pump();
     assert!(!split(&f).1);
@@ -183,8 +183,8 @@ fn top_overflow_selection_promotes_and_resize_recovers() {
                 }
                 let b = e.find_render_object(&app)?.as_box()?;
                 Some(
-                    b.local_to_global(&app, inset_embedder::Offset::ZERO, None)
-                        + inset_embedder::Offset::new(
+                    b.local_to_global(&app, waft_embedder::Offset::ZERO, None)
+                        + waft_embedder::Offset::new(
                             b.size(&app).width() / 2.0,
                             b.size(&app).height() / 2.0,
                         ),
@@ -192,8 +192,8 @@ fn top_overflow_selection_promotes_and_resize_recovers() {
             })
             .unwrap()
     };
-    f.send(inset_embedder::PointerChange::Down, point);
-    f.send(inset_embedder::PointerChange::Up, point);
+    f.send(waft_embedder::PointerChange::Down, point);
+    f.send(waft_embedder::PointerChange::Up, point);
     f.pump();
     f.tap("Destination 7");
     f.pump();
@@ -231,11 +231,11 @@ impl StatefulWidget for Content {
 
 impl State for ContentState {
     type Widget = Content;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         Column::new()
-            .main_axis_size(inset_rendering::MainAxisSize::Min)
+            .main_axis_size(waft_rendering::MainAxisSize::Min)
             .children([
                 Text::new(self.widget(app).0.clone()).into_widget(),
                 Button::text(
@@ -268,20 +268,20 @@ fn pane_closing_is_cancelable_only_for_light_dismiss_and_raised_once() {
         s.mode = NavigationViewPaneDisplayMode::LeftCompact;
         s.cancel_close = true;
     });
-    let toggle = inset_embedder::Offset::new(24.0, 24.0);
+    let toggle = waft_embedder::Offset::new(24.0, 24.0);
     for change in [
-        inset_embedder::PointerChange::Down,
-        inset_embedder::PointerChange::Up,
+        waft_embedder::PointerChange::Down,
+        waft_embedder::PointerChange::Up,
     ] {
         f.send(change, toggle);
     }
     f.pump();
     assert!(split(&f).1);
     let before = f.cell.borrow().get(p.0.get().unwrap()).closing_count;
-    let outside = inset_embedder::Offset::new(600.0, 200.0);
+    let outside = waft_embedder::Offset::new(600.0, 200.0);
     for change in [
-        inset_embedder::PointerChange::Down,
-        inset_embedder::PointerChange::Up,
+        waft_embedder::PointerChange::Down,
+        waft_embedder::PointerChange::Up,
     ] {
         f.send(change, outside);
     }
@@ -293,8 +293,8 @@ fn pane_closing_is_cancelable_only_for_light_dismiss_and_raised_once() {
     );
     update(&mut f, &p, |s| s.cancel_close = false);
     for change in [
-        inset_embedder::PointerChange::Down,
-        inset_embedder::PointerChange::Up,
+        waft_embedder::PointerChange::Down,
+        waft_embedder::PointerChange::Up,
     ] {
         f.send(change, outside);
     }

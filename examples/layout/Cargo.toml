@@ -8,10 +8,10 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
-inset-embedder.workspace = true
-inset-foundation.workspace = true
-inset-painting.workspace = true
-inset-rendering.workspace = true
+waft-embedder.workspace = true
+waft-foundation.workspace = true
+waft-painting.workspace = true
+waft-rendering.workspace = true
 
 [lints]
 workspace = true

@@ -1,6 +1,6 @@
 # menus
 
-The system's menus through Inset's widgets, in one window:
+The system's menus through Waft's widgets, in one window:
 
 - `PlatformMenuBar`:
   - the application menu with the provided About, Hide and Quit;

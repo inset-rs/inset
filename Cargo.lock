@@ -211,14 +211,14 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app-events"
-version = "0.19.0"
+version = "0.1.0"
 dependencies = [
- "inset-embedder",
- "inset-embedder-winit",
- "inset-foundation",
- "inset-painting",
- "inset-shell",
- "inset-widgets",
+ "waft-embedder",
+ "waft-embedder-winit",
+ "waft-foundation",
+ "waft-painting",
+ "waft-shell",
+ "waft-widgets",
 ]
 
 [[package]]
@@ -948,17 +948,17 @@ dependencies = [
 
 [[package]]
 name = "composition_layer"
-version = "0.19.0"
+version = "0.1.0"
 dependencies = [
- "inset-embedder",
- "inset-embedder-winit",
- "inset-foundation",
- "inset-painting",
- "inset-scheduler",
- "inset-shell",
- "inset-widgets",
  "objc2-core-foundation",
  "objc2-io-surface",
+ "waft-embedder",
+ "waft-embedder-winit",
+ "waft-foundation",
+ "waft-painting",
+ "waft-scheduler",
+ "waft-shell",
+ "waft-widgets",
 ]
 
 [[package]]
@@ -1124,23 +1124,23 @@ dependencies = [
 
 [[package]]
 name = "cupertino-gallery"
-version = "0.19.0"
+version = "0.1.0"
 dependencies = [
  "indexmap",
- "inset",
- "inset-animation",
- "inset-cupertino",
- "inset-embedder",
- "inset-embedder-default",
- "inset-foundation",
- "inset-gestures",
- "inset-painting",
- "inset-rendering",
- "inset-scheduler",
- "inset-shell",
- "inset-test",
- "inset-widgets",
  "valo-system-fonts",
+ "waft",
+ "waft-animation",
+ "waft-cupertino",
+ "waft-embedder",
+ "waft-embedder-default",
+ "waft-foundation",
+ "waft-gestures",
+ "waft-painting",
+ "waft-rendering",
+ "waft-scheduler",
+ "waft-shell",
+ "waft-test",
+ "waft-widgets",
 ]
 
 [[package]]
@@ -2081,363 +2081,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "inset"
-version = "0.19.0"
-dependencies = [
- "inset-embedder",
- "inset-embedder-default",
- "inset-foundation",
- "inset-macros",
- "inset-painting",
- "inset-scheduler",
- "inset-shell",
- "inset-widgets",
-]
-
-[[package]]
-name = "inset-animation"
-version = "0.19.0"
-dependencies = [
- "inset-embedder",
- "inset-foundation",
- "inset-physics",
- "inset-scheduler",
-]
-
-[[package]]
-name = "inset-cli"
-version = "0.19.0"
-dependencies = [
- "anyhow",
- "brotli",
- "cargo-packager",
- "cargo_metadata 0.23.1",
- "clap",
- "ds_parser",
- "flate2",
- "glob",
- "image",
- "plist",
- "serde",
- "serde_json",
- "tar",
- "ureq 3.4.1",
- "zip 2.4.2",
-]
-
-[[package]]
-name = "inset-cupertino"
-version = "0.19.0"
-dependencies = [
- "indexmap",
- "inset-animation",
- "inset-embedder",
- "inset-foundation",
- "inset-gestures",
- "inset-painting",
- "inset-physics",
- "inset-rendering",
- "inset-scheduler",
- "inset-services",
- "inset-test",
- "inset-widgets",
- "valo-system-fonts",
-]
-
-[[package]]
-name = "inset-embedder"
-version = "0.19.0"
-dependencies = [
- "indexmap",
- "objc2-core-foundation",
- "objc2-io-surface",
- "pollster",
- "raw-window-handle",
- "serde",
- "serde_json",
- "valo",
- "valo-geometry",
- "valo-system-fonts",
- "web-time",
- "wgpu",
-]
-
-[[package]]
-name = "inset-embedder-android"
-version = "0.19.0"
-dependencies = [
- "android-activity",
- "inset-embedder",
- "jni",
- "ndk",
- "ndk-sys",
- "pollster",
- "raw-window-handle",
- "valo",
- "valo-codec",
- "valo-codec-software",
- "wgpu",
-]
-
-[[package]]
-name = "inset-embedder-default"
-version = "0.19.0"
-dependencies = [
- "inset-embedder",
- "inset-embedder-android",
- "inset-embedder-web",
- "inset-embedder-winit",
-]
-
-[[package]]
-name = "inset-embedder-web"
-version = "0.19.0"
-dependencies = [
- "console_error_panic_hook",
- "getrandom 0.3.4",
- "inset-embedder",
- "js-sys",
- "valo",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "web-time",
- "wgpu",
-]
-
-[[package]]
-name = "inset-embedder-winit"
-version = "0.19.0"
-dependencies = [
- "arboard",
- "block2",
- "dispatch2",
- "inset-embedder",
- "inset-embedder-winit",
- "objc2",
- "objc2-app-kit",
- "objc2-av-foundation",
- "objc2-core-foundation",
- "objc2-core-graphics",
- "objc2-core-media",
- "objc2-core-text",
- "objc2-core-video",
- "objc2-foundation",
- "objc2-io-surface",
- "objc2-media-accessibility",
- "objc2-metal",
- "objc2-quartz-core",
- "objc2-ui-kit",
- "objc2-uniform-type-identifiers",
- "objc2-user-notifications",
- "png 0.18.1",
- "pollster",
- "sys-locale",
- "valo",
- "valo-codec",
- "valo-codec-apple",
- "valo-codec-software",
- "valo-geometry",
- "wgpu",
- "windows",
- "windows-core",
- "windows-sys 0.60.2",
- "winit",
- "zbus",
-]
-
-[[package]]
-name = "inset-foundation"
-version = "0.19.0"
-dependencies = [
- "async-task",
- "indexmap",
- "inset-embedder",
- "slotmap",
-]
-
-[[package]]
-name = "inset-gestures"
-version = "0.19.0"
-dependencies = [
- "indexmap",
- "inset-embedder",
- "inset-foundation",
- "inset-scheduler",
- "web-time",
-]
-
-[[package]]
-name = "inset-macros"
-version = "0.19.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "inset-markdown"
-version = "0.19.0"
-dependencies = [
- "inset-embedder",
- "inset-foundation",
- "inset-gestures",
- "inset-painting",
- "inset-rendering",
- "inset-scheduler",
- "inset-test",
- "inset-widgets",
- "pulldown-cmark",
- "valo-system-fonts",
-]
-
-[[package]]
-name = "inset-painting"
-version = "0.19.0"
-dependencies = [
- "indexmap",
- "inset-embedder",
- "inset-foundation",
- "inset-gestures",
- "inset-scheduler",
- "inset-services",
- "valo",
- "valo-system-fonts",
-]
-
-[[package]]
-name = "inset-physics"
-version = "0.19.0"
-dependencies = [
- "inset-embedder",
-]
-
-[[package]]
-name = "inset-rendering"
-version = "0.19.0"
-dependencies = [
- "indexmap",
- "inset-animation",
- "inset-embedder",
- "inset-foundation",
- "inset-gestures",
- "inset-painting",
- "inset-scheduler",
- "inset-services",
- "inset-test",
- "unicode-general-category",
- "valo",
- "valo-system-fonts",
-]
-
-[[package]]
-name = "inset-scheduler"
-version = "0.19.0"
-dependencies = [
- "indexmap",
- "inset-embedder",
- "inset-foundation",
- "inset-test",
-]
-
-[[package]]
-name = "inset-services"
-version = "0.19.0"
-dependencies = [
- "indexmap",
- "inset-embedder",
- "inset-foundation",
- "inset-gestures",
- "inset-scheduler",
- "inset-test",
- "unicode-segmentation",
-]
-
-[[package]]
-name = "inset-shell"
-version = "0.19.0"
-dependencies = [
- "inset-embedder",
- "inset-foundation",
- "inset-gestures",
- "inset-painting",
- "inset-rendering",
- "inset-scheduler",
- "inset-services",
- "inset-test",
-]
-
-[[package]]
-name = "inset-single-instance"
-version = "0.19.0"
-dependencies = [
- "windows-sys 0.60.2",
- "zbus",
-]
-
-[[package]]
-name = "inset-test"
-version = "0.19.0"
-dependencies = [
- "inset-embedder",
- "wgpu",
-]
-
-[[package]]
-name = "inset-widgets"
-version = "0.19.0"
-dependencies = [
- "indexmap",
- "inset-animation",
- "inset-embedder",
- "inset-foundation",
- "inset-gestures",
- "inset-painting",
- "inset-physics",
- "inset-rendering",
- "inset-scheduler",
- "inset-services",
- "inset-test",
- "valo-system-fonts",
-]
-
-[[package]]
-name = "inset-winui"
-version = "0.19.0"
-dependencies = [
- "inset-animation",
- "inset-embedder",
- "inset-foundation",
- "inset-gestures",
- "inset-painting",
- "inset-rendering",
- "inset-scheduler",
- "inset-services",
- "inset-test",
- "inset-widgets",
-]
-
-[[package]]
-name = "inset-winui-test-support"
-version = "0.1.0"
-dependencies = [
- "inset-animation",
- "inset-embedder",
- "inset-foundation",
- "inset-gestures",
- "inset-painting",
- "inset-rendering",
- "inset-scheduler",
- "inset-services",
- "inset-test",
- "inset-widgets",
- "png 0.17.16",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "interpolate_name"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2577,12 +2220,12 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "layout"
-version = "0.19.0"
+version = "0.1.0"
 dependencies = [
- "inset-embedder",
- "inset-foundation",
- "inset-painting",
- "inset-rendering",
+ "waft-embedder",
+ "waft-foundation",
+ "waft-painting",
+ "waft-rendering",
 ]
 
 [[package]]
@@ -2701,14 +2344,14 @@ checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
 
 [[package]]
 name = "media"
-version = "0.19.0"
+version = "0.1.0"
 dependencies = [
- "inset-embedder",
- "inset-embedder-winit",
- "inset-foundation",
- "inset-painting",
- "inset-shell",
- "inset-widgets",
+ "waft-embedder",
+ "waft-embedder-winit",
+ "waft-foundation",
+ "waft-painting",
+ "waft-shell",
+ "waft-widgets",
 ]
 
 [[package]]
@@ -2737,17 +2380,17 @@ dependencies = [
 
 [[package]]
 name = "menus"
-version = "0.19.0"
+version = "0.1.0"
 dependencies = [
- "inset-cupertino",
- "inset-embedder",
- "inset-embedder-winit",
- "inset-foundation",
- "inset-gestures",
- "inset-painting",
- "inset-services",
- "inset-shell",
- "inset-widgets",
+ "waft-cupertino",
+ "waft-embedder",
+ "waft-embedder-winit",
+ "waft-foundation",
+ "waft-gestures",
+ "waft-painting",
+ "waft-services",
+ "waft-shell",
+ "waft-widgets",
 ]
 
 [[package]]
@@ -3402,14 +3045,14 @@ checksum = "13c45bb4a6ae1280ec0803b1ef9d3455eb50f01efbbe1447ab020f1d54fba9d8"
 
 [[package]]
 name = "paint"
-version = "0.19.0"
+version = "0.1.0"
 dependencies = [
- "inset-embedder",
- "inset-embedder-winit",
- "inset-foundation",
- "inset-painting",
- "inset-scheduler",
- "inset-shell",
+ "waft-embedder",
+ "waft-embedder-winit",
+ "waft-foundation",
+ "waft-painting",
+ "waft-scheduler",
+ "waft-shell",
 ]
 
 [[package]]
@@ -5262,33 +4905,390 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "video_frames"
-version = "0.19.0"
+version = "0.1.0"
 dependencies = [
- "inset-embedder",
- "inset-embedder-winit",
- "inset-foundation",
- "inset-painting",
- "inset-scheduler",
- "inset-shell",
- "inset-widgets",
+ "waft-embedder",
+ "waft-embedder-winit",
+ "waft-foundation",
+ "waft-painting",
+ "waft-scheduler",
+ "waft-shell",
+ "waft-widgets",
 ]
 
 [[package]]
 name = "view_on_layer"
-version = "0.19.0"
+version = "0.1.0"
 dependencies = [
- "inset-embedder",
- "inset-embedder-winit",
- "inset-foundation",
- "inset-gestures",
- "inset-painting",
- "inset-rendering",
- "inset-scheduler",
- "inset-shell",
- "inset-widgets",
  "objc2",
  "objc2-app-kit",
  "objc2-quartz-core",
+ "waft-embedder",
+ "waft-embedder-winit",
+ "waft-foundation",
+ "waft-gestures",
+ "waft-painting",
+ "waft-rendering",
+ "waft-scheduler",
+ "waft-shell",
+ "waft-widgets",
+]
+
+[[package]]
+name = "waft"
+version = "0.1.0"
+dependencies = [
+ "waft-embedder",
+ "waft-embedder-default",
+ "waft-foundation",
+ "waft-macros",
+ "waft-painting",
+ "waft-scheduler",
+ "waft-shell",
+ "waft-widgets",
+]
+
+[[package]]
+name = "waft-animation"
+version = "0.1.0"
+dependencies = [
+ "waft-embedder",
+ "waft-foundation",
+ "waft-physics",
+ "waft-scheduler",
+]
+
+[[package]]
+name = "waft-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "brotli",
+ "cargo-packager",
+ "cargo_metadata 0.23.1",
+ "clap",
+ "ds_parser",
+ "flate2",
+ "glob",
+ "image",
+ "plist",
+ "serde",
+ "serde_json",
+ "tar",
+ "ureq 3.4.1",
+ "zip 2.4.2",
+]
+
+[[package]]
+name = "waft-cupertino"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "valo-system-fonts",
+ "waft-animation",
+ "waft-embedder",
+ "waft-foundation",
+ "waft-gestures",
+ "waft-painting",
+ "waft-physics",
+ "waft-rendering",
+ "waft-scheduler",
+ "waft-services",
+ "waft-test",
+ "waft-widgets",
+]
+
+[[package]]
+name = "waft-embedder"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "objc2-core-foundation",
+ "objc2-io-surface",
+ "pollster",
+ "raw-window-handle",
+ "serde",
+ "serde_json",
+ "valo",
+ "valo-geometry",
+ "valo-system-fonts",
+ "web-time",
+ "wgpu",
+]
+
+[[package]]
+name = "waft-embedder-android"
+version = "0.1.0"
+dependencies = [
+ "android-activity",
+ "jni",
+ "ndk",
+ "ndk-sys",
+ "pollster",
+ "raw-window-handle",
+ "valo",
+ "valo-codec",
+ "valo-codec-software",
+ "waft-embedder",
+ "wgpu",
+]
+
+[[package]]
+name = "waft-embedder-default"
+version = "0.1.0"
+dependencies = [
+ "waft-embedder",
+ "waft-embedder-android",
+ "waft-embedder-web",
+ "waft-embedder-winit",
+]
+
+[[package]]
+name = "waft-embedder-web"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "getrandom 0.3.4",
+ "js-sys",
+ "valo",
+ "waft-embedder",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "web-time",
+ "wgpu",
+]
+
+[[package]]
+name = "waft-embedder-winit"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "block2",
+ "dispatch2",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-av-foundation",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-core-media",
+ "objc2-core-text",
+ "objc2-core-video",
+ "objc2-foundation",
+ "objc2-io-surface",
+ "objc2-media-accessibility",
+ "objc2-metal",
+ "objc2-quartz-core",
+ "objc2-ui-kit",
+ "objc2-uniform-type-identifiers",
+ "objc2-user-notifications",
+ "png 0.18.1",
+ "pollster",
+ "sys-locale",
+ "valo",
+ "valo-codec",
+ "valo-codec-apple",
+ "valo-codec-software",
+ "valo-geometry",
+ "waft-embedder",
+ "waft-embedder-winit",
+ "wgpu",
+ "windows",
+ "windows-core",
+ "windows-sys 0.60.2",
+ "winit",
+ "zbus",
+]
+
+[[package]]
+name = "waft-foundation"
+version = "0.1.0"
+dependencies = [
+ "async-task",
+ "indexmap",
+ "slotmap",
+ "waft-embedder",
+]
+
+[[package]]
+name = "waft-gestures"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "waft-embedder",
+ "waft-foundation",
+ "waft-scheduler",
+ "web-time",
+]
+
+[[package]]
+name = "waft-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "waft-markdown"
+version = "0.1.0"
+dependencies = [
+ "pulldown-cmark",
+ "valo-system-fonts",
+ "waft-embedder",
+ "waft-foundation",
+ "waft-gestures",
+ "waft-painting",
+ "waft-rendering",
+ "waft-scheduler",
+ "waft-test",
+ "waft-widgets",
+]
+
+[[package]]
+name = "waft-painting"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "valo",
+ "valo-system-fonts",
+ "waft-embedder",
+ "waft-foundation",
+ "waft-gestures",
+ "waft-scheduler",
+ "waft-services",
+]
+
+[[package]]
+name = "waft-physics"
+version = "0.1.0"
+dependencies = [
+ "waft-embedder",
+]
+
+[[package]]
+name = "waft-rendering"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "unicode-general-category",
+ "valo",
+ "valo-system-fonts",
+ "waft-animation",
+ "waft-embedder",
+ "waft-foundation",
+ "waft-gestures",
+ "waft-painting",
+ "waft-scheduler",
+ "waft-services",
+ "waft-test",
+]
+
+[[package]]
+name = "waft-scheduler"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "waft-embedder",
+ "waft-foundation",
+ "waft-test",
+]
+
+[[package]]
+name = "waft-services"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "unicode-segmentation",
+ "waft-embedder",
+ "waft-foundation",
+ "waft-gestures",
+ "waft-scheduler",
+ "waft-test",
+]
+
+[[package]]
+name = "waft-shell"
+version = "0.1.0"
+dependencies = [
+ "waft-embedder",
+ "waft-foundation",
+ "waft-gestures",
+ "waft-painting",
+ "waft-rendering",
+ "waft-scheduler",
+ "waft-services",
+ "waft-test",
+]
+
+[[package]]
+name = "waft-single-instance"
+version = "0.1.0"
+dependencies = [
+ "windows-sys 0.60.2",
+ "zbus",
+]
+
+[[package]]
+name = "waft-test"
+version = "0.1.0"
+dependencies = [
+ "waft-embedder",
+ "wgpu",
+]
+
+[[package]]
+name = "waft-widgets"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "valo-system-fonts",
+ "waft-animation",
+ "waft-embedder",
+ "waft-foundation",
+ "waft-gestures",
+ "waft-painting",
+ "waft-physics",
+ "waft-rendering",
+ "waft-scheduler",
+ "waft-services",
+ "waft-test",
+]
+
+[[package]]
+name = "waft-winui"
+version = "0.1.0"
+dependencies = [
+ "waft-animation",
+ "waft-embedder",
+ "waft-foundation",
+ "waft-gestures",
+ "waft-painting",
+ "waft-rendering",
+ "waft-scheduler",
+ "waft-services",
+ "waft-test",
+ "waft-widgets",
+]
+
+[[package]]
+name = "waft-winui-test-support"
+version = "0.1.0"
+dependencies = [
+ "png 0.17.16",
+ "pollster",
+ "waft-animation",
+ "waft-embedder",
+ "waft-foundation",
+ "waft-gestures",
+ "waft-painting",
+ "waft-rendering",
+ "waft-scheduler",
+ "waft-services",
+ "waft-test",
+ "waft-widgets",
+ "wgpu",
 ]
 
 [[package]]
@@ -5734,17 +5734,17 @@ dependencies = [
 
 [[package]]
 name = "window"
-version = "0.19.0"
+version = "0.1.0"
 dependencies = [
- "inset-cupertino",
- "inset-embedder",
- "inset-embedder-winit",
- "inset-foundation",
- "inset-painting",
- "inset-rendering",
- "inset-services",
- "inset-shell",
- "inset-widgets",
+ "waft-cupertino",
+ "waft-embedder",
+ "waft-embedder-winit",
+ "waft-foundation",
+ "waft-painting",
+ "waft-rendering",
+ "waft-services",
+ "waft-shell",
+ "waft-widgets",
 ]
 
 [[package]]
@@ -6299,20 +6299,20 @@ dependencies = [
 name = "winui_gallery"
 version = "0.1.0"
 dependencies = [
- "inset",
- "inset-animation",
- "inset-embedder",
- "inset-foundation",
- "inset-gestures",
- "inset-painting",
- "inset-rendering",
- "inset-scheduler",
- "inset-services",
- "inset-shell",
- "inset-test",
- "inset-widgets",
- "inset-winui",
- "inset-winui-test-support",
+ "waft",
+ "waft-animation",
+ "waft-embedder",
+ "waft-foundation",
+ "waft-gestures",
+ "waft-painting",
+ "waft-rendering",
+ "waft-scheduler",
+ "waft-services",
+ "waft-shell",
+ "waft-test",
+ "waft-widgets",
+ "waft-winui",
+ "waft-winui-test-support",
 ]
 
 [[package]]

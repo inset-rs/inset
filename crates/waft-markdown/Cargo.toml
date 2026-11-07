@@ -1,0 +1,27 @@
+[package]
+name = "waft-markdown"
+description = "Markdown widgets for Waft, with flutter_markdown's API ideas and look, built on pulldown-cmark"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+waft-embedder.workspace = true
+waft-foundation.workspace = true
+waft-gestures.workspace = true
+waft-painting.workspace = true
+waft-rendering.workspace = true
+waft-widgets.workspace = true
+pulldown-cmark.workspace = true
+
+[dev-dependencies]
+waft-scheduler.workspace = true
+waft-test.workspace = true
+valo-system-fonts.workspace = true
+
+[lints]
+workspace = true

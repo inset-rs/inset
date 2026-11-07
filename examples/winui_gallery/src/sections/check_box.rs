@@ -1,8 +1,8 @@
 //! `CheckBox` unchecked, checked, three-state (starting indeterminate) and disabled, with a label reporting their `IsChecked` values.
 use crate::{column, example, example_row, label, section};
-use inset_foundation::{App, Handle};
-use inset_widgets::*;
-use inset_winui::*;
+use waft_foundation::{App, Handle};
+use waft_widgets::*;
+use waft_winui::*;
 
 /// Builds the examples for this feature destination.
 pub fn build(resources: &ThemeResources) -> Vec<WidgetRef> {
@@ -65,7 +65,7 @@ fn describe(is_checked: Option<bool>) -> &'static str {
 
 impl State for CheckBoxDemoState {
     type Widget = CheckBoxDemo;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     /// Builds the examples from their current property choices.
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {

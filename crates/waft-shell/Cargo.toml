@@ -1,0 +1,25 @@
+[package]
+name = "waft-shell"
+description = "Framework-side embedder client for Waft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+waft-embedder.workspace = true
+waft-foundation.workspace = true
+waft-gestures.workspace = true
+waft-painting.workspace = true
+waft-rendering.workspace = true
+waft-scheduler.workspace = true
+waft-services.workspace = true
+
+[dev-dependencies]
+waft-test.workspace = true
+
+[lints]
+workspace = true

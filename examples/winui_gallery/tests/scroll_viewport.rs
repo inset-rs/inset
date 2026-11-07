@@ -1,22 +1,22 @@
 //! Kit-native scrolling remains virtualized, reports dimensions, and accepts native input.
 #![feature(arbitrary_self_types)]
 
-use inset_embedder::{
-    Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
-};
-use inset_foundation::{Handle, Listenable, Listener};
-use inset_gestures::GestureBinding;
-use inset_painting::{Axis, EdgeInsetsGeometry};
-use inset_services::{
-    HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
-};
-use inset_widgets::*;
-use inset_winui::*;
-use inset_winui_test_support::Fixture;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
+use waft_embedder::{
+    Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
+};
+use waft_foundation::{Handle, Listenable, Listener};
+use waft_gestures::GestureBinding;
+use waft_painting::{Axis, EdgeInsetsGeometry};
+use waft_services::{
+    HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
+};
+use waft_widgets::*;
+use waft_winui::*;
+use waft_winui_test_support::Fixture;
 
 #[derive(Clone, Default)]
 struct Probe {

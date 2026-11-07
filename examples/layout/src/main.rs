@@ -7,10 +7,10 @@
 //! ```
 #![feature(arbitrary_self_types)]
 
-use inset_embedder::Size;
-use inset_foundation::AppCell;
-use inset_painting::EdgeInsetsGeometry;
-use inset_rendering::{
+use waft_embedder::Size;
+use waft_foundation::AppCell;
+use waft_painting::EdgeInsetsGeometry;
+use waft_rendering::{
     BoxConstraints, PipelineOwner, RenderBox, RenderConstrainedBox, RenderPadding,
 };
 

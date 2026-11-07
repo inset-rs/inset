@@ -2,7 +2,7 @@
 mod common;
 use common::Fixture;
 use common::GalleryFixtureExt;
-use inset_services::{
+use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyRepeatEvent, KeyUpEvent, LogicalKeyboardKey,
     PhysicalKeyboardKey,
 };

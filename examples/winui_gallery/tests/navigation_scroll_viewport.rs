@@ -1,16 +1,16 @@
 //! Source scrollbar presentation backed by native scrolling and drag recognizers.
 #![feature(arbitrary_self_types)]
-#[path = "../../../crates/inset-winui/src/controls/scroll_bar_viewport.rs"]
+#[path = "../../../crates/waft-winui/src/controls/scroll_bar_viewport.rs"]
 mod presentation;
-use inset_embedder::{Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
-use inset_foundation::{Handle, Listener};
-use inset_gestures::GestureBinding;
-use inset_rendering::{CrossAxisAlignment, MainAxisSize};
-use inset_widgets::*;
-use inset_winui::*;
-use inset_winui_test_support::Fixture;
 use presentation::ScrollBarViewport;
 use std::{cell::Cell, rc::Rc, time::Duration};
+use waft_embedder::{Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
+use waft_foundation::{Handle, Listener};
+use waft_gestures::GestureBinding;
+use waft_rendering::{CrossAxisAlignment, MainAxisSize};
+use waft_widgets::*;
+use waft_winui::*;
+use waft_winui_test_support::Fixture;
 fn fixture(theme: Theme) -> (Fixture, Handle<ScrollViewportController>) {
     let slot = Rc::new(Cell::new(None));
     let q = slot.clone();

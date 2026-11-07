@@ -8,10 +8,10 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use inset_cupertino::{CupertinoApp, CupertinoPageRoute, install_cupertino_icon_font};
-use inset_embedder::WindowConfig;
-use inset_foundation::{App, Handle, Listener, Timer};
-use inset_widgets::{
+use waft_cupertino::{CupertinoApp, CupertinoPageRoute, install_cupertino_icon_font};
+use waft_embedder::WindowConfig;
+use waft_foundation::{App, Handle, Listener, Timer};
+use waft_widgets::{
     AnyRoute, BuildContext, GlobalKey, IntoWidget, Navigator, NavigatorState, Route,
     RouteSettingsRef, WidgetBuilder, run_app_with,
 };
@@ -49,7 +49,7 @@ pub fn gallery() -> CupertinoApp {
 pub fn run_gallery(app: &mut App, opening: Option<Entry>) {
     let navigator = GlobalKey::new();
     let window = WindowConfig {
-        title: "Inset — cupertino gallery".to_owned(),
+        title: "Waft — cupertino gallery".to_owned(),
         size: [420.0, 720.0],
         ..WindowConfig::default()
     };

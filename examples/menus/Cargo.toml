@@ -8,15 +8,15 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
-inset-cupertino.workspace = true
-inset-embedder.workspace = true
-inset-embedder-winit.workspace = true
-inset-foundation.workspace = true
-inset-gestures.workspace = true
-inset-painting.workspace = true
-inset-services.workspace = true
-inset-shell.workspace = true
-inset-widgets.workspace = true
+waft-cupertino.workspace = true
+waft-embedder.workspace = true
+waft-embedder-winit.workspace = true
+waft-foundation.workspace = true
+waft-gestures.workspace = true
+waft-painting.workspace = true
+waft-services.workspace = true
+waft-shell.workspace = true
+waft-widgets.workspace = true
 
 [lints]
 workspace = true

@@ -4,16 +4,16 @@ mod catalog;
 mod sections;
 pub use catalog::Feature;
 
-use inset_embedder::{Color, WindowConfig};
-use inset_foundation::{App, Handle, ValueKey};
-use inset_painting::{Axis, EdgeInsetsGeometry, PaintingBinding};
-use inset_rendering::{CrossAxisAlignment, MainAxisSize, StackFit};
-use inset_widgets::*;
-use inset_winui::*;
 use std::rc::Rc;
+use waft_embedder::{Color, WindowConfig};
+use waft_foundation::{App, Handle, ValueKey};
+use waft_painting::{Axis, EdgeInsetsGeometry, PaintingBinding};
+use waft_rendering::{CrossAxisAlignment, MainAxisSize, StackFit};
+use waft_widgets::*;
+use waft_winui::*;
 
-/// Starts the gallery with the native or web host selected by Inset.
-#[inset::main]
+/// Starts the gallery with the native or web host selected by Waft.
+#[waft::main]
 fn main(app: &mut App) {
     run(app);
 }
@@ -297,7 +297,7 @@ impl GalleryState {
 
 impl State for GalleryState {
     type Widget = Gallery;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let r = ThemeResources::of(app, context);

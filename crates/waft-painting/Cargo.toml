@@ -1,0 +1,26 @@
+[package]
+name = "waft-painting"
+description = "Alignment, decoration, and text painting for Waft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+indexmap.workspace = true
+waft-embedder.workspace = true
+waft-foundation.workspace = true
+waft-gestures.workspace = true
+waft-scheduler.workspace = true
+waft-services.workspace = true
+
+[dev-dependencies]
+waft-embedder = { workspace = true, features = ["test-support"] }
+valo.workspace = true
+valo-system-fonts.workspace = true
+
+[lints]
+workspace = true

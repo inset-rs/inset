@@ -1,10 +1,10 @@
 //! Severity, actions and cancelable InfoBar closing.
 
 use crate::{column, example, example_row, section};
-use inset_foundation::{App, Handle, Listener};
-use inset_painting::EdgeInsetsGeometry;
-use inset_widgets::*;
-use inset_winui::*;
+use waft_foundation::{App, Handle, Listener};
+use waft_painting::EdgeInsetsGeometry;
+use waft_widgets::*;
+use waft_winui::*;
 
 /// Builds the notification examples.
 pub fn build(resources: &ThemeResources) -> Vec<WidgetRef> {
@@ -45,7 +45,7 @@ impl StatefulWidget for InfoBarDemo {
 
 impl State for InfoBarDemoState {
     type Widget = InfoBarDemo;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let resources = ThemeResources::of(app, context);

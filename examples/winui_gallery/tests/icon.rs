@@ -2,14 +2,14 @@
 //! the foreground each takes from its surroundings.
 #![feature(arbitrary_self_types)]
 
-use inset_embedder::valo::{Point, Rect as ValoRect};
-use inset_embedder::{Color, FillRule, Path, PathBuilder, Size, TextDirection};
-use inset_foundation::App;
-use inset_painting::{AlignmentGeometry, TextStyle};
-use inset_widgets::*;
-use inset_winui::{FluentSymbol, FontIcon, PathIcon, SizeObserver, install_icon_font};
-use inset_winui_test_support::{Fixture, mount};
 use std::{cell::RefCell, rc::Rc, sync::Arc};
+use waft_embedder::valo::{Point, Rect as ValoRect};
+use waft_embedder::{Color, FillRule, Path, PathBuilder, Size, TextDirection};
+use waft_foundation::App;
+use waft_painting::{AlignmentGeometry, TextStyle};
+use waft_widgets::*;
+use waft_winui::{FluentSymbol, FontIcon, PathIcon, SizeObserver, install_icon_font};
+use waft_winui_test_support::{Fixture, mount};
 
 const GREEN: Color = Color::from_argb(255, 0, 160, 0);
 

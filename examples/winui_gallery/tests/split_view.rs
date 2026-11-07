@@ -1,21 +1,21 @@
 //! SplitView through a real layout, input, focus, animation and GPU pipeline.
 #![feature(arbitrary_self_types)]
 
-use inset_embedder::{Offset, PointerChange, Rect};
-use inset_foundation::{App, Handle, Listener};
-use inset_painting::EdgeInsetsGeometry;
-use inset_rendering::{CrossAxisAlignment, MainAxisSize, RenderParagraph};
-use inset_services::{
-    HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
-};
-use inset_widgets::*;
-use inset_winui::*;
-use inset_winui_test_support::Fixture;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
     time::Duration,
 };
+use waft_embedder::{Offset, PointerChange, Rect};
+use waft_foundation::{App, Handle, Listener};
+use waft_painting::EdgeInsetsGeometry;
+use waft_rendering::{CrossAxisAlignment, MainAxisSize, RenderParagraph};
+use waft_services::{
+    HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
+};
+use waft_widgets::*;
+use waft_winui::*;
+use waft_winui_test_support::Fixture;
 
 #[derive(Clone, Debug, Default)]
 struct Probe {
@@ -56,7 +56,7 @@ impl StatefulWidget for Page {
 
 impl State for PageState {
     type Widget = Page;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         let probe = self.widget(app).0.clone();
         probe.state.set(Some(self));
@@ -143,7 +143,7 @@ impl StatefulWidget for PaneCounter {
 
 impl State for PaneCounterState {
     type Widget = PaneCounter;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let resources = ThemeResources::of(app, context);
         let count = app.get(self).count;

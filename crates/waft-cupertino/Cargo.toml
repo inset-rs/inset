@@ -1,0 +1,30 @@
+[package]
+name = "waft-cupertino"
+description = "iOS-style Cupertino widgets for Waft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+indexmap.workspace = true
+waft-animation.workspace = true
+waft-embedder.workspace = true
+waft-foundation.workspace = true
+waft-gestures.workspace = true
+waft-painting.workspace = true
+waft-physics.workspace = true
+waft-rendering.workspace = true
+waft-scheduler.workspace = true
+waft-services.workspace = true
+waft-widgets.workspace = true
+
+[dev-dependencies]
+waft-test.workspace = true
+valo-system-fonts.workspace = true
+
+[lints]
+workspace = true

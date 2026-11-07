@@ -5,16 +5,16 @@
 
 use std::rc::Rc;
 
-use inset_cupertino::{
+use waft_cupertino::{
     CupertinoColors, CupertinoDynamicColor, CupertinoListSection, CupertinoNavigationBar,
     CupertinoPageScaffold, CupertinoSliverNavigationBar, CupertinoTheme,
     ObstructingPreferredSizeWidgetRef,
 };
-use inset_foundation::App;
-use inset_painting::{
+use waft_foundation::App;
+use waft_painting::{
     AlignmentGeometry, AnyColor, BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry, TextStyle,
 };
-use inset_widgets::{
+use waft_widgets::{
     Align, BuildContext, Container, CustomScrollView, Icon, IconData, IntoWidget, ListView,
     MediaQuery, Padding, SizedBox, SliverList, SliverSafeArea, Text, WidgetRef,
 };

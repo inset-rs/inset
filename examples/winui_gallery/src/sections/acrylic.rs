@@ -1,12 +1,12 @@
 //! Compares acrylic recipes with their opaque fallback over a quiet landscape.
 
 use crate::{column, example, label, section};
-use inset_embedder::{Canvas, Color, FillRule, Paint, PathBuilder, Size, valo};
-use inset_foundation::App;
-use inset_painting::{BorderRadius, BorderRadiusGeometry};
-use inset_rendering::CustomPainter;
-use inset_widgets::*;
-use inset_winui::*;
+use waft_embedder::{Canvas, Color, FillRule, Paint, PathBuilder, Size, valo};
+use waft_foundation::App;
+use waft_painting::{BorderRadius, BorderRadiusGeometry};
+use waft_rendering::CustomPainter;
+use waft_widgets::*;
+use waft_winui::*;
 
 /// Builds two surfaces using the source flyout material recipe.
 pub fn build(resources: &ThemeResources) -> Vec<WidgetRef> {
@@ -31,7 +31,7 @@ pub fn build(resources: &ThemeResources) -> Vec<WidgetRef> {
                     )
                     .into_widget(),
                     Positioned::fill(
-                        Padding::new(inset_painting::EdgeInsetsGeometry::all(24.0)).child(
+                        Padding::new(waft_painting::EdgeInsetsGeometry::all(24.0)).child(
                             ControlBorder::new(background, Brush::Solid(Color::new(0)))
                                 .border_thickness(0.0)
                                 .corner_radius(8.0)

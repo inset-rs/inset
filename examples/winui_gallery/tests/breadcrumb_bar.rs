@@ -4,19 +4,19 @@ mod common;
 use common::GalleryFixtureExt;
 
 use common::Fixture;
-use inset_embedder::{Offset, PointerChange, TextDirection};
-use inset_foundation::{App, Handle, Listener};
-use inset_rendering::{CrossAxisAlignment, RenderParagraph};
-use inset_services::{
-    HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey as Key,
-    PhysicalKeyboardKey as Physical,
-};
-use inset_widgets::*;
-use inset_winui::*;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
+use waft_embedder::{Offset, PointerChange, TextDirection};
+use waft_foundation::{App, Handle, Listener};
+use waft_rendering::{CrossAxisAlignment, RenderParagraph};
+use waft_services::{
+    HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey as Key,
+    PhysicalKeyboardKey as Physical,
+};
+use waft_widgets::*;
+use waft_winui::*;
 
 #[derive(Debug, Default)]
 struct Probe {
@@ -53,7 +53,7 @@ impl StatefulWidget for Owner {
 
 impl State for OwnerState {
     type Widget = Owner;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         self.widget(app).0.state.set(Some(self));
@@ -119,7 +119,7 @@ impl StatefulWidget for RetainedLabel {
 
 impl State for RetainedLabelState {
     type Widget = RetainedLabel;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let probe = &self.widget(app).0;

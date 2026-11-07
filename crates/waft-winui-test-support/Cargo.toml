@@ -1,0 +1,24 @@
+[package]
+name = "waft-winui-test-support"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+waft-animation.workspace = true
+waft-embedder.workspace = true
+waft-foundation.workspace = true
+waft-gestures.workspace = true
+waft-painting.workspace = true
+waft-rendering.workspace = true
+waft-scheduler.workspace = true
+waft-services.workspace = true
+waft-test.workspace = true
+waft-widgets.workspace = true
+wgpu.workspace = true
+pollster.workspace = true
+png.workspace = true
+
+[lints]
+workspace = true

@@ -1,20 +1,20 @@
 //! ToolTipService through native input, timers, overlays, layout and GPU rendering.
 #![feature(arbitrary_self_types)]
 
-use inset_embedder::{Offset, PointerChange, Rect};
-use inset_foundation::{App, Handle, Listener};
-use inset_rendering::RenderParagraph;
-use inset_services::{
-    HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
-};
-use inset_widgets::*;
-use inset_winui::*;
-use inset_winui_test_support::Fixture;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
     time::Duration,
 };
+use waft_embedder::{Offset, PointerChange, Rect};
+use waft_foundation::{App, Handle, Listener};
+use waft_rendering::RenderParagraph;
+use waft_services::{
+    HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
+};
+use waft_widgets::*;
+use waft_winui::*;
+use waft_winui_test_support::Fixture;
 
 /// Test owner state and events recorded by the tooltip.
 #[derive(Clone, Debug, Default)]
@@ -53,7 +53,7 @@ impl StatefulWidget for Page {
 
 impl State for PageState {
     type Widget = Page;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         let p = self.widget(app).0.clone();

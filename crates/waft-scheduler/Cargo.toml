@@ -1,0 +1,21 @@
+[package]
+name = "waft-scheduler"
+description = "Frame callbacks and tickers for Waft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+indexmap.workspace = true
+waft-embedder.workspace = true
+waft-foundation.workspace = true
+
+[dev-dependencies]
+waft-test.workspace = true
+
+[lints]
+workspace = true

@@ -10,15 +10,15 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use inset_embedder::{
+use waft_embedder::{
     Color, ColorSpace, Offset, RRect, Radius, Rect, RequestId, SceneBuilder, ViewMetrics, ViewRef,
     WindowConfig,
 };
-use inset_embedder_winit::WinitEmbedder;
-use inset_foundation::App;
-use inset_painting::{Canvas, Paint, Picture, draw_rrect};
-use inset_scheduler::{FrameTarget, PersistentFrameCallback, SchedulerBinding};
-use inset_shell::Shell;
+use waft_embedder_winit::WinitEmbedder;
+use waft_foundation::App;
+use waft_painting::{Canvas, Paint, Picture, draw_rrect};
+use waft_scheduler::{FrameTarget, PersistentFrameCallback, SchedulerBinding};
+use waft_shell::Shell;
 
 fn main() {
     WinitEmbedder.run(|platform| Shell::new(platform, open_window));
@@ -31,7 +31,7 @@ fn open_window(app: &mut App) {
         .platform()
         .request_view(
             WindowConfig {
-                title: "Inset — paint".to_owned(),
+                title: "Waft — paint".to_owned(),
                 size: [900.0, 600.0],
                 ..WindowConfig::default()
             },

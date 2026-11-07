@@ -1,9 +1,9 @@
 //! ToolTip placement and shared hover/keyboard behavior.
 
 use crate::{column, example, example_row, section};
-use inset_foundation::{App, Handle, Listener};
-use inset_widgets::*;
-use inset_winui::*;
+use waft_foundation::{App, Handle, Listener};
+use waft_widgets::*;
+use waft_winui::*;
 
 /// Exercises automatic hover/focus opening and configurable placement.
 pub fn build(resources: &ThemeResources) -> Vec<WidgetRef> {
@@ -77,7 +77,7 @@ impl StatefulWidget for PlacementDemo {
 
 impl State for PlacementDemoState {
     type Widget = PlacementDemo;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         let (placement, open) = (app.get(self).placement, app.get(self).open);

@@ -8,15 +8,15 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
-inset-embedder.workspace = true
-inset-embedder-winit.workspace = true
-inset-foundation.workspace = true
-inset-gestures.workspace = true
-inset-painting.workspace = true
-inset-rendering.workspace = true
-inset-scheduler.workspace = true
-inset-shell.workspace = true
-inset-widgets.workspace = true
+waft-embedder.workspace = true
+waft-embedder-winit.workspace = true
+waft-foundation.workspace = true
+waft-gestures.workspace = true
+waft-painting.workspace = true
+waft-rendering.workspace = true
+waft-scheduler.workspace = true
+waft-shell.workspace = true
+waft-widgets.workspace = true
 
 # The layer of the window's view, which the added view's layer is placed in.
 [target.'cfg(target_os = "macos")'.dependencies]

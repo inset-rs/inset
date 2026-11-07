@@ -3,11 +3,11 @@
 mod common;
 use common::Fixture;
 use common::GalleryFixtureExt;
-use inset_embedder::{Offset, PointerChange, Rect, Size};
-use inset_rendering::{MainAxisSize, RenderParagraph};
-use inset_widgets::*;
-use inset_winui::*;
 use std::time::Duration;
+use waft_embedder::{Offset, PointerChange, Rect, Size};
+use waft_rendering::{MainAxisSize, RenderParagraph};
+use waft_widgets::*;
+use waft_winui::*;
 
 /// The bounds of the paragraph showing `text`. A slider's header fills the root grid's width, so its box is as wide as the slider and its bottom edge is where the `SliderTopHeaderMargin` starts.
 fn label_bounds(fixture: &Fixture, text: &str) -> Rect {
@@ -100,7 +100,7 @@ fn slider_presses_drags_snaps_and_switches_theme() {
 fn mouse_drag_updates_the_thumb_without_acquiring_focus() {
     let r = ThemeResources::new(Theme::Light, AccentPalette::default());
     let mut fixture = Fixture::for_feature([900, 2600], winui_gallery::Feature::Slider);
-    let focus = inset_widgets::primary_focus(&mut fixture.cell.borrow_mut());
+    let focus = waft_widgets::primary_focus(&mut fixture.cell.borrow_mut());
     fixture.find("Slider: 42 · stepped 50 · vertical 30");
     let volume = label_bounds(&fixture, "Volume");
     let thumb = track_point(&r, volume, 0.42);
@@ -130,7 +130,7 @@ fn mouse_drag_updates_the_thumb_without_acquiring_focus() {
     fixture.pump();
     fixture.find("Slider: 62 · stepped 50 · vertical 30");
     assert_eq!(
-        inset_widgets::primary_focus(&mut fixture.cell.borrow_mut()),
+        waft_widgets::primary_focus(&mut fixture.cell.borrow_mut()),
         focus,
     );
 }
@@ -169,7 +169,7 @@ fn a_vertical_slider_fills_the_height_it_is_given() {
     ] {
         let size = common::size_under_center([300, 300], move |_| {
             Slider::new(10.0, |_, _| {})
-                .orientation(inset_winui::Orientation::Vertical)
+                .orientation(waft_winui::Orientation::Vertical)
                 .tick_frequency(10.0)
                 .tick_placement(ticks)
                 .into_widget()

@@ -6,20 +6,20 @@ mod common;
 use common::GalleryFixtureExt;
 
 use common::{Fixture, mount};
-use inset_embedder::{
+use std::{cell::RefCell, rc::Rc, time::Duration};
+use waft_embedder::{
     Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
     Rect, TextAffinity, TextRange, TextSelection,
 };
-use inset_foundation::{App, Handle, Listener};
-use inset_gestures::GestureBinding;
-use inset_rendering::RenderParagraph;
-use inset_services::{
+use waft_foundation::{App, Handle, Listener};
+use waft_gestures::GestureBinding;
+use waft_rendering::RenderParagraph;
+use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey as Key,
     PhysicalKeyboardKey as Physical, TextEditingValue, TextInput,
 };
-use inset_widgets::*;
-use inset_winui::*;
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use waft_widgets::*;
+use waft_winui::*;
 use winui_gallery::Feature;
 
 /// A gallery page tall enough to show every example without scrolling.
@@ -113,7 +113,7 @@ fn editable_text(f: &Fixture, placeholder: &str) -> EditableText {
     let app = f.cell.borrow();
     for element in elements {
         if let Some(editable) =
-            downcast_widget::<inset_widgets::EditableText>(element.widget(&app).as_ref())
+            downcast_widget::<waft_widgets::EditableText>(element.widget(&app).as_ref())
         {
             return EditableText {
                 controller: editable.controller,
@@ -665,7 +665,7 @@ impl StatefulWidget for Owner {
 
 impl State for OwnerState {
     type Widget = Owner;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         let log = self.widget(app).log.clone();
@@ -737,7 +737,7 @@ fn owner() -> (Fixture, Rc<Log>) {
                 .home(ThemeScope::new(
                     Theme::Light,
                     Align::new()
-                        .alignment(inset_painting::AlignmentGeometry::TOP_START)
+                        .alignment(waft_painting::AlignmentGeometry::TOP_START)
                         .child(Owner { log: root }),
                 ))
                 .into_widget()

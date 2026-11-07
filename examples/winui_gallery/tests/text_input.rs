@@ -4,14 +4,14 @@ mod common;
 use common::GalleryFixtureExt;
 
 use common::Fixture;
-use inset_embedder::{Offset, PointerChange, TextAffinity, TextRange, TextSelection};
-use inset_foundation::Handle;
-use inset_services::{
+use waft_embedder::{Offset, PointerChange, TextAffinity, TextRange, TextSelection};
+use waft_foundation::Handle;
+use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey as Key,
     PhysicalKeyboardKey as Physical, TextEditingValue, TextInput,
 };
-use inset_widgets::*;
-use inset_winui::*;
+use waft_widgets::*;
+use waft_winui::*;
 
 /// Finds a public control's native controller by its placeholder.
 fn controller(f: &Fixture, placeholder: &str) -> AnyTextEditingController {
@@ -269,7 +269,7 @@ fn text_commands_copy_paste_undo_and_password_copy_policy() {
     assert!(!widgets.into_iter().any(|element| {
         element
             .render_object(&app)
-            .and_then(|render| render.downcast::<inset_rendering::RenderParagraph>(&app))
+            .and_then(|render| render.downcast::<waft_rendering::RenderParagraph>(&app))
             .is_some_and(|paragraph| paragraph.text(&app).to_plain_text(true, true) == "Copy")
     }));
 }

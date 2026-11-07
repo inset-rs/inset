@@ -2,10 +2,10 @@
 //! and right-to-left.
 
 use crate::{column, example, label, row, section};
-use inset_embedder::TextDirection;
-use inset_foundation::{App, Handle, Listener};
-use inset_widgets::*;
-use inset_winui::*;
+use waft_embedder::TextDirection;
+use waft_foundation::{App, Handle, Listener};
+use waft_widgets::*;
+use waft_winui::*;
 
 /// Builds the feature page.
 pub fn page(resources: &ThemeResources) -> Vec<WidgetRef> {
@@ -49,7 +49,7 @@ const FILES: [&str; 4] = ["Recent", "Shared", "Favorites", "Archived"];
 
 impl State for SelectorBarDemoState {
     type Widget = SelectorBarDemo;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let resources = ThemeResources::of(app, context);

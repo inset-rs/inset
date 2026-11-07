@@ -6,12 +6,12 @@
 
 use std::ptr::NonNull;
 
-use inset_embedder::HardwareBuffer;
 use objc2_core_foundation::{CFDictionary, CFNumber, CFString};
 use objc2_io_surface::{
     IOSurfaceLockOptions, IOSurfaceRef, kIOSurfaceBytesPerElement, kIOSurfaceBytesPerRow,
     kIOSurfaceHeight, kIOSurfacePixelFormat, kIOSurfaceWidth,
 };
+use waft_embedder::HardwareBuffer;
 
 /// The `OSType` for 32-bit BGRA.
 const BGRA: i32 = 0x4247_5241;

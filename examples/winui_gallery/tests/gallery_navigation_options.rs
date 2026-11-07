@@ -4,8 +4,8 @@ mod common;
 use common::GalleryFixtureExt;
 
 use common::Fixture;
-use inset_widgets::downcast_widget;
-use inset_winui::{NavigationView, SplitView, TabView, TabViewCloseButtonOverlayMode};
+use waft_widgets::downcast_widget;
+use waft_winui::{NavigationView, SplitView, TabView, TabViewCloseButtonOverlayMode};
 use winui_gallery::Feature;
 
 #[test]

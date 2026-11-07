@@ -1,15 +1,15 @@
 //! MenuFlyout templates, checked values and source keyboard navigation.
 #![feature(arbitrary_self_types)]
 
-use inset_foundation::{Handle, Listener};
-use inset_painting::Alignment;
-use inset_services::{
+use std::{cell::Cell, rc::Rc};
+use waft_foundation::{Handle, Listener};
+use waft_painting::Alignment;
+use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
 };
-use inset_widgets::*;
-use inset_winui::*;
-use inset_winui_test_support::Fixture;
-use std::{cell::Cell, rc::Rc};
+use waft_widgets::*;
+use waft_winui::*;
+use waft_winui_test_support::Fixture;
 
 #[derive(Default)]
 struct Probe {
@@ -134,7 +134,7 @@ fn focused(f: &Fixture, text: &str) -> bool {
     for element in f.elements() {
         let mut app = f.cell.borrow_mut();
         if let Some(object) = element.render_object(&app)
-            && let Some(paragraph) = object.downcast::<inset_rendering::RenderParagraph>(&app)
+            && let Some(paragraph) = object.downcast::<waft_rendering::RenderParagraph>(&app)
             && paragraph.text(&app).to_plain_text(true, true) == text
         {
             return Focus::of(&mut app, element, false, false).has_primary_focus(&app);

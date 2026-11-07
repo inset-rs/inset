@@ -13,13 +13,13 @@
 //! ```
 //!
 //! macOS opens files only with an app bundle it knows, and matches files to it by the types the
-//! bundle declares, which `[package.metadata.inset.file_associations]` in this crate's Cargo.toml
+//! bundle declares, which `[package.metadata.waft.file_associations]` in this crate's Cargo.toml
 //! gives:
 //!
 //! ```text
-//! cargo inset build macos -p app-events
-//! open "target/inset/macos/release/App events.app"
-//! open -a "App events" note.insetnote     # at launch or while it runs
+//! cargo waft build macos -p app-events
+//! open "target/waft/macos/release/App events.app"
+//! open -a "App events" note.waftnote     # at launch or while it runs
 //! ```
 //!
 //! Windows and Linux start the app with what it opens on its command line, which is the app's
@@ -27,7 +27,7 @@
 //! which reaches the same handler as the system's:
 //!
 //! ```text
-//! cargo run -p app-events -- note.insetnote
+//! cargo run -p app-events -- note.waftnote
 //! ```
 //!
 //! Click the Dock icon for a reopen, with the window on screen or minimized: each is printed
@@ -41,15 +41,15 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use inset_embedder::{
+use waft_embedder::{
     AppExitResponse, Color, DataTransferItem, DragReport, OpenRequest, PickedFile, TextDirection,
     WindowConfig,
 };
-use inset_embedder_winit::{Reopen, WinitEmbedder, WinitPlatform};
-use inset_foundation::{App, Completer, Entity, Listener, Task, Timer};
-use inset_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
-use inset_shell::Shell;
-use inset_widgets::{
+use waft_embedder_winit::{Reopen, WinitEmbedder, WinitPlatform};
+use waft_foundation::{App, Completer, Entity, Listener, Task, Timer};
+use waft_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
+use waft_shell::Shell;
+use waft_widgets::{
     AppLifecycleListener, BuildContext, Column, DecoratedBox, Directionality, DropListener,
     IntoWidget, Padding, StatelessWidget, Text, WidgetRef, run_app_with,
 };

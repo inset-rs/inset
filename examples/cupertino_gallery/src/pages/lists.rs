@@ -4,12 +4,12 @@
 //! detail worth watching: a section with leading widgets starts its dividers past them, and
 //! `has_leading(false)` is what tells it there are none.
 
-use inset_cupertino::{
+use waft_cupertino::{
     CupertinoColors, CupertinoDynamicColor, CupertinoFormRow, CupertinoFormSection, CupertinoIcons,
     CupertinoListSection, CupertinoListTile, CupertinoListTileChevron,
 };
-use inset_foundation::App;
-use inset_widgets::{BuildContext, IntoWidget, Text, WidgetRef};
+use waft_foundation::App;
+use waft_widgets::{BuildContext, IntoWidget, Text, WidgetRef};
 
 use crate::support::{badge, screen, scrolling_body, secondary, section_with_footer};
 

@@ -1,0 +1,32 @@
+[package]
+name = "waft-winui"
+description = "WinUI 3 controls and Fluent styling for the Waft UI framework"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["ui", "gui", "winui", "fluent", "waft"]
+categories.workspace = true
+readme = "README.md"
+include = ["src/**", "assets/**", "tests/**", "LICENSE", "THIRD_PARTY.md", "README.md", "Cargo.toml"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+waft-animation.workspace = true
+waft-embedder.workspace = true
+waft-foundation.workspace = true
+waft-gestures.workspace = true
+waft-painting.workspace = true
+waft-rendering.workspace = true
+waft-scheduler.workspace = true
+waft-services.workspace = true
+waft-widgets.workspace = true
+
+[dev-dependencies]
+waft-test.workspace = true
+
+[lints]
+workspace = true

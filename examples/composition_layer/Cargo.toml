@@ -8,13 +8,13 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
-inset-embedder.workspace = true
-inset-embedder-winit.workspace = true
-inset-foundation.workspace = true
-inset-painting.workspace = true
-inset-scheduler.workspace = true
-inset-shell.workspace = true
-inset-widgets.workspace = true
+waft-embedder.workspace = true
+waft-embedder-winit.workspace = true
+waft-foundation.workspace = true
+waft-painting.workspace = true
+waft-scheduler.workspace = true
+waft-shell.workspace = true
+waft-widgets.workspace = true
 
 # What a producer draws into: IOSurfaces, allocated and filled on the CPU.
 [target.'cfg(target_os = "macos")'.dependencies]

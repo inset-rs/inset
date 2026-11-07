@@ -4,15 +4,15 @@ mod common;
 use common::GalleryFixtureExt;
 
 use common::Fixture;
-use inset_embedder::{Offset, PointerChange, TextDirection};
-use inset_foundation::{App, Handle, Listener};
-use inset_rendering::{CrossAxisAlignment, RenderParagraph};
-use inset_services::{
+use std::{cell::Cell, rc::Rc, time::Duration};
+use waft_embedder::{Offset, PointerChange, TextDirection};
+use waft_foundation::{App, Handle, Listener};
+use waft_rendering::{CrossAxisAlignment, RenderParagraph};
+use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
 };
-use inset_widgets::*;
-use inset_winui::*;
-use std::{cell::Cell, rc::Rc, time::Duration};
+use waft_widgets::*;
+use waft_winui::*;
 
 #[derive(Default, Debug)]
 struct Probe {
@@ -57,7 +57,7 @@ impl StatefulWidget for Owner {
 
 impl State for OwnerState {
     type Widget = Owner;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         self.widget(app).probe.state.set(Some(self));
@@ -117,7 +117,7 @@ impl State for OwnerState {
                             .is_enabled(app.get(self).enabled)
                             .into_widget(),
                         SizedBox::new().height(80.0).into_widget(),
-                        inset_widgets::Listener::new()
+                        waft_widgets::Listener::new()
                             .on_pointer_down(Rc::new(move |_, _| {
                                 raw_outside
                                     .raw_outside

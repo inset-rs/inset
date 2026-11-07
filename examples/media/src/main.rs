@@ -6,24 +6,24 @@
 //! pauses or plays it.
 //!
 //! ```text
-//! cargo inset run -p media -- <a movie's path or link>
+//! cargo waft run -p media -- <a movie's path or link>
 //! ```
 //!
-//! Run through `cargo inset`, the app is a bundle that says why it uses the camera
+//! Run through `cargo waft`, the app is a bundle that says why it uses the camera
 //! (`usage_descriptions` in its `Cargo.toml`), without which macOS ends an app that opens one.
 
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use inset_embedder::{
+use waft_embedder::{
     Camera, CameraDevice, CameraError, CameraFormat, CameraOutputs, Color, PickedFile,
     PlayerActivity, TextDirection, WindowConfig,
 };
-use inset_embedder_winit::WinitEmbedder;
-use inset_foundation::{App, AsyncApp, Entity, Handle, Listenable, Listener};
-use inset_painting::{BoxDecoration, TextStyle};
-use inset_shell::Shell;
-use inset_widgets::{
+use waft_embedder_winit::WinitEmbedder;
+use waft_foundation::{App, AsyncApp, Entity, Handle, Listenable, Listener};
+use waft_painting::{BoxDecoration, TextStyle};
+use waft_shell::Shell;
+use waft_widgets::{
     BuildContext, CameraPreview, CameraSession, Center, DecoratedBox, Directionality, Expanded,
     GestureDetector, IntoWidget, Player, PlayerView, Row, StatelessWidget, Text, WidgetRef,
     available_cameras, available_cameras_changed, open_camera, run_app_with,
@@ -59,7 +59,7 @@ fn start(app: &mut App, url: Option<String>) {
     let camera = app.new_entity(|_cx| CameraPane::Opening);
     open_first_camera(app, &camera);
     let window = WindowConfig {
-        title: "Inset — media".to_owned(),
+        title: "Waft — media".to_owned(),
         size: [960.0, 400.0],
         ..WindowConfig::default()
     };

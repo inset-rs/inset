@@ -1,4 +1,4 @@
-# Inset
+# Waft
 
 A Flutter port in Rust. The framework matches Flutter closely enough that upstream changes land without worry. Below it, dart:ui as an embedder interface (value types and host traits) so the same framework runs in tests and on real hosts.
 
@@ -6,7 +6,7 @@ Reference checkouts live under `.reference/` at the repo root. That folder is no
 
 - Flutter is the spec: `.reference/flutter/packages/flutter/lib/src`. Read the Dart. Do not write Flutter from memory.
 - Zed (`crates/gpui`) is prior art for `Entity` as a user-facing store (not used to implement Flutter): `.reference/zed/crates/gpui`.
-- Microsoft UI XAML is the spec of `crates/inset-winui`, the WinUI kit: `.reference/microsoft-ui-xaml`.
+- Microsoft UI XAML is the spec of `crates/waft-winui`, the WinUI kit: `.reference/microsoft-ui-xaml`.
 
 If a checkout is missing, clone it there.
 
@@ -28,8 +28,8 @@ Run affected tests during ordinary work. Full workspace tests and clippy for a f
 
 ## Two layers
 
-- **Embedder interface** — dart:ui as host traits and value types, so the same framework runs in tests and on real hosts. The framework depends on `inset-embedder`, never on a host crate. Hosts implement the traits and drive the client; they do not name `App`.
-- **Framework** — a verbatim Flutter port. Crate order follows Flutter: dart:ui (`inset-embedder`) → foundation → scheduler → gestures → services → painting → rendering → widgets. Lower crates do not name higher crates. dart:ui value types (`Offset`, `Color`, `Shadow`, …) live in `inset-embedder` with the host traits.
+- **Embedder interface** — dart:ui as host traits and value types, so the same framework runs in tests and on real hosts. The framework depends on `waft-embedder`, never on a host crate. Hosts implement the traits and drive the client; they do not name `App`.
+- **Framework** — a verbatim Flutter port. Crate order follows Flutter: dart:ui (`waft-embedder`) → foundation → scheduler → gestures → services → painting → rendering → widgets. Lower crates do not name higher crates. dart:ui value types (`Offset`, `Color`, `Shadow`, …) live in `waft-embedder` with the host traits.
 
 Current loose target: cupertino widgets, first `CupertinoButton` that presses and fades, sitting on that stack — not a shortcut past it.
 
@@ -40,13 +40,13 @@ Accessibility is deferred. Do not stub `SemanticsBinding`, reduced-motion behavi
 One `App`. Every framework callback gets `&mut App` plus a typed handle to itself.
 
 - **`Handle<T>`** — Copy generational id, point access (`app.get` / `app.get_mut`). Exclusivity lasts one field access, never a whole pass. Flutter objects live here: elements, render objects, `AnimationController`, `ScrollController`, `FocusNode`, and the rest. `ChangeNotifier` is mixed in as a `ChangeNotifierData` field (mixin-as-field).
-- **`Entity<T>`** — Clone, refcounted store the app author writes (`inset-foundation`). Not a Flutter type, and not where Elements, render objects, or controllers live. Construct with `app.new_entity(|cx| Counter { count: 0 })`. Read with `app.read(&entity)`. Mutate with `app.update(&entity, |counter, cx| { … })`, which takes `T` out of the map for the closure (`cx` is `Context<T>`). Updating the same entity again inside that closure panics; other entities and every Handle stay reachable. `cx.notify()` runs `observe` callbacks and marks any element whose last widget `build` called `read` or `update` on this entity. `cx.emit` and `subscribe` carry a typed payload and do not rebuild. A `read` inside `StatelessWidget::build` or `State::build` is a dependency; a `read` in a pointer callback is not.
+- **`Entity<T>`** — Clone, refcounted store the app author writes (`waft-foundation`). Not a Flutter type, and not where Elements, render objects, or controllers live. Construct with `app.new_entity(|cx| Counter { count: 0 })`. Read with `app.read(&entity)`. Mutate with `app.update(&entity, |counter, cx| { … })`, which takes `T` out of the map for the closure (`cx` is `Context<T>`). Updating the same entity again inside that closure panics; other entities and every Handle stay reachable. `cx.notify()` runs `observe` callbacks and marks any element whose last widget `build` called `read` or `update` on this entity. `cx.emit` and `subscribe` carry a typed payload and do not rebuild. A `read` inside `StatelessWidget::build` or `State::build` is a dependency; a `read` in a pointer callback is not.
 
 Do not lease a Handle out of the arena for a pass. shaft-rs-next did that; layout then could not re-enter the node it was laying out.
 
 ## Porting
 
-**Before writing or changing any Rust that corresponds to a Flutter file, read `.agents/skills/porting-flutter/SKILL.md`.** For `crates/inset-winui` and `winui_gallery`, whose spec is WinUI rather than Flutter, read `.agents/skills/porting-winui/SKILL.md` instead.
+**Before writing or changing any Rust that corresponds to a Flutter file, read `.agents/skills/porting-flutter/SKILL.md`.** For `crates/waft-winui` and `winui_gallery`, whose spec is WinUI rather than Flutter, read `.agents/skills/porting-winui/SKILL.md` instead.
 
 Copy the Dart, then modify. Do not rewrite from understanding — models are bad at repeating a file they have only read.
 

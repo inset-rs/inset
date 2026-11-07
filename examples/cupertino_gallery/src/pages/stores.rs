@@ -5,15 +5,15 @@
 
 use std::rc::Rc;
 
-use inset_cupertino::{
+use waft_cupertino::{
     CupertinoButton, CupertinoButtonSize, CupertinoColors, CupertinoDynamicColor, CupertinoIcons,
     CupertinoListSection, CupertinoListTile, CupertinoListTileChevron, CupertinoTheme,
 };
-use inset_embedder::{FontFeature, FontWeight, TextAlign};
-use inset_foundation::{App, Entity, Listener, Task};
-use inset_painting::{AnyColor, EdgeInsetsGeometry};
-use inset_rendering::{CrossAxisAlignment, MainAxisAlignment, MainAxisSize};
-use inset_widgets::{
+use waft_embedder::{FontFeature, FontWeight, TextAlign};
+use waft_foundation::{App, Entity, Listener, Task};
+use waft_painting::{AnyColor, EdgeInsetsGeometry};
+use waft_rendering::{CrossAxisAlignment, MainAxisAlignment, MainAxisSize};
+use waft_widgets::{
     BuildContext, Column, Icon, IconData, IntoWidget, Padding, Row, SizedBox, StatelessWidget,
     Text, WidgetRef,
 };

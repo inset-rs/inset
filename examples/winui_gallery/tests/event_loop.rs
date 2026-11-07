@@ -1,20 +1,20 @@
 //! The gallery under a driver that behaves like the winit embedder: frames only when requested, timers only when the dispatcher's `wake_at` deadline is reached or a ready task asks with `wake_now`, the app clock advanced only by frames and wakes.
 #![feature(arbitrary_self_types)]
-use inset_embedder::valo::Context;
-use inset_embedder::{
-    Contact, Dispatcher, EmbedderClient, FontSource, Frame, Instant, Offset, Platform,
-    PointerDeviceKind, PointerReport, ReportedChange, SystemFontSource, TargetPlatform, View,
-    ViewId, ViewRef,
-};
-use inset_rendering::RenderParagraph;
-use inset_shell::Shell;
-use inset_widgets::WidgetsBinding;
-use inset_winui_test_support::CaptureView;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use waft_embedder::valo::Context;
+use waft_embedder::{
+    Contact, Dispatcher, EmbedderClient, FontSource, Frame, Instant, Offset, Platform,
+    PointerDeviceKind, PointerReport, ReportedChange, SystemFontSource, TargetPlatform, View,
+    ViewId, ViewRef,
+};
+use waft_rendering::RenderParagraph;
+use waft_shell::Shell;
+use waft_widgets::WidgetsBinding;
+use waft_winui_test_support::CaptureView;
 
 /// Records the next turn the framework asks for, so the driver can fire it when that time comes.
 struct LoopDispatcher {
@@ -113,12 +113,12 @@ struct Driver {
 impl Driver {
     fn new() -> Driver {
         let (device, queue) =
-            inset_winui_test_support::gpu::headless_device().expect("GPU required");
+            waft_winui_test_support::gpu::headless_device().expect("GPU required");
         let view = Rc::new(CaptureView {
             size: [900, 2000],
             renderer: RefCell::new(Context::new(device, queue)),
             pixels: RefCell::new(Vec::new()),
-            host: inset_test::TestViewHost::default(),
+            host: waft_test::TestViewHost::default(),
         });
         let platform = Rc::new(LoopPlatform {
             view,

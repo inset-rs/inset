@@ -1,6 +1,6 @@
 //! One navigation entry per feature, following the Cupertino gallery's explicit catalog.
 
-use inset_winui::FluentSymbol;
+use waft_winui::FluentSymbol;
 
 /// A gallery destination with its own retained examples and scroll position.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

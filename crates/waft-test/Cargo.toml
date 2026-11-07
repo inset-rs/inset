@@ -1,0 +1,18 @@
+[package]
+name = "waft-test"
+description = "Test scaffolding for Waft: a platform and a view to run an App under"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+waft-embedder.workspace = true
+# The device a video frame's texture is made on, which a mock frame names to make none.
+wgpu.workspace = true
+
+[lints]
+workspace = true

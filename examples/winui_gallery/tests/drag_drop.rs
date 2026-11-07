@@ -1,15 +1,15 @@
 //! Native drag/drop prerequisites exercised through real hit testing and pointer routing.
 #![feature(arbitrary_self_types)]
 
-use inset_embedder::{Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
-use inset_foundation::{App, Handle, Listener};
-use inset_gestures::GestureBinding;
-use inset_widgets::*;
-use inset_winui_test_support::Fixture;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
+use waft_embedder::{Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
+use waft_foundation::{App, Handle, Listener};
+use waft_gestures::GestureBinding;
+use waft_widgets::*;
+use waft_winui_test_support::Fixture;
 
 #[derive(Clone, Debug, Default)]
 struct Probe {
@@ -38,7 +38,7 @@ impl StatefulWidget for Page {
 
 impl State for PageState {
     type Widget = Page;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         let probe = self.widget(app).0.clone();
@@ -120,7 +120,7 @@ fn fixture_with_delayed(delayed: bool) -> (Fixture, Probe) {
         );
         run_app(
             app,
-            WidgetsApp::new(inset_embedder::Color::new(0xff000000))
+            WidgetsApp::new(waft_embedder::Color::new(0xff000000))
                 .debug_show_checked_mode_banner(false)
                 .builder(move |_, _, _| Overlay::new().initial_entries([entry]).into_widget())
                 .into_widget(),

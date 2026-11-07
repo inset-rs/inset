@@ -7,11 +7,11 @@
 use std::rc::Rc;
 
 use indexmap::IndexMap;
-use inset_cupertino::{CupertinoColors, CupertinoSegmentedControl};
-use inset_embedder::Color;
-use inset_foundation::{App, Handle, ValueChanged};
-use inset_painting::{BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry};
-use inset_widgets::{
+use waft_cupertino::{CupertinoColors, CupertinoSegmentedControl};
+use waft_embedder::Color;
+use waft_foundation::{App, Handle, ValueChanged};
+use waft_painting::{BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry};
+use waft_widgets::{
     BuildContext, Container, DefaultTextStyle, IntoWidget, Padding, State, StateData,
     StatefulWidget, Text, WidgetRef,
 };
@@ -79,7 +79,7 @@ impl StatefulWidget for SegmentsDemo {
 
 impl State for Selections {
     type Widget = SegmentsDemo;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let choose: ValueChanged<Sky> = Rc::new(move |app: &mut App, sky| {

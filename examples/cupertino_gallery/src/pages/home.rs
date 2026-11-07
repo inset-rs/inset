@@ -6,14 +6,14 @@
 
 use std::rc::Rc;
 
-use inset_cupertino::{
+use waft_cupertino::{
     CupertinoDynamicColor, CupertinoListTile, CupertinoListTileChevron,
     CupertinoSliverNavigationBar,
 };
-use inset_foundation::{App, Task};
-use inset_painting::EdgeInsetsGeometry;
-use inset_rendering::MainAxisSize;
-use inset_widgets::{BuildContext, IntoWidget, Padding, Row, StatelessWidget, Text, WidgetRef};
+use waft_foundation::{App, Task};
+use waft_painting::EdgeInsetsGeometry;
+use waft_rendering::MainAxisSize;
+use waft_widgets::{BuildContext, IntoWidget, Padding, Row, StatelessWidget, Text, WidgetRef};
 
 use crate::app::{INDEX_TITLE, open_entry};
 use crate::catalog::Entry;

@@ -7,9 +7,9 @@
 
 use std::rc::Rc;
 
-use inset_cupertino::{CupertinoListTile, CupertinoListTileChevron, CupertinoNavigationBar};
-use inset_foundation::{App, Task};
-use inset_widgets::{BuildContext, IntoWidget, Text, WidgetRef};
+use waft_cupertino::{CupertinoListTile, CupertinoListTileChevron, CupertinoNavigationBar};
+use waft_foundation::{App, Task};
+use waft_widgets::{BuildContext, IntoWidget, Text, WidgetRef};
 
 use crate::app::open_sub_page;
 use crate::catalog::Entry;

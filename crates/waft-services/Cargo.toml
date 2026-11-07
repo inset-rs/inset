@@ -1,0 +1,24 @@
+[package]
+name = "waft-services"
+description = "Keyboard, text input, and system services for Waft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+indexmap.workspace = true
+waft-embedder.workspace = true
+waft-foundation.workspace = true
+waft-gestures.workspace = true
+waft-scheduler.workspace = true
+unicode-segmentation.workspace = true
+
+[dev-dependencies]
+waft-test.workspace = true
+
+[lints]
+workspace = true

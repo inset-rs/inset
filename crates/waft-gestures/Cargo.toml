@@ -1,0 +1,20 @@
+[package]
+name = "waft-gestures"
+description = "Gesture arena and recognizers for Waft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+indexmap.workspace = true
+waft-embedder.workspace = true
+waft-foundation.workspace = true
+waft-scheduler.workspace = true
+web-time.workspace = true
+
+[lints]
+workspace = true

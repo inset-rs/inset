@@ -1,0 +1,19 @@
+[package]
+name = "waft-foundation"
+description = "App, Handle, and Entity for Waft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+async-task.workspace = true
+indexmap.workspace = true
+waft-embedder.workspace = true
+slotmap.workspace = true
+
+[lints]
+workspace = true

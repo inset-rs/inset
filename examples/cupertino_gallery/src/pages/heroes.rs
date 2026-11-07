@@ -15,13 +15,13 @@
 
 use std::rc::Rc;
 
-use inset_animation::{AnyAnimation, Tween};
-use inset_cupertino::{
+use waft_animation::{AnyAnimation, Tween};
+use waft_cupertino::{
     CupertinoColors, CupertinoDynamicColor, CupertinoListTile, CupertinoListTileChevron,
 };
-use inset_foundation::{App, Task};
-use inset_painting::{AnyColor, BorderRadiusGeometry, BoxDecoration};
-use inset_widgets::{
+use waft_foundation::{App, Task};
+use waft_painting::{AnyColor, BorderRadiusGeometry, BoxDecoration};
+use waft_widgets::{
     AnimatedBuilder, BuildContext, Container, Hero, HeroTagRef, IntoWidget, Text, WidgetRef,
 };
 

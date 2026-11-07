@@ -5,10 +5,10 @@
 // example has no `unsafe`.
 #![allow(unsafe_code)]
 
-use inset_embedder::{RawWindowHandle, WindowRef};
 use objc2::rc::Retained;
 use objc2_app_kit::NSView;
 use objc2_quartz_core::CALayer;
+use waft_embedder::{RawWindowHandle, WindowRef};
 
 /// The layer of `window`'s view, which AppKit gives it as it hosts the view's drawing; `None` for
 /// a window that has closed. Main thread.

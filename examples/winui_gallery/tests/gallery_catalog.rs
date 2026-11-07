@@ -4,9 +4,9 @@ mod common;
 use common::GalleryFixtureExt;
 
 use common::Fixture;
-use inset_widgets::downcast_widget;
-use inset_winui::NavigationView;
 use std::collections::HashSet;
+use waft_widgets::downcast_widget;
+use waft_winui::NavigationView;
 use winui_gallery::Feature;
 
 #[test]

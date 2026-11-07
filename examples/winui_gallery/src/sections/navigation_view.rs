@@ -1,10 +1,10 @@
 //! Adaptive left/top navigation, nested items, footer actions and back requests.
 
 use crate::{column, example, example_row, label, section};
-use inset_foundation::{App, Handle, Listener};
-use inset_painting::EdgeInsetsGeometry;
-use inset_widgets::*;
-use inset_winui::*;
+use waft_foundation::{App, Handle, Listener};
+use waft_painting::EdgeInsetsGeometry;
+use waft_widgets::*;
+use waft_winui::*;
 
 /// Builds the interactive NavigationView gallery section.
 pub fn build(resources: &ThemeResources) -> Vec<WidgetRef> {
@@ -70,7 +70,7 @@ impl StatefulWidget for NavigationDemo {
 
 impl State for NavigationDemoState {
     type Widget = NavigationDemo;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let resources = ThemeResources::of(app, context);

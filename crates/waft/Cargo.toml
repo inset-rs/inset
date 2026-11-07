@@ -1,0 +1,23 @@
+[package]
+name = "waft"
+description = "UI framework: Flutter's widgets, plus Entity, on a Rust render engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+waft-embedder.workspace = true
+waft-embedder-default.workspace = true
+waft-foundation.workspace = true
+waft-macros.workspace = true
+waft-painting.workspace = true
+waft-shell.workspace = true
+waft-scheduler.workspace = true
+waft-widgets.workspace = true
+
+[lints]
+workspace = true

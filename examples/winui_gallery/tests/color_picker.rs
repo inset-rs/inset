@@ -6,15 +6,15 @@ mod common;
 use common::GalleryFixtureExt;
 
 use common::{Fixture, mount};
-use inset_embedder::{Color, Offset, PointerChange, Rect, TextAffinity, TextRange, TextSelection};
-use inset_foundation::{App, Handle, Listener};
-use inset_services::{
+use std::{cell::RefCell, rc::Rc};
+use waft_embedder::{Color, Offset, PointerChange, Rect, TextAffinity, TextRange, TextSelection};
+use waft_foundation::{App, Handle, Listener};
+use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey as Key,
     PhysicalKeyboardKey as Physical, TextEditingValue, TextInput,
 };
-use inset_widgets::*;
-use inset_winui::*;
-use std::{cell::RefCell, rc::Rc};
+use waft_widgets::*;
+use waft_winui::*;
 use winui_gallery::Feature;
 
 /// A gallery page tall enough to show every example without scrolling.
@@ -159,7 +159,7 @@ fn label_starting(f: &Fixture, prefix: &str) -> String {
         .find_map(|element| {
             let paragraph = element
                 .render_object(&app)?
-                .downcast::<inset_rendering::RenderParagraph>(&app)?;
+                .downcast::<waft_rendering::RenderParagraph>(&app)?;
             let text = paragraph.text(&app).to_plain_text(true, true);
             text.starts_with(prefix).then_some(text)
         })
@@ -227,7 +227,7 @@ fn shows(f: &Fixture, text: &str) -> bool {
     elements.into_iter().any(|element| {
         element
             .render_object(&app)
-            .and_then(|object| object.downcast::<inset_rendering::RenderParagraph>(&app))
+            .and_then(|object| object.downcast::<waft_rendering::RenderParagraph>(&app))
             .is_some_and(|paragraph| paragraph.text(&app).to_plain_text(true, true) == text)
     })
 }
@@ -245,7 +245,7 @@ fn the_page_in_its_shapes_options_and_themes() {
     f.capture("color_picker_box_light");
     // Four pixels in from the top left: hue 5.6, saturation 0.98; the bottom is white.
     let spectrum = spectrum_bounds(&f);
-    assert_eq!(spectrum.size(), inset_embedder::Size::new(256.0, 256.0));
+    assert_eq!(spectrum.size(), waft_embedder::Size::new(256.0, 256.0));
     let near = |a: [u8; 3], b: [u8; 3]| a.iter().zip(b).all(|(a, b)| a.abs_diff(b) <= 3);
     let top_left = pixel(&f, spectrum.top_left() + Offset::new(4.0, 4.0));
     assert!(near(top_left, [255, 28, 4]), "{top_left:?}");
@@ -290,7 +290,7 @@ fn the_standalone_spectrum_is_a_ring_of_saturation_and_value() {
     let mut f = gallery();
     let ring =
         bounds_of::<ColorSpectrum>(&f, |spectrum| spectrum.shape == ColorSpectrumShape::Ring);
-    assert_eq!(ring.size(), inset_embedder::Size::new(200.0, 200.0));
+    assert_eq!(ring.size(), waft_embedder::Size::new(200.0, 200.0));
     // The centre is black: value runs from the outside in.
     let centre = pixel(&f, ring.center() + Offset::new(2.0, 2.0));
     assert!(centre.iter().all(|c| *c < 20), "{centre:?}");
@@ -352,7 +352,7 @@ fn hex(color: Color) -> String {
 
 impl State for OwnerState {
     type Widget = Owner;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         let log = self.widget(app).log.clone();
@@ -445,9 +445,9 @@ fn owner_of(
                     Theme::Light,
                     ColoredBox::new(Color::from_argb(255, 243, 243, 243)).child(
                         Align::new()
-                            .alignment(inset_painting::AlignmentGeometry::TOP_START)
+                            .alignment(waft_painting::AlignmentGeometry::TOP_START)
                             .child(
-                                Padding::new(inset_painting::EdgeInsetsGeometry::all(12.0)).child(
+                                Padding::new(waft_painting::EdgeInsetsGeometry::all(12.0)).child(
                                     Owner {
                                         initial,
                                         log: root,

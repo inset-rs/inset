@@ -1,8 +1,8 @@
 //! `CupertinoTextField`: the rounded field, a placeholder, a disabled field, and a password.
 
-use inset_cupertino::{CupertinoTextField, OverlayVisibilityMode};
-use inset_foundation::App;
-use inset_widgets::{BuildContext, WidgetRef};
+use waft_cupertino::{CupertinoTextField, OverlayVisibilityMode};
+use waft_foundation::App;
+use waft_widgets::{BuildContext, WidgetRef};
 
 use crate::support::{screen, scrolling_body, section_with_footer, showcase_leading};
 

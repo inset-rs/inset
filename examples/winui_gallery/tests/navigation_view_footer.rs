@@ -1,12 +1,12 @@
 //! Custom pane footers measure independently of settings and footer menu items.
 #![feature(arbitrary_self_types)]
 
-use inset_embedder::Offset;
-use inset_foundation::{App, Handle, Listener};
-use inset_widgets::*;
-use inset_winui::*;
-use inset_winui_test_support::Fixture;
 use std::{cell::Cell, rc::Rc};
+use waft_embedder::Offset;
+use waft_foundation::{App, Handle, Listener};
+use waft_widgets::*;
+use waft_winui::*;
+use waft_winui_test_support::Fixture;
 
 /// Gives the test access to the owning page and its custom footer container.
 #[derive(Clone, Debug)]
@@ -40,7 +40,7 @@ impl StatefulWidget for Page {
 
 impl State for PageState {
     type Widget = Page;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         let probe = self.widget(app).0.clone();

@@ -1,17 +1,17 @@
 //! Exercise the private TabView scrolling template without exposing it as public kit API.
 #![feature(arbitrary_self_types)]
 #[allow(dead_code)]
-#[path = "../../../crates/inset-winui/src/controls/scroll_tab_viewer.rs"]
+#[path = "../../../crates/waft-winui/src/controls/scroll_tab_viewer.rs"]
 mod template;
 
-use inset_embedder::{Offset, PointerChange, Rect};
-use inset_foundation::{App, Handle, Listener};
-use inset_painting::{Axis, EdgeInsetsGeometry};
-use inset_widgets::*;
-use inset_winui::*;
-use inset_winui_test_support::Fixture;
 use std::{cell::Cell, rc::Rc, time::Duration};
 use template::TabScrollViewer;
+use waft_embedder::{Offset, PointerChange, Rect};
+use waft_foundation::{App, Handle, Listener};
+use waft_painting::{Axis, EdgeInsetsGeometry};
+use waft_widgets::*;
+use waft_winui::*;
+use waft_winui_test_support::Fixture;
 
 #[derive(Clone, Debug, Default)]
 struct Probe {
@@ -38,7 +38,7 @@ impl StatefulWidget for Page {
 }
 impl State for PageState {
     type Widget = Page;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         let probe = self.widget(app).0.clone();

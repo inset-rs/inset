@@ -13,14 +13,14 @@
 
 use std::rc::Rc;
 
-use inset_cupertino::{
+use waft_cupertino::{
     CupertinoColors, CupertinoDynamicColor, CupertinoListTile, CupertinoListTileChevron,
     CupertinoNavigationBar,
 };
-use inset_foundation::{App, Task};
-use inset_painting::{AlignmentGeometry, BoxDecoration, EdgeInsetsGeometry};
-use inset_rendering::CrossAxisAlignment;
-use inset_widgets::{BuildContext, Column, Container, IntoWidget, SafeArea, Text, WidgetRef};
+use waft_foundation::{App, Task};
+use waft_painting::{AlignmentGeometry, BoxDecoration, EdgeInsetsGeometry};
+use waft_rendering::CrossAxisAlignment;
+use waft_widgets::{BuildContext, Column, Container, IntoWidget, SafeArea, Text, WidgetRef};
 
 use crate::app::open_sub_page;
 use crate::catalog::Entry;

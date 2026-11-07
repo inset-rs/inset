@@ -2,19 +2,19 @@
 #![feature(arbitrary_self_types)]
 mod common;
 
-use inset_embedder::{
-    Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, Rect,
-};
-use inset_foundation::{App, Handle, Listener, ValueKey};
-use inset_gestures::GestureBinding;
-use inset_services::{
-    HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
-};
-use inset_widgets::*;
-use inset_winui::*;
-use inset_winui_test_support::Fixture;
 use std::time::Duration;
 use std::{cell::Cell, rc::Rc};
+use waft_embedder::{
+    Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, Rect,
+};
+use waft_foundation::{App, Handle, Listener, ValueKey};
+use waft_gestures::GestureBinding;
+use waft_services::{
+    HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
+};
+use waft_widgets::*;
+use waft_winui::*;
+use waft_winui_test_support::Fixture;
 
 /// Gives tests access to the owner without replacing the TabView.
 #[derive(Clone, Debug, Default)]
@@ -67,7 +67,7 @@ impl StatefulWidget for Page {
 
 impl State for PageState {
     type Widget = Page;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         self.widget(app).0.0.set(Some(self));
@@ -130,7 +130,7 @@ impl State for PageState {
         }));
         if state.custom_feedback {
             tabs = tabs.tab_drag_feedback_builder(|_, _, _| {
-                ColoredBox::new(inset_embedder::Color::from_argb(255, 255, 0, 255))
+                ColoredBox::new(waft_embedder::Color::from_argb(255, 255, 0, 255))
                     .child(Text::new("Independent preview"))
                     .into_widget()
             });
@@ -163,7 +163,7 @@ impl StatefulWidget for Counter {
 
 impl State for CounterState {
     type Widget = Counter;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         Button::text(
@@ -429,7 +429,7 @@ impl StatefulWidget for CrossPage {
 }
 impl State for CrossState {
     type Widget = CrossPage;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         self.widget(app).0.0.set(Some(self));
         let items = |ids: &[usize]| {

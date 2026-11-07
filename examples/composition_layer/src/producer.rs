@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use inset_embedder::{CompositionLayer, HardwareBuffer, ScreenId, VsyncObserver, VsyncWaiter};
+use waft_embedder::{CompositionLayer, HardwareBuffer, ScreenId, VsyncObserver, VsyncWaiter};
 
 use crate::iosurface;
 

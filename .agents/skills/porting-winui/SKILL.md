@@ -1,14 +1,14 @@
 ---
 name: porting-winui
 description: >-
-  Port WinUI 3 controls and Fluent styling into `crates/inset-winui` from Microsoft's
+  Port WinUI 3 controls and Fluent styling into `crates/waft-winui` from Microsoft's
   source: templates, theme resources and behavior. Use before writing or changing any
-  Rust in `crates/inset-winui` or the `winui_gallery` example.
+  Rust in `crates/waft-winui` or the `winui_gallery` example.
 ---
 
 # Porting WinUI
 
-WinUI 3 (Fluent 2) on the Inset framework, ported from Microsoft's open source. Read values and behavior from the source, not from memory or screenshots. Desktop first: WinUI adapts by window size, not by device.
+WinUI 3 (Fluent 2) on the Waft framework, ported from Microsoft's open source. Read values and behavior from the source, not from memory or screenshots. Desktop first: WinUI adapts by window size, not by device.
 
 Ground truth: `.reference/microsoft-ui-xaml`. If that checkout is missing, clone it as `AGENTS.md` says.
 
@@ -22,19 +22,19 @@ Ground truth: `.reference/microsoft-ui-xaml`. If that checkout is missing, clone
 ## How the code is shaped
 
 - `theme/generated.rs` holds every colour, brush, size, duration and spline of the XAML theme dictionaries in one struct, `ThemeResources`, produced by `tools/gen_resources.py`; `{ThemeResource X}` or `{StaticResource X}` in a template is its field `x`, read from `ThemeResources::of(app, context)`. It is generated rather than typed so a value cannot be mistyped or invented; a control whose resources are missing is added to `DEFAULT_CONTROLS` in the generator.
-- A control file is a transcription of its `ControlTemplate`: the elements in order with their `x:Name`s in comments, each visual state group as an enum, the storyboards as the animations they declare. Its behaviour follows the C++ as closely as Inset allows.
+- A control file is a transcription of its `ControlTemplate`: the elements in order with their `x:Name`s in comments, each visual state group as an enum, the storyboards as the animations they declare. Its behaviour follows the C++ as closely as Waft allows.
 - What the repository leaves to Windows (accent shades, system colours, theme-animation timings, Segoe UI) has a substitute and a `PORTING.md` entry saying so. Text is Selawik, Microsoft's metric-compatible open substitute for Segoe UI, bundled with the gallery.
-- Widget construction follows `crates/inset-winui/docs/widget-syntax.md`.
+- Widget construction follows `crates/waft-winui/docs/widget-syntax.md`.
 
 ## Development
 
-The kit builds on the workspace's own Inset crates. The gallery is `winui_gallery`; its pages demonstrate control behavior and application-owned state. Keep gallery-specific setup in its tests and reusable GPU helpers in the unpublished `inset-winui-test-support` crate, used through dev-dependencies.
+The kit builds on the workspace's own Waft crates. The gallery is `winui_gallery`; its pages demonstrate control behavior and application-owned state. Keep gallery-specific setup in its tests and reusable GPU helpers in the unpublished `waft-winui-test-support` crate, used through dev-dependencies.
 
 ```sh
-cargo test -p inset-winui -p winui_gallery
-cargo clippy -p inset-winui -p winui_gallery --all-targets
+cargo test -p waft-winui -p winui_gallery
+cargo clippy -p waft-winui -p winui_gallery --all-targets
 WINUI_CAPTURE_DIR=$PWD/output cargo test -p winui_gallery
-python3 -m unittest discover -s crates/inset-winui/tools -p 'test_*.py'
+python3 -m unittest discover -s crates/waft-winui/tools -p 'test_*.py'
 ```
 
 ## Theme resources
@@ -42,24 +42,24 @@ python3 -m unittest discover -s crates/inset-winui/tools -p 'test_*.py'
 Building the library needs no WinUI checkout or Python. Regeneration uses `.reference/microsoft-ui-xaml`:
 
 ```sh
-python3 crates/inset-winui/tools/gen_resources.py
+python3 crates/waft-winui/tools/gen_resources.py
 ```
 
-The script owns the ordered `DEFAULT_CONTROLS` list and defaults to `crates/inset-winui/src/theme/generated.rs`. Add a newly needed dictionary to that list rather than extending a README command. Optional positional arguments override the source checkout, output file and control subset:
+The script owns the ordered `DEFAULT_CONTROLS` list and defaults to `crates/waft-winui/src/theme/generated.rs`. Add a newly needed dictionary to that list rather than extending a README command. Optional positional arguments override the source checkout, output file and control subset:
 
 ```sh
-python3 crates/inset-winui/tools/gen_resources.py /path/to/microsoft-ui-xaml /tmp/text-resources.rs TextBox PasswordBox
+python3 crates/waft-winui/tools/gen_resources.py /path/to/microsoft-ui-xaml /tmp/text-resources.rs TextBox PasswordBox
 ```
 
 The default paths are relative to the repository the script is in, not the current working directory. Explicit relative paths are relative to the current working directory. Check that regeneration produces the intended resource changes and that the generator tests pass.
 
 ## Release preparation
 
-Of the kit, only `inset-winui` is published, at the workspace's version with the rest of Inset. The gallery and test-support crate remain unpublished. The library archive includes generated resources, its icon font, licenses and porting notes.
+Of the kit, only `waft-winui` is published, at the workspace's version with the rest of Waft. The gallery and test-support crate remain unpublished. The library archive includes generated resources, its icon font, licenses and porting notes.
 
 ```sh
-cargo package -p inset-winui --list
-cargo package -p inset-winui
+cargo package -p waft-winui --list
+cargo package -p waft-winui
 ```
 
 Use `--allow-dirty` to inspect an archive of uncommitted preparation changes. Packaging verifies the crate without uploading it. Commits, pushes and publishing require an explicit user request; preparation alone does not authorize them.
@@ -76,7 +76,7 @@ Bottom up: a panel or primitive a template needs is ported before the control th
 
 ## Porting guidance
 
-Faithful WinUI behavior remains the aim, especially where later controls depend on it, to avoid drift over time. For small interaction differences, prefer Inset’s native mechanisms when reproducing the WinUI mechanism would add substantial complexity for little user benefit. One example is Button tap recognition: it uses Inset’s native tap recognizer, not WinUI's pointer capture.
+Faithful WinUI behavior remains the aim, especially where later controls depend on it, to avoid drift over time. For small interaction differences, prefer Waft’s native mechanisms when reproducing the WinUI mechanism would add substantial complexity for little user benefit. One example is Button tap recognition: it uses Waft’s native tap recognizer, not WinUI's pointer capture.
 
 ## Rules
 
@@ -86,10 +86,10 @@ Faithful WinUI behavior remains the aim, especially where later controls depend 
 
 ## PORTING.md
 
-Each source folder of `crates/inset-winui` keeps its own `PORTING.md` (`src/theme`, `src/primitives`, `src/controls`), with a section per file: `## toggle_switch.rs → ToggleSwitch`. An entry is Change / Reason / Affect, for a reader who knows Flutter and Rust but not WinUI internals; no visible Affect means identical, so no entry. An entry is three sentences: Change starts with its subject and says the idea, Reason names the kind and one fact, Affect says what a reader of the control would notice. Deferred items go under `## Deferred`, each with a trigger. The Reason is one of three, because each has its own way back:
+Each source folder of `crates/waft-winui` keeps its own `PORTING.md` (`src/theme`, `src/primitives`, `src/controls`), with a section per file: `## toggle_switch.rs → ToggleSwitch`. An entry is Change / Reason / Affect, for a reader who knows Flutter and Rust but not WinUI internals; no visible Affect means identical, so no entry. An entry is three sentences: Change starts with its subject and says the idea, Reason names the kind and one fact, Affect says what a reader of the control would notice. Deferred items go under `## Deferred`, each with a trigger. The Reason is one of three, because each has its own way back:
 
 - `os` — Windows supplies it and this host does not: a value not in the repository, or a facility of the OS. Name the substitute; the trigger is a measurement or table from a Windows machine, or a host that provides it.
-- `framework` — Inset has no equivalent of the XAML mechanism. The trigger is the framework feature.
+- `framework` — Waft has no equivalent of the XAML mechanism. The trigger is the framework feature.
 - `language` — Rust has no counterpart of the XAML or C++ shape. The Affect says what a caller writes differently.
 
 Start Change with the concrete type, constant or variant being described, then explain the behavior in ordinary language. Keep source symbol names as references, not as substitutes for an explanation. Avoid unnamed subjects such as “dragging a switch” and session-specific shorthand. Reason explains the underlying cause, rather than merely saying an API is missing; Affect describes what the user sees or what application code must do.

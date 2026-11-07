@@ -6,19 +6,19 @@ mod common;
 use common::GalleryFixtureExt;
 
 use common::Fixture;
-use inset_embedder::{
+use std::{cell::RefCell, rc::Rc};
+use waft_embedder::{
     Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
     Size, TextAffinity, TextInputAction, TextRange, TextSelection,
 };
-use inset_foundation::{App, Handle, ValueNotifier};
-use inset_gestures::GestureBinding;
-use inset_services::{
+use waft_foundation::{App, Handle, ValueNotifier};
+use waft_gestures::GestureBinding;
+use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyRepeatEvent, KeyUpEvent,
     LogicalKeyboardKey as Key, PhysicalKeyboardKey as Physical, TextEditingValue, TextInput,
 };
-use inset_widgets::*;
-use inset_winui::*;
-use std::{cell::RefCell, rc::Rc};
+use waft_widgets::*;
+use waft_winui::*;
 use winui_gallery::Feature;
 
 /// A gallery page tall enough to show every example without scrolling.

@@ -3,14 +3,14 @@
 mod common;
 use common::Fixture;
 use common::GalleryFixtureExt;
-use inset_embedder::{Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
-use inset_gestures::GestureBinding;
-use inset_rendering::RenderParagraph;
-use inset_winui::{
+use std::time::Duration;
+use waft_embedder::{Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
+use waft_gestures::GestureBinding;
+use waft_rendering::RenderParagraph;
+use waft_winui::{
     AccentPalette, CONTENT_GAP, KNOB_AREA, KNOB_TRANSLATION_RANGE, TRACK_HEIGHT, TRACK_WIDTH,
     Theme, ThemeResources,
 };
-use std::time::Duration;
 
 /// A label's left edge, centre line and height.
 fn label_bounds(fixture: &Fixture, text: &str) -> (Offset, f64) {

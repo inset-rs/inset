@@ -4,20 +4,20 @@
 mod common;
 
 use common::Fixture;
-use inset_embedder::{Offset, PointerChange, TextDirection};
-use inset_foundation::{App, Handle};
-use inset_rendering::CrossAxisAlignment;
-use inset_services::{
-    HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey as Key,
-    PhysicalKeyboardKey as Physical,
-};
-use inset_widgets::*;
-use inset_winui::*;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
     time::Duration,
 };
+use waft_embedder::{Offset, PointerChange, TextDirection};
+use waft_foundation::{App, Handle};
+use waft_rendering::CrossAxisAlignment;
+use waft_services::{
+    HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey as Key,
+    PhysicalKeyboardKey as Physical,
+};
+use waft_widgets::*;
+use waft_winui::*;
 
 const VIEWS: [&str; 4] = ["Recent", "Shared", "Favorites", "Archived"];
 const DISABLED: usize = 1;
@@ -50,7 +50,7 @@ impl StatefulWidget for Owner {
 
 impl State for OwnerState {
     type Widget = Owner;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         self.widget(app).0.state.set(Some(self));

@@ -1,10 +1,10 @@
 //! `Grid`: sizing, spacing, spans and child alignment.
 
 use crate::{example, label, section};
-use inset_embedder::Size;
-use inset_painting::Alignment;
-use inset_widgets::*;
-use inset_winui::*;
+use waft_embedder::Size;
+use waft_painting::Alignment;
+use waft_widgets::*;
+use waft_winui::*;
 
 /// Builds the grid sizing, spanning and alignment example.
 pub fn build(resources: &ThemeResources) -> Vec<WidgetRef> {

@@ -1,11 +1,11 @@
 //! Grid measures layout-time children before allocating its remaining star row.
 #![feature(arbitrary_self_types)]
 
-use inset_embedder::{Offset, Size};
-use inset_widgets::*;
-use inset_winui::{Grid, GridCell, GridLength, RowDefinition};
-use inset_winui_test_support::Fixture;
 use std::{cell::RefCell, rc::Rc};
+use waft_embedder::{Offset, Size};
+use waft_widgets::*;
+use waft_winui::{Grid, GridCell, GridLength, RowDefinition};
+use waft_winui_test_support::Fixture;
 
 /// WinUI MeasureCell calls child.Measure; a native LayoutBuilder needs actual layout.
 #[test]

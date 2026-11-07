@@ -6,16 +6,16 @@
 
 use std::rc::Rc;
 
-use inset_cupertino::CupertinoDynamicColor;
-use inset_cupertino::{
+use waft_cupertino::CupertinoDynamicColor;
+use waft_cupertino::{
     CupertinoColors, CupertinoListTile, CupertinoListTileChevron, CupertinoNavigationBar,
     CupertinoTheme, CupertinoThemeData,
 };
-use inset_embedder::Brightness;
-use inset_foundation::{App, Task};
-use inset_painting::{AnyColor, BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry};
-use inset_rendering::{CrossAxisAlignment, MainAxisAlignment};
-use inset_widgets::{
+use waft_embedder::Brightness;
+use waft_foundation::{App, Task};
+use waft_painting::{AnyColor, BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry};
+use waft_rendering::{CrossAxisAlignment, MainAxisAlignment};
+use waft_widgets::{
     BuildContext, Builder, Column, Container, IntoWidget, Padding, Row, SizedBox, Text, WidgetRef,
 };
 

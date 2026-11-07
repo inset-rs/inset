@@ -1,19 +1,19 @@
 //! Navigation's private attachment through the native overlay, focus and GPU pipeline.
 #![feature(arbitrary_self_types)]
-#[path = "../../../crates/inset-winui/src/primitives/anchored_flyout.rs"]
+#[path = "../../../crates/waft-winui/src/primitives/anchored_flyout.rs"]
 mod attachment;
 mod theme {}
 use attachment::{AnchoredFlyout, AnchoredFlyoutPlacement};
-use inset_embedder::{Offset, PointerChange, TextDirection};
-use inset_foundation::{App, Handle, Listener};
-use inset_rendering::{CrossAxisAlignment, MainAxisSize};
-use inset_services::{
+use std::{cell::Cell, rc::Rc};
+use waft_embedder::{Offset, PointerChange, TextDirection};
+use waft_foundation::{App, Handle, Listener};
+use waft_rendering::{CrossAxisAlignment, MainAxisSize};
+use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
 };
-use inset_widgets::*;
-use inset_winui::*;
-use inset_winui_test_support::Fixture;
-use std::{cell::Cell, rc::Rc};
+use waft_widgets::*;
+use waft_winui::*;
+use waft_winui_test_support::Fixture;
 
 #[derive(Clone, Debug, Default)]
 struct Probe {
@@ -59,7 +59,7 @@ impl StatefulWidget for Page {
 }
 impl State for PageState {
     type Widget = Page;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         let p = self.widget(app).0.clone();
         p.state.set(Some(self));

@@ -4,14 +4,14 @@
 //! height animates, and the tile controller is a real handle: the button in the second section
 //! drives the same tile the header tap does.
 
-use inset_cupertino::{
+use waft_cupertino::{
     CupertinoButton, CupertinoColors, CupertinoDynamicColor, CupertinoExpansionTile,
     CupertinoIcons, CupertinoListTile, ExpansionTileTransitionMode,
 };
-use inset_foundation::{App, Handle, ListenableObject, Listener};
-use inset_painting::AnyColor;
-use inset_rendering::MainAxisSize;
-use inset_widgets::{
+use waft_foundation::{App, Handle, ListenableObject, Listener};
+use waft_painting::AnyColor;
+use waft_rendering::MainAxisSize;
+use waft_widgets::{
     BuildContext, Column, ExpansibleController, IconData, IntoWidget, State, StateData,
     StatefulWidget, Text, WidgetRef,
 };
@@ -82,7 +82,7 @@ impl DrivenTile {
 
 impl State for DrivenTile {
     type Widget = ExpansionTilesDemo;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let controller = ExpansibleController::new(app);

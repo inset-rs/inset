@@ -1,12 +1,12 @@
 //! Real scene sampling and foreground isolation for the source acrylic effect pass.
 #![feature(arbitrary_self_types)]
 
-use inset_embedder::{Canvas, Color, Paint, Rect, Size};
-use inset_foundation::App;
-use inset_rendering::CustomPainter;
-use inset_widgets::*;
-use inset_winui::*;
-use inset_winui_test_support::Fixture;
+use waft_embedder::{Canvas, Color, Paint, Rect, Size};
+use waft_foundation::App;
+use waft_rendering::CustomPainter;
+use waft_widgets::*;
+use waft_winui::*;
+use waft_winui_test_support::Fixture;
 
 #[derive(Clone, Debug)]
 struct Pattern;
@@ -60,7 +60,7 @@ fn fixture_with_fallback_alpha(theme: Theme, acrylic: bool, transparent_fallback
         run_app(
             app,
             Directionality::new(
-                inset_embedder::TextDirection::Ltr,
+                waft_embedder::TextDirection::Ltr,
                 Stack::new().children(vec![
                     Positioned::fill(CustomPaint::new().painter(Pattern)).into_widget(),
                     Positioned::new(

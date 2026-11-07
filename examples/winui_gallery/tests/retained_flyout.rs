@@ -1,16 +1,16 @@
 //! Flyout content survives its opener; focus and inherited settings follow the active target.
 #![feature(arbitrary_self_types)]
 
-use inset_foundation::{App, Handle, Listener};
-use inset_painting::Alignment;
-use inset_rendering::MainAxisSize;
-use inset_widgets::*;
-use inset_winui::*;
-use inset_winui_test_support::Fixture;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
+use waft_foundation::{App, Handle, Listener};
+use waft_painting::Alignment;
+use waft_rendering::MainAxisSize;
+use waft_widgets::*;
+use waft_winui::*;
+use waft_winui_test_support::Fixture;
 
 #[derive(Clone, Debug, Default)]
 struct Probe {
@@ -51,7 +51,7 @@ impl StatefulWidget for Page {
 
 impl State for PageState {
     type Widget = Page;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let probe = self.widget(app).probe.clone();
@@ -93,7 +93,7 @@ impl State for PageState {
                 .focus_node(opener)
                 .into_widget()
             }))
-            .key(Rc::new(inset_foundation::ValueKey::new(name)))
+            .key(Rc::new(waft_foundation::ValueKey::new(name)))
             .into_widget()
         };
         ThemeScope::new(
@@ -154,7 +154,7 @@ impl StatefulWidget for Content {
 
 impl State for ContentState {
     type Widget = Content;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         app.get_mut(self).focus = Some(FocusNode::new(app).as_node());

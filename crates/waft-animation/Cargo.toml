@@ -1,0 +1,19 @@
+[package]
+name = "waft-animation"
+description = "Animation controllers and curves for Waft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+waft-foundation.workspace = true
+waft-embedder.workspace = true
+waft-physics.workspace = true
+waft-scheduler.workspace = true
+
+[lints]
+workspace = true

@@ -2,12 +2,12 @@
 //! previous colour, and a ColorSpectrum of its own, with the colours they keep.
 
 use crate::{column, example, example_row, label, section};
-use inset_embedder::Color;
-use inset_foundation::{App, Handle, Listener};
-use inset_widgets::*;
-// `Orientation` is also an `inset_widgets` name (the media query's); the picker's is XAML's.
-use inset_winui::Orientation;
-use inset_winui::*;
+use waft_embedder::Color;
+use waft_foundation::{App, Handle, Listener};
+use waft_widgets::*;
+// `Orientation` is also an `waft_widgets` name (the media query's); the picker's is XAML's.
+use waft_winui::Orientation;
+use waft_winui::*;
 
 /// Builds the ColorPicker feature page.
 pub fn build(resources: &ThemeResources) -> Vec<WidgetRef> {
@@ -89,7 +89,7 @@ impl ColorPickerDemoState {
 
 impl State for ColorPickerDemoState {
     type Widget = ColorPickerDemo;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let r = ThemeResources::of(app, context);

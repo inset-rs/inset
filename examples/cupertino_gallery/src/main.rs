@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! cargo run -p cupertino-gallery
-//! cargo inset run -d ios -p cupertino-gallery
+//! cargo waft run -d ios -p cupertino-gallery
 //! ```
 
 fn main() {

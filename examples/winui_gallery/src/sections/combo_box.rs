@@ -3,9 +3,9 @@
 //! selections they keep.
 
 use crate::{column, example, label, section};
-use inset_foundation::{App, Handle};
-use inset_widgets::*;
-use inset_winui::*;
+use waft_foundation::{App, Handle};
+use waft_widgets::*;
+use waft_winui::*;
 
 /// Builds the ComboBox feature page.
 pub fn build(resources: &ThemeResources) -> Vec<WidgetRef> {
@@ -188,7 +188,7 @@ impl ComboBoxDemoState {
 
 impl State for ComboBoxDemoState {
     type Widget = ComboBoxDemo;
-    inset_widgets::state_accessors!();
+    waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let r = ThemeResources::of(app, context);

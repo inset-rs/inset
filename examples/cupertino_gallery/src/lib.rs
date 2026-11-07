@@ -1,8 +1,8 @@
 //! A Cupertino widget gallery: an index of entries, each opening one screen that demonstrates
 //! one feature.
 //!
-//! The index is itself a [`CupertinoListSection`](inset_cupertino::CupertinoListSection) of
-//! [`CupertinoListTile`](inset_cupertino::CupertinoListTile)s, so the gallery's own structure
+//! The index is itself a [`CupertinoListSection`](waft_cupertino::CupertinoListSection) of
+//! [`CupertinoListTile`](waft_cupertino::CupertinoListTile)s, so the gallery's own structure
 //! is built out of the widgets it shows.
 //!
 //! The crate is a library as well as a binary so `tests/` can push the real gallery's pages
@@ -18,8 +18,8 @@ pub use app::{entry_route, gallery, open_entry, open_sub_page, run_gallery, sub_
 pub use catalog::Entry;
 
 /// Every host's entry point; `src/main.rs` calls the generated `main`.
-#[inset::main]
-fn main(app: &mut inset::App) {
+#[waft::main]
+fn main(app: &mut waft::App) {
     // `GALLERY_ENTRY=indicators` opens that screen over the index without a tap.
     let opening = std::env::var("GALLERY_ENTRY")
         .ok()

@@ -9,17 +9,17 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use cupertino_gallery_lib::{Entry, entry_route, gallery, sub_route};
-use inset_cupertino::{CupertinoNavigationBarBackButton, install_cupertino_icon_font};
-use inset_embedder::{
+use waft_cupertino::{CupertinoNavigationBarBackButton, install_cupertino_icon_font};
+use waft_embedder::{
     Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, TargetPlatform,
 };
-use inset_foundation::AppCell;
-use inset_gestures::GestureBinding;
-use inset_painting::PaintingBinding;
-use inset_rendering::{AnyRenderObject, RenderParagraph, RendererBinding};
-use inset_scheduler::SchedulerBinding;
-use inset_test::{IMPLICIT_VIEW_ID, TestPlatform, TestView};
-use inset_widgets::{
+use waft_foundation::AppCell;
+use waft_gestures::GestureBinding;
+use waft_painting::PaintingBinding;
+use waft_rendering::{AnyRenderObject, RenderParagraph, RendererBinding};
+use waft_scheduler::SchedulerBinding;
+use waft_test::{IMPLICIT_VIEW_ID, TestPlatform, TestView};
+use waft_widgets::{
     AnyElement, AnyRoute, GlobalKey, IntoWidget, NavigatorState, Text, WidgetsBinding,
     downcast_widget, run_app,
 };
@@ -128,7 +128,7 @@ impl Fixture {
         None
     }
 
-    fn navigator(&mut self) -> inset_foundation::Handle<NavigatorState> {
+    fn navigator(&mut self) -> waft_foundation::Handle<NavigatorState> {
         self.navigator
             .current_state::<NavigatorState>(&mut self.cell.borrow_mut())
             .expect("the CupertinoApp's navigator is mounted")
