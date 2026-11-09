@@ -1,4 +1,3 @@
-
 use std::{cell::Cell, rc::Rc, time::Duration};
 use waft_embedder::*;
 use waft_foundation::{AppCell, Listener};

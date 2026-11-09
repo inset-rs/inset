@@ -430,7 +430,8 @@ fn an_info_bar_given_spare_width_keeps_its_own() {
             .title("Title")
             .message("Message")
     };
-    let without_content = crate::common::size_under_center([300, 300], move |_| bar().into_widget());
+    let without_content =
+        crate::common::size_under_center([300, 300], move |_| bar().into_widget());
     let with_content = crate::common::size_under_center([300, 300], move |_| {
         bar()
             .content(SizedBox::new().width(10.0).height(10.0))
