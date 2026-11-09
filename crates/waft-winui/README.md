@@ -19,7 +19,7 @@ Run the gallery from the [Waft repository](https://github.com/xtyxtyx/waft-ui), 
 
 ```toml
 [dependencies]
-waft-winui = "0.3.0"
+waft-winui = "0.4.0"
 ```
 
 Use controls inside an Waft `WidgetsApp`, with `ThemeScope` selecting the light or dark theme. Call `install_icon_font` once during application setup. Controls that show popups need an `Overlay` ancestor.

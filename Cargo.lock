@@ -211,7 +211,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app-events"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "waft-embedder",
  "waft-embedder-winit",
@@ -948,7 +948,7 @@ dependencies = [
 
 [[package]]
 name = "composition_layer"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "objc2-core-foundation",
  "objc2-io-surface",
@@ -1124,7 +1124,7 @@ dependencies = [
 
 [[package]]
 name = "cupertino-gallery"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "indexmap",
  "valo-system-fonts",
@@ -2220,7 +2220,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "layout"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "waft-embedder",
  "waft-foundation",
@@ -2344,7 +2344,7 @@ checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
 
 [[package]]
 name = "media"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "waft-embedder",
  "waft-embedder-winit",
@@ -2380,7 +2380,7 @@ dependencies = [
 
 [[package]]
 name = "menus"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "waft-cupertino",
  "waft-embedder",
@@ -3056,7 +3056,7 @@ checksum = "13c45bb4a6ae1280ec0803b1ef9d3455eb50f01efbbe1447ab020f1d54fba9d8"
 
 [[package]]
 name = "paint"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "waft-embedder",
  "waft-embedder-winit",
@@ -4757,9 +4757,9 @@ dependencies = [
 
 [[package]]
 name = "valo"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbc2c9ec9f13ee38b7856baab2a8b156c90d8ccdd5bf3b1527d9fee03638ade5"
+checksum = "c8e10fa01196c537a6f37704a55074676dbe5a00b9c1e3cbf0cb36df3bde0dde"
 dependencies = [
  "futures-channel",
  "objc2",
@@ -4775,9 +4775,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eec709504ae527af3d7d83cbe424dd4a8f1c29aacafeefacdee0d3d75601eb86"
+checksum = "e95cb99f6e9897c33e675f5521cb8b79e7be93a7b8de8f5fc2102e524dc14f12"
 dependencies = [
  "valo",
  "wgpu",
@@ -4785,9 +4785,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec-apple"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "423efdb2ddabb871deef2f08873162dc5f32ea34ec496f6fdad424f00c3d9352"
+checksum = "f0f8ccbfb865ab295189b386cc468cc674ee98b50ba7d9a6824248ce8ed5bc34"
 dependencies = [
  "core-foundation",
  "core-foundation-sys",
@@ -4804,9 +4804,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec-software"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c0950bce65822ee2e78132f01ca52c2b67a7e3347b1e1cd7e42dc50822f5c64"
+checksum = "106aafb44706bcf4fb23e0a56577efee307fffe4e8c6a0d92900ec42d219e393"
 dependencies = [
  "gif",
  "image",
@@ -4819,9 +4819,9 @@ dependencies = [
 
 [[package]]
 name = "valo-dl"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "558b5406c3ac0df7c8c010923e70bc6ee7ede19845b4755ee02cb32579297a5c"
+checksum = "ee0bc29f2617d2ac1e45f0b33efb2c05346d889b5edadd69ffc8f43e7798f14b"
 dependencies = [
  "naga",
  "valo-geometry",
@@ -4831,9 +4831,9 @@ dependencies = [
 
 [[package]]
 name = "valo-fontmgr"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53f4177a739b82eddd1039949df29eb4c4e564397abf7d3796ca54642b2f30f9"
+checksum = "7b5f4b2216bfdf3ccf691e94dc76d8a8086bbe4539093608dc5f2eed4c3762db"
 dependencies = [
  "core-foundation",
  "core-foundation-sys",
@@ -4845,18 +4845,18 @@ dependencies = [
 
 [[package]]
 name = "valo-geometry"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c9e4e65ae72c9ce42f0f54cfddb64acafb3cfd8262eeee9222d4d91288accbd"
+checksum = "58ed4610086634be707ca76fdcce69f634f9be3e4eb9d33bf86e1ab04ea88884"
 dependencies = [
  "glam",
 ]
 
 [[package]]
 name = "valo-paragraph"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8cd8127d4651f57cd63b3ceb5b671cfa0263323d7b0fb195f171b2f8c1a1cda"
+checksum = "4161258f2f580c6359430f7679ea8d4f67594f7b27e97ae3d0c4220081295b1e"
 dependencies = [
  "unicode-bidi",
  "unicode-linebreak",
@@ -4868,9 +4868,9 @@ dependencies = [
 
 [[package]]
 name = "valo-renderer"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37af81f151f6ed22351d11e9dd2834b5b80c537a4d97aae3fc35935ba580d169"
+checksum = "170a8c52af672de9351f46e42c41c2f64cd29655b0b90f3cd9f949d75d7f17a6"
 dependencies = [
  "bytemuck",
  "etagere",
@@ -4886,9 +4886,9 @@ dependencies = [
 
 [[package]]
 name = "valo-system-fonts"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c5ab6ebc8780540fdcf8c3745f1b9f4316f272a81b57376945fa2f082096263"
+checksum = "2217db6faff1ac16de0505d4ae86df0d30fe5482259d8d66df8dc85a1809643a"
 dependencies = [
  "valo-fontmgr",
  "valo-text",
@@ -4896,9 +4896,9 @@ dependencies = [
 
 [[package]]
 name = "valo-text"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a237763e56df0b420dcb7853a0ccce5f5fbea0ea97dcabb96a8bab3403e4fe3"
+checksum = "66f129a0d6a8a60c10a0d64031cc6fea23ca0f59a21ff271d3917f8a5594f29c"
 dependencies = [
  "allsorts",
  "harfrust",
@@ -4916,7 +4916,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "video_frames"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "waft-embedder",
  "waft-embedder-winit",
@@ -4929,7 +4929,7 @@ dependencies = [
 
 [[package]]
 name = "view_on_layer"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "objc2",
  "objc2-app-kit",
@@ -4947,7 +4947,7 @@ dependencies = [
 
 [[package]]
 name = "waft"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "waft-embedder",
  "waft-embedder-default",
@@ -4961,7 +4961,7 @@ dependencies = [
 
 [[package]]
 name = "waft-animation"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "waft-embedder",
  "waft-foundation",
@@ -4971,7 +4971,7 @@ dependencies = [
 
 [[package]]
 name = "waft-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "brotli",
@@ -4992,7 +4992,7 @@ dependencies = [
 
 [[package]]
 name = "waft-cupertino"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "indexmap",
  "valo-system-fonts",
@@ -5011,7 +5011,7 @@ dependencies = [
 
 [[package]]
 name = "waft-embedder"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "indexmap",
  "pollster",
@@ -5027,7 +5027,7 @@ dependencies = [
 
 [[package]]
 name = "waft-embedder-android"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "android-activity",
  "jni",
@@ -5044,7 +5044,7 @@ dependencies = [
 
 [[package]]
 name = "waft-embedder-default"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "waft-embedder",
  "waft-embedder-android",
@@ -5054,7 +5054,7 @@ dependencies = [
 
 [[package]]
 name = "waft-embedder-web"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.3.4",
@@ -5070,7 +5070,7 @@ dependencies = [
 
 [[package]]
 name = "waft-embedder-winit"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "arboard",
  "block2",
@@ -5112,7 +5112,7 @@ dependencies = [
 
 [[package]]
 name = "waft-foundation"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "async-task",
  "indexmap",
@@ -5122,7 +5122,7 @@ dependencies = [
 
 [[package]]
 name = "waft-gestures"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "indexmap",
  "waft-embedder",
@@ -5133,7 +5133,7 @@ dependencies = [
 
 [[package]]
 name = "waft-macros"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5142,7 +5142,7 @@ dependencies = [
 
 [[package]]
 name = "waft-markdown"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "pulldown-cmark",
  "valo-system-fonts",
@@ -5158,7 +5158,7 @@ dependencies = [
 
 [[package]]
 name = "waft-painting"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "indexmap",
  "valo",
@@ -5172,14 +5172,14 @@ dependencies = [
 
 [[package]]
 name = "waft-physics"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "waft-embedder",
 ]
 
 [[package]]
 name = "waft-rendering"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "indexmap",
  "unicode-general-category",
@@ -5197,7 +5197,7 @@ dependencies = [
 
 [[package]]
 name = "waft-scheduler"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "indexmap",
  "waft-embedder",
@@ -5207,7 +5207,7 @@ dependencies = [
 
 [[package]]
 name = "waft-services"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "indexmap",
  "unicode-segmentation",
@@ -5220,7 +5220,7 @@ dependencies = [
 
 [[package]]
 name = "waft-shell"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "waft-embedder",
  "waft-foundation",
@@ -5234,7 +5234,7 @@ dependencies = [
 
 [[package]]
 name = "waft-single-instance"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "windows-sys 0.60.2",
  "zbus",
@@ -5242,7 +5242,7 @@ dependencies = [
 
 [[package]]
 name = "waft-test"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "waft-embedder",
  "wgpu",
@@ -5250,7 +5250,7 @@ dependencies = [
 
 [[package]]
 name = "waft-widgets"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "indexmap",
  "valo-system-fonts",
@@ -5268,7 +5268,7 @@ dependencies = [
 
 [[package]]
 name = "waft-winui"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "waft-animation",
  "waft-embedder",
@@ -5284,7 +5284,7 @@ dependencies = [
 
 [[package]]
 name = "waft-winui-test-support"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "png 0.17.16",
  "pollster",
@@ -5744,7 +5744,7 @@ dependencies = [
 
 [[package]]
 name = "window"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "waft-cupertino",
  "waft-embedder",
@@ -6307,7 +6307,7 @@ dependencies = [
 
 [[package]]
 name = "winui_gallery"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "waft",
  "waft-animation",
