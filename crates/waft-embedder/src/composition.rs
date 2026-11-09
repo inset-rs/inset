@@ -25,7 +25,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use crate::Placement;
+use crate::{HardwareBuffer, Placement};
 
 /// The host's compositor, as an app reaches it.
 pub trait Compositor: Send + Sync {
@@ -45,35 +45,27 @@ pub trait Compositor: Send + Sync {
 /// from a placed layer by downcasting through `Any`.
 pub trait CompositionLayer: Any + Send + Sync {
     /// Shows `buffer`, which fills the layer, and `children` beneath it, the bottom-most first,
-    /// from the compositor's next frame on, in one step. Each child lies where its placement says
-    /// in the buffer's pixels, as a scene places a layer in its view's, so the buffer's own
-    /// placement moves, clips and scales it with it. A child the last present showed and this one
-    /// does not name is let go; a layer another parent holds is not shown here, and is reported.
+    /// from the compositor's next frame on, in one step, in place of what the layer showed: the
+    /// buffers presented before, or a layer the system draws into, such as a player's, whose
+    /// picture goes nowhere then. A layer shows one source at a time, the last given it. Each
+    /// child lies where its placement says in the buffer's pixels, as a scene places a layer in
+    /// its view's, so the buffer's own placement moves, clips and scales it with it. A child the
+    /// last present showed and this one does not name is let go; a layer another parent holds is
+    /// not shown here, and is reported.
     ///
     /// Returns once the host holds the buffer, not once it is on screen. `released` runs, on any
     /// thread, when the compositor has finished with the buffer and the producer may draw into
-    /// it again, as Wayland's `wl_buffer.release`. On Apple platforms the host learns that from
-    /// `IOSurfaceIsInUse` at the layer's next present, or when the layer goes, so a producer
+    /// it again, as Wayland's `wl_buffer.release`; at once for a buffer another host handed out,
+    /// which is not shown. On Apple platforms the host learns that from `IOSurfaceIsInUse` at the
+    /// layer's next present, or when the layer goes, so a producer
     /// there never waits for a buffer to come back: it draws into one it knows is free, or a new
     /// one. Core Animation takes no fence, so a producer that draws the buffer on the GPU
     /// presents it once that work is scheduled (`waitUntilScheduled`), as Chromium does before
     /// it hands Core Animation a surface.
     fn present(
         &self,
-        buffer: HardwareBuffer,
+        buffer: Arc<dyn HardwareBuffer>,
         children: Vec<(Arc<dyn CompositionLayer>, Placement)>,
         released: Box<dyn FnOnce() + Send + Sync>,
     );
 }
-
-/// One block of pixels in memory the GPU, the system's compositor and other processes all reach,
-/// which a producer draws into and presents: the platform's own type, Android's `HardwareBuffer`,
-/// a dmabuf behind Wayland's `wl_buffer`, on Apple platforms an `IOSurface`.
-#[cfg(target_vendor = "apple")]
-pub type HardwareBuffer = objc2_core_foundation::CFRetained<objc2_io_surface::IOSurfaceRef>;
-
-/// A platform with no host that composites: no buffer can exist, so
-/// [`CompositionLayer::present`] cannot be called, and
-/// [`Platform::compositor`](crate::Platform::compositor) answers `None`.
-#[cfg(not(target_vendor = "apple"))]
-pub enum HardwareBuffer {}

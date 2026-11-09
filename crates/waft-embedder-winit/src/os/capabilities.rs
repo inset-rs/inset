@@ -8,11 +8,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use valo_codec::Decoder;
+use waft_embedder::image_codecs::ImageCodecs;
 use waft_embedder::{
     Cameras, CaptionSettings, Clipboard, CompositionLayer, Compositor, DataTransferItem, DockMenu,
-    FileDialogs, KeyData, MediaAssets, MenuBar, MenuEntry, MenuId, Notifications, Offset, Opener,
-    Placement, Players, Rect, Screen, ScreenId, TargetPlatform, TrayIcons, VideoFrameReaders,
-    ViewId, ViewPadding, VsyncWaiter, WindowConfig,
+    FileDialogs, HardwareBuffer, HardwareBufferAllocator, KeyData, MediaAssets, MenuBar, MenuEntry,
+    MenuId, Notifications, Offset, Opener, Placement, Players, Rect, Screen, ScreenId,
+    TargetPlatform, TrayIcons, VideoFrameReaders, ViewId, ViewPadding, VsyncWaiter, WindowConfig,
 };
 use winit::event_loop::{ActiveEventLoop, EventLoopBuilder};
 use winit::monitor::MonitorHandle;
@@ -43,11 +44,13 @@ pub(crate) trait OperatingSystem:
     + TrackpadTouches
     + FramePresentation
     + NativeComposition
+    + GpuInterop
     + NativeMenus
     + SystemFileDialogs
     + SystemOpener
     + SystemNotifications
     + SystemMedia
+    + SystemImageCodecs
     + SystemClipboard
     + SystemDrags
     + ImageDecoding
@@ -261,6 +264,12 @@ pub(crate) trait NativeComposition {
         None
     }
 
+    /// The allocator of the hardware buffers producers present on the compositor's layers. `None`
+    /// where the embedder allocates none.
+    fn hardware_buffer_allocator() -> Option<Arc<dyn HardwareBufferAllocator>> {
+        None
+    }
+
     /// What a window's code does for its view as `window` opens, as an app does for a view it
     /// adds: makes the layer the view shows into and places it in the window, filling it. Answers
     /// the layer, which the view is added on, and the window's hold on it. Main thread.
@@ -441,6 +450,28 @@ pub(crate) trait SystemMedia {
 
     /// The user's caption settings, or `None` where the system keeps none.
     fn caption_settings() -> Option<Rc<dyn CaptionSettings>> {
+        None
+    }
+}
+
+/// The system's image codecs, which the app decodes and encodes images with (`apple/image_codecs`
+/// on macOS and iOS).
+pub(crate) trait SystemImageCodecs {
+    /// The system's image codecs, or `None` where the embedder has none.
+    fn image_codecs() -> Option<Rc<dyn ImageCodecs>> {
+        None
+    }
+}
+
+/// How the system's hardware buffers meet the app's GPU device.
+pub(crate) trait GpuInterop {
+    /// `buffer`, one of this system's, imported as a texture on `device` over its memory, as the
+    /// system's GPU API imports it, for what its usage names: `Platform::import_texture`. `None`
+    /// where the embedder imports none, and for a buffer or a device the system cannot import.
+    fn import_texture(
+        _buffer: &dyn HardwareBuffer,
+        _device: &wgpu::Device,
+    ) -> Option<wgpu::Texture> {
         None
     }
 }

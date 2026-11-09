@@ -11,7 +11,7 @@ use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2_quartz_core::CALayer;
 use objc2_ui_kit::UIView;
-use waft_embedder::Compositor;
+use waft_embedder::{Compositor, HardwareBufferAllocator};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
@@ -19,6 +19,7 @@ use super::Ios;
 use crate::os::apple::composition::{
     CoreAnimationCompositor, CoreAnimationWindowComposition, WindowLayer,
 };
+use crate::os::apple::hardware_buffers::SurfaceBufferAllocator;
 use crate::os::capabilities::NativeComposition;
 use crate::os::window_handle_layer::{NoWindowHold, WindowHandleLayer};
 
@@ -28,6 +29,10 @@ impl NativeComposition for Ios {
 
     fn compositor() -> Option<Arc<dyn Compositor>> {
         Some(Arc::new(CoreAnimationCompositor))
+    }
+
+    fn hardware_buffer_allocator() -> Option<Arc<dyn HardwareBufferAllocator>> {
+        Some(Arc::new(SurfaceBufferAllocator))
     }
 
     fn view_layer_in(window: &Arc<dyn Window>) -> (Self::ViewLayer, NoWindowHold) {

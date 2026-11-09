@@ -24,10 +24,10 @@ use super::absent::{
     NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices, NoWindowComposition,
 };
 use super::capabilities::{
-    ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, ImageDecoding,
-    NativeComposition, NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges,
-    SystemClipboard, SystemDrags, SystemMedia, SystemRequests, TrackpadTouches, WindowChrome,
-    WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
+    ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, GpuInterop,
+    ImageDecoding, NativeComposition, NativeMenus, OperatingSystem, PointerQueries, Screens,
+    SystemChanges, SystemClipboard, SystemDrags, SystemImageCodecs, SystemMedia, SystemRequests,
+    TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
 };
 use super::window_handle_layer::{NoWindowHold, WindowHandleLayer};
 
@@ -81,11 +81,13 @@ impl TrackpadTouches for Linux {
 impl EventLoopSetup for Linux {}
 impl WindowGeometry for Linux {}
 impl SystemMedia for Linux {}
+impl SystemImageCodecs for Linux {}
 impl SystemDrags for Linux {}
 impl WindowMotion for Linux {}
 impl WindowChrome for Linux {}
 impl Screens for Linux {}
 impl PointerQueries for Linux {}
+impl GpuInterop for Linux {}
 impl ImageDecoding for Linux {}
 impl WorkQueue for Linux {}
 /// The system starts the app with what it opens on its command line, which is the app's own.

@@ -1,6 +1,6 @@
 //! The frames of the videos a view shows, as its rasterizer draws them: for each reader a draw
-//! asked for, the image of the frame on screen, the frame's texture on the view's device imported
-//! by valo. A reader is asked for the frame of the moment the picture reaches the screen when a
+//! asked for, the image of the frame on screen, the frame's hardware buffer imported as a texture
+//! on the view's device (`os`'s `GpuInterop`), and that imported by valo. A reader is asked for the frame of the moment the picture reaches the screen when a
 //! draw first asks for it, and at each vsync after that, which redraws the view when a new one
 //! came, as Apple's display link asks a player's video output for the frame of each refresh's
 //! target time.
@@ -16,6 +16,8 @@ use std::time::Instant;
 use waft_embedder::{Image, VideoFrameReader};
 
 use crate::gpu::Gpu;
+use crate::os::System;
+use crate::os::capabilities::GpuInterop;
 
 /// The videos one view shows, and the frame each shows now.
 #[derive(Default)]
@@ -98,7 +100,8 @@ impl ShownVideoFrames {
     }
 
     /// The image of `reader`'s frame for `display_time`, if it is a new one; `None`, skipping the
-    /// frame, for one the view's device cannot take, and for a texture valo does not sample.
+    /// frame, for one whose buffer the view's device cannot take, and for a texture valo does not
+    /// sample.
     fn frame_image(
         &self,
         gpu: &Gpu,
@@ -106,7 +109,7 @@ impl ShownVideoFrames {
         display_time: Instant,
     ) -> Option<Image> {
         let frame = reader.frame_for(display_time)?;
-        let texture = frame.texture(&gpu.device)?;
+        let texture = System::import_texture(&*frame.hardware_buffer(), &gpu.device)?;
         self.images(gpu).import_texture(texture, false).ok()
     }
 
@@ -133,76 +136,6 @@ mod tests {
     impl VideoFrameReader for NoFrames {
         fn frame_for(&self, display_time: Instant) -> Option<Arc<dyn VideoFrame>> {
             self.0.lock().unwrap().push(display_time);
-            None
-        }
-    }
-
-    /// A reader handing out a new frame each time a test puts one in.
-    #[derive(Default)]
-    struct NewFrames(Mutex<Option<Arc<dyn VideoFrame>>>);
-
-    impl NewFrames {
-        /// A new frame for the reader's next read.
-        fn put_new(&self) {
-            *self.0.lock().unwrap() = Some(Arc::new(PlainFrame));
-        }
-
-        /// A new frame for the reader's next read, which no device takes.
-        fn put_untakeable(&self) {
-            *self.0.lock().unwrap() = Some(Arc::new(UntakeableFrame));
-        }
-    }
-
-    impl VideoFrameReader for NewFrames {
-        fn frame_for(&self, _display_time: Instant) -> Option<Arc<dyn VideoFrame>> {
-            self.0.lock().unwrap().take()
-        }
-    }
-
-    /// A 4 by 4 frame whose texture is a new one on the device, as a host whose frames are not
-    /// the system's makes it.
-    struct PlainFrame;
-
-    impl VideoFrame for PlainFrame {
-        fn width(&self) -> u32 {
-            4
-        }
-
-        fn height(&self) -> u32 {
-            4
-        }
-
-        fn texture(&self, device: &wgpu::Device) -> Option<wgpu::Texture> {
-            Some(device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("plain frame"),
-                size: wgpu::Extent3d {
-                    width: self.width(),
-                    height: self.height(),
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Bgra8Unorm,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            }))
-        }
-    }
-
-    /// A 4 by 4 frame whose memory no device takes.
-    struct UntakeableFrame;
-
-    impl VideoFrame for UntakeableFrame {
-        fn width(&self) -> u32 {
-            4
-        }
-
-        fn height(&self) -> u32 {
-            4
-        }
-
-        fn texture(&self, _device: &wgpu::Device) -> Option<wgpu::Texture> {
             None
         }
     }
@@ -244,46 +177,136 @@ mod tests {
         assert_eq!(*frames.0.lock().unwrap(), [first, next]);
     }
 
-    /// A reader's frame is taken at its first draw, and at a vsync only once a new one came,
-    /// which is when the view is drawn again.
-    #[test]
-    fn a_vsync_takes_a_frame_only_when_a_new_one_came() {
-        let gpu = LazyGpu::default();
-        let shown = ShownVideoFrames::default();
-        let frames = Arc::new(NewFrames::default());
-        let reader: Arc<dyn VideoFrameReader> = frames.clone();
-        frames.put_new();
-        shown.begin_draw();
-        assert!(shown.image_of(gpu.get(), &reader, Instant::now()).is_some());
-        shown.end_draw();
-        assert!(
-            !shown.take_new_frames(gpu.get(), Instant::now()),
-            "nothing new"
-        );
-        frames.put_new();
-        assert!(shown.take_new_frames(gpu.get(), Instant::now()));
-    }
+    /// Frames whose buffers the view's device takes, as the systems whose buffers the host imports
+    /// hand them out.
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    mod taken {
+        use waft_embedder::HardwareBuffer;
+        use waft_embedder::HardwareBufferUsage;
+        use waft_embedder::image_codecs::{
+            ImageError, ImageErrorKind, ImageFuture, PixelBuffer, PixelFormat,
+        };
 
-    /// A frame the view's device cannot take is skipped: the frame on screen stays.
-    #[test]
-    fn a_frame_the_device_cannot_take_is_skipped() {
-        let gpu = LazyGpu::default();
-        let shown = ShownVideoFrames::default();
-        let frames = Arc::new(NewFrames::default());
-        let reader: Arc<dyn VideoFrameReader> = frames.clone();
-        frames.put_untakeable();
-        shown.begin_draw();
-        assert!(shown.image_of(gpu.get(), &reader, Instant::now()).is_none());
-        shown.end_draw();
-        frames.put_new();
-        assert!(shown.take_new_frames(gpu.get(), Instant::now()));
-        frames.put_untakeable();
-        assert!(!shown.take_new_frames(gpu.get(), Instant::now()));
-        shown.begin_draw();
-        assert!(
-            shown.image_of(gpu.get(), &reader, Instant::now()).is_some(),
-            "the last frame the device took stays on screen"
-        );
-        shown.end_draw();
+        use super::*;
+        use crate::os::capabilities::NativeComposition;
+
+        /// A reader handing out a new frame each time a test puts one in.
+        #[derive(Default)]
+        struct NewFrames(Mutex<Option<Arc<dyn VideoFrame>>>);
+
+        impl NewFrames {
+            /// A new frame for the reader's next read.
+            fn put_new(&self) {
+                *self.0.lock().unwrap() = Some(Arc::new(TestFrame(allocated_buffer())));
+            }
+
+            /// A new frame for the reader's next read, whose buffer no device takes.
+            fn put_untakeable(&self) {
+                *self.0.lock().unwrap() = Some(Arc::new(TestFrame(Arc::new(UntakeableBuffer))));
+            }
+        }
+
+        impl VideoFrameReader for NewFrames {
+            fn frame_for(&self, _display_time: Instant) -> Option<Arc<dyn VideoFrame>> {
+                self.0.lock().unwrap().take()
+            }
+        }
+
+        /// A 4 by 4 buffer the system allocated, which its GPU takes.
+        fn allocated_buffer() -> Arc<dyn HardwareBuffer> {
+            System::hardware_buffer_allocator()
+                .expect("Apple's systems allocate hardware buffers")
+                .allocate(4, 4, PixelFormat::Bgra8, HardwareBufferUsage::GPU_SAMPLED)
+                .expect("a buffer of 4 by 4")
+        }
+
+        /// A 4 by 4 frame of `buffer`, whose pixels these tests never read.
+        struct TestFrame(Arc<dyn HardwareBuffer>);
+
+        impl VideoFrame for TestFrame {
+            fn width(&self) -> u32 {
+                4
+            }
+
+            fn height(&self) -> u32 {
+                4
+            }
+
+            fn read_pixels(&self) -> ImageFuture<PixelBuffer> {
+                never_read()
+            }
+
+            fn hardware_buffer(&self) -> Arc<dyn HardwareBuffer> {
+                Arc::clone(&self.0)
+            }
+        }
+
+        /// A test frame's memory, 4 by 4, which no host handed out, so no device takes it.
+        struct UntakeableBuffer;
+
+        impl HardwareBuffer for UntakeableBuffer {
+            fn width(&self) -> u32 {
+                4
+            }
+
+            fn height(&self) -> u32 {
+                4
+            }
+
+            fn read_pixels(&self) -> ImageFuture<PixelBuffer> {
+                never_read()
+            }
+        }
+
+        fn never_read() -> ImageFuture<PixelBuffer> {
+            Box::pin(std::future::ready(Err(ImageError::new(
+                ImageErrorKind::Unsupported,
+                "a test frame, whose pixels these tests never read",
+            ))))
+        }
+
+        /// A reader's frame is taken at its first draw, and at a vsync only once a new one came,
+        /// which is when the view is drawn again.
+        #[test]
+        fn a_vsync_takes_a_frame_only_when_a_new_one_came() {
+            let gpu = LazyGpu::default();
+            let shown = ShownVideoFrames::default();
+            let frames = Arc::new(NewFrames::default());
+            let reader: Arc<dyn VideoFrameReader> = frames.clone();
+            frames.put_new();
+            shown.begin_draw();
+            assert!(shown.image_of(gpu.get(), &reader, Instant::now()).is_some());
+            shown.end_draw();
+            assert!(
+                !shown.take_new_frames(gpu.get(), Instant::now()),
+                "nothing new"
+            );
+            frames.put_new();
+            assert!(shown.take_new_frames(gpu.get(), Instant::now()));
+        }
+
+        /// A frame whose buffer the view's device cannot take is skipped: the frame on screen
+        /// stays.
+        #[test]
+        fn a_frame_the_device_cannot_take_is_skipped() {
+            let gpu = LazyGpu::default();
+            let shown = ShownVideoFrames::default();
+            let frames = Arc::new(NewFrames::default());
+            let reader: Arc<dyn VideoFrameReader> = frames.clone();
+            frames.put_untakeable();
+            shown.begin_draw();
+            assert!(shown.image_of(gpu.get(), &reader, Instant::now()).is_none());
+            shown.end_draw();
+            frames.put_new();
+            assert!(shown.take_new_frames(gpu.get(), Instant::now()));
+            frames.put_untakeable();
+            assert!(!shown.take_new_frames(gpu.get(), Instant::now()));
+            shown.begin_draw();
+            assert!(
+                shown.image_of(gpu.get(), &reader, Instant::now()).is_some(),
+                "the last frame the device took stays on screen"
+            );
+            shown.end_draw();
+        }
     }
 }

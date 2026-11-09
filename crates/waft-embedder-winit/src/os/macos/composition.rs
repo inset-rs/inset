@@ -24,13 +24,14 @@ use objc2_foundation::{
     NSObjectNSKeyValueObserverRegistration, NSString,
 };
 use objc2_quartz_core::CALayer;
-use waft_embedder::{CompositionLayer, Compositor};
+use waft_embedder::{CompositionLayer, Compositor, HardwareBufferAllocator};
 use winit::window::Window;
 
 use super::{AppKit, abort_on_panic, ns_view};
 use crate::os::apple::composition::{
     CoreAnimationCompositor, CoreAnimationViewLayer, WindowLayer, place_filling,
 };
+use crate::os::apple::hardware_buffers::SurfaceBufferAllocator;
 use crate::os::capabilities::NativeComposition;
 
 impl NativeComposition for AppKit {
@@ -39,6 +40,10 @@ impl NativeComposition for AppKit {
 
     fn compositor() -> Option<Arc<dyn Compositor>> {
         Some(Arc::new(CoreAnimationCompositor))
+    }
+
+    fn hardware_buffer_allocator() -> Option<Arc<dyn HardwareBufferAllocator>> {
+        Some(Arc::new(SurfaceBufferAllocator))
     }
 
     /// A composition layer made by the host's compositor, made with buffers that carry alpha: it

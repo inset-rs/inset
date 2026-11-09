@@ -47,7 +47,7 @@ fn idle_layer() -> std::sync::Arc<dyn crate::CompositionLayer> {
     impl crate::CompositionLayer for IdleLayer {
         fn present(
             &self,
-            _buffer: crate::HardwareBuffer,
+            _buffer: std::sync::Arc<dyn crate::HardwareBuffer>,
             _children: Vec<(
                 std::sync::Arc<dyn crate::CompositionLayer>,
                 crate::Placement,

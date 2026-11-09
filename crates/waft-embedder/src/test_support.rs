@@ -117,7 +117,7 @@ struct IdleLayer;
 impl CompositionLayer for IdleLayer {
     fn present(
         &self,
-        _buffer: HardwareBuffer,
+        _buffer: Arc<dyn HardwareBuffer>,
         _children: Vec<(Arc<dyn CompositionLayer>, Placement)>,
         _released: Box<dyn FnOnce() + Send + Sync>,
     ) {

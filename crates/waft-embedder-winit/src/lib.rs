@@ -64,19 +64,22 @@ mod windows;
 
 use waft_embedder::{EmbedderClient, PlatformRef};
 
-/// The system's players, media assets, frame readers and compositor without the event loop, for a
-/// test that serves the main thread itself, as AVFoundation changes a player's state on the main
-/// queue. Not an API.
+/// The system's players, media assets, image codecs, frame readers, compositor and hardware
+/// buffers without the event loop, for a test that serves the main thread itself, as AVFoundation
+/// changes a player's state on the main queue. Not an API.
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub mod test_support {
     use std::rc::Rc;
     use std::sync::Arc;
 
-    use waft_embedder::{Compositor, MediaAssets, Players, VideoFrameReaders};
+    use waft_embedder::image_codecs::ImageCodecs;
+    use waft_embedder::{
+        Compositor, HardwareBufferAllocator, MediaAssets, Players, VideoFrameReaders,
+    };
 
     use crate::os::System;
-    use crate::os::capabilities::{NativeComposition, SystemMedia};
+    use crate::os::capabilities::{NativeComposition, SystemImageCodecs, SystemMedia};
 
     /// The system's players, as `Platform::players` answers them; on the main thread.
     pub fn players() -> Option<Rc<dyn Players>> {
@@ -88,6 +91,11 @@ pub mod test_support {
         System::media_assets()
     }
 
+    /// The system's image codecs, as `Platform::image_codecs` answers them.
+    pub fn image_codecs() -> Option<Rc<dyn ImageCodecs>> {
+        System::image_codecs()
+    }
+
     /// The system's frame readers, as `Platform::video_frame_readers` answers them.
     pub fn video_frame_readers() -> Option<Rc<dyn VideoFrameReaders>> {
         System::video_frame_readers()
@@ -97,12 +105,18 @@ pub mod test_support {
     pub fn compositor() -> Option<Arc<dyn Compositor>> {
         System::compositor()
     }
+
+    /// The system's hardware buffer allocator, as `Platform::hardware_buffer_allocator` answers
+    /// it.
+    pub fn hardware_buffer_allocator() -> Option<Arc<dyn HardwareBufferAllocator>> {
+        System::hardware_buffer_allocator()
+    }
 }
 
 pub use images::{DecodeExecution, create_image_loader};
 pub use macos::MacOs;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-pub use os::CoreVideoFrame;
+pub use os::{CoreVideoFrame, SurfaceBuffer};
 pub use platform::WinitPlatform;
 pub use system_requests::{Reopen, ReopenHandler};
 

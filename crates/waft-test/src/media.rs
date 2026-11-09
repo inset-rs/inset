@@ -13,14 +13,21 @@ use std::sync::Mutex;
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
+use waft_embedder::image_codecs::{
+    ImageError, ImageErrorKind, ImageFuture, PixelBuffer, PixelFormat,
+};
 use waft_embedder::{
     Camera, CameraDevice, CameraError, CameraFormat, CameraListFuture, CameraOpenFuture,
     CameraOutputs, CameraStartFuture, Cameras, CaptureSession, CaptureState, CompositionLayer,
-    Compositor, Cue, HardwareBuffer, MediaAsset, MediaAssetFuture, MediaAssets, MediaChangeFuture,
-    MediaError, MediaMetadata, MediaPlayer, MediaTrack, MovieOptions, Photo, PhotoFuture,
-    Placement, PlayerError, PlayerState, Players, RecordingFuture, SeekTolerance, Size, VideoFrame,
-    VideoFrameReader, VideoFrameReaders, VideoOutput,
+    Compositor, Cue, HardwareBuffer, HardwareBufferUsage, MediaAsset, MediaAssetFuture,
+    MediaAssets, MediaChangeFuture, MediaError, MediaMetadata, MediaPlayer, MediaTrack,
+    MovieOptions, Photo, PhotoFuture, Placement, PlayerError, PlayerState, Players,
+    RecordingFuture, SeekTolerance, Size, VideoFrame, VideoFrameReader, VideoFrameReaders,
+    VideoOutput,
 };
+
+use crate::MockHardwareBuffer;
+use crate::image_codecs::pixels_of;
 
 /// A compositor whose layers show nowhere, and which keeps each layer it made. Every clone is the
 /// same compositor.
@@ -65,7 +72,7 @@ struct MockLayer;
 impl CompositionLayer for MockLayer {
     fn present(
         &self,
-        _buffer: HardwareBuffer,
+        _buffer: Arc<dyn HardwareBuffer>,
         _children: Vec<(Arc<dyn CompositionLayer>, Placement)>,
         released: Box<dyn FnOnce() + Send + Sync>,
     ) {
@@ -467,8 +474,9 @@ impl Drop for OpenedAsset {
     }
 }
 
-/// A picture of a size, with no pixels on any GPU: it makes no texture, as a frame a device cannot
-/// take, which a drawing skips.
+/// A picture of a size, with no pixels on any GPU: its buffer is imported as no texture, as a
+/// frame a device cannot take, which a drawing skips, and its pixels read back opaque black, in
+/// BGRA as Apple's frames are.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MockVideoFrame {
     pub width: u32,
@@ -484,8 +492,29 @@ impl VideoFrame for MockVideoFrame {
         self.height
     }
 
-    fn texture(&self, _device: &wgpu::Device) -> Option<wgpu::Texture> {
-        None
+    fn read_pixels(&self) -> ImageFuture<PixelBuffer> {
+        let read = if self.width == 0 || self.height == 0 {
+            Err(ImageError::new(
+                ImageErrorKind::Other,
+                "a frame with no pixels",
+            ))
+        } else {
+            Ok(pixels_of(
+                [self.width, self.height],
+                [0, 0, 0, 255],
+                PixelFormat::Bgra8,
+            ))
+        };
+        Box::pin(std::future::ready(read))
+    }
+
+    /// A [`MockHardwareBuffer`] of its size, for sampling.
+    fn hardware_buffer(&self) -> Arc<dyn HardwareBuffer> {
+        Arc::new(MockHardwareBuffer {
+            width: self.width,
+            height: self.height,
+            usage: HardwareBufferUsage::GPU_SAMPLED,
+        })
     }
 }
 

@@ -50,8 +50,9 @@ use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2_app_kit::{NSView, NSWindow};
 use valo_codec::Decoder;
+use waft_embedder::image_codecs::ImageCodecs;
 use waft_embedder::{
-    Cameras, CaptionSettings, MediaAssets, Notifications, Players, TargetPlatform,
+    Cameras, CaptionSettings, HardwareBuffer, MediaAssets, Notifications, Players, TargetPlatform,
     VideoFrameReaders,
 };
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -59,7 +60,8 @@ use winit::window::Window;
 
 use super::apple::{image_io_decoders, notifications};
 use super::capabilities::{
-    ImageDecoding, OperatingSystem, SystemMedia, SystemNotifications, WindowGeometry,
+    GpuInterop, ImageDecoding, OperatingSystem, SystemImageCodecs, SystemMedia,
+    SystemNotifications, WindowGeometry,
 };
 use crate::notifications::NotificationActivations;
 
@@ -95,6 +97,20 @@ impl SystemMedia for AppKit {
     /// Media Accessibility's.
     fn caption_settings() -> Option<Rc<dyn CaptionSettings>> {
         super::apple::caption_appearance::caption_settings()
+    }
+}
+
+/// Image I/O's, which iOS shares.
+impl SystemImageCodecs for AppKit {
+    fn image_codecs() -> Option<Rc<dyn ImageCodecs>> {
+        super::apple::image_codecs::image_codecs()
+    }
+}
+
+/// Metal's texture over the buffer's `IOSurface`, which iOS shares (`apple/gpu_interop`).
+impl GpuInterop for AppKit {
+    fn import_texture(buffer: &dyn HardwareBuffer, device: &wgpu::Device) -> Option<wgpu::Texture> {
+        super::apple::gpu_interop::import_texture(buffer, device)
     }
 }
 

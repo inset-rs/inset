@@ -7,13 +7,15 @@ use std::sync::{Arc, Mutex};
 
 use waft_embedder::{
     AppExit, AppLifecycleState, Brightness, Cameras, CaptionSettings, Clipboard, CompositionLayer,
-    Compositor, Dispatcher, DockMenu, FileDialogs, FontSource, Haptics, Image, ImageCodecFuture,
-    ImageDecodeError, Instant, MediaAssets, MenuBar, Notifications, Opener, Platform, Players,
-    PointerReport, PopupMenus, RequestId, Restoration, SystemChrome, SystemContextMenu,
-    TargetPlatform, TextServices, TrayIcons, VideoFrameReaders, View, ViewEmbedder, ViewError,
-    ViewFocusEvent, ViewHost, ViewId, ViewMetrics, ViewRef, WindowConfig,
+    Compositor, Dispatcher, DockMenu, FileDialogs, FontSource, Haptics, HardwareBuffer,
+    HardwareBufferAllocator, Image, ImageCodecFuture, ImageDecodeError, Instant, MediaAssets,
+    MenuBar, Notifications, Opener, Platform, Players, PointerReport, PopupMenus, RequestId,
+    Restoration, SystemChrome, SystemContextMenu, TargetPlatform, TextServices, TrayIcons,
+    VideoFrame, VideoFrameReaders, View, ViewEmbedder, ViewError, ViewFocusEvent, ViewHost, ViewId,
+    ViewMetrics, ViewRef, WindowConfig,
 };
 
+use waft_embedder::image_codecs::ImageCodecs;
 use waft_embedder::valo;
 
 use crate::windows::view_of_request;
@@ -22,6 +24,8 @@ use crate::{TestView, TestWindows};
 type FontSourceMaker = Rc<dyn Fn() -> Box<dyn FontSource>>;
 type ImageCodecOpener = Rc<dyn Fn(Arc<[u8]>) -> ImageCodecFuture>;
 type PixelImporter = Rc<dyn Fn(valo::PixelBuffer) -> Option<Image>>;
+type FrameImporter = Rc<dyn Fn(&dyn VideoFrame) -> Option<Image>>;
+type BufferImporter = Rc<dyn Fn(&dyn HardwareBuffer) -> Option<Image>>;
 
 /// A platform a test builds: which host it claims to be, the views it offers, and each
 /// capability as the test's own implementation or absent. It keeps the frames the framework asks
@@ -52,6 +56,8 @@ pub struct TestPlatform {
     font_source: Option<FontSourceMaker>,
     image_codec: Option<ImageCodecOpener>,
     pixel_import: Option<PixelImporter>,
+    frame_import: Option<FrameImporter>,
+    buffer_import: Option<BufferImporter>,
     windows: Option<Rc<TestWindows>>,
     clipboard: Option<Rc<dyn Clipboard>>,
     system_chrome: Option<Rc<dyn SystemChrome>>,
@@ -64,8 +70,10 @@ pub struct TestPlatform {
     opener: Option<Rc<dyn Opener>>,
     notifications: Option<Rc<dyn Notifications>>,
     compositor: Option<Arc<dyn Compositor>>,
+    hardware_buffer_allocator: Option<Arc<dyn HardwareBufferAllocator>>,
     players: Option<Rc<dyn Players>>,
     media_assets: Option<Rc<dyn MediaAssets>>,
+    image_codecs: Option<Rc<dyn ImageCodecs>>,
     cameras: Option<Rc<dyn Cameras>>,
     video_frame_readers: Option<Rc<dyn VideoFrameReaders>>,
     caption_settings: Option<Rc<dyn CaptionSettings>>,
@@ -93,6 +101,8 @@ impl TestPlatform {
             font_source: None,
             image_codec: None,
             pixel_import: None,
+            frame_import: None,
+            buffer_import: None,
             windows: None,
             clipboard: None,
             system_chrome: None,
@@ -105,8 +115,10 @@ impl TestPlatform {
             opener: None,
             notifications: None,
             compositor: None,
+            hardware_buffer_allocator: None,
             players: None,
             media_assets: None,
+            image_codecs: None,
             cameras: None,
             video_frame_readers: None,
             caption_settings: None,
@@ -212,6 +224,25 @@ impl TestPlatform {
         self
     }
 
+    /// The renderer behind `import_video_frame`; none unless set, so no image is made of a frame.
+    pub fn with_frame_import(
+        mut self,
+        import: impl Fn(&dyn VideoFrame) -> Option<Image> + 'static,
+    ) -> TestPlatform {
+        self.frame_import = Some(Rc::new(import));
+        self
+    }
+
+    /// The renderer behind `import_hardware_buffer`; none unless set, so no image is made of a
+    /// buffer.
+    pub fn with_buffer_import(
+        mut self,
+        import: impl Fn(&dyn HardwareBuffer) -> Option<Image> + 'static,
+    ) -> TestPlatform {
+        self.buffer_import = Some(Rc::new(import));
+        self
+    }
+
     /// The same platform answering requests for views with `windows`, as a desktop makes a
     /// window for each.
     pub fn with_windows(mut self, windows: Rc<TestWindows>) -> TestPlatform {
@@ -274,6 +305,14 @@ impl TestPlatform {
         self
     }
 
+    pub fn with_hardware_buffer_allocator(
+        mut self,
+        allocator: Arc<dyn HardwareBufferAllocator>,
+    ) -> TestPlatform {
+        self.hardware_buffer_allocator = Some(allocator);
+        self
+    }
+
     pub fn with_players(mut self, players: Rc<dyn Players>) -> TestPlatform {
         self.players = Some(players);
         self
@@ -281,6 +320,11 @@ impl TestPlatform {
 
     pub fn with_media_assets(mut self, media_assets: Rc<dyn MediaAssets>) -> TestPlatform {
         self.media_assets = Some(media_assets);
+        self
+    }
+
+    pub fn with_image_codecs(mut self, image_codecs: Rc<dyn ImageCodecs>) -> TestPlatform {
+        self.image_codecs = Some(image_codecs);
         self
     }
 
@@ -458,6 +502,26 @@ impl Platform for TestPlatform {
         self.pixel_import.as_ref().and_then(|import| import(pixels))
     }
 
+    fn import_video_frame(&self, frame: &dyn VideoFrame) -> Option<Image> {
+        self.frame_import.as_ref().and_then(|import| import(frame))
+    }
+
+    fn import_hardware_buffer(&self, buffer: &dyn HardwareBuffer) -> Option<Image> {
+        self.buffer_import
+            .as_ref()
+            .and_then(|import| import(buffer))
+    }
+
+    /// None: this host's buffers are in memory, on no GPU, as buffers a device cannot take, which
+    /// a drawing skips.
+    fn import_texture(
+        &self,
+        _buffer: &dyn HardwareBuffer,
+        _device: &wgpu::Device,
+    ) -> Option<wgpu::Texture> {
+        None
+    }
+
     fn clipboard(&self) -> Option<&dyn Clipboard> {
         self.clipboard.as_deref()
     }
@@ -502,12 +566,20 @@ impl Platform for TestPlatform {
         self.compositor.clone()
     }
 
+    fn hardware_buffer_allocator(&self) -> Option<Arc<dyn HardwareBufferAllocator>> {
+        self.hardware_buffer_allocator.clone()
+    }
+
     fn players(&self) -> Option<&dyn Players> {
         self.players.as_deref()
     }
 
     fn media_assets(&self) -> Option<&dyn MediaAssets> {
         self.media_assets.as_deref()
+    }
+
+    fn image_codecs(&self) -> Option<&dyn ImageCodecs> {
+        self.image_codecs.as_deref()
     }
 
     fn cameras(&self) -> Option<&dyn Cameras> {

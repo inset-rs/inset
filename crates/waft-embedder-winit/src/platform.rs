@@ -22,20 +22,23 @@ use crate::main_loop::MainLoopProxy;
 use crate::menus::MenuEvents;
 use crate::notifications::NotificationActivations;
 use crate::os::capabilities::{
-    FramePresentation, NativeComposition, NativeMenus, OperatingSystem, SystemClipboard,
-    SystemFileDialogs, SystemMedia, SystemNotifications, SystemOpener,
+    FramePresentation, GpuInterop, NativeComposition, NativeMenus, OperatingSystem,
+    SystemClipboard, SystemFileDialogs, SystemImageCodecs, SystemMedia, SystemNotifications,
+    SystemOpener,
 };
 use crate::os::{self, System};
 use crate::popup_menus::NativePopupMenus;
 use crate::state::EmbedderState;
 use crate::view::WinitView;
 use crate::windows::RequestedWindow;
+use waft_embedder::image_codecs::ImageCodecs;
 use waft_embedder::{
     AppExit, Brightness, Cameras, CaptionSettings, Clipboard, CompositionLayer, Compositor,
-    Dispatcher, DockMenu, FileDialogs, FontSource, ImageCodecFuture, Locale, MediaAssets, MenuBar,
-    Notifications, Opener, Platform, Players, PointerReport, PopupMenus, RequestId, Screens,
-    SystemFontSource, TargetPlatform, TrayIcons, VideoFrameReaders, ViewEmbedder, ViewError,
-    ViewFocusEvent, ViewHost, ViewId, ViewMetrics, ViewRef, VsyncWaiter, WindowConfig,
+    Dispatcher, DockMenu, FileDialogs, FontSource, HardwareBuffer, HardwareBufferAllocator,
+    ImageCodecFuture, Locale, MediaAssets, MenuBar, Notifications, Opener, Platform, Players,
+    PointerReport, PopupMenus, RequestId, Screens, SystemFontSource, TargetPlatform, TrayIcons,
+    VideoFrame, VideoFrameReaders, ViewEmbedder, ViewError, ViewFocusEvent, ViewHost, ViewId,
+    ViewMetrics, ViewRef, VsyncWaiter, WindowConfig,
 };
 
 /// The long-lived embedder capability held by `App`.
@@ -60,6 +63,8 @@ pub struct WinitPlatform {
     next_request_id: Cell<u64>,
     /// The system's compositor for composition layers, where it has one.
     compositor: Option<Arc<dyn Compositor>>,
+    /// The system's hardware buffer allocator, where it allocates them.
+    hardware_buffer_allocator: Option<Arc<dyn HardwareBufferAllocator>>,
     /// Where any thread waits for a screen's next vsync.
     vsync_waiter: Arc<dyn VsyncWaiter>,
     origin: Instant,
@@ -80,6 +85,8 @@ pub struct WinitPlatform {
     players: Option<Rc<dyn Players>>,
     media_assets: Option<Rc<dyn MediaAssets>>,
     cameras: Option<Rc<dyn Cameras>>,
+    /// The system's image codecs, where it has them (`os/apple/image_codecs`).
+    image_codecs: Option<Rc<dyn ImageCodecs>>,
     video_frame_readers: Option<Rc<dyn VideoFrameReaders>>,
     /// The user's caption settings, where the system keeps them.
     caption_settings: Option<Rc<dyn CaptionSettings>>,
@@ -104,10 +111,12 @@ impl WinitPlatform {
             players: System::players(),
             media_assets: System::media_assets(),
             cameras: System::cameras(),
+            image_codecs: System::image_codecs(),
             video_frame_readers: System::video_frame_readers(),
             caption_settings: System::caption_settings(),
             state,
             compositor: System::compositor(),
+            hardware_buffer_allocator: System::hardware_buffer_allocator(),
             vsync_waiter: System::vsync_waiter(&proxy),
             origin: Instant::now(),
             clipboard,
@@ -268,6 +277,33 @@ impl Platform for WinitPlatform {
         self.image_context().upload_pixels(pixels, false).ok()
     }
 
+    /// The frame's buffer as an image, as any buffer is.
+    fn import_video_frame(&self, frame: &dyn VideoFrame) -> Option<valo::Image> {
+        self.import_hardware_buffer(&*frame.hardware_buffer())
+    }
+
+    /// The buffer's texture on the device every window draws with, imported by valo.
+    fn import_hardware_buffer(&self, buffer: &dyn HardwareBuffer) -> Option<valo::Image> {
+        let images = self.image_context();
+        let texture = System::import_texture(buffer, images.device())?;
+        images.import_texture(texture, false).ok()
+    }
+
+    /// Metal's texture over the buffer's `IOSurface` on macOS and iOS (`os/apple/gpu_interop`),
+    /// and none elsewhere, where the host hands out no buffers.
+    fn import_texture(
+        &self,
+        buffer: &dyn HardwareBuffer,
+        device: &wgpu::Device,
+    ) -> Option<wgpu::Texture> {
+        System::import_texture(buffer, device)
+    }
+
+    /// The allocator of the system's `IOSurface`s on macOS and iOS (`os/apple/hardware_buffers`).
+    fn hardware_buffer_allocator(&self) -> Option<Arc<dyn HardwareBufferAllocator>> {
+        self.hardware_buffer_allocator.clone()
+    }
+
     /// The system's clipboard: on macOS its pasteboard, elsewhere its plain text
     /// (`clipboard/`).
     fn clipboard(&self) -> Option<&dyn Clipboard> {
@@ -307,6 +343,10 @@ impl Platform for WinitPlatform {
 
     fn cameras(&self) -> Option<&dyn Cameras> {
         self.cameras.as_deref()
+    }
+
+    fn image_codecs(&self) -> Option<&dyn ImageCodecs> {
+        self.image_codecs.as_deref()
     }
 
     fn video_frame_readers(&self) -> Option<&dyn VideoFrameReaders> {

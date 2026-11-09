@@ -631,6 +631,52 @@ pub trait Platform: Any {
         None
     }
 
+    /// An image of a video frame the app holds, its hardware buffer imported as a texture on the
+    /// renderer's device with no copy ([`import_texture`](Self::import_texture)), holding the frame
+    /// while the image lives: a still picture a media asset read, drawn as any image. Not
+    /// Flutter's: its `Texture` widget draws a source's frames as they come, as `VideoFrameView`
+    /// does. `None` when the host has no renderer to put it on yet, or the renderer's device cannot
+    /// take the frame's memory.
+    fn import_video_frame(&self, frame: &dyn crate::VideoFrame) -> Option<crate::Image> {
+        let _ = frame;
+        None
+    }
+
+    /// An image of a hardware buffer the app holds, imported as a texture on the renderer's device
+    /// with no copy ([`import_texture`](Self::import_texture)), holding the buffer while the image
+    /// lives: an image the hardware codecs decoded, or a buffer the app drew, drawn as any image.
+    /// `None` when the host has no renderer to put it on yet, or the renderer's device cannot take
+    /// the buffer's memory.
+    fn import_hardware_buffer(&self, buffer: &dyn crate::HardwareBuffer) -> Option<crate::Image> {
+        let _ = buffer;
+        None
+    }
+
+    /// `buffer`, one this host handed out, imported as a texture on `device` over its memory with
+    /// no copy, as the system's GPU API imports such memory (Metal's texture over an `IOSurface`,
+    /// Vulkan's external memory over an `AHardwareBuffer`): of the buffer's size, for what its
+    /// usage names, sampled where the GPU samples it, drawn into and copied into where it draws
+    /// into it, and copied from whatever its usage. The texture holds the buffer, and a video
+    /// frame's buffer its frame, until the GPU is done with it. The host imports it, as the one
+    /// that knows both the buffer and the device; a buffer names no GPU API. `None` for a buffer
+    /// another host handed out, and for a device that cannot take the buffer's memory: on Apple
+    /// platforms a wgpu device not on Metal. Not dart:ui's: Flutter's engine keeps its textures to
+    /// itself.
+    fn import_texture(
+        &self,
+        buffer: &dyn crate::HardwareBuffer,
+        device: &wgpu::Device,
+    ) -> Option<wgpu::Texture> {
+        let _ = (buffer, device);
+        None
+    }
+
+    /// The system's hardware buffer allocator, which the app allocates GPU memory the compositor
+    /// shows with, from any thread: `None` where the system allocates none.
+    fn hardware_buffer_allocator(&self) -> Option<Arc<dyn crate::HardwareBufferAllocator>> {
+        None
+    }
+
     /// The host's compositor, where it has one: composition layers shown beside the
     /// framework's picture. `None` on the web, on X11, on the inert host, and on an
     /// embedder that chose not to have one.
@@ -703,6 +749,11 @@ pub trait Platform: Any {
 
     /// The system's reading of media without playing it, or `None` where the host has none.
     fn media_assets(&self) -> Option<&dyn crate::MediaAssets> {
+        None
+    }
+
+    /// The system's image codecs, or `None` where the host has none.
+    fn image_codecs(&self) -> Option<&dyn crate::image_codecs::ImageCodecs> {
         None
     }
 

@@ -12,7 +12,8 @@ use std::sync::{Arc, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use waft_embedder::{CompositionLayer, HardwareBuffer, ScreenId, VsyncObserver, VsyncWaiter};
+use waft_embedder::{CompositionLayer, ScreenId, VsyncObserver, VsyncWaiter};
+use waft_embedder_winit::SurfaceBuffer;
 
 use crate::iosurface;
 
@@ -54,7 +55,7 @@ pub(crate) fn start(pacing: Pacing, size: [usize; 2], exit_after: Option<Duratio
 struct Producer {
     pacing: Pacing,
     size: [usize; 2],
-    buffers: Vec<HardwareBuffer>,
+    buffers: Vec<Arc<SurfaceBuffer>>,
     /// Where a buffer's release callback hands its index back, and where the producer takes
     /// the next one to draw into.
     hand_back: Sender<usize>,
@@ -155,7 +156,7 @@ impl Producer {
     /// Counts whether the compositor holds the buffer the layer shows.
     fn count_on_screen_in_use(&mut self) {
         if let Some(on_screen) = self.on_screen
-            && self.buffers[on_screen].is_in_use()
+            && self.buffers[on_screen].surface().is_in_use()
         {
             self.counts.on_screen_in_use += 1;
         }
@@ -165,7 +166,7 @@ impl Producer {
     /// presents it.
     fn draw_next_frame(&mut self) {
         let index = self.take_free_buffer();
-        iosurface::fill(&self.buffers[index], self.frame);
+        iosurface::fill(self.buffers[index].surface(), self.frame);
         let hand_back = self.hand_back.clone();
         self.pacing.layer.present(
             self.buffers[index].clone(),

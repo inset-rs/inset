@@ -3,15 +3,17 @@
 //! cues (`cues`, `cue_markup`), failing with the kinds of AVFoundation's errors (`player_errors`)
 //! and timed in Core Media's times (`media_times`); media read without playing it is an
 //! `AVURLAsset` (`asset`), listing its tracks and tags as a player does, its pictures an image
-//! generator's, drawn into frames as a reader hands them out (`asset_frames`); the cameras are a discovery session's devices, and a camera a
+//! generator's (`asset_frames`), drawn into frames as a reader hands them out (`drawn_frames`), as
+//! the hardware image codecs' pictures are (`apple/image_codecs`); a frame's pixels are read back
+//! while its buffer is locked (`locked_pixels`); the cameras are a discovery session's devices, and a camera a
 //! capture device (`camera`) with its formats (`camera_formats`), shared in one format by this
 //! process's sessions (`camera_sharing`), and a session an `AVCaptureSession` (`capture_session`)
 //! with its photo and movie outputs (`outputs`); a picture goes to a composition layer as a layer
 //! the system draws into, shown as its content so that Core Animation clips and scales it with it
 //! (`apple/composition`), or to a frame reader the app made (`frames`), each frame an
-//! `IOSurface`-backed pixel buffer (`video_frame`) whose texture CoreVideo's texture cache makes
-//! (`frame_textures`). AVFoundation tells changes by key-value observing and notifications
-//! (`observing`).
+//! `IOSurface`-backed pixel buffer (`video_frame`) whose surface is its hardware buffer, imported
+//! as a texture as any other is (`apple/gpu_interop`). AVFoundation tells changes by key-value
+//! observing and notifications (`observing`).
 //!
 //! A player and a session are controlled on the main thread, as AVFoundation asks of a player and
 //! the framework asks of everything; a session runs on a queue of its own, since starting it
@@ -30,8 +32,9 @@ mod camera_sharing;
 mod capture_session;
 mod cue_markup;
 mod cues;
-mod frame_textures;
+pub(in crate::os::apple) mod drawn_frames;
 mod frames;
+pub(in crate::os::apple) mod locked_pixels;
 mod media_times;
 mod metadata;
 mod observing;
@@ -54,6 +57,8 @@ use camera::AvCameras;
 use frames::AvFrameReaders;
 use player::AvPlayers;
 pub use video_frame::CoreVideoFrame;
+#[cfg(test)]
+pub(in crate::os::apple) use video_frame::test_frame;
 
 /// AVFoundation's players; `None` off the main thread, where none is controlled.
 pub(crate) fn players() -> Option<Rc<dyn Players>> {

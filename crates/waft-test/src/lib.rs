@@ -2,9 +2,11 @@
 //! into, whose [`TestViewHost`] records what it asks of the system, a [`MockClipboard`] for it to copy to and paste from, the system's menus
 //! ([`MockMenuBar`], [`MockPopupMenus`], [`MockDockMenu`], [`MockTrayIcons`]) for it to set and
 //! choose in, file dialogs ([`MockFileDialogs`], with [`MemoryFile`] and [`MemoryFolder`])
-//! for it to open and save through, and a compositor, frame readers, players, media assets and
+//! for it to open and save through, a hardware buffer allocator ([`MockHardwareBufferAllocator`]) for it to allocate buffers with,
+//! and a compositor, frame readers, players, media assets and
 //! cameras ([`MockCompositor`], [`MockVideoFrameReaders`], [`MockPlayers`], [`MockMediaAssets`],
-//! [`MockCameras`]) for it to show and read media through, with the user's caption settings ([`MockCaptionSettings`]) to draw subtitles
+//! [`MockCameras`]) for it to show and read media through, image codecs ([`MockImageCodecs`])
+//! for it to decode and encode images with, with the user's caption settings ([`MockCaptionSettings`]) to draw subtitles
 //! in, so a test supplies only the piece it is about. The shape of `flutter_test`'s `TestPlatformDispatcher` and
 //! `TestFlutterView`: real implementations of the host traits that answer what a test
 //! configures and record what the framework asks of them.
@@ -19,6 +21,8 @@
 mod caption_style;
 mod clipboard;
 mod file_dialogs;
+mod hardware_buffers;
+mod image_codecs;
 mod media;
 mod menus;
 mod notifications;
@@ -31,6 +35,8 @@ mod windows;
 pub use caption_style::MockCaptionSettings;
 pub use clipboard::MockClipboard;
 pub use file_dialogs::{AskedDialog, MemoryFile, MemoryFolder, MockFileDialogs};
+pub use hardware_buffers::{AskedAllocation, MockHardwareBuffer, MockHardwareBufferAllocator};
+pub use image_codecs::{CodecCall, ImageAnswers, ImageFacts, MockImageCodecs};
 pub use media::{
     AssetAnswers, FrameAsked, MadeLayer, MockCameras, MockCaptureSession, MockCompositor,
     MockMediaAsset, MockMediaAssets, MockPlayer, MockPlayers, MockVideoFrame,

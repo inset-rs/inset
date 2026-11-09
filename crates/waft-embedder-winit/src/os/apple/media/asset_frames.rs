@@ -1,15 +1,13 @@
 //! An asset's pictures: AVFoundation's `AVAssetImageGenerator`, which lands within the tolerance
 //! asked, scales down to fit the size asked and applies the track's preferred transform, as a
 //! player presents the picture, and answers a `CGImage` in the background. The image is drawn into
-//! a pixel buffer backed by an `IOSurface`, in 32-bit BGRA, the kind a frame reader hands out
-//! (`frames`), so the app draws it as any video frame (`video_frame`).
+//! a frame of the kind a frame reader hands out (`drawn_frames`), so the app draws it as any video
+//! frame.
 //!
 //! The generator, not an `AVAssetReader`, since the reader decodes from a time forwards and leaves
 //! the landing on a keyframe, the scaling and the track's rotation to its caller; the cost is one
 //! copy of the picture, at the size asked, on the CPU.
 
-use std::ffi::c_void;
-use std::ptr::NonNull;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -18,27 +16,18 @@ use objc2::rc::Retained;
 use objc2_av_foundation::{
     AVAsset, AVAssetImageGenerator, AVAssetImageGeneratorResult, NSValueAVFoundationExtensions,
 };
-use objc2_core_foundation::{CFDictionary, CFRetained, CGPoint, CGRect, CGSize};
-use objc2_core_graphics::{
-    CGBitmapContextCreate, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo,
-    CGImageByteOrderInfo, kCGColorSpaceSRGB,
-};
+use objc2_core_foundation::CGSize;
+use objc2_core_graphics::CGImage;
 use objc2_core_media::CMTime;
-use objc2_core_video::{
-    CVPixelBuffer, CVPixelBufferCreate, CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow,
-    CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
-    kCVPixelFormatType_32BGRA, kCVReturnSuccess,
-};
 use objc2_foundation::{NSArray, NSError, NSValue};
 use waft_embedder::{
     MediaAssetFuture, PlayerError, PlayerErrorKind, SeekTolerance, Size, VideoFrame,
 };
 
 use super::abort_on_panic;
-use super::frames::pixel_buffer_attributes;
+use super::drawn_frames::frame_of;
 use super::media_times::{cm_time_of, tolerance_time};
 use super::player_errors::error_of;
-use super::video_frame::CoreVideoFrame;
 use crate::answer::answer;
 
 /// `asset`'s picture at `time`, within `tolerance`, scaled down to fit `max_size` where given.
@@ -107,7 +96,8 @@ fn generator_of(
     }
 }
 
-/// The generator's answer as a frame: its image in a pixel buffer, or why there is none.
+/// The generator's answer as a frame: its image drawn into a frame (`drawn_frames`), or why there
+/// is none.
 fn picture_of(
     image: Option<&CGImage>,
     result: AVAssetImageGeneratorResult,
@@ -115,98 +105,12 @@ fn picture_of(
 ) -> Result<Arc<dyn VideoFrame>, PlayerError> {
     match image {
         Some(image) if result == AVAssetImageGeneratorResult::Succeeded => {
-            let buffer = pixel_buffer_of(image)?;
-            Ok(Arc::new(CoreVideoFrame::new(buffer)))
+            let frame = frame_of(image).map_err(|message| PlayerError {
+                kind: PlayerErrorKind::Other,
+                message,
+            })?;
+            Ok(Arc::new(frame))
         }
         _ => Err(error_of(error)),
-    }
-}
-
-/// `image`, drawn into a pixel buffer of its size backed by an `IOSurface`, in 32-bit BGRA, in
-/// sRGB.
-fn pixel_buffer_of(image: &CGImage) -> Result<CFRetained<CVPixelBuffer>, PlayerError> {
-    let (width, height) = (CGImage::width(Some(image)), CGImage::height(Some(image)));
-    let buffer = pixel_buffer(width, height)?;
-    // SAFETY: the buffer is locked while its base address is drawn into, as a bitmap of its own
-    // size, rows and format.
-    unsafe {
-        if CVPixelBufferLockBaseAddress(&buffer, CVPixelBufferLockFlags(0)) != kCVReturnSuccess {
-            return Err(failure(
-                "the system did not lock the picture's pixel buffer",
-            ));
-        }
-        let drawn = draw(image, &buffer, width, height);
-        CVPixelBufferUnlockBaseAddress(&buffer, CVPixelBufferLockFlags(0));
-        drawn?;
-    }
-    Ok(buffer)
-}
-
-/// A pixel buffer of `width` by `height`, as a frame reader's frames are.
-fn pixel_buffer(width: usize, height: usize) -> Result<CFRetained<CVPixelBuffer>, PlayerError> {
-    let attributes = pixel_buffer_attributes();
-    let attributes: *const _ = &*attributes;
-    // SAFETY: an NSDictionary is the CFDictionary it is toll-free bridged to.
-    let attributes = unsafe { &*attributes.cast::<CFDictionary>() };
-    let mut buffer = std::ptr::null_mut();
-    // SAFETY: attributes of the types their keys name, and `buffer` a valid place for the answer.
-    let status = unsafe {
-        CVPixelBufferCreate(
-            None,
-            width,
-            height,
-            kCVPixelFormatType_32BGRA,
-            Some(attributes),
-            NonNull::from(&mut buffer),
-        )
-    };
-    let buffer = NonNull::new(buffer).filter(|_| status == kCVReturnSuccess);
-    let buffer =
-        buffer.ok_or_else(|| failure("the system made no pixel buffer for the picture"))?;
-    // SAFETY: a buffer made just now, handed over with its one retain.
-    Ok(unsafe { CFRetained::from_raw(buffer) })
-}
-
-/// Draws `image` over the whole of `buffer`'s pixels, `width` by `height`.
-///
-/// # Safety
-///
-/// `buffer`'s base address is locked.
-unsafe fn draw(
-    image: &CGImage,
-    buffer: &CVPixelBuffer,
-    width: usize,
-    height: usize,
-) -> Result<(), PlayerError> {
-    let base: *mut c_void = CVPixelBufferGetBaseAddress(buffer);
-    let bytes_per_row = CVPixelBufferGetBytesPerRow(buffer);
-    // SAFETY: a constant Core Graphics exports for the life of the process.
-    let srgb = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceSRGB }));
-    // BGRA in memory: 32-bit words in little-endian order, alpha first and premultiplied.
-    let layout = CGImageAlphaInfo::PremultipliedFirst.0 | CGImageByteOrderInfo::Order32Little.0;
-    // SAFETY: the locked base address holds `height` rows of `bytes_per_row` bytes, each with
-    // `width` pixels of four bytes.
-    let context = unsafe {
-        CGBitmapContextCreate(
-            base,
-            width,
-            height,
-            8,
-            bytes_per_row,
-            srgb.as_deref(),
-            layout,
-        )
-    };
-    let context =
-        context.ok_or_else(|| failure("the system made no context to draw the picture"))?;
-    let whole = CGRect::new(CGPoint::ZERO, CGSize::new(width as f64, height as f64));
-    CGContext::draw_image(Some(&context), whole, Some(image));
-    Ok(())
-}
-
-fn failure(message: &str) -> PlayerError {
-    PlayerError {
-        kind: PlayerErrorKind::Other,
-        message: message.to_owned(),
     }
 }

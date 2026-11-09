@@ -12,11 +12,11 @@ use super::absent::{
     NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices, NoWindowComposition,
 };
 use super::capabilities::{
-    ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, ImageDecoding,
-    NativeComposition, NativeMenus, OperatingSystem, PointerQueries, Screens, SystemChanges,
-    SystemClipboard, SystemDrags, SystemFileDialogs, SystemMedia, SystemNotifications,
-    SystemOpener, SystemRequests, TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion,
-    WindowVisibility, WorkQueue,
+    ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, GpuInterop,
+    ImageDecoding, NativeComposition, NativeMenus, OperatingSystem, PointerQueries, Screens,
+    SystemChanges, SystemClipboard, SystemDrags, SystemFileDialogs, SystemImageCodecs, SystemMedia,
+    SystemNotifications, SystemOpener, SystemRequests, TrackpadTouches, WindowChrome,
+    WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
 };
 use super::window_handle_layer::{NoWindowHold, WindowHandleLayer};
 
@@ -69,12 +69,14 @@ impl TrackpadTouches for WinitOnly {
 impl EventLoopSetup for WinitOnly {}
 impl WindowGeometry for WinitOnly {}
 impl SystemMedia for WinitOnly {}
+impl SystemImageCodecs for WinitOnly {}
 impl SystemDrags for WinitOnly {}
 impl WindowMotion for WinitOnly {}
 impl WindowChrome for WinitOnly {}
 impl Screens for WinitOnly {}
 impl PointerQueries for WinitOnly {}
 impl NativeMenus for WinitOnly {}
+impl GpuInterop for WinitOnly {}
 impl ImageDecoding for WinitOnly {}
 impl WorkQueue for WinitOnly {}
 impl SystemFileDialogs for WinitOnly {}

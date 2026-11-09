@@ -69,24 +69,28 @@ objc2-user-notifications = { version = "0.3", default-features = false, features
 png = "0.18"
 # Composition layers: the Core Animation layers they are, the buffer each shows and whether the
 # compositor still reads it, the transform that places a layer with its children, the shapes that
-# clip it, and the colour a window shows behind them while its view draws nothing; and the bitmap a
-# media asset's picture is drawn into a frame's pixel buffer through.
+# clip it, and the colour a window shows behind them while its view draws nothing; the bitmap a
+# media asset's picture is drawn into a frame's pixel buffer through; and the image over pixels an
+# image codec encodes.
 objc2-quartz-core = { version = "0.3", features = ["CABase", "CALayer", "CAShapeLayer", "CATransaction", "CATransform3D"] }
 objc2-io-surface = "0.3"
-objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
-objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGAffineTransform", "CGBitmapContext", "CGColor", "CGColorSpace", "CGContext", "CGImage", "CGPath"] }
+objc2-core-foundation = { version = "0.3", features = ["CFBase", "CFCGTypes", "CFDictionary", "CFNumber", "CFString"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGAffineTransform", "CGBitmapContext", "CGColor", "CGColorSpace", "CGContext", "CGDataProvider", "CGImage", "CGPath"] }
 # Players, media assets and cameras: AVFoundation, the times and sample buffers it speaks in, the
 # markup of the subtitles it hands out, the pixel buffers a frame reader hands out, and the images
 # an asset's pictures come as, drawn into such buffers.
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "dispatch2", "objc2-core-foundation", "objc2-core-graphics", "objc2-core-media", "objc2-core-video", "objc2-quartz-core", "AVAnimation", "AVAsset", "AVAssetImageGenerator", "AVAssetTrack", "AVAsynchronousKeyValueLoading", "AVCaptureDevice", "AVCaptureFileOutput", "AVCaptureInput", "AVCaptureOutputBase", "AVCapturePhotoOutput", "AVCaptureSession", "AVCaptureSessionPreset", "AVCaptureVideoDataOutput", "AVCaptureVideoPreviewLayer", "AVError", "AVMediaFormat", "AVMediaSelection", "AVMediaSelectionGroup", "AVMetadataIdentifiers", "AVMetadataItem", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVPlayerItemTrack", "AVPlayerLayer", "AVTime", "AVVideoSettings"] }
 objc2-core-media = { version = "0.3", default-features = false, features = ["std", "objc2-core-video", "CMBase", "CMFormatDescription", "CMSampleBuffer", "CMSync", "CMTextMarkup", "CMTime"] }
-objc2-core-video = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-metal", "CVBase", "CVBuffer", "CVImageBuffer", "CVMetalTexture", "CVMetalTextureCache", "CVPixelBuffer", "CVReturn"] }
+objc2-core-video = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-io-surface", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVPixelBufferIOSurface", "CVReturn"] }
 # The user's caption style, its colours matched to sRGB above, and the family of the font it names.
 objc2-media-accessibility = { version = "0.3", default-features = false, features = ["std", "MACaptionAppearance", "objc2-core-graphics", "objc2-core-text"] }
 objc2-core-text = { version = "0.3", default-features = false, features = ["std", "CTFontDescriptor"] }
-# A video frame's texture: a Metal texture CoreVideo's texture cache makes on the frame, on the
-# Metal device behind the wgpu device it is made for.
-objc2-metal = { version = "0.3", default-features = false, features = ["std", "MTLDevice", "MTLPixelFormat", "MTLResource", "MTLTexture", "MTLTypes"] }
+# The system's image codecs: Image I/O's sources and destinations and the properties they read
+# and write, and the data providers an image's pixels are handed to them in.
+objc2-image-io = { version = "0.3", default-features = false, features = ["std", "objc2-core-graphics", "CGImageDestination", "CGImageProperties", "CGImageSource"] }
+# A hardware buffer's texture, a video frame's among them: a Metal texture over its `IOSurface`, on
+# the Metal device behind the wgpu device it is imported on.
+objc2-metal = { version = "0.3", default-features = false, features = ["std", "objc2-io-surface", "MTLAllocation", "MTLDevice", "MTLPixelFormat", "MTLResource", "MTLTexture", "MTLTypes"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 # The general pasteboard, and the notices that it changed or the application became active.
@@ -169,7 +173,11 @@ harness = false
 name = "an_asset_reads_its_length_tracks_and_pictures"
 harness = false
 
-# The test seam the media tests reach the system's players and media assets through.
+[[test]]
+name = "an_image_decodes_and_encodes_through_the_systems_codecs"
+harness = false
+
+# The test seam the media tests reach the system's players, media assets and image codecs through.
 [dev-dependencies]
 waft-embedder-winit = { path = ".", features = ["test-support"] }
 
@@ -190,9 +198,9 @@ objc2-core-video = { version = "0.3", default-features = false, features = ["std
 
 # AppKit's selectors and view hierarchy, UIKit's pasteboard, document picker and view, the
 # notification center's delegate and completion handlers, Core Animation's layers, AVFoundation,
-# Media Accessibility, and Win32 and COM, the toast activator's included, need `unsafe`, which the
+# Media Accessibility, Image I/O, and Win32 and COM, the toast activator's included, need `unsafe`, which the
 # workspace forbids; here it is denied instead, and `os/macos`, `os/apple/composition`,
-# `os/apple/media`, `os/apple/caption_appearance`, `os/apple/notifications`, `os/ios/pasteboard`,
+# `os/apple/media`, `os/apple/image_codecs`, `os/apple/caption_appearance`, `os/apple/notifications`, `os/ios/pasteboard`,
 # `os/ios/file_dialogs`, `os/ios/opener`, `os/ios/open_requests`, `os/ios/composition`,
 # `os/windows` and the tests' AppKit support, for a local event monitor, alone allow it.
 [lints.rust]

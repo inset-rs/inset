@@ -19,7 +19,9 @@ mod drag_drop;
 mod file_dialogs;
 mod fonts;
 mod geometry;
+mod hardware_buffers;
 mod image;
+pub mod image_codecs;
 mod key;
 mod locale;
 mod media;
@@ -55,7 +57,7 @@ pub use clipboard::{
     ClipboardReadFuture, ClipboardWriteFuture, Content, ContentFuture, CopyOptions, CopyRequest,
     DataTransferItem, FileSink, URI_LIST, WriteFuture,
 };
-pub use composition::{CompositionLayer, Compositor, HardwareBuffer};
+pub use composition::{CompositionLayer, Compositor};
 pub use cue::{
     Cue, CueAnchor, CueContent, CueImage, CueLine, CueTextAlignment, CueTextEdge, CueTextRun,
     CueVertical,
@@ -72,6 +74,7 @@ pub use fonts::{
     default_font_families, set_default_font_manager,
 };
 pub use geometry::*;
+pub use hardware_buffers::{HardwareBuffer, HardwareBufferAllocator, HardwareBufferUsage};
 pub use image::{
     ImageCodec, ImageCodecFuture, ImageDecodeError, ImageFrame, ImageFrameFuture, ImageRepetition,
 };

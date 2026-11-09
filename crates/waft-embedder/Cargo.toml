@@ -25,14 +25,9 @@ valo.workspace = true
 valo-geometry.workspace = true
 valo-system-fonts.workspace = true
 web-time.workspace = true
-# The device a video frame is made a texture on, and the texture: wgpu's own types, which valo
-# takes without re-exporting them.
+# The device a host imports a hardware buffer on as a texture (`Platform::import_texture`), and the
+# texture: wgpu's own types, which valo takes without re-exporting them.
 wgpu.workspace = true
-
-# The buffer a producer hands a composited surface is the platform's own type.
-[target.'cfg(target_vendor = "apple")'.dependencies]
-objc2-core-foundation = "0.3"
-objc2-io-surface = "0.3"
 
 [dev-dependencies]
 serde_json.workspace = true

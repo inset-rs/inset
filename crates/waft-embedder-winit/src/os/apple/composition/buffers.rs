@@ -4,7 +4,8 @@
 use objc2::runtime::AnyObject;
 use objc2_io_surface::IOSurfaceRef;
 use objc2_quartz_core::CALayer;
-use waft_embedder::HardwareBuffer;
+
+use crate::os::apple::hardware_buffers::SurfaceBuffer;
 
 /// Calls each producer's release callback: its buffer is its own again.
 pub(super) fn notify_released(callbacks: Vec<OnReleased>) {
@@ -13,16 +14,13 @@ pub(super) fn notify_released(callbacks: Vec<OnReleased>) {
     }
 }
 
-/// A producer's buffer, handed between threads.
-pub(super) struct CrossThreadBuffer(pub(super) HardwareBuffer);
+/// A producer's buffer, as a layer shows it: held, with the frame it is the memory of, until the
+/// compositor is done with it.
+pub(super) struct ShownBuffer(pub(super) SurfaceBuffer);
 
-// SAFETY: an `IOSurface` is made to be shared between threads and processes: its retain count
-// and use count are atomic. The binding cannot say so.
-unsafe impl Send for CrossThreadBuffer {}
-
-impl CrossThreadBuffer {
+impl ShownBuffer {
     pub(super) fn set_as_contents_of(&self, layer: &CALayer) {
-        let surface: *const IOSurfaceRef = &*self.0;
+        let surface: *const IOSurfaceRef = self.0.surface();
         // SAFETY: a CF type is an Objective-C object, and a layer takes an IOSurface as its
         // contents; Apple documents only images there, and WebKit, Chromium and Flutter all
         // rely on it.

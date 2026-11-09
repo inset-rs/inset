@@ -60,9 +60,11 @@ use objc2_core_graphics::CGMutablePath;
 use objc2_foundation::{NSPoint, NSRect};
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATransaction};
 use waft_embedder::{CompositionLayer, Compositor, HardwareBuffer, Placement, ViewId};
+
+use super::hardware_buffers::SurfaceBuffer;
 use winit::window::Window;
 
-use buffers::{CrossThreadBuffer, PresentedBuffers, notify_released};
+use buffers::{PresentedBuffers, ShownBuffer, notify_released};
 use layer_geometry::LayerGeometry;
 use placed::PlacedLayers;
 
@@ -119,7 +121,7 @@ pub(crate) struct CoreAnimationLayer {
     buffer_layer: CrossThreadLayer,
     /// A layer the system draws into, the content in place of the buffers while it is shown.
     system_layer: Mutex<Option<CrossThreadLayer>>,
-    buffers: Mutex<PresentedBuffers<CrossThreadBuffer>>,
+    buffers: Mutex<PresentedBuffers<ShownBuffer>>,
     children: Mutex<Children>,
     /// Whether a placement by a second placer was reported already.
     misplacement_reported: AtomicBool,
@@ -303,21 +305,28 @@ impl CoreAnimationLayer {
             .buffers
             .lock()
             .expect(HELD_BRIEFLY)
-            .release_unused(|buffer| buffer.0.is_in_use());
+            .release_unused(|buffer| buffer.0.surface().is_in_use());
         notify_released(released);
     }
 }
 
 impl CompositionLayer for CoreAnimationLayer {
     /// Shows the buffer and places the children in one transaction, and releases the replaced
-    /// buffers the compositor has finished with.
+    /// buffers the compositor has finished with. A buffer another host handed out is not shown,
+    /// and is reported.
     fn present(
         &self,
-        buffer: HardwareBuffer,
+        buffer: Arc<dyn HardwareBuffer>,
         children: Vec<(Arc<dyn CompositionLayer>, Placement)>,
         released: Box<dyn FnOnce() + Send + Sync>,
     ) {
-        let buffer = CrossThreadBuffer(buffer);
+        let buffer: &dyn std::any::Any = &*buffer;
+        let Some(buffer) = buffer.downcast_ref::<SurfaceBuffer>() else {
+            report_foreign_buffer();
+            released();
+            return;
+        };
+        let buffer = ShownBuffer(buffer.clone());
         let children = own_layers(children.iter().map(|(layer, placement)| (layer, placement)));
         in_transaction(|| {
             self.take_down_system_layer();
@@ -339,6 +348,14 @@ impl Drop for CoreAnimationLayer {
         in_transaction(|| self.clip_layer.0.removeFromSuperlayer());
         let released = self.buffers.get_mut().expect(HELD_BRIEFLY).release_all();
         notify_released(released);
+    }
+}
+
+/// Says, once, that a buffer no host of this system handed out was presented, and is not shown.
+fn report_foreign_buffer() {
+    static REPORTED: AtomicBool = AtomicBool::new(false);
+    if !REPORTED.swap(true, Ordering::Relaxed) {
+        eprintln!("waft: a buffer this host did not hand out was presented to a layer; not shown");
     }
 }
 

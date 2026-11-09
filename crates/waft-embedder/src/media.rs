@@ -71,6 +71,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::image_codecs::{ImageFuture, PixelBuffer};
 use crate::{CompositionLayer, Cue, Size};
 
 /// The system's players, or `None` from [`Platform::players`](crate::Platform::players) where it
@@ -640,8 +641,14 @@ pub trait VideoFrameReader: Any + Send + Sync {
     fn frame_for(&self, display_time: Instant) -> Option<Arc<dyn VideoFrame>>;
 }
 
-/// One picture of a video as the system hands it out, as WebCodecs' `VideoFrame`. It holds its
-/// slot in the decoder's pool until it, and every texture made of it, are dropped.
+/// One picture of a video as the system hands it out, as WebCodecs' `VideoFrame`: lent with its
+/// slot in the decoder's pool, which it holds until it, its hardware buffer and every texture
+/// imported of the buffer are dropped. Its memory is a [`HardwareBuffer`](crate::HardwareBuffer),
+/// GPU memory the system's compositor reaches too, which the app draws through a texture it
+/// imports ([`Platform::import_texture`](crate::Platform::import_texture)), the hardware codecs
+/// encode and a composition layer shows; memory the app holds of its own, which no pool waits for,
+/// is a buffer it allocates ([`HardwareBufferAllocator`](crate::HardwareBufferAllocator)) or an
+/// image the hardware codecs decoded.
 ///
 /// Each host implements it over the frames its system hands out. Platform code reaches the
 /// system's own frame by downcasting through `Any` to the type of the host that handed it out:
@@ -654,10 +661,16 @@ pub trait VideoFrame: Any + Send + Sync {
     /// The picture's height, in its own pixels.
     fn height(&self) -> u32;
 
-    /// A texture of the frame on `device`, for sampling, sharing its memory where the system can.
-    /// The texture holds the frame. `None` for a device that cannot take the frame's memory: on
-    /// macOS a wgpu device not on Metal, or one Core Video makes no texture of the frame on.
-    fn texture(&self, device: &wgpu::Device) -> Option<wgpu::Texture>;
+    /// The frame's pixels copied into the app's memory, in the layout the frame holds them: BGRA
+    /// on Apple's systems. The one way back from GPU memory to the app's;
+    /// [`ImageErrorKind::Unsupported`](crate::image_codecs::ImageErrorKind::Unsupported) for a
+    /// frame whose pixels are in no [`PixelFormat`](crate::image_codecs::PixelFormat).
+    fn read_pixels(&self) -> ImageFuture<PixelBuffer>;
+
+    /// The frame's memory, for sampling, which keeps the frame, and its slot in the pool, while
+    /// it and every texture imported of it are held: what the app draws through a texture it
+    /// imports, the hardware codecs encode and a composition layer shows.
+    fn hardware_buffer(&self) -> Arc<dyn crate::HardwareBuffer>;
 }
 
 /// Why a camera session's photo or recording answered nothing.

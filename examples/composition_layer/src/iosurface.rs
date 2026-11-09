@@ -1,17 +1,20 @@
-//! IOSurfaces a producer draws into on the CPU: allocated as BGRA, filled a row at a time.
+//! IOSurfaces a producer draws into on the CPU: allocated as BGRA, filled a row at a time, and
+//! presented as the host's own hardware buffers over them.
 
 // Allocating an IOSurface and writing its pixels is what this module is for; the rest of the
 // example has no `unsafe`.
 #![allow(unsafe_code)]
 
 use std::ptr::NonNull;
+use std::sync::Arc;
 
 use objc2_core_foundation::{CFDictionary, CFNumber, CFString};
 use objc2_io_surface::{
     IOSurfaceLockOptions, IOSurfaceRef, kIOSurfaceBytesPerElement, kIOSurfaceBytesPerRow,
     kIOSurfaceHeight, kIOSurfacePixelFormat, kIOSurfaceWidth,
 };
-use waft_embedder::HardwareBuffer;
+use waft_embedder::HardwareBufferUsage;
+use waft_embedder_winit::SurfaceBuffer;
 
 /// The `OSType` for 32-bit BGRA.
 const BGRA: i32 = 0x4247_5241;
@@ -24,8 +27,9 @@ const STRIPE: [u8; 4] = [240, 240, 240, 255];
 const STRIPE_WIDTH: usize = 48;
 const STRIPE_STEP: u64 = 8;
 
-/// A BGRA surface of `width` by `height` pixels.
-pub(crate) fn allocate(width: usize, height: usize) -> HardwareBuffer {
+/// A BGRA surface of `width` by `height` pixels, as the host's hardware buffer, which only the CPU
+/// draws into.
+pub(crate) fn allocate(width: usize, height: usize) -> Arc<SurfaceBuffer> {
     // SAFETY: the keys are constants IOSurface exports for the life of the process.
     let keys: [&CFString; 5] = unsafe {
         [
@@ -47,7 +51,8 @@ pub(crate) fn allocate(width: usize, height: usize) -> HardwareBuffer {
     let values: [&CFNumber; 5] = numbers.each_ref().map(|number| &**number);
     let properties = CFDictionary::from_slices(&keys, &values);
     // SAFETY: every value is of the type its key names.
-    unsafe { IOSurfaceRef::new(properties.as_opaque()) }.expect("an IOSurface")
+    let surface = unsafe { IOSurfaceRef::new(properties.as_opaque()) }.expect("an IOSurface");
+    Arc::new(SurfaceBuffer::new(surface, HardwareBufferUsage::default()))
 }
 
 /// Draws frame `frame` into `surface`: the background, with the stripe where it has moved to.

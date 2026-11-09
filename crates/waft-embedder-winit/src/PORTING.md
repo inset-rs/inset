@@ -219,19 +219,19 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Apple marks the interruption notice's reason key unavailable on macOS, and documents the notice for another application taking the hardware a session needs.
   Affect: on a Mac an interruption has no reason.
 
-## video_frames.rs, os/apple/media/video_frame.rs, os/apple/media/frame_textures.rs → the macOS embedder's `FlutterExternalTexture` (`copyPixelBuffer`, `CVMetalTextureCache`)
+## video_frames.rs, os/apple/media/video_frame.rs, os/apple/gpu_interop.rs → the macOS embedder's `FlutterExternalTexture` (`copyPixelBuffer`, `CVMetalTextureCache`)
 
 - Change: at each vsync a view asks each reader its scene draws for the frame of the display link's target time, when the picture reaches the screen, and draws its last scene again when a new one came, where Flutter's engine draws a texture's frame when its plugin calls `markTextureFrameAvailable`.
   Reason: platform — AVFoundation tells no player's frame as it comes; a display link asks the video output for the frame of each refresh's `targetTimestamp`, as `frame_for` does, so a frame shows at its moment of the video, in step with the sound.
   Affect: a view that shows a video takes every vsync while it does and is in sight, paused or not, none while its window is hidden or covered, and a reader the scene no longer draws is let go with its frame.
 
-- Change: on macOS and iOS a frame is a `CoreVideoFrame`, whose pixel buffer platform code reaches by downcasting, and its texture is made through CoreVideo's texture cache on the device's Metal device, holding the frame until wgpu frees it, where Flutter's embedder makes a texture of the pixel buffer a plugin hands it for each frame it draws.
-  Reason: platform — a CoreVideo pool hands a frame's surface out again once nothing holds the frame, whatever still reads the surface, and Apple documents the texture cache for a BGRA pixel buffer.
+- Change: on macOS and iOS a frame is a `CoreVideoFrame`, whose pixel buffer platform code reaches by downcasting, and whose hardware buffer, the pixel buffer's `IOSurface` holding the frame, `Platform::import_texture` makes a Metal texture over on the device's Metal device, as it does any hardware buffer, the texture holding the frame until wgpu frees it, where Flutter's embedder makes a texture of the pixel buffer a plugin hands it for each frame it draws, through CoreVideo's texture cache.
+  Reason: platform — a CoreVideo pool hands a frame's surface out again once nothing holds the frame, whatever still reads the surface, and Metal makes a texture over an `IOSurface` with no copy, so a frame's buffer and a buffer the app allocated are imported one way.
   Affect: a frame is drawn with no copy, on the view's device or any other the app made, and is not overwritten while the GPU reads it.
 
-- Change: a frame has no texture on a device not on Metal, nor where CoreVideo makes none, and a view skips such a frame, keeping the one it shows, where Flutter's engine draws nothing for a texture its embedder could not make.
-  Reason: platform — CoreVideo's texture cache makes textures on a Metal device, and can fail to make one.
-  Affect: a video drawn on a device its frames cannot reach shows nothing, and a frame CoreVideo fails on leaves the one before on screen.
+- Change: a frame's buffer has no texture on a device not on Metal, nor where Metal makes none of its surface, and a view skips such a frame, keeping the one it shows, where Flutter's engine draws nothing for a texture its embedder could not make.
+  Reason: platform — Metal makes textures over an `IOSurface` on a Metal device, and can fail to make one.
+  Affect: a video drawn on a device its frames cannot reach shows nothing, and a frame Metal fails on leaves the one before on screen.
 
 ## host_window.rs / main_loop/windows.rs / os/macos/visibility.rs → Flutter's desktop window controllers (`_window_macos.dart`, `_window_win32.dart`, `_window_linux.dart`)
 
