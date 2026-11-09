@@ -57,3 +57,10 @@ wgpu = "30"
 pollster = "0.4"
 png = "0.17"
 web-time = "1"
+
+# Every crate outside the workspace, valo's and wgpu's among them, with line tables as its only
+# debug information in debug builds, their build scripts and proc macros too: a backtrace still
+# names their files and lines, while the workspace's own crates keep all of it for the debugger.
+# The rest was 0.4 GB of the 10 GB a fresh `cargo test --workspace --no-run` wrote.
+[profile.dev.package."*"]
+debug = "line-tables-only"

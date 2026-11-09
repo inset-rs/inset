@@ -1,4 +1,7 @@
 //! Exercise the private TabView scrolling template without exposing it as public kit API.
+//!
+//! Its own binary, not a module of `all/`: the `waft-winui` source file it compiles names the
+//! kit's items through `crate::`, which only this file's imports answer.
 #![feature(arbitrary_self_types)]
 #[allow(dead_code)]
 #[path = "../../../crates/waft-winui/src/controls/scroll_tab_viewer.rs"]

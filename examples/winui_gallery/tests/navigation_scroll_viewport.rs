@@ -1,4 +1,7 @@
 //! Source scrollbar presentation backed by native scrolling and drag recognizers.
+//!
+//! Its own binary, not a module of `all/`: the `waft-winui` source file it compiles names the
+//! kit's items through `crate::`, which only this file's imports answer.
 #![feature(arbitrary_self_types)]
 #[path = "../../../crates/waft-winui/src/controls/scroll_bar_viewport.rs"]
 mod presentation;

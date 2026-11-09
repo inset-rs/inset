@@ -32,10 +32,5 @@ wgpu.workspace = true
 [dev-dependencies]
 serde_json.workspace = true
 
-# Built only with the derives it tests.
-[[test]]
-name = "view_values_come_back_from_json_as_they_went"
-required-features = ["serde"]
-
 [lints]
 workspace = true

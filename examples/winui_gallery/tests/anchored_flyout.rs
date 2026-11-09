@@ -1,4 +1,7 @@
 //! Navigation's private attachment through the native overlay, focus and GPU pipeline.
+//!
+//! Its own binary, not a module of `all/`: the `waft-winui` source file it compiles names the
+//! kit's items through `crate::`, which only this file's imports answer.
 #![feature(arbitrary_self_types)]
 #[path = "../../../crates/waft-winui/src/primitives/anchored_flyout.rs"]
 mod attachment;

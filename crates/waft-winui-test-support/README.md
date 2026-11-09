@@ -22,6 +22,6 @@ fixture.capture("empty-box");
 
 `CaptureView` and `gpu::headless_device` can also be used independently by tests that need their own frame driver. `Fixture::with_root` installs system fonts; the independent GPU and view helpers do not. Tests supply any additional fonts their controls require.
 
-This crate does not depend on `waft-winui` or `winui_gallery`. Gallery startup, feature selection and page navigation remain in `examples/winui_gallery/tests/common` as `GalleryFixtureExt`. Control tests can use `Fixture::with_root` directly without loading the gallery.
+This crate does not depend on `waft-winui` or `winui_gallery`. Gallery startup, feature selection and page navigation remain in `examples/winui_gallery/tests/all/common.rs` as `GalleryFixtureExt`. Control tests can use `Fixture::with_root` directly without loading the gallery.
 
 The GPU and PNG helpers originated in Valo's test harness; its MIT notice is retained in `VALO_LICENSE`.
