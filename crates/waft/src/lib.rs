@@ -20,8 +20,9 @@
 /// picture the `Image` widget shows, as `dart:ui`'s `Image` is to Flutter's.
 pub use waft_embedder as ui;
 pub use waft_embedder::{
-    BlurStyle, HostWindow, MenuEntry, MenuItem, Platform, RequestId, ViewError, WindowBackground,
-    WindowConfig, WindowLevel, WindowRef, WindowSizeLimits,
+    BlurStyle, HostWindow, MacosTitleBar, MacosWindowConfig, MenuEntry, MenuItem, Platform,
+    RequestId, TitleBarAction, ViewError, WindowBackground, WindowConfig, WindowLevel, WindowRef,
+    WindowSizeLimits,
 };
 pub use waft_embedder::{
     Brightness, Color, DragChange, DragReport, FontFeature, FontWeight, Offset, Radius, Rect, Size,

@@ -11,26 +11,40 @@ use objc2_app_kit::{
     NSVisualEffectState, NSVisualEffectView, NSWindowCollectionBehavior, NSWindowOrderingMode,
 };
 use objc2_foundation::NSRect;
-use waft_embedder::{WindowBackground, WindowConfig};
+use waft_embedder::{MacosTitleBar, TitleBarAction, WindowBackground, WindowConfig};
 use winit::platform::macos::WindowAttributesMacOS;
 use winit::window::{Window, WindowAttributes};
 
-use super::{AppKit, menus, ns_view, ns_window};
+use super::{AppKit, menus, ns_view, ns_window, title_bar};
 use crate::os::capabilities::WindowChrome;
 
 impl WindowChrome for AppKit {
-    /// What winit has an AppKit attribute for: the shadow.
+    /// What winit has an AppKit attribute for: the shadow, and a hidden title bar's view under a
+    /// transparent, untitled title bar.
     fn extend_attributes(attributes: WindowAttributes, config: &WindowConfig) -> WindowAttributes {
-        attributes.with_platform_attributes(Box::new(
-            WindowAttributesMacOS::default().with_has_shadow(config.shadow),
-        ))
+        let mut macos = WindowAttributesMacOS::default().with_has_shadow(config.shadow);
+        if let MacosTitleBar::Hidden { .. } = config.macos.title_bar {
+            macos = macos
+                .with_fullsize_content_view(true)
+                .with_titlebar_transparent(true)
+                .with_title_hidden(true);
+        }
+        attributes.with_platform_attributes(Box::new(macos))
     }
 
     /// The window's keys going to the framework before the menu bar, pointer tracking for a window
-    /// that never activates, presence on every Space, and the blur or glass behind a see-through
-    /// window.
+    /// that never activates, presence on every Space, the blur or glass behind a see-through
+    /// window, and a hidden title bar's buttons in its band.
+    /// System Settings' choice (`title_bar`).
+    fn title_bar_double_click_action() -> TitleBarAction {
+        title_bar::double_click_action()
+    }
+
     fn configure(window: &dyn Window, config: &WindowConfig) {
         menus::app_window_opened(window);
+        if let MacosTitleBar::Hidden { height } = config.macos.title_bar {
+            title_bar::put_buttons_in_band(window, height);
+        }
         if !config.activating {
             track_pointer_always(window);
         }

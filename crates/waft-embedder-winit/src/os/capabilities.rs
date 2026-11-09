@@ -13,7 +13,8 @@ use waft_embedder::{
     Cameras, CaptionSettings, Clipboard, CompositionLayer, Compositor, DataTransferItem, DockMenu,
     FileDialogs, HardwareBuffer, HardwareBufferAllocator, KeyData, MediaAssets, MenuBar, MenuEntry,
     MenuId, Notifications, Offset, Opener, Placement, Players, Rect, Screen, ScreenId,
-    TargetPlatform, TrayIcons, VideoFrameReaders, ViewId, ViewPadding, VsyncWaiter, WindowConfig,
+    TargetPlatform, TitleBarAction, TrayIcons, VideoFrameReaders, ViewId, ViewPadding, VsyncWaiter,
+    WindowConfig,
 };
 use winit::event_loop::{ActiveEventLoop, EventLoopBuilder};
 use winit::monitor::MonitorHandle;
@@ -132,6 +133,12 @@ pub(crate) trait WindowChrome {
 
     /// Applies, once the window exists, what `config` asks for and no attribute carries.
     fn configure(_window: &dyn Window, _config: &WindowConfig) {}
+
+    /// What the system's settings say a double-click on a title bar does; `Unknown` where it has
+    /// no such setting this reads.
+    fn title_bar_double_click_action() -> TitleBarAction {
+        TitleBarAction::Unknown
+    }
 }
 
 /// Whether a window is occluded, and the system's notices that a window may have been minimized

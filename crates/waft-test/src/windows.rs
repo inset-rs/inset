@@ -87,7 +87,8 @@ impl Default for TestWindows {
 }
 
 /// A window that shows nothing, keeps the frame it was last given, whether it was last shown or
-/// hidden and the size limits it was last given, and counts how often it was closed: one of
+/// hidden, whether it is maximized and the size limits it was last given, and counts how often it
+/// was closed and dragged: one of
 /// [`TestWindows`], or one a test gives the app a view in. A closed window's view is in no window any more, and is no longer among the
 /// views of [`TestWindows`]. It is neither minimized nor occluded until a test says so, and the
 /// test then reports the change itself, as a host would through `EmbedderClient::window_changed`.
@@ -97,7 +98,9 @@ pub struct TestWindow {
     frame: Cell<Rect>,
     shown: Cell<bool>,
     closes: Cell<u32>,
+    drags: Cell<u32>,
     minimized: Cell<bool>,
+    maximized: Cell<bool>,
     occluded: Cell<bool>,
     min_size: Cell<Option<Size>>,
     max_size: Cell<Option<Size>>,
@@ -119,7 +122,9 @@ impl TestWindow {
                 shown: Cell::new(config.visible),
                 config,
                 closes: Cell::new(0),
+                drags: Cell::new(0),
                 minimized: Cell::new(false),
+                maximized: Cell::new(false),
                 occluded: Cell::new(false),
                 min_size: Cell::new(None),
                 max_size: Cell::new(None),
@@ -145,6 +150,11 @@ impl TestWindow {
     /// How many times the window was closed.
     pub fn closes(&self) -> u32 {
         self.closes.get()
+    }
+
+    /// How many times the window was dragged.
+    pub fn drags(&self) -> u32 {
+        self.drags.get()
     }
 
     /// The window is minimized, or restored, from now on.
@@ -206,6 +216,22 @@ impl HostWindow for TestWindow {
 
     fn size_limits(&self) -> Option<&dyn WindowSizeLimits> {
         Some(self)
+    }
+
+    fn drag(&self) {
+        self.drags.set(self.drags.get() + 1);
+    }
+
+    fn is_maximized(&self) -> bool {
+        self.maximized.get()
+    }
+
+    fn set_maximized(&self, maximized: bool) {
+        self.maximized.set(maximized);
+    }
+
+    fn set_minimized(&self, minimized: bool) {
+        self.minimized.set(minimized);
     }
 
     fn native_handle(&self) -> Option<RawWindowHandle> {

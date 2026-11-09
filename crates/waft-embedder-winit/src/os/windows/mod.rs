@@ -16,7 +16,7 @@ mod opener;
 
 use std::sync::Arc;
 
-use waft_embedder::TargetPlatform;
+use waft_embedder::{TargetPlatform, TitleBarAction};
 use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use winit::window::Window;
 
@@ -84,7 +84,12 @@ impl SystemMedia for Windows {}
 impl SystemImageCodecs for Windows {}
 impl SystemDrags for Windows {}
 impl WindowMotion for Windows {}
-impl WindowChrome for Windows {}
+/// A caption's double-click maximizes or restores the window, which Windows has no setting for.
+impl WindowChrome for Windows {
+    fn title_bar_double_click_action() -> TitleBarAction {
+        TitleBarAction::Maximize
+    }
+}
 impl Screens for Windows {}
 impl PointerQueries for Windows {}
 impl GpuInterop for Windows {}

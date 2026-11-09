@@ -211,7 +211,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app-events"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "waft-embedder",
  "waft-embedder-winit",
@@ -948,7 +948,7 @@ dependencies = [
 
 [[package]]
 name = "composition_layer"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "objc2-core-foundation",
  "objc2-io-surface",
@@ -1124,7 +1124,7 @@ dependencies = [
 
 [[package]]
 name = "cupertino-gallery"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "indexmap",
  "valo-system-fonts",
@@ -2220,7 +2220,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "layout"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "waft-embedder",
  "waft-foundation",
@@ -2344,7 +2344,7 @@ checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
 
 [[package]]
 name = "media"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "waft-embedder",
  "waft-embedder-winit",
@@ -2380,7 +2380,7 @@ dependencies = [
 
 [[package]]
 name = "menus"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "waft-cupertino",
  "waft-embedder",
@@ -3056,7 +3056,7 @@ checksum = "13c45bb4a6ae1280ec0803b1ef9d3455eb50f01efbbe1447ab020f1d54fba9d8"
 
 [[package]]
 name = "paint"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "waft-embedder",
  "waft-embedder-winit",
@@ -4916,7 +4916,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "video_frames"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "waft-embedder",
  "waft-embedder-winit",
@@ -4929,7 +4929,7 @@ dependencies = [
 
 [[package]]
 name = "view_on_layer"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "objc2",
  "objc2-app-kit",
@@ -4947,7 +4947,7 @@ dependencies = [
 
 [[package]]
 name = "waft"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "waft-embedder",
  "waft-embedder-default",
@@ -4961,7 +4961,7 @@ dependencies = [
 
 [[package]]
 name = "waft-animation"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "waft-embedder",
  "waft-foundation",
@@ -4971,7 +4971,7 @@ dependencies = [
 
 [[package]]
 name = "waft-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "brotli",
@@ -4992,7 +4992,7 @@ dependencies = [
 
 [[package]]
 name = "waft-cupertino"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "indexmap",
  "valo-system-fonts",
@@ -5011,7 +5011,7 @@ dependencies = [
 
 [[package]]
 name = "waft-embedder"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "indexmap",
  "pollster",
@@ -5027,7 +5027,7 @@ dependencies = [
 
 [[package]]
 name = "waft-embedder-android"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "android-activity",
  "jni",
@@ -5044,7 +5044,7 @@ dependencies = [
 
 [[package]]
 name = "waft-embedder-default"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "waft-embedder",
  "waft-embedder-android",
@@ -5054,7 +5054,7 @@ dependencies = [
 
 [[package]]
 name = "waft-embedder-web"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.3.4",
@@ -5070,7 +5070,7 @@ dependencies = [
 
 [[package]]
 name = "waft-embedder-winit"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "arboard",
  "block2",
@@ -5112,7 +5112,7 @@ dependencies = [
 
 [[package]]
 name = "waft-foundation"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-task",
  "indexmap",
@@ -5122,7 +5122,7 @@ dependencies = [
 
 [[package]]
 name = "waft-gestures"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "indexmap",
  "waft-embedder",
@@ -5133,7 +5133,7 @@ dependencies = [
 
 [[package]]
 name = "waft-macros"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5142,7 +5142,7 @@ dependencies = [
 
 [[package]]
 name = "waft-markdown"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "pulldown-cmark",
  "valo-system-fonts",
@@ -5158,7 +5158,7 @@ dependencies = [
 
 [[package]]
 name = "waft-painting"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "indexmap",
  "valo",
@@ -5172,14 +5172,14 @@ dependencies = [
 
 [[package]]
 name = "waft-physics"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "waft-embedder",
 ]
 
 [[package]]
 name = "waft-rendering"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "indexmap",
  "unicode-general-category",
@@ -5197,7 +5197,7 @@ dependencies = [
 
 [[package]]
 name = "waft-scheduler"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "indexmap",
  "waft-embedder",
@@ -5207,7 +5207,7 @@ dependencies = [
 
 [[package]]
 name = "waft-services"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "indexmap",
  "unicode-segmentation",
@@ -5220,7 +5220,7 @@ dependencies = [
 
 [[package]]
 name = "waft-shell"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "waft-embedder",
  "waft-foundation",
@@ -5234,7 +5234,7 @@ dependencies = [
 
 [[package]]
 name = "waft-single-instance"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "windows-sys 0.60.2",
  "zbus",
@@ -5242,7 +5242,7 @@ dependencies = [
 
 [[package]]
 name = "waft-test"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "waft-embedder",
  "wgpu",
@@ -5250,7 +5250,7 @@ dependencies = [
 
 [[package]]
 name = "waft-widgets"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "indexmap",
  "valo-system-fonts",
@@ -5268,7 +5268,7 @@ dependencies = [
 
 [[package]]
 name = "waft-winui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "waft-animation",
  "waft-embedder",
@@ -5284,7 +5284,7 @@ dependencies = [
 
 [[package]]
 name = "waft-winui-test-support"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "png 0.17.16",
  "pollster",
@@ -5744,7 +5744,7 @@ dependencies = [
 
 [[package]]
 name = "window"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "waft-cupertino",
  "waft-embedder",
@@ -6307,7 +6307,7 @@ dependencies = [
 
 [[package]]
 name = "winui_gallery"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "waft",
  "waft-animation",

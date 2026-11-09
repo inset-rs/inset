@@ -49,6 +49,8 @@ pub struct WindowConfig {
     /// Whether the window casts the system's shadow.
     pub shadow: bool,
     pub visible: bool,
+    /// What only macOS windows offer; other systems leave it out.
+    pub macos: MacosWindowConfig,
 }
 
 impl Default for WindowConfig {
@@ -65,8 +67,29 @@ impl Default for WindowConfig {
             background: WindowBackground::Solid,
             shadow: true,
             visible: true,
+            macos: MacosWindowConfig::default(),
         }
     }
+}
+
+/// What a window offers on macOS alone.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MacosWindowConfig {
+    pub title_bar: MacosTitleBar,
+}
+
+/// The title bar of a macOS window.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum MacosTitleBar {
+    /// The system's, with the window's title in it.
+    #[default]
+    Standard,
+    /// None of its own, as Safari's and Finder's windows: the view runs to the window's top edge,
+    /// and the close, minimize and zoom buttons sit over it, centred in a band `height` points tall
+    /// at the top, as far from the left edge as from the band's top. Presses in the band reach the
+    /// app, which moves the window, and does a title bar's double press, from where it draws
+    /// nothing to press ([`HostWindow::drag`], [`HostWindow::title_bar_double_click_action`]).
+    Hidden { height: f64 },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -98,6 +121,18 @@ impl WindowBackground {
     pub fn sees_through(self) -> bool {
         self != WindowBackground::Solid
     }
+}
+
+/// What a double-click on a window's title bar does
+/// ([`HostWindow::title_bar_double_click_action`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TitleBarAction {
+    Maximize,
+    Minimize,
+    Nothing,
+    /// The host can't tell, or the system's setting has a value it doesn't know.
+    #[default]
+    Unknown,
 }
 
 /// The number of a request for a view, which the view carries when it arrives
@@ -162,6 +197,27 @@ pub trait HostWindow: 'static {
     /// resize windows (phones). Flutter `WindowController.setConstraints`.
     fn size_limits(&self) -> Option<&dyn WindowSizeLimits>;
 
+    /// Starts the system's own move of the window from the press under way, as a press on its
+    /// title bar does: for an app that draws its own ([`MacosTitleBar::Hidden`]). Call it from
+    /// the press.
+    fn drag(&self);
+
+    /// Flutter `WindowController.isMaximized`; on macOS, zoomed.
+    fn is_maximized(&self) -> bool;
+
+    /// Flutter `WindowController.setMaximized`; on macOS, zooms the window or returns it to its
+    /// size from before.
+    fn set_maximized(&self, maximized: bool);
+
+    /// Flutter `WindowController.setMinimized`.
+    fn set_minimized(&self, minimized: bool);
+
+    /// What the system's settings say a double-click on a title bar does, for an app that draws
+    /// its own ([`MacosTitleBar::Hidden`]): macOS's "Double-click a window's title bar to".
+    fn title_bar_double_click_action(&self) -> TitleBarAction {
+        TitleBarAction::Unknown
+    }
+
     /// The native window, for configuration this interface does not carry.
     fn native_handle(&self) -> Option<RawWindowHandle>;
 }
@@ -186,6 +242,7 @@ mod tests {
         assert!(config.decorations && config.visible && config.activating);
         assert_eq!(config.level, WindowLevel::Normal);
         assert_eq!(config.background, WindowBackground::Solid);
+        assert_eq!(config.macos.title_bar, MacosTitleBar::Standard);
     }
 
     #[test]

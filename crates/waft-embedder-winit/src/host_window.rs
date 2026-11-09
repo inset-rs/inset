@@ -7,14 +7,16 @@ use std::rc::Rc;
 use std::sync::Weak;
 use std::time::Duration;
 
-use waft_embedder::{HostWindow, RawWindowHandle, Rect, Size, ViewRef, WindowSizeLimits};
+use waft_embedder::{
+    HostWindow, RawWindowHandle, Rect, Size, TitleBarAction, ViewRef, WindowSizeLimits,
+};
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::{Window, WindowId};
 
 use crate::app_requests::{AppRequest, AppRequests, WindowRequest};
 use crate::os::System;
-use crate::os::capabilities::{WindowMotion, WindowVisibility};
+use crate::os::capabilities::{WindowChrome, WindowMotion, WindowVisibility};
 use crate::view::WinitView;
 
 /// A created window as the app holds it. Holds the window weakly: the embedder's registry owns it,
@@ -163,6 +165,36 @@ impl HostWindow for WinitWindow {
     /// Every window the app asks for is a desktop's, which its user resizes.
     fn size_limits(&self) -> Option<&dyn WindowSizeLimits> {
         Some(self)
+    }
+
+    /// winit's, which starts the system's own move from the press the system is handling; none
+    /// starts outside a press, as there is nothing to move with.
+    fn drag(&self) {
+        if let Some(window) = self.window.upgrade() {
+            let _ = window.drag_window();
+        }
+    }
+
+    fn is_maximized(&self) -> bool {
+        self.window
+            .upgrade()
+            .is_some_and(|window| window.is_maximized())
+    }
+
+    fn set_maximized(&self, maximized: bool) {
+        if let Some(window) = self.window.upgrade() {
+            window.set_maximized(maximized);
+        }
+    }
+
+    fn set_minimized(&self, minimized: bool) {
+        if let Some(window) = self.window.upgrade() {
+            window.set_minimized(minimized);
+        }
+    }
+
+    fn title_bar_double_click_action(&self) -> TitleBarAction {
+        System::title_bar_double_click_action()
     }
 
     fn native_handle(&self) -> Option<RawWindowHandle> {

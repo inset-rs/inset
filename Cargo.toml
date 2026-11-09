@@ -4,7 +4,7 @@ members = ["crates/*", "examples/*"]
 
 [workspace.package]
 edition = "2024"
-version = "0.2.0"
+version = "0.3.0"
 license = "MIT"
 repository = "https://github.com/xtyxtyx/waft-ui"
 homepage = "https://waft.rs"
@@ -18,28 +18,28 @@ unsafe_code = "forbid"
 arboard = "3"
 async-task = "4"
 indexmap = "2"
-waft = { version = "0.2.0", path = "crates/waft" }
-waft-animation = { version = "0.2.0", path = "crates/waft-animation" }
-waft-cupertino = { version = "0.2.0", path = "crates/waft-cupertino" }
-waft-embedder = { version = "0.2.0", path = "crates/waft-embedder" }
-waft-embedder-android = { version = "0.2.0", path = "crates/waft-embedder-android" }
-waft-embedder-default = { version = "0.2.0", path = "crates/waft-embedder-default" }
-waft-embedder-web = { version = "0.2.0", path = "crates/waft-embedder-web" }
-waft-embedder-winit = { version = "0.2.0", path = "crates/waft-embedder-winit" }
-waft-foundation = { version = "0.2.0", path = "crates/waft-foundation" }
-waft-gestures = { version = "0.2.0", path = "crates/waft-gestures" }
-waft-markdown = { version = "0.2.0", path = "crates/waft-markdown" }
-waft-macros = { version = "0.2.0", path = "crates/waft-macros" }
-waft-painting = { version = "0.2.0", path = "crates/waft-painting" }
-waft-physics = { version = "0.2.0", path = "crates/waft-physics" }
-waft-rendering = { version = "0.2.0", path = "crates/waft-rendering" }
-waft-scheduler = { version = "0.2.0", path = "crates/waft-scheduler" }
-waft-services = { version = "0.2.0", path = "crates/waft-services" }
-waft-shell = { version = "0.2.0", path = "crates/waft-shell" }
-waft-single-instance = { version = "0.2.0", path = "crates/waft-single-instance" }
-waft-test = { version = "0.2.0", path = "crates/waft-test" }
-waft-widgets = { version = "0.2.0", path = "crates/waft-widgets" }
-waft-winui = { version = "0.2.0", path = "crates/waft-winui" }
+waft = { version = "0.3.0", path = "crates/waft" }
+waft-animation = { version = "0.3.0", path = "crates/waft-animation" }
+waft-cupertino = { version = "0.3.0", path = "crates/waft-cupertino" }
+waft-embedder = { version = "0.3.0", path = "crates/waft-embedder" }
+waft-embedder-android = { version = "0.3.0", path = "crates/waft-embedder-android" }
+waft-embedder-default = { version = "0.3.0", path = "crates/waft-embedder-default" }
+waft-embedder-web = { version = "0.3.0", path = "crates/waft-embedder-web" }
+waft-embedder-winit = { version = "0.3.0", path = "crates/waft-embedder-winit" }
+waft-foundation = { version = "0.3.0", path = "crates/waft-foundation" }
+waft-gestures = { version = "0.3.0", path = "crates/waft-gestures" }
+waft-markdown = { version = "0.3.0", path = "crates/waft-markdown" }
+waft-macros = { version = "0.3.0", path = "crates/waft-macros" }
+waft-painting = { version = "0.3.0", path = "crates/waft-painting" }
+waft-physics = { version = "0.3.0", path = "crates/waft-physics" }
+waft-rendering = { version = "0.3.0", path = "crates/waft-rendering" }
+waft-scheduler = { version = "0.3.0", path = "crates/waft-scheduler" }
+waft-services = { version = "0.3.0", path = "crates/waft-services" }
+waft-shell = { version = "0.3.0", path = "crates/waft-shell" }
+waft-single-instance = { version = "0.3.0", path = "crates/waft-single-instance" }
+waft-test = { version = "0.3.0", path = "crates/waft-test" }
+waft-widgets = { version = "0.3.0", path = "crates/waft-widgets" }
+waft-winui = { version = "0.3.0", path = "crates/waft-winui" }
 waft-winui-test-support = { path = "crates/waft-winui-test-support" }
 pulldown-cmark = { version = "0.13", default-features = false }
 slotmap = "1"

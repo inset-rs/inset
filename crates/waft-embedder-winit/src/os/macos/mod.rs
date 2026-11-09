@@ -36,6 +36,7 @@ mod pasteboard;
 mod pointer;
 mod screens;
 mod system_changes;
+mod title_bar;
 mod trackpad_touches;
 mod visibility;
 mod vsync_waiter;
