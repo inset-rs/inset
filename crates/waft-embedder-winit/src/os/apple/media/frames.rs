@@ -142,10 +142,11 @@ impl PlayerFrames {
     }
 }
 
-impl FrameOutput for PlayerFrames {
+impl PlayerFrames {
     /// The item's frame for the moment `display_time` is in the video, as Apple's display link
-    /// pattern asks for its target time.
-    fn frame_for(&self, display_time: Instant) -> Option<Arc<dyn VideoFrame>> {
+    /// pattern asks for its target time; `None` when the output handed that frame out already,
+    /// or has none.
+    pub(super) fn new_frame_for(&self, display_time: Instant) -> Option<CoreVideoFrame> {
         let output = &self.output.0;
         // SAFETY: the output answers from any thread, as a display link's thread reads it.
         let buffer = unsafe {
@@ -155,7 +156,13 @@ impl FrameOutput for PlayerFrames {
             }
             output.copyPixelBufferForItemTime_itemTimeForDisplay(time, std::ptr::null_mut())?
         };
-        Some(Arc::new(CoreVideoFrame::new(cf_pixel_buffer_of(buffer))))
+        Some(CoreVideoFrame::new(cf_pixel_buffer_of(buffer)))
+    }
+}
+
+impl FrameOutput for PlayerFrames {
+    fn frame_for(&self, display_time: Instant) -> Option<Arc<dyn VideoFrame>> {
+        Some(Arc::new(self.new_frame_for(display_time)?))
     }
 }
 
@@ -167,9 +174,10 @@ struct CrossThreadOutput(Retained<AVPlayerItemVideoOutput>);
 unsafe impl Send for CrossThreadOutput {}
 unsafe impl Sync for CrossThreadOutput {}
 
-/// A camera's frames: the newest picture its video data output delivered, kept until read.
+/// A camera's frames: the newest picture its video data output delivered, kept until the next
+/// replaces it, and handed to a reader once.
 pub(super) struct CameraFrames {
-    newest: Arc<Mutex<Option<CoreVideoFrame>>>,
+    newest: Arc<Mutex<Newest>>,
     output: CrossThreadVideoDataOutput,
     /// The delegate the output calls, which it holds weakly.
     _delegate: CrossThreadDelegate,
@@ -177,10 +185,34 @@ pub(super) struct CameraFrames {
     _queue: DispatchRetained<DispatchQueue>,
 }
 
+/// The newest picture a video data output delivered, and whether a reader has had it.
+#[derive(Default)]
+struct Newest {
+    frame: Option<CoreVideoFrame>,
+    answered: bool,
+}
+
+impl Newest {
+    /// `frame` came, replacing the one before, for a reader to have.
+    fn delivered(&mut self, frame: CoreVideoFrame) {
+        self.frame = Some(frame);
+        self.answered = false;
+    }
+
+    /// The newest frame, once: `None` when the reader had it already.
+    fn for_reader(&mut self) -> Option<CoreVideoFrame> {
+        if self.answered {
+            return None;
+        }
+        self.answered = true;
+        self.frame.clone()
+    }
+}
+
 impl CameraFrames {
     /// An output delivering pixel buffers on a queue of its own, kept here as they come.
     pub(super) fn new() -> CameraFrames {
-        let newest = Arc::new(Mutex::new(None));
+        let newest = Arc::new(Mutex::new(Newest::default()));
         let delegate = SampleBufferDelegate::alloc().set_ivars(Arc::clone(&newest));
         // SAFETY: plain NSObject initialisation of an allocated instance.
         let delegate: Retained<SampleBufferDelegate> = unsafe { msg_send![super(delegate), init] };
@@ -211,17 +243,22 @@ impl CameraFrames {
     pub(super) fn output(&self) -> &AVCaptureVideoDataOutput {
         &self.output.0
     }
+
+    /// The newest frame the output delivered, whether or not a reader has had it: what the
+    /// camera shows now.
+    pub(super) fn newest(&self) -> Option<CoreVideoFrame> {
+        self.newest_guard().frame.clone()
+    }
+
+    fn newest_guard(&self) -> MutexGuard<'_, Newest> {
+        self.newest.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 }
 
 impl FrameOutput for CameraFrames {
-    /// The newest frame: a camera's frames are live, so each is for now.
+    /// The newest frame, once: a camera's frames are live, so each is for now.
     fn frame_for(&self, _display_time: Instant) -> Option<Arc<dyn VideoFrame>> {
-        let newest = self
-            .newest
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()?;
-        Some(Arc::new(newest))
+        Some(Arc::new(self.newest_guard().for_reader()?))
     }
 }
 
@@ -231,7 +268,7 @@ define_class!(
     // SAFETY: NSObject has no subclassing requirements, and the delegate has no `Drop`.
     #[unsafe(super(NSObject))]
     #[name = "WaftCameraFramesDelegate"]
-    #[ivars = Arc<Mutex<Option<CoreVideoFrame>>>]
+    #[ivars = Arc<Mutex<Newest>>]
     struct SampleBufferDelegate;
 
     unsafe impl NSObjectProtocol for SampleBufferDelegate {}
@@ -250,8 +287,10 @@ define_class!(
                 let Some(image) = (unsafe { sample_buffer.image_buffer() }) else {
                     return;
                 };
-                *self.ivars().lock().unwrap_or_else(PoisonError::into_inner) =
-                    Some(CoreVideoFrame::new(image));
+                self.ivars()
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .delivered(CoreVideoFrame::new(image));
             });
         }
     }
@@ -352,6 +391,28 @@ mod tests {
         reader.stop_reading(&(Arc::clone(&second) as Arc<dyn FrameOutput>));
         reader.frame_for(Instant::now());
         assert_eq!(second.reads(), 1, "fed by nothing, it reads nothing");
+    }
+
+    /// A camera's newest frame goes to its reader once, and stays what the camera shows until the
+    /// next comes.
+    #[test]
+    fn a_cameras_newest_frame_is_read_once_and_shown_until_the_next() {
+        let mut newest = Newest::default();
+        assert!(newest.for_reader().is_none(), "none came yet");
+        let first = crate::os::apple::media::test_frame();
+        newest.delivered(first.clone());
+        assert!(is_frame(newest.for_reader(), &first));
+        assert!(newest.for_reader().is_none(), "the reader had it");
+        assert!(is_frame(newest.frame.clone(), &first), "still shown");
+        let second = crate::os::apple::media::test_frame();
+        newest.delivered(second.clone());
+        assert!(is_frame(newest.frame.clone(), &second));
+        assert!(is_frame(newest.for_reader(), &second));
+    }
+
+    /// Whether `frame` is `expected`'s pixel buffer.
+    fn is_frame(frame: Option<CoreVideoFrame>, expected: &CoreVideoFrame) -> bool {
+        frame.is_some_and(|frame| std::ptr::eq(frame.pixel_buffer(), expected.pixel_buffer()))
     }
 
     /// A source feeds a reader this host made, and not one made elsewhere.

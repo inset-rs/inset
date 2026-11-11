@@ -57,7 +57,7 @@ pub use clipboard::{
     ClipboardReadFuture, ClipboardWriteFuture, Content, ContentFuture, CopyOptions, CopyRequest,
     DataTransferItem, FileSink, URI_LIST, WriteFuture,
 };
-pub use composition::{CompositionLayer, Compositor};
+pub use composition::{CompositionLayer, Compositor, LayerPicture};
 pub use cue::{
     Cue, CueAnchor, CueContent, CueImage, CueLine, CueTextAlignment, CueTextEdge, CueTextRun,
     CueVertical,

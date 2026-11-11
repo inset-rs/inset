@@ -3,8 +3,10 @@
 //! never played, plays it, hands its frames to a reader made on its own, each the host's
 //! `CoreVideoFrame` over a BGRA pixel buffer backed by an IOSurface, ends, paused at its end,
 //! tells a seek under way until it lands and is read where it landed, mutes, and plays on past
-//! its end once it loops: all without a window or a sound. On its way it is put on a surface, not in any window, and nowhere
-//! again; sent nowhere at the end, it feeds the reader no more.
+//! its end once it loops: all without a window or a sound. On its way it is put on a composition
+//! layer, not in any window, which answers its first frame as what it shows though it was never
+//! played, lent as the host's `CoreVideoFrame`, and nothing once the player is sent nowhere again;
+//! sent nowhere at the end, it feeds the reader no more.
 //!
 //! Its own binary, without the test harness: AVFoundation changes a player's state on the main
 //! queue, which only the main thread serves, so this one serves it while it waits. On iOS it runs
@@ -36,7 +38,7 @@ mod player {
     };
     use objc2_foundation::{NSDate, NSDefaultRunLoopMode, NSRunLoop};
     use waft_embedder::{
-        MediaChangeFuture, MediaTrackKind, PauseReason, PickedFile, PlayerActivity,
+        LayerPicture, MediaChangeFuture, MediaTrackKind, PauseReason, PickedFile, PlayerActivity,
         PlayerErrorKind, PlayerStatus, SeekTolerance, Size, TimeRange, VideoOutput,
     };
     use waft_embedder_winit::CoreVideoFrame;
@@ -90,8 +92,35 @@ mod player {
         let compositor =
             waft_embedder_winit::test_support::compositor().expect("the system's compositor");
         let layer = compositor.make_layer(false);
-        player.set_video_output(Some(VideoOutput::Layer(layer)));
+        player.set_video_output(Some(VideoOutput::Layer(Arc::clone(&layer))));
+        let mut shown = None;
+        serve_until("the layer shows the first frame", || {
+            shown = layer.current_picture();
+            shown.is_some()
+        });
+        let Some(LayerPicture::Frame(shown)) = shown else {
+            panic!("the player's frame, lent");
+        };
+        assert_eq!([shown.width(), shown.height()], [64, 48]);
+        let shown: &dyn std::any::Any = &*shown;
+        let frame = shown
+            .downcast_ref::<CoreVideoFrame>()
+            .expect("the host's own frame")
+            .pixel_buffer();
+        assert_eq!(
+            CVPixelBufferGetPixelFormatType(frame),
+            kCVPixelFormatType_32BGRA
+        );
+        assert!(CVPixelBufferGetIOSurface(Some(frame)).is_some());
+        assert!(
+            layer.current_picture().is_some(),
+            "a paused player's frame stays what the layer shows"
+        );
         player.set_video_output(None);
+        assert!(
+            layer.current_picture().is_none(),
+            "a player sent nowhere leaves its layer showing nothing"
+        );
 
         let readers = waft_embedder_winit::test_support::video_frame_readers()
             .expect("the system's frame readers");

@@ -61,6 +61,12 @@ impl<B> PresentedBuffers<B> {
         self.replaced.extend(previous);
     }
 
+    /// The buffer on screen; `None` before the first present, and once something else is the
+    /// layer's content.
+    pub(super) fn on_screen(&self) -> Option<&B> {
+        self.on_screen.as_ref().map(|presented| &presented.buffer)
+    }
+
     /// The one on screen is replaced by nothing: something else is the layer's content now.
     pub(super) fn take_off_screen(&mut self) {
         self.replaced.extend(self.on_screen.take());
@@ -122,6 +128,18 @@ mod tests {
         );
         notify_released(buffers.release_unused(|_| false));
         assert_eq!(released.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn the_buffer_on_screen_is_the_last_presented_until_it_is_taken_off() {
+        let released = Arc::new(AtomicUsize::new(0));
+        let mut buffers = PresentedBuffers::new();
+        assert_eq!(buffers.on_screen(), None);
+        buffers.present("first", counting(&released));
+        buffers.present("second", counting(&released));
+        assert_eq!(buffers.on_screen(), Some(&"second"));
+        buffers.take_off_screen();
+        assert_eq!(buffers.on_screen(), None);
     }
 
     #[test]

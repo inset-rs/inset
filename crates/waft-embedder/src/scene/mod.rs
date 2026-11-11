@@ -55,6 +55,10 @@ fn idle_layer() -> std::sync::Arc<dyn crate::CompositionLayer> {
             _released: Box<dyn FnOnce() + Send + Sync>,
         ) {
         }
+
+        fn current_picture(&self) -> Option<crate::LayerPicture> {
+            None
+        }
     }
 
     std::sync::Arc::new(IdleLayer)

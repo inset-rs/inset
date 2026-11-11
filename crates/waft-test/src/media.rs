@@ -19,9 +19,9 @@ use waft_embedder::image_codecs::{
 use waft_embedder::{
     Camera, CameraDevice, CameraError, CameraFormat, CameraListFuture, CameraOpenFuture,
     CameraOutputs, CameraStartFuture, Cameras, CaptureSession, CaptureState, CompositionLayer,
-    Compositor, Cue, HardwareBuffer, HardwareBufferUsage, MediaAsset, MediaAssetFuture,
-    MediaAssets, MediaChangeFuture, MediaError, MediaMetadata, MediaPlayer, MediaTrack,
-    MovieOptions, Photo, PhotoFuture, Placement, PlayerError, PlayerState, Players,
+    Compositor, Cue, HardwareBuffer, HardwareBufferUsage, LayerPicture, MediaAsset,
+    MediaAssetFuture, MediaAssets, MediaChangeFuture, MediaError, MediaMetadata, MediaPlayer,
+    MediaTrack, MovieOptions, Photo, PhotoFuture, Placement, PlayerError, PlayerState, Players,
     RecordingFuture, SeekTolerance, Size, VideoFrame, VideoFrameReader, VideoFrameReaders,
     VideoOutput,
 };
@@ -77,6 +77,10 @@ impl CompositionLayer for MockLayer {
         released: Box<dyn FnOnce() + Send + Sync>,
     ) {
         released();
+    }
+
+    fn current_picture(&self) -> Option<LayerPicture> {
+        None
     }
 }
 

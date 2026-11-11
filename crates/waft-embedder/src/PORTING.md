@@ -118,6 +118,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — a host that draws programs shows each program's picture as a composition layer whose own layers go beneath it, where Flutter's platform views are always the view's own.
   Affect: a layer has one parent at a time; a child shows only where its parent's last present placed it, and moves, is clipped and is scaled with its parent.
 
+- Change: a composition layer answers what it shows now (`CompositionLayer::current_picture`), a `LayerPicture`: the raw buffer presented to it last, or the lent frame of the player's video or the camera's picture shown on it.
+  Reason: platform — a tool that takes a picture of a window draws the layers the system's compositor shows beneath the picture above them, and only the host can read what its compositor shows.
+  Affect: a picture of a window can show its videos and camera previews; a layer that shows nothing answers `None`, as does one showing a system layer the host does not read.
+
 ## image.rs → dart:ui `instantiateImageCodec` / `Codec` / `FrameInfo`
 
 - Change: `Image` is a counted handle to the host's texture, with no clone and no dispose.

@@ -6,7 +6,8 @@
 //! configuration the system refuses, or the runtime error Apple's documentation of
 //! `startRunning` posts for a session that fails to start. Its preview is an
 //! `AVCaptureVideoPreviewLayer` shown as a composition layer's content, its frames a video data
-//! output a reader reads (`frames`), its photos and recordings the system's outputs (`outputs`).
+//! output a reader reads (`frames`), the same output the composition layer reads what its preview
+//! shows from (`layer_pictures`), its photos and recordings the system's outputs (`outputs`).
 //! Its state follows AVFoundation's notices: an interruption, its end, and a runtime error, which
 //! ends the session as a configuration the system refuses does.
 //!
@@ -46,9 +47,10 @@ use super::camera_sharing::CameraShare;
 use super::frames::{
     AvFrameReader, CameraFrames, FrameOutput, report_foreign_reader, report_reader_in_use,
 };
+use super::layer_pictures::CameraPicture;
 use super::observing::NotificationObservation;
 use super::outputs::{MovieRecorder, PhotoTaker};
-use super::{in_transaction, show_system_layer};
+use super::{SystemPicture, in_transaction, show_system_layer};
 use crate::media::{Changes, MediaAnswer, media_answer};
 
 /// A session running one device.
@@ -56,16 +58,17 @@ pub(super) struct AvCaptureSession {
     shared: Arc<SessionShared>,
     share: CameraShare,
     preview: Option<Preview>,
-    frames: Option<FedReader>,
+    reader: Option<FedReader>,
     photos: Option<PhotoTaker>,
     movies: Option<MovieRecorder>,
     _notices: NotificationObservation,
 }
 
 /// The preview layer and the composition layer it is the content of, which the session holds as
-/// a producer does.
+/// a producer does, and what the composition layer reads it shows from.
 struct Preview {
     layer: Retained<AVCaptureVideoPreviewLayer>,
+    _picture: Arc<dyn SystemPicture>,
     _shown_on: Arc<dyn CompositionLayer>,
 }
 
@@ -124,10 +127,19 @@ impl AvCaptureSession {
     ) -> AvCaptureSession {
         let shared = Arc::new(SessionShared::new(started));
         let notices = observe_notices(&shared);
+        let frames = (outputs.preview.is_some() || outputs.frames.is_some())
+            .then(|| Arc::new(CameraFrames::new()));
         let preview = outputs
             .preview
-            .map(|shown_on| Preview::show(&shared.session.0, shown_on));
-        let frames = outputs.frames.and_then(feed);
+            .zip(frames.clone())
+            .map(|(shown_on, frames)| Preview::show(&shared.session.0, shown_on, frames));
+        let reader = outputs
+            .frames
+            .zip(frames.clone())
+            .and_then(|(reader, frames)| feed(reader, frames));
+        // The video data output, which the preview and the reader hold, is the session's to feed;
+        // a reader refused reads nothing, so a session without a preview needs none then.
+        let frames = frames.filter(|_| preview.is_some() || reader.is_some());
         let photos = outputs
             .photos
             .map(|size| PhotoTaker::new(Arc::clone(&shared), photo_size_in(share.format(), size)));
@@ -137,7 +149,7 @@ impl AvCaptureSession {
         let configuration = Configuration {
             device: CrossThreadDevice(device),
             format: share.sets_format().then(|| share.format().clone()),
-            outputs: outputs_of(frames.as_ref(), photos.as_ref(), movies.as_ref()),
+            outputs: outputs_of(frames.as_deref(), photos.as_ref(), movies.as_ref()),
             photos: photos.clone(),
         };
         let sound = outputs.movies.is_some_and(|options| options.sound);
@@ -146,7 +158,7 @@ impl AvCaptureSession {
             shared,
             share,
             preview,
-            frames,
+            reader,
             photos,
             movies,
             _notices: notices,
@@ -195,7 +207,7 @@ impl Drop for AvCaptureSession {
         if let Some(preview) = self.preview.take() {
             in_transaction(|| preview.layer.removeFromSuperlayer());
         }
-        if let Some(fed) = self.frames.take() {
+        if let Some(fed) = self.reader.take() {
             fed.reader
                 .stop_reading(&(fed.frames as Arc<dyn FrameOutput>));
         }
@@ -204,30 +216,37 @@ impl Drop for AvCaptureSession {
 }
 
 impl Preview {
-    /// A preview of `session`, showing all of its picture, as `shown_on`'s content.
-    fn show(session: &AVCaptureSession, shown_on: Arc<dyn CompositionLayer>) -> Preview {
+    /// A preview of `session`, showing all of its picture, as `shown_on`'s content, which reads
+    /// what it shows from `frames`, the session's video data output.
+    fn show(
+        session: &AVCaptureSession,
+        shown_on: Arc<dyn CompositionLayer>,
+        frames: Arc<CameraFrames>,
+    ) -> Preview {
         // SAFETY: a layer of the session, made on the main thread.
         let layer = unsafe { AVCaptureVideoPreviewLayer::layerWithSession(session) };
         // SAFETY: a constant AVFoundation exports for the life of the process.
         if let Some(gravity) = unsafe { AVLayerVideoGravityResizeAspect } {
             unsafe { layer.setVideoGravity(gravity) };
         }
-        show_system_layer(&shown_on, &layer);
+        let picture: Arc<dyn SystemPicture> = Arc::new(CameraPicture(frames));
+        show_system_layer(&shown_on, &layer, Some(Arc::downgrade(&picture)));
         Preview {
             layer,
+            _picture: picture,
             _shown_on: shown_on,
         }
     }
 }
 
-/// A video data output read by `reader`; `None`, the camera's frames going nowhere, for a reader
-/// this host did not make or one another source feeds, which the host says once.
-fn feed(reader: Arc<dyn VideoFrameReader>) -> Option<FedReader> {
+/// `frames`, the session's video data output, read by `reader`; `None`, the camera's frames going
+/// to no reader, for a reader this host did not make or one another source feeds, which the host
+/// says once.
+fn feed(reader: Arc<dyn VideoFrameReader>, frames: Arc<CameraFrames>) -> Option<FedReader> {
     let Some(reader) = AvFrameReader::downcast_from(reader) else {
         report_foreign_reader();
         return None;
     };
-    let frames = Arc::new(CameraFrames::new());
     if !reader.read(Arc::clone(&frames) as Arc<dyn FrameOutput>) {
         report_reader_in_use();
         return None;
@@ -237,12 +256,12 @@ fn feed(reader: Arc<dyn VideoFrameReader>) -> Option<FedReader> {
 
 /// The AVFoundation outputs of the frames, photos and movies the app asked for.
 fn outputs_of(
-    frames: Option<&FedReader>,
+    frames: Option<&CameraFrames>,
     photos: Option<&PhotoTaker>,
     movies: Option<&MovieRecorder>,
 ) -> Vec<CrossThreadOutput> {
     [
-        frames.map(|fed| fed.frames.output().as_super()),
+        frames.map(|frames| frames.output().as_super()),
         photos.map(PhotoTaker::output),
         movies.map(MovieRecorder::output),
     ]

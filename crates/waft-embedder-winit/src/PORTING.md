@@ -177,13 +177,17 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Core Animation gives no signal when it lets go of a buffer.
   Affect: a producer never waits for a buffer to come back, but draws into another when none is known free, as Flutter's `FlutterSurfaceManager` does.
 
+- Change: a composition layer answers what it shows now (`CompositionLayer::current_picture`) with the buffer presented to it last, or, while a player's or a camera's layer is its content, with what that source's own output beside the layer has for now, the frame read last staying the answer until a newer comes; a view's `CAMetalLayer` and an app's own system layer answer nothing.
+  Reason: platform — Core Animation hands nothing back of what an `AVPlayerLayer`, an `AVCaptureVideoPreviewLayer` or a `CAMetalLayer` shows, so only an output the source feeds beside it can.
+  Affect: a picture of a window shows its videos and camera previews, a paused video's frame among them, each a `CoreVideoFrame` lent as a reader's frames are.
+
 ## media.rs, os/apple/media/ → `video_player_avfoundation` and `camera_avfoundation`
 
 - Change: a player is an `AVPlayer` whose state and position are read from it on the main thread when the app asks, its changes told by key-value observing, its end-of-item, time-jumped and rate notifications and each seek's completion, where Flutter's plugin copies events over an event channel and polls the position on a timer.
   Reason: platform — AVFoundation changes a player's state on the main queue, where the app reads it, keeps its current time for the app to read, tells when that time jumps and why its rate fell to zero, and completes each seek.
   Affect: the app's player hears its state change at once on load, play, pause, a wait for data and end, a seek's landing and a loop, and nothing as it plays on; before macOS 12 and iOS 15, which tell no reason for a fall of the rate, a pause the app did not ask for has none.
 
-- Change: a player shown on a composition layer makes an `AVPlayerLayer` its content (`MacOs::show_system_layer` for an app's own system layer), and one given a frame reader adds an `AVPlayerItemVideoOutput` of BGRA `IOSurface`-backed pixel buffers to its item, which the reader reads, where Flutter's plugin copies every frame into a texture.
+- Change: a player shown on a composition layer makes an `AVPlayerLayer` its content (`MacOs::show_system_layer` for an app's own system layer), with an `AVPlayerItemVideoOutput` added to its item beside it, which the layer reads its current picture from, and one given a frame reader adds an `AVPlayerItemVideoOutput` of BGRA `IOSurface`-backed pixel buffers to its item, which the reader reads, where Flutter's plugin copies every frame into a texture.
   Reason: platform — Core Animation clips and scales a layer with the one it is the content of, and a pixel buffer backed by an `IOSurface` reaches the GPU with no copy.
   Affect: a video moves, clips and shrinks with the framework's frame, and a frame reader hands out the frame for the moment the picture reaches the screen, keeping none for later.
 
@@ -207,7 +211,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Apple's header gives key-value observing a discovery session's `devices` as the way to hear its list change, and gives `AVCaptureDeviceWasConnectedNotification` and `AVCaptureDeviceWasDisconnectedNotification` for `AVCaptureDevice.devices`, which it deprecated.
   Affect: on a Mac, an app hears the cameras change as one is plugged in or out.
 
-- Change: a camera opens once the user lets the app use the cameras, lists its device's own formats, and runs as an `AVCaptureSession` given its camera, format and outputs at once and started on a serial queue of its own, its start answering once it runs, is interrupted or fails, asking for the microphone first where a recording wants sound, with its preview a layer that is a composition layer's content.
+- Change: a camera opens once the user lets the app use the cameras, lists its device's own formats, and runs as an `AVCaptureSession` given its camera, format and outputs at once and started on a serial queue of its own, its start answering once it runs, is interrupted or fails, asking for the microphone first where a recording wants sound, with its preview a layer that is a composition layer's content and one video data output, added for a preview or a reader, that both read.
   Reason: platform — AVFoundation configures a session's inputs and outputs together, each output is AVFoundation's own, and Apple's documentation of `AVCaptureSession` starts a session on a serial queue, since `startRunning` blocks until it runs or fails.
   Affect: the app's thread goes on while a camera starts, a session reports running, interrupted or ended as AVFoundation tells it, photos arrive as JPEG at the size asked for, and recordings as QuickTime movies.
 

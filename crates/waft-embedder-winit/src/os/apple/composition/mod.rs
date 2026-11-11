@@ -21,6 +21,12 @@
 //! window's content and its contents changed off the main thread, and `2026-09-25-buffer-hold`
 //! how long the display engine holds a buffer.
 //!
+//! What a layer shows now is read back: the buffer its producer presented last, or, while a layer
+//! the system draws into is its content, the frame the system's own source beside that layer
+//! answers ([`SystemPicture`]): a player's video output, a camera's video data output, reached
+//! weakly, so it goes with its source. A layer the system draws into that nothing
+//! beside it reads, a view's `CAMetalLayer` or an app's own, answers nothing.
+//!
 //! The module holds the compositor and the composition layer; `layer_geometry` where a placement
 //! puts a layer's `CALayer`s, `buffers` what a layer was presented and when each goes back to its
 //! producer, `placed` the layers a scene or a present placed last, `view_layer` the composition
@@ -51,7 +57,7 @@ mod view_layer;
 mod window_composition;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use objc2::Message;
 use objc2::rc::Retained;
@@ -59,7 +65,9 @@ use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::CGMutablePath;
 use objc2_foundation::{NSPoint, NSRect};
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATransaction};
-use waft_embedder::{CompositionLayer, Compositor, HardwareBuffer, Placement, ViewId};
+use waft_embedder::{
+    CompositionLayer, Compositor, HardwareBuffer, LayerPicture, Placement, VideoFrame, ViewId,
+};
 
 use super::hardware_buffers::SurfaceBuffer;
 use winit::window::Window;
@@ -104,6 +112,20 @@ enum Placer {
     Window,
 }
 
+/// What a layer the system draws into shows now, read from a source of the system's own beside
+/// it: the current frame of a player's video or of a camera's picture.
+pub(crate) trait SystemPicture: Send + Sync {
+    /// The frame the system shows now, lent; `None` before it has shown one. Any thread.
+    fn current_frame(&self) -> Option<Arc<dyn VideoFrame>>;
+}
+
+/// A layer the system draws into, shown as a composition layer's content, and what reads what it
+/// shows, where something does, for as long as the source that shows it holds that.
+struct SystemContent {
+    layer: CrossThreadLayer,
+    picture: Option<Weak<dyn SystemPicture>>,
+}
+
 /// A composition layer: its `CALayer`s, who places it, the buffers presented to it and not yet
 /// released, and its children.
 pub(crate) struct CoreAnimationLayer {
@@ -120,7 +142,7 @@ pub(crate) struct CoreAnimationLayer {
     content_layer: CrossThreadLayer,
     buffer_layer: CrossThreadLayer,
     /// A layer the system draws into, the content in place of the buffers while it is shown.
-    system_layer: Mutex<Option<CrossThreadLayer>>,
+    system_layer: Mutex<Option<SystemContent>>,
     buffers: Mutex<PresentedBuffers<ShownBuffer>>,
     children: Mutex<Children>,
     /// Whether a placement by a second placer was reported already.
@@ -232,33 +254,37 @@ impl CoreAnimationLayer {
         let buffer_layer = &self.buffer_layer.0;
         buffer_layer.setFrame(content_layer.bounds());
         buffer_layer.setContentsScale(window_scale);
-        if let Some(system_layer) = &*self.system_layer.lock().expect(HELD_BRIEFLY)
-            && is_sublayer_of(&system_layer.0, content_layer)
+        if let Some(system) = &*self.system_layer.lock().expect(HELD_BRIEFLY)
+            && is_sublayer_of(&system.layer.0, content_layer)
         {
-            system_layer.0.setFrame(content_layer.bounds());
+            system.layer.0.setFrame(content_layer.bounds());
         }
         self.lay_out_children_for(window_scale);
         clip_layer.setHidden(false);
     }
 
     /// Shows `system_layer`, which the system draws into, as the layer's content, filling it, in
-    /// place of the buffer presented last and of any system layer shown before. Main thread.
-    fn show_system_layer(&self, system_layer: &CALayer) {
+    /// place of the buffer presented last and of any system layer shown before; `picture`, where
+    /// given, reads what the system shows there while its source holds it. Main thread.
+    fn show_system_layer(&self, system_layer: &CALayer, picture: Option<Weak<dyn SystemPicture>>) {
         let mut shown = self.system_layer.lock().expect(HELD_BRIEFLY);
         in_transaction(|| {
             let content_layer = &self.content_layer.0;
             if let Some(previous) = shown.take()
-                && !std::ptr::eq(&*previous.0, system_layer)
-                && is_sublayer_of(&previous.0, content_layer)
+                && !std::ptr::eq(&*previous.layer.0, system_layer)
+                && is_sublayer_of(&previous.layer.0, content_layer)
             {
-                previous.0.removeFromSuperlayer();
+                previous.layer.0.removeFromSuperlayer();
             }
             // SAFETY: clearing a layer's contents, inside the transaction, on the main thread.
             unsafe { self.buffer_layer.0.setContents(None) };
             system_layer.setFrame(content_layer.bounds());
             content_layer.addSublayer(system_layer);
         });
-        *shown = Some(CrossThreadLayer(system_layer.retain()));
+        *shown = Some(SystemContent {
+            layer: CrossThreadLayer(system_layer.retain()),
+            picture,
+        });
         self.buffers.lock().expect(HELD_BRIEFLY).take_off_screen();
         self.release_unused_buffers();
     }
@@ -266,11 +292,28 @@ impl CoreAnimationLayer {
     /// Takes down the system layer shown as the content, for a buffer to take its place. Inside
     /// the caller's transaction.
     fn take_down_system_layer(&self) {
-        if let Some(system_layer) = self.system_layer.lock().expect(HELD_BRIEFLY).take()
-            && is_sublayer_of(&system_layer.0, &self.content_layer.0)
+        if let Some(system) = self.system_layer.lock().expect(HELD_BRIEFLY).take()
+            && is_sublayer_of(&system.layer.0, &self.content_layer.0)
         {
-            system_layer.0.removeFromSuperlayer();
+            system.layer.0.removeFromSuperlayer();
         }
+    }
+
+    /// What reads what `system`, the system layer shown as the content, shows now; `None` where
+    /// nothing does, and once its source took it off or let go of what reads it, as a player sent
+    /// elsewhere does.
+    fn reader_of(&self, system: &SystemContent) -> Option<Arc<dyn SystemPicture>> {
+        if !is_sublayer_of(&system.layer.0, &self.content_layer.0) {
+            return None;
+        }
+        system.picture.as_ref()?.upgrade()
+    }
+
+    /// The buffer presented last, held as the layer holds it.
+    fn presented_picture(&self) -> Option<LayerPicture> {
+        let buffers = self.buffers.lock().expect(HELD_BRIEFLY);
+        let shown = buffers.on_screen()?;
+        Some(LayerPicture::Buffer(Arc::new(shown.0.clone())))
     }
 
     /// Lays the children out again for a window of `window_scale`, if they were laid out for
@@ -339,6 +382,19 @@ impl CompositionLayer for CoreAnimationLayer {
             .present(buffer, released);
         self.release_unused_buffers();
     }
+
+    /// The buffer presented last, while no system layer is the content in its place; or the frame
+    /// that system layer shows, read beside it.
+    fn current_picture(&self) -> Option<LayerPicture> {
+        let system = self.system_layer.lock().expect(HELD_BRIEFLY);
+        let Some(reader) = system.as_ref().map(|system| self.reader_of(system)) else {
+            drop(system);
+            return self.presented_picture();
+        };
+        // Read outside the lock, which the main thread takes to change the content.
+        drop(system);
+        reader?.current_frame().map(LayerPicture::Frame)
+    }
 }
 
 impl Drop for CoreAnimationLayer {
@@ -361,10 +417,16 @@ fn report_foreign_buffer() {
 
 /// Shows `system_layer`, which the system draws into, such as a player's, as `layer`'s content,
 /// filling it and clipped and scaled with it, in place of its buffers and of any system layer
-/// shown before. A layer no compositor of this host made shows nothing. Main thread.
-pub(crate) fn show_system_layer(layer: &Arc<dyn CompositionLayer>, system_layer: &CALayer) {
+/// shown before; `picture`, where given, reads what the system shows there, which the layer
+/// answers as its current picture while the source holds it. A layer no compositor of this host
+/// made shows nothing. Main thread.
+pub(crate) fn show_system_layer(
+    layer: &Arc<dyn CompositionLayer>,
+    system_layer: &CALayer,
+    picture: Option<Weak<dyn SystemPicture>>,
+) {
     match CoreAnimationLayer::downcast_from(layer) {
-        Some(layer) => layer.show_system_layer(system_layer),
+        Some(layer) => layer.show_system_layer(system_layer, picture),
         None => placed::report_foreign_layer(),
     }
 }
@@ -538,6 +600,7 @@ mod tests {
     use waft_embedder::{Matrix4, Mutator, RRect, Radius, Rect};
 
     use super::*;
+    use crate::os::apple::media::CoreVideoFrame;
 
     /// A card: a page 390 by 844 points, at half its size, of which a square in the middle
     /// shows. In a flipped view, as winit's `NSView` is, the buffer's layer lies where the
@@ -781,7 +844,7 @@ mod tests {
         let layer = made_layer();
         let layers = CoreAnimationLayer::downcast_from(&layer).unwrap();
         let first = CALayer::new();
-        show_system_layer(&layer, &first);
+        show_system_layer(&layer, &first, None);
         layers.show_in(
             &view_layer,
             0,
@@ -795,7 +858,7 @@ mod tests {
         assert!(unsafe { layers.buffer_layer.0.contents() }.is_none());
 
         let second = CALayer::new();
-        show_system_layer(&layer, &second);
+        show_system_layer(&layer, &second, None);
         assert!(first.superlayer().is_none());
         let sublayers = unsafe { layers.content_layer.0.sublayers() }.unwrap();
         assert!(std::ptr::eq(&*sublayers.lastObject().unwrap(), &*second));
@@ -843,6 +906,90 @@ mod tests {
             "placed again, it stays where it is"
         );
         assert!(!picture_layers.adopted_by(Placer::View(ViewId(0))));
+    }
+
+    /// A layer answers the buffer presented to it last, and nothing before the first.
+    #[test]
+    fn a_layer_shows_the_buffer_presented_last() {
+        let layer = made_layer();
+        assert!(layer.current_picture().is_none(), "nothing presented yet");
+        let (first, second) = (buffer(), buffer());
+        layer.present(Arc::new(first), Vec::new(), Box::new(|| {}));
+        layer.present(Arc::new(second.clone()), Vec::new(), Box::new(|| {}));
+        assert!(is_buffer(layer.current_picture(), &second));
+    }
+
+    /// While a system layer is the content, the layer answers what reads it beside it, nothing
+    /// for one nothing reads, and nothing once its source took it off or let go of what reads it;
+    /// a present shows a buffer in its place again.
+    #[test]
+    fn a_system_layer_shows_what_its_source_reads() {
+        let layer = made_layer();
+        layer.present(Arc::new(buffer()), Vec::new(), Box::new(|| {}));
+        let frame = crate::os::apple::media::test_frame();
+        let video = CALayer::new();
+        let source: Arc<dyn SystemPicture> = Arc::new(Showing(frame.clone()));
+        show_system_layer(&layer, &video, Some(Arc::downgrade(&source)));
+        assert!(is_frame(layer.current_picture(), &frame));
+
+        in_transaction(|| video.removeFromSuperlayer());
+        assert!(
+            layer.current_picture().is_none(),
+            "a player sent elsewhere takes its layer off"
+        );
+
+        let camera = CALayer::new();
+        show_system_layer(&layer, &camera, Some(Arc::downgrade(&source)));
+        assert!(is_frame(layer.current_picture(), &frame));
+        drop(source);
+        assert!(
+            layer.current_picture().is_none(),
+            "what reads it goes with its source"
+        );
+
+        show_system_layer(&layer, &CALayer::new(), None);
+        assert!(layer.current_picture().is_none(), "nothing reads it");
+
+        let presented = buffer();
+        layer.present(Arc::new(presented.clone()), Vec::new(), Box::new(|| {}));
+        assert!(is_buffer(layer.current_picture(), &presented));
+    }
+
+    /// What a test's system layer shows: one frame.
+    struct Showing(CoreVideoFrame);
+
+    impl SystemPicture for Showing {
+        fn current_frame(&self) -> Option<Arc<dyn VideoFrame>> {
+            Some(Arc::new(self.0.clone()))
+        }
+    }
+
+    /// A buffer of 4 by 4 pixels.
+    fn buffer() -> SurfaceBuffer {
+        let surface = crate::os::apple::hardware_buffers::allocate(4, 4).expect("an IOSurface");
+        SurfaceBuffer::new(surface, waft_embedder::HardwareBufferUsage::default())
+    }
+
+    /// Whether `picture` is a buffer over `buffer`'s surface.
+    fn is_buffer(picture: Option<LayerPicture>, buffer: &SurfaceBuffer) -> bool {
+        let Some(LayerPicture::Buffer(picture)) = picture else {
+            return false;
+        };
+        let picture: &dyn std::any::Any = &*picture;
+        picture
+            .downcast_ref::<SurfaceBuffer>()
+            .is_some_and(|picture| std::ptr::eq(picture.surface(), buffer.surface()))
+    }
+
+    /// Whether `picture` is `frame`, lent.
+    fn is_frame(picture: Option<LayerPicture>, frame: &CoreVideoFrame) -> bool {
+        let Some(LayerPicture::Frame(picture)) = picture else {
+            return false;
+        };
+        let picture: &dyn std::any::Any = &*picture;
+        picture
+            .downcast_ref::<CoreVideoFrame>()
+            .is_some_and(|picture| std::ptr::eq(picture.pixel_buffer(), frame.pixel_buffer()))
     }
 
     fn made_layer() -> Arc<dyn CompositionLayer> {

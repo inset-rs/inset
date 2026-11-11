@@ -81,10 +81,12 @@ impl MacOs {
 
     /// Shows `system_layer`, which the system draws into, such as an `AVPlayerLayer` or a
     /// `CALayerHost`, as `layer`'s content, filling it and clipped and scaled with it, in place
-    /// of the buffers presented to it, until the next present. A layer no compositor of this host
-    /// made shows nothing. Main thread.
+    /// of the buffers presented to it, until the next present. The host does not read what the
+    /// app's system layer shows, so `layer` answers no current picture meanwhile
+    /// (`CompositionLayer::current_picture`). A layer no compositor of this host made shows
+    /// nothing. Main thread.
     #[cfg(target_os = "macos")]
     pub fn show_system_layer(&self, layer: &Arc<dyn CompositionLayer>, system_layer: &CALayer) {
-        os::show_system_layer(layer, system_layer);
+        os::show_system_layer(layer, system_layer, None);
     }
 }

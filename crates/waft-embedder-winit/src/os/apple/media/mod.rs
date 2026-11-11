@@ -5,7 +5,9 @@
 //! `AVURLAsset` (`asset`), listing its tracks and tags as a player does, its pictures an image
 //! generator's (`asset_frames`), drawn into frames as a reader hands them out (`drawn_frames`), as
 //! the hardware image codecs' pictures are (`apple/image_codecs`); a frame's pixels are read back
-//! while its buffer is locked (`locked_pixels`); the cameras are a discovery session's devices, and a camera a
+//! while its buffer is locked (`locked_pixels`); what a player's or a camera's picture on a
+//! composition layer shows now is read from an output of its own beside that layer
+//! (`layer_pictures`); the cameras are a discovery session's devices, and a camera a
 //! capture device (`camera`) with its formats (`camera_formats`), shared in one format by this
 //! process's sessions (`camera_sharing`), and a session an `AVCaptureSession` (`capture_session`)
 //! with its photo and movie outputs (`outputs`); a picture goes to a composition layer as a layer
@@ -34,6 +36,7 @@ mod cue_markup;
 mod cues;
 pub(in crate::os::apple) mod drawn_frames;
 mod frames;
+mod layer_pictures;
 pub(in crate::os::apple) mod locked_pixels;
 mod media_times;
 mod metadata;
@@ -51,7 +54,7 @@ use std::rc::Rc;
 use objc2::MainThreadMarker;
 use waft_embedder::{Cameras, MediaAssets, Players, VideoFrameReaders};
 
-pub(super) use super::composition::{in_transaction, show_system_layer};
+pub(super) use super::composition::{SystemPicture, in_transaction, show_system_layer};
 use asset::AvMediaAssets;
 use camera::AvCameras;
 use frames::AvFrameReaders;

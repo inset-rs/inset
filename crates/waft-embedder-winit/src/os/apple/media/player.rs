@@ -2,8 +2,10 @@
 //! whose state and position are read from them when asked and whose changes AVFoundation tells by
 //! key-value observing, its end-of-item, time-jumped, rate and media selection notifications, each
 //! seek's completion, and the loading of its tracks, tags and subtitles. Its picture goes either
-//! to an `AVPlayerLayer` shown as a composition layer's content, or to an
-//! `AVPlayerItemVideoOutput` added to its item, which the reader it was given reads; its subtitles
+//! to an `AVPlayerLayer` shown as a composition layer's content, with an `AVPlayerItemVideoOutput`
+//! added to its item beside it, which the composition layer reads what it shows from
+//! (`layer_pictures`), or to an `AVPlayerItemVideoOutput` added to its item, which the reader it
+//! was given reads; its subtitles
 //! go to a legible output added to its item, which hands them over as cues.
 //!
 //! What it does is AVFoundation's `timeControlStatus`; why it paused is the reason AVFoundation
@@ -40,12 +42,13 @@ use super::cues::LegibleCues;
 use super::frames::{
     AvFrameReader, FrameOutput, PlayerFrames, report_foreign_reader, report_reader_in_use,
 };
+use super::layer_pictures::PlayerPicture;
 use super::media_times::{cm_time_of, duration_of, tolerance_time};
 use super::metadata::AssetMetadata;
 use super::observing::{NotificationObservation, PropertyObservation};
 use super::player_errors::error_of;
-use super::show_system_layer;
 use super::tracks::MediaTracks;
+use super::{SystemPicture, show_system_layer};
 use crate::media::{Changes, lock};
 
 /// AVFoundation's players.
@@ -118,9 +121,11 @@ struct End {
 enum Destination {
     Nowhere,
     /// Its layer is this composition layer's content, which the player holds as a producer
-    /// does.
+    /// does, and a video output added to its item beside it is what the composition layer reads
+    /// it shows.
     Layer {
         layer: Retained<AVPlayerLayer>,
+        picture: Arc<PlayerPicture>,
         _shown_on: Arc<dyn CompositionLayer>,
     },
     /// Its item's video output, which this reader reads.
@@ -270,7 +275,8 @@ impl AvMediaPlayer {
         }
     }
 
-    /// The picture on a layer of the player's own, which is `shown_on`'s content.
+    /// The picture on a layer of the player's own, which is `shown_on`'s content, and to a video
+    /// output added to the item beside it, which `shown_on` reads what it shows from.
     fn show_on(&self, shown_on: Arc<dyn CompositionLayer>) -> Destination {
         // SAFETY: a layer of the player, made on the main thread.
         let layer = unsafe { AVPlayerLayer::playerLayerWithPlayer(Some(&self.player)) };
@@ -278,9 +284,14 @@ impl AvMediaPlayer {
         if let Some(gravity) = unsafe { AVLayerVideoGravityResizeAspect } {
             unsafe { layer.setVideoGravity(gravity) };
         }
-        show_system_layer(&shown_on, &layer);
+        let picture = Arc::new(PlayerPicture::new());
+        // SAFETY: adding an output to the item on the main thread.
+        unsafe { self.item.addOutput(picture.output()) };
+        let read: Arc<dyn SystemPicture> = Arc::clone(&picture) as _;
+        show_system_layer(&shown_on, &layer, Some(Arc::downgrade(&read)));
         Destination::Layer {
             layer,
+            picture,
             _shown_on: shown_on,
         }
     }
@@ -307,9 +318,12 @@ impl AvMediaPlayer {
     fn leave_destination(&self) {
         match self.destination.replace(Destination::Nowhere) {
             Destination::Nowhere => {}
-            Destination::Layer { layer, .. } => {
-                // SAFETY: on the main thread, where the layer was shown.
-                unsafe { layer.setPlayer(None) };
+            Destination::Layer { layer, picture, .. } => {
+                // SAFETY: on the main thread, where the layer was shown and the output added.
+                unsafe {
+                    layer.setPlayer(None);
+                    self.item.removeOutput(picture.output());
+                }
                 super::in_transaction(|| layer.removeFromSuperlayer());
             }
             Destination::Frames { reader, output } => {

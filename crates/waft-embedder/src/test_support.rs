@@ -111,7 +111,7 @@ pub fn idle_layer() -> Arc<dyn CompositionLayer> {
     Arc::new(IdleLayer)
 }
 
-/// What [`idle_layer`] hands out: presents go nowhere.
+/// What [`idle_layer`] hands out: presents go nowhere, so it shows nothing.
 struct IdleLayer;
 
 impl CompositionLayer for IdleLayer {
@@ -121,5 +121,9 @@ impl CompositionLayer for IdleLayer {
         _children: Vec<(Arc<dyn CompositionLayer>, Placement)>,
         _released: Box<dyn FnOnce() + Send + Sync>,
     ) {
+    }
+
+    fn current_picture(&self) -> Option<crate::LayerPicture> {
+        None
     }
 }

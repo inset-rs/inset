@@ -58,7 +58,8 @@ impl CoreAnimationViewLayer {
         // Bottom-left is the visual top-left in a flipped view's layer, as for the buffer layer.
         // SAFETY: a constant Core Animation exports for the life of the process.
         drawing.setContentsGravity(unsafe { objc2_quartz_core::kCAGravityBottomLeft });
-        layer.show_system_layer(&drawing);
+        // The view's drawing is the framework's own, which it reads back from nothing here.
+        layer.show_system_layer(&drawing, None);
         Some(CoreAnimationViewLayer {
             layer,
             drawing,

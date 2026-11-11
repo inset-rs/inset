@@ -17,7 +17,10 @@
 //! `wl_surface.commit`, `IDCompositionDevice::Commit`, a `SurfaceControl.Transaction`). A
 //! program whose picture is itself a layer in another app's window shows its own layers as that
 //! picture's children, and the placement of the picture moves, clips and scales the whole group
-//! as one.
+//! as one. What a layer shows can be read back ([`CompositionLayer::current_picture`]): the raw
+//! buffer presented to it, or the lent frame of the video or camera on it, so a tool that takes a
+//! picture of a window draws its layers beneath the picture above them as the compositor shows
+//! them.
 //!
 //! The invariant: a layer is on screen only where its parent's last frame placed it, it has one
 //! parent at a time, and the host, not the framework, owns the native object behind it.
@@ -25,7 +28,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use crate::{HardwareBuffer, Placement};
+use crate::{HardwareBuffer, Placement, VideoFrame};
 
 /// The host's compositor, as an app reaches it.
 pub trait Compositor: Send + Sync {
@@ -68,4 +71,20 @@ pub trait CompositionLayer: Any + Send + Sync {
         children: Vec<(Arc<dyn CompositionLayer>, Placement)>,
         released: Box<dyn FnOnce() + Send + Sync>,
     );
+
+    /// What the layer shows now: the last buffer presented, or the current frame of the video or
+    /// camera it shows. `None` while it shows nothing, and while it shows a layer the system draws
+    /// into that the host does not read, such as one an app shows on it itself.
+    fn current_picture(&self) -> Option<LayerPicture>;
+}
+
+/// What a composition layer shows now ([`CompositionLayer::current_picture`]), as raw memory or a
+/// lent frame, as the app holds either.
+pub enum LayerPicture {
+    /// The buffer presented to the layer last, which fills it.
+    Buffer(Arc<dyn HardwareBuffer>),
+    /// The frame of the video or the camera shown on the layer, lent: held while the picture is
+    /// kept, since its pool hands its memory out again once nothing holds it. The system shows it
+    /// whole, keeping its shape.
+    Frame(Arc<dyn VideoFrame>),
 }
