@@ -24,7 +24,7 @@ cargo clippy --workspace
 cargo run -p <example>
 ```
 
-Run affected tests during ordinary work. Full workspace tests and clippy for a finished cross-cutting batch.
+Run affected tests during ordinary work. Full workspace tests and clippy only for a finished cross-cutting batch if needed.
 
 ## Two layers
 

@@ -391,6 +391,7 @@ impl TextStyle {
             Some(height) if height != crate::text::K_TEXT_HEIGHT_NONE => Some(height as f32),
             _ => None,
         };
+        style.leading_distribution = native_leading_distribution(self.leading_distribution);
         style.decoration = native_decoration(
             self.decoration,
             self.decoration_color,
@@ -407,6 +408,18 @@ impl TextStyle {
                 .collect();
         }
         style
+    }
+}
+
+/// Flutter's default, `Proportional`, when unset.
+fn native_leading_distribution(
+    distribution: Option<TextLeadingDistribution>,
+) -> valo::LeadingDistribution {
+    match distribution {
+        None | Some(TextLeadingDistribution::Proportional) => {
+            valo::LeadingDistribution::Proportional
+        }
+        Some(TextLeadingDistribution::Even) => valo::LeadingDistribution::Even,
     }
 }
 
@@ -464,6 +477,9 @@ impl ParagraphStyle {
             font_family: self.font_family.clone(),
             font_size: self.font_size,
             height: self.height,
+            leading_distribution: self
+                .text_height_behavior
+                .map(|behavior| behavior.leading_distribution),
             font_weight: self.font_weight,
             font_style: self.font_style,
             ..TextStyle::default()
@@ -477,7 +493,20 @@ impl ParagraphStyle {
             preserve_trailing_whitespace: false,
             max_lines: self.max_lines.map(|max_lines| max_lines as u32),
             ellipsis: self.ellipsis.clone(),
+            text_height_behavior: self
+                .text_height_behavior
+                .map(native_height_behavior)
+                .unwrap_or_default(),
         }
+    }
+}
+
+/// The behavior's `leading_distribution` is not here: as in `dart:ui`, it is the default for
+/// spans that set none, through [`ParagraphStyle::base_text_style`].
+fn native_height_behavior(behavior: TextHeightBehavior) -> valo::TextHeightBehavior {
+    valo::TextHeightBehavior {
+        apply_height_to_first_ascent: behavior.apply_height_to_first_ascent,
+        apply_height_to_last_descent: behavior.apply_height_to_last_descent,
     }
 }
 
@@ -1262,6 +1291,63 @@ mod tests {
             styles[1].color,
             valo::Color::BLACK,
             "popping restores the base"
+        );
+    }
+
+    /// As in `dart:ui`, the paragraph's `TextHeightBehavior::leading_distribution` is the share
+    /// for spans that set none, and a span's own wins.
+    #[test]
+    fn the_paragraphs_leading_distribution_is_the_spans_default() {
+        let mut builder = ParagraphBuilder::new(ParagraphStyle {
+            text_height_behavior: Some(TextHeightBehavior {
+                leading_distribution: TextLeadingDistribution::Even,
+                ..TextHeightBehavior::default()
+            }),
+            ..ParagraphStyle::default()
+        });
+        builder.add_text("x");
+        builder.push_style(TextStyle {
+            leading_distribution: Some(TextLeadingDistribution::Proportional),
+            ..TextStyle::default()
+        });
+        builder.add_text("y");
+        let styles = text_styles(&builder);
+        assert_eq!(
+            styles[0].leading_distribution,
+            valo::LeadingDistribution::Even
+        );
+        assert_eq!(
+            styles[1].leading_distribution,
+            valo::LeadingDistribution::Proportional
+        );
+        assert_eq!(
+            ParagraphBuilder::new(ParagraphStyle::new())
+                .current_style()
+                .leading_distribution,
+            valo::LeadingDistribution::Proportional,
+            "unset is Flutter's default"
+        );
+    }
+
+    #[test]
+    fn the_height_flags_reach_valo() {
+        let style = ParagraphStyle {
+            text_height_behavior: Some(TextHeightBehavior {
+                apply_height_to_first_ascent: false,
+                ..TextHeightBehavior::default()
+            }),
+            ..ParagraphStyle::default()
+        };
+        assert_eq!(
+            style.to_native().text_height_behavior,
+            valo::TextHeightBehavior {
+                apply_height_to_first_ascent: false,
+                apply_height_to_last_descent: true,
+            }
+        );
+        assert_eq!(
+            ParagraphStyle::new().to_native().text_height_behavior,
+            valo::TextHeightBehavior::default()
         );
     }
 
