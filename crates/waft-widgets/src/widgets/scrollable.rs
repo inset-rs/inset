@@ -1299,21 +1299,25 @@ impl RestorableValue for RestorableScrollOffset {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
+    use std::collections::HashSet;
     use waft_foundation::AppCell;
 
-    use waft_embedder::Restoration;
+    use waft_embedder::{PointerDeviceKind, Restoration, TargetPlatform, TextDirection};
+    use waft_gestures::{PointerDownEvent, PointerMoveEvent, PointerUpEvent};
+    use waft_scheduler::SchedulerBinding;
     use waft_services::{RestorationMap, RestorationUpdate};
-    use waft_test::TestPlatform;
+    use waft_test::{TestPlatform, TestView};
 
     use super::*;
     use crate::framework::Element;
     use crate::test_harness::Harness;
-    use crate::test_harness::pump_every_view;
-    use crate::widgets::basic::{Builder, SizedBox};
+    use crate::test_harness::{binding_mount, binding_pump, pump_every_view};
+    use crate::widgets::basic::{Builder, Directionality, SizedBox, SliverToBoxAdapter};
     use crate::widgets::media_query::{MediaQuery, MediaQueryData};
     use crate::widgets::restoration::RootRestorationScope;
+    use crate::widgets::scroll_configuration::ScrollBehavior;
     use crate::widgets::scroll_controller::ScrollControllerLeaf;
-    use crate::widgets::scroll_physics::{BouncingScrollPhysics, ClampingScrollPhysics};
+    use crate::widgets::scroll_view::CustomScrollView;
     use waft_rendering::{RenderBox, RenderSliver};
 
     /// A host that answers `Restoration::get` with what it was handed and records every
@@ -1615,262 +1619,361 @@ mod tests {
         assert_eq!(state.position(&app).device_pixel_ratio(&app), 3.0);
     }
 
-    // ---- a fling, a catch and a second fling, against Flutter's numbers ----
-    //
-    // The expected values are what Flutter's own `ListView` reports for the same pointer
-    // events and frame times, run through `flutter_test` (Flutter 6655482) with the same view
-    // (1440 x 2880 physical pixels at 3.5) on Android.
+    // ---- scrollable_test.dart: holds, flings and carried momentum ----
 
-    const FRAME_PERIOD: Duration = Duration::from_micros(16_667);
+    /// `scrollable_test.dart`'s `dragOffset`.
+    const DRAG_OFFSET: f64 = 200.0;
 
-    /// What reaches the app at one moment: a pointer event, or a frame.
-    #[derive(Clone, Copy, Debug)]
-    enum Step {
-        Down(Offset),
-        Move(Offset),
-        Up,
-        Frame,
-    }
+    /// The center of the `Scrollable` [`pump_test`] mounts, which fills the 800 x 600 view:
+    /// where Flutter's `tester.getCenter(find.byType(Scrollable))` puts a gesture.
+    const SCROLLABLE_CENTER: Offset = Offset::new(400.0, 300.0);
 
-    /// A touch at `at` that moves by `dy` every 8ms, `moves` times, and lifts 4ms later.
-    fn stroke(start: Duration, at: Offset, dy: f64, moves: u32) -> Vec<(Duration, Step)> {
-        let move_period = Duration::from_millis(8);
-        let mut steps = vec![(start, Step::Down(at))];
-        for i in 1..=moves {
-            steps.push((start + move_period * i, Step::Move(Offset::new(0.0, dy))));
+    /// `scrollable_test.dart`'s `NoScrollbarBehavior`.
+    #[derive(Debug)]
+    struct NoScrollbarBehavior;
+
+    impl ScrollBehavior for NoScrollbarBehavior {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
-        steps.push((
-            start + move_period * moves + Duration::from_millis(4),
-            Step::Up,
-        ));
-        steps
-    }
 
-    /// An upward fling from 100ms, caught at 405ms by a stroke moving `second_dy` a step,
-    /// with a frame every [`FRAME_PERIOD`] up to 1.5s; a pointer event at a frame's time
-    /// comes first.
-    fn fling_catch_and_fling(second_dy: f64) -> Vec<(Duration, Step)> {
-        let mut steps = stroke(
-            Duration::from_millis(100),
-            Offset::new(200.0, 600.0),
-            -30.0,
-            10,
-        );
-        steps.extend(stroke(
-            Duration::from_millis(405),
-            Offset::new(200.0, 400.0),
-            second_dy,
-            8,
-        ));
-        let mut frame = FRAME_PERIOD;
-        while frame <= Duration::from_millis(1500) {
-            steps.push((frame, Step::Frame));
-            frame += FRAME_PERIOD;
-        }
-        steps.sort_by_key(|(time, step)| (*time, matches!(step, Step::Frame)));
-        steps
-    }
-
-    /// What a run recorded: the velocity of the position's activity as each touch lifts, and
-    /// the scroll offset after each frame.
-    struct FlingRecord {
-        velocities_at_lift: Vec<f64>,
-        pixels_at_frame: Vec<(Duration, f64)>,
-    }
-
-    impl FlingRecord {
-        fn pixels_at(&self, frame: Duration) -> f64 {
-            self.pixels_at_frame
-                .iter()
-                .find(|(time, _)| *time == frame)
-                .map(|(_, pixels)| *pixels)
-                .expect("a frame at that time")
+        fn build_scrollbar(
+            &self,
+            _app: &mut App,
+            _context: BuildContext,
+            child: WidgetRef,
+            _details: &ScrollableDetails,
+        ) -> WidgetRef {
+            child
         }
     }
 
-    /// Runs `steps` through the gesture binding over a 1000-item list at offset 5000 with
-    /// `physics`, on an Android phone's screen.
-    fn record_fling(physics: ScrollPhysicsRef, steps: Vec<(Duration, Step)>) -> FlingRecord {
-        use waft_embedder::{PointerDeviceKind, TargetPlatform, TextDirection};
-        use waft_gestures::{PointerDownEvent, PointerMoveEvent, PointerUpEvent};
-        use waft_test::TestView;
+    /// The part of `flutter_test`'s `WidgetTester` these tests use: a fake clock that a pump
+    /// advances, frames stamped with it, and pointers sent straight to the gesture binding.
+    struct WidgetTester {
+        cell: Rc<AppCell>,
+        /// The binding's clock: the time stamp of the next frame.
+        now: Duration,
+        /// The last pointer number handed out; Flutter's first is 1.
+        last_pointer: i64,
+    }
 
-        use crate::test_harness::binding_mount;
-        use crate::widgets::basic::Directionality;
-        use crate::widgets::scroll_controller::ScrollController;
-        use crate::widgets::scroll_view::ListView;
+    /// A pointer that is down, as a `flutter_test` `TestGesture` holds one.
+    struct TestGesture {
+        pointer: i64,
+        location: Offset,
+    }
 
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::Android)
-            .with_view(Rc::new(TestView::with_pixel_ratio(1440.0, 2880.0, 3.5)));
-        let cell = AppCell::with_platform(Rc::new(platform));
-        let mut app = cell.borrow_mut();
-        let controller = ScrollController::new(&mut app, 5000.0, true, None, None, None);
-        let list = ListView::builder(|_app, _context, _index| {
-            Some(SizedBox::new().height(100.0).into_widget())
-        })
-        .item_count(1000)
-        .build()
-        .item_extent(100.0)
-        .physics(physics)
-        .controller(controller.as_controller());
-        drop(app);
-        binding_mount(
-            &cell,
-            Directionality::new(TextDirection::Ltr, list).into_widget(),
-        );
-
-        let mut app = cell.borrow_mut();
-        let binding = GestureBinding::instance(&mut app);
-        let position = controller.as_controller().position(&app);
-        let mut record = FlingRecord {
-            velocities_at_lift: Vec::new(),
-            pixels_at_frame: Vec::new(),
-        };
-        let mut pointer = 0;
-        let mut at = Offset::ZERO;
-        for (time_stamp, step) in steps {
-            let event = match step {
-                Step::Down(down_at) => {
-                    pointer += 1;
-                    at = down_at;
-                    PointerEvent::Down(PointerDownEvent {
-                        pointer,
-                        position: at,
-                        time_stamp,
-                        kind: PointerDeviceKind::Touch,
-                        ..PointerDownEvent::default()
-                    })
-                }
-                Step::Move(delta) => {
-                    at = at + delta;
-                    PointerEvent::Move(PointerMoveEvent {
-                        pointer,
-                        position: at,
-                        delta,
-                        time_stamp,
-                        kind: PointerDeviceKind::Touch,
-                        ..PointerMoveEvent::default()
-                    })
-                }
-                Step::Up => PointerEvent::Up(PointerUpEvent {
-                    pointer,
-                    position: at,
-                    time_stamp,
-                    kind: PointerDeviceKind::Touch,
-                    ..PointerUpEvent::default()
-                }),
-                Step::Frame => {
-                    pump_every_view(&mut app, time_stamp);
-                    record
-                        .pixels_at_frame
-                        .push((time_stamp, position.pixels(&app)));
-                    continue;
-                }
-            };
-            binding.handle_pointer_event(&mut app, event);
+    impl WidgetTester {
+        /// `tester.pump(duration)`: the clock advances by `duration`, firing the timers that
+        /// come due, then a frame runs if one was asked for.
+        fn pump(&mut self, duration: Duration) {
+            self.cell.elapse(duration);
+            self.now += duration;
+            let mut app = self.cell.borrow_mut();
+            binding_pump(&mut app, self.now);
             app.drain_microtasks();
-            if matches!(step, Step::Up) {
-                let activity = position.activity(&app).expect("a position has an activity");
-                record.velocities_at_lift.push(activity.velocity(&mut app));
+        }
+
+        /// `tester.pumpAndSettle(duration)`: pumps by `duration` until no frame is asked for,
+        /// and answers how many pumps it took.
+        fn pump_and_settle(&mut self, duration: Duration) -> u32 {
+            let end_time = self.now + Duration::from_secs(10 * 60);
+            let mut count = 0;
+            loop {
+                assert!(self.now <= end_time, "pumpAndSettle timed out");
+                self.pump(duration);
+                count += 1;
+                if !SchedulerBinding::has_scheduled_frame(&mut self.cell.borrow_mut()) {
+                    return count;
+                }
             }
         }
-        record
+
+        /// `tester.sendEventToBinding(event)`, with the microtasks its `await` runs.
+        fn send_event_to_binding(&self, event: PointerEvent) {
+            let mut app = self.cell.borrow_mut();
+            GestureBinding::instance(&mut app).handle_pointer_event(&mut app, event);
+            app.drain_microtasks();
+        }
+
+        fn next_pointer(&mut self) -> i64 {
+            self.last_pointer += 1;
+            self.last_pointer
+        }
+
+        /// `tester.startGesture(location)`: a touch down at `location`, stamped zero.
+        fn start_gesture(&mut self, location: Offset) -> TestGesture {
+            let gesture = TestGesture {
+                pointer: self.next_pointer(),
+                location,
+            };
+            self.send_event_to_binding(PointerEvent::Down(PointerDownEvent {
+                pointer: gesture.pointer,
+                position: location,
+                ..PointerDownEvent::default()
+            }));
+            gesture
+        }
+
+        /// `gesture.moveBy(offset)`, stamped zero.
+        fn move_by(&self, gesture: &mut TestGesture, offset: Offset) {
+            self.move_to(gesture, gesture.location + offset, Duration::ZERO);
+        }
+
+        fn move_to(&self, gesture: &mut TestGesture, location: Offset, time_stamp: Duration) {
+            let delta = location - gesture.location;
+            gesture.location = location;
+            self.send_event_to_binding(PointerEvent::Move(PointerMoveEvent {
+                pointer: gesture.pointer,
+                position: location,
+                delta,
+                time_stamp,
+                ..PointerMoveEvent::default()
+            }));
+        }
+
+        /// `gesture.up()`, stamped zero.
+        fn up(&self, gesture: TestGesture) {
+            self.up_at(gesture, Duration::ZERO);
+        }
+
+        fn up_at(&self, gesture: TestGesture, time_stamp: Duration) {
+            self.send_event_to_binding(PointerEvent::Up(PointerUpEvent {
+                pointer: gesture.pointer,
+                position: gesture.location,
+                time_stamp,
+                ..PointerUpEvent::default()
+            }));
+        }
+
+        /// `tester.drag(find.byType(Scrollable), offset, touchSlopY: 0.0)` for a vertical
+        /// `offset`: with no slop to break the drag at, one move by all of it.
+        fn drag_without_touch_slop(&mut self, offset: Offset) {
+            assert_eq!(offset.dx(), 0.0, "a horizontal drag is split at the slop");
+            let mut gesture = self.start_gesture(SCROLLABLE_CENTER);
+            self.move_by(&mut gesture, offset);
+            self.up(gesture);
+        }
+
+        /// `tester.fling(find.byType(Scrollable), offset, speed)`: 50 moves over `offset` at
+        /// `speed` pixels a second, stamped from zero, with a pump each time more than 16ms of
+        /// them have passed.
+        fn fling(&mut self, offset: Offset, speed: f64) {
+            const MOVE_COUNT: u32 = 50;
+            let frame_interval = Duration::from_millis(16).as_micros() as f64;
+            let time_stamp_delta = 1000000.0 * offset.distance() / (MOVE_COUNT as f64 * speed);
+            let mut time_stamp: f64 = 0.0;
+            let mut last_time_stamp = time_stamp;
+            let mut gesture = self.start_gesture(SCROLLABLE_CENTER);
+            for i in 0..=MOVE_COUNT {
+                let location = SCROLLABLE_CENTER
+                    + Offset::lerp(
+                        Some(Offset::ZERO),
+                        Some(offset),
+                        i as f64 / MOVE_COUNT as f64,
+                    )
+                    .expect("both ends are given");
+                self.move_to(&mut gesture, location, micros(time_stamp.round()));
+                time_stamp += time_stamp_delta;
+                if time_stamp - last_time_stamp > frame_interval {
+                    self.pump(micros((time_stamp - last_time_stamp).trunc()));
+                    last_time_stamp = time_stamp;
+                }
+            }
+            self.up_at(gesture, micros(time_stamp.round()));
+        }
+
+        fn scrollable(&self) -> Handle<ScrollableState> {
+            let mut app = self.cell.borrow_mut();
+            let root = crate::binding::WidgetsBinding::instance(&mut app)
+                .root_element(&app)
+                .expect("a mounted tree");
+            let mut elements = vec![root];
+            while let Some(element) = elements.pop() {
+                if let Some(state) = element.state_handle::<ScrollableState>(&app) {
+                    return state;
+                }
+                element.visit_children(&app, &mut |child| elements.push(child));
+            }
+            panic!("no Scrollable is mounted")
+        }
+
+        /// `scrollable_test.dart`'s `getScrollOffset`.
+        fn scroll_offset(&self) -> f64 {
+            let position = self.scrollable().position(&self.cell.borrow());
+            position.pixels(&self.cell.borrow())
+        }
+
+        /// `scrollable_test.dart`'s `getScrollVelocity`.
+        fn scroll_velocity(&self) -> f64 {
+            let position = self.scrollable().position(&self.cell.borrow());
+            let mut app = self.cell.borrow_mut();
+            let activity = position.activity(&app).expect("a position has an activity");
+            activity.velocity(&mut app)
+        }
     }
 
-    fn assert_near(actual: f64, expected: f64, what: &str) {
-        assert!(
-            (actual - expected).abs() < 1e-3,
-            "{what}: {actual}, where Flutter has {expected}"
-        );
+    fn micros(micros: f64) -> Duration {
+        Duration::from_micros(micros as u64)
     }
 
-    /// What Flutter reports for a run: where the list was at the last frame before the catch,
-    /// the second fling's velocity, and where the list is at 700ms and at the last frame.
-    struct FlutterFling {
-        caught_at: f64,
-        second_velocity: f64,
-        at_700ms: f64,
-        at_end: f64,
+    /// `scrollable_test.dart`'s `pumpTest` with its defaults on `platform`: a vertical
+    /// `CustomScrollView` over 2000 pixels that every device kind drags, with no scrollbar, in
+    /// `flutter_test`'s 800 x 600 view.
+    fn pump_test(platform: TargetPlatform) -> WidgetTester {
+        let view = TestView::with_pixel_ratio(2400.0, 1800.0, 3.0);
+        let platform = TestPlatform::new().on(platform).with_view(Rc::new(view));
+        let cell = AppCell::with_platform(Rc::new(platform));
+        let behavior = ScrollBehaviorRef::new(NoScrollbarBehavior)
+            .copy_with()
+            .drag_devices(HashSet::from([
+                PointerDeviceKind::Touch,
+                PointerDeviceKind::Mouse,
+                PointerDeviceKind::Stylus,
+                PointerDeviceKind::InvertedStylus,
+                PointerDeviceKind::Trackpad,
+                PointerDeviceKind::Unknown,
+            ]));
+        let scroll_view = CustomScrollView::new().slivers([SliverToBoxAdapter::new()
+            .child(SizedBox::new().height(2000.0))
+            .into_widget()]);
+        binding_mount(
+            &cell,
+            Directionality::new(
+                TextDirection::Ltr,
+                ScrollConfiguration::new(ScrollBehaviorRef::new(behavior), scroll_view),
+            )
+            .into_widget(),
+        );
+        WidgetTester {
+            cell,
+            now: Duration::ZERO,
+            last_pointer: 0,
+        }
     }
 
-    fn assert_matches_flutter(record: &FlingRecord, flutter: FlutterFling) {
-        assert_near(
-            record.velocities_at_lift[0],
-            3750.0,
-            "the first fling's velocity",
-        );
-        assert_near(
-            record.pixels_at(FRAME_PERIOD * 24),
-            flutter.caught_at,
-            "the offset at the last frame before the catch",
-        );
-        assert_near(
-            record.velocities_at_lift[1],
-            flutter.second_velocity,
-            "the second fling's velocity",
-        );
-        assert_near(
-            record.pixels_at(FRAME_PERIOD * 42),
-            flutter.at_700ms,
-            "the offset at 700ms",
-        );
-        assert_near(
-            record.pixels_at(FRAME_PERIOD * 89),
-            flutter.at_end,
-            "the offset at the last frame",
-        );
-    }
+    /// `TargetPlatformVariant(<TargetPlatform>{TargetPlatform.iOS, TargetPlatform.macOS})`.
+    const IOS_AND_MACOS: [TargetPlatform; 2] = [TargetPlatform::IOS, TargetPlatform::MacOS];
 
+    /// `scrollable_test.dart`: "Holding scroll".
     #[test]
-    fn a_bouncing_list_caught_and_flung_back_moves_as_flutters_does() {
-        let record = record_fling(
-            Rc::new(BouncingScrollPhysics::new()),
-            fling_catch_and_fling(25.0),
-        );
-        // Flung the other way, the first fling's momentum is not carried.
-        assert_matches_flutter(
-            &record,
-            FlutterFling {
-                caught_at: 5918.0168,
-                second_velocity: -3125.0,
-                at_700ms: 5168.6831,
-                at_end: 4368.1201,
-            },
-        );
+    #[ignore = "settles in 2 pumps, not 3: Flutter's third is the semantics update a ScrollMetricsNotification asks for, and accessibility is deferred"]
+    fn a_hold_in_overscroll_stops_the_ballistic_and_its_release_snaps_back() {
+        for platform in IOS_AND_MACOS {
+            let mut tester = pump_test(platform);
+            tester.drag_without_touch_slop(Offset::new(0.0, 200.0));
+            assert_eq!(tester.scroll_offset(), -200.0, "{platform:?}");
+            tester.pump(Duration::ZERO); // trigger ballistic
+            tester.pump(Duration::from_millis(10));
+            assert!(tester.scroll_offset() > -200.0, "{platform:?}");
+            assert!(tester.scroll_offset() < 0.0, "{platform:?}");
+            let held_position = tester.scroll_offset();
+            // Hold and let go while in overscroll.
+            let gesture = tester.start_gesture(SCROLLABLE_CENTER);
+            assert_eq!(
+                tester.pump_and_settle(Duration::from_millis(100)),
+                1,
+                "{platform:?}"
+            );
+            assert_eq!(tester.scroll_offset(), held_position, "{platform:?}");
+            tester.up(gesture);
+            // Once the hold is let go, it should still snap back to origin.
+            assert_eq!(
+                tester.pump_and_settle(Duration::from_secs(60)),
+                3,
+                "{platform:?}"
+            );
+            assert_eq!(tester.scroll_offset(), 0.0, "{platform:?}");
+        }
     }
 
+    /// `scrollable_test.dart`: "Repeated flings builds momentum".
     #[test]
-    fn a_bouncing_list_caught_and_flung_on_carries_the_first_flings_momentum() {
-        let record = record_fling(
-            Rc::new(BouncingScrollPhysics::new()),
-            fling_catch_and_fling(-30.0),
-        );
-        assert_matches_flutter(
-            &record,
-            FlutterFling {
-                caught_at: 5918.0168,
-                second_velocity: 7728.1039,
-                at_700ms: 7516.5155,
-                at_end: 9496.3024,
-            },
-        );
+    fn repeated_flings_build_momentum_on_ios_and_macos() {
+        for platform in IOS_AND_MACOS {
+            let mut tester = pump_test(platform);
+            tester.fling(Offset::new(0.0, -DRAG_OFFSET), 1000.0);
+            tester.pump(Duration::ZERO); // trigger fling
+            tester.pump(Duration::from_millis(10));
+            // Repeat the exact same motion.
+            tester.fling(Offset::new(0.0, -DRAG_OFFSET), 1000.0);
+            tester.pump(Duration::ZERO);
+            // On iOS, the velocity will be larger than the velocity of the last fling by a
+            // non-trivial amount.
+            assert!(tester.scroll_velocity() > 1100.0, "{platform:?}");
+        }
     }
 
+    /// `scrollable_test.dart`: "Repeated flings do not build momentum on Android".
     #[test]
-    fn a_clamping_list_caught_and_flung_back_moves_as_flutters_does() {
-        let record = record_fling(
-            Rc::new(ClampingScrollPhysics::new()),
-            fling_catch_and_fling(25.0),
-        );
-        assert_matches_flutter(
-            &record,
-            FlutterFling {
-                caught_at: 5967.7082,
-                second_velocity: -3125.0,
-                at_700ms: 5182.2016,
-                at_end: 4364.2725,
-            },
-        );
+    fn repeated_flings_do_not_build_momentum_on_android() {
+        let mut tester = pump_test(TargetPlatform::Android);
+        tester.fling(Offset::new(0.0, -DRAG_OFFSET), 1000.0);
+        tester.pump(Duration::ZERO); // trigger fling
+        tester.pump(Duration::from_millis(10));
+        // Repeat the exact same motion.
+        tester.fling(Offset::new(0.0, -DRAG_OFFSET), 1000.0);
+        tester.pump(Duration::ZERO);
+        // On Android, there is no momentum build. The final velocity is the same as the
+        // velocity of the last fling.
+        let velocity = tester.scroll_velocity();
+        assert!((velocity - 1000.0).abs() <= 1e-10, "{velocity}");
+    }
+
+    /// `scrollable_test.dart`: "A slower final fling does not apply carried momentum".
+    #[test]
+    fn a_slower_final_fling_does_not_apply_carried_momentum() {
+        for platform in IOS_AND_MACOS {
+            let mut tester = pump_test(platform);
+            tester.fling(Offset::new(0.0, -DRAG_OFFSET), 1000.0);
+            tester.pump(Duration::ZERO); // trigger fling
+            tester.pump(Duration::from_millis(10));
+            // Repeat the exact same motion to build momentum.
+            tester.fling(Offset::new(0.0, -DRAG_OFFSET), 1000.0);
+            tester.pump(Duration::ZERO); // trigger the second fling
+            tester.pump(Duration::from_millis(10));
+            // Make a final fling that is much slower.
+            tester.fling(Offset::new(0.0, -DRAG_OFFSET), 200.0);
+            tester.pump(Duration::ZERO); // trigger the third fling
+            tester.pump(Duration::from_millis(10));
+            // expect that there is no carried velocity
+            assert!(tester.scroll_velocity() < 200.0, "{platform:?}");
+        }
+    }
+
+    /// `scrollable_test.dart`: "No iOS/macOS momentum build with flings in opposite
+    /// directions".
+    #[test]
+    fn flings_in_opposite_directions_build_no_momentum_on_ios_and_macos() {
+        for platform in IOS_AND_MACOS {
+            let mut tester = pump_test(platform);
+            tester.fling(Offset::new(0.0, -DRAG_OFFSET), 1000.0);
+            tester.pump(Duration::ZERO); // trigger fling
+            tester.pump(Duration::from_millis(10));
+            // Repeat the exact same motion in the opposite direction.
+            tester.fling(Offset::new(0.0, DRAG_OFFSET), 1000.0);
+            tester.pump(Duration::ZERO);
+            // The only applied velocity to the scrollable is the second fling that was in the
+            // opposite direction.
+            assert_eq!(tester.scroll_velocity(), -1000.0, "{platform:?}");
+        }
+    }
+
+    /// `scrollable_test.dart`: "No iOS/macOS momentum kept on hold gestures".
+    #[test]
+    fn a_hold_keeps_no_momentum_on_ios_and_macos() {
+        for platform in IOS_AND_MACOS {
+            let mut tester = pump_test(platform);
+            tester.fling(Offset::new(0.0, -DRAG_OFFSET), 1000.0);
+            tester.pump(Duration::ZERO); // trigger fling
+            tester.pump(Duration::from_millis(10));
+            assert!(tester.scroll_velocity() > 0.0, "{platform:?}");
+            let gesture = tester.start_gesture(SCROLLABLE_CENTER);
+            tester.pump(Duration::from_millis(40));
+            tester.up(gesture);
+            // After a hold longer than 2 frames, previous velocity is lost.
+            assert_eq!(tester.scroll_velocity(), 0.0, "{platform:?}");
+        }
     }
 }
