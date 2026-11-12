@@ -4,13 +4,14 @@
 use std::sync::Weak;
 use std::time::Instant;
 
-use waft_embedder::{EmbedderClient, Frame, ScreenId, View, ViewId, VsyncObserver};
+use waft_embedder::{EmbedderClient, Frame, FrameVsync, ScreenId, View, ViewId, VsyncObserver};
 use winit::event_loop::ActiveEventLoop;
 use winit::monitor::MonitorHandle;
 
 use crate::os::System;
 use crate::os::capabilities::Screens;
 use crate::view::WinitView;
+use crate::vsync_source::VsyncTimes;
 
 use super::MainLoop;
 
@@ -69,7 +70,8 @@ impl<C: EmbedderClient> MainLoop<C> {
         let refresh = self.frame_scheduler.on_vsync(screen);
         serve_waits(&refresh.waiting, Instant::now(), display_time);
         if !refresh.views.is_empty() {
-            self.draw_frame(&refresh.views);
+            let vsync = self.frame_scheduler.vsync_times(screen);
+            self.draw_frame(&refresh.views, vsync.map(|vsync| self.frame_vsync(vsync)));
         }
         self.redraw_without_the_framework(screen);
     }
@@ -88,19 +90,29 @@ impl<C: EmbedderClient> MainLoop<C> {
     /// transaction: a refresh of that view alone.
     pub(super) fn draw_resize_frame(&mut self, view: &WinitView) {
         let _transaction = view.present_in_transaction();
-        self.draw_frame(&[view.id()]);
+        self.draw_frame(&[view.id()], None);
         self.frame_scheduler.drew_frame_for_resize(view.id());
     }
 
-    /// Draws a refresh of `views`: the framework builds, lays out, paints and presents them; a
-    /// scene a surface timed out on is drawn again at the next vsync.
-    fn draw_frame(&mut self, views: &[ViewId]) {
+    /// Draws a refresh of `views`, for `vsync` where it is drawn at one: the framework builds,
+    /// lays out, paints and presents them; a scene a surface timed out on is drawn again at the
+    /// next vsync.
+    fn draw_frame(&mut self, views: &[ViewId], vsync: Option<FrameVsync>) {
         let frame = Frame {
             elapsed: self.platform.elapsed(),
+            vsync,
         };
         self.client.frame(views, frame);
         for &view in views {
             self.request_vsync_if_wanted(view);
+        }
+    }
+
+    /// `vsync`'s times on the platform's clock.
+    fn frame_vsync(&self, vsync: VsyncTimes) -> FrameVsync {
+        FrameVsync {
+            start: self.platform.elapsed_at(vsync.start),
+            target: self.platform.elapsed_at(vsync.target),
         }
     }
 

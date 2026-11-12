@@ -32,7 +32,7 @@ use winit::monitor::MonitorHandle;
 
 use crate::os::System;
 use crate::os::capabilities::Screens;
-use crate::vsync_source::VsyncSource;
+use crate::vsync_source::{VsyncSource, VsyncTimes};
 
 /// When each view's frame is drawn, and each wait on a screen served; owned by the loop.
 pub(crate) struct FrameScheduler {
@@ -195,6 +195,15 @@ impl FrameScheduler {
             .iter()
             .find(|vsyncs| vsyncs.screen == screen)
             .map_or_else(Instant::now, |vsyncs| vsyncs.vsync.display_time())
+    }
+
+    /// When `screen`'s vsync that came occurred, and when the picture drawn at it reaches the
+    /// screen; `None` before its first.
+    pub(crate) fn vsync_times(&self, screen: ScreenId) -> Option<VsyncTimes> {
+        self.screens
+            .iter()
+            .find(|vsyncs| vsyncs.screen == screen)
+            .and_then(|vsyncs| vsyncs.vsync.vsync_times())
     }
 
     /// The views on `screen`, in the order they came.

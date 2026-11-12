@@ -13,7 +13,8 @@
 //! each activity starts, ties the process's code to one activity again.
 
 // Registering native methods takes their functions as raw pointers, whose signatures the caller
-// answers for; that is the `unsafe` here.
+// answers for, and `ndk-context` takes the VM and the application as raw pointers; that is the
+// `unsafe` here.
 #![allow(unsafe_code)]
 
 use std::sync::Arc;
@@ -50,6 +51,35 @@ impl Application {
                 context: Arc::new(env.new_global_ref(application)?),
             })
         })
+    }
+
+    /// The app's VM.
+    pub(crate) fn vm(&self) -> JavaVM {
+        self.vm.clone()
+    }
+
+    /// The application as JNI's raw global reference, which this handle keeps.
+    pub(crate) fn as_raw(&self) -> jni::sys::jobject {
+        self.context.as_raw()
+    }
+
+    /// Hands the VM and the application to `ndk-context`, through which crates written for
+    /// Android find them, such as cpal's audio, as android-activity did; once for the process.
+    pub(crate) fn hand_to_ndk_context(&self) {
+        let kept = self.with(|env, application| env.new_global_ref(application));
+        match kept {
+            Ok(kept) => {
+                // SAFETY: the VM is this process's and the reference a global one, which is never
+                // deleted: `ndk-context` hands both out for the rest of the process.
+                unsafe {
+                    ndk_context::initialize_android_context(
+                        self.vm.get_raw().cast(),
+                        kept.into_raw().cast(),
+                    );
+                }
+            }
+            Err(error) => crate::log::warn_to_log!("waft: ndk-context has no application: {error}"),
+        }
     }
 
     /// Runs `work` with this thread attached to the app's VM and the application in hand, as a

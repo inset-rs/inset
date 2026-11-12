@@ -2,7 +2,7 @@
 //!
 //! No Gradle project and no Java of the app's own. The Java is Waft's five classes (under
 //! `android/rs/waft/` in this crate). The activity, `rs.waft.WaftActivity`, is the platform's
-//! `NativeActivity`, which loads the app's shared library and calls its `android_main`, with the
+//! `NativeActivity`, which loads the app's shared library and calls into Waft's host in it, with the
 //! results of the activities the app starts, the intents that reach it while it runs and the
 //! answers to the permissions it asks for handed on to its native code, as the document pickers,
 //! being opened and notifications need. The file provider, `rs.waft.WaftFileProvider`, shares a
@@ -47,8 +47,8 @@ const LEAST_MIN_SDK: u32 = 31;
 /// surface at every level, and the host is told what the bars cover of it as the window's insets
 /// (`waft-embedder-android`'s `window_insets.rs`).
 const DEFAULT_TARGET_SDK: u32 = 34;
-/// Waft's activity: the platform's `NativeActivity`, which loads a native library and calls
-/// `android_main`, handing activity results on to it.
+/// Waft's activity: the platform's `NativeActivity`, which loads a native library and calls its
+/// `ANativeActivity_onCreate`, Waft's Android host's, handing activity results on to it.
 const WAFT_ACTIVITY: &str = "rs.waft.WaftActivity";
 /// Waft's file provider, which shares a file of the app's with the app that opens it.
 const WAFT_FILE_PROVIDER: &str = "rs.waft.WaftFileProvider";
@@ -96,11 +96,13 @@ const JAVA_RELEASE: &str = "11";
 /// draws with the GPU for a game they do not know and hold it at 60 Hz whatever the panel
 /// can do. Saying anything at all stops that.
 const DEFAULT_CATEGORY: &str = "productivity";
-/// Every configuration change the activity absorbs rather than being recreated for, which
-/// is every one Android names. The activity must survive them all: winit allows one event
-/// loop per process, and a recreated activity calls `android_main` a second time in the
-/// same process, where a second loop cannot be made.
-const CONFIG_CHANGES: &str = "colorMode|density|fontScale|grammaticalGender|keyboard|keyboardHidden|layoutDirection|locale|mcc|mnc|navigation|orientation|screenLayout|screenSize|smallestScreenSize|touchscreen|uiMode";
+/// Every configuration change the activity absorbs rather than being recreated for, which is
+/// every one the activity element's reference names: the host hears each as a change of the
+/// activity's configuration and of its window, and draws the next frame for it. An activity
+/// Android recreates all the same, as under "Don't keep activities", hands its view to the one made
+/// in its place (`waft-embedder-android`'s `saved_view.rs`), so the app runs on either way; this
+/// spares the window that goes and comes back.
+const CONFIG_CHANGES: &str = "colorMode|density|fontScale|fontWeightAdjustment|grammaticalGender|keyboard|keyboardHidden|layoutDirection|locale|mcc|mnc|navigation|orientation|screenLayout|screenSize|smallestScreenSize|touchscreen|uiMode";
 /// How long an emulator gets to boot.
 const BOOT_TIMEOUT: Duration = Duration::from_secs(240);
 
@@ -538,9 +540,9 @@ struct Manifest<'a> {
     permissions: &'a [String],
 }
 
-/// The manifest around Waft's activity. `configChanges` keeps the activity, and so the
-/// app's state, through a rotation or a switch to dark mode, which winit reports as a
-/// resize; `adjustResize`, which Flutter's template sets too, has the system leave the window in
+/// The manifest around Waft's activity. `configChanges` keeps the activity through a rotation or
+/// a switch to dark mode, which the host hears as a change of configuration and a resize;
+/// `adjustResize`, which Flutter's template sets too, has the system leave the window in
 /// place under the keyboard, which the host hears of as the window's insets. Waft's file provider is declared at `<package>.waft.files`, not
 /// exported, granting each URI it shares; its notification receiver, not exported, hears only the
 /// app's own alarms; `<queries>` names viewing the links of [`QUERIED_SCHEMES`]; the app asks for
@@ -1065,8 +1067,8 @@ pub fn run(apk: &Apk, device: &Device) -> Result<()> {
         command
     };
     // Stopped before it is replaced: installing over a running app has the system relaunch
-    // the old activity, and the launch below then makes a second one in that same process,
-    // which is one more than winit's single event loop can serve.
+    // the old activity, and the launch below then makes a second one in that same process, a
+    // second view of the app's while the host serves one activity at a time.
     let _ = adb(&["shell", "am", "force-stop", &apk.package]).output();
     tools::run(adb(&["install", "-r", "-t"]).arg(&apk.path), "adb install")?;
     println!("launching {} on {}", apk.package, device.model);
@@ -1172,6 +1174,7 @@ mod tests {
             "screenSize",
             "uiMode",
             "fontScale",
+            "fontWeightAdjustment",
             "density",
         ] {
             assert!(

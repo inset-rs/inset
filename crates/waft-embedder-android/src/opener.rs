@@ -27,7 +27,7 @@ use jni::sys::jint;
 use jni::{Env, jni_sig, jni_str};
 use waft_embedder::{OpenError, OpenFuture, Opener};
 
-use crate::activity::{Activity, device_api_level};
+use crate::activity::{AttachedActivity, device_api_level};
 use crate::application::Application;
 use crate::file_dialogs::string;
 
@@ -47,8 +47,8 @@ const ANY_BYTES: &str = "application/octet-stream";
 /// Intents to view, started from an activity.
 pub(crate) struct IntentOpener {
     application: Application,
-    /// The activity each intent is started from.
-    activity: Activity,
+    /// The activity each intent is started from: the one attached to the app.
+    activity: AttachedActivity,
     /// The authority of Waft's file provider, where the app declares it.
     files: Option<String>,
     /// The schemes the manifest's `<queries>` names.
@@ -56,7 +56,7 @@ pub(crate) struct IntentOpener {
 }
 
 impl IntentOpener {
-    pub(crate) fn new(application: Application, activity: Activity) -> IntentOpener {
+    pub(crate) fn new(application: Application, activity: AttachedActivity) -> IntentOpener {
         let declared = application.with(|env, context| {
             Ok((file_provider(env, context)?, queried_schemes(env, context)?))
         });

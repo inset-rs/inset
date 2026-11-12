@@ -12,15 +12,21 @@
 //! decor view may be touched, so each call returns at once and the framework never waits.
 //!
 //! Both asks are one activity's: the bars' style is its window's, and the description its task's.
-//! `SystemChrome` names no view, so they go to the activity this was made with, the app's one.
+//! `SystemChrome` names no view, so they go to the activity attached to the app now. An activity
+//! Android makes in place of a destroyed one has neither, and the framework, which told them once,
+//! does not tell them again: so the last of each is kept and told again to each activity attached
+//! ([`AndroidChrome::restore`]), as Flutter's `PlatformPlugin.updateSystemUiOverlays` applies its
+//! current theme again as an activity resumes.
 
 use jni::objects::{JObject, JValue};
 use jni::{Env, jni_sig, jni_str};
+use std::cell::{Cell, RefCell};
+
 use waft_embedder::{
     ApplicationSwitcherDescription, Brightness, SystemChrome, SystemUiOverlayStyle,
 };
 
-use crate::activity::{Activity, device_api_level};
+use crate::activity::{AttachedActivity, device_api_level};
 
 /// `View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR`, API 23: a light status bar, which is to say
 /// dark icons on it.
@@ -42,20 +48,36 @@ const BAR_CONTRAST: i32 = 29;
 /// bitmap.
 const TASK_ICON_BY_ID: i32 = 28;
 
-/// The system bars around an activity's window, and its task in the switcher.
+/// The system bars around the attached activity's window, and its task in the switcher.
 pub(crate) struct AndroidChrome {
-    activity: Activity,
+    activity: AttachedActivity,
+    /// The bars' style the framework set last, if it set one.
+    style: Cell<Option<SystemUiOverlayStyle>>,
+    /// The task's description the framework set last, if it set one.
+    description: RefCell<Option<ApplicationSwitcherDescription>>,
 }
 
 impl AndroidChrome {
-    pub(crate) fn new(activity: Activity) -> AndroidChrome {
-        AndroidChrome { activity }
+    pub(crate) fn new(activity: AttachedActivity) -> AndroidChrome {
+        AndroidChrome {
+            activity,
+            style: Cell::new(None),
+            description: RefCell::new(None),
+        }
     }
-}
 
-impl SystemChrome for AndroidChrome {
-    fn set_overlay_style(&self, style: &SystemUiOverlayStyle) {
-        let style = *style;
+    /// Tells the activity attached now the bars' style and the task's description the framework
+    /// set last.
+    pub(crate) fn restore(&self) {
+        if let Some(style) = self.style.get() {
+            self.apply_style(style);
+        }
+        if let Some(description) = self.description.borrow().clone() {
+            self.apply_description(description);
+        }
+    }
+
+    fn apply_style(&self, style: SystemUiOverlayStyle) {
         self.activity
             .on_main_thread("a style for the system bars", move |env, activity| {
                 let window = window_of(env, activity)?;
@@ -64,12 +86,23 @@ impl SystemChrome for AndroidChrome {
             });
     }
 
-    fn set_application_switcher_description(&self, description: &ApplicationSwitcherDescription) {
-        let description = description.clone();
+    fn apply_description(&self, description: ApplicationSwitcherDescription) {
         self.activity
             .on_main_thread("a description for the switcher", move |env, activity| {
                 describe_the_task(env, activity, &description)
             });
+    }
+}
+
+impl SystemChrome for AndroidChrome {
+    fn set_overlay_style(&self, style: &SystemUiOverlayStyle) {
+        self.style.set(Some(*style));
+        self.apply_style(*style);
+    }
+
+    fn set_application_switcher_description(&self, description: &ApplicationSwitcherDescription) {
+        *self.description.borrow_mut() = Some(description.clone());
+        self.apply_description(description.clone());
     }
 }
 

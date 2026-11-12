@@ -32,7 +32,7 @@ use jni::sys::jint;
 use jni::{Env, EnvUnowned, NativeMethod, jni_sig, jni_str};
 use waft_embedder::{NotificationError, NotificationPermission, PermissionFuture, PermissionState};
 
-use crate::activity::{Activity, WAFT_ACTIVITY, device_api_level};
+use crate::activity::{AttachedActivity, WAFT_ACTIVITY, device_api_level};
 use crate::answer::{Answer, answer};
 use crate::application::Application;
 use crate::log::warn_to_log;
@@ -54,8 +54,9 @@ static NEXT_REQUEST: AtomicI32 = AtomicI32::new(1);
 #[derive(Clone)]
 pub(super) struct Permission {
     application: Application,
-    /// The activity the question is asked over, which gets its answer.
-    activity: Activity,
+    /// The activity the question is asked over, which gets its answer: the one attached to the
+    /// app.
+    activity: AttachedActivity,
     /// Whether the system asks the user: Android 13 and later, for an app that targets it.
     asks: bool,
 }
@@ -63,8 +64,9 @@ pub(super) struct Permission {
 impl Permission {
     /// The permission, asked for over `activity`, once the answer method of Waft's activity is
     /// registered; `None` under an activity that is not Waft's, which hands no answer on.
-    pub(super) fn new(application: Application, activity: Activity) -> Option<Permission> {
-        if !(answers_are_heard(&application) && activity.is_wafts()) {
+    pub(super) fn new(application: Application, activity: AttachedActivity) -> Option<Permission> {
+        let is_wafts = activity.get().is_some_and(|activity| activity.is_wafts());
+        if !(answers_are_heard(&application) && is_wafts) {
             return None;
         }
         let asks = application.with(|env, context| {

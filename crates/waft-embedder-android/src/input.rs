@@ -4,13 +4,13 @@
 
 use std::time::Duration;
 
-use android_activity::input::{Axis, MotionAction, MotionEvent, Pointer, ToolType};
+use ndk::event::{Axis, MotionAction, MotionEvent, Pointer, ToolType};
 use waft_embedder::{Contact, PointerDeviceKind, PointerReport, ReportedChange, ViewId};
 
 use crate::pointer::{buttons_of, device_id, kind_of_tool, scroll_delta, tool};
 
 /// The reports one motion event makes, in the order the framework takes them.
-pub(crate) fn reports_of(event: &MotionEvent<'_>, view_id: ViewId) -> Vec<PointerReport> {
+pub(crate) fn reports_of(event: &MotionEvent, view_id: ViewId) -> Vec<PointerReport> {
     // The NDK reports event times in nanoseconds, on `System.nanoTime`'s scale, where
     // the Java API reports milliseconds. The framework's velocity tracker measures a
     // fling from these, so the unit decides whether a fling happens at all.

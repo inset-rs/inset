@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use waft_embedder::valo::Context;
 use waft_embedder::{
-    Contact, Dispatcher, EmbedderClient, FontSource, Frame, Instant, Offset, Platform,
+    Contact, Dispatcher, EmbedderClient, FontSource, Frame, FrameVsync, Instant, Offset, Platform,
     PointerDeviceKind, PointerReport, ReportedChange, SystemFontSource, TargetPlatform, View,
     ViewId, ViewRef,
 };
@@ -145,10 +145,19 @@ impl Driver {
             let now = self.platform.clock.get();
             if self.platform.frame_requested.replace(false) {
                 self.log.push(format!("{now:?} frame"));
-                self.shell
-                    .frame(&[self.platform.view.id()], Frame { elapsed: now });
+                // The tick is the vsync, and its picture is for the next, as winit's timer gives
+                // them.
+                let vsync = FrameVsync {
+                    start: now,
+                    target: now + Duration::from_millis(16),
+                };
+                let frame = Frame {
+                    elapsed: now,
+                    vsync: Some(vsync),
+                };
+                self.shell.frame(&[self.platform.view.id()], frame);
                 // The display's next vsync.
-                self.platform.clock.set(now + Duration::from_millis(16));
+                self.platform.clock.set(vsync.target);
             } else if self.platform.dispatcher.take_wake(self.platform.now()) {
                 self.log.push(format!("{now:?} wake"));
                 self.shell.wake(now);

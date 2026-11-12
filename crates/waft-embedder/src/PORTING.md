@@ -167,6 +167,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — there is no isolate-global hooks table; the host drives a client without naming `App`.
   Affect: the host does not run scheduler phases or build `PointerEvent` / `KeyEvent` itself, and decides from `key_data`'s answer whether to keep propagating the native event.
 
+- Change: `Frame` carries the platform's clock, `elapsed`, beside its vsync's start and target, and a frame a host draws outside a vsync, as one a resize draws before it returns, has no vsync; Flutter's engine begins every frame at a vsync, and `FlutterEngineOnVsync` carries its two times alone.
+  Reason: platform — the app's timers run on the host's clock, which the shell advances at each frame, and a host draws a resize's frame before the resize returns.
+  Affect: a frame's time is its vsync's target, so an animation steps by the refresh however late a frame's drawing starts; in a frame a resize draws it steps by the platform's clock.
+
 - Change: `EmbedderClient::wake(elapsed)` reports that a `Platform::wake_at` deadline passed, on the clock `Frame::elapsed` uses.
   Reason: platform — the `App` owns its timers and has no event loop firing them.
   Affect: a `Timer` fires only when the host calls `wake` or delivers a frame, so a host that never wakes never runs one.

@@ -46,7 +46,7 @@ use waft_embedder::{
     FolderOptions, OpenOptions, PickedFile, PickedFolder, SaveOptions, ViewId,
 };
 
-use crate::activity::{Activity, WAFT_ACTIVITY};
+use crate::activity::{AttachedActivity, WAFT_ACTIVITY};
 use crate::answer::{Answer, Answered, answer};
 use crate::application::Application;
 use crate::document_tree::DocumentFolder;
@@ -63,15 +63,20 @@ const GRANT_PERSISTABLE: jint = 0x40;
 /// The pickers, where the activity is Waft's.
 pub(crate) struct DocumentPickers {
     application: Application,
-    /// The activity that starts each picker and gets its result.
-    activity: Activity,
+    /// The activity that starts each picker and gets its result: the one attached to the app.
+    activity: AttachedActivity,
 }
 
 impl DocumentPickers {
     /// The pickers `activity` starts, once the result method of Waft's activity is registered;
-    /// `None` under an activity that is not Waft's, which hands no result on.
-    pub(crate) fn new(application: Application, activity: Activity) -> Option<DocumentPickers> {
-        (results_are_heard(&application) && activity.is_wafts()).then_some(DocumentPickers {
+    /// `None` under an activity that is not Waft's, which hands no result on, as the one attached
+    /// now tells.
+    pub(crate) fn new(
+        application: Application,
+        activity: AttachedActivity,
+    ) -> Option<DocumentPickers> {
+        let is_wafts = activity.get().is_some_and(|activity| activity.is_wafts());
+        (results_are_heard(&application) && is_wafts).then_some(DocumentPickers {
             application,
             activity,
         })

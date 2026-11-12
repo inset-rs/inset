@@ -30,6 +30,13 @@ pub(crate) struct VsyncSource {
     requested: bool,
 }
 
+/// When a vsync occurred, and when the picture drawn at it reaches the screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct VsyncTimes {
+    pub(crate) start: Instant,
+    pub(crate) target: Instant,
+}
+
 impl VsyncSource {
     /// The vsyncs of `display`, paused: its display link calls `on_vsync` at each vsync asked for,
     /// and a timer's vsyncs are the loop's to notice, by [`timer_due`](Self::timer_due).
@@ -53,6 +60,7 @@ impl VsyncSource {
     /// A vsync came: the source runs on to the next if this one was asked for, and pauses if
     /// not.
     pub(crate) fn vsync_came(&mut self) {
+        self.timer.came();
         if std::mem::take(&mut self.requested) {
             self.run_on();
         } else {
@@ -67,6 +75,23 @@ impl VsyncSource {
             .as_ref()
             .and_then(|display_link| display_link.target_time())
             .unwrap_or_else(|| Instant::now() + self.timer.interval)
+    }
+
+    /// When the vsync that came occurred, and when the picture drawn at it reaches the screen: the
+    /// display link's timestamp and target time, or, where a timer stands in for a link, the
+    /// timer's tick and one interval on, as Flutter's fallback waiter ticks on a grid of the
+    /// display's rate (`VsyncWaiterFallback`). `None` before the first vsync.
+    pub(crate) fn vsync_times(&self) -> Option<VsyncTimes> {
+        match &self.display_link {
+            Some(display_link) => Some(VsyncTimes {
+                start: display_link.vsync_time()?,
+                target: display_link.target_time()?,
+            }),
+            None => self.timer.last_tick.map(|start| VsyncTimes {
+                start,
+                target: start + self.timer.interval,
+            }),
+        }
     }
 
     /// When the timer's next vsync is due, for the loop to wait until; `None` on a display link.
@@ -102,6 +127,8 @@ struct VsyncTimer {
     interval: Duration,
     /// When the next vsync is due; `None` while paused.
     due: Option<Instant>,
+    /// When the vsync that came last was due; `None` before the first.
+    last_tick: Option<Instant>,
 }
 
 impl VsyncTimer {
@@ -110,6 +137,14 @@ impl VsyncTimer {
         VsyncTimer {
             interval,
             due: None,
+            last_tick: None,
+        }
+    }
+
+    /// A vsync came, the one that was due if the timer runs.
+    fn came(&mut self) {
+        if let Some(due) = self.due {
+            self.last_tick = Some(due);
         }
     }
 

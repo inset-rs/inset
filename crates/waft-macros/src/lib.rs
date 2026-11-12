@@ -5,7 +5,7 @@
 //!
 //! - desktop and iOS: `main`
 //! - web: an exported `main`, called once the page has the module
-//! - Android: `android_main`, called by the activity's glue with its `AndroidApp`
+//! - Android: `android_main`, called once a process by Waft's Android host with the `AndroidApp`
 //!
 //! A WASI component, such as one for wapk, gets no entry: Waft ships no host for it, so
 //! the app writes its own with that host's embedder crate.
@@ -61,9 +61,9 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
                 .run(|platform| ::waft::Shell::new(platform, #setup_name));
         }
 
-        // The activity's glue looks this symbol up in the app's library and calls it on a
-        // thread of its own with the `AndroidApp` the loop runs on. The window is the
-        // screen, which the system sizes and titles.
+        // Waft's Android host calls this symbol on the app's thread, once a process, with the
+        // `AndroidApp` the loop runs for. Each activity's window is a view, which the system
+        // sizes and titles.
         #[cfg(target_os = "android")]
         #[unsafe(no_mangle)]
         fn android_main(app: ::waft::AndroidApp) {

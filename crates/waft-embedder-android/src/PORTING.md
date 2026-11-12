@@ -3,6 +3,20 @@
 Host implementation. Flutter analogue: the engine's Android embedder under
 `shell/platform/android`, whose activity and view are written in Java.
 
+## native_activity.rs / app_thread.rs / host.rs → the Android embedder's `FlutterActivity` and `FlutterActivityAndFragmentDelegate`
+
+- Change: the app runs on a thread of its own, started with the process's first activity and kept for the process, which every activity's callbacks hand their events to from Android's main thread, each activity a view of the one app; where Flutter's activity owns an engine of its own, destroyed with it unless the engine is cached.
+  Reason: design — one app per process, whose views are its activities' windows, as a desktop app's are its windows.
+  Affect: an activity finished by Back or by the system takes its view with it while the app runs on, and the activity Android makes next, in the same process, is a new view of the running app rather than a new start of it.
+
+- Change: an activity Android destroys without finishing it, for a configuration change the manifest does not absorb or under "Don't keep activities", saves its view's id with a value made fresh in each process, and the activity made in its place attaches to that view, which was kept without a window; Flutter keeps its plugins attached across a configuration change but destroys an engine that is not cached with its activity.
+  Reason: design — the view is the app's, not the activity's, and only the activity's window goes.
+  Affect: the app's state, a scrolled list or a typed text, stays through "Don't keep activities"; an activity brought back after its process died starts a new view, as the saved value is another process's.
+
+- Change: at each refresh of the display the input waiting in the views' queues is read before the frame is decided and drawn.
+  Reason: platform — the input queues and the choreographer are both on the app's looper, which fixes no order between them within a poll, where Android's `Choreographer.doFrame` runs its input callbacks before its frame.
+  Affect: a touch that arrived before a refresh moves that refresh's frame, not the next one.
+
 ## window_insets.rs / view.rs → the Android embedder's `FlutterView.onApplyWindowInsets`
 
 - Change: the insets are heard by a listener on the window's decor view, `rs.waft.WaftWindowInsets`, which `WaftActivity` adds, and measured from the window's edges, where Flutter's view overrides `onApplyWindowInsets` itself and is told what is left of them where it was laid out.

@@ -6,7 +6,7 @@
 //! ```
 
 fn main() {
-    // On Android the activity loads the library and calls its `android_main`; there is no `main`.
+    // On Android the activity loads the library, whose host calls its `android_main`; there is no `main`.
     #[cfg(not(target_os = "android"))]
     android_composition_lib::main();
 }

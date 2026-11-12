@@ -1,12 +1,13 @@
 //! The host's [`View`]: an activity's window as the framework sees it.
 //!
 //! Each activity has one window, which is one view, and the view outlives the windows the system
-//! hands the activity: the framework keeps its tree and its last picture while the activity is in
-//! the background, and the picture is presented again on the window that comes back.
+//! hands the activity, and the activity itself: the framework keeps its tree and its last picture
+//! while the activity is in the background, or destroyed to be made again, and the picture is
+//! presented again on the window that comes back.
 //!
 //! What is one window's is kept here, by view, and nowhere for the app: the window and its size,
-//! what the system covers of it, the rectangle its content was laid out in, its picture, its text
-//! input, and the activity it is of. A later editor must keep it so: the loop reaches a view
+//! what the system covers of it, the rectangle its content was laid out in, its configuration, its
+//! picture, its text input, and the activity attached to it now. A later editor must keep it so: the loop reaches a view
 //! through the registry (`views.rs`) by the id an event carries, and what it finds there must be
 //! that window's and no other's.
 //!
@@ -16,13 +17,14 @@
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
+use ndk::configuration::Configuration;
 use ndk::native_window::NativeWindow;
 use waft_embedder::{
     Scene, ScreenId, SystemMouseCursorKind, TextInputHost, View, ViewConstraints,
     ViewFocusDirection, ViewFocusState, ViewHost, ViewId, ViewMetrics, ViewPadding,
 };
 
-use crate::activity::Activity;
+use crate::activity::{Activity, AttachedActivity};
 use crate::composition::SurfaceControlCompositor;
 use crate::gpu::Gpu;
 use crate::picture::ViewPicture;
@@ -31,8 +33,11 @@ use crate::window_insets::WindowInsets;
 
 pub(crate) struct AndroidView {
     id: ViewId,
-    /// The activity whose window the view is.
-    activity: Activity,
+    /// The activity whose window the view is, while Android has one for it.
+    activity: AttachedActivity,
+    /// The configuration of the activity's resources, as Android last told: the density among
+    /// it.
+    configuration: RefCell<Configuration>,
     /// The window, while the system gives the activity one.
     window: RefCell<Option<NativeWindow>>,
     /// What the system covers of the window, as its insets listener last told
@@ -58,12 +63,15 @@ pub(crate) struct AndroidView {
 }
 
 impl AndroidView {
-    /// The view numbered `id` that `activity`'s window is, with no window yet: it draws nothing
-    /// until the system gives one. Its picture is a composition layer's content on `compositor`,
-    /// where there is one, and its text is typed through `text_input`, where there is one.
+    /// The view numbered `id`, whose activity, attached to it later, is `activity`, and whose
+    /// configuration is `configuration` until its activity tells another; with no window yet: it
+    /// draws nothing until the system gives one. Its picture is a composition layer's content on
+    /// `compositor`, where there is one, and its text is typed through `text_input`, where there is
+    /// one, which follows `activity`.
     pub(crate) fn new(
         id: ViewId,
-        activity: Activity,
+        activity: AttachedActivity,
+        configuration: Configuration,
         gpu: &Gpu,
         compositor: Option<&SurfaceControlCompositor>,
         text_input: Option<AndroidTextInput>,
@@ -73,6 +81,7 @@ impl AndroidView {
         AndroidView {
             id,
             activity,
+            configuration: RefCell::new(configuration),
             window: RefCell::new(None),
             window_insets: Cell::new(None),
             content_rect: Cell::new([0; 4]),
@@ -85,9 +94,42 @@ impl AndroidView {
         }
     }
 
-    /// The activity whose window the view is.
-    pub(crate) fn activity(&self) -> &Activity {
-        &self.activity
+    /// The activity whose window the view is, while Android has one for it.
+    pub(crate) fn activity(&self) -> Option<Activity> {
+        self.activity.get()
+    }
+
+    /// Android made `activity` for the view, with `configuration`: its keyboard types into the
+    /// view from now on.
+    pub(crate) fn attach(&self, activity: &Activity, configuration: Configuration) {
+        self.activity.attach(activity);
+        self.set_configuration(configuration);
+        if let Some(text_input) = &self.text_input {
+            text_input.types_into(self.id);
+        }
+    }
+
+    /// Android destroyed `activity`: the view has none until Android makes another for it.
+    pub(crate) fn detach(&self, activity: &Activity) {
+        self.activity.detach(activity);
+    }
+
+    /// The activity's configuration changed to `configuration`.
+    pub(crate) fn set_configuration(&self, configuration: Configuration) {
+        *self.configuration.borrow_mut() = configuration;
+    }
+
+    /// The configuration of the activity's resources, as Android last told.
+    pub(crate) fn configuration(&self) -> Configuration {
+        self.configuration.borrow().clone()
+    }
+
+    /// Pixels per logical pixel, from the configuration's density.
+    pub(crate) fn density(&self) -> f64 {
+        self.configuration
+            .borrow()
+            .density()
+            .map_or(1.0, |dpi| f64::from(dpi) / 160.0)
     }
 
     /// Whether the system gives the view a window now: a frame is drawn for no other.

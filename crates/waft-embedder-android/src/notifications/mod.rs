@@ -33,7 +33,7 @@ use waft_embedder::{
 };
 
 use self::permission::Permission;
-use crate::activity::Activity;
+use crate::activity::AttachedActivity;
 use crate::application::{Application, package_class};
 use crate::file_dialogs::string;
 use crate::log::warn_to_log;
@@ -57,7 +57,7 @@ impl AndroidNotifications {
     /// The app's notifications, the user asked for the permission over `activity`.
     pub(crate) fn new(
         application: Application,
-        activity: Activity,
+        activity: AttachedActivity,
     ) -> Option<AndroidNotifications> {
         let permission = Permission::new(application.clone(), activity)?;
         let has_receiver = application.with(|env, context| receiver(env, context).map(drop));

@@ -106,11 +106,15 @@ impl Shell {
 }
 
 impl EmbedderClient for Shell {
+    /// The app's timers run to the platform's clock, and the frame's time is its vsync's target,
+    /// as the engine hands `_beginFrame` (`Animator::BeginFrame`); a frame drawn outside a vsync
+    /// takes the platform's clock.
     fn frame(&mut self, views: &[ViewId], frame: Frame) {
         self.origin = Some(self.platform.now() - frame.elapsed);
         self.advance_clock(frame.elapsed);
+        let time_stamp = frame.vsync.map_or(frame.elapsed, |vsync| vsync.target);
         // The engine runs `_beginFrame` and `_drawFrame` as two native tasks: two calls.
-        self.handle_event(|app| SchedulerBinding::on_begin_frame(app, views, Some(frame.elapsed)));
+        self.handle_event(|app| SchedulerBinding::on_begin_frame(app, views, Some(time_stamp)));
         self.handle_event(|app| SchedulerBinding::on_draw_frame(app, views));
     }
 
@@ -646,6 +650,7 @@ mod tests {
         };
         let at = |ms| Frame {
             elapsed: Duration::from_millis(ms),
+            vsync: None,
         };
         shell.frame(&[IMPLICIT_VIEW_ID], at(16));
         shell.frame(&[IMPLICIT_VIEW_ID], at(32));
@@ -750,6 +755,7 @@ mod tests {
             &[IMPLICIT_VIEW_ID],
             Frame {
                 elapsed: Duration::from_millis(16),
+                vsync: None,
             },
         );
     }
@@ -839,9 +845,96 @@ mod tests {
             &[IMPLICIT_VIEW_ID],
             Frame {
                 elapsed: Duration::from_millis(32),
+                vsync: None,
             },
         );
         assert_eq!(fired.take(), vec!["late"]);
+    }
+
+    /// The refresh period of the frames below, a 60 Hz display's, in the microseconds the
+    /// framework's frame times are counted in.
+    const REFRESH: Duration = Duration::from_micros(16_667);
+
+    /// A frame drawn at the vsync `start`, whose picture is for the next one, its drawing begun at
+    /// `elapsed` on the platform's clock.
+    fn frame_at_vsync(start: Duration, elapsed: Duration) -> Frame {
+        Frame {
+            elapsed,
+            vsync: Some(waft_embedder::FrameVsync {
+                start,
+                target: start + REFRESH,
+            }),
+        }
+    }
+
+    /// The times a running ticker hears in each frame `frames` hands the shell.
+    fn ticks_at(frames: &[Frame]) -> Vec<Duration> {
+        use waft_scheduler::{FrameCallback, Ticker};
+
+        let ticks = Rc::new(Cell::new(Vec::new()));
+        let heard = Rc::clone(&ticks);
+        let mut shell = Shell::new(Rc::new(TestPlatform::new()), move |app| {
+            let on_tick = FrameCallback::new(move |_app, elapsed| {
+                let mut ticks = heard.take();
+                ticks.push(elapsed);
+                heard.set(ticks);
+            });
+            let ticker = Ticker::new(app, on_tick, None);
+            ticker.start(app);
+        });
+        for frame in frames {
+            shell.frame(&[IMPLICIT_VIEW_ID], *frame);
+        }
+        ticks.take()
+    }
+
+    #[test]
+    fn a_frame_whose_drawing_starts_late_still_advances_by_the_vsync_interval() {
+        let ticks = ticks_at(&[
+            frame_at_vsync(Duration::ZERO, Duration::from_millis(1)),
+            // The next refresh's drawing begins 20 ms late, three refreshes after the first.
+            frame_at_vsync(REFRESH, Duration::from_millis(37)),
+        ]);
+        assert_eq!(ticks, [Duration::ZERO, REFRESH]);
+    }
+
+    #[test]
+    fn a_frame_drawn_outside_a_vsync_takes_the_platforms_clock() {
+        let at = |ms| Frame {
+            elapsed: Duration::from_millis(ms),
+            vsync: None,
+        };
+        let ticks = ticks_at(&[at(1), at(37)]);
+        assert_eq!(ticks, [Duration::ZERO, Duration::from_millis(36)]);
+    }
+
+    #[test]
+    fn a_vsync_frame_after_timers_fire_them_at_the_platforms_clock() {
+        let platform = Rc::new(TestPlatform::new());
+        let fired = Rc::new(Cell::new(false));
+        let fired_flag = Rc::clone(&fired);
+        let mut shell = Shell::new(platform, move |app| {
+            let fired_flag = Rc::clone(&fired_flag);
+            waft_foundation::Timer::new(
+                app,
+                Duration::from_millis(30),
+                waft_foundation::Listener::new(move |_app| fired_flag.set(true)),
+            );
+        });
+        // The vsync's target is past the timer's time, but the platform's clock is not.
+        shell.frame(
+            &[IMPLICIT_VIEW_ID],
+            frame_at_vsync(Duration::from_millis(20), Duration::from_millis(25)),
+        );
+        assert!(
+            !fired.get(),
+            "a timer runs to the platform's clock, not the vsync's"
+        );
+        shell.frame(
+            &[IMPLICIT_VIEW_ID],
+            frame_at_vsync(Duration::from_millis(30), Duration::from_millis(31)),
+        );
+        assert!(fired.get());
     }
 
     #[test]

@@ -1,20 +1,22 @@
-//! Android host: the activity's own loop, native window and input.
+//! Android host: Waft's own glue over `NativeActivity`, the app's loop on a thread of its own, and
+//! each activity's window as a view of the app.
 //!
-//! The entry point is `android_main`, which the platform's activity glue calls on a thread
-//! of its own with an [`AndroidApp`]. The application hands that to [`AndroidEmbedder`],
-//! which runs the loop until the activity is destroyed.
+//! `NativeActivity` calls `ANativeActivity_onCreate` (`native_activity`) on Android's main thread
+//! for each activity it makes. The process's first starts the app's thread (`app_thread`), which
+//! calls the app's entry, `android_main`, once for the process, with an [`AndroidApp`]; the entry
+//! hands that to [`AndroidEmbedder`], which runs the loop for the rest of the process. Each
+//! activity's callbacks hand what Android tells them from the main thread to the app's thread
+//! (`activity_events`), and its input queue is attached to the app's thread's looper
+//! (`input_queues`). No thread stands for an activity: the app outlives each, and an activity is a
+//! view of it while it lives. Everything above the glue, the window, the surface, input, the
+//! display's refresh, is this crate's too, so the host answers the framework in dart:ui's terms
+//! rather than a desktop windowing library's.
 //!
-//! The glue is [`android_activity`], the crate that owns `android_main`, the activity's
-//! lifecycle and its looper. Everything above it — the window, the surface, input, the
-//! display's refresh — is this crate's, so the host answers the framework in dart:ui's
-//! terms rather than a desktop windowing library's.
-//!
-//! The host is shaped for an app that has several activities, each a view of it, though the glue
-//! runs one today. The glue's own types stay in the loop that polls it (`host`) and where the
-//! host's handles are made from them (`activity`, `loop_waker`); a call into Java goes through
-//! the process's application or one activity (`application`, `activity`); what Java tells the app
-//! carries the view it is about (`text_input`, `window_insets`); and the views are a registry by
-//! id (`views`), each holding what is its window's (`view`).
+//! A call into Java goes through the process's application or one activity (`application`,
+//! `activity`), the one attached to a view or to the app now, since Android makes and destroys
+//! them while the app runs on; what Java tells the app carries the view it is about
+//! (`activity_events`, `text_input`, `window_insets`); and the views are a registry by id
+//! (`views`), each holding what is its window's (`view`).
 //!
 //! Elsewhere the crate still builds, with no host in it, so the workspace's tests cover
 //! the input tables on any machine.
@@ -28,7 +30,11 @@ pub use pointer::{buttons_of, device_id, kind_of_tool, scroll_delta};
 #[cfg(target_os = "android")]
 mod activity;
 #[cfg(target_os = "android")]
+mod activity_events;
+#[cfg(target_os = "android")]
 mod answer;
+#[cfg(target_os = "android")]
+mod app_thread;
 #[cfg(target_os = "android")]
 mod application;
 #[cfg(target_os = "android")]
@@ -60,11 +66,17 @@ mod images;
 #[cfg(target_os = "android")]
 mod input;
 #[cfg(target_os = "android")]
+mod input_queues;
+#[cfg(target_os = "android")]
 mod intents;
 #[cfg(target_os = "android")]
 mod log;
 #[cfg(target_os = "android")]
 mod loop_waker;
+#[cfg(target_os = "android")]
+mod main_thread;
+#[cfg(target_os = "android")]
+mod native_activity;
 #[cfg(target_os = "android")]
 mod notifications;
 #[cfg(target_os = "android")]
@@ -79,6 +91,8 @@ mod platform;
 mod queue_family_handover;
 #[cfg(target_os = "android")]
 mod refresh;
+#[cfg(any(target_os = "android", test))]
+mod saved_view;
 #[cfg(target_os = "android")]
 mod surface;
 #[cfg(target_os = "android")]
@@ -99,7 +113,7 @@ mod vulkan_imports;
 mod window_insets;
 
 #[cfg(target_os = "android")]
-pub use android_activity::AndroidApp;
+pub use app_thread::AndroidApp;
 #[cfg(target_os = "android")]
 pub use hardware_buffers::AndroidHardwareBuffer;
 #[cfg(target_os = "android")]

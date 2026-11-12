@@ -84,7 +84,7 @@ impl WindowInsets {
 /// host's view that window is, and asks for the ones it already applied. Under an activity that
 /// is not Waft's there is nothing to hear.
 pub(crate) fn hear(application: &Application, activity: &Activity, view: ViewId) {
-    // A view before this one, in the same process, may have left its window's.
+    // The window of an activity the view had before may have left its own.
     locked(&APPLIED).remove(&view);
     if !insets_are_told(application) {
         warn_to_log!("waft: the window's insets are not heard: the package has no {LISTENER}");

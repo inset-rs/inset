@@ -1,22 +1,24 @@
 //! Every view the app has: the one registry of them, which the loop and the platform share, the
 //! numbers the views take, and the frames they asked for.
 //!
-//! A view is an activity's window (`view.rs`). The app has one activity today, so the registry
-//! holds one view, but nothing here counts on that: a view is reached by its id, and a frame is
-//! asked for and drawn by view. Flutter's Android embedding has no counterpart, since its shell
+//! A view is an activity's window (`view.rs`), and outlives the activities Android makes for it.
+//! The app has one activity at a time today, so the registry holds one view, but nothing here
+//! counts on that: a view is reached by its id, and a frame is asked for and drawn by view. Flutter's Android embedding has no counterpart, since its shell
 //! feeds one implicit view and several activities are several engines; Waft's desktop host keeps
 //! the same registry for its windows (`waft-embedder-winit`'s `views.rs`).
 //!
 //! The invariants a later editor must keep: a number is taken once and never given to another
-//! view; and a view's asking for a frame is held until a refresh finds it with a window, as
+//! view, whichever thread takes it ([`take_view_id`]: Android's main thread numbers an activity's
+//! view as it makes the activity); and a view's asking for a frame is held until a refresh finds it with a window, as
 //! `Platform::request_frame` promises, so a view in the background is not drawn and not forgotten.
 //!
 //! Every call borrows the registry for itself alone and answers copies, so a caller may call the
 //! client with what it got, and the client may reach the registry through the platform meanwhile.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use waft_embedder::{View, ViewId};
 
@@ -27,23 +29,26 @@ use crate::view::AndroidView;
 pub(crate) struct Views {
     /// By view: views are numbered as they come, so this is the order they came in.
     views: RefCell<BTreeMap<ViewId, Rc<AndroidView>>>,
-    /// The number the next view takes.
-    next_id: Cell<u64>,
     /// The views that asked for a frame and have not been in one since.
     frame_requests: RefCell<BTreeSet<ViewId>>,
 }
 
-impl Views {
-    /// The number a view about to be made takes, which no view had before.
-    pub(crate) fn take_id(&self) -> ViewId {
-        let id = ViewId(self.next_id.get());
-        self.next_id.set(id.0 + 1);
-        id
-    }
+/// The number a view about to be made takes, which no view had before, from any thread.
+pub(crate) fn take_view_id() -> ViewId {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+    ViewId(NEXT_ID.fetch_add(1, Ordering::Relaxed))
+}
 
+impl Views {
     /// `view` is one of the app's views from now on.
     pub(crate) fn add(&self, view: Rc<AndroidView>) {
         self.views.borrow_mut().insert(view.id(), view);
+    }
+
+    /// The view numbered `id` is the app's no more, nor the frame it asked for.
+    pub(crate) fn remove(&self, id: ViewId) -> Option<Rc<AndroidView>> {
+        self.frame_requests.borrow_mut().remove(&id);
+        self.views.borrow_mut().remove(&id)
     }
 
     /// The view numbered `id`, if it is one of the app's.

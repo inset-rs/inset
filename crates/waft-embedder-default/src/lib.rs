@@ -4,7 +4,8 @@
 //! An application depends on this crate instead of picking an embedder and repeating
 //! target-cfg dependencies. `DefaultEmbedder::run` is the same closure on all of them; what
 //! differs is what each host needs before it can start, which is nothing on the desktops, a
-//! canvas in the browser, and the `AndroidApp` the activity handed `android_main`.
+//! canvas in the browser, and the `AndroidApp` Waft's Android host hands `android_main`, once a
+//! process.
 //!
 //! A `wasm32-wasi` build, a component for a WASI host, has no default host: the host's own
 //! embedder crate exports the guest's start and runs the app, and this crate is empty there.
@@ -34,8 +35,8 @@ impl DefaultEmbedder {
         self
     }
 
-    /// The `AndroidApp` the activity handed `android_main`, which the host's loop runs on.
-    /// Required there, and `run` panics without it.
+    /// The `AndroidApp` Waft's Android host handed `android_main`, the process's app, which the
+    /// host's loop runs for. Required there, and `run` panics without it.
     #[cfg(target_os = "android")]
     pub fn android_app(mut self, app: AndroidApp) -> DefaultEmbedder {
         self.app = Some(app);
@@ -43,7 +44,8 @@ impl DefaultEmbedder {
     }
 
     /// Starts the host loop. `start` runs once, at launch, with the views the host has then,
-    /// and returns the client the host drives.
+    /// and returns the client the host drives. On Android the loop runs for the rest of the
+    /// process, and this never returns.
     pub fn run<C: EmbedderClient + 'static>(
         self,
         start: impl FnOnce(waft_embedder::PlatformRef) -> C + 'static,

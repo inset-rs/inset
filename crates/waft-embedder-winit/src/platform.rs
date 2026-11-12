@@ -152,7 +152,12 @@ impl WinitPlatform {
     }
 
     pub(crate) fn elapsed(&self) -> Duration {
-        self.now().saturating_duration_since(self.origin)
+        self.elapsed_at(self.now())
+    }
+
+    /// The platform's clock at `instant`, since its origin.
+    pub(crate) fn elapsed_at(&self, instant: Instant) -> Duration {
+        instant.saturating_duration_since(self.origin)
     }
 
     /// Whether the system's clipboard changed since this was last asked.

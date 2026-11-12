@@ -251,6 +251,10 @@ pub(crate) trait DisplayLink: Sized {
     /// When the picture drawn at the latest vsync reaches the screen, as the system's display
     /// link says; `None` before the first vsync.
     fn target_time(&self) -> Option<Instant>;
+
+    /// When the latest vsync occurred, as the system's display link says; `None` before the
+    /// first vsync.
+    fn vsync_time(&self) -> Option<Instant>;
 }
 
 /// The system's compositor for composition layers, Core Animation's on macOS and iOS, and why it

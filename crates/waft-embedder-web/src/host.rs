@@ -6,9 +6,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_embedder::{
-    Brightness, Contact, EmbedderClient, Frame, KeyData, KeyEventType, Platform, PlatformRef,
-    PointerDeviceKind, PointerReport, ReportedChange, ScreenId, View, ViewConstraints, ViewMetrics,
-    ViewPadding, ViewRef,
+    Brightness, Contact, EmbedderClient, Frame, FrameVsync, KeyData, KeyEventType, Platform,
+    PlatformRef, PointerDeviceKind, PointerReport, ReportedChange, ScreenId, View, ViewConstraints,
+    ViewMetrics, ViewPadding, ViewRef,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::Closure;
@@ -150,14 +150,15 @@ impl<C> Host<C> {
 
 fn install_turn_callbacks<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
     let for_raf = Rc::clone(host);
-    *host.raf_callback.borrow_mut() = Some(Closure::new(move |_time: f64| {
+    *host.raf_callback.borrow_mut() = Some(Closure::new(move |time: f64| {
         for_raf.raf_held.set(false);
-        on_turn(&for_raf);
+        let vsync = instant_of(&for_raf.window, time);
+        on_turn(&for_raf, vsync);
     }));
     let for_timeout = Rc::clone(host);
     *host.timeout_callback.borrow_mut() = Some(Closure::new(move || {
         for_timeout.timeout_id.set(None);
-        on_turn(&for_timeout);
+        on_turn(&for_timeout, None);
     }));
 }
 
@@ -206,7 +207,22 @@ fn resize_canvas(canvas: &HtmlCanvasElement, [width, height]: [u32; 2]) {
     }
 }
 
-fn on_turn<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
+/// The moment `time`, a `requestAnimationFrame` timestamp on `performance.now()`'s clock, is as an
+/// `Instant`, which reads the same clock: as far before now as the clock reads past it. Its error
+/// is the time between reading the two, under the clock's own coarsening. `None` where the page
+/// has no `performance`.
+fn instant_of(window: &Window, time: f64) -> Option<Instant> {
+    let now = Instant::now();
+    let ago = (window.performance()?.now() - time).max(0.0);
+    Some(
+        now.checked_sub(Duration::from_secs_f64(ago / 1000.0))
+            .unwrap_or(now),
+    )
+}
+
+/// One turn of the page's loop, at `requestAnimationFrame`'s `vsync` where it came from one, and
+/// from a timeout otherwise.
+fn on_turn<C: EmbedderClient + 'static>(host: &Rc<Host<C>>, vsync: Option<Instant>) {
     let now = Instant::now();
     if host.platform.should_wake(now) {
         host.client.borrow_mut().wake(host.platform.elapsed());
@@ -219,10 +235,23 @@ fn on_turn<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {
             &[CANVAS_VIEW],
             Frame {
                 elapsed: host.platform.elapsed(),
+                vsync: vsync.map(|vsync| frame_vsync(&host.platform, vsync)),
             },
         );
     }
     schedule_next(host);
+}
+
+/// The times of the refresh `requestAnimationFrame` called back for at `vsync`, on the platform's
+/// clock. The browser says nothing of the next refresh, so the target is the refresh's own time,
+/// which is the time Flutter's web engine hands the framework (`_beginFrame` with the
+/// callback's timestamp).
+fn frame_vsync(platform: &WebPlatform, vsync: Instant) -> FrameVsync {
+    let start = vsync.saturating_duration_since(platform.origin);
+    FrameVsync {
+        start,
+        target: start,
+    }
 }
 
 fn schedule_next<C: EmbedderClient + 'static>(host: &Rc<Host<C>>) {

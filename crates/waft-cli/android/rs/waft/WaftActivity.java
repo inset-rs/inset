@@ -64,8 +64,9 @@ public class WaftActivity extends NativeActivity {
     /**
      * Does what Android does with a Back press nothing handled, on the main thread, for the app's
      * native code, which asks from its own thread once the app has left the press unhandled: the
-     * system's own {@code onBackPressed}, which since Android 12 moves a launcher's root activity
-     * to the background and finishes any other.
+     * system's own {@code onBackPressed}. Android 12's release notes say it moves a launcher's
+     * root activity to the background; on the emulator's API 37 it finished it, started from the
+     * launcher's intent or not. The app's native code runs on either way.
      */
     void backLeftUnhandled() {
         runOnUiThread(

@@ -7,8 +7,8 @@
 //! The platform is the app's, not an activity's: its views are the registry's (`views.rs`), each
 //! an activity's window, and what it hands out goes through the application wherever any context
 //! answers. Where Waft's interface names no view, the system bars' style, the task's description,
-//! opening a link, a file dialog's and a permission question's activity, the call goes to the one
-//! activity the platform was made with.
+//! opening a link, a file dialog's and a permission question's activity, the call goes to the
+//! activity attached to the app now, the one Android made last ([`AndroidPlatform::attach`]).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -23,7 +23,7 @@ use waft_embedder::{
     Screens, SystemChrome, SystemFontSource, TargetPlatform, ViewRef,
 };
 
-use crate::activity::Activity;
+use crate::activity::{Activity, AttachedActivity};
 use crate::application::Application;
 use crate::chrome::AndroidChrome;
 use crate::clipboard::AndroidClipboard;
@@ -41,6 +41,8 @@ use crate::vsync_waiter::{ChoreographerWaiter, Waits};
 pub struct AndroidPlatform {
     /// The app's views, and the frames they asked for (`views.rs`).
     views: Rc<Views>,
+    /// The activity what names no view goes to.
+    activity: AttachedActivity,
     /// When the framework asked to be woken, shared with whatever thread asked.
     pub(crate) wakes: Arc<Wakes>,
     origin: Instant,
@@ -73,8 +75,8 @@ pub struct AndroidPlatform {
 
 impl AndroidPlatform {
     /// The platform of the app `application` is, whose views are `views`, drawn with `gpu`;
-    /// `waker` wakes the loop that serves it, and `activity` is the one that takes what names no
-    /// view.
+    /// `waker` wakes the loop that serves it, and `activity` is attached to it first, which tells
+    /// whether the app's activities are Waft's.
     pub(crate) fn new(
         views: Rc<Views>,
         application: &Application,
@@ -84,6 +86,8 @@ impl AndroidPlatform {
         compositor: Option<Arc<SurfaceControlCompositor>>,
     ) -> AndroidPlatform {
         let images = valo::ImageContext::new(gpu.device.clone(), gpu.queue.clone());
+        let attached = AttachedActivity::default();
+        attached.attach(activity);
         AndroidPlatform {
             views,
             wakes: Arc::new(Wakes {
@@ -103,16 +107,34 @@ impl AndroidPlatform {
             }),
             image_loader: crate::images::loader(images.clone()),
             images,
-            chrome: AndroidChrome::new(activity.clone()),
+            chrome: AndroidChrome::new(attached.clone()),
             clipboard: AndroidClipboard::new(application.clone()),
-            file_dialogs: DocumentPickers::new(application.clone(), activity.clone()),
-            opener: IntentOpener::new(application.clone(), activity.clone()),
-            notifications: AndroidNotifications::new(application.clone(), activity.clone()),
+            file_dialogs: DocumentPickers::new(application.clone(), attached.clone()),
+            opener: IntentOpener::new(application.clone(), attached.clone()),
+            notifications: AndroidNotifications::new(application.clone(), attached.clone()),
+            activity: attached,
         }
     }
 
+    /// Android made `activity`, which takes what names no view from now on, the bars' style and
+    /// the task's description told it again.
+    pub(crate) fn attach(&self, activity: &Activity) {
+        self.activity.attach(activity);
+        self.chrome.restore();
+    }
+
+    /// Android destroyed `activity`, which takes nothing from now on.
+    pub(crate) fn detach(&self, activity: &Activity) {
+        self.activity.detach(activity);
+    }
+
     pub(crate) fn elapsed(&self) -> Duration {
-        Instant::now().saturating_duration_since(self.origin)
+        self.elapsed_at(Instant::now())
+    }
+
+    /// The platform's clock at `instant`, since its origin.
+    pub(crate) fn elapsed_at(&self, instant: Instant) -> Duration {
+        instant.saturating_duration_since(self.origin)
     }
 
     /// The renderer's image store, on the device every view draws with: an image made

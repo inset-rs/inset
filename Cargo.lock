@@ -5044,11 +5044,11 @@ dependencies = [
 name = "waft-embedder-android"
 version = "0.5.0"
 dependencies = [
- "android-activity",
  "ash",
  "jni",
  "libc",
  "ndk",
+ "ndk-context",
  "ndk-sys",
  "pollster",
  "raw-window-handle",

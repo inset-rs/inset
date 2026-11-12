@@ -973,10 +973,33 @@ impl Platform for InertPlatform {
     }
 }
 
-/// A refresh of a screen, as the host delivers it.
+/// A refresh of a screen, as the host delivers it: Flutter's `FlutterEngineOnVsync`, with the
+/// platform's clock beside the vsync's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Frame {
+    /// The platform's clock as the host hands the frame over, since the host's origin: what the
+    /// app's timers run to.
     pub elapsed: Duration,
+    /// The vsync the frame is drawn for, on the same clock as `elapsed`; `None` for a frame drawn
+    /// outside the display's refresh, as one a resize draws before it returns, whose time is
+    /// `elapsed`.
+    pub vsync: Option<FrameVsync>,
+}
+
+/// The times of the vsync a frame is drawn for, on the platform's clock since the host's origin:
+/// `FlutterEngineOnVsync`'s `frame_start_time_nanos` and `frame_target_time_nanos`.
+///
+/// The framework's frame time is `target`, as Flutter's engine hands `_beginFrame` the target time
+/// (`Animator::BeginFrame`), so animations step by the refresh, not by when a frame's drawing
+/// happened to start. A later editor must keep both on the clock of [`Frame::elapsed`], so the
+/// framework can set them against its timers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameVsync {
+    /// When the vsync occurred, or will: no later than the frame is handed over.
+    pub start: Duration,
+    /// When the host expects the next vsync, the one the frame's picture is for: one refresh
+    /// after `start`, or `start` where the host knows no refresh period.
+    pub target: Duration,
 }
 
 #[cfg(test)]

@@ -13,8 +13,8 @@
 //! editing value has one owner.
 //!
 //! Each activity has a text input view of its own, and the native methods are the process's: so
-//! each view is given the id of the host's view it types into ([`AndroidTextInput::new`]) and
-//! hands it back with everything it tells, as the Java side of Flutter's embedding carries its
+//! each activity's is given the id of the host's view it types into as the activity is attached to
+//! the view ([`AndroidTextInput::types_into`]), and hands it back with everything it tells, as the Java side of Flutter's embedding carries its
 //! shell's id into each native call (`FlutterJNI.nativeShellHolderId`). Flutter has no counterpart
 //! for the rest, since its engine has one activity at a time: what the keyboards did is one queue
 //! for the app, in the order they did it, each event naming its view, and it wakes the app's one
@@ -40,7 +40,7 @@ use waft_embedder::{
     TextRange, TextSelection, ViewId,
 };
 
-use crate::activity::Activity;
+use crate::activity::AttachedActivity;
 use crate::application::Application;
 use crate::editor_info::{self, EditorInfo};
 use crate::file_dialogs::string;
@@ -67,36 +67,25 @@ pub(crate) fn take() -> Vec<(ViewId, TextInputEvent)> {
     std::mem::take(&mut *locked(&TYPED))
 }
 
-/// An activity's text input, through Waft's text input view.
+/// A view's text input, through the text input view of the activity attached to the view.
 pub(crate) struct AndroidTextInput {
-    activity: Activity,
+    activity: AttachedActivity,
 }
 
 impl AndroidTextInput {
-    /// The text input of `view`, the host's view `activity`'s window is, where the activity is
-    /// Waft's and has its text input view: none under the bare `NativeActivity`, whose own view
-    /// takes no text. What a keyboard does there is told as done to `view` from now on.
+    /// The text input of a view whose activity is `activity`, where the package has Waft's text
+    /// input view: none without, as under the bare `NativeActivity`, whose own view takes no text.
     pub(crate) fn new(
         application: &Application,
-        activity: &Activity,
-        view: ViewId,
+        activity: AttachedActivity,
     ) -> Option<AndroidTextInput> {
-        if !the_keyboard_is_heard(application) {
-            return None;
-        }
-        // A view before this one, in the same process, may have left what was typed into it.
-        locked(&TYPED).retain(|(typed_into, _)| *typed_into != view);
-        let attached = activity.with(|env, activity| {
-            let text_input = text_input_view(env, activity)?;
-            attach(env, &text_input, view)
-        });
-        if attached.is_err() {
-            activity.clear_exception();
-            return None;
-        }
-        Some(AndroidTextInput {
-            activity: activity.clone(),
-        })
+        the_keyboard_is_heard(application).then_some(AndroidTextInput { activity })
+    }
+
+    /// What a keyboard does through the attached activity's text input view is told as done to
+    /// `view` from now on.
+    pub(crate) fn types_into(&self, view: ViewId) {
+        self.tell_view("attach", |env, text_input| attach(env, text_input, view));
     }
 
     /// Calls `method` on the text input view, which carries it out on the main thread.

@@ -66,6 +66,10 @@ impl DisplayLink for ScreenDisplayLink {
     fn target_time(&self) -> Option<Instant> {
         self.clock.link.target_time()
     }
+
+    fn vsync_time(&self) -> Option<Instant> {
+        self.clock.link.vsync_time()
+    }
 }
 
 impl ScreenDisplayLink {
@@ -96,6 +100,9 @@ pub(crate) trait PausableLink: 'static {
 
     /// When the picture drawn at the latest refresh reaches the screen; `None` before the first.
     fn target_time(&self) -> Option<Instant>;
+
+    /// When the latest refresh occurred; `None` before the first.
+    fn vsync_time(&self) -> Option<Instant>;
 }
 
 /// The screens' clocks, one per screen, each shared by the subscriptions to it. Generic over the
@@ -283,6 +290,13 @@ impl PausableLink for CoreAnimationLink {
         let target = self.link.targetTimestamp();
         (target > 0.0).then(|| instant_of(target))
     }
+
+    /// The link's `timestamp`: the refresh its latest tick is for, which Flutter's macOS vsync
+    /// waiter takes as a frame's start.
+    fn vsync_time(&self) -> Option<Instant> {
+        let vsync = self.link.timestamp();
+        (vsync > 0.0).then(|| instant_of(vsync))
+    }
 }
 
 impl Drop for CoreAnimationLink {
@@ -352,6 +366,10 @@ mod tests {
         }
 
         fn target_time(&self) -> Option<Instant> {
+            None
+        }
+
+        fn vsync_time(&self) -> Option<Instant> {
             None
         }
     }

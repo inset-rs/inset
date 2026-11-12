@@ -30,6 +30,10 @@ impl DisplayLink for NoDisplayLink {
     fn target_time(&self) -> Option<std::time::Instant> {
         match *self {}
     }
+
+    fn vsync_time(&self) -> Option<std::time::Instant> {
+        match *self {}
+    }
 }
 
 /// No compositor: no layer is made, so a window has none to place.
