@@ -967,7 +967,7 @@ mod tests {
     /// A buffer of 4 by 4 pixels.
     fn buffer() -> SurfaceBuffer {
         let surface = crate::os::apple::hardware_buffers::allocate(4, 4).expect("an IOSurface");
-        SurfaceBuffer::new(surface, waft_embedder::HardwareBufferUsage::default())
+        SurfaceBuffer::new(surface)
     }
 
     /// Whether `picture` is a buffer over `buffer`'s surface.

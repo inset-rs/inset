@@ -1,7 +1,9 @@
 //! Hardware buffers in memory, as a host with no GPU of its own hands them out: each knows its
 //! size and usage, is imported as no texture (`TestPlatform::import_texture`), and reads back
-//! opaque black, in BGRA as Apple's buffers are; and the system's allocator, which allocates them
-//! and keeps what the app asked for.
+//! opaque black, in BGRA as Apple's buffers are, where its usage has `cpu_read`; and the system's
+//! allocator, which allocates them for exactly what the app asked for, and keeps each ask. A
+//! buffer the codecs decode or a video frame's is for what Apple's systems give one
+//! ([`SYSTEM_GIVEN`]).
 
 use std::sync::{Arc, Mutex};
 
@@ -11,6 +13,14 @@ use waft_embedder::image_codecs::{
 use waft_embedder::{HardwareBuffer, HardwareBufferAllocator, HardwareBufferUsage};
 
 use crate::image_codecs::pixels_of;
+
+/// What a decoded image's buffer and a video frame's are for: sampled, as the system made them,
+/// and shown by the compositor and read by the CPU, as on Apple's systems.
+pub(crate) const SYSTEM_GIVEN: HardwareBufferUsage = HardwareBufferUsage {
+    composer_overlay: true,
+    cpu_read: true,
+    ..HardwareBufferUsage::GPU_SAMPLED
+};
 
 /// A hardware buffer of a size, with no pixels on any GPU: it is imported as no texture, as a
 /// buffer a device cannot take, which a drawing skips, and its pixels read back opaque black.
@@ -30,8 +40,17 @@ impl HardwareBuffer for MockHardwareBuffer {
         self.height
     }
 
+    fn usage(&self) -> HardwareBufferUsage {
+        self.usage
+    }
+
     fn read_pixels(&self) -> ImageFuture<PixelBuffer> {
-        let read = if self.width == 0 || self.height == 0 {
+        let read = if !self.usage.cpu_read {
+            Err(ImageError::new(
+                ImageErrorKind::Unsupported,
+                "a buffer whose usage lacks `cpu_read`",
+            ))
+        } else if self.width == 0 || self.height == 0 {
             Err(ImageError::new(
                 ImageErrorKind::Other,
                 "a buffer with no pixels",
@@ -108,5 +127,43 @@ impl HardwareBufferAllocator for MockHardwareBufferAllocator {
             height,
             usage,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::task::{Context, Poll, Waker};
+
+    use super::*;
+
+    fn now<T>(future: impl Future<Output = T>) -> T {
+        let mut future = std::pin::pin!(future);
+        match future
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+        {
+            Poll::Ready(output) => output,
+            Poll::Pending => panic!("answers at once"),
+        }
+    }
+
+    #[test]
+    fn a_buffer_answers_what_it_was_allocated_for_and_is_read_only_with_cpu_read() {
+        let allocator = MockHardwareBufferAllocator::new();
+        let drawn = allocator
+            .allocate(4, 4, PixelFormat::Bgra8, HardwareBufferUsage::GPU_SAMPLED)
+            .expect("a buffer");
+        assert_eq!(drawn.usage(), HardwareBufferUsage::GPU_SAMPLED);
+        let refused = now(drawn.read_pixels()).err().map(|error| error.kind);
+        assert_eq!(refused, Some(ImageErrorKind::Unsupported));
+
+        let read = HardwareBufferUsage {
+            cpu_read: true,
+            ..HardwareBufferUsage::default()
+        };
+        let readable = allocator
+            .allocate(4, 4, PixelFormat::Bgra8, read)
+            .expect("a buffer");
+        assert!(now(readable.read_pixels()).is_ok());
     }
 }

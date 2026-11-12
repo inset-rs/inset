@@ -5,7 +5,7 @@
 //! the background, and the picture is presented again on the window that comes back.
 
 use std::cell::{Cell, RefCell};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use ndk::native_window::NativeWindow;
 use waft_embedder::{
@@ -13,37 +13,41 @@ use waft_embedder::{
     ViewFocusDirection, ViewFocusState, ViewHost, ViewId, ViewMetrics, ViewPadding,
 };
 
+use crate::composition::SurfaceControlCompositor;
 use crate::gpu::Gpu;
-use crate::surface::{Surface, Target};
+use crate::picture::ViewPicture;
 
 /// The one view the activity has.
 pub(crate) const VIEW: ViewId = ViewId(0);
 
 pub(crate) struct AndroidView {
-    pub(crate) surface: Arc<Mutex<Surface>>,
+    /// How the picture reaches the screen (`picture.rs`).
+    picture: RefCell<ViewPicture>,
+    /// The renderer's image store, on the device the picture is drawn with.
+    images: valo::ImageContext,
     metrics: Cell<ViewMetrics>,
     /// What a frame starts from.
     clear: valo::Color,
     /// The last picture the framework handed over, kept to present again on the window the
     /// system gives back, and to tell a picture equal to it from one worth drawing.
     latest: RefCell<Option<Arc<Scene>>>,
-    /// Whether the latest picture is on the surface: not while there is no window, and not
-    /// when the surface refused it.
+    /// Whether the latest picture is on the screen: not while there is no window, and not
+    /// when the screen refused it.
     on_screen: Cell<bool>,
     /// The system's bars, told from the keyboard in the one padding the activity reports.
     bars: Cell<Bars>,
 }
 
 impl AndroidView {
-    /// A view with no window yet: it draws nothing until the system gives one.
-    pub(crate) fn new(gpu: &Gpu) -> AndroidView {
+    /// A view with no window yet: it draws nothing until the system gives one. Its picture is a
+    /// composition layer's content on `compositor`, where there is one.
+    pub(crate) fn new(gpu: &Gpu, compositor: Option<&SurfaceControlCompositor>) -> AndroidView {
         let mut context = valo::Context::new(gpu.device.clone(), gpu.queue.clone());
         context.set_hide_missing_glyphs(true);
+        let images = context.image_context();
         AndroidView {
-            surface: Arc::new(Mutex::new(Surface {
-                surface: None,
-                context,
-            })),
+            picture: RefCell::new(ViewPicture::new(gpu, compositor, context)),
+            images,
             metrics: Cell::new(ViewMetrics::default()),
             clear: valo::Color::WHITE,
             latest: RefCell::new(None),
@@ -54,46 +58,32 @@ impl AndroidView {
 
     /// The renderer's image store, for the images decoded on this device.
     pub(crate) fn image_context(&self) -> valo::ImageContext {
-        self.surface
-            .lock()
-            .expect("surface lock")
-            .context
-            .image_context()
+        self.images.clone()
     }
 
-    /// The system gave the activity a window: a surface on it, owed whatever the framework
+    /// The system gave the activity a window: the picture reaches it, owed whatever the framework
     /// last drew.
     pub(crate) fn window_arrived(&self, gpu: &Gpu, window: &NativeWindow, size: [u32; 2]) {
-        let made = valo::Surface::new_with_options(
-            &gpu.instance,
-            &gpu.adapter,
-            &gpu.device,
-            Target(window.clone()),
-            size,
-            valo::SurfaceOptions::default(),
-        );
-        match made {
-            Ok(surface) => self.surface.lock().expect("surface lock").surface = Some(surface),
-            Err(error) => crate::log::warn_to_log!("no surface on the window given: {error}"),
+        let arrived = self.picture.borrow_mut().window_arrived(gpu, window, size);
+        if let Err(error) = arrived {
+            crate::log::warn_to_log!("no picture on the window given: {error}");
         }
         self.on_screen.set(false);
     }
 
     /// The system took the window away: the view keeps its picture and owes it.
     pub(crate) fn window_gone(&self) {
-        self.surface.lock().expect("surface lock").surface = None;
+        self.picture.borrow_mut().window_gone();
         self.on_screen.set(false);
     }
 
-    /// The window changed size: the surface follows it, and whatever it showed is gone.
+    /// The window changed size: the picture follows it, and whatever it showed is gone.
     pub(crate) fn resized(&self, size: [u32; 2]) {
-        if let Some(surface) = &mut self.surface.lock().expect("surface lock").surface {
-            surface.resize(size);
-        }
+        self.picture.borrow_mut().resized(size);
         self.on_screen.set(false);
     }
 
-    /// Presents the latest picture again if it is not on the surface: an owed frame, paid
+    /// Presents the latest picture again if it is not on the screen: an owed frame, paid
     /// without the framework drawing another.
     pub(crate) fn represent(&self) {
         if self.on_screen.get() {
@@ -105,14 +95,13 @@ impl AndroidView {
         }
     }
 
-    /// Draws `scene`'s slices; with no compositor here, no surface is placed.
+    /// Draws `scene`, its composition layers beneath it where the picture is composited.
     fn draw(&self, scene: &Scene) {
-        let picture = waft_embedder::slices(scene).picture_with_room();
+        let pixel_ratio = self.metrics.get().device_pixel_ratio;
         let drawn = self
-            .surface
-            .lock()
-            .expect("surface lock")
-            .draw(&picture, self.clear);
+            .picture
+            .borrow_mut()
+            .draw(scene, self.clear, pixel_ratio);
         self.on_screen.set(drawn.is_ok());
     }
 

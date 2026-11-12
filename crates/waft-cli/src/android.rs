@@ -12,7 +12,9 @@
 //! package is that library, the classes compiled to `classes.dex`, a manifest, and icons, put
 //! together with the SDK's own tools: `javac` and `d8` compile the classes, `aapt2` links the
 //! manifest and resources, `zipalign` aligns, `apksigner` signs with the debug key, and `adb`
-//! installs and launches it on an emulator or a device.
+//! installs and launches it on an emulator or a device. The library in the package is a stripped
+//! copy (`strip_option` says of what); the library as built stays under `target/` to symbolise
+//! a stack trace against.
 //!
 //! Everything but the NDK's linker and Java is found under the SDK. The NDK is where the
 //! linker and the C library for the target live; Java compiles the classes and runs `d8`,
@@ -33,9 +35,11 @@ use crate::icons;
 use crate::project::{Profile, Project};
 use crate::tools;
 
-/// Android 8.0, the first whose clip says when it was set, which tells the app another writer's
-/// copy (`waft-embedder-android`'s clipboard).
-const DEFAULT_MIN_SDK: u32 = 26;
+/// Android 12, the least an app runs on: Waft's Android host links the surface-control calls
+/// that place a composition layer by position, scale and crop (`waft-embedder-android`'s
+/// `surface_control.rs`), which are API 31's, so its library neither links for nor loads on an
+/// earlier version. It is also every app's default.
+const LEAST_MIN_SDK: u32 = 31;
 /// The last level before the system stops fitting the window to its bars: from 35 an
 /// app is edge to edge, and the host learns the safe area from the fitted content rect.
 const DEFAULT_TARGET_SDK: u32 = 34;
@@ -325,7 +329,7 @@ pub fn build(project: &Project, profile: Profile, abi: Abi) -> Result<Apk> {
         .java
         .as_ref()
         .context("no Java for javac and apksigner: install Android Studio, or set JAVA_HOME")?;
-    let min_sdk = project.android.min_sdk.unwrap_or(DEFAULT_MIN_SDK);
+    let min_sdk = min_sdk(project.android.min_sdk)?;
     tools::ensure_rust_target(&project.root, abi.triple())?;
     let shared_library = cargo::build(&Build {
         project,
@@ -370,13 +374,12 @@ pub fn build(project: &Project, profile: Profile, abi: Abi) -> Result<Apk> {
     link(&sdk, &stage, &linked, has_icon)?;
     let classes = compile_classes(&sdk, java, &stage, min_sdk)?;
     add_to_package(&linked, "classes.dex", &classes)?;
-    let packaged = match profile {
-        // Symbols are for reading a crash report, not for the device: they double the
-        // download and nothing loads them. The built library keeps them, so a stack trace
-        // from this build can still be symbolised against it, which is what Gradle does.
-        Profile::Release => strip(ndk, &shared_library, &stage.join("stripped.so"))?,
-        Profile::Debug => shared_library,
-    };
+    let packaged = strip(
+        ndk,
+        &shared_library,
+        &stage.join("stripped.so"),
+        strip_option(profile),
+    )?;
     add_to_package(
         &linked,
         &format!("lib/{}/lib{library}.so", abi.dir_name()),
@@ -401,18 +404,44 @@ pub fn build(project: &Project, profile: Profile, abi: Abi) -> Result<Apk> {
     Ok(Apk { path: apk, package })
 }
 
-/// The environment that points cargo, and any C a dependency compiles, at the NDK's
-/// toolchain for the target.
-/// A copy of `library` at `to` with its symbols removed, for the package.
-fn strip(ndk: &Path, library: &Path, to: &Path) -> Result<PathBuf> {
+/// The `minSdkVersion` an app is built for: the one it asks for, or Android 12, refusing one below
+/// Android 12, which Waft's host does not run on.
+fn min_sdk(asked: Option<u32>) -> Result<u32> {
+    let min_sdk = asked.unwrap_or(LEAST_MIN_SDK);
+    if min_sdk < LEAST_MIN_SDK {
+        bail!(
+            "min_sdk = {min_sdk} is below {LEAST_MIN_SDK}, Android 12, the least Waft's Android host runs on: \
+             it places composition layers with surface-control calls Android 12 brought"
+        );
+    }
+    Ok(min_sdk)
+}
+
+/// What `llvm-strip` removes from the library the package carries. The library as built keeps
+/// everything under `target/`, so a stack trace from either build can be symbolised against it
+/// with `ndk-stack` or `llvm-addr2line`, which is what Gradle does.
+///
+/// A release package drops the symbols too: they are for reading a crash report, not for the
+/// device, and nothing on it loads them. A debug package drops only the debug information, most
+/// of a debug library and read by nothing on the device, and keeps the symbol table and the
+/// unwind tables, so a panic's backtrace still names its functions.
+fn strip_option(profile: Profile) -> &'static str {
+    match profile {
+        Profile::Release => "--strip-all",
+        Profile::Debug => "--strip-debug",
+    }
+}
+
+/// A copy of `library` at `to`, stripped with `option`, for the package.
+fn strip(ndk: &Path, library: &Path, to: &Path, option: &str) -> Result<PathBuf> {
     let strip = toolchain(ndk).join(tools::exe_name("llvm-strip"));
     if !strip.is_file() {
-        // Shipping the symbols wastes the download but runs the same; say so and go on.
-        eprintln!("note: no llvm-strip in the NDK; the library ships with its symbols");
+        // Shipping the library as built wastes the download but runs the same; say so and go on.
+        eprintln!("note: no llvm-strip in the NDK; the library ships as built");
         return Ok(library.to_path_buf());
     }
     fs::copy(library, to)?;
-    tools::run(Command::new(strip).arg("--strip-all").arg(to), "llvm-strip")?;
+    tools::run(Command::new(strip).arg(option).arg(to), "llvm-strip")?;
     Ok(to.to_path_buf())
 }
 
@@ -426,6 +455,8 @@ fn toolchain(ndk: &Path) -> PathBuf {
     ndk.join("toolchains/llvm/prebuilt").join(host).join("bin")
 }
 
+/// The environment that points cargo, and any C a dependency compiles, at the NDK's
+/// toolchain for the target.
 fn linker_env(ndk: &Path, abi: Abi, min_sdk: u32) -> Result<Vec<(&'static str, String)>> {
     let bin = toolchain(ndk);
     let clang = bin.join(tools::exe_name(&abi.clang_name(min_sdk)));
@@ -990,6 +1021,26 @@ mod tests {
     }
 
     #[test]
+    fn an_app_runs_on_android_12_or_later() {
+        assert_eq!(min_sdk(None).unwrap(), 31);
+        assert_eq!(min_sdk(Some(33)).unwrap(), 33);
+        assert!(
+            min_sdk(Some(26)).is_err(),
+            "the host's library does not load before API 31"
+        );
+    }
+
+    #[test]
+    fn only_a_release_package_drops_the_symbols() {
+        assert_eq!(strip_option(Profile::Release), "--strip-all");
+        assert_eq!(
+            strip_option(Profile::Debug),
+            "--strip-debug",
+            "a debug backtrace names its functions from the symbol table"
+        );
+    }
+
+    #[test]
     fn version_code_orders_like_the_package_version() {
         assert_eq!(version_code("0.1.0"), 100);
         assert_eq!(version_code("1.2.3"), 10203);
@@ -1005,7 +1056,7 @@ mod tests {
             library: "my_app",
             version_code: 100,
             version_name: "0.1.0",
-            min_sdk: 26,
+            min_sdk: 31,
             target_sdk: 34,
             debuggable: true,
             has_icon: false,
@@ -1045,7 +1096,7 @@ mod tests {
             library: "my_app",
             version_code: 100,
             version_name: "0.1.0",
-            min_sdk: 26,
+            min_sdk: 31,
             target_sdk: 34,
             debuggable: false,
             has_icon: false,
@@ -1072,7 +1123,7 @@ mod tests {
             library: "my_app",
             version_code: 100,
             version_name: "0.1.0",
-            min_sdk: 26,
+            min_sdk: 31,
             target_sdk: 34,
             debuggable: false,
             has_icon: false,

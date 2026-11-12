@@ -5,10 +5,8 @@
 //! `VsyncWaiter`. A callback fires once, so each one asks for the next.
 //!
 //! The rate the panel runs at is the system's own choice. `ANativeWindow_setFrameRate`
-//! would ask for one, but it is an API 30 symbol and this library loads on API 24, where
-//! the loader cannot find it and the whole library fails to open; asking would mean
-//! resolving it at run time. Flutter's engine does not ask either — it reads the rate the
-//! display reports and paces to it — so neither does this.
+//! would ask for one; Flutter's engine does not ask — it reads the rate the display reports
+//! and paces to it — so neither does this.
 
 // The choreographer is a C API with no binding in the `ndk` crate.
 #![allow(unsafe_code)]

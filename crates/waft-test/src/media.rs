@@ -19,14 +19,14 @@ use waft_embedder::image_codecs::{
 use waft_embedder::{
     Camera, CameraDevice, CameraError, CameraFormat, CameraListFuture, CameraOpenFuture,
     CameraOutputs, CameraStartFuture, Cameras, CaptureSession, CaptureState, CompositionLayer,
-    Compositor, Cue, HardwareBuffer, HardwareBufferUsage, LayerPicture, MediaAsset,
-    MediaAssetFuture, MediaAssets, MediaChangeFuture, MediaError, MediaMetadata, MediaPlayer,
-    MediaTrack, MovieOptions, Photo, PhotoFuture, Placement, PlayerError, PlayerState, Players,
-    RecordingFuture, SeekTolerance, Size, VideoFrame, VideoFrameReader, VideoFrameReaders,
-    VideoOutput,
+    Compositor, Cue, HardwareBuffer, LayerPicture, MediaAsset, MediaAssetFuture, MediaAssets,
+    MediaChangeFuture, MediaError, MediaMetadata, MediaPlayer, MediaTrack, MovieOptions, Photo,
+    PhotoFuture, Placement, PlayerError, PlayerState, Players, RecordingFuture, SeekTolerance,
+    Size, VideoFrame, VideoFrameReader, VideoFrameReaders, VideoOutput,
 };
 
 use crate::MockHardwareBuffer;
+use crate::hardware_buffers::SYSTEM_GIVEN;
 use crate::image_codecs::pixels_of;
 
 /// A compositor whose layers show nowhere, and which keeps each layer it made. Every clone is the
@@ -512,12 +512,12 @@ impl VideoFrame for MockVideoFrame {
         Box::pin(std::future::ready(read))
     }
 
-    /// A [`MockHardwareBuffer`] of its size, for sampling.
+    /// A [`MockHardwareBuffer`] of its size, for what a frame's is ([`SYSTEM_GIVEN`]).
     fn hardware_buffer(&self) -> Arc<dyn HardwareBuffer> {
         Arc::new(MockHardwareBuffer {
             width: self.width,
             height: self.height,
-            usage: HardwareBufferUsage::GPU_SAMPLED,
+            usage: SYSTEM_GIVEN,
         })
     }
 }

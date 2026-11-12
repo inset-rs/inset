@@ -253,6 +253,10 @@ mod tests {
                 4
             }
 
+            fn usage(&self) -> HardwareBufferUsage {
+                HardwareBufferUsage::GPU_SAMPLED
+            }
+
             fn read_pixels(&self) -> ImageFuture<PixelBuffer> {
                 never_read()
             }

@@ -1,0 +1,115 @@
+//! A Vulkan device that imports hardware buffers: opened through wgpu-hal with
+//! `VK_ANDROID_external_memory_android_hardware_buffer` and the `VK_EXT_queue_family_foreign` it
+//! depends on added to the extensions wgpu enables, which wgpu-hal never adds itself; and whether a
+//! device was opened so. Every other part of the device is what wgpu-hal opens, so wgpu-core's
+//! device over it is any wgpu device.
+//!
+//! The invariant: a device answers that it imports only when it was opened with both extensions,
+//! since `vkGetAndroidHardwareBufferPropertiesANDROID` and an import into a device without them are
+//! undefined. `VK_EXT_queue_family_foreign` is what lets the view hand its buffers' images to the
+//! compositor and take them back (`queue_family_handover`).
+
+// Opening a device through wgpu-hal and reading what a device enabled need `unsafe`; this module
+// writes it for them.
+#![allow(unsafe_code)]
+
+use std::ffi::CStr;
+
+use wgpu::hal::api::Vulkan;
+
+/// What a device must enable to import hardware buffers.
+const IMPORT_EXTENSIONS: [&CStr; 2] = [
+    ash::android::external_memory_android_hardware_buffer::NAME,
+    ash::ext::queue_family_foreign::NAME,
+];
+
+/// The features a device is asked for where the adapter offers them, as valo's own
+/// `request_device` asks: timestamps for the frame's GPU time, and mappable primary buffers, which
+/// valo writes each frame's uniforms and vertices into directly.
+const WANTED_FEATURES: wgpu::Features =
+    wgpu::Features::TIMESTAMP_QUERY.union(wgpu::Features::MAPPABLE_PRIMARY_BUFFERS);
+
+/// A device and its queue on the first of `adapters`, Vulkan's, that imports hardware buffers,
+/// hardware ones before software ones; `None` where none can.
+pub(crate) fn open_on_first(
+    mut adapters: Vec<wgpu::Adapter>,
+) -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+    adapters.sort_by_key(|adapter| adapter.get_info().device_type == wgpu::DeviceType::Cpu);
+    adapters.into_iter().find_map(|adapter| {
+        if !can_import(&adapter) {
+            return None;
+        }
+        match open(&adapter) {
+            Ok((device, queue)) => Some((adapter, device, queue)),
+            Err(error) => {
+                crate::log::warn_to_log!(
+                    "{} gave no device that imports hardware buffers: {error}",
+                    adapter.get_info().name
+                );
+                None
+            }
+        }
+    })
+}
+
+/// Whether `device` was opened with the extensions that import a hardware buffer's memory.
+pub(crate) fn imports(device: &wgpu::Device) -> bool {
+    // SAFETY: the device is only read, and let go before this returns.
+    let Some(hal) = (unsafe { device.as_hal::<Vulkan>() }) else {
+        return false;
+    };
+    let enabled = hal.enabled_device_extensions();
+    IMPORT_EXTENSIONS
+        .iter()
+        .all(|extension| enabled.contains(extension))
+}
+
+/// Whether `adapter` is Vulkan's, at 1.1 or later, whose dedicated allocations an import takes,
+/// and offers both extensions.
+fn can_import(adapter: &wgpu::Adapter) -> bool {
+    // SAFETY: the adapter is only read, and let go before this returns.
+    let Some(hal) = (unsafe { adapter.as_hal::<Vulkan>() }) else {
+        return false;
+    };
+    let capabilities = hal.physical_device_capabilities();
+    capabilities.properties().api_version >= ash::vk::API_VERSION_1_1
+        && IMPORT_EXTENSIONS
+            .iter()
+            .all(|extension| capabilities.supports_extension(extension))
+}
+
+/// A device on `adapter` with its own limits, the features valo uses that it offers, and the
+/// import's extensions.
+fn open(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue), String> {
+    let descriptor = wgpu::DeviceDescriptor {
+        label: Some("waft"),
+        required_features: adapter.features() & WANTED_FEATURES,
+        required_limits: adapter.limits(),
+        ..Default::default()
+    };
+    // SAFETY: the features and limits are the adapter's own, the callback only adds two extensions
+    // the adapter offers (`can_import`), and the hal adapter is let go before wgpu takes the device
+    // it opened.
+    let opened = unsafe {
+        let hal = adapter
+            .as_hal::<Vulkan>()
+            .ok_or("the adapter is not Vulkan's")?;
+        hal.open_with_callback(
+            descriptor.required_features,
+            &descriptor.required_limits,
+            &descriptor.memory_hints,
+            Some(Box::new(|arguments| {
+                for extension in IMPORT_EXTENSIONS {
+                    if !arguments.extensions.contains(&extension) {
+                        arguments.extensions.push(extension);
+                    }
+                }
+            })),
+        )
+    }
+    .map_err(|error| error.to_string())?;
+    // SAFETY: the device was opened on this adapter's physical device, with the descriptor's
+    // features and limits.
+    unsafe { adapter.create_device_from_hal(opened, &descriptor) }
+        .map_err(|error| error.to_string())
+}

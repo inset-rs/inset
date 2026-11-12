@@ -13,6 +13,7 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use android_activity::input::{KeyAction, Keycode};
@@ -21,6 +22,7 @@ use waft_embedder::{
     EmbedderClient, Frame, PlatformRef, ViewFocusDirection, ViewFocusEvent, ViewFocusState,
 };
 
+use crate::composition::SurfaceControlCompositor;
 use crate::gpu::Gpu;
 use crate::open_requests::OpenRequests;
 use crate::platform::AndroidPlatform;
@@ -46,8 +48,14 @@ impl AndroidEmbedder {
     /// activity a window, and returns the client the host drives.
     pub fn run<C: EmbedderClient + 'static>(self, start: impl FnOnce(PlatformRef) -> C + 'static) {
         let gpu = Gpu::acquire();
-        let view = Rc::new(AndroidView::new(&gpu));
-        let platform = Rc::new(AndroidPlatform::new(Rc::clone(&view), &self.app));
+        let compositor = composition_on(&gpu);
+        let view = Rc::new(AndroidView::new(&gpu, compositor.as_deref()));
+        let platform = Rc::new(AndroidPlatform::new(
+            Rc::clone(&view),
+            &self.app,
+            &gpu,
+            compositor,
+        ));
         *platform.images.borrow_mut() = Some(view.image_context());
         *platform.image_loader.borrow_mut() = crate::images::loader(view.image_context());
         crate::intents::hear(&self.app);
@@ -67,6 +75,15 @@ impl AndroidEmbedder {
         };
         host.run();
     }
+}
+
+/// The compositor, where Waft's device imports the hardware buffers its layers show: none on
+/// OpenGL ES, whose view draws through a swapchain (`picture.rs`).
+fn composition_on(gpu: &Gpu) -> Option<Arc<SurfaceControlCompositor>> {
+    if !gpu.imports_hardware_buffers() {
+        return None;
+    }
+    SurfaceControlCompositor::new().map(Arc::new)
 }
 
 struct Host<C> {
@@ -224,6 +241,8 @@ impl<C: EmbedderClient> Host<C> {
         if *self.platform.screen.borrow() == screen {
             return;
         }
+        *self.platform.screen_id.lock().expect("screen lock") =
+            screen.as_ref().map(|screen| screen.id);
         *self.platform.screen.borrow_mut() = screen;
         if let Some(client) = &mut self.client {
             client.screens_changed();
@@ -390,23 +409,31 @@ impl<C: EmbedderClient> Host<C> {
         }
     }
 
-    /// One refresh of the display: the frame the framework asked for, if it asked. The
-    /// signal is paused after a few refreshes with nothing to draw, and started again by
-    /// the next request.
+    /// One refresh of the display: the waits on it served, and the frame the framework asked for,
+    /// if it asked. The signal is paused after a few refreshes with nothing to draw and nobody
+    /// waiting, and started again by the next request or wait.
     fn pace(&mut self) {
         let wanted = self.platform.frame_requested.get();
+        let waited = self.platform.vsync_waits.any();
         if let Some(vsync) = &self.vsync
-            && wanted
+            && (wanted || waited)
         {
             vsync.set_paused(false);
         }
         if !self.refreshed.replace(false) {
             return;
         }
+        if waited {
+            self.idle_ticks = 0;
+            self.platform.vsync_waits.serve(self.refresh_period());
+        }
         if wanted {
             self.idle_ticks = 0;
             self.platform.frame_requested.set(false);
             self.draw_frame();
+            return;
+        }
+        if waited {
             return;
         }
         self.idle_ticks += 1;
@@ -416,6 +443,20 @@ impl<C: EmbedderClient> Host<C> {
             self.idle_ticks = 0;
             vsync.set_paused(true);
         }
+    }
+
+    /// The time between two refreshes of the activity's screen, as the system reports its rate;
+    /// a 60 Hz panel's where it reports none.
+    fn refresh_period(&self) -> Duration {
+        let rate = self
+            .platform
+            .screen
+            .borrow()
+            .as_ref()
+            .and_then(|screen| screen.refresh_rate)
+            .filter(|rate| *rate > 0.0)
+            .unwrap_or(60.0);
+        Duration::from_secs_f64(1.0 / rate)
     }
 
     /// Draws one frame: the framework builds, lays out and paints, and the view presents.

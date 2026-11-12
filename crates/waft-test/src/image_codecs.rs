@@ -11,9 +11,10 @@ use waft_embedder::image_codecs::{
     ImageFuture, ImageMetadata, ImageOrientation, ImageSource, PixelBuffer, PixelFormat,
     PixelLayout,
 };
-use waft_embedder::{HardwareBuffer, HardwareBufferUsage, Size};
+use waft_embedder::{HardwareBuffer, Size};
 
 use crate::MockHardwareBuffer;
+use crate::hardware_buffers::SYSTEM_GIVEN;
 
 /// Image codecs that answer what the test set, at once, and keep what the app asked of them,
 /// with hardware codecs where the test gives them. Every clone is the same codecs.
@@ -216,7 +217,7 @@ impl HardwareImageCodecs for MockHardwareImageCodecs {
                 Arc::new(MockHardwareBuffer {
                     width,
                     height,
-                    usage: HardwareBufferUsage::GPU_SAMPLED,
+                    usage: SYSTEM_GIVEN,
                 }) as Arc<dyn HardwareBuffer>
             }),
             None => Err(ImageError::new(

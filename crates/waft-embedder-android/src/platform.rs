@@ -12,17 +12,22 @@ use std::time::{Duration, Instant};
 
 use android_activity::AndroidAppWaker;
 use waft_embedder::{
-    Brightness, Clipboard, Dispatcher, FileDialogs, FontSource, ImageCodec, ImageCodecFuture,
-    ImageDecodeError, ImageFrame, ImageFrameFuture, ImageRepetition, Locale, Notifications, Offset,
-    Opener, Platform, Screen, Screens, SystemChrome, SystemFontSource, TargetPlatform, ViewRef,
+    Brightness, Clipboard, Compositor, Dispatcher, FileDialogs, FontSource, HardwareBuffer,
+    HardwareBufferAllocator, ImageCodec, ImageCodecFuture, ImageDecodeError, ImageFrame,
+    ImageFrameFuture, ImageRepetition, Locale, Notifications, Offset, Opener, Platform, Screen,
+    Screens, SystemChrome, SystemFontSource, TargetPlatform, ViewRef,
 };
 
 use crate::chrome::AndroidChrome;
 use crate::clipboard::AndroidClipboard;
+use crate::composition::SurfaceControlCompositor;
 use crate::file_dialogs::DocumentPickers;
+use crate::gpu::Gpu;
+use crate::hardware_buffers::GrallocAllocator;
 use crate::notifications::AndroidNotifications;
 use crate::opener::IntentOpener;
 use crate::view::{AndroidView, VIEW};
+use crate::vsync_waiter::{ChoreographerWaiter, Waits};
 
 /// The long-lived host capability held by the application.
 pub struct AndroidPlatform {
@@ -36,6 +41,15 @@ pub struct AndroidPlatform {
     /// The screen the activity is on, as the app was last told it; `None` until the system first
     /// describes it.
     pub(crate) screen: RefCell<Option<Screen>>,
+    /// The id of that screen, for the waits on its refreshes asked from any thread.
+    pub(crate) screen_id: Arc<Mutex<Option<waft_embedder::ScreenId>>>,
+    /// The waits on the display's refreshes not yet served (`vsync_waiter.rs`).
+    pub(crate) vsync_waits: Arc<Waits>,
+    /// SurfaceFlinger's surface controls, where Waft's device imports hardware buffers
+    /// (`composition/`).
+    compositor: Option<Arc<SurfaceControlCompositor>>,
+    /// The system's allocator of the buffers the compositor shows (`hardware_buffers.rs`).
+    hardware_buffer_allocator: Arc<GrallocAllocator>,
     pub(crate) image_loader: RefCell<Option<valo_codec::ImageLoader>>,
     pub(crate) images: RefCell<Option<valo::ImageContext>>,
     chrome: AndroidChrome,
@@ -48,9 +62,12 @@ pub struct AndroidPlatform {
 }
 
 impl AndroidPlatform {
+    /// The platform of `app`, whose one view is `view`, drawn with `gpu`.
     pub(crate) fn new(
         view: Rc<AndroidView>,
         app: &android_activity::AndroidApp,
+        gpu: &Gpu,
+        compositor: Option<Arc<SurfaceControlCompositor>>,
     ) -> AndroidPlatform {
         let waker = app.create_waker();
         AndroidPlatform {
@@ -65,6 +82,12 @@ impl AndroidPlatform {
             brightness: Cell::new(Brightness::Light),
             locales: RefCell::new(Vec::new()),
             screen: RefCell::new(None),
+            screen_id: Arc::new(Mutex::new(None)),
+            vsync_waits: Waits::new(app.create_waker()),
+            compositor,
+            hardware_buffer_allocator: Arc::new(GrallocAllocator {
+                largest_side: gpu.device.limits().max_texture_dimension_2d,
+            }),
             image_loader: RefCell::new(None),
             images: RefCell::new(None),
             chrome: AndroidChrome::new(app.clone()),
@@ -206,6 +229,15 @@ impl Platform for AndroidPlatform {
         Some(&self.chrome)
     }
 
+    /// The display's refreshes, which the loop serves from the choreographer the framework's frames
+    /// are drawn at (`vsync_waiter.rs`).
+    fn vsync_waiter(&self) -> Option<Arc<dyn waft_embedder::VsyncWaiter>> {
+        Some(Arc::new(ChoreographerWaiter {
+            waits: Arc::clone(&self.vsync_waits),
+            screen: Arc::clone(&self.screen_id),
+        }))
+    }
+
     /// The one screen the activity is on (`display.rs`).
     fn screens(&self) -> Option<&dyn Screens> {
         Some(self)
@@ -250,6 +282,37 @@ impl Platform for AndroidPlatform {
 
     fn import_pixels(&self, pixels: valo::PixelBuffer) -> Option<waft_embedder::Image> {
         self.image_context()?.upload_pixels(pixels, false).ok()
+    }
+
+    /// The buffer's texture on the device every view draws with, imported by valo; none where
+    /// that device imports no hardware buffers.
+    fn import_hardware_buffer(&self, buffer: &dyn HardwareBuffer) -> Option<waft_embedder::Image> {
+        let images = self.image_context()?;
+        let texture = crate::gpu_interop::import_texture(buffer, images.device())?;
+        images.import_texture(texture, false).ok()
+    }
+
+    /// A `VkImage` over the buffer's memory, on a device opened to import hardware buffers
+    /// (`gpu_interop.rs`): Waft's own, where Vulkan can, and none an app opened itself.
+    fn import_texture(
+        &self,
+        buffer: &dyn HardwareBuffer,
+        device: &wgpu::Device,
+    ) -> Option<wgpu::Texture> {
+        crate::gpu_interop::import_texture(buffer, device)
+    }
+
+    /// Surface controls beneath the view's picture (`composition/`), where Waft's device imports
+    /// hardware buffers; none on OpenGL ES, whose view draws through a swapchain.
+    fn compositor(&self) -> Option<Arc<dyn Compositor>> {
+        self.compositor
+            .as_ref()
+            .map(|compositor| Arc::clone(compositor) as Arc<dyn Compositor>)
+    }
+
+    /// The allocator of the system's `AHardwareBuffer`s (`hardware_buffers.rs`).
+    fn hardware_buffer_allocator(&self) -> Option<Arc<dyn HardwareBufferAllocator>> {
+        Some(Arc::clone(&self.hardware_buffer_allocator) as Arc<dyn HardwareBufferAllocator>)
     }
 }
 

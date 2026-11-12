@@ -1,6 +1,6 @@
 //! A hardware buffer imported as a texture on the app's GPU device, on macOS and iOS: a Metal
 //! texture over the buffer's `IOSurface` (`newTextureWithDescriptor:iosurface:plane:`), made a
-//! wgpu texture through wgpu-hal, for what the buffer was allocated for. A video frame's buffer is
+//! wgpu texture through wgpu-hal, for what the buffer's usage allows. A video frame's buffer is
 //! its pixel buffer's surface (`media::video_frame`), imported the same way, so a frame is drawn
 //! with no copy on the device the app gives.
 //!
@@ -156,8 +156,8 @@ mod tests {
     use crate::os::apple::media::test_frame;
 
     const DRAWN: HardwareBufferUsage = HardwareBufferUsage {
-        gpu_sampled: true,
         gpu_color_output: true,
+        ..HardwareBufferUsage::GPU_SAMPLED
     };
 
     #[test]
@@ -175,8 +175,8 @@ mod tests {
     #[test]
     fn a_buffer_drawn_into_is_copied_into_too() {
         let usage = HardwareBufferUsage {
-            gpu_sampled: false,
             gpu_color_output: true,
+            ..HardwareBufferUsage::default()
         };
         assert_eq!(
             texture_usages(usage),
@@ -265,6 +265,10 @@ mod tests {
 
             fn height(&self) -> u32 {
                 4
+            }
+
+            fn usage(&self) -> HardwareBufferUsage {
+                HardwareBufferUsage::ALL
             }
 
             fn read_pixels(

@@ -81,7 +81,7 @@ team = "ABCDE12345"                # narrows the signing identity when a machine
 minimum_version = "15.0"
 
 [package.metadata.waft.android]
-min_sdk = 26                       # the default: Android 8.0, the first whose clip says when it was set
+min_sdk = 31                       # the default and the least: Android 12, whose surface controls place composition layers
 target_sdk = 34                    # 35 and up draw edge to edge: the safe area goes, until the host reads insets
 version_code = 100                 # defaults to one derived from the version: 1.2.3 is 10203
 
@@ -174,6 +174,8 @@ The `.apk` is built without Gradle and without any Java of your own. The Java is
 
 The manifest's `<queries>` names viewing `http`, `https` and `mailto` links, so the opener can say whether some app takes one; the application's meta-data `rs.waft.queried_schemes` lists the same schemes for it. It asks for `POST_NOTIFICATIONS`, which Android 13 asks the user for when the app asks (`NotificationPermission::request`), and `SCHEDULE_EXACT_ALARM`, which Android 14 leaves to the user to grant under the app's Alarms & reminders setting: without it a scheduled notification may come late. A scheduled notification does not survive a restart of the device.
 
+An app runs on Android 12 (API 31) and later, which `min_sdk` defaults to and may not go below: Waft's host places composition layers with the surface-control calls Android 12 brought, and links them, so its library does not load on an earlier version.
+
 You need:
 
 - the Android SDK, with build tools and a platform, as Android Studio installs it. `ANDROID_HOME` names a different one.
@@ -184,6 +186,8 @@ You need:
 `doctor` checks all four.
 
 `run -d <device>` builds for that device's processor. `build apk` builds for 64-bit ARM. After launching, the app's log follows until ctrl-c, which is `adb logcat` for its process.
+
+The package carries a stripped copy of your library. A release apk's has no symbols (`llvm-strip --strip-all`). A debug apk's has no debug information (`llvm-strip --strip-debug`), which is most of a debug library and read by nothing on the device, but keeps the symbol table and the unwind tables, so a panic's backtrace in the log still names its functions. The library as built, with everything, stays at `target/<triple>/<profile>/lib<name>.so` (`target/aarch64-linux-android/debug/` for a debug `build apk`), and the NDK's tools read files and lines from it. `llvm-addr2line -f -C -e` it with an address in the library: a crash report's `pc`, or a backtrace's address less the start of the library's executable mapping in `/proc/<pid>/maps`. `ndk-stack -sym <folder>` symbolises a native crash's report from `adb logcat`, given a folder that holds both the library and the `.apk`: the library is loaded straight from the package, so the report names the `.apk` and an offset into it, which `ndk-stack` reads the library's name from.
 
 Still missing, because the activity does not reach them yet: the keyboard, the clipboard beyond text, and haptics. Text fields draw and scroll, but nothing can be typed into them yet. Each of these needs more of the activity's Java.
 

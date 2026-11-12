@@ -13,7 +13,6 @@ use objc2_io_surface::{
     IOSurfaceLockOptions, IOSurfaceRef, kIOSurfaceBytesPerElement, kIOSurfaceBytesPerRow,
     kIOSurfaceHeight, kIOSurfacePixelFormat, kIOSurfaceWidth,
 };
-use waft_embedder::HardwareBufferUsage;
 use waft_embedder_winit::SurfaceBuffer;
 
 /// The `OSType` for 32-bit BGRA.
@@ -52,7 +51,7 @@ pub(crate) fn allocate(width: usize, height: usize) -> Arc<SurfaceBuffer> {
     let properties = CFDictionary::from_slices(&keys, &values);
     // SAFETY: every value is of the type its key names.
     let surface = unsafe { IOSurfaceRef::new(properties.as_opaque()) }.expect("an IOSurface");
-    Arc::new(SurfaceBuffer::new(surface, HardwareBufferUsage::default()))
+    Arc::new(SurfaceBuffer::new(surface))
 }
 
 /// Draws frame `frame` into `surface`: the background, with the stripe where it has moved to.

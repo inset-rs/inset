@@ -91,6 +91,26 @@ Host implementation. Flutter analogue: the engine's Android embedder under
   Reason: platform — a display listener is a Java interface, which `NativeActivity` gives the app no class to implement.
   Affect: the screen reads 0 on a phone as Flutter's does; a rate the panel changes on its own, with nothing else, is not heard until the next configuration change, and before API 30 the visible frame is the whole screen.
 
+## picture.rs / composition/ → the Android embedder's `FlutterSurfaceView`, `PlatformViewsController` and its hybrid composition
+
+- Change: where Waft's device is Vulkan with `VK_ANDROID_external_memory_android_hardware_buffer`, the view's picture is drawn into three `AHardwareBuffer`s of its own and shown as the content of a surface control made from the window, with the scene's composition layers beneath it as child surface controls, all in one `ASurfaceTransaction` a frame; on OpenGL ES the view draws through a swapchain on the window and the platform has no compositor, where Flutter's engine draws into the window's surface and shows platform views as Android views or overlay surfaces beside it.
+  Reason: platform — a swapchain cannot join the transaction its layers are placed in, so a moved layer would land a frame off its hole; only a device that imports hardware buffers can draw buffers the compositor shows.
+  Affect: a composition layer moves with the framework's picture in the same frame on Vulkan; on an emulator or a phone with no Vulkan the app shows no composition layers.
+
+- Change: a composition layer is placed by its box, its scale and the bounds of the clips above it (`setPosition`, `setScale`, `setCrop`), with no rotation, shear, rounded or path clip.
+  Reason: platform — the NDK places a surface control by an integer position, one scale and an axis-aligned crop alone.
+  Affect: a turned layer shows upright over the box around it, and a rounded clip's corners show only as far as the picture above them covers.
+
+- Change: a replaced buffer goes back to its producer once the release fence the system hands over for it has signalled, waited on by a thread of the host's own, and a frame is handed over with no acquire fence once its GPU work is done.
+  Reason: platform — `OnComplete` arrives before the buffer is free, and wgpu makes no fence to hand over.
+  Affect: a producer gets its buffer back about a refresh after the present that replaced it; the loop's thread waits about 3 ms a frame for the GPU.
+
+## hardware_buffers.rs / gpu_interop.rs
+
+- Change: buffers are `AHardwareBuffer`s in RGBA8, imported as textures only on a device opened with the import's extensions, which Waft's own is and a device an app opens itself is not; `read_pixels` answers `Unsupported` for a buffer allocated without `cpu_read`, whatever the device's allocator allows.
+  Reason: platform — wgpu enables no import of Android's buffers itself, and some allocators refuse a CPU lock of a buffer allocated without a CPU usage.
+  Affect: an app draws into a buffer on the renderer's device, and reads back only one it asked to read.
+
 ## input.rs
 
 - Change: the pressure range reported with every touch is zero to one, rather than the range the device declares.

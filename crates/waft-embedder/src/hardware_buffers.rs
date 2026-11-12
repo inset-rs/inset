@@ -13,8 +13,8 @@
 //! its own device ([`Platform::import_texture`](crate::Platform::import_texture)), shows it on a
 //! composition layer ([`CompositionLayer::present`](crate::CompositionLayer::present)), and has
 //! the hardware codecs encode it; its pixels come back to the app's memory only through
-//! [`HardwareBuffer::read_pixels`]. A buffer knows only its own facts, its size and what it was
-//! allocated for, and names no GPU API: the host, which knows both the buffer and the device,
+//! [`HardwareBuffer::read_pixels`]. A buffer knows only its own facts, its size and what it can be
+//! used for, and names no GPU API: the host, which knows both the buffer and the device,
 //! imports it, as each system's GPU API imports such memory.
 //!
 //! Each host implements [`HardwareBuffer`] over its system's buffers. Platform code reaches the
@@ -35,8 +35,9 @@ use crate::image_codecs::{ImageError, ImageFuture, PixelBuffer, PixelFormat};
 /// system allocates none. It may be called from any thread, as a producer allocates a buffer where
 /// it draws.
 pub trait HardwareBufferAllocator: Send + Sync {
-    /// A buffer of `width` by `height` pixels in `format`, for what `usage` names, its pixels as
-    /// the system leaves new memory until the app draws them:
+    /// A buffer of `width` by `height` pixels in `format`, for at least what `usage` names
+    /// ([`HardwareBuffer::usage`] answers all it is for), its pixels as the system leaves new
+    /// memory until the app draws them:
     /// [`ImageErrorKind::Unsupported`](crate::image_codecs::ImageErrorKind::Unsupported) for a
     /// format the system does not allocate a buffer in, as Apple platforms allocate only
     /// [`PixelFormat::Bgra8`] and Android's `AHardwareBuffer` only [`PixelFormat::Rgba8`];
@@ -53,10 +54,17 @@ pub trait HardwareBufferAllocator: Send + Sync {
     ) -> Result<Arc<dyn HardwareBuffer>, ImageError>;
 }
 
-/// What a buffer is allocated for, named after its users, as Android's `AHardwareBuffer` usage
-/// is: so far what the GPU does with it, which a texture imported of it allows
-/// ([`Platform::import_texture`](crate::Platform::import_texture)). The CPU, the system's
-/// compositor and a video encoder join as they are needed.
+/// What a buffer can be used for, named after its users, as Android's `AHardwareBuffer` usage is:
+/// what the GPU does with it, which a texture imported of it allows
+/// ([`Platform::import_texture`](crate::Platform::import_texture)), whether the system's
+/// compositor shows it as an overlay, and whether the CPU reads it. A video encoder joins as it is
+/// needed.
+///
+/// The usage an app allocates a buffer for is the least the buffer is for, and the buffer answers
+/// all it is for ([`HardwareBuffer::usage`]), which every check reads: a system that gives a buffer
+/// more than it was asked, as Apple's give any `IOSurface` every use, says so there rather than
+/// hiding it. Android gives a buffer what it was allocated for, as `AHardwareBuffer_describe`
+/// answers.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct HardwareBufferUsage {
     /// The GPU samples it in its shaders: Android's `GPU_SAMPLED_IMAGE`.
@@ -64,6 +72,16 @@ pub struct HardwareBufferUsage {
     /// The GPU draws into it, as a render pass's colour output, and copies into it: Android's
     /// `GPU_COLOR_OUTPUT`.
     pub gpu_color_output: bool,
+    /// The system's compositor may show it as a plane of the display, without compositing it on
+    /// the GPU: Android's `COMPOSER_OVERLAY`, which a buffer presented to a composition layer
+    /// there wants and SurfaceFlinger otherwise draws with the GPU, at a cost in power. Core
+    /// Animation shows any `IOSurface` so, and every buffer on Apple's systems has it.
+    pub composer_overlay: bool,
+    /// The CPU reads it, through [`HardwareBuffer::read_pixels`], which answers
+    /// [`ImageErrorKind::Unsupported`](crate::image_codecs::ImageErrorKind::Unsupported) for a
+    /// buffer without it: Android's `CPU_READ_RARELY` or `CPU_READ_OFTEN`. The CPU reads any
+    /// `IOSurface` while it is locked, and every buffer on Apple's systems has it.
+    pub cpu_read: bool,
 }
 
 impl HardwareBufferUsage {
@@ -71,6 +89,16 @@ impl HardwareBufferUsage {
     pub const GPU_SAMPLED: HardwareBufferUsage = HardwareBufferUsage {
         gpu_sampled: true,
         gpu_color_output: false,
+        composer_overlay: false,
+        cpu_read: false,
+    };
+
+    /// Every use, as any `IOSurface` has.
+    pub const ALL: HardwareBufferUsage = HardwareBufferUsage {
+        gpu_sampled: true,
+        gpu_color_output: true,
+        composer_overlay: true,
+        cpu_read: true,
     };
 }
 
@@ -83,10 +111,18 @@ pub trait HardwareBuffer: Any + Send + Sync {
     /// The buffer's height, in its own pixels.
     fn height(&self) -> u32;
 
+    /// What the buffer can be used for: at least what it was allocated for, and on some systems
+    /// more (see [`HardwareBufferUsage`]). A texture imported of it allows what this allows, and
+    /// [`read_pixels`](HardwareBuffer::read_pixels) reads it only where this has
+    /// [`cpu_read`](HardwareBufferUsage::cpu_read).
+    fn usage(&self) -> HardwareBufferUsage;
+
     /// The buffer's pixels copied into the app's memory, in the layout the buffer holds them: BGRA
-    /// on Apple platforms. It reads what the GPU has finished writing, so an app that drew into
-    /// the buffer waits for that work first, as it does before presenting it;
+    /// on Apple platforms, RGBA on Android. It reads what the GPU has finished writing, so an app
+    /// that drew into the buffer waits for that work first, as it does before presenting it;
     /// [`ImageErrorKind::Unsupported`](crate::image_codecs::ImageErrorKind::Unsupported) for a
-    /// buffer whose pixels are in no [`PixelFormat`].
+    /// buffer whose [`usage`](HardwareBuffer::usage) lacks
+    /// [`cpu_read`](HardwareBufferUsage::cpu_read), on every system, and for one whose pixels are
+    /// in no [`PixelFormat`].
     fn read_pixels(&self) -> ImageFuture<PixelBuffer>;
 }

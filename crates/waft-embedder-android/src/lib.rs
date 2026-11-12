@@ -27,6 +27,8 @@ mod chrome;
 #[cfg(target_os = "android")]
 mod clipboard;
 #[cfg(target_os = "android")]
+mod composition;
+#[cfg(target_os = "android")]
 mod display;
 #[cfg(target_os = "android")]
 mod document_tree;
@@ -34,6 +36,10 @@ mod document_tree;
 mod file_dialogs;
 #[cfg(target_os = "android")]
 mod gpu;
+#[cfg(target_os = "android")]
+mod gpu_interop;
+#[cfg(target_os = "android")]
+mod hardware_buffers;
 #[cfg(target_os = "android")]
 mod host;
 #[cfg(target_os = "android")]
@@ -51,18 +57,30 @@ mod open_requests;
 #[cfg(target_os = "android")]
 mod opener;
 #[cfg(target_os = "android")]
+mod picture;
+#[cfg(target_os = "android")]
 mod platform;
+#[cfg(target_os = "android")]
+mod queue_family_handover;
 #[cfg(target_os = "android")]
 mod refresh;
 #[cfg(target_os = "android")]
 mod surface;
 #[cfg(target_os = "android")]
+mod surface_control;
+#[cfg(target_os = "android")]
 mod view;
 #[cfg(target_os = "android")]
 mod vsync;
+#[cfg(target_os = "android")]
+mod vsync_waiter;
+#[cfg(target_os = "android")]
+mod vulkan_imports;
 
 #[cfg(target_os = "android")]
 pub use android_activity::AndroidApp;
+#[cfg(target_os = "android")]
+pub use hardware_buffers::AndroidHardwareBuffer;
 #[cfg(target_os = "android")]
 pub use host::AndroidEmbedder;
 #[cfg(target_os = "android")]

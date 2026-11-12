@@ -20,7 +20,6 @@ use objc2_core_video::{
     kCVPixelFormatType_32BGRA, kCVReturnSuccess,
 };
 use objc2_io_surface::IOSurfaceLockOptions;
-use waft_embedder::HardwareBufferUsage;
 
 use super::frames::pixel_buffer_attributes;
 use super::video_frame::CoreVideoFrame;
@@ -51,7 +50,8 @@ pub(in crate::os::apple) fn frame_of(image: &CGImage) -> Result<CoreVideoFrame, 
     Ok(CoreVideoFrame::new(buffer))
 }
 
-/// `image`, drawn into a hardware buffer of its size, for sampling; why not, in the system's
+/// `image`, drawn into a hardware buffer of its size, which answers what the system makes a decoded
+/// image's buffer for (`SurfaceBuffer::system_given`); why not, in the system's
 /// terms, where the system made no surface or context for it.
 pub(in crate::os::apple) fn buffer_of(image: &CGImage) -> Result<SurfaceBuffer, String> {
     let (width, height) = (CGImage::width(Some(image)), CGImage::height(Some(image)));
@@ -69,10 +69,7 @@ pub(in crate::os::apple) fn buffer_of(image: &CGImage) -> Result<SurfaceBuffer, 
         surface.unlock(options, std::ptr::null_mut());
         drawn?;
     }
-    Ok(SurfaceBuffer::new(
-        surface,
-        HardwareBufferUsage::GPU_SAMPLED,
-    ))
+    Ok(SurfaceBuffer::system_given(surface))
 }
 
 /// A pixel buffer of `width` by `height`, as a frame reader's frames are.

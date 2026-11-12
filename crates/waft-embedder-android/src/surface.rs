@@ -1,4 +1,5 @@
-//! The window's valo surface: rendering a picture into a drawable and presenting it.
+//! The window's valo surface: rendering a picture into a drawable and presenting it, where the
+//! view's picture reaches the screen through a swapchain on the window (`picture.rs`).
 //!
 //! The system takes the window away when the activity goes to the background and gives a
 //! new one back on return, so the surface is made and dropped over the host's life while
@@ -15,13 +16,56 @@ use raw_window_handle::{
 };
 use waft_embedder::Picture;
 
+use crate::gpu::Gpu;
+
 pub(crate) struct Surface {
     /// `None` between the window being taken away and the next one arriving.
-    pub(crate) surface: Option<valo::Surface>,
-    pub(crate) context: valo::Context,
+    surface: Option<valo::Surface>,
+    context: valo::Context,
 }
 
 impl Surface {
+    /// A surface with no window yet, which renders with `context`.
+    pub(crate) fn new(context: valo::Context) -> Surface {
+        Surface {
+            surface: None,
+            context,
+        }
+    }
+
+    /// The system gave the activity `window`, `size` pixels large: a surface on it, on `gpu`'s
+    /// device. `Err` where wgpu makes none.
+    pub(crate) fn window_arrived(
+        &mut self,
+        gpu: &Gpu,
+        window: &NativeWindow,
+        size: [u32; 2],
+    ) -> Result<(), String> {
+        let made = valo::Surface::new_with_options(
+            &gpu.instance,
+            &gpu.adapter,
+            &gpu.device,
+            Target(window.clone()),
+            size,
+            valo::SurfaceOptions::default(),
+        )
+        .map_err(|error| error.to_string())?;
+        self.surface = Some(made);
+        Ok(())
+    }
+
+    /// The system took the window away, and the surface with it.
+    pub(crate) fn window_gone(&mut self) {
+        self.surface = None;
+    }
+
+    /// The window changed size: the surface follows it.
+    pub(crate) fn resized(&mut self, size: [u32; 2]) {
+        if let Some(surface) = &mut self.surface {
+            surface.resize(size);
+        }
+    }
+
     /// Renders `picture` into the surface's next drawable and presents it, cleared to
     /// `clear`. `Err` is the surface refusing a drawable.
     pub(crate) fn draw(
