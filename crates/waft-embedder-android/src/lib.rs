@@ -82,6 +82,8 @@ mod vsync;
 mod vsync_waiter;
 #[cfg(target_os = "android")]
 mod vulkan_imports;
+#[cfg(target_os = "android")]
+mod window_insets;
 
 #[cfg(target_os = "android")]
 pub use android_activity::AndroidApp;

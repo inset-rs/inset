@@ -1,8 +1,9 @@
 //! The activity's loop: what the system tells the app, and where each of it goes.
 //!
 //! The glue owns `android_main`'s thread and its looper; this is the loop that runs on it.
-//! One pass drains the system's main events, then the input the activity received, then
-//! draws a frame if the display refreshed and the framework asked for one.
+//! One pass takes the insets Android applied to the window, drains the system's main events,
+//! then the input the activity received, then draws a frame if the display refreshed and the
+//! framework asked for one.
 //!
 //! The framework is never called from inside a looper callback. A refresh and a wake asked
 //! for from another thread both only set something down and wake the looper, so every call
@@ -29,6 +30,7 @@ use crate::platform::AndroidPlatform;
 use crate::text_input::{AndroidTextInput, TextInputEvent};
 use crate::view::{AndroidView, Geometry, VIEW};
 use crate::vsync::Vsync;
+use crate::window_insets::WindowInsets;
 
 /// Refreshes in a row with nothing to draw before the signal is paused, so an idle app
 /// makes no wakes.
@@ -61,12 +63,14 @@ impl AndroidEmbedder {
         *platform.images.borrow_mut() = Some(view.image_context());
         *platform.image_loader.borrow_mut() = crate::images::loader(view.image_context());
         crate::intents::hear(&self.app);
+        crate::window_insets::hear(&self.app);
         let open_requests = OpenRequests::new(self.app.clone());
         let mut host = Host {
             open_requests,
             app: self.app,
             gpu,
             view,
+            window_insets: None,
             platform,
             client: None,
             start: Some(Box::new(start)),
@@ -92,6 +96,9 @@ struct Host<C> {
     app: AndroidApp,
     gpu: Gpu,
     view: Rc<AndroidView>,
+    /// What the system covers of the window, as the activity last told (`window_insets.rs`):
+    /// none before it told any, and never any under an activity that is not Waft's.
+    window_insets: Option<WindowInsets>,
     platform: Rc<AndroidPlatform>,
     client: Option<C>,
     start: Option<Box<dyn FnOnce(PlatformRef) -> C>>,
@@ -118,6 +125,9 @@ impl<C: EmbedderClient> Host<C> {
                     events.push(Recorded::of(&main));
                 }
             });
+            // Before the main events, so that a window arriving in this pass is measured with
+            // the insets applied to it.
+            self.follow_window_insets();
             for event in events {
                 self.on_main_event(event);
             }
@@ -154,9 +164,9 @@ impl<C: EmbedderClient> Host<C> {
             Recorded::ConfigChanged => {
                 self.sync_configuration();
                 self.sync_screen();
-                self.sync_metrics();
+                self.sync_geometry();
             }
-            Recorded::GeometryChanged => self.sync_metrics(),
+            Recorded::GeometryChanged => self.sync_geometry(),
             Recorded::RedrawNeeded => self.view.represent(),
             Recorded::FocusChanged(focused) => self.on_focus(focused),
             Recorded::Destroy => self.destroyed = true,
@@ -200,11 +210,10 @@ impl<C: EmbedderClient> Host<C> {
             .native_window()
             .map(|window| [window.width() as u32, window.height() as u32])
             .unwrap_or([0, 0]);
-        let rect = self.app.content_rect();
         Geometry {
             size,
             density: self.density(),
-            content: [rect.left, rect.top, rect.right, rect.bottom],
+            insets: self.insets_of(size),
             screen: self
                 .platform
                 .screen
@@ -212,6 +221,15 @@ impl<C: EmbedderClient> Host<C> {
                 .as_ref()
                 .map(|screen| screen.id),
         }
+    }
+
+    /// What the system covers of the window of `size`: what the activity told, and until it
+    /// tells, or where it never does, what its content rect leaves.
+    fn insets_of(&self, size: [u32; 2]) -> WindowInsets {
+        self.window_insets.unwrap_or_else(|| {
+            let rect = self.app.content_rect();
+            WindowInsets::around_content(size, [rect.left, rect.top, rect.right, rect.bottom])
+        })
     }
 
     /// Pixels per logical pixel, from the configuration's density.
@@ -222,17 +240,33 @@ impl<C: EmbedderClient> Host<C> {
             .map_or(1.0, |dpi| f64::from(dpi) / 160.0)
     }
 
-    fn sync_metrics(&mut self) {
-        let geometry = self.geometry();
+    /// The window's size or its content rect changed: the picture follows the size, and the
+    /// view's metrics both.
+    fn sync_geometry(&mut self) {
         if let Some(window) = self.app.native_window() {
             self.view
                 .resized([window.width() as u32, window.height() as u32]);
         }
-        if self.view.refresh_metrics(geometry)
+        self.sync_metrics();
+    }
+
+    /// The view's metrics, read again: the framework hears of them when they changed.
+    fn sync_metrics(&mut self) {
+        if self.view.refresh_metrics(self.geometry())
             && let Some(client) = &mut self.client
         {
             client.view_metrics_changed(VIEW);
         }
+    }
+
+    /// Takes the insets Android applied to the window since the last pass, and has the view's
+    /// metrics follow them.
+    fn follow_window_insets(&mut self) {
+        let Some(insets) = crate::window_insets::take() else {
+            return;
+        };
+        self.window_insets = Some(insets);
+        self.sync_metrics();
     }
 
     /// The screen the activity is on, read again: the app hears of it when it differs from what

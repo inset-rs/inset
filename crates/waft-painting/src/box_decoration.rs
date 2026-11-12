@@ -452,7 +452,7 @@ impl BoxDecorationPainter {
                 && box_shadow.blur_style == waft_embedder::BlurStyle::Outer
             {
                 canvas.save();
-                canvas.clip_rect(bounds, ClipOp::Intersect);
+                canvas.clip_rect(bounds, ClipOp::Intersect, true);
             }
             Self::paint_box(
                 canvas,

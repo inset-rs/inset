@@ -1462,6 +1462,7 @@ impl SwitchPainter {
             track_rrect.outer_rect(),
             rrect_radii_elliptical(track_rrect),
             ClipOp::Intersect,
+            true,
         );
     }
 

@@ -20,7 +20,7 @@
 // pointers; that is the `unsafe` here.
 #![allow(unsafe_code)]
 
-use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
 
 use android_activity::{AndroidApp, AndroidAppWaker};
 use jni::errors::LogErrorAndDefault;
@@ -39,8 +39,9 @@ use crate::log::warn_to_log;
 
 /// What the keyboard did since the loop last looked, in the order it did it.
 static TYPED: LazyLock<Mutex<Vec<TextInputEvent>>> = LazyLock::new(Mutex::default);
-/// Wakes the loop when the keyboard did something.
-static WAKER: OnceLock<AndroidAppWaker> = OnceLock::new();
+/// Wakes the loop when the keyboard did something: the loop of the activity that set it last, since Android
+/// starts another activity in the same process once one is finished.
+static WAKER: Mutex<Option<AndroidAppWaker>> = Mutex::new(None);
 
 /// Something the keyboard did to the field that takes text.
 pub(crate) enum TextInputEvent {
@@ -64,7 +65,7 @@ impl AndroidTextInput {
     /// The activity's text input, where the activity is Waft's and has its text input view: none
     /// under the bare `NativeActivity`, whose own view takes no text.
     pub(crate) fn new(app: &AndroidApp) -> Option<AndroidTextInput> {
-        let _ = WAKER.set(app.create_waker());
+        *locked(&WAKER) = Some(app.create_waker());
         let registered = with_activity(app, |env, activity| {
             let view = text_input_view(env, activity)?;
             register_native_methods(env, &view)
@@ -240,7 +241,7 @@ fn composing_range(start: jint, end: jint) -> TextRange {
 
 fn hand_on(event: TextInputEvent) {
     locked(&TYPED).push(event);
-    if let Some(waker) = WAKER.get() {
+    if let Some(waker) = locked(&WAKER).as_ref() {
         waker.wake();
     }
 }

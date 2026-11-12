@@ -2,11 +2,7 @@
 
 Host implementation. Flutter analogue: the web engine under `engine/lib/web_ui`.
 
-## gpu.rs / platform.rs
-
-- Change: each frame draws into a backing texture that has `COPY_SRC`, then blits 1:1 onto the canvas swapchain.
-  Reason: platform — WebGPU's canvas swapchain is `RENDER_ATTACHMENT` only, and Valo's advanced blends and backdrop filters copy the target.
-  Affect: a cupertino nav-bar blur or a scrolling clip still presents; drawing straight to the swapchain invalidates the command buffer.
+## gpu.rs
 
 - Change: the valo context hides missing glyphs.
   Reason: platform — Valo paints `.notdef` tofu unless asked not to.

@@ -313,6 +313,8 @@ pub(crate) fn window_metrics(window: &dyn Window) -> ViewMetrics {
         padding,
         view_padding: padding,
         view_insets: ViewPadding::ZERO,
+        // Flutter's desktop and iOS embedders report no system gesture insets.
+        system_gesture_insets: ViewPadding::ZERO,
         screen: screen_of(window),
     }
 }

@@ -17,6 +17,7 @@ use crate::composition::SurfaceControlCompositor;
 use crate::gpu::Gpu;
 use crate::picture::ViewPicture;
 use crate::text_input::AndroidTextInput;
+use crate::window_insets::WindowInsets;
 
 /// The one view the activity has.
 pub(crate) const VIEW: ViewId = ViewId(0);
@@ -35,8 +36,6 @@ pub(crate) struct AndroidView {
     /// Whether the latest picture is on the screen: not while there is no window, and not
     /// when the screen refused it.
     on_screen: Cell<bool>,
-    /// The system's bars, told from the keyboard in the one padding the activity reports.
-    bars: Cell<Bars>,
     /// The keyboards' way in, where the activity is Waft's (`text_input.rs`).
     text_input: Option<AndroidTextInput>,
 }
@@ -60,7 +59,6 @@ impl AndroidView {
             clear: valo::Color::WHITE,
             latest: RefCell::new(None),
             on_screen: Cell::new(false),
-            bars: Cell::new(Bars::default()),
             text_input,
         }
     }
@@ -114,33 +112,14 @@ impl AndroidView {
         self.on_screen.set(drawn.is_ok());
     }
 
-    /// Takes the metrics the system now reports and answers whether they changed. The
-    /// activity's content rect moves when the bars or the keyboard do, and the glue reports
-    /// no event for it, so the host reads it again after every turn.
+    /// Takes the metrics the system now reports and answers whether they changed.
     pub(crate) fn refresh_metrics(&self, geometry: Geometry) -> bool {
-        let metrics = self.read_metrics(geometry);
+        let metrics = geometry.metrics();
         if self.metrics.get() == metrics {
             return false;
         }
         self.metrics.set(metrics);
         true
-    }
-
-    fn read_metrics(&self, geometry: Geometry) -> ViewMetrics {
-        let [width, height] = geometry.size.map(f64::from);
-        let content = geometry.content_padding([width, height]);
-        let bars = self.bars.get().update([width, height], content);
-        self.bars.set(bars);
-        let (padding, view_padding, view_insets) = split_padding(content, bars.padding);
-        ViewMetrics {
-            physical_size: [width, height],
-            physical_constraints: ViewConstraints::tight(width, height),
-            device_pixel_ratio: geometry.density,
-            padding,
-            view_padding,
-            view_insets,
-            screen: geometry.screen,
-        }
     }
 }
 
@@ -193,91 +172,42 @@ pub(crate) struct Geometry {
     pub(crate) size: [u32; 2],
     /// Pixels per logical pixel, from the configuration's density.
     pub(crate) density: f64,
-    /// The rectangle the activity's content was laid out in, within the window.
-    pub(crate) content: [i32; 4],
+    /// What the system covers of the window.
+    pub(crate) insets: WindowInsets,
     /// The screen the window is on, once the system has described it.
     pub(crate) screen: Option<ScreenId>,
 }
 
 impl Geometry {
-    /// What the content rect leaves on each side. Empty before the activity's first
-    /// layout, which is no padding at all.
-    fn content_padding(self, [width, height]: [f64; 2]) -> ViewPadding {
-        let [left, top, right, bottom] = self.content;
-        if right <= left || bottom <= top {
-            return ViewPadding::ZERO;
-        }
-        ViewPadding {
-            left: f64::from(left).max(0.0),
-            top: f64::from(top).max(0.0),
-            right: (width - f64::from(right)).max(0.0),
-            bottom: (height - f64::from(bottom)).max(0.0),
-        }
-    }
-}
-
-/// The system's bars, as the least the content has been padded at the bottom at one window
-/// size: the bars do not move while the window keeps its size, and the one thing that pads
-/// the content more is the keyboard the window was resized for. A new size, a rotation,
-/// starts over.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Bars {
-    size: [f64; 2],
-    padding: ViewPadding,
-}
-
-impl Default for Bars {
-    fn default() -> Bars {
-        Bars {
-            size: [0.0, 0.0],
-            padding: ViewPadding::ZERO,
+    /// The view's metrics: the window's whole surface, with Flutter's three paddings of it and the
+    /// system's gesture zones.
+    fn metrics(self) -> ViewMetrics {
+        let [width, height] = self.size.map(f64::from);
+        let WindowInsets {
+            view_padding,
+            view_insets,
+            system_gesture_insets,
+        } = self.insets;
+        ViewMetrics {
+            physical_size: [width, height],
+            physical_constraints: ViewConstraints::tight(width, height),
+            device_pixel_ratio: self.density,
+            padding: clear_of(view_padding, view_insets),
+            view_padding,
+            view_insets,
+            system_gesture_insets,
+            screen: self.screen,
         }
     }
 }
 
-impl Bars {
-    fn update(self, size: [f64; 2], content: ViewPadding) -> Bars {
-        // A keyboard only ever pads the bottom, so anything else changing is a new safe
-        // area and not a keyboard: a new window size, or a different top, left or right.
-        // Without that, a reading taken before the window is laid out, which is all zeros,
-        // would be kept as the bars and the real safe area arriving later would be read as
-        // a keyboard for as long as the size held.
-        let same_bars = size == self.size
-            && content.top == self.padding.top
-            && content.left == self.padding.left
-            && content.right == self.padding.right;
-        if same_bars && content.bottom > self.padding.bottom {
-            self
-        } else {
-            Bars {
-                size,
-                padding: content,
-            }
-        }
+/// `padding` as dart:ui makes it of the other two (`_buildViewConfiguration`, `hooks.dart`): what
+/// of the system's bars the keyboard does not already cover.
+fn clear_of(view_padding: ViewPadding, view_insets: ViewPadding) -> ViewPadding {
+    ViewPadding {
+        left: (view_padding.left - view_insets.left).max(0.0),
+        top: (view_padding.top - view_insets.top).max(0.0),
+        right: (view_padding.right - view_insets.right).max(0.0),
+        bottom: (view_padding.bottom - view_insets.bottom).max(0.0),
     }
-}
-
-/// Flutter's three paddings from the one the activity reports: `bars` is the system's own,
-/// `viewPadding`; where the content lost more at the bottom than the bars take, a keyboard is
-/// up, and `viewInsets` is how far it reaches up from the view's bottom edge, over the system's
-/// bar there, as Flutter measures it; and `padding` is the bars less what the keyboard covers,
-/// since `MediaQuery.padding` excludes the insets.
-fn split_padding(
-    content: ViewPadding,
-    bars: ViewPadding,
-) -> (ViewPadding, ViewPadding, ViewPadding) {
-    let keyboard = if content.bottom > bars.bottom {
-        content.bottom
-    } else {
-        0.0
-    };
-    let padding = ViewPadding {
-        bottom: (bars.bottom - keyboard).max(0.0),
-        ..bars
-    };
-    let view_insets = ViewPadding {
-        bottom: keyboard,
-        ..ViewPadding::ZERO
-    };
-    (padding, bars, view_insets)
 }

@@ -109,6 +109,7 @@ fn view_metrics_and_their_parts_come_back() {
         padding,
         view_padding: padding,
         view_insets: ViewPadding::ZERO,
+        system_gesture_insets: padding,
         screen: Some(ScreenId(9)),
     });
 }

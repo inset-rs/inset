@@ -3,11 +3,19 @@
 Host implementation. Flutter analogue: the engine's Android embedder under
 `shell/platform/android`, whose activity and view are written in Java.
 
-## view.rs
+## window_insets.rs / view.rs → the Android embedder's `FlutterView.onApplyWindowInsets`
 
-- Change: the keyboard's height is taken as whatever the content rect loses at the bottom beyond the widest it has been at this window size.
-  Reason: platform — `NativeActivity` reports one content rect and never `onApplyWindowInsets`, which is where the engine's Java view reads the bars and the keyboard apart.
-  Affect: the keyboard lifts the layout as it does on every other host, but a bar that grows while the window keeps its size, a navigation bar appearing, is taken for a keyboard until the window is resized.
+- Change: the insets are heard by a listener on the window's decor view, `rs.waft.WaftWindowInsets`, which `WaftActivity` adds, and measured from the window's edges, where Flutter's view overrides `onApplyWindowInsets` itself and is told what is left of them where it was laid out.
+  Reason: platform — `NativeActivity` hands its native code the window's whole surface and no Java view of it, and tells it only the rectangle its content was laid out in, which does not say the bars from the keyboard.
+  Affect: an app draws behind the status bar and the navigation bar on every release, each reported as view padding, as a Flutter app does once its window is edge to edge; under the bare `NativeActivity` the bars are what the content rect leaves of the window, and no keyboard is known.
+
+- Change: the cutout's bounds, the display's corner radii and the caption bar, which `onApplyWindowInsets` also reads, are not read.
+  Reason: design — `ViewMetrics` carries the three paddings and the system gesture insets alone.
+  Affect: `MediaQuery.displayFeatures` is empty, so an app cannot tell where the cutout is.
+
+- Change: the keyboard's inset arrives once, at its full height, as the keyboard starts to show, and goes as it starts to hide; Flutter's `ImeSyncDeferringInsetsCallback` reports it frame by frame with the keyboard's animation.
+  Reason: design — not ported yet.
+  Affect: what sits above the keyboard jumps to its place while the keyboard slides.
 
 ## text_input.rs / editor_info.rs → the Android embedder's `TextInputPlugin`, `InputConnectionAdaptor` and `ListenableEditingState`
 
@@ -125,7 +133,7 @@ Host implementation. Flutter analogue: the engine's Android embedder under
 
 ## Deferred
 
-- Haptics, and the bars and keyboard as the system reports them. Trigger: either of them, which is a Java activity of the app's own, as Flutter's is.
+- Haptics. Trigger: an app that needs them, which is Java code of the activity's own, as Flutter's is.
 - The framework's key events, Android's keys mapped to Flutter's: until then every key but back is left to the text input view, which types it into the field that takes text, deleting, moving the caret and acting on enter as Flutter's framework would, and to the system, which sets the volume. Trigger: a shortcut, such as select all, or an app that reads keys on Android.
 - The keyboard's own cut, copy, paste and select all, the images it commits, autofill, hint locales and the delta model, which Flutter's text input plugin takes. Trigger: an app that needs one.
 - The predictive back gesture, with its peek animation. Trigger: a Java activity that registers with the system's back callback; the plain back button already pops.

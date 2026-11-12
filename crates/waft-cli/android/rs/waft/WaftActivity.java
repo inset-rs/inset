@@ -7,7 +7,7 @@ import android.view.ViewGroup;
 
 /**
  * Waft's activity: the platform's {@link NativeActivity}, which loads the app's native library
- * and runs it, with four things added, which NativeActivity keeps to itself or cannot give.
+ * and runs it, with five things added, which NativeActivity keeps to itself or cannot give.
  *
  * <ul>
  *   <li>An activity the app starts for a result, such as the system's document picker, answers
@@ -21,6 +21,10 @@ import android.view.ViewGroup;
  *   <li>The system's keyboards edit text only through a view's input connection, which
  *       NativeActivity's content view does not give; this adds {@link WaftTextInput} beside it,
  *       which does, and which the native code reaches through {@link #textInput}.
+ *   <li>What the system's bars and the keyboard cover of the window arrives as the window's
+ *       insets, where NativeActivity tells only the rectangle its content was laid out in; this
+ *       has {@link WaftWindowInsets} hear the window's decor view and hand the insets on, which
+ *       the native code reaches through {@link #windowInsets}.
  * </ul>
  *
  * <p>The native methods are registered by the app's native code when it starts
@@ -29,12 +33,16 @@ import android.view.ViewGroup;
  */
 public class WaftActivity extends NativeActivity {
     private WaftTextInput textInput;
+    private WaftWindowInsets windowInsets;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        // Made before NativeActivity starts the app's native code, which asks for it at once.
+        // Both made before NativeActivity starts the app's native code, which asks for them at
+        // once.
         textInput = new WaftTextInput(this);
+        windowInsets = new WaftWindowInsets();
         super.onCreate(savedInstanceState);
+        windowInsets.hear(getWindow().getDecorView());
         addContentView(
                 textInput,
                 new ViewGroup.LayoutParams(
@@ -44,6 +52,11 @@ public class WaftActivity extends NativeActivity {
     /** The view the system's keyboards edit text through, for the app's native code. */
     WaftTextInput textInput() {
         return textInput;
+    }
+
+    /** What tells the window's insets, for the app's native code. */
+    WaftWindowInsets windowInsets() {
+        return windowInsets;
     }
 
     /**

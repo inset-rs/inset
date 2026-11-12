@@ -25,8 +25,8 @@ pub trait ClipContext {
     ) {
         clip_and_paint(
             self,
-            |canvas, _do_anti_alias| {
-                canvas.clip_path(path, FillRule::NonZero, ClipOp::Intersect);
+            |canvas, do_anti_alias| {
+                canvas.clip_path(path, FillRule::NonZero, ClipOp::Intersect, do_anti_alias);
             },
             clip_behavior,
             bounds,
@@ -47,11 +47,12 @@ pub trait ClipContext {
     ) {
         clip_and_paint(
             self,
-            |canvas, _do_anti_alias| {
+            |canvas, do_anti_alias| {
                 canvas.clip_rrect_radii_elliptical(
                     rrect.outer_rect(),
                     rrect_radii_elliptical(rrect),
                     ClipOp::Intersect,
+                    do_anti_alias,
                 );
             },
             clip_behavior,
@@ -73,13 +74,18 @@ pub trait ClipContext {
     ) {
         clip_and_paint(
             self,
-            |canvas, _do_anti_alias| {
+            |canvas, do_anti_alias| {
                 let mut path = PathBuilder::new();
                 path.rsuperellipse_radii(
                     rse.outer_rect().into(),
                     rsuperellipse_radii_elliptical(rse),
                 );
-                canvas.clip_path(&path.build(), FillRule::NonZero, ClipOp::Intersect);
+                canvas.clip_path(
+                    &path.build(),
+                    FillRule::NonZero,
+                    ClipOp::Intersect,
+                    do_anti_alias,
+                );
             },
             clip_behavior,
             bounds,
@@ -100,8 +106,8 @@ pub trait ClipContext {
     ) {
         clip_and_paint(
             self,
-            |canvas, _do_anti_alias| {
-                canvas.clip_rect(rect, ClipOp::Intersect);
+            |canvas, do_anti_alias| {
+                canvas.clip_rect(rect, ClipOp::Intersect, do_anti_alias);
             },
             clip_behavior,
             bounds,

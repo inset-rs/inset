@@ -122,6 +122,10 @@ pub struct ViewMetrics {
     pub padding: ViewPadding,
     pub view_padding: ViewPadding,
     pub view_insets: ViewPadding,
+    /// The physical pixels on each side of the view that it can draw into but where the system
+    /// takes input gestures for its navigation, as a swipe in from an edge goes back:
+    /// `_ViewConfiguration.systemGestureInsets`, which `FlutterView.systemGestureInsets` reads.
+    pub system_gesture_insets: ViewPadding,
     /// The screen the view is on, one of `Platform::screens`: `_ViewConfiguration.displayId`,
     /// which `FlutterView.display` looks up. `None` while it is on none the host can name, as a
     /// view without a window is.
@@ -137,6 +141,7 @@ impl Default for ViewMetrics {
             padding: ViewPadding::ZERO,
             view_padding: ViewPadding::ZERO,
             view_insets: ViewPadding::ZERO,
+            system_gesture_insets: ViewPadding::ZERO,
             screen: None,
         }
     }

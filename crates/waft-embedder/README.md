@@ -74,8 +74,8 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - Give every size and position in physical pixels from the view's top-left corner, and update `View::metrics` before calling `view_metrics_changed`.
 
 **Padding and insets**
-- `ViewMetrics::view_padding`, `view_insets`, `padding`
-- Report what the system may cover as `view_padding`, what the keyboard hides as `view_insets`, and `padding` as `max(0, view_padding - view_insets)` on each side.
+- `ViewMetrics::view_padding`, `view_insets`, `padding`, `system_gesture_insets`
+- Report what the system may cover as `view_padding`, what the keyboard hides as `view_insets`, and `padding` as `max(0, view_padding - view_insets)` on each side. Report where the system takes a swipe for its own navigation as `system_gesture_insets`, and zero where Flutter's embedder for the system reports none, as on iOS, the desktops and the web.
 
 **Screens**
 - `Platform::screens`, `Screens::screens`, `pointer_location`, `Screen`, `ScreenId`, `ViewMetrics::screen`, `EmbedderClient::screens_changed`

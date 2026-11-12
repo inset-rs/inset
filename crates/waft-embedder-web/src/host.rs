@@ -189,6 +189,7 @@ fn fit_canvas(
         padding: ViewPadding::ZERO,
         view_padding: ViewPadding::ZERO,
         view_insets: ViewPadding::ZERO,
+        system_gesture_insets: ViewPadding::ZERO,
         screen,
     };
     (metrics, [width as u32, height as u32])

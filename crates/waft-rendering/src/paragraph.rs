@@ -893,7 +893,7 @@ impl RenderObject for RenderParagraph {
         if needs_clipping {
             let bounds = offset & self.size(app);
             context.canvas().save();
-            context.canvas().clip_rect(bounds, ClipOp::Intersect);
+            context.canvas().clip_rect(bounds, ClipOp::Intersect, true);
         }
         let (painter, fonts) = self.painter_with_fonts(app);
         painter.paint(fonts, context.canvas(), offset);

@@ -177,7 +177,7 @@ impl<'a> Slicer<'a> {
     fn end_slice(&mut self) {
         let next = SliceRecording::reopening(&self.open);
         let ended = std::mem::replace(&mut self.slice, next);
-        self.keep(ended.finish(self.open.len()));
+        self.keep(ended.finish());
     }
 
     fn keep(&mut self, slice: Option<Arc<Picture>>) {
@@ -186,7 +186,7 @@ impl<'a> Slicer<'a> {
 
     fn finish(mut self) -> Slices {
         let last = std::mem::replace(&mut self.slice, SliceRecording::new());
-        self.keep(last.finish(0));
+        self.keep(last.finish());
         Slices { parts: self.parts }
     }
 }
@@ -195,6 +195,10 @@ impl<'a> Slicer<'a> {
 /// in, and whether anything drawn in it changes a pixel.
 struct SliceRecording {
     canvas: Canvas,
+    /// The canvas's save count before each open scope, the innermost last. Closing a scope
+    /// restores to it, however many saves its effect made, as flow's `MutatorContext` restores to
+    /// the count it began at.
+    scope_starts: Vec<usize>,
     paints: bool,
 }
 
@@ -202,6 +206,7 @@ impl SliceRecording {
     fn new() -> SliceRecording {
         SliceRecording {
             canvas: Canvas::new(),
+            scope_starts: Vec::new(),
             paints: false,
         }
     }
@@ -217,6 +222,7 @@ impl SliceRecording {
 
     /// Opens a scope doing what `effect` does, as the walk enters its container.
     fn open(&mut self, effect: &Effect) {
+        self.scope_starts.push(self.canvas.save_count());
         if let Effect::BackdropFilter {
             filter,
             blend_mode,
@@ -228,7 +234,7 @@ impl SliceRecording {
                 .save_layer_backdrop(None, &blending(*blend_mode), backdrop);
             self.paints = true;
         } else {
-            self.reopen(effect);
+            self.apply_reopened(effect);
         }
     }
 
@@ -236,6 +242,12 @@ impl SliceRecording {
     /// backdrop filter has filtered what lies beneath already, so it opens a plain layer of its
     /// blend mode, as flow's `BackdropFilterEntry::reapply` does.
     fn reopen(&mut self, effect: &Effect) {
+        self.scope_starts.push(self.canvas.save_count());
+        self.apply_reopened(effect);
+    }
+
+    /// Does what `effect` does as [`Self::reopen`] has it, in a scope already begun.
+    fn apply_reopened(&mut self, effect: &Effect) {
         let canvas = &mut self.canvas;
         match effect {
             Effect::None => canvas.save(),
@@ -247,26 +259,35 @@ impl SliceRecording {
                 rect,
                 clip_behavior,
             } => {
-                open_clip(canvas, *clip_behavior, (*rect).into());
-                canvas.clip_rect(*rect, ClipOp::Intersect);
+                canvas.save();
+                canvas.clip_rect(*rect, ClipOp::Intersect, anti_aliases(*clip_behavior));
+                open_clip_layer(canvas, *clip_behavior, (*rect).into());
             }
             Effect::ClipRRect {
                 rrect,
                 clip_behavior,
             } => {
-                open_clip(canvas, *clip_behavior, rrect.outer_rect().into());
+                canvas.save();
                 canvas.clip_rrect_radii_elliptical(
                     rrect.outer_rect(),
                     rrect_radii_elliptical(*rrect),
                     ClipOp::Intersect,
+                    anti_aliases(*clip_behavior),
                 );
+                open_clip_layer(canvas, *clip_behavior, rrect.outer_rect().into());
             }
             Effect::ClipPath {
                 path,
                 clip_behavior,
             } => {
-                open_clip(canvas, *clip_behavior, path.bounds());
-                canvas.clip_path(path, FillRule::NonZero, ClipOp::Intersect);
+                canvas.save();
+                canvas.clip_path(
+                    path,
+                    FillRule::NonZero,
+                    ClipOp::Intersect,
+                    anti_aliases(*clip_behavior),
+                );
+                open_clip_layer(canvas, *clip_behavior, path.bounds());
             }
             Effect::Opacity { alpha, offset } => {
                 let paint = Paint {
@@ -284,7 +305,10 @@ impl SliceRecording {
 
     /// Closes the innermost scope.
     fn close(&mut self) {
-        self.canvas.restore();
+        let start = self.scope_starts.pop().expect("a scope is open");
+        while self.canvas.save_count() > start {
+            self.canvas.restore();
+        }
     }
 
     fn draw_picture(&mut self, layer: &DisplayListLayer) {
@@ -303,9 +327,9 @@ impl SliceRecording {
         self.paints = true;
     }
 
-    /// The slice, its `open` scopes closed; `None` when it paints nothing.
-    fn finish(mut self, open: usize) -> Option<Arc<Picture>> {
-        for _ in 0..open {
+    /// The slice, its open scopes closed; `None` when it paints nothing.
+    fn finish(mut self) -> Option<Arc<Picture>> {
+        while !self.scope_starts.is_empty() {
             self.close();
         }
         self.paints.then(|| Arc::new(self.canvas.build()))
@@ -355,13 +379,16 @@ fn make_room(canvas: &mut Canvas, placement: &Placement) {
 fn apply(canvas: &mut Canvas, mutator: &Mutator) {
     match mutator {
         Mutator::Transform(matrix) => canvas.concat(matrix),
-        Mutator::ClipRect(rect) => canvas.clip_rect(*rect, ClipOp::Intersect),
+        Mutator::ClipRect(rect) => canvas.clip_rect(*rect, ClipOp::Intersect, true),
         Mutator::ClipRRect(rrect) => canvas.clip_rrect_radii_elliptical(
             rrect.outer_rect(),
             rrect_radii_elliptical(*rrect),
             ClipOp::Intersect,
+            true,
         ),
-        Mutator::ClipPath(path) => canvas.clip_path(path, FillRule::NonZero, ClipOp::Intersect),
+        Mutator::ClipPath(path) => {
+            canvas.clip_path(path, FillRule::NonZero, ClipOp::Intersect, true)
+        }
         Mutator::Opacity(_) => {}
     }
 }
@@ -380,13 +407,19 @@ fn clearing(opacity: f64) -> Paint {
     }
 }
 
-/// The save that starts a clip scope. `Clip::AntiAliasWithSaveLayer` opens a layer over the
-/// clip's bounds, as the engine's clip layers do.
-fn open_clip(canvas: &mut Canvas, clip_behavior: Clip, bounds: valo::Rect) {
-    match clip_behavior {
-        Clip::None | Clip::HardEdge | Clip::AntiAlias => canvas.save(),
-        Clip::AntiAliasWithSaveLayer => canvas.save_layer(Some(bounds), &Paint::default()),
+/// The layer `Clip::AntiAliasWithSaveLayer` opens over the clip's bounds once its clip is in
+/// force, so the clip edges the layer's composite rather than each draw in it: flow's
+/// `ClipShapeLayer::Paint` clips and then saves a layer. Every other behaviour opens none.
+fn open_clip_layer(canvas: &mut Canvas, clip_behavior: Clip, bounds: valo::Rect) {
+    if clip_behavior == Clip::AntiAliasWithSaveLayer {
+        canvas.save_layer(Some(bounds), &Paint::default());
     }
+}
+
+/// Whether a clip layer of `clip_behavior` anti-aliases its edge: every behaviour but
+/// `Clip::HardEdge`, as the engine's clip layers pass `clip_behavior != Clip::kHardEdge`.
+fn anti_aliases(clip_behavior: Clip) -> bool {
+    clip_behavior != Clip::HardEdge
 }
 
 fn blending(blend_mode: BlendMode) -> Paint {
@@ -543,6 +576,78 @@ mod tests {
         );
         assert!(!slices.paints());
         assert_eq!(slices.composition_layers().count(), 2);
+    }
+
+    /// The save, clip and layer ops the slices of a rectangle clip layer of `clip_behavior` over
+    /// one picture record, and where the picture is drawn, in replay order.
+    fn clip_scope_ops(clip_behavior: Clip) -> Vec<&'static str> {
+        let mut builder = SceneBuilder::new();
+        builder.push_clip_rect(Rect::from_ltwh(0.0, 0.0, 5.0, 5.0), clip_behavior);
+        builder.add_picture(Offset::ZERO, &square(), false, false);
+        builder.pop();
+        flattened_ops(&slices(&builder.build(), |_| None).picture_with_room())
+            .into_iter()
+            .filter_map(|op| match op {
+                valo::Op::Save => Some("save"),
+                valo::Op::ClipPath { .. } => Some("clip"),
+                valo::Op::SaveLayer { .. } => Some("save layer"),
+                valo::Op::Restore => Some("restore"),
+                valo::Op::DrawDisplayList { .. } => Some("picture"),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The slice, the root's save, then the clip layer's scope around the picture's own save and
+    /// restore: flow's `ClipShapeLayer::Paint` saves, clips and only then saves its layer, so the
+    /// clip edges the layer's composite, and its scope restores both.
+    #[test]
+    fn a_save_layer_clip_layer_clips_and_then_opens_its_layer() {
+        assert_eq!(
+            clip_scope_ops(Clip::AntiAliasWithSaveLayer),
+            [
+                "picture",
+                "save",
+                "save",
+                "clip",
+                "save layer",
+                "save",
+                "picture",
+                "restore",
+                "restore",
+                "restore",
+                "restore",
+            ]
+        );
+        assert_eq!(
+            clip_scope_ops(Clip::AntiAlias),
+            [
+                "picture", "save", "save", "clip", "save", "picture", "restore", "restore",
+                "restore",
+            ]
+        );
+    }
+
+    /// Whether the clip a rectangle clip layer of `clip_behavior` records anti-aliases its edge.
+    fn recorded_clip_anti_aliases(clip_behavior: Clip) -> bool {
+        let mut builder = SceneBuilder::new();
+        builder.push_clip_rect(Rect::from_ltwh(0.0, 0.0, 5.0, 5.0), clip_behavior);
+        builder.add_picture(Offset::ZERO, &square(), false, false);
+        builder.pop();
+        flattened_ops(&slices(&builder.build(), |_| None).picture_with_room())
+            .into_iter()
+            .find_map(|op| match op {
+                valo::Op::ClipPath { anti_alias, .. } => Some(anti_alias),
+                _ => None,
+            })
+            .expect("the clip layer records a clip")
+    }
+
+    #[test]
+    fn a_clip_layer_anti_aliases_its_edge_unless_it_is_hard_edged() {
+        assert!(!recorded_clip_anti_aliases(Clip::HardEdge));
+        assert!(recorded_clip_anti_aliases(Clip::AntiAlias));
+        assert!(recorded_clip_anti_aliases(Clip::AntiAliasWithSaveLayer));
     }
 
     #[test]

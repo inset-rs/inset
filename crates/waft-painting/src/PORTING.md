@@ -43,10 +43,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## clip.rs → clip.dart
 
-- Change: `doAntiAlias` is ignored; the clip methods take a `ClipOp`, not an AA flag.
-  Reason: platform — valo clips are anti-aliased.
-  Affect: `Clip::HardEdge` and `Clip::AntiAlias` record the same clip, so a hard-edge clip has smooth edges.
-
 - Change: clipping and hit-testing pass `FillRule::NonZero` alongside the path.
   Reason: platform — valo `Path` carries no `fillType`, and Dart's default is `nonZero`.
   Affect: a path with self-crossing subpaths clips and hit-tests as non-zero; there is no even-odd option.

@@ -119,6 +119,7 @@ impl CustomPainter for PopupShadow {
             bounds,
             radii.map(|radius| radius as f32),
             ClipOp::Difference,
+            true,
         );
         for shadow in self.shadows() {
             if shadow.color.a == 0.0 {

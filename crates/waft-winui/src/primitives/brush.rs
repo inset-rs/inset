@@ -80,6 +80,7 @@ impl Brush {
                 rect.outer_rect(),
                 rrect_radii_elliptical(rect),
                 ClipOp::Intersect,
+                true,
             );
             self.paint_material(canvas, rect.outer_rect());
             canvas.restore();
@@ -95,7 +96,7 @@ impl Brush {
             path.rrect_radii_elliptical(outer.outer_rect(), rrect_radii_elliptical(outer));
             path.rrect_radii_elliptical(inner.outer_rect(), rrect_radii_elliptical(inner));
             canvas.save();
-            canvas.clip_path(&path.build(), FillRule::EvenOdd, ClipOp::Intersect);
+            canvas.clip_path(&path.build(), FillRule::EvenOdd, ClipOp::Intersect, true);
             self.paint_material(canvas, outer.outer_rect());
             canvas.restore();
         }

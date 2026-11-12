@@ -151,8 +151,9 @@ pub struct AndroidMetadata {
     /// `minSdkVersion`. Defaults to 31, Android 12, the least Waft's Android host runs on, and
     /// refused below it.
     pub min_sdk: Option<u32>,
-    /// `targetSdkVersion`. Defaults to 34, the last level before the system stops fitting the
-    /// window to its bars, which is how the host learns the safe area.
+    /// `targetSdkVersion`. Defaults to 34, the last level before the system lays every app out
+    /// edge to edge; a later one lays a Waft app out the same, as it draws its whole window and is
+    /// told what the bars cover at every level.
     pub target_sdk: Option<u32>,
     /// `versionCode`. Defaults to one derived from the package version.
     pub version_code: Option<u32>,

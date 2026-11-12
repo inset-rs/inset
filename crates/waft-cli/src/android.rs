@@ -1,6 +1,6 @@
 //! Android: the `.apk` Gradle would produce, assembled from a cargo library.
 //!
-//! No Gradle project and no Java of the app's own. The Java is Waft's four classes (under
+//! No Gradle project and no Java of the app's own. The Java is Waft's five classes (under
 //! `android/rs/waft/` in this crate). The activity, `rs.waft.WaftActivity`, is the platform's
 //! `NativeActivity`, which loads the app's shared library and calls its `android_main`, with the
 //! results of the activities the app starts, the intents that reach it while it runs and the
@@ -9,13 +9,14 @@
 //! file of the app's with the app that opens it. The notification receiver,
 //! `rs.waft.WaftNotificationReceiver`, builds and shows the app's notifications, and shows one
 //! when its alarm goes off, whether or not the app runs. The text input, `rs.waft.WaftTextInput`,
-//! is the view the activity adds for the system's keyboards to edit text through. So the
-//! package is that library, the classes compiled to `classes.dex`, a manifest, and icons, put
-//! together with the SDK's own tools: `javac` and `d8` compile the classes, `aapt2` links the
-//! manifest and resources, `zipalign` aligns, `apksigner` signs with the debug key, and `adb`
-//! installs and launches it on an emulator or a device. The library in the package is a stripped
-//! copy (`strip_option` says of what); the library as built stays under `target/` to symbolise
-//! a stack trace against.
+//! is the view the activity adds for the system's keyboards to edit text through. The window
+//! insets listener, `rs.waft.WaftWindowInsets`, tells the app what the system's bars and the
+//! keyboard cover of its window. So the package is that library, the classes compiled to
+//! `classes.dex`, a manifest, and icons, put together with the SDK's own tools: `javac` and `d8`
+//! compile the classes, `aapt2` links the manifest and resources, `zipalign` aligns, `apksigner`
+//! signs with the debug key, and `adb` installs and launches it on an emulator or a device. The
+//! library in the package is a stripped copy (`strip_option` says of what); the library as built
+//! stays under `target/` to symbolise a stack trace against.
 //!
 //! Everything but the NDK's linker and Java is found under the SDK. The NDK is where the
 //! linker and the C library for the target live; Java compiles the classes and runs `d8`,
@@ -41,8 +42,10 @@ use crate::tools;
 /// `surface_control.rs`), which are API 31's, so its library neither links for nor loads on an
 /// earlier version. It is also every app's default.
 const LEAST_MIN_SDK: u32 = 31;
-/// The last level before the system stops fitting the window to its bars: from 35 an
-/// app is edge to edge, and the host learns the safe area from the fitted content rect.
+/// The level an app targets unless it names another: the last before the system lays every app
+/// out edge to edge. A later one lays a Waft app out the same: it draws its window's whole
+/// surface at every level, and the host is told what the bars cover of it as the window's insets
+/// (`waft-embedder-android`'s `window_insets.rs`).
 const DEFAULT_TARGET_SDK: u32 = 34;
 /// Waft's activity: the platform's `NativeActivity`, which loads a native library and calls
 /// `android_main`, handing activity results on to it.
@@ -58,7 +61,7 @@ const PERMISSIONS: [&str; 2] = [
     "android.permission.SCHEDULE_EXACT_ALARM",
 ];
 /// The Java classes every app's package compiles, by their paths under the sources' root.
-const JAVA_SOURCES: [(&str, &str); 4] = [
+const JAVA_SOURCES: [(&str, &str); 5] = [
     (
         "rs/waft/WaftActivity.java",
         include_str!("../android/rs/waft/WaftActivity.java"),
@@ -74,6 +77,10 @@ const JAVA_SOURCES: [(&str, &str); 4] = [
     (
         "rs/waft/WaftTextInput.java",
         include_str!("../android/rs/waft/WaftTextInput.java"),
+    ),
+    (
+        "rs/waft/WaftWindowInsets.java",
+        include_str!("../android/rs/waft/WaftWindowInsets.java"),
     ),
 ];
 /// The schemes of the links whose viewers the app may ask about (`<queries>`): from Android 11 the
@@ -533,8 +540,8 @@ struct Manifest<'a> {
 
 /// The manifest around Waft's activity. `configChanges` keeps the activity, and so the
 /// app's state, through a rotation or a switch to dark mode, which winit reports as a
-/// resize; `adjustResize` has the system fit the window to the keyboard, which is how
-/// the host learns of it. Waft's file provider is declared at `<package>.waft.files`, not
+/// resize; `adjustResize`, which Flutter's template sets too, has the system leave the window in
+/// place under the keyboard, which the host hears of as the window's insets. Waft's file provider is declared at `<package>.waft.files`, not
 /// exported, granting each URI it shares; its notification receiver, not exported, hears only the
 /// app's own alarms; `<queries>` names viewing the links of [`QUERIED_SCHEMES`]; the app asks for
 /// [`PERMISSIONS`] and its own; the activity is offered for the files of the app's associations

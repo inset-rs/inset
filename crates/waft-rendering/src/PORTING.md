@@ -119,7 +119,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: a transform always paints through `push_transform`, or through the child's paint offset when the matrix is a translation.
 
 - Change: `RenderColoredBox` does not pass `is_anti_alias` to the canvas.
-  Reason: platform — valo's `Paint` has no anti-alias flag; painting's `PORTING.md` records the same for `Clip`.
+  Reason: platform — valo's `Paint` has no anti-alias flag.
   Affect: the fill is drawn the way valo draws it, and setting the flag only marks a repaint.
 
 ## shifted_box.rs → shifted_box.dart (RenderConstraintsTransformBox)

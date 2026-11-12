@@ -394,7 +394,12 @@ impl ShapeDecorationPainter {
             let mut clip_path = PathBuilder::new();
             clip_path.rect(Rect::LARGEST.into());
             clip_path.append(path, &Matrix4::IDENTITY);
-            canvas.clip_path(&clip_path.build(), FillRule::EvenOdd, ClipOp::Intersect);
+            canvas.clip_path(
+                &clip_path.build(),
+                FillRule::EvenOdd,
+                ClipOp::Intersect,
+                true,
+            );
         }
     }
 

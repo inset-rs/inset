@@ -598,7 +598,10 @@ impl MediaQueryData {
             padding: edge_insets_from_view_padding(metrics.padding, device_pixel_ratio),
             view_padding: edge_insets_from_view_padding(metrics.view_padding, device_pixel_ratio),
             view_insets: edge_insets_from_view_padding(metrics.view_insets, device_pixel_ratio),
-            system_gesture_insets: EdgeInsets::ZERO,
+            system_gesture_insets: edge_insets_from_view_padding(
+                metrics.system_gesture_insets,
+                device_pixel_ratio,
+            ),
             accessible_navigation: platform_data.is_some_and(|data| data.accessible_navigation),
             invert_colors: platform_data.is_some_and(|data| data.invert_colors),
             disable_animations: platform_data.is_some_and(|data| data.disable_animations),
@@ -2404,7 +2407,8 @@ mod tests {
     use crate::view::View;
     use crate::widgets::basic::SizedBox;
 
-    /// An 800x600 physical view at 2x with a status bar, a home indicator, and a keyboard.
+    /// An 800x600 physical view at 2x with a status bar, a home indicator, a keyboard, and the
+    /// system's gesture zones along the sides and the bottom.
     #[derive(Default)]
     struct TestView {
         host: waft_test::TestViewHost,
@@ -2433,6 +2437,12 @@ mod tests {
                     top: 0.0,
                     right: 0.0,
                     bottom: 20.0,
+                },
+                system_gesture_insets: ViewPadding {
+                    left: 60.0,
+                    top: 0.0,
+                    right: 60.0,
+                    bottom: 112.0,
                 },
                 screen: None,
             }
@@ -2521,6 +2531,10 @@ mod tests {
             EdgeInsets::from_ltrb(0.0, 20.0, 0.0, 34.0)
         );
         assert_eq!(data.view_insets, EdgeInsets::from_ltrb(0.0, 0.0, 0.0, 10.0));
+        assert_eq!(
+            data.system_gesture_insets,
+            EdgeInsets::from_ltrb(30.0, 0.0, 30.0, 56.0)
+        );
         assert_eq!(data.orientation(), Orientation::Landscape);
         assert_eq!(data.platform_brightness, Brightness::Light);
         assert_eq!(data.text_scaler, TextScaler::NO_SCALING);
@@ -2791,6 +2805,10 @@ mod tests {
         assert_eq!(data, MediaQueryData::from_view(&app, &*view, None));
         assert_eq!(data.size, Size::new(400.0, 300.0));
         assert_eq!(data.padding, EdgeInsets::from_ltrb(0.0, 20.0, 0.0, 34.0));
+        assert_eq!(
+            data.system_gesture_insets,
+            EdgeInsets::from_ltrb(30.0, 0.0, 30.0, 56.0)
+        );
         assert_eq!(
             data.platform_brightness,
             Brightness::Dark,

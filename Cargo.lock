@@ -4772,9 +4772,9 @@ dependencies = [
 
 [[package]]
 name = "valo"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79961527d70e0b8764f7e4d572503e5cd6d90ecb91f81245624a733b7b3615eb"
+checksum = "f1fd59cb4747bb364bd276119cab0be57cdfd3bb3287b35d8296da0cc02ead3a"
 dependencies = [
  "futures-channel",
  "objc2",
@@ -4790,9 +4790,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be7e9870f73a744179d5626184015783e3ca194b3c53c1048cbd27fcc0fbd341"
+checksum = "63f12eed66e172a1f0a943aaa9425ae73b40fc4bcaa96d07bd09b4dab574f2bf"
 dependencies = [
  "valo",
  "wgpu",
@@ -4800,9 +4800,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec-apple"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7f5b3431584516309ebf3e1536d7ff7cff0044f0e6933619668922bbd786fe0"
+checksum = "b12d37bfdb2cdd5c03f4018d28a4d37c6f315b5fa3d3358afd83e67afac889b6"
 dependencies = [
  "core-foundation",
  "core-foundation-sys",
@@ -4819,9 +4819,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec-software"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fe95c1a8d127f1b2121ff3e3d93ca2e5437b27e6d477bf57913422f3dee5556"
+checksum = "6849b4da35d6e0b5b540bb977e7cea9a52db6cb6626afea86521661f4fd352e7"
 dependencies = [
  "gif",
  "image",
@@ -4834,9 +4834,9 @@ dependencies = [
 
 [[package]]
 name = "valo-dl"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2e95f3c63d4e69115783e821289147b4c88b62598d387c62331503ed0880a0b"
+checksum = "5c18bd1722b8b1e3507d109e5a90d73ed4a471c1ca49f6d49219ade22ac65ec5"
 dependencies = [
  "naga",
  "valo-geometry",
@@ -4846,9 +4846,9 @@ dependencies = [
 
 [[package]]
 name = "valo-fontmgr"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52a93ebcfbccc8f64e4ce2af1dfcde5b1cb7ad3d4bd537a405f8af853a52e553"
+checksum = "94eb6abe82792dea04e75dc8d6a3b60bc39447b7a375c4bc235736eddd1ecb28"
 dependencies = [
  "core-foundation",
  "core-foundation-sys",
@@ -4860,18 +4860,18 @@ dependencies = [
 
 [[package]]
 name = "valo-geometry"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fffa5e44dba96dec81ff30b4552e04211b140c49077f3a5b8862e0c15ae91dda"
+checksum = "551da90b93031e72ad3a0db32027ac1803042f518089313423ece09916c15b1d"
 dependencies = [
  "glam",
 ]
 
 [[package]]
 name = "valo-paragraph"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "743e7ee81a07f414fb36868e825a0d93325a76cf7b2879041a550d7c498bdaf1"
+checksum = "4bc16ad0128ffd83852063c1ebc1de076fa4cb4d68aafcebe0e5f41291f2c55d"
 dependencies = [
  "unicode-bidi",
  "unicode-linebreak",
@@ -4883,9 +4883,9 @@ dependencies = [
 
 [[package]]
 name = "valo-renderer"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9c181700583e0601ea2481b703fa640ca8893eaa8a1e5b40f1c21a923a4605e"
+checksum = "3fb1a3252e62ea4f7c68866ef4220e9976be30dd56bdeaccd676846ea7d7f6dd"
 dependencies = [
  "bytemuck",
  "etagere",
@@ -4901,9 +4901,9 @@ dependencies = [
 
 [[package]]
 name = "valo-system-fonts"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1ecab26600df065f63003eba6525158e3e6db87573a18d4adfce318cf060a2a"
+checksum = "845cc1f4ef7366dbac815490e5ccb2a2778b70ca786489e8ab069373c999d785"
 dependencies = [
  "valo-fontmgr",
  "valo-text",
@@ -4911,9 +4911,9 @@ dependencies = [
 
 [[package]]
 name = "valo-text"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5396d86843dad80bac43163eae0cb1ca8543a207dfe94689198ec751292e39c3"
+checksum = "2d4335126bcc4e26b4a39d927968153a4233d12db385962694382129af19389e"
 dependencies = [
  "allsorts",
  "harfrust",

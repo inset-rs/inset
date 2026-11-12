@@ -10,7 +10,7 @@
 // JNI hands the native method raw arguments; that is the `unsafe` here.
 #![allow(unsafe_code)]
 
-use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
 
 use android_activity::{AndroidApp, AndroidAppWaker};
 use jni::errors::LogErrorAndDefault;
@@ -24,8 +24,9 @@ use crate::open_requests::{self, Viewed};
 
 /// What the intents that arrived ask, not yet handed on.
 static ARRIVED: LazyLock<Mutex<Arrived>> = LazyLock::new(Mutex::default);
-/// Wakes the loop when an intent arrives.
-static WAKER: OnceLock<AndroidAppWaker> = OnceLock::new();
+/// Wakes the loop when an intent arrives: the loop of the activity that set it last, since Android
+/// starts another activity in the same process once one is finished.
+static WAKER: Mutex<Option<AndroidAppWaker>> = Mutex::new(None);
 
 /// What the intents that arrived since the loop last looked ask of the app.
 #[derive(Default)]
@@ -38,7 +39,7 @@ pub(crate) struct Arrived {
 
 /// Hears the intents that reach the activity from now on, and reads the one it started with.
 pub(crate) fn hear(app: &AndroidApp) {
-    let _ = WAKER.set(app.create_waker());
+    *locked(&WAKER) = Some(app.create_waker());
     if let Err(error) = with_activity(app, hear_new_intents) {
         clear_exception(app);
         warn_to_log!("waft: intents that reach the running app are not heard: {error}");
@@ -92,7 +93,7 @@ extern "system" fn on_intent<'local>(
 ) {
     env.with_env(|env| -> jni::errors::Result<()> {
         record(env, &activity, &intent)?;
-        if let Some(waker) = WAKER.get() {
+        if let Some(waker) = locked(&WAKER).as_ref() {
             waker.wake();
         }
         Ok(())

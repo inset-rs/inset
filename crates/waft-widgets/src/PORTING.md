@@ -231,8 +231,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## widgets/media_query.rs → media_query.dart
 
-- Change: `MediaQueryData::from_view` reads the platform's brightness, its system context menu and the user's caption style, and leaves the accessibility, text-scaling, gesture-inset and corner-radius fields at their defaults.
-  Reason: platform — `Platform` exposes `platform_brightness`, `system_context_menu` and `caption_settings` only, and `ViewMetrics` has no gesture insets or corner radii.
+- Change: `MediaQueryData::from_view` reads the platform's brightness, its system context menu and the user's caption style, and leaves the accessibility, text-scaling and corner-radius fields at their defaults.
+  Reason: platform — `Platform` exposes `platform_brightness`, `system_context_menu` and `caption_settings` only, and `ViewMetrics` has no corner radii.
   Affect: those fields are only non-default when an ambient `MediaQuery` supplies `platform_data`.
 
 - Change: `MediaQueryData` carries the user's caption style, which `MediaQuery::from_view` takes again at each change, where Flutter's carries no caption style.
@@ -662,7 +662,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - transitions.rs, implicit_animations.rs: diagnostics. Trigger: diagnostics.
 - icon_theme: `IconThemeData.hashCode` (no `Hash` over `f64`). Trigger: a map keyed by `IconThemeData`.
 - gesture_detector.rs: the semantics gesture handling, and the double-tap and force-press callbacks. Trigger: accessibility (do not stub); `DoubleTapGestureRecognizer`; a caller of the force-press callbacks.
-- media_query.rs: `DisplayFeature`, `SystemTextScaler`, the platform sources for the accessibility flags, 24-hour format, text style overrides, corner radii and gesture insets, and the media-query debug checks. Trigger: observers in binding.rs; those members on `Platform` / `ViewMetrics`; diagnostics.
+- media_query.rs: `DisplayFeature`, `SystemTextScaler`, the platform sources for the accessibility flags, 24-hour format, text style overrides and corner radii, and the media-query debug checks. Trigger: observers in binding.rs; those members on `Platform` / `ViewMetrics`; diagnostics.
 - widget_state.rs: `WidgetStateBorderSide`, `WidgetStateOutlinedBorder`, `WidgetStateTextStyle`, `WidgetStatePropertyAll`, `WidgetStatesController` as a `ValueListenable`, and hashing. Trigger: the first theme or input decoration that needs them; theme-data hashing.
 - localizations.rs: the semantics wrapper `_LocalizationsState.build` adds, and the localization debug checks. Trigger: semantics; diagnostics.
 - banner.rs: repaint on `PaintingBinding.systemFonts`. Trigger: a host reporting system font changes.
