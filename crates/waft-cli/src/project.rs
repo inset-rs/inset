@@ -165,6 +165,50 @@ pub struct AndroidMetadata {
     /// manifest does not name, so an app that opens a socket without `INTERNET` gets "operation
     /// not permitted".
     pub permissions: Vec<String>,
+    /// The launcher icon as Android draws it since API 26, `<adaptive-icon>`: two layers the
+    /// launcher cuts to its own shape. Without it, the app's one `icon` is the launcher icon, which
+    /// a launcher shrinks into its shape.
+    pub adaptive_icon: Option<AdaptiveIcon>,
+}
+
+/// Android's adaptive launcher icon: a foreground over a background, each 108 dp square, which the
+/// launcher masks to its shape (a circle, a rounded square) and may move apart as it animates; what
+/// lies in the middle 72 dp is always shown, and up to 18 dp on each side may be cut.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdaptiveIcon {
+    /// `<foreground>`: a square PNG with transparency, relative to the package root, its whole
+    /// side the layer's 108 dp: 432 px is its size at the largest density.
+    pub foreground: PathBuf,
+    /// `<background>`: an opaque colour, `#rrggbb`, or a square PNG relative to the package root,
+    /// as the foreground is.
+    pub background: AdaptiveIconBackground,
+}
+
+/// What an adaptive icon's background layer is.
+#[derive(Debug, Deserialize)]
+#[serde(try_from = "String")]
+pub enum AdaptiveIconBackground {
+    /// `#rrggbb`.
+    Color(String),
+    Image(PathBuf),
+}
+
+impl TryFrom<String> for AdaptiveIconBackground {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let Some(hex) = value.strip_prefix('#') else {
+            return Ok(AdaptiveIconBackground::Image(PathBuf::from(value)));
+        };
+        if hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            Ok(AdaptiveIconBackground::Color(value))
+        } else {
+            Err(format!(
+                "adaptive_icon's background `{value}` is neither `#rrggbb` nor a path to a PNG"
+            ))
+        }
+    }
 }
 
 pub struct Project {
@@ -248,6 +292,11 @@ impl Project {
             .entitlements
             .map(|entitlements| existing_file(&root, entitlements, "entitlements"))
             .transpose()?;
+        let mut android = waft.android;
+        android.adaptive_icon = android
+            .adaptive_icon
+            .map(|icon| icon.under(&root))
+            .transpose()?;
         Ok(Project {
             workspace_root: metadata.workspace_root.clone().into_std_path_buf(),
             target_dir: metadata.target_directory.clone().into_std_path_buf(),
@@ -266,7 +315,7 @@ impl Project {
             usage_descriptions: waft.usage_descriptions,
             macos,
             ios: waft.ios,
-            android: waft.android,
+            android,
             root,
         })
     }
@@ -302,6 +351,23 @@ impl Project {
             }
         }
         Ok(files)
+    }
+}
+
+impl AdaptiveIcon {
+    /// The icon with its images' paths under the package `root`, each of which must exist.
+    fn under(self, root: &Path) -> Result<AdaptiveIcon> {
+        let background =
+            match self.background {
+                AdaptiveIconBackground::Image(image) => AdaptiveIconBackground::Image(
+                    existing_file(root, image, "adaptive_icon's background")?,
+                ),
+                color => color,
+            };
+        Ok(AdaptiveIcon {
+            foreground: existing_file(root, self.foreground, "adaptive_icon's foreground")?,
+            background,
+        })
     }
 }
 
@@ -357,6 +423,19 @@ pub fn display_name(package: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_adaptive_icons_background_is_a_colour_or_an_image() {
+        let background = |value: &str| AdaptiveIconBackground::try_from(value.to_owned());
+        assert!(
+            matches!(background("#1f5fae"), Ok(AdaptiveIconBackground::Color(color)) if color == "#1f5fae")
+        );
+        assert!(
+            matches!(background("assets/back.png"), Ok(AdaptiveIconBackground::Image(path)) if path == Path::new("assets/back.png"))
+        );
+        assert!(background("#fff").is_err(), "only #rrggbb");
+        assert!(background("#12345g").is_err());
+    }
 
     #[test]
     fn display_name_spaces_and_capitalizes() {

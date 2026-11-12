@@ -85,6 +85,7 @@ min_sdk = 31                       # the default and the least: Android 12, whos
 target_sdk = 34                    # the default; 35 and up, which Android lays out edge to edge, lay a Waft app out the same
 version_code = 100                 # defaults to one derived from the version: 1.2.3 is 10203
 permissions = ["android.permission.INTERNET"]  # what the app asks for besides Waft's own; a socket needs INTERNET
+adaptive_icon = { foreground = "assets/icon-foreground.png", background = "#ffffff" }  # the launcher icon on API 26 and up, two 108 dp layers the launcher cuts to its shape; background is #rrggbb or a PNG; without it, `icon` is shrunk into the shape
 
 [[package.metadata.waft.file_associations]]  # a kind of file this app defines
 extensions = ["mydoc"]
