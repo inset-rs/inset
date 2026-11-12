@@ -1313,6 +1313,7 @@ mod tests {
     use crate::widgets::media_query::{MediaQuery, MediaQueryData};
     use crate::widgets::restoration::RootRestorationScope;
     use crate::widgets::scroll_controller::ScrollControllerLeaf;
+    use crate::widgets::scroll_physics::{BouncingScrollPhysics, ClampingScrollPhysics};
     use waft_rendering::{RenderBox, RenderSliver};
 
     /// A host that answers `Restoration::get` with what it was handed and records every
@@ -1612,5 +1613,264 @@ mod tests {
 
         assert_eq!(ScrollContext::device_pixel_ratio(&state, &app), 3.0);
         assert_eq!(state.position(&app).device_pixel_ratio(&app), 3.0);
+    }
+
+    // ---- a fling, a catch and a second fling, against Flutter's numbers ----
+    //
+    // The expected values are what Flutter's own `ListView` reports for the same pointer
+    // events and frame times, run through `flutter_test` (Flutter 6655482) with the same view
+    // (1440 x 2880 physical pixels at 3.5) on Android.
+
+    const FRAME_PERIOD: Duration = Duration::from_micros(16_667);
+
+    /// What reaches the app at one moment: a pointer event, or a frame.
+    #[derive(Clone, Copy, Debug)]
+    enum Step {
+        Down(Offset),
+        Move(Offset),
+        Up,
+        Frame,
+    }
+
+    /// A touch at `at` that moves by `dy` every 8ms, `moves` times, and lifts 4ms later.
+    fn stroke(start: Duration, at: Offset, dy: f64, moves: u32) -> Vec<(Duration, Step)> {
+        let move_period = Duration::from_millis(8);
+        let mut steps = vec![(start, Step::Down(at))];
+        for i in 1..=moves {
+            steps.push((start + move_period * i, Step::Move(Offset::new(0.0, dy))));
+        }
+        steps.push((
+            start + move_period * moves + Duration::from_millis(4),
+            Step::Up,
+        ));
+        steps
+    }
+
+    /// An upward fling from 100ms, caught at 405ms by a stroke moving `second_dy` a step,
+    /// with a frame every [`FRAME_PERIOD`] up to 1.5s; a pointer event at a frame's time
+    /// comes first.
+    fn fling_catch_and_fling(second_dy: f64) -> Vec<(Duration, Step)> {
+        let mut steps = stroke(
+            Duration::from_millis(100),
+            Offset::new(200.0, 600.0),
+            -30.0,
+            10,
+        );
+        steps.extend(stroke(
+            Duration::from_millis(405),
+            Offset::new(200.0, 400.0),
+            second_dy,
+            8,
+        ));
+        let mut frame = FRAME_PERIOD;
+        while frame <= Duration::from_millis(1500) {
+            steps.push((frame, Step::Frame));
+            frame += FRAME_PERIOD;
+        }
+        steps.sort_by_key(|(time, step)| (*time, matches!(step, Step::Frame)));
+        steps
+    }
+
+    /// What a run recorded: the velocity of the position's activity as each touch lifts, and
+    /// the scroll offset after each frame.
+    struct FlingRecord {
+        velocities_at_lift: Vec<f64>,
+        pixels_at_frame: Vec<(Duration, f64)>,
+    }
+
+    impl FlingRecord {
+        fn pixels_at(&self, frame: Duration) -> f64 {
+            self.pixels_at_frame
+                .iter()
+                .find(|(time, _)| *time == frame)
+                .map(|(_, pixels)| *pixels)
+                .expect("a frame at that time")
+        }
+    }
+
+    /// Runs `steps` through the gesture binding over a 1000-item list at offset 5000 with
+    /// `physics`, on an Android phone's screen.
+    fn record_fling(physics: ScrollPhysicsRef, steps: Vec<(Duration, Step)>) -> FlingRecord {
+        use waft_embedder::{PointerDeviceKind, TargetPlatform, TextDirection};
+        use waft_gestures::{PointerDownEvent, PointerMoveEvent, PointerUpEvent};
+        use waft_test::TestView;
+
+        use crate::test_harness::binding_mount;
+        use crate::widgets::basic::Directionality;
+        use crate::widgets::scroll_controller::ScrollController;
+        use crate::widgets::scroll_view::ListView;
+
+        let platform = TestPlatform::new()
+            .on(TargetPlatform::Android)
+            .with_view(Rc::new(TestView::with_pixel_ratio(1440.0, 2880.0, 3.5)));
+        let cell = AppCell::with_platform(Rc::new(platform));
+        let mut app = cell.borrow_mut();
+        let controller = ScrollController::new(&mut app, 5000.0, true, None, None, None);
+        let list = ListView::builder(|_app, _context, _index| {
+            Some(SizedBox::new().height(100.0).into_widget())
+        })
+        .item_count(1000)
+        .build()
+        .item_extent(100.0)
+        .physics(physics)
+        .controller(controller.as_controller());
+        drop(app);
+        binding_mount(
+            &cell,
+            Directionality::new(TextDirection::Ltr, list).into_widget(),
+        );
+
+        let mut app = cell.borrow_mut();
+        let binding = GestureBinding::instance(&mut app);
+        let position = controller.as_controller().position(&app);
+        let mut record = FlingRecord {
+            velocities_at_lift: Vec::new(),
+            pixels_at_frame: Vec::new(),
+        };
+        let mut pointer = 0;
+        let mut at = Offset::ZERO;
+        for (time_stamp, step) in steps {
+            let event = match step {
+                Step::Down(down_at) => {
+                    pointer += 1;
+                    at = down_at;
+                    PointerEvent::Down(PointerDownEvent {
+                        pointer,
+                        position: at,
+                        time_stamp,
+                        kind: PointerDeviceKind::Touch,
+                        ..PointerDownEvent::default()
+                    })
+                }
+                Step::Move(delta) => {
+                    at = at + delta;
+                    PointerEvent::Move(PointerMoveEvent {
+                        pointer,
+                        position: at,
+                        delta,
+                        time_stamp,
+                        kind: PointerDeviceKind::Touch,
+                        ..PointerMoveEvent::default()
+                    })
+                }
+                Step::Up => PointerEvent::Up(PointerUpEvent {
+                    pointer,
+                    position: at,
+                    time_stamp,
+                    kind: PointerDeviceKind::Touch,
+                    ..PointerUpEvent::default()
+                }),
+                Step::Frame => {
+                    pump_every_view(&mut app, time_stamp);
+                    record
+                        .pixels_at_frame
+                        .push((time_stamp, position.pixels(&app)));
+                    continue;
+                }
+            };
+            binding.handle_pointer_event(&mut app, event);
+            app.drain_microtasks();
+            if matches!(step, Step::Up) {
+                let activity = position.activity(&app).expect("a position has an activity");
+                record.velocities_at_lift.push(activity.velocity(&mut app));
+            }
+        }
+        record
+    }
+
+    fn assert_near(actual: f64, expected: f64, what: &str) {
+        assert!(
+            (actual - expected).abs() < 1e-3,
+            "{what}: {actual}, where Flutter has {expected}"
+        );
+    }
+
+    /// What Flutter reports for a run: where the list was at the last frame before the catch,
+    /// the second fling's velocity, and where the list is at 700ms and at the last frame.
+    struct FlutterFling {
+        caught_at: f64,
+        second_velocity: f64,
+        at_700ms: f64,
+        at_end: f64,
+    }
+
+    fn assert_matches_flutter(record: &FlingRecord, flutter: FlutterFling) {
+        assert_near(
+            record.velocities_at_lift[0],
+            3750.0,
+            "the first fling's velocity",
+        );
+        assert_near(
+            record.pixels_at(FRAME_PERIOD * 24),
+            flutter.caught_at,
+            "the offset at the last frame before the catch",
+        );
+        assert_near(
+            record.velocities_at_lift[1],
+            flutter.second_velocity,
+            "the second fling's velocity",
+        );
+        assert_near(
+            record.pixels_at(FRAME_PERIOD * 42),
+            flutter.at_700ms,
+            "the offset at 700ms",
+        );
+        assert_near(
+            record.pixels_at(FRAME_PERIOD * 89),
+            flutter.at_end,
+            "the offset at the last frame",
+        );
+    }
+
+    #[test]
+    fn a_bouncing_list_caught_and_flung_back_moves_as_flutters_does() {
+        let record = record_fling(
+            Rc::new(BouncingScrollPhysics::new()),
+            fling_catch_and_fling(25.0),
+        );
+        // Flung the other way, the first fling's momentum is not carried.
+        assert_matches_flutter(
+            &record,
+            FlutterFling {
+                caught_at: 5918.0168,
+                second_velocity: -3125.0,
+                at_700ms: 5168.6831,
+                at_end: 4368.1201,
+            },
+        );
+    }
+
+    #[test]
+    fn a_bouncing_list_caught_and_flung_on_carries_the_first_flings_momentum() {
+        let record = record_fling(
+            Rc::new(BouncingScrollPhysics::new()),
+            fling_catch_and_fling(-30.0),
+        );
+        assert_matches_flutter(
+            &record,
+            FlutterFling {
+                caught_at: 5918.0168,
+                second_velocity: 7728.1039,
+                at_700ms: 7516.5155,
+                at_end: 9496.3024,
+            },
+        );
+    }
+
+    #[test]
+    fn a_clamping_list_caught_and_flung_back_moves_as_flutters_does() {
+        let record = record_fling(
+            Rc::new(ClampingScrollPhysics::new()),
+            fling_catch_and_fling(25.0),
+        );
+        assert_matches_flutter(
+            &record,
+            FlutterFling {
+                caught_at: 5967.7082,
+                second_velocity: -3125.0,
+                at_700ms: 5182.2016,
+                at_end: 4364.2725,
+            },
+        );
     }
 }
