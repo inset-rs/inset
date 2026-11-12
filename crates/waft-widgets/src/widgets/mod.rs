@@ -89,6 +89,7 @@ pub mod text_selection_toolbar_anchors;
 pub mod text_selection_toolbar_layout_delegate;
 pub mod ticker_provider;
 pub mod title;
+pub mod toggleable;
 pub mod transitions;
 pub mod undo_history;
 pub mod value_listenable_builder;

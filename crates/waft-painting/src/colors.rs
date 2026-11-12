@@ -17,7 +17,8 @@ fn get_hue(red: f64, green: f64, blue: f64, max: f64, delta: f64) -> f64 {
     let hue = if max == 0.0 {
         0.0
     } else if max == red {
-        60.0 * (((green - blue) / delta) % 6.0)
+        // Dart's `%` is never negative; Rust's `%` keeps the dividend's sign.
+        60.0 * ((green - blue) / delta).rem_euclid(6.0)
     } else if max == green {
         60.0 * (((blue - red) / delta) + 2.0)
     } else {
@@ -344,6 +345,13 @@ mod tests {
             Color::new(0xffff0000),
         ];
         assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn a_colour_between_magenta_and_red_has_a_positive_hue() {
+        let color = Color::new(0xffff0099);
+        assert!((HSVColor::from_color(color).hue - 324.0).abs() < 1e-9);
+        assert!((HSLColor::from_color(color).hue - 324.0).abs() < 1e-9);
     }
 
     // colors_test.dart 'HSVColor saturation sweep test'.

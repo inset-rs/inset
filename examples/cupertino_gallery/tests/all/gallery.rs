@@ -330,6 +330,7 @@ fn marker(entry: Entry) -> &'static str {
         Entry::PageScaffold => "Body starts here",
         Entry::Buttons => "Custom colour",
         Entry::Segments => "Selected: Midnight",
+        Entry::Switches => "Airplane Mode off, Wi-Fi on",
         Entry::Dialogs => "Ask a question",
         Entry::Scrolling => "Rows 1\u{2013}10",
         Entry::Icons => "house_fill",
@@ -523,6 +524,26 @@ fn tapping_a_segment_moves_the_value_it_is_bound_to() {
     assert!(
         fixture.shows("Selected: Cerulean"),
         "the last control keeps its own value; saw {:?}",
+        fixture.texts()
+    );
+}
+
+/// A switch reports the flip; the page decides what it means, so the tile around it flips it too.
+#[test]
+fn tapping_a_settings_row_flips_the_switch_it_holds() {
+    let mut fixture = Fixture::new();
+    fixture.push_entry(Entry::Switches);
+    assert!(
+        fixture.shows("Airplane Mode off, Wi-Fi on"),
+        "the summary starts on the initial values; saw {:?}",
+        fixture.texts()
+    );
+
+    // The tile's title comes before the summary that repeats it.
+    fixture.tap_first("Airplane Mode");
+    assert!(
+        fixture.shows("Airplane Mode on, Wi-Fi on"),
+        "the tile's tap reached the page state; saw {:?}",
         fixture.texts()
     );
 }

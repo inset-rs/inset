@@ -30,6 +30,7 @@ mod route;
 mod scrollbar;
 mod segmented_control;
 mod sheet;
+mod switch;
 #[cfg(test)]
 mod test_support;
 mod text_field;
@@ -66,6 +67,7 @@ pub use route::*;
 pub use scrollbar::*;
 pub use segmented_control::*;
 pub use sheet::*;
+pub use switch::*;
 pub use text_field::*;
 pub use text_selection::*;
 pub use text_selection_toolbar::*;

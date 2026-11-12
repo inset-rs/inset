@@ -397,6 +397,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — accessibility is deferred.
   Affect: a detector exposes no semantics focusable / focused flags.
 
+## widgets/toggleable.rs → toggleable.dart
+
+- Change: `build_toggleable_with_child` builds without Dart's `Semantics(enabled:)` around the child, and a tap sends no `TapSemanticEvent`.
+  Reason: platform — accessibility is deferred.
+  Affect: nothing announces whether a toggleable is enabled, or that it was tapped.
+
 ## widgets/shortcuts.rs → shortcuts.dart
 
 - Change: shortcuts are an insertion-ordered list of activator and intent pairs, not a map; `CallbackShortcuts.bindings` has the same shape.
@@ -689,6 +695,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - single_child_scroll_view.rs: the semantics clip and the approximate paint clip (deferred crate-wide in rendering's PORTING.md), and its diagnostics. Trigger: accessibility (do not stub); the inspector; diagnostics.
 - scrollbar.rs: the painter's semantics and the structured error reports, which are plain assert messages here. Trigger: accessibility (do not stub); diagnostics.
 - radio_group.rs: the radio-group semantics wrapper. Trigger: accessibility (do not stub).
+- toggleable.rs: the `Semantics(enabled:)` wrapper and the tap's `TapSemanticEvent`. Trigger: accessibility (do not stub).
 - radio_group.rs: the post-frame check that at most one radio carries the group value. Trigger: diagnostics, and a post-frame callback usable from a state that may run without a binding.
 - shortcuts.rs: the deprecated `isActivatedBy`, the duplicate-shortcut check, and `Shortcuts.includeSemantics`. Trigger: content equality on `ShortcutActivator`; diagnostics; accessibility.
 - actions.rs, shortcuts.rs, focus_traversal.rs: diagnostics on the actions, intents, activators, managers, policies and orders. Trigger: diagnostics.

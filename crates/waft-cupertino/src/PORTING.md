@@ -89,6 +89,16 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — accessibility is deferred.
   Affect: nothing announces a segment or which one is selected.
 
+## switch.rs → switch.dart
+
+- Change: the `Semantics(toggled:)` wrapper is not in the tree.
+  Reason: platform — accessibility is deferred.
+  Affect: nothing announces the switch or whether it is on.
+
+- Change: `activeThumbImage`, `inactiveThumbImage` and their two error listeners are not on `CupertinoSwitch`; the thumb is its colour and, when set, its `thumb_icon`.
+  Reason: platform — painting's `DecorationImage`, which the thumb's `ShapeDecoration` paints them with, is deferred (waft-painting's PORTING.md).
+  Affect: a switch cannot show a picture on its thumb.
+
 ## route.rs → route.dart
 
 - Change: `CupertinoRouteTransitionMixin` carries its `dispose` and `didChangePrevious` overrides itself, so a leaf route writes the three `cupertino_route_transition_mixin_*_overrides!` macros in place of widgets' route-override macros.
@@ -168,6 +178,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - scrollbar.rs: the haptic feedback on a thumb press and on a slow release. Trigger: `services/haptic_feedback.dart`.
 - page_scaffold.rs: the binding observer's status-bar tap callback. Trigger: the binding's status-bar tap event.
 - segmented_control.rs: the `Semantics` around each segment. Trigger: accessibility (do not stub).
+- switch.rs: the `Semantics(toggled:)` wrapper. Trigger: accessibility (do not stub).
+- switch.rs: `activeThumbImage`, `inactiveThumbImage`, `onActiveThumbImageError` and `onInactiveThumbImageError`, and the painter's cache of them. Trigger: painting's `DecorationImage` and the `image` field on `ShapeDecoration`.
+- switch.rs: the deprecated `activeColor` and `trackColor`, Dart's aliases of `activeTrackColor` and `inactiveTrackColor`. Trigger: never — port them only if Flutter un-deprecates them.
 - app.rs: `CupertinoApp.router` and everything only it fills. Trigger: `WidgetsApp.router` / `router.dart`.
 - app.rs: the `DefaultSelectionStyle` between the `CupertinoTheme` and the `HeroControllerScope`. Trigger: `default_selection_style.dart`.
 - app.rs: the three inspector-button builders and the button they build; the three debug flags reach the `WidgetsApp` as Dart passes them. Trigger: `widget_inspector.dart`'s `InspectorButton`.

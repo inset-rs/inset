@@ -137,6 +137,7 @@ pub use widgets::text_selection_toolbar_anchors::*;
 pub use widgets::text_selection_toolbar_layout_delegate::*;
 pub use widgets::ticker_provider::*;
 pub use widgets::title::*;
+pub use widgets::toggleable::*;
 pub use widgets::transitions::*;
 pub use widgets::undo_history::*;
 pub use widgets::value_listenable_builder::*;

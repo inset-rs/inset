@@ -17,6 +17,7 @@ pub enum Entry {
     PageScaffold,
     Buttons,
     Segments,
+    Switches,
     Dialogs,
     Scrolling,
     Icons,
@@ -33,11 +34,12 @@ pub enum Entry {
 
 impl Entry {
     /// Index order — the order the rows appear in.
-    pub const ALL: [Entry; 16] = [
+    pub const ALL: [Entry; 17] = [
         Entry::Navigation,
         Entry::PageScaffold,
         Entry::Buttons,
         Entry::Segments,
+        Entry::Switches,
         Entry::Dialogs,
         Entry::Scrolling,
         Entry::Icons,
@@ -71,6 +73,7 @@ impl Entry {
             Entry::PageScaffold => "Page Scaffold",
             Entry::Buttons => "Buttons",
             Entry::Segments => "Segmented Control",
+            Entry::Switches => "Switches",
             Entry::Dialogs => "Dialogs & Sheets",
             Entry::Scrolling => "Scrolling",
             Entry::Icons => "Icons",
@@ -93,6 +96,7 @@ impl Entry {
             Entry::PageScaffold => "Bar obstruction",
             Entry::Buttons => "Sizes, states",
             Entry::Segments => "One of a set",
+            Entry::Switches => "On, off",
             Entry::Dialogs => "Alert, sheet",
             Entry::Scrolling => "Scrolled under",
             Entry::Icons => "1,322",
@@ -115,6 +119,7 @@ impl Entry {
             Entry::PageScaffold => CupertinoIcons::rectangle_grid_1x2(),
             Entry::Buttons => CupertinoIcons::capsule(),
             Entry::Segments => CupertinoIcons::rectangle_split_3x1(),
+            Entry::Switches => CupertinoIcons::power(),
             Entry::Dialogs => CupertinoIcons::exclamationmark_bubble(),
             Entry::Scrolling => CupertinoIcons::arrow_up_down(),
             Entry::Icons => CupertinoIcons::sparkles(),
@@ -137,6 +142,7 @@ impl Entry {
             Entry::PageScaffold => CupertinoColors::SYSTEM_INDIGO,
             Entry::Buttons => CupertinoColors::SYSTEM_GREEN,
             Entry::Segments => CupertinoColors::SYSTEM_YELLOW,
+            Entry::Switches => CupertinoColors::SYSTEM_GREEN,
             Entry::Dialogs => CupertinoColors::SYSTEM_ORANGE,
             Entry::Scrolling => CupertinoColors::SYSTEM_TEAL,
             Entry::Icons => CupertinoColors::SYSTEM_PINK,
@@ -174,6 +180,7 @@ impl Entry {
             Entry::PageScaffold => pages::scaffold::body(app, context),
             Entry::Buttons => pages::buttons::body(app, context),
             Entry::Segments => pages::segments::body(app, context),
+            Entry::Switches => pages::switches::body(app, context),
             Entry::Dialogs => pages::dialogs::body(app, context),
             Entry::Scrolling => pages::scrolling::body(app, context),
             Entry::Icons => pages::icons::body(app, context),
