@@ -84,6 +84,20 @@ fn can_import(adapter: &wgpu::Adapter) -> bool {
             .all(|extension| capabilities.supports_extension(extension))
 }
 
+/// The size of the blocks the device takes memory from the system in: what Impeller asks of its
+/// Vulkan allocator (`allocator_vk.cc`, `preferredLargeHeapBlockSize`).
+const MEMORY_BLOCK_BYTES: u64 = 4 * 1024 * 1024;
+
+/// How the device takes memory from the system: in blocks of one small size, and a block of its
+/// own for anything larger, so a texture that comes costs an allocation of its size. wgpu's
+/// default takes 128 to 256 MB at a time and gives a block back as it empties: where a frame's
+/// lasting textures happened to fill the first block exactly, the full-size texture that comes
+/// and goes with a backdrop blur cost a Pixel 2 XL a 256 MB allocation, 134 to 225 ms, each time
+/// (measured on a WaOS program's device, which opened the same way).
+const MEMORY_HINTS: wgpu::MemoryHints = wgpu::MemoryHints::Manual {
+    suballocated_device_memory_block_size: MEMORY_BLOCK_BYTES..MEMORY_BLOCK_BYTES,
+};
+
 /// A device on `adapter` with its own limits, the features valo uses that it offers, and the
 /// import's extensions.
 fn open(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue), String> {
@@ -91,6 +105,7 @@ fn open(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue), String> 
         label: Some("waft"),
         required_features: adapter.features() & WANTED_FEATURES,
         required_limits: adapter.limits(),
+        memory_hints: MEMORY_HINTS,
         ..Default::default()
     };
     // SAFETY: the features and limits are the adapter's own, the callback only adds extensions the
