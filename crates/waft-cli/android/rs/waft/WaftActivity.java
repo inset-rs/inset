@@ -29,7 +29,9 @@ import android.view.ViewGroup;
  *
  * <p>The native methods are registered by the app's native code when it starts
  * ({@code RegisterNatives}), since NativeActivity loads the app's library itself, where the
- * runtime would not look for it by name. waft-cli compiles this class into every Android app.
+ * runtime would not look for it by name: once for the process, on this class found by its name,
+ * so every activity of this class, or of a subclass of it, calls the same ones. waft-cli compiles
+ * this class into every Android app.
  */
 public class WaftActivity extends NativeActivity {
     private WaftTextInput textInput;

@@ -1,15 +1,16 @@
 //! Being opened: an intent to view (`ACTION_VIEW`) asks to open its data, at launch or while the app
 //! runs (`intents`): a `content://` document, opened as a picked one is
 //! (`file_dialogs::open_document`), to write where the intent grants writing; a `file://` URI as its
-//! path; any other URI as a link. The intent is read on the activity's thread, which only records
-//! its URI; the loop opens the documents on the app's thread.
+//! path; any other URI as a link. Where the intent is read, which for one that reaches the running
+//! app is Android's main thread, only its URI is recorded; the loop opens the documents on the
+//! app's thread, through the application, as any context opens a document.
 
-use android_activity::AndroidApp;
 use jni::objects::JObject;
 use jni::sys::jint;
 use jni::{Env, jni_sig, jni_str};
 use waft_embedder::{OpenRequest, PickedFile, file_uri_path};
 
+use crate::application::Application;
 use crate::file_dialogs::{open_document, string};
 use crate::log::warn_to_log;
 
@@ -27,12 +28,12 @@ pub(crate) struct Viewed {
 
 /// The files and links intents to view ask the app to open.
 pub(crate) struct OpenRequests {
-    app: AndroidApp,
+    application: Application,
 }
 
 impl OpenRequests {
-    pub(crate) fn new(app: AndroidApp) -> OpenRequests {
-        OpenRequests { app }
+    pub(crate) fn new(application: Application) -> OpenRequests {
+        OpenRequests { application }
     }
 
     /// What the intents to view that arrived ask to open; `None` when nothing.
@@ -56,9 +57,9 @@ impl OpenRequests {
     fn open(&self, viewed: &Viewed) -> Option<PickedFile> {
         let written = viewed
             .writable
-            .then(|| open_document(&self.app, &viewed.uri, true).ok())
+            .then(|| open_document(&self.application, &viewed.uri, true).ok())
             .flatten();
-        match written.map_or_else(|| open_document(&self.app, &viewed.uri, false), Ok) {
+        match written.map_or_else(|| open_document(&self.application, &viewed.uri, false), Ok) {
             Ok(file) => Some(file),
             Err(error) => {
                 warn_to_log!("waft: {} could not be opened: {error}", viewed.uri);

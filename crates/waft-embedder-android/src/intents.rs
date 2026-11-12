@@ -1,32 +1,32 @@
-//! The intents that reach the activity: the one it started with, and each one Waft's activity hands
-//! on from `onNewIntent` (`NativeActivity` keeps it to itself). Each is read on the activity's
-//! thread into what it asks of the app: files and links to open (`open_requests`), or a tap on one
-//! of the app's notifications (`notifications`); other intents ask nothing. Under an activity that is
-//! not Waft's, only the intent the activity started with comes.
+//! The intents that reach an activity: the one it started with, and each one Waft's activity hands
+//! on from `onNewIntent` (`NativeActivity` keeps it to itself). Each is read where it arrives, the
+//! one an activity started with on the app's thread and a later one on Android's main thread, into
+//! what it asks of the app: files and links to open (`open_requests`), or a tap on one of the app's
+//! notifications (`notifications`); other intents ask nothing. Under an activity that is not
+//! Waft's, only the intent the activity started with comes.
 //!
-//! What an intent asks is set down and the loop woken; the loop hands it on once the client is there,
-//! so the intent the activity started with waits for the app to start.
+//! What an intent asks is asked of the app, whichever activity it reached: it is set down in one
+//! queue and the app's loop woken; the loop hands it on once the client is there, so the intent an
+//! activity started with waits for the app to start.
 
 // JNI hands the native method raw arguments; that is the `unsafe` here.
 #![allow(unsafe_code)]
 
-use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
+use std::sync::{LazyLock, Mutex, MutexGuard, Once, PoisonError};
 
-use android_activity::{AndroidApp, AndroidAppWaker};
 use jni::errors::LogErrorAndDefault;
 use jni::objects::JObject;
 use jni::{Env, EnvUnowned, NativeMethod, jni_sig, jni_str};
 use waft_embedder::NotificationActivation;
 
-use crate::activity::with_activity;
+use crate::activity::{Activity, WAFT_ACTIVITY};
+use crate::application::Application;
 use crate::log::warn_to_log;
+use crate::loop_waker::wake_app_loop;
 use crate::open_requests::{self, Viewed};
 
 /// What the intents that arrived ask, not yet handed on.
 static ARRIVED: LazyLock<Mutex<Arrived>> = LazyLock::new(Mutex::default);
-/// Wakes the loop when an intent arrives: the loop of the activity that set it last, since Android
-/// starts another activity in the same process once one is finished.
-static WAKER: Mutex<Option<AndroidAppWaker>> = Mutex::new(None);
 
 /// What the intents that arrived since the loop last looked ask of the app.
 #[derive(Default)]
@@ -37,15 +37,20 @@ pub(crate) struct Arrived {
     pub(crate) activations: Vec<NotificationActivation>,
 }
 
-/// Hears the intents that reach the activity from now on, and reads the one it started with.
-pub(crate) fn hear(app: &AndroidApp) {
-    *locked(&WAKER) = Some(app.create_waker());
-    if let Err(error) = with_activity(app, hear_new_intents) {
-        clear_exception(app);
-        warn_to_log!("waft: intents that reach the running app are not heard: {error}");
-    }
-    if let Err(error) = with_activity(app, record_launch_intent) {
-        clear_exception(app);
+/// Hears the intents that reach Waft's activities from now on.
+pub(crate) fn hear(application: &Application) {
+    static REGISTERED: Once = Once::new();
+    REGISTERED.call_once(|| {
+        if let Err(error) = hear_new_intents(application) {
+            warn_to_log!("waft: intents that reach the running app are not heard: {error}");
+        }
+    });
+}
+
+/// Reads the intent `activity` started with.
+pub(crate) fn read_launch_intent(activity: &Activity) {
+    if let Err(error) = activity.with(record_launch_intent) {
+        activity.clear_exception();
         warn_to_log!("waft: the intent the app started with could not be read: {error}");
     }
 }
@@ -55,9 +60,8 @@ pub(crate) fn take() -> Arrived {
     std::mem::take(&mut *locked(&ARRIVED))
 }
 
-/// Registers `WaftActivity.onIntent`, which the activity calls from `onNewIntent`.
-fn hear_new_intents(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Result<()> {
-    let class = env.get_object_class(activity)?;
+/// Registers `WaftActivity.onIntent`, which an activity calls from `onNewIntent`.
+fn hear_new_intents(application: &Application) -> jni::errors::Result<()> {
     let method = [
         // SAFETY: `on_intent` takes the arguments `(Landroid/content/Intent;)V` names, as an
         // instance method's native function does.
@@ -70,7 +74,7 @@ fn hear_new_intents(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::R
         },
     ];
     // SAFETY: the method's function matches its signature, above.
-    unsafe { env.register_native_methods(&class, &method) }
+    unsafe { application.register_native_methods(WAFT_ACTIVITY, &method) }
 }
 
 fn record_launch_intent(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Result<()> {
@@ -85,7 +89,7 @@ fn record_launch_intent(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::error
     record(env, activity, &intent)
 }
 
-/// What `WaftActivity.onNewIntent` hands on, on the activity's thread.
+/// What `WaftActivity.onNewIntent` hands on, on Android's main thread.
 extern "system" fn on_intent<'local>(
     mut env: EnvUnowned<'local>,
     activity: JObject<'local>,
@@ -93,9 +97,7 @@ extern "system" fn on_intent<'local>(
 ) {
     env.with_env(|env| -> jni::errors::Result<()> {
         record(env, &activity, &intent)?;
-        if let Some(waker) = locked(&WAKER).as_ref() {
-            waker.wake();
-        }
+        wake_app_loop();
         Ok(())
     })
     .resolve::<LogErrorAndDefault>();
@@ -116,13 +118,6 @@ fn record(
         locked(&ARRIVED).activations.push(activation);
     }
     Ok(())
-}
-
-fn clear_exception(app: &AndroidApp) {
-    let _ = with_activity(app, |env, _| {
-        env.exception_clear();
-        Ok(())
-    });
 }
 
 fn locked<T>(shared: &Mutex<T>) -> MutexGuard<'_, T> {

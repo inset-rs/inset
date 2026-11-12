@@ -1,8 +1,17 @@
-//! The host's [`View`]: the activity's window as the framework sees it.
+//! The host's [`View`]: an activity's window as the framework sees it.
 //!
-//! One activity has one window, so the host has one view, and it outlives the windows the
-//! system hands out: the framework keeps its tree and its last picture while the app is in
+//! Each activity has one window, which is one view, and the view outlives the windows the system
+//! hands the activity: the framework keeps its tree and its last picture while the activity is in
 //! the background, and the picture is presented again on the window that comes back.
+//!
+//! What is one window's is kept here, by view, and nowhere for the app: the window and its size,
+//! what the system covers of it, the rectangle its content was laid out in, its picture, its text
+//! input, and the activity it is of. A later editor must keep it so: the loop reaches a view
+//! through the registry (`views.rs`) by the id an event carries, and what it finds there must be
+//! that window's and no other's.
+//!
+//! While the view has no window it holds no buffers: what its picture was drawn into goes with the
+//! window (`picture.rs`), and the scene it kept is drawn again into new ones when a window arrives.
 
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
@@ -13,20 +22,28 @@ use waft_embedder::{
     ViewFocusDirection, ViewFocusState, ViewHost, ViewId, ViewMetrics, ViewPadding,
 };
 
+use crate::activity::Activity;
 use crate::composition::SurfaceControlCompositor;
 use crate::gpu::Gpu;
 use crate::picture::ViewPicture;
 use crate::text_input::AndroidTextInput;
 use crate::window_insets::WindowInsets;
 
-/// The one view the activity has.
-pub(crate) const VIEW: ViewId = ViewId(0);
-
 pub(crate) struct AndroidView {
+    id: ViewId,
+    /// The activity whose window the view is.
+    activity: Activity,
+    /// The window, while the system gives the activity one.
+    window: RefCell<Option<NativeWindow>>,
+    /// What the system covers of the window, as its insets listener last told
+    /// (`window_insets.rs`): none before it told any, and never any under an activity that is not
+    /// Waft's.
+    window_insets: Cell<Option<WindowInsets>>,
+    /// The rectangle the activity laid its content out in, left, top, right and bottom, as the
+    /// system last told: what is known of the system's bars until the insets are told.
+    content_rect: Cell<[i32; 4]>,
     /// How the picture reaches the screen (`picture.rs`).
     picture: RefCell<ViewPicture>,
-    /// The renderer's image store, on the device the picture is drawn with.
-    images: valo::ImageContext,
     metrics: Cell<ViewMetrics>,
     /// What a frame starts from.
     clear: valo::Color,
@@ -41,20 +58,25 @@ pub(crate) struct AndroidView {
 }
 
 impl AndroidView {
-    /// A view with no window yet: it draws nothing until the system gives one. Its picture is a
-    /// composition layer's content on `compositor`, where there is one, and its text is typed
-    /// through `text_input`, where there is one.
+    /// The view numbered `id` that `activity`'s window is, with no window yet: it draws nothing
+    /// until the system gives one. Its picture is a composition layer's content on `compositor`,
+    /// where there is one, and its text is typed through `text_input`, where there is one.
     pub(crate) fn new(
+        id: ViewId,
+        activity: Activity,
         gpu: &Gpu,
         compositor: Option<&SurfaceControlCompositor>,
         text_input: Option<AndroidTextInput>,
     ) -> AndroidView {
         let mut context = valo::Context::new(gpu.device.clone(), gpu.queue.clone());
         context.set_hide_missing_glyphs(true);
-        let images = context.image_context();
         AndroidView {
-            picture: RefCell::new(ViewPicture::new(gpu, compositor, context)),
-            images,
+            id,
+            activity,
+            window: RefCell::new(None),
+            window_insets: Cell::new(None),
+            content_rect: Cell::new([0; 4]),
+            picture: RefCell::new(ViewPicture::new(id, gpu, compositor, context)),
             metrics: Cell::new(ViewMetrics::default()),
             clear: valo::Color::WHITE,
             latest: RefCell::new(None),
@@ -63,31 +85,55 @@ impl AndroidView {
         }
     }
 
-    /// The renderer's image store, for the images decoded on this device.
-    pub(crate) fn image_context(&self) -> valo::ImageContext {
-        self.images.clone()
+    /// The activity whose window the view is.
+    pub(crate) fn activity(&self) -> &Activity {
+        &self.activity
     }
 
-    /// The system gave the activity a window: the picture reaches it, owed whatever the framework
+    /// Whether the system gives the view a window now: a frame is drawn for no other.
+    pub(crate) fn has_window(&self) -> bool {
+        self.window.borrow().is_some()
+    }
+
+    /// The system gave the activity `window`: the picture reaches it, owed whatever the framework
     /// last drew.
-    pub(crate) fn window_arrived(&self, gpu: &Gpu, window: &NativeWindow, size: [u32; 2]) {
-        let arrived = self.picture.borrow_mut().window_arrived(gpu, window, size);
+    pub(crate) fn window_arrived(&self, gpu: &Gpu, window: NativeWindow) {
+        let arrived = self
+            .picture
+            .borrow_mut()
+            .window_arrived(gpu, &window, size_of(&window));
         if let Err(error) = arrived {
             crate::log::warn_to_log!("no picture on the window given: {error}");
         }
+        *self.window.borrow_mut() = Some(window);
         self.on_screen.set(false);
     }
 
-    /// The system took the window away: the view keeps its picture and owes it.
+    /// The system took the window away: the view keeps the scene it showed and owes it, and
+    /// nothing it was drawn into.
     pub(crate) fn window_gone(&self) {
         self.picture.borrow_mut().window_gone();
+        self.window.borrow_mut().take();
         self.on_screen.set(false);
     }
 
     /// The window changed size: the picture follows it, and whatever it showed is gone.
-    pub(crate) fn resized(&self, size: [u32; 2]) {
+    pub(crate) fn resized(&self) {
+        let Some(size) = self.window.borrow().as_ref().map(size_of) else {
+            return;
+        };
         self.picture.borrow_mut().resized(size);
         self.on_screen.set(false);
+    }
+
+    /// Android applied `insets` to the window.
+    pub(crate) fn set_window_insets(&self, insets: WindowInsets) {
+        self.window_insets.set(Some(insets));
+    }
+
+    /// The activity laid its content out in `rect`, its left, top, right and bottom.
+    pub(crate) fn set_content_rect(&self, rect: [i32; 4]) {
+        self.content_rect.set(rect);
     }
 
     /// Presents the latest picture again if it is not on the screen: an owed frame, paid
@@ -112,20 +158,45 @@ impl AndroidView {
         self.on_screen.set(drawn.is_ok());
     }
 
-    /// Takes the metrics the system now reports and answers whether they changed.
-    pub(crate) fn refresh_metrics(&self, geometry: Geometry) -> bool {
-        let metrics = geometry.metrics();
+    /// Takes the metrics the system now reports of the window, at `density` pixels per logical
+    /// pixel on `screen`, and answers whether they changed.
+    pub(crate) fn refresh_metrics(&self, density: f64, screen: Option<ScreenId>) -> bool {
+        let metrics = self.geometry(density, screen).metrics();
         if self.metrics.get() == metrics {
             return false;
         }
         self.metrics.set(metrics);
         true
     }
+
+    /// What the system says about the window now; no size while there is no window.
+    fn geometry(&self, density: f64, screen: Option<ScreenId>) -> Geometry {
+        let size = self.window.borrow().as_ref().map_or([0, 0], size_of);
+        Geometry {
+            size,
+            density,
+            insets: self.insets_of(size),
+            screen,
+        }
+    }
+
+    /// What the system covers of the window of `size`: what its insets listener told, and until
+    /// it tells, or where it never does, what the content rect leaves.
+    fn insets_of(&self, size: [u32; 2]) -> WindowInsets {
+        self.window_insets
+            .get()
+            .unwrap_or_else(|| WindowInsets::around_content(size, self.content_rect.get()))
+    }
+}
+
+/// The window's pixels, as the system reports them now.
+fn size_of(window: &NativeWindow) -> [u32; 2] {
+    [window.width() as u32, window.height() as u32]
 }
 
 impl View for AndroidView {
     fn id(&self) -> ViewId {
-        VIEW
+        self.id
     }
 
     fn metrics(&self) -> ViewMetrics {
@@ -167,15 +238,15 @@ impl ViewHost for AndroidView {
 
 /// What the system says about the window this turn.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Geometry {
+struct Geometry {
     /// The window's pixels.
-    pub(crate) size: [u32; 2],
+    size: [u32; 2],
     /// Pixels per logical pixel, from the configuration's density.
-    pub(crate) density: f64,
+    density: f64,
     /// What the system covers of the window.
-    pub(crate) insets: WindowInsets,
+    insets: WindowInsets,
     /// The screen the window is on, once the system has described it.
-    pub(crate) screen: Option<ScreenId>,
+    screen: Option<ScreenId>,
 }
 
 impl Geometry {

@@ -9,6 +9,13 @@
 //! display's refresh — is this crate's, so the host answers the framework in dart:ui's
 //! terms rather than a desktop windowing library's.
 //!
+//! The host is shaped for an app that has several activities, each a view of it, though the glue
+//! runs one today. The glue's own types stay in the loop that polls it (`host`) and where the
+//! host's handles are made from them (`activity`, `loop_waker`); a call into Java goes through
+//! the process's application or one activity (`application`, `activity`); what Java tells the app
+//! carries the view it is about (`text_input`, `window_insets`); and the views are a registry by
+//! id (`views`), each holding what is its window's (`view`).
+//!
 //! Elsewhere the crate still builds, with no host in it, so the workspace's tests cover
 //! the input tables on any machine.
 
@@ -22,6 +29,8 @@ pub use pointer::{buttons_of, device_id, kind_of_tool, scroll_delta};
 mod activity;
 #[cfg(target_os = "android")]
 mod answer;
+#[cfg(target_os = "android")]
+mod application;
 #[cfg(target_os = "android")]
 mod chrome;
 #[cfg(target_os = "android")]
@@ -55,6 +64,8 @@ mod intents;
 #[cfg(target_os = "android")]
 mod log;
 #[cfg(target_os = "android")]
+mod loop_waker;
+#[cfg(target_os = "android")]
 mod notifications;
 #[cfg(target_os = "android")]
 mod open_requests;
@@ -76,6 +87,8 @@ mod surface_control;
 mod text_input;
 #[cfg(target_os = "android")]
 mod view;
+#[cfg(target_os = "android")]
+mod views;
 #[cfg(target_os = "android")]
 mod vsync;
 #[cfg(target_os = "android")]

@@ -7,20 +7,19 @@
 //! from the window manager's largest window, as Flutter's do, from API 30, which has it; before,
 //! the screen is the display's real size and the bars are not known.
 
-use android_activity::AndroidApp;
 use jni::objects::{JObject, JString, JValue};
 use jni::{Env, jni_sig, jni_str};
 use waft_embedder::{Rect, Screen, ScreenId};
 
-use crate::activity::{device_api_level, with_activity};
+use crate::activity::{Activity, device_api_level};
 
 /// The first release whose window manager reports the largest window and its insets.
 const MAXIMUM_WINDOW_METRICS: i32 = 30;
 
-/// The screen the activity is on, at `scale`, the configuration's density, which every view's
+/// The screen `activity` is on, at `scale`, the configuration's density, which every view's
 /// pixel ratio is; `None`, said in the log, where the system would not say.
-pub(crate) fn read_screen(app: &AndroidApp, scale: f64) -> Option<Screen> {
-    match with_activity(app, |env, activity| screen_of(env, activity, scale)) {
+pub(crate) fn read_screen(activity: &Activity, scale: f64) -> Option<Screen> {
+    match activity.with(|env, activity| screen_of(env, activity, scale)) {
         Ok(screen) => Some(screen),
         Err(error) => {
             crate::log::warn_to_log!("the system would not describe its display: {error:?}");

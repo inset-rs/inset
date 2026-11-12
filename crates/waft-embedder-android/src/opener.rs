@@ -13,17 +13,22 @@
 //! scheme, `None`, unless an app was found.
 //!
 //! Each call starts the intent from the app's thread and answers at once.
+//!
+//! What the package declares and which apps take a link are the application's to answer. The
+//! intent is started from an activity, so what opens lands on that activity's task, as a start
+//! from the application, which must ask for a task of its own, would not: the activity the opener
+//! was made with, the app's one, `Opener` naming no view.
 
 use std::path::Path;
 
-use android_activity::AndroidApp;
 use jni::objects::{JObject, JValue};
 use jni::strings::JNIStr;
 use jni::sys::jint;
 use jni::{Env, jni_sig, jni_str};
 use waft_embedder::{OpenError, OpenFuture, Opener};
 
-use crate::activity::{device_api_level, with_activity};
+use crate::activity::{Activity, device_api_level};
+use crate::application::Application;
 use crate::file_dialogs::string;
 
 /// Android 11, from which an app sees only the apps its manifest's `<queries>` names.
@@ -39,9 +44,11 @@ const QUERIED_SCHEMES_KEY: &str = "rs.waft.queried_schemes";
 /// The type of a file whose extension names none.
 const ANY_BYTES: &str = "application/octet-stream";
 
-/// Intents to view, started from the activity.
+/// Intents to view, started from an activity.
 pub(crate) struct IntentOpener {
-    app: AndroidApp,
+    application: Application,
+    /// The activity each intent is started from.
+    activity: Activity,
     /// The authority of Waft's file provider, where the app declares it.
     files: Option<String>,
     /// The schemes the manifest's `<queries>` names.
@@ -49,19 +56,17 @@ pub(crate) struct IntentOpener {
 }
 
 impl IntentOpener {
-    pub(crate) fn new(app: AndroidApp) -> IntentOpener {
-        let declared = with_activity(&app, |env, activity| {
-            Ok((
-                file_provider(env, activity)?,
-                queried_schemes(env, activity)?,
-            ))
+    pub(crate) fn new(application: Application, activity: Activity) -> IntentOpener {
+        let declared = application.with(|env, context| {
+            Ok((file_provider(env, context)?, queried_schemes(env, context)?))
         });
         let (files, queried_schemes) = declared.unwrap_or_else(|_| {
-            clear_exception(&app);
+            application.clear_exception();
             (None, Vec::new())
         });
         IntentOpener {
-            app,
+            application,
+            activity,
             files,
             queried_schemes,
         }
@@ -72,7 +77,7 @@ impl IntentOpener {
         &self,
         intent: impl for<'local> FnOnce(&mut Env<'local>) -> jni::errors::Result<JObject<'local>>,
     ) -> Result<(), OpenError> {
-        let started = with_activity(&self.app, |env, activity| {
+        let started = self.activity.with(|env, activity| {
             let started = intent(env).and_then(|intent| {
                 env.call_method(
                     activity,
@@ -85,17 +90,17 @@ impl IntentOpener {
             Ok(started.map_err(|error| opening_error(env, &error)))
         });
         started.unwrap_or_else(|error| {
-            clear_exception(&self.app);
+            self.activity.clear_exception();
             Err(OpenError::Failed(error.to_string()))
         })
     }
 
     /// Whether some app takes the link, as `resolveActivity` sees it.
     fn resolves(&self, link: &str) -> Option<bool> {
-        let resolved = with_activity(&self.app, |env, activity| {
+        let resolved = self.application.with(|env, context| {
             let uri = parse(env, link)?;
             let intent = view_intent(env, &uri)?;
-            let manager = package_manager(env, activity)?;
+            let manager = package_manager(env, context)?;
             let info = env
                 .call_method(
                     &manager,
@@ -109,7 +114,7 @@ impl IntentOpener {
         match resolved {
             Ok(resolved) => Some(resolved),
             Err(_) => {
-                clear_exception(&self.app);
+                self.application.clear_exception();
                 None
             }
         }
@@ -257,10 +262,10 @@ fn mime_type_of(env: &mut Env<'_>, extension: &str) -> jni::errors::Result<Optio
 }
 
 /// The authority of Waft's file provider, where the manifest declares it.
-fn file_provider(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Result<Option<String>> {
+fn file_provider(env: &mut Env<'_>, context: &JObject<'_>) -> jni::errors::Result<Option<String>> {
     let package = env
         .call_method(
-            activity,
+            context,
             jni_str!("getPackageName"),
             jni_sig!("()Ljava/lang/String;"),
             &[],
@@ -270,7 +275,7 @@ fn file_provider(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Resu
         return Ok(None);
     };
     let authority = format!("{package}.waft.files");
-    let manager = package_manager(env, activity)?;
+    let manager = package_manager(env, context)?;
     let name = env.new_string(&authority)?;
     let provider = env
         .call_method(
@@ -284,11 +289,11 @@ fn file_provider(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Resu
 }
 
 /// The schemes the application's meta-data says the manifest's `<queries>` names.
-fn queried_schemes(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Result<Vec<String>> {
-    let manager = package_manager(env, activity)?;
+fn queried_schemes(env: &mut Env<'_>, context: &JObject<'_>) -> jni::errors::Result<Vec<String>> {
+    let manager = package_manager(env, context)?;
     let package = env
         .call_method(
-            activity,
+            context,
             jni_str!("getPackageName"),
             jni_sig!("()Ljava/lang/String;"),
             &[],
@@ -324,10 +329,10 @@ fn queried_schemes(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Re
 
 fn package_manager<'local>(
     env: &mut Env<'local>,
-    activity: &JObject<'_>,
+    context: &JObject<'_>,
 ) -> jni::errors::Result<JObject<'local>> {
     env.call_method(
-        activity,
+        context,
         jni_str!("getPackageManager"),
         jni_sig!("()Landroid/content/pm/PackageManager;"),
         &[],
@@ -378,13 +383,6 @@ fn opening_error(env: &mut Env<'_>, error: &jni::errors::Error) -> OpenError {
             OpenError::Failed(error.to_string())
         }
     }
-}
-
-fn clear_exception(app: &AndroidApp) {
-    let _ = with_activity(app, |env, _| {
-        env.exception_clear();
-        Ok(())
-    });
 }
 
 fn failed(reason: String) -> OpenFuture {

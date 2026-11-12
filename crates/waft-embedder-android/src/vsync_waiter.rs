@@ -9,17 +9,18 @@
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
-use android_activity::AndroidAppWaker;
 use waft_embedder::{ScreenId, VsyncObserver, VsyncWaiter};
+
+use crate::loop_waker::LoopWaker;
 
 /// The waits not yet served, shared by the waiter any thread holds and the loop.
 pub(crate) struct Waits {
     observers: Mutex<Vec<Weak<dyn VsyncObserver>>>,
-    waker: AndroidAppWaker,
+    waker: LoopWaker,
 }
 
 impl Waits {
-    pub(crate) fn new(waker: AndroidAppWaker) -> Arc<Waits> {
+    pub(crate) fn new(waker: LoopWaker) -> Arc<Waits> {
         Arc::new(Waits {
             observers: Mutex::new(Vec::new()),
             waker,

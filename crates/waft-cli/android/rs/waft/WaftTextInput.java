@@ -42,12 +42,21 @@ import java.util.Objects;
  * key its framework left. A key the keyboard takes, it edits through the connection instead, and
  * neither the native code nor this view sees it.
  *
- * <p>The native methods are registered by the app's native code when it starts. waft-cli compiles
- * this class into every Android app.
+ * <p>The app's native code is one for the process, whichever activities it has, and each
+ * activity's window is one of its views: the native code gives this the number of its view
+ * ({@link #attach}) before it starts a field, and everything it is told carries it, as the Java
+ * side of Flutter's embedding carries its shell's id into each native call ({@code
+ * FlutterJNI.nativeShellHolderId}). The native methods are registered by the app's native code
+ * before it attaches a view. waft-cli compiles this class into every Android app.
  */
 final class WaftTextInput extends View {
+    /** No view: the native code has not attached this yet. */
+    private static final long NO_VIEW = -1;
+
     private final InputMethodManager inputMethods;
     private final Handler mainThread = new Handler(Looper.getMainLooper());
+    /** The number the native code gave the view this types into; the main thread's alone. */
+    private long view = NO_VIEW;
     /** The field's text, its selection and its composing region; the main thread's alone. */
     private final SpannableStringBuilder editable = new SpannableStringBuilder();
     /** Sets the editable's composing region, which only a connection can. */
@@ -77,6 +86,14 @@ final class WaftTextInput extends View {
                     }
                 };
         lines = DynamicLayout.Builder.obtain(editable, new TextPaint(), Integer.MAX_VALUE).build();
+    }
+
+    /**
+     * What the keyboard does here is told as done to the view numbered {@code view} from now on.
+     * Called by the app's native code, from its thread, before it starts a field.
+     */
+    void attach(long view) {
+        mainThread.post(() -> this.view = view);
     }
 
     /**
@@ -183,6 +200,7 @@ final class WaftTextInput extends View {
         if (field != null && !now.equals(known)) {
             known = now;
             onEditingState(
+                    view,
                     now.text,
                     now.selectionStart,
                     now.selectionEnd,
@@ -260,7 +278,7 @@ final class WaftTextInput extends View {
             case KeyEvent.KEYCODE_ENTER:
             case KeyEvent.KEYCODE_NUMPAD_ENTER:
                 if ((field.inputType & InputType.TYPE_TEXT_FLAG_MULTI_LINE) == 0) {
-                    onEditorAction(field.imeOptions & EditorInfo.IME_MASK_ACTION);
+                    onEditorAction(view, field.imeOptions & EditorInfo.IME_MASK_ACTION);
                     return true;
                 }
                 return insert(event.getUnicodeChar());
@@ -352,12 +370,23 @@ final class WaftTextInput extends View {
         return after == BreakIterator.DONE ? editable.length() : after;
     }
 
-    /** Hands the app's native code the field's value the keyboard changed; registered by it. */
+    /**
+     * Hands the app's native code the value the keyboard changed, of the field of the view numbered
+     * {@code view}; registered by it.
+     */
     private native void onEditingState(
-            String text, int selectionStart, int selectionEnd, int composingStart, int composingEnd);
+            long view,
+            String text,
+            int selectionStart,
+            int selectionEnd,
+            int composingStart,
+            int composingEnd);
 
-    /** Hands the app's native code an action key the user pressed; registered by it. */
-    private native void onEditorAction(int action);
+    /**
+     * Hands the app's native code an action key the user pressed in the field of the view numbered
+     * {@code view}; registered by it.
+     */
+    private native void onEditorAction(long view, int action);
 
     /**
      * The connection a keyboard edits the field through: the platform's own over the editable, its
@@ -432,7 +461,7 @@ final class WaftTextInput extends View {
         @Override
         public boolean performEditorAction(int action) {
             if (field != null) {
-                onEditorAction(action);
+                onEditorAction(view, action);
             }
             return true;
         }

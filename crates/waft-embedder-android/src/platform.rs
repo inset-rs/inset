@@ -1,8 +1,14 @@
 //! The host capability the framework holds: [`Platform`] and what it hands out.
 //!
-//! A request from the framework only records what was asked for and wakes the activity's
-//! looper; the loop serves it on its next pass, since the window, the keyboard and the
-//! surface all belong to that thread.
+//! A request from the framework only records what was asked for and wakes the app's loop; the
+//! loop serves it on its next pass, since the windows, the keyboard and the surfaces all belong
+//! to that thread.
+//!
+//! The platform is the app's, not an activity's: its views are the registry's (`views.rs`), each
+//! an activity's window, and what it hands out goes through the application wherever any context
+//! answers. Where Waft's interface names no view, the system bars' style, the task's description,
+//! opening a link, a file dialog's and a permission question's activity, the call goes to the one
+//! activity the platform was made with.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -10,7 +16,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use android_activity::AndroidAppWaker;
 use waft_embedder::{
     Brightness, Clipboard, Compositor, Dispatcher, FileDialogs, FontSource, HardwareBuffer,
     HardwareBufferAllocator, ImageCodec, ImageCodecFuture, ImageDecodeError, ImageFrame,
@@ -18,21 +23,24 @@ use waft_embedder::{
     Screens, SystemChrome, SystemFontSource, TargetPlatform, ViewRef,
 };
 
+use crate::activity::Activity;
+use crate::application::Application;
 use crate::chrome::AndroidChrome;
 use crate::clipboard::AndroidClipboard;
 use crate::composition::SurfaceControlCompositor;
 use crate::file_dialogs::DocumentPickers;
 use crate::gpu::Gpu;
 use crate::hardware_buffers::GrallocAllocator;
+use crate::loop_waker::LoopWaker;
 use crate::notifications::AndroidNotifications;
 use crate::opener::IntentOpener;
-use crate::view::{AndroidView, VIEW};
+use crate::views::Views;
 use crate::vsync_waiter::{ChoreographerWaiter, Waits};
 
 /// The long-lived host capability held by the application.
 pub struct AndroidPlatform {
-    pub(crate) view: Rc<AndroidView>,
-    pub(crate) frame_requested: Cell<bool>,
+    /// The app's views, and the frames they asked for (`views.rs`).
+    views: Rc<Views>,
     /// When the framework asked to be woken, shared with whatever thread asked.
     pub(crate) wakes: Arc<Wakes>,
     origin: Instant,
@@ -50,8 +58,10 @@ pub struct AndroidPlatform {
     compositor: Option<Arc<SurfaceControlCompositor>>,
     /// The system's allocator of the buffers the compositor shows (`hardware_buffers.rs`).
     hardware_buffer_allocator: Arc<GrallocAllocator>,
-    pub(crate) image_loader: RefCell<Option<valo_codec::ImageLoader>>,
-    pub(crate) images: RefCell<Option<valo::ImageContext>>,
+    /// The decoders of this build, decoding into `images`; none where they could not start.
+    image_loader: Option<valo_codec::ImageLoader>,
+    /// The renderer's image store, on the device every view draws with.
+    images: valo::ImageContext,
     chrome: AndroidChrome,
     pub(crate) clipboard: AndroidClipboard,
     /// The document pickers, where the activity is Waft's.
@@ -62,39 +72,42 @@ pub struct AndroidPlatform {
 }
 
 impl AndroidPlatform {
-    /// The platform of `app`, whose one view is `view`, drawn with `gpu`.
+    /// The platform of the app `application` is, whose views are `views`, drawn with `gpu`;
+    /// `waker` wakes the loop that serves it, and `activity` is the one that takes what names no
+    /// view.
     pub(crate) fn new(
-        view: Rc<AndroidView>,
-        app: &android_activity::AndroidApp,
+        views: Rc<Views>,
+        application: &Application,
+        activity: &Activity,
+        waker: LoopWaker,
         gpu: &Gpu,
         compositor: Option<Arc<SurfaceControlCompositor>>,
     ) -> AndroidPlatform {
-        let waker = app.create_waker();
+        let images = valo::ImageContext::new(gpu.device.clone(), gpu.queue.clone());
         AndroidPlatform {
-            view,
-            frame_requested: Cell::new(false),
+            views,
             wakes: Arc::new(Wakes {
                 timer_wakeup: Mutex::new(None),
                 wake_now_requested: AtomicBool::new(false),
-                waker,
+                waker: waker.clone(),
             }),
             origin: Instant::now(),
             brightness: Cell::new(Brightness::Light),
             locales: RefCell::new(Vec::new()),
             screen: RefCell::new(None),
             screen_id: Arc::new(Mutex::new(None)),
-            vsync_waits: Waits::new(app.create_waker()),
+            vsync_waits: Waits::new(waker),
             compositor,
             hardware_buffer_allocator: Arc::new(GrallocAllocator {
                 largest_side: gpu.device.limits().max_texture_dimension_2d,
             }),
-            image_loader: RefCell::new(None),
-            images: RefCell::new(None),
-            chrome: AndroidChrome::new(app.clone()),
-            clipboard: AndroidClipboard::new(app.clone()),
-            file_dialogs: DocumentPickers::new(app.clone()),
-            opener: IntentOpener::new(app.clone()),
-            notifications: AndroidNotifications::new(app.clone()),
+            image_loader: crate::images::loader(images.clone()),
+            images,
+            chrome: AndroidChrome::new(activity.clone()),
+            clipboard: AndroidClipboard::new(application.clone()),
+            file_dialogs: DocumentPickers::new(application.clone(), activity.clone()),
+            opener: IntentOpener::new(application.clone(), activity.clone()),
+            notifications: AndroidNotifications::new(application.clone(), activity.clone()),
         }
     }
 
@@ -102,10 +115,10 @@ impl AndroidPlatform {
         Instant::now().saturating_duration_since(self.origin)
     }
 
-    /// The renderer's image store, on the device the window draws with: an image made
+    /// The renderer's image store, on the device every view draws with: an image made
     /// through it is one `RawImage` shows.
     pub fn image_context(&self) -> Option<valo::ImageContext> {
-        self.images.borrow().clone()
+        Some(self.images.clone())
     }
 }
 
@@ -120,7 +133,7 @@ pub(crate) struct Wakes {
     timer_wakeup: Mutex<Option<Instant>>,
     /// A ready task asking for the framework to be woken.
     wake_now_requested: AtomicBool,
-    waker: AndroidAppWaker,
+    waker: LoopWaker,
 }
 
 impl Wakes {
@@ -175,9 +188,10 @@ impl Platform for AndroidPlatform {
         TargetPlatform::Android
     }
 
-    /// The activity's window is the one view: a frame of any other is no frame of the app's.
+    /// The request is the registry's to hold until the view has a window (`views.rs`); the loop
+    /// is woken for one that is news. A frame of a view that is not the app's is no frame.
     fn request_frame(&self, view: waft_embedder::ViewId) {
-        if view == VIEW && !self.frame_requested.replace(true) {
+        if self.views.request_frame(view) {
             self.wakes.waker.wake();
         }
     }
@@ -192,13 +206,14 @@ impl Platform for AndroidPlatform {
         })
     }
 
-    /// The activity's window, the one view the system gives the app.
+    /// The activities' windows, the views the system gives the app.
     fn views(&self) -> Vec<ViewRef> {
-        vec![Rc::clone(&self.view) as ViewRef]
+        let views = self.views.all();
+        views.into_iter().map(|view| view as ViewRef).collect()
     }
 
     fn view(&self, id: waft_embedder::ViewId) -> Option<ViewRef> {
-        (id == VIEW).then(|| Rc::clone(&self.view) as ViewRef)
+        self.views.get(id).map(|view| view as ViewRef)
     }
 
     /// The system's clipboard, as far as an app without Java code reaches it (`clipboard.rs`).
@@ -257,7 +272,7 @@ impl Platform for AndroidPlatform {
     }
 
     fn open_image_codec(&self, bytes: Arc<[u8]>) -> ImageCodecFuture {
-        let loader = self.image_loader.borrow().clone();
+        let loader = self.image_loader.clone();
         Box::pin(async move {
             if bytes.is_empty() {
                 return Err(ImageDecodeError::Empty);
@@ -281,15 +296,14 @@ impl Platform for AndroidPlatform {
     }
 
     fn import_pixels(&self, pixels: valo::PixelBuffer) -> Option<waft_embedder::Image> {
-        self.image_context()?.upload_pixels(pixels, false).ok()
+        self.images.upload_pixels(pixels, false).ok()
     }
 
     /// The buffer's texture on the device every view draws with, imported by valo; none where
     /// that device imports no hardware buffers.
     fn import_hardware_buffer(&self, buffer: &dyn HardwareBuffer) -> Option<waft_embedder::Image> {
-        let images = self.image_context()?;
-        let texture = crate::gpu_interop::import_texture(buffer, images.device())?;
-        images.import_texture(texture, false).ok()
+        let texture = crate::gpu_interop::import_texture(buffer, self.images.device())?;
+        self.images.import_texture(texture, false).ok()
     }
 
     /// A `VkImage` over the buffer's memory, on a device opened to import hardware buffers
@@ -328,7 +342,7 @@ impl Screens for AndroidPlatform {
 }
 
 /// The host's threads as any thread reaches them: a wake is a time the loop keeps and a
-/// wake of the activity's looper; work goes to a thread of its own.
+/// wake of the app's loop; work goes to a thread of its own.
 struct AndroidDispatcher {
     wakes: Arc<Wakes>,
 }

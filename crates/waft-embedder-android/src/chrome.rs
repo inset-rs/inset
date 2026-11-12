@@ -10,15 +10,17 @@
 //!
 //! Everything here is posted to the Java main thread, which is where a window and its
 //! decor view may be touched, so each call returns at once and the framework never waits.
+//!
+//! Both asks are one activity's: the bars' style is its window's, and the description its task's.
+//! `SystemChrome` names no view, so they go to the activity this was made with, the app's one.
 
-use android_activity::AndroidApp;
 use jni::objects::{JObject, JValue};
 use jni::{Env, jni_sig, jni_str};
 use waft_embedder::{
     ApplicationSwitcherDescription, Brightness, SystemChrome, SystemUiOverlayStyle,
 };
 
-use crate::activity::{device_api_level, with_activity};
+use crate::activity::{Activity, device_api_level};
 
 /// `View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR`, API 23: a light status bar, which is to say
 /// dark icons on it.
@@ -40,38 +42,34 @@ const BAR_CONTRAST: i32 = 29;
 /// bitmap.
 const TASK_ICON_BY_ID: i32 = 28;
 
-/// The system bars around the activity's window.
+/// The system bars around an activity's window, and its task in the switcher.
 pub(crate) struct AndroidChrome {
-    app: AndroidApp,
+    activity: Activity,
 }
 
 impl AndroidChrome {
-    pub(crate) fn new(app: AndroidApp) -> AndroidChrome {
-        AndroidChrome { app }
+    pub(crate) fn new(activity: Activity) -> AndroidChrome {
+        AndroidChrome { activity }
     }
 }
 
 impl SystemChrome for AndroidChrome {
     fn set_overlay_style(&self, style: &SystemUiOverlayStyle) {
         let style = *style;
-        on_the_activity(
-            &self.app,
-            "a style for the system bars",
-            move |env, activity| {
+        self.activity
+            .on_main_thread("a style for the system bars", move |env, activity| {
                 let window = window_of(env, activity)?;
                 paint_the_bars(env, &window, &style)?;
                 light_or_dark_icons(env, &window, &style)
-            },
-        );
+            });
     }
 
     fn set_application_switcher_description(&self, description: &ApplicationSwitcherDescription) {
         let description = description.clone();
-        on_the_activity(
-            &self.app,
-            "a description for the switcher",
-            move |env, activity| describe_the_task(env, activity, &description),
-        );
+        self.activity
+            .on_main_thread("a description for the switcher", move |env, activity| {
+                describe_the_task(env, activity, &description)
+            });
     }
 }
 
@@ -319,20 +317,4 @@ fn window_of<'local>(
         &[],
     )?
     .l()
-}
-
-/// Runs `work` on the Java main thread with the activity in hand, and says in the log
-/// whatever it turned out the system would not take.
-fn on_the_activity(
-    app: &AndroidApp,
-    what: &'static str,
-    work: impl FnOnce(&mut Env<'_>, &JObject<'_>) -> jni::errors::Result<()> + Send + 'static,
-) {
-    let app = app.clone();
-    let posted = app.clone();
-    posted.run_on_java_main_thread(Box::new(move || {
-        if let Err(error) = with_activity(&app, work) {
-            crate::log::warn_to_log!("the system would not take {what}: {error:?}");
-        }
-    }));
 }

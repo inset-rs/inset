@@ -9,67 +9,58 @@
 //! does not set it for them; an engine that never asks is why a Flutter app runs at 60 on
 //! a 120 panel.
 
-use android_activity::AndroidApp;
 use jni::objects::{JObject, JObjectArray, JValue};
-use jni::{jni_sig, jni_str};
+use jni::{Env, jni_sig, jni_str};
 
-use crate::activity::with_activity;
+use crate::activity::Activity;
 
-/// Asks the activity's window to run as fast as its display can, which is the fastest of
+/// Asks `activity`'s window to run as fast as its display can, which is the fastest of
 /// the modes the display reports. Window attributes belong to the Java main thread, so the
 /// work is posted there and this returns at once.
-pub(crate) fn follow_the_display(app: &AndroidApp) {
-    let app = app.clone();
-    let posted = app.clone();
-    posted.run_on_java_main_thread(Box::new(move || {
-        if let Err(error) = prefer_the_fastest_mode(&app) {
-            crate::log::warn_to_log!("the window would not take a refresh rate: {error:?}");
-        }
-    }));
+pub(crate) fn follow_the_display(activity: &Activity) {
+    activity.on_main_thread("a refresh rate for the window", prefer_the_fastest_mode);
 }
 
-fn prefer_the_fastest_mode(app: &AndroidApp) -> jni::errors::Result<()> {
-    with_activity(app, |env, activity| {
-        let window = env
-            .call_method(
-                activity,
-                jni_str!("getWindow"),
-                jni_sig!("()Landroid/view/Window;"),
-                &[],
-            )?
-            .l()?;
-        let Some(rate) = fastest_mode(env, &window)? else {
-            return Ok(());
-        };
-        let attributes = env
-            .call_method(
-                &window,
-                jni_str!("getAttributes"),
-                jni_sig!("()Landroid/view/WindowManager$LayoutParams;"),
-                &[],
-            )?
-            .l()?;
-        env.set_field(
-            &attributes,
-            jni_str!("preferredRefreshRate"),
-            jni_sig!("F"),
-            JValue::Float(rate),
-        )?;
-        // Setting the field alone changes nothing: the window takes its attributes again.
-        env.call_method(
+fn prefer_the_fastest_mode(env: &mut Env<'_>, activity: &JObject<'_>) -> jni::errors::Result<()> {
+    let window = env
+        .call_method(
+            activity,
+            jni_str!("getWindow"),
+            jni_sig!("()Landroid/view/Window;"),
+            &[],
+        )?
+        .l()?;
+    let Some(rate) = fastest_mode(env, &window)? else {
+        return Ok(());
+    };
+    let attributes = env
+        .call_method(
             &window,
-            jni_str!("setAttributes"),
-            jni_sig!("(Landroid/view/WindowManager$LayoutParams;)V"),
-            &[JValue::Object(&attributes)],
-        )?;
-        Ok(())
-    })
+            jni_str!("getAttributes"),
+            jni_sig!("()Landroid/view/WindowManager$LayoutParams;"),
+            &[],
+        )?
+        .l()?;
+    env.set_field(
+        &attributes,
+        jni_str!("preferredRefreshRate"),
+        jni_sig!("F"),
+        JValue::Float(rate),
+    )?;
+    // Setting the field alone changes nothing: the window takes its attributes again.
+    env.call_method(
+        &window,
+        jni_str!("setAttributes"),
+        jni_sig!("(Landroid/view/WindowManager$LayoutParams;)V"),
+        &[JValue::Object(&attributes)],
+    )?;
+    Ok(())
 }
 
 /// The fastest of the modes this window's display reports, or `None` where it reports
 /// none. `getDefaultDisplay` is deprecated in favour of the activity's own `getDisplay`,
 /// which arrived in API 30; this library runs on 24, so it asks the window manager.
-fn fastest_mode(env: &mut jni::Env<'_>, window: &JObject<'_>) -> jni::errors::Result<Option<f32>> {
+fn fastest_mode(env: &mut Env<'_>, window: &JObject<'_>) -> jni::errors::Result<Option<f32>> {
     let manager = env
         .call_method(
             window,

@@ -8,7 +8,7 @@
 //! a layer.
 
 use ndk::native_window::NativeWindow;
-use waft_embedder::Scene;
+use waft_embedder::{Scene, ViewId};
 
 use crate::composition::{SurfaceControlCompositor, SurfaceControlViewLayer};
 use crate::gpu::Gpu;
@@ -22,17 +22,18 @@ pub(crate) enum ViewPicture {
 }
 
 impl ViewPicture {
-    /// The picture on `compositor` where there is one, through a swapchain where there is not,
-    /// drawn with `context` on `gpu`'s device.
+    /// The picture of the view numbered `view`, on `compositor` where there is one, through a
+    /// swapchain where there is not, drawn with `context` on `gpu`'s device.
     pub(crate) fn new(
+        view: ViewId,
         gpu: &Gpu,
         compositor: Option<&SurfaceControlCompositor>,
         context: valo::Context,
     ) -> ViewPicture {
         match compositor {
-            Some(compositor) => {
-                ViewPicture::Composited(SurfaceControlViewLayer::new(compositor, gpu, context))
-            }
+            Some(compositor) => ViewPicture::Composited(SurfaceControlViewLayer::new(
+                view, compositor, gpu, context,
+            )),
             None => ViewPicture::Swapchain(Surface::new(context)),
         }
     }
@@ -51,7 +52,7 @@ impl ViewPicture {
         }
     }
 
-    /// The system takes the window away.
+    /// The system takes the window away, and what the picture was drawn into goes with it.
     pub(crate) fn window_gone(&mut self) {
         match self {
             ViewPicture::Composited(layer) => layer.window_gone(),

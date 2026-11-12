@@ -24,10 +24,12 @@
 //! fence (`frame_fence`).
 //!
 //! Every present, placement and letting go is built and applied as one transaction under the
-//! compositor's lock, from any thread: a producer presents from its own, the view from the loop's.
+//! compositor's lock, from any thread: a producer presents from its own, a view from the loop's.
 //! The invariants a later editor must keep: a replaced buffer's release runs only once the release
 //! fence the system hands over for it has signalled, or when its layer goes; and a layer has one
-//! placer at a time, from the placement that adopts it until that placer lets it go.
+//! placer at a time, from the placement that adopts it until that placer lets it go. A window's
+//! placer names its view, so a layer two views' scenes place is one view's, and is reported for
+//! the other.
 
 mod buffers;
 mod frames_in_flight;
@@ -41,7 +43,9 @@ use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use waft_embedder::{CompositionLayer, Compositor, HardwareBuffer, LayerPicture, Placement};
+use waft_embedder::{
+    CompositionLayer, Compositor, HardwareBuffer, LayerPicture, Placement, ViewId,
+};
 
 use crate::hardware_buffers::AndroidHardwareBuffer;
 use crate::surface_control::{Geometry, SurfaceControl, Transaction};
@@ -80,12 +84,12 @@ impl Compositor for SurfaceControlCompositor {
     }
 }
 
-/// Who places a layer: the presents of one layer, by its number, or a window, the view's picture
-/// in the window's surface control.
+/// Who places a layer: the presents of one layer, by its number, or a window, the picture of the
+/// view named in its window's surface control.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Placer {
     Layer(u64),
-    Window,
+    Window(ViewId),
 }
 
 /// A composition layer: who places it, and its state, which every transaction changes under its
@@ -141,6 +145,15 @@ impl SurfaceControlLayer {
                 pixel_ratio: None,
             }),
         }
+    }
+
+    /// A layer as this one was made, with nothing presented and placed nowhere, to take the place
+    /// of this one where it is dropped for what it holds.
+    fn successor(&self) -> Arc<SurfaceControlLayer> {
+        Arc::new(SurfaceControlLayer::new(
+            self.opaque,
+            Arc::clone(&self.transactions),
+        ))
     }
 
     /// The host's own layer behind a placed one; `None` for a layer no compositor of this host

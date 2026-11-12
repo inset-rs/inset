@@ -22,10 +22,17 @@
 //! transaction hands the compositor with the buffer (`frame_fence`). No thread waits for the
 //! frame's GPU work: SurfaceFlinger waits on the fence before it reads the buffer.
 //!
+//! The view holds buffers only while it has a window. When the window goes, so do the pool and the
+//! layer, with its surface controls and the buffers presented to it, which the compositor would
+//! otherwise keep, a screen's worth for each view in the background; the layers the scene placed
+//! beneath it are let go, to be placed again. A window that arrives is given a new layer, and the
+//! next draw makes buffers of its size.
+//!
 //! The invariant: a buffer is drawn into only after its release has run and its image has been
 //! acquired back, and is presented only with the fence of the submission that released its image;
 //! and the layer is placed in the window that is there, which goes and comes back with the
-//! activity's, and whose own surface holds a buffer of its size.
+//! activity's, and whose own surface holds a buffer of its size. A later editor must not keep the
+//! pool or the layer across a window's going: nothing bounds the views in the background.
 
 use std::collections::VecDeque;
 use std::ffi::CStr;
@@ -33,7 +40,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use ndk::native_window::NativeWindow;
-use waft_embedder::{HardwareBufferAllocator, HardwareBufferUsage, Picture, Slices};
+use waft_embedder::{HardwareBufferAllocator, HardwareBufferUsage, Picture, Slices, ViewId};
 
 use crate::frame_fence::{FrameFences, SignalledFrame};
 use crate::gpu::Gpu;
@@ -60,6 +67,8 @@ const WINDOW_NAME: &CStr = c"waft view";
 /// The view's composition layer, the window it is placed in, and the buffers its picture is drawn
 /// into.
 pub(crate) struct SurfaceControlViewLayer {
+    /// The view, which the layer's placement in a window names.
+    view: ViewId,
     layer: Arc<SurfaceControlLayer>,
     /// The window, while there is one.
     window: Option<ViewWindow>,
@@ -73,19 +82,21 @@ pub(crate) struct SurfaceControlViewLayer {
 }
 
 impl SurfaceControlViewLayer {
-    /// The view's layer, made opaque on `compositor`, drawn with `context` on `gpu`'s device,
-    /// which imports hardware buffers.
+    /// The layer of the view numbered `view`, made opaque on `compositor`, drawn with `context`
+    /// on `gpu`'s device, which imports hardware buffers.
     ///
     /// # Panics
     ///
     /// Where the device is not Vulkan's, which one that imports hardware buffers always is
     /// (`vulkan_imports`).
     pub(crate) fn new(
+        view: ViewId,
         compositor: &SurfaceControlCompositor,
         gpu: &Gpu,
         context: valo::Context,
     ) -> SurfaceControlViewLayer {
         SurfaceControlViewLayer {
+            view,
             layer: compositor.layer(true),
             window: None,
             size: [0, 0],
@@ -115,14 +126,15 @@ impl SurfaceControlViewLayer {
         Ok(())
     }
 
-    /// The system takes the window away: the layer leaves it, with every layer beneath it.
+    /// The system takes the window away: the layer goes, off screen with its surface controls
+    /// and the buffers presented to it, every layer beneath it let go, and the view's buffers go.
+    /// A layer with nothing presented stands in for the window that comes back.
     pub(crate) fn window_gone(&mut self) {
         let Some(window) = self.window.take() else {
             return;
         };
-        self.layer
-            .transactions
-            .transact(|transaction| self.layer.let_go(transaction));
+        self.layer = self.layer.successor();
+        self.buffers = None;
         drop(window);
     }
 
@@ -175,7 +187,7 @@ impl SurfaceControlViewLayer {
         let released = buffers.release_of(slot.index);
         let layer = &self.layer;
         layer.transactions.transact(|transaction| {
-            if layer.adopted_by(super::Placer::Window) {
+            if layer.adopted_by(super::Placer::Window(self.view)) {
                 let filling = Some(layer_geometry::filling(size));
                 layer.show_in(transaction, &window.control, 0, filling, pixel_ratio);
             }

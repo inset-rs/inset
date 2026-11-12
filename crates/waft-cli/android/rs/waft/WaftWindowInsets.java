@@ -21,14 +21,23 @@ import android.view.WindowInsets;
  * part of Flutter's Android {@code FlutterView.onApplyWindowInsets} for Android 11 and later, which
  * is every release Waft runs on.
  *
- * <p>The native method is registered by the app's native code when it starts, which may be after
- * the first insets were applied: it then asks for them again ({@link #tellAgain}). waft-cli
+ * <p>The app's native code is one for the process, whichever activities it has, and each
+ * activity's window is one of its views: the native code gives this the number of its view
+ * ({@link #attach}), and every telling carries it, as the Java side of Flutter's embedding carries
+ * its shell's id into each native call ({@code FlutterJNI.nativeShellHolderId}). Until then
+ * nothing is told: the native code registers its method before it attaches a listener, and has
+ * Android apply the insets again as it does, since the first were applied before. waft-cli
  * compiles this class into every Android app.
  */
 final class WaftWindowInsets implements View.OnApplyWindowInsetsListener {
+    /** No view: the native code has not attached this yet. */
+    private static final long NO_VIEW = -1;
+
     private final Handler mainThread = new Handler(Looper.getMainLooper());
     /** The window's decor view, once the activity has one; the main thread's alone. */
     private View decorView;
+    /** The number the native code gave the view this window is; the main thread's alone. */
+    private long view = NO_VIEW;
 
     /** Hears the insets Android applies to the window {@code decorView} is the root of. */
     void hear(View decorView) {
@@ -37,12 +46,17 @@ final class WaftWindowInsets implements View.OnApplyWindowInsetsListener {
     }
 
     /**
-     * Has Android apply the window's insets once more, on the main thread, for the app's native
-     * code, which asks from its own thread once it can hear them. The main thread comes to it
-     * after the activity's {@code onCreate}, which is where the decor view is given.
+     * Tells the window's insets as those of the view numbered {@code view} from now on, and has
+     * Android apply them once more, on the main thread, for the app's native code, which asks from
+     * its own thread once it can hear them. The main thread comes to it after the activity's
+     * {@code onCreate}, which is where the decor view is given.
      */
-    void tellAgain() {
-        mainThread.post(() -> decorView.requestApplyInsets());
+    void attach(long view) {
+        mainThread.post(
+                () -> {
+                    this.view = view;
+                    decorView.requestApplyInsets();
+                });
     }
 
     @Override
@@ -53,6 +67,9 @@ final class WaftWindowInsets implements View.OnApplyWindowInsetsListener {
     }
 
     private void tell(WindowInsets insets) {
+        if (view == NO_VIEW) {
+            return;
+        }
         Insets uiInsets = insets.getInsets(WindowInsets.Type.systemBars());
         int viewPaddingLeft = uiInsets.left;
         int viewPaddingTop = uiInsets.top;
@@ -83,30 +100,29 @@ final class WaftWindowInsets implements View.OnApplyWindowInsetsListener {
 
         Insets imeInsets = insets.getInsets(WindowInsets.Type.ime());
         Insets systemGestureInsets = insets.getInsets(WindowInsets.Type.systemGestures());
-        try {
-            onWindowInsets(
-                    viewPaddingLeft,
-                    viewPaddingTop,
-                    viewPaddingRight,
-                    viewPaddingBottom,
-                    imeInsets.left,
-                    imeInsets.top,
-                    imeInsets.right,
-                    imeInsets.bottom, // Typically, only bottom is non-zero
-                    systemGestureInsets.left,
-                    systemGestureInsets.top,
-                    systemGestureInsets.right,
-                    systemGestureInsets.bottom);
-        } catch (UnsatisfiedLinkError notYetRegistered) {
-            // The native code has not started yet; it asks for the insets again when it does.
-        }
+        onWindowInsets(
+                view,
+                viewPaddingLeft,
+                viewPaddingTop,
+                viewPaddingRight,
+                viewPaddingBottom,
+                imeInsets.left,
+                imeInsets.top,
+                imeInsets.right,
+                imeInsets.bottom, // Typically, only bottom is non-zero
+                systemGestureInsets.left,
+                systemGestureInsets.top,
+                systemGestureInsets.right,
+                systemGestureInsets.bottom);
     }
 
     /**
-     * Hands the window's insets to the app's native code, which registered it: the view padding,
-     * the view insets and then the system gesture insets, each side in pixels.
+     * Hands the insets of the window the view numbered {@code view} is to the app's native code,
+     * which registered it: the view padding, the view insets and then the system gesture insets,
+     * each side in pixels.
      */
     private native void onWindowInsets(
+            long view,
             int viewPaddingLeft,
             int viewPaddingTop,
             int viewPaddingRight,

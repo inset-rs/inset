@@ -7,7 +7,6 @@
 //!
 //! Every call reaches the provider through JNI on the app's thread, as the app awaits it.
 
-use android_activity::AndroidApp;
 use jni::objects::{JObject, JValue};
 use jni::{Env, jni_sig, jni_str};
 use waft_embedder::{
@@ -15,7 +14,7 @@ use waft_embedder::{
     PickedFolder,
 };
 
-use crate::activity::with_activity;
+use crate::application::Application;
 use crate::file_dialogs::{keep_permission, open_document, string};
 
 /// `DocumentsContract.Document.MIME_TYPE_DIR`.
@@ -25,7 +24,7 @@ const ANY_BYTES: &str = "application/octet-stream";
 
 /// A folder of a picked document tree.
 pub(crate) struct DocumentFolder {
-    app: AndroidApp,
+    application: Application,
     /// The tree the user picked, whose permission covers this folder.
     tree: String,
     /// This folder's document id in the tree.
@@ -43,9 +42,13 @@ struct Child {
 
 impl DocumentFolder {
     /// The folder at the root of the tree `tree` names, its permission kept.
-    pub(crate) fn picked(app: AndroidApp, tree: &str, writable: bool) -> std::io::Result<Self> {
-        let (document, name) = reach(&app, |env, activity| {
-            let resolver = resolver(env, activity)?;
+    pub(crate) fn picked(
+        application: Application,
+        tree: &str,
+        writable: bool,
+    ) -> std::io::Result<Self> {
+        let (document, name) = reach(&application, |env, context| {
+            let resolver = resolver(env, context)?;
             let tree_uri = parse(env, tree)?;
             keep_permission(env, &resolver, &tree_uri, writable);
             let document = env
@@ -67,7 +70,7 @@ impl DocumentFolder {
         })
         .map_err(java_error)?;
         Ok(DocumentFolder {
-            app,
+            application,
             tree: tree.to_owned(),
             document,
             name,
@@ -77,8 +80,8 @@ impl DocumentFolder {
 
     /// The folder's children, as its provider lists them.
     fn children(&self) -> std::io::Result<Vec<Child>> {
-        reach(&self.app, |env, activity| {
-            let resolver = resolver(env, activity)?;
+        reach(&self.application, |env, context| {
+            let resolver = resolver(env, context)?;
             let tree = parse(env, &self.tree)?;
             let document = env.new_string(&self.document)?;
             let children = env
@@ -106,7 +109,7 @@ impl DocumentFolder {
 
     /// The URI of the document `document` of this folder's tree.
     fn uri_of(&self, document: &str) -> std::io::Result<String> {
-        reach(&self.app, |env, _| {
+        reach(&self.application, |env, _| {
             let tree = parse(env, &self.tree)?;
             let uri = document_uri(env, &tree, document)?;
             Ok(uri_text(env, &uri)?.unwrap_or_default())
@@ -116,13 +119,13 @@ impl DocumentFolder {
 
     fn file(&self, document: &str) -> std::io::Result<PickedFile> {
         let uri = self.uri_of(document)?;
-        open_document(&self.app, &uri, self.writable)
+        open_document(&self.application, &uri, self.writable)
             .map_err(|error| std::io::Error::other(error.to_string()))
     }
 
     fn folder(&self, document: String, name: String) -> PickedFolder {
         PickedFolder::Handle(Box::new(DocumentFolder {
-            app: self.app.clone(),
+            application: self.application.clone(),
             tree: self.tree.clone(),
             document,
             name,
@@ -132,8 +135,8 @@ impl DocumentFolder {
 
     /// Makes a document `name` of `mime` in this folder; answers its id.
     fn create(&self, mime: &str, name: &str) -> std::io::Result<String> {
-        reach(&self.app, |env, activity| {
-            let resolver = resolver(env, activity)?;
+        reach(&self.application, |env, context| {
+            let resolver = resolver(env, context)?;
             let tree = parse(env, &self.tree)?;
             let parent = document_uri(env, &tree, &self.document)?;
             let mime = env.new_string(mime)?;
@@ -172,7 +175,7 @@ impl DocumentFolder {
         let Some((_, extension)) = name.rsplit_once('.') else {
             return ANY_BYTES.to_owned();
         };
-        reach(&self.app, |env, _| {
+        reach(&self.application, |env, _| {
             let map = env
                 .call_static_method(
                     jni_str!("android/webkit/MimeTypeMap"),
@@ -342,10 +345,10 @@ fn cell(
 
 fn resolver<'local>(
     env: &mut Env<'local>,
-    activity: &JObject<'_>,
+    context: &JObject<'_>,
 ) -> jni::errors::Result<JObject<'local>> {
     env.call_method(
-        activity,
+        context,
         jni_str!("getContentResolver"),
         jni_sig!("()Landroid/content/ContentResolver;"),
         &[],
@@ -392,18 +395,15 @@ fn uri_text(env: &mut Env<'_>, uri: &JObject<'_>) -> jni::errors::Result<Option<
     string(env, text)
 }
 
-/// Runs `work` with the activity, as `with_activity` does, clearing the Java exception a failure
+/// Runs `work` with the application, as a `Context`, clearing the Java exception a failure
 /// leaves, so the next call into Java is not refused.
 fn reach<T>(
-    app: &AndroidApp,
+    application: &Application,
     work: impl FnOnce(&mut Env<'_>, &JObject<'_>) -> jni::errors::Result<T>,
 ) -> jni::errors::Result<T> {
-    let reached = with_activity(app, work);
+    let reached = application.with(work);
     if reached.is_err() {
-        let _ = with_activity(app, |env, _| {
-            env.exception_clear();
-            Ok(())
-        });
+        application.clear_exception();
     }
     reached
 }

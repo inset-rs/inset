@@ -8,6 +8,14 @@
 //! down and the loop woken, and the loop takes them ([`take`]) and has the view's metrics follow.
 //! Only the latest matter, so a later one replaces one the loop has not taken yet.
 //!
+//! Each activity's window has a listener of its own, and the native method is the process's: so a
+//! listener is given the id of the host's view its window is ([`hear`]) and hands it back with each
+//! telling, as the Java side of Flutter's embedding carries its shell's id into each native call
+//! (`FlutterJNI.nativeShellHolderId`). Flutter has no counterpart for the rest, since its engine
+//! has one activity at a time: the latest insets are kept for each view, and a telling wakes the
+//! app's one loop. A later editor must keep them by view: one slot for the app would hand one
+//! window's insets, its keyboard's among them, to another's view.
+//!
 //! Under an activity that is not Waft's nothing tells the insets, and the host knows only the
 //! rectangle `NativeActivity` laid its content out in ([`WindowInsets::around_content`]).
 
@@ -15,22 +23,24 @@
 // pointer; that is the `unsafe` here.
 #![allow(unsafe_code)]
 
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::collections::BTreeMap;
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
-use android_activity::{AndroidApp, AndroidAppWaker};
-use jni::objects::JObject;
-use jni::sys::jint;
+use jni::objects::{JObject, JValue};
+use jni::sys::{jint, jlong};
 use jni::{Env, EnvUnowned, NativeMethod, jni_sig, jni_str};
-use waft_embedder::ViewPadding;
+use waft_embedder::{ViewId, ViewPadding};
 
-use crate::activity::with_activity;
+use crate::activity::Activity;
+use crate::application::Application;
 use crate::log::warn_to_log;
+use crate::loop_waker::wake_app_loop;
 
-/// The insets Android applied since the loop last looked.
-static APPLIED: Mutex<Option<WindowInsets>> = Mutex::new(None);
-/// Wakes the loop when Android applies the window's insets: the loop of the activity that hears
-/// them now, which is a new one for each activity the process starts.
-static WAKER: Mutex<Option<AndroidAppWaker>> = Mutex::new(None);
+/// Waft's window insets listener, which declares the native method registered here.
+const LISTENER: &str = "rs.waft.WaftWindowInsets";
+
+/// The insets Android applied to each view's window since the loop last looked.
+static APPLIED: Mutex<BTreeMap<ViewId, WindowInsets>> = Mutex::new(BTreeMap::new());
 
 /// What the system covers of the window, each side in pixels from the window's edge.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -70,26 +80,29 @@ impl WindowInsets {
     }
 }
 
-/// Hears the insets Android applies to the activity's window from now on, and asks for the ones
-/// it already applied. Under an activity that is not Waft's there is nothing to hear.
-pub(crate) fn hear(app: &AndroidApp) {
-    *locked(&WAKER) = Some(app.create_waker());
-    // An activity before this one, in the same process, may have left its window's.
-    locked(&APPLIED).take();
-    let heard = with_activity(app, |env, activity| {
+/// Hears the insets Android applies to `activity`'s window from now on as those of `view`, the
+/// host's view that window is, and asks for the ones it already applied. Under an activity that
+/// is not Waft's there is nothing to hear.
+pub(crate) fn hear(application: &Application, activity: &Activity, view: ViewId) {
+    // A view before this one, in the same process, may have left its window's.
+    locked(&APPLIED).remove(&view);
+    if !insets_are_told(application) {
+        warn_to_log!("waft: the window's insets are not heard: the package has no {LISTENER}");
+        return;
+    }
+    let heard = activity.with(|env, activity| {
         let listener = listener(env, activity)?;
-        register_native_method(env, &listener)?;
-        tell_again(env, &listener)
+        attach(env, &listener, view)
     });
     if let Err(error) = heard {
-        clear_exception(app);
+        activity.clear_exception();
         warn_to_log!("waft: the window's insets are not heard: {error}");
     }
 }
 
-/// The insets Android applied since the last call, if it applied any.
-pub(crate) fn take() -> Option<WindowInsets> {
-    locked(&APPLIED).take()
+/// The insets Android applied since the last call, by the view whose window it applied them to.
+pub(crate) fn take() -> BTreeMap<ViewId, WindowInsets> {
+    std::mem::take(&mut *locked(&APPLIED))
 }
 
 /// Waft's window insets listener, from the activity.
@@ -106,37 +119,48 @@ fn listener<'local>(
     .l()
 }
 
-/// Registers the listener's `onWindowInsets`, which it calls on the main thread.
-fn register_native_method(env: &mut Env<'_>, listener: &JObject<'_>) -> jni::errors::Result<()> {
-    let class = env.get_object_class(listener)?;
-    let method = [
-        // SAFETY: `on_window_insets` takes the arguments `(IIIIIIIIIIII)V` names, as an instance
-        // method's native function does.
-        unsafe {
-            NativeMethod::from_raw_parts(
-                jni_str!("onWindowInsets"),
-                jni_str!("(IIIIIIIIIIII)V"),
-                on_window_insets as *mut std::ffi::c_void,
-            )
-        },
-    ];
-    // SAFETY: the method's function matches its signature, above.
-    unsafe { env.register_native_methods(&class, &method) }
+/// Registers the listener's `onWindowInsets`, which a listener calls on the main thread, once for
+/// the process, and answers whether it is registered: not in a package without the listener.
+fn insets_are_told(application: &Application) -> bool {
+    static TOLD: OnceLock<bool> = OnceLock::new();
+    *TOLD.get_or_init(|| {
+        let method = [
+            // SAFETY: `on_window_insets` takes the arguments `(JIIIIIIIIIIII)V` names, as an
+            // instance method's native function does.
+            unsafe {
+                NativeMethod::from_raw_parts(
+                    jni_str!("onWindowInsets"),
+                    jni_str!("(JIIIIIIIIIIII)V"),
+                    on_window_insets as *mut std::ffi::c_void,
+                )
+            },
+        ];
+        // SAFETY: the method's function matches its signature, above.
+        unsafe { application.register_native_methods(LISTENER, &method) }.is_ok()
+    })
 }
 
-/// Has Android apply the window's insets once more: the ones it applied before the method was
-/// registered reached nobody.
-fn tell_again(env: &mut Env<'_>, listener: &JObject<'_>) -> jni::errors::Result<()> {
-    env.call_method(listener, jni_str!("tellAgain"), jni_sig!("()V"), &[])
-        .map(drop)
+/// Gives the listener the id of the host's view its window is, which it hands back with each
+/// telling, and has Android apply the window's insets once more: the ones it applied before
+/// reached nobody.
+fn attach(env: &mut Env<'_>, listener: &JObject<'_>, view: ViewId) -> jni::errors::Result<()> {
+    env.call_method(
+        listener,
+        jni_str!("attach"),
+        jni_sig!("(J)V"),
+        &[JValue::Long(view.0 as jlong)],
+    )
+    .map(drop)
 }
 
-/// What the listener's `onWindowInsets` hands on, on the main thread: the view padding, the view
-/// insets and then the system gesture insets, each side in pixels.
+/// What a listener's `onWindowInsets` hands on, on the main thread, for the window the view
+/// numbered `view` is: the view padding, the view insets and then the system gesture insets, each
+/// side in pixels.
 #[allow(clippy::too_many_arguments)]
 extern "system" fn on_window_insets<'local>(
     _env: EnvUnowned<'local>,
     _listener: JObject<'local>,
+    view: jlong,
     view_padding_left: jint,
     view_padding_top: jint,
     view_padding_right: jint,
@@ -170,17 +194,8 @@ extern "system" fn on_window_insets<'local>(
             bottom: f64::from(system_gesture_inset_bottom),
         },
     };
-    *locked(&APPLIED) = Some(insets);
-    if let Some(waker) = locked(&WAKER).as_ref() {
-        waker.wake();
-    }
-}
-
-fn clear_exception(app: &AndroidApp) {
-    let _ = with_activity(app, |env, _| {
-        env.exception_clear();
-        Ok(())
-    });
+    locked(&APPLIED).insert(ViewId(view as u64), insets);
+    wake_app_loop();
 }
 
 fn locked<T>(shared: &Mutex<T>) -> MutexGuard<'_, T> {

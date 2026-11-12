@@ -1,4 +1,4 @@
-//! The view's text input: Waft's text input view (`rs.waft.WaftTextInput`, which waft-cli builds
+//! A view's text input: Waft's text input view (`rs.waft.WaftTextInput`, which waft-cli builds
 //! into the app and `WaftActivity` adds beside `NativeActivity`'s content view), which the system's
 //! keyboards edit a field's text through, by the `InputConnection` it answers. The framework drives
 //! it through `TextInputHost`, as Flutter's drives its Android `TextInputPlugin`; the field's
@@ -12,6 +12,14 @@
 //! A later editor must keep both halves so: the main thread never calls the framework, and the
 //! editing value has one owner.
 //!
+//! Each activity has a text input view of its own, and the native methods are the process's: so
+//! each view is given the id of the host's view it types into ([`AndroidTextInput::new`]) and
+//! hands it back with everything it tells, as the Java side of Flutter's embedding carries its
+//! shell's id into each native call (`FlutterJNI.nativeShellHolderId`). Flutter has no counterpart
+//! for the rest, since its engine has one activity at a time: what the keyboards did is one queue
+//! for the app, in the order they did it, each event naming its view, and it wakes the app's one
+//! loop. A later editor must not key anything here by "the" activity.
+//!
 //! A key the host leaves unhandled reaches the view while a field takes text, which types it in;
 //! a key the keyboard takes never reaches the host. Under an activity that is not Waft's there is
 //! no such view, and no text input.
@@ -20,30 +28,33 @@
 // pointers; that is the `unsafe` here.
 #![allow(unsafe_code)]
 
-use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
+use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock, PoisonError};
 
-use android_activity::{AndroidApp, AndroidAppWaker};
 use jni::errors::LogErrorAndDefault;
 use jni::objects::{JObject, JValue};
 use jni::sys::jint;
+use jni::sys::jlong;
 use jni::{Env, EnvUnowned, NativeMethod, jni_sig, jni_str};
 use waft_embedder::{
     Matrix4, Rect, Size, TextEditingValue, TextInputAction, TextInputConfiguration, TextInputHost,
-    TextRange, TextSelection,
+    TextRange, TextSelection, ViewId,
 };
 
-use crate::activity::with_activity;
+use crate::activity::Activity;
+use crate::application::Application;
 use crate::editor_info::{self, EditorInfo};
 use crate::file_dialogs::string;
 use crate::log::warn_to_log;
+use crate::loop_waker::wake_app_loop;
 
-/// What the keyboard did since the loop last looked, in the order it did it.
-static TYPED: LazyLock<Mutex<Vec<TextInputEvent>>> = LazyLock::new(Mutex::default);
-/// Wakes the loop when the keyboard did something: the loop of the activity that set it last, since Android
-/// starts another activity in the same process once one is finished.
-static WAKER: Mutex<Option<AndroidAppWaker>> = Mutex::new(None);
+/// Waft's text input view, which declares the native methods registered here.
+const TEXT_INPUT_VIEW: &str = "rs.waft.WaftTextInput";
 
-/// Something the keyboard did to the field that takes text.
+/// What the keyboards did since the loop last looked, in the order they did it, each to the field
+/// of the view it names.
+static TYPED: LazyLock<Mutex<Vec<(ViewId, TextInputEvent)>>> = LazyLock::new(Mutex::default);
+
+/// Something a keyboard did to the field that takes text in a view.
 pub(crate) enum TextInputEvent {
     /// The field's value as the keyboard left it.
     Edited(TextEditingValue),
@@ -51,40 +62,51 @@ pub(crate) enum TextInputEvent {
     Action(TextInputAction),
 }
 
-/// What the keyboard did since the last call.
-pub(crate) fn take() -> Vec<TextInputEvent> {
+/// What the keyboards did since the last call, and in which view.
+pub(crate) fn take() -> Vec<(ViewId, TextInputEvent)> {
     std::mem::take(&mut *locked(&TYPED))
 }
 
-/// The activity's text input, through Waft's text input view.
+/// An activity's text input, through Waft's text input view.
 pub(crate) struct AndroidTextInput {
-    app: AndroidApp,
+    activity: Activity,
 }
 
 impl AndroidTextInput {
-    /// The activity's text input, where the activity is Waft's and has its text input view: none
-    /// under the bare `NativeActivity`, whose own view takes no text.
-    pub(crate) fn new(app: &AndroidApp) -> Option<AndroidTextInput> {
-        *locked(&WAKER) = Some(app.create_waker());
-        let registered = with_activity(app, |env, activity| {
-            let view = text_input_view(env, activity)?;
-            register_native_methods(env, &view)
-        });
-        if registered.is_err() {
-            clear_exception(app);
+    /// The text input of `view`, the host's view `activity`'s window is, where the activity is
+    /// Waft's and has its text input view: none under the bare `NativeActivity`, whose own view
+    /// takes no text. What a keyboard does there is told as done to `view` from now on.
+    pub(crate) fn new(
+        application: &Application,
+        activity: &Activity,
+        view: ViewId,
+    ) -> Option<AndroidTextInput> {
+        if !the_keyboard_is_heard(application) {
             return None;
         }
-        Some(AndroidTextInput { app: app.clone() })
+        // A view before this one, in the same process, may have left what was typed into it.
+        locked(&TYPED).retain(|(typed_into, _)| *typed_into != view);
+        let attached = activity.with(|env, activity| {
+            let text_input = text_input_view(env, activity)?;
+            attach(env, &text_input, view)
+        });
+        if attached.is_err() {
+            activity.clear_exception();
+            return None;
+        }
+        Some(AndroidTextInput {
+            activity: activity.clone(),
+        })
     }
 
     /// Calls `method` on the text input view, which carries it out on the main thread.
     fn tell_view(&self, method: &str, call: impl FnOnce(&mut Env<'_>, &JObject<'_>) -> CallResult) {
-        let told = with_activity(&self.app, |env, activity| {
+        let told = self.activity.with(|env, activity| {
             let view = text_input_view(env, activity)?;
             call(env, &view)
         });
         if let Err(error) = told {
-            clear_exception(&self.app);
+            self.activity.clear_exception();
             warn_to_log!("waft: the text input's {method} failed: {error}");
         }
     }
@@ -167,38 +189,58 @@ fn text_input_view<'local>(
     .l()
 }
 
-/// Registers the view's `onEditingState` and `onEditorAction`, which it calls on the main thread.
-fn register_native_methods(env: &mut Env<'_>, view: &JObject<'_>) -> CallResult {
-    let class = env.get_object_class(view)?;
+/// Gives Waft's text input view the id of the host's view it types into, which it hands back with
+/// what it tells.
+fn attach(env: &mut Env<'_>, text_input: &JObject<'_>, view: ViewId) -> CallResult {
+    env.call_method(
+        text_input,
+        jni_str!("attach"),
+        jni_sig!("(J)V"),
+        &[JValue::Long(view.0 as jlong)],
+    )
+    .map(drop)
+}
+
+/// Registers the text input view's `onEditingState` and `onEditorAction`, which a view calls on
+/// the main thread, once for the process, and answers whether they are registered: not in a
+/// package without the view.
+fn the_keyboard_is_heard(application: &Application) -> bool {
+    static HEARD: OnceLock<bool> = OnceLock::new();
+    *HEARD.get_or_init(|| register_native_methods(application).is_ok())
+}
+
+fn register_native_methods(application: &Application) -> CallResult {
     let methods = [
-        // SAFETY: `on_editing_state` takes the arguments `(Ljava/lang/String;IIII)V` names, as an
+        // SAFETY: `on_editing_state` takes the arguments `(JLjava/lang/String;IIII)V` names, as an
         // instance method's native function does.
         unsafe {
             NativeMethod::from_raw_parts(
                 jni_str!("onEditingState"),
-                jni_str!("(Ljava/lang/String;IIII)V"),
+                jni_str!("(JLjava/lang/String;IIII)V"),
                 on_editing_state as *mut std::ffi::c_void,
             )
         },
-        // SAFETY: `on_editor_action` takes the arguments `(I)V` names, as an instance method's
+        // SAFETY: `on_editor_action` takes the arguments `(JI)V` names, as an instance method's
         // native function does.
         unsafe {
             NativeMethod::from_raw_parts(
                 jni_str!("onEditorAction"),
-                jni_str!("(I)V"),
+                jni_str!("(JI)V"),
                 on_editor_action as *mut std::ffi::c_void,
             )
         },
     ];
     // SAFETY: each method's function matches its signature, above.
-    unsafe { env.register_native_methods(&class, &methods) }
+    unsafe { application.register_native_methods(TEXT_INPUT_VIEW, &methods) }
 }
 
-/// What the view's `onEditingState` hands on, on the main thread: the field's value as the
-/// keyboard left it, its offsets UTF-16's, as the framework's are.
+/// What a text input view's `onEditingState` hands on, on the main thread: the value of the field
+/// of the view numbered `view` as the keyboard left it, its offsets UTF-16's, as the framework's
+/// are.
 extern "system" fn on_editing_state<'local>(
     mut env: EnvUnowned<'local>,
-    _view: JObject<'local>,
+    _text_input: JObject<'local>,
+    view: jlong,
     text: JObject<'local>,
     selection_start: jint,
     selection_end: jint,
@@ -211,20 +253,22 @@ extern "system" fn on_editing_state<'local>(
             selection: TextSelection::new(selection_start, selection_end),
             composing: composing_range(composing_start, composing_end),
         };
-        hand_on(TextInputEvent::Edited(value));
+        hand_on(view, TextInputEvent::Edited(value));
         Ok(())
     })
     .resolve::<LogErrorAndDefault>();
 }
 
-/// What the view's `onEditorAction` hands on, on the main thread.
+/// What a text input view's `onEditorAction` hands on, on the main thread, for the field of the
+/// view numbered `view`.
 extern "system" fn on_editor_action<'local>(
     mut env: EnvUnowned<'local>,
-    _view: JObject<'local>,
+    _text_input: JObject<'local>,
+    view: jlong,
     code: jint,
 ) {
     env.with_env(|_env| -> CallResult {
-        hand_on(TextInputEvent::Action(editor_info::action_of(code)));
+        hand_on(view, TextInputEvent::Action(editor_info::action_of(code)));
         Ok(())
     })
     .resolve::<LogErrorAndDefault>();
@@ -239,18 +283,10 @@ fn composing_range(start: jint, end: jint) -> TextRange {
     }
 }
 
-fn hand_on(event: TextInputEvent) {
-    locked(&TYPED).push(event);
-    if let Some(waker) = locked(&WAKER).as_ref() {
-        waker.wake();
-    }
-}
-
-fn clear_exception(app: &AndroidApp) {
-    let _ = with_activity(app, |env, _| {
-        env.exception_clear();
-        Ok(())
-    });
+/// Sets `event` down for the loop as done in the view numbered `view`, and wakes it.
+fn hand_on(view: jlong, event: TextInputEvent) {
+    locked(&TYPED).push((ViewId(view as u64), event));
+    wake_app_loop();
 }
 
 fn locked<T>(shared: &Mutex<T>) -> MutexGuard<'_, T> {

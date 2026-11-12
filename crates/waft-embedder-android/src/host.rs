@@ -1,16 +1,20 @@
-//! The activity's loop: what the system tells the app, and where each of it goes.
+//! The app's loop: what the system tells the app, and where each of it goes.
 //!
 //! The glue owns `android_main`'s thread and its looper; this is the loop that runs on it.
-//! One pass takes the insets Android applied to the window, drains the system's main events,
-//! then the input the activity received, then draws a frame if the display refreshed and the
-//! framework asked for one.
+//! One pass takes the insets Android applied to the views' windows, drains the system's main
+//! events, then the input the activity received, then draws a frame of the views that asked for
+//! one, if the display refreshed.
+//!
+//! Two kinds of thing reach the loop, and a later editor must keep them apart. What the glue
+//! reports, a window, its size, the configuration, the focus, input and Back, is the one
+//! activity's the glue runs this loop for, so it goes to that activity's view (`Host::view`).
+//! Everything else is the app's and names its view where it has one: what a keyboard typed and
+//! the insets Android applied carry a view's id, and a frame is drawn for the views that asked;
+//! each is looked up in the registry (`views.rs`), never taken to be the glue's.
 //!
 //! The framework is never called from inside a looper callback. A refresh and a wake asked
 //! for from another thread both only set something down and wake the looper, so every call
 //! into the framework happens here, between polls, where nothing else is borrowed.
-
-// Closing the activity is a C call on the pointer the glue owns; that is the `unsafe` here.
-#![allow(unsafe_code)]
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -20,17 +24,20 @@ use std::time::{Duration, Instant};
 use android_activity::input::{KeyAction, Keycode};
 use android_activity::{AndroidApp, InputStatus, MainEvent, PollEvent};
 use waft_embedder::{
-    EmbedderClient, Frame, PlatformRef, ViewFocusDirection, ViewFocusEvent, ViewFocusState,
+    EmbedderClient, Frame, PlatformRef, View, ViewFocusDirection, ViewFocusEvent, ViewFocusState,
 };
 
+use crate::activity::Activity;
+use crate::application::Application;
 use crate::composition::SurfaceControlCompositor;
 use crate::gpu::Gpu;
+use crate::loop_waker::LoopWaker;
 use crate::open_requests::OpenRequests;
 use crate::platform::AndroidPlatform;
 use crate::text_input::{AndroidTextInput, TextInputEvent};
-use crate::view::{AndroidView, Geometry, VIEW};
+use crate::view::AndroidView;
+use crate::views::Views;
 use crate::vsync::Vsync;
-use crate::window_insets::WindowInsets;
 
 /// Refreshes in a row with nothing to draw before the signal is paused, so an idle app
 /// makes no wakes.
@@ -38,39 +45,44 @@ const IDLE_TICKS: u8 = 2;
 
 /// Runs an Waft application on the activity the system started.
 pub struct AndroidEmbedder {
-    app: AndroidApp,
+    glue: AndroidApp,
 }
 
 impl AndroidEmbedder {
     /// Takes the [`AndroidApp`] the glue handed `android_main`.
     pub fn new(app: AndroidApp) -> AndroidEmbedder {
-        AndroidEmbedder { app }
+        AndroidEmbedder { glue: app }
     }
 
     /// Runs until the activity is destroyed. `start` runs once the system has given the
     /// activity a window, and returns the client the host drives.
     pub fn run<C: EmbedderClient + 'static>(self, start: impl FnOnce(PlatformRef) -> C + 'static) {
+        let activity = Activity::of(&self.glue);
+        let application =
+            Application::of(&activity).expect("an activity hands out its application");
+        let waker = LoopWaker::of(self.glue.create_waker());
+        waker.serve_native_methods();
         let gpu = Gpu::acquire();
         let compositor = composition_on(&gpu);
-        let text_input = AndroidTextInput::new(&self.app);
-        let view = Rc::new(AndroidView::new(&gpu, compositor.as_deref(), text_input));
+        let views = Rc::new(Views::default());
+        let view = view_of(&activity, &application, &views, &gpu, compositor.as_deref());
         let platform = Rc::new(AndroidPlatform::new(
-            Rc::clone(&view),
-            &self.app,
+            Rc::clone(&views),
+            &application,
+            &activity,
+            waker,
             &gpu,
             compositor,
         ));
-        *platform.images.borrow_mut() = Some(view.image_context());
-        *platform.image_loader.borrow_mut() = crate::images::loader(view.image_context());
-        crate::intents::hear(&self.app);
-        crate::window_insets::hear(&self.app);
-        let open_requests = OpenRequests::new(self.app.clone());
+        crate::intents::hear(&application);
+        crate::intents::read_launch_intent(&activity);
+        let open_requests = OpenRequests::new(application);
         let mut host = Host {
             open_requests,
-            app: self.app,
+            glue: self.glue,
             gpu,
             view,
-            window_insets: None,
+            views,
             platform,
             client: None,
             start: Some(Box::new(start)),
@@ -83,6 +95,30 @@ impl AndroidEmbedder {
     }
 }
 
+/// The view `activity`'s window is, one of `views` from now on, under a number of its own: what
+/// the activity's keyboard types and the insets Android applies to its window are told as that
+/// view's.
+fn view_of(
+    activity: &Activity,
+    application: &Application,
+    views: &Views,
+    gpu: &Gpu,
+    compositor: Option<&SurfaceControlCompositor>,
+) -> Rc<AndroidView> {
+    let id = views.take_id();
+    let text_input = AndroidTextInput::new(application, activity, id);
+    crate::window_insets::hear(application, activity, id);
+    let view = Rc::new(AndroidView::new(
+        id,
+        activity.clone(),
+        gpu,
+        compositor,
+        text_input,
+    ));
+    views.add(Rc::clone(&view));
+    view
+}
+
 /// The compositor, where Waft's device imports the hardware buffers its layers show: none on
 /// OpenGL ES, whose view draws through a swapchain (`picture.rs`).
 fn composition_on(gpu: &Gpu) -> Option<Arc<SurfaceControlCompositor>> {
@@ -93,16 +129,18 @@ fn composition_on(gpu: &Gpu) -> Option<Arc<SurfaceControlCompositor>> {
 }
 
 struct Host<C> {
-    app: AndroidApp,
+    /// android-activity's glue for the one activity it runs this loop for: that activity's
+    /// events, its window, its configuration and its input.
+    glue: AndroidApp,
     gpu: Gpu,
+    /// The view the glue's activity's window is: what the glue reports is this view's.
     view: Rc<AndroidView>,
-    /// What the system covers of the window, as the activity last told (`window_insets.rs`):
-    /// none before it told any, and never any under an activity that is not Waft's.
-    window_insets: Option<WindowInsets>,
+    /// Every view of the app's, which what does not come from the glue is looked up in.
+    views: Rc<Views>,
     platform: Rc<AndroidPlatform>,
     client: Option<C>,
     start: Option<Box<dyn FnOnce(PlatformRef) -> C>>,
-    /// The display's signal, while the activity has a window.
+    /// The display's signal, while a view has a window.
     vsync: Option<Vsync>,
     /// Set by the refresh callback, read by the loop: the framework is never called from
     /// inside a looper callback.
@@ -118,9 +156,9 @@ impl<C: EmbedderClient> Host<C> {
         while !self.destroyed {
             let timeout = self.timeout();
             // The closure only records what happened; the work is after the poll.
-            let app = self.app.clone();
+            let glue = self.glue.clone();
             let mut events = Vec::new();
-            app.poll_events(timeout, |event| {
+            glue.poll_events(timeout, |event| {
                 if let PollEvent::Main(main) = event {
                     events.push(Recorded::of(&main));
                 }
@@ -154,10 +192,7 @@ impl<C: EmbedderClient> Host<C> {
     fn on_main_event(&mut self, event: Recorded) {
         match event {
             Recorded::WindowArrived => self.window_arrived(),
-            Recorded::WindowGone => {
-                self.vsync = None;
-                self.view.window_gone();
-            }
+            Recorded::WindowGone => self.window_gone(),
             // The configuration carries the appearance and the languages, and the screen's
             // size, orientation and density, and a change of it arrives as its own event rather
             // than through the window.
@@ -175,14 +210,15 @@ impl<C: EmbedderClient> Host<C> {
     }
 
     fn window_arrived(&mut self) {
-        let Some(window) = self.app.native_window() else {
+        let Some(window) = self.glue.native_window() else {
             return;
         };
-        let size = [window.width() as u32, window.height() as u32];
-        self.view.window_arrived(&self.gpu, &window, size);
+        self.view.window_arrived(&self.gpu, window.clone());
+        self.view.set_content_rect(self.content_rect());
         self.sync_configuration();
         self.sync_screen();
-        self.view.refresh_metrics(self.geometry());
+        let (density, screen) = (self.density(), self.screen_id());
+        self.view.refresh_metrics(density, screen);
         if self.client.is_none() {
             let start = self.start.take().expect("start runs once");
             self.client = Some(start(Rc::clone(&self.platform) as PlatformRef));
@@ -190,90 +226,90 @@ impl<C: EmbedderClient> Host<C> {
             // Back from the background: the framework's last picture belongs to the new
             // window, and its metrics may have changed while the app was away.
             if let Some(client) = &mut self.client {
-                client.view_metrics_changed(VIEW);
+                client.view_metrics_changed(self.view.id());
             }
             self.view.represent();
         }
+        crate::refresh::follow_the_display(self.view.activity());
         self.start_vsync(&window);
     }
 
+    /// The system took the glue's activity's window away; the display's signal stops with the
+    /// last window.
+    fn window_gone(&mut self) {
+        self.view.window_gone();
+        if !self.views.any_has_window() {
+            self.vsync = None;
+        }
+    }
+
+    /// Starts the display's signal, unless a view's window already started it.
     fn start_vsync(&mut self, window: &ndk::native_window::NativeWindow) {
-        crate::refresh::follow_the_display(&self.app);
+        if self.vsync.is_some() {
+            return;
+        }
         let refreshed = Rc::clone(&self.refreshed);
         self.vsync = Vsync::start(window, Box::new(move || refreshed.set(true)));
     }
 
-    /// The window's geometry as the system now reports it.
-    fn geometry(&self) -> Geometry {
-        let size = self
-            .app
-            .native_window()
-            .map(|window| [window.width() as u32, window.height() as u32])
-            .unwrap_or([0, 0]);
-        Geometry {
-            size,
-            density: self.density(),
-            insets: self.insets_of(size),
-            screen: self
-                .platform
-                .screen
-                .borrow()
-                .as_ref()
-                .map(|screen| screen.id),
-        }
+    /// The rectangle the glue's activity laid its content out in: left, top, right and bottom.
+    fn content_rect(&self) -> [i32; 4] {
+        let rect = self.glue.content_rect();
+        [rect.left, rect.top, rect.right, rect.bottom]
     }
 
-    /// What the system covers of the window of `size`: what the activity told, and until it
-    /// tells, or where it never does, what its content rect leaves.
-    fn insets_of(&self, size: [u32; 2]) -> WindowInsets {
-        self.window_insets.unwrap_or_else(|| {
-            let rect = self.app.content_rect();
-            WindowInsets::around_content(size, [rect.left, rect.top, rect.right, rect.bottom])
-        })
+    /// The screen the app was last told it is on, once the system has described it.
+    fn screen_id(&self) -> Option<waft_embedder::ScreenId> {
+        self.platform
+            .screen
+            .borrow()
+            .as_ref()
+            .map(|screen| screen.id)
     }
 
     /// Pixels per logical pixel, from the configuration's density.
     fn density(&self) -> f64 {
-        self.app
+        self.glue
             .config()
             .density()
             .map_or(1.0, |dpi| f64::from(dpi) / 160.0)
     }
 
-    /// The window's size or its content rect changed: the picture follows the size, and the
-    /// view's metrics both.
+    /// The size of the glue's activity's window or its content rect changed: the picture follows
+    /// the size, and the view's metrics both.
     fn sync_geometry(&mut self) {
-        if let Some(window) = self.app.native_window() {
-            self.view
-                .resized([window.width() as u32, window.height() as u32]);
-        }
-        self.sync_metrics();
+        self.view.resized();
+        self.view.set_content_rect(self.content_rect());
+        let view = Rc::clone(&self.view);
+        self.sync_metrics(&view);
     }
 
-    /// The view's metrics, read again: the framework hears of them when they changed.
-    fn sync_metrics(&mut self) {
-        if self.view.refresh_metrics(self.geometry())
+    /// `view`'s metrics, read again: the framework hears of them when they changed.
+    fn sync_metrics(&mut self, view: &AndroidView) {
+        if view.refresh_metrics(self.density(), self.screen_id())
             && let Some(client) = &mut self.client
         {
-            client.view_metrics_changed(VIEW);
+            client.view_metrics_changed(view.id());
         }
     }
 
-    /// Takes the insets Android applied to the window since the last pass, and has the view's
-    /// metrics follow them.
+    /// Takes the insets Android applied to the views' windows since the last pass, and has each
+    /// view's metrics follow its own.
     fn follow_window_insets(&mut self) {
-        let Some(insets) = crate::window_insets::take() else {
-            return;
-        };
-        self.window_insets = Some(insets);
-        self.sync_metrics();
+        for (id, insets) in crate::window_insets::take() {
+            let Some(view) = self.views.get(id) else {
+                continue;
+            };
+            view.set_window_insets(insets);
+            self.sync_metrics(&view);
+        }
     }
 
     /// The screen the activity is on, read again: the app hears of it when it differs from what
     /// the app was told. The system says nothing of a change of the refresh rate alone, which only
     /// a display listener would hear.
     fn sync_screen(&mut self) {
-        let screen = crate::display::read_screen(&self.app, self.density());
+        let screen = crate::display::read_screen(self.view.activity(), self.density());
         if *self.platform.screen.borrow() == screen {
             return;
         }
@@ -287,7 +323,7 @@ impl<C: EmbedderClient> Host<C> {
 
     /// The appearance and the languages the configuration carries.
     fn sync_configuration(&mut self) {
-        let config = self.app.config();
+        let config = self.glue.config();
         let brightness = match config.ui_mode_night() {
             android_activity::ndk::configuration::UiModeNight::Yes => {
                 waft_embedder::Brightness::Dark
@@ -315,12 +351,12 @@ impl<C: EmbedderClient> Host<C> {
         }
     }
 
-    /// The activity gained or lost the focus; one that gains it has the clipboard looked at, which
-    /// only the focused app may read.
+    /// The glue's activity gained or lost the focus; one that gains it has the clipboard looked
+    /// at, which only the focused app may read.
     fn on_focus(&mut self, focused: bool) {
         if let Some(client) = &mut self.client {
             client.view_focus_changed(ViewFocusEvent {
-                view_id: VIEW,
+                view_id: self.view.id(),
                 state: if focused {
                     ViewFocusState::Focused
                 } else {
@@ -346,8 +382,8 @@ impl<C: EmbedderClient> Host<C> {
 
     /// The input the activity received since the last pass.
     fn read_input(&mut self) {
-        let app = self.app.clone();
-        let Ok(mut events) = app.input_events_iter() else {
+        let glue = self.glue.clone();
+        let Ok(mut events) = glue.input_events_iter() else {
             return;
         };
         loop {
@@ -374,7 +410,7 @@ impl<C: EmbedderClient> Host<C> {
     }
 
     fn on_motion(&mut self, motion: &android_activity::input::MotionEvent<'_>) {
-        let reports = crate::input::reports_of(motion, VIEW);
+        let reports = crate::input::reports_of(motion, self.view.id());
         if reports.is_empty() {
             return;
         }
@@ -415,7 +451,7 @@ impl<C: EmbedderClient> Host<C> {
     /// background, the app running on, and finishes any other, the loop then ending at the
     /// `Destroy` that follows.
     fn close(&self) {
-        let asked = crate::activity::with_activity(&self.app, |env, activity| {
+        let asked = self.view.activity().with(|env, activity| {
             env.call_method(
                 activity,
                 jni::jni_str!("backLeftUnhandled"),
@@ -465,26 +501,29 @@ impl<C: EmbedderClient> Host<C> {
         }
     }
 
-    /// Hands the client what the keyboard did to the field that takes text, in the order it did
-    /// it.
+    /// Hands the client what the keyboards did to the fields that take text, each in its view, in
+    /// the order they did it; what was typed into a view that is the app's no more is dropped.
     fn hand_on_typing(&mut self) {
         let typed = crate::text_input::take();
         let Some(client) = &mut self.client else {
             return;
         };
-        for event in typed {
+        for (view, event) in typed {
+            if self.views.get(view).is_none() {
+                continue;
+            }
             match event {
-                TextInputEvent::Edited(value) => client.text_input_editing_value(VIEW, value),
-                TextInputEvent::Action(action) => client.text_input_action(VIEW, action),
+                TextInputEvent::Edited(value) => client.text_input_editing_value(view, value),
+                TextInputEvent::Action(action) => client.text_input_action(view, action),
             }
         }
     }
 
-    /// One refresh of the display: the waits on it served, and the frame the framework asked for,
-    /// if it asked. The signal is paused after a few refreshes with nothing to draw and nobody
-    /// waiting, and started again by the next request or wait.
+    /// One refresh of the display: the waits on it served, and a frame of the views that asked
+    /// for one and have a window, if any did. The signal is paused after a few refreshes with
+    /// nothing to draw and nobody waiting, and started again by the next request or wait.
     fn pace(&mut self) {
-        let wanted = self.platform.frame_requested.get();
+        let wanted = self.views.any_frame_due();
         let waited = self.platform.vsync_waits.any();
         if let Some(vsync) = &self.vsync
             && (wanted || waited)
@@ -500,7 +539,6 @@ impl<C: EmbedderClient> Host<C> {
         }
         if wanted {
             self.idle_ticks = 0;
-            self.platform.frame_requested.set(false);
             self.draw_frame();
             return;
         }
@@ -530,11 +568,13 @@ impl<C: EmbedderClient> Host<C> {
         Duration::from_secs_f64(1.0 / rate)
     }
 
-    /// Draws one frame: the framework builds, lays out and paints, and the view presents.
+    /// Draws one frame of the views that asked for one and have a window: the framework builds,
+    /// lays out and paints, and each view presents.
     fn draw_frame(&mut self) {
+        let views = self.views.take_frames_due();
         let elapsed = self.platform.elapsed();
         if let Some(client) = &mut self.client {
-            client.frame(&[VIEW], Frame { elapsed });
+            client.frame(&views, Frame { elapsed });
         }
     }
 }
