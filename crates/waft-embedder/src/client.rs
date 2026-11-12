@@ -120,7 +120,9 @@ pub trait EmbedderClient {
     ///
     /// Flutter sends this as `popRoute` on `SystemChannels.navigation`, and has to ask the
     /// framework in advance whether it handles back at all, because the answer cannot
-    /// cross its channel in time. This call answers on the spot instead.
+    /// cross its channel in time. This call answers on the spot instead; a host that cannot ask
+    /// on the spot hears it in advance through
+    /// [`Platform::set_framework_handles_back`](crate::Platform::set_framework_handles_back).
     fn pop_route(&mut self) -> bool {
         false
     }

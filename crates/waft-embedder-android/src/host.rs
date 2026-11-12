@@ -376,22 +376,22 @@ impl<C: EmbedderClient> Host<C> {
         }
     }
 
-    /// Closes the activity, as Android closes an app whose back press nothing handled: Waft's
-    /// activity is asked to finish itself, which it does on the main thread, and the loop ends at
-    /// the `Destroy` that follows. The glue hands out the Java activity, not the NDK's
-    /// `ANativeActivity`, so the NDK's own finish is not what is called.
+    /// Leaves a Back press nothing handled to Android: Waft's activity does the system's own with
+    /// it, on the main thread, which since Android 12 moves a launcher's root activity to the
+    /// background, the app running on, and finishes any other, the loop then ending at the
+    /// `Destroy` that follows.
     fn close(&self) {
         let asked = crate::activity::with_activity(&self.app, |env, activity| {
             env.call_method(
                 activity,
-                jni::jni_str!("finishFromAnyThread"),
+                jni::jni_str!("backLeftUnhandled"),
                 jni::jni_sig!("()V"),
                 &[],
             )
             .map(drop)
         });
         if let Err(error) = asked {
-            crate::log::warn_to_log!("the activity was not asked to finish: {error}");
+            crate::log::warn_to_log!("the activity was not handed the back press: {error}");
         }
     }
 

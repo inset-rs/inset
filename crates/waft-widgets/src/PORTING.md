@@ -307,9 +307,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — an `Rc` or an arena handle cannot be a `const`, and Dart's `defaultActions` is one mutable map of shared action objects.
   Affect: modifying the returned map changes only the app it is passed to, where Dart's global map is shared by every `WidgetsApp`.
 
-- Change: the default navigation-notification handler stops the notification without telling the host, so `WidgetsApp` keeps no lifecycle state for it.
-  Reason: platform — `EmbedderClient::pop_route` answers the host on the spot, so it needs no notice in advance.
-  Affect: an `on_navigation_notification` of your own still runs in place of the default.
+- Change: the default navigation-notification handler tells the host through `Platform::set_framework_handles_back` on every target, where Dart's `SystemNavigator.setFrameworkHandlesBack` sends it on Android alone.
+  Reason: platform — whether Back is heard in advance is the host's to know, and a host whose app answers behind an interface hears it on any system, as a program of WaOS's does.
+  Affect: a host that implements it hears whether a navigator can pop on every system; the default drops it, as a host that asks `EmbedderClient::pop_route` on the spot does.
 
 ## widgets/scroll_context.rs → scroll_context.dart
 

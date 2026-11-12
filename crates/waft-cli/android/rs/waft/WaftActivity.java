@@ -47,15 +47,17 @@ public class WaftActivity extends NativeActivity {
     }
 
     /**
-     * Finishes the activity on the main thread, for the app's native code, which asks from its
-     * own thread, as the NDK's {@code ANativeActivity_finish} does for a native activity's.
+     * Does what Android does with a Back press nothing handled, on the main thread, for the app's
+     * native code, which asks from its own thread once the app has left the press unhandled: the
+     * system's own {@code onBackPressed}, which since Android 12 moves a launcher's root activity
+     * to the background and finishes any other.
      */
-    void finishFromAnyThread() {
+    void backLeftUnhandled() {
         runOnUiThread(
                 new Runnable() {
                     @Override
                     public void run() {
-                        finish();
+                        WaftActivity.super.onBackPressed();
                     }
                 });
     }

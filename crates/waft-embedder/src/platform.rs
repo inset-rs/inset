@@ -578,6 +578,18 @@ pub trait Platform: Any {
         String::from("/")
     }
 
+    /// Informs the host of whether or not the framework will handle back events (Flutter
+    /// `SystemNavigator.setFrameworkHandlesBack`): whether a navigator of the app has a route to
+    /// pop. A host that hears Back only while the app said it handles it follows it, as Android's
+    /// predictive back does, or one whose app cannot answer a press on the spot.
+    ///
+    /// The default drops it: a host that asks the app on the spot, through
+    /// [`EmbedderClient::pop_route`](crate::EmbedderClient::pop_route), has the answer then and
+    /// needs no notice in advance.
+    fn set_framework_handles_back(&self, framework_handles_back: bool) {
+        let _ = framework_handles_back;
+    }
+
     /// The lifecycle state immediately after the application started (Flutter
     /// `PlatformDispatcher.initialLifecycleState`).
     ///

@@ -258,14 +258,19 @@ impl Bars {
 }
 
 /// Flutter's three paddings from the one the activity reports: `bars` is the system's own,
-/// `viewPadding`; what the content lost at the bottom beyond them is the keyboard,
-/// `viewInsets`; and `padding` is the bars less what the keyboard covers, since
-/// `MediaQuery.padding` excludes the insets.
+/// `viewPadding`; where the content lost more at the bottom than the bars take, a keyboard is
+/// up, and `viewInsets` is how far it reaches up from the view's bottom edge, over the system's
+/// bar there, as Flutter measures it; and `padding` is the bars less what the keyboard covers,
+/// since `MediaQuery.padding` excludes the insets.
 fn split_padding(
     content: ViewPadding,
     bars: ViewPadding,
 ) -> (ViewPadding, ViewPadding, ViewPadding) {
-    let keyboard = (content.bottom - bars.bottom).max(0.0);
+    let keyboard = if content.bottom > bars.bottom {
+        content.bottom
+    } else {
+        0.0
+    };
     let padding = ViewPadding {
         bottom: (bars.bottom - keyboard).max(0.0),
         ..bars

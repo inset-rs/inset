@@ -11,9 +11,10 @@ use std::ptr;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use waft_embedder::{Clip, Color, Locale, TargetPlatform};
+use waft_embedder::{AppLifecycleState, Clip, Color, Locale, TargetPlatform};
 use waft_foundation::{App, Handle, K_IS_WEB, Listenable};
 use waft_painting::{AxisDirection, TextStyle};
+use waft_scheduler::SchedulerBinding;
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 use crate::framework::{
@@ -1200,6 +1201,7 @@ impl StatefulWidget for WidgetsApp {
             navigator: None,
             localizations_resolver: None,
             observer: None,
+            app_lifecycle_state: None,
         }
     }
 }
@@ -1299,6 +1301,7 @@ pub struct WidgetsAppState {
     navigator: Option<GlobalKey>,
     localizations_resolver: Option<Handle<LocalizationsResolver>>,
     observer: Option<WidgetsBindingObserverRef>,
+    app_lifecycle_state: Option<AppLifecycleState>,
 }
 
 impl WidgetsAppState {
@@ -1319,15 +1322,29 @@ impl WidgetsAppState {
 
     /// The default value for [`WidgetsApp::on_navigation_notification`].
     ///
-    /// Stops bubbling without telling the host, which learns whether the app went back from
-    /// `EmbedderClient::pop_route` instead; see PORTING.md.
+    /// Does nothing and stops bubbling if the app is detached. Otherwise, updates the platform
+    /// with [`NavigationNotification::can_handle_pop`] and stops bubbling.
     fn default_on_navigation_notification(
         self: Handle<Self>,
         app: &mut App,
         notification: &NavigationNotification,
     ) -> bool {
-        let _ = (app, notification);
-        true
+        match app.get(self).app_lifecycle_state {
+            None | Some(AppLifecycleState::Detached) => {
+                // Avoid updating the engine when the app isn't ready.
+                true
+            }
+            Some(
+                AppLifecycleState::Inactive
+                | AppLifecycleState::Resumed
+                | AppLifecycleState::Hidden
+                | AppLifecycleState::Paused,
+            ) => {
+                app.platform()
+                    .set_framework_handles_back(notification.can_handle_pop);
+                true
+            }
+        }
     }
 
     fn clear_navigator_resource(self: Handle<Self>, app: &mut App) {
@@ -1547,6 +1564,10 @@ impl WidgetsBindingObserverObject for WidgetsAppState {
         };
         navigator.maybe_pop(app, None)
     }
+
+    fn did_change_app_lifecycle_state(self: Handle<Self>, app: &mut App, state: AppLifecycleState) {
+        app.get_mut(self).app_lifecycle_state = Some(state);
+    }
 }
 
 impl State for WidgetsAppState {
@@ -1573,6 +1594,7 @@ impl State for WidgetsAppState {
         let observer: WidgetsBindingObserverRef = Rc::new(self);
         WidgetsBinding::instance(app).add_observer(app, Rc::clone(&observer));
         app.get_mut(self).observer = Some(observer);
+        app.get_mut(self).app_lifecycle_state = SchedulerBinding::lifecycle_state(app);
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &WidgetsApp) {
@@ -1806,10 +1828,10 @@ mod tests {
     use waft_services::LogicalKeyboardKey;
     use waft_test::{TestPlatform, TestView};
 
-    use crate::framework::{AnyElement, StatelessWidget, downcast_widget};
+    use crate::framework::{AnyElement, Notification, StatelessWidget, downcast_widget};
     use crate::widgets::actions::IntentRef;
     use crate::widgets::basic::SizedBox;
-    use crate::widgets::focus_manager::tests::{app_with_view, mount};
+    use crate::widgets::focus_manager::tests::{app_with_view, app_with_view_of_host, mount};
     use crate::widgets::focus_manager::{AnyFocusNode, FocusManager, FocusNodeLeaf, primary_focus};
     use crate::widgets::focus_scope::Focus;
     use crate::widgets::localizations::WidgetsLocalizations;
@@ -2054,6 +2076,132 @@ mod tests {
             !binding.handle_pop_route(&mut app),
             "back at the first route it answers that it did not go back"
         );
+    }
+
+    /// An [`App`] with one view on an Android host, where Flutter's predictive back is.
+    fn android_app_with_view() -> Rc<AppCell> {
+        app_with_view_of_host(TargetPlatform::Android, false)
+    }
+
+    /// Every value the app told its host of whether it handles back, in order.
+    fn framework_handles_backs(app: &App) -> Vec<bool> {
+        app.platform()
+            .downcast_ref::<TestPlatform>()
+            .expect("a test platform")
+            .framework_handles_back()
+    }
+
+    /// Flutter's app_test.dart, "WidgetsApp calls setFrameworkHandlesBack only when app is
+    /// ready".
+    #[test]
+    fn widgets_app_calls_set_framework_handles_back_only_when_app_is_ready() {
+        let cell = android_app_with_view();
+        let mut app = cell.borrow_mut();
+        install_fonts(&mut app);
+        // Start in the `resumed` state, where set_framework_handles_back should be called like
+        // normal.
+        SchedulerBinding::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Resumed);
+        let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
+        let sink = Rc::clone(&captured);
+        drop(app);
+        mount(
+            &cell,
+            WidgetsApp::new(COLOR)
+                .builder(move |_app, context, _child| {
+                    sink.set(Some(context));
+                    Marker.into_widget()
+                })
+                .into_widget(),
+        );
+        let mut app = cell.borrow_mut();
+        let context = captured.get().expect("the builder ran");
+
+        assert!(framework_handles_backs(&app).is_empty());
+
+        NavigationNotification::new(true).dispatch(&mut app, Some(context));
+        settle(&mut app);
+        assert_eq!(framework_handles_backs(&app).last(), Some(&true));
+
+        NavigationNotification::new(false).dispatch(&mut app, Some(context));
+        settle(&mut app);
+        assert_eq!(framework_handles_backs(&app).last(), Some(&false));
+
+        // Set the app state to inactive, where set_framework_handles_back is still called. This
+        // could happen when responding to a tap on a notification when the app is not active and
+        // immediately navigating, for example.
+        SchedulerBinding::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Inactive);
+
+        let inactive_start_calls_length = framework_handles_backs(&app).len();
+        NavigationNotification::new(true).dispatch(&mut app, Some(context));
+        settle(&mut app);
+        assert_eq!(
+            framework_handles_backs(&app).len(),
+            inactive_start_calls_length + 1
+        );
+
+        NavigationNotification::new(false).dispatch(&mut app, Some(context));
+        settle(&mut app);
+        assert_eq!(
+            framework_handles_backs(&app).len(),
+            inactive_start_calls_length + 2
+        );
+
+        // Set the app state to detached, where set_framework_handles_back shouldn't be called.
+        SchedulerBinding::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Detached);
+
+        let final_calls_length = framework_handles_backs(&app).len();
+        NavigationNotification::new(true).dispatch(&mut app, Some(context));
+        settle(&mut app);
+        assert_eq!(framework_handles_backs(&app).len(), final_calls_length);
+
+        NavigationNotification::new(false).dispatch(&mut app, Some(context));
+        settle(&mut app);
+        assert_eq!(framework_handles_backs(&app).len(), final_calls_length);
+    }
+
+    /// Flutter's navigator_test.dart, "a single route is already defaulted to false" and
+    /// "navigating around a single Navigator with system back", on a `WidgetsApp`.
+    #[test]
+    fn the_host_hears_whether_the_app_navigator_can_go_back_as_routes_come_and_go() {
+        let cell = android_app_with_view();
+        let mut app = cell.borrow_mut();
+        install_fonts(&mut app);
+        SchedulerBinding::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Resumed);
+        let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
+        let sink = Rc::clone(&captured);
+        drop(app);
+        mount(
+            &cell,
+            widgets_app()
+                .home(Builder::new(move |_app, context| {
+                    sink.set(Some(context));
+                    Marker.into_widget()
+                }))
+                .into_widget(),
+        );
+        let mut app = cell.borrow_mut();
+        settle(&mut app);
+        assert_eq!(
+            framework_handles_backs(&app).last(),
+            Some(&false),
+            "a single route is already defaulted to false"
+        );
+
+        let context = captured.get().expect("the home built");
+        let settings = RouteSettings::new().name("/one");
+        let route = page_route(
+            &mut app,
+            &settings,
+            Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
+        );
+        Navigator::of(&mut app, context, false).push(&mut app, route.as_route());
+        settle(&mut app);
+        assert_eq!(framework_handles_backs(&app).last(), Some(&true));
+
+        let binding = WidgetsBinding::instance(&mut app);
+        assert!(binding.handle_pop_route(&mut app));
+        settle(&mut app);
+        assert_eq!(framework_handles_backs(&app).last(), Some(&false));
     }
 
     #[test]

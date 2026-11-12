@@ -29,7 +29,8 @@ type BufferImporter = Rc<dyn Fn(&dyn HardwareBuffer) -> Option<Image>>;
 
 /// A platform a test builds: which host it claims to be, the views it offers, and each
 /// capability as the test's own implementation or absent. It keeps the frames the framework asks
-/// for and the deadlines it asks to be woken at, so a test can assert on them; the test itself
+/// for, what it says of whether it handles back, and the deadlines it asks to be woken at, so a
+/// test can assert on them; the test itself
 /// pumps the app, since there is no loop to run it.
 ///
 /// With a compositor it has a view embedder, which adds a view on any layer the app asks it to
@@ -52,6 +53,8 @@ pub struct TestPlatform {
     added_views: RefCell<Vec<Rc<TestView>>>,
     /// The view of each frame asked for since the test last took them, in the order asked.
     frame_requests: RefCell<Vec<ViewId>>,
+    /// Each value the framework said of whether it handles back, in the order said.
+    framework_handles_back: RefCell<Vec<bool>>,
     dispatcher: Arc<TestDispatcher>,
     font_source: Option<FontSourceMaker>,
     image_codec: Option<ImageCodecOpener>,
@@ -97,6 +100,7 @@ impl TestPlatform {
             next_request: Cell::new(1),
             added_views: RefCell::default(),
             frame_requests: RefCell::default(),
+            framework_handles_back: RefCell::default(),
             dispatcher: Arc::new(TestDispatcher::default()),
             font_source: None,
             image_codec: None,
@@ -411,6 +415,12 @@ impl TestPlatform {
             .collect()
     }
 
+    /// Each value the framework said of whether it handles back
+    /// (`Platform::set_framework_handles_back`), in the order said.
+    pub fn framework_handles_back(&self) -> Vec<bool> {
+        self.framework_handles_back.borrow().clone()
+    }
+
     /// The timer wakeups the framework has set, in order. A `None` is the framework
     /// saying no timer is waiting.
     pub fn wakes(&self) -> Vec<Option<Instant>> {
@@ -481,6 +491,12 @@ impl Platform for TestPlatform {
 
     fn default_route_name(&self) -> String {
         self.default_route.clone()
+    }
+
+    fn set_framework_handles_back(&self, framework_handles_back: bool) {
+        self.framework_handles_back
+            .borrow_mut()
+            .push(framework_handles_back);
     }
 
     fn initial_lifecycle_state(&self) -> Option<AppLifecycleState> {
