@@ -4,7 +4,9 @@
 //! the compositor may not see what was written: on the emulator a buffer whose last write was a
 //! copy showed black until it was released (`experiments/2026-11-11-android-surface-control`,
 //! question 8). wgpu-core has no call for either, so each is a raw barrier in a command encoder of
-//! its own, submitted on wgpu's queue in order with the frame's work.
+//! its own, on wgpu's queue in order with the frame's work: the acquire submitted here, before the
+//! frame is drawn, and the release handed back as commands for the view to submit as the frame's
+//! last submission, which signals the fence the compositor waits on (`frame_fence`).
 //!
 //! The image keeps one layout across the handover: wgpu is first told to bring the texture to the
 //! colour attachment's state, and both barriers keep its layout, so what wgpu tracks for the
@@ -28,14 +30,13 @@ use wgpu::wgt::TextureUses;
 const HANDED_OVER_STATE: TextureUses = TextureUses::COLOR_TARGET;
 const HANDED_OVER_LAYOUT: vk::ImageLayout = vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL;
 
-/// Hands `texture`'s image to the compositor once the work submitted on `queue` before this is
-/// done: wgpu brings it to the handed-over state, then a barrier releases it to the foreign
-/// queue family, both in one submission. Reported and left undone on a device not Vulkan's.
+/// The commands that hand `texture`'s image to the compositor once the work submitted before them
+/// is done, to be submitted together: wgpu brings it to the handed-over state, then a barrier
+/// releases it to the foreign queue family. `None`, reported, on a device not Vulkan's.
 pub(crate) fn release_to_compositor(
     device: &wgpu::Device,
-    queue: &wgpu::Queue,
     texture: &wgpu::Texture,
-) {
+) -> Option<[wgpu::CommandBuffer; 2]> {
     let mut to_handed_over_state = device.create_command_encoder(&Default::default());
     to_handed_over_state.transition_resources(
         std::iter::empty(),
@@ -45,10 +46,8 @@ pub(crate) fn release_to_compositor(
             state: HANDED_OVER_STATE,
         }),
     );
-    let Some(release) = barrier_encoder(device, texture, Handover::Release) else {
-        return;
-    };
-    queue.submit([to_handed_over_state.finish(), release.finish()]);
+    let release = barrier_encoder(device, texture, Handover::Release)?;
+    Some([to_handed_over_state.finish(), release.finish()])
 }
 
 /// Takes `texture`'s image back from the compositor, which released the buffer, before the work

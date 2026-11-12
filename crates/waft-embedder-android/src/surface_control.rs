@@ -12,7 +12,7 @@
 #![allow(unsafe_code)]
 
 use std::ffi::{CStr, c_char, c_void};
-use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd};
 use std::ptr;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -220,11 +220,19 @@ impl Transaction {
         unsafe { ASurfaceTransaction_setZOrder(self.raw, surface.raw, z) };
     }
 
-    /// Shows `buffer` on `surface`, whose GPU work is done, so with no acquire fence.
-    pub(crate) fn set_buffer(&mut self, surface: &SurfaceControl, buffer: &HardwareBufferRef) {
+    /// Shows `buffer` on `surface` once `acquire_fence` signals, at once where there is none,
+    /// as for a buffer whose GPU work is done; the transaction owns the fence from here on.
+    pub(crate) fn set_buffer(
+        &mut self,
+        surface: &SurfaceControl,
+        buffer: &HardwareBufferRef,
+        acquire_fence: Option<OwnedFd>,
+    ) {
+        let fence = acquire_fence.map_or(NO_FENCE, IntoRawFd::into_raw_fd);
         // SAFETY: a live transaction, surface control and buffer, which the transaction takes a
-        // reference on.
-        unsafe { ASurfaceTransaction_setBuffer(self.raw, surface.raw, buffer.as_ptr(), NO_FENCE) };
+        // reference on; the fence is a descriptor handed over, which the system closes, as the
+        // header says.
+        unsafe { ASurfaceTransaction_setBuffer(self.raw, surface.raw, buffer.as_ptr(), fence) };
     }
 
     /// Whether SurfaceFlinger may take `surface`'s buffer as covering what lies beneath it.

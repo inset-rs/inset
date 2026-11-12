@@ -1,6 +1,6 @@
 //! Android: the `.apk` Gradle would produce, assembled from a cargo library.
 //!
-//! No Gradle project and no Java of the app's own. The Java is Waft's three classes (under
+//! No Gradle project and no Java of the app's own. The Java is Waft's four classes (under
 //! `android/rs/waft/` in this crate). The activity, `rs.waft.WaftActivity`, is the platform's
 //! `NativeActivity`, which loads the app's shared library and calls its `android_main`, with the
 //! results of the activities the app starts, the intents that reach it while it runs and the
@@ -8,7 +8,8 @@
 //! being opened and notifications need. The file provider, `rs.waft.WaftFileProvider`, shares a
 //! file of the app's with the app that opens it. The notification receiver,
 //! `rs.waft.WaftNotificationReceiver`, builds and shows the app's notifications, and shows one
-//! when its alarm goes off, whether or not the app runs. So the
+//! when its alarm goes off, whether or not the app runs. The text input, `rs.waft.WaftTextInput`,
+//! is the view the activity adds for the system's keyboards to edit text through. So the
 //! package is that library, the classes compiled to `classes.dex`, a manifest, and icons, put
 //! together with the SDK's own tools: `javac` and `d8` compile the classes, `aapt2` links the
 //! manifest and resources, `zipalign` aligns, `apksigner` signs with the debug key, and `adb`
@@ -32,7 +33,7 @@ use crate::devices::Target;
 
 use crate::cargo::{self, Artifact, Build};
 use crate::icons;
-use crate::project::{Profile, Project};
+use crate::project::{FileAssociation, Profile, Project};
 use crate::tools;
 
 /// Android 12, the least an app runs on: Waft's Android host links the surface-control calls
@@ -50,14 +51,14 @@ const WAFT_ACTIVITY: &str = "rs.waft.WaftActivity";
 const WAFT_FILE_PROVIDER: &str = "rs.waft.WaftFileProvider";
 /// Waft's notification receiver, which builds the app's notifications and hears their alarms.
 const WAFT_NOTIFICATION_RECEIVER: &str = "rs.waft.WaftNotificationReceiver";
-/// What the app may do for its notifications: post them, which Android 13 asks the user for, and
+/// What every app may do for its notifications: post them, which Android 13 asks the user for, and
 /// show one at its exact time, which Android 14 leaves to the user to grant in the app's settings.
 const PERMISSIONS: [&str; 2] = [
     "android.permission.POST_NOTIFICATIONS",
     "android.permission.SCHEDULE_EXACT_ALARM",
 ];
 /// The Java classes every app's package compiles, by their paths under the sources' root.
-const JAVA_SOURCES: [(&str, &str); 3] = [
+const JAVA_SOURCES: [(&str, &str); 4] = [
     (
         "rs/waft/WaftActivity.java",
         include_str!("../android/rs/waft/WaftActivity.java"),
@@ -69,6 +70,10 @@ const JAVA_SOURCES: [(&str, &str); 3] = [
     (
         "rs/waft/WaftNotificationReceiver.java",
         include_str!("../android/rs/waft/WaftNotificationReceiver.java"),
+    ),
+    (
+        "rs/waft/WaftTextInput.java",
+        include_str!("../android/rs/waft/WaftTextInput.java"),
     ),
 ];
 /// The schemes of the links whose viewers the app may ask about (`<queries>`): from Android 11 the
@@ -368,6 +373,8 @@ pub fn build(project: &Project, profile: Profile, abi: Abi) -> Result<Apk> {
             target_sdk: project.android.target_sdk.unwrap_or(DEFAULT_TARGET_SDK),
             debuggable: !profile.is_release(),
             has_icon,
+            file_associations: &project.file_associations,
+            permissions: &project.android.permissions,
         }),
     )?;
     let linked = stage.join("unaligned.apk");
@@ -518,6 +525,10 @@ struct Manifest<'a> {
     debuggable: bool,
     has_icon: bool,
     category: &'a str,
+    /// The kinds of file the system offers the app for.
+    file_associations: &'a [FileAssociation],
+    /// The permissions the app asks for besides [`PERMISSIONS`].
+    permissions: &'a [String],
 }
 
 /// The manifest around Waft's activity. `configChanges` keeps the activity, and so the
@@ -526,7 +537,8 @@ struct Manifest<'a> {
 /// the host learns of it. Waft's file provider is declared at `<package>.waft.files`, not
 /// exported, granting each URI it shares; its notification receiver, not exported, hears only the
 /// app's own alarms; `<queries>` names viewing the links of [`QUERIED_SCHEMES`]; the app asks for
-/// [`PERMISSIONS`].
+/// [`PERMISSIONS`] and its own; the activity is offered for the files of the app's associations
+/// ([`file_intent_filters`]).
 fn manifest(manifest: &Manifest) -> String {
     let icon = if manifest.has_icon {
         r#" android:icon="@mipmap/ic_launcher""#
@@ -562,7 +574,7 @@ fn manifest(manifest: &Manifest) -> String {
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
-    </activity>
+{file_intent_filters}    </activity>
     <provider
         android:name="{provider}"
         android:authorities="{package}.waft.files"
@@ -587,18 +599,90 @@ fn manifest(manifest: &Manifest) -> String {
         library = manifest.library,
         provider = WAFT_FILE_PROVIDER,
         receiver = WAFT_NOTIFICATION_RECEIVER,
-        permissions = uses_permissions(),
+        permissions = uses_permissions(manifest.permissions),
         queried_schemes_key = QUERIED_SCHEMES_KEY,
         queried_schemes = QUERIED_SCHEMES.join(","),
         queries = queried_intents(),
+        file_intent_filters = file_intent_filters(manifest.file_associations),
     )
 }
 
-/// One `<uses-permission>` for each of [`PERMISSIONS`].
-fn uses_permissions() -> String {
-    PERMISSIONS
-        .iter()
-        .map(|permission| format!("  <uses-permission android:name=\"{permission}\" />\n"))
+/// The `<intent-filter>`s by which the system offers the activity to view a file of one of
+/// `associations`, as a `content:` or a `file:` URI: a type's MIME type, where it has one; its
+/// extensions at the end of the URI's path, of any type; and, for a type the app defines, any file
+/// of `application/octet-stream`, once for all of them.
+///
+/// Android has no way for an app to teach the system a new extension, so a file of a type the app
+/// defines reaches it as `application/octet-stream`, and the Files app's Downloads view may name
+/// a download by a number, with no extension to match: only the untyped filter offers the app for
+/// it, which offers the app for every untyped file too.
+fn file_intent_filters(associations: &[FileAssociation]) -> String {
+    let mut filters = String::new();
+    for association in associations {
+        if let Some(mime_type) = &association.mime_type {
+            filters += &view_filter(&format!(
+                r#"<data android:mimeType="{}" />"#,
+                xml_escape(mime_type)
+            ));
+        }
+        filters += &view_filter(&extension_data(&association.extensions));
+    }
+    if associations.iter().any(|association| association.owner) {
+        filters += &view_filter(r#"<data android:mimeType="application/octet-stream" />"#);
+    }
+    filters
+}
+
+/// The data of a filter that matches a path ending in one of `extensions`, of any type: a path is
+/// matched only where the filter names a host.
+fn extension_data(extensions: &[String]) -> String {
+    let suffixes = extensions.iter().map(|extension| {
+        format!(
+            r#"<data android:pathSuffix=".{}" />"#,
+            xml_escape(extension)
+        )
+    });
+    [
+        r#"<data android:host="*" />"#.to_owned(),
+        r#"<data android:mimeType="*/*" />"#.to_owned(),
+    ]
+    .into_iter()
+    .chain(suffixes)
+    .collect::<Vec<_>>()
+    .join("\n        ")
+}
+
+/// An `<intent-filter>` for viewing a `content:` or a `file:` URI that `data` matches further.
+fn view_filter(data: &str) -> String {
+    format!(
+        r#"      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:scheme="content" />
+        <data android:scheme="file" />
+        {data}
+      </intent-filter>
+"#
+    )
+}
+
+/// One `<uses-permission>` for each of [`PERMISSIONS`], then for each of `the_apps` not among
+/// them, once each.
+fn uses_permissions(the_apps: &[String]) -> String {
+    let mut named: Vec<&str> = PERMISSIONS.to_vec();
+    for permission in the_apps {
+        if !named.contains(&permission.as_str()) {
+            named.push(permission);
+        }
+    }
+    named
+        .into_iter()
+        .map(|permission| {
+            format!(
+                "  <uses-permission android:name=\"{}\" />\n",
+                xml_escape(permission)
+            )
+        })
         .collect()
 }
 
@@ -1061,6 +1145,8 @@ mod tests {
             debuggable: true,
             has_icon: false,
             category: "productivity",
+            file_associations: &[],
+            permissions: &[],
         });
         assert!(manifest.contains(r#"package="com.example.my_app""#));
         assert!(manifest.contains(r#"android:name="rs.waft.WaftActivity""#));
@@ -1101,6 +1187,8 @@ mod tests {
             debuggable: false,
             has_icon: false,
             category: "productivity",
+            file_associations: &[],
+            permissions: &[],
         });
         assert!(manifest.contains(r#"android:name="rs.waft.WaftFileProvider""#));
         assert!(manifest.contains(r#"android:authorities="com.example.my_app.waft.files""#));
@@ -1116,6 +1204,32 @@ mod tests {
     }
 
     #[test]
+    fn an_apps_own_permissions_follow_wafts_once_each() {
+        let own = [
+            "android.permission.INTERNET".to_owned(),
+            "android.permission.POST_NOTIFICATIONS".to_owned(),
+            "android.permission.INTERNET".to_owned(),
+        ];
+        let asked = uses_permissions(&own);
+        assert_eq!(
+            asked.matches("android.permission.INTERNET").count(),
+            1,
+            "{asked}"
+        );
+        assert_eq!(
+            asked
+                .matches("android.permission.POST_NOTIFICATIONS")
+                .count(),
+            1,
+            "{asked}"
+        );
+        assert!(
+            asked.find("POST_NOTIFICATIONS") < asked.find("INTERNET"),
+            "Waft's own come first: {asked}"
+        );
+    }
+
+    #[test]
     fn manifest_declares_the_notification_receiver_and_its_permissions() {
         let manifest = manifest(&Manifest {
             package: "com.example.my_app",
@@ -1128,6 +1242,8 @@ mod tests {
             debuggable: false,
             has_icon: false,
             category: "productivity",
+            file_associations: &[],
+            permissions: &[],
         });
         assert!(manifest.contains(
             r#"<receiver android:name="rs.waft.WaftNotificationReceiver" android:exported="false" />"#
@@ -1142,6 +1258,84 @@ mod tests {
             manifest.find("<uses-permission") < manifest.find("<application"),
             "permissions belong to the manifest, before the application"
         );
+    }
+
+    fn association(extensions: &[&str], mime_type: Option<&str>, owner: bool) -> FileAssociation {
+        FileAssociation {
+            extensions: extensions
+                .iter()
+                .map(|extension| extension.to_string())
+                .collect(),
+            name: "A document".into(),
+            owner,
+            role: Default::default(),
+            identifier: None,
+            mime_type: mime_type.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn a_typed_association_is_viewed_by_its_mime_type_and_its_extensions() {
+        let filters = file_intent_filters(&[association(
+            &["md", "markdown"],
+            Some("text/markdown"),
+            false,
+        )]);
+        assert_eq!(filters.matches("<intent-filter>").count(), 2);
+        assert!(filters.contains(r#"<action android:name="android.intent.action.VIEW" />"#));
+        assert!(filters.contains(r#"<category android:name="android.intent.category.DEFAULT" />"#));
+        assert!(filters.contains(r#"<data android:scheme="content" />"#));
+        assert!(filters.contains(r#"<data android:scheme="file" />"#));
+        assert!(filters.contains(r#"<data android:mimeType="text/markdown" />"#));
+        assert!(filters.contains(r#"<data android:pathSuffix=".md" />"#));
+        assert!(filters.contains(r#"<data android:pathSuffix=".markdown" />"#));
+        assert!(
+            filters.contains(r#"<data android:host="*" />"#),
+            "a path is matched only where the filter names a host"
+        );
+        assert!(
+            !filters.contains("application/octet-stream"),
+            "a type the system knows needs no untyped filter"
+        );
+    }
+
+    #[test]
+    fn an_owned_type_is_also_offered_for_untyped_files_once() {
+        let filters = file_intent_filters(&[
+            association(&["wapk"], None, true),
+            association(&["wapp"], None, true),
+        ]);
+        assert!(filters.contains(r#"<data android:pathSuffix=".wapk" />"#));
+        assert!(filters.contains(r#"<data android:pathSuffix=".wapp" />"#));
+        assert_eq!(
+            filters
+                .matches(r#"<data android:mimeType="application/octet-stream" />"#)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn the_activity_carries_the_file_filters() {
+        let associations = [association(&["wapk"], None, true)];
+        let manifest = manifest(&Manifest {
+            package: "com.example.my_app",
+            label: "My App",
+            library: "my_app",
+            version_code: 100,
+            version_name: "0.1.0",
+            min_sdk: 31,
+            target_sdk: 34,
+            debuggable: false,
+            has_icon: false,
+            category: "productivity",
+            file_associations: &associations,
+            permissions: &[],
+        });
+        let activity =
+            &manifest[manifest.find("<activity").unwrap()..manifest.find("</activity>").unwrap()];
+        assert!(activity.contains(r#"<data android:pathSuffix=".wapk" />"#));
+        assert!(activity.contains("application/octet-stream"));
     }
 
     #[test]

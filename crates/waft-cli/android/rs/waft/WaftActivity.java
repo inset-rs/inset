@@ -2,10 +2,12 @@ package rs.waft;
 
 import android.app.NativeActivity;
 import android.content.Intent;
+import android.os.Bundle;
+import android.view.ViewGroup;
 
 /**
  * Waft's activity: the platform's {@link NativeActivity}, which loads the app's native library
- * and runs it, with three things added, which NativeActivity keeps to itself.
+ * and runs it, with four things added, which NativeActivity keeps to itself or cannot give.
  *
  * <ul>
  *   <li>An activity the app starts for a result, such as the system's document picker, answers
@@ -16,6 +18,9 @@ import android.content.Intent;
  *       reads itself.
  *   <li>The user's answer to a permission the app asked for, such as posting notifications,
  *       arrives through {@link #onRequestPermissionsResult}; this hands it on.
+ *   <li>The system's keyboards edit text only through a view's input connection, which
+ *       NativeActivity's content view does not give; this adds {@link WaftTextInput} beside it,
+ *       which does, and which the native code reaches through {@link #textInput}.
  * </ul>
  *
  * <p>The native methods are registered by the app's native code when it starts
@@ -23,6 +28,38 @@ import android.content.Intent;
  * runtime would not look for it by name. waft-cli compiles this class into every Android app.
  */
 public class WaftActivity extends NativeActivity {
+    private WaftTextInput textInput;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        // Made before NativeActivity starts the app's native code, which asks for it at once.
+        textInput = new WaftTextInput(this);
+        super.onCreate(savedInstanceState);
+        addContentView(
+                textInput,
+                new ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    /** The view the system's keyboards edit text through, for the app's native code. */
+    WaftTextInput textInput() {
+        return textInput;
+    }
+
+    /**
+     * Finishes the activity on the main thread, for the app's native code, which asks from its
+     * own thread, as the NDK's {@code ANativeActivity_finish} does for a native activity's.
+     */
+    void finishFromAnyThread() {
+        runOnUiThread(
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        finish();
+                    }
+                });
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);

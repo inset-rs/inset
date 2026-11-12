@@ -32,8 +32,12 @@ mod composition;
 mod display;
 #[cfg(target_os = "android")]
 mod document_tree;
+#[cfg(any(target_os = "android", test))]
+mod editor_info;
 #[cfg(target_os = "android")]
 mod file_dialogs;
+#[cfg(target_os = "android")]
+mod frame_fence;
 #[cfg(target_os = "android")]
 mod gpu;
 #[cfg(target_os = "android")]
@@ -68,6 +72,8 @@ mod refresh;
 mod surface;
 #[cfg(target_os = "android")]
 mod surface_control;
+#[cfg(target_os = "android")]
+mod text_input;
 #[cfg(target_os = "android")]
 mod view;
 #[cfg(target_os = "android")]

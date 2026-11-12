@@ -70,7 +70,8 @@ pub struct FileAssociation {
     /// given, and is then matched by its extensions.
     pub identifier: Option<String>,
     /// The type's MIME type, `application/wasm`. Linux associates files by it, so there a
-    /// type without one is not associated; macOS adds it to the type's declaration.
+    /// type without one is not associated; macOS adds it to the type's declaration; Android
+    /// offers the app for files of it, beside those its extensions end.
     pub mime_type: Option<String>,
 }
 
@@ -158,6 +159,11 @@ pub struct AndroidMetadata {
     /// `android:appCategory`: `accessibility`, `audio`, `game`, `image`, `maps`, `news`,
     /// `productivity`, `social` or `video`. Defaults to `productivity`.
     pub category: Option<String>,
+    /// The permissions the app asks for besides those Waft's own classes need, each by its full
+    /// name, `android.permission.INTERNET`: one `<uses-permission>` each. Android refuses what a
+    /// manifest does not name, so an app that opens a socket without `INTERNET` gets "operation
+    /// not permitted".
+    pub permissions: Vec<String>,
 }
 
 pub struct Project {

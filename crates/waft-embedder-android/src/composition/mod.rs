@@ -17,8 +17,11 @@
 //! The module holds the compositor and the composition layer; `layer_geometry` where a placement
 //! puts a layer's container, `buffers` what a layer was presented and when each goes back,
 //! `transaction` one frame of the tree and the buffers it replaces, `releases` the thread that
-//! waits on release fences, `view_layer` the view's own picture, and `window_surface` the
-//! window's own surface beneath it, whose buffer Android sizes the window's input by.
+//! waits on release fences, `view_layer` the view's own picture, `frames_in_flight` how far the
+//! view's frames run ahead of the GPU, and `window_surface` the window's own surface beneath it,
+//! whose buffer Android sizes the window's input by. A producer's buffer is presented with no
+//! acquire fence, its GPU work done, as Waft's contract asks; the view's own carries its frame's
+//! fence (`frame_fence`).
 //!
 //! Every present, placement and letting go is built and applied as one transaction under the
 //! compositor's lock, from any thread: a producer presents from its own, the view from the loop's.
@@ -27,12 +30,14 @@
 //! placer at a time, from the placement that adopts it until that placer lets it go.
 
 mod buffers;
+mod frames_in_flight;
 mod layer_geometry;
 mod releases;
 mod transaction;
 mod view_layer;
 mod window_surface;
 
+use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -206,19 +211,20 @@ impl SurfaceControlLayer {
         }
     }
 
-    /// Shows `buffer` and places `children` beneath it in `transaction`, letting go of the
-    /// children no longer named; the buffer it replaces goes back to its producer once the
-    /// compositor is done with it.
+    /// Shows `buffer`, once `acquire_fence` signals where there is one, and places `children`
+    /// beneath it in `transaction`, letting go of the children no longer named; the buffer it
+    /// replaces goes back to its producer once the compositor is done with it.
     fn present_in(
         &self,
         transaction: &mut LayerTransaction,
         buffer: AndroidHardwareBuffer,
+        acquire_fence: Option<OwnedFd>,
         children: Vec<(Arc<SurfaceControlLayer>, Placement)>,
         released: OnReleased,
     ) {
         let release = Release::new(Arc::new(buffer.clone()), released);
         let mut state = self.state();
-        let replaced = state.buffers.present(buffer, release);
+        let replaced = state.buffers.present(buffer, acquire_fence, release);
         let previous_children = std::mem::replace(
             &mut state.children,
             adopted_by(children, Placer::Layer(self.number)),
@@ -302,9 +308,12 @@ impl LayerState {
             Arc::clone(&surfaces.buffer),
         );
         if let Some(unset) = self.buffers.unset() {
-            transaction
-                .transaction
-                .set_buffer(&buffer_surface, unset.buffer.buffer());
+            let acquire_fence = unset.acquire_fence.take();
+            transaction.transaction.set_buffer(
+                &buffer_surface,
+                unset.buffer.buffer(),
+                acquire_fence,
+            );
             unset.set = true;
         }
         for ((child, placement), z) in self.children.iter().zip(0..) {
@@ -318,8 +327,8 @@ impl LayerState {
 }
 
 impl CompositionLayer for SurfaceControlLayer {
-    /// Shows the buffer and places the children in one transaction. A buffer another host handed
-    /// out is not shown, and is reported.
+    /// Shows the buffer, its GPU work done, so with no acquire fence, and places the children in
+    /// one transaction. A buffer another host handed out is not shown, and is reported.
     fn present(
         &self,
         buffer: Arc<dyn HardwareBuffer>,
@@ -334,7 +343,7 @@ impl CompositionLayer for SurfaceControlLayer {
         };
         let children = own_layers(&children);
         self.transactions.transact(|transaction| {
-            self.present_in(transaction, buffer.clone(), children, released);
+            self.present_in(transaction, buffer.clone(), None, children, released);
         });
     }
 

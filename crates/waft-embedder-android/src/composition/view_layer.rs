@@ -7,43 +7,44 @@
 //! in. The window's own surface holds only a buffer of the clear colour at the window's size,
 //! which Android sizes the window and its input by (`window_surface`).
 //!
-//! The view keeps a few buffers at the window's size, each drawn again once the compositor has
-//! released it: one replaced comes back about a refresh after the present that replaced it, so
-//! three at 60 Hz are rarely all held (`experiments/2026-11-11-android-surface-control`,
-//! question 5). A frame goes, in order on wgpu's queue: the buffer's image acquired back from the
-//! compositor's queue family where the compositor had it, the picture drawn, the image released
-//! to that family (`queue_family_handover`); then the loop's thread waits for the GPU, since
-//! `present` carries no fence (about 3 ms for a clear on the emulator and on a Pixel, a known
-//! gap), and the transaction presents the buffer.
+//! The view's buffers, at the window's size, are a pool as Impeller's hardware-buffer swapchain
+//! keeps one (`AHBTexturePoolVK`): a frame takes the buffer the compositor released first, or a
+//! new one where none is free, and a buffer goes back to the pool once the compositor has released
+//! it, about a refresh after the present that replaced it
+//! (`experiments/2026-11-11-android-surface-control`, question 5). What bounds the pool is the
+//! frames in flight: before a frame is drawn, the loop waits for the frame two before it to be
+//! done on the GPU (`frames_in_flight`), so it holds the buffers of at most two pending frames
+//! beside those the compositor holds.
+//!
+//! A frame goes, in order on wgpu's queue: the buffer's image acquired back from the compositor's
+//! queue family where the compositor had it, the picture drawn, and the image released to that
+//! family (`queue_family_handover`) as the frame's last submission, which signals the fence the
+//! transaction hands the compositor with the buffer (`frame_fence`). No thread waits for the
+//! frame's GPU work: SurfaceFlinger waits on the fence before it reads the buffer.
 //!
 //! The invariant: a buffer is drawn into only after its release has run and its image has been
-//! acquired back, and is presented only once its image has been released; and the layer is placed
-//! in the window that is there, which goes and comes back with the activity's, and whose own
-//! surface holds a buffer of its size.
+//! acquired back, and is presented only with the fence of the submission that released its image;
+//! and the layer is placed in the window that is there, which goes and comes back with the
+//! activity's, and whose own surface holds a buffer of its size.
 
+use std::collections::VecDeque;
 use std::ffi::CStr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use ndk::native_window::NativeWindow;
 use waft_embedder::{HardwareBufferAllocator, HardwareBufferUsage, Picture, Slices};
 
+use crate::frame_fence::{FrameFences, SignalledFrame};
 use crate::gpu::Gpu;
 use crate::hardware_buffers::{AndroidHardwareBuffer, GrallocAllocator};
 use crate::queue_family_handover;
 use crate::surface_control::SurfaceControl;
 
+use super::frames_in_flight::FramesInFlight;
+use super::releases::OnReleased;
 use super::window_surface::WindowSurface;
 use super::{SurfaceControlCompositor, SurfaceControlLayer, layer_geometry, own_layers};
-
-/// How many buffers the view draws into in turn.
-const BUFFERS: usize = 3;
-
-/// How long a draw waits for one of the buffers to come back before it is refused, to be drawn
-/// again at the next refresh: longer than a frame held a refresh and a half, the most the
-/// experiment saw.
-const PATIENCE: Duration = Duration::from_millis(100);
 
 /// What the view's buffers are allocated for: drawn into and sampled by the GPU, and shown by the
 /// display as an overlay.
@@ -65,6 +66,8 @@ pub(crate) struct SurfaceControlViewLayer {
     /// The window's size, in pixels.
     size: [u32; 2],
     buffers: Option<ViewBuffers>,
+    fences: FrameFences,
+    in_flight: FramesInFlight,
     gpu: Gpu,
     context: valo::Context,
 }
@@ -72,6 +75,11 @@ pub(crate) struct SurfaceControlViewLayer {
 impl SurfaceControlViewLayer {
     /// The view's layer, made opaque on `compositor`, drawn with `context` on `gpu`'s device,
     /// which imports hardware buffers.
+    ///
+    /// # Panics
+    ///
+    /// Where the device is not Vulkan's, which one that imports hardware buffers always is
+    /// (`vulkan_imports`).
     pub(crate) fn new(
         compositor: &SurfaceControlCompositor,
         gpu: &Gpu,
@@ -82,6 +90,9 @@ impl SurfaceControlViewLayer {
             window: None,
             size: [0, 0],
             buffers: None,
+            fences: FrameFences::new(&gpu.device, &gpu.queue)
+                .expect("a device that imports hardware buffers is Vulkan's"),
+            in_flight: FramesInFlight::new(),
             gpu: gpu.clone(),
             context,
         }
@@ -122,9 +133,10 @@ impl SurfaceControlViewLayer {
 
     /// Draws `slices` over `clear` into a free buffer, and shows it filling the window with the
     /// composition layers the slices place beneath it, laid out at `pixel_ratio`, in one
-    /// transaction; the window's own surface is filled with `clear` first where its size is new.
-    /// Refused as lost while there is no window or no buffer can be made, and as timed out while
-    /// every buffer is still the compositor's.
+    /// transaction, the buffer with its frame's fence; the window's own surface is filled with
+    /// `clear` first where its size is new. Waits first while two frames are pending on the GPU.
+    /// Refused as lost while there is no window, where no buffer can be made, and where the frame
+    /// gets no fence.
     pub(crate) fn draw(
         &mut self,
         slices: &Slices,
@@ -138,11 +150,10 @@ impl SurfaceControlViewLayer {
         window.own_surface.fill(size, clear);
         let buffers = match &mut self.buffers {
             Some(buffers) if buffers.size == size => buffers,
-            buffers => {
-                buffers.insert(ViewBuffers::new(&self.gpu, size).ok_or(valo::Refused::Lost)?)
-            }
+            buffers => buffers.insert(ViewBuffers::new(size)),
         };
-        let slot = buffers.take_free()?;
+        self.in_flight.wait_for_turn();
+        let slot = buffers.take_free(&self.gpu).ok_or(valo::Refused::Lost)?;
         slot.drawn.take_back_from_compositor(&self.gpu);
         render(
             &mut self.context,
@@ -150,8 +161,11 @@ impl SurfaceControlViewLayer {
             &slot.drawn,
             clear,
         );
-        slot.drawn.hand_to_compositor(&self.gpu);
-        wait_for_gpu(&self.gpu);
+        let Some(frame) = slot.drawn.hand_to_compositor(&self.gpu, &self.fences) else {
+            buffers.give_back(slot.index);
+            return Err(valo::Refused::Lost);
+        };
+        self.in_flight.submitted(frame.submission);
         let children = own_layers(
             &slices
                 .composition_layers()
@@ -165,7 +179,13 @@ impl SurfaceControlViewLayer {
                 let filling = Some(layer_geometry::filling(size));
                 layer.show_in(transaction, &window.control, 0, filling, pixel_ratio);
             }
-            layer.present_in(transaction, slot.buffer, children, released);
+            layer.present_in(
+                transaction,
+                slot.buffer,
+                frame.acquire_fence,
+                children,
+                released,
+            );
         });
         Ok(())
     }
@@ -195,14 +215,6 @@ fn render(
     context.render(picture, &target);
 }
 
-/// Waits for the GPU to finish the frame and its handover: the compositor is handed the buffer
-/// with no fence to wait on.
-fn wait_for_gpu(gpu: &Gpu) {
-    if let Err(error) = gpu.device.poll(wgpu::PollType::wait_indefinitely()) {
-        crate::log::warn_to_log!("the device did not finish the view's frame: {error}");
-    }
-}
-
 /// A buffer's texture on Waft's device, the view the picture is drawn through, and whether its
 /// image was handed to the compositor and not yet taken back.
 struct DrawnTexture {
@@ -212,10 +224,13 @@ struct DrawnTexture {
 }
 
 impl DrawnTexture {
-    /// Releases the image to the compositor, after the frame's work submitted before this.
-    fn hand_to_compositor(&self, gpu: &Gpu) {
-        queue_family_handover::release_to_compositor(&gpu.device, &gpu.queue, &self.texture);
+    /// Releases the image to the compositor as the frame's last submission, after the frame's
+    /// work submitted before this, and answers it with the fence it signals; `None`, reported,
+    /// where it was not submitted or gave no fence.
+    fn hand_to_compositor(&self, gpu: &Gpu, fences: &FrameFences) -> Option<SignalledFrame> {
+        let release = queue_family_handover::release_to_compositor(&gpu.device, &self.texture)?;
         self.with_compositor.store(true, Ordering::Relaxed);
+        fences.submit_signalling(release)
     }
 
     /// Acquires the image back from the compositor, which released its buffer, before the work
@@ -227,17 +242,12 @@ impl DrawnTexture {
     }
 }
 
-/// The buffers the view draws into, of one size, and which of them the compositor has released.
+/// The buffers the view draws into, of one size, made as frames need them, and which of them the
+/// compositor has released, in the order it released them.
 struct ViewBuffers {
     size: [u32; 2],
     buffers: Vec<(AndroidHardwareBuffer, Arc<DrawnTexture>)>,
-    free: Arc<FreeBuffers>,
-}
-
-/// Which buffers are free to draw into, and the condition a draw waits on for one.
-struct FreeBuffers {
-    free: Mutex<Vec<bool>>,
-    released: Condvar,
+    free: Arc<Mutex<VecDeque<usize>>>,
 }
 
 /// A free buffer, taken to be drawn into and presented.
@@ -248,80 +258,85 @@ struct Slot {
 }
 
 impl ViewBuffers {
-    /// Buffers of `size`, allocated and imported on `gpu`'s device; `None` where the system
-    /// allocates or imports none.
-    fn new(gpu: &Gpu, size: [u32; 2]) -> Option<ViewBuffers> {
-        let allocator = GrallocAllocator {
-            largest_side: gpu.device.limits().max_texture_dimension_2d,
-        };
-        let buffers = (0..BUFFERS)
-            .map(|_| {
-                let allocated = allocator
-                    .allocate(
-                        size[0],
-                        size[1],
-                        waft_embedder::image_codecs::PixelFormat::Rgba8,
-                        DRAWN_AND_SHOWN,
-                    )
-                    .inspect_err(|error| {
-                        crate::log::warn_to_log!("no buffer for the view: {error}")
-                    })
-                    .ok()?;
-                let texture = crate::gpu_interop::import_texture(&*allocated, &gpu.device)?;
-                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-                let buffer = (&*allocated as &dyn std::any::Any)
-                    .downcast_ref::<AndroidHardwareBuffer>()?
-                    .clone();
-                let drawn = DrawnTexture {
-                    texture,
-                    view,
-                    with_compositor: AtomicBool::new(false),
-                };
-                Some((buffer, Arc::new(drawn)))
-            })
-            .collect::<Option<Vec<_>>>()?;
-        Some(ViewBuffers {
+    /// No buffers yet, of `size`.
+    fn new(size: [u32; 2]) -> ViewBuffers {
+        ViewBuffers {
             size,
-            buffers,
-            free: Arc::new(FreeBuffers {
-                free: Mutex::new(vec![true; BUFFERS]),
-                released: Condvar::new(),
-            }),
-        })
+            buffers: Vec::new(),
+            free: Arc::new(Mutex::new(VecDeque::new())),
+        }
     }
 
-    /// A free buffer, taken, waiting a while for the compositor to release one; refused as timed
-    /// out where none comes back in time.
-    fn take_free(&self) -> Result<Slot, valo::Refused> {
-        let free = self
-            .free
+    /// The buffer the compositor released first, taken, or a new one where none is free, as
+    /// Impeller's pool pops; `None` where the system allocates or imports none.
+    fn take_free(&mut self, gpu: &Gpu) -> Option<Slot> {
+        let released = self
             .free
             .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let (mut free, _) = self
-            .free
-            .released
-            .wait_timeout_while(free, PATIENCE, |free| !free.contains(&true))
-            .unwrap_or_else(PoisonError::into_inner);
-        let index = free
-            .iter()
-            .position(|free| *free)
-            .ok_or(valo::Refused::Timeout)?;
-        free[index] = false;
+            .unwrap_or_else(PoisonError::into_inner)
+            .pop_front();
+        let index = match released {
+            Some(index) => index,
+            None => self.add(gpu)?,
+        };
         let (buffer, drawn) = &self.buffers[index];
-        Ok(Slot {
+        Some(Slot {
             index,
             buffer: buffer.clone(),
             drawn: Arc::clone(drawn),
         })
     }
 
-    /// What frees buffer `index` once the compositor releases it.
-    fn release_of(&self, index: usize) -> Box<dyn FnOnce() + Send + Sync> {
-        let free = Arc::clone(&self.free);
-        Box::new(move || {
-            free.free.lock().unwrap_or_else(PoisonError::into_inner)[index] = true;
-            free.released.notify_all();
-        })
+    /// Buffer `index`, taken and not presented, is free again.
+    fn give_back(&self, index: usize) {
+        free_buffer(&self.free, index);
     }
+
+    /// What frees buffer `index` once the compositor releases it.
+    fn release_of(&self, index: usize) -> OnReleased {
+        let free = Arc::clone(&self.free);
+        Box::new(move || free_buffer(&free, index))
+    }
+
+    /// A new buffer, allocated and imported on `gpu`'s device, and its index.
+    fn add(&mut self, gpu: &Gpu) -> Option<usize> {
+        let buffer = drawn_buffer(gpu, self.size)?;
+        self.buffers.push(buffer);
+        Some(self.buffers.len() - 1)
+    }
+}
+
+/// Puts buffer `index` at the back of `free`, to be taken after those released before it.
+fn free_buffer(free: &Mutex<VecDeque<usize>>, index: usize) {
+    free.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push_back(index);
+}
+
+/// A buffer of `size`, allocated to be drawn into and shown, and its texture on `gpu`'s device;
+/// `None`, reported where the system allocates none, where it imports none.
+fn drawn_buffer(gpu: &Gpu, size: [u32; 2]) -> Option<(AndroidHardwareBuffer, Arc<DrawnTexture>)> {
+    let allocator = GrallocAllocator {
+        largest_side: gpu.device.limits().max_texture_dimension_2d,
+    };
+    let allocated = allocator
+        .allocate(
+            size[0],
+            size[1],
+            waft_embedder::image_codecs::PixelFormat::Rgba8,
+            DRAWN_AND_SHOWN,
+        )
+        .inspect_err(|error| crate::log::warn_to_log!("no buffer for the view: {error}"))
+        .ok()?;
+    let texture = crate::gpu_interop::import_texture(&*allocated, &gpu.device)?;
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let buffer = (&*allocated as &dyn std::any::Any)
+        .downcast_ref::<AndroidHardwareBuffer>()?
+        .clone();
+    let drawn = DrawnTexture {
+        texture,
+        view,
+        with_compositor: AtomicBool::new(false),
+    };
+    Some((buffer, Arc::new(drawn)))
 }

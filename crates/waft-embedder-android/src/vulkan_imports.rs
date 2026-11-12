@@ -1,13 +1,17 @@
-//! A Vulkan device that imports hardware buffers: opened through wgpu-hal with
-//! `VK_ANDROID_external_memory_android_hardware_buffer` and the `VK_EXT_queue_family_foreign` it
-//! depends on added to the extensions wgpu enables, which wgpu-hal never adds itself; and whether a
-//! device was opened so. Every other part of the device is what wgpu-hal opens, so wgpu-core's
-//! device over it is any wgpu device.
+//! A Vulkan device that imports hardware buffers and hands frames to the compositor: opened
+//! through wgpu-hal with `VK_ANDROID_external_memory_android_hardware_buffer`, the
+//! `VK_EXT_queue_family_foreign` it depends on, and `VK_KHR_external_semaphore_fd` added to the
+//! extensions wgpu enables, which wgpu-hal never adds itself; and whether a device was opened so.
+//! Every other part of the device is what wgpu-hal opens, so wgpu-core's device over it is any
+//! wgpu device.
 //!
-//! The invariant: a device answers that it imports only when it was opened with both extensions,
-//! since `vkGetAndroidHardwareBufferPropertiesANDROID` and an import into a device without them are
-//! undefined. `VK_EXT_queue_family_foreign` is what lets the view hand its buffers' images to the
-//! compositor and take them back (`queue_family_handover`).
+//! The invariant: a device answers that it imports only when it was opened with all three
+//! extensions, since `vkGetAndroidHardwareBufferPropertiesANDROID` and an import into a device
+//! without them are undefined, and the composition path it answers for needs the other two.
+//! `VK_EXT_queue_family_foreign` is what lets the view hand its buffers' images to the compositor
+//! and take them back (`queue_family_handover`); `VK_KHR_external_semaphore_fd` is what gives the
+//! compositor the fence each frame hands over with its buffer (`frame_fence`), its dependency
+//! `VK_KHR_external_semaphore` being Vulkan 1.1's own.
 
 // Opening a device through wgpu-hal and reading what a device enabled need `unsafe`; this module
 // writes it for them.
@@ -17,10 +21,11 @@ use std::ffi::CStr;
 
 use wgpu::hal::api::Vulkan;
 
-/// What a device must enable to import hardware buffers.
-const IMPORT_EXTENSIONS: [&CStr; 2] = [
+/// What a device must enable to import hardware buffers and hand frames to the compositor.
+const COMPOSITION_EXTENSIONS: [&CStr; 3] = [
     ash::android::external_memory_android_hardware_buffer::NAME,
     ash::ext::queue_family_foreign::NAME,
+    ash::khr::external_semaphore_fd::NAME,
 ];
 
 /// The features a device is asked for where the adapter offers them, as valo's own
@@ -52,20 +57,21 @@ pub(crate) fn open_on_first(
     })
 }
 
-/// Whether `device` was opened with the extensions that import a hardware buffer's memory.
+/// Whether `device` was opened with the extensions that import a hardware buffer's memory and
+/// hand a frame to the compositor.
 pub(crate) fn imports(device: &wgpu::Device) -> bool {
     // SAFETY: the device is only read, and let go before this returns.
     let Some(hal) = (unsafe { device.as_hal::<Vulkan>() }) else {
         return false;
     };
     let enabled = hal.enabled_device_extensions();
-    IMPORT_EXTENSIONS
+    COMPOSITION_EXTENSIONS
         .iter()
         .all(|extension| enabled.contains(extension))
 }
 
 /// Whether `adapter` is Vulkan's, at 1.1 or later, whose dedicated allocations an import takes,
-/// and offers both extensions.
+/// and offers the three extensions.
 fn can_import(adapter: &wgpu::Adapter) -> bool {
     // SAFETY: the adapter is only read, and let go before this returns.
     let Some(hal) = (unsafe { adapter.as_hal::<Vulkan>() }) else {
@@ -73,7 +79,7 @@ fn can_import(adapter: &wgpu::Adapter) -> bool {
     };
     let capabilities = hal.physical_device_capabilities();
     capabilities.properties().api_version >= ash::vk::API_VERSION_1_1
-        && IMPORT_EXTENSIONS
+        && COMPOSITION_EXTENSIONS
             .iter()
             .all(|extension| capabilities.supports_extension(extension))
 }
@@ -87,8 +93,8 @@ fn open(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue), String> 
         required_limits: adapter.limits(),
         ..Default::default()
     };
-    // SAFETY: the features and limits are the adapter's own, the callback only adds two extensions
-    // the adapter offers (`can_import`), and the hal adapter is let go before wgpu takes the device
+    // SAFETY: the features and limits are the adapter's own, the callback only adds extensions the
+    // adapter offers (`can_import`), and the hal adapter is let go before wgpu takes the device
     // it opened.
     let opened = unsafe {
         let hal = adapter
@@ -99,7 +105,7 @@ fn open(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue), String> 
             &descriptor.required_limits,
             &descriptor.memory_hints,
             Some(Box::new(|arguments| {
-                for extension in IMPORT_EXTENSIONS {
+                for extension in COMPOSITION_EXTENSIONS {
                     if !arguments.extensions.contains(&extension) {
                         arguments.extensions.push(extension);
                     }

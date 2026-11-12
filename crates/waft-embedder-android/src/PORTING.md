@@ -9,9 +9,15 @@ Host implementation. Flutter analogue: the engine's Android embedder under
   Reason: platform — `NativeActivity` reports one content rect and never `onApplyWindowInsets`, which is where the engine's Java view reads the bars and the keyboard apart.
   Affect: the keyboard lifts the layout as it does on every other host, but a bar that grows while the window keeps its size, a navigation bar appearing, is taken for a keyboard until the window is resized.
 
-- Change: there is no text input, so no soft keyboard opens and nothing can be typed.
-  Reason: platform — typing needs an `InputConnection`, which belongs to a Java view; `NativeActivity` has none.
-  Affect: a text field draws, scrolls and can be selected in, and stays empty.
+## text_input.rs / editor_info.rs → the Android embedder's `TextInputPlugin`, `InputConnectionAdaptor` and `ListenableEditingState`
+
+- Change: the keyboard edits text through Waft's own view, `rs.waft.WaftTextInput`, which `WaftActivity` adds beside `NativeActivity`'s content view and which holds the field's value on the main thread, while the app's thread hands it the framework's calls and hears the keyboard's changes once a batch of edits ends; Flutter's keyboard talks to the `FlutterView` that also draws and takes touches.
+  Reason: platform — a keyboard edits only through the `InputConnection` of a focused Java view, which `NativeActivity`'s content view does not give, and it must be answered on the main thread at once, where the app's thread runs the framework.
+  Affect: an app built by waft-cli opens the keyboard for a focused field and is typed into; under the bare `NativeActivity` no keyboard opens and a field stays empty.
+
+- Change: the keyboard connects again where the field's configuration changed or the framework replaced its text or composing region, as for an `EditText` whose text is set; Flutter's plugin connects it again at each new client and where the framework changed the composing text.
+  Reason: platform — `start` is the attach, the show and the configuration update at once, so a new client is told by what changed.
+  Affect: moving from one field to another with the same configuration and the same text keeps the keyboard's state, such as its shift.
 
 ## platform.rs
 
@@ -93,7 +99,7 @@ Host implementation. Flutter analogue: the engine's Android embedder under
 
 ## picture.rs / composition/ → the Android embedder's `FlutterSurfaceView`, `PlatformViewsController` and its hybrid composition
 
-- Change: where Waft's device is Vulkan with `VK_ANDROID_external_memory_android_hardware_buffer`, the view's picture is drawn into three `AHardwareBuffer`s of its own and shown as the content of a surface control made from the window, with the scene's composition layers beneath it as child surface controls, all in one `ASurfaceTransaction` a frame; on OpenGL ES the view draws through a swapchain on the window and the platform has no compositor, where Flutter's engine draws into the window's surface and shows platform views as Android views or overlay surfaces beside it.
+- Change: where Waft's device is Vulkan with `VK_ANDROID_external_memory_android_hardware_buffer`, the view's picture is drawn into `AHardwareBuffer`s of its own and shown as the content of a surface control made from the window, with the scene's composition layers beneath it as child surface controls, all in one `ASurfaceTransaction` a frame; on OpenGL ES the view draws through a swapchain on the window and the platform has no compositor, where Flutter's engine draws into the window's surface and shows platform views as Android views or overlay surfaces beside it.
   Reason: platform — a swapchain cannot join the transaction its layers are placed in, so a moved layer would land a frame off its hole; only a device that imports hardware buffers can draw buffers the compositor shows.
   Affect: a composition layer moves with the framework's picture in the same frame on Vulkan; on an emulator or a phone with no Vulkan the app shows no composition layers.
 
@@ -101,9 +107,9 @@ Host implementation. Flutter analogue: the engine's Android embedder under
   Reason: platform — the NDK places a surface control by an integer position, one scale and an axis-aligned crop alone.
   Affect: a turned layer shows upright over the box around it, and a rounded clip's corners show only as far as the picture above them covers.
 
-- Change: a replaced buffer goes back to its producer once the release fence the system hands over for it has signalled, waited on by a thread of the host's own, and a frame is handed over with no acquire fence once its GPU work is done.
-  Reason: platform — `OnComplete` arrives before the buffer is free, and wgpu makes no fence to hand over.
-  Affect: a producer gets its buffer back about a refresh after the present that replaced it; the loop's thread waits about 3 ms a frame for the GPU.
+- Change: a replaced buffer goes back to its producer once the release fence the system hands over for it has signalled, waited on by a thread of the host's own; Impeller's swapchain takes its buffer back at `OnComplete` and imports the release fence as a semaphore its next draw into the buffer waits on.
+  Reason: platform — `OnComplete` arrives before the buffer is free, and a producer's buffer goes back to it through `CompositionLayer::present`'s `released`, which promises it free.
+  Affect: a producer gets its buffer back about a refresh after the present that replaced it, and the view draws into a buffer only once the compositor is done with it, so its pool holds a buffer or so more than Impeller's would.
 
 ## hardware_buffers.rs / gpu_interop.rs
 
@@ -119,7 +125,9 @@ Host implementation. Flutter analogue: the engine's Android embedder under
 
 ## Deferred
 
-- The keyboard, haptics, and the bars and keyboard as the system reports them. Trigger: any of them, which is a Java activity of the app's own, as Flutter's is.
+- Haptics, and the bars and keyboard as the system reports them. Trigger: either of them, which is a Java activity of the app's own, as Flutter's is.
+- The framework's key events, Android's keys mapped to Flutter's: until then every key but back is left to the text input view, which types it into the field that takes text, deleting, moving the caret and acting on enter as Flutter's framework would, and to the system, which sets the volume. Trigger: a shortcut, such as select all, or an app that reads keys on Android.
+- The keyboard's own cut, copy, paste and select all, the images it commits, autofill, hint locales and the delta model, which Flutter's text input plugin takes. Trigger: an app that needs one.
 - The predictive back gesture, with its peek animation. Trigger: a Java activity that registers with the system's back callback; the plain back button already pops.
 - Deep links, which Flutter carries beside the back button. Trigger: an app that opens on a route the system names.
 - A window the app manages around the activity's view, with whether it is minimized and whether it is occluded, which the activity's stop and start would tell. Trigger: an app that manages its window on Android, as in desktop windowing.

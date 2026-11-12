@@ -26,6 +26,7 @@ use crate::composition::SurfaceControlCompositor;
 use crate::gpu::Gpu;
 use crate::open_requests::OpenRequests;
 use crate::platform::AndroidPlatform;
+use crate::text_input::{AndroidTextInput, TextInputEvent};
 use crate::view::{AndroidView, Geometry, VIEW};
 use crate::vsync::Vsync;
 
@@ -49,7 +50,8 @@ impl AndroidEmbedder {
     pub fn run<C: EmbedderClient + 'static>(self, start: impl FnOnce(PlatformRef) -> C + 'static) {
         let gpu = Gpu::acquire();
         let compositor = composition_on(&gpu);
-        let view = Rc::new(AndroidView::new(&gpu, compositor.as_deref()));
+        let text_input = AndroidTextInput::new(&self.app);
+        let view = Rc::new(AndroidView::new(&gpu, compositor.as_deref(), text_input));
         let platform = Rc::new(AndroidPlatform::new(
             Rc::clone(&view),
             &self.app,
@@ -315,23 +317,25 @@ impl<C: EmbedderClient> Host<C> {
             return;
         };
         loop {
-            let read = events.next(|event| {
-                self.on_input(event);
-                InputStatus::Handled
-            });
+            let read = events.next(|event| self.on_input(event));
             if !read {
                 break;
             }
         }
     }
 
-    fn on_input(&mut self, event: &android_activity::input::InputEvent<'_>) {
+    /// Takes one event of the activity's input. A key left unhandled goes on through the window's
+    /// views, to the text input's when a field takes text (`text_input.rs`), and to the system's
+    /// own handling, such as the volume keys'.
+    fn on_input(&mut self, event: &android_activity::input::InputEvent<'_>) -> InputStatus {
         use android_activity::input::InputEvent;
         match event {
-            InputEvent::MotionEvent(motion) => self.on_motion(motion),
+            InputEvent::MotionEvent(motion) => {
+                self.on_motion(motion);
+                InputStatus::Handled
+            }
             InputEvent::KeyEvent(key) => self.on_key(key),
-            // The rest of the keyboard follows.
-            _ => {}
+            _ => InputStatus::Unhandled,
         }
     }
 
@@ -350,12 +354,19 @@ impl<C: EmbedderClient> Host<C> {
     /// Android does for an app that does not handle back itself.
     ///
     /// It is read on release, as Android's own back is: a press that is held and then
-    /// cancelled must not go back.
-    fn on_key(&mut self, key: &android_activity::input::KeyEvent<'_>) {
-        if key.key_code() != Keycode::Back || key.action() != KeyAction::Up {
-            // The rest of the keyboard follows.
-            return;
+    /// cancelled must not go back. Every other key is left unhandled: the framework hears no key
+    /// on Android yet.
+    fn on_key(&mut self, key: &android_activity::input::KeyEvent<'_>) -> InputStatus {
+        if key.key_code() != Keycode::Back {
+            return InputStatus::Unhandled;
         }
+        if key.action() == KeyAction::Up {
+            self.go_back();
+        }
+        InputStatus::Handled
+    }
+
+    fn go_back(&mut self) {
         let went_back = self
             .client
             .as_mut()
@@ -365,21 +376,32 @@ impl<C: EmbedderClient> Host<C> {
         }
     }
 
-    /// Closes the activity, as Android closes an app whose back press nothing handled.
+    /// Closes the activity, as Android closes an app whose back press nothing handled: Waft's
+    /// activity is asked to finish itself, which it does on the main thread, and the loop ends at
+    /// the `Destroy` that follows. The glue hands out the Java activity, not the NDK's
+    /// `ANativeActivity`, so the NDK's own finish is not what is called.
     fn close(&self) {
-        // SAFETY: the activity this process was started with, as the glue hands it out. The
-        // call only asks the system to finish it; the loop ends at the `Destroy` that
-        // follows.
-        unsafe {
-            ndk_sys::ANativeActivity_finish(self.app.activity_as_ptr().cast());
+        let asked = crate::activity::with_activity(&self.app, |env, activity| {
+            env.call_method(
+                activity,
+                jni::jni_str!("finishFromAnyThread"),
+                jni::jni_sig!("()V"),
+                &[],
+            )
+            .map(drop)
+        });
+        if let Err(error) = asked {
+            crate::log::warn_to_log!("the activity was not asked to finish: {error}");
         }
     }
 
-    /// What the framework is waiting for: what the intents that reached the app ask of it, the
-    /// clipboard's change once the host cleared a copy of the app's whose time came, a wake, when
-    /// one was asked for or its timer wakeup has arrived, and a frame at the display's refresh.
+    /// What the framework is waiting for: what the intents that reached the app ask of it, what the
+    /// keyboard typed, the clipboard's change once the host cleared a copy of the app's whose time
+    /// came, a wake, when one was asked for or its timer wakeup has arrived, and a frame at the
+    /// display's refresh.
     fn serve_requests(&mut self) {
         self.hand_on_intents();
+        self.hand_on_typing();
         if self.platform.clipboard.clear_expired(Instant::now())
             && let Some(client) = &mut self.client
         {
@@ -406,6 +428,21 @@ impl<C: EmbedderClient> Host<C> {
         }
         for activation in arrived.activations {
             client.notification_activated(activation);
+        }
+    }
+
+    /// Hands the client what the keyboard did to the field that takes text, in the order it did
+    /// it.
+    fn hand_on_typing(&mut self) {
+        let typed = crate::text_input::take();
+        let Some(client) = &mut self.client else {
+            return;
+        };
+        for event in typed {
+            match event {
+                TextInputEvent::Edited(value) => client.text_input_editing_value(VIEW, value),
+                TextInputEvent::Action(action) => client.text_input_action(VIEW, action),
+            }
         }
     }
 

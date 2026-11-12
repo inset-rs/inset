@@ -1,16 +1,21 @@
 //! The buffers a producer presented to a composition layer, and when each goes back to it: the
 //! one on screen until a present replaces it, then once the release fence the system hands over
 //! for it signals (`releases`), at once for one never set on the layer's surface control, and
-//! when the layer goes.
+//! when the layer goes. A buffer presented with an acquire fence keeps it until a transaction
+//! sets the buffer, which hands the fence to the system.
+
+use std::os::fd::OwnedFd;
 
 use crate::hardware_buffers::AndroidHardwareBuffer;
 
 use super::releases::Release;
 
-/// The buffer presented last, and whether a transaction has set it on the layer's surface
-/// control yet: not while the layer has none, before its first placement.
+/// The buffer presented last, the fence the compositor waits on before it reads it until a
+/// transaction takes it, and whether a transaction has set it on the layer's surface control yet:
+/// not while the layer has none, before its first placement.
 pub(super) struct Shown {
     pub(super) buffer: AndroidHardwareBuffer,
+    pub(super) acquire_fence: Option<OwnedFd>,
     pub(super) release: Release,
     pub(super) set: bool,
 }
@@ -30,16 +35,18 @@ impl PresentedBuffers {
         }
     }
 
-    /// `buffer` is on screen now, not yet set; the one it replaces is answered, kept until its
-    /// release runs.
+    /// `buffer` is on screen now, not yet set, to be read once `acquire_fence` signals; the one
+    /// it replaces is answered, kept until its release runs.
     pub(super) fn present(
         &mut self,
         buffer: AndroidHardwareBuffer,
+        acquire_fence: Option<OwnedFd>,
         release: Release,
     ) -> Option<Shown> {
         self.replaced.retain(|replaced| !replaced.has_run());
         let previous = self.on_screen.replace(Shown {
             buffer,
+            acquire_fence,
             release,
             set: false,
         });

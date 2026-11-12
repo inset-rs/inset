@@ -84,6 +84,7 @@ minimum_version = "15.0"
 min_sdk = 31                       # the default and the least: Android 12, whose surface controls place composition layers
 target_sdk = 34                    # 35 and up draw edge to edge: the safe area goes, until the host reads insets
 version_code = 100                 # defaults to one derived from the version: 1.2.3 is 10203
+permissions = ["android.permission.INTERNET"]  # what the app asks for besides Waft's own; a socket needs INTERNET
 
 [[package.metadata.waft.file_associations]]  # a kind of file this app defines
 extensions = ["mydoc"]
@@ -109,7 +110,8 @@ Each `file_associations` table lets the system open the app for files with those
 - macOS: a document type; a type the app owns opens in it on double-click, another app's type is offered under Open With. `role` applies here only.
 - Windows: the installer registers the extensions; the app gets the file as its first argument, which it reads itself.
 - Linux: the desktop entry lists each `mime_type`; a type without one isn't associated.
-- iOS, Android and the web: not declared.
+- Android: the activity is offered to view a `content:` or `file:` URI of each `mime_type`, and of any type whose path ends in one of the `extensions`. Android has no way for an app to teach the system a new extension, so a file of a type the app defines (`owner = true`) reaches apps as `application/octet-stream`, and the Files app's Downloads view may name a file by a number, with no extension to match: an app that owns a type is also offered for every `application/octet-stream` file, and tells its own files from others itself, by their name or their content.
+- iOS and the web: not declared.
 
 An app hears the files and links the system itself opens it with through `App::set_open_requested_handler`, at launch and while it runs on macOS, iOS and Android, and at launch on the web. On Windows and Linux the system gives the app only its command line: the app reads it, decides which arguments are files, and hands them to the same handler with `App::open_requested` (see `examples/app_events`). There a second launch is a new process; `waft-single-instance` hands its command line to the first.
 
@@ -166,11 +168,12 @@ The CLI puts the `.app` together itself, as it does an iOS app: the executable i
 
 ## Android
 
-The `.apk` is built without Gradle and without any Java of your own. The Java is Waft's three classes (`android/rs/waft/`), which `javac` and `d8` compile into the package's `classes.dex`:
+The `.apk` is built without Gradle and without any Java of your own. The Java is Waft's four classes (`android/rs/waft/`), which `javac` and `d8` compile into the package's `classes.dex`:
 
 - `rs.waft.WaftActivity`, the activity: Android's `NativeActivity`, which loads your library and calls the `android_main` that `#[waft::main]` emits, with the results of the activities your app starts, the intents that reach it while it runs and the user's answers to the permissions it asks for handed on to it, as the file dialogs, being opened and notifications need.
 - `rs.waft.WaftFileProvider`, a content provider at `<package>.waft.files`, not exported, through which the opener shares a file of the app's with the app that opens it.
 - `rs.waft.WaftNotificationReceiver`, a broadcast receiver, not exported, which builds and shows the app's notifications, and shows a scheduled one when its alarm goes off, whether or not the app runs.
+- `rs.waft.WaftTextInput`, the view the activity adds beside its own, which the system's keyboards type into a text field through.
 
 The manifest's `<queries>` names viewing `http`, `https` and `mailto` links, so the opener can say whether some app takes one; the application's meta-data `rs.waft.queried_schemes` lists the same schemes for it. It asks for `POST_NOTIFICATIONS`, which Android 13 asks the user for when the app asks (`NotificationPermission::request`), and `SCHEDULE_EXACT_ALARM`, which Android 14 leaves to the user to grant under the app's Alarms & reminders setting: without it a scheduled notification may come late. A scheduled notification does not survive a restart of the device.
 
@@ -189,9 +192,7 @@ You need:
 
 The package carries a stripped copy of your library. A release apk's has no symbols (`llvm-strip --strip-all`). A debug apk's has no debug information (`llvm-strip --strip-debug`), which is most of a debug library and read by nothing on the device, but keeps the symbol table and the unwind tables, so a panic's backtrace in the log still names its functions. The library as built, with everything, stays at `target/<triple>/<profile>/lib<name>.so` (`target/aarch64-linux-android/debug/` for a debug `build apk`), and the NDK's tools read files and lines from it. `llvm-addr2line -f -C -e` it with an address in the library: a crash report's `pc`, or a backtrace's address less the start of the library's executable mapping in `/proc/<pid>/maps`. `ndk-stack -sym <folder>` symbolises a native crash's report from `adb logcat`, given a folder that holds both the library and the `.apk`: the library is loaded straight from the package, so the report names the `.apk` and an offset into it, which `ndk-stack` reads the library's name from.
 
-Still missing, because the activity does not reach them yet: the keyboard, the clipboard beyond text, and haptics. Text fields draw and scroll, but nothing can be typed into them yet. Each of these needs more of the activity's Java.
-
-File associations are not declared either: the host does not read the intent the activity starts with, so an intent filter would list the app under Open with and then drop the file.
+Still missing, because the activity does not reach them yet: the clipboard beyond text, and haptics. Each of these needs more of the activity's Java.
 
 ## Not here yet
 

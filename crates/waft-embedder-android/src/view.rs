@@ -16,6 +16,7 @@ use waft_embedder::{
 use crate::composition::SurfaceControlCompositor;
 use crate::gpu::Gpu;
 use crate::picture::ViewPicture;
+use crate::text_input::AndroidTextInput;
 
 /// The one view the activity has.
 pub(crate) const VIEW: ViewId = ViewId(0);
@@ -36,12 +37,19 @@ pub(crate) struct AndroidView {
     on_screen: Cell<bool>,
     /// The system's bars, told from the keyboard in the one padding the activity reports.
     bars: Cell<Bars>,
+    /// The keyboards' way in, where the activity is Waft's (`text_input.rs`).
+    text_input: Option<AndroidTextInput>,
 }
 
 impl AndroidView {
     /// A view with no window yet: it draws nothing until the system gives one. Its picture is a
-    /// composition layer's content on `compositor`, where there is one.
-    pub(crate) fn new(gpu: &Gpu, compositor: Option<&SurfaceControlCompositor>) -> AndroidView {
+    /// composition layer's content on `compositor`, where there is one, and its text is typed
+    /// through `text_input`, where there is one.
+    pub(crate) fn new(
+        gpu: &Gpu,
+        compositor: Option<&SurfaceControlCompositor>,
+        text_input: Option<AndroidTextInput>,
+    ) -> AndroidView {
         let mut context = valo::Context::new(gpu.device.clone(), gpu.queue.clone());
         context.set_hide_missing_glyphs(true);
         let images = context.image_context();
@@ -53,6 +61,7 @@ impl AndroidView {
             latest: RefCell::new(None),
             on_screen: Cell::new(false),
             bars: Cell::new(Bars::default()),
+            text_input,
         }
     }
 
@@ -163,11 +172,13 @@ impl View for AndroidView {
     }
 }
 
-/// The view is its own host, which takes nothing: this embedder has no input methods, no cursor
-/// and no focus to move yet.
+/// The view is its own host, which takes text through the system's keyboards; this embedder has
+/// no cursor and no focus to move yet.
 impl ViewHost for AndroidView {
     fn text_input(&self) -> Option<&dyn TextInputHost> {
-        None
+        self.text_input
+            .as_ref()
+            .map(|text_input| text_input as &dyn TextInputHost)
     }
 
     fn activate_system_cursor(&self, _device: i64, _kind: SystemMouseCursorKind) {}
