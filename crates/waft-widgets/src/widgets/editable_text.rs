@@ -2999,6 +2999,11 @@ impl EditableTextState {
     }
 
     fn post_frame_update_for_scroll(self: Handle<Self>, app: &mut App, _time_stamp: Duration) {
+        // Not in Dart: a disposed state's handle is gone, where Dart's disposed state has no
+        // selection overlay and does nothing below.
+        if !app.contains(self) {
+            return;
+        }
         if let Some(overlay) = app.get(self).selection_overlay {
             overlay.update_for_scroll(app);
         }
@@ -4509,7 +4514,7 @@ impl EditableTextState {
     }
 
     fn apply_autofocus(self: Handle<Self>, app: &mut App, _elapsed: Duration) {
-        if !self.mounted(app) {
+        if !self.mounted(app) || !self.render_editable(app).has_size(app) {
             return;
         }
         app.get_mut(self).next_focus_change_is_internal = true;
@@ -7282,6 +7287,103 @@ mod tests {
             "the field took the focus and opened its input connection"
         );
         shown.set_value(&mut cell.borrow_mut(), false);
+        pump(&cell);
+    }
+
+    /// A phone's screen, whose bottom inset grows while its keyboard shows.
+    struct KeyboardView {
+        screen: waft_test::TestView,
+        keyboard_height: Cell<f64>,
+    }
+
+    impl waft_embedder::View for KeyboardView {
+        fn id(&self) -> waft_embedder::ViewId {
+            self.screen.id()
+        }
+
+        fn metrics(&self) -> waft_embedder::ViewMetrics {
+            waft_embedder::ViewMetrics {
+                view_insets: waft_embedder::ViewPadding {
+                    bottom: self.keyboard_height.get(),
+                    ..waft_embedder::ViewPadding::ZERO
+                },
+                ..self.screen.metrics()
+            }
+        }
+
+        fn present(&self, scene: std::sync::Arc<waft_embedder::Scene>) {
+            self.screen.present(scene);
+        }
+
+        fn host(&self) -> &dyn waft_embedder::ViewHost {
+            self.screen.host()
+        }
+    }
+
+    /// The keyboard showing schedules `EditableText.updateForScroll` and
+    /// `EditableText.showCaret` for after the next frame; the field leaving the tree in that
+    /// frame disposes its state before they run.
+    #[test]
+    fn a_field_removed_before_its_keyboard_callbacks_run_does_not_crash() {
+        use crate::{ListenableBuilder, SizedBox, primary_focus, run_app};
+        use waft_embedder::TargetPlatform;
+        use waft_foundation::ValueNotifier;
+        use waft_test::{TestPlatform, TestView};
+
+        let view = Rc::new(KeyboardView {
+            screen: TestView::new(300.0, 600.0),
+            keyboard_height: Cell::new(0.0),
+        });
+        let platform = TestPlatform::new()
+            .on(TargetPlatform::Android)
+            .with_view(Rc::clone(&view) as waft_embedder::ViewRef);
+        let cell = AppCell::with_platform(Rc::new(platform));
+        let shown = {
+            let mut app = cell.borrow_mut();
+            install_fonts(&mut app);
+            let shown = app.create(ValueNotifier::new(true));
+            let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
+            let focus_node = FocusNode::new(&mut app);
+            let field = ListenableBuilder::new(Rc::new(shown), move |app, _, _| {
+                if !*app.get(shown).value() {
+                    return SizedBox::shrink().into_widget();
+                }
+                EditableText::new(
+                    controller.as_controller(),
+                    focus_node,
+                    TextStyle::new(),
+                    Color::from_argb(255, 0, 0, 0),
+                    Color::from_argb(255, 128, 128, 128),
+                )
+                .autofocus(true)
+                .into_widget()
+            });
+            run_app(
+                &mut app,
+                Directionality::new(TextDirection::Ltr, field).into_widget(),
+            );
+            shown
+        };
+        cell.elapse(Duration::ZERO);
+        let mut at = Duration::ZERO;
+        let mut pump = |cell: &AppCell| {
+            for _ in 0..5 {
+                at += Duration::from_millis(20);
+                crate::test_harness::pump_every_view(&mut cell.borrow_mut(), at);
+            }
+        };
+        pump(&cell);
+        assert!(
+            primary_focus(&mut cell.borrow_mut()).is_some(),
+            "the field took the focus and listens for the keyboard"
+        );
+
+        {
+            let mut app = cell.borrow_mut();
+            view.keyboard_height.set(250.0);
+            waft_rendering::RendererBinding::instance(&mut app).handle_metrics_changed(&mut app);
+            shown.set_value(&mut app, false);
+        }
         pump(&cell);
     }
 }
