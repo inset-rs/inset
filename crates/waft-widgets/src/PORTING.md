@@ -68,9 +68,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the caption settings tell their changes by a future of their own, where the other system settings reach the binding through the dispatcher.
   Affect: every observer hears each change of the user's caption style, for as long as the app runs.
 
-- Change: `run_app` builds its content in every view the platform gives the app, and where it gives none at start, as on a desktop, asks for a window through a `WindowController` configured as `run_app_with` says and panics if the platform refuses, where Flutter's `runApp` draws into the implicit view.
+- Change: `run_app` builds its content, through a `MultiViewApp`, in every view the platform hosts for the app that carries no initial data, and where the platform gives none at start, as on a desktop, asks for one with `Platform::request_view` configured as `run_app_with` says and panics if the platform refuses at once, where Flutter's `runApp` draws into the implicit view.
   Reason: platform — there is no implicit view: the platform gives the app its views or makes them on request.
-  Affect: an app given several views shows its content in each, with its own state; a request to close the app's last view asks to quit, as Cmd-Q does; an app embedded where views come later starts with `run_widget` over a `MultiViewApp`, as Flutter's web multi-view apps start with `runWidget`.
+  Affect: an app given several views shows its content in each, with its own state; a request to close the app's last view asks to quit, as Cmd-Q does; an app with views of several kinds, or embedded where views come later, starts with `run_widget` over a `MultiViewApp`, as Flutter's web multi-view apps start with `runWidget`.
 
 - Change: `WidgetsBinding::handle_clipboard_event` hands the host's copy, cut and paste to the primary focus as `CopySelectionTextIntent` and `PasteTextIntent`, with the event as the clipboard while they run.
   Reason: platform — a host that owns the user's copy and paste, as a browser does, sends them as events, where Flutter's web engine has the browser paste into its own hidden text field.
@@ -92,9 +92,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — each Android task of one app is a view with its own Back, and the host says which (`EmbedderClient::pop_route`).
   Affect: an observer that belongs to one view answers for that view alone, and one for the whole app answers for any.
 
-- Change: `WidgetsBindingObserver` hears a view added or removed by its id (`did_add_view`, `did_remove_view`) and a request to close one (`did_request_view_close`), where Flutter tells only `didChangeMetrics` and a listener compares `platformDispatcher.views` with what it had.
-  Reason: platform — the host reports each view's arrival, departure and close request by view, and every view the app has arrives this way.
-  Affect: the observers hear only the views no `WindowController` asked for, and a close request stops at the first observer that answers `true`.
+- Change: `WidgetsBindingObserver` hears every view the platform adds or removes for the app (`did_add_view`, `did_remove_view`), whoever started it, a request to close one (`did_request_view_close`) and a request for a view that got none (`did_fail_view_request`), where Flutter tells only `didChangeMetrics` and a listener compares `platformDispatcher.views` with what it had.
+  Reason: platform — the host reports each view's arrival, departure and close request by view, and a view the app asked for arrives as one the system made or restored does, as an iOS scene connects or an Android activity is created, carrying the initial data it was asked for with.
+  Affect: an app decides what goes in each view as it arrives, from its initial data, a view on a composition layer of the app's own among them; a close request stops at the first observer that answers `true`, which is whoever builds the view.
 
 - Change: each element marked dirty outside a build pass asks for a frame of its own view, or of every view for one above every `View`, where Flutter asks once for the first.
   Reason: platform — another view may be hidden and get no frames, while each frame builds every dirty element.
@@ -102,27 +102,13 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## multi_view_app.rs → `MultiViewApp` of Flutter web's embedding guide
 
-- Change: `MultiViewApp` is a framework widget, where Flutter shows it as a sample in its web embedding guide, and it answers close requests on its views.
-  Reason: platform — there is no implicit view, so every app that is given views builds them this way.
-  Affect: it builds only the views the platform gave, never one the app asked for, a window's or one on a layer; an app's root is a `MultiViewApp`, its own `Window`s, or both in a `ViewCollection`.
+- Change: `MultiViewApp` is a framework widget and the one way an app says what each of its views shows, as SwiftUI's scenes say it, where Flutter shows it as a sample in its web embedding guide; its builder answers, for each view the platform hosts for the app, what goes in it or `None`, and it answers close requests on the views it shows content in (`on_close_requested`). The module doc states the design of an app's views.
+  Reason: platform — there is no implicit view, and a view the app asked for in a window (`Platform::request_view`) or on a composition layer of its own (`ViewEmbedder::add_view`, Flutter's embedder's `FlutterEngineAddView`, which Flutter's framework has no object for), the first one and one the system made or restored all arrive the same way, each saying by its initial data what it is for.
+  Affect: an app asks for another view and holds nothing: the view arrives in the builder; a view the builder answers `None` for shows nothing; by default a request to close the app's last view asks to quit and any other's window closes. An app that hosts a view on its own layer gives it its metrics, sight, input and removal through the `ViewEmbedder` by the view's id, learned as the view arrives.
 
-## windowing.rs → _window.dart (`WindowController`, `WindowControllerDelegate`)
-
-- Change: `WindowController::new` asks the platform for a window and gets its view when the view arrives, where Flutter's controller makes the window within its constructor; a close request goes to its handler, or closes it, as Flutter's delegate does by default.
-  Reason: platform — the host makes a window on its own loop, and the view arrives later, carrying the request's id.
-  Affect: a controller has no view at first, and its listeners hear the view arrive and go; one closed before its view arrives closes the window as it arrives, unseen, and its listeners hear its request end with no view.
-
-- Change: a window controller answers whether its window is minimized and whether it is occluded, and its listeners hear each time the host says either changed or the window moved, where Flutter's controller asks the platform whether its window is minimized, has no answer for a covered one, and is notified by each platform's own windowing, on Windows at every resize and activation too.
-  Reason: platform — the host hears a window's changes and reports them by view, and a resize already reaches the app as the view's metrics.
-  Affect: a controller with no window answers no to both, its listeners hear the window minimized, covered, shown again or moved but not resized, and the window of a view no controller asked for changes unheard.
-
-- Change: `ViewRequest` is a view the app asked for, a window's, which a `WindowController` holds and adds a window's closing to, or one on a composition layer of the app's own (`ViewRequest::on_layer`), whose one state is pending, arrived with its view, refused or ended, and whose listeners hear each change, where Flutter's framework has no object for a view its embedder adds.
-  Reason: platform — the host adds a view on a layer on its own loop, as it makes a window, so either view arrives later carrying its request's id.
-  Affect: an app has a view on its layer once the request's listeners hear it arrive, gives it its size and sight and removes it through the platform's view embedder, and no `MultiViewApp` builds it; `on_layer` answers no request where the platform has no view embedder; a request ends when its view goes or its window is closed before the view came, so nothing waits for a view that will not come.
-
-- Change: `WidgetsBinding::windowing_owner` is one `WindowingOwner` that keeps the requests and the window controllers by their ids and hears every view event first, claiming the views the app asked for, where Flutter's is an abstract factory with an implementation per platform, which `createWindowingOwner` and a setter replace.
-  Reason: platform — the host makes the windows behind `Platform::request_view` and the views behind `ViewEmbedder::add_view`, so what differs between platforms is the host's, and the owner only matches arriving views to requests.
-  Affect: no app or test installs a windowing owner of its own; a test stands in for windows and for views on layers through its platform's `request_view` and its view embedder.
+- Change: Waft does not port Flutter's windowing API, `widgets/_window.dart`'s `WindowController`, `WindowingOwner`, `RegularWindow` and their archetypes.
+  Reason: platform — it is experimental and desktop-only, the app making each window through a controller it holds, with nothing for the views a system makes or restores, as Android brings a task back from Recents and iOS a scene; Waft's one model is a view, asked for or not, arriving with what it is for.
+  Affect: an app asks for a window with `Platform::request_view` and builds it in a `MultiViewApp`; what Flutter's controller gives, a window's frame, title, minimizing and closing, the content reaches through `WindowScope`.
 
 ## widgets/composition_layer_view.rs → platform views (`AndroidView`, `UiKitView`, `Texture`)
 
@@ -622,11 +608,11 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: language — Rust has no named arguments, so the table is built by setters that each see one argument, and none sees them all.
   Affect: in a debug build, a malformed table panics when it is mounted or rebuilt, not where it is written.
 
-## window.rs → _window.dart
+## window.rs → _window.dart (`WindowScope`)
 
-- Change: `Window` and `WindowScope` carry a `WindowController` of one kind, a regular window made from a configuration, where Flutter has a controller for each archetype; there is no `WindowManager` or registry, and a `Window` does not rebuild on its own when the window's size changes.
-  Reason: platform — the host makes windows from one configuration, and a size change reaches the tree through the view's metrics.
-  Affect: an app lists its `Window`s in a `ViewCollection` itself and reads the controller from `WindowScope::of`; size and position come from the controller's window's frame, not a listenable.
+- Change: `WindowScope` hands the content of a view in a window the window itself, the host's `HostWindow` (`WindowScope::of`, `WindowScope::maybe_of`), where Flutter's hands the window's controller; the `View` widget provides it for every view in a window, and its dependents rebuild when the host reports the window changed, where Flutter's `Window` widget provides it for the controller it is given.
+  Reason: platform — every view in a window, asked for or made by the system, has its window from the host (`View::window`), and there is no controller to hand.
+  Affect: content reads its window's frame, minimizing and closing from its context, and rebuilds when the window is minimized or restored, covered or shown, or moved, as it rebuilds with its view's metrics; content in no window, a phone's screen, has none.
 
 ## Deferred
 

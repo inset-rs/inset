@@ -22,7 +22,7 @@ use waft_embedder::{
     Locale, MediaChangeFuture, RequestId, TrayIconEvent, TrayIconId, ViewError, ViewFocusEvent,
     ViewId, ViewRef, WindowConfig,
 };
-use waft_foundation::{App, Handle, Listenable, Listener, Task, Timer};
+use waft_foundation::{App, Handle, Listener, Task, Timer};
 use waft_rendering::{RendererBinding, RendererBindingOverridesObject};
 use waft_scheduler::{FrameTarget, SchedulerBinding, SchedulerBindingOverridesObject};
 use waft_services::{
@@ -34,7 +34,7 @@ use crate::framework::{
     WidgetKind, WidgetRef, downcast_widget,
 };
 use crate::multi_view_app::MultiViewApp;
-use crate::view::{View, ViewCollection};
+use crate::view::View;
 use crate::widgets::actions::{Actions, Intent};
 use crate::widgets::focus_manager::FocusManager;
 use crate::widgets::platform_menu_bar::{DefaultPlatformMenuDelegate, PlatformMenuDelegateRef};
@@ -42,8 +42,6 @@ use crate::widgets::text_editing_intents::{
     CopySelectionTextIntent, DeleteCharacterIntent, PasteTextIntent, RedoTextIntent,
     SelectAllTextIntent, UndoTextIntent,
 };
-use crate::window::Window;
-use crate::windowing::{ViewRequestState, WindowController, WindowingOwner};
 
 /// The glue between the widgets layer and the Flutter engine.
 ///
@@ -61,8 +59,8 @@ pub struct WidgetsBinding {
     root_element: Option<AnyElement>,
     ready_to_produce_frames: bool,
     observers: Vec<WidgetsBindingObserverRef>,
-    /// Flutter's `windowingOwner`: the window controllers, and every view event first.
-    windowing_owner: Option<Handle<WindowingOwner>>,
+    /// Who hears each change of a view's window, by the view: each view's `WindowScope`.
+    window_listeners: HashMap<ViewId, Vec<Listener>>,
     /// Flutter's `platformMenuDelegate`.
     platform_menu_delegate: Option<PlatformMenuDelegateRef>,
     /// Who hears each tray icon's events, by the icon's id.
@@ -176,10 +174,13 @@ pub trait WidgetsBindingObserver {
         false
     }
 
-    /// Called when the platform gives the app a view no window controller asked for: a
-    /// phone's screen, a web page's element, a host app's view. Flutter tells this only as
-    /// [`did_change_metrics`](Self::did_change_metrics), and a listener compares
-    /// `platformDispatcher.views` with what it had.
+    /// Called when the platform adds a view for the app, whoever started it: one the app asked
+    /// for in a window (`Platform::request_view`) or on a layer of its own
+    /// (`ViewEmbedder::add_view`), which says which request it answers (`View::request_id`), or
+    /// one the system made or restored, a phone's screen, a web page's element, a host app's
+    /// view, a task Android brings back from Recents; each says what it is for
+    /// (`View::initial_data`). Flutter tells this only as [`did_change_metrics`](Self::did_change_metrics),
+    /// and a listener compares `platformDispatcher.views` with what it had.
     fn did_add_view(&self, app: &mut App, view: &ViewRef) {
         let _ = (app, view);
     }
@@ -189,7 +190,12 @@ pub trait WidgetsBindingObserver {
         let _ = (app, view);
     }
 
-    /// Called when the user asks to close such a view.
+    /// Called when the app's request `request` for a view got none, and why.
+    fn did_fail_view_request(&self, app: &mut App, request: RequestId, error: &ViewError) {
+        let _ = (app, request, error);
+    }
+
+    /// Called when the user asks to close such a view: whoever builds it decides.
     ///
     /// Answers whether this observer handled it. The first one that answers `true` stops the
     /// others from being asked, as with [`did_pop_route`](Self::did_pop_route).
@@ -269,6 +275,16 @@ pub trait WidgetsBindingObserverObject: Sized + 'static {
         let _ = (app, view);
     }
 
+    /// See [`WidgetsBindingObserver::did_fail_view_request`].
+    fn did_fail_view_request(
+        self: Handle<Self>,
+        app: &mut App,
+        request: RequestId,
+        error: &ViewError,
+    ) {
+        let _ = (app, request, error);
+    }
+
     /// See [`WidgetsBindingObserver::did_request_view_close`].
     fn did_request_view_close(self: Handle<Self>, app: &mut App, view: ViewId) -> bool {
         let _ = (app, view);
@@ -329,6 +345,10 @@ impl<T: WidgetsBindingObserverObject> WidgetsBindingObserver for Handle<T> {
         T::did_remove_view(*self, app, view);
     }
 
+    fn did_fail_view_request(&self, app: &mut App, request: RequestId, error: &ViewError) {
+        T::did_fail_view_request(*self, app, request, error);
+    }
+
     fn did_request_view_close(&self, app: &mut App, view: ViewId) -> bool {
         T::did_request_view_close(*self, app, view)
     }
@@ -367,8 +387,6 @@ impl WidgetsBinding {
             })),
         );
         app.get_mut(self).build_owner = Some(build_owner);
-        let windowing_owner = WindowingOwner::new(app);
-        app.get_mut(self).windowing_owner = Some(windowing_owner);
         WidgetsBinding::assign_dispatcher_callbacks(app);
         self.follow_caption_settings(app);
         let platform_menu_delegate: PlatformMenuDelegateRef = DefaultPlatformMenuDelegate::new(app);
@@ -527,43 +545,55 @@ impl WidgetsBinding {
         app.get(self).ready_to_produce_frames
     }
 
-    /// Flutter's `windowingOwner`: the window controllers the app made, which hear every event
-    /// about the views they asked for.
-    pub fn windowing_owner(self: Handle<Self>, app: &App) -> Handle<WindowingOwner> {
-        app.get(self)
-            .windowing_owner
-            .expect("WidgetsBinding::instance must run first")
+    /// `listener` hears each change of the window of `view` from now on: a `WindowScope`.
+    pub(crate) fn add_window_listener(
+        self: Handle<Self>,
+        app: &mut App,
+        view: ViewId,
+        listener: Listener,
+    ) {
+        app.get_mut(self)
+            .window_listeners
+            .entry(view)
+            .or_default()
+            .push(listener);
     }
 
-    /// A view came: the window controller that asked for it takes it, or the observers hear it.
+    /// `listener` hears the window of `view` no more.
+    pub(crate) fn remove_window_listener(
+        self: Handle<Self>,
+        app: &mut App,
+        view: ViewId,
+        listener: &Listener,
+    ) {
+        let listeners = &mut app.get_mut(self).window_listeners;
+        if let Some(heard) = listeners.get_mut(&view) {
+            heard.retain(|kept| kept != listener);
+            if heard.is_empty() {
+                listeners.remove(&view);
+            }
+        }
+    }
+
+    /// The host added a view, whoever started it: the observers hear of it.
     fn handle_view_added(self: Handle<Self>, app: &mut App, view: ViewId) {
         let Some(view) = app.platform().view(view) else {
             return;
         };
-        if self.windowing_owner(app).view_added(app, &view) {
-            return;
-        }
         for observer in app.get(self).observers.clone() {
             observer.did_add_view(app, &view);
         }
     }
 
-    /// A view went: the window controller whose it was hears it, or the observers do.
+    /// The host removed a view: the observers hear of it.
     fn handle_view_removed(self: Handle<Self>, app: &mut App, view: ViewId) {
-        if self.windowing_owner(app).view_removed(app, view) {
-            return;
-        }
         for observer in app.get(self).observers.clone() {
             observer.did_remove_view(app, view);
         }
     }
 
-    /// The user asked to close `view`: the window controller whose it is decides, or else the
-    /// first observer that handles it.
+    /// The user asked to close `view`: the first observer that handles it decides.
     fn handle_view_close_requested(self: Handle<Self>, app: &mut App, view: ViewId) {
-        if self.windowing_owner(app).view_close_requested(app, view) {
-            return;
-        }
         for observer in app.get(self).observers.clone() {
             if observer.did_request_view_close(app, view) {
                 return;
@@ -572,19 +602,29 @@ impl WidgetsBinding {
     }
 
     /// The window of `view` was minimized or restored, became occluded or shown, or moved: the
-    /// window controller whose window it is tells its listeners.
+    /// view's `WindowScope` hears it.
     fn handle_window_changed(self: Handle<Self>, app: &mut App, view: ViewId) {
-        self.windowing_owner(app).window_changed(app, view);
+        let listeners = app
+            .get(self)
+            .window_listeners
+            .get(&view)
+            .cloned()
+            .unwrap_or_default();
+        for listener in listeners {
+            listener.call(app);
+        }
     }
 
+    /// The request `request_id` got no view: the observers hear why.
     fn handle_view_request_failed(
         self: Handle<Self>,
         app: &mut App,
         request_id: RequestId,
         error: ViewError,
     ) {
-        self.windowing_owner(app)
-            .view_request_failed(app, request_id, error);
+        for observer in app.get(self).observers.clone() {
+            observer.did_fail_view_request(app, request_id, &error);
+        }
     }
 
     /// Schedules a `Timer` for attaching the root widget.
@@ -939,10 +979,11 @@ impl RendererBindingOverridesObject for WidgetsBinding {
 /// The root widget is attached on the next timer turn, as Dart's `Timer.run` does, and the
 /// first frame is scheduled.
 ///
-/// `content` is built in every view the app is given, each with its own state
-/// ([`MultiViewApp`]). Where the platform gives the app no view at start, as on a desktop, it
-/// asks for a window with the default configuration ([`run_app_with`] takes one); a platform that
-/// gives the app its own view, as a phone does, has it there at start. A request to close the
+/// `content` is built in every view the platform hosts for the app that carries no initial data,
+/// each with its own state ([`MultiViewApp`]). Where the platform gives the app no view
+/// at start, as on a desktop, it asks for a window with the default configuration
+/// ([`run_app_with`] takes one); a platform that gives the app its own view, as a phone does, has
+/// it there at start. A request to close the
 /// app's last view asks to quit, as Cmd-Q does. Flutter's `runApp` needs the implicit view,
 /// which Waft has no more.
 ///
@@ -958,42 +999,16 @@ pub fn run_app(app: &mut App, content: WidgetRef) {
 /// [`run_app`], asking for a window configured as `window` where the platform gives the app no
 /// view at start, as on a desktop. Where it gives one, as a phone does, `window` goes unused.
 pub fn run_app_with(app: &mut App, content: WidgetRef, window: WindowConfig) {
-    let given_views = {
-        let content = content.clone();
-        MultiViewApp::new(move |_app, _view| content.clone()).into_widget()
-    };
-    if !app.platform().views().is_empty() {
-        run_widget(app, given_views);
-        return;
+    if app.platform().views().is_empty()
+        && let Err(error) = app.platform().request_view(window, None)
+    {
+        no_window_for_the_app(&error);
     }
-    let main_window = request_main_window(app, window);
-    let main_window = Window::new(main_window, content).into_widget();
     run_widget(
         app,
-        ViewCollection::new(vec![given_views, main_window]).into_widget(),
+        MultiViewApp::new(move |_app, view| view.initial_data().is_none().then(|| content.clone()))
+            .into_widget(),
     );
-}
-
-/// The app's own window, where the platform gave it no view: a request to close it is the close
-/// rule's, and a platform that refuses or fails to make it leaves the app nothing to show.
-fn request_main_window(app: &mut App, config: WindowConfig) -> Handle<WindowController> {
-    let controller = WindowController::new(app, config);
-    panic_if_refused(app, controller);
-    controller.on_close_requested(app, Rc::new(close_or_ask_to_quit));
-    let listenable: Rc<dyn Listenable> = Rc::new(controller);
-    listenable.add_listener(
-        app,
-        Listener::new(move |app| panic_if_refused(app, controller)),
-    );
-    controller
-}
-
-/// Ends the app where the platform refused `window`, the app's own, which leaves it nothing to
-/// show.
-fn panic_if_refused(app: &App, window: Handle<WindowController>) {
-    if let ViewRequestState::Refused(error) = window.request(app).state(app) {
-        no_window_for_the_app(error);
-    }
 }
 
 fn no_window_for_the_app(error: &ViewError) -> ! {
@@ -1004,16 +1019,14 @@ fn no_window_for_the_app(error: &ViewError) -> ! {
 }
 
 /// The close rule of `run_app` and [`MultiViewApp`]: a request to close the app's last view asks
-/// to quit, as Cmd-Q does, so the exit listeners may refuse, and any other view closes with its
-/// window. A view in no window is not the app's to close, and no platform asks to close one.
-pub(crate) fn close_or_ask_to_quit(app: &mut App, view: ViewId) {
-    let platform = app.platform();
-    if platform.views().len() <= 1 {
+/// to quit, as Cmd-Q does, so the exit listeners may refuse, and any other view's window closes.
+pub(crate) fn close_or_ask_to_quit(app: &mut App, view: &ViewRef) {
+    if app.platform().views().len() <= 1 {
         let _answer =
             ServicesBinding::instance(app).exit_application(app, AppExitType::Cancelable, 0);
         return;
     }
-    if let Some(window) = platform.view(view).and_then(|view| view.window()) {
+    if let Some(window) = view.window() {
         window.close();
     }
 }

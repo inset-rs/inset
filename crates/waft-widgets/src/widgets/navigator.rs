@@ -6013,7 +6013,7 @@ mod tests {
 
     /// Rebuilds the root with a new widget, the way `run_app` first attached it.
     fn attach(binding: Handle<crate::binding::WidgetsBinding>, app: &mut App, child: WidgetRef) {
-        let root = crate::MultiViewApp::new(move |_app, _view| child.clone());
+        let root = crate::MultiViewApp::new(move |_app, _view| Some(child.clone()));
         binding.attach_root_widget(app, root.into_widget());
     }
 

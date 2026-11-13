@@ -6,9 +6,11 @@
 //! window, which on Android sends the task to the background with its card kept, as WaOS does for
 //! a program.
 //!
-//! A view's number is its initial data, so a card Android brings back after the process died shows
-//! its number again; the first view, which no request made, is numbered 0. What happens is printed,
-//! which Android's log carries under `waft`.
+//! A view's number is its initial data, which says what each view shows, the first, one asked for
+//! and one brought back alike, so a card Android brings back after the process died shows its
+//! number again; the first view, where the platform gives one, is numbered 0, and a window asked
+//! for at the start, where it gives none, 1. The window is reached from inside the page. What
+//! happens is printed, which Android's log carries under `waft`.
 //!
 //! ```text
 //! cargo run -p views
@@ -22,7 +24,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use waft::{App, Handle, Listener, Timer, ValueKey};
+use waft::{App, Handle, Listener, Timer};
 use waft_cupertino::{
     CupertinoApp, CupertinoButton, CupertinoNavigationBar, CupertinoPageRoute,
     CupertinoPageScaffold, CupertinoTextField, ObstructingPreferredSizeWidgetRef,
@@ -33,9 +35,9 @@ use waft_embedder::{
 };
 use waft_painting::EdgeInsetsGeometry;
 use waft_widgets::{
-    BuildContext, Builder, IntoWidget, KeyRef, ListView, MediaQuery, Navigator, Padding, PopScope,
-    Route, State, StateData, StatefulWidget, Text, View, ViewCollection, WidgetRef, WidgetsBinding,
-    WidgetsBindingObserverObject, WidgetsBindingObserverRef, run_widget,
+    BuildContext, Builder, IntoWidget, ListView, MediaQuery, MultiViewApp, Navigator, Padding,
+    PopScope, Route, State, StateData, StatefulWidget, Text, View, WidgetRef, WidgetsBinding,
+    WidgetsBindingObserver, WidgetsBindingObserverRef, WindowScope, run_widget,
 };
 
 /// The side of each view's icon, in pixels.
@@ -53,129 +55,36 @@ const ICON_COLORS: [[u8; 3]; 6] = [
 #[waft::main]
 fn main(app: &mut App) {
     print_failed_requests(app);
-    run_widget(app, EveryView.into_widget());
-}
-
-/// Prints each request that got no view, before the binding hears of it.
-fn print_failed_requests(app: &mut App) {
-    WidgetsBinding::instance(app);
-    let callbacks = app.platform_callbacks_mut();
-    let binding = callbacks.on_view_request_failed.take();
-    callbacks.on_view_request_failed = Some(Rc::new(
-        move |app: &mut App, request: RequestId, error: ViewError| {
-            println!("views: request {} got no view: {error}", request.0);
-            if let Some(binding) = &binding {
-                binding(app, request, error);
+    let next_number = Rc::new(Cell::new(1));
+    if app.platform().views().is_empty() {
+        ask_for_view(app, &next_number);
+    }
+    let pages = MultiViewApp::new(move |_app, view| {
+        let number = number_of(view);
+        next_number.set(next_number.get().max(number + 1));
+        Some(
+            ViewPage {
+                number,
+                next_number: Rc::clone(&next_number),
             }
-        },
-    ));
+            .into_widget(),
+        )
+    });
+    run_widget(app, pages.into_widget());
 }
 
-/// Every view the app has, given or asked for, each showing its [`ViewPage`].
-#[derive(Debug)]
-struct EveryView;
-
-struct EveryViewState {
-    state: StateData<EveryView>,
-    views: Vec<ViewRef>,
-    /// The number the next view asked for takes.
-    next_number: Rc<Cell<u32>>,
-    observer: Option<WidgetsBindingObserverRef>,
+/// Prints each request that got no view.
+fn print_failed_requests(app: &mut App) {
+    let observer: WidgetsBindingObserverRef = Rc::new(FailedRequests);
+    WidgetsBinding::instance(app).add_observer(app, observer);
 }
 
-impl StatefulWidget for EveryView {
-    type State = EveryViewState;
+/// Prints why a request got no view.
+struct FailedRequests;
 
-    fn create_state(&self) -> EveryViewState {
-        EveryViewState {
-            state: StateData::new(),
-            views: Vec::new(),
-            next_number: Rc::new(Cell::new(1)),
-            observer: None,
-        }
-    }
-}
-
-impl EveryViewState {
-    /// Shows `view`, which arrived, and numbers the next request past its own number.
-    fn show(self: Handle<Self>, app: &mut App, view: ViewRef) {
-        let number = number_of(&view);
-        println!(
-            "views: view {} arrived, numbered {number}, for request {:?}",
-            view.id().0,
-            view.request_id().map(|request| request.0),
-        );
-        let next = &app.get(self).next_number;
-        next.set(next.get().max(number + 1));
-        if view.request_id().is_none()
-            && let Some(window) = view.window()
-        {
-            window.set_title(&title_of(number));
-            window.set_icon(Some(&icon_of(number)));
-        }
-        app.get_mut(self).views.push(view);
-    }
-}
-
-impl WidgetsBindingObserverObject for EveryViewState {
-    fn did_add_view(self: Handle<Self>, app: &mut App, view: &ViewRef) {
-        let view = Rc::clone(view);
-        self.show(app, view);
-        self.set_state(app, |_| {});
-    }
-
-    fn did_remove_view(self: Handle<Self>, app: &mut App, view: ViewId) {
-        println!("views: view {} went", view.0);
-        self.set_state(app, |state| state.views.retain(|shown| shown.id() != view));
-    }
-
-    fn did_request_view_close(self: Handle<Self>, app: &mut App, view: ViewId) -> bool {
-        if let Some(window) = app.platform().view(view).and_then(|view| view.window()) {
-            window.close();
-        }
-        true
-    }
-}
-
-impl State for EveryViewState {
-    type Widget = EveryView;
-    waft_widgets::state_accessors!();
-
-    fn init_state(self: Handle<Self>, app: &mut App) {
-        let observer: WidgetsBindingObserverRef = Rc::new(self);
-        WidgetsBinding::instance(app).add_observer(app, observer.clone());
-        app.get_mut(self).observer = Some(observer);
-        let views = app.platform().views();
-        if views.is_empty() {
-            let number = app.get(self).next_number.get();
-            ask_for_view(app, number);
-        }
-        for view in views {
-            self.show(app, view);
-        }
-    }
-
-    fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(observer) = app.get_mut(self).observer.take() {
-            WidgetsBinding::instance(app).remove_observer(app, &observer);
-        }
-    }
-
-    fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
-        let next_number = Rc::clone(&app.get(self).next_number);
-        let views = app.get(self).views.clone();
-        let pages = views
-            .into_iter()
-            .map(|view| {
-                let key: KeyRef = Rc::new(ValueKey::new(view.id().0));
-                let page = ViewPage {
-                    view: Rc::clone(&view),
-                    next_number: Rc::clone(&next_number),
-                };
-                View::new(view, page).key(key).into_widget()
-            })
-            .collect();
-        ViewCollection::new(pages).into_widget()
+impl WidgetsBindingObserver for FailedRequests {
+    fn did_fail_view_request(&self, _app: &mut App, _request: RequestId, error: &ViewError) {
+        println!("views: a view asked for got none: {error}");
     }
 }
 
@@ -203,8 +112,10 @@ fn icon_of(number: u32) -> IconImage {
     }
 }
 
-/// Asks for the view numbered `number`, in a window titled and iconed as it.
-fn ask_for_view(app: &mut App, number: u32) {
+/// Asks for the next view, in a window titled and iconed as its number.
+fn ask_for_view(app: &mut App, next_number: &Cell<u32>) {
+    let number = next_number.get();
+    next_number.set(number + 1);
     let config = WindowConfig {
         title: title_of(number),
         icon: Some(icon_of(number)),
@@ -215,31 +126,72 @@ fn ask_for_view(app: &mut App, number: u32) {
         .platform()
         .request_view(config, Some(number.to_string()))
     {
-        Ok(request) => println!("views: asked for view {number}, request {}", request.0),
+        Ok(_) => println!("views: asked for view {number}"),
         Err(error) => println!("views: view {number} was refused: {error}"),
     }
 }
 
-/// What one view shows: an app of its own, whose first screen is [`home`].
+/// What one view shows: an app of its own, whose first screen is [`home`]. Its window, a card in
+/// Recents on Android, is titled and iconed as its number, which a window Android brings back
+/// after the process died has not been.
 struct ViewPage {
-    view: ViewRef,
+    number: u32,
     next_number: Rc<Cell<u32>>,
 }
 
 impl fmt::Debug for ViewPage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ViewPage")
-            .field("view", &self.view.id())
+            .field("number", &self.number)
             .finish_non_exhaustive()
     }
 }
 
-impl waft_widgets::StatelessWidget for ViewPage {
-    fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
-        let number = number_of(&self.view);
-        let home = PopScope::new(home(&self.view, &self.next_number))
-            .can_pop(false)
-            .on_pop_invoked_with_result(minimizer(&self.view));
+struct ViewPageState {
+    state: StateData<ViewPage>,
+    /// Whether its window was titled and iconed.
+    described: bool,
+}
+
+impl StatefulWidget for ViewPage {
+    type State = ViewPageState;
+
+    fn create_state(&self) -> ViewPageState {
+        ViewPageState {
+            state: StateData::new(),
+            described: false,
+        }
+    }
+}
+
+impl State for ViewPageState {
+    type Widget = ViewPage;
+    waft_widgets::state_accessors!();
+
+    /// Titles and icons its window, once.
+    fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
+        if std::mem::replace(&mut app.get_mut(self).described, true) {
+            return;
+        }
+        let number = self.widget(app).number;
+        let view = View::of(app, self.context(app));
+        println!("views: view {} arrived, numbered {number}", view.id().0);
+        if let Some(window) = WindowScope::maybe_of(app, self.context(app)) {
+            window.set_title(&title_of(number));
+            window.set_icon(Some(&icon_of(number)));
+        }
+    }
+
+    fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+        let widget = self.widget(app);
+        let number = widget.number;
+        let next_number = Rc::clone(&widget.next_number);
+        let home = Builder::new(move |_app, context| {
+            PopScope::new(home(context, number, &next_number))
+                .can_pop(false)
+                .on_pop_invoked_with_result(minimizer(context))
+                .into_widget()
+        });
         CupertinoApp::new()
             .title("Views")
             .home(screen(&title_of(number), home))
@@ -247,15 +199,14 @@ impl waft_widgets::StatelessWidget for ViewPage {
     }
 }
 
-/// What Back at the first screen does: minimizes the view's window.
-fn minimizer(view: &ViewRef) -> waft_widgets::PopInvokedWithResultCallback {
-    let view = Rc::clone(view);
-    Rc::new(move |_app, did_pop, _result| {
+/// What Back at the first screen does: minimizes the window of the view of `context`.
+fn minimizer(context: BuildContext) -> waft_widgets::PopInvokedWithResultCallback {
+    Rc::new(move |app, did_pop, _result| {
         if did_pop {
             return;
         }
-        println!("views: Back at view {}'s first screen", view.id().0);
-        if let Some(window) = view.window() {
+        println!("views: Back at a view's first screen");
+        if let Some(window) = WindowScope::maybe_of(app, context) {
             window.set_minimized(true);
         }
     })
@@ -270,16 +221,11 @@ fn screen<K>(title: &str, body: impl IntoWidget<K>) -> WidgetRef {
         .into_widget()
 }
 
-/// The first screen of `view`'s page.
-fn home(view: &ViewRef, next_number: &Rc<Cell<u32>>) -> WidgetRef {
-    let number = number_of(view);
+/// The first screen of view `number`'s page, built in `context`.
+fn home(context: BuildContext, number: u32, next_number: &Rc<Cell<u32>>) -> WidgetRef {
     let ask = {
         let next_number = Rc::clone(next_number);
-        move |app: &mut App| {
-            let number = next_number.get();
-            next_number.set(number + 1);
-            ask_for_view(app, number);
-        }
+        move |app: &mut App| ask_for_view(app, &next_number)
     };
     let ask_later = {
         let ask = ask.clone();
@@ -289,27 +235,20 @@ fn home(view: &ViewRef, next_number: &Rc<Cell<u32>>) -> WidgetRef {
             Timer::new(app, Duration::from_secs(5), Listener::new(ask));
         })
     };
-    let window_of = {
-        let view = Rc::clone(view);
-        move || view.window()
-    };
-    let minimize = {
-        let window_of = window_of.clone();
-        Listener::new(move |_app| {
-            if let Some(window) = window_of() {
-                window.set_minimized(true);
-            }
-        })
-    };
-    let close = Listener::new(move |_app| {
-        if let Some(window) = window_of() {
+    let minimize = Listener::new(move |app| {
+        if let Some(window) = WindowScope::maybe_of(app, context) {
+            window.set_minimized(true);
+        }
+    });
+    let close = Listener::new(move |app| {
+        if let Some(window) = WindowScope::maybe_of(app, context) {
             window.close();
         }
     });
-    let bring_forward = {
-        let view = view.id();
-        Listener::new(move |app| bring_another_forward(app, view))
-    };
+    let bring_forward = Listener::new(move |app| {
+        let this = View::of(app, context).id();
+        bring_another_forward(app, this);
+    });
     let push = Builder::new(move |_app, context| {
         button(
             "Push a page",

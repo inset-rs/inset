@@ -1,7 +1,8 @@
 //! Flutter counterpart: `widgets/view.dart` (`View`, `RawView`, the view scopes).
 //!
 //! `View` wraps its child in `MediaQuery::from_view`, a `FocusTraversalGroup` parented on the
-//! root scope, and a `FocusScope` over its own scope node. `ViewCollection` and `ViewAnchor`
+//! root scope, and a `FocusScope` over its own scope node, and, for a view in a window, a
+//! `WindowScope` over the window. `ViewCollection` and `ViewAnchor`
 //! place further views beside or under a tree.
 
 use std::any::Any;
@@ -27,6 +28,7 @@ use crate::widgets::focus_traversal::{
     AnyFocusTraversalPolicy, FocusTraversalGroup, FocusTraversalPolicy, ReadingOrderTraversalPolicy,
 };
 use crate::widgets::media_query::MediaQuery;
+use crate::window::WindowScopeOfView;
 
 /// Bootstraps a render tree that is rendered into the provided `FlutterView`.
 ///
@@ -274,6 +276,15 @@ impl State for ViewState {
         // under an enclosing view's scope (which happens when a view is rendered inside another
         // via a `ViewAnchor`). Each view is an independent focus root: nesting would otherwise
         // make an ancestor view report `has_focus` when a descendant view is focused.
+        let child = match view.window() {
+            Some(window) => WindowScopeOfView {
+                view: Rc::clone(&view),
+                window,
+                child,
+            }
+            .into_widget(),
+            None => child,
+        };
         let scoped = FocusTraversalGroup::new(
             FocusScope::with_external_focus_node(child, scope_node).include_semantics(false),
         )

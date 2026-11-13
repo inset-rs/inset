@@ -41,7 +41,7 @@ fn replace(fixture: &mut Fixture, ring: ProgressRing) {
         let mut app = fixture.cell.borrow_mut();
         let binding = WidgetsBinding::instance(&mut app);
         let tree = tree(ring);
-        let root = MultiViewApp::new(move |_, _| tree.clone()).into_widget();
+        let root = MultiViewApp::new(move |_, _| Some(tree.clone())).into_widget();
         binding.attach_root_widget(&mut app, root);
     }
     advance(fixture, Duration::from_millis(20));

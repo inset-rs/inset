@@ -2,22 +2,19 @@
 //! as the command line says.
 
 use std::cell::Cell;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use waft_embedder::{
-    Color, CompositionLayer, PlatformRef, TextDirection, ViewId, ViewRef, WindowConfig,
-};
+use waft_embedder::{Color, CompositionLayer, PlatformRef, TextDirection, ViewRef, WindowConfig};
 use waft_embedder_winit::WinitEmbedder;
-use waft_foundation::{App, Handle, Listenable, Listener};
+use waft_foundation::{App, Handle};
 use waft_painting::{BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry, TextStyle};
 use waft_scheduler::{PersistentFrameCallback, SchedulerBinding};
 use waft_shell::Shell;
 use waft_widgets::{
-    Center, ClipRRect, CompositionLayerView, DecoratedBox, Directionality, IntoWidget, Opacity,
-    Padding, Positioned, SizedBox, Stack, StackFit, Text, Transform, ViewRequestState, WidgetRef,
-    Window, WindowController, run_widget,
+    BuildContext, Center, ClipRRect, CompositionLayerView, DecoratedBox, Directionality,
+    IntoWidget, Opacity, Padding, Positioned, SizedBox, Stack, StackFit, State, StateData,
+    StatefulWidget, Text, Transform, View, WidgetRef, run_app_with,
 };
 
 use crate::producer::{self, Pacing, ViewScreen};
@@ -29,7 +26,7 @@ const LABEL_BACKGROUND: Color = Color::from_argb(160, 0, 0, 0);
 const LABEL: Color = Color::from_argb(255, 255, 255, 255);
 
 /// How the layer and its label are shown, together.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct Presentation {
     /// What they are scaled by, about their middle.
     pub(crate) scale: f64,
@@ -40,58 +37,75 @@ pub(crate) struct Presentation {
     pub(crate) corner_radius: f64,
 }
 
-/// Runs the window, the layer and its label shown as `presentation` says.
+/// Runs the window, the layer and its label shown as `presentation` says; closing the window
+/// quits, as an app's last window does.
 pub(crate) fn run(exit_after: Option<Duration>, presentation: Presentation) {
     WinitEmbedder.run(move |platform| {
         Shell::new(platform, move |app| {
-            open_window(app, exit_after, presentation)
+            let config = WindowConfig {
+                title: "Waft — a composition layer".to_owned(),
+                size: [640.0, 480.0],
+                ..WindowConfig::default()
+            };
+            let home = Home {
+                exit_after,
+                presentation,
+            };
+            run_app_with(app, home.into_widget(), config);
         })
     });
 }
 
-/// Asks for the window, and once its view has arrived makes the layer and shows both;
-/// closing the window quits.
-fn open_window(app: &mut App, exit_after: Option<Duration>, presentation: Presentation) {
-    let config = WindowConfig {
-        title: "Waft — a composition layer".to_owned(),
-        size: [640.0, 480.0],
-        ..WindowConfig::default()
-    };
-    let controller = WindowController::new(app, config);
-    controller.on_close_requested(app, Rc::new(quit));
-    let shown = Cell::new(false);
-    let listenable: Rc<dyn Listenable> = Rc::new(controller);
-    listenable.add_listener(
-        app,
-        Listener::new(move |app| {
-            if let ViewRequestState::Arrived(view) = controller.request(app).state(app)
-                && !shown.replace(true)
-            {
-                let view = Rc::clone(view);
-                show(app, controller, view, exit_after, presentation);
-            }
-        }),
-    );
-}
-
-fn show(
-    app: &mut App,
-    controller: Handle<WindowController>,
-    view: ViewRef,
+/// The window's content: the layer and its label, the layer's producer started once the view the
+/// content is in has a size.
+#[derive(Debug)]
+struct Home {
     exit_after: Option<Duration>,
     presentation: Presentation,
-) {
-    let layer = make_layer(&app.platform());
-    start_producer_once_sized(app, view, Arc::clone(&layer), exit_after);
-    run_widget(
-        app,
-        Window::new(controller, home(layer, presentation)).into_widget(),
-    );
 }
 
-fn quit(app: &mut App, _view: ViewId) {
-    if let Some(app_exit) = app.platform().app_exit() {
-        app_exit.quit(0);
+struct HomeState {
+    state: StateData<Home>,
+    layer: Option<Arc<dyn CompositionLayer>>,
+    /// Whether the producer was started for the view the content is in.
+    producing: bool,
+}
+
+impl StatefulWidget for Home {
+    type State = HomeState;
+
+    fn create_state(&self) -> HomeState {
+        HomeState {
+            state: StateData::new(),
+            layer: None,
+            producing: false,
+        }
+    }
+}
+
+impl State for HomeState {
+    type Widget = Home;
+    waft_widgets::state_accessors!();
+
+    fn init_state(self: Handle<Self>, app: &mut App) {
+        let layer = make_layer(&app.platform());
+        app.get_mut(self).layer = Some(layer);
+    }
+
+    /// Starts the producer for the view the content is in, once.
+    fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
+        if std::mem::replace(&mut app.get_mut(self).producing, true) {
+            return;
+        }
+        let view = View::of(app, self.context(app));
+        let layer = Arc::clone(app.get(self).layer.as_ref().expect("made in init_state"));
+        let exit_after = self.widget(app).exit_after;
+        start_producer_once_sized(app, view, layer, exit_after);
+    }
+
+    fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+        let layer = Arc::clone(app.get(self).layer.as_ref().expect("made in init_state"));
+        home(layer, self.widget(app).presentation)
     }
 }
 

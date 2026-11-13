@@ -624,12 +624,13 @@ impl ViewEmbedder for TestPlatform {
         _layer: &Arc<dyn CompositionLayer>,
         metrics: ViewMetrics,
         host: Rc<dyn ViewHost>,
+        initial_data: Option<String>,
     ) -> Result<RequestId, ViewError> {
         let id = self.take_request_id();
         let [width, height] = metrics.physical_size;
         let mut view = TestView::with_pixel_ratio(width, height, metrics.device_pixel_ratio)
             .with_id(view_of_request(id))
-            .with_request(id, None)
+            .with_request(id, initial_data)
             .with_host(host);
         if let Some(screen) = metrics.screen {
             view = view.on_screen(screen);

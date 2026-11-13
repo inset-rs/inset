@@ -330,7 +330,8 @@ pub trait ViewEmbedder {
     /// made with the platform's [`compositor`](crate::Platform::compositor), opaque or not, and
     /// places itself, at `metrics`, asking what it asks of the system of `host`. The view arrives
     /// as a window's does, through `EmbedderClient::view_added`, carrying the id answered here
-    /// ([`View::request_id`]); it is in sight until the app says otherwise
+    /// ([`View::request_id`]) and `initial_data` ([`View::initial_data`]), which says what it is
+    /// for, as a window's does (`Platform::request_view`); it is in sight until the app says otherwise
     /// ([`set_view_in_sight`](Self::set_view_in_sight)), and its frames follow the screen its
     /// metrics name. Refused at once, with
     /// [`ViewError::Unsupported`](crate::ViewError::Unsupported), where the host cannot draw a
@@ -340,6 +341,7 @@ pub trait ViewEmbedder {
         layer: &std::sync::Arc<dyn crate::CompositionLayer>,
         metrics: ViewMetrics,
         host: std::rc::Rc<dyn ViewHost>,
+        initial_data: Option<String>,
     ) -> Result<crate::RequestId, crate::ViewError>;
 
     /// Flutter's `SendWindowMetricsEvent`, for a view the app added with

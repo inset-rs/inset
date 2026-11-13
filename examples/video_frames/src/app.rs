@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use waft_embedder::{
     Color, MediaTrack, MediaTrackKind, PauseReason, PlayerActivity, PlayerState, PlayerStatus,
-    TextDirection, VideoOutput, ViewId, WaitReason, WindowConfig,
+    TextDirection, VideoOutput, WaitReason, WindowConfig,
 };
 use waft_embedder_winit::WinitEmbedder;
 use waft_foundation::{App, Handle, Listenable, Listener};
@@ -24,8 +24,8 @@ use waft_widgets::{
     AspectRatio, BuildContext, Center, ClipRRect, Column, DecoratedBox, Directionality,
     GestureDetector, IntoWidget, ListenableBuilder, MainAxisSize, Padding, Player, Positioned,
     SingleTickerProviderStateMixin, SingleTickerProviderStateMixinData, SizedBox, Stack, State,
-    StateData, StatefulWidget, SubtitleView, Text, Transform, VideoFrameView, ViewRequestState,
-    WidgetRef, Window, WindowController, run_widget,
+    StateData, StatefulWidget, SubtitleView, Text, Transform, VideoFrameView, WidgetRef,
+    run_app_with,
 };
 
 /// The video's width in logical pixels; its height follows its aspect.
@@ -48,38 +48,23 @@ pub(crate) struct Presentation {
     pub(crate) subtitles: Option<String>,
 }
 
+/// Plays the video in the window; closing the window quits, as an app's last window does.
 pub(crate) fn run(presentation: Presentation) {
-    WinitEmbedder
-        .run(move |platform| Shell::new(platform, move |app| open_window(app, presentation)));
+    WinitEmbedder.run(move |platform| {
+        Shell::new(platform, move |app| {
+            let config = WindowConfig {
+                title: "Waft — a video player".to_owned(),
+                size: [800.0, 560.0],
+                ..WindowConfig::default()
+            };
+            let home = playing(app, &presentation);
+            run_app_with(app, home, config);
+        })
+    });
 }
 
-/// Asks for the window, and once its view has arrived plays the video into it; closing the
-/// window quits.
-fn open_window(app: &mut App, presentation: Presentation) {
-    let config = WindowConfig {
-        title: "Waft — a video player".to_owned(),
-        size: [800.0, 560.0],
-        ..WindowConfig::default()
-    };
-    let controller = WindowController::new(app, config);
-    controller.on_close_requested(app, Rc::new(quit));
-    let shown = Cell::new(false);
-    let listenable: Rc<dyn Listenable> = Rc::new(controller);
-    listenable.add_listener(
-        app,
-        Listener::new(move |app| {
-            let arrived = matches!(
-                controller.request(app).state(app),
-                ViewRequestState::Arrived(_)
-            );
-            if arrived && !shown.replace(true) {
-                show(app, controller, &presentation);
-            }
-        }),
-    );
-}
-
-fn show(app: &mut App, controller: Handle<WindowController>, presentation: &Presentation) {
+/// Plays the video as `presentation` says: the window's content.
+fn playing(app: &mut App, presentation: &Presentation) -> WidgetRef {
     let player = Player::new(app, &presentation.url).expect("macOS has players");
     Player::set_looping(player, app, true);
     let reader = app
@@ -93,12 +78,12 @@ fn show(app: &mut App, controller: Handle<WindowController>, presentation: &Pres
     Player::play(player, app);
     let presentation = presentation.clone();
     let listenable: Rc<dyn Listenable> = Rc::new(player);
-    let home = ListenableBuilder::new(listenable, move |app, _, _| {
+    ListenableBuilder::new(listenable, move |app, _, _| {
         let subtitled = with_subtitles(video.clone(), Player::cues(player, app).to_vec());
         let state = Player::state(player, app);
         page(player, subtitled, state, &presentation)
-    });
-    run_widget(app, Window::new(controller, home).into_widget());
+    })
+    .into_widget()
 }
 
 /// Prints the player's tracks each time they change, and shows the first text track in
@@ -147,12 +132,6 @@ fn text_track_in<'a>(tracks: &'a [MediaTrack], language: &str) -> Option<&'a Med
         track.kind == MediaTrackKind::Text
             && (track.language == language || track.language.starts_with(&format!("{language}-")))
     })
-}
-
-fn quit(app: &mut App, _view: ViewId) {
-    if let Some(app_exit) = app.platform().app_exit() {
-        app_exit.quit(0);
-    }
 }
 
 /// `video` with a subtitle view of `cues` over it, the size of its picture.

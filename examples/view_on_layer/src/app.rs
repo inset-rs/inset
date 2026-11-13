@@ -1,5 +1,7 @@
 //! The window, and the view the app adds on a layer it places in it: the window's content takes the
-//! clicks where the layer is and forwards them to the added view, which counts them.
+//! clicks where the layer is and forwards them to the added view, which counts them. Both arrive as
+//! every view does and the app's one builder builds each from its data: the window, which carries
+//! none, gets the window's content, and the added view, which carries [`COUNTER`], the counter.
 
 use std::cell::Cell;
 use std::hash::{BuildHasher, RandomState};
@@ -9,19 +11,19 @@ use std::sync::Arc;
 use waft_embedder::{
     Color, CompositionLayer, Contact, Matrix4, Mutator, Placement, PointerReport, Rect,
     ReportedChange, SystemMouseCursorKind, TextDirection, TextInputHost, ViewConstraints,
-    ViewFocusDirection, ViewFocusState, ViewHost, ViewId, ViewMetrics, ViewRef, WindowConfig,
+    ViewFocusDirection, ViewFocusState, ViewHost, ViewMetrics, ViewRef, WindowConfig, WindowRef,
 };
 use waft_embedder_winit::{WinitEmbedder, WinitPlatform};
-use waft_foundation::{App, Handle, Listenable, Listener, ValueListenable, ValueNotifier};
+use waft_foundation::{App, Handle, Listener, ValueListenable, ValueNotifier};
 use waft_gestures::PointerEvent;
 use waft_painting::{BoxDecoration, TextStyle};
 use waft_rendering::HitTestBehavior;
 use waft_scheduler::{PersistentFrameCallback, SchedulerBinding};
 use waft_shell::Shell;
 use waft_widgets::{
-    Center, DecoratedBox, Directionality, GestureDetector, IntoWidget, ListenableBuilder,
-    Positioned, SizedBox, Stack, Text, ValueListenableBuilder, View, ViewCollection, ViewRequest,
-    ViewRequestState, WidgetRef, Window, WindowController, run_widget,
+    BuildContext, Center, DecoratedBox, Directionality, GestureDetector, IntoWidget, MultiViewApp,
+    Positioned, SizedBox, Stack, State, StateData, StatefulWidget, Text, ValueListenableBuilder,
+    View, WidgetRef, WindowScope, run_widget,
 };
 
 use crate::window_layer;
@@ -36,63 +38,111 @@ const ADDED_TEXT: Color = Color::from_argb(255, 255, 255, 255);
 const CAPTION: Color = Color::from_argb(255, 60, 60, 60);
 /// What the app counts on of the macOS host, which embeds views on layers.
 const EMBEDS_VIEWS: &str = "the macOS host has a view embedder";
+/// The initial data of the view the app adds on its layer, which says it is the counter.
+const COUNTER: &str = "counter";
 
-/// Runs the window and the view the app adds in it.
+/// Runs the window and the view the app adds in it; closing the window quits.
 pub(crate) fn run() {
-    WinitEmbedder.run(|platform| Shell::new(platform, open_window));
+    WinitEmbedder.run(|platform| {
+        Shell::new(platform, |app| {
+            let config = WindowConfig {
+                title: "Waft — a view on a layer".to_owned(),
+                size: [480.0, 300.0],
+                ..WindowConfig::default()
+            };
+            app.platform()
+                .request_view(config, None)
+                .expect("the macOS host makes windows");
+            let clicks = app.create(ValueNotifier::new(0));
+            let windows =
+                MultiViewApp::new(move |_app, view| match view.initial_data().as_deref() {
+                    None => Some(Home.into_widget()),
+                    Some(COUNTER) => Some(click_counter(clicks)),
+                    Some(_) => None,
+                })
+                .on_close_requested(Rc::new(quit));
+            run_widget(app, windows.into_widget());
+        })
+    });
 }
 
-/// Asks for the window, and once its view has arrived adds the view on a layer placed in it and
-/// shows both; closing the window quits.
-fn open_window(app: &mut App) {
-    let config = WindowConfig {
-        title: "Waft — a view on a layer".to_owned(),
-        size: [480.0, 300.0],
-        ..WindowConfig::default()
-    };
-    let window = WindowController::new(app, config);
-    window.on_close_requested(app, Rc::new(quit));
-    let shown = Cell::new(false);
-    let listenable: Rc<dyn Listenable> = Rc::new(window);
-    listenable.add_listener(
-        app,
-        Listener::new(move |app| {
-            if let ViewRequestState::Arrived(window_view) = window.request(app).state(app)
-                && !shown.replace(true)
-            {
-                let window_view = Rc::clone(window_view);
-                show(app, window, window_view);
-            }
-        }),
-    );
+/// The window's content, which adds the counter's view on a layer it places in its window, under
+/// its own drawing, and forwards the presses over it there.
+#[derive(Debug)]
+struct Home;
+
+struct HomeState {
+    state: StateData<Home>,
+    /// What forwards the window's presses to the counter's view, from the content's first build
+    /// in its window on, once the view is asked for.
+    forwarding: Option<Rc<Forwarding>>,
 }
 
-/// Adds a view on a layer placed in the window of `window_view`, and shows the window's content
-/// and the added view's.
-fn show(app: &mut App, window: Handle<WindowController>, window_view: ViewRef) {
+impl StatefulWidget for Home {
+    type State = HomeState;
+
+    fn create_state(&self) -> HomeState {
+        HomeState {
+            state: StateData::new(),
+            forwarding: None,
+        }
+    }
+}
+
+impl State for HomeState {
+    type Widget = Home;
+    waft_widgets::state_accessors!();
+
+    /// Asks for the counter's view, once, on a layer placed in the window the content is in.
+    fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
+        if app.get(self).forwarding.is_some() {
+            return;
+        }
+        let context = self.context(app);
+        let window_view = View::of(app, context);
+        let window = WindowScope::of(app, context);
+        add_counter_in(app, window_view, &window);
+        app.get_mut(self).forwarding = Some(Rc::new(Forwarding::new()));
+    }
+
+    fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+        let forwarding = app
+            .get(self)
+            .forwarding
+            .clone()
+            .expect("asked for as the content came");
+        window_content(forwarding)
+    }
+}
+
+/// Asks for the counter's view on a layer placed in `window`, `window_view`'s; it arrives as every
+/// view does.
+fn add_counter_in(app: &mut App, window_view: ViewRef, window: &WindowRef) {
     let layer = app
         .platform()
         .compositor()
         .expect("the macOS host has a compositor")
         .make_layer(true);
     let metrics = added_metrics(&window_view.metrics());
-    place_in_window(app, &window_view, &layer, &metrics);
+    place_in_window(app, window, &layer, &metrics);
     let host = Rc::new(ThroughWindow(Rc::clone(&window_view)));
-    let added = ViewRequest::on_layer(app, &layer, metrics, host).expect(EMBEDS_VIEWS);
-    follow_window(app, window_view, layer, added, metrics);
-    let clicks = app.create(ValueNotifier::new(0));
-    let forwarding = Rc::new(Forwarding::to(added));
-    run_widget(
-        app,
-        ViewCollection::new(vec![
-            Window::new(window, window_content(forwarding)).into_widget(),
-            added_view(added, clicks),
-        ])
-        .into_widget(),
-    );
+    let platform = app.platform();
+    let embedder = platform.view_embedder().expect(EMBEDS_VIEWS);
+    embedder
+        .add_view(&layer, metrics, host, Some(COUNTER.to_owned()))
+        .expect("the macOS host adds a view on a layer of its compositor's");
+    follow_window(app, window_view, layer, metrics);
 }
 
-fn quit(app: &mut App, _view: ViewId) {
+/// The counter's view, once it has arrived.
+fn counter_view(app: &App) -> Option<ViewRef> {
+    app.platform()
+        .views()
+        .into_iter()
+        .find(|view| view.initial_data().as_deref() == Some(COUNTER))
+}
+
+fn quit(app: &mut App, _view: &ViewRef) {
     if let Some(app_exit) = app.platform().app_exit() {
         app_exit.quit(0);
     }
@@ -113,16 +163,16 @@ fn added_metrics(window: &ViewMetrics) -> ViewMetrics {
     }
 }
 
-/// Places `layer` in the window of `window_view`, above the window's own drawing, `MARGIN` from
-/// its top-left corner, at the size of the added view's `metrics`: in its logical pixels, under a
-/// transform by its scale, as a view's scene places a layer.
+/// Places `layer` in `window`, above the window's own drawing, `MARGIN` from its top-left corner,
+/// at the size of the added view's `metrics`: in its logical pixels, under a transform by its
+/// scale, as a view's scene places a layer.
 fn place_in_window(
     app: &App,
-    window_view: &ViewRef,
+    window: &WindowRef,
     layer: &Arc<dyn CompositionLayer>,
     metrics: &ViewMetrics,
 ) {
-    let Some(parent) = window_view.window().as_ref().and_then(window_layer::of) else {
+    let Some(parent) = window_layer::of(window) else {
         return;
     };
     let scale = metrics.device_pixel_ratio;
@@ -141,14 +191,13 @@ fn place_in_window(
         .place_layer_in(&parent, layer, &placement, scale);
 }
 
-/// At each frame after the window resizes or moves to another screen, places the added view's
-/// layer again and gives the view the metrics it now has; `placed_for` are the metrics the layer
-/// was placed for last.
+/// At each frame after the window resizes or moves to another screen, places the counter's layer
+/// again and gives its view the metrics it now has; `placed_for` are the metrics the layer was
+/// placed for last.
 fn follow_window(
     app: &mut App,
     window_view: ViewRef,
     layer: Arc<dyn CompositionLayer>,
-    added: Handle<ViewRequest>,
     placed_for: ViewMetrics,
 ) {
     let placed_for = Cell::new(placed_for);
@@ -156,10 +205,12 @@ fn follow_window(
         app,
         PersistentFrameCallback::new(move |app, _views, _elapsed| {
             let metrics = added_metrics(&window_view.metrics());
-            if placed_for.replace(metrics) != metrics {
-                place_in_window(app, &window_view, &layer, &metrics);
+            if placed_for.replace(metrics) != metrics
+                && let Some(window) = window_view.window()
+            {
+                place_in_window(app, &window, &layer, &metrics);
             }
-            if let ViewRequestState::Arrived(view) = added.state(app)
+            if let Some(view) = counter_view(app)
                 && view.metrics() != metrics
             {
                 let platform = app.platform();
@@ -191,21 +242,20 @@ impl ViewHost for ThroughWindow {
 /// the view's physical pixels, each device under a number of its own, random for each run, which
 /// none of the host's own devices takes.
 struct Forwarding {
-    added: Handle<ViewRequest>,
     device_numbers: RandomState,
 }
 
 impl Forwarding {
-    fn to(added: Handle<ViewRequest>) -> Forwarding {
+    fn new() -> Forwarding {
         Forwarding {
-            added,
             device_numbers: RandomState::new(),
         }
     }
 
-    /// Forwards `event`, a press, move, release or cancel the window took over the added view.
+    /// Forwards `event`, a press, move, release or cancel the window took over the counter's
+    /// view, once the view has arrived.
     fn forward(&self, app: &mut App, event: PointerEvent) {
-        let ViewRequestState::Arrived(view) = self.added.state(app) else {
+        let Some(view) = counter_view(app) else {
             return;
         };
         let Some(change) = reported_change(&event) else {
@@ -286,23 +336,7 @@ fn forwarded_presses(forwarding: Rc<Forwarding>) -> WidgetRef {
         .into_widget()
 }
 
-/// The added view, once it has arrived: the framework draws into it what counts the clicks it
-/// takes.
-fn added_view(added: Handle<ViewRequest>, clicks: Handle<ValueNotifier<u32>>) -> WidgetRef {
-    let listenable: Rc<dyn Listenable> = Rc::new(added);
-    ListenableBuilder::new(listenable, move |app, _context, child| {
-        let child = child
-            .cloned()
-            .expect("the added view's content is passed as the child");
-        match added.state(app) {
-            ViewRequestState::Arrived(view) => View::new(Rc::clone(view), child).into_widget(),
-            _ => ViewCollection::new(Vec::new()).into_widget(),
-        }
-    })
-    .child(click_counter(clicks))
-    .into_widget()
-}
-
+/// What the counter's view shows: how many clicks it took, which the window forwards.
 fn click_counter(clicks: Handle<ValueNotifier<u32>>) -> WidgetRef {
     let count: Rc<dyn ValueListenable<u32>> = Rc::new(clicks);
     let label = ValueListenableBuilder::new(count, |_app, _context, count, _child| {

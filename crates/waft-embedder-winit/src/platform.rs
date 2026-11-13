@@ -392,6 +392,7 @@ impl ViewEmbedder for WinitPlatform {
         layer: &Arc<dyn CompositionLayer>,
         metrics: ViewMetrics,
         host: Rc<dyn ViewHost>,
+        initial_data: Option<String>,
     ) -> Result<RequestId, ViewError> {
         let (view_layer, opaque) = System::view_layer_on(layer).ok_or(ViewError::Unsupported)?;
         let request_id = self.take_request_id();
@@ -401,7 +402,7 @@ impl ViewEmbedder for WinitPlatform {
             !opaque,
             host,
         )
-        .with_request(request_id, None);
+        .with_request(request_id, initial_data);
         self.send_to_embedder(EmbedderRequest::AddView(Rc::new(view), view_layer, metrics));
         Ok(request_id)
     }

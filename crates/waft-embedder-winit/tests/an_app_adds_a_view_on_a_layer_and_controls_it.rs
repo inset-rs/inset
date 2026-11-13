@@ -142,6 +142,7 @@ mod client {
                     &layer,
                     metrics(&platform, SIZE),
                     Rc::clone(&host) as Rc<dyn ViewHost>,
+                    None,
                 )
                 .expect("the macOS host adds a view on a layer of its compositor's");
             let window_request = support::request_window(&platform, support::titled(TEST));
