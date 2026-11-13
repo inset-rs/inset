@@ -50,6 +50,9 @@ pub(crate) struct WinitView {
     /// The app's handle on the view's window, while it is open; none for the screen view, whose
     /// window the app may not manage.
     window_handle: RefCell<Weak<WinitWindow>>,
+    /// Whether the view owes the compositor a present of its last scene, for a composition layer
+    /// a producer presented, on a system that shows that present only with the view's.
+    present_owed: Cell<bool>,
 }
 
 impl WinitView {
@@ -71,6 +74,7 @@ impl WinitView {
             request_id: None,
             initial_data: None,
             window_handle: RefCell::new(Weak::new()),
+            present_owed: Cell::new(false),
         }
     }
 
@@ -126,6 +130,21 @@ impl WinitView {
     /// without the framework.
     pub(crate) fn draw_last_scene(&self) {
         self.rasterizer.borrow_mut().draw_last_scene();
+    }
+
+    /// The view owes the compositor a present of its last scene, for a layer a producer presented.
+    pub(crate) fn owe_present(&self) {
+        self.present_owed.set(true);
+    }
+
+    /// Whether the view owes a present, which it no longer does once asked.
+    pub(crate) fn takes_owed_present(&self) -> bool {
+        self.present_owed.replace(false)
+    }
+
+    /// Draws and presents the last scene again, however it was shown.
+    pub(crate) fn redraw_last_scene(&self) {
+        self.rasterizer.borrow_mut().redraw_last_scene();
     }
 
     /// Whether the next vsync should draw the owed scene again.

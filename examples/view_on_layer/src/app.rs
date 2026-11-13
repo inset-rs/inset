@@ -13,7 +13,7 @@ use waft_embedder::{
     ReportedChange, SystemMouseCursorKind, TextDirection, TextInputHost, ViewConstraints,
     ViewFocusDirection, ViewFocusState, ViewHost, ViewMetrics, ViewRef, WindowConfig, WindowRef,
 };
-use waft_embedder_winit::{WinitEmbedder, WinitPlatform};
+use waft_embedder_winit::{LinuxSettings, WinitEmbedder, WinitPlatform};
 use waft_foundation::{App, Handle, Listener, ValueListenable, ValueNotifier};
 use waft_gestures::PointerEvent;
 use waft_painting::{BoxDecoration, TextStyle};
@@ -43,27 +43,31 @@ const COUNTER: &str = "counter";
 
 /// Runs the window and the view the app adds in it; closing the window quits.
 pub(crate) fn run() {
-    WinitEmbedder.run(|platform| {
-        Shell::new(platform, |app| {
-            let config = WindowConfig {
-                title: "Waft — a view on a layer".to_owned(),
-                size: [480.0, 300.0],
-                ..WindowConfig::default()
-            };
-            app.platform()
-                .request_view(config, None)
-                .expect("the macOS host makes windows");
-            let clicks = app.create(ValueNotifier::new(0));
-            let windows =
-                MultiViewApp::new(move |_app, view| match view.initial_data().as_deref() {
-                    None => Some(Home.into_widget()),
-                    Some(COUNTER) => Some(click_counter(clicks)),
-                    Some(_) => None,
-                })
-                .on_close_requested(Rc::new(quit));
-            run_widget(app, windows.into_widget());
+    WinitEmbedder::default()
+        .linux(LinuxSettings {
+            app_id: Some(waft_macros::linux_app_id!().to_owned()),
         })
-    });
+        .run(|platform| {
+            Shell::new(platform, |app| {
+                let config = WindowConfig {
+                    title: "Waft — a view on a layer".to_owned(),
+                    size: [480.0, 300.0],
+                    ..WindowConfig::default()
+                };
+                app.platform()
+                    .request_view(config, None)
+                    .expect("the macOS host makes windows");
+                let clicks = app.create(ValueNotifier::new(0));
+                let windows =
+                    MultiViewApp::new(move |_app, view| match view.initial_data().as_deref() {
+                        None => Some(Home.into_widget()),
+                        Some(COUNTER) => Some(click_counter(clicks)),
+                        Some(_) => None,
+                    })
+                    .on_close_requested(Rc::new(quit));
+                run_widget(app, windows.into_widget());
+            })
+        });
 }
 
 /// The window's content, which adds the counter's view on a layer it places in its window, under

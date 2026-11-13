@@ -26,7 +26,7 @@ fn main() {
     support::fail_after(TEST, GIVE_UP_AFTER, || {
         format!("the waits were not served within {GIVE_UP_AFTER:?}")
     });
-    WinitEmbedder.run(client::WaitingClient::new);
+    WinitEmbedder::default().run(client::WaitingClient::new);
 }
 
 #[cfg(not(target_os = "macos"))]

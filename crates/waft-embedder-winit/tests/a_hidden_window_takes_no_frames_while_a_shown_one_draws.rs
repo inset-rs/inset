@@ -16,7 +16,7 @@ fn main() {
     use waft_embedder_winit::WinitEmbedder;
 
     support::fail_after(TEST, frames::GIVE_UP_AFTER, frames::counted);
-    WinitEmbedder.run(client::CountingClient::new);
+    WinitEmbedder::default().run(client::CountingClient::new);
 }
 
 #[cfg(not(target_os = "macos"))]

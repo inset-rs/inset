@@ -19,6 +19,7 @@ camera = "Shows what the camera sees beside the video."
 waft-embedder.workspace = true
 waft-embedder-winit.workspace = true
 waft-foundation.workspace = true
+waft-macros.workspace = true
 waft-painting.workspace = true
 waft-shell.workspace = true
 waft-widgets.workspace = true

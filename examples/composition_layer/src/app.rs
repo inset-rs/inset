@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use waft_embedder::{Color, CompositionLayer, PlatformRef, TextDirection, ViewRef, WindowConfig};
-use waft_embedder_winit::WinitEmbedder;
+use waft_embedder_winit::{LinuxSettings, WinitEmbedder};
 use waft_foundation::{App, Handle};
 use waft_painting::{BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry, TextStyle};
 use waft_scheduler::{PersistentFrameCallback, SchedulerBinding};
@@ -40,20 +40,24 @@ pub(crate) struct Presentation {
 /// Runs the window, the layer and its label shown as `presentation` says; closing the window
 /// quits, as an app's last window does.
 pub(crate) fn run(exit_after: Option<Duration>, presentation: Presentation) {
-    WinitEmbedder.run(move |platform| {
-        Shell::new(platform, move |app| {
-            let config = WindowConfig {
-                title: "Waft — a composition layer".to_owned(),
-                size: [640.0, 480.0],
-                ..WindowConfig::default()
-            };
-            let home = Home {
-                exit_after,
-                presentation,
-            };
-            run_app_with(app, home.into_widget(), config);
+    WinitEmbedder::default()
+        .linux(LinuxSettings {
+            app_id: Some(waft_macros::linux_app_id!().to_owned()),
         })
-    });
+        .run(move |platform| {
+            Shell::new(platform, move |app| {
+                let config = WindowConfig {
+                    title: "Waft — a composition layer".to_owned(),
+                    size: [640.0, 480.0],
+                    ..WindowConfig::default()
+                };
+                let home = Home {
+                    exit_after,
+                    presentation,
+                };
+                run_app_with(app, home.into_widget(), config);
+            })
+        });
 }
 
 /// The window's content: the layer and its label, the layer's producer started once the view the

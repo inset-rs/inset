@@ -27,7 +27,7 @@ fn main() {
     support::fail_after(TEST, GIVE_UP_AFTER, || {
         format!("the menu did not close within {GIVE_UP_AFTER:?}")
     });
-    WinitEmbedder.run(client::MenuClient::new);
+    WinitEmbedder::default().run(client::MenuClient::new);
 }
 
 #[cfg(not(target_os = "macos"))]

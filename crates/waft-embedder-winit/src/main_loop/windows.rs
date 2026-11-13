@@ -18,9 +18,7 @@ use crate::os::capabilities::{FramePresentation, TrackpadTouches, WindowVisibili
 use crate::screens::screen_of;
 use crate::view_focus;
 use crate::views::{Holder, SCREEN_VIEW};
-use crate::windows::{
-    OpenWindow, OpenedWindow, RequestedWindow, WindowObservers, open_screen_window, window_metrics,
-};
+use crate::windows::{OpenWindow, OpenedWindow, RequestedWindow, WindowObservers, window_metrics};
 
 use super::{MainLoop, MainLoopEvent};
 
@@ -113,7 +111,10 @@ impl<C: EmbedderClient> MainLoop<C> {
             open,
             view_layer,
             hold,
-        } = open_screen_window(event_loop, screen).expect("open the screen view's window");
+        } = self
+            .view_maker
+            .open_screen_window(event_loop, screen)
+            .expect("open the screen view's window");
         self.views().place_screen_view(view_layer);
         self.windows()
             .add(open.clone(), hold, WindowObservers::default());

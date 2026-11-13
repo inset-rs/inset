@@ -24,7 +24,7 @@ fn main() {
     support::fail_after(TEST, GIVE_UP_AFTER, || {
         format!("no quit in {GIVE_UP_AFTER:?}")
     });
-    WinitEmbedder.run(client::LateAnsweringClient::new);
+    WinitEmbedder::default().run(client::LateAnsweringClient::new);
     support::fail(TEST, "the loop returned without quitting the process");
 }
 

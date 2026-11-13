@@ -21,7 +21,7 @@ use waft_embedder::{
     AppExitType, CheckState, Color, IconImage, MenuEntry, MenuItem, MenuItemCheck, Offset,
     ViewFocusDirection, ViewFocusState, ViewId, WindowConfig,
 };
-use waft_embedder_winit::WinitEmbedder;
+use waft_embedder_winit::{LinuxSettings, WinitEmbedder};
 use waft_foundation::{App, Entity, VoidCallback};
 use waft_gestures::TapUpDetails;
 use waft_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
@@ -46,21 +46,25 @@ struct Choices {
 }
 
 fn main() {
-    WinitEmbedder.run(|platform| {
-        Shell::new(platform, |app| {
-            let choices = app.new_entity(|_cx| Choices {
-                last: "none yet".to_owned(),
-                show_hints: true,
-            });
-            let window = WindowConfig {
-                title: "Waft — menus".to_owned(),
-                size: [520.0, 360.0],
-                ..WindowConfig::default()
-            };
-            let home = CupertinoApp::new().title("Menus").home(Menus { choices });
-            run_app_with(app, home.into_widget(), window);
+    WinitEmbedder::default()
+        .linux(LinuxSettings {
+            app_id: Some(waft_macros::linux_app_id!().to_owned()),
         })
-    });
+        .run(|platform| {
+            Shell::new(platform, |app| {
+                let choices = app.new_entity(|_cx| Choices {
+                    last: "none yet".to_owned(),
+                    show_hints: true,
+                });
+                let window = WindowConfig {
+                    title: "Waft — menus".to_owned(),
+                    size: [520.0, 360.0],
+                    ..WindowConfig::default()
+                };
+                let home = CupertinoApp::new().title("Menus").home(Menus { choices });
+                run_app_with(app, home.into_widget(), window);
+            })
+        });
 }
 
 #[derive(Debug)]

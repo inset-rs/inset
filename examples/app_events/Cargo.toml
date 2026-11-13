@@ -15,6 +15,7 @@ name = "App events"
 [[package.metadata.waft.file_associations]]
 extensions = ["waftnote"]
 name = "Waft note"
+mime_type = "application/x-waftnote"
 owner = true
 role = "editor"
 
@@ -28,6 +29,7 @@ identifier = "org.example.peer-document"
 waft-embedder.workspace = true
 waft-embedder-winit.workspace = true
 waft-foundation.workspace = true
+waft-macros.workspace = true
 waft-painting.workspace = true
 waft-shell.workspace = true
 waft-widgets.workspace = true

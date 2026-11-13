@@ -23,7 +23,7 @@ fn main() {
     support::fail_after(TEST, GIVE_UP_AFTER, || {
         format!("not everything asked for was served in {GIVE_UP_AFTER:?}")
     });
-    WinitEmbedder.run(client::RecordingClient::new);
+    WinitEmbedder::default().run(client::RecordingClient::new);
 }
 
 #[cfg(not(target_os = "macos"))]

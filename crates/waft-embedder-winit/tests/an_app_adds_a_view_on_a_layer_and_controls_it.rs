@@ -28,7 +28,7 @@ fn main() {
     support::fail_after(TEST, GIVE_UP_AFTER, || {
         format!("the steps did not end in {GIVE_UP_AFTER:?}")
     });
-    WinitEmbedder.run(client::AddingClient::new);
+    WinitEmbedder::default().run(client::AddingClient::new);
 }
 
 #[cfg(not(target_os = "macos"))]

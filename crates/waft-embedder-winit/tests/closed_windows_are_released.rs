@@ -23,7 +23,7 @@ fn main() {
     support::fail_after(TEST, GIVE_UP_AFTER, || {
         format!("no answer in {GIVE_UP_AFTER:?}")
     });
-    WinitEmbedder.run(client::ClosingClient::new);
+    WinitEmbedder::default().run(client::ClosingClient::new);
 }
 
 #[cfg(not(target_os = "macos"))]

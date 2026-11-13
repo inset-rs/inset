@@ -13,7 +13,7 @@ use waft_embedder::{
     Color, MediaTrack, MediaTrackKind, PauseReason, PlayerActivity, PlayerState, PlayerStatus,
     TextDirection, VideoOutput, WaitReason, WindowConfig,
 };
-use waft_embedder_winit::WinitEmbedder;
+use waft_embedder_winit::{LinuxSettings, WinitEmbedder};
 use waft_foundation::{App, Handle, Listenable, Listener};
 use waft_painting::{
     AlignmentGeometry, BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry, TextStyle,
@@ -50,17 +50,21 @@ pub(crate) struct Presentation {
 
 /// Plays the video in the window; closing the window quits, as an app's last window does.
 pub(crate) fn run(presentation: Presentation) {
-    WinitEmbedder.run(move |platform| {
-        Shell::new(platform, move |app| {
-            let config = WindowConfig {
-                title: "Waft — a video player".to_owned(),
-                size: [800.0, 560.0],
-                ..WindowConfig::default()
-            };
-            let home = playing(app, &presentation);
-            run_app_with(app, home, config);
+    WinitEmbedder::default()
+        .linux(LinuxSettings {
+            app_id: Some(waft_macros::linux_app_id!().to_owned()),
         })
-    });
+        .run(move |platform| {
+            Shell::new(platform, move |app| {
+                let config = WindowConfig {
+                    title: "Waft — a video player".to_owned(),
+                    size: [800.0, 560.0],
+                    ..WindowConfig::default()
+                };
+                let home = playing(app, &presentation);
+                run_app_with(app, home, config);
+            })
+        });
 }
 
 /// Plays the video as `presentation` says: the window's content.

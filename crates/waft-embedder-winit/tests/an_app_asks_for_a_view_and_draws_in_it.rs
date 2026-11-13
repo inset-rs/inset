@@ -26,7 +26,7 @@ fn main() {
     support::fail_after(TEST, GIVE_UP_AFTER, || {
         format!("the view was not drawn in within {GIVE_UP_AFTER:?}")
     });
-    WinitEmbedder.run(client::OpeningClient::new);
+    WinitEmbedder::default().run(client::OpeningClient::new);
 }
 
 #[cfg(not(target_os = "macos"))]

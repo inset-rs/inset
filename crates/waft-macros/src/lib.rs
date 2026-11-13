@@ -9,6 +9,11 @@
 //!
 //! A WASI component, such as one for wapk, gets no entry: Waft ships no host for it, so
 //! the app writes its own with that host's embedder crate.
+//!
+//! The desktop entry gives the embedder the app's Linux app id, the manifest's `identifier`, which
+//! [`linux_app_id!`] gives an entry the app writes itself.
+
+mod identifier;
 
 use proc_macro::TokenStream;
 use proc_macro2::Span;
@@ -41,6 +46,7 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into();
     }
     let mut setup = syn::parse_macro_input!(item as ItemFn);
+    let identifier = identifier::expression();
     let as_written = setup.clone();
     let setup_name = Ident::new("__waft_setup", Span::call_site());
     setup.sig.ident = setup_name.clone();
@@ -57,7 +63,10 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
         pub fn main() {
+            let mut linux = ::waft::LinuxSettings::default();
+            linux.app_id = ::std::option::Option::Some(::std::string::String::from(#identifier));
             ::waft::DefaultEmbedder::default()
+                .linux(linux)
                 .run(|platform| ::waft::Shell::new(platform, #setup_name));
         }
 
@@ -80,4 +89,26 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
     .into()
+}
+
+/// The app's Linux app id: `identifier` under `[package.metadata.waft]` in the crate's Cargo.toml,
+/// or `com.example.<package>` without one, as `cargo waft` names the app's desktop file. A
+/// `&'static str`, for an entry written by hand to give `LinuxSettings::app_id`, as
+/// `#[waft::main]`'s does.
+///
+/// ```ignore
+/// let mut linux = LinuxSettings::default();
+/// linux.app_id = Some(waft::linux_app_id!().to_owned());
+/// DefaultEmbedder::default()
+///     .linux(linux)
+///     .run(|platform| Shell::new(platform, setup));
+/// ```
+#[proc_macro]
+pub fn linux_app_id(input: TokenStream) -> TokenStream {
+    if !input.is_empty() {
+        return syn::Error::new(Span::call_site(), "`linux_app_id!` takes nothing")
+            .to_compile_error()
+            .into();
+    }
+    identifier::expression().into()
 }

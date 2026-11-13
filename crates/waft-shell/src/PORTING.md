@@ -5,6 +5,7 @@ No Flutter counterpart. Dart has no type — the engine owns the isolate.
 ## Identical
 
 - lib.rs `pointer_reports` → the engine's `RuntimeController::DispatchPointerDataPacket`, which runs every host's packets through its one `PointerDataPacketConverter` before the framework sees them
+- lib.rs `view_added` → `RuntimeController::AddView`, which schedules a frame once the view is added
 
 ## lib.rs
 

@@ -16,10 +16,11 @@ use waft_embedder::{
     TargetPlatform, TitleBarAction, TrayIcons, VideoFrameReaders, ViewId, ViewPadding, VsyncWaiter,
     WindowConfig,
 };
-use winit::event_loop::{ActiveEventLoop, EventLoopBuilder};
+use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopBuilder};
 use winit::monitor::MonitorHandle;
 use winit::window::{Window, WindowAttributes};
 
+use crate::LinuxSettings;
 use crate::clipboard::ClipboardChanges;
 use crate::file_dialogs::ParentWindows;
 use crate::gpu::Gpu;
@@ -84,6 +85,10 @@ pub(crate) trait EventLoopSetup {
     /// Configures winit's event loop before it is built: macOS leaves winit's own menu bar out,
     /// for the system's standard one, and leaves the app's coming forward at launch to the system.
     fn configure_event_loop(_builder: &mut EventLoopBuilder) {}
+
+    /// Takes note of the event loop just built, before it runs: on Linux, the Wayland display it
+    /// connected to, which composition layers share.
+    fn event_loop_built(_event_loop: &EventLoop) {}
 }
 
 /// How big a window's drawing surface is, and what of it the system covers.
@@ -126,8 +131,14 @@ pub(crate) trait WindowMotion {
 
 /// What a window's configuration asks for beyond what winit's attributes carry.
 pub(crate) trait WindowChrome {
-    /// The attributes the system adds to winit's for `config`.
-    fn extend_attributes(attributes: WindowAttributes, _config: &WindowConfig) -> WindowAttributes {
+    /// winit's attributes with the system's own for `config` and the app's `linux` settings, made
+    /// once: winit takes one set of a system's attributes per window, so they are all made here.
+    fn extend_attributes(
+        _event_loop: &dyn ActiveEventLoop,
+        attributes: WindowAttributes,
+        _config: &WindowConfig,
+        _linux: &LinuxSettings,
+    ) -> WindowAttributes {
         attributes
     }
 
@@ -178,6 +189,12 @@ pub(crate) trait Screens {
     /// keeps for the app's life (`screens.rs`).
     fn screen_id(monitor: &MonitorHandle) -> ScreenId {
         monitor_number(monitor)
+    }
+
+    /// The monitor `window` is on: winit's current monitor by default. `None` where the system
+    /// names none for it.
+    fn monitor_of(window: &dyn Window) -> Option<MonitorHandle> {
+        window.current_monitor()
     }
 
     /// Where the pointer is now, in the coordinates of a window's frame, over a window of the app
@@ -285,6 +302,17 @@ pub(crate) trait NativeComposition {
     /// adds: makes the layer the view shows into and places it in the window, filling it. Answers
     /// the layer, which the view is added on, and the window's hold on it. Main thread.
     fn view_layer_in(window: &Arc<dyn Window>) -> (Self::ViewLayer, Self::WindowHold);
+
+    /// Hands the system `wake`, which wakes the loop from any thread, for a system whose compositor
+    /// shows a layer's present only with its view's next present to say a view owes one
+    /// ([`Self::take_presented_views`]).
+    fn wake_on_layer_presents(_wake: Box<dyn Fn() + Send + Sync>) {}
+
+    /// The views a producer presented a layer of since the last call, each to present its last
+    /// scene again at its next vsync. None where the compositor shows a present by itself.
+    fn take_presented_views() -> Vec<ViewId> {
+        Vec::new()
+    }
 
     /// Whether a view the app adds can draw into a composition layer the app places, which
     /// `view_layer_on` then answers for every layer this host's compositor made.

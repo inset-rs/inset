@@ -25,7 +25,7 @@ fn main() {
     support::fail_after(TEST, GIVE_UP_AFTER, || {
         format!("the window did not open within {GIVE_UP_AFTER:?}")
     });
-    WinitEmbedder.run(client::ScreenClient::new);
+    WinitEmbedder::default().run(client::ScreenClient::new);
 }
 
 #[cfg(not(target_os = "macos"))]

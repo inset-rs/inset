@@ -102,6 +102,8 @@ mime_type = "text/markdown"
 
 The Android package name is the identifier as a Java package name: `com.example.my-app` becomes `com.example.my_app`.
 
+On Linux the identifier is how the desktop knows the app's windows: `#[waft::main]` reads it from `Cargo.toml` as the app compiles, by the same default, and Waft gives it to each window as its Wayland app id and its X11 class (`LinuxSettings::app_id`); a deb's desktop entry is named after it, `<identifier>.desktop`, with `StartupWMClass` set to it, so the dock shows the app's name and icon for its windows. An entry written by hand gives it with `DefaultEmbedder::linux` with `LinuxSettings { app_id: Some(waft::linux_app_id!().to_owned()) }`. An AppImage's entry is named after the executable, as its tool links it, and carries the same `StartupWMClass`.
+
 Version comes from `[package]`. A project-root `index.html` replaces the generated web page; keep a `<canvas id="waft">` and import `./app.js`.
 
 ### File associations
@@ -110,7 +112,7 @@ Each `file_associations` table lets the system open the app for files with those
 
 - macOS: a document type; a type the app owns opens in it on double-click, another app's type is offered under Open With. `role` applies here only.
 - Windows: the installer registers the extensions; the app gets the file as its first argument, which it reads itself.
-- Linux: the desktop entry lists each `mime_type`; a type without one isn't associated.
+- Linux: the desktop entry lists each `mime_type`; a type without one isn't associated. A type the app owns is declared to the system in shared-mime-info, `/usr/share/mime/packages/<identifier>.xml`: its MIME type, its `name` and a glob per extension, so the file manager names a file of it and opens it with the app. No registry names the MIME type of a type an app defines: give it one, `application/x-<extension>` where nothing else names it. The package has no scripts of its own: shared-mime-info and desktop-file-utils hold dpkg triggers on the folders it installs into, which update the system's databases whenever a package installs or removes a file there.
 - Android: the activity is offered to view a `content:` or `file:` URI of each `mime_type`, and of any type whose path ends in one of the `extensions`. Android has no way for an app to teach the system a new extension, so a file of a type the app defines (`owner = true`) reaches apps as `application/octet-stream`, and the Files app's Downloads view may name a file by a number, with no extension to match: an app that owns a type is also offered for every `application/octet-stream` file, and tells its own files from others itself, by their name or their content.
 - iOS and the web: not declared.
 
@@ -200,4 +202,4 @@ Still missing, because the activity does not reach them yet: the clipboard beyon
 
 ## Not here yet
 
-An `ipa` upload step, a release key for Android, rebuild-on-change for `run -d web`, and a MIME type definition for a Linux app's own file associations.
+An `ipa` upload step, a release key for Android, and rebuild-on-change for `run -d web`.

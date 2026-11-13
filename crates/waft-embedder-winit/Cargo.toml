@@ -52,6 +52,13 @@ png = "0.18"
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
 png = "0.18"
+# Composition layers on Wayland: Waft's share of winit's connection (the system libwayland, which
+# winit's is too), the globals they need, and GBM, loaded at run time, for their buffers.
+wayland-backend = { version = "0.3", features = ["client_system"] }
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+libloading = "0.8"
+libc = "0.2"
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 valo-codec-apple = { version = "0.21.1", optional = true }
@@ -202,6 +209,7 @@ objc2-core-video = { version = "0.3", default-features = false, features = ["std
 # workspace forbids; here it is denied instead, and `os/macos`, `os/apple/composition`,
 # `os/apple/media`, `os/apple/image_codecs`, `os/apple/caption_appearance`, `os/apple/notifications`, `os/ios/pasteboard`,
 # `os/ios/file_dialogs`, `os/ios/opener`, `os/ios/open_requests`, `os/ios/composition`,
-# `os/windows` and the tests' AppKit support, for a local event monitor, alone allow it.
+# `os/windows`, `os/linux/wayland` and `os/linux/dmabuf` (libwayland's proxies, GBM, DRM and dma-buf
+# ioctls) and the tests' AppKit support, for a local event monitor, alone allow it.
 [lints.rust]
 unsafe_code = "deny"

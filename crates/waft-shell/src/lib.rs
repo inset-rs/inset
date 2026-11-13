@@ -118,7 +118,11 @@ impl EmbedderClient for Shell {
         self.handle_event(|app| SchedulerBinding::on_draw_frame(app, views));
     }
 
-    /// The framework hears which view came, then "metrics changed", as `_addView` invokes it.
+    /// The framework hears which view came, then "metrics changed", as `_addView` invokes it;
+    /// then a frame is scheduled, as `RuntimeController::AddView` schedules one once the view is
+    /// added. Without it, a build scheduled while the app had no view, such as the one that puts
+    /// the new view's window on it, would wait for an event of the view's window, which a Wayland
+    /// window, unseen until it presents a picture, never sends.
     fn view_added(&mut self, id: ViewId) {
         self.push(|app| {
             let callback = app.platform_callbacks().on_view_added.clone();
@@ -127,6 +131,7 @@ impl EmbedderClient for Shell {
             }
         });
         self.metrics_changed();
+        self.handle_event(|app| SchedulerBinding::schedule_frame(app, FrameTarget::View(id)));
     }
 
     fn view_metrics_changed(&mut self, _id: ViewId) {
@@ -597,6 +602,15 @@ mod tests {
             *heard.borrow(),
             [("added", ViewId(4)), ("removed", ViewId(4))]
         );
+    }
+
+    #[test]
+    fn a_view_added_while_no_frame_is_pending_gets_a_frame() {
+        let platform = Rc::new(TestPlatform::new().with_views(&[ViewId(2)]));
+        let mut shell = Shell::new(platform.clone(), |_app| {});
+        assert_eq!(platform.take_frame_requests(), [], "no frame is pending");
+        shell.view_added(ViewId(2));
+        assert_eq!(platform.take_frame_requests(), [ViewId(2)]);
     }
 
     #[test]

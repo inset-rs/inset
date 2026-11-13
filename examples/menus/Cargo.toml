@@ -12,6 +12,7 @@ waft-cupertino.workspace = true
 waft-embedder.workspace = true
 waft-embedder-winit.workspace = true
 waft-foundation.workspace = true
+waft-macros.workspace = true
 waft-gestures.workspace = true
 waft-painting.workspace = true
 waft-services.workspace = true

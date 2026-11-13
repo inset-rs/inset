@@ -165,6 +165,14 @@ impl Rasterizer {
         self.video_frames.shows_video()
     }
 
+    /// Draws the last scene again and presents it, though it is on the surface: for a compositor
+    /// that shows a composition layer's present only with the view's next present.
+    pub(crate) fn redraw_last_scene(&mut self) {
+        if let Some(scene) = self.last_scene.scene() {
+            self.show(&self.slices_of(&scene));
+        }
+    }
+
     /// Takes the new frames of the videos the last scene draws, at a vsync, and draws the scene
     /// again with them when any came.
     pub(crate) fn draw_new_video_frames(&mut self) {

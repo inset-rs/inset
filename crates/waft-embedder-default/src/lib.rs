@@ -15,6 +15,8 @@ use waft_embedder::EmbedderClient;
 
 #[cfg(target_os = "android")]
 pub use waft_embedder_android::AndroidApp;
+#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+pub use waft_embedder_winit::LinuxSettings;
 
 /// Runs the application on this target's host.
 #[derive(Default)]
@@ -32,6 +34,24 @@ impl DefaultEmbedder {
     #[cfg(target_arch = "wasm32")]
     pub fn canvas_id(mut self, id: impl Into<String>) -> DefaultEmbedder {
         self.inner = self.inner.canvas_id(id);
+        self
+    }
+
+    /// Whether every window draws on the system's software adapter, WebGPU's
+    /// `forceFallbackAdapter`: lavapipe or llvmpipe on Linux, WARP on Windows. Off by default,
+    /// which takes a hardware adapter wherever there is one.
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+    pub fn force_fallback_adapter(mut self, force: bool) -> DefaultEmbedder {
+        self.inner = self.inner.force_fallback_adapter(force);
+        self
+    }
+
+    /// What the app tells Linux's desktops, its app id among it; ignored on every other system.
+    /// `#[waft::main]` gives the app id from the manifest; an entry written by hand gives
+    /// `waft::linux_app_id!()`.
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+    pub fn linux(mut self, settings: LinuxSettings) -> DefaultEmbedder {
+        self.inner = self.inner.linux(settings);
         self
     }
 

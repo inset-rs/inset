@@ -115,6 +115,8 @@ pub mod test_support {
 
 pub use images::{DecodeExecution, create_image_loader};
 pub use macos::MacOs;
+#[cfg(target_os = "linux")]
+pub use os::DmabufBuffer;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub use os::{CoreVideoFrame, SurfaceBuffer};
 pub use platform::WinitPlatform;
@@ -123,14 +125,47 @@ pub use system_requests::{Reopen, ReopenHandler};
 /// Runs the winit event loop until quit. The app decides what happens when its last window
 /// closes, as it decides every window's close.
 #[derive(Default)]
-pub struct WinitEmbedder;
+pub struct WinitEmbedder {
+    linux: LinuxSettings,
+    force_fallback_adapter: bool,
+}
+
+/// What the app tells Linux's desktops about itself, which no other system asks of it.
+#[derive(Clone, Debug, Default)]
+pub struct LinuxSettings {
+    /// The app's id, by which the desktop matches its windows to its desktop file,
+    /// `<app_id>.desktop`: each window's Wayland app id (xdg-shell's `set_app_id`) and its X11
+    /// class (`WM_CLASS`). `#[waft::main]` gives `[package.metadata.waft] identifier`, as
+    /// `cargo waft` names the desktop file. Without it a window is of no app the desktop knows.
+    pub app_id: Option<String>,
+}
 
 impl WinitEmbedder {
+    /// Whether the device every window draws with is on the system's software adapter, WebGPU's
+    /// `forceFallbackAdapter`: lavapipe or llvmpipe on Linux, WARP on Windows, where the system has
+    /// one; no device otherwise. Off by default, which takes a hardware adapter wherever there is
+    /// one, at the best level Waft draws at on it, before a software one.
+    pub fn force_fallback_adapter(mut self, force: bool) -> WinitEmbedder {
+        self.force_fallback_adapter = force;
+        self
+    }
+
+    /// What the app tells Linux's desktops; ignored on every other system.
+    pub fn linux(mut self, settings: LinuxSettings) -> WinitEmbedder {
+        self.linux = settings;
+        self
+    }
+
     /// Runs the app until it quits. `start` runs first, before winit's loop, and returns the
     /// client; where the system's window is the screen, the screen view is already among the
     /// platform's views then, with no window yet, which opens at winit's first call.
     pub fn run<C: EmbedderClient + 'static>(self, start: impl FnOnce(PlatformRef) -> C + 'static) {
-        launch::run(Box::new(start), None);
+        launch::run(
+            Box::new(start),
+            None,
+            self.linux,
+            self.force_fallback_adapter,
+        );
     }
 
     /// Starts the native loop with an image loader of the application's choosing.
@@ -144,6 +179,11 @@ impl WinitEmbedder {
         make_loader: impl FnOnce(valo::ImageContext) -> valo_codec::ImageLoader + 'static,
         start: impl FnOnce(PlatformRef) -> C + 'static,
     ) {
-        launch::run(Box::new(start), Some(Box::new(make_loader)));
+        launch::run(
+            Box::new(start),
+            Some(Box::new(make_loader)),
+            self.linux,
+            self.force_fallback_adapter,
+        );
     }
 }

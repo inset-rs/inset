@@ -35,9 +35,7 @@ impl Screens for WinitPlatform {
 /// The screen `window` is on, by the id `screens` gives it; `None` where the system names no
 /// monitor for the window.
 pub(crate) fn screen_of(window: &dyn Window) -> Option<ScreenId> {
-    window
-        .current_monitor()
-        .map(|monitor| System::screen_id(&monitor))
+    System::monitor_of(window).map(|monitor| System::screen_id(&monitor))
 }
 
 /// The monitors winit lists through `window`, the primary one first, as screens.

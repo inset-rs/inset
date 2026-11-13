@@ -16,6 +16,8 @@ proc-macro = true
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
+# The app's identifier, from its Cargo.toml.
+toml = { version = "0.9", default-features = false, features = ["std", "parse", "serde"] }
 
 [lints]
 workspace = true

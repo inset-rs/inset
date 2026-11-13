@@ -51,6 +51,15 @@ impl<C: EmbedderClient> MainLoop<C> {
         }
     }
 
+    /// A producer presented a layer `view` places, which the compositor shows only with the view's
+    /// next present: the view presents its last scene again at its screen's next vsync.
+    pub(super) fn on_layer_presented(&mut self, view: ViewId) {
+        if let Some(shown) = self.views().get(view) {
+            shown.owe_present();
+            self.frame_scheduler.request_vsync(view);
+        }
+    }
+
     /// Someone waits, through the platform's waiter, for the next vsync of `screen`.
     pub(super) fn on_vsync_waited(
         &mut self,
@@ -126,6 +135,8 @@ impl<C: EmbedderClient> MainLoop<C> {
             };
             if view.retries_at_vsync() {
                 view.retry_owed_scene();
+            } else if view.takes_owed_present() {
+                view.redraw_last_scene();
             }
             if view.shows_video() && self.frame_scheduler.is_in_sight(view_id) {
                 view.draw_new_video_frames();

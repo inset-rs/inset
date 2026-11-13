@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use crate::app_requests::AppRequests;
 use crate::appearance::Appearance;
-use crate::gpu::LazyGpu;
+use crate::gpu::{GpuRequest, LazyGpu};
 use crate::images::{CreateImageLoader, Images};
 use crate::locales::Locales;
 use crate::main_loop::MainLoopProxy;
@@ -42,8 +42,9 @@ impl EmbedderState {
     pub(crate) fn new(
         proxy: MainLoopProxy,
         create_image_loader: Option<CreateImageLoader>,
+        gpu_request: GpuRequest,
     ) -> EmbedderState {
-        let gpu = LazyGpu::default();
+        let gpu = LazyGpu::new(gpu_request);
         EmbedderState {
             views: Views::default(),
             windows: Windows::default(),

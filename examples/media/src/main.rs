@@ -19,7 +19,7 @@ use waft_embedder::{
     Camera, CameraDevice, CameraError, CameraFormat, CameraOutputs, Color, PickedFile,
     PlayerActivity, TextDirection, WindowConfig,
 };
-use waft_embedder_winit::WinitEmbedder;
+use waft_embedder_winit::{LinuxSettings, WinitEmbedder};
 use waft_foundation::{App, AsyncApp, Entity, Handle, Listenable, Listener};
 use waft_painting::{BoxDecoration, TextStyle};
 use waft_shell::Shell;
@@ -37,7 +37,11 @@ const LARGEST: (f64, f64) = (1920.0, 1080.0);
 
 fn main() {
     let url = std::env::args().nth(1).map(url_of);
-    WinitEmbedder.run(move |platform| Shell::new(platform, move |app| start(app, url)));
+    let linux = LinuxSettings {
+        app_id: Some(waft_macros::linux_app_id!().to_owned()),
+    };
+    let embedder = WinitEmbedder::default().linux(linux);
+    embedder.run(move |platform| Shell::new(platform, move |app| start(app, url)));
 }
 
 /// A link as it is, and anything else as a file's path, by the URL a pick of it would have.

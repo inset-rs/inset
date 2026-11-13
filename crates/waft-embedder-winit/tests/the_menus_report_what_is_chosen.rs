@@ -25,7 +25,7 @@ fn main() {
     support::fail_after(TEST, GIVE_UP_AFTER, || {
         format!("the choices did not arrive within {GIVE_UP_AFTER:?}")
     });
-    WinitEmbedder.run(client::MenusClient::new);
+    WinitEmbedder::default().run(client::MenusClient::new);
 }
 
 #[cfg(not(target_os = "macos"))]

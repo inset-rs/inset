@@ -36,6 +36,8 @@ pub(crate) use apple::composition::{place_layer_in, show_system_layer};
 pub use apple::hardware_buffers::SurfaceBuffer;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub use apple::media::CoreVideoFrame;
+#[cfg(target_os = "linux")]
+pub use linux::DmabufBuffer;
 pub(crate) mod capabilities;
 #[cfg(target_os = "ios")]
 mod ios;

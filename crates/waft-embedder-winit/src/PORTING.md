@@ -31,7 +31,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 - Change: a desktop app has no view until it asks for one: the host makes a window for each request and adds its view carrying the request's id, where Flutter's runners make the implicit view's window and only its multi-window apps make their own (`[win32] Multi-window should never have implicit view`).
   Reason: platform — the app owns its windows and decides every window's close, the last one's included, so the host makes no window the app did not ask for and has no rule for the last one.
-  Affect: `WinitEmbedder` has no settings; `run_app` asks for the app's window, and what the last window's closing means is the app's to decide.
+  Affect: `WinitEmbedder`'s one setting is what the app tells Linux's desktops (`LinuxSettings`, its app id); `run_app` asks for the app's window, and what the last window's closing means is the app's to decide.
 
 - Change: on macOS every `terminate:` asks the framework until the app has decided to quit, where Flutter's termination handler marks the quit as under way when it asks, which lets a second Cmd-Q through.
   Reason: platform — the host reports every request to quit to the framework, which decides each, such as quitting only at a second Cmd-Q.
@@ -430,3 +430,13 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - A pen's barrel and other buttons, as Flutter's stylus buttons. Trigger: an app that reads a stylus's secondary button.
 - A menu item's icon at the screen's scale on Windows, where it shows at its own size in pixels. Trigger: a menu with icons on a display scaled above 100%.
 - Translating the labels of macOS's and Windows' provided items, which are English. Trigger: an app localized beyond English.
+
+## gpu.rs → the device the embedder brings to valo, where Flutter's engine brings its own
+
+- Change: the wgpu instance is made with the event loop's display handle.
+  Reason: platform — wgpu's GL backend presents to a Wayland or X11 window only through an EGL display on that window system's platform, which it opens from the instance's display handle; without one it takes EGL's surfaceless platform (`experiments/2026-11-13-wgpu-gl-in-vm`).
+  Affect: where valo draws with a GL adapter, its surfaces configure and present on Linux; which adapter is chosen does not change.
+
+- Change: the device is on a hardware adapter wherever the machine has one, at `Core` where it is fully WebGPU-compliant and at `Compatibility` otherwise, before any software adapter (`DeviceType::Cpu`); `WinitEmbedder::force_fallback_adapter`, WebGPU's `forceFallbackAdapter`, asks for the software adapter instead.
+  Reason: platform — Waft draws with neither compute nor storage buffers, so a downlevel GPU, a virtual machine's GL driver among them, draws it faster than lavapipe or WARP; the option keeps the software adapter within reach.
+  Affect: in a virtual machine whose Vulkan is lavapipe and whose GL is the host's, the app draws on GL, unless it forces the fallback adapter.

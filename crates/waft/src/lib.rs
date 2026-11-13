@@ -32,10 +32,12 @@ pub use waft_embedder::{
 pub use waft_embedder_default::AndroidApp;
 #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
 pub use waft_embedder_default::DefaultEmbedder;
+#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+pub use waft_embedder_default::LinuxSettings;
 /// Change-notifier callback used by buttons. The pointer widget is [`waft_widgets::Listener`].
 pub use waft_foundation::Listener;
 pub use waft_foundation::*;
-pub use waft_macros::main;
+pub use waft_macros::{linux_app_id, main};
 pub use waft_painting::{
     Alignment, AlignmentGeometry, AnyColor, Axis, Border, BorderRadius, BorderRadiusGeometry,
     BorderSide, BorderStyle, BoxDecoration, BoxFit, BoxShadow, BoxShape, Clip, EdgeInsets,

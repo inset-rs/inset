@@ -28,6 +28,7 @@ use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowAttributes, WindowId};
 
+use crate::LinuxSettings;
 use crate::app_requests::AppRequests;
 use crate::gpu::LazyGpu;
 use crate::host_window::{WinitWindow, winit_icon};
@@ -199,11 +200,17 @@ pub(crate) struct ViewMaker {
     gpu: LazyGpu,
     /// Where the views' hosts and the windows' handles send their requests, to the loop.
     requests: Rc<AppRequests>,
+    /// What the app tells Linux's desktops, its app id among it, which every window carries.
+    linux: LinuxSettings,
 }
 
 impl ViewMaker {
-    pub(crate) fn new(gpu: LazyGpu, requests: Rc<AppRequests>) -> ViewMaker {
-        ViewMaker { gpu, requests }
+    pub(crate) fn new(gpu: LazyGpu, requests: Rc<AppRequests>, linux: LinuxSettings) -> ViewMaker {
+        ViewMaker {
+            gpu,
+            requests,
+            linux,
+        }
     }
 
     /// The screen view, with its host and its window to open, where the system's window is the
@@ -229,7 +236,7 @@ impl ViewMaker {
         views: &Views,
     ) -> Result<OpenedWindow, String> {
         let config = &window_request.config;
-        let window = open_window(event_loop, config)?;
+        let window = self.open_window(event_loop, config)?;
         let (view, host) = self.view(views.take_id(), config);
         let view = Rc::new(view.with_request(
             window_request.request_id,
@@ -256,6 +263,42 @@ impl ViewMaker {
         })
     }
 
+    /// Opens the screen view's window, `screen`, holding the screen view.
+    pub(crate) fn open_screen_window(
+        &self,
+        event_loop: &dyn ActiveEventLoop,
+        screen: ScreenWindow,
+    ) -> Result<OpenedWindow, String> {
+        let window = self.open_window(event_loop, &screen.config)?;
+        let (view_layer, hold) = hold_view(&window, &screen.host);
+        let open = OpenWindow {
+            window,
+            view: screen.view,
+            host: screen.host,
+            handle: None,
+        };
+        Ok(OpenedWindow {
+            open,
+            view_layer,
+            hold,
+        })
+    }
+
+    /// A window configured as `config`, of this app: winit's attributes, then what the system's
+    /// module applies beyond them, and the drags it takes beyond winit's.
+    fn open_window(
+        &self,
+        event_loop: &dyn ActiveEventLoop,
+        config: &WindowConfig,
+    ) -> Result<Arc<dyn Window>, String> {
+        let window = event_loop
+            .create_window(attributes_for(event_loop, config, &self.linux))
+            .map_err(|error| error.to_string())?;
+        System::configure(&*window, config);
+        System::accept_drags(&*window);
+        Ok(Arc::from(window))
+    }
+
     /// The view numbered `id`, drawing with the device every view shares, for a window
     /// configured as `config`, with the host the window's code makes for it.
     fn view(&self, id: ViewId, config: &WindowConfig) -> (WinitView, Rc<WindowViewHost>) {
@@ -268,26 +311,6 @@ impl ViewMaker {
         );
         (view, host)
     }
-}
-
-/// Opens the screen view's window, `screen`, holding the screen view.
-pub(crate) fn open_screen_window(
-    event_loop: &dyn ActiveEventLoop,
-    screen: ScreenWindow,
-) -> Result<OpenedWindow, String> {
-    let window = open_window(event_loop, &screen.config)?;
-    let (view_layer, hold) = hold_view(&window, &screen.host);
-    let open = OpenWindow {
-        window,
-        view: screen.view,
-        host: screen.host,
-        handle: None,
-    };
-    Ok(OpenedWindow {
-        open,
-        view_layer,
-        hold,
-    })
 }
 
 /// `window` holds the view whose host is `host` from now on: it makes the layer the view is to
@@ -319,23 +342,14 @@ pub(crate) fn window_metrics(window: &dyn Window) -> ViewMetrics {
     }
 }
 
-/// A window configured as `config`: winit's attributes, then what the system's module applies
-/// beyond them, and the drags it takes beyond winit's.
-fn open_window(
+/// winit's attributes for a configuration, the system's own among them for this app's `linux`
+/// settings. What winit has no attribute for, the system's module applies after creation. A
+/// system whose window is the screen sizes it itself.
+fn attributes_for(
     event_loop: &dyn ActiveEventLoop,
     config: &WindowConfig,
-) -> Result<Arc<dyn Window>, String> {
-    let window = event_loop
-        .create_window(attributes_for(config))
-        .map_err(|error| error.to_string())?;
-    System::configure(&*window, config);
-    System::accept_drags(&*window);
-    Ok(Arc::from(window))
-}
-
-/// winit's attributes for a configuration. What winit has no attribute for, the system's
-/// module applies after creation. A system whose window is the screen sizes it itself.
-fn attributes_for(config: &WindowConfig) -> WindowAttributes {
+    linux: &LinuxSettings,
+) -> WindowAttributes {
     let level = match config.level {
         WindowLevel::Normal => winit::window::WindowLevel::Normal,
         WindowLevel::AlwaysOnTop => winit::window::WindowLevel::AlwaysOnTop,
@@ -357,5 +371,5 @@ fn attributes_for(config: &WindowConfig) -> WindowAttributes {
     if let Some([x, y]) = config.position {
         attributes = attributes.with_position(LogicalPosition::new(x, y));
     }
-    System::extend_attributes(attributes, config)
+    System::extend_attributes(event_loop, attributes, config, linux)
 }

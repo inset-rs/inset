@@ -12,16 +12,23 @@ use objc2_app_kit::{
 };
 use objc2_foundation::NSRect;
 use waft_embedder::{MacosTitleBar, TitleBarAction, WindowBackground, WindowConfig};
+use winit::event_loop::ActiveEventLoop;
 use winit::platform::macos::WindowAttributesMacOS;
 use winit::window::{Window, WindowAttributes};
 
 use super::{AppKit, menus, ns_view, ns_window, title_bar};
+use crate::LinuxSettings;
 use crate::os::capabilities::WindowChrome;
 
 impl WindowChrome for AppKit {
     /// What winit has an AppKit attribute for: the shadow, and a hidden title bar's view under a
     /// transparent, untitled title bar.
-    fn extend_attributes(attributes: WindowAttributes, config: &WindowConfig) -> WindowAttributes {
+    fn extend_attributes(
+        _event_loop: &dyn ActiveEventLoop,
+        attributes: WindowAttributes,
+        config: &WindowConfig,
+        _linux: &LinuxSettings,
+    ) -> WindowAttributes {
         let mut macos = WindowAttributesMacOS::default().with_has_shadow(config.shadow);
         if let MacosTitleBar::Hidden { .. } = config.macos.title_bar {
             macos = macos

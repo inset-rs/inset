@@ -45,7 +45,7 @@ use waft_embedder::{
     AppExitResponse, Color, DataTransferItem, DragReport, OpenRequest, PickedFile, TextDirection,
     WindowConfig,
 };
-use waft_embedder_winit::{Reopen, WinitEmbedder, WinitPlatform};
+use waft_embedder_winit::{LinuxSettings, Reopen, WinitEmbedder, WinitPlatform};
 use waft_foundation::{App, Completer, Entity, Listener, Task, Timer};
 use waft_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
 use waft_shell::Shell;
@@ -61,7 +61,11 @@ const INK: Color = Color::from_argb(255, 51, 51, 64);
 const SAVE_TIME: Duration = Duration::from_secs(3);
 
 fn main() {
-    WinitEmbedder.run(|platform| {
+    let linux = LinuxSettings {
+        app_id: Some(waft_macros::linux_app_id!().to_owned()),
+    };
+    let embedder = WinitEmbedder::default().linux(linux);
+    embedder.run(|platform| {
         Shell::new(platform, |app| {
             let requests = app.new_entity(|_cx| Requests::default());
             listen(app, &requests);

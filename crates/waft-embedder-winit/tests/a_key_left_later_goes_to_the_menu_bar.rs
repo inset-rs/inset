@@ -24,7 +24,7 @@ fn main() {
     support::fail_after(TEST, GIVE_UP_AFTER, || {
         format!("the item was not chosen within {GIVE_UP_AFTER:?}")
     });
-    WinitEmbedder.run(client::KeyClient::new);
+    WinitEmbedder::default().run(client::KeyClient::new);
 }
 
 #[cfg(not(target_os = "macos"))]

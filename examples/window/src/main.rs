@@ -12,7 +12,7 @@ use std::rc::Rc;
 
 use waft_cupertino::{CupertinoButton, CupertinoTheme, CupertinoThemeData};
 use waft_embedder::{Brightness, Color, TextDirection, WindowConfig};
-use waft_embedder_winit::WinitEmbedder;
+use waft_embedder_winit::{LinuxSettings, WinitEmbedder};
 use waft_foundation::Listener;
 use waft_painting::{BoxDecoration, EdgeInsetsGeometry, TextStyle};
 use waft_services::SystemMouseCursors;
@@ -27,16 +27,20 @@ const CARD: Color = Color::from_argb(255, 51, 51, 64);
 const LABEL: Color = Color::from_argb(255, 245, 245, 240);
 
 fn main() {
-    WinitEmbedder.run(|platform| {
-        Shell::new(platform, |app| {
-            let window = WindowConfig {
-                title: "Waft — widgets".to_owned(),
-                size: [600.0, 400.0],
-                ..WindowConfig::default()
-            };
-            run_app_with(app, home(), window)
+    WinitEmbedder::default()
+        .linux(LinuxSettings {
+            app_id: Some(waft_macros::linux_app_id!().to_owned()),
         })
-    });
+        .run(|platform| {
+            Shell::new(platform, |app| {
+                let window = WindowConfig {
+                    title: "Waft — widgets".to_owned(),
+                    size: [600.0, 400.0],
+                    ..WindowConfig::default()
+                };
+                run_app_with(app, home(), window)
+            })
+        });
 }
 
 /// What `WidgetsApp` would supply: the ambient reading direction the text needs.

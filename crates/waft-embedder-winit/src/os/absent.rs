@@ -1,18 +1,19 @@
 //! What a system without a display link, a compositor or notices of a window's visibility
 //! answers: no display link is made, no composition layer is ever placed in a window, and no
-//! notice is observed. iOS has a compositor, Core Animation's, which it shares with macOS.
+//! notice is observed. iOS has a compositor, Core Animation's, which it shares with macOS, and
+//! Linux has Wayland's.
 
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "linux")))]
 use std::sync::Arc;
 
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "linux")))]
 use waft_embedder::{CompositionLayer, Placement, ViewId};
 use winit::monitor::MonitorHandle;
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "linux")))]
 use winit::window::Window;
 
 use super::capabilities::DisplayLink;
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "linux")))]
 use super::window_handle_layer::WindowComposition;
 
 /// No display link: the embedder takes its vsyncs from a timer at the display's rate. Never made.
@@ -37,10 +38,10 @@ impl DisplayLink for NoDisplayLink {
 }
 
 /// No compositor: no layer is made, so a window has none to place.
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "linux")))]
 pub(crate) struct NoWindowComposition;
 
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "linux")))]
 impl WindowComposition for NoWindowComposition {
     fn new(_window: Arc<dyn Window>) -> Self {
         NoWindowComposition

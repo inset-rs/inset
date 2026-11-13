@@ -14,6 +14,7 @@ mod desktop;
 mod devices;
 mod doctor;
 mod file_associations;
+mod freedesktop;
 mod icons;
 mod ios;
 mod macos;

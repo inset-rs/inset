@@ -14,14 +14,18 @@ use waft_embedder::{
     Color, ColorSpace, Offset, RRect, Radius, Rect, RequestId, SceneBuilder, ViewMetrics, ViewRef,
     WindowConfig,
 };
-use waft_embedder_winit::WinitEmbedder;
+use waft_embedder_winit::{LinuxSettings, WinitEmbedder};
 use waft_foundation::App;
 use waft_painting::{Canvas, Paint, Picture, draw_rrect};
 use waft_scheduler::{FrameTarget, PersistentFrameCallback, SchedulerBinding};
 use waft_shell::Shell;
 
 fn main() {
-    WinitEmbedder.run(|platform| Shell::new(platform, open_window));
+    WinitEmbedder::default()
+        .linux(LinuxSettings {
+            app_id: Some(waft_macros::linux_app_id!().to_owned()),
+        })
+        .run(|platform| Shell::new(platform, open_window));
 }
 
 /// Asks the host for the window, and draws into its view at each of the view's frames, the first

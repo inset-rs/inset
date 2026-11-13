@@ -112,15 +112,19 @@ use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::window::WindowId;
 
+use crate::LinuxSettings;
 use crate::app_requests::AppRequest;
 use crate::dispatcher::{Wakeups, earliest};
 use crate::drag_drop::Drags;
 use crate::frame_scheduler::FrameScheduler;
+use crate::gpu::GpuRequest;
 use crate::images::CreateImageLoader;
 use crate::keyboard::Keyboard;
 use crate::launch::StartApp;
 use crate::lifecycle::{AppLifecycle, LifecycleNotice};
 use crate::menus::MenuEvent;
+use crate::os::System;
+use crate::os::capabilities::NativeComposition;
 use crate::platform::WinitPlatform;
 use crate::pointer::Pointer;
 use crate::state::EmbedderState;
@@ -198,6 +202,11 @@ impl MainLoopProxy {
         }
     }
 
+    /// What wakes the loop, for a thread that sends it nothing but a wake.
+    pub(crate) fn waker(&self) -> EventLoopProxy {
+        self.wake.clone()
+    }
+
     /// Wakes the loop to hear the events waiting.
     fn wake(&self) {
         self.wake.wake_up();
@@ -247,12 +256,18 @@ impl<C: EmbedderClient> MainLoop<C> {
     pub(crate) fn start(
         start: StartApp<C>,
         create_image_loader: Option<CreateImageLoader>,
+        linux: LinuxSettings,
+        gpu_request: GpuRequest,
         proxy: MainLoopProxy,
         events: Receiver<MainLoopEvent>,
     ) -> MainLoop<C> {
-        let state = Rc::new(EmbedderState::new(proxy.clone(), create_image_loader));
+        let state = Rc::new(EmbedderState::new(
+            proxy.clone(),
+            create_image_loader,
+            gpu_request,
+        ));
         let platform = Rc::new(WinitPlatform::new(Rc::clone(&state), proxy.clone()));
-        let view_maker = ViewMaker::new(state.gpu().clone(), Rc::clone(state.requests()));
+        let view_maker = ViewMaker::new(state.gpu().clone(), Rc::clone(state.requests()), linux);
         let screen_window = view_maker.make_screen_view();
         if let Some(screen) = &screen_window {
             state.views().add_screen_view(Rc::clone(&screen.view));
@@ -390,6 +405,9 @@ impl<C: EmbedderClient> ApplicationHandler for MainLoop<C> {
     fn proxy_wake_up(&mut self, event_loop: &dyn ActiveEventLoop) {
         if !self.started {
             return;
+        }
+        for view in <System as NativeComposition>::take_presented_views() {
+            self.on_layer_presented(view);
         }
         while let Ok(event) = self.events.try_recv() {
             self.on_main_loop_event(event_loop, event);
