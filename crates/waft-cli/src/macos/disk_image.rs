@@ -13,6 +13,7 @@
 //! `codesign --verify --strict` refuses on a signed app, there and wherever it is copied to.
 
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -230,6 +231,17 @@ impl Drop for Mounted {
         }
     }
 }
+
+/// A disk image is made on macOS alone, where `ditto` and `hdiutil` are; elsewhere the CLI
+/// compiles, and a build never gets this far (`make_app` refuses first).
+#[cfg(not(unix))]
+fn symlink(_original: &str, _link: std::path::PathBuf) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "a disk image is made on macOS",
+    ))
+}
+
 
 #[cfg(test)]
 mod tests {
