@@ -1,8 +1,9 @@
 //! What a view shows into on every system but macOS: its window. wgpu makes the view's surface from
-//! the window's handle, as from any raw window handle, and the system sizes it with the window; the
-//! composition layers the view's scenes place go where the system's share of its compositor for
-//! that window puts them ([`WindowComposition`]): beneath the window's content on iOS, nowhere on a
-//! system without a compositor (`absent`).
+//! the window's handle, as from any raw window handle, and the system sizes it with the window,
+//! unless the system's share of its compositor for that window makes it itself, as Windows makes it
+//! on a DirectComposition visual; the composition layers the view's scenes place go where that
+//! share puts them ([`WindowComposition`]): beneath the window's content on iOS, Wayland and
+//! Windows, nowhere on a system without a compositor (`absent`).
 
 use std::sync::Arc;
 
@@ -24,6 +25,20 @@ pub(crate) trait WindowComposition {
         placements: impl IntoIterator<Item = (&'a Arc<dyn CompositionLayer>, &'a Placement)>,
         view: ViewId,
     );
+
+    /// The view's surface, made by the system's share of its compositor rather than on the window's
+    /// handle; `None` where it is made on the window. Main thread.
+    fn make_surface(
+        &self,
+        _gpu: &Gpu,
+        _size: [u32; 2],
+        _alpha: valo::SurfaceAlpha,
+    ) -> Option<Result<valo::Surface, String>> {
+        None
+    }
+
+    /// The view's drawing is about to present ([`ViewLayer::will_present`]). Main thread.
+    fn will_present(&self) {}
 }
 
 /// A window's view's layer that is the window itself, drawn into through the window's handle, with
@@ -55,6 +70,9 @@ impl<C: WindowComposition> ViewLayer for WindowHandleLayer<C> {
         size: [u32; 2],
         alpha: valo::SurfaceAlpha,
     ) -> Result<valo::Surface, String> {
+        if let Some(made) = self.composition.make_surface(gpu, size, alpha) {
+            return made;
+        }
         valo::Surface::new_with_options(
             &gpu.instance,
             &gpu.adapter,
@@ -72,5 +90,9 @@ impl<C: WindowComposition> ViewLayer for WindowHandleLayer<C> {
         view: ViewId,
     ) {
         self.composition.place(placements, view);
+    }
+
+    fn will_present(&self) {
+        self.composition.will_present();
     }
 }

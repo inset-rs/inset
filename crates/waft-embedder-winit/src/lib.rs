@@ -117,6 +117,8 @@ pub use images::{DecodeExecution, create_image_loader};
 pub use macos::MacOs;
 #[cfg(target_os = "linux")]
 pub use os::DmabufBuffer;
+#[cfg(target_os = "windows")]
+pub use os::SharedTexture;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub use os::{CoreVideoFrame, SurfaceBuffer};
 pub use platform::WinitPlatform;

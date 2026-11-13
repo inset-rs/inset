@@ -17,7 +17,8 @@
 //! fingers coming down on a trackpad, and the requests it makes of the application and what it says
 //! changed, among others (`macos`); iOS reports its window's size and safe area differently, and
 //! has its pasteboard and composition layers (`ios`); Windows tells the clipboard's changes by its
-//! sequence number, and has a menu at a point, icons in the notification area and toasts
+//! sequence number, and has a menu at a point, icons in the notification area, toasts, a display
+//! link and DirectComposition's composition layers, a view drawn on a visual of its own
 //! (`windows`); Linux has the desktop's tray and its notification server (`linux`); every other
 //! system winit covers by itself (`winit_only`). What macOS and iOS share, their notification
 //! center and the compositor of composition layers among it, is in `apple`.
@@ -38,6 +39,8 @@ pub use apple::hardware_buffers::SurfaceBuffer;
 pub use apple::media::CoreVideoFrame;
 #[cfg(target_os = "linux")]
 pub use linux::DmabufBuffer;
+#[cfg(target_os = "windows")]
+pub use windows::SharedTexture;
 pub(crate) mod capabilities;
 #[cfg(target_os = "ios")]
 mod ios;

@@ -1,5 +1,6 @@
 //! The embedder's hidden window, which the notification area tells what happens to the app's icons
-//! (`menus/notify_icons`), and from whose procedure every system loop the app asks for runs, on a
+//! (`menus/notify_icons`), which a display link's thread has call the main thread at each vsync
+//! (`display_links`), and from whose procedure every system loop the app asks for runs, on a
 //! message posted for it ([`run_soon`]): a menu's (`menus/popup_menu`) and a file dialog's
 //! (`file_dialogs`), each of which runs its own modal loop. Run from there, a loop is outside
 //! every call into the app, while Windows goes on dispatching winit's window messages from it, as
@@ -22,12 +23,14 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_APP, WNDCLASSEXW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 
-use super::menus;
+use super::{display_links, menus};
 
 /// What the notification area sends about an icon, as the icons ask it to.
 pub(super) const ICON_NOTIFICATION: u32 = WM_APP + 1;
 /// The work posted is to run.
 const RUN_POSTED: u32 = WM_APP + 2;
+/// A display link's vsync came: the link's id in `wparam` (`display_links`).
+pub(super) const VSYNC: u32 = WM_APP + 3;
 
 /// Work for a later turn of the main thread.
 pub(super) type Posted = Box<dyn FnOnce()>;
@@ -124,6 +127,7 @@ unsafe extern "system" fn window_procedure(
     match message {
         ICON_NOTIFICATION => menus::icon_notified(wparam, lparam),
         RUN_POSTED => run_posted(),
+        VSYNC => display_links::vsync(wparam as u64),
         message if message == taskbar_created() => menus::taskbar_created(),
         // SAFETY: Windows' own answer to a message the window leaves, with what it was sent.
         _ => return unsafe { DefWindowProcW(window, message, wparam, lparam) },

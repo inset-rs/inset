@@ -3,22 +3,31 @@
 //! point and icons in the notification area (`menus`), the shell's file dialogs
 //! (`file_dialogs`), whose loops run from the embedder's hidden window (`hidden_window`), the
 //! shell's opener (`opener`), WinRT's toasts (`notifications`), the console of the process that
-//! started a GUI program (`console`), and the app's icon in its executable's resources.
+//! started a GUI program (`console`), the app's icon in its executable's resources, DirectComposition's
+//! composition layers beneath a view drawn on a visual of its own (`composition`), over textures
+//! shared by NT handle (`shared_textures`), and each display's refreshes (`display_links`).
 
 // Win32 is reached through system calls, which Rust reaches through `unsafe`; this module and its
 // children are the one place on Windows that writes it.
 #![allow(unsafe_code)]
 
+mod composition;
 mod console;
+mod display_links;
 mod file_dialogs;
 mod hidden_window;
 mod menus;
 mod notifications;
 mod opener;
+mod shared_textures;
+
+pub use shared_textures::SharedTexture;
 
 use std::sync::Arc;
 
-use waft_embedder::{IconImage, TargetPlatform, TitleBarAction, WindowConfig};
+use waft_embedder::{
+    Compositor, HardwareBuffer, IconImage, TargetPlatform, TitleBarAction, WindowConfig,
+};
 use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetSystemMetrics, SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON, SYSTEM_METRICS_INDEX,
@@ -33,9 +42,7 @@ use crate::LinuxSettings;
 use crate::clipboard::{ChangeProbe, TextClipboard};
 use crate::host_window::winit_icon;
 
-use super::absent::{
-    NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices, NoWindowComposition,
-};
+use super::absent::{NoTrackpadTouchObserver, NoVisibilityNotices};
 use super::capabilities::{
     ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, GpuInterop,
     ImageDecoding, NativeComposition, OperatingSystem, PointerQueries, Screens, StandardStreams,
@@ -43,6 +50,9 @@ use super::capabilities::{
     TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
 };
 use super::window_handle_layer::{NoWindowHold, WindowHandleLayer};
+use crate::gpu::Gpu;
+use composition::{DirectComposition, WindowsCompositor};
+use display_links::VBlankLink;
 
 /// Windows. A type only: never made, its answers are associated functions.
 pub(crate) enum Windows {}
@@ -68,13 +78,26 @@ fn sequence_number() -> u32 {
     unsafe { GetClipboardSequenceNumber() }
 }
 
+/// A display's refreshes from `IDXGIOutput::WaitForVBlank` (`display_links`).
 impl FramePresentation for Windows {
-    type DisplayLink = NoDisplayLink;
+    type DisplayLink = VBlankLink;
 }
 
+/// Composition layers as DirectComposition visuals beneath the view's picture, itself a visual's
+/// composition swapchain, each layer showing a copy of its producer's shared texture in a swapchain
+/// of its own (`composition`). Waft allocates no buffers here: its producers bring theirs.
 impl NativeComposition for Windows {
-    type ViewLayer = WindowHandleLayer<NoWindowComposition>;
+    type ViewLayer = WindowHandleLayer<DirectComposition>;
     type WindowHold = NoWindowHold;
+
+    fn compositor() -> Option<Arc<dyn Compositor>> {
+        let compositor = WindowsCompositor::new()?;
+        Some(Arc::new(compositor))
+    }
+
+    fn device_made(gpu: &Gpu) {
+        composition::device_made(gpu);
+    }
 
     fn view_layer_in(window: &Arc<dyn Window>) -> (Self::ViewLayer, NoWindowHold) {
         WindowHandleLayer::in_window(window)
@@ -106,8 +129,10 @@ impl WindowChrome for Windows {
         config: &WindowConfig,
         _linux: &LinuxSettings,
     ) -> WindowAttributes {
+        // The window shows DirectComposition's visuals alone, its view's picture among them.
         let windows = WindowAttributesWindows::default()
-            .with_taskbar_icon(taskbar_icon(config.icon.as_ref()));
+            .with_taskbar_icon(taskbar_icon(config.icon.as_ref()))
+            .with_no_redirection_bitmap(true);
         attributes.with_platform_attributes(Box::new(windows))
     }
 
@@ -154,7 +179,17 @@ impl StandardStreams for Windows {
 
 impl Screens for Windows {}
 impl PointerQueries for Windows {}
-impl GpuInterop for Windows {}
+/// A shared texture opened on the device, anew for each import.
+impl GpuInterop for Windows {
+    fn import_texture(buffer: &dyn HardwareBuffer, device: &wgpu::Device) -> Option<wgpu::Texture> {
+        let buffer: &dyn std::any::Any = buffer;
+        let shared = buffer.downcast_ref::<SharedTexture>()?;
+        shared.open_on(
+            device,
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+        )
+    }
+}
 impl ImageDecoding for Windows {}
 impl WorkQueue for Windows {}
 /// The system starts the app with what it opens on its command line, which is the app's own.

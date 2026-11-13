@@ -312,6 +312,10 @@ pub(crate) trait NativeComposition {
         None
     }
 
+    /// Waft's device is made, `gpu`'s: what the compositor does on it, as copying a producer's
+    /// buffer into a layer on Windows, may start. Main thread.
+    fn device_made(_gpu: &Gpu) {}
+
     /// What a window's code does for its view as `window` opens, as an app does for a view it
     /// adds: makes the layer the view shows into and places it in the window, filling it. Answers
     /// the layer, which the view is added on, and the window's hold on it. Main thread.
@@ -383,6 +387,11 @@ pub(crate) trait ViewLayer {
     /// Shows `color` behind the view's drawing and its composition layers, for the frames that
     /// are not drawn and the empty ones. Main thread.
     fn show_background(&self, _color: valo::Color) {}
+
+    /// The view's drawing is about to present: what the system shows of its scenes' placements
+    /// with that present is handed to the compositor now, where it is not by the present itself.
+    /// Main thread.
+    fn will_present(&self) {}
 }
 
 /// Menus the system draws itself (`menus/`): each place is the system's, or none where it has

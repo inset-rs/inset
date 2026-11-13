@@ -337,6 +337,9 @@ impl Rasterizer {
             .get_or_insert_with(|| context_on(self.gpu.get()));
         let surface_frame = surface.acquire()?;
         context.render(picture, &surface_frame.target(Some(clear)));
+        if let Some(layer) = &self.layer {
+            layer.will_present();
+        }
         context.present(surface_frame);
         Ok(())
     }

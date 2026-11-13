@@ -12,12 +12,18 @@
 //!
 //! The instance is made with the event loop's display, as wgpu asks for GL on Wayland and X11:
 //! without it wgpu's EGL is on its surfaceless platform, whose GL adapter cannot present to a
-//! window (`../experiments/2026-11-13-wgpu-gl-in-vm`).
+//! window (`../experiments/2026-11-13-wgpu-gl-in-vm`). On Windows it is D3D12's alone: a view draws
+//! on a DirectComposition visual and a composition layer copies a texture shared by NT handle, both
+//! D3D12's (`os/windows/composition.rs`), so a machine whose only hardware driver is another API's
+//! draws on WARP. The compositor is told once the device is made (`NativeComposition::device_made`).
 
 use std::cell::OnceCell;
 use std::rc::Rc;
 
 use winit::event_loop::OwnedDisplayHandle;
+
+use crate::os::System;
+use crate::os::capabilities::NativeComposition as _;
 
 pub(crate) struct Gpu {
     pub(crate) instance: wgpu::Instance,
@@ -46,11 +52,21 @@ impl Gpu {
     }
 }
 
-/// What the instance is made with: the event loop's display where there is one.
+/// What the instance is made with: the event loop's display where there is one; on Windows, D3D12
+/// alone, which DirectComposition's swapchains and textures shared by NT handle need
+/// (`os/windows/composition.rs`).
 fn instance_descriptor(display: Option<OwnedDisplayHandle>) -> wgpu::InstanceDescriptor {
-    match display {
+    let descriptor = match display {
         Some(display) => wgpu::InstanceDescriptor::new_with_display_handle(Box::new(display)),
         None => wgpu::InstanceDescriptor::new_without_display_handle(),
+    };
+    if cfg!(target_os = "windows") {
+        wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::DX12,
+            ..descriptor
+        }
+    } else {
+        descriptor
     }
 }
 
@@ -86,7 +102,11 @@ impl LazyGpu {
     ///
     /// When no adapter gives a device, saying why each refused.
     pub(crate) fn get(&self) -> &Gpu {
-        self.gpu.get_or_init(|| Gpu::acquire(&self.request))
+        self.gpu.get_or_init(|| {
+            let gpu = Gpu::acquire(&self.request);
+            System::device_made(&gpu);
+            gpu
+        })
     }
 }
 
