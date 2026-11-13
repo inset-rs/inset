@@ -57,15 +57,26 @@ pub struct Build<'a> {
     pub artifact: Artifact<'a>,
     /// Environment for rustc and the linker, such as a deployment target.
     pub env: Vec<(&'a str, String)>,
+    /// Files the linker takes into the artifact itself, as a Windows executable's compiled
+    /// resources. They go to rustc for the artifact's own crate alone, through `cargo rustc`, so
+    /// no dependency is built again for them. Cargo links again when an input's path changes, not
+    /// its content: a file whose content changes takes a new name.
+    pub link_inputs: Vec<PathBuf>,
 }
 
 /// `cargo build` with JSON messages, so the artifact's path comes from cargo instead of
-/// being guessed from the target directory layout.
+/// being guessed from the target directory layout; `cargo rustc` where the artifact links inputs
+/// of its own.
 pub fn build(build: &Build) -> Result<PathBuf> {
     let mut command = Command::new("cargo");
+    let subcommand = if build.link_inputs.is_empty() {
+        "build"
+    } else {
+        "rustc"
+    };
     command
         .current_dir(&build.project.root)
-        .arg("build")
+        .arg(subcommand)
         .arg("--message-format=json-render-diagnostics")
         .args(["-p", build.package]);
     if build.profile.is_release() {
@@ -84,6 +95,14 @@ pub fn build(build: &Build) -> Result<PathBuf> {
     }
     for (key, value) in &build.env {
         command.env(key, value);
+    }
+    if !build.link_inputs.is_empty() {
+        command.arg("--");
+        for input in &build.link_inputs {
+            let mut argument = std::ffi::OsString::from("-Clink-arg=");
+            argument.push(input);
+            command.arg(argument);
+        }
     }
     let mut child = command
         .stdout(Stdio::piped())
@@ -128,26 +147,4 @@ fn wanted_file(build: &Build, artifact: &cargo_metadata::Artifact) -> Option<Pat
                 .is_some_and(|extension| build.artifact.extensions().contains(&extension))
         })
         .map(|file| file.clone().into_std_path_buf())
-}
-
-/// `cargo run` for the host desktop; the app's stdio is the terminal.
-pub fn run(project: &Project, profile: Profile, args: &[String]) -> Result<()> {
-    let mut command = Command::new("cargo");
-    command.current_dir(&project.root).arg("run").args([
-        "-p",
-        &project.package,
-        "--bin",
-        &project.bin,
-    ]);
-    if profile.is_release() {
-        command.arg("--release");
-    }
-    if !args.is_empty() {
-        command.arg("--").args(args);
-    }
-    let status = command.status().context("cargo is not on PATH")?;
-    if !status.success() {
-        bail!("cargo run failed");
-    }
-    Ok(())
 }

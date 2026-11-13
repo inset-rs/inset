@@ -11,12 +11,13 @@ use valo_codec::Decoder;
 use waft_embedder::image_codecs::ImageCodecs;
 use waft_embedder::{
     Cameras, CaptionSettings, Clipboard, CompositionLayer, Compositor, DataTransferItem, DockMenu,
-    FileDialogs, HardwareBuffer, HardwareBufferAllocator, KeyData, MediaAssets, MenuBar, MenuEntry,
-    MenuId, Notifications, Offset, Opener, Placement, Players, Rect, Screen, ScreenId,
+    FileDialogs, HardwareBuffer, HardwareBufferAllocator, IconImage, KeyData, MediaAssets, MenuBar,
+    MenuEntry, MenuId, Notifications, Offset, Opener, Placement, Players, Rect, Screen, ScreenId,
     TargetPlatform, TitleBarAction, TrayIcons, VideoFrameReaders, ViewId, ViewPadding, VsyncWaiter,
     WindowConfig,
 };
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopBuilder};
+use winit::icon::Icon;
 use winit::monitor::MonitorHandle;
 use winit::window::{Window, WindowAttributes};
 
@@ -61,6 +62,7 @@ pub(crate) trait OperatingSystem:
     + SystemChanges
     + ApplicationControl
     + ApplicationLifecycle
+    + StandardStreams
 {
     /// The platform the framework is told it runs on, where Flutter's `defaultTargetPlatform`
     /// bottoms out in `dart:io`'s `Platform.isAndroid` chain.
@@ -144,6 +146,18 @@ pub(crate) trait WindowChrome {
 
     /// Applies, once the window exists, what `config` asks for and no attribute carries.
     fn configure(_window: &dyn Window, _config: &WindowConfig) {}
+
+    /// The app's icon at the size of winit's window icon, the title bar's, which a window shows
+    /// where its configuration names none: on Windows the one its executable carries. None where
+    /// the system shows the app's icon itself, or finds none, which leaves the window winit's.
+    fn app_icon() -> Option<Icon> {
+        None
+    }
+
+    /// Sets the icon the taskbar and the task switcher show for `window`, where the system keeps
+    /// it apart from winit's window icon, as Windows does: `icon`, the window's own, or the app's
+    /// at that larger size. `extend_attributes` gives a new window its own.
+    fn set_taskbar_icon(_window: &dyn Window, _icon: Option<&IconImage>) {}
 
     /// What the system's settings say a double-click on a title bar does; `Unknown` where it has
     /// no such setting this reads.
@@ -602,4 +616,11 @@ pub(crate) trait ApplicationLifecycle {
     /// system posts them, so `send` must only queue. Nothing is sent where the embedder hears none,
     /// and the framework is told no lifecycle state there.
     fn send_lifecycle_notices(_send: Box<dyn Fn(LifecycleNotice)>) {}
+}
+
+/// Where the app's standard output and error go.
+pub(crate) trait StandardStreams {
+    /// Sends them to the console of the process that started the app, where the system starts a
+    /// GUI program with none: Windows. Elsewhere they are where the app was started already.
+    fn attach_to_parent_console() {}
 }

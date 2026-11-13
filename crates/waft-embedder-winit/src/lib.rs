@@ -156,6 +156,14 @@ impl WinitEmbedder {
         self
     }
 
+    /// Sends the app's standard output and error to the terminal it was run from: on Windows, where
+    /// a GUI program (`#![windows_subsystem = "windows"]`) starts with no console, the console of the
+    /// process that started it, when that process has one. Called first in `main`, before anything is
+    /// written. Elsewhere they are there already, and nothing changes.
+    pub fn attach_to_parent_console() {
+        <os::System as os::capabilities::StandardStreams>::attach_to_parent_console();
+    }
+
     /// Runs the app until it quits. `start` runs first, before winit's loop, and returns the
     /// client; where the system's window is the screen, the screen view is already among the
     /// platform's views then, with no window yet, which opens at winit's first call.

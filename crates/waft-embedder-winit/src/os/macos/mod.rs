@@ -61,7 +61,7 @@ use winit::window::Window;
 
 use super::apple::{image_io_decoders, notifications};
 use super::capabilities::{
-    GpuInterop, ImageDecoding, OperatingSystem, SystemImageCodecs, SystemMedia,
+    GpuInterop, ImageDecoding, OperatingSystem, StandardStreams, SystemImageCodecs, SystemMedia,
     SystemNotifications, WindowGeometry,
 };
 use crate::notifications::NotificationActivations;
@@ -75,6 +75,7 @@ impl OperatingSystem for AppKit {
 
 /// winit's sizes are AppKit's, and a desktop window has no safe area.
 impl WindowGeometry for AppKit {}
+impl StandardStreams for AppKit {}
 
 /// AVFoundation's players and cameras, and Media Accessibility's caption settings, which iOS
 /// shares.

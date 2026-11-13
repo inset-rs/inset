@@ -1,14 +1,18 @@
-//! Windows and Linux bundles and installers, through cargo-packager; macOS's are the CLI's own
-//! (`macos/`).
+//! Windows and Linux bundles and installers, through cargo-packager, and `run` on those desktops;
+//! macOS's are the CLI's own (`macos/`).
 //!
 //! The app's file associations go to cargo-packager for every format. A Linux package's desktop
 //! entry and the types the app owns are the CLI's own (`freedesktop`), which the package carries
-//! among its files in place of cargo-packager's entry.
+//! among its files in place of cargo-packager's entry. On Windows the executable carries the app's
+//! icon as a resource (`windows_resources`), linked in as it is built, since cargo-packager puts it
+//! only on the installer; `run` builds the same executable, so it carries the icon too.
 
 use std::fs;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use cargo_packager::config::{AppImageConfig, Binary, DebianConfig, LinuxConfig, Resource};
 use cargo_packager::{Config, PackageFormat};
 
@@ -17,6 +21,7 @@ use crate::file_associations;
 use crate::freedesktop;
 use crate::icons;
 use crate::project::{Profile, Project};
+use crate::windows_resources;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
@@ -51,20 +56,41 @@ impl Format {
 }
 
 pub fn build(project: &Project, profile: Profile, format: Format) -> Result<Vec<PathBuf>> {
-    let executable = cargo::build(&Build {
+    let out = project.out_dir(format.dir_name(), profile);
+    let executable = build_executable(project, profile, &out)?;
+    match format.package_format() {
+        None => folder(project, &executable, &out),
+        Some(package_format) => package(project, &executable, &out, package_format),
+    }
+}
+
+/// The executable `build windows` or `build linux` makes, run here with `args`; the app's stdio
+/// is the terminal.
+pub fn run(project: &Project, profile: Profile, args: &[String]) -> Result<()> {
+    let out = project.out_dir(Format::Folder.dir_name(), profile);
+    let executable = build_executable(project, profile, &out)?;
+    let status = Command::new(&executable)
+        .args(args)
+        .status()
+        .with_context(|| format!("could not start {}", executable.display()))?;
+    if !status.success() {
+        bail!("{} exited with {status}", project.name);
+    }
+    Ok(())
+}
+
+/// The app's executable, with the resources it carries written under `out`.
+fn build_executable(project: &Project, profile: Profile, out: &Path) -> Result<PathBuf> {
+    fs::create_dir_all(out)?;
+    cargo::build(&Build {
         project,
         package: &project.package,
         profile,
         triple: None,
         artifact: Artifact::Executable(&project.bin),
         env: Vec::new(),
-    })?;
-    let out = project.out_dir(format.dir_name(), profile);
-    fs::create_dir_all(&out)?;
-    match format.package_format() {
-        None => folder(project, &executable, &out),
-        Some(package_format) => package(project, &executable, &out, package_format),
-    }
+        link_inputs: executable_resources(project, out)?.into_iter().collect(),
+    })
 }
 
 fn folder(project: &Project, executable: &Path, out: &Path) -> Result<Vec<PathBuf>> {
@@ -160,6 +186,34 @@ fn add_freedesktop_files(
     Ok(())
 }
 
+/// The resources the executable carries, written under `out`: on Windows its icon, which the
+/// shortcuts, the taskbar and the title bar show; none elsewhere, or for an app without an icon.
+fn executable_resources(project: &Project, out: &Path) -> Result<Option<PathBuf>> {
+    let Some(icon) = project
+        .icon
+        .as_ref()
+        .filter(|_| cfg!(target_os = "windows"))
+    else {
+        return Ok(None);
+    };
+    let resources = windows_resources::icon_resources(&icons::load(icon)?);
+    write_resource_file(out, &resources).map(Some)
+}
+
+/// Writes a compiled resource file under `dir`, named after a hash of its content.
+///
+/// Cargo tracks the arguments it gives rustc, not the files they name: a file of the same name
+/// with another icon in it would leave the executable with the old one until its crate compiled
+/// for another reason. The hash may change with the Rust release the CLI is built with, which
+/// costs one more link.
+fn write_resource_file(dir: &Path, resources: &[u8]) -> Result<PathBuf> {
+    let mut hasher = DefaultHasher::new();
+    resources.hash(&mut hasher);
+    let path = dir.join(format!("resources-{:016x}.res", hasher.finish()));
+    fs::write(&path, resources).with_context(|| format!("writing {}", path.display()))?;
+    Ok(path)
+}
+
 /// PNGs at every size the ico and Linux icon builders want, from the app's one icon.
 fn icon_set(project: &Project, dir: &Path) -> Result<Vec<String>> {
     let Some(icon) = &project.icon else {
@@ -180,4 +234,25 @@ fn icon_set(project: &Project, dir: &Path) -> Result<Vec<String>> {
         paths.push(path.to_string_lossy().into_owned());
     }
     Ok(paths)
+}
+
+#[cfg(test)]
+mod tests {
+    use image::{Rgba, RgbaImage};
+
+    use super::*;
+
+    #[test]
+    fn a_changed_icon_is_linked_from_a_file_of_another_name() {
+        let dir = std::env::temp_dir().join(format!("waft-resources-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let written = |colour| {
+            let icon = RgbaImage::from_pixel(32, 32, Rgba(colour));
+            write_resource_file(&dir, &windows_resources::icon_resources(&icon)).unwrap()
+        };
+        let blue = written([10, 132, 255, 255]);
+        assert_eq!(written([10, 132, 255, 255]), blue, "the same icon");
+        assert_ne!(written([255, 59, 48, 255]), blue);
+        fs::remove_dir_all(&dir).unwrap();
+    }
 }

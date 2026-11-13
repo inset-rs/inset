@@ -170,6 +170,7 @@ fn make_app(project: &Project, profile: Profile, signing: &Signing) -> Result<Pa
         triple: None,
         artifact: Artifact::Executable(&project.bin),
         env: Vec::new(),
+        link_inputs: Vec::new(),
     })?;
     let carried = carried::build(project, profile)?;
     let out = project.out_dir("macos", profile);

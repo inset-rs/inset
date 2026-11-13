@@ -11,6 +11,7 @@
 //!
 //! Run through `cargo waft`, the app is a bundle that says why it uses the camera
 //! (`usage_descriptions` in its `Cargo.toml`), without which macOS ends an app that opens one.
+#![windows_subsystem = "windows"]
 
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -36,6 +37,7 @@ const LABEL: Color = Color::from_argb(255, 200, 200, 200);
 const LARGEST: (f64, f64) = (1920.0, 1080.0);
 
 fn main() {
+    WinitEmbedder::attach_to_parent_console();
     let url = std::env::args().nth(1).map(url_of);
     let linux = LinuxSettings {
         app_id: Some(waft_macros::linux_app_id!().to_owned()),

@@ -50,7 +50,7 @@ impl StatelessWidget for Home {
         let click = Listener::new(|_app| {});
         ThemeScope::new(
             theme,
-            ColoredBox::new(resources.common.solid_background_fill_color_base)
+            ColoredBox::new(resources.solid_background_fill_color_base)
                 .child(Center::new().child(Button::text("Hello, Waft", click))),
         )
         .into_widget()

@@ -13,7 +13,7 @@ cargo waft new myapp            # a crate every host can load
 cargo waft doctor               # what this machine can build for, with the fix for each gap
 cargo waft devices              # what `run -d` accepts
 
-cargo waft run                  # this desktop: on macOS the built .app, elsewhere cargo run
+cargo waft run                  # this desktop: the built .app on macOS, the built executable elsewhere
 cargo waft run -d ios           # the booted simulator, or the newest iPhone
 cargo waft run -d "iPhone 16"   # a simulator by name or id
 cargo waft run -d android       # the connected Android device, or the first emulator, booted
@@ -40,7 +40,7 @@ cargo waft build web            # static folder: index.html, app.js, app_bg.wasm
 myapp/
   Cargo.toml        lib (cdylib + rlib) and a bin, the kit dependency, [package.metadata.waft]
   src/lib.rs        the app, with an #[waft::main] function
-  src/main.rs       one line calling the library's main; never edited
+  src/main.rs       the binary, calling the library's main, a GUI program on Windows; never edited
   assets/icon.png   one 1024 px PNG; every platform's sizes derive from it
 ```
 
@@ -54,6 +54,8 @@ fn main(app: &mut App) {
 ```
 
 On a desktop `run_app` asks for a window with the default configuration; `run_app_with` takes the window's title, size and the rest.
+
+`main.rs` makes the binary a GUI program on Windows (`#![windows_subsystem = "windows"]`, which only a binary's own source can say), so no console window opens with the app; the entry `#[waft::main]` emits attaches it to the console of whatever started it, when that has one (`DefaultEmbedder::attach_to_parent_console`), so what it writes shows in the terminal it was run from. An entry written out without the macro calls that first. It is not the terminal a console program has, as it is not for a Flutter app on Windows either: cmd and PowerShell do not wait for a GUI program, so the prompt comes back at once and the app's output lands over it; Ctrl-C in that terminal, at the prompt too, or closing it, ends the app through the console's default handler, without Waft's quit flow. `cargo waft run` waits for the app, so its terminal stays the app's.
 
 ## Metadata
 
@@ -164,6 +166,10 @@ Signing happens when credentials are present, never by flag.
 ## macOS
 
 The CLI puts the `.app` together itself, as it does an iOS app: the executable in `Contents/MacOS`, the `Info.plist`, the icon (an `.icns` made by `iconutil`) and the resources in `Contents/Resources`, signed with `codesign` as [Signing](#signing) says. `build dmg` makes the disk image around it with `hdiutil`: the app beside a link to Applications in a 600 by 400 window, laid out by a `.DS_Store` the CLI writes, so no Finder window opens while it builds, and the app's icon as the volume's.
+
+## Windows
+
+`build windows`, `build msi` and `build nsis` link the app's icon into its executable as a resource (`src/windows_resources.rs`): its sizes from 16 to 256 pixels, as the compiled resource file `rc.exe` would make, written by the CLI and passed to the linker for the app's own crate alone (`cargo rustc -- -Clink-arg=…`), so neither a resource compiler nor a build script is needed. Explorer, the shortcuts and the taskbar show it, and Waft's host gives it to every window whose configuration names no icon, at the title bar's size and at the taskbar's. cargo-packager puts the same icon on the installer. `cargo waft run` builds and runs the same executable; `cargo run` builds one without the icon. Cargo does not track the resource file, only the argument naming it, so the file is named after a hash of its content: a changed icon is a new argument, and the executable links again.
 
 ## Tools it fetches
 

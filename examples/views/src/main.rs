@@ -4,6 +4,7 @@
 //! cargo run -p views
 //! cargo waft run -d emulator-5554 -p views
 //! ```
+#![windows_subsystem = "windows"]
 
 fn main() {
     // On Android the activity loads the library, whose host calls its `android_main`; there is no `main`.

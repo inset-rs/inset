@@ -39,8 +39,9 @@ use super::absent::{NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices}
 use super::capabilities::{
     ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, GpuInterop,
     ImageDecoding, NativeComposition, NativeMenus, OperatingSystem, PointerQueries, Screens,
-    SystemChanges, SystemClipboard, SystemDrags, SystemImageCodecs, SystemMedia, SystemRequests,
-    TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
+    StandardStreams, SystemChanges, SystemClipboard, SystemDrags, SystemImageCodecs, SystemMedia,
+    SystemRequests, TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility,
+    WorkQueue,
 };
 use super::window_handle_layer::{NoWindowHold, WindowHandleLayer};
 use composition::{LinuxComposition, WaylandCompositor};
@@ -174,3 +175,4 @@ impl SystemRequests for Linux {}
 impl SystemChanges for Linux {}
 impl ApplicationControl for Linux {}
 impl ApplicationLifecycle for Linux {}
+impl StandardStreams for Linux {}

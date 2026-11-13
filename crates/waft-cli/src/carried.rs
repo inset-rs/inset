@@ -83,6 +83,7 @@ fn build_helper(project: &Project, profile: Profile, helper: &Helper) -> Result<
         triple: None,
         artifact: Artifact::Executable(&helper.bin),
         env: Vec::new(),
+        link_inputs: Vec::new(),
     })?;
     Ok(Carried {
         file,
@@ -98,6 +99,7 @@ fn build_library(project: &Project, profile: Profile, library: &Library) -> Resu
         triple: None,
         artifact: Artifact::Library(&library.lib),
         env: Vec::new(),
+        link_inputs: Vec::new(),
     })?;
     Ok(Carried {
         file,

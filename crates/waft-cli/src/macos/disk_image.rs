@@ -242,7 +242,6 @@ fn symlink(_original: &str, _link: std::path::PathBuf) -> std::io::Result<()> {
     ))
 }
 
-
 #[cfg(test)]
 mod tests {
     use ds_parser::Value;

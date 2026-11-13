@@ -124,12 +124,13 @@ impl HostWindow for WinitWindow {
         }
     }
 
-    /// winit's window icon: the title bar's and the taskbar's on Windows, the window manager's on
-    /// X11 and on a Wayland compositor with `xdg_toplevel_icon`; nothing on macOS, whose windows
-    /// show the app's icon alone.
+    /// winit's window icon, the title bar's on Windows, and the taskbar's beside it; the window
+    /// manager's on X11 and on a Wayland compositor with `xdg_toplevel_icon`; nothing on macOS,
+    /// whose windows show the app's icon alone.
     fn set_icon(&self, icon: Option<&IconImage>) {
         if let Some(window) = self.window.upgrade() {
-            window.set_window_icon(icon.and_then(winit_icon));
+            window.set_window_icon(window_icon(icon));
+            System::set_taskbar_icon(&*window, icon);
         }
     }
 
@@ -231,6 +232,13 @@ impl WindowSizeLimits for WinitWindow {
 
 fn logical_size(size: Size) -> winit::dpi::Size {
     LogicalSize::new(size.width(), size.height()).into()
+}
+
+/// The window icon winit shows for `icon`, a window's own: the app's where it names none, as
+/// [`WindowConfig::icon`](waft_embedder::WindowConfig::icon) has it, or where its pixels do not
+/// fill its size.
+pub(crate) fn window_icon(icon: Option<&IconImage>) -> Option<Icon> {
+    icon.and_then(winit_icon).or_else(System::app_icon)
 }
 
 /// `image` as winit's window icon; none for an image whose pixels do not fill its size.

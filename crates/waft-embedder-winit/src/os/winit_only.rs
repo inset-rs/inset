@@ -14,9 +14,9 @@ use super::absent::{
 use super::capabilities::{
     ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, GpuInterop,
     ImageDecoding, NativeComposition, NativeMenus, OperatingSystem, PointerQueries, Screens,
-    SystemChanges, SystemClipboard, SystemDrags, SystemFileDialogs, SystemImageCodecs, SystemMedia,
-    SystemNotifications, SystemOpener, SystemRequests, TrackpadTouches, WindowChrome,
-    WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
+    StandardStreams, SystemChanges, SystemClipboard, SystemDrags, SystemFileDialogs,
+    SystemImageCodecs, SystemMedia, SystemNotifications, SystemOpener, SystemRequests,
+    TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
 };
 use super::window_handle_layer::{NoWindowHold, WindowHandleLayer};
 
@@ -86,3 +86,4 @@ impl SystemRequests for WinitOnly {}
 impl SystemChanges for WinitOnly {}
 impl ApplicationControl for WinitOnly {}
 impl ApplicationLifecycle for WinitOnly {}
+impl StandardStreams for WinitOnly {}

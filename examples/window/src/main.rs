@@ -6,6 +6,7 @@
 //! ```text
 //! cargo run -p window
 //! ```
+#![windows_subsystem = "windows"]
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -27,6 +28,7 @@ const CARD: Color = Color::from_argb(255, 51, 51, 64);
 const LABEL: Color = Color::from_argb(255, 245, 245, 240);
 
 fn main() {
+    WinitEmbedder::attach_to_parent_console();
     WinitEmbedder::default()
         .linux(LinuxSettings {
             app_id: Some(waft_macros::linux_app_id!().to_owned()),

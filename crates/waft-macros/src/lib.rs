@@ -3,7 +3,8 @@
 //! The attribute keeps your function as the app's setup and adds the entry point beside it,
 //! which starts the default embedder and the shell. Which entry depends on the target:
 //!
-//! - desktop and iOS: `main`
+//! - desktop and iOS: `main`, which on Windows first attaches the app to the console of the
+//!   process that started it, since the binary is a GUI program (`cargo waft new`'s `main.rs`)
 //! - web: an exported `main`, called once the page has the module
 //! - Android: `android_main`, called once a process by Waft's Android host with the `AndroidApp`
 //!
@@ -61,8 +62,11 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
         #[allow(dead_code)]
         #as_written
 
+        // A GUI program on Windows has no console of its own: what it writes goes to the
+        // terminal it was run from.
         #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
         pub fn main() {
+            ::waft::DefaultEmbedder::attach_to_parent_console();
             let mut linux = ::waft::LinuxSettings::default();
             linux.app_id = ::std::option::Option::Some(::std::string::String::from(#identifier));
             ::waft::DefaultEmbedder::default()

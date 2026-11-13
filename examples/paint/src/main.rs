@@ -4,6 +4,7 @@
 // Proving a shared display list `Send` walks its nesting past the default limit.
 #![recursion_limit = "256"]
 #![feature(arbitrary_self_types)]
+#![windows_subsystem = "windows"]
 
 use std::f32::consts::TAU;
 use std::rc::Rc;
@@ -21,6 +22,7 @@ use waft_scheduler::{FrameTarget, PersistentFrameCallback, SchedulerBinding};
 use waft_shell::Shell;
 
 fn main() {
+    WinitEmbedder::attach_to_parent_console();
     WinitEmbedder::default()
         .linux(LinuxSettings {
             app_id: Some(waft_macros::linux_app_id!().to_owned()),

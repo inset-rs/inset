@@ -25,6 +25,7 @@ pub fn build(project: &Project, profile: Profile) -> Result<PathBuf> {
         triple: Some(WASM_TARGET),
         artifact: Artifact::Wasm(library),
         env: Vec::new(),
+        link_inputs: Vec::new(),
     })?;
 
     let out = project.out_dir("web", profile);

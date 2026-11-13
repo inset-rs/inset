@@ -25,6 +25,7 @@ mod tools;
 mod usage_descriptions;
 mod wasm;
 mod web;
+mod windows_resources;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -185,7 +186,7 @@ fn run_on(
     let project = Project::load(package)?;
     match target {
         Target::Desktop if cfg!(target_os = "macos") => macos::run(&project, profile, args),
-        Target::Desktop => cargo::run(&project, profile, args),
+        Target::Desktop => desktop::run(&project, profile, args),
         Target::Web { browser } => {
             let out = web::build(&project, profile)?;
             serve::serve_and_open(out, browser)

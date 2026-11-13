@@ -129,10 +129,17 @@ fn waft_version() -> String {
     }
 }
 
+/// The binary: the library's `main`, as a GUI program on Windows, which opens no console window;
+/// the entry `#[waft::main]` emits sends what the app writes to the terminal it was run from.
+/// Only a binary's own source can say its subsystem, so it is here, not in the macro.
 fn main_rs(name: &str) -> String {
     let krate = name.replace('-', "_");
-    format!("fn main() {{\n    {krate}::main();\n}}\n")
+    format!("{GUI_SUBSYSTEM}\nfn main() {{\n    {krate}::main();\n}}\n")
 }
+
+/// The attribute that makes the binary a GUI program on Windows, with its reason; ignored
+/// elsewhere.
+const GUI_SUBSYSTEM: &str = "// A GUI program on Windows: no console window opens with it, and what it writes goes to the\n// terminal it was run from.\n#![windows_subsystem = \"windows\"]\n";
 
 const TOOLCHAIN: &str = "[toolchain]\nchannel = \"nightly\"\n";
 
@@ -168,7 +175,15 @@ mod tests {
     }
 
     #[test]
-    fn binary_calls_the_library_main() {
-        assert_eq!(main_rs("my-app"), "fn main() {\n    my_app::main();\n}\n");
+    fn binary_calls_the_library_main_as_a_gui_program() {
+        let main = main_rs("my-app");
+        assert!(
+            main.contains("#![windows_subsystem = \"windows\"]\n"),
+            "{main}"
+        );
+        assert!(
+            main.ends_with("fn main() {\n    my_app::main();\n}\n"),
+            "{main}"
+        );
     }
 }

@@ -13,6 +13,7 @@
 //! cargo run -p menus
 //! ```
 #![feature(arbitrary_self_types)]
+#![windows_subsystem = "windows"]
 
 use std::rc::Rc;
 
@@ -46,6 +47,7 @@ struct Choices {
 }
 
 fn main() {
+    WinitEmbedder::attach_to_parent_console();
     WinitEmbedder::default()
         .linux(LinuxSettings {
             app_id: Some(waft_macros::linux_app_id!().to_owned()),

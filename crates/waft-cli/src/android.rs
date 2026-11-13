@@ -367,6 +367,7 @@ pub fn build(project: &Project, profile: Profile, abi: Abi) -> Result<Apk> {
         triple: Some(abi.triple()),
         artifact: Artifact::Library(library),
         env: linker_env(ndk, abi, min_sdk)?,
+        link_inputs: Vec::new(),
     })?;
 
     let out = project.out_dir("android", profile);

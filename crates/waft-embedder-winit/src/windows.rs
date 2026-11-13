@@ -31,7 +31,7 @@ use winit::window::{Window, WindowAttributes, WindowId};
 use crate::LinuxSettings;
 use crate::app_requests::AppRequests;
 use crate::gpu::LazyGpu;
-use crate::host_window::{WinitWindow, winit_icon};
+use crate::host_window::{WinitWindow, window_icon};
 use crate::os::capabilities::{
     NativeComposition, OperatingSystem, SystemDrags, WindowChrome, WindowGeometry,
 };
@@ -361,7 +361,7 @@ fn attributes_for(
     }
     attributes = attributes
         .with_title(&config.title)
-        .with_window_icon(config.icon.as_ref().and_then(winit_icon))
+        .with_window_icon(window_icon(config.icon.as_ref()))
         .with_decorations(config.decorations)
         .with_resizable(config.resizable)
         .with_transparent(config.background.sees_through())

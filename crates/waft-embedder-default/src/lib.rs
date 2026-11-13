@@ -63,6 +63,15 @@ impl DefaultEmbedder {
         self
     }
 
+    /// Sends the app's standard output and error to the terminal it was run from, where the
+    /// system starts a GUI program without it: on Windows, the console of the process that
+    /// started the app (`WinitEmbedder::attach_to_parent_console`). `#[waft::main]`'s entry calls
+    /// it first; an entry written out calls it before it writes anything. Nothing elsewhere.
+    pub fn attach_to_parent_console() {
+        #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+        waft_embedder_winit::WinitEmbedder::attach_to_parent_console();
+    }
+
     /// Starts the host loop. `start` runs once, at launch, with the views the host has then,
     /// and returns the client the host drives. On Android the loop runs for the rest of the
     /// process, and this never returns.

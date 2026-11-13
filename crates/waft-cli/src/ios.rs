@@ -81,6 +81,7 @@ pub fn build(project: &Project, profile: Profile, destination: Destination) -> R
         triple: Some(destination.triple()),
         artifact: Artifact::Executable(&project.bin),
         env: vec![("IPHONEOS_DEPLOYMENT_TARGET", minimum_version.clone())],
+        link_inputs: Vec::new(),
     })?;
 
     let out = project.out_dir(destination.dir_name(), profile);

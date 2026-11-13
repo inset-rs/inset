@@ -37,6 +37,7 @@
 //! report of the drag is printed with the types its items are offered in, and on the drop each
 //! item is read in its first type, which the window lists.
 #![feature(arbitrary_self_types)]
+#![windows_subsystem = "windows"]
 
 use std::rc::Rc;
 use std::time::Duration;
@@ -61,6 +62,7 @@ const INK: Color = Color::from_argb(255, 51, 51, 64);
 const SAVE_TIME: Duration = Duration::from_secs(3);
 
 fn main() {
+    WinitEmbedder::attach_to_parent_console();
     let linux = LinuxSettings {
         app_id: Some(waft_macros::linux_app_id!().to_owned()),
     };
