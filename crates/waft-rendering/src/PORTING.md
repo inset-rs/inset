@@ -86,6 +86,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## view.rs → view.dart, binding.rs → binding.dart
 
+- Change: `RenderView` sets the overlay style it finds under the system's bars for its own view.
+  Reason: platform — the overlay style is a view's (waft-services' system_chrome.rs entry).
+  Affect: each window, such as each Android task of one app, has its bars styled from its own layer tree.
+
 - Change: a frame lays out every view's render tree, then paints and composites only its own views, each without the views a `ViewAnchor` places in it.
   Reason: platform — each view has frames of its own, a view placed in another included.
   Affect: drawing one window repaints no other.

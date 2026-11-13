@@ -1,8 +1,16 @@
 //! Flutter `services/system_chrome.dart`: the application switcher description, the system
 //! overlay style, and what a lifecycle change does to it. The rest of `SystemChrome` waits for
 //! the host capabilities it would talk to.
+//!
+//! The overlay style is a view's, sent to the view's host, since each window carries its own
+//! bars, where Flutter's is the app's. The invariant a later editor will break: the pending and the
+//! latest style are kept per view, so one view's style never stands for, or hides, another's.
 
-use waft_embedder::{AppLifecycleState, ApplicationSwitcherDescription, SystemUiOverlayStyle};
+use std::collections::BTreeMap;
+
+use waft_embedder::{
+    AppLifecycleState, ApplicationSwitcherDescription, SystemUiOverlayStyle, ViewId,
+};
 use waft_foundation::{App, Handle, Listener};
 
 /// Specifies a set of mutually exclusive system UI overlays.
@@ -20,11 +28,11 @@ pub enum SystemUiOverlay {
 }
 
 /// Dart's `SystemChrome._pendingStyle` and `SystemChrome._latestStyle`, which are static
-/// fields of a Dart class and one arena object per [`App`] here.
+/// fields of a Dart class and one arena object per [`App`] here, each by view.
 #[derive(Default)]
 struct SystemChromeStyles {
-    pending_style: Option<SystemUiOverlayStyle>,
-    latest_style: Option<SystemUiOverlayStyle>,
+    pending_style: BTreeMap<ViewId, SystemUiOverlayStyle>,
+    latest_style: BTreeMap<ViewId, SystemUiOverlayStyle>,
 }
 
 /// Controls specific aspects of the operating system's graphical interface and
@@ -47,7 +55,8 @@ impl SystemChrome {
     }
 
     /// Specifies the style to use for the system overlays (e.g. the status bar on
-    /// Android or iOS, the system navigation bar on Android) that are visible (if any).
+    /// Android or iOS, the system navigation bar on Android) that are visible (if any) over
+    /// `view`.
     ///
     /// This method will schedule the embedder update to be run in a microtask.
     /// Any subsequent calls to this method during the current event loop will
@@ -65,35 +74,38 @@ impl SystemChrome {
     /// an `AnnotatedRegion` widget instead of calling this method directly. That widget
     /// places a value directly into the layer tree where it can be hit-tested by the
     /// framework.
-    pub fn set_system_ui_overlay_style(app: &mut App, style: &SystemUiOverlayStyle) {
+    pub fn set_system_ui_overlay_style(app: &mut App, view: ViewId, style: &SystemUiOverlayStyle) {
         let styles = app.singleton::<SystemChromeStyles>();
-        if app.get(styles).pending_style.is_some() {
+        if !app.get(styles).pending_style.is_empty() {
             // The microtask has already been queued; just update the pending value.
-            app.get_mut(styles).pending_style = Some(*style);
+            app.get_mut(styles).pending_style.insert(view, *style);
             return;
         }
-        if Some(*style) == app.get(styles).latest_style {
+        if Some(style) == app.get(styles).latest_style.get(&view) {
             // Trivial success: no microtask has been queued and the given style is
             // already in effect, so no need to queue a microtask.
             return;
         }
-        app.get_mut(styles).pending_style = Some(*style);
+        app.get_mut(styles).pending_style.insert(view, *style);
         app.schedule_microtask(Listener::new(move |app| {
-            Self::send_pending_style(app, styles)
+            Self::send_pending_styles(app, styles)
         }));
     }
 
-    /// The body of the microtask Dart's `setSystemUIOverlayStyle` queues.
-    fn send_pending_style(app: &mut App, styles: Handle<SystemChromeStyles>) {
-        let pending = app.get(styles).pending_style;
-        debug_assert!(pending.is_some());
-        if pending != app.get(styles).latest_style {
-            if let (Some(style), Some(chrome)) = (pending, app.platform().system_chrome()) {
-                chrome.set_overlay_style(&style);
+    /// The body of the microtask Dart's `setSystemUIOverlayStyle` queues, for each view a style
+    /// is pending for.
+    fn send_pending_styles(app: &mut App, styles: Handle<SystemChromeStyles>) {
+        let pending = std::mem::take(&mut app.get_mut(styles).pending_style);
+        debug_assert!(!pending.is_empty());
+        for (view, style) in pending {
+            if app.get(styles).latest_style.get(&view) == Some(&style) {
+                continue;
             }
-            app.get_mut(styles).latest_style = pending;
+            if let Some(view) = app.platform().view(view) {
+                view.host().set_overlay_style(&style);
+            }
+            app.get_mut(styles).latest_style.insert(view, style);
         }
-        app.get_mut(styles).pending_style = None;
     }
 
     /// Called by the binding during a transition to a new app lifecycle state.
@@ -103,54 +115,46 @@ impl SystemChrome {
         if state == AppLifecycleState::Detached {
             let styles = app.singleton::<SystemChromeStyles>();
             app.schedule_microtask(Listener::new(move |app| {
-                app.get_mut(styles).latest_style = None;
+                app.get_mut(styles).latest_style.clear();
             }));
         }
     }
 
-    /// The last style that was set using
+    /// The last style that was set over `view` using
     /// [`set_system_ui_overlay_style`](SystemChrome::set_system_ui_overlay_style).
-    pub fn latest_style(app: &mut App) -> Option<SystemUiOverlayStyle> {
+    pub fn latest_style(app: &mut App, view: ViewId) -> Option<SystemUiOverlayStyle> {
         let styles = app.singleton::<SystemChromeStyles>();
-        app.get(styles).latest_style
+        app.get(styles).latest_style.get(&view).copied()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
     use std::rc::Rc;
     use waft_foundation::AppCell;
 
-    use waft_embedder::{Brightness, Color, SystemChrome as SystemChromeHost, TargetPlatform};
-    use waft_test::TestPlatform;
+    use waft_embedder::{Brightness, Color, TargetPlatform};
+    use waft_test::{IMPLICIT_VIEW_ID, TestPlatform, TestView};
 
     use super::*;
 
-    /// A host that records the overlay styles it is handed.
-    #[derive(Default)]
-    struct RecordingChrome {
-        styles: RefCell<Vec<SystemUiOverlayStyle>>,
+    const VIEW: ViewId = IMPLICIT_VIEW_ID;
+    const OTHER_VIEW: ViewId = ViewId(1);
+
+    /// An app with two views, whose hosts record the overlay styles they are handed.
+    fn recording_app() -> (Rc<TestPlatform>, Rc<AppCell>) {
+        let platform = Rc::new(
+            TestPlatform::new()
+                .on(TargetPlatform::IOS)
+                .with_views(&[VIEW, OTHER_VIEW]),
+        );
+        (Rc::clone(&platform), AppCell::with_platform(platform))
     }
 
-    impl SystemChromeHost for RecordingChrome {
-        fn set_overlay_style(&self, style: &SystemUiOverlayStyle) {
-            self.styles.borrow_mut().push(*style);
-        }
-
-        fn set_application_switcher_description(
-            &self,
-            _description: &ApplicationSwitcherDescription,
-        ) {
-        }
-    }
-
-    fn recording_app() -> (Rc<RecordingChrome>, Rc<AppCell>) {
-        let chrome = Rc::new(RecordingChrome::default());
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::IOS)
-            .with_system_chrome(chrome.clone());
-        (chrome, AppCell::with_platform(Rc::new(platform)))
+    /// The styles `view`'s host was handed, oldest first.
+    fn styles_of(platform: &TestPlatform, view: ViewId) -> Vec<SystemUiOverlayStyle> {
+        let view: Rc<TestView> = platform.test_view(view);
+        view.test_host().overlay_styles()
     }
 
     #[test]
@@ -194,46 +198,46 @@ mod tests {
     /// `system_chrome_test.dart`: `SystemChrome overlay style test`.
     #[test]
     fn only_the_last_style_of_a_turn_reaches_the_host() {
-        let (chrome, cell) = recording_app();
+        let (platform, cell) = recording_app();
         let mut app = cell.borrow_mut();
-        SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::LIGHT);
-        SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::DARK);
+        SystemChrome::set_system_ui_overlay_style(&mut app, VIEW, &SystemUiOverlayStyle::LIGHT);
+        SystemChrome::set_system_ui_overlay_style(&mut app, VIEW, &SystemUiOverlayStyle::DARK);
         assert!(
-            chrome.styles.borrow().is_empty(),
+            styles_of(&platform, VIEW).is_empty(),
             "nothing is sent before the microtask runs"
         );
-        assert_eq!(SystemChrome::latest_style(&mut app), None);
+        assert_eq!(SystemChrome::latest_style(&mut app, VIEW), None);
 
         app.drain_microtasks();
         assert_eq!(
-            chrome.styles.borrow().as_slice(),
+            styles_of(&platform, VIEW).as_slice(),
             [SystemUiOverlayStyle::DARK]
         );
         assert_eq!(
-            SystemChrome::latest_style(&mut app),
+            SystemChrome::latest_style(&mut app, VIEW),
             Some(SystemUiOverlayStyle::DARK)
         );
     }
 
     #[test]
     fn a_style_already_in_effect_queues_nothing() {
-        let (chrome, cell) = recording_app();
+        let (platform, cell) = recording_app();
         let mut app = cell.borrow_mut();
-        SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::LIGHT);
+        SystemChrome::set_system_ui_overlay_style(&mut app, VIEW, &SystemUiOverlayStyle::LIGHT);
         app.drain_microtasks();
 
-        SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::LIGHT);
+        SystemChrome::set_system_ui_overlay_style(&mut app, VIEW, &SystemUiOverlayStyle::LIGHT);
         app.drain_microtasks();
         assert_eq!(
-            chrome.styles.borrow().as_slice(),
+            styles_of(&platform, VIEW).as_slice(),
             [SystemUiOverlayStyle::LIGHT],
             "an unchanged style does not reach the host again"
         );
 
-        SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::DARK);
+        SystemChrome::set_system_ui_overlay_style(&mut app, VIEW, &SystemUiOverlayStyle::DARK);
         app.drain_microtasks();
         assert_eq!(
-            chrome.styles.borrow().as_slice(),
+            styles_of(&platform, VIEW).as_slice(),
             [SystemUiOverlayStyle::LIGHT, SystemUiOverlayStyle::DARK]
         );
     }
@@ -241,36 +245,67 @@ mod tests {
     /// `system_chrome_test.dart`: the end of `SystemChrome overlay style test`.
     #[test]
     fn the_style_is_sent_again_after_the_app_was_detached() {
-        let (chrome, cell) = recording_app();
+        let (platform, cell) = recording_app();
         let mut app = cell.borrow_mut();
-        SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::LIGHT);
+        SystemChrome::set_system_ui_overlay_style(&mut app, VIEW, &SystemUiOverlayStyle::LIGHT);
         app.drain_microtasks();
-        assert_eq!(chrome.styles.borrow().len(), 1);
+        assert_eq!(styles_of(&platform, VIEW).len(), 1);
 
         // The state should be sent again if the app was detached.
         SystemChrome::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Detached);
         app.drain_microtasks();
         SystemChrome::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Resumed);
-        SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::LIGHT);
+        SystemChrome::set_system_ui_overlay_style(&mut app, VIEW, &SystemUiOverlayStyle::LIGHT);
         app.drain_microtasks();
-        assert_eq!(chrome.styles.borrow().len(), 2);
+        assert_eq!(styles_of(&platform, VIEW).len(), 2);
     }
 
     #[test]
     fn a_style_that_returns_to_the_latest_within_the_turn_sends_nothing() {
-        let (chrome, cell) = recording_app();
+        let (platform, cell) = recording_app();
         let mut app = cell.borrow_mut();
-        SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::LIGHT);
+        SystemChrome::set_system_ui_overlay_style(&mut app, VIEW, &SystemUiOverlayStyle::LIGHT);
         app.drain_microtasks();
-        chrome.styles.borrow_mut().clear();
 
-        SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::DARK);
-        SystemChrome::set_system_ui_overlay_style(&mut app, &SystemUiOverlayStyle::LIGHT);
+        SystemChrome::set_system_ui_overlay_style(&mut app, VIEW, &SystemUiOverlayStyle::DARK);
+        SystemChrome::set_system_ui_overlay_style(&mut app, VIEW, &SystemUiOverlayStyle::LIGHT);
         app.drain_microtasks();
-        assert!(chrome.styles.borrow().is_empty());
         assert_eq!(
-            SystemChrome::latest_style(&mut app),
+            styles_of(&platform, VIEW).as_slice(),
+            [SystemUiOverlayStyle::LIGHT]
+        );
+        assert_eq!(
+            SystemChrome::latest_style(&mut app, VIEW),
             Some(SystemUiOverlayStyle::LIGHT)
+        );
+    }
+
+    #[test]
+    fn each_view_keeps_its_own_style() {
+        let (platform, cell) = recording_app();
+        let mut app = cell.borrow_mut();
+        SystemChrome::set_system_ui_overlay_style(&mut app, VIEW, &SystemUiOverlayStyle::LIGHT);
+        SystemChrome::set_system_ui_overlay_style(
+            &mut app,
+            OTHER_VIEW,
+            &SystemUiOverlayStyle::DARK,
+        );
+        app.drain_microtasks();
+        assert_eq!(
+            styles_of(&platform, VIEW).as_slice(),
+            [SystemUiOverlayStyle::LIGHT]
+        );
+        assert_eq!(
+            styles_of(&platform, OTHER_VIEW).as_slice(),
+            [SystemUiOverlayStyle::DARK]
+        );
+
+        SystemChrome::set_system_ui_overlay_style(&mut app, VIEW, &SystemUiOverlayStyle::LIGHT);
+        app.drain_microtasks();
+        assert_eq!(
+            styles_of(&platform, VIEW).len(),
+            1,
+            "a style in effect over its view is not sent again for another view's"
         );
     }
 }

@@ -39,7 +39,7 @@ use waft_embedder::{
     ViewFocusState, ViewId,
 };
 
-use crate::activity::{Activity, AttachedActivity};
+use crate::activity::Activity;
 use crate::activity_events::{ActivityEvent, Told};
 use crate::app_thread::AndroidApp;
 use crate::application::Application;
@@ -49,8 +49,8 @@ use crate::input_queues::InputQueues;
 use crate::log::warn_to_log;
 use crate::open_requests::OpenRequests;
 use crate::platform::AndroidPlatform;
-use crate::text_input::{AndroidTextInput, TextInputEvent};
-use crate::view::AndroidView;
+use crate::text_input::TextInputEvent;
+use crate::view::{AndroidView, ViewParts};
 use crate::views::Views;
 use crate::vsync::Vsync;
 
@@ -258,8 +258,9 @@ impl<C: EmbedderClient> Host<C> {
     }
 
     /// Android made `activity` for the view numbered `id`, with `configuration`: the activity is
-    /// attached to the view, which is made if it is new, and to the app. Its intent is read for
-    /// what it asks, unless the activity was `restored`, whose intent was read when it first came.
+    /// attached to the view, which is made if it is new. The launcher's intent is
+    /// read for what it asks, unless the activity was `restored`, whose intent was read when it
+    /// first came; a document activity's intent is the view's own (`view_requests.rs`).
     fn activity_created(
         &mut self,
         id: ViewId,
@@ -269,30 +270,35 @@ impl<C: EmbedderClient> Host<C> {
     ) {
         let view = match self.views.get(id) {
             Some(view) => view,
-            None => self.add_view(id, configuration.clone()),
+            None => self.add_view(id, activity, configuration.clone()),
         };
         view.attach(activity, configuration);
         crate::window_insets::hear(&self.application, activity, id);
-        self.platform.attach(activity);
-        if !restored {
+        if !restored && !activity.is_document() {
             crate::intents::read_launch_intent(activity);
         }
     }
 
-    /// The view numbered `id`, one of the app's from now on, without an activity or a window yet:
-    /// what its activity's keyboard types and the insets Android applies to its window are told
-    /// as that view's. The client hears of it, once there is one.
-    fn add_view(&mut self, id: ViewId, configuration: Configuration) -> Rc<AndroidView> {
-        let activity = AttachedActivity::default();
-        let text_input = AndroidTextInput::new(&self.application, activity.clone());
-        let view = Rc::new(AndroidView::new(
+    /// The view numbered `id`, which `activity` arrived as, one of the app's from now on, without
+    /// a window yet: what its activity's keyboard types and the insets Android applies to its
+    /// window are told as that view's. The client hears of it, once there is one.
+    fn add_view(
+        &mut self,
+        id: ViewId,
+        activity: &Activity,
+        configuration: Configuration,
+    ) -> Rc<AndroidView> {
+        let view = AndroidView::new(
             id,
-            activity,
-            configuration,
-            &self.gpu,
-            self.compositor.as_deref(),
-            text_input,
-        ));
+            ViewParts {
+                arrival: self.platform.view_requests.arrival(activity),
+                configuration,
+                application: &self.application,
+                app_description: self.platform.app_description.clone(),
+                gpu: &self.gpu,
+                compositor: self.compositor.as_deref(),
+            },
+        );
         self.views.add(Rc::clone(&view));
         if let Some(client) = &mut self.client {
             client.view_added(id);
@@ -310,7 +316,6 @@ impl<C: EmbedderClient> Host<C> {
         };
         if let Some(activity) = view.activity() {
             view.detach(&activity);
-            self.platform.detach(&activity);
         }
         if finishing {
             self.remove_view(id);
@@ -327,7 +332,7 @@ impl<C: EmbedderClient> Host<C> {
     }
 
     /// The system gave the activity of the view numbered `id` its window: the first window of the
-    /// app's starts the client.
+    /// app's starts the client, and the view's task is no longer minimized.
     fn window_arrived(&mut self, id: ViewId, window: NativeWindow) {
         let Some(view) = self.views.get(id) else {
             return;
@@ -344,6 +349,7 @@ impl<C: EmbedderClient> Host<C> {
             // window, and its metrics may have changed while the app was away.
             if let Some(client) = &mut self.client {
                 client.view_metrics_changed(id);
+                client.window_changed(id);
             }
             view.represent();
         }
@@ -353,11 +359,14 @@ impl<C: EmbedderClient> Host<C> {
         self.start_vsync(&window);
     }
 
-    /// The system took the window of the view numbered `id` away; the display's signal stops with
-    /// the last window.
+    /// The system took the window of the view numbered `id` away, which minimizes its task; the
+    /// display's signal stops with the last window.
     fn window_gone(&mut self, id: ViewId) {
         if let Some(view) = self.views.get(id) {
             view.window_gone();
+            if let Some(client) = &mut self.client {
+                client.window_changed(id);
+            }
         }
         if !self.views.any_has_window() {
             self.vsync = None;
@@ -472,8 +481,12 @@ impl<C: EmbedderClient> Host<C> {
     }
 
     /// The window of the view numbered `id` gained or lost the focus; one that gains it has the
-    /// clipboard looked at, which only the focused app may read.
+    /// clipboard looked at, which only the focused app may read, and the app's tasks, which the
+    /// user may have swiped away meanwhile.
     fn on_focus(&mut self, id: ViewId, focused: bool) {
+        if let Some(view) = self.views.get(id) {
+            view.set_focused(focused);
+        }
         if let Some(client) = &mut self.client {
             client.view_focus_changed(ViewFocusEvent {
                 view_id: id,
@@ -487,6 +500,31 @@ impl<C: EmbedderClient> Host<C> {
         }
         if focused {
             self.look_at_clipboard();
+            self.look_at_tasks();
+        }
+    }
+
+    /// Removes each view whose activity Android destroyed to make again and whose task is gone
+    /// since: the user swiped its card away, which no activity is there to hear. Android keeps
+    /// the task of a view whose activity it will make again, so a task missing from the app's is
+    /// one that will not come back.
+    fn look_at_tasks(&mut self) {
+        let kept: Vec<_> = self
+            .views
+            .all()
+            .into_iter()
+            .filter(|view| view.activity().is_none())
+            .collect();
+        if kept.is_empty() {
+            return;
+        }
+        let Some(tasks) = crate::task_window::task_ids(&self.application) else {
+            return;
+        };
+        for view in kept {
+            if view.task().task_id().is_some_and(|id| !tasks.contains(&id)) {
+                self.remove_view(view.id());
+            }
         }
     }
 
@@ -554,7 +592,7 @@ impl<C: EmbedderClient> Host<C> {
         let went_back = self
             .client
             .as_mut()
-            .is_some_and(|client| client.pop_route());
+            .is_some_and(|client| client.pop_route(view));
         if !went_back {
             self.close(view);
         }
@@ -588,6 +626,8 @@ impl<C: EmbedderClient> Host<C> {
     /// came, a wake, when one was asked for or its timer wakeup has arrived, and a frame at the
     /// display's refresh.
     fn serve_requests(&mut self) {
+        self.hand_on_failed_requests();
+        self.remove_views_of_removed_tasks();
         self.hand_on_intents();
         self.hand_on_typing();
         if self.platform.clipboard.clear_expired(Instant::now())
@@ -602,6 +642,26 @@ impl<C: EmbedderClient> Host<C> {
             client.wake(elapsed);
         }
         self.pace();
+    }
+
+    /// Tells the client of the requests for views that got none.
+    fn hand_on_failed_requests(&mut self) {
+        let Some(client) = &mut self.client else {
+            return;
+        };
+        for (request, error) in self.platform.view_requests.take_failed() {
+            client.view_request_failed(request, error);
+        }
+    }
+
+    /// Removes the views whose tasks the app removed while Android had destroyed their activities
+    /// (`TaskWindow::close`).
+    fn remove_views_of_removed_tasks(&mut self) {
+        for view in self.views.all() {
+            if view.is_task_removed() {
+                self.remove_view(view.id());
+            }
+        }
     }
 
     /// Hands the client what the intents that arrived ask: the files and links to open, and the

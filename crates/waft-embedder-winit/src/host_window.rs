@@ -8,9 +8,10 @@ use std::sync::Weak;
 use std::time::Duration;
 
 use waft_embedder::{
-    HostWindow, RawWindowHandle, Rect, Size, TitleBarAction, ViewRef, WindowSizeLimits,
+    HostWindow, IconImage, RawWindowHandle, Rect, Size, TitleBarAction, ViewRef, WindowSizeLimits,
 };
 use winit::dpi::{LogicalPosition, LogicalSize};
+use winit::icon::{Icon, RgbaIcon};
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::{Window, WindowId};
 
@@ -123,6 +124,15 @@ impl HostWindow for WinitWindow {
         }
     }
 
+    /// winit's window icon: the title bar's and the taskbar's on Windows, the window manager's on
+    /// X11 and on a Wayland compositor with `xdg_toplevel_icon`; nothing on macOS, whose windows
+    /// show the app's icon alone.
+    fn set_icon(&self, icon: Option<&IconImage>) {
+        if let Some(window) = self.window.upgrade() {
+            window.set_window_icon(icon.and_then(winit_icon));
+        }
+    }
+
     fn show(&self) {
         if let Some(window) = self.window.upgrade() {
             window.set_visible(true);
@@ -221,4 +231,15 @@ impl WindowSizeLimits for WinitWindow {
 
 fn logical_size(size: Size) -> winit::dpi::Size {
     LogicalSize::new(size.width(), size.height()).into()
+}
+
+/// `image` as winit's window icon; none for an image whose pixels do not fill its size.
+pub(crate) fn winit_icon(image: &IconImage) -> Option<Icon> {
+    match RgbaIcon::new(image.rgba.to_vec(), image.width, image.height) {
+        Ok(icon) => Some(icon.into()),
+        Err(error) => {
+            eprintln!("waft: a window icon was dropped: {error}");
+            None
+        }
+    }
 }

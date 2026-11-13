@@ -195,8 +195,8 @@ pub struct PlatformCallbacks {
     /// Something happened to one of the app's tray icons; no Flutter counterpart, and the app's to
     /// set.
     pub on_tray_icon_event: Option<TrayIconEventCallback>,
-    /// The user asked to go back. Answers whether the application went back. Flutter's
-    /// `popRoute` on `SystemChannels.navigation`.
+    /// The user asked to go back in a view. Answers whether the application went back there.
+    /// Flutter's `popRoute` on `SystemChannels.navigation`, which names no view.
     pub on_pop_route: Option<PopRouteCallback>,
     /// The platform added a view: one the platform gave, or one the app asked for. Flutter's
     /// `_addView` tells it only as `onMetricsChanged`.
@@ -231,7 +231,7 @@ pub type MenuSelectedCallback = Rc<dyn Fn(&mut App, MenuId)>;
 pub type TrayIconEventCallback = Rc<dyn Fn(&mut App, TrayIconId, TrayIconEvent)>;
 
 /// The framework's handler for `EmbedderClient::pop_route`.
-pub type PopRouteCallback = Rc<dyn Fn(&mut App) -> bool>;
+pub type PopRouteCallback = Rc<dyn Fn(&mut App, ViewId) -> bool>;
 
 /// The framework's handler for `EmbedderClient::view_added` and `view_removed`.
 pub type ViewChangeCallback = Rc<dyn Fn(&mut App, ViewId)>;

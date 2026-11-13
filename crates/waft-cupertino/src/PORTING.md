@@ -10,7 +10,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - activity_indicator.rs → activity_indicator.dart
 - form_section.rs → form_section.dart
 - focus_halo.rs → cupertino_focus_halo.dart
-- app.rs → app.dart
 - constants.rs → constants.dart
 - theme.rs → theme.dart
 - localizations.rs → localizations.dart
@@ -20,6 +19,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - desktop_text_selection.rs → desktop_text_selection.dart
 - text_selection.rs → text_selection.dart
 - text_selection_toolbar_button.rs → text_selection_toolbar_button.dart
+
+## app.rs → app.dart
+
+- Change: the overlay style `CupertinoApp` sets from its brightness is set for the view it is built in (`View::maybe_of`), and for none outside a view.
+  Reason: platform — the overlay style is a view's (waft-services' system_chrome.rs entry).
+  Affect: two `CupertinoApp`s in two views, such as two Android tasks of one app, each style their own view's bars.
 
 ## adaptive_text_selection_toolbar.rs → adaptive_text_selection_toolbar.dart
 

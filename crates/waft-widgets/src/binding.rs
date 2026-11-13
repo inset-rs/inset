@@ -165,13 +165,14 @@ pub trait WidgetsBindingObserver {
         let _ = app;
     }
 
-    /// Called when the user asks to go back, which on Android is the back button or the
-    /// back gesture.
+    /// Called when the user asks to go back in `view`, which on Android is the back button or
+    /// the back gesture in the activity whose window the view is.
     ///
     /// Answers whether this observer went back. The first one that answers `true` stops
-    /// the others from being asked.
-    fn did_pop_route(&self, app: &mut App) -> bool {
-        let _ = app;
+    /// the others from being asked. An observer that belongs to one view answers for that view
+    /// alone.
+    fn did_pop_route(&self, app: &mut App, view: ViewId) -> bool {
+        let _ = (app, view);
         false
     }
 
@@ -253,8 +254,8 @@ pub trait WidgetsBindingObserverObject: Sized + 'static {
     }
 
     /// See [`WidgetsBindingObserver::did_pop_route`].
-    fn did_pop_route(self: Handle<Self>, app: &mut App) -> bool {
-        let _ = app;
+    fn did_pop_route(self: Handle<Self>, app: &mut App, view: ViewId) -> bool {
+        let _ = (app, view);
         false
     }
 
@@ -316,8 +317,8 @@ impl<T: WidgetsBindingObserverObject> WidgetsBindingObserver for Handle<T> {
         T::did_change_accessibility_features(*self, app);
     }
 
-    fn did_pop_route(&self, app: &mut App) -> bool {
-        T::did_pop_route(*self, app)
+    fn did_pop_route(&self, app: &mut App, view: ViewId) -> bool {
+        T::did_pop_route(*self, app, view)
     }
 
     fn did_add_view(&self, app: &mut App, view: &ViewRef) {
@@ -429,8 +430,8 @@ impl WidgetsBinding {
         callbacks.on_locale_changed = Some(Listener::new(|app| {
             WidgetsBinding::instance(app).handle_locale_changed(app)
         }));
-        callbacks.on_pop_route = Some(Rc::new(|app| {
-            WidgetsBinding::instance(app).handle_pop_route(app)
+        callbacks.on_pop_route = Some(Rc::new(|app, view| {
+            WidgetsBinding::instance(app).handle_pop_route(app, view)
         }));
         callbacks.on_view_added = Some(Rc::new(|app, view| {
             WidgetsBinding::instance(app).handle_view_added(app, view)
@@ -802,14 +803,14 @@ impl WidgetsBinding {
         }
     }
 
-    /// Called when the user asks to go back: asks each observer in turn and stops at the
-    /// first that says it went back.
+    /// Called when the user asks to go back in `view`: asks each observer in turn and stops at
+    /// the first that says it went back.
     ///
     /// Answers whether any of them did. When none did there was nothing left to go back
-    /// to, and the host does whatever the platform does without the application.
-    pub fn handle_pop_route(self: Handle<Self>, app: &mut App) -> bool {
+    /// to in the view, and the host does whatever the platform does without the application.
+    pub fn handle_pop_route(self: Handle<Self>, app: &mut App, view: ViewId) -> bool {
         for observer in app.get(self).observers.clone() {
-            if observer.did_pop_route(app) {
+            if observer.did_pop_route(app, view) {
                 return true;
             }
         }

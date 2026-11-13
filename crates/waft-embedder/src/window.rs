@@ -3,14 +3,17 @@
 //! An app asks for a view in a window configured as a [`WindowConfig`]
 //! (`Platform::request_view`), and the view arrives later, as every view does, carrying the
 //! request's [`RequestId`], as iOS hands back the activity of `requestSceneSessionActivation` with
-//! the connecting scene. On a desktop the host makes the window; where the platform gives the app
-//! views and makes none, on a phone and when embedded, a request is refused. A view in a window
+//! the connecting scene. On a desktop the host makes the window, and on Android a task with an
+//! activity of its own; where the platform gives the app views and makes none, on an iPhone and
+//! when embedded, a request is refused. A view in a window
 //! the app may manage, one it asked for or one the platform gave, has a [`HostWindow`]
 //! (`View::window`): the configuration every window wants up front, whether the window is
 //! minimized or occluded, which the host reports with the window's moves
 //! (`EmbedderClient::window_changed`), the limits the user resizes it within where users resize
 //! windows ([`WindowSizeLimits`]), the native handle for anything beyond it, and the window's
-//! closing, which is how a view closes.
+//! closing, which is how a view closes. On Android a window is an activity's task, the card in
+//! Recents: its title and icon are the card's, closing it removes the task, and minimizing it sends
+//! the task to the background.
 //!
 //! Flutter's windowing API (`widgets/_window.dart`, experimental) builds window archetypes
 //! over the engine's views, each controller making its window within its constructor.
@@ -21,7 +24,7 @@ use std::time::Duration;
 
 pub use raw_window_handle::RawWindowHandle;
 
-use crate::{Rect, Size, ViewRef};
+use crate::{IconImage, Rect, Size, ViewRef};
 
 /// How a window is made. Sizes and positions are logical, in the host's screen space with
 /// the origin at the top left of the primary screen.
@@ -33,6 +36,10 @@ use crate::{Rect, Size, ViewRef};
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowConfig {
     pub title: String,
+    /// The window's own icon, where the system shows one for a window rather than for the app:
+    /// the title bar's and the taskbar's on Windows and X11, the card's in Android's Recents. The
+    /// app's icon where `None`.
+    pub icon: Option<IconImage>,
     pub size: [f64; 2],
     /// Where the window opens; the host chooses when `None`.
     pub position: Option<[f64; 2]>,
@@ -57,6 +64,7 @@ impl Default for WindowConfig {
     fn default() -> WindowConfig {
         WindowConfig {
             title: String::new(),
+            icon: None,
             size: [900.0, 600.0],
             position: None,
             decorations: true,
@@ -174,6 +182,10 @@ pub trait HostWindow: 'static {
     fn set_frame(&self, frame: Rect, animate: Option<Duration>);
 
     fn set_title(&self, title: &str);
+
+    /// The window's own icon from now on ([`WindowConfig::icon`]); the app's icon where `None`.
+    /// A system that shows no icon for a window, as macOS and Wayland do not, drops it.
+    fn set_icon(&self, icon: Option<&IconImage>);
 
     fn show(&self);
 

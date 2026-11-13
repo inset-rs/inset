@@ -88,6 +88,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — there are no method channels; the host trait is the channel.
   Affect: a `PlatformMenuBar` sets nothing on a host without a menu bar, where Flutter's channel call fails unheard.
 
+- Change: `WidgetsBindingObserver::did_pop_route` and `WidgetsBinding::handle_pop_route` take the view the user went back in, where Dart's `didPopRoute` names none.
+  Reason: platform — each Android task of one app is a view with its own Back, and the host says which (`EmbedderClient::pop_route`).
+  Affect: an observer that belongs to one view answers for that view alone, and one for the whole app answers for any.
+
 - Change: `WidgetsBindingObserver` hears a view added or removed by its id (`did_add_view`, `did_remove_view`) and a request to close one (`did_request_view_close`), where Flutter tells only `didChangeMetrics` and a listener compares `platformDispatcher.views` with what it had.
   Reason: platform — the host reports each view's arrival, departure and close request by view, and every view the app has arrives this way.
   Affect: the observers hear only the views no `WindowController` asked for, and a close request stops at the first observer that answers `true`.
@@ -307,9 +311,13 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — an `Rc` or an arena handle cannot be a `const`, and Dart's `defaultActions` is one mutable map of shared action objects.
   Affect: modifying the returned map changes only the app it is passed to, where Dart's global map is shared by every `WidgetsApp`.
 
-- Change: the default navigation-notification handler tells the host through `Platform::set_framework_handles_back` on every target, where Dart's `SystemNavigator.setFrameworkHandlesBack` sends it on Android alone.
-  Reason: platform — whether Back is heard in advance is the host's to know, and a host whose app answers behind an interface hears it on any system, as a program of WaOS's does.
-  Affect: a host that implements it hears whether a navigator can pop on every system; the default drops it, as a host that asks `EmbedderClient::pop_route` on the spot does.
+- Change: the default navigation-notification handler tells the host of the view the app is built in through `ViewHost::set_framework_handles_back` on every target, where Dart's `SystemNavigator.setFrameworkHandlesBack` tells the platform as a whole on Android alone.
+  Reason: platform — whether Back is heard in advance is the host's to know, a host whose app answers behind an interface hears it on any system, as a program of WaOS's does, and each Android task of one app has its own Back.
+  Affect: a host that implements it hears whether a navigator can pop in each view on every system; the default drops it, as a host that asks `EmbedderClient::pop_route` on the spot does.
+
+- Change: `did_pop_route` goes back only for a Back in the view the app is built in.
+  Reason: platform — the binding hears Back for one view (binding.rs's `did_pop_route` entry).
+  Affect: with an app in each of two views, Back pops the navigator of the view it was pressed in, and the other's stays.
 
 ## widgets/scroll_context.rs → scroll_context.dart
 

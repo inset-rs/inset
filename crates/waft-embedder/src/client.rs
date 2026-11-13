@@ -111,19 +111,20 @@ pub trait EmbedderClient {
     /// keyboard with other native components should not propagate a handled one.
     fn key_data(&mut self, data: KeyData) -> bool;
 
-    /// The user asked to go back: Android's back button or back gesture, and whatever a
-    /// later host maps onto the same idea.
+    /// The user asked to go back in `view`: Android's back button or back gesture, in the
+    /// activity whose window the view is, and whatever a later host maps onto the same idea.
     ///
     /// Answers whether the application went back. `false` means there was nothing left to
-    /// go back to, and the host should then do what the platform does without the
-    /// application, which on Android is to close the activity.
+    /// go back to in the view, and the host should then do what the platform does without the
+    /// application, which on Android is the system's own Back for the activity.
     ///
     /// Flutter sends this as `popRoute` on `SystemChannels.navigation`, and has to ask the
     /// framework in advance whether it handles back at all, because the answer cannot
     /// cross its channel in time. This call answers on the spot instead; a host that cannot ask
     /// on the spot hears it in advance through
-    /// [`Platform::set_framework_handles_back`](crate::Platform::set_framework_handles_back).
-    fn pop_route(&mut self) -> bool {
+    /// [`ViewHost::set_framework_handles_back`](crate::ViewHost::set_framework_handles_back).
+    fn pop_route(&mut self, view: ViewId) -> bool {
+        let _ = view;
         false
     }
 

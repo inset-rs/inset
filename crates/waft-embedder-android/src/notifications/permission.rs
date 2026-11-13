@@ -15,14 +15,15 @@
 //!
 //! Whether the permission is granted is the application's to answer. The question, and whether the
 //! user refused it once, are an activity's alone (`Activity.requestPermissions`,
-//! `shouldShowRequestPermissionRationale`): the one the permission was made with, the app's one,
-//! over which the question shows. An answer is matched to its question by a request code no other
+//! `shouldShowRequestPermissionRationale`): `NotificationPermission` naming no view, the activity
+//! in front (`views.rs`), over which the question shows. An answer is matched to its question by a request code no other
 //! question in the process has, whichever activity hands it on.
 
 // JNI hands the native method raw arguments; that is the `unsafe` here.
 #![allow(unsafe_code)]
 
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock, PoisonError};
 
@@ -32,10 +33,11 @@ use jni::sys::jint;
 use jni::{Env, EnvUnowned, NativeMethod, jni_sig, jni_str};
 use waft_embedder::{NotificationError, NotificationPermission, PermissionFuture, PermissionState};
 
-use crate::activity::{AttachedActivity, WAFT_ACTIVITY, device_api_level};
+use crate::activity::{Activity, WAFT_ACTIVITY, device_api_level};
 use crate::answer::{Answer, answer};
 use crate::application::Application;
 use crate::log::warn_to_log;
+use crate::views::Views;
 
 /// `Manifest.permission.POST_NOTIFICATIONS`.
 const POST_NOTIFICATIONS: &str = "android.permission.POST_NOTIFICATIONS";
@@ -54,19 +56,22 @@ static NEXT_REQUEST: AtomicI32 = AtomicI32::new(1);
 #[derive(Clone)]
 pub(super) struct Permission {
     application: Application,
-    /// The activity the question is asked over, which gets its answer: the one attached to the
-    /// app.
-    activity: AttachedActivity,
+    /// The views, whose activity in front the question is asked over, and gets its answer.
+    views: Rc<Views>,
     /// Whether the system asks the user: Android 13 and later, for an app that targets it.
     asks: bool,
 }
 
 impl Permission {
-    /// The permission, asked for over `activity`, once the answer method of Waft's activity is
-    /// registered; `None` under an activity that is not Waft's, which hands no answer on.
-    pub(super) fn new(application: Application, activity: AttachedActivity) -> Option<Permission> {
-        let is_wafts = activity.get().is_some_and(|activity| activity.is_wafts());
-        if !(answers_are_heard(&application) && is_wafts) {
+    /// The permission, asked for over the activity in front, once the answer method of Waft's
+    /// activity is registered; `None` where the app's activities, as `first` tells, are not
+    /// Waft's, which hand no answer on.
+    pub(super) fn new(
+        application: Application,
+        views: Rc<Views>,
+        first: &Activity,
+    ) -> Option<Permission> {
+        if !(answers_are_heard(&application) && first.is_wafts()) {
             return None;
         }
         let asks = application.with(|env, context| {
@@ -75,7 +80,7 @@ impl Permission {
         match asks {
             Ok(asks) => Some(Permission {
                 application,
-                activity,
+                views,
                 asks,
             }),
             Err(_) => {
@@ -121,7 +126,7 @@ impl Permission {
     /// The state where the app does not hold the permission: refused, where the user refused it
     /// once, and otherwise not asked for. Only an activity answers.
     fn where_not_held(&self) -> jni::errors::Result<PermissionState> {
-        self.activity.with(|env, activity| {
+        self.in_front()?.with(|env, activity| {
             Ok(if refused_once(env, activity)? {
                 PermissionState::Denied
             } else {
@@ -130,27 +135,38 @@ impl Permission {
         })
     }
 
+    /// The activity in front, which the question is asked over; an error while none is.
+    fn in_front(&self) -> jni::errors::Result<Activity> {
+        self.views
+            .activity_in_front()
+            .ok_or(jni::errors::Error::NullPtr(
+                "an activity in sight, while none is",
+            ))
+    }
+
     /// Shows the system's question, and answers the user's answer.
     fn ask(&self) -> PermissionFuture {
         let request = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed);
         let (answer, answered) = answer(PermissionState::NotAsked);
         locked(&PENDING).insert(request, answer);
-        let asked = self.activity.with(|env, activity| {
-            let permissions =
-                env.new_object_array(1, jni_str!("java/lang/String"), JObject::null())?;
-            let permission = env.new_string(POST_NOTIFICATIONS)?;
-            permissions.set_element(env, 0, &permission)?;
-            env.call_method(
-                activity,
-                jni_str!("requestPermissions"),
-                jni_sig!("([Ljava/lang/String;I)V"),
-                &[JValue::Object(&permissions), JValue::Int(request)],
-            )
-            .map(drop)
+        let asked = self.in_front().and_then(|in_front| {
+            in_front.with(|env, activity| {
+                let permissions =
+                    env.new_object_array(1, jni_str!("java/lang/String"), JObject::null())?;
+                let permission = env.new_string(POST_NOTIFICATIONS)?;
+                permissions.set_element(env, 0, &permission)?;
+                env.call_method(
+                    activity,
+                    jni_str!("requestPermissions"),
+                    jni_sig!("([Ljava/lang/String;I)V"),
+                    &[JValue::Object(&permissions), JValue::Int(request)],
+                )
+                .map(drop)
+            })
         });
         if let Err(error) = asked {
             warn_to_log!("waft: the permission to notify could not be asked for: {error}");
-            self.activity.clear_exception();
+            self.application.clear_exception();
             if let Some(answer) = locked(&PENDING).remove(&request) {
                 answer.give(self.current());
             }

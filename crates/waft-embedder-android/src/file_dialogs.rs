@@ -4,10 +4,11 @@
 //! waft-cli builds into the app and whose `onActivityResult` calls the method registered here;
 //! under another activity the dialogs are `None`.
 //!
-//! A picker is started by one activity, over which it shows and which gets its result: the one
-//! the pickers were made with, the app's one, whichever view the app names as the dialog's parent.
-//! A result is matched to its pick by a request code no other pick in the process has, so it
-//! finds its pick whichever activity hands it on. The documents picked are the application's: any
+//! A picker is started by one activity, over which it shows and which gets its result: the
+//! activity of the view the app names as the dialog's parent, and of the view in front where it
+//! names none (`views.rs`), since only an activity gets a result. A result is matched to its pick
+//! by a request code no other pick in the process has, so it finds its pick whichever activity
+//! hands it on. The documents picked are the application's: any
 //! context opens them.
 //!
 //! A document has no path, so each pick is opened when it is answered: `"rw"` for a writable pick,
@@ -46,10 +47,13 @@ use waft_embedder::{
     FolderOptions, OpenOptions, PickedFile, PickedFolder, SaveOptions, ViewId,
 };
 
-use crate::activity::{AttachedActivity, WAFT_ACTIVITY};
+use std::rc::Rc;
+
+use crate::activity::{Activity, WAFT_ACTIVITY};
 use crate::answer::{Answer, Answered, answer};
 use crate::application::Application;
 use crate::document_tree::DocumentFolder;
+use crate::views::Views;
 
 /// `Activity.RESULT_OK`.
 const RESULT_OK: jint = -1;
@@ -60,38 +64,49 @@ const GRANT_WRITE: jint = 0x2;
 /// `Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION`.
 const GRANT_PERSISTABLE: jint = 0x40;
 
-/// The pickers, where the activity is Waft's.
+/// The pickers, where the activities are Waft's.
 pub(crate) struct DocumentPickers {
     application: Application,
-    /// The activity that starts each picker and gets its result: the one attached to the app.
-    activity: AttachedActivity,
+    /// The views, whose activities start the pickers and get their results.
+    views: Rc<Views>,
 }
 
 impl DocumentPickers {
-    /// The pickers `activity` starts, once the result method of Waft's activity is registered;
-    /// `None` under an activity that is not Waft's, which hands no result on, as the one attached
-    /// now tells.
+    /// The pickers the views' activities start, once the result method of Waft's activity is
+    /// registered; `None` where the app's activities, as `first` tells, are not Waft's, which hand
+    /// no result on.
     pub(crate) fn new(
         application: Application,
-        activity: AttachedActivity,
+        views: Rc<Views>,
+        first: &Activity,
     ) -> Option<DocumentPickers> {
-        let is_wafts = activity.get().is_some_and(|activity| activity.is_wafts());
-        (results_are_heard(&application) && is_wafts).then_some(DocumentPickers {
-            application,
-            activity,
-        })
+        (results_are_heard(&application) && first.is_wafts())
+            .then_some(DocumentPickers { application, views })
     }
 
-    /// Starts the picker `intent` makes for a result, and answers the URIs of the documents
-    /// picked, none if the user cancelled.
+    /// The activity a picker for `parent` starts from: the parent's, or the one in front for
+    /// none.
+    fn activity_for(&self, parent: Option<ViewId>) -> Option<Activity> {
+        match parent {
+            Some(parent) => self.views.get(parent)?.activity(),
+            None => self.views.activity_in_front(),
+        }
+    }
+
+    /// Starts the picker `intent` makes for a result, from the activity of `parent`, and answers
+    /// the URIs of the documents picked, none if the user cancelled.
     fn pick(
         &self,
+        parent: Option<ViewId>,
         intent: impl for<'local> FnOnce(&mut Env<'local>) -> jni::errors::Result<JObject<'local>>,
     ) -> UrisPicked {
+        let Some(activity) = self.activity_for(parent) else {
+            return failed_pick("no activity of the app is in sight to show the picker over");
+        };
         let request = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed);
         let (answer, answered) = one_shot();
         locked(&PENDING).insert(request, answer);
-        let started = self.activity.with(|env, activity| {
+        let started = activity.with(|env, activity| {
             let intent = intent(env)?;
             env.call_method(
                 activity,
@@ -103,20 +118,21 @@ impl DocumentPickers {
         });
         if let Err(error) = started {
             locked(&PENDING).remove(&request);
-            self.activity.clear_exception();
-            let (failed, answered) = one_shot();
-            failed.give(Err(FileDialogError::Failed(format!(
-                "the picker did not start: {error}"
-            ))));
-            return answered;
+            activity.clear_exception();
+            return failed_pick(&format!("the picker did not start: {error}"));
         }
         answered
     }
 
-    fn open(&self, options: &OpenOptions, multiple: bool) -> FileDialogFuture<Vec<PickedFile>> {
+    fn open(
+        &self,
+        parent: Option<ViewId>,
+        options: &OpenOptions,
+        multiple: bool,
+    ) -> FileDialogFuture<Vec<PickedFile>> {
         let writable = options.writable;
         let types = options.types.clone();
-        let picked = self.pick(move |env| {
+        let picked = self.pick(parent, move |env| {
             let mime_types = mime_types(env, &types)?;
             let intent = intent(env, "android.intent.action.OPEN_DOCUMENT")?;
             set_type(env, &intent, &mime_types)?;
@@ -140,28 +156,28 @@ impl DocumentPickers {
 impl FileDialogs for DocumentPickers {
     fn open_file(
         &self,
-        _parent: Option<ViewId>,
+        parent: Option<ViewId>,
         options: OpenOptions,
     ) -> FileDialogFuture<Option<PickedFile>> {
-        let picked = self.open(&options, false);
+        let picked = self.open(parent, &options, false);
         Box::pin(async move { Ok(picked.await?.into_iter().next()) })
     }
 
     fn open_files(
         &self,
-        _parent: Option<ViewId>,
+        parent: Option<ViewId>,
         options: OpenOptions,
     ) -> FileDialogFuture<Vec<PickedFile>> {
-        self.open(&options, true)
+        self.open(parent, &options, true)
     }
 
     fn open_folder(
         &self,
-        _parent: Option<ViewId>,
+        parent: Option<ViewId>,
         options: FolderOptions,
     ) -> FileDialogFuture<Option<PickedFolder>> {
         let writable = options.writable;
-        let picked = self.pick(move |env| {
+        let picked = self.pick(parent, move |env| {
             let intent = env.new_string("android.intent.action.OPEN_DOCUMENT_TREE")?;
             let intent = env.new_object(
                 jni_str!("android/content/Intent"),
@@ -185,10 +201,10 @@ impl FileDialogs for DocumentPickers {
 
     fn save_file(
         &self,
-        _parent: Option<ViewId>,
+        parent: Option<ViewId>,
         options: SaveOptions,
     ) -> FileDialogFuture<Option<PickedFile>> {
-        let picked = self.pick(move |env| {
+        let picked = self.pick(parent, move |env| {
             let mime_types = mime_types(env, &options.types)?;
             let intent = intent(env, "android.intent.action.CREATE_DOCUMENT")?;
             let mime = mime_types
@@ -694,6 +710,13 @@ fn one_shot() -> (Answer<Picked>, UrisPicked) {
     answer(Err(FileDialogError::Failed(
         "the picker ended without an answer".to_owned(),
     )))
+}
+
+/// A pick that failed for `reason` before a picker showed.
+fn failed_pick(reason: &str) -> UrisPicked {
+    let (failed, answered) = one_shot();
+    failed.give(Err(FileDialogError::Failed(reason.to_owned())));
+    answered
 }
 
 fn locked<T>(shared: &Mutex<T>) -> MutexGuard<'_, T> {

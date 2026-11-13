@@ -4961,6 +4961,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "views"
+version = "0.5.0"
+dependencies = [
+ "waft",
+ "waft-cupertino",
+ "waft-embedder",
+ "waft-foundation",
+ "waft-painting",
+ "waft-widgets",
+]
+
+[[package]]
 name = "waft"
 version = "0.5.0"
 dependencies = [

@@ -13,10 +13,11 @@
 //! rather than a desktop windowing library's.
 //!
 //! A call into Java goes through the process's application or one activity (`application`,
-//! `activity`), the one attached to a view or to the app now, since Android makes and destroys
-//! them while the app runs on; what Java tells the app carries the view it is about
-//! (`activity_events`, `text_input`, `window_insets`); and the views are a registry by id
-//! (`views`), each holding what is its window's (`view`).
+//! `activity`), the one attached to a view now, since Android makes and destroys them while the
+//! app runs on; what Java tells the app carries the view it is about (`activity_events`,
+//! `text_input`, `window_insets`); and the views are a registry by id (`views`), each holding what
+//! is its window's (`view`) and its activity's task, which is its window (`task_window`). A view
+//! the app asks for is a document activity in a task of its own (`view_requests`).
 //!
 //! Elsewhere the crate still builds, with no host in it, so the workspace's tests cover
 //! the input tables on any machine.
@@ -62,6 +63,8 @@ mod hardware_buffers;
 #[cfg(target_os = "android")]
 mod host;
 #[cfg(target_os = "android")]
+mod icon_pixels;
+#[cfg(target_os = "android")]
 mod images;
 #[cfg(target_os = "android")]
 mod input;
@@ -98,9 +101,15 @@ mod surface;
 #[cfg(target_os = "android")]
 mod surface_control;
 #[cfg(target_os = "android")]
+mod task_window;
+#[cfg(target_os = "android")]
 mod text_input;
+#[cfg(any(target_os = "android", test))]
+mod this_process;
 #[cfg(target_os = "android")]
 mod view;
+#[cfg(target_os = "android")]
+mod view_requests;
 #[cfg(target_os = "android")]
 mod views;
 #[cfg(target_os = "android")]

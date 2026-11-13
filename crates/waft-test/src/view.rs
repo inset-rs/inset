@@ -107,8 +107,9 @@ impl TestView {
         self.last_scene.borrow().clone()
     }
 
-    /// The view's host, which records the cursors shown over the view, the focus requested for it
-    /// and what its text input was asked.
+    /// The view's host, which records the cursors shown over the view, the focus requested for it,
+    /// what its text input was asked, what the framework said of handling Back in it and the bars'
+    /// styles set over it.
     pub fn test_host(&self) -> &TestViewHost {
         &self.host
     }

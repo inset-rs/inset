@@ -162,9 +162,13 @@ The key constants and the four tables are machine-written from the Dart, as Flut
 
 ## system_chrome.rs → system_chrome.dart
 
-- Change: the switcher description and the overlay style are calls on the host's `SystemChrome` capability that complete in place and cannot fail.
+- Change: the switcher description is a call on the host's `SystemChrome` capability and the overlay style one on the host of the view it is for, both completing in place and unable to fail.
   Reason: platform — the host trait is the channel; there is no `Future` and no channel error.
   Affect: `Title` and `CupertinoApp` apply them mid-build, and the failure Dart's `onError` handler reports cannot happen.
+
+- Change: `SystemChrome::set_system_ui_overlay_style` and `latest_style` take the view the style is for, and the pending and latest styles are kept for each view, where Dart's are one for the app.
+  Reason: platform — each window carries its own bars, as each Android task of one app does, and a style is the view's whose bars it describes.
+  Affect: each view's `RenderView` and each `CupertinoApp` styles its own view's bars, and a style in effect over one view is sent again when another view asks for it.
 
 ## haptic_feedback.rs → haptic_feedback.dart
 

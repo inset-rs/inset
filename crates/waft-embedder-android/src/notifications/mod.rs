@@ -22,6 +22,7 @@
 
 mod permission;
 
+use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
 use jni::objects::{JClass, JObject, JObjectArray, JValue};
@@ -33,10 +34,11 @@ use waft_embedder::{
 };
 
 use self::permission::Permission;
-use crate::activity::AttachedActivity;
+use crate::activity::Activity;
 use crate::application::{Application, package_class};
 use crate::file_dialogs::string;
 use crate::log::warn_to_log;
+use crate::views::Views;
 
 /// The receiver's binary name, as its class loader takes it.
 const RECEIVER: &str = "rs.waft.WaftNotificationReceiver";
@@ -54,12 +56,14 @@ pub(crate) struct AndroidNotifications {
 }
 
 impl AndroidNotifications {
-    /// The app's notifications, the user asked for the permission over `activity`.
+    /// The app's notifications, the user asked for the permission over the activity of the view
+    /// in front among `views`, where the app's activities, as `first` tells, are Waft's.
     pub(crate) fn new(
         application: Application,
-        activity: AttachedActivity,
+        views: Rc<Views>,
+        first: &Activity,
     ) -> Option<AndroidNotifications> {
-        let permission = Permission::new(application.clone(), activity)?;
+        let permission = Permission::new(application.clone(), views, first)?;
         let has_receiver = application.with(|env, context| receiver(env, context).map(drop));
         if has_receiver.is_err() {
             application.clear_exception();
@@ -219,9 +223,7 @@ fn put_image(
     bundle: &JObject<'_>,
     image: &IconImage,
 ) -> jni::errors::Result<()> {
-    let colors = argb_colors(&image.rgba);
-    let pixels = jni::objects::JIntArray::new(env, colors.len())?;
-    pixels.set_region(env, 0, &colors)?;
+    let pixels = crate::icon_pixels::int_array(env, image)?;
     let key = env.new_string("pixels")?;
     env.call_method(
         bundle,
@@ -231,15 +233,6 @@ fn put_image(
     )?;
     put_int(env, bundle, "width", image.width as jint)?;
     put_int(env, bundle, "height", image.height as jint)
-}
-
-/// RGBA bytes as the platform's colours, alpha in the top byte.
-fn argb_colors(rgba: &[u8]) -> Vec<jint> {
-    let (pixels, _) = rgba.as_chunks::<4>();
-    pixels
-        .iter()
-        .map(|&[red, green, blue, alpha]| i32::from_be_bytes([alpha, red, green, blue]))
-        .collect()
 }
 
 fn put_string(

@@ -1,0 +1,33 @@
+[package]
+name = "views"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[package.metadata.waft]
+identifier = "rs.waft.views"
+name = "Views"
+
+# The activity loads the library. Named apart from the binary: on Windows a cdylib and a binary of
+# one name write the same `.pdb`.
+[lib]
+name = "views_lib"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "views"
+path = "src/main.rs"
+
+[dependencies]
+waft.workspace = true
+waft-cupertino.workspace = true
+waft-embedder.workspace = true
+waft-foundation.workspace = true
+waft-painting.workspace = true
+waft-widgets.workspace = true
+
+[lints]
+workspace = true

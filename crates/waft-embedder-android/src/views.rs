@@ -1,11 +1,14 @@
 //! Every view the app has: the one registry of them, which the loop and the platform share, the
 //! numbers the views take, and the frames they asked for.
 //!
-//! A view is an activity's window (`view.rs`), and outlives the activities Android makes for it.
-//! The app has one activity at a time today, so the registry holds one view, but nothing here
-//! counts on that: a view is reached by its id, and a frame is asked for and drawn by view. Flutter's Android embedding has no counterpart, since its shell
-//! feeds one implicit view and several activities are several engines; Waft's desktop host keeps
-//! the same registry for its windows (`waft-embedder-winit`'s `views.rs`).
+//! A view is an activity's window (`view.rs`), and outlives the activities Android makes for it:
+//! the launcher's, and a document activity in a task of its own for each view the app asks for
+//! (`view_requests.rs`). A view is reached by its id, and a frame is asked for and drawn by view.
+//! Flutter's Android embedding has no counterpart, since its shell feeds one implicit view and
+//! several activities are several engines; Waft's desktop host keeps the same registry for its
+//! windows (`waft-embedder-winit`'s `views.rs`). What names no view and needs an activity, the
+//! notification permission's question and a file dialog given no parent, goes to the activity in
+//! front ([`Views::activity_in_front`]).
 //!
 //! The invariants a later editor must keep: a number is taken once and never given to another
 //! view, whichever thread takes it ([`take_view_id`]: Android's main thread numbers an activity's
@@ -22,6 +25,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use waft_embedder::{View, ViewId};
 
+use crate::activity::Activity;
 use crate::view::AndroidView;
 
 /// Every view the app has, in the order they came, and those that asked for a frame.
@@ -59,6 +63,18 @@ impl Views {
     /// Every view the app has, in the order they came.
     pub(crate) fn all(&self) -> Vec<Rc<AndroidView>> {
         self.views.borrow().values().cloned().collect()
+    }
+
+    /// The activity of the view the user is looking at: the one whose window has the focus, else
+    /// one whose window is on screen; none while no view has a window, when Android would show
+    /// nothing an activity starts.
+    pub(crate) fn activity_in_front(&self) -> Option<Activity> {
+        let views = self.views.borrow();
+        let focused = views
+            .values()
+            .find(|view| view.is_focused() && view.has_window());
+        let in_sight = || views.values().find(|view| view.has_window());
+        focused.or_else(in_sight)?.activity()
     }
 
     /// Whether the system gives any view a window now.

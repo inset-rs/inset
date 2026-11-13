@@ -20,7 +20,8 @@ use waft_widgets::{
     LocalizationsDelegateRef, MediaQuery, NavigationNotification, NotificationListenerCallback,
     PageRoute, RouteFactory, RouteSettingsRef, ScrollBehavior, ScrollBehaviorRef,
     ScrollConfiguration, ScrollDecelerationRate, ScrollPhysicsRef, ScrollableDetails, ShortcutMap,
-    State, StateData, StatefulWidget, TransitionBuilder, WidgetBuilder, WidgetRef, WidgetsApp,
+    State, StateData, StatefulWidget, TransitionBuilder, View, WidgetBuilder, WidgetRef,
+    WidgetsApp,
 };
 
 use crate::colors::CupertinoDynamicColor;
@@ -689,13 +690,16 @@ impl State for CupertinoAppState {
             .brightness()
             .unwrap_or_else(|| MediaQuery::platform_brightness_of(app, context));
 
-        SystemChrome::set_system_ui_overlay_style(
-            app,
-            match brightness {
-                Brightness::Dark => &SystemUiOverlayStyle::LIGHT,
-                Brightness::Light => &SystemUiOverlayStyle::DARK,
-            },
-        );
+        if let Some(view) = View::maybe_of(app, context) {
+            SystemChrome::set_system_ui_overlay_style(
+                app,
+                view.id(),
+                match brightness {
+                    Brightness::Dark => &SystemUiOverlayStyle::LIGHT,
+                    Brightness::Light => &SystemUiOverlayStyle::DARK,
+                },
+            );
+        }
 
         let behavior = self
             .widget(app)

@@ -6,9 +6,11 @@
 //!
 //! The platform is the app's, not an activity's: its views are the registry's (`views.rs`), each
 //! an activity's window, and what it hands out goes through the application wherever any context
-//! answers. Where Waft's interface names no view, the system bars' style, the task's description,
-//! opening a link, a file dialog's and a permission question's activity, the call goes to the
-//! activity attached to the app now, the one Android made last ([`AndroidPlatform::attach`]).
+//! answers. What one view asks of the system, the bars' style, its task's card and its focus, is
+//! that view's host's (`view.rs`, `task_window.rs`); a file dialog starts from its parent's
+//! activity. Where Waft's interface names no view, opening a link starts from the application, in
+//! a task of its own, and what only an activity can show, the notification permission's question
+//! and a file dialog with no parent, goes to the activity in front (`Views::activity_in_front`).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -19,13 +21,14 @@ use std::time::{Duration, Instant};
 use waft_embedder::{
     Brightness, Clipboard, Compositor, Dispatcher, FileDialogs, FontSource, HardwareBuffer,
     HardwareBufferAllocator, ImageCodec, ImageCodecFuture, ImageDecodeError, ImageFrame,
-    ImageFrameFuture, ImageRepetition, Locale, Notifications, Offset, Opener, Platform, Screen,
-    Screens, SystemChrome, SystemFontSource, TargetPlatform, ViewRef,
+    ImageFrameFuture, ImageRepetition, Locale, Notifications, Offset, Opener, Platform, RequestId,
+    Screen, Screens, SystemChrome, SystemFontSource, TargetPlatform, ViewError, ViewRef,
+    WindowConfig,
 };
 
-use crate::activity::{Activity, AttachedActivity};
+use crate::activity::Activity;
 use crate::application::Application;
-use crate::chrome::AndroidChrome;
+use crate::chrome::{AndroidChrome, AppDescription};
 use crate::clipboard::AndroidClipboard;
 use crate::composition::SurfaceControlCompositor;
 use crate::file_dialogs::DocumentPickers;
@@ -34,6 +37,7 @@ use crate::hardware_buffers::GrallocAllocator;
 use crate::loop_waker::LoopWaker;
 use crate::notifications::AndroidNotifications;
 use crate::opener::IntentOpener;
+use crate::view_requests::ViewRequests;
 use crate::views::Views;
 use crate::vsync_waiter::{ChoreographerWaiter, Waits};
 
@@ -41,8 +45,6 @@ use crate::vsync_waiter::{ChoreographerWaiter, Waits};
 pub struct AndroidPlatform {
     /// The app's views, and the frames they asked for (`views.rs`).
     views: Rc<Views>,
-    /// The activity what names no view goes to.
-    activity: AttachedActivity,
     /// When the framework asked to be woken, shared with whatever thread asked.
     pub(crate) wakes: Arc<Wakes>,
     origin: Instant,
@@ -65,6 +67,10 @@ pub struct AndroidPlatform {
     /// The renderer's image store, on the device every view draws with.
     images: valo::ImageContext,
     chrome: AndroidChrome,
+    /// What every view's task shows where its window says nothing (`chrome.rs`).
+    pub(crate) app_description: AppDescription,
+    /// The views asked for whose activities have not arrived (`view_requests.rs`).
+    pub(crate) view_requests: ViewRequests,
     pub(crate) clipboard: AndroidClipboard,
     /// The document pickers, where the activity is Waft's.
     file_dialogs: Option<DocumentPickers>,
@@ -75,20 +81,24 @@ pub struct AndroidPlatform {
 
 impl AndroidPlatform {
     /// The platform of the app `application` is, whose views are `views`, drawn with `gpu`;
-    /// `waker` wakes the loop that serves it, and `activity` is attached to it first, which tells
-    /// whether the app's activities are Waft's.
+    /// `waker` wakes the loop that serves it, and `first`, the app's first activity, tells whether
+    /// the app's activities are Waft's.
     pub(crate) fn new(
         views: Rc<Views>,
         application: &Application,
-        activity: &Activity,
+        first: &Activity,
         waker: LoopWaker,
         gpu: &Gpu,
         compositor: Option<Arc<SurfaceControlCompositor>>,
     ) -> AndroidPlatform {
         let images = valo::ImageContext::new(gpu.device.clone(), gpu.queue.clone());
-        let attached = AttachedActivity::default();
-        attached.attach(activity);
+        let app_description = AppDescription::default();
         AndroidPlatform {
+            chrome: AndroidChrome::new(Rc::clone(&views), app_description.clone()),
+            app_description,
+            view_requests: ViewRequests::new(application.clone()),
+            file_dialogs: DocumentPickers::new(application.clone(), Rc::clone(&views), first),
+            notifications: AndroidNotifications::new(application.clone(), Rc::clone(&views), first),
             views,
             wakes: Arc::new(Wakes {
                 timer_wakeup: Mutex::new(None),
@@ -107,25 +117,9 @@ impl AndroidPlatform {
             }),
             image_loader: crate::images::loader(images.clone()),
             images,
-            chrome: AndroidChrome::new(attached.clone()),
             clipboard: AndroidClipboard::new(application.clone()),
-            file_dialogs: DocumentPickers::new(application.clone(), attached.clone()),
-            opener: IntentOpener::new(application.clone(), attached.clone()),
-            notifications: AndroidNotifications::new(application.clone(), attached.clone()),
-            activity: attached,
+            opener: IntentOpener::new(application.clone()),
         }
-    }
-
-    /// Android made `activity`, which takes what names no view from now on, the bars' style and
-    /// the task's description told it again.
-    pub(crate) fn attach(&self, activity: &Activity) {
-        self.activity.attach(activity);
-        self.chrome.restore();
-    }
-
-    /// Android destroyed `activity`, which takes nothing from now on.
-    pub(crate) fn detach(&self, activity: &Activity) {
-        self.activity.detach(activity);
     }
 
     pub(crate) fn elapsed(&self) -> Duration {
@@ -236,6 +230,19 @@ impl Platform for AndroidPlatform {
 
     fn view(&self, id: waft_embedder::ViewId) -> Option<ViewRef> {
         self.views.get(id).map(|view| view as ViewRef)
+    }
+
+    /// A task of its own, Waft's document activity's (`view_requests.rs`), titled and iconed as
+    /// `config` says; the rest of `config` is the system's to decide on a phone. It fails at once
+    /// while no view of the app has a window, as Android starts no activity for an app in the
+    /// background.
+    fn request_view(
+        &self,
+        config: WindowConfig,
+        initial_data: Option<String>,
+    ) -> Result<RequestId, ViewError> {
+        self.view_requests
+            .request(config, initial_data, self.views.any_has_window())
     }
 
     /// The system's clipboard, as far as an app without Java code reaches it (`clipboard.rs`).

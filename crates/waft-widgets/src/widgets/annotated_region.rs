@@ -92,57 +92,27 @@ impl<T: PartialEq + Debug + 'static> SingleChildRenderObjectWidget for Annotated
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
     use std::rc::Rc;
 
-    use waft_embedder::{
-        ApplicationSwitcherDescription, Brightness, Offset, SystemChrome, SystemUiOverlayStyle,
-    };
+    use waft_embedder::{Brightness, Offset, SystemUiOverlayStyle, ViewRef};
     use waft_foundation::AppCell;
     use waft_rendering::{AnnotationResult, AnyContainerLayer, ErasedLayer};
-    use waft_test::TestPlatform;
+    use waft_test::{TestPlatform, TestView};
 
     use super::*;
-    use crate::test_harness::Harness;
+    use crate::test_harness::{Harness, VIEW_HEIGHT, VIEW_WIDTH, binding_mount};
     use crate::widgets::basic::{Center, Column, SizedBox};
 
-    /// A host that records how it was asked to draw the system's bars.
-    #[derive(Default)]
-    struct RecordingChrome {
-        styles: RefCell<Vec<SystemUiOverlayStyle>>,
-    }
-
-    impl RecordingChrome {
-        fn styles(&self) -> Vec<SystemUiOverlayStyle> {
-            self.styles.borrow().clone()
-        }
-    }
-
-    impl SystemChrome for RecordingChrome {
-        fn set_overlay_style(&self, style: &SystemUiOverlayStyle) {
-            self.styles.borrow_mut().push(*style);
-        }
-
-        fn set_application_switcher_description(
-            &self,
-            _description: &ApplicationSwitcherDescription,
-        ) {
-        }
-    }
-
-    /// Mounts `child`, lays it out and composites one frame, which is where the system's
-    /// bars are styled from the tree. Answers what the host was told.
+    /// Mounts `child` in a view of the platform's and runs the first frame, which is where the
+    /// system's bars are styled from the tree. Answers what the view's host was told.
     fn styles_of_one_frame(child: WidgetRef) -> Vec<SystemUiOverlayStyle> {
-        let chrome = Rc::new(RecordingChrome::default());
-        let platform = TestPlatform::new().with_system_chrome(chrome.clone());
+        let view = Rc::new(TestView::new(VIEW_WIDTH, VIEW_HEIGHT));
+        let platform = TestPlatform::new().with_view(Rc::clone(&view) as ViewRef);
         let cell = AppCell::with_platform(Rc::new(platform));
-        let harness = Harness::mount(&mut cell.borrow_mut(), child);
-        harness.pump(&mut cell.borrow_mut());
-        let root = harness.render_root(&cell.borrow());
-        root.composite_frame(&mut cell.borrow_mut());
+        binding_mount(&cell, child);
         // The style is sent from a microtask, as Dart's `SystemChrome` sends it.
         cell.checkpoint();
-        chrome.styles()
+        view.test_host().overlay_styles()
     }
 
     /// The whole view annotated with one style, so both the status bar and the navigation

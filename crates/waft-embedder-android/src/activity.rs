@@ -6,8 +6,8 @@
 //! (`application.rs`), which is there while the process is.
 //!
 //! An activity comes and goes while the app runs on: Android destroys one and makes another, and
-//! the app outlives both. So what outlives activities, a view or the app, holds the one attached to
-//! it now ([`AttachedActivity`]), as Flutter's engine holds the activity attached to it
+//! the app outlives both. So what outlives activities, a view, holds the one attached to it now
+//! ([`AttachedActivity`]), as Flutter's engine holds the activity attached to it
 //! (`ActivityControlSurface.attachToActivity`, `ActivityPluginBinding.getActivity`), and never an
 //! [`Activity`] of its own: one kept would be a destroyed activity once Android made the next.
 //!
@@ -32,6 +32,8 @@ use crate::log::warn_to_log;
 /// Waft's activity, which declares the native methods the host registers for an activity's
 /// results, intents and permission answers.
 pub(crate) const WAFT_ACTIVITY: &str = "rs.waft.WaftActivity";
+/// Waft's activity for a view the app asks for, in a task of its own (`view_requests.rs`).
+pub(crate) const WAFT_DOCUMENT_ACTIVITY: &str = "rs.waft.WaftDocumentActivity";
 
 /// One activity of the app's.
 #[derive(Clone)]
@@ -103,13 +105,34 @@ impl Activity {
     /// its results, its intents and its permission answers to the methods the host registers; the
     /// bare `NativeActivity` keeps them to itself.
     pub(crate) fn is_wafts(&self) -> bool {
-        let is_wafts = self.with(|env, activity| {
-            let class = package_class(env, activity, WAFT_ACTIVITY)?;
+        self.is_a(WAFT_ACTIVITY)
+    }
+
+    /// Whether the activity is Waft's document activity, which a request for a view starts in a
+    /// task of its own, and whose intent is the view's (`view_requests.rs`).
+    pub(crate) fn is_document(&self) -> bool {
+        self.is_a(WAFT_DOCUMENT_ACTIVITY)
+    }
+
+    /// Whether the activity is of the package's class `class` or a subclass of it; not in a
+    /// package without the class.
+    fn is_a(&self, class: &str) -> bool {
+        let is_a = self.with(|env, activity| {
+            let class = package_class(env, activity, class)?;
             env.is_instance_of(activity, &class)
         });
-        is_wafts.unwrap_or_else(|_| {
+        is_a.unwrap_or_else(|_| {
             self.clear_exception();
             false
+        })
+    }
+
+    /// The number of the activity's task, `Activity.getTaskId`, which stays the task's while
+    /// Android makes the activity again in it.
+    pub(crate) fn task_id(&self) -> jni::errors::Result<i32> {
+        self.with(|env, activity| {
+            env.call_method(activity, jni_str!("getTaskId"), jni_sig!("()I"), &[])?
+                .i()
         })
     }
 
@@ -137,8 +160,8 @@ impl Activity {
     }
 }
 
-/// The activity attached to what outlives activities, a view or the app, while one is: the one
-/// Android made last for it, until Android destroys it. The app's thread's alone.
+/// The activity attached to what outlives activities, a view, while one is: the one Android made
+/// last for it, until Android destroys it. The app's thread's alone.
 #[derive(Clone, Default)]
 pub(crate) struct AttachedActivity {
     attached: Rc<RefCell<Option<Activity>>>,

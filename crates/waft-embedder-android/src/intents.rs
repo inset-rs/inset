@@ -3,7 +3,9 @@
 //! one an activity started with on the app's thread and a later one on Android's main thread, into
 //! what it asks of the app: files and links to open (`open_requests`), or a tap on one of the app's
 //! notifications (`notifications`); other intents ask nothing. Under an activity that is not
-//! Waft's, only the intent the activity started with comes.
+//! Waft's, only the intent the activity started with comes. A document activity's intents ask
+//! nothing of the app: the one it started with is its view's (`view_requests.rs`), and no other is
+//! sent it.
 //!
 //! What an intent asks is asked of the app, whichever activity it reached: it is set down in one
 //! queue and the app's loop woken; the loop hands it on once the client is there, so the intent an
@@ -19,8 +21,8 @@ use jni::objects::JObject;
 use jni::{Env, EnvUnowned, NativeMethod, jni_sig, jni_str};
 use waft_embedder::NotificationActivation;
 
-use crate::activity::{Activity, WAFT_ACTIVITY};
-use crate::application::Application;
+use crate::activity::{Activity, WAFT_ACTIVITY, WAFT_DOCUMENT_ACTIVITY};
+use crate::application::{Application, package_class};
 use crate::log::warn_to_log;
 use crate::loop_waker::wake_app_loop;
 use crate::open_requests::{self, Viewed};
@@ -96,11 +98,24 @@ extern "system" fn on_intent<'local>(
     intent: JObject<'local>,
 ) {
     env.with_env(|env| -> jni::errors::Result<()> {
+        if is_document(env, &activity) {
+            return Ok(());
+        }
         record(env, &activity, &intent)?;
         wake_app_loop();
         Ok(())
     })
     .resolve::<LogErrorAndDefault>();
+}
+
+/// Whether `activity` is Waft's document activity; not in a package without it.
+fn is_document(env: &mut Env<'_>, activity: &JObject<'_>) -> bool {
+    let class = package_class(env, activity, WAFT_DOCUMENT_ACTIVITY);
+    let is_document = class.and_then(|class| env.is_instance_of(activity, &class));
+    is_document.unwrap_or_else(|_| {
+        env.exception_clear();
+        false
+    })
 }
 
 /// Sets down what `intent` asks of the app.

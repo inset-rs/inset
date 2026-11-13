@@ -1,20 +1,25 @@
 //! A view's host that does what a test reads back: it records the cursors shown over its view, the
-//! focus requested for it and what its text input was asked, and moves nothing.
+//! focus requested for it, what its text input was asked, what the framework said of handling
+//! Back in it and the bars' styles set over it, and moves nothing.
 
 use std::cell::RefCell;
 
 use waft_embedder::{
-    Matrix4, Rect, Size, SystemMouseCursorKind, TextEditingValue, TextInputConfiguration,
-    TextInputHost, ViewFocusDirection, ViewFocusState, ViewHost,
+    Matrix4, Rect, Size, SystemMouseCursorKind, SystemUiOverlayStyle, TextEditingValue,
+    TextInputConfiguration, TextInputHost, ViewFocusDirection, ViewFocusState, ViewHost,
 };
 
 /// A view's host that records what the view asks of the system, as `flutter_test`'s
-/// `TestTextInput` logs the text input channel and its tests log `SystemChannels.mouseCursor`.
+/// `TestTextInput` logs the text input channel and its tests log `SystemChannels.mouseCursor`,
+/// `SystemChannels.navigation`'s `setFrameworkHandlesBack` and `SystemChannels.platform`'s
+/// overlay style.
 #[derive(Default)]
 pub struct TestViewHost {
     cursors: RefCell<Vec<(i64, SystemMouseCursorKind)>>,
     focus_requests: RefCell<Vec<(ViewFocusState, ViewFocusDirection)>>,
     text_input: RecordingTextInput,
+    framework_handles_back: RefCell<Vec<bool>>,
+    overlay_styles: RefCell<Vec<SystemUiOverlayStyle>>,
 }
 
 impl TestViewHost {
@@ -32,6 +37,18 @@ impl TestViewHost {
     pub fn text_input_calls(&self) -> Vec<TextInputCall> {
         self.text_input.calls.borrow().clone()
     }
+
+    /// Each value the framework said of whether it handles back in the view
+    /// (`ViewHost::set_framework_handles_back`), oldest first.
+    pub fn framework_handles_back(&self) -> Vec<bool> {
+        self.framework_handles_back.borrow().clone()
+    }
+
+    /// Each style set for the system's bars over the view (`ViewHost::set_overlay_style`), oldest
+    /// first.
+    pub fn overlay_styles(&self) -> Vec<SystemUiOverlayStyle> {
+        self.overlay_styles.borrow().clone()
+    }
 }
 
 impl ViewHost for TestViewHost {
@@ -45,6 +62,14 @@ impl ViewHost for TestViewHost {
 
     fn request_focus_change(&self, state: ViewFocusState, direction: ViewFocusDirection) {
         self.focus_requests.borrow_mut().push((state, direction));
+    }
+
+    fn set_framework_handles_back(&self, handles: bool) {
+        self.framework_handles_back.borrow_mut().push(handles);
+    }
+
+    fn set_overlay_style(&self, style: &SystemUiOverlayStyle) {
+        self.overlay_styles.borrow_mut().push(*style);
     }
 }
 

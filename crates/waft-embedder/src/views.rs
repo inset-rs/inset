@@ -2,7 +2,8 @@
 //! window; this stable handle exposes its identity and current configuration.
 
 use crate::{
-    Matrix4, Rect, ScreenId, Size, SystemMouseCursorKind, TextEditingValue, TextInputConfiguration,
+    Matrix4, Rect, ScreenId, Size, SystemMouseCursorKind, SystemUiOverlayStyle, TextEditingValue,
+    TextInputConfiguration,
 };
 
 /// Opaque id for one [`View`] (`FlutterView.viewId`).
@@ -222,8 +223,9 @@ pub trait View: 'static {
 
     /// The window this view is in, where the platform lets the app manage it, as `NSView.window`
     /// answers: every window on a desktop, whether the app asked for it or the platform gave it,
-    /// such as WaOS's window around a program's view. `None` for a view in nothing the app may
-    /// manage: a phone's screen, a web page's element, a host app's view. Closing a view is its
+    /// such as WaOS's window around a program's view, and every activity's task on Android. `None`
+    /// for a view in nothing the app may manage: an iPhone's screen, a web page's element, a host
+    /// app's view. Closing a view is its
     /// window's: a view with none is not the app's to close, and its way out is to quit.
     fn window(&self) -> Option<crate::WindowRef> {
         None
@@ -233,7 +235,7 @@ pub trait View: 'static {
 /// What one view asks of the system, provided by whoever hosts the view: a window's view gets its
 /// window's. Chromium's `RenderWidgetHostView` and Android's `SurfaceControlViewHost` are this
 /// piece; where Flutter's embedders take the same requests on the platform as a whole, through
-/// `SystemChannels.textInput`, `SystemChannels.mouseCursor` and
+/// `SystemChannels.textInput`, `SystemChannels.mouseCursor`, `SystemChannels.platform` and
 /// `PlatformDispatcher.requestViewFocusChange`, here each view's own host takes them.
 pub trait ViewHost {
     /// The input methods that edit text in this view; none where it takes no text.
@@ -247,6 +249,28 @@ pub trait ViewHost {
     /// Flutter's `PlatformDispatcher.requestViewFocusChange` for this view: asks the system to move
     /// the focus to it, or away from it. A host whose system has no focus to move ignores it.
     fn request_focus_change(&self, state: ViewFocusState, direction: ViewFocusDirection);
+
+    /// Informs the host of whether or not the framework will handle back events in this view
+    /// (Flutter `SystemNavigator.setFrameworkHandlesBack`): whether a navigator in the view has a
+    /// route to pop. A host that hears Back only while the view said it handles it follows it, as
+    /// Android's predictive back does, or one whose view cannot answer a press on the spot.
+    ///
+    /// The default drops it: a host that asks the app on the spot, through
+    /// [`EmbedderClient::pop_route`](crate::EmbedderClient::pop_route), has the answer then and
+    /// needs no notice in advance.
+    fn set_framework_handles_back(&self, handles: bool) {
+        let _ = handles;
+    }
+
+    /// Styles the system overlays the host draws over this view: the status bar, and on Android
+    /// the system navigation bar (Flutter `SystemChrome.setSystemUIOverlayStyle`). Each window
+    /// carries its own bars, so the style is the view's, as Flutter's Android embedding applies
+    /// it to its one activity's window.
+    ///
+    /// The default drops it, for a host that draws no overlays over its views.
+    fn set_overlay_style(&self, style: &SystemUiOverlayStyle) {
+        let _ = style;
+    }
 }
 
 /// The host side of Flutter's text input connection for one view.

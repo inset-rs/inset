@@ -1,4 +1,5 @@
-//! The system's bars over the app: their colour, and the colour of their icons.
+//! The system's bars over a view's window, their colour and the colour of their icons, and the
+//! app's description in the switcher, which each view's task shows.
 //!
 //! The status bar and the navigation bar are drawn by the system, not by the app, so the
 //! system is the one that has to be told what is behind them. An app that says nothing
@@ -11,22 +12,24 @@
 //! Everything here is posted to the Java main thread, which is where a window and its
 //! decor view may be touched, so each call returns at once and the framework never waits.
 //!
-//! Both asks are one activity's: the bars' style is its window's, and the description its task's.
-//! `SystemChrome` names no view, so they go to the activity attached to the app now. An activity
-//! Android makes in place of a destroyed one has neither, and the framework, which told them once,
-//! does not tell them again: so the last of each is kept and told again to each activity attached
-//! ([`AndroidChrome::restore`]), as Flutter's `PlatformPlugin.updateSystemUiOverlays` applies its
-//! current theme again as an activity resumes.
+//! The bars' style is one view's, its activity's window's ([`style_the_bars`]); the view keeps the
+//! last and styles each activity attached to it again (`view.rs`), as Flutter's
+//! `PlatformPlugin.updateSystemUiOverlays` applies its current theme again as an activity resumes.
+//! The description is the app's, `SystemChrome` naming no view: every view's task starts from it,
+//! under what the view's window says itself (`task_window.rs`), and each is told it again when it
+//! changes.
 
 use jni::objects::{JObject, JValue};
 use jni::{Env, jni_sig, jni_str};
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use waft_embedder::{
     ApplicationSwitcherDescription, Brightness, SystemChrome, SystemUiOverlayStyle,
 };
 
-use crate::activity::{AttachedActivity, device_api_level};
+use crate::activity::{Activity, device_api_level};
+use crate::views::Views;
 
 /// `View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR`, API 23: a light status bar, which is to say
 /// dark icons on it.
@@ -44,65 +47,49 @@ const INSETS_CONTROLLER: i32 = 30;
 const NAVIGATION_BAR_DIVIDER: i32 = 28;
 /// The first release that scrims a transparent bar for contrast, and lets an app say not to.
 const BAR_CONTRAST: i32 = 29;
-/// The first release whose task description takes an icon by resource id rather than a
-/// bitmap.
-const TASK_ICON_BY_ID: i32 = 28;
 
-/// The system bars around the attached activity's window, and its task in the switcher.
+/// Styles the bars over `activity`'s window as `style` says.
+pub(crate) fn style_the_bars(activity: &Activity, style: SystemUiOverlayStyle) {
+    activity.on_main_thread("a style for the system bars", move |env, activity| {
+        let window = window_of(env, activity)?;
+        paint_the_bars(env, &window, &style)?;
+        light_or_dark_icons(env, &window, &style)
+    });
+}
+
+/// The description the framework set last for the app in the switcher, which every task's card
+/// starts from (`task_window.rs`).
+#[derive(Clone, Default)]
+pub(crate) struct AppDescription(Rc<RefCell<Option<ApplicationSwitcherDescription>>>);
+
+impl AppDescription {
+    pub(crate) fn get(&self) -> Option<ApplicationSwitcherDescription> {
+        self.0.borrow().clone()
+    }
+
+    fn set(&self, description: &ApplicationSwitcherDescription) {
+        *self.0.borrow_mut() = Some(description.clone());
+    }
+}
+
+/// The app in the switcher: what every view's task shows where its window says nothing.
 pub(crate) struct AndroidChrome {
-    activity: AttachedActivity,
-    /// The bars' style the framework set last, if it set one.
-    style: Cell<Option<SystemUiOverlayStyle>>,
-    /// The task's description the framework set last, if it set one.
-    description: RefCell<Option<ApplicationSwitcherDescription>>,
+    views: Rc<Views>,
+    description: AppDescription,
 }
 
 impl AndroidChrome {
-    pub(crate) fn new(activity: AttachedActivity) -> AndroidChrome {
-        AndroidChrome {
-            activity,
-            style: Cell::new(None),
-            description: RefCell::new(None),
-        }
-    }
-
-    /// Tells the activity attached now the bars' style and the task's description the framework
-    /// set last.
-    pub(crate) fn restore(&self) {
-        if let Some(style) = self.style.get() {
-            self.apply_style(style);
-        }
-        if let Some(description) = self.description.borrow().clone() {
-            self.apply_description(description);
-        }
-    }
-
-    fn apply_style(&self, style: SystemUiOverlayStyle) {
-        self.activity
-            .on_main_thread("a style for the system bars", move |env, activity| {
-                let window = window_of(env, activity)?;
-                paint_the_bars(env, &window, &style)?;
-                light_or_dark_icons(env, &window, &style)
-            });
-    }
-
-    fn apply_description(&self, description: ApplicationSwitcherDescription) {
-        self.activity
-            .on_main_thread("a description for the switcher", move |env, activity| {
-                describe_the_task(env, activity, &description)
-            });
+    pub(crate) fn new(views: Rc<Views>, description: AppDescription) -> AndroidChrome {
+        AndroidChrome { views, description }
     }
 }
 
 impl SystemChrome for AndroidChrome {
-    fn set_overlay_style(&self, style: &SystemUiOverlayStyle) {
-        self.style.set(Some(*style));
-        self.apply_style(*style);
-    }
-
     fn set_application_switcher_description(&self, description: &ApplicationSwitcherDescription) {
-        *self.description.borrow_mut() = Some(description.clone());
-        self.apply_description(description.clone());
+        self.description.set(description);
+        for view in self.views.all() {
+            view.task().describe();
+        }
     }
 }
 
@@ -265,47 +252,6 @@ fn set_the_decor_flags(
         jni_str!("setSystemUiVisibility"),
         jni_sig!("(I)V"),
         &[JValue::Int(flags)],
-    )?;
-    Ok(())
-}
-
-/// How the app appears in the switcher: `ActivityManager.TaskDescription`, whose icon this
-/// leaves to the manifest. The older constructor takes a bitmap where the newer takes a
-/// resource id, and both are happy with nothing.
-fn describe_the_task(
-    env: &mut Env<'_>,
-    activity: &JObject<'_>,
-    description: &ApplicationSwitcherDescription,
-) -> jni::errors::Result<()> {
-    let label = match &description.label {
-        Some(label) => JObject::from(env.new_string(label)?),
-        None => JObject::null(),
-    };
-    let color = description.primary_color.unwrap_or(0) as i32;
-    let class = env.find_class(jni_str!("android/app/ActivityManager$TaskDescription"))?;
-    let task = if device_api_level() >= TASK_ICON_BY_ID {
-        env.new_object(
-            &class,
-            jni_sig!("(Ljava/lang/String;II)V"),
-            &[JValue::Object(&label), JValue::Int(0), JValue::Int(color)],
-        )?
-    } else {
-        let icon = JObject::null();
-        env.new_object(
-            &class,
-            jni_sig!("(Ljava/lang/String;Landroid/graphics/Bitmap;I)V"),
-            &[
-                JValue::Object(&label),
-                JValue::Object(&icon),
-                JValue::Int(color),
-            ],
-        )?
-    };
-    env.call_method(
-        activity,
-        jni_str!("setTaskDescription"),
-        jni_sig!("(Landroid/app/ActivityManager$TaskDescription;)V"),
-        &[JValue::Object(&task)],
     )?;
     Ok(())
 }

@@ -54,7 +54,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — on every platform that can make a view for the app, asking is a request whose view arrives later, as iOS scenes and Android activities do, so one set of views and a request cover a phone, a desktop and an embedder alike.
   Affect: an app on a desktop has no view until it asks; the framework tells the views it asked for from those it was given by their request ids.
 
-- Change: a requested view's window is made from a `WindowConfig` (size, position, decorations, level, activation, every desktop, background, shadow) and reached through `View::window` as a `HostWindow`, its frame, visibility, closing and native handle, as `NSView.window` is, where Flutter builds regular, dialog, popup, tooltip and satellite controllers and its `FlutterView` names no window.
+- Change: a requested view's window is made from a `WindowConfig` (title, icon, size, position, decorations, level, activation, every desktop, background, shadow) and reached through `View::window` as a `HostWindow`, its frame, visibility, closing and native handle, as `NSView.window` is, where Flutter builds regular, dialog, popup, tooltip and satellite controllers and its `FlutterView` names no window.
   Reason: platform — the common configuration and the raw handle cover what a Rust app configures itself, as winit and wgpu expose theirs.
   Affect: an app names its windows' properties directly rather than choosing an archetype; a property the config lacks is set through the native handle; a host without windows refuses requests.
 
@@ -78,9 +78,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — each window is on a screen with its own refresh rate and can be minimized or occluded, and a host that paces every view by one screen stops them all while that one is out of sight.
   Affect: each window draws at its own screen's refresh rate, and a minimized or occluded window draws nothing until it shows while the others keep drawing.
 
-- Change: what a view asks of the system, its text input, its cursor and its focus, goes to the view's own host (`View::host`, `ViewHost`), where Flutter's framework sends it to the platform as a whole through its text input and mouse cursor channels and `PlatformDispatcher.requestViewFocusChange`.
-  Reason: platform — what a view asks of the system is served by what holds that view, a window or another app's view as in WaOS, and not by the application as a whole.
-  Affect: a cursor, a focus request or an input method reaches the host of the view it is for, and every view has one, a test's view one that records what it is asked.
+- Change: what a view asks of the system, its text input, its cursor, its focus, whether it handles Back and the style of the system's bars over it, goes to the view's own host (`View::host`, `ViewHost`), where Flutter's framework sends it to the platform as a whole through its text input and mouse cursor channels, `PlatformDispatcher.requestViewFocusChange`, `SystemNavigator.setFrameworkHandlesBack` and `SystemChrome.setSystemUIOverlayStyle`.
+  Reason: platform — what a view asks of the system is served by what holds that view, a window, an Android task or another app's view as in WaOS, and not by the application as a whole.
+  Affect: a cursor, a focus request, an input method, a navigator's word on Back or a bar style reaches the host of the view it is for, so two Android tasks of one app each keep their own bars and Back, and every view has a host, a test's view one that records what it is asked.
 
 - Change: `PlatformDispatcher.displays` is a host's `Screens` capability, whose `Screen` is Flutter's `Display` with a name, a frame placed on the desktop in points in place of a size in pixels, and what the system's bars leave free, and which also says where the pointer is.
   Reason: platform — a desktop app that places a window against a screen's edge or its own icon needs to know where the screens are, in the points its window frames are in.
@@ -199,9 +199,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — there are no plugins, and the app is the only listener; one call covers every system's way, whose files are the file dialogs' `PickedFile`, as Android hands one over as a `content://` document and the web's `launchQueue` as a file handle.
   Affect: an app hears what it is asked to open in one place on every system, the launch's request included, which waits for its handler.
 
-- Change: `EmbedderClient::pop_route` answers at once whether the application went back, and the framework never tells the host in advance whether it handles back.
-  Reason: platform — Dart's `popRoute` crosses a channel and cannot answer in time, which is why Flutter tells the host in advance; this call is direct.
-  Affect: when the answer is no, the host does what its platform does without the app, which on Android is to close the activity.
+- Change: `EmbedderClient::pop_route` names the view the user went back in and answers at once whether the application went back there, and a host that asks on the spot needs no word in advance of whether the framework handles back.
+  Reason: platform — Dart's `popRoute` crosses a channel and cannot answer in time, which is why Flutter tells the host in advance; this call is direct, and each Android task of one app has its own Back.
+  Affect: Back pops the navigator of the view it was pressed in, and when the answer is no, the host does what its platform does without the app, which on Android is the system's own Back for that activity.
 
 - Change: `EmbedderClient::request_app_exit` takes an `AppExitReply` the framework answers, rather than replying on a channel.
   Reason: platform — there are no method channels; the host trait is the channel.

@@ -14,10 +14,11 @@
 //!
 //! Each call starts the intent from the app's thread and answers at once.
 //!
-//! What the package declares and which apps take a link are the application's to answer. The
-//! intent is started from an activity, so what opens lands on that activity's task, as a start
-//! from the application, which must ask for a task of its own, would not: the activity the opener
-//! was made with, the app's one, `Opener` naming no view.
+//! What the package declares, which apps take a link, and the start itself are the
+//! application's: `Opener` names no view, so no activity's task is the one what opens belongs to,
+//! and what opens starts in a task of its own (`FLAG_ACTIVITY_NEW_TASK`, which a start from the
+//! application needs), as a link opened from a desktop app opens in a window of its own. Android
+//! starts it only while the app has a window in sight.
 
 use std::path::Path;
 
@@ -27,7 +28,7 @@ use jni::sys::jint;
 use jni::{Env, jni_sig, jni_str};
 use waft_embedder::{OpenError, OpenFuture, Opener};
 
-use crate::activity::{AttachedActivity, device_api_level};
+use crate::activity::device_api_level;
 use crate::application::Application;
 use crate::file_dialogs::string;
 
@@ -39,16 +40,16 @@ const MATCH_DEFAULT_ONLY: jint = 0x10000;
 const GET_META_DATA: jint = 0x80;
 /// `Intent.FLAG_GRANT_READ_URI_PERMISSION`.
 const GRANT_READ: jint = 0x1;
+/// `Intent.FLAG_ACTIVITY_NEW_TASK`, which a start from the application needs.
+const NEW_TASK: jint = 0x1000_0000;
 /// The meta-data key under which waft-cli lists the schemes `<queries>` names.
 const QUERIED_SCHEMES_KEY: &str = "rs.waft.queried_schemes";
 /// The type of a file whose extension names none.
 const ANY_BYTES: &str = "application/octet-stream";
 
-/// Intents to view, started from an activity.
+/// Intents to view, started from the application.
 pub(crate) struct IntentOpener {
     application: Application,
-    /// The activity each intent is started from: the one attached to the app.
-    activity: AttachedActivity,
     /// The authority of Waft's file provider, where the app declares it.
     files: Option<String>,
     /// The schemes the manifest's `<queries>` names.
@@ -56,7 +57,7 @@ pub(crate) struct IntentOpener {
 }
 
 impl IntentOpener {
-    pub(crate) fn new(application: Application, activity: AttachedActivity) -> IntentOpener {
+    pub(crate) fn new(application: Application) -> IntentOpener {
         let declared = application.with(|env, context| {
             Ok((file_provider(env, context)?, queried_schemes(env, context)?))
         });
@@ -66,21 +67,21 @@ impl IntentOpener {
         });
         IntentOpener {
             application,
-            activity,
             files,
             queried_schemes,
         }
     }
 
-    /// Starts the intent `intent` makes, from the activity.
+    /// Starts the intent `intent` makes, from the application, in a task of its own.
     fn start(
         &self,
         intent: impl for<'local> FnOnce(&mut Env<'local>) -> jni::errors::Result<JObject<'local>>,
     ) -> Result<(), OpenError> {
-        let started = self.activity.with(|env, activity| {
+        let started = self.application.with(|env, context| {
             let started = intent(env).and_then(|intent| {
+                add_flags(env, &intent, NEW_TASK)?;
                 env.call_method(
-                    activity,
+                    context,
                     jni_str!("startActivity"),
                     jni_sig!("(Landroid/content/Intent;)V"),
                     &[JValue::Object(&intent)],
@@ -90,7 +91,7 @@ impl IntentOpener {
             Ok(started.map_err(|error| opening_error(env, &error)))
         });
         started.unwrap_or_else(|error| {
-            self.activity.clear_exception();
+            self.application.clear_exception();
             Err(OpenError::Failed(error.to_string()))
         })
     }
@@ -213,13 +214,18 @@ fn shared_file_intent<'local>(
         jni_sig!("(Landroid/net/Uri;Ljava/lang/String;)Landroid/content/Intent;"),
         &[JValue::Object(&uri), JValue::Object(&mime)],
     )?;
+    add_flags(env, &intent, GRANT_READ)?;
+    Ok(intent)
+}
+
+fn add_flags(env: &mut Env<'_>, intent: &JObject<'_>, flags: jint) -> jni::errors::Result<()> {
     env.call_method(
-        &intent,
+        intent,
         jni_str!("addFlags"),
         jni_sig!("(I)Landroid/content/Intent;"),
-        &[JValue::Int(GRANT_READ)],
+        &[JValue::Int(flags)],
     )?;
-    Ok(intent)
+    Ok(())
 }
 
 /// Sets one part of the URI `builder` builds.

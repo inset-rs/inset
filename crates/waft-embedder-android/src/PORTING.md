@@ -17,6 +17,20 @@ Host implementation. Flutter analogue: the engine's Android embedder under
   Reason: platform — the input queues and the choreographer are both on the app's looper, which fixes no order between them within a poll, where Android's `Choreographer.doFrame` runs its input callbacks before its frame.
   Affect: a touch that arrived before a refresh moves that refresh's frame, not the next one.
 
+## view_requests.rs / task_window.rs → no Flutter counterpart (Flutter's Android embedding has one activity to an engine)
+
+- Change: `Platform::request_view` starts Waft's document activity, `rs.waft.WaftDocumentActivity`, from the application in a task of its own (`FLAG_ACTIVITY_NEW_TASK | NEW_DOCUMENT | MULTIPLE_TASK`), the intent's data the view's initial data and its extras the request's number and a value made fresh in each process, and the activity arrives as the view carrying both; a task Android brings back after the process died arrives as a view the platform gave, with the initial data and no request.
+  Reason: platform — a document task is Android's window for one document of an app, a card of its own in Recents, and its intent is all of a request that outlives the process.
+  Affect: every request gives a new card in Recents, as a desktop gives a new window, and an app tells a restored card's view by its initial data; a request made while no view of the app has a window fails at once (`view_request_failed`), as Android would block the start without a word.
+
+- Change: every view, the launcher's and each document activity's, is in a window (`View::window`), its activity's task: the title and icon are the task's description, the window's own over the app's switcher description, closing is `finishAndRemoveTask`, minimizing is `moveTaskToBack` and restoring or focusing the view is `ActivityManager.AppTask.moveToFront`, and minimized is having no window from the system; the frame is the view's size at the origin, and moving, sizing, showing, hiding, maximizing and dragging do nothing.
+  Reason: platform — a phone sizes and places every task itself, and a task in the background is what a minimized window is on a desktop.
+  Affect: an app titles, icons, closes, sends back and brings forward each of its cards, and hears `window_changed` as a task goes to the background and comes back; Recents draws the icon and reads the label out to accessibility but draws no label.
+
+- Change: a view whose activity Android destroyed to make again, and whose task is no longer among the app's (`ActivityManager.getAppTasks`) when a window of the app next takes the focus, is removed.
+  Reason: platform — a card swiped away while its activity is destroyed tells no activity.
+  Affect: such a view goes when the user next comes back to the app, not when its card was swiped.
+
 ## window_insets.rs / view.rs → the Android embedder's `FlutterView.onApplyWindowInsets`
 
 - Change: the insets are heard by a listener on the window's decor view, `rs.waft.WaftWindowInsets`, which `WaftActivity` adds, and measured from the window's edges, where Flutter's view overrides `onApplyWindowInsets` itself and is told what is left of them where it was laid out.
@@ -41,7 +55,17 @@ Host implementation. Flutter analogue: the engine's Android embedder under
   Reason: platform — `start` is the attach, the show and the configuration update at once, so a new client is told by what changed.
   Affect: moving from one field to another with the same configuration and the same text keeps the keyboard's state, such as its shift.
 
+## chrome.rs / view.rs → the Android embedder's `PlatformPlugin`
+
+- Change: the system bars' style is the view's (`ViewHost::set_overlay_style`), applied to its activity's window and again to each activity Android makes for the view, and the app's switcher description is what every view's task shows where its window has no title of its own; Flutter's plugin styles its one activity's window and applies its style again as the activity resumes.
+  Reason: platform — each activity's window has its own bars, and each task its own card.
+  Affect: two tasks of one app keep their own bars' style and their own card.
+
 ## platform.rs
+
+- Change: what names no view and needs an activity, the notification permission's question and a file dialog given no parent, goes to the activity of the view whose window has the focus, else of one whose window is on screen, and fails while none is; a file dialog given a parent starts from that view's activity; a link or a file opens from the application in a task of its own.
+  Reason: platform — only an activity shows a picker or a permission question and gets its answer, and no activity's task is the one a link the app opens belongs to.
+  Affect: a picker shows over the task it was asked from, and a link opens as a card of its own in Recents.
 
 - Change: haptics are absent, and the platform answers that it has none.
   Reason: platform — haptics are a Java API that needs an activity of the app's own.
@@ -150,6 +174,6 @@ Host implementation. Flutter analogue: the engine's Android embedder under
 - Haptics. Trigger: an app that needs them, which is Java code of the activity's own, as Flutter's is.
 - The framework's key events, Android's keys mapped to Flutter's: until then every key but back is left to the text input view, which types it into the field that takes text, deleting, moving the caret and acting on enter as Flutter's framework would, and to the system, which sets the volume. Trigger: a shortcut, such as select all, or an app that reads keys on Android.
 - The keyboard's own cut, copy, paste and select all, the images it commits, autofill, hint locales and the delta model, which Flutter's text input plugin takes. Trigger: an app that needs one.
-- The predictive back gesture, with its peek animation. Trigger: a Java activity that registers with the system's back callback; the plain back button already pops.
+- The predictive back gesture, with its peek animation, whose registration (`OnBackInvokedCallback`) `ViewHost::set_framework_handles_back` would drive; the host asks `pop_route(view)` on the spot, so it drops that notice. Trigger: a Java activity that registers with the system's back callback; the plain back button already pops.
 - Deep links, which Flutter carries beside the back button. Trigger: an app that opens on a route the system names.
-- A window the app manages around the activity's view, with whether it is minimized and whether it is occluded, which the activity's stop and start would tell. Trigger: an app that manages its window on Android, as in desktop windowing.
+- A window moved and sized by the app, and whether one is occluded, as Android's desktop windowing would allow. Trigger: an app that manages its windows on Android in desktop windowing.

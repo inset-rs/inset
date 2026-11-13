@@ -1,11 +1,13 @@
 //! Android: the `.apk` Gradle would produce, assembled from a cargo library.
 //!
-//! No Gradle project and no Java of the app's own. The Java is Waft's five classes (under
+//! No Gradle project and no Java of the app's own. The Java is Waft's seven classes (under
 //! `android/rs/waft/` in this crate). The activity, `rs.waft.WaftActivity`, is the platform's
 //! `NativeActivity`, which loads the app's shared library and calls into Waft's host in it, with the
 //! results of the activities the app starts, the intents that reach it while it runs and the
 //! answers to the permissions it asks for handed on to its native code, as the document pickers,
-//! being opened and notifications need. The file provider, `rs.waft.WaftFileProvider`, shares a
+//! being opened and notifications need. The document activity, `rs.waft.WaftDocumentActivity`, is
+//! Waft's activity in a task of its own, a card in Recents, for each view the app asks for, and
+//! `rs.waft.WaftTask` describes a task's card and brings a task forward. The file provider, `rs.waft.WaftFileProvider`, shares a
 //! file of the app's with the app that opens it. The notification receiver,
 //! `rs.waft.WaftNotificationReceiver`, builds and shows the app's notifications, and shows one
 //! when its alarm goes off, whether or not the app runs. The text input, `rs.waft.WaftTextInput`,
@@ -50,6 +52,11 @@ const DEFAULT_TARGET_SDK: u32 = 34;
 /// Waft's activity: the platform's `NativeActivity`, which loads a native library and calls its
 /// `ANativeActivity_onCreate`, Waft's Android host's, handing activity results on to it.
 const WAFT_ACTIVITY: &str = "rs.waft.WaftActivity";
+/// Waft's activity for a view the app asks for, each in a task of its own.
+const WAFT_DOCUMENT_ACTIVITY: &str = "rs.waft.WaftDocumentActivity";
+/// The most tasks of the document activity Recents keeps before it removes the oldest, which
+/// finishes its activity as a swipe does: the most Android takes, where its default is 16.
+const MAX_RECENTS: u32 = 50;
 /// Waft's file provider, which shares a file of the app's with the app that opens it.
 const WAFT_FILE_PROVIDER: &str = "rs.waft.WaftFileProvider";
 /// Waft's notification receiver, which builds the app's notifications and hears their alarms.
@@ -61,10 +68,18 @@ const PERMISSIONS: [&str; 2] = [
     "android.permission.SCHEDULE_EXACT_ALARM",
 ];
 /// The Java classes every app's package compiles, by their paths under the sources' root.
-const JAVA_SOURCES: [(&str, &str); 5] = [
+const JAVA_SOURCES: [(&str, &str); 7] = [
     (
         "rs/waft/WaftActivity.java",
         include_str!("../android/rs/waft/WaftActivity.java"),
+    ),
+    (
+        "rs/waft/WaftDocumentActivity.java",
+        include_str!("../android/rs/waft/WaftDocumentActivity.java"),
+    ),
+    (
+        "rs/waft/WaftTask.java",
+        include_str!("../android/rs/waft/WaftTask.java"),
     ),
     (
         "rs/waft/WaftFileProvider.java",
@@ -543,7 +558,11 @@ struct Manifest<'a> {
 /// The manifest around Waft's activity. `configChanges` keeps the activity through a rotation or
 /// a switch to dark mode, which the host hears as a change of configuration and a resize;
 /// `adjustResize`, which Flutter's template sets too, has the system leave the window in
-/// place under the keyboard, which the host hears of as the window's insets. Waft's file provider is declared at `<package>.waft.files`, not
+/// place under the keyboard, which the host hears of as the window's insets. The launcher's
+/// activity is `singleTask`, the one task files, links and notification taps reach; beside it the
+/// document activity, not exported, starts a task of its own for each view the app asks for
+/// (`standard` and `intoExisting`, as Android requires of an activity started as a new document),
+/// with the same `configChanges`, Recents keeping [`MAX_RECENTS`] of them. Waft's file provider is declared at `<package>.waft.files`, not
 /// exported, granting each URI it shares; its notification receiver, not exported, hears only the
 /// app's own alarms; `<queries>` names viewing the links of [`QUERIED_SCHEMES`]; the app asks for
 /// [`PERMISSIONS`] and its own; the activity is offered for the files of the app's associations
@@ -584,6 +603,16 @@ fn manifest(manifest: &Manifest) -> String {
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
 {file_intent_filters}    </activity>
+    <activity
+        android:name="{document_activity}"
+        android:exported="false"
+        android:launchMode="standard"
+        android:documentLaunchMode="intoExisting"
+        android:maxRecents="{max_recents}"
+        android:configChanges="{config_changes}"
+        android:windowSoftInputMode="adjustResize">
+      <meta-data android:name="android.app.lib_name" android:value="{library}" />
+    </activity>
     <provider
         android:name="{provider}"
         android:authorities="{package}.waft.files"
@@ -605,6 +634,8 @@ fn manifest(manifest: &Manifest) -> String {
         label = xml_escape(manifest.label),
         category = manifest.category,
         activity = WAFT_ACTIVITY,
+        document_activity = WAFT_DOCUMENT_ACTIVITY,
+        max_recents = MAX_RECENTS,
         library = manifest.library,
         provider = WAFT_FILE_PROVIDER,
         receiver = WAFT_NOTIFICATION_RECEIVER,
@@ -1288,6 +1319,48 @@ mod tests {
                 "the activity must absorb {change} rather than be recreated for it"
             );
         }
+    }
+
+    #[test]
+    fn manifest_declares_a_document_activity_beside_the_launchers() {
+        let manifest = manifest(&Manifest {
+            package: "com.example.my_app",
+            label: "My App",
+            library: "my_app",
+            version_code: 1,
+            version_name: "0.1.0",
+            min_sdk: 31,
+            target_sdk: 34,
+            debuggable: false,
+            has_icon: false,
+            category: "productivity",
+            file_associations: &[],
+            permissions: &[],
+        });
+        let launcher =
+            &manifest[manifest.find("<activity").unwrap()..manifest.find("</activity>").unwrap()];
+        assert!(launcher.contains(r#"android:launchMode="singleTask""#));
+        let document = &manifest[manifest
+            .find(r#"android:name="rs.waft.WaftDocumentActivity""#)
+            .expect("the document activity is declared")..];
+        let document = &document[..document.find("</activity>").unwrap()];
+        for attribute in [
+            r#"android:exported="false""#,
+            r#"android:launchMode="standard""#,
+            r#"android:documentLaunchMode="intoExisting""#,
+            r#"android:maxRecents="50""#,
+            r#"android:value="my_app""#,
+        ] {
+            assert!(
+                document.contains(attribute),
+                "the document activity has {attribute}"
+            );
+        }
+        assert!(document.contains(CONFIG_CHANGES));
+        assert!(
+            !document.contains("intent-filter"),
+            "only the app starts it"
+        );
     }
 
     #[test]

@@ -5,8 +5,8 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use waft_embedder::{
-    HostWindow, RawWindowHandle, Rect, RequestId, ScreenId, Size, ViewId, ViewRef, WindowConfig,
-    WindowSizeLimits,
+    HostWindow, IconImage, RawWindowHandle, Rect, RequestId, ScreenId, Size, ViewId, ViewRef,
+    WindowConfig, WindowSizeLimits,
 };
 
 use crate::TestView;
@@ -86,8 +86,9 @@ impl Default for TestWindows {
     }
 }
 
-/// A window that shows nothing, keeps the frame it was last given, whether it was last shown or
-/// hidden, whether it is maximized and the size limits it was last given, and counts how often it
+/// A window that shows nothing, keeps the frame, the title and the icon it was last given, whether
+/// it was last shown or hidden, whether it is maximized and the size limits it was last given, and
+/// counts how often it
 /// was closed and dragged: one of
 /// [`TestWindows`], or one a test gives the app a view in. A closed window's view is in no window any more, and is no longer among the
 /// views of [`TestWindows`]. It is neither minimized nor occluded until a test says so, and the
@@ -96,6 +97,8 @@ pub struct TestWindow {
     view: Rc<TestView>,
     config: WindowConfig,
     frame: Cell<Rect>,
+    title: RefCell<String>,
+    icon: RefCell<Option<IconImage>>,
     shown: Cell<bool>,
     closes: Cell<u32>,
     drags: Cell<u32>,
@@ -119,6 +122,8 @@ impl TestWindow {
             TestWindow {
                 view: Rc::new(view),
                 frame: Cell::new(Rect::from_ltwh(left, top, width, height)),
+                title: RefCell::new(config.title.clone()),
+                icon: RefCell::new(config.icon.clone()),
                 shown: Cell::new(config.visible),
                 config,
                 closes: Cell::new(0),
@@ -140,6 +145,16 @@ impl TestWindow {
     /// The configuration the window was asked for with.
     pub fn config(&self) -> &WindowConfig {
         &self.config
+    }
+
+    /// The title the window was last given, its configuration's until the app sets another.
+    pub fn title(&self) -> String {
+        self.title.borrow().clone()
+    }
+
+    /// The icon the window was last given, its configuration's until the app sets another.
+    pub fn icon(&self) -> Option<IconImage> {
+        self.icon.borrow().clone()
     }
 
     /// Whether the window was last shown, rather than hidden.
@@ -191,7 +206,13 @@ impl HostWindow for TestWindow {
         self.frame.set(frame);
     }
 
-    fn set_title(&self, _title: &str) {}
+    fn set_title(&self, title: &str) {
+        *self.title.borrow_mut() = title.to_owned();
+    }
+
+    fn set_icon(&self, icon: Option<&IconImage>) {
+        *self.icon.borrow_mut() = icon.cloned();
+    }
 
     fn show(&self) {
         self.shown.set(true);

@@ -7,7 +7,9 @@
 //!
 //! What is one window's is kept here, by view, and nowhere for the app: the window and its size,
 //! what the system covers of it, the rectangle its content was laid out in, its configuration, its
-//! picture, its text input, and the activity attached to it now. A later editor must keep it so: the loop reaches a view
+//! picture, its text input, the style of the bars over it, its task (`task_window.rs`), what it
+//! arrived with (`view_requests.rs`), and the activity attached to it now. A later editor must keep
+//! it so: the loop reaches a view
 //! through the registry (`views.rs`) by the id an event carries, and what it finds there must be
 //! that window's and no other's.
 //!
@@ -15,20 +17,26 @@
 //! window (`picture.rs`), and the scene it kept is drawn again into new ones when a window arrives.
 
 use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use ndk::configuration::Configuration;
 use ndk::native_window::NativeWindow;
 use waft_embedder::{
-    Scene, ScreenId, SystemMouseCursorKind, TextInputHost, View, ViewConstraints,
-    ViewFocusDirection, ViewFocusState, ViewHost, ViewId, ViewMetrics, ViewPadding,
+    RequestId, Scene, ScreenId, SystemMouseCursorKind, SystemUiOverlayStyle, TextInputHost, View,
+    ViewConstraints, ViewFocusDirection, ViewFocusState, ViewHost, ViewId, ViewMetrics,
+    ViewPadding, WindowRef,
 };
 
 use crate::activity::{Activity, AttachedActivity};
+use crate::application::Application;
+use crate::chrome::AppDescription;
 use crate::composition::SurfaceControlCompositor;
 use crate::gpu::Gpu;
 use crate::picture::ViewPicture;
+use crate::task_window::TaskWindow;
 use crate::text_input::AndroidTextInput;
+use crate::view_requests::Arrival;
 use crate::window_insets::WindowInsets;
 
 pub(crate) struct AndroidView {
@@ -60,26 +68,60 @@ pub(crate) struct AndroidView {
     on_screen: Cell<bool>,
     /// The keyboards' way in, where the activity is Waft's (`text_input.rs`).
     text_input: Option<AndroidTextInput>,
+    /// The style the framework set last for the system's bars over the window, told again to each
+    /// activity attached.
+    overlay_style: Cell<Option<SystemUiOverlayStyle>>,
+    /// The activity's task, which is the view's window.
+    task: Rc<TaskWindow>,
+    /// The request the view arrived for; none for a view the platform gave.
+    request: Option<RequestId>,
+    initial_data: Option<String>,
+    /// Whether the window has the focus, as Android last told.
+    focused: Cell<bool>,
+    /// Whether the app removed the task while Android had destroyed its activity, which no
+    /// activity's destruction will tell.
+    task_removed: Cell<bool>,
+}
+
+/// What a view is made of beside its id: what it arrived with, and what its window draws with.
+pub(crate) struct ViewParts<'a> {
+    pub(crate) arrival: Arrival,
+    pub(crate) configuration: Configuration,
+    pub(crate) application: &'a Application,
+    pub(crate) app_description: AppDescription,
+    pub(crate) gpu: &'a Gpu,
+    pub(crate) compositor: Option<&'a SurfaceControlCompositor>,
 }
 
 impl AndroidView {
-    /// The view numbered `id`, whose activity, attached to it later, is `activity`, and whose
-    /// configuration is `configuration` until its activity tells another; with no window yet: it
-    /// draws nothing until the system gives one. Its picture is a composition layer's content on
-    /// `compositor`, where there is one, and its text is typed through `text_input`, where there is
-    /// one, which follows `activity`.
-    pub(crate) fn new(
-        id: ViewId,
-        activity: AttachedActivity,
-        configuration: Configuration,
-        gpu: &Gpu,
-        compositor: Option<&SurfaceControlCompositor>,
-        text_input: Option<AndroidTextInput>,
-    ) -> AndroidView {
+    /// The view numbered `id`, made of `parts`, whose activity is attached to it later, and whose
+    /// configuration is the one it arrived with until its activity tells another; with no window
+    /// yet: it draws nothing until the system gives one. Its picture is a composition layer's
+    /// content on the compositor, where there is one, and its text is typed through the keyboards,
+    /// under Waft's activity.
+    pub(crate) fn new(id: ViewId, parts: ViewParts<'_>) -> Rc<AndroidView> {
+        let ViewParts {
+            arrival,
+            configuration,
+            application,
+            app_description,
+            gpu,
+            compositor,
+        } = parts;
+        let activity = AttachedActivity::default();
+        let text_input = AndroidTextInput::new(application, activity.clone());
         let mut context = valo::Context::new(gpu.device.clone(), gpu.queue.clone());
         context.set_hide_missing_glyphs(true);
-        AndroidView {
+        let (request, config) = arrival.request.unzip();
+        Rc::new_cyclic(|view| AndroidView {
             id,
+            task: Rc::new(TaskWindow::new(
+                view.clone(),
+                activity.clone(),
+                application.clone(),
+                app_description,
+                config.as_ref(),
+            )),
             activity,
             configuration: RefCell::new(configuration),
             window: RefCell::new(None),
@@ -91,7 +133,44 @@ impl AndroidView {
             latest: RefCell::new(None),
             on_screen: Cell::new(false),
             text_input,
-        }
+            overlay_style: Cell::new(None),
+            request,
+            initial_data: arrival.initial_data,
+            focused: Cell::new(false),
+            task_removed: Cell::new(false),
+        })
+    }
+
+    /// The view's task, which is its window.
+    pub(crate) fn task(&self) -> &TaskWindow {
+        &self.task
+    }
+
+    /// The window the system gives the view now.
+    pub(crate) fn native_window(&self) -> Option<NativeWindow> {
+        self.window.borrow().clone()
+    }
+
+    /// Whether the window has the focus, as Android last told.
+    pub(crate) fn is_focused(&self) -> bool {
+        self.focused.get()
+    }
+
+    /// The window gained or lost the focus.
+    pub(crate) fn set_focused(&self, focused: bool) {
+        self.focused.set(focused);
+    }
+
+    /// The app removed the view's task while Android had destroyed its activity: the view goes at
+    /// the loop's next pass, as no activity's destruction will tell.
+    pub(crate) fn task_was_removed(&self) {
+        self.task_removed.set(true);
+        crate::loop_waker::wake_app_loop();
+    }
+
+    /// Whether the app removed the view's task while it had no activity.
+    pub(crate) fn is_task_removed(&self) -> bool {
+        self.task_removed.get()
     }
 
     /// The activity whose window the view is, while Android has one for it.
@@ -100,13 +179,18 @@ impl AndroidView {
     }
 
     /// Android made `activity` for the view, with `configuration`: its keyboard types into the
-    /// view from now on.
+    /// view from now on, its window's bars take the style the framework set last, and its task
+    /// shows what the window has.
     pub(crate) fn attach(&self, activity: &Activity, configuration: Configuration) {
         self.activity.attach(activity);
         self.set_configuration(configuration);
         if let Some(text_input) = &self.text_input {
             text_input.types_into(self.id);
         }
+        if let Some(style) = self.overlay_style.get() {
+            crate::chrome::style_the_bars(activity, style);
+        }
+        self.task.attach(activity);
     }
 
     /// Android destroyed `activity`: the view has none until Android makes another for it.
@@ -262,10 +346,25 @@ impl View for AndroidView {
     fn host(&self) -> &dyn ViewHost {
         self
     }
+
+    fn initial_data(&self) -> Option<String> {
+        self.initial_data.clone()
+    }
+
+    fn request_id(&self) -> Option<RequestId> {
+        self.request
+    }
+
+    /// The activity's task, which every view on Android is in.
+    fn window(&self) -> Option<WindowRef> {
+        Some(Rc::clone(&self.task) as WindowRef)
+    }
 }
 
-/// The view is its own host, which takes text through the system's keyboards; this embedder has
-/// no cursor and no focus to move yet.
+/// The view is its own host, which takes text through the system's keyboards, styles the bars
+/// over its activity's window and brings its task forward for the focus; this embedder has no
+/// cursor, and asks the framework about Back on the spot (`EmbedderClient::pop_route`), so it needs
+/// no word in advance.
 impl ViewHost for AndroidView {
     fn text_input(&self) -> Option<&dyn TextInputHost> {
         self.text_input
@@ -275,7 +374,21 @@ impl ViewHost for AndroidView {
 
     fn activate_system_cursor(&self, _device: i64, _kind: SystemMouseCursorKind) {}
 
-    fn request_focus_change(&self, _state: ViewFocusState, _direction: ViewFocusDirection) {}
+    /// The focus is brought to the view by bringing its task forward
+    /// (`ActivityManager.AppTask.moveToFront`), which Android allows while the app has a window in
+    /// sight; a phone has no focus to move away from a view but to another.
+    fn request_focus_change(&self, state: ViewFocusState, _direction: ViewFocusDirection) {
+        if state == ViewFocusState::Focused {
+            self.task.move_to_front();
+        }
+    }
+
+    fn set_overlay_style(&self, style: &SystemUiOverlayStyle) {
+        self.overlay_style.set(Some(*style));
+        if let Some(activity) = self.activity() {
+            crate::chrome::style_the_bars(&activity, *style);
+        }
+    }
 }
 
 /// What the system says about the window this turn.

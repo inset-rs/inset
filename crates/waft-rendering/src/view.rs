@@ -406,7 +406,8 @@ impl RenderView {
         let Some(style) = merged_overlay_style(upper, lower, is_android) else {
             return;
         };
-        SystemChrome::set_system_ui_overlay_style(app, &style);
+        let view = self.get(app).view.id();
+        SystemChrome::set_system_ui_overlay_style(app, view, &style);
     }
 
     /// An estimate of the bounds within which this render object will paint, in physical

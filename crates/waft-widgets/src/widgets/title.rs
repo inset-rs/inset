@@ -110,7 +110,7 @@ mod tests {
     use std::rc::Rc;
     use waft_foundation::AppCell;
 
-    use waft_embedder::{SystemChrome, SystemUiOverlayStyle};
+    use waft_embedder::SystemChrome;
     use waft_test::TestPlatform;
 
     use super::*;
@@ -124,8 +124,6 @@ mod tests {
     }
 
     impl SystemChrome for RecordingChrome {
-        fn set_overlay_style(&self, _style: &SystemUiOverlayStyle) {}
-
         fn set_application_switcher_description(
             &self,
             description: &ApplicationSwitcherDescription,

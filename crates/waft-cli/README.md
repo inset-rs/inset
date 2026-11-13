@@ -169,9 +169,11 @@ The CLI puts the `.app` together itself, as it does an iOS app: the executable i
 
 ## Android
 
-The `.apk` is built without Gradle and without any Java of your own. The Java is Waft's five classes (`android/rs/waft/`), which `javac` and `d8` compile into the package's `classes.dex`:
+The `.apk` is built without Gradle and without any Java of your own. The Java is Waft's seven classes (`android/rs/waft/`), which `javac` and `d8` compile into the package's `classes.dex`:
 
 - `rs.waft.WaftActivity`, the activity: Android's `NativeActivity`, which loads your library, where Waft's host starts your app's thread with the process's first activity and calls the `android_main` that `#[waft::main]` emits once for the process, each activity a view of the app, with the results of the activities your app starts, the intents that reach it while it runs and the user's answers to the permissions it asks for handed on to it, as the file dialogs, being opened and notifications need.
+- `rs.waft.WaftDocumentActivity`, the same activity in a task of its own, a card in Recents, which the app starts for each view it asks for (`Platform::request_view`); the manifest declares it beside the launcher's `singleTask` activity, not exported, `standard` and `intoExisting`, Recents keeping 50 of its tasks.
+- `rs.waft.WaftTask`, which describes a task's card, its label and icon, and brings a task forward or removes it.
 - `rs.waft.WaftFileProvider`, a content provider at `<package>.waft.files`, not exported, through which the opener shares a file of the app's with the app that opens it.
 - `rs.waft.WaftNotificationReceiver`, a broadcast receiver, not exported, which builds and shows the app's notifications, and shows a scheduled one when its alarm goes off, whether or not the app runs.
 - `rs.waft.WaftTextInput`, the view the activity adds beside its own, which the system's keyboards type into a text field through.
