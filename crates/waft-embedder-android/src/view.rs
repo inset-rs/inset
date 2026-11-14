@@ -20,7 +20,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use ndk::configuration::Configuration;
+use ndk::configuration::{Configuration, UiModeNight};
 use ndk::native_window::NativeWindow;
 use waft_embedder::{
     RequestId, Scene, ScreenId, SystemMouseCursorKind, SystemUiOverlayStyle, TextInputHost, View,
@@ -69,7 +69,8 @@ pub(crate) struct AndroidView {
     /// The keyboards' way in, where the activity is Waft's (`text_input.rs`).
     text_input: Option<AndroidTextInput>,
     /// The style the framework set last for the system's bars over the window, told again to each
-    /// activity attached.
+    /// activity attached and at each change of configuration; none until the framework sets one,
+    /// and the bars follow the system's mode till then.
     overlay_style: Cell<Option<SystemUiOverlayStyle>>,
     /// The activity's task, which is the view's window.
     task: Rc<TaskWindow>,
@@ -179,16 +180,13 @@ impl AndroidView {
     }
 
     /// Android made `activity` for the view, with `configuration`: its keyboard types into the
-    /// view from now on, its window's bars take the style the framework set last, and its task
+    /// view from now on, its window's bars are styled ([`Self::set_configuration`]), and its task
     /// shows what the window has.
     pub(crate) fn attach(&self, activity: &Activity, configuration: Configuration) {
         self.activity.attach(activity);
         self.set_configuration(configuration);
         if let Some(text_input) = &self.text_input {
             text_input.types_into(self.id);
-        }
-        if let Some(style) = self.overlay_style.get() {
-            crate::chrome::style_the_bars(activity, style);
         }
         self.task.attach(activity);
     }
@@ -198,9 +196,25 @@ impl AndroidView {
         self.activity.detach(activity);
     }
 
-    /// The activity's configuration changed to `configuration`.
+    /// The activity's configuration changed to `configuration`, which may have switched the
+    /// system between light and dark mode: the bars are styled again.
     pub(crate) fn set_configuration(&self, configuration: Configuration) {
         *self.configuration.borrow_mut() = configuration;
+        self.style_the_bars();
+    }
+
+    /// Styles the bars over the activity's window as the framework set last, or, until it sets a
+    /// style, as the system's mode has them ([`crate::chrome::style_of_the_mode`]).
+    fn style_the_bars(&self) {
+        let Some(activity) = self.activity() else {
+            return;
+        };
+        let style = self.overlay_style.get().unwrap_or_else(|| {
+            crate::chrome::style_of_the_mode(
+                self.configuration.borrow().ui_mode_night() == UiModeNight::Yes,
+            )
+        });
+        crate::chrome::style_the_bars(&activity, style);
     }
 
     /// The configuration of the activity's resources, as Android last told.
@@ -385,9 +399,7 @@ impl ViewHost for AndroidView {
 
     fn set_overlay_style(&self, style: &SystemUiOverlayStyle) {
         self.overlay_style.set(Some(*style));
-        if let Some(activity) = self.activity() {
-            crate::chrome::style_the_bars(&activity, *style);
-        }
+        self.style_the_bars();
     }
 }
 

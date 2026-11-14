@@ -2,9 +2,10 @@
 //! app's description in the switcher, which each view's task shows.
 //!
 //! The status bar and the navigation bar are drawn by the system, not by the app, so the
-//! system is the one that has to be told what is behind them. An app that says nothing
-//! keeps whatever the device's theme chose, which over a light page is often white icons
-//! on white. Flutter's engine answers the same ask in
+//! system is the one that has to be told what is behind them. Until an app says something, the
+//! icons follow the system's light or dark mode ([`style_of_the_mode`]); the device's theme alone
+//! would keep the mode the app started in, and over a light page often white icons on white.
+//! Flutter's engine answers the same ask in
 //! `PlatformPlugin.setSystemChromeSystemUIOverlayStyle`, and the split below is its: a
 //! window from API 30 carries an insets controller that owns the bars' appearance, and
 //! before that the appearance is flags on the decor view.
@@ -47,6 +48,24 @@ const INSETS_CONTROLLER: i32 = 30;
 const NAVIGATION_BAR_DIVIDER: i32 = 28;
 /// The first release that scrims a transparent bar for contrast, and lets an app say not to.
 const BAR_CONTRAST: i32 = 29;
+
+/// The style of the bars while the app has set none: dark icons in light mode and light icons in
+/// dark mode, what androidx's `EdgeToEdge.enable` gives with `SystemBarStyle.auto`, which reads
+/// the mode from the configuration's `uiMode`. The host applies it again at each change of
+/// configuration, since the activity stays through a switch of mode (`configChanges`) and its
+/// theme is not read again.
+pub(crate) fn style_of_the_mode(night: bool) -> SystemUiOverlayStyle {
+    let icons = if night {
+        Brightness::Light
+    } else {
+        Brightness::Dark
+    };
+    SystemUiOverlayStyle {
+        status_bar_icon_brightness: Some(icons),
+        system_navigation_bar_icon_brightness: Some(icons),
+        ..SystemUiOverlayStyle::default()
+    }
+}
 
 /// Styles the bars over `activity`'s window as `style` says.
 pub(crate) fn style_the_bars(activity: &Activity, style: SystemUiOverlayStyle) {

@@ -130,6 +130,8 @@ pub enum FluentSymbol {
     TextBulletListTree,
     /// Work whose completion is shown as a ring.
     SpinnerIos,
+    /// A page of an app's content.
+    Document,
 }
 
 impl FluentSymbol {
@@ -182,6 +184,7 @@ impl FluentSymbol {
             Self::Color => 62197,
             Self::TextBulletListTree => 63406,
             Self::SpinnerIos => 63241,
+            Self::Document => 62329,
         })
         .unwrap()
     }

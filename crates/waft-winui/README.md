@@ -22,7 +22,7 @@ Run the gallery from the [Waft repository](https://github.com/xtyxtyx/waft-ui), 
 waft-winui = "0.5.0"
 ```
 
-Use controls inside an Waft `WidgetsApp`, with `ThemeScope` selecting the light or dark theme. Call `install_icon_font` once during application setup. Controls that show popups need an `Overlay` ancestor.
+Use controls inside an Waft `WidgetsApp`, with `ThemeScope` selecting the light or dark theme. Call `install_icon_font` once during application setup. Controls that show popups need an `Overlay` ancestor. An app's content goes in a `Page`, whose background reaches under a phone's system bars while its content stays clear of them and of the keyboard.
 
 A `ThemeScope` can also change WinUI's theme resources for its subtree, as XAML's resource dictionaries do: `any` in both themes, then `light` or `dark`. Each resource is a field named after its XAML key.
 

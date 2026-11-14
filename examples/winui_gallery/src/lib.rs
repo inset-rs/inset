@@ -225,6 +225,20 @@ impl GalleryState {
         resources: &ThemeResources,
         horizontal_inset: f64,
     ) -> WidgetRef {
+        match feature {
+            Feature::Page => sections::page::build(resources, horizontal_inset),
+            _ => self.scrolled_feature_page(app, feature, resources, horizontal_inset),
+        }
+    }
+
+    /// Builds one feature whose examples scroll under the shell's heading.
+    fn scrolled_feature_page(
+        self: Handle<Self>,
+        app: &mut App,
+        feature: Feature,
+        resources: &ThemeResources,
+        horizontal_inset: f64,
+    ) -> WidgetRef {
         let examples = match feature {
             Feature::Button => sections::button::build(self, resources),
             Feature::SplitButton | Feature::ToggleSplitButton | Feature::MenuFlyout => {
@@ -262,6 +276,9 @@ impl GalleryState {
             Feature::SelectorBar => sections::selector_bar::page(resources),
             Feature::Typography => sections::typography::build(resources),
             Feature::Icons => sections::icons::build(resources),
+            Feature::Page => {
+                unreachable!("the Page destination fills its area instead of scrolling")
+            }
         };
         let mut children = vec![label(
             feature.description(),
@@ -301,13 +318,13 @@ impl State for GalleryState {
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let r = ThemeResources::of(app, context);
+        let minimal = MediaQuery::size_of(app, context).width() < GALLERY_NAVIGATION_BREAKPOINT;
         // Minimal HeaderContent follows the visible toggle column and its negative margin.
-        let horizontal_inset =
-            if MediaQuery::size_of(app, context).width() < GALLERY_NAVIGATION_BREAKPOINT {
-                r.pane_toggle_button_width + r.navigation_view_minimal_header_margin[0]
-            } else {
-                r.navigation_view_header_margin[0]
-            };
+        let horizontal_inset = if minimal {
+            r.pane_toggle_button_width + r.navigation_view_minimal_header_margin[0]
+        } else {
+            r.navigation_view_header_margin[0]
+        };
         let state = app.get(self);
         let (dark, selected, visited) = (state.dark, state.selected, state.visited.clone());
         let theme = if dark { Theme::Dark } else { Theme::Light };
@@ -383,10 +400,29 @@ impl State for GalleryState {
                     self.set_state(app, |state| state.dark = !state.dark);
                 }
             });
-        ThemeScope::new(
-            theme,
-            ColoredBox::new(resources.solid_background_fill_color_base).child(navigation),
-        )
-        .into_widget()
+        ThemeScope::new(theme, gallery_page(&resources, minimal, navigation)).into_widget()
     }
+}
+
+/// The page the navigation shell sits on. Expanded, the pane lies on the base colour and the content on its own layer, as in WinUI's gallery. Minimal, the content layer covers the whole page, so the page takes the colour the layer shows and the layer paints nothing: otherwise the strips under a phone's bars, which only the page reaches, would show as bands of another shade below a border line.
+fn gallery_page(
+    resources: &ThemeResources,
+    minimal: bool,
+    navigation: NavigationView,
+) -> WidgetRef {
+    let base = resources.solid_background_fill_color_base;
+    if !minimal {
+        return waft_winui::Page::new()
+            .background(Brush::Solid(base))
+            .content(navigation)
+            .into_widget();
+    }
+    let content_layer = Color::alpha_blend(resources.navigation_view_content_background, base);
+    waft_winui::Page::new()
+        .background(Brush::Solid(content_layer))
+        .content(ThemeScope::overriding(navigation).any(|r| {
+            r.navigation_view_content_background = Color::from_argb(0, 0, 0, 0);
+            r.navigation_view_minimal_content_grid_border_thickness = [0.0; 4];
+        }))
+        .into_widget()
 }

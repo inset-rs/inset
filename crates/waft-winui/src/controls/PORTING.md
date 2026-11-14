@@ -614,6 +614,20 @@ Ported against: aa3207e6
   Reason: framework — Waft rebuilds a control's description from its owner's state instead of the control holding a `SelectedItem` property of its own.
   Affect: Callers set `selected` from `selection_changed`, and selecting an item from code raises no event, where setting WinUI's `SelectedItem` raises `SelectionChanged`.
 
+## page.rs → `Page`
+
+- Change: `Page` keeps its content clear of the system's bars by the ambient `MediaQuery`'s `padding`, and hands its content a `MediaQuery` with that padding removed, wherever the page sits.
+  Reason: framework — WinUI's `CalculateUpdatedBounds` applies the window's layout bounds only when the page is the window's size, while Waft, after Flutter's `SafeArea`, removes padding an ancestor has used from the `MediaQuery` it passes down.
+  Affect: A page nested in another page, or under a `SafeArea`, adds no inset, as in WinUI; a page smaller than the window still pads by what its `MediaQuery` reports, where WinUI's would add none.
+
+- Change: `Page` also shrinks its content by the keyboard's height, `MediaQuery::view_insets.bottom`, and removes that inset from the content's `MediaQuery`, as Flutter's `Scaffold` does with `resizeToAvoidBottomInset`.
+  Reason: framework — WinUI leaves the page's size alone and scrolls the focused text box into view from its input pane handler (`CInputPaneHandler`), which the kit does not port.
+  Affect: Content laid out to the page's bottom edge, such as a text box there, moves above the keyboard while the keyboard shows.
+
+- Change: `Page` has no counterpart of `ApplicationView.DesiredBoundsMode`'s `UseCoreWindow`, under which WinUI pages fill the window under the system's bars.
+  Reason: framework — Waft has no app-wide bounds mode; what is left of the window's padding is the `MediaQuery`'s.
+  Affect: Content that should reach under the system's bars is placed outside the page, or under a `MediaQuery` whose padding the app has removed.
+
 ## Deferred
 
 - `MenuBar` activation by pressing Alt followed by a letter, and the temporary labels showing those letters, remain deferred. Trigger: The kit provides shared access-key mode and label display.
@@ -662,3 +676,6 @@ Ported against: aa3207e6
 - Cancelling a `TreeView` drag with Escape remains deferred. Trigger: Waft's drag and drop can be cancelled by a key.
 - `SelectorBar`'s accessibility, its automation peers and their selection pattern, remains deferred. Trigger: The kit gains accessibility support.
 - `SelectorBarItem`'s tooltip for a truncated text, which the spec leaves open, remains deferred. Trigger: WinUI's control shows one.
+- `Page`'s `TopAppBar` and `BottomAppBar`, whose closed height WinUI also keeps the content clear of, remain deferred. Trigger: The kit ports `AppBar`.
+- `Page`'s navigation members, `Frame`, `NavigationCacheMode` and `OnNavigatedTo`, `OnNavigatedFrom` and `OnNavigatingFrom`, remain deferred. Trigger: The kit ports `Frame`.
+- `Page` giving the focus to its first focusable element when it loads with nothing focused, with the soft keyboard held back for that focus (`InitialFocusSIPSuspender`), remains deferred. Trigger: Waft's text input can be focused without showing the soft keyboard.

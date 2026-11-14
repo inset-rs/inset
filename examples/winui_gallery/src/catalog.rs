@@ -76,11 +76,13 @@ pub enum Feature {
     TreeView,
     /// A few views of one page, one at a time.
     SelectorBar,
+    /// An app's content kept clear of the system's bars and keyboard.
+    Page,
 }
 
 impl Feature {
     /// Display order in the navigation pane.
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 37] = [
         Self::Button,
         Self::DropDownButton,
         Self::SplitButton,
@@ -115,6 +117,7 @@ impl Feature {
         Self::NavigationView,
         Self::TreeView,
         Self::SelectorBar,
+        Self::Page,
         Self::Typography,
         Self::Icons,
     ];
@@ -156,6 +159,7 @@ impl Feature {
             Self::NavigationView => "NavigationView",
             Self::TreeView => "TreeView",
             Self::SelectorBar => "SelectorBar",
+            Self::Page => "Page",
             Self::Typography => "Typography",
             Self::Icons => "Icons",
         }
@@ -198,6 +202,7 @@ impl Feature {
             Self::NavigationView => FluentSymbol::Navigation,
             Self::TreeView => FluentSymbol::TextBulletListTree,
             Self::SelectorBar => FluentSymbol::Tabs,
+            Self::Page => FluentSymbol::Document,
             Self::Typography => FluentSymbol::TextFont,
             Self::Icons => FluentSymbol::Apps,
         }
@@ -258,6 +263,7 @@ impl Feature {
                 "Expand, select and reorder nested items, one at a time or with check boxes."
             }
             Self::SelectorBar => "Switch between a few views of the same page.",
+            Self::Page => "Keep an app's content clear of the system's bars and the keyboard.",
             Self::Typography => "Choose text styles and build a clear hierarchy.",
             Self::Icons => "Use Fluent symbols in navigation, actions and status indicators.",
         }

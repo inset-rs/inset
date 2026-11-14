@@ -121,3 +121,6 @@ pub use tree_view::*;
 
 mod selector_bar;
 pub use selector_bar::*;
+
+mod page;
+pub use page::*;

@@ -12,9 +12,10 @@
 //! engine.
 //!
 //! What is ported from android-activity's glue (`native_activity/glue.rs`): the callbacks it sets,
-//! the window taken with a reference of the app's own, the configuration read from the activity's
-//! asset manager, the saved state answered in memory `malloc` gave, and the waits where a window
-//! or an input queue is taken away. What is dropped: a thread for each activity and its pipe of
+//! the window taken with a reference of the app's own, the configuration read from an asset
+//! manager (the one the activity's resources hold now, where the glue reads the one it was
+//! handed), the saved state answered in memory `malloc` gave, and the waits where a window or an
+//! input queue is taken away. What is dropped: a thread for each activity and its pipe of
 //! commands; the waits at start, resume, pause and stop, which Android does not require, as the
 //! host takes no lifecycle; the wait at saving the state, since the glue knows the view the
 //! activity saves without asking the app; the wait at destruction for that thread to end; and the
@@ -33,6 +34,8 @@
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
+use jni::objects::JObject;
+use jni::{Env, jni_sig, jni_str};
 use ndk::asset::AssetManager;
 use ndk::configuration::Configuration;
 use ndk::input_queue::InputQueue;
@@ -85,12 +88,13 @@ pub unsafe extern "C" fn ANativeActivity_onCreate(
         }))
         .cast();
     }
+    // SAFETY: the same.
+    let configuration = unsafe { configuration_of(&activity, native) };
     tell(
         view,
         ActivityEvent::Created {
             activity,
-            // SAFETY: the same.
-            configuration: unsafe { configuration_of(native) },
+            configuration,
             restored: !saved.is_empty(),
         },
     );
@@ -146,15 +150,57 @@ unsafe fn view_of(native: *mut ANativeActivity) -> ViewId {
     unsafe { made(native) }.view
 }
 
-/// The configuration of `native`'s resources now.
+/// The configuration of `activity`'s resources now, read from the asset manager its resources
+/// hold now (`getResources().getAssets()`). The one `NativeActivity` handed the native code at
+/// its creation (`ANativeActivity.assetManager`) is not the one Android updates at a change of
+/// configuration: on the emulator's API 37 it kept the mode the activity started in through a
+/// switch to dark mode and back. Where Java cannot be asked, that one is read, `native`'s.
 ///
 /// # Safety
 ///
 /// As [`made`]: the activity's asset manager lives while it does.
-unsafe fn configuration_of(native: *mut ANativeActivity) -> Configuration {
-    // SAFETY: the caller's; the manager is borrowed for the call, not owned.
-    let assets = unsafe { AssetManager::from_ptr(NonNull::new_unchecked((*native).assetManager)) };
-    Configuration::from_asset_manager(&assets)
+unsafe fn configuration_of(activity: &Activity, native: *mut ANativeActivity) -> Configuration {
+    match activity.with(current_configuration) {
+        Ok(configuration) => configuration,
+        Err(error) => {
+            activity.clear_exception();
+            warn_to_log!("waft: the resources' configuration is not read: {error}");
+            // SAFETY: the caller's; the manager is borrowed for the call, not owned.
+            let assets =
+                unsafe { AssetManager::from_ptr(NonNull::new_unchecked((*native).assetManager)) };
+            Configuration::from_asset_manager(&assets)
+        }
+    }
+}
+
+/// The configuration of the asset manager `activity`'s resources hold.
+fn current_configuration(
+    env: &mut Env<'_>,
+    activity: &JObject<'_>,
+) -> jni::errors::Result<Configuration> {
+    let resources = env
+        .call_method(
+            activity,
+            jni_str!("getResources"),
+            jni_sig!("()Landroid/content/res/Resources;"),
+            &[],
+        )?
+        .l()?;
+    let assets = env
+        .call_method(
+            &resources,
+            jni_str!("getAssets"),
+            jni_sig!("()Landroid/content/res/AssetManager;"),
+            &[],
+        )?
+        .l()?;
+    // SAFETY: `assets` is a live `android.content.res.AssetManager` for the call, which the native
+    // manager answered belongs to, and the configuration is copied out of it before it returns.
+    let manager = unsafe { ndk_sys::AAssetManager_fromJava(env.get_raw().cast(), assets.as_raw()) };
+    let manager = NonNull::new(manager).ok_or(jni::errors::Error::NullPtr("the asset manager"))?;
+    // SAFETY: the same.
+    let assets = unsafe { AssetManager::from_ptr(manager) };
+    Ok(Configuration::from_asset_manager(&assets))
 }
 
 /// Android destroys the activity: gone for good where it is finishing, and otherwise to be made
@@ -196,8 +242,13 @@ unsafe extern "C" fn on_save_instance_state(
 
 unsafe extern "C" fn on_configuration_changed(native: *mut ANativeActivity) {
     // SAFETY: Android's, between the activity's creation and destruction.
-    let (view, configuration) = unsafe { (view_of(native), configuration_of(native)) };
-    tell(view, ActivityEvent::ConfigurationChanged(configuration));
+    let made = unsafe { made(native) };
+    // SAFETY: the same.
+    let configuration = unsafe { configuration_of(&made.activity, native) };
+    tell(
+        made.view,
+        ActivityEvent::ConfigurationChanged(configuration),
+    );
 }
 
 unsafe extern "C" fn on_window_focus_changed(native: *mut ANativeActivity, focused: i32) {
