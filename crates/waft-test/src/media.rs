@@ -466,6 +466,8 @@ impl MediaAsset for OpenedAsset {
             Arc::new(MockVideoFrame {
                 width: size.width() as u32,
                 height: size.height() as u32,
+                rotation: 0,
+                flip: false,
             }) as Arc<dyn VideoFrame>
         });
         Box::pin(std::future::ready(frame))
@@ -485,6 +487,9 @@ impl Drop for OpenedAsset {
 pub struct MockVideoFrame {
     pub width: u32,
     pub height: u32,
+    /// What it reports as its `rotation` and `flip`.
+    pub rotation: u32,
+    pub flip: bool,
 }
 
 impl VideoFrame for MockVideoFrame {
@@ -510,6 +515,14 @@ impl VideoFrame for MockVideoFrame {
             ))
         };
         Box::pin(std::future::ready(read))
+    }
+
+    fn rotation(&self) -> u32 {
+        self.rotation
+    }
+
+    fn flip(&self) -> bool {
+        self.flip
     }
 
     /// A [`MockHardwareBuffer`] of its size, for what a frame's is ([`SYSTEM_GIVEN`]).
@@ -640,6 +653,7 @@ impl OpenedCamera {
             format: running.unwrap_or_else(|| format.clone()),
             outputs,
             state: RefCell::new(CaptureState::Running),
+            angles: Cell::new([0, 0]),
             photo: RefCell::default(),
             recordings: RefCell::default(),
             recording: RefCell::default(),
@@ -663,6 +677,8 @@ struct SessionShared {
     format: CameraFormat,
     outputs: CameraOutputs,
     state: RefCell<CaptureState>,
+    /// The preview's and the capture's rotation angles, 0 until the test sets them.
+    angles: Cell<[u32; 2]>,
     photo: RefCell<Option<Photo>>,
     /// The paths recorded to, in order.
     recordings: RefCell<Vec<PathBuf>>,
@@ -716,6 +732,13 @@ impl MockCaptureSession {
         self.0.dropped.get()
     }
 
+    /// Reports `preview` and `capture` as its rotation angles from now on, as the system would
+    /// have turned them with the device.
+    pub fn set_rotation_angles(&self, preview: u32, capture: u32) {
+        self.0.angles.set([preview, capture]);
+        self.0.changes.notify();
+    }
+
     /// Answers each photo with `photo` from now on, while the session runs.
     pub fn answering_photo(&self, photo: Photo) {
         *self.0.photo.borrow_mut() = Some(photo);
@@ -742,6 +765,14 @@ impl CaptureSession for StartedSession {
 
     fn state(&self) -> CaptureState {
         self.0.0.state.borrow().clone()
+    }
+
+    fn video_rotation_angle_for_horizon_level_preview(&self) -> u32 {
+        self.0.0.angles.get()[0]
+    }
+
+    fn video_rotation_angle_for_horizon_level_capture(&self) -> u32 {
+        self.0.0.angles.get()[1]
     }
 
     fn changed(&self) -> MediaChangeFuture {

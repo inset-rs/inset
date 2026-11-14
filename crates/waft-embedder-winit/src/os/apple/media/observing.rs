@@ -1,7 +1,8 @@
 //! Hearing AVFoundation say something changed: key-value observing of an object's properties, and
 //! notifications about an object, each telling a player's, a session's or the cameras' [`Changes`]
-//! and nothing more, from whatever thread AVFoundation says so on. The app reads the state itself
-//! when it hears.
+//! and nothing more, from whatever thread AVFoundation says so on, or calling what a session keeps
+//! applied as its rotation coordinator's angles change. The app reads the state itself when it
+//! hears.
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -26,7 +27,7 @@ define_class!(
     // SAFETY: NSObject has no subclassing requirements, and `ChangeObserver` has no `Drop`.
     #[unsafe(super(NSObject))]
     #[name = "WaftMediaChangeObserver"]
-    #[ivars = Changes]
+    #[ivars = Box<dyn Fn()>]
     struct ChangeObserver;
 
     unsafe impl NSObjectProtocol for ChangeObserver {}
@@ -41,7 +42,7 @@ define_class!(
             _change: Option<&NSDictionary<NSKeyValueChangeKey, AnyObject>>,
             _context: *mut c_void,
         ) {
-            abort_on_panic(|| self.ivars().notify());
+            abort_on_panic(|| (self.ivars())());
         }
     }
 );
@@ -60,7 +61,18 @@ impl PropertyObservation {
         key_paths: &[&str],
         changes: Changes,
     ) -> PropertyObservation {
-        let observer = ChangeObserver::alloc().set_ivars(changes);
+        PropertyObservation::calling(object, key_paths, move || changes.notify())
+    }
+
+    /// Calls `heard`, on the thread the change is told on, whenever one of `key_paths` of
+    /// `object` changes.
+    pub(super) fn calling(
+        object: &NSObject,
+        key_paths: &[&str],
+        heard: impl Fn() + 'static,
+    ) -> PropertyObservation {
+        let heard: Box<dyn Fn()> = Box::new(heard);
+        let observer = ChangeObserver::alloc().set_ivars(heard);
         // SAFETY: plain NSObject initialisation of an allocated instance.
         let observer: Retained<ChangeObserver> = unsafe { msg_send![super(observer), init] };
         let key_paths: Vec<Retained<NSString>> = key_paths

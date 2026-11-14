@@ -20,6 +20,8 @@ use ndk::hardware_buffer::HardwareBufferRef;
 use ndk::native_window::NativeWindow;
 use ndk_sys::{AHardwareBuffer, ANativeWindow, ARect};
 
+use crate::buffer_transform::BufferTransform;
+
 #[repr(C)]
 struct ASurfaceControl {
     _opaque: [u8; 0],
@@ -93,6 +95,11 @@ unsafe extern "C" {
         surface_control: *mut ASurfaceControl,
         x_scale: f32,
         y_scale: f32,
+    );
+    fn ASurfaceTransaction_setBufferTransform(
+        transaction: *mut ASurfaceTransaction,
+        surface_control: *mut ASurfaceControl,
+        transform: i32,
     );
     fn ASurfaceTransaction_setCrop(
         transaction: *mut ASurfaceTransaction,
@@ -259,6 +266,16 @@ impl Transaction {
             ASurfaceTransaction_setScale(self.raw, surface.raw, geometry.scale, geometry.scale);
             ASurfaceTransaction_setCrop(self.raw, surface.raw, &crop);
         }
+    }
+
+    /// Turns `surface`'s buffer by `transform` before it is shown, cropped, scaled and placed.
+    pub(crate) fn set_buffer_transform(
+        &mut self,
+        surface: &SurfaceControl,
+        transform: BufferTransform,
+    ) {
+        // SAFETY: a live transaction and surface control, and a transform of Android's flags.
+        unsafe { ASurfaceTransaction_setBufferTransform(self.raw, surface.raw, transform.flags()) };
     }
 
     /// Runs `complete`, on a thread of the system's, once the transaction's frame is on screen,

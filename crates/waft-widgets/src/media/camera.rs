@@ -8,7 +8,7 @@ use std::sync::Arc;
 use waft_embedder::{
     Camera, CameraDevice, CameraError, CameraFormat, CameraListFuture, CameraOpenFuture,
     CameraOutputs, CaptureSession, CaptureState, CompositionLayer, MediaChangeFuture, PhotoFuture,
-    RecordingFuture,
+    RecordingFuture, Size,
 };
 use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Task};
 
@@ -16,6 +16,7 @@ use super::at_size;
 use crate::framework::{BuildContext, IntoWidget, KeyRef, StatelessWidget, WidgetRef};
 use crate::widgets::basic::SizedBox;
 use crate::widgets::composition_layer_view::CompositionLayerView;
+use crate::widgets::transitions::ListenableBuilder;
 
 /// The cameras attached now, in the system's order; none where the platform has no cameras:
 /// Flutter's `availableCameras`. Listing asks the user nothing.
@@ -49,6 +50,8 @@ pub struct CameraSession {
     format: CameraFormat,
     /// The host's state when it last changed.
     state: CaptureState,
+    /// The host's rotation angles, the preview's and the capture's, when they last changed.
+    rotation_angles: [u32; 2],
     /// The layer the preview shows on, among the outputs it started with, which a
     /// [`CameraPreview`] places.
     preview_layer: Option<Arc<dyn CompositionLayer>>,
@@ -87,6 +90,7 @@ impl CameraSession {
             change_notifier: ChangeNotifierData::new(),
             format: host.format(),
             state: host.state(),
+            rotation_angles: rotation_angles_of(&*host),
             host: Some(host),
             preview_layer,
         });
@@ -102,6 +106,19 @@ impl CameraSession {
     /// The session's state when it last changed.
     pub fn state(self: Handle<Self>, app: &App) -> &CaptureState {
         &app.get(self).state
+    }
+
+    /// The turn, in degrees clockwise, that keeps the preview level, when it last changed:
+    /// [`CaptureSession::video_rotation_angle_for_horizon_level_preview`]. The system's preview is
+    /// turned so on its layer, which a [`CameraPreview`] lays out turned.
+    pub fn video_rotation_angle_for_horizon_level_preview(self: Handle<Self>, app: &App) -> u32 {
+        app.get(self).rotation_angles[0]
+    }
+
+    /// The turn that keeps what is captured level, when it last changed:
+    /// [`CaptureSession::video_rotation_angle_for_horizon_level_capture`].
+    pub fn video_rotation_angle_for_horizon_level_capture(self: Handle<Self>, app: &App) -> u32 {
+        app.get(self).rotation_angles[1]
     }
 
     /// The layer the preview shows on, which a [`CameraPreview`] places; `None` where the session
@@ -163,19 +180,30 @@ impl CameraSession {
         });
     }
 
-    /// Takes the host's state, telling the listeners if it changed; answers the future of the
-    /// host's next change, asked before the state is read so that no change goes unheard, or
-    /// `None` once the session is disposed.
+    /// Takes the host's state and rotation angles, telling the listeners if either changed;
+    /// answers the future of the host's next change, asked before they are read so that no change
+    /// goes unheard, or `None` once the session is disposed.
     fn take_host_state(self: Handle<Self>, app: &mut App) -> Option<MediaChangeFuture> {
         let host = app.get(self).host.clone()?;
         let next = host.changed();
         let state = host.state();
-        if state != app.get(self).state {
-            app.get_mut(self).state = state;
+        let rotation_angles = rotation_angles_of(&*host);
+        let session = app.get_mut(self);
+        if state != session.state || rotation_angles != session.rotation_angles {
+            session.state = state;
+            session.rotation_angles = rotation_angles;
             self.notify_listeners(app);
         }
         Some(next)
     }
+}
+
+/// `host`'s rotation angles, the preview's and the capture's.
+fn rotation_angles_of(host: &dyn CaptureSession) -> [u32; 2] {
+    [
+        host.video_rotation_angle_for_horizon_level_preview(),
+        host.video_rotation_angle_for_horizon_level_capture(),
+    ]
 }
 
 impl ChangeNotifier for CameraSession {
@@ -197,8 +225,9 @@ impl fmt::Debug for CameraSession {
     }
 }
 
-/// A camera session's preview, laid out at the size of the format the camera runs in, in logical
-/// pixels, or as large as the constraints let it be at that aspect. It places the layer the
+/// A camera session's preview, laid out at the size of the format the camera runs in, turned by
+/// the preview's rotation angle, in logical pixels, or as large as the constraints let it be at
+/// that aspect; laid out again as the angle changes. It places the layer the
 /// session started with for its preview, which the system draws into; a session started without
 /// one shows nothing there.
 #[derive(Clone)]
@@ -229,13 +258,29 @@ impl StatelessWidget for CameraPreview {
         self.key.as_ref()
     }
 
-    fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
-        let size = self.session.format(app).size;
-        let preview = match self.session.preview_layer(app) {
-            Some(layer) => CompositionLayerView::new(Arc::clone(layer)).into_widget(),
-            None => SizedBox::expand().into_widget(),
-        };
-        at_size(size, preview)
+    fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
+        let session = self.session;
+        ListenableBuilder::new(Rc::new(session), move |app, _context, _child| {
+            let size = turned(
+                session.format(app).size,
+                session.video_rotation_angle_for_horizon_level_preview(app),
+            );
+            let preview = match session.preview_layer(app) {
+                Some(layer) => CompositionLayerView::new(Arc::clone(layer)).into_widget(),
+                None => SizedBox::expand().into_widget(),
+            };
+            at_size(size, preview)
+        })
+        .into_widget()
+    }
+}
+
+/// `size` turned `angle` degrees clockwise: its sides swapped by a quarter turn.
+fn turned(size: Size, angle: u32) -> Size {
+    if angle % 180 == 90 {
+        Size::new(size.height(), size.width())
+    } else {
+        size
     }
 }
 
@@ -526,5 +571,30 @@ mod tests {
             Size::new(400.0, 225.0),
             "as wide as the view lets it be, at the format's aspect"
         );
+
+        cameras.sessions()[0].set_rotation_angles(90, 90);
+        cell.checkpoint();
+        assert_eq!(
+            session.video_rotation_angle_for_horizon_level_preview(&cell.borrow()),
+            90
+        );
+        cell.elapse(Duration::ZERO);
+        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
+        let scene = view.last_scene().unwrap();
+        let slices = waft_embedder::slices(&scene, |_| None);
+        let (_, placement) = slices.composition_layers().next().unwrap();
+        let size = placement.bounds().size();
+        assert_eq!(
+            (size.width(), (size.height() * 10.0).round() / 10.0),
+            (400.0, 711.1),
+            "turned a quarter as the device turns: as wide as the view, at the turned aspect"
+        );
+    }
+
+    #[test]
+    fn a_size_turned_a_quarter_swaps_its_sides() {
+        assert_eq!(turned(Size::new(16.0, 9.0), 90), Size::new(9.0, 16.0));
+        assert_eq!(turned(Size::new(16.0, 9.0), 270), Size::new(9.0, 16.0));
+        assert_eq!(turned(Size::new(16.0, 9.0), 180), Size::new(16.0, 9.0));
     }
 }

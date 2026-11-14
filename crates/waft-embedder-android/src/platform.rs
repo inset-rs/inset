@@ -36,6 +36,7 @@ use crate::gpu::Gpu;
 use crate::hardware_buffers::GrallocAllocator;
 use crate::image_codecs::AndroidImageCodecs;
 use crate::loop_waker::LoopWaker;
+use crate::media::{NdkCameras, NdkFrameReaders};
 use crate::notifications::AndroidNotifications;
 use crate::opener::IntentOpener;
 use crate::view_requests::ViewRequests;
@@ -80,6 +81,10 @@ pub struct AndroidPlatform {
     opener: IntentOpener,
     /// The system's notifications, where the activity is Waft's.
     notifications: Option<AndroidNotifications>,
+    /// The NDK's cameras, where the system has a camera manager (`media/`).
+    cameras: Option<NdkCameras>,
+    /// The readers a camera's frames go to (`media/`).
+    video_frame_readers: NdkFrameReaders,
 }
 
 impl AndroidPlatform {
@@ -102,6 +107,8 @@ impl AndroidPlatform {
             view_requests: ViewRequests::new(application.clone()),
             file_dialogs: DocumentPickers::new(application.clone(), Rc::clone(&views), first),
             notifications: AndroidNotifications::new(application.clone(), Rc::clone(&views), first),
+            cameras: NdkCameras::new(application.clone(), Rc::clone(&views)),
+            video_frame_readers: NdkFrameReaders,
             views,
             wakes: Arc::new(Wakes {
                 timer_wakeup: Mutex::new(None),
@@ -273,6 +280,18 @@ impl Platform for AndroidPlatform {
             .map(|notifications| notifications as &dyn Notifications)
     }
 
+    /// The NDK's cameras (`media/`).
+    fn cameras(&self) -> Option<&dyn waft_embedder::Cameras> {
+        self.cameras
+            .as_ref()
+            .map(|cameras| cameras as &dyn waft_embedder::Cameras)
+    }
+
+    /// The readers a camera's frames, drawn in RGBA, go to (`media/`).
+    fn video_frame_readers(&self) -> Option<&dyn waft_embedder::VideoFrameReaders> {
+        Some(&self.video_frame_readers)
+    }
+
     fn system_chrome(&self) -> Option<&dyn SystemChrome> {
         Some(&self.chrome)
     }
@@ -335,6 +354,14 @@ impl Platform for AndroidPlatform {
 
     fn import_pixels(&self, pixels: valo::PixelBuffer) -> Option<waft_embedder::Image> {
         self.images.upload_pixels(pixels, false).ok()
+    }
+
+    /// The frame's buffer, imported as any hardware buffer is.
+    fn import_video_frame(
+        &self,
+        frame: &dyn waft_embedder::VideoFrame,
+    ) -> Option<waft_embedder::Image> {
+        self.import_hardware_buffer(&*frame.hardware_buffer())
     }
 
     /// The buffer's texture on the device every view draws with, imported by valo; none where

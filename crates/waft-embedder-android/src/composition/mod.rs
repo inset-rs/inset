@@ -14,8 +14,16 @@
 //! placement's are. The experiment `experiments/2026-11-11-android-surface-control` settled the
 //! choices here.
 //!
+//! A picture the system draws onto a layer, a camera's preview, is a stream of buffers the system
+//! hands out, each presented to the layer's buffer surface control as a producer's is, but shown
+//! whole within the layer's box, centred and turned upright (`present_system_frame`), as Apple's
+//! preview layer shows its camera's; what such a layer shows is read from the system's picture,
+//! which answers it as a frame in RGBA (`SystemPicture`), since the buffers it shows are in the
+//! camera's own format.
+//!
 //! The module holds the compositor and the composition layer; `layer_geometry` where a placement
-//! puts a layer's container, `buffers` what a layer was presented and when each goes back,
+//! puts a layer's container, and a system's frame in it, `buffers` what a layer was presented and
+//! when each goes back,
 //! `transaction` one frame of the tree and the buffers it replaces, `releases` the thread that
 //! waits on release fences, `view_layer` the view's own picture, `frames_in_flight` how far the
 //! view's frames run ahead of the GPU, and `window_surface` the window's own surface beneath it,
@@ -41,19 +49,21 @@ mod window_surface;
 
 use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use waft_embedder::{
-    CompositionLayer, Compositor, HardwareBuffer, LayerPicture, Placement, ViewId,
+    CompositionLayer, Compositor, HardwareBuffer, LayerPicture, Placement, VideoFrame, ViewId,
 };
 
+use crate::buffer_transform::BufferTransform;
 use crate::hardware_buffers::AndroidHardwareBuffer;
 use crate::surface_control::{Geometry, SurfaceControl, Transaction};
 
-use buffers::PresentedBuffers;
-use releases::{OnReleased, Release, Releases};
+use buffers::{PresentedBuffers, Shown};
+use releases::{Release, Releases};
 use transaction::{LayerTransaction, Transactions};
 
+pub(crate) use releases::OnReleased;
 pub(crate) use view_layer::SurfaceControlViewLayer;
 
 /// The compositor of Android: every layer it makes shares one lock to build transactions under
@@ -82,6 +92,20 @@ impl Compositor for SurfaceControlCompositor {
     fn make_layer(&self, opaque: bool) -> Arc<dyn CompositionLayer> {
         self.layer(opaque)
     }
+}
+
+/// One frame of a picture the system draws onto a layer, such as a camera's preview: shown whole
+/// within the layer's box, centred, turned by `transform`, as Apple's preview layer shows its
+/// camera's with `resizeAspect`.
+pub(crate) struct SystemFrame {
+    pub(crate) buffer: AndroidHardwareBuffer,
+    pub(crate) transform: BufferTransform,
+}
+
+/// A picture the system draws onto a layer, which the layer reads what it shows now from.
+pub(crate) trait SystemPicture: Send + Sync {
+    /// The frame it shows now, in RGBA, as a frame reader hands one out; `None` before the first.
+    fn current_frame(&self) -> Option<Arc<dyn VideoFrame>>;
 }
 
 /// Who places a layer: the presents of one layer, by its number, or a window, the picture of the
@@ -118,6 +142,11 @@ struct LayerState {
     /// The device pixel ratio the layer was last placed at, which its children are laid out at;
     /// `None` until it is placed.
     pixel_ratio: Option<f64>,
+    /// The layer's box in its own pixels, as it was last placed, which a system's frame is fitted
+    /// in; `None` until it is placed.
+    box_size: Option<[f64; 2]>,
+    /// The picture the system draws onto the layer, while its frames are what the layer shows.
+    system_picture: Option<Weak<dyn SystemPicture>>,
 }
 
 /// A layer's surface controls: the container its placement moves, and its buffer's on top of its
@@ -143,6 +172,8 @@ impl SurfaceControlLayer {
                 buffers: PresentedBuffers::new(),
                 children: Vec::new(),
                 pixel_ratio: None,
+                box_size: None,
+                system_picture: None,
             }),
         }
     }
@@ -158,7 +189,9 @@ impl SurfaceControlLayer {
 
     /// The host's own layer behind a placed one; `None` for a layer no compositor of this host
     /// made.
-    fn downcast_from(layer: &Arc<dyn CompositionLayer>) -> Option<Arc<SurfaceControlLayer>> {
+    pub(crate) fn downcast_from(
+        layer: &Arc<dyn CompositionLayer>,
+    ) -> Option<Arc<SurfaceControlLayer>> {
         let layer = Arc::clone(layer);
         let any: Arc<dyn std::any::Any + Send + Sync> = layer;
         any.downcast().ok()
@@ -194,14 +227,16 @@ impl SurfaceControlLayer {
     }
 
     /// Shows the layer in `parent` at `z` among its siblings, where `geometry` says, or hides it
-    /// where nothing of it shows, its children laid out at `pixel_ratio`; its surface controls
-    /// are made under `parent` if it has none, and moved into it if they lie elsewhere.
+    /// where nothing of it shows, its box `box_size` of its own pixels, its children laid out at
+    /// `pixel_ratio`; its surface controls are made under `parent` if it has none, and moved into
+    /// it if they lie elsewhere.
     fn show_in(
         &self,
         transaction: &mut LayerTransaction,
         parent: &SurfaceControl,
         z: i32,
         geometry: Option<Geometry>,
+        box_size: [f64; 2],
         pixel_ratio: f64,
     ) {
         let mut state = self.state();
@@ -218,8 +253,9 @@ impl SurfaceControlLayer {
         if let Some(geometry) = &geometry {
             tx.set_geometry(&container, geometry);
         }
-        if new || state.pixel_ratio != Some(pixel_ratio) {
+        if new || state.pixel_ratio != Some(pixel_ratio) || state.box_size != Some(box_size) {
             state.pixel_ratio = Some(pixel_ratio);
+            state.box_size = Some(box_size);
             state.lay_out(transaction, self.opaque);
         }
     }
@@ -237,7 +273,8 @@ impl SurfaceControlLayer {
     ) {
         let release = Release::new(Arc::new(buffer.clone()), released);
         let mut state = self.state();
-        let replaced = state.buffers.present(buffer, acquire_fence, release);
+        state.system_picture = None;
+        let replaced = state.buffers.present(buffer, acquire_fence, None, release);
         let previous_children = std::mem::replace(
             &mut state.children,
             adopted_by(children, Placer::Layer(self.number)),
@@ -249,7 +286,73 @@ impl SurfaceControlLayer {
             gone.let_go(transaction);
         }
         transaction.keep(previous_children.into_iter().map(|(layer, _)| layer));
-        let Some(surfaces) = &state.surfaces else {
+        state.show_in_place_of(transaction, replaced, self.opaque);
+    }
+
+    /// Shows `frame` of `picture`, a picture the system draws onto the layer, in place of what
+    /// the layer showed, the children it holds kept beneath it; the buffer it replaces goes back
+    /// to its producer once the compositor is done with it, and `released` runs once the
+    /// compositor is done with this one.
+    pub(crate) fn present_system_frame(
+        &self,
+        frame: SystemFrame,
+        picture: Weak<dyn SystemPicture>,
+        released: OnReleased,
+    ) {
+        self.transactions.transact(|transaction| {
+            let release = Release::new(Arc::new(frame.buffer.clone()), released);
+            let mut state = self.state();
+            state.system_picture = Some(picture);
+            let replaced =
+                state
+                    .buffers
+                    .present(frame.buffer, None, Some(frame.transform), release);
+            state.show_in_place_of(transaction, replaced, self.opaque);
+        });
+    }
+
+    /// The layer shows nothing of `picture` from now on, nor anything else until its next
+    /// present, where `picture` is what it shows.
+    pub(crate) fn withdraw_system_picture(&self, picture: &Weak<dyn SystemPicture>) {
+        self.transactions.transact(|transaction| {
+            let mut state = self.state();
+            let shows_it = state
+                .system_picture
+                .as_ref()
+                .is_some_and(|shown| Weak::ptr_eq(shown, picture));
+            if !shows_it {
+                return;
+            }
+            state.system_picture = None;
+            let withdrawn = state.buffers.withdraw();
+            state.show_in_place_of(transaction, withdrawn, self.opaque);
+        });
+    }
+
+    /// What the layer shows now: the frame of the system's picture on it, or the buffer presented
+    /// last, held as the layer holds it.
+    fn shown_picture(&self) -> Option<LayerPicture> {
+        let state = self.state();
+        if let Some(picture) = &state.system_picture {
+            let picture = picture.upgrade()?;
+            drop(state);
+            return picture.current_frame().map(LayerPicture::Frame);
+        }
+        let shown = state.buffers.on_screen()?;
+        Some(LayerPicture::Buffer(Arc::new(shown.buffer.clone())))
+    }
+}
+
+impl LayerState {
+    /// Shows what is on screen now in place of `replaced`, which goes back to its producer once the
+    /// compositor is done with it, at once where it was never set, in `transaction`.
+    fn show_in_place_of(
+        &mut self,
+        transaction: &mut LayerTransaction,
+        replaced: Option<Shown>,
+        opaque: bool,
+    ) {
+        let Some(surfaces) = &self.surfaces else {
             if let Some(replaced) = replaced {
                 transaction.release_unshown(replaced.release);
             }
@@ -263,18 +366,9 @@ impl SurfaceControlLayer {
             Some(replaced) => transaction.release_unshown(replaced.release),
             None => {}
         }
-        state.lay_out(transaction, self.opaque);
+        self.lay_out(transaction, opaque);
     }
 
-    /// The buffer presented last, held as the layer holds it.
-    fn presented_picture(&self) -> Option<LayerPicture> {
-        let state = self.state();
-        let shown = state.buffers.on_screen()?;
-        Some(LayerPicture::Buffer(Arc::new(shown.buffer.clone())))
-    }
-}
-
-impl LayerState {
     /// Makes the layer's surface controls under `parent` if it has none, or moves its container
     /// into `parent` if it lies elsewhere or nowhere, as one let go and placed again does, and
     /// answers whether they are new; `None` where the system made none.
@@ -331,11 +425,34 @@ impl LayerState {
         }
         for ((child, placement), z) in self.children.iter().zip(0..) {
             let geometry = layer_geometry::of(placement, pixel_ratio);
-            child.show_in(transaction, &container, z, geometry, pixel_ratio);
+            let box_size = layer_geometry::box_size(placement, pixel_ratio);
+            child.show_in(transaction, &container, z, geometry, box_size, pixel_ratio);
         }
         let tx = &mut transaction.transaction;
         tx.set_z_order(&buffer_surface, self.children.len() as i32);
         tx.set_opaque(&buffer_surface, opaque && self.children.is_empty());
+        self.place_buffer(transaction, &buffer_surface);
+    }
+
+    /// Places the buffer on screen on its surface control: a producer's as it is, filling the
+    /// layer, and a system's frame turned and fitted in the layer's box; the surface control is
+    /// hidden while nothing is on screen.
+    fn place_buffer(&self, transaction: &mut LayerTransaction, buffer_surface: &SurfaceControl) {
+        let tx = &mut transaction.transaction;
+        let Some(shown) = self.buffers.on_screen() else {
+            tx.set_visible(buffer_surface, false);
+            return;
+        };
+        let size = [shown.buffer.width(), shown.buffer.height()];
+        let (transform, geometry) = match (shown.fitted, self.box_size) {
+            (Some(transform), Some(box_size)) => {
+                (transform, layer_geometry::fitted(size, transform, box_size))
+            }
+            _ => (BufferTransform::IDENTITY, layer_geometry::unfitted(size)),
+        };
+        tx.set_visible(buffer_surface, true);
+        tx.set_buffer_transform(buffer_surface, transform);
+        tx.set_geometry(buffer_surface, &geometry);
     }
 }
 
@@ -360,9 +477,10 @@ impl CompositionLayer for SurfaceControlLayer {
         });
     }
 
-    /// The buffer presented last: a surface control reads nothing back.
+    /// The buffer presented last, or the frame of the system's picture on it, which it reads from
+    /// the picture: a surface control reads nothing back.
     fn current_picture(&self) -> Option<LayerPicture> {
-        self.presented_picture()
+        self.shown_picture()
     }
 }
 

@@ -1,5 +1,7 @@
 //! Where one placement puts a composition layer's container surface control in its parent's:
-//! moved, scaled and cropped, which is all a surface control is placed by.
+//! moved, scaled and cropped, which is all a surface control is placed by; and where a buffer lies
+//! in its layer: a producer's filling it from its origin, and a system's frame turned, shown whole
+//! within the layer's box and centred in it.
 //!
 //! The NDK places a surface control by an integer position, one scale and an axis-aligned crop in
 //! its own pixels (API 31), and has no arbitrary matrix and no rounded or path clip, so a layer is
@@ -16,6 +18,7 @@
 
 use waft_embedder::Placement;
 
+use crate::buffer_transform::BufferTransform;
 use crate::surface_control::Geometry;
 
 /// Where `placement` puts a layer whose buffers are drawn `pixel_ratio` pixels to its unit, in its
@@ -41,6 +44,50 @@ pub(super) fn of(placement: &Placement, pixel_ratio: f64) -> Option<Geometry> {
         scale: scale as f32,
         crop: crop.map(|side| side as i32),
     })
+}
+
+/// The box `placement` gives a layer whose buffers are drawn `pixel_ratio` pixels to its unit, in
+/// the layer's own pixels.
+pub(super) fn box_size(placement: &Placement, pixel_ratio: f64) -> [f64; 2] {
+    [
+        placement.rect.width() * pixel_ratio,
+        placement.rect.height() * pixel_ratio,
+    ]
+}
+
+/// Where a producer's buffer `size` pixels large lies in its layer: at its origin, unscaled, all of
+/// it.
+pub(super) fn unfitted(size: [u32; 2]) -> Geometry {
+    Geometry {
+        position: [0, 0],
+        scale: 1.0,
+        crop: [0, 0, size[0] as i32, size[1] as i32],
+    }
+}
+
+/// Where a system's frame `size` pixels large, turned by `transform`, lies in a layer whose box is
+/// `box_size` of its pixels: all of it, as large as the box holds, centred.
+pub(super) fn fitted(size: [u32; 2], transform: BufferTransform, box_size: [f64; 2]) -> Geometry {
+    let [width, height] = if transform.swaps_sides() {
+        [size[1], size[0]]
+    } else {
+        size
+    };
+    let (width, height) = (f64::from(width.max(1)), f64::from(height.max(1)));
+    let scale = (box_size[0] / width).min(box_size[1] / height);
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    Geometry {
+        position: [
+            ((box_size[0] - width * scale) / 2.0).round() as i32,
+            ((box_size[1] - height * scale) / 2.0).round() as i32,
+        ],
+        scale: scale as f32,
+        crop: [0, 0, width as i32, height as i32],
+    }
 }
 
 /// Where a layer that fills a window `size` pixels large lies in it: at its origin, unscaled,
@@ -108,6 +155,32 @@ mod tests {
             mutators: vec![Mutator::Transform(Matrix4::scale(0.0, 0.0))],
         };
         assert_eq!(of(&shrunk, 1.0), None);
+    }
+
+    /// A camera's 640 by 480 frame turned a quarter, in a box 300 by 600: 480 by 640 upright,
+    /// scaled to the box's width, centred down it.
+    #[test]
+    fn a_turned_frame_is_shown_whole_and_centred_in_the_box() {
+        let geometry = fitted(
+            [640, 480],
+            BufferTransform::turned(90, false),
+            [300.0, 600.0],
+        );
+        assert_eq!(geometry.scale, 0.625);
+        assert_eq!(geometry.position, [0, 100]);
+        assert_eq!(geometry.crop, [0, 0, 480, 640]);
+        let unturned = fitted([640, 480], BufferTransform::IDENTITY, [640.0, 960.0]);
+        assert_eq!(unturned.scale, 1.0);
+        assert_eq!(unturned.position, [0, 240]);
+    }
+
+    #[test]
+    fn a_placements_box_is_its_rect_in_the_layers_pixels() {
+        let placement = Placement {
+            rect: Rect::from_ltwh(20.0, 40.0, 320.0, 180.0),
+            mutators: vec![Mutator::Transform(Matrix4::scale(2.5, 2.5))],
+        };
+        assert_eq!(box_size(&placement, 2.5), [800.0, 450.0]);
     }
 
     #[test]

@@ -440,6 +440,9 @@ impl<C: EmbedderClient> Host<C> {
         let Some(activity) = view.activity() else {
             return;
         };
+        if let Some(rotation) = crate::display::read_rotation(&activity) {
+            crate::media::display_rotated(rotation);
+        }
         let screen = crate::display::read_screen(&activity, view.density());
         if *self.platform.screen.borrow() == screen {
             return;
@@ -501,6 +504,7 @@ impl<C: EmbedderClient> Host<C> {
         if focused {
             self.look_at_clipboard();
             self.look_at_tasks();
+            crate::media::app_in_front();
         }
     }
 

@@ -134,7 +134,9 @@ macOS and iOS ask the user before an app opens the camera or the microphone, sho
 - `camera`: `NSCameraUsageDescription`.
 - `microphone`: `NSMicrophoneUsageDescription`.
 
-On macOS the bundle is also signed with the hardened runtime's entitlement for each declared device, `com.apple.security.device.camera` and `com.apple.security.device.audio-input`, merged into the app's own `entitlements`, whose value wins where it names one: a signed bundle runs with the hardened runtime, which refuses a device its entitlements leave out. Android and the web: not declared yet.
+On macOS the bundle is also signed with the hardened runtime's entitlement for each declared device, `com.apple.security.device.camera` and `com.apple.security.device.audio-input`, merged into the app's own `entitlements`, whose value wins where it names one: a signed bundle runs with the hardened runtime, which refuses a device its entitlements leave out.
+
+On Android a declared camera puts `android.permission.CAMERA` in the manifest, which the system asks the user for as the app opens a camera, beside `<uses-feature android:name="android.hardware.camera" android:required="false"/>`, so a store does not take the app for one that needs a camera; Android shows no sentence of the app's. The microphone and the web: not declared yet.
 
 ## Signing
 

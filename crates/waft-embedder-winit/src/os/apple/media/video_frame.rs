@@ -29,30 +29,50 @@ use crate::os::apple::hardware_buffers::SurfaceBuffer;
 /// # }
 /// ```
 #[derive(Clone)]
-pub struct CoreVideoFrame(CFRetained<CVPixelBuffer>);
+pub struct CoreVideoFrame {
+    buffer: CFRetained<CVPixelBuffer>,
+    /// The turn it is shown at, in degrees clockwise, before `flip`.
+    rotation: u32,
+    /// Whether it is shown mirrored, after `rotation`.
+    flip: bool,
+}
 
 impl CoreVideoFrame {
     /// The frame of `buffer`, a pixel buffer backed by an `IOSurface`, in 32-bit BGRA, as a
-    /// reader's output hands it out: what platform code that holds the system's own buffer, as
-    /// WaOS does for a program, hands the app's codecs back.
+    /// reader's output hands it out, shown as it is: what platform code that holds the system's
+    /// own buffer, as WaOS does for a program, hands the app's codecs back.
     pub fn new(buffer: CFRetained<CVPixelBuffer>) -> CoreVideoFrame {
-        CoreVideoFrame(buffer)
+        CoreVideoFrame {
+            buffer,
+            rotation: 0,
+            flip: false,
+        }
+    }
+
+    /// The frame shown turned `rotation` degrees clockwise, then mirrored where `flip` says, as
+    /// a camera's frame is whose pixels its connection did not turn.
+    pub fn shown_turned(self, rotation: u32, flip: bool) -> CoreVideoFrame {
+        CoreVideoFrame {
+            rotation: rotation % 360,
+            flip,
+            ..self
+        }
     }
 
     /// The pixel buffer AVFoundation handed out. Retained, it holds the frame's slot in its pool,
     /// as the frame does.
     pub fn pixel_buffer(&self) -> &CVPixelBuffer {
-        &self.0
+        &self.buffer
     }
 }
 
 impl VideoFrame for CoreVideoFrame {
     fn width(&self) -> u32 {
-        CVPixelBufferGetWidth(&self.0) as u32
+        CVPixelBufferGetWidth(&self.buffer) as u32
     }
 
     fn height(&self) -> u32 {
-        CVPixelBufferGetHeight(&self.0) as u32
+        CVPixelBufferGetHeight(&self.buffer) as u32
     }
 
     /// Its surface's rows as they lie, BGRA and premultiplied, copied while it is locked for
@@ -64,12 +84,20 @@ impl VideoFrame for CoreVideoFrame {
     fn hardware_buffer(&self) -> Arc<dyn HardwareBuffer> {
         Arc::new(self.surface_buffer())
     }
+
+    fn rotation(&self) -> u32 {
+        self.rotation
+    }
+
+    fn flip(&self) -> bool {
+        self.flip
+    }
 }
 
 impl CoreVideoFrame {
     /// The frame's surface, which holds the frame.
     fn surface_buffer(&self) -> SurfaceBuffer {
-        SurfaceBuffer::of_frame(self.0.clone())
+        SurfaceBuffer::of_frame(self.buffer.clone())
             .expect("a frame's pixel buffer is on an IOSurface, as `CoreVideoFrame::new` takes it")
     }
 }

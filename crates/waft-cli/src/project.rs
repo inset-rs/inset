@@ -92,7 +92,8 @@ pub enum FileRole {
 
 /// `[package.metadata.waft.usage_descriptions]`: why the app uses each device the system asks
 /// the user about before an app may open it, in the sentence the system's prompt shows. macOS and
-/// iOS end an app that opens one of these without its description.
+/// iOS end an app that opens one of these without its description; on Android a declared camera
+/// is asked for in the manifest.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct UsageDescriptions {

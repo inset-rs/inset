@@ -177,6 +177,11 @@ fn external_device_types() -> Option<&'static AVCaptureDeviceType> {
     None
 }
 
+/// Whether `device` looks at its user, so that its picture is shown as a mirror.
+pub(super) fn faces_user(device: &AVCaptureDevice) -> bool {
+    camera_of(device).facing == CameraFacing::Front
+}
+
 /// `device` as the app knows it.
 fn camera_of(device: &AVCaptureDevice) -> Camera {
     // SAFETY: reading a device's id, name, place and type.

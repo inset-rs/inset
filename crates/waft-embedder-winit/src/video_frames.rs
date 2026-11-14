@@ -239,6 +239,14 @@ mod tests {
             fn hardware_buffer(&self) -> Arc<dyn HardwareBuffer> {
                 Arc::clone(&self.0)
             }
+
+            fn rotation(&self) -> u32 {
+                0
+            }
+
+            fn flip(&self) -> bool {
+                false
+            }
         }
 
         /// A test frame's memory, 4 by 4, which no host handed out, so no device takes it.

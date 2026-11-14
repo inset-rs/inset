@@ -460,8 +460,12 @@ pub trait CameraDevice {
     /// the system configures together, and answers the session once it runs, or is interrupted,
     /// from which it resumes by itself. Where the camera already runs for another session and the
     /// system runs a camera in one format at a time, the session joins that format instead, and
-    /// its [`format`](CaptureSession::format) says so. It fails for what can happen at any time:
-    /// the camera in use, unplugged, or not allowed; and for a format the camera does not list.
+    /// its [`format`](CaptureSession::format) says so; on Android, which gives a camera one JPEG
+    /// stream, a session that joins takes photos at the size the first session set, or none where
+    /// it set none. It fails for what can happen at any time: the camera in use, unplugged, or not
+    /// allowed; for a format the camera does not list; and, with
+    /// [`CameraError::NotSupported`], for outputs the system cannot feed, such as upright frames
+    /// on Android.
     fn start(&self, format: &CameraFormat, outputs: CameraOutputs) -> CameraStartFuture;
 }
 
@@ -497,6 +501,14 @@ pub struct CameraOutputs {
     /// Recordings, each encoded and written to a file by the system, with sound where `options`
     /// ask for it, which asks the user for the microphone as the session starts.
     pub movies: Option<MovieOptions>,
+    /// Whether the frames come turned and mirrored as they show, each reporting a
+    /// [`rotation`](VideoFrame::rotation) of 0 and no [`flip`](VideoFrame::flip), the system
+    /// turning every frame at a cost and keeping them turned at the session's capture angle as
+    /// the device turns: Apple's video data output connection's `videoRotationAngle` and
+    /// `isVideoMirrored`. Only the frames: photos are turned in their EXIF, and the preview by
+    /// the system, either way. A system that cannot turn them fails the start with
+    /// [`CameraError::NotSupported`], as Android's camera does.
+    pub upright_frames: bool,
 }
 
 impl CameraOutputs {
@@ -524,6 +536,11 @@ impl CameraOutputs {
         self.movies = Some(options);
         self
     }
+
+    pub fn upright_frames(mut self) -> CameraOutputs {
+        self.upright_frames = true;
+        self
+    }
 }
 
 /// A camera running for the app, controlled on the app's main thread. Dropped, it stops for the
@@ -536,8 +553,23 @@ pub trait CaptureSession {
     /// The session's state now.
     fn state(&self) -> CaptureState;
 
-    /// Resolves once [`state`](Self::state) may answer something else than when this was
-    /// called, or once the session is gone.
+    /// The turn, in degrees clockwise, 0, 90, 180 or 270, that keeps the preview level relative
+    /// to gravity: Apple's `AVCaptureDevice.RotationCoordinator`'s
+    /// `videoRotationAngleForHorizonLevelPreview`. The system's preview on a layer is turned so
+    /// already; an app lays the layer out at the turned size. On Android it is the capture angle.
+    /// WaOS's `capture-session` gives both angles as one record, and a stream of their changes.
+    fn video_rotation_angle_for_horizon_level_preview(&self) -> u32;
+
+    /// The turn, in degrees clockwise, that keeps what is captured level relative to gravity:
+    /// the coordinator's `videoRotationAngleForHorizonLevelCapture`. A photo is taken turned so,
+    /// in its EXIF, and a frame reports what of it its pixels do not carry as its
+    /// [`rotation`](VideoFrame::rotation). It differs from the preview's only while the device
+    /// turns, and on Android never: there both are the sensor's orientation against the
+    /// display's.
+    fn video_rotation_angle_for_horizon_level_capture(&self) -> u32;
+
+    /// Resolves once [`state`](Self::state) or either rotation angle may answer something else
+    /// than when this was called, or once the session is gone.
     fn changed(&self) -> MediaChangeFuture;
 
     /// Takes a photo while the session runs with photos among its outputs, answering it once the
@@ -584,6 +616,9 @@ pub enum CameraError {
     InUse,
     /// The camera is no longer attached.
     Unplugged,
+    /// The system cannot feed an output asked for, for this reason, such as upright frames on
+    /// Android.
+    NotSupported(String),
     /// The system failed, for its reason.
     Failed(String),
 }
@@ -594,6 +629,7 @@ impl fmt::Display for CameraError {
             CameraError::NotAllowed => f.write_str("the app may not use the camera"),
             CameraError::InUse => f.write_str("another app has the camera"),
             CameraError::Unplugged => f.write_str("the camera is no longer attached"),
+            CameraError::NotSupported(reason) => write!(f, "the system cannot: {reason}"),
             CameraError::Failed(reason) => write!(f, "the camera failed: {reason}"),
         }
     }
@@ -671,6 +707,18 @@ pub trait VideoFrame: Any + Send + Sync {
     /// it and every texture imported of it are held: what the app draws through a texture it
     /// imports, the hardware codecs encode and a composition layer shows.
     fn hardware_buffer(&self) -> Arc<dyn crate::HardwareBuffer>;
+
+    /// The rotation applied to the frame when it is shown, in degrees clockwise: 0, 90, 180 or
+    /// 270, as WebCodecs' `VideoFrame.rotation`. It applies before [`flip`](Self::flip). The
+    /// pixels are not turned: [`width`](Self::width) and [`height`](Self::height) are the
+    /// frame's own, so a frame turned a quarter shows `height` wide. A camera's frame on a phone
+    /// is turned so, unless its session asked for upright frames.
+    fn rotation(&self) -> u32;
+
+    /// Whether the frame is flipped horizontally when it is shown, after
+    /// [`rotation`](Self::rotation), as WebCodecs' `VideoFrame.flip`: a camera that looks at its
+    /// user, shown as a mirror.
+    fn flip(&self) -> bool;
 }
 
 /// Why a camera session's photo or recording answered nothing.

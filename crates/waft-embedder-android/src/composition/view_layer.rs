@@ -189,7 +189,15 @@ impl SurfaceControlViewLayer {
         layer.transactions.transact(|transaction| {
             if layer.adopted_by(super::Placer::Window(self.view)) {
                 let filling = Some(layer_geometry::filling(size));
-                layer.show_in(transaction, &window.control, 0, filling, pixel_ratio);
+                let box_size = [f64::from(size[0]), f64::from(size[1])];
+                layer.show_in(
+                    transaction,
+                    &window.control,
+                    0,
+                    filling,
+                    box_size,
+                    pixel_ratio,
+                );
             }
             layer.present_in(
                 transaction,

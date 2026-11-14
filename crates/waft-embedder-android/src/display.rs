@@ -28,6 +28,27 @@ pub(crate) fn read_screen(activity: &Activity, scale: f64) -> Option<Screen> {
     }
 }
 
+/// How far what the screen `activity` is on shows is turned from the screen's natural orientation,
+/// in degrees clockwise: `Display.getRotation`'s quarter turns, `ROTATION_90` for a phone turned a
+/// quarter anticlockwise. `None`, said in the log, where the system would not say.
+pub(crate) fn read_rotation(activity: &Activity) -> Option<u32> {
+    let rotation = activity.with(|env, activity| {
+        let manager = window_manager(env, activity)?;
+        let display = default_display(env, &manager)?;
+        env.call_method(&display, jni_str!("getRotation"), jni_sig!("()I"), &[])?
+            .i()
+    });
+    match rotation {
+        Ok(quarter_turns) => Some(quarter_turns.rem_euclid(4) as u32 * 90),
+        Err(error) => {
+            crate::log::warn_to_log!(
+                "the system would not say how its display is turned: {error:?}"
+            );
+            None
+        }
+    }
+}
+
 fn screen_of(env: &mut Env<'_>, activity: &JObject<'_>, scale: f64) -> jni::errors::Result<Screen> {
     let manager = window_manager(env, activity)?;
     let display = default_display(env, &manager)?;

@@ -1,11 +1,15 @@
-//! What the app tells macOS and iOS about the devices it opens: why it uses each, in the
-//! sentence the system's prompt shows the user, and on macOS the hardened runtime's leave to open
-//! it.
+//! What the app tells the systems about the devices it opens: on macOS and iOS why it uses each,
+//! in the sentence the system's prompt shows the user, and on macOS the hardened runtime's leave
+//! to open it; on Android the permission the system asks the user for, and the hardware feature,
+//! which a store reads to decide which devices the app is for.
 //!
-//! Both systems end an app that opens the camera or the microphone without a usage description
+//! Apple's systems end an app that opens the camera or the microphone without a usage description
 //! for it in its `Info.plist`; a macOS bundle signed with the hardened runtime, as the CLI signs
-//! one with a certificate, is also refused the device unless its entitlements allow it. Keep the two lists
-//! describing the same devices.
+//! one with a certificate, is also refused the device unless its entitlements allow it. Android
+//! refuses the camera to an app whose manifest does not ask for its permission, and takes a
+//! permission that implies a feature as requiring it, so the feature is declared not required,
+//! as Android's documentation of the camera asks of an app that works without one. Keep the lists
+//! describing the same devices; the microphone is not declared on Android yet.
 
 use anyhow::{Result, bail};
 use plist::{Dictionary, Value};
@@ -43,6 +47,22 @@ pub fn macos_entitlements(descriptions: &UsageDescriptions) -> Dictionary {
         .collect()
 }
 
+/// The permissions an Android app asks for in its manifest for each device it declares.
+pub fn android_permissions(descriptions: &UsageDescriptions) -> Vec<String> {
+    devices(descriptions)
+        .filter_map(|(device, _)| android_permission(device))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The hardware features an Android app uses for each device it declares, each not required: the
+/// app runs on a device without it, and finds no camera there.
+pub fn android_features(descriptions: &UsageDescriptions) -> Vec<&'static str> {
+    devices(descriptions)
+        .filter_map(|(device, _)| android_feature(device))
+        .collect()
+}
+
 /// A device the system asks the user about before an app may open it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Device {
@@ -73,6 +93,20 @@ fn info_plist_key(device: Device) -> &'static str {
     match device {
         Device::Camera => "NSCameraUsageDescription",
         Device::Microphone => "NSMicrophoneUsageDescription",
+    }
+}
+
+fn android_permission(device: Device) -> Option<&'static str> {
+    match device {
+        Device::Camera => Some("android.permission.CAMERA"),
+        Device::Microphone => None,
+    }
+}
+
+fn android_feature(device: Device) -> Option<&'static str> {
+    match device {
+        Device::Camera => Some("android.hardware.camera"),
+        Device::Microphone => None,
     }
 }
 
@@ -119,10 +153,24 @@ mod tests {
     }
 
     #[test]
+    fn a_declared_camera_asks_android_for_its_permission_and_uses_its_feature() {
+        assert_eq!(
+            android_permissions(&camera_only()),
+            vec!["android.permission.CAMERA".to_owned()]
+        );
+        assert_eq!(
+            android_features(&camera_only()),
+            vec!["android.hardware.camera"]
+        );
+    }
+
+    #[test]
     fn nothing_declared_adds_nothing() {
         let none = UsageDescriptions::default();
         assert!(info_plist(&none).is_empty());
         assert!(macos_entitlements(&none).is_empty());
+        assert!(android_permissions(&none).is_empty());
+        assert!(android_features(&none).is_empty());
         assert!(check(&none).is_ok());
     }
 

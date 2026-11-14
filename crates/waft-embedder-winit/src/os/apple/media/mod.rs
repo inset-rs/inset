@@ -10,7 +10,8 @@
 //! (`layer_pictures`); the cameras are a discovery session's devices, and a camera a
 //! capture device (`camera`) with its formats (`camera_formats`), shared in one format by this
 //! process's sessions (`camera_sharing`), and a session an `AVCaptureSession` (`capture_session`)
-//! with its photo and movie outputs (`outputs`); a picture goes to a composition layer as a layer
+//! with its photo and movie outputs (`outputs`) and its rotation coordinator's angles
+//! (`camera_rotation`); a picture goes to a composition layer as a layer
 //! the system draws into, shown as its content so that Core Animation clips and scales it with it
 //! (`apple/composition`), or to a frame reader the app made (`frames`), each frame an
 //! `IOSurface`-backed pixel buffer (`video_frame`) whose surface is its hardware buffer, imported
@@ -30,6 +31,7 @@ mod asset;
 mod asset_frames;
 mod camera;
 mod camera_formats;
+mod camera_rotation;
 mod camera_sharing;
 mod capture_session;
 mod cue_markup;

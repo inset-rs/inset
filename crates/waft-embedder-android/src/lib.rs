@@ -38,6 +38,8 @@ mod answer;
 mod app_thread;
 #[cfg(target_os = "android")]
 mod application;
+#[cfg(any(target_os = "android", test))]
+mod buffer_transform;
 #[cfg(target_os = "android")]
 mod chrome;
 #[cfg(target_os = "android")]
@@ -80,6 +82,8 @@ mod log;
 mod loop_waker;
 #[cfg(target_os = "android")]
 mod main_thread;
+#[cfg(any(target_os = "android", test))]
+mod media;
 #[cfg(target_os = "android")]
 mod native_activity;
 #[cfg(target_os = "android")]
@@ -96,6 +100,8 @@ mod platform;
 mod queue_family_handover;
 #[cfg(target_os = "android")]
 mod refresh;
+#[cfg(target_os = "android")]
+mod runtime_permissions;
 #[cfg(any(target_os = "android", test))]
 mod saved_view;
 #[cfg(target_os = "android")]
@@ -129,5 +135,7 @@ pub use app_thread::AndroidApp;
 pub use hardware_buffers::AndroidHardwareBuffer;
 #[cfg(target_os = "android")]
 pub use host::AndroidEmbedder;
+#[cfg(target_os = "android")]
+pub use media::AndroidVideoFrame;
 #[cfg(target_os = "android")]
 pub use platform::AndroidPlatform;

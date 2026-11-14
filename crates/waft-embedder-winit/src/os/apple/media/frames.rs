@@ -31,6 +31,7 @@ use objc2_core_video::{
 use objc2_foundation::{NSDictionary, NSNumber, NSString};
 use waft_embedder::{VideoFrame, VideoFrameReader, VideoFrameReaders};
 
+use super::camera_rotation::{RotationAngles, shown_orientation};
 use super::video_frame::CoreVideoFrame;
 use super::{abort_on_panic, as_ns_string};
 use crate::os::apple::media_time::media_time_of;
@@ -174,8 +175,8 @@ struct CrossThreadOutput(Retained<AVPlayerItemVideoOutput>);
 unsafe impl Send for CrossThreadOutput {}
 unsafe impl Sync for CrossThreadOutput {}
 
-/// A camera's frames: the newest picture its video data output delivered, kept until the next
-/// replaces it, and handed to a reader once.
+/// A camera's frames: the newest picture its video data output delivered, with how it shows, kept
+/// until the next replaces it, and handed to a reader once.
 pub(super) struct CameraFrames {
     newest: Arc<Mutex<Newest>>,
     output: CrossThreadVideoDataOutput,
@@ -210,10 +211,16 @@ impl Newest {
 }
 
 impl CameraFrames {
-    /// An output delivering pixel buffers on a queue of its own, kept here as they come.
-    pub(super) fn new() -> CameraFrames {
+    /// An output delivering pixel buffers on a queue of its own, kept here as they come, each
+    /// shown turned by what of the session's capture angle in `angles` its connection did not
+    /// apply, and mirrored for a camera that `faces_user` where its connection did not mirror it.
+    pub(super) fn new(angles: Arc<RotationAngles>, faces_user: bool) -> CameraFrames {
         let newest = Arc::new(Mutex::new(Newest::default()));
-        let delegate = SampleBufferDelegate::alloc().set_ivars(Arc::clone(&newest));
+        let delegate = SampleBufferDelegate::alloc().set_ivars(Delivered {
+            newest: Arc::clone(&newest),
+            angles,
+            faces_user,
+        });
         // SAFETY: plain NSObject initialisation of an allocated instance.
         let delegate: Retained<SampleBufferDelegate> = unsafe { msg_send![super(delegate), init] };
         let queue = DispatchQueue::new("rs.waft.camera-frames", DispatchQueueAttr::SERIAL);
@@ -244,6 +251,16 @@ impl CameraFrames {
         &self.output.0
     }
 
+    /// The connection the session delivers its video through, once the output is added to it.
+    pub(super) fn video_connection(&self) -> Option<Retained<AVCaptureConnection>> {
+        // SAFETY: a constant AVFoundation exports for the life of the process, and the output's
+        // connection of that media, which AVFoundation guards.
+        unsafe {
+            let video = objc2_av_foundation::AVMediaTypeVideo?;
+            self.output.0.connectionWithMediaType(video)
+        }
+    }
+
     /// The newest frame the output delivered, whether or not a reader has had it: what the
     /// camera shows now.
     pub(super) fn newest(&self) -> Option<CoreVideoFrame> {
@@ -262,13 +279,33 @@ impl FrameOutput for CameraFrames {
     }
 }
 
+/// Where a video data output's pictures go, and what tells how each shows.
+struct Delivered {
+    newest: Arc<Mutex<Newest>>,
+    angles: Arc<RotationAngles>,
+    faces_user: bool,
+}
+
+impl Delivered {
+    /// Keeps `image`, delivered through `connection`, as the newest, shown as it should be.
+    fn keep(&self, image: CFRetained<CVPixelBuffer>, connection: &AVCaptureConnection) {
+        let (rotation, flip) =
+            shown_orientation(connection, self.angles.capture(), self.faces_user);
+        let frame = CoreVideoFrame::new(image).shown_turned(rotation, flip);
+        self.newest
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .delivered(frame);
+    }
+}
+
 define_class!(
     /// Keeps the newest picture a video data output delivers.
     //
     // SAFETY: NSObject has no subclassing requirements, and the delegate has no `Drop`.
     #[unsafe(super(NSObject))]
     #[name = "WaftCameraFramesDelegate"]
-    #[ivars = Arc<Mutex<Newest>>]
+    #[ivars = Delivered]
     struct SampleBufferDelegate;
 
     unsafe impl NSObjectProtocol for SampleBufferDelegate {}
@@ -279,7 +316,7 @@ define_class!(
             &self,
             _output: &AVCaptureOutput,
             sample_buffer: &CMSampleBuffer,
-            _connection: &AVCaptureConnection,
+            connection: &AVCaptureConnection,
         ) {
             abort_on_panic(|| {
                 // SAFETY: the sample buffer is live for the call, and a retained image buffer
@@ -287,10 +324,7 @@ define_class!(
                 let Some(image) = (unsafe { sample_buffer.image_buffer() }) else {
                     return;
                 };
-                self.ivars()
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .delivered(CoreVideoFrame::new(image));
+                self.ivars().keep(image, connection);
             });
         }
     }
@@ -337,7 +371,7 @@ unsafe impl Send for CrossThreadVideoDataOutput {}
 unsafe impl Sync for CrossThreadVideoDataOutput {}
 
 /// The sample buffer delegate handed between threads, kept while its output is: the output holds
-/// it weakly.
+/// it weakly. Its state is behind a mutex and atomics.
 struct CrossThreadDelegate {
     _delegate: Retained<SampleBufferDelegate>,
 }

@@ -9,7 +9,10 @@
 //! output a reader reads (`frames`), the same output the composition layer reads what its preview
 //! shows from (`layer_pictures`), its photos and recordings the system's outputs (`outputs`).
 //! Its state follows AVFoundation's notices: an interruption, its end, and a runtime error, which
-//! ends the session as a configuration the system refuses does.
+//! ends the session as a configuration the system refuses does. Its rotation angles are its
+//! coordinator's (`camera_rotation`), kept applied to its preview layer's connection and, where it
+//! asked for upright frames, to its video data output's, which then turns and mirrors the frames
+//! it delivers; a change of them is a change the app hears.
 //!
 //! The state is written where the system answers, the session's queue and the main queue's
 //! notices, and read on the main thread, so it lives behind a mutex shared with them. The
@@ -41,8 +44,9 @@ use waft_embedder::{
     RecordingFuture, Size, VideoFrameReader,
 };
 
-use super::camera::{CrossThreadDevice, ask_for, audio, camera_error_of_unanswered};
+use super::camera::{CrossThreadDevice, ask_for, audio, camera_error_of_unanswered, faces_user};
 use super::camera_formats::{device_format_for, photo_dimensions_of};
+use super::camera_rotation::{RotationAngles, SessionRotation, deliver_upright, turn_connection};
 use super::camera_sharing::CameraShare;
 use super::frames::{
     AvFrameReader, CameraFrames, FrameOutput, report_foreign_reader, report_reader_in_use,
@@ -57,6 +61,7 @@ use crate::media::{Changes, MediaAnswer, media_answer};
 pub(super) struct AvCaptureSession {
     shared: Arc<SessionShared>,
     share: CameraShare,
+    rotation: SessionRotation,
     preview: Option<Preview>,
     reader: Option<FedReader>,
     photos: Option<PhotoTaker>,
@@ -100,6 +105,12 @@ struct Configuration {
     format: Option<CameraFormat>,
     outputs: Vec<CrossThreadOutput>,
     photos: Option<PhotoTaker>,
+    /// The preview layer, whose connection is turned to the preview's angle once it has one.
+    preview: Option<CrossThreadPreviewLayer>,
+    /// The frames' output, delivering upright frames where the session asked for them.
+    upright_frames: Option<Arc<CameraFrames>>,
+    angles: Arc<RotationAngles>,
+    faces_user: bool,
 }
 
 impl AvCaptureSession {
@@ -127,8 +138,10 @@ impl AvCaptureSession {
     ) -> AvCaptureSession {
         let shared = Arc::new(SessionShared::new(started));
         let notices = observe_notices(&shared);
+        let faces_user = faces_user(&device);
+        let angles = Arc::new(RotationAngles::default());
         let frames = (outputs.preview.is_some() || outputs.frames.is_some())
-            .then(|| Arc::new(CameraFrames::new()));
+            .then(|| Arc::new(CameraFrames::new(Arc::clone(&angles), faces_user)));
         let preview = outputs
             .preview
             .zip(frames.clone())
@@ -146,17 +159,32 @@ impl AvCaptureSession {
         let movies = outputs
             .movies
             .map(|_| MovieRecorder::new(Arc::clone(&shared)));
+        let upright_frames = frames.clone().filter(|_| outputs.upright_frames);
+        let rotation = keep_turned(
+            &device,
+            &shared,
+            preview.as_ref().map(|preview| preview.layer.clone()),
+            upright_frames.clone(),
+            Arc::clone(&angles),
+        );
         let configuration = Configuration {
             device: CrossThreadDevice(device),
             format: share.sets_format().then(|| share.format().clone()),
             outputs: outputs_of(frames.as_deref(), photos.as_ref(), movies.as_ref()),
             photos: photos.clone(),
+            preview: preview
+                .as_ref()
+                .map(|preview| CrossThreadPreviewLayer(preview.layer.clone())),
+            upright_frames,
+            angles,
+            faces_user,
         };
         let sound = outputs.movies.is_some_and(|options| options.sound);
         shared.configure_and_run(configuration, sound);
         AvCaptureSession {
             shared,
             share,
+            rotation,
             preview,
             reader,
             photos,
@@ -173,6 +201,14 @@ impl CaptureSession for AvCaptureSession {
 
     fn state(&self) -> CaptureState {
         self.shared.state()
+    }
+
+    fn video_rotation_angle_for_horizon_level_preview(&self) -> u32 {
+        self.rotation.angles().preview()
+    }
+
+    fn video_rotation_angle_for_horizon_level_capture(&self) -> u32 {
+        self.rotation.angles().capture()
     }
 
     fn changed(&self) -> MediaChangeFuture {
@@ -252,6 +288,47 @@ fn feed(reader: Arc<dyn VideoFrameReader>, frames: Arc<CameraFrames>) -> Option<
         return None;
     }
     Some(FedReader { frames, reader })
+}
+
+/// The rotation coordinator of `device` and the session's `preview_layer`, its angles kept applied
+/// as they change, on the main thread: the preview's to the preview layer's connection, and the
+/// capture's to the video data output's connection of `upright_frames`, on the session's queue,
+/// where the session asked for upright frames; and each change told to the app.
+fn keep_turned(
+    device: &AVCaptureDevice,
+    shared: &Arc<SessionShared>,
+    preview_layer: Option<Retained<AVCaptureVideoPreviewLayer>>,
+    upright_frames: Option<Arc<CameraFrames>>,
+    angles: Arc<RotationAngles>,
+) -> SessionRotation {
+    let heard = Arc::downgrade(shared);
+    let layer = preview_layer.clone();
+    SessionRotation::new(
+        device,
+        preview_layer.as_deref().map(|layer| layer.as_super()),
+        angles,
+        move |angles| {
+            // SAFETY: the preview layer's connection, read on the main thread.
+            if let Some(connection) = layer
+                .as_ref()
+                .and_then(|layer| unsafe { layer.connection() })
+            {
+                turn_connection(&connection, angles.preview());
+            }
+            let Some(shared) = heard.upgrade() else {
+                return;
+            };
+            if let Some(frames) = upright_frames.clone() {
+                let capture = angles.capture();
+                shared.queue.exec_async(move || {
+                    if let Some(connection) = frames.video_connection() {
+                        turn_connection(&connection, capture);
+                    }
+                });
+            }
+            shared.changes.notify();
+        },
+    )
 }
 
 /// The AVFoundation outputs of the frames, photos and movies the app asked for.
@@ -404,10 +481,12 @@ impl SessionShared {
         let session = &self.session.0;
         // SAFETY: configuring the session on its own queue.
         unsafe { session.beginConfiguration() };
-        let added = add_all(session, configuration, sound);
+        let added =
+            add_all(session, configuration, sound).and_then(|()| turn_upright(configuration));
         // SAFETY: as above.
         unsafe { session.commitConfiguration() };
         added?;
+        turn_preview(configuration);
         if let Some(photos) = &configuration.photos {
             photos.prepare();
         }
@@ -422,6 +501,34 @@ impl SessionShared {
         self.queue
             .exec_async(move || unsafe { shared.session.0.stopRunning() });
         self.changes.end();
+    }
+}
+
+/// Has the frames' output deliver its frames upright, where the session asked for it, inside its
+/// configuration, as Apple asks of a turn that reconfigures the pipeline.
+fn turn_upright(configuration: &Configuration) -> Result<(), CameraError> {
+    let Some(frames) = &configuration.upright_frames else {
+        return Ok(());
+    };
+    let connection = frames.video_connection().ok_or_else(|| {
+        CameraError::NotSupported("the camera's frames have no connection to turn".to_owned())
+    })?;
+    deliver_upright(
+        &connection,
+        configuration.angles.capture(),
+        configuration.faces_user,
+    )
+}
+
+/// Turns the preview layer's connection, which it has once the session has its camera, to the
+/// preview's angle.
+fn turn_preview(configuration: &Configuration) {
+    let Some(layer) = &configuration.preview else {
+        return;
+    };
+    // SAFETY: the preview layer's connection, which AVFoundation guards.
+    if let Some(connection) = unsafe { layer.0.connection() } {
+        turn_connection(&connection, configuration.angles.preview());
     }
 }
 
@@ -610,6 +717,14 @@ unsafe impl Send for CrossThreadSession {}
 unsafe impl Sync for CrossThreadSession {}
 
 struct CrossThreadOutput(Retained<AVCaptureOutput>);
+
+/// The preview layer, whose connection the session's queue turns once it is configured.
+struct CrossThreadPreviewLayer(Retained<AVCaptureVideoPreviewLayer>);
+
+// SAFETY: only the layer's connection is read off the main thread, an AVCaptureConnection that
+// AVFoundation guards; the layer itself is changed on the main thread alone.
+unsafe impl Send for CrossThreadPreviewLayer {}
+unsafe impl Sync for CrossThreadPreviewLayer {}
 
 // SAFETY: an output is added to its session on the session's queue alone.
 unsafe impl Send for CrossThreadOutput {}

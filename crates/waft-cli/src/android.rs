@@ -51,8 +51,11 @@ use manifest_merger::LibraryManifest;
 
 use crate::cargo::{self, Artifact, Build};
 use crate::icons;
-use crate::project::{AdaptiveIcon, AdaptiveIconBackground, FileAssociation, Profile, Project};
+use crate::project::{
+    AdaptiveIcon, AdaptiveIconBackground, FileAssociation, Profile, Project, UsageDescriptions,
+};
 use crate::tools;
+use crate::usage_descriptions;
 
 /// Android 12, the least an app runs on: Waft's Android host links the surface-control calls
 /// that place a composition layer by position, scale and crop (`waft-embedder-android`'s
@@ -423,6 +426,7 @@ pub fn build(project: &Project, profile: Profile, abi: Abi) -> Result<Apk> {
         has_icon,
         file_associations: &project.file_associations,
         permissions: &project.android.permissions,
+        devices: &project.usage_descriptions,
     });
     fs::write(
         stage.join("AndroidManifest.xml"),
@@ -582,6 +586,8 @@ struct Manifest<'a> {
     file_associations: &'a [FileAssociation],
     /// The permissions the app asks for besides [`PERMISSIONS`].
     permissions: &'a [String],
+    /// The devices the app declares it opens, whose permissions and features it asks for.
+    devices: &'a UsageDescriptions,
 }
 
 /// The manifest around Waft's activity. `configChanges` keeps the activity through a rotation or
@@ -595,7 +601,8 @@ struct Manifest<'a> {
 /// exported, granting each URI it shares; its notification receiver, not exported, hears only the
 /// app's own alarms; `<queries>` names viewing the links of [`QUERIED_SCHEMES`]; the app asks for
 /// [`PERMISSIONS`] and its own; the activity is offered for the files of the app's associations
-/// ([`file_intent_filters`]).
+/// ([`file_intent_filters`]); and it asks for the permission of each device it declares, using its
+/// feature, not required ([`uses_features`]).
 fn manifest(manifest: &Manifest) -> String {
     let icon = if manifest.has_icon {
         r#" android:icon="@mipmap/ic_launcher""#
@@ -614,7 +621,7 @@ fn manifest(manifest: &Manifest) -> String {
     android:versionCode="{version_code}"
     android:versionName="{version_name}">
   <uses-sdk android:minSdkVersion="{min_sdk}" android:targetSdkVersion="{target_sdk}" />
-{permissions}  <application
+{permissions}{features}  <application
       android:label="{label}"{icon}{debuggable}
       android:appCategory="{category}"
       android:hasCode="true"
@@ -668,7 +675,14 @@ fn manifest(manifest: &Manifest) -> String {
         library = manifest.library,
         provider = WAFT_FILE_PROVIDER,
         receiver = WAFT_NOTIFICATION_RECEIVER,
-        permissions = uses_permissions(manifest.permissions),
+        permissions = uses_permissions(
+            &[
+                manifest.permissions,
+                &usage_descriptions::android_permissions(manifest.devices),
+            ]
+            .concat()
+        ),
+        features = uses_features(&usage_descriptions::android_features(manifest.devices)),
         queried_schemes_key = QUERIED_SCHEMES_KEY,
         queried_schemes = QUERIED_SCHEMES.join(","),
         queries = queried_intents(),
@@ -750,6 +764,20 @@ fn uses_permissions(the_apps: &[String]) -> String {
             format!(
                 "  <uses-permission android:name=\"{}\" />\n",
                 xml_escape(permission)
+            )
+        })
+        .collect()
+}
+
+/// One `<uses-feature>` for each of `features`, not required: the app installs on a device without
+/// it.
+fn uses_features(features: &[&str]) -> String {
+    features
+        .iter()
+        .map(|feature| {
+            format!(
+                "  <uses-feature android:name=\"{}\" android:required=\"false\" />\n",
+                xml_escape(feature)
             )
         })
         .collect()
@@ -1424,6 +1452,7 @@ mod tests {
             category: "productivity",
             file_associations: &[],
             permissions: &[],
+            devices: &UsageDescriptions::default(),
         });
         assert!(manifest.contains(r#"package="com.example.my_app""#));
         assert!(manifest.contains(r#"android:name="rs.waft.WaftActivity""#));
@@ -1467,6 +1496,7 @@ mod tests {
             category: "productivity",
             file_associations: &[],
             permissions: &[],
+            devices: &UsageDescriptions::default(),
         });
         let launcher =
             &manifest[manifest.find("<activity").unwrap()..manifest.find("</activity>").unwrap()];
@@ -1509,6 +1539,7 @@ mod tests {
             category: "productivity",
             file_associations: &[],
             permissions: &[],
+            devices: &UsageDescriptions::default(),
         });
         assert!(manifest.contains(r#"android:name="rs.waft.WaftFileProvider""#));
         assert!(manifest.contains(r#"android:authorities="com.example.my_app.waft.files""#));
@@ -1564,6 +1595,7 @@ mod tests {
             category: "productivity",
             file_associations: &[],
             permissions: &[],
+            devices: &UsageDescriptions::default(),
         });
         assert!(manifest.contains(
             r#"<receiver android:name="rs.waft.WaftNotificationReceiver" android:exported="false" />"#
@@ -1578,6 +1610,40 @@ mod tests {
             manifest.find("<uses-permission") < manifest.find("<application"),
             "permissions belong to the manifest, before the application"
         );
+    }
+
+    #[test]
+    fn a_declared_camera_is_asked_for_and_its_feature_not_required() {
+        let camera = UsageDescriptions {
+            camera: Some("Takes photos.".into()),
+            microphone: None,
+        };
+        let manifest = manifest(&Manifest {
+            package: "com.example.my_app",
+            label: "My App",
+            library: "my_app",
+            version_code: 100,
+            version_name: "0.1.0",
+            min_sdk: 31,
+            target_sdk: 34,
+            debuggable: false,
+            has_icon: false,
+            category: "productivity",
+            file_associations: &[],
+            permissions: &["android.permission.CAMERA".to_owned()],
+            devices: &camera,
+        });
+        assert_eq!(
+            manifest
+                .matches(r#"<uses-permission android:name="android.permission.CAMERA" />"#)
+                .count(),
+            1,
+            "asked for once, though the app names it too"
+        );
+        assert!(manifest.contains(
+            r#"<uses-feature android:name="android.hardware.camera" android:required="false" />"#
+        ));
+        assert!(manifest.find("<uses-feature") < manifest.find("<application"));
     }
 
     fn association(extensions: &[&str], mime_type: Option<&str>, owner: bool) -> FileAssociation {
@@ -1651,6 +1717,7 @@ mod tests {
             category: "productivity",
             file_associations: &associations,
             permissions: &[],
+            devices: &UsageDescriptions::default(),
         });
         let activity =
             &manifest[manifest.find("<activity").unwrap()..manifest.find("</activity>").unwrap()];

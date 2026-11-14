@@ -35,8 +35,10 @@ libc = "0.2"
 ndk-context = "0.1"
 # Android 12 (API 31) is the least the host runs on: its surface controls place a layer by
 # position, scale and crop, which no earlier version has (`surface_control.rs`).
-ndk = { version = "0.9", features = ["rwh_06", "api-level-31"] }
-# `bitmap` links `libjnigraphics`, the NDK's image decoder and encoder (`image_codecs/`).
+# `media` binds the image readers a camera's pictures arrive in (`media/`).
+ndk = { version = "0.9", features = ["rwh_06", "api-level-31", "media"] }
+# `bitmap` links `libjnigraphics`, the NDK's image decoder and encoder (`image_codecs/`); the
+# camera calls it declares are linked in `media/camera_manager.rs`.
 ndk-sys = { version = "0.6", features = ["bitmap"] }
 
 # The NDK's C APIs — `NativeActivity`'s callbacks, the choreographer, the native window, surface

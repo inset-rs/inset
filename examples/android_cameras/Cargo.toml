@@ -1,0 +1,43 @@
+[package]
+name = "android_cameras"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[package.metadata.waft]
+identifier = "rs.waft.android-cameras"
+name = "Android cameras"
+
+# Declares the camera, which puts Android's `CAMERA` permission in the manifest.
+[package.metadata.waft.usage_descriptions]
+camera = "Shows what each camera sees and takes a photo with it."
+
+# The activity loads the library; the binary is the desktop's, which says the example is
+# Android's. Named apart from the binary: on Windows a cdylib and a binary of one name write the
+# same `.pdb`.
+[lib]
+name = "android_cameras_lib"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "android_cameras"
+path = "src/main.rs"
+
+[dependencies]
+waft.workspace = true
+waft-embedder.workspace = true
+waft-foundation.workspace = true
+waft-painting.workspace = true
+waft-widgets.workspace = true
+
+# The system's log the example reports to.
+[target.'cfg(target_os = "android")'.dependencies]
+ndk-sys = "0.6"
+
+# Writing to the system's log needs `unsafe`, which the workspace forbids; here it is denied
+# instead, and `log.rs` alone allows it.
+[lints.rust]
+unsafe_code = "deny"
