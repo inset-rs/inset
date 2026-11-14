@@ -29,8 +29,9 @@ pub(crate) enum AppRequest {
     RequestFrame(ViewId),
     /// What the framework asks of the windows: opening, closing and focusing them.
     Window(WindowRequest),
-    /// What the app asks of the views it embeds, through the platform's `ViewEmbedder`.
-    Embedder(EmbedderRequest),
+    /// What the app asks of the views it embeds, through the platform's `ViewEmbedder`. Boxed, as
+    /// a window's opening is: both are far larger than the other requests.
+    Embedder(Box<EmbedderRequest>),
     /// The app's exit: its own, or its answer to the system's request.
     Exit(ExitRequest),
     /// Look at the clipboard, and tell the app if it changed: the system cleared a copy of the
@@ -40,8 +41,9 @@ pub(crate) enum AppRequest {
 
 /// What the framework asks of the windows the embedder makes.
 pub(crate) enum WindowRequest {
-    /// Open a window for a view the app asked for; the view arrives through `view_added`.
-    Open(RequestedWindow),
+    /// Open a window for a view the app asked for; the view arrives through `view_added`. Boxed:
+    /// a window's configuration is far larger than the other requests.
+    Open(Box<RequestedWindow>),
     /// A created window's `close`: the window is freed, and its view goes.
     Close(WindowId),
     /// Focus a view's window, or give up its focus.

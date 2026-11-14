@@ -153,6 +153,13 @@ impl LaterLaunches {
 pub struct Launch {
     pub arguments: Vec<OsString>,
     pub current_dir: PathBuf,
+    /// On Linux, the XDG activation token the desktop gave the launch (`XDG_ACTIVATION_TOKEN`,
+    /// or X11's `DESKTOP_STARTUP_ID`), with which the window the app shows for it may take the
+    /// focus: `LinuxWindowConfig::activation_token` for a window it opens, `Linux::activate` for
+    /// one already open. A desktop gives one only to a launch from a desktop entry with
+    /// `StartupNotify=true`. `None` elsewhere: on Windows the launch hands the first instance its
+    /// right to the foreground itself.
+    pub activation_token: Option<String>,
 }
 
 /// The launches waiting, and the task waiting for one.
@@ -160,7 +167,7 @@ pub struct Launch {
 struct Arrivals(Mutex<(VecDeque<Launch>, Option<Waker>)>);
 
 impl Arrivals {
-    /// A later launch passed `arguments` on, from `current_dir`.
+    /// A later launch passed itself on.
     #[cfg_attr(
         not(any(target_os = "linux", target_os = "windows")),
         allow(
@@ -168,13 +175,10 @@ impl Arrivals {
             reason = "no later launch reaches this system's first instance"
         )
     )]
-    fn arrive(&self, arguments: Vec<OsString>, current_dir: PathBuf) {
+    fn arrive(&self, launch: Launch) {
         let waker = {
             let mut arrivals = self.locked();
-            arrivals.0.push_back(Launch {
-                arguments,
-                current_dir,
-            });
+            arrivals.0.push_back(launch);
             arrivals.1.take()
         };
         if let Some(waker) = waker {
@@ -242,16 +246,14 @@ mod tests {
         let first = FirstInstance::new(Arc::clone(&arrivals), Box::new(()));
         let mut launches = first.launches();
         assert!(now(launches.next_launch()).is_none(), "nothing yet");
-        let arguments = ["phone", "--verbose", "notes.txt"]
-            .map(OsString::from)
-            .to_vec();
-        arrivals.arrive(arguments.clone(), PathBuf::from("/home/me"));
-        assert_eq!(
-            now(launches.next_launch()),
-            Some(Launch {
-                arguments,
-                current_dir: PathBuf::from("/home/me"),
-            })
-        );
+        let launch = Launch {
+            arguments: ["phone", "--verbose", "notes.txt"]
+                .map(OsString::from)
+                .to_vec(),
+            current_dir: PathBuf::from("/home/me"),
+            activation_token: Some("gnome-shell/Notes/2313-3_TIME121955272".to_owned()),
+        };
+        arrivals.arrive(launch.clone());
+        assert_eq!(now(launches.next_launch()), Some(launch));
     }
 }

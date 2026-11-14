@@ -7,7 +7,9 @@
 //! once the app registers it.
 //!
 //! While the activator is registered, every click comes through it, a toast's own `Activated`
-//! event goes unheard (`mod.rs`), and no click is heard twice.
+//! event goes unheard (`mod.rs`), and no click is heard twice. The platform names the app whose
+//! toast was clicked: one the process posted as another app (`notifications_of`), whose
+//! registration names this class too, is told apart from the process's own by that ID.
 
 use std::slice;
 use std::sync::OnceLock;
@@ -35,12 +37,14 @@ const PATIENCE: Duration = Duration::from_secs(5);
 static REGISTERED: OnceLock<bool> = OnceLock::new();
 
 /// Registers the class `clsid` as the app's toast activator, sending each click to
-/// `activations`; answers once it is registered, or failed to be.
-pub(crate) fn register(clsid: GUID, activations: NotificationActivations) {
+/// `activations`, as one of the app's own, posted under `own`, its AppUserModelID, or as one of the
+/// app it was posted as; a packaged app, `own` `None`, posts as no other. Answers once it is
+/// registered, or failed to be.
+pub(crate) fn register(clsid: GUID, own: Option<String>, activations: NotificationActivations) {
     let (registered, registering) = mpsc::channel();
     let started = std::thread::Builder::new()
         .name("waft-toast-activator".to_owned())
-        .spawn(move || serve(clsid, activations, &registered));
+        .spawn(move || serve(clsid, Clicks { own, activations }, &registered));
     let is_registered = started.is_ok()
         && registering
             .recv_timeout(PATIENCE)
@@ -56,7 +60,7 @@ pub(crate) fn is_registered() -> bool {
 /// Registers the class's object in the multithreaded apartment, tells `registered` whether it
 /// is, and keeps the thread, and with it the apartment and the registration, for the process's
 /// life.
-fn serve(clsid: GUID, activations: NotificationActivations, registered: &mpsc::Sender<bool>) {
+fn serve(clsid: GUID, clicks: Clicks, registered: &mpsc::Sender<bool>) {
     // SAFETY: COM entered on this thread, which never leaves it, so the apartment outlives the
     // registration.
     let entered = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
@@ -64,7 +68,7 @@ fn serve(clsid: GUID, activations: NotificationActivations, registered: &mpsc::S
         let _ = registered.send(false);
         return;
     }
-    let factory: IClassFactory = ActivatorFactory { activations }.into();
+    let factory: IClassFactory = ActivatorFactory { clicks }.into();
     // SAFETY: the factory is a live COM object, registered for local activation and never
     // revoked, as the process serves clicks until it ends.
     let registration =
@@ -77,10 +81,30 @@ fn serve(clsid: GUID, activations: NotificationActivations, registered: &mpsc::S
     }
 }
 
+/// Where the activator sends a click: as one of the process's own, which it knows by `own`, its
+/// AppUserModelID, or as one of the app it was posted as.
+#[derive(Clone)]
+struct Clicks {
+    own: Option<String>,
+    activations: NotificationActivations,
+}
+
+impl Clicks {
+    /// The clicks on the toasts of the app the platform names `app_user_model_id`.
+    fn of(&self, app_user_model_id: &str) -> NotificationActivations {
+        match &self.own {
+            Some(own) if app_user_model_id != own && !app_user_model_id.is_empty() => {
+                self.activations.of(app_user_model_id)
+            }
+            _ => self.activations.clone(),
+        }
+    }
+}
+
 /// The class's factory, which COM asks for the activator.
 #[implement(IClassFactory)]
 struct ActivatorFactory {
-    activations: NotificationActivations,
+    clicks: Clicks,
 }
 
 impl IClassFactory_Impl for ActivatorFactory_Impl {
@@ -99,7 +123,7 @@ impl IClassFactory_Impl for ActivatorFactory_Impl {
             return Err(CLASS_E_NOAGGREGATION.into());
         }
         let activator: INotificationActivationCallback = Activator {
-            activations: self.activations.clone(),
+            clicks: self.clicks.clone(),
         }
         .into();
         // SAFETY: COM passes the interface it wants and the slot for it, both checked above.
@@ -114,13 +138,13 @@ impl IClassFactory_Impl for ActivatorFactory_Impl {
 /// The activator, which hears a click.
 #[implement(INotificationActivationCallback)]
 struct Activator {
-    activations: NotificationActivations,
+    clicks: Clicks,
 }
 
 impl INotificationActivationCallback_Impl for Activator_Impl {
     fn Activate(
         &self,
-        _app_user_model_id: &PCWSTR,
+        app_user_model_id: &PCWSTR,
         invoked_arguments: &PCWSTR,
         data: *const NOTIFICATION_USER_INPUT_DATA,
         count: u32,
@@ -141,7 +165,9 @@ impl INotificationActivationCallback_Impl for Activator_Impl {
             })
         });
         if let Some(activation) = activation {
-            self.activations.send(activation);
+            // SAFETY: the platform passes the clicked app's ID as a NUL-terminated string, or null.
+            let app = unsafe { text(*app_user_model_id) };
+            self.clicks.of(&app).send(activation);
         }
         Ok(())
     }
@@ -168,19 +194,29 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn a_click_through_the_activator_reaches_the_app_with_what_was_typed() {
-        let heard = Arc::new(Mutex::new(Vec::new()));
-        let hearing = Arc::clone(&heard);
+    /// An activator whose clicks are heard with the identity they carry, the process's own ID
+    /// `Waft.Test`.
+    fn activator_heard_by(
+        heard: &Arc<Mutex<Vec<(Option<String>, NotificationActivation)>>>,
+    ) -> INotificationActivationCallback {
+        let hearing = Arc::clone(heard);
         let factory: IClassFactory = ActivatorFactory {
-            activations: NotificationActivations::to(move |activation| {
-                hearing.lock().unwrap().push(activation);
-            }),
+            clicks: Clicks {
+                own: Some("Waft.Test".to_owned()),
+                activations: NotificationActivations::to(move |identity, activation| {
+                    hearing.lock().unwrap().push((identity, activation));
+                }),
+            },
         }
         .into();
         // SAFETY: no outer object; the factory answers a new activator.
-        let activator: INotificationActivationCallback =
-            unsafe { factory.CreateInstance(None) }.expect("an activator");
+        unsafe { factory.CreateInstance(None) }.expect("an activator")
+    }
+
+    #[test]
+    fn a_click_through_the_activator_reaches_the_app_with_what_was_typed() {
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let activator = activator_heard_by(&heard);
         let app = HSTRING::from("Waft.Test");
         let invoked = HSTRING::from(arguments::of_action("message-7", "answer", Some("reply-1")));
         let (key, value) = (HSTRING::from("reply-1"), HSTRING::from("on my way"));
@@ -199,12 +235,39 @@ mod tests {
         }
         assert_eq!(
             *heard.lock().unwrap(),
-            [NotificationActivation {
-                id: "message-7".to_owned(),
-                action: Some("answer".to_owned()),
-                reply: Some("on my way".to_owned()),
-            }],
+            [(
+                None,
+                NotificationActivation {
+                    id: "message-7".to_owned(),
+                    action: Some("answer".to_owned()),
+                    reply: Some("on my way".to_owned()),
+                }
+            )],
             "another toast's arguments tell the app nothing"
+        );
+    }
+
+    #[test]
+    fn a_click_on_a_toast_posted_as_another_app_carries_its_id() {
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let activator = activator_heard_by(&heard);
+        let invoked = HSTRING::from(arguments::of_notification("note-3"));
+        // SAFETY: strings that outlive the call.
+        unsafe {
+            activator
+                .Activate(&HSTRING::from("dev.waos.app.notes"), &invoked, &[])
+                .expect("activated");
+        }
+        assert_eq!(
+            *heard.lock().unwrap(),
+            [(
+                Some("dev.waos.app.notes".to_owned()),
+                NotificationActivation {
+                    id: "note-3".to_owned(),
+                    action: None,
+                    reply: None,
+                }
+            )]
         );
     }
 }

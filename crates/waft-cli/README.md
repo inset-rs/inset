@@ -107,6 +107,8 @@ The Android package name is the identifier as a Java package name: `com.example.
 
 On Linux the identifier is how the desktop knows the app's windows: `#[waft::main]` reads it from `Cargo.toml` as the app compiles, by the same default, and Waft gives it to each window as its Wayland app id and its X11 class (`LinuxSettings::app_id`); a deb's desktop entry is named after it, `<identifier>.desktop`, with `StartupWMClass` set to it, so the dock shows the app's name and icon for its windows. An entry written by hand gives it with `DefaultEmbedder::linux` with `LinuxSettings { app_id: Some(waft::linux_app_id!().to_owned()) }`. An AppImage's entry is named after the executable, as its tool links it, and carries the same `StartupWMClass`.
 
+On Windows the identifier is the app's AppUserModelID, by which the taskbar groups and pins its windows and the notification platform knows it: `#[waft::main]` gives it to the process (`WindowsSettings::app_user_model_id`), and the MSI's and the NSIS installer's shortcuts carry it. An entry written by hand gives it with `DefaultEmbedder::windows`.
+
 Version comes from `[package]`. A project-root `index.html` replaces the generated web page; keep a `<canvas id="waft">` and import `./app.js`.
 
 ### File associations

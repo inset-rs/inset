@@ -5846,6 +5846,7 @@ dependencies = [
  "waft-rendering",
  "waft-services",
  "waft-shell",
+ "waft-single-instance",
  "waft-widgets",
 ]
 

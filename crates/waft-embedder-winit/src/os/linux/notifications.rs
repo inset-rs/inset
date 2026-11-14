@@ -656,7 +656,7 @@ mod tests {
             .expect("the fake server on the session bus");
         let (clicked, clicks) = std::sync::mpsc::channel();
         let clicked = Mutex::new(clicked);
-        let server = Server::connect(NotificationActivations::to(move |activation| {
+        let server = Server::connect(NotificationActivations::to(move |_identity, activation| {
             let _ = clicked.lock().unwrap().send(activation);
         }))
         .expect("the server");

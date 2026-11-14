@@ -132,6 +132,7 @@ pub use views::{
 pub use vsync::{VsyncObserver, VsyncWaiter};
 pub use web_time::Instant;
 pub use window::{
-    HostWindow, MacosTitleBar, MacosWindowConfig, RawWindowHandle, RequestId, TitleBarAction,
-    ViewError, WindowBackground, WindowConfig, WindowLevel, WindowRef, WindowSizeLimits,
+    HostWindow, LinuxWindowConfig, MacosTitleBar, MacosWindowConfig, RawWindowHandle, RequestId,
+    TitleBarAction, ViewError, WindowBackground, WindowConfig, WindowLevel, WindowRef,
+    WindowSizeLimits, WindowsIconResource, WindowsRelaunch, WindowsWindowConfig,
 };

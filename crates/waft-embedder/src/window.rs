@@ -19,6 +19,7 @@
 //! over the engine's views, each controller making its window within its constructor.
 
 use std::fmt;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -58,6 +59,10 @@ pub struct WindowConfig {
     pub visible: bool,
     /// What only macOS windows offer; other systems leave it out.
     pub macos: MacosWindowConfig,
+    /// What only Windows' windows offer; other systems leave it out.
+    pub windows: WindowsWindowConfig,
+    /// What only Linux's windows offer; other systems leave it out.
+    pub linux: LinuxWindowConfig,
 }
 
 impl Default for WindowConfig {
@@ -76,6 +81,8 @@ impl Default for WindowConfig {
             shadow: true,
             visible: true,
             macos: MacosWindowConfig::default(),
+            windows: WindowsWindowConfig::default(),
+            linux: LinuxWindowConfig::default(),
         }
     }
 }
@@ -98,6 +105,53 @@ pub enum MacosTitleBar {
     /// app, which moves the window, and does a title bar's double press, from where it draws
     /// nothing to press ([`HostWindow::drag`], [`HostWindow::title_bar_double_click_action`]).
     Hidden { height: f64 },
+}
+
+/// What a window offers on Windows alone: the app it is on the taskbar, which one process may give
+/// each of its windows apart, and what a pin of it starts.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WindowsWindowConfig {
+    /// The window's own AppUserModelID (`System.AppUserModel.ID`): the taskbar groups the window
+    /// with that app's, apart from the process's, and pins it as that app. The process's ID where
+    /// `None`. At most 128 characters, without spaces.
+    pub app_user_model_id: Option<String>,
+    /// What a pin of the window starts, where no Start menu shortcut carries its ID: such a
+    /// shortcut is what the taskbar pins instead. Only with an `app_user_model_id`.
+    pub relaunch: Option<WindowsRelaunch>,
+}
+
+/// What a pin of a window starts, and how the pin shows (`System.AppUserModel.RelaunchCommand`,
+/// `RelaunchDisplayNameResource`, `RelaunchIconResource`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct WindowsRelaunch {
+    /// The whole command line a pin runs, its program quoted where its path has spaces.
+    pub command: String,
+    /// The pin's name.
+    pub display_name: String,
+    /// The pin's icon; the program's where `None`. An icon Windows cannot load makes it drop the
+    /// whole relaunch, command and name too, without a word: the pin then starts the process's
+    /// executable alone.
+    pub icon: Option<WindowsIconResource>,
+}
+
+/// An icon in a file, as Windows names one: an `.ico` file and the index of its icon, or a module
+/// and a resource id as a negative index.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WindowsIconResource {
+    pub path: PathBuf,
+    pub index: i32,
+}
+
+/// What a window offers on Linux alone.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LinuxWindowConfig {
+    /// The window's own app id (xdg-shell's `set_app_id`; the class, `WM_CLASS`, on X11), by which
+    /// the desktop matches it to the desktop file `<app_id>.desktop`, in place of the app's own.
+    /// The app's where `None`.
+    pub app_id: Option<String>,
+    /// The XDG activation token the window shows with, which lets it take the focus the desktop
+    /// gave the launch that brought it (`XDG_ACTIVATION_TOKEN`): a later launch's, passed on.
+    pub activation_token: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -255,6 +309,8 @@ mod tests {
         assert_eq!(config.level, WindowLevel::Normal);
         assert_eq!(config.background, WindowBackground::Solid);
         assert_eq!(config.macos.title_bar, MacosTitleBar::Standard);
+        assert_eq!(config.windows, WindowsWindowConfig::default());
+        assert_eq!(config.linux, LinuxWindowConfig::default());
     }
 
     #[test]

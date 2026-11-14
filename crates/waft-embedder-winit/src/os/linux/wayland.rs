@@ -1,7 +1,8 @@
 //! Waft's own share of the Wayland connection winit opened: the globals composition layers need
 //! (`wl_compositor`, `wl_subcompositor`, `wp_viewporter`, `zwp_linux_dmabuf_v1`), bound on an event
 //! queue of Waft's, which a thread of its own reads, as Mesa's Vulkan WSI shares the connection on
-//! a queue of its own. A dmabuf becomes a `wl_buffer` here, and its releases come back here.
+//! a queue of its own. A dmabuf becomes a `wl_buffer` here, and its releases come back here. XDG
+//! activation, where the compositor offers it, brings a window forward with a launch's token.
 //!
 //! The invariants a later editor must keep: nothing here makes a request that can fail with a
 //! protocol error, since one ends the whole connection, winit's windows with it: a `wl_buffer` is
@@ -31,6 +32,9 @@ use wayland_protocols::wp::linux_dmabuf::zv1::client::{
     zwp_linux_buffer_params_v1, zwp_linux_dmabuf_v1,
 };
 use wayland_protocols::wp::viewporter::client::{wp_viewport, wp_viewporter};
+use wayland_protocols::xdg::activation::v1::client::xdg_activation_v1;
+use winit::raw_window_handle::RawWindowHandle;
+use winit::window::Window;
 
 use waft_embedder::HardwareBuffer;
 
@@ -58,6 +62,8 @@ pub(crate) struct Wayland {
     pub(crate) subcompositor: wl_subcompositor::WlSubcompositor,
     pub(crate) viewporter: wp_viewporter::WpViewporter,
     linux_dmabuf: zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1,
+    /// XDG activation; `None` where the compositor offers none.
+    activation: Option<xdg_activation_v1::XdgActivationV1>,
     /// The modifiers the compositor takes ARGB8888 in.
     modifiers: Arc<Mutex<Vec<u64>>>,
 }
@@ -123,6 +129,7 @@ impl Wayland {
         let linux_dmabuf = globals
             .bind(&handle, 3..=3, Arc::clone(&modifiers))
             .map_err(|_| bind_error("zwp_linux_dmabuf_v1 at version 3"))?;
+        let activation = globals.bind(&handle, 1..=1, ()).ok();
         queue
             .roundtrip(&mut Events)
             .map_err(|error| error.to_string())?;
@@ -141,6 +148,7 @@ impl Wayland {
             subcompositor,
             viewporter,
             linux_dmabuf,
+            activation,
             modifiers,
         })
     }
@@ -164,6 +172,16 @@ impl Wayland {
         let id = unsafe { ObjectId::from_ptr(wl_surface::WlSurface::interface(), surface.cast()) }
             .ok()?;
         wl_surface::WlSurface::from_id(&self.connection, id).ok()
+    }
+
+    /// Asks the compositor to bring `surface` forward with `token`. A token the compositor does
+    /// not know, or no longer honours, is ignored, never an error.
+    fn activate(&self, surface: &wl_surface::WlSurface, token: &str) {
+        let Some(activation) = &self.activation else {
+            return;
+        };
+        activation.activate(token.to_owned(), surface);
+        self.flush();
     }
 
     /// The modifier the compositor is told `buffer` has: its own where the compositor takes it,
@@ -215,6 +233,23 @@ impl Wayland {
             eprintln!("waft: the compositor refused a dmabuf: its layer is not shown");
         }
         made
+    }
+}
+
+/// Brings `window` forward with `token`, an XDG activation token a launch was given; nothing on X11
+/// or where the compositor offers no XDG activation.
+pub(crate) fn activate(window: &dyn Window, token: &str) {
+    let Some(wayland) = Wayland::get() else {
+        return;
+    };
+    let Ok(handle) = window.rwh_06_window_handle().window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Wayland(handle) = handle.as_raw() else {
+        return;
+    };
+    if let Some(surface) = wayland.foreign_surface(handle.surface.as_ptr()) {
+        wayland.activate(&surface, token);
     }
 }
 
@@ -301,3 +336,4 @@ delegate_noop!(Events: ignore wl_subsurface::WlSubsurface);
 delegate_noop!(Events: ignore wl_region::WlRegion);
 delegate_noop!(Events: ignore wp_viewporter::WpViewporter);
 delegate_noop!(Events: ignore wp_viewport::WpViewport);
+delegate_noop!(Events: ignore xdg_activation_v1::XdgActivationV1);

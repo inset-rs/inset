@@ -6,6 +6,10 @@
 //!
 //! A message is the arguments, then the folder, each as its count of UTF-16 units, little-endian
 //! 32 bits, and the units, after their number.
+//!
+//! A later launch started by the user may bring a window forward, which the first instance may
+//! not: before it writes, it hands that right to the process at the pipe's other end
+//! (`AllowSetForegroundWindow`), so the window the first instance shows for it comes to the front.
 
 // The mutex and the pipe are system calls, which Rust reaches through `unsafe`; this module is the
 // one place in the crate that writes it.
@@ -28,14 +32,15 @@ use windows_sys::Win32::Storage::FileSystem::{
     PIPE_ACCESS_INBOUND, ReadFile, WriteFile,
 };
 use windows_sys::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE,
-    PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
-    WaitNamedPipeW,
+    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, GetNamedPipeServerProcessId,
+    PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
+    PIPE_WAIT, WaitNamedPipeW,
 };
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows_sys::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId};
+use windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
 
-use crate::{Arrivals, FirstInstance, SingleInstance, this_launch};
+use crate::{Arrivals, FirstInstance, Launch, SingleInstance, this_launch};
 
 /// How long a later launch tries to reach the first instance's pipe, which a first instance just
 /// started may not have opened yet.
@@ -137,6 +142,7 @@ fn hand_over(pipe: &[u16]) -> io::Result<()> {
             thread::sleep(Duration::from_millis(50));
         }
     };
+    hand_foreground_to_server(&handle);
     let mut written = 0;
     while written < message.len() {
         let mut wrote = 0;
@@ -157,6 +163,17 @@ fn hand_over(pipe: &[u16]) -> io::Result<()> {
         written += wrote as usize;
     }
     Ok(())
+}
+
+/// Lets the first instance, at the other end of `pipe`, bring a window to the front, which this
+/// launch may and it may not; nothing where Windows will not tell who it is.
+fn hand_foreground_to_server(pipe: &Owned) {
+    let mut server = 0;
+    // SAFETY: a pipe handle of this process's, and an out-pointer of the call's own.
+    if unsafe { GetNamedPipeServerProcessId(pipe.0, &mut server) } != 0 {
+        // SAFETY: takes a process id and no pointers.
+        unsafe { AllowSetForegroundWindow(server) };
+    }
 }
 
 /// Listens for later launches on the pipe, one after another, for as long as the process runs; each
@@ -186,7 +203,11 @@ fn listen(pipe: &[u16], arrivals: &Arc<Arrivals>) {
             || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
         if connected {
             if let Some((arguments, current_dir)) = decode(&read_all(&instance)) {
-                arrivals.arrive(arguments, PathBuf::from(current_dir));
+                arrivals.arrive(Launch {
+                    arguments,
+                    current_dir: PathBuf::from(current_dir),
+                    activation_token: None,
+                });
             }
             // SAFETY: the connected instance, which is closed next.
             unsafe { DisconnectNamedPipe(instance.0) };

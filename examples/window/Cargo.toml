@@ -7,6 +7,9 @@ repository.workspace = true
 homepage.workspace = true
 publish = false
 
+[package.metadata.waft]
+identifier = "rs.waft.window"
+
 [dependencies]
 waft-cupertino.workspace = true
 waft-embedder.workspace = true
@@ -17,6 +20,7 @@ waft-painting.workspace = true
 waft-rendering.workspace = true
 waft-services.workspace = true
 waft-shell.workspace = true
+waft-single-instance.workspace = true
 waft-widgets.workspace = true
 
 [lints]

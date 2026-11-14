@@ -128,11 +128,13 @@ impl Windows {
         self.view_of_window.borrow_mut().insert(window, view);
     }
 
-    /// Closes `window`: it is freed once the caller's copies of it are dropped and its view, which
-    /// this answers for the caller to remove, has let go of its layer.
+    /// Closes `window`: what the system keeps of it apart from the window is undone at once, and
+    /// the window is freed once the caller's copies of it are dropped and its view, which this
+    /// answers for the caller to remove, has let go of its layer.
     pub(crate) fn close(&self, window: WindowId) -> Option<ViewId> {
         let view = self.view_of_window.borrow_mut().remove(&window)?;
-        self.entries.borrow_mut().remove(&view)?;
+        let entry = self.entries.borrow_mut().remove(&view)?;
+        System::before_close(&*entry.window);
         Some(view)
     }
 

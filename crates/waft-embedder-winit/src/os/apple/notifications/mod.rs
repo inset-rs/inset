@@ -274,7 +274,7 @@ mod tests {
         let state = block_on(permission.state());
         eprintln!("the permission stands at {state:?}");
         let center = bundled_center().expect("the center");
-        hear_activations(NotificationActivations::to(|_| {}));
+        hear_activations(NotificationActivations::to(|_, _| {}));
         assert!(center.delegate().is_some(), "the delegate is kept");
         let actions = vec![NotificationAction::button("later", "Later")];
         let (held, holding) = mpsc::channel();

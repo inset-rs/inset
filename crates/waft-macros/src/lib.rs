@@ -11,8 +11,8 @@
 //! A WASI component, such as one for wapk, gets no entry: Waft ships no host for it, so
 //! the app writes its own with that host's embedder crate.
 //!
-//! The desktop entry gives the embedder the app's Linux app id, the manifest's `identifier`, which
-//! [`linux_app_id!`] gives an entry the app writes itself.
+//! The desktop entry gives the embedder the app's Linux app id and its Windows AppUserModelID, both
+//! the manifest's `identifier`, which [`linux_app_id!`] gives an entry the app writes itself.
 
 mod identifier;
 
@@ -69,8 +69,12 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
             ::waft::DefaultEmbedder::attach_to_parent_console();
             let mut linux = ::waft::LinuxSettings::default();
             linux.app_id = ::std::option::Option::Some(::std::string::String::from(#identifier));
+            let mut windows = ::waft::WindowsSettings::default();
+            windows.app_user_model_id =
+                ::std::option::Option::Some(::std::string::String::from(#identifier));
             ::waft::DefaultEmbedder::default()
                 .linux(linux)
+                .windows(windows)
                 .run(|platform| ::waft::Shell::new(platform, #setup_name));
         }
 

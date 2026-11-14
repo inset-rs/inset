@@ -13,6 +13,9 @@
 //!
 //! There is no question: the user turns an app's notifications off in Settings, which the
 //! notifier answers (`ToastNotifier.Setting`).
+//!
+//! The process may also post as another app the platform knows (`notifications_of`): the same
+//! toasts under that app's AppUserModelID, its clicks carrying the ID.
 
 mod activator;
 mod arguments;
@@ -46,23 +49,26 @@ impl SystemNotifications for Windows {
     /// Registers the app's toast activator, where its registration names one, before the loop
     /// runs, so the click that started the app is heard.
     fn hear_notification_activations(activations: NotificationActivations) {
-        let Some(clsid) = AppIdentity::of_this_process().and_then(|app| app.activator()) else {
+        let Some(app) = AppIdentity::of_this_process() else {
             return;
         };
-        activator::register(clsid, activations);
+        let Some(clsid) = app.activator() else {
+            return;
+        };
+        activator::register(clsid, app.app_user_model_id(), activations);
     }
 
     fn notifications(activations: NotificationActivations) -> Option<Rc<dyn Notifications>> {
         let app = AppIdentity::of_this_process()?;
-        let notifier = app.notifier().ok()?;
-        Some(Rc::new(Toasts {
-            app,
-            notifier,
-            clicks: (!activator::is_registered()).then(|| Clicks {
-                activations,
-                shown: Arc::default(),
-            }),
-        }))
+        Toasts::of(app, activations)
+    }
+
+    fn notifications_of(
+        app_user_model_id: &str,
+        activations: NotificationActivations,
+    ) -> Option<Rc<dyn Notifications>> {
+        let app = AppIdentity::Unpackaged(HSTRING::from(app_user_model_id));
+        Toasts::of(app, activations)
     }
 }
 
@@ -82,6 +88,20 @@ struct Clicks {
 }
 
 impl Toasts {
+    /// The toasts of `app`, their clicks sent to `activations`; `None` where the platform makes no
+    /// notifier for it.
+    fn of(app: AppIdentity, activations: NotificationActivations) -> Option<Rc<dyn Notifications>> {
+        let notifier = app.notifier().ok()?;
+        Some(Rc::new(Toasts {
+            app,
+            notifier,
+            clicks: (!activator::is_registered()).then(|| Clicks {
+                activations,
+                shown: Arc::default(),
+            }),
+        }))
+    }
+
     /// Shows `notification` at once, in place of any toast shown or scheduled under its id.
     fn show(&self, notification: &Notification) -> Result<(), NotificationError> {
         self.allowed()?;

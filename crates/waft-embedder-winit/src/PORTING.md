@@ -31,7 +31,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 - Change: a desktop app has no view until it asks for one: the host makes a window for each request and adds its view carrying the request's id, where Flutter's runners make the implicit view's window and only its multi-window apps make their own (`[win32] Multi-window should never have implicit view`).
   Reason: platform — the app owns its windows and decides every window's close, the last one's included, so the host makes no window the app did not ask for and has no rule for the last one.
-  Affect: `WinitEmbedder`'s one setting is what the app tells Linux's desktops (`LinuxSettings`, its app id); `run_app` asks for the app's window, and what the last window's closing means is the app's to decide.
+  Affect: `WinitEmbedder`'s settings are what the app tells Linux's desktops (`LinuxSettings`, its app id) and Windows' shell (`WindowsSettings`, its AppUserModelID); `run_app` asks for the app's window, and what the last window's closing means is the app's to decide.
 
 - Change: on macOS every `terminate:` asks the framework until the app has decided to quit, where Flutter's termination handler marks the quit as under way when it asks, which lets a second Cmd-Q through.
   Reason: platform — the host reports every request to quit to the framework, which decides each, such as quitting only at a second Cmd-Q.
@@ -414,6 +414,12 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - Change: `WinitPlatform::macos` slides a window in and hides the app, neither of which Flutter's framework offers.
   Reason: platform — an app that places a window against the screen, such as a panel above its Dock icon, needs them, and `Platform` stays Flutter's.
   Affect: an app reaches them only on macOS; on other systems `macos()` is `None`.
+
+## windows_os.rs, linux.rs → what only Windows and Linux offer beyond `Platform`
+
+- Change: `WinitPlatform::windows` posts notifications as another app (`notifications_of`), their clicks going to a handler of their own, and `WinitPlatform::linux` brings a window forward with a launch's activation token (`activate`); neither is in Flutter's framework.
+  Reason: platform — a host whose windows are other apps', as WaOS's programs are on Windows and Linux, posts their notifications and brings their windows forward as theirs.
+  Affect: an app reaches them only on Windows or Linux; elsewhere `windows()` and `linux()` are `None`.
 
 ## Deferred
 

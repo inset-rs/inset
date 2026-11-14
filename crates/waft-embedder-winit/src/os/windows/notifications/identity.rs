@@ -43,6 +43,14 @@ impl AppIdentity {
         explicit_app_user_model_id().map(AppIdentity::Unpackaged)
     }
 
+    /// The AppUserModelID of an unpackaged app; `None` for a packaged one.
+    pub(crate) fn app_user_model_id(&self) -> Option<String> {
+        match self {
+            AppIdentity::Package => None,
+            AppIdentity::Unpackaged(id) => Some(id.to_string()),
+        }
+    }
+
     /// The notifier that shows and schedules the app's toasts.
     pub(crate) fn notifier(&self) -> Result<ToastNotifier> {
         match self {

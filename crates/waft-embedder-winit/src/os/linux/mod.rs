@@ -29,7 +29,7 @@ use winit::monitor::MonitorHandle;
 use winit::platform::wayland::{ActiveEventLoopExtWayland, WindowAttributesWayland};
 use winit::platform::x11::{ActiveEventLoopExtX11, WindowAttributesX11};
 use winit::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
-use winit::window::{Window, WindowAttributes};
+use winit::window::{ActivationToken, Window, WindowAttributes};
 
 use crate::LinuxSettings;
 use crate::clipboard::{ChangeProbe, TextClipboard};
@@ -37,11 +37,11 @@ use crate::menus::MenuEvents;
 
 use super::absent::{NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices};
 use super::capabilities::{
-    ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, GpuInterop,
-    ImageDecoding, NativeComposition, NativeMenus, OperatingSystem, PointerQueries, Screens,
-    StandardStreams, SystemChanges, SystemClipboard, SystemDrags, SystemImageCodecs, SystemMedia,
-    SystemRequests, TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility,
-    WorkQueue,
+    ApplicationControl, ApplicationIdentity, ApplicationLifecycle, EventLoopSetup,
+    FramePresentation, GpuInterop, ImageDecoding, NativeComposition, NativeMenus, OperatingSystem,
+    PointerQueries, Screens, StandardStreams, SystemChanges, SystemClipboard, SystemDrags,
+    SystemImageCodecs, SystemMedia, SystemRequests, TrackpadTouches, WindowChrome, WindowGeometry,
+    WindowMotion, WindowVisibility, WorkQueue,
 };
 use super::window_handle_layer::{NoWindowHold, WindowHandleLayer};
 use composition::{LinuxComposition, WaylandCompositor};
@@ -133,26 +133,46 @@ impl WindowMotion for Linux {}
 /// The app's id as each window's app id on Wayland (xdg-shell's `set_app_id`) and its class on
 /// X11 (`WM_CLASS`), by which the desktop matches the window to the app's desktop file,
 /// `<app_id>.desktop`, whose `StartupWMClass` names the same: its dock shows the app's name and
-/// icon for the window.
+/// icon for the window. A window that names an app id of its own is that app's instead, and a
+/// window given a launch's activation token takes the focus with it (XDG activation).
 impl WindowChrome for Linux {
     fn extend_attributes(
         event_loop: &dyn ActiveEventLoop,
         attributes: WindowAttributes,
-        _config: &WindowConfig,
+        config: &WindowConfig,
         linux: &LinuxSettings,
     ) -> WindowAttributes {
-        let Some(app_id) = &linux.app_id else {
-            return attributes;
-        };
+        let app_id = config.linux.app_id.as_ref().or(linux.app_id.as_ref());
+        let token = config
+            .linux
+            .activation_token
+            .clone()
+            .map(ActivationToken::from_raw);
         if event_loop.is_wayland() {
-            let wayland = WindowAttributesWayland::default().with_name(app_id, app_id);
+            let mut wayland = WindowAttributesWayland::default();
+            if let Some(app_id) = app_id {
+                wayland = wayland.with_name(app_id, app_id);
+            }
+            if let Some(token) = token {
+                wayland = wayland.with_activation_token(token);
+            }
             attributes.with_platform_attributes(Box::new(wayland))
         } else if event_loop.is_x11() {
-            let x11 = WindowAttributesX11::default().with_name(app_id, app_id);
+            let mut x11 = WindowAttributesX11::default();
+            if let Some(app_id) = app_id {
+                x11 = x11.with_name(app_id, app_id);
+            }
+            if let Some(token) = token {
+                x11 = x11.with_activation_token(token);
+            }
             attributes.with_platform_attributes(Box::new(x11))
         } else {
             attributes
         }
+    }
+
+    fn activate_with_token(window: &dyn Window, token: &str) {
+        wayland::activate(window, token);
     }
 }
 /// A Wayland window is on no output until the compositor has shown it, and winit says nothing
@@ -175,4 +195,6 @@ impl SystemRequests for Linux {}
 impl SystemChanges for Linux {}
 impl ApplicationControl for Linux {}
 impl ApplicationLifecycle for Linux {}
+/// The app's identity is each window's app id (`WindowChrome`), not the process's.
+impl ApplicationIdentity for Linux {}
 impl StandardStreams for Linux {}

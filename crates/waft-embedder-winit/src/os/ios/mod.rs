@@ -25,10 +25,10 @@ use pasteboard::Pasteboard;
 use super::absent::{NoDisplayLink, NoTrackpadTouchObserver, NoVisibilityNotices};
 use super::apple::{image_io_decoders, notifications};
 use super::capabilities::{
-    ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, GpuInterop,
-    ImageDecoding, NativeMenus, OperatingSystem, PointerQueries, Screens, StandardStreams,
-    SystemChanges, SystemClipboard, SystemDrags, SystemImageCodecs, SystemMedia,
-    SystemNotifications, TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion,
+    ApplicationControl, ApplicationIdentity, ApplicationLifecycle, EventLoopSetup,
+    FramePresentation, GpuInterop, ImageDecoding, NativeMenus, OperatingSystem, PointerQueries,
+    Screens, StandardStreams, SystemChanges, SystemClipboard, SystemDrags, SystemImageCodecs,
+    SystemMedia, SystemNotifications, TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion,
     WindowVisibility, WorkQueue,
 };
 use crate::notifications::NotificationActivations;
@@ -150,4 +150,5 @@ impl WorkQueue for Ios {}
 impl SystemChanges for Ios {}
 impl ApplicationControl for Ios {}
 impl ApplicationLifecycle for Ios {}
+impl ApplicationIdentity for Ios {}
 impl StandardStreams for Ios {}
