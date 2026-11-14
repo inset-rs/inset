@@ -64,6 +64,8 @@ mod hardware_buffers;
 mod host;
 #[cfg(target_os = "android")]
 mod icon_pixels;
+#[cfg(any(target_os = "android", test))]
+mod image_codecs;
 #[cfg(target_os = "android")]
 mod images;
 #[cfg(target_os = "android")]

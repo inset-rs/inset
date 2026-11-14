@@ -160,6 +160,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "android_image_codecs"
+version = "0.5.0"
+dependencies = [
+ "ndk-sys",
+ "waft",
+ "waft-embedder",
+ "waft-foundation",
+ "waft-painting",
+ "waft-widgets",
+]
+
+[[package]]
 name = "android_library"
 version = "0.5.0"
 dependencies = [

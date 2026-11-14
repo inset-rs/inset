@@ -36,7 +36,8 @@ ndk-context = "0.1"
 # Android 12 (API 31) is the least the host runs on: its surface controls place a layer by
 # position, scale and crop, which no earlier version has (`surface_control.rs`).
 ndk = { version = "0.9", features = ["rwh_06", "api-level-31"] }
-ndk-sys = "0.6"
+# `bitmap` links `libjnigraphics`, the NDK's image decoder and encoder (`image_codecs/`).
+ndk-sys = { version = "0.6", features = ["bitmap"] }
 
 # The NDK's C APIs — `NativeActivity`'s callbacks, the choreographer, the native window, surface
 # controls, hardware buffers, JNI — and Vulkan's need `unsafe`, which the workspace forbids; here it

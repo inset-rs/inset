@@ -34,6 +34,7 @@ use crate::composition::SurfaceControlCompositor;
 use crate::file_dialogs::DocumentPickers;
 use crate::gpu::Gpu;
 use crate::hardware_buffers::GrallocAllocator;
+use crate::image_codecs::AndroidImageCodecs;
 use crate::loop_waker::LoopWaker;
 use crate::notifications::AndroidNotifications;
 use crate::opener::IntentOpener;
@@ -66,6 +67,8 @@ pub struct AndroidPlatform {
     image_loader: Option<valo_codec::ImageLoader>,
     /// The renderer's image store, on the device every view draws with.
     images: valo::ImageContext,
+    /// Android's own image decoder and encoder, for the app's own use (`image_codecs/`).
+    image_codecs: AndroidImageCodecs,
     chrome: AndroidChrome,
     /// What every view's task shows where its window says nothing (`chrome.rs`).
     pub(crate) app_description: AppDescription,
@@ -117,6 +120,7 @@ impl AndroidPlatform {
             }),
             image_loader: crate::images::loader(images.clone()),
             images,
+            image_codecs: AndroidImageCodecs::new(application.clone()),
             clipboard: AndroidClipboard::new(application.clone()),
             opener: IntentOpener::new(application.clone()),
         }
@@ -322,6 +326,11 @@ impl Platform for AndroidPlatform {
                 .map_err(as_decode_error)?;
             Ok(Box::new(AndroidImageCodec { codec }) as Box<dyn ImageCodec>)
         })
+    }
+
+    /// `AImageDecoder` and `AndroidBitmap_compress`, with no hardware codecs (`image_codecs/`).
+    fn image_codecs(&self) -> Option<&dyn waft_embedder::image_codecs::ImageCodecs> {
+        Some(&self.image_codecs)
     }
 
     fn import_pixels(&self, pixels: valo::PixelBuffer) -> Option<waft_embedder::Image> {

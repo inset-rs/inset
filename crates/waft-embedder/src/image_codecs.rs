@@ -1,11 +1,11 @@
 //! The system's image codecs, as a host hands them to the app. Not a dart:ui file: dart:ui's
 //! `instantiateImageCodec` (this crate's `image`) decodes for the framework's own drawing and
 //! answers an [`Image`](crate::Image) the renderer draws, never its pixels. These are the system's
-//! codecs as an app uses them itself, to read and write image files: Apple's Image I/O, Android's
-//! `ImageDecoder` and `Bitmap.compress`, Windows' `BitmapDecoder` and `BitmapEncoder`, the web's
-//! `ImageDecoder`. They follow `wasdk:media/image-codecs` one to one, and are a module of their
-//! own, named as that interface is, since the crate's root holds dart:ui's `ImageFrame`, which this
-//! module's [`ImageFrame`] would collide with.
+//! codecs as an app uses them itself, to read and write image files: Apple's Image I/O,
+//! Android's `AImageDecoder` and `AndroidBitmap_compress`, Windows' `BitmapDecoder` and
+//! `BitmapEncoder`, the web's `ImageDecoder`. They follow `wasdk:media/image-codecs` one to one,
+//! and are a module of their own, named as that interface is, since the crate's root holds
+//! dart:ui's `ImageFrame`, which this module's [`ImageFrame`] would collide with.
 //!
 //! Pixels are in one of two kinds of memory, and every move between them is a call of its own, so
 //! an app sees each copy it makes. An image decodes into the app's memory, a [`PixelBuffer`], on
@@ -16,9 +16,9 @@
 //! [`Platform::import_hardware_buffer`](crate::Platform::import_hardware_buffer) draws with no
 //! copy and which holds no slot in a pool, and encode from one, a buffer the app drew or a video
 //! frame's ([`VideoFrame::hardware_buffer`](crate::VideoFrame::hardware_buffer)) among them:
-//! Apple's codecs decode into an `IOSurface`, and Android's `ImageDecoder` allocates a hardware
-//! bitmap. A hardware buffer comes back to the app's memory only through
-//! [`HardwareBuffer::read_pixels`].
+//! Apple's codecs decode into an `IOSurface`; Android's NDK decoder writes only the app's memory,
+//! so Android's host has none, a hardware bitmap being Java's `ImageDecoder`'s alone. A hardware
+//! buffer comes back to the app's memory only through [`HardwareBuffer::read_pixels`].
 //!
 //! An image is opened from its bytes, or from a file, which the system reads only as far as it
 //! needs; opening reads what the image says of itself, its format, size, frames, orientation and
