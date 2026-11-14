@@ -101,7 +101,7 @@ pub use notifications::{
     NotificationPermission, NotificationReplies, NotificationScheduling, Notifications,
     PermissionFuture, PermissionState, PostFuture,
 };
-pub use opener::{OpenError, OpenFuture, OpenRequest, Opener, file_uri_path};
+pub use opener::{OpenError, OpenFuture, OpenRequest, Opener, file_uri, file_uri_path};
 pub use painting::*;
 pub use paragraph::*;
 pub use platform::{
