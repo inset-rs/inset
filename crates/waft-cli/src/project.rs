@@ -169,6 +169,10 @@ pub struct AndroidMetadata {
     /// launcher cuts to its own shape. Without it, the app's one `icon` is the launcher icon, which
     /// a launcher shrinks into its shape.
     pub adaptive_icon: Option<AdaptiveIcon>,
+    /// Android libraries merged into the package, as Gradle merges a module's dependencies: each an
+    /// `.aar` or a `.jar`, relative to the package root, in priority order, the first winning a
+    /// resource both define. An app lists the libraries each of these needs too.
+    pub dependencies: Vec<PathBuf>,
 }
 
 /// Android's adaptive launcher icon: a foreground over a background, each 108 dp square, which the
@@ -297,6 +301,11 @@ impl Project {
             .adaptive_icon
             .map(|icon| icon.under(&root))
             .transpose()?;
+        android.dependencies = android
+            .dependencies
+            .into_iter()
+            .map(|library| existing_file(&root, library, "the Android library"))
+            .collect::<Result<_>>()?;
         Ok(Project {
             workspace_root: metadata.workspace_root.clone().into_std_path_buf(),
             target_dir: metadata.target_directory.clone().into_std_path_buf(),
@@ -484,5 +493,6 @@ mod tests {
         assert!(metadata.resources.is_empty());
         assert!(metadata.ios.team.is_none());
         assert!(metadata.macos.helpers.is_empty() && metadata.macos.libraries.is_empty());
+        assert!(metadata.android.dependencies.is_empty());
     }
 }

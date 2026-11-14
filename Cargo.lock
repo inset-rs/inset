@@ -160,6 +160,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "android_library"
+version = "0.5.0"
+dependencies = [
+ "jni",
+ "ndk-context",
+ "ndk-sys",
+ "waft",
+ "waft-embedder",
+ "waft-painting",
+ "waft-widgets",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1584,7 +1597,7 @@ version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbc773e24e02d4ddd8395fd30dc147524273a83e54e0f312d986ea30de5f5646"
 dependencies = [
- "roxmltree",
+ "roxmltree 0.20.0",
 ]
 
 [[package]]
@@ -3758,6 +3771,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
+name = "roxmltree"
+version = "0.21.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9da7f59328b09405b181fee1018925fad50f157afb43c0c0f5c522c256dd5907"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "rpassword"
 version = "7.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5017,6 +5039,7 @@ dependencies = [
  "glob",
  "image",
  "plist",
+ "roxmltree 0.21.2",
  "serde",
  "serde_json",
  "tar",
@@ -6692,9 +6715,11 @@ dependencies = [
  "crc32fast",
  "crossbeam-utils",
  "displaydoc",
+ "flate2",
  "indexmap",
  "memchr",
  "thiserror 2.0.20",
+ "zopfli",
 ]
 
 [[package]]
@@ -6708,6 +6733,18 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[package]]
+name = "zopfli"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f05cd8797d63865425ff89b5c4a48804f35ba0ce8d125800027ad6017d2b5249"
+dependencies = [
+ "bumpalo",
+ "crc32fast",
+ "log",
+ "simd-adler32",
+]
 
 [[package]]
 name = "zune-core"

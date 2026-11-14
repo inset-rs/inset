@@ -88,6 +88,7 @@ target_sdk = 34                    # the default; 35 and up, which Android lays 
 version_code = 100                 # defaults to one derived from the version: 1.2.3 is 10203
 permissions = ["android.permission.INTERNET"]  # what the app asks for besides Waft's own; a socket needs INTERNET
 adaptive_icon = { foreground = "assets/icon-foreground.png", background = "#ffffff" }  # the launcher icon on API 26 and up, two 108 dp layers the launcher cuts to its shape; background is #rrggbb or a PNG; without it, `icon` is shrunk into the shape
+dependencies = ["android/some-library-1.0.aar", "android/kotlin-stdlib-2.2.10.jar"]  # Android libraries merged into the package, as Gradle merges a module's; see Android libraries
 
 [[package.metadata.waft.file_associations]]  # a kind of file this app defines
 extensions = ["mydoc"]
@@ -177,7 +178,7 @@ The CLI puts the `.app` together itself, as it does an iOS app: the executable i
 
 ## Android
 
-The `.apk` is built without Gradle and without any Java of your own. The Java is Waft's seven classes (`android/rs/waft/`), which `javac` and `d8` compile into the package's `classes.dex`:
+The `.apk` is built without Gradle and without any Java source of your own; prebuilt Android libraries are merged in (see [Android libraries](#android-libraries)). The Java is Waft's seven classes (`android/rs/waft/`), which `javac` and `d8` compile into the package's `classes.dex`:
 
 - `rs.waft.WaftActivity`, the activity: Android's `NativeActivity`, which loads your library, where Waft's host starts your app's thread with the process's first activity and calls the `android_main` that `#[waft::main]` emits once for the process, each activity a view of the app, with the results of the activities your app starts, the intents that reach it while it runs and the user's answers to the permissions it asks for handed on to it, as the file dialogs, being opened and notifications need.
 - `rs.waft.WaftDocumentActivity`, the same activity in a task of its own, a card in Recents, which the app starts for each view it asks for (`Platform::request_view`); the manifest declares it beside the launcher's `singleTask` activity, not exported, `standard` and `intoExisting`, Recents keeping 50 of its tasks.
@@ -199,6 +200,26 @@ You need:
 - `rustup target add aarch64-linux-android`.
 
 `doctor` checks all four.
+
+### Android libraries
+
+`dependencies` lists Android libraries, each an `.aar` or a `.jar` relative to the package root, which the package carries as a Gradle build carries an app's `implementation files(…)`. They are local files: the app gathers each library and the libraries it needs itself (a library written in Kotlin needs `kotlin-stdlib`'s JAR, which a Gradle app gets from its Kotlin plugin), and the first listed has the highest priority.
+
+What is merged, from an AAR:
+
+- `classes.jar` and `libs/*.jar`: dexed by `d8` with Waft's classes, and on `javac`'s class path. Past 65,536 methods the dex is split, `classes2.dex` and on.
+- `res/`: compiled and linked with the app's resources beneath them, the app's winning a resource both define, then the library listed first. An R class is generated for each library's package from the linked resources (`aapt2 link --extra-packages`), so a library's classes read its resources by `R`.
+- `AndroidManifest.xml`: merged into Waft's by Android's merge rules ("Merge multiple manifest files" on developer.android.com) for `<uses-permission>`, `<uses-permission-sdk-23>`, `<permission>`, `<uses-feature>` (`android:required` merged by *or*), `<queries>` and its `<package>`, `<intent>` and `<provider>`, `<application>`'s attributes and its `<activity>`, `<activity-alias>`, `<service>`, `<receiver>`, `<provider>`, `<meta-data>`, `<uses-library>` and `<uses-native-library>`, with a component's `<intent-filter>`s and `<meta-data>`. An element is matched by its `android:name` (or is the one of its parent), an attribute it lacks is added, `${applicationId}` is the app's package name, a relative class name (`.Receiver`) is under the library's package, and lint's `tools:` attributes are dropped. A library's `<uses-sdk>` is checked, not merged: its `minSdkVersion` may not be above `min_sdk`, and one that targets an old level adds the permissions Android's table of implicit system permissions gives (a manifest with no `<uses-sdk>` targets API 1, so it adds `WRITE_EXTERNAL_STORAGE` and `READ_PHONE_STATE`).
+- `jni/<abi>/*.so`: the package's processor's, beside the app's library under `lib/<abi>/`.
+- `META-INF/com/android/build/gradle/aar-metadata.properties`: checked as Gradle checks it.
+
+A JAR brings classes alone. Every JAR's Java resources, the files beside its classes, are packaged at the package's root with Gradle's default exclusions (`META-INF/MANIFEST.MF`, licences, signatures and the like) and its default merges (`META-INF/services/**` joined).
+
+Ignored, as nothing reads them in a package built without Gradle: `R.txt` and `public.txt` (the R class comes from the linked resources), `proguard.txt` (nothing shrinks the classes), `lint.jar`, `annotations.zip`, `api.jar`, `aidl/`, `prefab/` and `baseline-prof.txt`.
+
+Refused, with an error that names the library and what it holds: an AAR's `assets/` and `navigation.json`, any entry not in the AAR format, an AAR without a manifest; a manifest element outside the list above, a `tools:` merge rule marker (`tools:node="remove"`, `tools:replace`, …), a placeholder other than `${applicationId}`, an element without its `android:name`, two values for one attribute, a `minSdkVersion` above the app's; a library with native libraries but none for the package's processor; two files at one path in the package, as Gradle refuses them ("2 files found with path"); two AARs of one package; one listed twice; an AAR whose metadata asks for a newer AAR format, a later platform than the SDK's newest, or core library desugaring.
+
+`examples/android_library` calls an AAR's class through JNI and shows what it read of the library's resources, manifest, native library and the JAR it needs.
 
 `run -d <device>` builds for that device's processor. `build apk` builds for 64-bit ARM. After launching, the app's log follows until ctrl-c, which is `adb logcat` for its process.
 

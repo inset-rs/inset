@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.example.greeter">
+
+    <uses-sdk android:minSdkVersion="26" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <permission
+        android:name="${applicationId}.GREETER"
+        android:protectionLevel="signature" />
+
+    <application
+        android:networkSecurityConfig="@xml/network_security_config"
+        tools:ignore="UnusedAttribute">
+        <meta-data
+            android:name="com.example.greeter.flavour"
+            android:value="vanilla" />
+        <receiver
+            android:name=".GreeterReceiver"
+            android:exported="false"
+            android:permission="${applicationId}.GREETER" />
+    </application>
+</manifest>

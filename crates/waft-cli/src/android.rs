@@ -20,6 +20,12 @@
 //! library in the package is a stripped copy (`strip_option` says of what); the library as built
 //! stays under `target/` to symbolise a stack trace against.
 //!
+//! The Android libraries the app depends on (`library.rs`) are merged in as Gradle merges them:
+//! their classes compiled into the dex with Waft's, their manifests into Waft's
+//! (`manifest_merger.rs`), their resources linked with the app's, beneath them, and an R class
+//! generated for each, their native libraries for the package's processor
+//! (`native_libraries.rs`) and their JARs' Java resources (`java_resources.rs`) packaged.
+//!
 //! Everything but the NDK's linker and Java is found under the SDK. The NDK is where the
 //! linker and the C library for the target live; Java compiles the classes and runs `d8`,
 //! `apksigner` and `keytool`.
@@ -33,6 +39,15 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 
 use crate::devices::Target;
+
+mod java_resources;
+mod library;
+mod manifest_merger;
+mod native_libraries;
+mod xml;
+
+use library::AndroidLibrary;
+use manifest_merger::LibraryManifest;
 
 use crate::cargo::{self, Artifact, Build};
 use crate::icons;
@@ -359,6 +374,22 @@ pub fn build(project: &Project, profile: Profile, abi: Abi) -> Result<Apk> {
         .as_ref()
         .context("no Java for javac and apksigner: install Android Studio, or set JAVA_HOME")?;
     let min_sdk = min_sdk(project.android.min_sdk)?;
+    let out = project.out_dir("android", profile);
+    let stage = out.join("apk");
+    if stage.exists() {
+        fs::remove_dir_all(&stage)?;
+    }
+    fs::create_dir_all(&stage)?;
+    // Unpacked before the app is built, so a library that cannot be merged is refused at once.
+    let libraries = library::unpack_all(
+        &project.root,
+        &project.android.dependencies,
+        &stage.join("libraries"),
+        sdk.platform.level,
+    )?;
+    let library_file = format!("lib{library}.so");
+    let native_libraries = native_libraries::for_abi(&libraries, abi.dir_name(), &library_file)?;
+    let java_resources = java_resources::gather(&libraries, &stage.join("java-resources"))?;
     tools::ensure_rust_target(&project.root, abi.triple())?;
     let shared_library = cargo::build(&Build {
         project,
@@ -370,53 +401,50 @@ pub fn build(project: &Project, profile: Profile, abi: Abi) -> Result<Apk> {
         link_inputs: Vec::new(),
     })?;
 
-    let out = project.out_dir("android", profile);
-    let stage = out.join("apk");
-    if stage.exists() {
-        fs::remove_dir_all(&stage)?;
-    }
-    fs::create_dir_all(&stage)?;
     let package = project.android_package();
     let has_icon = write_icons(project, &stage.join("res"))?;
+    let wafts_manifest = manifest(&Manifest {
+        package: &package,
+        label: &project.name,
+        library,
+        version_code: project
+            .android
+            .version_code
+            .unwrap_or_else(|| version_code(&project.version)),
+        version_name: &project.version,
+        category: project
+            .android
+            .category
+            .as_deref()
+            .unwrap_or(DEFAULT_CATEGORY),
+        min_sdk,
+        target_sdk: project.android.target_sdk.unwrap_or(DEFAULT_TARGET_SDK),
+        debuggable: !profile.is_release(),
+        has_icon,
+        file_associations: &project.file_associations,
+        permissions: &project.android.permissions,
+    });
     fs::write(
         stage.join("AndroidManifest.xml"),
-        manifest(&Manifest {
-            package: &package,
-            label: &project.name,
-            library,
-            version_code: project
-                .android
-                .version_code
-                .unwrap_or_else(|| version_code(&project.version)),
-            version_name: &project.version,
-            category: project
-                .android
-                .category
-                .as_deref()
-                .unwrap_or(DEFAULT_CATEGORY),
-            min_sdk,
-            target_sdk: project.android.target_sdk.unwrap_or(DEFAULT_TARGET_SDK),
-            debuggable: !profile.is_release(),
-            has_icon,
-            file_associations: &project.file_associations,
-            permissions: &project.android.permissions,
-        }),
+        merge_manifests(&wafts_manifest, &libraries)?,
     )?;
     let linked = stage.join("unaligned.apk");
-    link(&sdk, &stage, &linked, has_icon)?;
-    let classes = compile_classes(&sdk, java, &stage, min_sdk)?;
-    add_to_package(&linked, "classes.dex", &classes)?;
+    link(&sdk, &stage, &linked, has_icon, &libraries)?;
     let packaged = strip(
         ndk,
         &shared_library,
         &stage.join("stripped.so"),
         strip_option(profile),
     )?;
-    add_to_package(
-        &linked,
-        &format!("lib/{}/lib{library}.so", abi.dir_name()),
-        &packaged,
-    )?;
+    let mut entries = compile_classes(&sdk, java, &stage, min_sdk, &libraries)?;
+    entries.push((format!("lib/{}/{library_file}", abi.dir_name()), packaged));
+    entries.extend(native_libraries);
+    entries.extend(
+        java_resources
+            .into_iter()
+            .map(|resource| (resource.path, resource.file)),
+    );
+    add_to_package(&linked, &entries)?;
     let aligned = stage.join("aligned.apk");
     tools::run(
         Command::new(sdk.build_tools.join(tools::exe_name("zipalign")))
@@ -866,19 +894,47 @@ fn write_at_densities(source: &image::RgbaImage, dp: f64, res: &Path, name: &str
     Ok(())
 }
 
-/// `aapt2`: the resources compiled, then linked with the manifest into an unsigned package.
-fn link(sdk: &Sdk, stage: &Path, out: &Path, has_resources: bool) -> Result<()> {
+/// Waft's manifest with each library's merged into it, the first listed first.
+fn merge_manifests(wafts: &str, libraries: &[AndroidLibrary]) -> Result<String> {
+    let manifests: Vec<LibraryManifest> = libraries
+        .iter()
+        .filter_map(|library| {
+            library.manifest.as_ref().map(|manifest| LibraryManifest {
+                library: &library.name,
+                manifest: &manifest.element,
+            })
+        })
+        .collect();
+    manifest_merger::merge(wafts, &manifests)
+}
+
+/// `aapt2`: the app's resources and each library's compiled, then linked with the manifest into an
+/// unsigned package, with the R class of each library's package written under `r/` for its
+/// classes to read their resources by.
+///
+/// Where two define one resource the app's wins, then the library listed first, as Gradle merges
+/// them: the least of them is linked first and each one above it laid over it.
+fn link(
+    sdk: &Sdk,
+    stage: &Path,
+    out: &Path,
+    has_resources: bool,
+    libraries: &[AndroidLibrary],
+) -> Result<()> {
     let aapt2 = sdk.build_tools.join(tools::exe_name("aapt2"));
-    let compiled = stage.join("res.zip");
+    let mut compiled = Vec::new();
+    for (index, library) in libraries.iter().enumerate().rev() {
+        if let Some(resources) = &library.resources {
+            let archive = stage.join(format!("res-{index}.zip"));
+            compile_resources(&aapt2, resources, &archive)
+                .with_context(|| format!("{}: its resources do not compile", library.name))?;
+            compiled.push(archive);
+        }
+    }
     if has_resources {
-        tools::run(
-            Command::new(&aapt2)
-                .args(["compile", "--dir"])
-                .arg(stage.join("res"))
-                .arg("-o")
-                .arg(&compiled),
-            "aapt2 compile",
-        )?;
+        let archive = stage.join("res.zip");
+        compile_resources(&aapt2, &stage.join("res"), &archive)?;
+        compiled.push(archive);
     }
     let mut command = Command::new(&aapt2);
     command
@@ -889,15 +945,57 @@ fn link(sdk: &Sdk, stage: &Path, out: &Path, has_resources: bool) -> Result<()> 
         .arg(stage.join("AndroidManifest.xml"))
         .arg("-I")
         .arg(&sdk.platform.jar);
-    if has_resources {
-        command.arg(&compiled);
+    if let Some((least, overlays)) = compiled.split_first() {
+        command.arg(least);
+        for overlay in overlays {
+            command.arg("-R").arg(overlay);
+        }
+        if !overlays.is_empty() {
+            command.arg("--auto-add-overlay");
+        }
+    }
+    let packages = library_packages(libraries);
+    if !packages.is_empty() {
+        command
+            .arg("--java")
+            .arg(stage.join("r"))
+            .arg("--extra-packages")
+            .arg(packages.join(":"));
     }
     tools::run(&mut command, "aapt2 link")
 }
 
-/// `javac` and `d8`: Waft's classes, compiled against the platform's `android.jar` into the
-/// `classes.dex` the package carries.
-fn compile_classes(sdk: &Sdk, java: &Java, stage: &Path, min_sdk: u32) -> Result<PathBuf> {
+fn compile_resources(aapt2: &Path, res: &Path, archive: &Path) -> Result<()> {
+    tools::run(
+        Command::new(aapt2)
+            .args(["compile", "--dir"])
+            .arg(res)
+            .arg("-o")
+            .arg(archive),
+        "aapt2 compile",
+    )
+}
+
+/// The packages of the AARs among `libraries`, whose R classes the link writes.
+fn library_packages(libraries: &[AndroidLibrary]) -> Vec<&str> {
+    libraries
+        .iter()
+        .filter_map(|library| library.manifest.as_ref())
+        .map(|manifest| manifest.package.as_str())
+        .collect()
+}
+
+/// `javac` and `d8`: Waft's classes and the R classes the link wrote, compiled against the
+/// platform's `android.jar` with the libraries' JARs on the class path, then dexed with those
+/// JARs; answers the package's dex files, `classes.dex` and, past the 65,536 methods one file
+/// holds, `classes2.dex` and on, as package entries.
+fn compile_classes(
+    sdk: &Sdk,
+    java: &Java,
+    stage: &Path,
+    min_sdk: u32,
+    libraries: &[AndroidLibrary],
+) -> Result<Vec<(String, PathBuf)>> {
     let sources = stage.join("java");
     fs::create_dir_all(sources.join("rs/waft"))?;
     let mut source_paths = Vec::new();
@@ -906,17 +1004,28 @@ fn compile_classes(sdk: &Sdk, java: &Java, stage: &Path, min_sdk: u32) -> Result
         fs::write(&written, source)?;
         source_paths.push(written);
     }
+    let generated = stage.join("r");
+    if generated.is_dir() {
+        source_paths.extend(files_with_extension(&generated, "java")?);
+    }
+    let class_jars: Vec<&Path> = libraries
+        .iter()
+        .flat_map(|library| &library.class_jars)
+        .map(PathBuf::as_path)
+        .collect();
+    let class_path = std::env::join_paths(
+        std::iter::once(sdk.platform.jar.as_path()).chain(class_jars.iter().copied()),
+    )?;
     let classes = stage.join("classes");
     tools::run(
         java.bin("javac")
             .args(["--release", JAVA_RELEASE, "-Xlint:-options", "-classpath"])
-            .arg(&sdk.platform.jar)
+            .arg(&class_path)
             .arg("-d")
             .arg(&classes)
             .args(&source_paths),
         "javac",
     )?;
-    let class_files = class_files(&classes.join("rs/waft"))?;
     let dex = stage.join("dex");
     fs::create_dir_all(&dex)?;
     tools::run(
@@ -929,36 +1038,57 @@ fn compile_classes(sdk: &Sdk, java: &Java, stage: &Path, min_sdk: u32) -> Result
             .arg(&sdk.platform.jar)
             .arg("--output")
             .arg(&dex)
-            .args(class_files),
+            .args(files_with_extension(&classes, "class")?)
+            .args(class_jars),
         "d8",
     )?;
-    Ok(dex.join("classes.dex"))
+    dex_files(&dex)
 }
 
-/// The classes `javac` wrote into `dir`, a nested class's file beside its outer class's.
-fn class_files(dir: &Path) -> Result<Vec<PathBuf>> {
+/// The files under `dir`, at any depth, whose names end in `.<extension>`: a nested class's file
+/// is beside its outer class's.
+fn files_with_extension(dir: &Path, extension: &str) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     for entry in fs::read_dir(dir)? {
         let path = entry?.path();
-        if path
-            .extension()
-            .is_some_and(|extension| extension == "class")
-        {
+        if path.is_dir() {
+            files.extend(files_with_extension(&path, extension)?);
+        } else if path.extension().is_some_and(|found| found == extension) {
             files.push(path);
         }
     }
     Ok(files)
 }
 
-/// Adds `file` to the package as `entry`, stored rather than deflated: the system loads a
-/// shared library from the package in place, page-aligned by `zipalign`, and maps the dex.
-fn add_to_package(apk: &Path, entry: &str, file: &Path) -> Result<()> {
+/// The dex files `d8` wrote into `dir`, by their names in the package.
+fn dex_files(dir: &Path) -> Result<Vec<(String, PathBuf)>> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        if name.starts_with("classes") && name.ends_with(".dex") {
+            files.push((name, path));
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+/// Adds each file to the package under its entry's name, stored rather than deflated: the system
+/// loads a shared library from the package in place, page-aligned by `zipalign`, and maps the dex.
+fn add_to_package(apk: &Path, entries: &[(String, PathBuf)]) -> Result<()> {
     let package = fs::OpenOptions::new().read(true).write(true).open(apk)?;
     let mut writer = zip::ZipWriter::new_append(package).context("reading the linked package")?;
     let options =
         zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
-    writer.start_file(entry, options)?;
-    writer.write_all(&fs::read(file)?)?;
+    for (entry, file) in entries {
+        writer.start_file(entry.as_str(), options)?;
+        writer.write_all(&fs::read(file)?)?;
+    }
     writer.finish()?;
     Ok(())
 }

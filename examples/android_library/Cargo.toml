@@ -1,0 +1,44 @@
+[package]
+name = "android_library"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[package.metadata.waft]
+identifier = "rs.waft.android-library"
+name = "Android library"
+
+[package.metadata.waft.android]
+# Built from the sources beside them by `android/build.sh`: an AAR, which needs the JAR's class.
+dependencies = ["android/greeter.aar", "android/adder.jar"]
+
+# The activity loads the library; the binary is the desktop's, which says the example is
+# Android's. Named apart from the binary: on Windows a cdylib and a binary of one name write the
+# same `.pdb`.
+[lib]
+name = "android_library_lib"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "android_library"
+path = "src/main.rs"
+
+[dependencies]
+waft.workspace = true
+waft-embedder.workspace = true
+waft-painting.workspace = true
+waft-widgets.workspace = true
+
+# Java through JNI, the VM and application `ndk-context` hands out, and the system's log.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.22.4"
+ndk-context = "0.1"
+ndk-sys = "0.6"
+
+# Writing to the system's log and taking the VM from `ndk-context` need `unsafe`, which the
+# workspace forbids; here it is denied instead, and `log.rs` and `greeter.rs` alone allow it.
+[lints.rust]
+unsafe_code = "deny"
