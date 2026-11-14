@@ -35,7 +35,7 @@ struct PageState {
     allow_drop: bool,
     cancel: bool,
     events: Vec<String>,
-    custom_header: Option<Rc<LabeledGlobalKey>>,
+    custom_header: Option<GlobalKey>,
     custom_feedback: bool,
 }
 
@@ -80,7 +80,7 @@ impl State for PageState {
                     return TabViewItem::new(
                         id.to_string(),
                         SizedBox::new()
-                            .key(key.clone())
+                            .key(key.clone().into())
                             .child(Text::new("Custom tab")),
                         Center::new().child(Counter(*id)),
                     );
@@ -506,7 +506,7 @@ fn custom_keyed_header_drag_keeps_live_subtree_and_accepts_independent_feedback(
     let (mut f, p) = fixture(3);
     settle(&mut f);
     let owner = p.0.get().unwrap();
-    let header_key = Rc::new(<dyn GlobalKey>::new());
+    let header_key = GlobalKey::new();
     owner.set_state(&mut f.cell.borrow_mut(), |state| {
         state.custom_header = Some(header_key.clone())
     });
@@ -734,7 +734,7 @@ fn collection_replacement_is_visible_in_the_first_frame() {
 
 /// The bounds of the laid-out elements keyed `name` that have any width.
 fn named_bounds(f: &Fixture, name: &'static str) -> Vec<Rect> {
-    let expected = ValueKey::new(name);
+    let expected: KeyRef = ValueKey::new(name).into();
     let elements = f.elements();
     let app = f.cell.borrow();
     elements
@@ -743,7 +743,7 @@ fn named_bounds(f: &Fixture, name: &'static str) -> Vec<Rect> {
             element
                 .widget(&app)
                 .key()
-                .is_some_and(|key| key.as_ref().eq_key(&expected))
+                .is_some_and(|key| *key == expected)
         })
         .filter_map(|element| {
             let object = element.find_render_object(&app)?.as_box()?;

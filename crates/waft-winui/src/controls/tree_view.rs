@@ -411,7 +411,7 @@ impl StatefulWidget for TreeView {
             row_estimate: 0.0,
             item_focus: HashMap::new(),
             row_keys: HashMap::new(),
-            viewport_key: <dyn GlobalKey>::new(),
+            viewport_key: GlobalKey::new(),
             heights: HashMap::new(),
             widths: HashMap::new(),
             realized: HashSet::new(),
@@ -456,10 +456,10 @@ pub struct TreeViewState {
     item_focus: HashMap<String, Handle<FocusNode>>,
 
     /// Identifies each row's container, where the row is laid out.
-    row_keys: HashMap<String, LabeledGlobalKey>,
+    row_keys: HashMap<String, GlobalKey>,
 
     /// Identifies the list's viewport.
-    viewport_key: LabeledGlobalKey,
+    viewport_key: GlobalKey,
 
     /// Each row's height and width, by node, as last laid out.
     heights: HashMap<String, f64>,
@@ -849,11 +849,11 @@ impl TreeViewState {
     }
 
     /// The key of the node's row.
-    fn row_key(self: Handle<Self>, app: &mut App, id: &str) -> LabeledGlobalKey {
+    fn row_key(self: Handle<Self>, app: &mut App, id: &str) -> GlobalKey {
         app.get_mut(self)
             .row_keys
             .entry(id.to_owned())
-            .or_insert_with(<dyn GlobalKey>::new)
+            .or_insert_with(GlobalKey::new)
             .clone()
     }
 
@@ -1508,9 +1508,9 @@ impl TreeViewState {
                     row,
                     Rc::new(move |app, _, size| self.row_measured(app, &measured, size)),
                 )
-                .key(Rc::new(key)),
+                .key(key.into()),
             )
-            .key(Rc::new(ValueKey::new(id)))
+            .key(ValueKey::new(id).into())
             .into_widget(),
         )
     }
@@ -1526,7 +1526,7 @@ impl TreeViewState {
         })
         .item_count(ids.len() as i32)
         .find_child_index_callback(Rc::new(move |key| {
-            (key.as_ref() as &dyn std::any::Any)
+            (key.key() as &dyn std::any::Any)
                 .downcast_ref::<ValueKey<String>>()
                 .and_then(|key| ids.iter().position(|id| *id == key.value))
                 .map(|index| index as i32)
@@ -1535,7 +1535,7 @@ impl TreeViewState {
         .controller(scroll.native_controller(app))
         .shrink_wrap(shrink_wrap)
         .padding(EdgeInsetsGeometry::ZERO);
-        let viewport = KeyedSubtree::new(list).key(Rc::new(app.get(self).viewport_key.clone()));
+        let viewport = KeyedSubtree::new(list).key(app.get(self).viewport_key.clone().into());
         ScrollBarViewport::scroller(scroll, viewport).into_widget()
     }
 }

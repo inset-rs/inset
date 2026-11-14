@@ -346,7 +346,7 @@ impl State for GalleryState {
                             .descendants_are_focusable(active),
                     )),
                 )
-                .key(Rc::new(ValueKey::new(feature.title().to_owned())))
+                .key(ValueKey::new(feature.title().to_owned()).into())
                 .into_widget()
             })
             .collect();

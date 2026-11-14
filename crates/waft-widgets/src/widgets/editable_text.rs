@@ -48,8 +48,8 @@ use waft_services::{
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 use crate::framework::{
-    BuildContext, GlobalKey, IntoWidget, KeyRef, LabeledGlobalKey, MultiChildRenderObjectWidget,
-    RenderObjectWidget, SingleChildRenderObjectWidget, State, StateData, StatefulWidget, WidgetRef,
+    BuildContext, GlobalKey, IntoWidget, KeyRef, MultiChildRenderObjectWidget, RenderObjectWidget,
+    SingleChildRenderObjectWidget, State, StateData, StatefulWidget, WidgetRef,
 };
 use crate::state_accessors;
 use crate::view::View;
@@ -1994,8 +1994,8 @@ impl StatefulWidget for EditableText {
             actions: None,
             vertical_movement_run: None,
             run_selection: None,
-            editable_key: Rc::new(<dyn GlobalKey>::new()),
-            scrollable_key: Rc::new(<dyn GlobalKey>::new()),
+            editable_key: GlobalKey::new(),
+            scrollable_key: GlobalKey::new(),
             style: TextStyle::new(),
             tickers_enabled: true,
             batch_edit_depth: 0,
@@ -2301,8 +2301,8 @@ pub struct EditableTextState {
     /// to that instance, so the run is shared here instead.
     vertical_movement_run: Option<VerticalCaretMovementRun>,
     run_selection: Option<TextSelection>,
-    editable_key: Rc<LabeledGlobalKey>,
-    scrollable_key: Rc<LabeledGlobalKey>,
+    editable_key: GlobalKey,
+    scrollable_key: GlobalKey,
     style: TextStyle,
     tickers_enabled: bool,
     batch_edit_depth: i32,
@@ -3518,7 +3518,7 @@ impl EditableTextState {
             return;
         }
 
-        let key = Rc::clone(&app.get(self).scrollable_key);
+        let key = app.get(self).scrollable_key.clone();
         let state = key
             .current_state::<ScrollableState>(app)
             .expect("EditableText mounts a Scrollable");
@@ -3559,7 +3559,7 @@ impl EditableTextState {
         self: Handle<Self>,
         app: &mut App,
     ) -> TextEditingValue {
-        let key = Rc::clone(&app.get(self).editable_key);
+        let key = app.get(self).editable_key.clone();
         let widget = key.current_widget(app).expect("Editable must be mounted");
         widget
             .as_any()
@@ -4683,7 +4683,7 @@ impl EditableTextState {
         let clip_behavior = self.widget(app).clip_behavior;
         // `CompositedTransformTarget(link: _toolbarLayerLink, child: ..)` around the editable.
         let editable = Editable {
-            key: Some(Rc::clone(&app.get(self).editable_key) as KeyRef),
+            key: Some(app.get(self).editable_key.clone().into()),
             children: WidgetSpan::extract_from_inline_span(&*inline_span, &text_scaler),
             inline_span,
             value,
@@ -5172,7 +5172,7 @@ impl State for EditableTextState {
         let viewport_builder: ViewportBuilder =
             Rc::new(move |app, context, offset| state.build_editable(app, context, offset));
         let mut scrollable = Scrollable::new(viewport_builder)
-            .key(Rc::clone(&app.get(self).scrollable_key) as KeyRef)
+            .key(app.get(self).scrollable_key.clone().into())
             .axis_direction(if is_multiline {
                 AxisDirection::Down
             } else {
@@ -6922,7 +6922,7 @@ mod tests {
     fn cut_and_copy_do_nothing_in_obscured_mode_even_if_explicitly_called() {
         let mock_clipboard = Rc::new(waft_test::MockClipboard::new());
         let cell = app_with_clipboard(&mock_clipboard);
-        let key = <dyn crate::framework::GlobalKey>::new();
+        let key = crate::framework::GlobalKey::new();
         let (harness, state) = {
             let mut app = cell.borrow_mut();
             let controller = TextEditingController::new(&mut app).text(&mut app, "blah blah");
@@ -6935,7 +6935,7 @@ mod tests {
                 Color::from_argb(255, 128, 128, 128),
             )
             .obscure_text(true)
-            .key(Rc::new(key.clone()));
+            .key(key.clone().into());
             let tree = MediaQuery::new(
                 MediaQueryData::new(),
                 Directionality::new(TextDirection::Ltr, editable),
@@ -6983,7 +6983,7 @@ mod tests {
     fn should_not_scroll_on_paste_if_caret_already_visible() {
         let mock_clipboard = Rc::new(waft_test::MockClipboard::new());
         let cell = app_with_clipboard(&mock_clipboard);
-        let key = <dyn crate::framework::GlobalKey>::new();
+        let key = crate::framework::GlobalKey::new();
         let (harness, state, controller, focus_node, scroll_controller) = {
             let mut app = cell.borrow_mut();
             let scroll_controller = ScrollController::default(&mut app);
@@ -7001,7 +7001,7 @@ mod tests {
             )
             .scroll_controller(scroll_controller)
             .max_lines(None)
-            .key(Rc::new(key.clone()));
+            .key(key.clone().into());
             let tree = MediaQuery::new(
                 MediaQueryData::new(),
                 Directionality::new(
@@ -7051,7 +7051,7 @@ mod tests {
 
         let cell = binding_cell();
         install_fonts(&mut cell.borrow_mut());
-        let key = <dyn crate::framework::GlobalKey>::new();
+        let key = crate::framework::GlobalKey::new();
         let (controller, focus_node, scroll_controller) = {
             let mut app = cell.borrow_mut();
             (
@@ -7069,7 +7069,7 @@ mod tests {
         )
         .scroll_controller(scroll_controller)
         .max_lines(None)
-        .key(Rc::new(key.clone()));
+        .key(key.clone().into());
         let tree = MediaQuery::new(
             MediaQueryData::new(),
             Directionality::new(

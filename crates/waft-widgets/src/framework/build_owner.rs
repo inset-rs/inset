@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use waft_foundation::{App, Handle, Listener, ValueChanged};
 
 use super::element::{AnyElement, ElementLifecycle};
-use super::widget::GlobalKeyId;
+use super::widget::GlobalKey;
 use crate::widgets::focus_manager::FocusManager;
 
 /// A class that determines the scope of a `BuildOwner::build_scope` operation.
@@ -226,7 +226,7 @@ pub struct BuildOwner {
     /// [`build_scope`](Self::build_scope) is running: it builds the elements marked dirty
     /// meanwhile, so none is scheduled.
     in_build_scope: bool,
-    global_key_registry: HashMap<GlobalKeyId, AnyElement>,
+    global_key_registry: HashMap<GlobalKey, AnyElement>,
     debug_state_lock_level: i32,
     debug_building: bool,
     debug_current_build_target: Option<AnyElement>,
@@ -429,28 +429,30 @@ impl BuildOwner {
     pub(crate) fn register_global_key(
         self: Handle<Self>,
         app: &mut App,
-        key: GlobalKeyId,
+        key: &GlobalKey,
         element: AnyElement,
     ) {
         if cfg!(debug_assertions)
-            && let Some(old_element) = app.get(self).global_key_registry.get(&key).copied()
+            && let Some(old_element) = app.get(self).global_key_registry.get(key).copied()
         {
             debug_assert!(
                 element.widget(app).widget_type() != old_element.widget(app).widget_type(),
                 "Multiple widgets used the same GlobalKey: {key:?}"
             );
         }
-        app.get_mut(self).global_key_registry.insert(key, element);
+        app.get_mut(self)
+            .global_key_registry
+            .insert(key.clone(), element);
     }
 
     pub(crate) fn unregister_global_key(
         self: Handle<Self>,
         app: &mut App,
-        key: GlobalKeyId,
+        key: &GlobalKey,
         element: AnyElement,
     ) {
-        if app.get(self).global_key_registry.get(&key) == Some(&element) {
-            app.get_mut(self).global_key_registry.remove(&key);
+        if app.get(self).global_key_registry.get(key) == Some(&element) {
+            app.get_mut(self).global_key_registry.remove(key);
         }
     }
 
@@ -458,9 +460,9 @@ impl BuildOwner {
     pub fn global_key_element(
         self: Handle<Self>,
         app: &App,
-        key: GlobalKeyId,
+        key: &GlobalKey,
     ) -> Option<AnyElement> {
-        app.get(self).global_key_registry.get(&key).copied()
+        app.get(self).global_key_registry.get(key).copied()
     }
 
     // ---- the inactive-element list (Dart's `_InactiveElements`) ----

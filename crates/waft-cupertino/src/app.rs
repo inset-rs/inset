@@ -15,8 +15,8 @@ use waft_painting::AnyColor;
 use waft_services::SystemChrome;
 use waft_widgets::{
     AnyAction, AnyNavigatorObserver, AnyRoute, BouncingScrollPhysics, BuildContext, Builder,
-    DefaultSelectionStyle, GenerateAppTitle, GlobalKeyRef, GlobalObjectKey, HeroController,
-    HeroControllerScope, InitialRouteListFactory, IntoWidget, KeyRef, LocaleListResolutionCallback,
+    DefaultSelectionStyle, GenerateAppTitle, GlobalKey, HeroController, HeroControllerScope,
+    InitialRouteListFactory, IntoWidget, KeyRef, LocaleListResolutionCallback,
     LocaleResolutionCallback, LocalizationsDelegateRef, MediaQuery, NavigationNotification,
     NotificationListenerCallback, PageRoute, RouteFactory, RouteSettingsRef, ScrollBehavior,
     ScrollBehaviorRef, ScrollConfiguration, ScrollDecelerationRate, ScrollPhysicsRef,
@@ -91,7 +91,7 @@ pub struct CupertinoApp {
     pub key: Option<KeyRef>,
 
     /// See [`WidgetsApp::navigator_key`].
-    pub navigator_key: Option<GlobalKeyRef>,
+    pub navigator_key: Option<GlobalKey>,
 
     /// See [`WidgetsApp::home`].
     pub home: Option<WidgetRef>,
@@ -272,7 +272,7 @@ impl CupertinoApp {
     }
 
     /// Dart `CupertinoApp(navigatorKey:)`.
-    pub fn navigator_key(mut self, navigator_key: GlobalKeyRef) -> CupertinoApp {
+    pub fn navigator_key(mut self, navigator_key: GlobalKey) -> CupertinoApp {
         self.navigator_key = Some(navigator_key);
         self
     }
@@ -571,7 +571,7 @@ impl CupertinoAppState {
         let localizations_delegates = self.localizations_delegates(app);
         let widget = self.widget(app);
         let mut widgets_app = WidgetsApp::new(color.color())
-            .key(Rc::new(GlobalObjectKey::new(self.id())))
+            .key(GlobalKey::object(self.id()).into())
             .navigator_observers(widget.navigator_observers.clone())
             .page_route_builder(|app, settings, builder| {
                 let route = CupertinoPageRoute::new(app, builder)

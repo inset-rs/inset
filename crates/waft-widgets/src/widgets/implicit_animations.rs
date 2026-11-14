@@ -3905,7 +3905,7 @@ mod tests {
 
     use super::*;
     use crate::binding::WidgetsBinding;
-    use crate::framework::{GlobalKey, LabeledGlobalKey};
+    use crate::framework::GlobalKey;
     use crate::test_harness::{binding_cell, binding_mount, binding_pump};
     use crate::view::View;
     use crate::widgets::basic::{Align, Builder, Directionality, SizedBox, Stack};
@@ -3921,7 +3921,7 @@ mod tests {
         binding_pump(app, at);
     }
 
-    fn render_box_of(app: &mut App, key: &LabeledGlobalKey) -> waft_rendering::AnyRenderBox {
+    fn render_box_of(app: &mut App, key: &GlobalKey) -> waft_rendering::AnyRenderBox {
         key.current_context(app)
             .expect("the widget is mounted")
             .find_render_object(app)
@@ -3930,13 +3930,9 @@ mod tests {
             .expect("a box")
     }
 
-    fn positioned_tree(
-        key: &Rc<LabeledGlobalKey>,
-        width: f64,
-        on_end: Option<Listener>,
-    ) -> WidgetRef {
+    fn positioned_tree(key: &GlobalKey, width: f64, on_end: Option<Listener>) -> WidgetRef {
         let mut positioned = AnimatedPositioned::new(SizedBox::expand(), DURATION)
-            .key(key.clone())
+            .key(key.clone().into())
             .left(0.0)
             .top(0.0)
             .width(width)
@@ -3954,7 +3950,7 @@ mod tests {
     #[test]
     fn an_animated_positioned_animates_its_box_and_calls_on_end_once() {
         let cell = binding_cell();
-        let key = Rc::new(<dyn GlobalKey>::new());
+        let key = GlobalKey::new();
         let ends = Rc::new(Cell::new(0));
         let counted = Rc::clone(&ends);
         let on_end = Listener::new(move |_app| counted.set(counted.get() + 1));
@@ -4000,14 +3996,14 @@ mod tests {
         assert_eq!(ends.get(), 1, "on_end fires once per animation");
     }
 
-    fn opacity_tree(key: &Rc<LabeledGlobalKey>, opacity: f64) -> WidgetRef {
+    fn opacity_tree(key: &GlobalKey, opacity: f64) -> WidgetRef {
         AnimatedOpacity::new(opacity, DURATION)
-            .key(key.clone())
+            .key(key.clone().into())
             .child(SizedBox::square(Some(10.0)))
             .into_widget()
     }
 
-    fn opacity_of(app: &mut App, key: &LabeledGlobalKey) -> f64 {
+    fn opacity_of(app: &mut App, key: &GlobalKey) -> f64 {
         let render_object = key
             .current_context(app)
             .expect("the widget is mounted")
@@ -4021,7 +4017,7 @@ mod tests {
     #[test]
     fn an_animated_opacity_reaches_its_target_after_the_duration() {
         let cell = binding_cell();
-        let key = Rc::new(<dyn GlobalKey>::new());
+        let key = GlobalKey::new();
         binding_mount(&cell, opacity_tree(&key, 1.0));
         let mut app = cell.borrow_mut();
         assert_eq!(opacity_of(&mut app, &key), 1.0);
@@ -4040,7 +4036,7 @@ mod tests {
     #[test]
     fn a_new_target_mid_flight_retargets_from_the_value_on_screen() {
         let cell = binding_cell();
-        let key = Rc::new(<dyn GlobalKey>::new());
+        let key = GlobalKey::new();
         binding_mount(&cell, opacity_tree(&key, 0.0));
         let mut app = cell.borrow_mut();
         rebuild(&mut app, opacity_tree(&key, 1.0), Duration::ZERO);
@@ -4107,7 +4103,7 @@ mod tests {
     #[test]
     fn a_target_that_did_not_change_leaves_the_controller_dismissed() {
         let cell = binding_cell();
-        let key = Rc::new(<dyn GlobalKey>::new());
+        let key = GlobalKey::new();
         binding_mount(&cell, opacity_tree(&key, 0.5));
         let mut app = cell.borrow_mut();
         rebuild(&mut app, opacity_tree(&key, 0.5), Duration::ZERO);
@@ -4165,7 +4161,7 @@ mod tests {
     #[test]
     fn dispose_frees_the_arena_tweens_the_constructors_made() {
         let cell = binding_cell();
-        let key = Rc::new(<dyn GlobalKey>::new());
+        let key = GlobalKey::new();
         binding_mount(&cell, opacity_tree(&key, 0.5));
         let mut app = cell.borrow_mut();
         let state = key
@@ -4211,13 +4207,9 @@ mod tests {
         assert_eq!(halfway.max_height, 20.0);
     }
 
-    fn container_tree(
-        key: &Rc<LabeledGlobalKey>,
-        width: f64,
-        on_end: Option<Listener>,
-    ) -> WidgetRef {
+    fn container_tree(key: &GlobalKey, width: f64, on_end: Option<Listener>) -> WidgetRef {
         let mut container = AnimatedContainer::new(DURATION)
-            .key(key.clone())
+            .key(key.clone().into())
             .width(width)
             .height(10.0);
         if let Some(on_end) = on_end {
@@ -4229,7 +4221,7 @@ mod tests {
     #[test]
     fn an_animated_container_animates_its_width_and_calls_on_end_once() {
         let cell = binding_cell();
-        let key = Rc::new(<dyn GlobalKey>::new());
+        let key = GlobalKey::new();
         let ends = Rc::new(Cell::new(0));
         let counted = Rc::clone(&ends);
         let on_end = Listener::new(move |_app| counted.set(counted.get() + 1));
@@ -4271,22 +4263,18 @@ mod tests {
     }
 
     /// The global offset of the widget the key is on.
-    fn offset_of(app: &mut App, key: &LabeledGlobalKey) -> Offset {
+    fn offset_of(app: &mut App, key: &GlobalKey) -> Offset {
         render_box_of(app, key).local_to_global(app, Offset::ZERO, None)
     }
 
-    fn padding_tree(
-        key: &Rc<LabeledGlobalKey>,
-        text_direction: TextDirection,
-        start: f64,
-    ) -> WidgetRef {
+    fn padding_tree(key: &GlobalKey, text_direction: TextDirection, start: f64) -> WidgetRef {
         Directionality::new(
             text_direction,
             AnimatedPadding::new(
                 EdgeInsetsGeometry::from_steb(start, 0.0, 0.0, 0.0),
                 DURATION,
             )
-            .child(SizedBox::square(Some(10.0)).key(key.clone())),
+            .child(SizedBox::square(Some(10.0)).key(key.clone().into())),
         )
         .into_widget()
     }
@@ -4294,7 +4282,7 @@ mod tests {
     #[test]
     fn an_animated_padding_interpolates_a_directional_inset() {
         let cell = binding_cell();
-        let key = Rc::new(<dyn GlobalKey>::new());
+        let key = GlobalKey::new();
         binding_mount(&cell, padding_tree(&key, TextDirection::Ltr, 0.0));
         let mut app = cell.borrow_mut();
         assert_eq!(offset_of(&mut app, &key), Offset::ZERO);
@@ -4322,16 +4310,16 @@ mod tests {
         );
     }
 
-    fn align_tree(key: &Rc<LabeledGlobalKey>, alignment: AlignmentGeometry) -> WidgetRef {
+    fn align_tree(key: &GlobalKey, alignment: AlignmentGeometry) -> WidgetRef {
         AnimatedAlign::new(alignment, DURATION)
-            .child(SizedBox::square(Some(10.0)).key(key.clone()))
+            .child(SizedBox::square(Some(10.0)).key(key.clone().into()))
             .into_widget()
     }
 
     #[test]
     fn an_animated_align_interpolates_the_alignment() {
         let cell = binding_cell();
-        let key = Rc::new(<dyn GlobalKey>::new());
+        let key = GlobalKey::new();
         binding_mount(&cell, align_tree(&key, AlignmentGeometry::TOP_LEFT));
         let mut app = cell.borrow_mut();
         assert_eq!(offset_of(&mut app, &key), Offset::ZERO);
@@ -4348,12 +4336,12 @@ mod tests {
         assert_eq!(offset_of(&mut app, &key), Offset::new(290.0, 190.0));
     }
 
-    fn slide_tree(key: &Rc<LabeledGlobalKey>, offset: Offset) -> WidgetRef {
+    fn slide_tree(key: &GlobalKey, offset: Offset) -> WidgetRef {
         Align::new()
             .alignment(AlignmentGeometry::TOP_LEFT)
             .child(
                 AnimatedSlide::new(offset, DURATION)
-                    .child(SizedBox::square(Some(10.0)).key(key.clone())),
+                    .child(SizedBox::square(Some(10.0)).key(key.clone().into())),
             )
             .into_widget()
     }
@@ -4361,7 +4349,7 @@ mod tests {
     #[test]
     fn an_animated_slide_moves_the_child_by_a_fraction_of_its_size() {
         let cell = binding_cell();
-        let key = Rc::new(<dyn GlobalKey>::new());
+        let key = GlobalKey::new();
         binding_mount(&cell, slide_tree(&key, Offset::ZERO));
         let mut app = cell.borrow_mut();
         assert_eq!(offset_of(&mut app, &key), Offset::ZERO);
@@ -4444,11 +4432,11 @@ mod tests {
                 .with_views(&[first, second]),
         );
         let cell = AppCell::with_platform(platform.clone());
-        let key = Rc::new(<dyn GlobalKey>::new());
+        let key = GlobalKey::new();
         let tree = |view: ViewId, enabled: bool, opacity: f64| -> WidgetRef {
             let animated = TickerMode::new(
                 enabled,
-                AnimatedOpacity::new(opacity, DURATION).key(key.clone()),
+                AnimatedOpacity::new(opacity, DURATION).key(key.clone().into()),
             )
             .into_widget();
             let (in_first, in_second) = if view == first {
@@ -4518,7 +4506,7 @@ mod tests {
     }
 
     fn physical_model_tree(
-        key: &Rc<LabeledGlobalKey>,
+        key: &GlobalKey,
         elevation: f64,
         color: Color,
         animate_color: bool,
@@ -4529,7 +4517,7 @@ mod tests {
             Color::new(0xFF000000),
             DURATION,
         )
-        .key(key.clone())
+        .key(key.clone().into())
         .elevation(elevation)
         .animate_color(animate_color)
         .into_widget()
@@ -4537,7 +4525,7 @@ mod tests {
 
     fn physical_model_of(
         app: &mut App,
-        key: &LabeledGlobalKey,
+        key: &GlobalKey,
     ) -> RenderHandle<waft_rendering::RenderPhysicalModel> {
         key.current_context(app)
             .expect("the widget is mounted")
@@ -4554,7 +4542,7 @@ mod tests {
         use waft_rendering::RenderPhysicalModelBase;
         for animate_color in [true, false] {
             let cell = binding_cell();
-            let key = Rc::new(<dyn GlobalKey>::new());
+            let key = GlobalKey::new();
             let red = Color::new(0xFFFF0000);
             let blue = Color::new(0xFF0000FF);
             binding_mount(&cell, physical_model_tree(&key, 0.0, red, animate_color));
@@ -4591,7 +4579,7 @@ mod tests {
     #[test]
     fn an_animated_physical_model_calls_on_end_once_its_animation_ends() {
         let cell = binding_cell();
-        let key = Rc::new(<dyn GlobalKey>::new());
+        let key = GlobalKey::new();
         let ends = Rc::new(Cell::new(0));
         let counted = Rc::clone(&ends);
         let on_end = Listener::new(move |_app| counted.set(counted.get() + 1));
@@ -4602,7 +4590,7 @@ mod tests {
                 Color::new(0xFF000000),
                 DURATION,
             )
-            .key(key.clone())
+            .key(key.clone().into())
             .elevation(elevation)
             .on_end(on_end.clone())
             .into_widget()
@@ -4622,7 +4610,7 @@ mod tests {
     /// `implicit_animations_test.dart`: "AnimatedPhysicalModel does not crash at zero area".
     #[test]
     fn an_animated_physical_model_in_a_view_of_no_area_takes_no_space() {
-        let key = Rc::new(<dyn GlobalKey>::new());
+        let key = GlobalKey::new();
         let platform = waft_test::TestPlatform::new()
             .on(waft_embedder::TargetPlatform::MacOS)
             .with_view(Rc::new(waft_test::TestView::new(0.0, 0.0)));
@@ -4638,7 +4626,7 @@ mod tests {
                         Color::new(0xFF000000),
                         DURATION,
                     )
-                    .key(key.clone()),
+                    .key(key.clone().into()),
                 ),
             )
             .into_widget(),

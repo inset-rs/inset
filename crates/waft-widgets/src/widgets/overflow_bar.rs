@@ -860,29 +860,28 @@ impl RenderBox for RenderOverflowBar {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
 
     use waft_embedder::Rect;
     use waft_foundation::AppCell;
     use waft_painting::AlignmentGeometry;
 
     use super::*;
-    use crate::framework::{GlobalKey, IntoWidget, LabeledGlobalKey};
+    use crate::framework::{GlobalKey, IntoWidget};
     use crate::test_harness::Harness;
     use crate::widgets::basic::{
         Align, Center, Column, ConstrainedBox, IntrinsicHeight, IntrinsicWidth, Row, SizedBox,
     };
     use crate::widgets::container::Container;
 
-    fn keyed(key: &LabeledGlobalKey, width: f64, height: f64) -> WidgetRef {
+    fn keyed(key: &GlobalKey, width: f64, height: f64) -> WidgetRef {
         SizedBox::new()
-            .key(Rc::new(key.clone()))
+            .key(key.clone().into())
             .width(width)
             .height(height)
             .into_widget()
     }
 
-    fn rect_of(app: &mut App, key: &LabeledGlobalKey) -> Rect {
+    fn rect_of(app: &mut App, key: &GlobalKey) -> Rect {
         let render_box = key
             .current_context(app)
             .expect("mounted")
@@ -894,7 +893,7 @@ mod tests {
     }
 
     /// The three keyed children's rectangles, all checked as Dart's frames check them.
-    fn assert_rects(app: &mut App, keys: &[LabeledGlobalKey; 3], expected: [Rect; 3]) {
+    fn assert_rects(app: &mut App, keys: &[GlobalKey; 3], expected: [Rect; 3]) {
         let actual = [
             rect_of(app, &keys[0]),
             rect_of(app, &keys[1]),
@@ -980,11 +979,7 @@ mod tests {
     fn a_bar_that_fits_lays_its_children_out_in_a_centred_row() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let keys = [
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-        ];
+        let keys = [GlobalKey::new(), GlobalKey::new(), GlobalKey::new()];
         let mut harness = None;
         let mut frame = |app: &mut App, spacing: f64, text_direction: TextDirection| {
             let tree = Directionality::new(
@@ -1048,11 +1043,7 @@ mod tests {
     fn a_bar_that_overflows_lays_its_children_out_in_an_aligned_column() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let keys = [
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-        ];
+        let keys = [GlobalKey::new(), GlobalKey::new(), GlobalKey::new()];
         let mut harness = None;
         let mut frame = |app: &mut App,
                          overflow_spacing: f64,
@@ -1226,11 +1217,7 @@ mod tests {
     fn a_bar_wider_than_its_intrinsic_width_starts_its_row_at_the_start() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let keys = [
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-        ];
+        let keys = [GlobalKey::new(), GlobalKey::new(), GlobalKey::new()];
         let mut harness = None;
         for (text_direction, lefts) in [
             (TextDirection::Ltr, [0.0, 60.0, 130.0]),
@@ -1272,17 +1259,9 @@ mod tests {
             MainAxisAlignment::SpaceEvenly,
         ] {
             for text_direction in [TextDirection::Ltr, TextDirection::Rtl] {
-                let bar_keys = [
-                    <dyn GlobalKey>::new(),
-                    <dyn GlobalKey>::new(),
-                    <dyn GlobalKey>::new(),
-                ];
-                let row_keys = [
-                    <dyn GlobalKey>::new(),
-                    <dyn GlobalKey>::new(),
-                    <dyn GlobalKey>::new(),
-                ];
-                let children = |keys: &[LabeledGlobalKey; 3]| {
+                let bar_keys = [GlobalKey::new(), GlobalKey::new(), GlobalKey::new()];
+                let row_keys = [GlobalKey::new(), GlobalKey::new(), GlobalKey::new()];
+                let children = |keys: &[GlobalKey; 3]| {
                     vec![
                         keyed(&keys[0], 50.0, 50.0),
                         keyed(&keys[1], 70.0, 50.0),

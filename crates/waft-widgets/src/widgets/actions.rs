@@ -1690,7 +1690,7 @@ impl StatefulWidget for FocusableActionDetector {
             highlight_mode_listener: None,
             // This global key is needed to keep only the necessary widgets in the tree while
             // maintaining the subtree's state.
-            mouse_region_key: Rc::new(<dyn GlobalKey>::new()),
+            mouse_region_key: GlobalKey::new(),
         }
     }
 }
@@ -1702,7 +1702,7 @@ pub struct FocusableActionDetectorState {
     hovering: bool,
     focused: bool,
     highlight_mode_listener: Option<HighlightModeListener>,
-    mouse_region_key: KeyRef,
+    mouse_region_key: GlobalKey,
 }
 
 /// Dart's `VoidCallback? task` argument of `_mayTriggerCallback`, which mutates the state
@@ -1920,7 +1920,7 @@ impl State for FocusableActionDetectorState {
             widget.child.clone(),
             widget.enabled,
         );
-        let mouse_region_key = Rc::clone(&app.get(self).mouse_region_key);
+        let mouse_region_key = app.get(self).mouse_region_key.clone();
 
         let mut focus = Focus::new(child)
             .autofocus(autofocus)
@@ -1934,7 +1934,7 @@ impl State for FocusableActionDetectorState {
         }
 
         let mut child: WidgetRef = MouseRegion::new()
-            .key(mouse_region_key)
+            .key(mouse_region_key.into())
             .on_enter(Rc::new(move |app, _event| self.handle_mouse_enter(app)))
             .on_exit(Rc::new(move |app, _event| self.handle_mouse_exit(app)))
             .cursor(mouse_cursor)

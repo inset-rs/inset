@@ -1049,7 +1049,6 @@ impl MultiChildRenderObjectWidget for RichText {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
     use waft_foundation::AppCell;
 
     use waft_embedder::{Color, TextLeadingDistribution};
@@ -1342,7 +1341,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let keyed = |key: &str| {
             Text::new("Hello")
-                .key(Rc::new(ValueKey::new(key.to_owned())))
+                .key(ValueKey::new(key.to_owned()).into())
                 .into_widget()
         };
         let harness = mount(&mut app, keyed("a"));

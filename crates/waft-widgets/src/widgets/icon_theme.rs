@@ -223,7 +223,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let (reader, seen) = reader();
         let red = Color::new(0xFFFF0000);
-        let key: KeyRef = Rc::new(ValueKey::new("merged"));
+        let key: KeyRef = ValueKey::new("merged").into();
         mount(
             &mut app,
             IconTheme::new(

@@ -216,7 +216,7 @@ pub struct Flyout {
     last_target_bounds: Rect,
 
     /// Identifies the presenter's render box for pointer-distance dismissal.
-    presenter_key: LabeledGlobalKey,
+    presenter_key: GlobalKey,
 
     /// Global pointer-movement listener used only by the pointer-distance show mode.
     pointer_route: Option<PointerRoute>,
@@ -275,7 +275,7 @@ impl Flyout {
             position: None,
             exclusion: Rect::ZERO,
             last_target_bounds: Rect::ZERO,
-            presenter_key: <dyn GlobalKey>::new(),
+            presenter_key: GlobalKey::new(),
             pointer_route: None,
             disposed: false,
         });
@@ -702,7 +702,7 @@ impl Flyout {
                 let maximum = flyout.maximum_size.unwrap_or(style_maximum);
                 let content = flyout.content.clone();
                 let style = flyout.flyout_presenter_style.clone();
-                let key: KeyRef = Rc::new(flyout.presenter_key.clone());
+                let key: KeyRef = flyout.presenter_key.clone().into();
                 let open = self.is_open(app);
                 let padding = flyout.padding.unwrap_or(r.flyout_content_padding);
                 let root = self.root(app);

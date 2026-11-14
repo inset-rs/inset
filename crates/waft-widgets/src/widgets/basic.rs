@@ -2782,7 +2782,8 @@ impl SingleChildRenderObjectWidget for CustomSingleChildLayout {
 /// identifiers.
 #[derive(Debug)]
 pub struct LayoutId {
-    pub key: Option<KeyRef>,
+    /// Dart's `key ?? ValueKey<Object>(id)`; the id is already a key here.
+    pub key: KeyRef,
     /// An object representing the identity of this child.
     ///
     /// The [`id`](Self::id) needs to be unique among the children that the
@@ -2795,7 +2796,7 @@ impl LayoutId {
     /// Marks a child with a layout identifier.
     pub fn new<K>(id: ChildLayoutId, child: impl IntoWidget<K>) -> LayoutId {
         LayoutId {
-            key: None,
+            key: KeyRef::Local(Rc::clone(&id)),
             id,
             child: child.into_widget(),
         }
@@ -2803,7 +2804,7 @@ impl LayoutId {
 
     /// Dart `LayoutId(key:)`.
     pub fn key(mut self, key: KeyRef) -> LayoutId {
-        self.key = Some(key);
+        self.key = key;
         self
     }
 }
@@ -2811,9 +2812,8 @@ impl LayoutId {
 impl ParentDataWidget for LayoutId {
     type ParentData = MultiChildLayoutParentData;
 
-    /// Dart's `key ?? ValueKey<Object>(id)`; the id is already a key here.
     fn key(&self) -> Option<&KeyRef> {
-        Some(self.key.as_ref().unwrap_or(&self.id))
+        Some(&self.key)
     }
 
     fn child(&self) -> &WidgetRef {
@@ -8429,7 +8429,7 @@ mod tests {
 
     use super::*;
     use crate::framework::{
-        GlobalKey, IntoWidget, LabeledGlobalKey, State, StateData, StatefulWidget, downcast_widget,
+        GlobalKey, IntoWidget, State, StateData, StatefulWidget, downcast_widget,
     };
     use crate::test_harness::{Harness, padding_under_root};
 
@@ -8951,14 +8951,10 @@ mod tests {
     }
 
     /// The `TileState` a global key names, through the harness's own build owner.
-    fn tile_state(
-        harness: &Harness,
-        app: &App,
-        key: &LabeledGlobalKey,
-    ) -> Option<Handle<TileState>> {
+    fn tile_state(harness: &Harness, app: &App, key: &GlobalKey) -> Option<Handle<TileState>> {
         harness
             .owner
-            .global_key_element(app, key.identity())
+            .global_key_element(app, key)
             .and_then(|element| element.state_handle::<TileState>(app))
     }
 
@@ -8970,9 +8966,9 @@ mod tests {
     }
 
     impl Tile {
-        fn keyed(key: &LabeledGlobalKey, width: f64) -> WidgetRef {
+        fn keyed(key: &GlobalKey, width: f64) -> WidgetRef {
             Tile {
-                key: Some(Rc::new(key.clone())),
+                key: Some(key.clone().into()),
                 width,
             }
             .into_widget()
@@ -9186,17 +9182,13 @@ mod tests {
     fn reordering_keyed_children_moves_elements_and_render_children() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let (first, second, third) = (
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-        );
-        let row = |order: [&LabeledGlobalKey; 3]| {
+        let (first, second, third) = (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
+        let row = |order: [&GlobalKey; 3]| {
             let widths = [10.0, 20.0, 30.0];
-            let by_key = |key: &LabeledGlobalKey| {
+            let by_key = |key: &GlobalKey| {
                 let index = [&first, &second, &third]
                     .iter()
-                    .position(|candidate| candidate.identity() == key.identity())
+                    .position(|candidate| *candidate == key)
                     .expect("one of the three keys");
                 Tile::keyed(key, widths[index])
             };
@@ -9245,11 +9237,7 @@ mod tests {
     fn a_child_can_be_added_and_removed_in_the_middle() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let (first, middle, last) = (
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-        );
+        let (first, middle, last) = (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
         let ends = || {
             ltr(Row::new()
                 .children([Tile::keyed(&first, 10.0), Tile::keyed(&last, 30.0)])
@@ -10469,7 +10457,7 @@ mod tests {
         cell
     }
 
-    fn keyed_size(app: &mut App, key: &LabeledGlobalKey) -> Size {
+    fn keyed_size(app: &mut App, key: &GlobalKey) -> Size {
         key.current_context(app)
             .expect("mounted")
             .find_render_object(app)
@@ -10483,24 +10471,24 @@ mod tests {
     /// "PhysicalShape does not crash at zero area", in a view of no area.
     #[test]
     fn a_physical_model_and_shape_in_a_view_of_no_area_take_no_space() {
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         let cell = zero_area_cell(
             Directionality::new(
                 TextDirection::Ltr,
                 Center::new()
-                    .child(PhysicalModel::new(Color::new(0xAABBCC00)).key(Rc::new(key.clone()))),
+                    .child(PhysicalModel::new(Color::new(0xAABBCC00)).key(key.clone().into())),
             )
             .into_widget(),
         );
         assert_eq!(keyed_size(&mut cell.borrow_mut(), &key), Size::ZERO);
 
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         let cell = zero_area_cell(
             Directionality::new(
                 TextDirection::Ltr,
                 Center::new().child(
                     PhysicalShape::new(circle_clipper(), Color::new(0xAABBCC00))
-                        .key(Rc::new(key.clone())),
+                        .key(key.clone().into()),
                 ),
             )
             .into_widget(),

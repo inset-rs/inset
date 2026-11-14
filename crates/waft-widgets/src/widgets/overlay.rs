@@ -23,7 +23,7 @@ use waft_scheduler::{
 
 use crate::framework::{
     AnyElement, BuildContext, BuildScope, BuildScopeCallback, Element, ElementData, GlobalKey,
-    InheritedWidget, IntoWidget, KeyRef, LabeledGlobalKey, MultiChildRenderObjectElementBase,
+    InheritedWidget, IntoWidget, KeyRef, MultiChildRenderObjectElementBase,
     MultiChildRenderObjectElementData, MultiChildRenderObjectWidget, RenderObjectElement,
     RenderObjectElementData, RenderObjectElementWidget, RenderObjectWidget,
     SingleChildRenderObjectWidget, Slot, State, StateData, StatefulWidget, Widget, WidgetKind,
@@ -117,7 +117,7 @@ pub struct OverlayEntry {
     overlay_entry_state_notifier:
         Option<Handle<ValueNotifier<Option<Handle<OverlayEntryWidgetState>>>>>,
     overlay: Option<Handle<OverlayState>>,
-    key: LabeledGlobalKey,
+    key: GlobalKey,
     disposed_by_owner: bool,
 }
 
@@ -144,7 +144,7 @@ impl OverlayEntry {
             can_size_overlay,
             overlay_entry_state_notifier: Some(notifier),
             overlay: None,
-            key: <dyn GlobalKey>::new(),
+            key: GlobalKey::new(),
             disposed_by_owner: false,
         })
     }
@@ -975,7 +975,7 @@ impl State for OverlayState {
         let mut onstage = true;
         let mut onstage_count = 0usize;
         for entry in app.get(self).entries.clone().into_iter().rev() {
-            let key: KeyRef = Rc::new(app.get(entry).key.clone());
+            let key: KeyRef = app.get(entry).key.clone().into();
             if onstage {
                 onstage_count += 1;
                 children.push(

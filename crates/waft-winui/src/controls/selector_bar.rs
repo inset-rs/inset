@@ -205,7 +205,7 @@ impl SelectorBarState {
         let shown = item.clone();
         ItemContainer::new(SizedBox::shrink())
             .is_enabled(item.is_enabled)
-            .key(Rc::new(ValueKey::new(item.id.clone())))
+            .key(ValueKey::new(item.id.clone()).into())
             .template(Rc::new(move |_, _, states| {
                 SelectorBarItemVisual {
                     item: shown.clone(),

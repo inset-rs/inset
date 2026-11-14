@@ -182,7 +182,7 @@ impl State for MultiViewAppState {
             .filter_map(|view| {
                 let content = builder(app, &view)?;
                 showing.insert(view.id());
-                let key: KeyRef = Rc::new(ValueKey::new(view.id().0));
+                let key: KeyRef = ValueKey::new(view.id().0).into();
                 Some(View::new(view, content).key(key).into_widget())
             })
             .collect();

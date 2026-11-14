@@ -98,6 +98,5 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - The form a `Listenable` takes when held as a value (stored, re-pointed, compared). Trigger: `AnimatedBuilder` / `ValueListenableBuilder`.
 - `ChangeNotifier.maybeDispatchObjectCreation` / `memory_allocations`. Trigger: leak tracker / devtools.
 - Diagnostics / `FlutterError` structured trees; messages are `debug_assert!` strings meanwhile. Trigger: porting diagnostics.
-- `GlobalKey` / `ObjectKey`. Trigger: `widgets/framework.dart`.
 - `IterableFilter`. Trigger: the first iterable-filter call site.
 - Waking a task from another thread; it would need a `Send` poke into the host's event loop. Trigger: the first background executor or platform callback off the main thread.

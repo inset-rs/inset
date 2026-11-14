@@ -34,16 +34,15 @@ use waft_widgets::{
     DecoratedBox, DefaultTextStyle, DefaultTextStyleTransition, Directionality, Expanded,
     FadeTransition, Flexible, FocusableActionDetector, GestureDetector, GlobalKey, Hero,
     HeroFlightDirection, HeroTagRef, IconTheme, IconThemeData, IntoWidget, KeyRef, KeyedSubtree,
-    LabeledGlobalKey, LayoutBuilder, MediaQuery, NavigationToolbar, Navigator, NavigatorState,
-    Opacity, Orientation, Padding, PositionedTransition, PreferredSizeWidget,
-    PreferredSizeWidgetRef, RectTweenObject, RelativeRectTween, RenderObjectWidget, Row, SafeArea,
-    ScaleTransition, ScrollNotification, ScrollNotificationCallback, ScrollNotificationObserver,
-    ScrollNotificationObserverState, ScrollUpdateNotification, Scrollable, ScrollableState,
-    SingleChildRenderObjectWidget, SizedBox, SliverPersistentHeader,
-    SliverPersistentHeaderDelegate, Stack, StandardComponentType, State, StateData, StatefulWidget,
-    StatelessWidget, Text, TextStyleTween, TickerProviderStateMixin, TickerProviderStateMixinData,
-    Transform, ValueListenableBuilder, ViewportNotificationMixin, Visibility, WidgetRef,
-    downcast_widget,
+    LayoutBuilder, MediaQuery, NavigationToolbar, Navigator, NavigatorState, Opacity, Orientation,
+    Padding, PositionedTransition, PreferredSizeWidget, PreferredSizeWidgetRef, RectTweenObject,
+    RelativeRectTween, RenderObjectWidget, Row, SafeArea, ScaleTransition, ScrollNotification,
+    ScrollNotificationCallback, ScrollNotificationObserver, ScrollNotificationObserverState,
+    ScrollUpdateNotification, Scrollable, ScrollableState, SingleChildRenderObjectWidget, SizedBox,
+    SliverPersistentHeader, SliverPersistentHeaderDelegate, Stack, StandardComponentType, State,
+    StateData, StatefulWidget, StatelessWidget, Text, TextStyleTween, TickerProviderStateMixin,
+    TickerProviderStateMixinData, Transform, ValueListenableBuilder, ViewportNotificationMixin,
+    Visibility, WidgetRef, downcast_widget,
 };
 
 use crate::button::CupertinoButton;
@@ -1067,7 +1066,7 @@ impl State for CupertinoNavigationBarState {
             Hero::new(
                 tag,
                 TransitionableNavigationBar {
-                    key: Rc::new(keys.nav_bar_box_key.clone()),
+                    key: keys.nav_bar_box_key.clone().into(),
                     components_keys: Rc::clone(&keys),
                     background_color: Some(effective_background_color.clone()),
                     back_button_text_style: text_theme.nav_action_text_style(),
@@ -2179,7 +2178,7 @@ impl SliverPersistentHeaderDelegate for LargeTitleNavigationBarSliverDelegate {
             // `CupertinoSliverNavigationBar` like `CupertinoNavigationBar` because it needs to
             // wrap the top level `RenderBox` rather than a `RenderSliver`.
             TransitionableNavigationBar {
-                key: Rc::new(self.keys.nav_bar_box_key.clone()),
+                key: self.keys.nav_bar_box_key.clone().into(),
                 components_keys: Rc::clone(&self.keys),
                 background_color: Some(effective_background_color),
                 back_button_text_style: theme_text_theme.nav_action_text_style(),
@@ -2601,27 +2600,27 @@ impl StatelessWidget for PersistentNavigationBar {
 /// These keys should never re-appear inside the `Hero` flights.
 #[derive(Debug)]
 struct NavigationBarStaticComponentsKeys {
-    nav_bar_box_key: LabeledGlobalKey,
-    leading_key: LabeledGlobalKey,
-    back_chevron_key: LabeledGlobalKey,
-    back_label_key: LabeledGlobalKey,
-    middle_key: LabeledGlobalKey,
-    trailing_key: LabeledGlobalKey,
-    large_title_key: LabeledGlobalKey,
-    nav_bar_bottom_key: LabeledGlobalKey,
+    nav_bar_box_key: GlobalKey,
+    leading_key: GlobalKey,
+    back_chevron_key: GlobalKey,
+    back_label_key: GlobalKey,
+    middle_key: GlobalKey,
+    trailing_key: GlobalKey,
+    large_title_key: GlobalKey,
+    nav_bar_bottom_key: GlobalKey,
 }
 
 impl NavigationBarStaticComponentsKeys {
     fn new() -> Rc<NavigationBarStaticComponentsKeys> {
         Rc::new(NavigationBarStaticComponentsKeys {
-            nav_bar_box_key: <dyn GlobalKey>::labeled("Navigation bar render box"),
-            leading_key: <dyn GlobalKey>::labeled("Leading"),
-            back_chevron_key: <dyn GlobalKey>::labeled("Back chevron"),
-            back_label_key: <dyn GlobalKey>::labeled("Back label"),
-            middle_key: <dyn GlobalKey>::labeled("Middle"),
-            trailing_key: <dyn GlobalKey>::labeled("Trailing"),
-            large_title_key: <dyn GlobalKey>::labeled("Large title"),
-            nav_bar_bottom_key: <dyn GlobalKey>::labeled("Navigation bar bottom"),
+            nav_bar_box_key: GlobalKey::labeled("Navigation bar render box"),
+            leading_key: GlobalKey::labeled("Leading"),
+            back_chevron_key: GlobalKey::labeled("Back chevron"),
+            back_label_key: GlobalKey::labeled("Back label"),
+            middle_key: GlobalKey::labeled("Middle"),
+            trailing_key: GlobalKey::labeled("Trailing"),
+            large_title_key: GlobalKey::labeled("Large title"),
+            nav_bar_bottom_key: GlobalKey::labeled("Navigation bar bottom"),
         })
     }
 }
@@ -2773,7 +2772,7 @@ impl NavigationBarStaticComponents {
     fn create_leading(
         app: &mut App,
         context: BuildContext,
-        leading_key: &LabeledGlobalKey,
+        leading_key: &GlobalKey,
         user_leading: Option<WidgetRef>,
         route: Option<AnyModalRoute>,
         automatically_imply_leading: bool,
@@ -2826,7 +2825,7 @@ impl NavigationBarStaticComponents {
                     .into_widget(),
                 ),
             )
-            .key(Rc::new(leading_key.clone()))
+            .key(leading_key.clone().into())
             .into_widget(),
         )
     }
@@ -2834,7 +2833,7 @@ impl NavigationBarStaticComponents {
     fn create_back_chevron(
         app: &mut App,
         context: BuildContext,
-        back_chevron_key: &LabeledGlobalKey,
+        back_chevron_key: &GlobalKey,
         user_leading: Option<WidgetRef>,
         route: Option<AnyModalRoute>,
         automatically_imply_leading: bool,
@@ -2862,7 +2861,7 @@ impl NavigationBarStaticComponents {
                 )
                 .into_widget(),
             )
-            .key(Rc::new(back_chevron_key.clone()))
+            .key(back_chevron_key.clone().into())
             .into_widget(),
         )
     }
@@ -2870,7 +2869,7 @@ impl NavigationBarStaticComponents {
     fn create_back_label(
         app: &mut App,
         context: BuildContext,
-        back_label_key: &LabeledGlobalKey,
+        back_label_key: &GlobalKey,
         user_leading: Option<WidgetRef>,
         route: Option<AnyModalRoute>,
         previous_page_title: Option<String>,
@@ -2902,7 +2901,7 @@ impl NavigationBarStaticComponents {
                 )
                 .into_widget(),
             )
-            .key(Rc::new(back_label_key.clone()))
+            .key(back_label_key.clone().into())
             .into_widget(),
         )
     }
@@ -2911,7 +2910,7 @@ impl NavigationBarStaticComponents {
     fn create_middle(
         app: &mut App,
         context: BuildContext,
-        middle_key: &LabeledGlobalKey,
+        middle_key: &GlobalKey,
         user_middle: Option<WidgetRef>,
         user_large_title: Option<WidgetRef>,
         large: bool,
@@ -2947,7 +2946,7 @@ impl NavigationBarStaticComponents {
                 )
                 .into_widget(),
             )
-            .key(Rc::new(middle_key.clone()))
+            .key(middle_key.clone().into())
             .into_widget(),
         )
     }
@@ -2955,7 +2954,7 @@ impl NavigationBarStaticComponents {
     fn create_trailing(
         app: &mut App,
         context: BuildContext,
-        trailing_key: &LabeledGlobalKey,
+        trailing_key: &GlobalKey,
         user_trailing: Option<WidgetRef>,
         padding: Option<EdgeInsetsDirectional>,
     ) -> Option<WidgetRef> {
@@ -2979,7 +2978,7 @@ impl NavigationBarStaticComponents {
                     .into_widget(),
                 ),
             )
-            .key(Rc::new(trailing_key.clone()))
+            .key(trailing_key.clone().into())
             .into_widget(),
         )
     }
@@ -2987,7 +2986,7 @@ impl NavigationBarStaticComponents {
     fn create_large_title(
         app: &mut App,
         context: BuildContext,
-        large_title_key: &LabeledGlobalKey,
+        large_title_key: &GlobalKey,
         user_large_title: Option<WidgetRef>,
         large: bool,
         automatic_imply_title: bool,
@@ -3023,7 +3022,7 @@ impl NavigationBarStaticComponents {
                 )
                 .into_widget(),
             )
-            .key(Rc::new(large_title_key.clone()))
+            .key(large_title_key.clone().into())
             .into_widget(),
         )
     }
@@ -3031,7 +3030,7 @@ impl NavigationBarStaticComponents {
     fn create_nav_bar_bottom(
         app: &mut App,
         context: BuildContext,
-        nav_bar_bottom_key: &LabeledGlobalKey,
+        nav_bar_bottom_key: &GlobalKey,
         user_bottom: Option<WidgetRef>,
     ) -> WidgetRef {
         let text_scaler = MediaQuery::text_scaler_of(app, context);
@@ -3044,7 +3043,7 @@ impl NavigationBarStaticComponents {
             )
             .into_widget(),
         )
-        .key(Rc::new(nav_bar_bottom_key.clone()))
+        .key(nav_bar_bottom_key.clone().into())
         .into_widget()
     }
 }
@@ -3786,7 +3785,7 @@ impl NavigationBarComponentsTransition {
     fn position_in_transition_box(
         &self,
         app: &mut App,
-        key: &LabeledGlobalKey,
+        key: &GlobalKey,
         from: AnyRenderBox,
     ) -> RelativeRect {
         let component_box = keyed_render_box(app, key);
@@ -3815,9 +3814,9 @@ impl NavigationBarComponentsTransition {
     fn slide_from_leading_edge(
         &self,
         app: &mut App,
-        from_key: &LabeledGlobalKey,
+        from_key: &GlobalKey,
         from_nav_bar_box: AnyRenderBox,
-        to_key: &LabeledGlobalKey,
+        to_key: &GlobalKey,
         to_nav_bar_box: AnyRenderBox,
         curve: Rc<dyn Curve>,
         child: WidgetRef,
@@ -4674,7 +4673,7 @@ impl NavigationBarComponentsTransition {
 // The hero plumbing and the file's private tweens
 
 /// The render box of the widget the global `key` is on.
-fn keyed_render_box(app: &mut App, key: &LabeledGlobalKey) -> AnyRenderBox {
+fn keyed_render_box(app: &mut App, key: &GlobalKey) -> AnyRenderBox {
     key.current_context(app)
         .expect("the keyed component is mounted")
         .find_render_object(app)
@@ -4685,7 +4684,7 @@ fn keyed_render_box(app: &mut App, key: &LabeledGlobalKey) -> AnyRenderBox {
 
 /// Dart's `key.currentWidget as KeyedSubtree?` followed by `.child`: the component the static
 /// nav bar built, without the `KeyedSubtree` whose global key must not appear twice.
-fn keyed_subtree_child(app: &mut App, key: &LabeledGlobalKey) -> Option<WidgetRef> {
+fn keyed_subtree_child(app: &mut App, key: &GlobalKey) -> Option<WidgetRef> {
     let widget = key.current_widget(app)?;
     Some(
         downcast_widget::<KeyedSubtree>(&*widget)
@@ -4975,7 +4974,7 @@ mod tests {
     }
 
     /// The render box of the widget the global `key` is on.
-    fn keyed_box(app: &mut App, key: &LabeledGlobalKey) -> AnyRenderBox {
+    fn keyed_box(app: &mut App, key: &GlobalKey) -> AnyRenderBox {
         key.current_context(app)
             .expect("the keyed widget is mounted")
             .find_render_object(app)
@@ -5000,13 +4999,9 @@ mod tests {
 
     /// Mounts a bare navigation bar under the chrome it reads: a media query with `padding`,
     /// the Cupertino localizations, and a text direction.
-    fn mount_bar(
-        cell: &AppCell,
-        padding: EdgeInsets,
-        bar: CupertinoNavigationBar,
-    ) -> LabeledGlobalKey {
-        let key = <dyn GlobalKey>::new();
-        let bar = bar.key(Rc::new(key.clone()));
+    fn mount_bar(cell: &AppCell, padding: EdgeInsets, bar: CupertinoNavigationBar) -> GlobalKey {
+        let key = GlobalKey::new();
+        let bar = bar.key(key.clone().into());
         // A scaffold `Positioned`s the bar at the top, which leaves its height loose.
         let tree = MediaQuery::new(
             MediaQueryData::new().padding(padding),
@@ -5265,8 +5260,8 @@ mod tests {
         const BAR: Color = Color::new(0xFF405060);
 
         let cell = app_with_fonts();
-        let key = <dyn GlobalKey>::new();
-        let bar_key = Rc::new(key.clone());
+        let key = GlobalKey::new();
+        let bar_key = key.clone();
         let inner = Rc::new(Cell::new(None));
         let probe = Rc::clone(&inner);
         let tree = MediaQuery::new(
@@ -5279,7 +5274,7 @@ mod tests {
                         move |_app: &mut App, context: BuildContext| {
                             probe.set(Some(context));
                             CupertinoNavigationBar::new()
-                                .key(bar_key.clone())
+                                .key(bar_key.clone().into())
                                 .background_color(BAR)
                                 .into_widget()
                         },
@@ -5319,7 +5314,7 @@ mod tests {
     }
 
     /// The colour of the bar's own `DecoratedBox`, the one `wrap_with_background` builds.
-    fn bar_background(app: &mut App, key: &LabeledGlobalKey) -> Color {
+    fn bar_background(app: &mut App, key: &GlobalKey) -> Color {
         let bar = keyed_box(app, key).as_object();
         let mut found = None;
         let mut stack = vec![bar];

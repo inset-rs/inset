@@ -61,7 +61,7 @@ pub(super) struct TextControlState {
     state: StateData<TextControl>,
 
     /// Global key consumed by the native selection gesture delegate.
-    editable_key: LabeledGlobalKey,
+    editable_key: GlobalKey,
 
     /// Native selection gesture builder; never duplicates caret hit testing.
     gestures: Option<Handle<TextControlSelectionBuilder>>,
@@ -120,7 +120,7 @@ impl TextSelectionGestureDetectorBuilder for TextControlSelectionBuilder {
 }
 
 impl TextSelectionGestureDetectorBuilderDelegate for TextControlState {
-    fn editable_text_key(self: Handle<Self>, app: &App) -> LabeledGlobalKey {
+    fn editable_text_key(self: Handle<Self>, app: &App) -> GlobalKey {
         app.get(self).editable_key.clone()
     }
 
@@ -139,7 +139,7 @@ impl StatefulWidget for TextControl {
     fn create_state(&self) -> Self::State {
         TextControlState {
             state: StateData::new(),
-            editable_key: <dyn GlobalKey>::new(),
+            editable_key: GlobalKey::new(),
             gestures: None,
             owned_focus: None,
             focus: None,
@@ -615,7 +615,7 @@ impl State for TextControlState {
         })
         .autocorrect(password.is_none())
         .enable_suggestions(password.is_none())
-        .key(Rc::new(app.get(self).editable_key.clone()));
+        .key(app.get(self).editable_key.clone().into());
         // A WinUI text box keeps the focus on Enter: the platform's done action ends the
         // composition without the unfocusing Flutter defaults to.
         let controller = config.controller;

@@ -236,21 +236,21 @@ impl Key for SaltedValueKey {
     fn eq_key(&self, other: &dyn Key) -> bool {
         (other as &dyn Any)
             .downcast_ref::<SaltedValueKey>()
-            .is_some_and(|other| *other.0.value == *self.0.value)
+            .is_some_and(|other| other.0.value == self.0.value)
     }
 
     fn hash_key(&self, mut state: &mut dyn Hasher) {
         use std::hash::Hash;
         TypeId::of::<SaltedValueKey>().hash(&mut state);
-        self.0.value.hash_key(state);
+        self.0.value.hash(&mut state);
     }
 }
 
 /// Dart's `key is _SaltedValueKey ? key.value : key`.
 fn unsalt(key: &KeyRef) -> KeyRef {
-    match ((&**key) as &dyn Any).downcast_ref::<SaltedValueKey>() {
-        Some(salted) => Rc::clone(&salted.0.value),
-        None => Rc::clone(key),
+    match (key.key() as &dyn Any).downcast_ref::<SaltedValueKey>() {
+        Some(salted) => salted.0.value.clone(),
+        None => key.clone(),
     }
 }
 
@@ -262,7 +262,7 @@ fn unsalt(key: &KeyRef) -> KeyRef {
 fn wrap_child(child: WidgetRef, add_repaint_boundaries: bool) -> WidgetRef {
     let key = child
         .key()
-        .map(|key| Rc::new(SaltedValueKey::new(Rc::clone(key))) as KeyRef);
+        .map(|key| KeyRef::from(SaltedValueKey::new(key.clone())));
     let child = if add_repaint_boundaries {
         RepaintBoundary::new().child(child).into_widget()
     } else {
@@ -670,8 +670,8 @@ impl SliverChildListDelegate {
         while index < self.children.len() {
             let child = &self.children[index];
             if let Some(child_key) = child.key() {
-                cache.map.insert(Rc::clone(child_key), index as i32);
-                if **child_key == **key {
+                cache.map.insert(child_key.clone(), index as i32);
+                if child_key == key {
                     // Record current index for next function call.
                     cache.cursor = index + 1;
                     return Some(index as i32);

@@ -941,8 +941,8 @@ mod tests {
             let presses = Rc::clone(&presses);
             move |_app| presses.set(presses.get() + 1)
         });
-        let global_key = <dyn GlobalKey>::new();
-        let key: KeyRef = Rc::new(global_key.clone());
+        let global_key = GlobalKey::new();
+        let key: KeyRef = global_key.clone().into();
         let button = configure(CupertinoButton::new(
             SizedBox::square(Some(40.0)).into_widget(),
             Some(on_pressed),
@@ -1079,8 +1079,8 @@ mod tests {
     #[test]
     fn a_disabled_button_ignores_the_pointer() {
         let cell = crate::test_support::test_cell();
-        let global_key = <dyn GlobalKey>::new();
-        let key: KeyRef = Rc::new(global_key.clone());
+        let global_key = GlobalKey::new();
+        let key: KeyRef = global_key.clone().into();
         let button =
             CupertinoButton::new(SizedBox::square(Some(40.0)).into_widget(), None).key(key);
         assert!(!button.enabled());
@@ -1213,8 +1213,8 @@ mod tests {
     #[test]
     fn a_tinted_button_fills_with_the_primary_color_at_the_light_tinted_opacity() {
         let cell = crate::test_support::test_cell();
-        let global_key = <dyn GlobalKey>::new();
-        let key: KeyRef = Rc::new(global_key.clone());
+        let global_key = GlobalKey::new();
+        let key: KeyRef = global_key.clone().into();
         let button = CupertinoButton::tinted(
             SizedBox::square(Some(40.0)).into_widget(),
             Some(Listener::new(|_app| {})),

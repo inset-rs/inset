@@ -389,7 +389,7 @@ pub struct SliderState {
     /// `Thumb::m_previousPosition`: where the last drag delta was measured from.
     previous_position: Offset,
     /// Names `SliderContainer`, whose `ActualWidth` / `ActualHeight` the pointer maths reads.
-    container_key: Rc<LabeledGlobalKey>,
+    container_key: GlobalKey,
 }
 
 impl StatefulWidget for Slider {
@@ -411,7 +411,7 @@ impl StatefulWidget for Slider {
             drag_value: 0.0,
             intermediate_value: None,
             previous_position: Offset::ZERO,
-            container_key: Rc::new(<dyn GlobalKey>::new()),
+            container_key: GlobalKey::new(),
         }
     }
 }
@@ -736,7 +736,7 @@ impl State for SliderState {
                 && widget.is_thumb_tool_tip_enabled,
             tooltip_offset: app.get(self).tooltip_offset,
         };
-        let container_key: KeyRef = app.get(self).container_key.clone();
+        let container_key: KeyRef = app.get(self).container_key.clone().into();
         let enabled = widget.is_enabled;
         let parts = SliderTemplateParts {
             container: Rc::new(move |content| {

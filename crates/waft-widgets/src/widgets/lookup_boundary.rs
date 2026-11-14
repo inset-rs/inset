@@ -594,12 +594,12 @@ mod tests {
 
     /// A spy keyed by `key`, so that a change of the tree around it moves its element.
     fn spy(
-        key: &crate::framework::LabeledGlobalKey,
+        key: &crate::framework::GlobalKey,
         count: &Rc<Cell<u32>>,
         on_did_change_dependencies: impl Fn(&mut App, BuildContext) + 'static,
     ) -> WidgetRef {
         DidChangeDependencySpy {
-            key: Some(Rc::new(key.clone())),
+            key: Some(key.clone().into()),
             count: Rc::clone(count),
             on_did_change_dependencies: Rc::new(on_did_change_dependencies),
         }
@@ -612,7 +612,7 @@ mod tests {
 
     /// A spy whose dependencies callback records `LookupBoundary::depend_on…`'s value.
     fn depending_spy(
-        key: &crate::framework::LabeledGlobalKey,
+        key: &crate::framework::GlobalKey,
         count: &Rc<Cell<u32>>,
         seen: &Rc<Cell<Option<i32>>>,
     ) -> WidgetRef {
@@ -636,7 +636,7 @@ mod tests {
     fn depend_on_inherited_widget_creates_a_dependency() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let key = <dyn crate::framework::GlobalKey>::new();
+        let key = crate::framework::GlobalKey::new();
         let (count, seen) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(None)));
         let harness = Harness::mount(&mut app, inherited(1, depending_spy(&key, &count, &seen)));
         harness.pump(&mut app);
@@ -656,7 +656,7 @@ mod tests {
     fn a_move_reaches_did_change_dependencies_though_the_boundary_hid_the_dependency() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let key = <dyn crate::framework::GlobalKey>::new();
+        let key = crate::framework::GlobalKey::new();
         let (count, seen) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(None)));
         let tree = |value: i32| {
             inherited(
@@ -693,7 +693,7 @@ mod tests {
     fn a_move_reaches_did_change_dependencies_though_nothing_was_found() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let key = <dyn crate::framework::GlobalKey>::new();
+        let key = crate::framework::GlobalKey::new();
         let (count, seen) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(None)));
         let harness = Harness::mount(&mut app, depending_spy(&key, &count, &seen));
         harness.pump(&mut app);
@@ -716,7 +716,7 @@ mod tests {
     }
 
     /// A spy whose dependencies callback only looks an element up.
-    fn looking_spy(key: &crate::framework::LabeledGlobalKey, count: &Rc<Cell<u32>>) -> WidgetRef {
+    fn looking_spy(key: &crate::framework::GlobalKey, count: &Rc<Cell<u32>>) -> WidgetRef {
         spy(key, count, |app, context| {
             LookupBoundary::get_element_for_inherited_widget_of_exact_type::<MyInheritedWidget>(
                 app, context,
@@ -730,7 +730,7 @@ mod tests {
     fn get_element_for_inherited_widget_does_not_bring_did_change_dependencies_on_a_move() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let key = <dyn crate::framework::GlobalKey>::new();
+        let key = crate::framework::GlobalKey::new();
         let count = Rc::new(Cell::new(0));
         let tree = |value: i32| inherited(value, LookupBoundary::new(looking_spy(&key, &count)));
         let harness = Harness::mount(&mut app, tree(1));
@@ -750,7 +750,7 @@ mod tests {
         );
         assert_eq!(count.get(), 1);
 
-        let key = <dyn crate::framework::GlobalKey>::new();
+        let key = crate::framework::GlobalKey::new();
         let count = Rc::new(Cell::new(0));
         let harness = Harness::mount(&mut app, looking_spy(&key, &count));
         harness.pump(&mut app);
@@ -772,7 +772,7 @@ mod tests {
     fn the_ancestor_finds_establish_no_dependency() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let key = <dyn crate::framework::GlobalKey>::new();
+        let key = crate::framework::GlobalKey::new();
         let count = Rc::new(Cell::new(0));
         let found = Rc::new(Cell::new((false, false, false, false)));
         let tree = || {

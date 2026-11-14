@@ -2,7 +2,6 @@
 //! and moved with it as its text scrolls or changes, the way a code editor's gutter follows its
 //! text.
 
-use std::rc::Rc;
 use waft::{FrameCallback, SchedulerBinding};
 use waft_foundation::{App, Handle, ListenableObject, Listener};
 use waft_painting::EdgeInsetsGeometry;
@@ -24,7 +23,7 @@ pub struct LineNumbers {
 /// Where each line's number goes.
 pub struct LineNumbersState {
     state: StateData<LineNumbers>,
-    key: LabeledGlobalKey,
+    key: GlobalKey,
     /// Each numbered line's top and height in the box's coordinates.
     lines: Vec<(usize, f64, f64)>,
     listener: Option<Listener>,
@@ -36,7 +35,7 @@ impl StatefulWidget for LineNumbers {
     fn create_state(&self) -> LineNumbersState {
         LineNumbersState {
             state: StateData::new(),
-            key: <dyn GlobalKey>::new(),
+            key: GlobalKey::new(),
             lines: Vec::new(),
             listener: None,
         }
@@ -131,7 +130,7 @@ impl State for LineNumbersState {
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         let key = app.get(self).key.clone();
-        let text_box = self.widget(app).text_box.clone().key(Rc::new(key));
+        let text_box = self.widget(app).text_box.clone().key(key.into());
         let scrolled = NotificationListener::<dyn ScrollNotification>::new(text_box)
             .on_notification(move |app, _| {
                 self.place_after_frame(app);

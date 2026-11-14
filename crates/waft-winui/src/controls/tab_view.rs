@@ -231,7 +231,7 @@ impl TabView {
 #[derive(Clone)]
 struct TabContainer {
     /// Identifies the realized header independently of its collection index.
-    key: Rc<LabeledGlobalKey>,
+    key: GlobalKey,
 
     /// Owns keyboard focus for the header surface.
     tab_focus: AnyFocusNode,
@@ -249,7 +249,7 @@ impl TabContainer {
         let content_focus = FocusScopeNode::new(app);
         content_focus.set_traversal_edge_behavior(app, TraversalEdgeBehavior::ParentScope);
         Self {
-            key: Rc::new(<dyn GlobalKey>::labeled(format!("Tab {id}"))),
+            key: GlobalKey::labeled(format!("Tab {id}")),
             tab_focus: FocusNode::new(app).as_node(),
             close_focus: FocusNode::new(app).as_node(),
             content_focus,
@@ -1045,16 +1045,16 @@ impl TabViewState {
                     }
                 }),
             )
-            .key(container.key);
+            .key(container.key.into());
             let mut sized = SizedBox::new().child(header);
             if equal {
                 sized = sized.width(width);
             }
-            Some(sized.key(Rc::new(ValueKey::new(id))).into_widget())
+            Some(sized.key(ValueKey::new(id).into()).into_widget())
         })
         .item_count(visible.len() as i32)
         .find_child_index_callback(Rc::new(move |key| {
-            (key.as_ref() as &dyn std::any::Any)
+            (key.key() as &dyn std::any::Any)
                 .downcast_ref::<ValueKey<String>>()
                 .and_then(|key| {
                     visible
@@ -1209,7 +1209,7 @@ impl TabViewState {
                         ExcludeFocus::new(FocusScope::new(item.content.clone()).node(scope))
                             .excluding(!selected),
                     ))
-                    .key(Rc::new(ValueKey::new(item.id.clone())))
+                    .key(ValueKey::new(item.id.clone()).into())
                     .into_widget()
             })
             .collect();

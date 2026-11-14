@@ -1876,7 +1876,7 @@ mod tests {
     use waft_test::TestPlatform;
     use waft_widgets::{
         Actions, ActivateIntent, Center, FocusHighlightStrategy, FocusManager, FocusNode,
-        FocusNodeLeaf, GlobalKey, LabeledGlobalKey, MediaQueryData, SizedBox, UnfocusDisposition,
+        FocusNodeLeaf, GlobalKey, MediaQueryData, SizedBox, UnfocusDisposition,
     };
 
     use super::*;
@@ -1927,7 +1927,7 @@ mod tests {
                 state: StateData::new(),
                 value: self.initial,
                 enabled: true,
-                switch_key: <dyn GlobalKey>::new(),
+                switch_key: GlobalKey::new(),
             }
         }
     }
@@ -1936,7 +1936,7 @@ mod tests {
         state: StateData<Host>,
         value: bool,
         enabled: bool,
-        switch_key: LabeledGlobalKey,
+        switch_key: GlobalKey,
     }
 
     impl State for HostState {
@@ -1953,7 +1953,7 @@ mod tests {
                 }) as ValueChanged<bool>
             });
             let mut switch = CupertinoSwitch::new(app.get(self).value, on_changed)
-                .key(Rc::new(app.get(self).switch_key.clone()));
+                .key(app.get(self).switch_key.clone().into());
             if let Some(focus_node) = self.widget(app).focus_node {
                 switch = switch.focus_node(focus_node);
             }
@@ -2057,11 +2057,11 @@ mod tests {
                 .focusable
                 .then(|| FocusNode::new(&mut cell.borrow_mut()).as_node());
             let changes: Rc<RefCell<Vec<bool>>> = Rc::default();
-            let host_key = <dyn GlobalKey>::new();
+            let host_key = GlobalKey::new();
             build(
                 &cell,
                 Host {
-                    key: Some(Rc::new(host_key.clone())),
+                    key: Some(host_key.clone().into()),
                     initial: self.initial,
                     text_direction: self.text_direction,
                     media: self.media,
@@ -2899,7 +2899,7 @@ mod tests {
     #[test]
     fn a_switch_squeezed_to_nothing_lays_out_at_zero() {
         let cell = crate::test_support::test_cell();
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         build(
             &cell,
             Directionality::new(
@@ -2907,7 +2907,7 @@ mod tests {
                 Center::new().child(
                     SizedBox::shrink().child(
                         CupertinoSwitch::new(false, Some(Rc::new(|_app: &mut App, _| {})))
-                            .key(Rc::new(key.clone())),
+                            .key(key.clone().into()),
                     ),
                 ),
             )

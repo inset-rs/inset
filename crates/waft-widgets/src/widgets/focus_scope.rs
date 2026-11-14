@@ -1484,14 +1484,14 @@ mod tests {
         let cell = app_with_view();
         let app = cell.borrow();
         let captured: Captured = Rc::default();
-        let key: KeyRef = Rc::new(<dyn GlobalKey>::new());
+        let key = GlobalKey::new();
         drop(app);
         mount(
             &cell,
             Padding::new(waft_painting::EdgeInsetsGeometry::all(4.0))
                 .child(
                     Focus::new(probe(&captured))
-                        .key(Rc::clone(&key))
+                        .key(key.clone().into())
                         .autofocus(true),
                 )
                 .into_widget(),
@@ -1504,7 +1504,7 @@ mod tests {
         mount(
             &cell,
             Center::new()
-                .child(Focus::new(probe(&captured)).key(Rc::clone(&key)))
+                .child(Focus::new(probe(&captured)).key(key.clone().into()))
                 .into_widget(),
         );
         let app = cell.borrow();

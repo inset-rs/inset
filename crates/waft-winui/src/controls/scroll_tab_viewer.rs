@@ -124,11 +124,14 @@ impl TabScrollViewer {
                             ),
                     )
                     .column(column)
-                    .key(Rc::new(ValueKey::new(if increase {
-                        "ScrollIncreaseButtonContainer"
-                    } else {
-                        "ScrollDecreaseButtonContainer"
-                    })))
+                    .key(
+                        ValueKey::new(if increase {
+                            "ScrollIncreaseButtonContainer"
+                        } else {
+                            "ScrollDecreaseButtonContainer"
+                        })
+                        .into(),
+                    )
                     .into_widget(),
                 );
             }
@@ -144,7 +147,7 @@ impl TabScrollViewer {
                 ),
             )
             .column(1)
-            .key(Rc::new(ValueKey::new("ScrollContentPresenter")))
+            .key(ValueKey::new("ScrollContentPresenter").into())
             .into_widget(),
         );
         // Root (Border), then its three-column Grid.
@@ -182,7 +185,7 @@ pub(crate) fn bottom_border_line(name: &'static str, color: Color) -> GridCell {
         ControlBorder::new_optional(None, Some(Brush::Solid(color)))
             .border_thickness_ltrb([0.0, 0.0, 0.0, 1.0]),
     )
-    .key(Rc::new(ValueKey::new(name)))
+    .key(ValueKey::new(name).into())
 }
 
 /// TabView::UpdateScrollViewerDecreaseAndIncreaseButtonsViewState's edge tolerance.

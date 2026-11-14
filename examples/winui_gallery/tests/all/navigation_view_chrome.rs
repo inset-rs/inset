@@ -137,16 +137,11 @@ fn text_bounds(f: &Fixture, text: &str) -> Option<Rect> {
 }
 
 fn key_bounds(f: &Fixture, value: &'static str) -> Option<Rect> {
-    let expected = ValueKey::new(value);
+    let expected: KeyRef = ValueKey::new(value).into();
     let elements = f.elements();
     let app = f.cell.borrow();
     elements.into_iter().find_map(|e| {
-        if !onstage(e, &app)
-            || !e
-                .widget(&app)
-                .key()
-                .is_some_and(|key| key.as_ref().eq_key(&expected))
-        {
+        if !onstage(e, &app) || !e.widget(&app).key().is_some_and(|key| *key == expected) {
             return None;
         }
         let render = e.find_render_object(&app)?.as_box()?;

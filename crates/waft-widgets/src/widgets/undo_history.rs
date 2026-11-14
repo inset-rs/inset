@@ -878,7 +878,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let value = app.create(ValueNotifier::new(0i32));
         let focus_node = FocusNode::new(&mut app);
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         let widget = UndoHistory::new(
             value,
             move |app, next| {
@@ -887,7 +887,7 @@ mod tests {
             focus_node,
             SizedBox::shrink(),
         )
-        .key(Rc::new(key.clone()));
+        .key(key.clone().into());
         let harness = Harness::mount(&mut app, widget.into_widget());
         harness.pump(&mut app);
         drop(app);

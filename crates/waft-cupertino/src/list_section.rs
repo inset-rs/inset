@@ -579,21 +579,21 @@ mod tests {
         AnyRenderObject, RenderBox, RenderClipRSuperellipse, RenderCustomClip, RenderHandle,
         RenderObject,
     };
-    use waft_widgets::{Builder, Directionality, GlobalKey, LabeledGlobalKey};
+    use waft_widgets::{Builder, Directionality, GlobalKey};
 
     use super::*;
     use crate::test_support::{build, test_cell};
 
-    fn key_of(key: &LabeledGlobalKey) -> KeyRef {
-        Rc::new(key.clone())
+    fn key_of(key: &GlobalKey) -> KeyRef {
+        key.clone().into()
     }
 
     /// A `SizedBox` of `width` x `height`, findable through `key`.
-    fn slot(key: &LabeledGlobalKey, width: f64, height: f64) -> SizedBox {
+    fn slot(key: &GlobalKey, width: f64, height: f64) -> SizedBox {
         SizedBox::new().key(key_of(key)).width(width).height(height)
     }
 
-    fn offset_of(app: &mut App, key: &LabeledGlobalKey) -> Offset {
+    fn offset_of(app: &mut App, key: &GlobalKey) -> Offset {
         key.current_context(app)
             .expect("the slot mounted")
             .find_render_object(app)
@@ -617,7 +617,7 @@ mod tests {
         found
     }
 
-    fn root(app: &mut App, key: &LabeledGlobalKey) -> AnyRenderObject {
+    fn root(app: &mut App, key: &GlobalKey) -> AnyRenderObject {
         key.current_context(app)
             .expect("the section mounted")
             .find_render_object(app)
@@ -645,11 +645,11 @@ mod tests {
     fn a_base_section_stacks_its_top_margin_header_dividers_and_footer() {
         let cell = test_cell();
         let (section_key, header, first, second, footer) = (
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
+            GlobalKey::new(),
+            GlobalKey::new(),
+            GlobalKey::new(),
+            GlobalKey::new(),
+            GlobalKey::new(),
         );
         mount(
             &cell,
@@ -695,11 +695,7 @@ mod tests {
     #[test]
     fn an_inset_grouped_section_clips_its_rows_and_drops_the_long_dividers() {
         let cell = test_cell();
-        let (section_key, first, second) = (
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-        );
+        let (section_key, first, second) = (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
         mount(
             &cell,
             CupertinoListSection::inset_grouped()

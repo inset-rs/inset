@@ -27,9 +27,9 @@ use waft_widgets::{
     Align, AlwaysScrollableScrollPhysics, AnimatedBuilder, AnnotatedRegion, AnyRoute,
     AnyScrollActivity, AnyScrollController, AnyScrollPosition, AnyTransitionRoute, BuildContext,
     ClipRSuperellipse, ColoredBox, DecoratedBox, DelegatedTransitionBuilder, FadeTransition,
-    GlobalKey, InheritedWidget, IntoWidget, KeyRef, LabeledGlobalKey, LocalHistoryRoute,
-    LocalHistoryRouteData, MediaQuery, ModalRoute, ModalRouteData, Navigator, NavigatorPopHandler,
-    NavigatorState, OverlayRoute, OverlayRouteData, Padding, PageRoute, PageRouteData, PopScope,
+    GlobalKey, InheritedWidget, IntoWidget, KeyRef, LocalHistoryRoute, LocalHistoryRouteData,
+    MediaQuery, ModalRoute, ModalRouteData, Navigator, NavigatorPopHandler, NavigatorState,
+    OverlayRoute, OverlayRouteData, Padding, PageRoute, PageRouteData, PopScope,
     PredictiveBackRoute, Route, RouteData, RouteResult, RouteSettingsRef, ScaleTransition,
     ScrollActivityDelegate, ScrollContext, ScrollControllerData, ScrollControllerLeaf,
     ScrollPhysicsRef, ScrollPosition, ScrollPositionData, ScrollPositionWithSingleContext,
@@ -292,7 +292,7 @@ pub fn show_cupertino_sheet(
     );
 
     let effective_builder = builder;
-    let nested_navigator_key = <dyn GlobalKey>::new();
+    let nested_navigator_key = GlobalKey::new();
     if !use_nested_navigation {
         let route = CupertinoSheetRoute::new(app).enable_drag(app, enable_drag);
         if let Some(effective_builder) = effective_builder {
@@ -347,10 +347,10 @@ pub fn show_cupertino_sheet(
 
 /// Dart's local `nestedNavigationContent` inside `showCupertinoSheet`.
 fn nested_navigation_content(
-    nested_navigator_key: &LabeledGlobalKey,
+    nested_navigator_key: &GlobalKey,
     builder: WidgetBuilder,
 ) -> WidgetRef {
-    let key: KeyRef = Rc::new(nested_navigator_key.clone());
+    let key: KeyRef = nested_navigator_key.clone().into();
     let pop_key = nested_navigator_key.clone();
     NavigatorPopHandler::new(
         Navigator::new()
@@ -2243,9 +2243,9 @@ mod tests {
     ///
     /// The report comes from a `Builder` so the context is the one the page's own widgets see,
     /// not the one the route handed the builder.
-    fn page(probe: &Rc<Probe>, key: &LabeledGlobalKey) -> WidgetBuilder {
+    fn page(probe: &Rc<Probe>, key: &GlobalKey) -> WidgetBuilder {
         let probe = Rc::clone(probe);
-        let key: KeyRef = Rc::new(key.clone());
+        let key: KeyRef = key.clone().into();
         Rc::new(move |_app: &mut App, _context: BuildContext| {
             let probe = Rc::clone(&probe);
             let key = key.clone();
@@ -2304,7 +2304,7 @@ mod tests {
     }
 
     /// The top-left corner the keyed widget paints at, in the view's coordinate system.
-    fn top_left(key: &LabeledGlobalKey, app: &mut App) -> Offset {
+    fn top_left(key: &GlobalKey, app: &mut App) -> Offset {
         let context = key.current_context(app).expect("the widget is mounted");
         context
             .find_render_object(app)
@@ -2315,9 +2315,9 @@ mod tests {
     }
 
     /// An app showing one settled `CupertinoPageRoute` whose content reports to `probe`.
-    fn app_with_page(probe: &Rc<Probe>, key: &LabeledGlobalKey) -> (Rc<AppCell>, Duration) {
+    fn app_with_page(probe: &Rc<Probe>, key: &GlobalKey) -> (Rc<AppCell>, Duration) {
         let cell = test_cell();
-        let navigator_key = <dyn GlobalKey>::new();
+        let navigator_key = GlobalKey::new();
         let builder = page(probe, key);
         build(
             &cell,
@@ -2334,11 +2334,8 @@ mod tests {
         (cell, at)
     }
 
-    fn navigator(
-        key: &LabeledGlobalKey,
-        configure: impl FnOnce(Navigator) -> Navigator,
-    ) -> WidgetRef {
-        let navigator = configure(Navigator::new().key(Rc::new(key.clone())));
+    fn navigator(key: &GlobalKey, configure: impl FnOnce(Navigator) -> Navigator) -> WidgetRef {
+        let navigator = configure(Navigator::new().key(key.clone().into()));
         Localizations::new(
             Locale::new("en"),
             vec![
@@ -2354,9 +2351,9 @@ mod tests {
     struct Sheet {
         cell: Rc<AppCell>,
         page: Rc<Probe>,
-        page_key: LabeledGlobalKey,
+        page_key: GlobalKey,
         sheet: Rc<Probe>,
-        sheet_key: LabeledGlobalKey,
+        sheet_key: GlobalKey,
         popped: CompleterFuture<RouteResult>,
         at: Duration,
     }
@@ -2364,12 +2361,12 @@ mod tests {
     /// Pushes a sheet over a page and runs `steps` frames of the push transition.
     fn show_sheet(show_drag_handle: bool) -> Sheet {
         let page_probe: Rc<Probe> = Rc::default();
-        let page_key = <dyn GlobalKey>::new();
+        let page_key = GlobalKey::new();
         let (cell, at) = app_with_page(&page_probe, &page_key);
         let mut app = cell.borrow_mut();
 
         let sheet_probe: Rc<Probe> = Rc::default();
-        let sheet_key = <dyn GlobalKey>::new();
+        let sheet_key = GlobalKey::new();
         let context = page_probe.context.get().expect("the page built");
         let builder = page(&sheet_probe, &sheet_key);
         let popped = show_cupertino_sheet(
@@ -2528,12 +2525,12 @@ mod tests {
         // Regression test for https://github.com/flutter/flutter/issues/187693.
         for use_nested_navigation in [false, true] {
             let page_probe: Rc<Probe> = Rc::default();
-            let page_key = <dyn GlobalKey>::new();
+            let page_key = GlobalKey::new();
             let (cell, at) = app_with_page(&page_probe, &page_key);
             let mut app = cell.borrow_mut();
             let context = page_probe.context.get().expect("the page built");
             let sheet_probe: Rc<Probe> = Rc::default();
-            let sheet_key = <dyn GlobalKey>::new();
+            let sheet_key = GlobalKey::new();
             let builder = page(&sheet_probe, &sheet_key);
             show_cupertino_sheet(
                 &mut app,
@@ -2569,12 +2566,12 @@ mod tests {
     #[test]
     fn a_covered_sheet_does_not_reveal_the_root_route_through_its_top_gap() {
         let page_probe: Rc<Probe> = Rc::default();
-        let page_key = <dyn GlobalKey>::new();
+        let page_key = GlobalKey::new();
         let (cell, at) = app_with_page(&page_probe, &page_key);
         let mut app = cell.borrow_mut();
 
         let second_probe: Rc<Probe> = Rc::default();
-        let second_key = <dyn GlobalKey>::new();
+        let second_key = GlobalKey::new();
         let context = page_probe.context.get().expect("the page built");
         let second =
             CupertinoSheetRoute::new(&mut app).builder(&mut app, page(&second_probe, &second_key));
@@ -2582,7 +2579,7 @@ mod tests {
         let at = settle(&mut app, at);
 
         let third_probe: Rc<Probe> = Rc::default();
-        let third_key = <dyn GlobalKey>::new();
+        let third_key = GlobalKey::new();
         let context = second_probe.context.get().expect("the second sheet built");
         let third =
             CupertinoSheetRoute::new(&mut app).builder(&mut app, page(&third_probe, &third_key));
@@ -2754,25 +2751,25 @@ mod tests {
     struct ScrollableSheet {
         cell: Rc<AppCell>,
         /// The scroll view, which is the sheet's own top.
-        view_key: LabeledGlobalKey,
+        view_key: GlobalKey,
         /// The scrolled content, which moves as the list scrolls.
-        content_key: LabeledGlobalKey,
+        content_key: GlobalKey,
         popped: CompleterFuture<RouteResult>,
         at: Duration,
     }
 
     fn show_scrollable_sheet() -> ScrollableSheet {
         let page_probe: Rc<Probe> = Rc::default();
-        let page_key = <dyn GlobalKey>::new();
+        let page_key = GlobalKey::new();
         let (cell, at) = app_with_page(&page_probe, &page_key);
         let mut app = cell.borrow_mut();
 
-        let view_key = <dyn GlobalKey>::new();
-        let content_key = <dyn GlobalKey>::new();
+        let view_key = GlobalKey::new();
+        let content_key = GlobalKey::new();
         let context = page_probe.context.get().expect("the page built");
         let scrollable_builder: ScrollableWidgetBuilder = {
-            let view_key: KeyRef = Rc::new(view_key.clone());
-            let content_key: KeyRef = Rc::new(content_key.clone());
+            let view_key: KeyRef = view_key.clone().into();
+            let content_key: KeyRef = content_key.clone().into();
             Rc::new(move |_app, _context, controller| {
                 SingleChildScrollView::new()
                     .key(view_key.clone())
@@ -2966,14 +2963,14 @@ mod tests {
     #[test]
     fn a_nested_navigation_sheets_inner_route_pops_back_to_the_root() {
         let page_probe: Rc<Probe> = Rc::default();
-        let page_key = <dyn GlobalKey>::new();
+        let page_key = GlobalKey::new();
         let (cell, at) = app_with_page(&page_probe, &page_key);
         let mut app = cell.borrow_mut();
 
         let sheet_probe: Rc<Probe> = Rc::default();
-        let sheet_key = <dyn GlobalKey>::new();
+        let sheet_key = GlobalKey::new();
         let inner_probe: Rc<Probe> = Rc::default();
-        let inner_key = <dyn GlobalKey>::new();
+        let inner_key = GlobalKey::new();
         let context = page_probe.context.get().expect("the page built");
         let sheet_popped = show_cupertino_sheet(
             &mut app,

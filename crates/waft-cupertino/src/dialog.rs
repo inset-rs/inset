@@ -4190,16 +4190,15 @@ mod tests {
     use waft_painting::TextScaler;
     use waft_rendering::RenderDecoratedBox;
     use waft_widgets::{
-        Builder, DefaultWidgetsLocalizations, GlobalKey, LabeledGlobalKey, Localizations,
-        MediaQueryData,
+        Builder, DefaultWidgetsLocalizations, GlobalKey, Localizations, MediaQueryData,
     };
 
     use super::*;
     use crate::localizations::DefaultCupertinoLocalizations;
     use crate::test_support::{build, pump, test_cell};
 
-    fn key_of(key: &LabeledGlobalKey) -> KeyRef {
-        Rc::new(key.clone())
+    fn key_of(key: &GlobalKey) -> KeyRef {
+        key.clone().into()
     }
 
     /// The first descendant render object of type `T`, from `node` down.
@@ -4227,19 +4226,19 @@ mod tests {
         });
     }
 
-    fn root(app: &mut App, key: &LabeledGlobalKey) -> AnyRenderObject {
+    fn root(app: &mut App, key: &GlobalKey) -> AnyRenderObject {
         key.current_context(app)
             .expect("the widget mounted")
             .find_render_object(app)
             .expect("the widget has been laid out")
     }
 
-    fn box_of(app: &mut App, key: &LabeledGlobalKey) -> AnyRenderBox {
+    fn box_of(app: &mut App, key: &GlobalKey) -> AnyRenderBox {
         root(app, key).as_box().expect("a box")
     }
 
     /// The keyed box's rectangle in the view's coordinate system.
-    fn rect_of(app: &mut App, key: &LabeledGlobalKey) -> Rect {
+    fn rect_of(app: &mut App, key: &GlobalKey) -> Rect {
         let render_box = box_of(app, key);
         let origin = render_box.local_to_global(app, Offset::ZERO, None);
         origin & render_box.size(app)
@@ -4282,12 +4281,12 @@ mod tests {
         })
     }
 
-    fn slot(key: &LabeledGlobalKey, width: f64, height: f64) -> SizedBox {
+    fn slot(key: &GlobalKey, width: f64, height: f64) -> SizedBox {
         SizedBox::new().key(key_of(key)).width(width).height(height)
     }
 
     /// Every `BoxDecoration` colour painted under `key`'s render object.
-    fn decoration_colors(app: &mut App, key: &LabeledGlobalKey) -> Vec<Color> {
+    fn decoration_colors(app: &mut App, key: &GlobalKey) -> Vec<Color> {
         let node = root(app, key);
         let mut colors = Vec::new();
         for_each_render_object(app, node, &mut |app, object| {
@@ -4326,7 +4325,7 @@ mod tests {
     #[test]
     fn an_alert_dialog_stacks_its_content_section_over_its_actions_at_the_dialog_width() {
         let cell = test_cell();
-        let (dialog, title) = (<dyn GlobalKey>::new(), <dyn GlobalKey>::new());
+        let (dialog, title) = (GlobalKey::new(), GlobalKey::new());
         mount(
             &cell,
             CupertinoAlertDialog::new()
@@ -4363,7 +4362,7 @@ mod tests {
     #[test]
     fn an_alert_dialog_in_accessibility_mode_is_wider() {
         let cell = test_cell();
-        let dialog = <dyn GlobalKey>::new();
+        let dialog = GlobalKey::new();
         mount_scaled(
             &cell,
             2.0,
@@ -4390,7 +4389,7 @@ mod tests {
     #[test]
     fn two_actions_sit_side_by_side_and_three_stack_vertically() {
         let cell = test_cell();
-        let (first, second) = (<dyn GlobalKey>::new(), <dyn GlobalKey>::new());
+        let (first, second) = (GlobalKey::new(), GlobalKey::new());
         mount(
             &cell,
             CupertinoAlertDialog::new()
@@ -4410,11 +4409,7 @@ mod tests {
 
         let cell = crate::test_support::test_cell();
 
-        let (first, second, third) = (
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-        );
+        let (first, second, third) = (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
         mount(
             &cell,
             CupertinoAlertDialog::new()
@@ -4468,7 +4463,7 @@ mod tests {
     #[test]
     fn holding_an_alert_dialog_action_paints_the_pressed_colour() {
         let cell = test_cell();
-        let (dialog, action) = (<dyn GlobalKey>::new(), <dyn GlobalKey>::new());
+        let (dialog, action) = (GlobalKey::new(), GlobalKey::new());
         mount(
             &cell,
             CupertinoAlertDialog::new()
@@ -4504,7 +4499,7 @@ mod tests {
     #[test]
     fn an_action_sheets_cancel_button_sits_below_the_main_sheet_with_a_gap() {
         let cell = test_cell();
-        let (action, cancel) = (<dyn GlobalKey>::new(), <dyn GlobalKey>::new());
+        let (action, cancel) = (GlobalKey::new(), GlobalKey::new());
         mount(
             &cell,
             CupertinoActionSheet::new()
@@ -4540,11 +4535,7 @@ mod tests {
     #[test]
     fn dragging_across_action_sheet_buttons_moves_the_pressed_index() {
         let cell = test_cell();
-        let (sheet, first, second) = (
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-        );
+        let (sheet, first, second) = (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
         mount(
             &cell,
             CupertinoActionSheet::new().key(key_of(&sheet)).actions([

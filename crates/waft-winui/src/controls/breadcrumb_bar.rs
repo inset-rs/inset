@@ -221,7 +221,7 @@ impl BreadcrumbBarState {
                     current: false,
                     dropdown: true,
                     enabled: widget.is_enabled && item.is_enabled,
-                    key: Rc::new(ValueKey::new(item.id.clone())),
+                    key: ValueKey::new(item.id.clone()).into(),
                 }
                 .into_widget()
             })
@@ -307,13 +307,13 @@ impl State for BreadcrumbBarState {
                 current: false,
                 dropdown: false,
                 enabled: widget.is_enabled,
-                key: Rc::new(ValueKey::new((false, String::new()))),
+                key: ValueKey::new((false, String::new())).into(),
             }
             .into_widget(),
         ];
         let count = widget.items_source.len();
         for (index, item) in widget.items_source.into_iter().enumerate() {
-            let key = Rc::new(ValueKey::new((true, item.id.clone())));
+            let key = ValueKey::new((true, item.id.clone())).into();
             children.push(
                 BreadcrumbItemControl {
                     owner: self,

@@ -42,13 +42,13 @@ pub fn size_under_center(
     size: [u32; 2],
     control: impl FnOnce(&mut App) -> WidgetRef + 'static,
 ) -> Size {
-    let key = Rc::new(<dyn GlobalKey>::new());
+    let key = GlobalKey::new();
     let control_key = key.clone();
     let fixture = Fixture::with_root(
         size,
         mount(move |app| {
             winui_gallery::install_fonts(app);
-            let control = KeyedSubtree::new(control(app)).key(control_key);
+            let control = KeyedSubtree::new(control(app)).key(control_key.into());
             WidgetsApp::new(AccentPalette::default().base)
                 .debug_show_checked_mode_banner(false)
                 .page_route_builder(|app, settings, builder| {

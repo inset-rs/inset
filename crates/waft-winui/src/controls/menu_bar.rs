@@ -204,7 +204,7 @@ impl State for MenuBarState {
             .items
             .into_iter()
             .map(|item| {
-                let key = Rc::new(ValueKey::new(item.id.clone()));
+                let key = ValueKey::new(item.id.clone()).into();
                 MenuHeader {
                     tab_stop: remembered.as_ref() == Some(&item.id),
                     enabled: widget.is_enabled && item.is_enabled,

@@ -51,7 +51,7 @@ use crate::window::WindowScopeOfView;
 ///
 /// Each `FlutterView` can be associated with at most one [`View`] widget in the widget tree.
 /// Two or more [`View`] widgets configured with the same `FlutterView` must never exist within
-/// the same widget tree at the same time. This limitation is enforced by a `GlobalObjectKey`
+/// the same widget tree at the same time. This limitation is enforced by a `GlobalKey`
 /// that derives its identity from the [`view`](Self::view) provided to this widget.
 ///
 /// Since the [`View`] widget bootstraps its own independent render tree, neither it nor any of
@@ -375,7 +375,7 @@ pub struct RawViewInternal {
 impl RawViewInternal {
     fn new(view: ViewRef, builder: RawViewContentBuilder) -> RawViewInternal {
         RawViewInternal {
-            key: Rc::new(ValueKey::new(view.id().0)),
+            key: ValueKey::new(view.id().0).into(),
             view,
             builder,
         }
@@ -1142,8 +1142,7 @@ mod tests {
 
     use crate::binding::WidgetsBinding;
     use crate::framework::{
-        BuildContext, GlobalKey, IntoWidget, KeyRef, LabeledGlobalKey, State, StateData,
-        StatefulWidget, WidgetRef,
+        BuildContext, GlobalKey, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
     };
     use crate::test_harness::{
         binding_cell, binding_mount, binding_pump, binding_pump_view, pump_every_view,
@@ -1159,12 +1158,12 @@ mod tests {
     fn a_dirty_render_object_under_a_view_schedules_a_frame() {
         let cell = binding_cell();
         let app = cell.borrow();
-        let key = Rc::new(<dyn GlobalKey>::new());
+        let key = GlobalKey::new();
         drop(app);
         binding_mount(
             &cell,
             SizedBox::new()
-                .key(key.clone())
+                .key(key.clone().into())
                 .width(10.0)
                 .height(10.0)
                 .into_widget(),
@@ -1510,11 +1509,11 @@ mod tests {
     #[test]
     fn a_global_key_subtree_moved_to_another_view_keeps_its_state_and_ticks_there() {
         let (cell, platform) = app_with_two_views();
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         let ticks = Ticks::default();
         let tree = |in_first: bool| -> WidgetRef {
             let ticking =
-                || -> WidgetRef { Ticking::new(&ticks).key(Rc::new(key.clone())).into_widget() };
+                || -> WidgetRef { Ticking::new(&ticks).key(key.clone().into()).into_widget() };
             let (first, second): (WidgetRef, WidgetRef) = if in_first {
                 (ticking(), SizedBox::new().into_widget())
             } else {
@@ -1556,7 +1555,7 @@ mod tests {
     #[test]
     fn an_anchored_view_paints_only_at_its_own_frame() {
         let (cell, platform) = app_with_two_views();
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         mount_root(
             &cell,
             super::View::new(
@@ -1564,7 +1563,7 @@ mod tests {
                 super::ViewAnchor::new(SizedBox::new().width(10.0).height(10.0)).view(
                     super::View::new(
                         platform.test_view(SECOND),
-                        SizedBox::new().key(Rc::new(key.clone())),
+                        SizedBox::new().key(key.clone().into()),
                     ),
                 ),
             )
@@ -1602,14 +1601,14 @@ mod tests {
     #[test]
     fn a_request_for_another_view_made_during_a_frame_is_not_lost() {
         let (cell, platform) = app_with_two_views();
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         mount_root(
             &cell,
             super::ViewCollection::new(vec![
                 super::View::new(platform.test_view(FIRST), SizedBox::new()).into_widget(),
                 super::View::new(
                     platform.test_view(SECOND),
-                    SizedBox::new().key(Rc::new(key.clone())),
+                    SizedBox::new().key(key.clone().into()),
                 )
                 .into_widget(),
             ])
@@ -1641,15 +1640,11 @@ mod tests {
 
     /// Two views, each holding a keyed subtree, under a keyed subtree above both; answers the
     /// keys: above, in the first view, in the second.
-    fn mount_keyed_views(cell: &AppCell, platform: &TestPlatform) -> [LabeledGlobalKey; 3] {
-        let keys = [
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-            <dyn GlobalKey>::new(),
-        ];
-        let keyed = |key: &LabeledGlobalKey, child: WidgetRef| -> WidgetRef {
+    fn mount_keyed_views(cell: &AppCell, platform: &TestPlatform) -> [GlobalKey; 3] {
+        let keys = [GlobalKey::new(), GlobalKey::new(), GlobalKey::new()];
+        let keyed = |key: &GlobalKey, child: WidgetRef| -> WidgetRef {
             crate::KeyedSubtree::new(child)
-                .key(Rc::new(key.clone()))
+                .key(key.clone().into())
                 .into_widget()
         };
         mount_root(
@@ -1675,7 +1670,7 @@ mod tests {
     }
 
     /// Marks the element `key` is on dirty.
-    fn mark_needs_build(app: &mut App, key: &LabeledGlobalKey) {
+    fn mark_needs_build(app: &mut App, key: &GlobalKey) {
         key.current_context(app)
             .expect("mounted")
             .mark_needs_build(app);
@@ -1766,14 +1761,14 @@ mod tests {
     fn a_ticker_whose_widget_moves_to_another_view_while_its_view_is_hidden_ticks_there() {
         let (cell, platform) = app_with_two_views();
         let ticks = Ticks::default();
-        let key = <dyn GlobalKey>::new();
-        let above = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
+        let above = GlobalKey::new();
         let in_first = Rc::new(std::cell::Cell::new(true));
         let tree = {
             let (ticks, key, in_first) = (Rc::clone(&ticks), key.clone(), Rc::clone(&in_first));
             let platform = Rc::clone(&platform);
             crate::Builder::new(move |_app, _context| {
-                let ticking = Ticking::new(&ticks).key(Rc::new(key.clone())).into_widget();
+                let ticking = Ticking::new(&ticks).key(key.clone().into()).into_widget();
                 let empty = || SizedBox::new().into_widget();
                 let (first, second) = if in_first.get() {
                     (ticking, empty())
@@ -1786,7 +1781,7 @@ mod tests {
                 ])
                 .into_widget()
             })
-            .key(Rc::new(above.clone()))
+            .key(above.clone().into())
             .into_widget()
         };
         mount_root(&cell, tree);

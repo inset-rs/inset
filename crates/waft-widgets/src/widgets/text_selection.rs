@@ -2865,7 +2865,7 @@ impl State for SelectionToolbarWrapperState {
 pub trait TextSelectionGestureDetectorBuilderDelegate: Sized + 'static {
     /// [GlobalKey] to the [`EditableText`] for which the
     /// [`TextSelectionGestureDetectorBuilder`] will build a [`TextSelectionGestureDetector`].
-    fn editable_text_key(self: Handle<Self>, app: &App) -> crate::framework::LabeledGlobalKey;
+    fn editable_text_key(self: Handle<Self>, app: &App) -> GlobalKey;
 
     /// Whether the text field should respond to force presses.
     fn force_press_enabled(self: Handle<Self>, app: &App) -> bool;
@@ -2885,7 +2885,7 @@ pub trait TextSelectionGestureDetectorBuilderDelegate: Sized + 'static {
 }
 
 struct TextSelectionGestureDetectorBuilderDelegateVTable {
-    editable_text_key: fn(&App, HandleId) -> crate::framework::LabeledGlobalKey,
+    editable_text_key: fn(&App, HandleId) -> GlobalKey,
     force_press_enabled: fn(&App, HandleId) -> bool,
     selection_enabled: fn(&App, HandleId) -> bool,
 }
@@ -2915,7 +2915,7 @@ pub struct AnyTextSelectionGestureDetectorBuilderDelegate {
 }
 
 impl AnyTextSelectionGestureDetectorBuilderDelegate {
-    pub fn editable_text_key(self, app: &App) -> crate::framework::LabeledGlobalKey {
+    pub fn editable_text_key(self, app: &App) -> GlobalKey {
         (self.vtable.editable_text_key)(app, self.id)
     }
 

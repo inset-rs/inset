@@ -8,8 +8,6 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use waft_foundation::{App, HandleId, Key};
-
-pub use waft_foundation::GlobalKeyId;
 use waft_rendering::{
     AnyRenderObject, ContainerRenderObjectMixin, ParentData, RenderHandle, RenderObject,
     RenderObjectWithChildMixin,
@@ -23,8 +21,69 @@ use super::elements::{
 use super::state::State;
 use crate::widgets::inherited_theme::InheritedTheme;
 
-/// A shared key (Dart's `Key?` on a widget).
-pub type KeyRef = Rc<dyn Key>;
+/// A widget's key (Dart's `Key?` on a widget): a local key, or a [`GlobalKey`], which is a
+/// key the element tree registers.
+///
+/// Every key type converts into it with `.into()`: a [`GlobalKey`] into
+/// [`Global`](Self::Global), any other [`Key`] (including an app's own) into
+/// [`Local`](Self::Local).
+#[derive(Clone)]
+pub enum KeyRef {
+    /// A key the element tree does not register (Dart's `LocalKey`).
+    Local(Rc<dyn Key>),
+    /// A key the element tree registers (Dart's `GlobalKey`).
+    Global(GlobalKey),
+}
+
+impl KeyRef {
+    /// The key that decides how this key compares.
+    pub fn key(&self) -> &dyn Key {
+        match self {
+            KeyRef::Local(key) => &**key,
+            KeyRef::Global(global) => global.key(),
+        }
+    }
+}
+
+impl PartialEq for KeyRef {
+    fn eq(&self, other: &KeyRef) -> bool {
+        match (self, other) {
+            (KeyRef::Local(a), KeyRef::Local(b)) => **a == **b,
+            (KeyRef::Global(a), KeyRef::Global(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for KeyRef {}
+
+impl Hash for KeyRef {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        self.key().hash(state);
+    }
+}
+
+impl Debug for KeyRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            KeyRef::Local(key) => key.fmt(f),
+            KeyRef::Global(global) => global.fmt(f),
+        }
+    }
+}
+
+impl<K: Key> From<K> for KeyRef {
+    fn from(key: K) -> KeyRef {
+        KeyRef::Local(Rc::new(key))
+    }
+}
+
+impl From<GlobalKey> for KeyRef {
+    fn from(key: GlobalKey) -> KeyRef {
+        KeyRef::Global(key)
+    }
+}
 
 /// A shared, immutable widget (Dart's `Widget` reference).
 pub type WidgetRef = Rc<dyn Widget>;
@@ -95,7 +154,7 @@ pub fn can_update(old_widget: &dyn Widget, new_widget: &dyn Widget) -> bool {
 pub fn keys_equal(a: Option<&KeyRef>, b: Option<&KeyRef>) -> bool {
     match (a, b) {
         (None, None) => true,
-        (Some(a), Some(b)) => **a == **b,
+        (Some(a), Some(b)) => a == b,
         _ => false,
     }
 }
@@ -724,62 +783,77 @@ where
 /// will trigger a call to `State::deactivate` on the associated [`State`] and all of its
 /// descendants; then force all widgets that depends on an `InheritedWidget` to rebuild.
 ///
-/// Dart's abstract class: each kind is a type of its own ([`LabeledGlobalKey`],
-/// [`GlobalObjectKey`]) that answers [`Key::global_key_identity`] with what it compares by,
-/// and the lookups through the registry are provided here once for every kind. A key that may
-/// be of any kind is held as a [`GlobalKeyRef`]; Dart's factory `GlobalKey()` is
-/// `<dyn GlobalKey>::new()`. Dart's type argument names the state; here
+/// A global key is a key the element tree registers: it compares and hashes as the [`Key`] it
+/// wraps, and the registry maps it to its element as Dart's `Map<GlobalKey, Element>` does.
+/// [`new`](Self::new) and [`labeled`](Self::labeled) compare by themselves (Dart's
+/// `LabeledGlobalKey`), [`object`](Self::object) by an object (Dart's `GlobalObjectKey`), and
+/// [`wrapping`](Self::wrapping) as the key it is given (Dart's subclasses that override `==`).
+/// Cloning shares the key. Dart's type argument names the state; here
 /// [`current_state`](Self::current_state) does.
-pub trait GlobalKey: Key {
-    /// The identity this key registers under.
-    fn identity(&self) -> GlobalKeyId {
-        self.global_key_identity()
-            .expect("a global key answers `Key::global_key_identity`")
+#[derive(Clone)]
+pub struct GlobalKey {
+    key: Rc<dyn Key>,
+}
+
+impl GlobalKey {
+    /// Creates a global key that is equal only to itself and its clones; Dart's factory
+    /// `GlobalKey()`, a `LabeledGlobalKey` without a label.
+    #[expect(
+        clippy::new_without_default,
+        reason = "each call creates a distinct key; Default would suggest a neutral value"
+    )]
+    pub fn new() -> GlobalKey {
+        GlobalKey::wrapping(Rc::new(LabeledGlobalKeyValue::new(None)))
+    }
+
+    /// Creates a global key with a debugging label (Dart's `LabeledGlobalKey`).
+    ///
+    /// The label does not affect the key's identity.
+    pub fn labeled(debug_label: impl Into<String>) -> GlobalKey {
+        GlobalKey::wrapping(Rc::new(LabeledGlobalKeyValue::new(Some(
+            debug_label.into(),
+        ))))
+    }
+
+    /// Creates a global key that uses the identity of `value` for its `==` (Dart's
+    /// `GlobalObjectKey`).
+    ///
+    /// An object's identity is its [`Handle`](waft_foundation::Handle): Dart's
+    /// `GlobalObjectKey(this)` in a `State` is `GlobalKey::object(self.id())`.
+    pub fn object(value: impl Into<HandleId>) -> GlobalKey {
+        GlobalKey::wrapping(Rc::new(GlobalObjectKeyValue {
+            value: value.into(),
+        }))
+    }
+
+    /// Creates a global key that compares and hashes as `key`: Dart's `GlobalKey` subclasses
+    /// that override `==` and `hashCode`, such as `_ReorderableItemGlobalKey`.
+    ///
+    /// Two global keys wrapping equal keys name the same element.
+    pub fn wrapping(key: Rc<dyn Key>) -> GlobalKey {
+        GlobalKey { key }
+    }
+
+    /// The key this global key compares and hashes as.
+    pub fn key(&self) -> &dyn Key {
+        &*self.key
     }
 
     /// The build context in which the widget with this key builds.
     ///
     /// The current context is `None` if there is no widget in the tree that matches this
     /// global key.
-    fn current_context(&self, app: &mut App) -> Option<BuildContext> {
-        current_element(app, self.identity())
+    pub fn current_context(&self, app: &mut App) -> Option<BuildContext> {
+        self.current_element(app)
     }
 
     /// The widget in the tree that currently has this global key.
     ///
     /// The current widget is `None` if there is no widget in the tree that matches this
     /// global key.
-    fn current_widget(&self, app: &mut App) -> Option<WidgetRef> {
-        let element = current_element(app, self.identity())?;
+    pub fn current_widget(&self, app: &mut App) -> Option<WidgetRef> {
+        let element = self.current_element(app)?;
         Some(element.widget(app).clone())
-    }
-
-    /// The element the registry holds under this key; the shared body of each kind's
-    /// `current_state`, which is generic and so cannot be a method of this trait.
-    fn current_element(&self, app: &mut App) -> Option<AnyElement> {
-        current_element(app, self.identity())
-    }
-}
-
-/// A global key of any kind, shared (Dart's `GlobalKey` reference).
-pub type GlobalKeyRef = Rc<dyn GlobalKey>;
-
-impl dyn GlobalKey {
-    /// Creates a [`LabeledGlobalKey`]; Dart's factory `GlobalKey()`.
-    #[expect(
-        clippy::new_ret_no_self,
-        reason = "Dart's GlobalKey factory returns LabeledGlobalKey, not the trait object"
-    )]
-    pub fn new() -> LabeledGlobalKey {
-        LabeledGlobalKey::new(None)
-    }
-
-    /// Creates a [`LabeledGlobalKey`] with a debugging label; Dart's factory
-    /// `GlobalKey(debugLabel:)`.
-    ///
-    /// The label does not affect the key's identity.
-    pub fn labeled(debug_label: impl Into<String>) -> LabeledGlobalKey {
-        LabeledGlobalKey::new(Some(debug_label.into()))
     }
 
     /// The [`State`] for the widget in the tree that currently has this global key.
@@ -788,77 +862,68 @@ impl dyn GlobalKey {
     /// global key, (2) that widget is not a [`StatefulWidget`], or the associated [`State`]
     /// object is not an `S`.
     pub fn current_state<S: State>(&self, app: &mut App) -> Option<waft_foundation::Handle<S>> {
-        current_state_of(app, self.identity())
+        let element = self.current_element(app)?;
+        element.state_handle::<S>(app)
+    }
+
+    fn current_element(&self, app: &mut App) -> Option<AnyElement> {
+        let owner = crate::binding::current_build_owner(app)?;
+        owner.global_key_element(app, self)
     }
 }
 
-/// The element the registry holds under `identity`.
-fn current_element(app: &mut App, identity: GlobalKeyId) -> Option<AnyElement> {
-    let owner = crate::binding::current_build_owner(app)?;
-    owner.global_key_element(app, identity)
+impl PartialEq for GlobalKey {
+    fn eq(&self, other: &GlobalKey) -> bool {
+        *self.key == *other.key
+    }
 }
 
-fn current_state_of<S: State>(
-    app: &mut App,
-    identity: GlobalKeyId,
-) -> Option<waft_foundation::Handle<S>> {
-    let element = current_element(app, identity)?;
-    element.state_handle::<S>(app)
+impl Eq for GlobalKey {}
+
+impl Hash for GlobalKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.key.hash(state);
+    }
 }
 
-/// A global key with a debug label.
-///
-/// The debug label is useful for documentation and for debugging. The label does not affect
-/// the key's identity: a labeled key is equal only to itself and its clones.
-#[derive(Clone)]
-pub struct LabeledGlobalKey {
-    id: Rc<LabeledGlobalKeyIdentity>,
+impl Debug for GlobalKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.key.fmt(f)
+    }
+}
+
+/// What a [`GlobalKey::new`] or [`GlobalKey::labeled`] key compares by: itself (Dart's
+/// `LabeledGlobalKey`).
+struct LabeledGlobalKeyValue {
+    unique: waft_foundation::UniqueKey,
     debug_label: Option<String>,
 }
 
-/// The allocation a [`LabeledGlobalKey`] compares by; one per key.
-struct LabeledGlobalKeyIdentity;
-
-impl LabeledGlobalKey {
-    /// Creates a global key with a debugging label.
-    ///
-    /// The label does not affect the key's identity.
-    pub fn new(debug_label: Option<String>) -> LabeledGlobalKey {
-        LabeledGlobalKey {
-            id: Rc::new(LabeledGlobalKeyIdentity),
+impl LabeledGlobalKeyValue {
+    fn new(debug_label: Option<String>) -> LabeledGlobalKeyValue {
+        LabeledGlobalKeyValue {
+            unique: waft_foundation::UniqueKey::new(),
             debug_label,
         }
     }
 }
 
-impl Key for LabeledGlobalKey {
+impl Key for LabeledGlobalKeyValue {
     fn eq_key(&self, other: &dyn Key) -> bool {
         (other as &dyn Any)
-            .downcast_ref::<LabeledGlobalKey>()
-            .is_some_and(|other| Rc::ptr_eq(&self.id, &other.id))
+            .downcast_ref::<LabeledGlobalKeyValue>()
+            .is_some_and(|other| other.unique == self.unique)
     }
 
     fn hash_key(&self, mut state: &mut dyn Hasher) {
-        GlobalKey::identity(self).hash(&mut state);
-    }
-
-    fn global_key_identity(&self) -> Option<GlobalKeyId> {
-        Some(GlobalKeyId::allocation(Rc::as_ptr(&self.id)))
+        TypeId::of::<LabeledGlobalKeyValue>().hash(&mut state);
+        self.unique.hash(&mut state);
     }
 }
 
-impl GlobalKey for LabeledGlobalKey {}
-
-impl LabeledGlobalKey {
-    /// See `<dyn GlobalKey>::current_state`.
-    pub fn current_state<S: State>(&self, app: &mut App) -> Option<waft_foundation::Handle<S>> {
-        current_state_of(app, GlobalKey::identity(self))
-    }
-}
-
-impl Debug for LabeledGlobalKey {
+impl Debug for LabeledGlobalKeyValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let id = Rc::as_ptr(&self.id) as usize & 0xF_FFFF;
+        let id = std::ptr::from_ref(self) as usize & 0xF_FFFF;
         match &self.debug_label {
             Some(label) => write!(f, "[GlobalKey#{id:05x} {label}]"),
             None => write!(f, "[GlobalKey#{id:05x}]"),
@@ -866,54 +931,26 @@ impl Debug for LabeledGlobalKey {
     }
 }
 
-/// A global key that takes its identity from the object used as its value.
-///
-/// Used to tie the identity of a widget to the identity of an object used to generate that
-/// widget. An object's identity is its [`Handle`](waft_foundation::Handle): Dart's
-/// `GlobalObjectKey(this)` in a `State` is `GlobalObjectKey::new(self.id())`.
-///
-/// Any [`GlobalObjectKey`] created for the same object will match.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct GlobalObjectKey {
-    /// The object whose identity is used by this key's `==`.
-    pub value: HandleId,
+/// What a [`GlobalKey::object`] key compares by: an object's identity (Dart's
+/// `GlobalObjectKey`).
+struct GlobalObjectKeyValue {
+    value: HandleId,
 }
 
-impl GlobalObjectKey {
-    /// Creates a global key that uses the identity of `value` for its `==`.
-    pub fn new(value: impl Into<HandleId>) -> GlobalObjectKey {
-        GlobalObjectKey {
-            value: value.into(),
-        }
-    }
-}
-
-impl Key for GlobalObjectKey {
+impl Key for GlobalObjectKeyValue {
     fn eq_key(&self, other: &dyn Key) -> bool {
         (other as &dyn Any)
-            .downcast_ref::<GlobalObjectKey>()
+            .downcast_ref::<GlobalObjectKeyValue>()
             .is_some_and(|other| other.value == self.value)
     }
 
     fn hash_key(&self, mut state: &mut dyn Hasher) {
+        TypeId::of::<GlobalObjectKeyValue>().hash(&mut state);
         self.value.hash(&mut state);
     }
-
-    fn global_key_identity(&self) -> Option<GlobalKeyId> {
-        Some(GlobalKeyId::object(self.value))
-    }
 }
 
-impl GlobalKey for GlobalObjectKey {}
-
-impl GlobalObjectKey {
-    /// See `<dyn GlobalKey>::current_state`.
-    pub fn current_state<S: State>(&self, app: &mut App) -> Option<waft_foundation::Handle<S>> {
-        current_state_of(app, GlobalKey::identity(self))
-    }
-}
-
-impl Debug for GlobalObjectKey {
+impl Debug for GlobalObjectKeyValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "[GlobalObjectKey {:?}]", self.value)
     }
@@ -964,9 +1001,4 @@ impl Debug for ObjectKey {
             None => f.write_str("[null]"),
         }
     }
-}
-
-/// Dart's `key is GlobalKey`: the registry identity when a key is a global key.
-pub fn global_key_id(key: &KeyRef) -> Option<GlobalKeyId> {
-    key.global_key_identity()
 }

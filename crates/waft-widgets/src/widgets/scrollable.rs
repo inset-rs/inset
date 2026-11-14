@@ -21,8 +21,8 @@ use waft_scheduler::{Ticker, TickerCallback, TickerProvider, TickerProviderObjec
 use waft_services::{HardwareKeyboard, RestorationBucket, RestorationData, RestorationManager};
 
 use crate::framework::{
-    BuildContext, GlobalKey, InheritedWidget, IntoWidget, KeyRef, LabeledGlobalKey, State,
-    StateData, StatefulWidget, WidgetRef,
+    BuildContext, GlobalKey, InheritedWidget, IntoWidget, KeyRef, State, StateData, StatefulWidget,
+    WidgetRef,
 };
 use crate::view::View;
 use crate::widgets::basic::{IgnorePointer, Listener as PointerListener};
@@ -446,8 +446,8 @@ impl StatefulWidget for Scrollable {
             fallback_scroll_controller: None,
             media_query_gesture_settings: None,
             device_pixel_ratio: 1.0,
-            gesture_detector_key: Rc::new(<dyn GlobalKey>::new()),
-            ignore_pointer_key: Rc::new(<dyn GlobalKey>::new()),
+            gesture_detector_key: GlobalKey::new(),
+            ignore_pointer_key: GlobalKey::new(),
             gesture_recognizers: Vec::new(),
             should_ignore_pointer: false,
             last_can_drag: None,
@@ -515,8 +515,8 @@ pub struct ScrollableState {
     fallback_scroll_controller: Option<Handle<ScrollController>>,
     media_query_gesture_settings: Option<DeviceGestureSettings>,
     device_pixel_ratio: f64,
-    gesture_detector_key: Rc<LabeledGlobalKey>,
-    ignore_pointer_key: Rc<LabeledGlobalKey>,
+    gesture_detector_key: GlobalKey,
+    ignore_pointer_key: GlobalKey,
     // This field is set during layout, and then reused until the next time it is set.
     gesture_recognizers: GestureRecognizerFactories,
     should_ignore_pointer: bool,
@@ -752,7 +752,7 @@ impl ScrollableState {
         app.get_mut(self).drag = None;
     }
 
-    fn gesture_detector_key(self: Handle<Self>, app: &App) -> Rc<LabeledGlobalKey> {
+    fn gesture_detector_key(self: Handle<Self>, app: &App) -> GlobalKey {
         app.get(self).gesture_detector_key.clone()
     }
 
@@ -1206,12 +1206,12 @@ impl State for ScrollableState {
                 }))
                 .child(
                     RawGestureDetector::new()
-                        .key(state.gesture_detector_key.clone())
+                        .key(state.gesture_detector_key.clone().into())
                         .gestures(state.gesture_recognizers.clone())
                         .behavior(hit_test_behavior)
                         .child(
                             IgnorePointer::new()
-                                .key(state.ignore_pointer_key.clone())
+                                .key(state.ignore_pointer_key.clone().into())
                                 .ignoring(state.should_ignore_pointer)
                                 .child(viewport),
                         ),

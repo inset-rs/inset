@@ -363,7 +363,7 @@ where
             let old_key_child = new_widget_key.as_ref().and_then(|key| {
                 old_keyed_elements
                     .iter()
-                    .find(|(old_key, _)| **old_key == **key)
+                    .find(|(old_key, _)| old_key == key)
                     .map(|(_, child)| *child)
             });
             // Try to find the slot for the correct Element that `widget` should update.
@@ -393,14 +393,14 @@ where
                     let keyed_children = &mut app.get_mut(self).keyed_children;
                     let existing = keyed_children
                         .iter()
-                        .position(|(key, _)| **key == *new_widget_key);
+                        .position(|(key, _)| *key == new_widget_key);
                     if cfg!(debug_assertions)
                         && let Some(index) = existing
                     {
                         let existing_element = keyed_children[index].1;
                         match debug_duplicate_keys
                             .iter_mut()
-                            .find(|(key, _)| **key == *new_widget_key)
+                            .find(|(key, _)| *key == new_widget_key)
                         {
                             Some((_, elements)) => elements.push(new_child),
                             None => debug_duplicate_keys
@@ -795,7 +795,7 @@ mod tests {
 
     fn keyed(key: &str, width: f64, height: f64) -> WidgetRef {
         SizedBox::new()
-            .key(Rc::new(ValueKey::new(key.to_owned())))
+            .key(ValueKey::new(key.to_owned()).into())
             .width(width)
             .height(height)
             .into_widget()

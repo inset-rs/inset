@@ -19,8 +19,8 @@ use waft_physics::Simulation;
 use waft_scheduler::{FrameCallback, SchedulerBinding, SchedulerPhase, TickerFuture};
 
 use crate::framework::{
-    BuildContext, GlobalKey, InheritedModel, InheritedWidget, IntoWidget, KeyRef, LabeledGlobalKey,
-    Notification, State, StateData, StatefulWidget, WidgetRef,
+    BuildContext, GlobalKey, InheritedModel, InheritedWidget, IntoWidget, KeyRef, Notification,
+    State, StateData, StatefulWidget, WidgetRef,
 };
 use crate::view::View;
 use crate::widgets::actions::{Action, ActionData, Actions, DismissAction, DismissIntent};
@@ -1706,7 +1706,7 @@ impl State for ModalScopeState {
             Some(page) => page,
             None => {
                 let page = RepaintBoundary::new()
-                    .key(Rc::new(route.subtree_key(app)))
+                    .key(route.subtree_key(app).into())
                     .child(Builder::new(move |app, context| {
                         let animation = route.animation(app).expect("an installed route");
                         let secondary = route.secondary_animation(app).expect("an installed route");
@@ -1829,8 +1829,8 @@ pub struct ModalRouteData {
     animation_proxy: Option<Handle<ProxyAnimation>>,
     secondary_animation_proxy: Option<Handle<ProxyAnimation>>,
     pop_entries: Vec<Rc<dyn PopEntry>>,
-    scope_key: LabeledGlobalKey,
-    subtree_key: LabeledGlobalKey,
+    scope_key: GlobalKey,
+    subtree_key: GlobalKey,
     storage_bucket: Handle<PageStorageBucket>,
     modal_barrier: Option<Handle<OverlayEntry>>,
     modal_scope: Option<Handle<OverlayEntry>>,
@@ -1849,8 +1849,8 @@ impl ModalRouteData {
             animation_proxy: None,
             secondary_animation_proxy: None,
             pop_entries: Vec::new(),
-            scope_key: <dyn GlobalKey>::new(),
-            subtree_key: <dyn GlobalKey>::new(),
+            scope_key: GlobalKey::new(),
+            subtree_key: GlobalKey::new(),
             storage_bucket: PageStorageBucket::new(app),
             modal_barrier: None,
             modal_scope: None,
@@ -2479,7 +2479,7 @@ pub trait ModalRoute: LocalHistoryRoute {
             None => {
                 let key = self.modal_route_data(app).scope_key.clone();
                 let scope = ModalScope {
-                    key: Some(Rc::new(key)),
+                    key: Some(key.into()),
                     route: ModalRoute::as_modal_route(self),
                 }
                 .into_widget();
@@ -2585,7 +2585,7 @@ struct ModalRouteVTable {
     traversal_edge_behavior: fn(&App, HandleId) -> Option<TraversalEdgeBehavior>,
     directional_traversal_edge_behavior: fn(&App, HandleId) -> Option<TraversalEdgeBehavior>,
     storage_bucket: fn(&App, HandleId) -> Handle<PageStorageBucket>,
-    subtree_key: fn(&App, HandleId) -> LabeledGlobalKey,
+    subtree_key: fn(&App, HandleId) -> GlobalKey,
     subtree_context: fn(&mut App, HandleId) -> Option<BuildContext>,
     build_page:
         fn(&mut App, HandleId, BuildContext, AnyAnimation<f64>, AnyAnimation<f64>) -> WidgetRef,
@@ -2865,7 +2865,7 @@ impl AnyModalRoute {
     }
 
     /// Dart's `ModalRoute._subtreeKey`.
-    pub fn subtree_key(self, app: &App) -> LabeledGlobalKey {
+    pub fn subtree_key(self, app: &App) -> GlobalKey {
         (self.vtable.subtree_key)(app, self.id)
     }
 
@@ -4182,19 +4182,19 @@ mod tests {
     /// A navigator whose initial route is a plain page, under a `Directionality` the overlay's
     /// theater needs.
     fn navigator(
-        key: &LabeledGlobalKey,
+        key: &GlobalKey,
         on_generate_route: impl Fn(&mut App, &RouteSettings) -> Option<AnyRoute> + 'static,
     ) -> WidgetRef {
         Directionality::new(
             TextDirection::Ltr,
             Navigator::new()
-                .key(Rc::new(key.clone()))
+                .key(key.clone().into())
                 .on_generate_route(on_generate_route),
         )
         .into_widget()
     }
 
-    fn state(key: &LabeledGlobalKey, app: &mut App) -> Handle<NavigatorState> {
+    fn state(key: &GlobalKey, app: &mut App) -> Handle<NavigatorState> {
         key.current_state::<NavigatorState>(app)
             .expect("a mounted navigator")
     }
@@ -4231,7 +4231,7 @@ mod tests {
     #[test]
     fn pushing_a_page_route_runs_its_transition_to_completion_and_popping_runs_it_back() {
         let cell = app_with_view();
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         mount(
             &cell,
             navigator(&key, |app, _settings| {
@@ -4274,7 +4274,7 @@ mod tests {
     fn modal_route_of_reports_is_current_and_is_first() {
         let cell = app_with_view();
         let app = cell.borrow();
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         let seen: Rc<RefCell<Vec<(bool, bool)>>> = Rc::new(RefCell::new(Vec::new()));
         let watcher = probe({
             let seen = Rc::clone(&seen);
@@ -4310,7 +4310,7 @@ mod tests {
     #[test]
     fn a_pop_scope_with_can_pop_false_blocks_maybe_pop() {
         let cell = app_with_view();
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         let blocked = Rc::new(Cell::new(false));
         let scope = PopScope::new(SizedBox::new())
             .can_pop(false)
@@ -4346,7 +4346,7 @@ mod tests {
     #[test]
     fn tapping_the_barrier_dismisses_a_dismissible_popup_route() {
         let cell = app_with_view();
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         mount(
             &cell,
             navigator(&key, |app, _settings| {
@@ -4376,7 +4376,7 @@ mod tests {
     #[test]
     fn a_non_dismissible_barrier_keeps_the_route() {
         let cell = app_with_view();
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         mount(
             &cell,
             navigator(&key, |app, _settings| {
@@ -4402,7 +4402,7 @@ mod tests {
     #[test]
     fn local_history_entries_are_popped_before_the_route() {
         let cell = app_with_view();
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         mount(
             &cell,
             navigator(&key, |app, _settings| {
@@ -4471,7 +4471,7 @@ mod tests {
 
         let cell = app_with_view();
         let mut app = cell.borrow_mut();
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         let observer = RouteObserver::new(
             &mut app,
             Rc::new(|app, route: AnyRoute| route.as_page_route(app).is_some()),
@@ -4483,7 +4483,7 @@ mod tests {
             Directionality::new(
                 TextDirection::Ltr,
                 Navigator::new()
-                    .key(Rc::new(key.clone()))
+                    .key(key.clone().into())
                     .on_generate_route({
                         let initial = Rc::clone(&initial);
                         move |app, _settings| {

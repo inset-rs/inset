@@ -44,8 +44,8 @@ use waft_painting::{
 use waft_rendering::{AnyRenderBox, CustomPainter};
 
 use crate::framework::{
-    BuildContext, BuildOwner, GlobalKey, IntoWidget, KeyRef, LabeledGlobalKey, State, StateData,
-    StatefulWidget, WidgetRef, downcast_widget,
+    BuildContext, BuildOwner, GlobalKey, IntoWidget, KeyRef, State, StateData, StatefulWidget,
+    WidgetRef, downcast_widget,
 };
 use crate::view::View;
 use crate::widgets::basic::{
@@ -1669,13 +1669,13 @@ pub struct RawScrollbarStateData {
     fadeout_animation_controller: Option<Handle<AnimationController>>,
     fadeout_opacity_animation: Option<Handle<CurvedAnimation>>,
     scrollbar_painter: Option<Handle<ScrollbarPainter>>,
-    scrollbar_painter_key: Rc<LabeledGlobalKey>,
+    scrollbar_painter_key: GlobalKey,
     hover_is_active: bool,
     thumb_drag: Option<Rc<dyn Drag>>,
     max_scroll_extent_permits_scrolling: bool,
     thumb_hold: Option<Rc<dyn ScrollHoldController>>,
     axis: Option<Axis>,
-    gesture_detector_key: Rc<LabeledGlobalKey>,
+    gesture_detector_key: GlobalKey,
 }
 
 impl RawScrollbarStateData {
@@ -1690,13 +1690,13 @@ impl RawScrollbarStateData {
             fadeout_animation_controller: None,
             fadeout_opacity_animation: None,
             scrollbar_painter: None,
-            scrollbar_painter_key: Rc::new(<dyn GlobalKey>::new()),
+            scrollbar_painter_key: GlobalKey::new(),
             hover_is_active: false,
             thumb_drag: None,
             max_scroll_extent_permits_scrolling: false,
             thumb_hold: None,
             axis: None,
-            gesture_detector_key: Rc::new(<dyn GlobalKey>::new()),
+            gesture_detector_key: GlobalKey::new(),
         }
     }
 }
@@ -3099,7 +3099,7 @@ impl RawScrollbarState {
         let gestures = RawScrollbarState::gestures(this, app);
 
         let custom_paint = CustomPaint::new()
-            .key(painter_key)
+            .key(painter_key.into())
             .foreground_painter(ScrollbarPainterRef::new(painter))
             .child(RepaintBoundary::new().child(child));
 
@@ -3129,7 +3129,7 @@ impl RawScrollbarState {
             .child(custom_paint);
 
         let gesture_detector = RawGestureDetector::new()
-            .key(gesture_detector_key)
+            .key(gesture_detector_key.into())
             .gestures(gestures)
             .child(mouse_region);
 
@@ -3301,10 +3301,10 @@ impl Debug for RawScrollbarState {
 fn get_local_offset(
     app: &App,
     owner: Handle<BuildOwner>,
-    scrollbar_painter_key: &LabeledGlobalKey,
+    scrollbar_painter_key: &GlobalKey,
     position: Offset,
 ) -> Option<Offset> {
-    let element = owner.global_key_element(app, scrollbar_painter_key.identity())?;
+    let element = owner.global_key_element(app, scrollbar_painter_key)?;
     let render_box = element
         .find_render_object(app)?
         .as_box()
@@ -3315,9 +3315,9 @@ fn get_local_offset(
 fn painter_of(
     app: &App,
     owner: Handle<BuildOwner>,
-    custom_paint_key: &LabeledGlobalKey,
+    custom_paint_key: &GlobalKey,
 ) -> Option<Handle<ScrollbarPainter>> {
-    let element = owner.global_key_element(app, custom_paint_key.identity())?;
+    let element = owner.global_key_element(app, custom_paint_key)?;
     let custom_paint = downcast_widget::<CustomPaint>(&**element.widget(app))?;
     custom_paint
         .foreground_painter
@@ -3330,7 +3330,7 @@ fn painter_of(
 fn is_thumb_event(
     app: &App,
     owner: Handle<BuildOwner>,
-    custom_paint_key: &LabeledGlobalKey,
+    custom_paint_key: &GlobalKey,
     event: &PointerDownEvent,
 ) -> bool {
     let Some(painter) = painter_of(app, owner, custom_paint_key) else {
@@ -3345,7 +3345,7 @@ fn is_thumb_event(
 fn is_track_event(
     app: &App,
     owner: Handle<BuildOwner>,
-    custom_paint_key: &LabeledGlobalKey,
+    custom_paint_key: &GlobalKey,
     event: &PointerDownEvent,
 ) -> bool {
     let Some(painter) = painter_of(app, owner, custom_paint_key) else {
@@ -3382,7 +3382,7 @@ macro_rules! thumb_drag_gesture_recognizer_leaf {
             pub fn new(
                 app: &mut App,
                 owner: Handle<BuildOwner>,
-                custom_paint_key: Rc<LabeledGlobalKey>,
+                custom_paint_key: GlobalKey,
             ) -> Handle<$name> {
                 app.create($name {
                     recognizer: GestureRecognizerData::new(),
@@ -3505,7 +3505,7 @@ pub struct VerticalThumbDragGestureRecognizer {
     one_sequence: OneSequenceData,
     drag: DragData,
     owner: Handle<BuildOwner>,
-    custom_paint_key: Rc<LabeledGlobalKey>,
+    custom_paint_key: GlobalKey,
 }
 
 thumb_drag_gesture_recognizer_leaf!(VerticalThumbDragGestureRecognizer, "vertical thumb drag");
@@ -3563,7 +3563,7 @@ pub struct HorizontalThumbDragGestureRecognizer {
     one_sequence: OneSequenceData,
     drag: DragData,
     owner: Handle<BuildOwner>,
-    custom_paint_key: Rc<LabeledGlobalKey>,
+    custom_paint_key: GlobalKey,
 }
 
 thumb_drag_gesture_recognizer_leaf!(
@@ -3625,7 +3625,7 @@ pub struct TrackTapGestureRecognizer {
     primary: PrimaryPointerData,
     base_tap: BaseTapData,
     owner: Handle<BuildOwner>,
-    custom_paint_key: Rc<LabeledGlobalKey>,
+    custom_paint_key: GlobalKey,
     on_tap_down: Option<GestureTapDownCallback>,
 }
 
@@ -3635,7 +3635,7 @@ impl TrackTapGestureRecognizer {
     pub fn new(
         app: &mut App,
         owner: Handle<BuildOwner>,
-        custom_paint_key: Rc<LabeledGlobalKey>,
+        custom_paint_key: GlobalKey,
     ) -> Handle<TrackTapGestureRecognizer> {
         app.create(TrackTapGestureRecognizer {
             recognizer: GestureRecognizerData::new(),
@@ -3828,14 +3828,14 @@ mod tests {
 
     /// A scrollbar with a global key around a `ListView` of 40 fixed-height boxes, both on the
     /// same controller: the shape every scrollbar test mounts.
-    fn mount(cell: &AppCell) -> (Rc<LabeledGlobalKey>, Handle<ScrollController>) {
-        let key = Rc::new(<dyn GlobalKey>::new());
+    fn mount(cell: &AppCell) -> (GlobalKey, Handle<ScrollController>) {
+        let key = GlobalKey::new();
         let controller = ScrollController::default(&mut cell.borrow_mut());
         let list = ListView::new()
             .controller(controller.as_controller())
             .children((0..ITEM_COUNT).map(|_| SizedBox::new().height(ITEM_EXTENT).into_widget()));
         let scrollbar = RawScrollbar::new(list)
-            .key(key.clone())
+            .key(key.clone().into())
             .controller(controller.as_controller());
         let tree: WidgetRef = MediaQuery::new(
             MediaQueryData::new()
@@ -3854,7 +3854,7 @@ mod tests {
         (key, controller)
     }
 
-    fn painter(app: &mut App, key: &LabeledGlobalKey) -> Handle<ScrollbarPainter> {
+    fn painter(app: &mut App, key: &GlobalKey) -> Handle<ScrollbarPainter> {
         let state = key
             .current_state::<RawScrollbarState>(app)
             .expect("the scrollbar is mounted");
@@ -3989,13 +3989,13 @@ mod tests {
     fn a_raw_scrollbar_hides_its_thumb_when_the_child_cannot_scroll() {
         let cell = binding_cell();
         let mut app = cell.borrow_mut();
-        let key = Rc::new(<dyn GlobalKey>::new());
+        let key = GlobalKey::new();
         let controller = ScrollController::default(&mut app);
         let list = ListView::new()
             .controller(controller.as_controller())
             .children([SizedBox::new().height(ITEM_EXTENT).into_widget()]);
         let scrollbar = RawScrollbar::new(list)
-            .key(key.clone())
+            .key(key.clone().into())
             .controller(controller.as_controller());
         let tree: WidgetRef = MediaQuery::new(
             MediaQueryData::new().size(Size::new(VIEW_WIDTH, VIEW_HEIGHT)),

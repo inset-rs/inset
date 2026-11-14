@@ -23,8 +23,8 @@ use waft_scheduler::{
 use waft_services::RestorationBucket;
 
 use crate::framework::{
-    BuildContext, GlobalKey, InheritedWidget, IntoWidget, KeyRef, LabeledGlobalKey, Notification,
-    State, StateData, StatefulWidget, WidgetRef, keys_equal,
+    BuildContext, GlobalKey, InheritedWidget, IntoWidget, KeyRef, Notification, State, StateData,
+    StatefulWidget, WidgetRef, keys_equal,
 };
 use crate::view::View;
 use crate::widgets::basic::AbsorbPointer;
@@ -3267,7 +3267,7 @@ pub struct NavigatorState {
     state: StateData<Navigator>,
     ticker_provider: TickerProviderStateMixinData,
     restoration: RestorationMixinData,
-    overlay_key: Option<LabeledGlobalKey>,
+    overlay_key: Option<GlobalKey>,
     history: Option<Handle<History>>,
     /// The [`RouteEntry`]s that are waiting for their subtrees to be disposed.
     entry_waiting_for_subtree_disposal: HashSet<Handle<RouteEntry>>,
@@ -3482,10 +3482,10 @@ impl NavigatorState {
         for page in &self.widget(app).pages {
             if let Some(key) = page.key() {
                 assert!(
-                    !key_reservation.iter().any(|other| **other == **key),
+                    !key_reservation.iter().any(|other| other == key),
                     "The Navigator.pages must not contain two pages with the same key."
                 );
-                key_reservation.push(Rc::clone(key));
+                key_reservation.push(key.clone());
             }
         }
     }
@@ -3680,7 +3680,7 @@ impl NavigatorState {
                 phantom_entries.insert(old_entry);
                 continue;
             }
-            debug_assert!(!page_key_to_old_entry.iter().any(|(k, _)| **k == *key));
+            debug_assert!(!page_key_to_old_entry.iter().any(|(k, _)| *k == key));
             page_key_to_old_entry.push((key, old_entry));
         }
 
@@ -3691,7 +3691,7 @@ impl NavigatorState {
             let matching = next_page.key().and_then(|key| {
                 page_key_to_old_entry
                     .iter()
-                    .position(|(other, _)| **other == **key)
+                    .position(|(other, _)| other == key)
             });
             let matching = matching.filter(|index| {
                 let entry = page_key_to_old_entry[*index].1;
@@ -3759,9 +3759,7 @@ impl NavigatorState {
             // was not taken during updating the middle of new page, or is a phantom entry.
             let key_is_free = match potential_page_to_remove.key() {
                 None => true,
-                Some(key) => page_key_to_old_entry
-                    .iter()
-                    .any(|(other, _)| **other == **key),
+                Some(key) => page_key_to_old_entry.iter().any(|(other, _)| other == key),
             };
             if key_is_free || phantom_entries.contains(&potential_entry_to_remove) {
                 location_to_exiting_page_route
@@ -4997,7 +4995,7 @@ impl RestorationMixin for NavigatorState {
         // Delete everything in the old history and clear the overlay.
         self.forced_dispose_all_route_entries(app);
         debug_assert!(self.history(app).is_empty(app));
-        app.get_mut(self).overlay_key = Some(<dyn GlobalKey>::new());
+        app.get_mut(self).overlay_key = Some(GlobalKey::new());
 
         // Populate the new history from restoration data.
         let history = self.history(app);
@@ -5231,12 +5229,12 @@ impl State for NavigatorState {
         debug_assert!(!app.get(self).debug_locked);
         debug_assert!(!self.history(app).is_empty(app));
 
-        let overlay_key: KeyRef = Rc::new(
-            app.get(self)
-                .overlay_key
-                .clone()
-                .expect("restore_state has run"),
-        );
+        let overlay_key: KeyRef = app
+            .get(self)
+            .overlay_key
+            .clone()
+            .expect("restore_state has run")
+            .into();
         let initial_entries = match self.overlay(app) {
             None => self.all_route_overlay_entries(app),
             Some(_) => Vec::new(),
@@ -6048,7 +6046,7 @@ mod tests {
         fn page(name: &str) -> PageRef {
             Rc::new(TestPage {
                 name: name.to_string(),
-                key: Rc::new(ValueKey::new(name.to_string())),
+                key: ValueKey::new(name.to_string()).into(),
                 restoration_id: None,
             })
         }
@@ -6056,7 +6054,7 @@ mod tests {
         fn restorable_page(name: &str) -> PageRef {
             Rc::new(TestPage {
                 name: name.to_string(),
-                key: Rc::new(ValueKey::new(name.to_string())),
+                key: ValueKey::new(name.to_string()).into(),
                 restoration_id: Some(name.to_string()),
             })
         }
@@ -6102,18 +6100,18 @@ mod tests {
             .collect()
     }
 
-    fn pages_navigator(key: &LabeledGlobalKey, pages: Vec<PageRef>) -> WidgetRef {
+    fn pages_navigator(key: &GlobalKey, pages: Vec<PageRef>) -> WidgetRef {
         Directionality::new(
             TextDirection::Ltr,
             Navigator::new()
-                .key(Rc::new(key.clone()))
+                .key(key.clone().into())
                 .pages(pages)
                 .on_did_remove_page(|_app, _page| {}),
         )
         .into_widget()
     }
 
-    fn state(key: &LabeledGlobalKey, app: &mut App) -> Handle<NavigatorState> {
+    fn state(key: &GlobalKey, app: &mut App) -> Handle<NavigatorState> {
         key.current_state::<NavigatorState>(app)
             .expect("a mounted navigator")
     }
@@ -6124,7 +6122,7 @@ mod tests {
     fn the_pages_api_inserts_removes_and_reorders_routes_through_the_transition_delegate() {
         let (cell, _restoration) = app_with_view(None);
         let mut app = cell.borrow_mut();
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         let binding = crate::binding::WidgetsBinding::instance(&mut app);
         drop(app);
         mount(
@@ -6255,7 +6253,7 @@ mod tests {
 
         let (cell, _restoration) = app_with_view(None);
         let mut app = cell.borrow_mut();
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         let observer = app.create(Recorder::default());
         drop(app);
         mount(
@@ -6263,7 +6261,7 @@ mod tests {
             Directionality::new(
                 TextDirection::Ltr,
                 Navigator::new()
-                    .key(Rc::new(key.clone()))
+                    .key(key.clone().into())
                     .observers(vec![observer.as_observer()])
                     .on_generate_route(|app, settings| {
                         let name = settings.name.clone().unwrap_or_default();
@@ -6306,7 +6304,7 @@ mod tests {
     fn the_history_is_restored_from_the_restoration_data_of_a_previous_run() {
         // Run once, pushing a restorable named route on top of a restorable page.
         let (cell, restoration) = app_with_view(None);
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         mount(
             &cell,
             Directionality::new(
@@ -6314,7 +6312,7 @@ mod tests {
                 RootRestorationScope::new(
                     Some("root".to_string()),
                     Navigator::new()
-                        .key(Rc::new(key.clone()))
+                        .key(key.clone().into())
                         .restoration_scope_id("nav")
                         .pages(vec![TestPage::restorable_page("a")])
                         .on_did_remove_page(|_app, _page| {})
@@ -6347,7 +6345,7 @@ mod tests {
 
         // Run again from the saved data: the pageless route comes back.
         let (cell, _restoration) = app_with_view(Some(saved));
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         mount(
             &cell,
             Directionality::new(
@@ -6355,7 +6353,7 @@ mod tests {
                 RootRestorationScope::new(
                     Some("root".to_string()),
                     Navigator::new()
-                        .key(Rc::new(key.clone()))
+                        .key(key.clone().into())
                         .restoration_scope_id("nav")
                         .pages(vec![TestPage::restorable_page("a")])
                         .on_did_remove_page(|_app, _page| {})
@@ -6380,22 +6378,20 @@ mod tests {
     #[test]
     fn a_route_reports_its_position_in_the_history() {
         let (cell, _restoration) = app_with_view(None);
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         let pushed: Rc<Cell<Option<AnyRoute>>> = Rc::new(Cell::new(None));
         mount(
             &cell,
             Directionality::new(
                 TextDirection::Ltr,
-                Navigator::new()
-                    .key(Rc::new(key.clone()))
-                    .on_generate_route({
-                        let pushed = Rc::clone(&pushed);
-                        move |app, _settings| {
-                            let route = PageRouteBuilder::new(app, corner_page()).as_route();
-                            pushed.set(Some(route));
-                            Some(route)
-                        }
-                    }),
+                Navigator::new().key(key.clone().into()).on_generate_route({
+                    let pushed = Rc::clone(&pushed);
+                    move |app, _settings| {
+                        let route = PageRouteBuilder::new(app, corner_page()).as_route();
+                        pushed.set(Some(route));
+                        Some(route)
+                    }
+                }),
             )
             .into_widget(),
         );
@@ -6419,11 +6415,11 @@ mod tests {
     }
 
     /// A navigator whose every route is a plain [`PageRouteBuilder`] showing the corner page.
-    fn pageless_navigator(key: &LabeledGlobalKey) -> WidgetRef {
+    fn pageless_navigator(key: &GlobalKey) -> WidgetRef {
         Directionality::new(
             TextDirection::Ltr,
             Navigator::new()
-                .key(Rc::new(key.clone()))
+                .key(key.clone().into())
                 .on_generate_route(|app, _settings| {
                     Some(PageRouteBuilder::new(app, corner_page()).as_route())
                 }),
@@ -6436,7 +6432,7 @@ mod tests {
     #[test]
     fn push_returns_a_future_that_completes_with_the_pop_result() {
         let (cell, _restoration) = app_with_view(None);
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         mount(&cell, pageless_navigator(&key));
         let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);
@@ -6470,7 +6466,7 @@ mod tests {
     #[test]
     fn remove_route_completes_the_awaited_value() {
         let (cell, _restoration) = app_with_view(None);
-        let key = <dyn GlobalKey>::new();
+        let key = GlobalKey::new();
         mount(&cell, pageless_navigator(&key));
         let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);

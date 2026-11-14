@@ -27,7 +27,7 @@ use waft_services::{MouseCursor, SystemMouseCursors};
 use waft_widgets::{
     Action, Actions, AnyAction, AnyFocusNode, AnyRadioGroupRegistry, BuildContext, Center,
     DefaultTextStyle, Directionality, Focus, FocusNode, FocusNodeLeaf, GestureDetector, GlobalKey,
-    IconTheme, IconThemeData, IntoWidget, KeyEventResult, KeyRef, LabeledGlobalKey, MouseRegion,
+    IconTheme, IconThemeData, IntoWidget, KeyEventResult, KeyRef, MouseRegion,
     MultiChildRenderObjectWidget, Padding, RadioClient, RadioClientData, RadioGroup,
     RenderObjectWidget, State, StateData, StatefulWidget, TickerProviderStateMixin,
     TickerProviderStateMixinData, UnconstrainedBox, VoidCallbackAction, VoidCallbackIntent,
@@ -431,7 +431,7 @@ pub struct SegmentedControlState<T: Copy + Eq + Hash + Debug + 'static> {
     action_map: HashMap<std::any::TypeId, AnyAction>,
     selection_controllers: Vec<Handle<AnimationController>>,
     child_tweens: Vec<Handle<ColorTween>>,
-    segment_keys: HashMap<T, LabeledGlobalKey>,
+    segment_keys: HashMap<T, GlobalKey>,
     forward_background_color_tween: Option<Handle<ColorTween>>,
     reverse_background_color_tween: Option<Handle<ColorTween>>,
     text_color_tween: Option<Handle<ColorTween>>,
@@ -838,7 +838,7 @@ impl<T: Copy + Eq + Hash + Debug + 'static> State for SegmentedControlState<T> {
                 .get_mut(self)
                 .segment_keys
                 .entry(current_key)
-                .or_insert_with(<dyn GlobalKey>::new)
+                .or_insert_with(GlobalKey::new)
                 .clone();
 
             let mut detector = GestureDetector::new().behavior(HitTestBehavior::Opaque);
@@ -864,7 +864,7 @@ impl<T: Copy + Eq + Hash + Debug + 'static> State for SegmentedControlState<T> {
                 ));
 
             let segment = SegmentButton {
-                key: Some(Rc::new(segment_key)),
+                key: Some(segment_key.into()),
                 value: current_key,
                 enabled: is_enabled,
                 child: MouseRegion::new()
@@ -1525,7 +1525,7 @@ mod tests {
     use waft_services::{
         HardwareKeyboard, KeyDownEvent, KeyEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
     };
-    use waft_widgets::{GlobalKey, LabeledGlobalKey, SizedBox, WidgetsBinding};
+    use waft_widgets::{GlobalKey, SizedBox, WidgetsBinding};
 
     use super::*;
     use crate::test_support::{build, pump};
@@ -1572,7 +1572,7 @@ mod tests {
             HostState {
                 state: StateData::new(),
                 group_value: 0,
-                control_key: <dyn GlobalKey>::new(),
+                control_key: GlobalKey::new(),
             }
         }
     }
@@ -1580,7 +1580,7 @@ mod tests {
     struct HostState {
         state: StateData<Host>,
         group_value: u32,
-        control_key: LabeledGlobalKey,
+        control_key: GlobalKey,
     }
 
     impl State for HostState {
@@ -1609,7 +1609,7 @@ mod tests {
             .pressed_color(AnyColor::new(PRESSED))
             .border_color(AnyColor::new(BORDER))
             .disabled_children(self.widget(app).disabled.clone())
-            .key(Rc::new(app.get(self).control_key.clone()));
+            .key(app.get(self).control_key.clone().into());
             waft_widgets::Directionality::new(self.widget(app).text_direction, control)
                 .into_widget()
         }
@@ -1682,11 +1682,11 @@ mod tests {
     fn mount(disabled: Vec<u32>, text_direction: TextDirection) -> Mounted {
         let cell = crate::test_support::test_cell();
         let changes: Rc<RefCell<Vec<u32>>> = Rc::default();
-        let host_key = <dyn GlobalKey>::new();
+        let host_key = GlobalKey::new();
         build(
             &cell,
             Host {
-                key: Some(Rc::new(host_key.clone())),
+                key: Some(host_key.clone().into()),
                 changes: Rc::clone(&changes),
                 disabled,
                 text_direction,

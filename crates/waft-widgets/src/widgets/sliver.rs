@@ -2125,7 +2125,7 @@ mod tests {
     use crate::widgets::viewport::Viewport;
 
     fn key(value: u32) -> KeyRef {
-        Rc::new(ValueKey::new(value)) as KeyRef
+        KeyRef::from(ValueKey::new(value))
     }
 
     fn item(value: u32) -> WidgetRef {
