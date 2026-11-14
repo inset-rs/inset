@@ -1024,12 +1024,7 @@ impl Paragraph {
         let Some(line) = self.line_containing(byte, position.affinity) else {
             return TextRange::EMPTY;
         };
-        let text = self.inner.text();
-        let mut end = line.range.end;
-        if end > line.range.start && text.as_bytes().get(end - 1) == Some(&b'\n') {
-            end -= 1;
-        }
-        self.text_range(line.range.start..end)
+        self.text_range(line.range.start..line.text_end)
     }
 
     fn line_containing(&self, byte: usize, affinity: TextAffinity) -> Option<&valo::Line> {
@@ -1055,16 +1050,13 @@ impl Paragraph {
     /// of each laid out line.
     pub fn compute_line_metrics(&self) -> Vec<LineMetrics> {
         let lines = self.inner.lines();
-        let text = self.inner.text();
         lines
             .iter()
             .enumerate()
             .map(|(index, line)| {
                 let is_last = index + 1 == lines.len();
-                let ends_with_newline = line.range.end > line.range.start
-                    && text.as_bytes().get(line.range.end - 1) == Some(&b'\n');
                 LineMetrics {
-                    hard_break: is_last || ends_with_newline,
+                    hard_break: is_last || line.ends_with_hard_break(),
                     ascent: f64::from(line.ascent),
                     descent: f64::from(line.descent),
                     unscaled_ascent: f64::from(line.ascent),
@@ -1520,6 +1512,163 @@ mod layout_tests {
             past_the_end.grapheme_cluster_code_unit_range,
             TextRange::new(2, 3)
         );
+    }
+
+    /// Fails unless `found` is `wanted`, to within what adding a line's advances in another
+    /// order changes.
+    fn assert_same_place(found: Rect, wanted: Rect) {
+        let apart = [
+            found.left - wanted.left,
+            found.top - wanted.top,
+            found.right - wanted.right,
+            found.bottom - wanted.bottom,
+        ];
+        assert!(
+            apart.iter().all(|distance| distance.abs() < 0.01),
+            "{found:?} is not {wanted:?}"
+        );
+    }
+
+    /// A newline is a grapheme of its own, zero-width where its line's text ends, as Skia's
+    /// paragraph measures a hard line break: a caret before it stays on its line.
+    #[test]
+    fn a_newline_is_a_zero_width_glyph_where_its_lines_text_ends() {
+        let paragraph = paragraph("ab\ncd", ParagraphStyle::new(), f64::INFINITY);
+        let b = paragraph.get_glyph_info_at(1).expect("the b glyph");
+        assert_eq!(b.grapheme_cluster_code_unit_range, TextRange::new(1, 2));
+        let end_of_line = Rect::from_ltrb(
+            b.grapheme_cluster_layout_bounds.right,
+            b.grapheme_cluster_layout_bounds.top,
+            b.grapheme_cluster_layout_bounds.right,
+            b.grapheme_cluster_layout_bounds.bottom,
+        );
+
+        let newline = paragraph.get_glyph_info_at(2).expect("the newline");
+        assert_eq!(
+            newline.grapheme_cluster_code_unit_range,
+            TextRange::new(2, 3)
+        );
+        assert_same_place(newline.grapheme_cluster_layout_bounds, end_of_line);
+        assert_eq!(newline.writing_direction, TextDirection::Ltr);
+
+        let boxes =
+            paragraph.get_boxes_for_range(2, 3, BoxHeightStyle::Tight, BoxWidthStyle::Tight);
+        assert_eq!(boxes.len(), 1, "{boxes:?}");
+        assert_same_place(boxes[0].to_rect(), end_of_line);
+    }
+
+    /// An empty line has no glyph but its newline's, which is at the line's start.
+    #[test]
+    fn an_empty_lines_newline_is_a_zero_width_glyph_at_the_lines_start() {
+        let paragraph = paragraph("ab\n\ncd", ParagraphStyle::new(), f64::INFINITY);
+        let empty_line = paragraph.get_line_metrics_at(1).expect("the empty line");
+        let start_of_line = Rect::from_ltrb(
+            empty_line.left,
+            empty_line.baseline - empty_line.ascent,
+            empty_line.left,
+            empty_line.baseline + empty_line.descent,
+        );
+
+        let newline = paragraph
+            .get_glyph_info_at(3)
+            .expect("the empty line's newline");
+        assert_eq!(
+            newline.grapheme_cluster_code_unit_range,
+            TextRange::new(3, 4)
+        );
+        assert_same_place(newline.grapheme_cluster_layout_bounds, start_of_line);
+
+        let boxes =
+            paragraph.get_boxes_for_range(3, 4, BoxHeightStyle::Tight, BoxWidthStyle::Tight);
+        assert_eq!(boxes.len(), 1, "{boxes:?}");
+        assert_same_place(boxes[0].to_rect(), start_of_line);
+    }
+
+    /// A range that selects a line's text with its newline has the text's box alone, and one
+    /// across lines no box of a newline between them.
+    #[test]
+    fn a_newline_selected_with_text_adds_no_box() {
+        let paragraph = paragraph("ab\ncd", ParagraphStyle::new(), f64::INFINITY);
+        let boxes_of = |start, end| {
+            paragraph.get_boxes_for_range(start, end, BoxHeightStyle::Tight, BoxWidthStyle::Tight)
+        };
+        assert_eq!(boxes_of(0, 3), boxes_of(0, 2));
+        assert_eq!(boxes_of(0, 5).len(), 2);
+    }
+
+    /// A line separator ends its line as a newline does: Skia's paragraph treats every
+    /// character of the line-break classes LF and BK as a hard break.
+    #[test]
+    fn a_line_separator_ends_its_line_like_a_newline() {
+        let paragraph = paragraph("ab\u{2028}cd", ParagraphStyle::new(), f64::INFINITY);
+        assert_eq!(paragraph.number_of_lines(), 2);
+        let b = paragraph.get_glyph_info_at(1).expect("the b glyph");
+        let separator = paragraph.get_glyph_info_at(2).expect("the separator");
+        assert_eq!(
+            separator.grapheme_cluster_code_unit_range,
+            TextRange::new(2, 3)
+        );
+        let bounds = b.grapheme_cluster_layout_bounds;
+        let end_of_line = Rect::from_ltrb(bounds.right, bounds.top, bounds.right, bounds.bottom);
+        assert_same_place(separator.grapheme_cluster_layout_bounds, end_of_line);
+        assert_eq!(
+            paragraph.get_line_boundary(TextPosition::new(0)),
+            TextRange::new(0, 2)
+        );
+        assert!(paragraph.compute_line_metrics()[0].hard_break);
+    }
+
+    /// "\r\n" breaks once, at its line feed: the carriage return is trailing whitespace of the
+    /// line's text, where Skia's line text ends.
+    #[test]
+    fn a_carriage_return_line_feed_ends_its_line_at_the_line_feed() {
+        let paragraph = paragraph("ab\r\ncd", ParagraphStyle::new(), f64::INFINITY);
+        assert_eq!(paragraph.number_of_lines(), 2);
+        assert_eq!(paragraph.get_line_number_at(3), Some(0));
+        assert_eq!(paragraph.get_line_number_at(4), Some(1));
+        let b = paragraph.get_glyph_info_at(1).expect("the b glyph");
+        let carriage_return = paragraph.get_glyph_info_at(2).expect("the carriage return");
+        assert_eq!(
+            carriage_return.grapheme_cluster_layout_bounds.left,
+            b.grapheme_cluster_layout_bounds.right
+        );
+        let line_feed = paragraph.get_glyph_info_at(3).expect("the line feed");
+        assert_eq!(
+            line_feed.grapheme_cluster_code_unit_range,
+            TextRange::new(3, 4)
+        );
+        assert_eq!(line_feed.grapheme_cluster_layout_bounds.width(), 0.0);
+        assert_eq!(
+            line_feed.grapheme_cluster_layout_bounds.left,
+            carriage_return.grapheme_cluster_layout_bounds.right
+        );
+        assert_eq!(
+            paragraph.get_line_boundary(TextPosition::new(0)),
+            TextRange::new(0, 3)
+        );
+    }
+
+    /// In a right-to-left paragraph the newline takes the paragraph's direction, so it sits at
+    /// the left end of its line, where right-to-left text ends.
+    #[test]
+    fn a_right_to_left_lines_newline_is_at_its_left_end() {
+        let style = ParagraphStyle {
+            text_align: Some(TextAlign::Start),
+            text_direction: Some(TextDirection::Rtl),
+            ..ParagraphStyle::new()
+        };
+        let paragraph = paragraph("שלום\nשלום", style, 300.0);
+        let line = paragraph.get_line_metrics_at(0).expect("the first line");
+        let newline = paragraph.get_glyph_info_at(4).expect("the newline");
+        assert_eq!(newline.writing_direction, TextDirection::Rtl);
+        let start_of_line = Rect::from_ltrb(
+            line.left,
+            line.baseline - line.ascent,
+            line.left,
+            line.baseline + line.descent,
+        );
+        assert_same_place(newline.grapheme_cluster_layout_bounds, start_of_line);
+        assert!(line.left > 0.0, "the line is right-aligned");
     }
 
     #[test]

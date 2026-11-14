@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use waft_animation::Curve;
 use waft_embedder::{Clip, Offset};
-use waft_foundation::{App, CompleterFuture, Handle, Listener, wait_all};
+use waft_foundation::{App, CompleterFuture, Handle, HandleId, Listener, wait_all};
 use waft_gestures::{
     DeviceGestureSettings, Drag, DragDownDetails, DragEndDetails, DragGestureRecognizer,
     DragStartBehavior, DragStartDetails, DragUpdateDetails, GestureBinding,
@@ -930,6 +930,10 @@ impl RestorationMixin for ScrollableState {
 impl ScrollContext for Handle<ScrollableState> {
     fn type_name(&self) -> &'static str {
         "ScrollableState"
+    }
+
+    fn handle_id(&self) -> HandleId {
+        self.id()
     }
 
     fn vsync(&self) -> Rc<dyn TickerProvider> {

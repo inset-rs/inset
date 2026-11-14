@@ -1775,6 +1775,36 @@ mod tests {
         );
     }
 
+    /// A scrollable built as a list settles at its end and dropped in the same frame has its
+    /// metrics' notification still scheduled: the microtask finds it disposed and sends nothing,
+    /// as Flutter's does, rather than reaching a destroyed state.
+    #[test]
+    fn a_nested_scrollable_dropped_in_the_frame_it_was_laid_out_sends_no_metrics_notification() {
+        let cell = binding_cell();
+        let mut app = cell.borrow_mut();
+        let controller = ScrollController::default(&mut app);
+        let mut children = boxes(ITEM_COUNT);
+        for _ in 0..4 {
+            children.push(
+                crate::widgets::single_child_scroll_view::SingleChildScrollView::new()
+                    .scroll_direction(waft_painting::Axis::Horizontal)
+                    .child(SizedBox::new().width(1000.0).height(ITEM_EXTENT))
+                    .into_widget(),
+            );
+        }
+        let list = ListView::new()
+            .controller(controller.as_controller())
+            .children(children);
+        drop(app);
+        binding_mount(&cell, wrap(list));
+        let mut app = cell.borrow_mut();
+        controller.jump_to(&mut app, 100_000.0);
+        binding_pump(&mut app, std::time::Duration::ZERO);
+        app.drain_microtasks();
+        binding_pump(&mut app, std::time::Duration::ZERO);
+        app.drain_microtasks();
+    }
+
     fn item_count_under_view(app: &mut App) -> usize {
         let root = crate::binding::WidgetsBinding::instance(app)
             .root_element(app)

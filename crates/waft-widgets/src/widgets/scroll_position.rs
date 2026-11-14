@@ -1040,7 +1040,16 @@ impl ScrollPositionBase {
                 .scroll_position_data(app)
                 .have_scheduled_update_notification
             {
-                app.schedule_microtask(Listener::handle_method(this, P::did_update_scroll_metrics));
+                // Dart's microtask holds the position, and through it its context, until it runs
+                // (scroll_position.dart:678-680): a scrollable disposed in this frame stays
+                // readable, its notification context `null` (scrollable.dart:603), so nothing is
+                // sent (scroll_position.dart:1089). A position is never destroyed, so its context
+                // is all there is to keep.
+                let context_retained = app.retain_id(this.context(app).handle_id());
+                app.schedule_microtask(Listener::new(move |app| {
+                    let _context_retained = &context_retained;
+                    P::did_update_scroll_metrics(this, app);
+                }));
                 this.scroll_position_data_mut(app)
                     .have_scheduled_update_notification = true;
             }

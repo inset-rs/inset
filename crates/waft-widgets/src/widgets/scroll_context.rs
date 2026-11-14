@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use waft_foundation::App;
+use waft_foundation::{App, HandleId};
 use waft_painting::AxisDirection;
 use waft_scheduler::TickerProvider;
 
@@ -25,6 +25,10 @@ use crate::framework::BuildContext;
 pub trait ScrollContext {
     /// Dart's `context.runtimeType`, for a debug description.
     fn type_name(&self) -> &'static str;
+
+    /// The handle of the object that is this context, which a callback scheduled for later keeps
+    /// past the object's dispose with `App::retain_id`, as the callback's reference keeps it in Dart.
+    fn handle_id(&self) -> HandleId;
 
     /// The [`BuildContext`] that should be used when dispatching
     /// `ScrollNotification`s.

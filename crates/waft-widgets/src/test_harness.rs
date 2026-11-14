@@ -6,7 +6,7 @@
 use std::rc::Rc;
 
 use waft_embedder::{View as EmbedderView, ViewConstraints, ViewId, ViewMetrics};
-use waft_foundation::{App, AppCell, Handle};
+use waft_foundation::{App, AppCell, Handle, HandleId};
 use waft_rendering::{AnyRenderObject, PipelineOwner, RenderHandle, RenderView, ViewConfiguration};
 use waft_test::{IMPLICIT_VIEW_ID, TestPlatform};
 
@@ -343,6 +343,10 @@ impl waft_scheduler::TickerProviderObject for TestScrollContext {
 impl ScrollContext for Handle<TestScrollContext> {
     fn type_name(&self) -> &'static str {
         "TestScrollContext"
+    }
+
+    fn handle_id(&self) -> HandleId {
+        self.id()
     }
 
     fn vsync(&self) -> Rc<dyn TickerProvider> {

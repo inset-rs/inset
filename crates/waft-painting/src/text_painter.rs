@@ -1619,6 +1619,169 @@ mod tests {
         assert_eq!(painter.get_offset_after(5), None);
     }
 
+    /// The carets of Flutter's `handles newlines properly`, for explicit newlines: a caret is
+    /// where its offset says whatever its affinity, before a newline at the end of that line's
+    /// text, and after one at the start of the next line.
+    #[test]
+    fn a_caret_beside_a_newline_is_on_the_line_its_offset_says() {
+        let mut fonts = fonts();
+        let mut painter = painter("aaa\n\n\n");
+        painter.layout(&mut fonts, 0.0, f64::INFINITY);
+        let lines = painter.compute_line_metrics();
+        let top_of = |line: usize| lines[line].baseline - lines[line].ascent;
+        let text_width = lines[0].width;
+        assert!(text_width > 0.0);
+        let wanted = [
+            (3, Offset::new(text_width, top_of(0))),
+            (4, Offset::new(0.0, top_of(1))),
+            (5, Offset::new(0.0, top_of(2))),
+            (6, Offset::new(0.0, top_of(3))),
+        ];
+        for (offset, caret) in wanted {
+            for affinity in [TextAffinity::Downstream, TextAffinity::Upstream] {
+                let position = TextPosition::with_affinity(offset, affinity);
+                let found = painter.get_offset_for_caret(&mut fonts, position, Rect::ZERO);
+                assert!(
+                    (found - caret).distance() < 0.01,
+                    "the caret at {position:?} is at {found:?}, not {caret:?}"
+                );
+            }
+        }
+    }
+
+    /// A caret as `(offset, line, x)`: at `offset`, whatever its affinity, at `x` on top of
+    /// `line`.
+    type Caret = (i32, usize, f64);
+
+    /// Fails unless each of `wanted` is where its caret is.
+    fn assert_carets(painter: &mut TextPainter, fonts: &mut FontCollection, wanted: &[Caret]) {
+        let lines = painter.compute_line_metrics();
+        for &(offset, line, x) in wanted {
+            let caret = Offset::new(x, lines[line].baseline - lines[line].ascent);
+            for affinity in [TextAffinity::Downstream, TextAffinity::Upstream] {
+                let position = TextPosition::with_affinity(offset, affinity);
+                let found = painter.get_offset_for_caret(fonts, position, Rect::ZERO);
+                assert!(
+                    (found - caret).distance() < 0.01,
+                    "the caret at {position:?} is at {found:?}, not {caret:?}"
+                );
+            }
+        }
+    }
+
+    /// The rest of Flutter's `handles newlines properly` for explicit newlines: blank lines,
+    /// leading and trailing newlines, and a newline between lines of text.
+    #[test]
+    fn handles_newlines_properly() {
+        let mut fonts = fonts();
+        let cases: [(&str, &[Caret]); 4] = [
+            ("\n\n", &[(0, 0, 0.0), (1, 1, 0.0), (2, 2, 0.0)]),
+            ("\naaa", &[(0, 0, 0.0), (1, 1, 0.0)]),
+            ("aaa\naaa", &[(4, 1, 0.0)]),
+            (
+                "\n\n\naaa",
+                &[(0, 0, 0.0), (1, 1, 0.0), (2, 2, 0.0), (3, 3, 0.0)],
+            ),
+        ];
+        for (text, wanted) in cases {
+            let mut painter = painter(text);
+            painter.layout(&mut fonts, 0.0, f64::INFINITY);
+            assert_carets(&mut painter, &mut fonts, wanted);
+        }
+        let mut painter = painter("aaa\n");
+        painter.layout(&mut fonts, 0.0, f64::INFINITY);
+        assert_carets(&mut painter, &mut fonts, &[(4, 1, 0.0)]);
+    }
+
+    /// Flutter's `handles newlines properly` for a soft wrap: affinity tells the end of the
+    /// first line from the start of the second. Wrapped at a space, which ends the first line
+    /// as a ghost, since valo breaks no word.
+    #[test]
+    fn affinity_tells_a_soft_wraps_two_carets_apart() {
+        let mut fonts = fonts();
+        let mut first = painter("aaa ");
+        first.layout(&mut fonts, 0.0, f64::INFINITY);
+        let mut painter = painter("aaa aaaa");
+        painter.layout(&mut fonts, 0.0, first.max_intrinsic_width() + 1.0);
+        let lines = painter.compute_line_metrics();
+        assert_eq!(lines.len(), 2);
+        let downstream = painter.get_offset_for_caret(&mut fonts, TextPosition::new(4), Rect::ZERO);
+        let start_of_second = Offset::new(0.0, lines[1].baseline - lines[1].ascent);
+        assert!(
+            (downstream - start_of_second).distance() < 0.01,
+            "{downstream:?}"
+        );
+        let space = painter.get_boxes_for_selection(
+            TextSelection::new(3, 4),
+            BoxHeightStyle::Tight,
+            BoxWidthStyle::Tight,
+        );
+        assert!(
+            space[0].right > lines[0].width,
+            "the space hangs past the line's width"
+        );
+        // `getOffsetForCaret` clamps a caret after trailing whitespace to the content width.
+        let end_of_first = Offset::new(
+            space[0].right.min(painter.width()),
+            lines[0].baseline - lines[0].ascent,
+        );
+        let upstream = TextPosition::with_affinity(4, TextAffinity::Upstream);
+        let upstream = painter.get_offset_for_caret(&mut fonts, upstream, Rect::ZERO);
+        assert!(
+            (upstream - end_of_first).distance() < 0.01,
+            "{upstream:?} is not {end_of_first:?}"
+        );
+    }
+
+    /// Flutter's `trailing newlines`: the end-of-text caret after trailing spaces sits after
+    /// the last space, which the line keeps outside its width.
+    #[test]
+    fn the_end_of_text_caret_follows_trailing_spaces() {
+        let mut fonts = fonts();
+        let mut painter = painter("a    ");
+        painter.layout(&mut fonts, 1000.0, 1000.0);
+        let end = painter.get_offset_for_caret(&mut fonts, TextPosition::new(5), Rect::ZERO);
+        let boxes = painter.get_boxes_for_selection(
+            TextSelection::new(0, 5),
+            BoxHeightStyle::Tight,
+            BoxWidthStyle::Tight,
+        );
+        let right = boxes
+            .iter()
+            .map(|text_box| text_box.right)
+            .fold(f64::MIN, f64::max);
+        assert!(
+            right > painter.compute_line_metrics()[0].width + 1.0,
+            "the spaces are boxed"
+        );
+        assert!((end.dx() - right).abs() < 0.01, "{end:?} is not at {right}");
+    }
+
+    /// A caret before a newline that text follows stays at the end of its own line.
+    #[test]
+    fn a_caret_before_a_newline_between_lines_of_text_ends_its_line() {
+        let mut fonts = fonts();
+        let mut painter = painter("aaa\naaa");
+        painter.layout(&mut fonts, 0.0, f64::INFINITY);
+        let lines = painter.compute_line_metrics();
+        let end_of_first = Offset::new(lines[0].width, lines[0].baseline - lines[0].ascent);
+        let start_of_second = Offset::new(0.0, lines[1].baseline - lines[1].ascent);
+        for affinity in [TextAffinity::Downstream, TextAffinity::Upstream] {
+            let before = TextPosition::with_affinity(3, affinity);
+            let found = painter.get_offset_for_caret(&mut fonts, before, Rect::ZERO);
+            assert!(
+                (found - end_of_first).distance() < 0.01,
+                "the caret at {before:?} is at {found:?}, not {end_of_first:?}"
+            );
+            let after = TextPosition::with_affinity(4, affinity);
+            let found = painter.get_offset_for_caret(&mut fonts, after, Rect::ZERO);
+            assert!(
+                (found - start_of_second).distance() < 0.01,
+                "the caret at {after:?} is at {found:?}, not {start_of_second:?}"
+            );
+        }
+    }
+
     #[test]
     fn preferred_line_height_needs_no_layout() {
         let mut fonts = fonts();
