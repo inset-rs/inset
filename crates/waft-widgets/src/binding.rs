@@ -198,7 +198,8 @@ pub trait WidgetsBindingObserver {
     /// Called when the user asks to close such a view: whoever builds it decides.
     ///
     /// Answers whether this observer handled it. The first one that answers `true` stops the
-    /// others from being asked, as with [`did_pop_route`](Self::did_pop_route).
+    /// others from being asked, as with [`did_pop_route`](Self::did_pop_route); where none does,
+    /// the view closes, or, the app's last, asks to quit.
     fn did_request_view_close(&self, app: &mut App, view: ViewId) -> bool {
         let _ = (app, view);
         false
@@ -592,12 +593,18 @@ impl WidgetsBinding {
         }
     }
 
-    /// The user asked to close `view`: the first observer that handles it decides.
+    /// The user asked to close `view`: the first observer that handles it decides, and where none
+    /// does, the close rule closes it, as Flutter's window delegate destroys a window by default
+    /// (`onWindowCloseRequested`).
     fn handle_view_close_requested(self: Handle<Self>, app: &mut App, view: ViewId) {
         for observer in app.get(self).observers.clone() {
             if observer.did_request_view_close(app, view) {
                 return;
             }
+        }
+        let shown = app.platform().views();
+        if let Some(view) = shown.iter().find(|shown| shown.id() == view) {
+            close_or_ask_to_quit(app, view);
         }
     }
 

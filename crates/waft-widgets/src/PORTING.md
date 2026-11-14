@@ -120,7 +120,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 - Change: `WidgetsBindingObserver` hears every view the platform adds or removes for the app (`did_add_view`, `did_remove_view`), whoever started it, a request to close one (`did_request_view_close`) and a request for a view that got none (`did_fail_view_request`), where Flutter tells only `didChangeMetrics` and a listener compares `platformDispatcher.views` with what it had.
   Reason: platform — the host reports each view's arrival, departure and close request by view, and a view the app asked for arrives as one the system made or restored does, as an iOS scene connects or an Android activity is created, carrying the initial data it was asked for with.
-  Affect: an app decides what goes in each view as it arrives, from its initial data, a view on a composition layer of the app's own among them; a close request stops at the first observer that answers `true`, which is whoever builds the view.
+  Affect: an app decides what goes in each view as it arrives, from its initial data, a view on a composition layer of the app's own among them; a close request stops at the first observer that answers `true`, which is whoever builds the view, and one no observer answers closes the view by the close rule, as Flutter's window delegate destroys a window by default, so a close that comes before the view's first build is not lost.
 
 - Change: each element marked dirty outside a build pass asks for a frame of its own view, or of every view for one above every `View`, where Flutter asks once for the first.
   Reason: platform — another view may be hidden and get no frames, while each frame builds every dirty element.
