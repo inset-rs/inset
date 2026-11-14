@@ -1,7 +1,8 @@
 //! Flutter counterpart: `painting/borders.dart`.
 
 use std::any::Any;
-use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::fmt::{self, Debug, Formatter, Result as FmtResult};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use waft_embedder::{Canvas, FillRule, Paint, PaintStyle, Path, PathBuilder, Stroke};
@@ -829,6 +830,104 @@ pub fn paint_border(
             canvas.draw_path(&path.build(), FillRule::NonZero, &paint);
         }
         BorderStyle::None => {}
+    }
+}
+
+/// A `BorderSide` subclass's own part, carried by an [`AnyBorderSide`]: Dart's `class Foo extends BorderSide`.
+pub trait BorderSideExtension: Any + Debug {
+    /// The extension as `Any`, for Dart's `is` checks ([`AnyBorderSide::extension`]).
+    fn as_any(&self) -> &dyn Any;
+
+    /// Dart's `==` override on the subclass, called once the values compared equal. `other`
+    /// is the same runtime type when it downcasts; any other type is unequal, as Dart's
+    /// `runtimeType` check makes it.
+    fn eq_extension(&self, other: &dyn BorderSideExtension) -> bool;
+}
+
+/// A `BorderSide` that may be an instance of a `BorderSide` subclass, as [`AnyColor`](crate::AnyColor) is
+/// for `Color`.
+///
+/// The framework stores this wherever Flutter stores a `BorderSide` that may be a subclass
+/// (`WidgetStateBorderSide`). The plain value is the one the subclass passed to `super`, reached
+/// by [`value`](Self::value) or by deref; the subclass is recovered with
+/// [`extension`](Self::extension), Dart's `is` check.
+///
+/// Equality follows Dart's: two plain values compare by value, two extended ones by value
+/// and by the subclass's `==`, and a plain value never equals an extended one.
+#[derive(Clone)]
+pub struct AnyBorderSide {
+    value: BorderSide,
+    extension: Option<Rc<dyn BorderSideExtension>>,
+}
+
+impl AnyBorderSide {
+    /// A plain value.
+    pub fn new(value: BorderSide) -> AnyBorderSide {
+        AnyBorderSide {
+            value,
+            extension: None,
+        }
+    }
+
+    /// A subclass instance: `value` is what it passed to `super`.
+    pub fn with_shared(value: BorderSide, extension: Rc<dyn BorderSideExtension>) -> AnyBorderSide {
+        AnyBorderSide {
+            value,
+            extension: Some(extension),
+        }
+    }
+
+    /// The plain value: the subclass's `super` value.
+    pub fn value(&self) -> &BorderSide {
+        &self.value
+    }
+
+    /// Dart's `value is T`: the subclass instance, if this value is one.
+    pub fn extension<E: BorderSideExtension>(&self) -> Option<&E> {
+        self.extension
+            .as_ref()
+            .and_then(|extension| extension.as_any().downcast_ref::<E>())
+    }
+
+    /// Whether this value is a subclass instance.
+    pub fn has_extension(&self) -> bool {
+        self.extension.is_some()
+    }
+}
+
+impl std::ops::Deref for AnyBorderSide {
+    type Target = BorderSide;
+
+    fn deref(&self) -> &BorderSide {
+        &self.value
+    }
+}
+
+impl From<BorderSide> for AnyBorderSide {
+    fn from(value: BorderSide) -> AnyBorderSide {
+        AnyBorderSide::new(value)
+    }
+}
+
+impl PartialEq for AnyBorderSide {
+    fn eq(&self, other: &AnyBorderSide) -> bool {
+        if self.value != other.value {
+            return false;
+        }
+        match (&self.extension, &other.extension) {
+            (None, None) => true,
+            (Some(mine), Some(theirs)) => mine.eq_extension(&**theirs),
+            _ => false,
+        }
+    }
+}
+
+impl Debug for AnyBorderSide {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.extension {
+            Some(extension) => extension.fmt(f),
+            None => self.value.fmt(f),
+        }
     }
 }
 

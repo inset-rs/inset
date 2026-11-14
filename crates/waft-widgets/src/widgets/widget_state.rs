@@ -1,9 +1,4 @@
 //! Flutter counterpart: `widgets/widget_state.dart`.
-//!
-//! `WidgetStateBorderSide`, `WidgetStateOutlinedBorder`, and `WidgetStateTextStyle` (with
-//! `_LerpSides`) wait: painting's `BorderSide` and `TextStyle` are plain values with no
-//! extension slot to carry a resolver, and `OutlinedBorder` has no stand-in for Dart's
-//! `RoundedRectangleBorder` default. See the crate's PORTING.md.
 
 use std::any::{Any, type_name};
 use std::collections::HashSet;
@@ -11,9 +6,15 @@ use std::fmt::{self, Debug};
 use std::ops::{BitAnd, BitOr, Deref, Not};
 use std::rc::Rc;
 
-use waft_embedder::Color;
+use std::sync::Arc;
+
+use waft_embedder::{Canvas, Color, Offset, Paint, Path, Rect};
 use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB};
-use waft_painting::{AnyColor, ColorExtension};
+use waft_painting::{
+    AnyBorderSide, AnyColor, AnyTextStyle, BorderSide, BorderSideExtension, ColorExtension,
+    EdgeInsetsGeometry, OutlinedBorder, RoundedRectangleBorder, ShapeBorder, TextDirection,
+    TextStyle, TextStyleExtension,
+};
 use waft_services::{MouseCursor, MouseCursorRef, MouseCursorSession, SystemMouseCursors};
 
 /// Dart's `Set<WidgetState>`: the interactive states a widget is in.
@@ -743,8 +744,520 @@ impl MaybeWidgetStateProperty<MouseCursorRef> for MouseCursorRef {
     }
 }
 
-// `WidgetStateBorderSide`, `_LerpSides`, `WidgetStateOutlinedBorder`, and `WidgetStateTextStyle`
-// wait; see the crate's PORTING.md.
+/// Defines a `BorderSide` whose value depends on a set of [`WidgetState`]s which represent
+/// the interactive state of a component.
+///
+/// To use a [`WidgetStateBorderSide`], you can either:
+///   1. Create a subclass of [`WidgetStateBorderSide`] and implement the abstract
+///      `resolve` method.
+///   2. Use [`WidgetStateBorderSide::resolve_with`] and pass in a callback that will be used
+///      to resolve the color in the given states.
+///   3. Use [`WidgetStateBorderSide::from_map`] to assign a value using a [`WidgetStateMap`].
+///
+/// If a [`WidgetStateBorderSide`] is used for a property or a parameter that doesn't
+/// support resolving [`WidgetStateProperty<Option<BorderSide>>`]s, then its default value
+/// will be used for all states.
+///
+/// It is the `BorderSide` it is in Dart once erased with [`into_any`](Self::into_any) (or
+/// `.into()`): an [`AnyBorderSide`] whose value is Dart's `super` value, the default
+/// `BorderSide`, and whose extension is this object, recovered with
+/// `side.extension::<WidgetStateBorderSide>()`.
+pub struct WidgetStateBorderSide {
+    subclass: BorderSideSubclass,
+}
+
+/// Dart's two private subclasses of `WidgetStateBorderSide`.
+enum BorderSideSubclass {
+    /// `_WidgetStateBorderSide`.
+    ResolveWith(WidgetPropertyResolver<Option<BorderSide>>),
+    /// `_WidgetBorderSideMapper`.
+    Mapper(WidgetStateMapper<Option<BorderSide>>),
+}
+
+impl WidgetStateBorderSide {
+    /// Creates a [`WidgetStateBorderSide`] from a [`WidgetPropertyResolver<Option<BorderSide>>`]
+    /// callback function.
+    ///
+    /// If used as a regular `BorderSide`, its behavior matches an empty `BorderSide()`
+    /// constructor.
+    pub fn resolve_with(
+        callback: impl Fn(&WidgetStates) -> Option<BorderSide> + 'static,
+    ) -> WidgetStateBorderSide {
+        WidgetStateBorderSide {
+            subclass: BorderSideSubclass::ResolveWith(Rc::new(callback)),
+        }
+    }
+
+    /// Creates a [`WidgetStateBorderSide`] from a [`WidgetStateMap`].
+    ///
+    /// This constructor's [`resolve`](WidgetStateProperty::resolve) method finds the first
+    /// entry whose key is satisfied by the set of states, and returns its associated value.
+    pub fn from_map(map: WidgetStateMap<Option<BorderSide>>) -> WidgetStateBorderSide {
+        WidgetStateBorderSide {
+            subclass: BorderSideSubclass::Mapper(WidgetStateMapper::new(map)),
+        }
+    }
+
+    /// The side as the `BorderSide` it is in Dart: the default `BorderSide`, carrying this
+    /// object as the extension.
+    pub fn into_any(self) -> AnyBorderSide {
+        AnyBorderSide::with_shared(BorderSide::default(), Rc::new(self))
+    }
+
+    /// Linearly interpolate between two [`WidgetStateProperty`]s of `BorderSide`.
+    pub fn lerp(
+        a: Option<WidgetStatePropertyRef<Option<BorderSide>>>,
+        b: Option<WidgetStatePropertyRef<Option<BorderSide>>>,
+        t: f64,
+    ) -> Option<WidgetStatePropertyRef<Option<BorderSide>>> {
+        // Avoid creating a _LerpSides object for a common case.
+        if a.is_none() && b.is_none() {
+            return None;
+        }
+        if let (Some(a), Some(b)) = (&a, &b)
+            && Rc::ptr_eq(a, b)
+        {
+            return Some(Rc::clone(a));
+        }
+        Some(Rc::new(LerpSides { a, b, t }))
+    }
+}
+
+impl WidgetStateProperty<Option<BorderSide>> for WidgetStateBorderSide {
+    fn resolve(&self, states: &WidgetStates) -> Option<BorderSide> {
+        match &self.subclass {
+            BorderSideSubclass::ResolveWith(resolve) => resolve(states),
+            BorderSideSubclass::Mapper(mapper) => mapper.resolve(states),
+        }
+    }
+}
+
+impl BorderSideExtension for WidgetStateBorderSide {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    // Dart's `BorderSide.==` compares runtime types (values are already equal here); the
+    // mapper subclass compares maps instead.
+    fn eq_extension(&self, other: &dyn BorderSideExtension) -> bool {
+        other
+            .as_any()
+            .downcast_ref::<WidgetStateBorderSide>()
+            .is_some_and(|other| match (&self.subclass, &other.subclass) {
+                (BorderSideSubclass::ResolveWith(_), BorderSideSubclass::ResolveWith(_)) => true,
+                (BorderSideSubclass::Mapper(mine), BorderSideSubclass::Mapper(theirs)) => {
+                    mine == theirs
+                }
+                _ => false,
+            })
+    }
+}
+
+impl Debug for WidgetStateBorderSide {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.subclass {
+            BorderSideSubclass::ResolveWith(_) => f.write_str("WidgetStateBorderSide.resolveWith"),
+            BorderSideSubclass::Mapper(mapper) => mapper.fmt(f),
+        }
+    }
+}
+
+impl From<WidgetStateBorderSide> for AnyBorderSide {
+    fn from(side: WidgetStateBorderSide) -> AnyBorderSide {
+        side.into_any()
+    }
+}
+
+/// Dart's `T?` is `BorderSide?`: a `WidgetStateBorderSide` resolves to an optional side.
+impl MaybeWidgetStateProperty<Option<BorderSide>> for Option<AnyBorderSide> {
+    fn as_widget_state_property(&self) -> Option<&dyn WidgetStateProperty<Option<BorderSide>>> {
+        self.as_ref()
+            .and_then(|side| side.extension::<WidgetStateBorderSide>())
+            .map(|side| side as &dyn WidgetStateProperty<Option<BorderSide>>)
+    }
+
+    fn from_resolved(value: Option<BorderSide>) -> Option<AnyBorderSide> {
+        value.map(AnyBorderSide::new)
+    }
+}
+
+/// Dart's `_LerpSides`.
+struct LerpSides {
+    a: Option<WidgetStatePropertyRef<Option<BorderSide>>>,
+    b: Option<WidgetStatePropertyRef<Option<BorderSide>>>,
+    t: f64,
+}
+
+impl WidgetStateProperty<Option<BorderSide>> for LerpSides {
+    fn resolve(&self, states: &WidgetStates) -> Option<BorderSide> {
+        let resolved_a = self.a.as_ref().and_then(|a| a.resolve(states));
+        let resolved_b = self.b.as_ref().and_then(|b| b.resolve(states));
+        match (resolved_a, resolved_b) {
+            (None, None) => None,
+            (None, Some(resolved_b)) => Some(BorderSide::lerp(
+                BorderSide {
+                    width: 0.0,
+                    color: resolved_b.color.with_alpha(0),
+                    ..BorderSide::default()
+                },
+                resolved_b,
+                self.t,
+            )),
+            (Some(resolved_a), None) => Some(BorderSide::lerp(
+                resolved_a,
+                BorderSide {
+                    width: 0.0,
+                    color: resolved_a.color.with_alpha(0),
+                    ..BorderSide::default()
+                },
+                self.t,
+            )),
+            (Some(resolved_a), Some(resolved_b)) => {
+                Some(BorderSide::lerp(resolved_a, resolved_b, self.t))
+            }
+        }
+    }
+}
+
+impl Debug for LerpSides {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "_LerpSides({:?}, {:?}, {})", self.a, self.b, self.t)
+    }
+}
+
+/// Defines an `OutlinedBorder` whose value depends on a set of [`WidgetState`]s which
+/// represent the interactive state of a component.
+///
+/// To use a [`WidgetStateOutlinedBorder`], you should create a subclass of a
+/// [`WidgetStateOutlinedBorder`] and override the abstract `resolve` method, or use
+/// [`WidgetStateOutlinedBorder::resolve_with`] or [`WidgetStateOutlinedBorder::from_map`].
+///
+/// If a [`WidgetStateOutlinedBorder`] is used for a property or a parameter that doesn't
+/// support resolving [`WidgetStateProperty<Option<Box<dyn OutlinedBorder>>>`]s, then its
+/// default value, Dart's `RoundedRectangleBorder()`, will be used for all states.
+///
+/// It is itself an `OutlinedBorder`, as `OutlinedBorder` is a trait here: a
+/// `Box<dyn OutlinedBorder>` is recovered with
+/// `border.as_any().downcast_ref::<WidgetStateOutlinedBorder>()`.
+#[derive(Clone)]
+pub struct WidgetStateOutlinedBorder {
+    subclass: OutlinedBorderSubclass,
+    /// Dart's `super`: `_WidgetStateOutlinedBorder extends RoundedRectangleBorder`.
+    border: RoundedRectangleBorder,
+}
+
+/// Dart's two private subclasses of `WidgetStateOutlinedBorder`.
+#[derive(Clone)]
+enum OutlinedBorderSubclass {
+    /// `_WidgetStateOutlinedBorder`.
+    ResolveWith(WidgetPropertyResolver<Option<Box<dyn OutlinedBorder>>>),
+    /// `_WidgetOutlinedBorderMapper`.
+    Mapper(Rc<WidgetStateMapper<Option<Box<dyn OutlinedBorder>>>>),
+}
+
+impl WidgetStateOutlinedBorder {
+    /// Creates a [`WidgetStateOutlinedBorder`] from a [`WidgetPropertyResolver`] callback
+    /// function.
+    ///
+    /// If used as a regular `OutlinedBorder`, it acts the same as an empty
+    /// `RoundedRectangleBorder()` constructor.
+    pub fn resolve_with(
+        callback: impl Fn(&WidgetStates) -> Option<Box<dyn OutlinedBorder>> + 'static,
+    ) -> WidgetStateOutlinedBorder {
+        WidgetStateOutlinedBorder {
+            subclass: OutlinedBorderSubclass::ResolveWith(Rc::new(callback)),
+            border: RoundedRectangleBorder::default(),
+        }
+    }
+
+    /// Creates a [`WidgetStateOutlinedBorder`] from a [`WidgetStateMap`].
+    ///
+    /// This constructor's [`resolve`](WidgetStateProperty::resolve) method finds the first
+    /// entry whose key is satisfied by the set of states, and returns its associated value.
+    pub fn from_map(
+        map: WidgetStateMap<Option<Box<dyn OutlinedBorder>>>,
+    ) -> WidgetStateOutlinedBorder {
+        WidgetStateOutlinedBorder {
+            subclass: OutlinedBorderSubclass::Mapper(Rc::new(WidgetStateMapper::new(map))),
+            border: RoundedRectangleBorder::default(),
+        }
+    }
+}
+
+impl WidgetStateProperty<Option<Box<dyn OutlinedBorder>>> for WidgetStateOutlinedBorder {
+    fn resolve(&self, states: &WidgetStates) -> Option<Box<dyn OutlinedBorder>> {
+        match &self.subclass {
+            OutlinedBorderSubclass::ResolveWith(resolve) => resolve(states),
+            OutlinedBorderSubclass::Mapper(mapper) => mapper.resolve(states),
+        }
+    }
+}
+
+impl Debug for WidgetStateOutlinedBorder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.subclass {
+            OutlinedBorderSubclass::ResolveWith(_) => {
+                f.write_str("WidgetStateOutlinedBorder.resolveWith")
+            }
+            OutlinedBorderSubclass::Mapper(mapper) => mapper.fmt(f),
+        }
+    }
+}
+
+/// Dart's `mapEquals` over two border maps, comparing borders by `==`.
+fn outlined_border_maps_equal(
+    a: &WidgetStateMapper<Option<Box<dyn OutlinedBorder>>>,
+    b: &WidgetStateMapper<Option<Box<dyn OutlinedBorder>>>,
+) -> bool {
+    let same =
+        |x: &Option<Box<dyn OutlinedBorder>>, y: &Option<Box<dyn OutlinedBorder>>| match (x, y) {
+            (None, None) => true,
+            (Some(x), Some(y)) => x.eq_shape(&**y as &dyn ShapeBorder),
+            _ => false,
+        };
+    a.map.len() == b.map.len()
+        && a.map.iter().all(|(key, value)| {
+            b.map
+                .iter()
+                .any(|(other_key, other_value)| other_key == key && same(value, other_value))
+        })
+}
+
+/// `_WidgetStateOutlinedBorder extends RoundedRectangleBorder`: every `ShapeBorder` member is
+/// the default rounded rectangle's.
+impl ShapeBorder for WidgetStateOutlinedBorder {
+    fn dimensions(&self) -> EdgeInsetsGeometry {
+        self.border.dimensions()
+    }
+
+    fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
+        ShapeBorder::scale(&self.border, t)
+    }
+
+    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+        self.border.lerp_from(a, t)
+    }
+
+    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+        self.border.lerp_to(b, t)
+    }
+
+    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+        self.border.get_outer_path(rect, text_direction)
+    }
+
+    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+        self.border.get_inner_path(rect, text_direction)
+    }
+
+    fn hit_test(
+        &self,
+        rect: Rect,
+        position: Offset,
+        text_direction: Option<TextDirection>,
+    ) -> bool {
+        self.border.hit_test(rect, position, text_direction)
+    }
+
+    fn paint_interior(
+        &self,
+        canvas: &mut Canvas,
+        rect: Rect,
+        paint: &Paint,
+        text_direction: Option<TextDirection>,
+    ) {
+        self.border
+            .paint_interior(canvas, rect, paint, text_direction);
+    }
+
+    fn prefer_paint_interior(&self) -> bool {
+        self.border.prefer_paint_interior()
+    }
+
+    fn paint(&self, canvas: &mut Canvas, rect: Rect, text_direction: Option<TextDirection>) {
+        self.border.paint(canvas, rect, text_direction);
+    }
+
+    fn clone_box(&self) -> Box<dyn ShapeBorder> {
+        Box::new(self.clone())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_outlined_border(&self) -> Option<&dyn OutlinedBorder> {
+        Some(self)
+    }
+
+    // Dart's `RoundedRectangleBorder.==`: the same runtime type and fields; the mapper
+    // compares maps.
+    fn eq_shape(&self, other: &dyn ShapeBorder) -> bool {
+        other
+            .as_any()
+            .downcast_ref::<WidgetStateOutlinedBorder>()
+            .is_some_and(|other| {
+                self.border.eq_shape(&other.border)
+                    && match (&self.subclass, &other.subclass) {
+                        (
+                            OutlinedBorderSubclass::ResolveWith(_),
+                            OutlinedBorderSubclass::ResolveWith(_),
+                        ) => true,
+                        (
+                            OutlinedBorderSubclass::Mapper(mine),
+                            OutlinedBorderSubclass::Mapper(theirs),
+                        ) => outlined_border_maps_equal(mine, theirs),
+                        _ => false,
+                    }
+            })
+    }
+}
+
+impl OutlinedBorder for WidgetStateOutlinedBorder {
+    fn side(&self) -> BorderSide {
+        self.border.side()
+    }
+
+    fn copy_with(&self, side: Option<BorderSide>) -> Box<dyn OutlinedBorder> {
+        OutlinedBorder::copy_with(&self.border, side)
+    }
+
+    fn clone_outlined(&self) -> Box<dyn OutlinedBorder> {
+        Box::new(self.clone())
+    }
+}
+
+/// Dart's `T?` is `OutlinedBorder?`: a `WidgetStateOutlinedBorder` resolves to an optional
+/// border.
+impl MaybeWidgetStateProperty<Option<Box<dyn OutlinedBorder>>> for Option<Box<dyn OutlinedBorder>> {
+    fn as_widget_state_property(
+        &self,
+    ) -> Option<&dyn WidgetStateProperty<Option<Box<dyn OutlinedBorder>>>> {
+        self.as_ref()
+            .and_then(|border| border.as_any().downcast_ref::<WidgetStateOutlinedBorder>())
+            .map(|border| border as &dyn WidgetStateProperty<Option<Box<dyn OutlinedBorder>>>)
+    }
+
+    fn from_resolved(value: Option<Box<dyn OutlinedBorder>>) -> Option<Box<dyn OutlinedBorder>> {
+        value
+    }
+}
+
+/// Defines a `TextStyle` that is also a [`WidgetStateProperty`].
+///
+/// This class exists to enable widgets with `TextStyle` valued properties to also accept
+/// `WidgetStateProperty<TextStyle>` values. A widget state text style property represents a
+/// text style which depends on a widget's "interactive state". This state is represented as
+/// a set of [`WidgetState`]s, like [`WidgetState::Pressed`], [`WidgetState::Focused`] and
+/// [`WidgetState::Hovered`].
+///
+/// [`WidgetStateTextStyle`] should only be used with widgets that document their support,
+/// like `InputDecoration.labelStyle`.
+///
+/// It is the `TextStyle` it is in Dart once erased with [`into_any`](Self::into_any) (or
+/// `.into()`): an [`AnyTextStyle`] whose value is Dart's `super` value, the empty
+/// `TextStyle()`, and whose extension is this object, recovered with
+/// `style.extension::<WidgetStateTextStyle>()`.
+pub struct WidgetStateTextStyle {
+    subclass: TextStyleSubclass,
+}
+
+/// Dart's two private subclasses of `WidgetStateTextStyle`.
+enum TextStyleSubclass {
+    /// `_WidgetStateTextStyle`.
+    ResolveWith(WidgetPropertyResolver<TextStyle>),
+    /// `_WidgetTextStyleMapper`.
+    Mapper(WidgetStateMapper<TextStyle>),
+}
+
+impl WidgetStateTextStyle {
+    /// Creates a [`WidgetStateTextStyle`] from a [`WidgetPropertyResolver<TextStyle>`]
+    /// callback function.
+    ///
+    /// If used as a regular text style, the style resolved in the default state (the empty
+    /// set of states) will be used.
+    ///
+    /// The given callback parameter must return a non-null text style in the default state.
+    pub fn resolve_with(
+        callback: impl Fn(&WidgetStates) -> TextStyle + 'static,
+    ) -> WidgetStateTextStyle {
+        WidgetStateTextStyle {
+            subclass: TextStyleSubclass::ResolveWith(Rc::new(callback)),
+        }
+    }
+
+    /// Creates a [`WidgetStateTextStyle`] from a [`WidgetStateMap<TextStyle>`].
+    ///
+    /// This constructor's [`resolve`](WidgetStateProperty::resolve) method finds the first
+    /// entry whose key is satisfied by the set of states, and returns its associated value.
+    pub fn from_map(map: WidgetStateMap<TextStyle>) -> WidgetStateTextStyle {
+        WidgetStateTextStyle {
+            subclass: TextStyleSubclass::Mapper(WidgetStateMapper::new(map)),
+        }
+    }
+
+    /// The style as the `TextStyle` it is in Dart: the empty style, carrying this object as
+    /// the extension.
+    pub fn into_any(self) -> AnyTextStyle {
+        AnyTextStyle::with_shared(TextStyle::new(), Rc::new(self))
+    }
+}
+
+impl WidgetStateProperty<TextStyle> for WidgetStateTextStyle {
+    fn resolve(&self, states: &WidgetStates) -> TextStyle {
+        match &self.subclass {
+            TextStyleSubclass::ResolveWith(resolve) => resolve(states),
+            TextStyleSubclass::Mapper(mapper) => mapper.resolve(states),
+        }
+    }
+}
+
+impl TextStyleExtension for WidgetStateTextStyle {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    // Dart's `TextStyle.==` compares runtime types (values are already equal here); the
+    // mapper subclass compares maps instead.
+    fn eq_extension(&self, other: &dyn TextStyleExtension) -> bool {
+        other
+            .as_any()
+            .downcast_ref::<WidgetStateTextStyle>()
+            .is_some_and(|other| match (&self.subclass, &other.subclass) {
+                (TextStyleSubclass::ResolveWith(_), TextStyleSubclass::ResolveWith(_)) => true,
+                (TextStyleSubclass::Mapper(mine), TextStyleSubclass::Mapper(theirs)) => {
+                    mine == theirs
+                }
+                _ => false,
+            })
+    }
+}
+
+impl Debug for WidgetStateTextStyle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.subclass {
+            TextStyleSubclass::ResolveWith(_) => f.write_str("WidgetStateTextStyle.resolveWith"),
+            TextStyleSubclass::Mapper(mapper) => mapper.fmt(f),
+        }
+    }
+}
+
+impl From<WidgetStateTextStyle> for AnyTextStyle {
+    fn from(style: WidgetStateTextStyle) -> AnyTextStyle {
+        style.into_any()
+    }
+}
+
+impl MaybeWidgetStateProperty<TextStyle> for AnyTextStyle {
+    fn as_widget_state_property(&self) -> Option<&dyn WidgetStateProperty<TextStyle>> {
+        self.extension::<WidgetStateTextStyle>()
+            .map(|style| style as &dyn WidgetStateProperty<TextStyle>)
+    }
+
+    fn from_resolved(value: TextStyle) -> AnyTextStyle {
+        AnyTextStyle::new(value)
+    }
+}
 
 /// Interface for classes that [`resolve`] to a value of type `T` based
 /// on a widget's interactive "state", which is defined as a set
@@ -1488,6 +2001,151 @@ mod tests {
         );
         assert!(*cursor_1 == *cursor_2);
         assert!(*cursor_1 != *cursor_3);
+
+        let white_border = BorderSide {
+            color: WHITE,
+            ..BorderSide::default()
+        };
+        let black_border = BorderSide::default();
+        let side = |first: BorderSide, rest: BorderSide| {
+            WidgetStateBorderSide::from_map(vec![
+                (WidgetState::Focused | WidgetState::Hovered, Some(first)),
+                (WidgetState::any(), Some(rest)),
+            ])
+            .into_any()
+        };
+        assert!(side(white_border, black_border) == side(white_border, black_border));
+        assert!(side(white_border, black_border) != side(black_border, white_border));
+
+        let rrect = |side: BorderSide| -> Box<dyn OutlinedBorder> {
+            Box::new(RoundedRectangleBorder {
+                side,
+                ..RoundedRectangleBorder::default()
+            })
+        };
+        let border = |first: BorderSide, rest: BorderSide| {
+            WidgetStateOutlinedBorder::from_map(vec![
+                (
+                    WidgetState::Focused | WidgetState::Hovered,
+                    Some(rrect(first)),
+                ),
+                (WidgetState::any(), Some(rrect(rest))),
+            ])
+        };
+        assert!(border(white_border, black_border).eq_shape(&border(white_border, black_border)));
+        assert!(!border(white_border, black_border).eq_shape(&border(black_border, white_border)));
+
+        let text = |first: Color, rest: Color| {
+            WidgetStateTextStyle::from_map(vec![
+                (
+                    WidgetState::Focused | WidgetState::Hovered,
+                    TextStyle::new().color(first),
+                ),
+                (WidgetState::any(), TextStyle::new().color(rest)),
+            ])
+            .into_any()
+        };
+        assert!(text(WHITE, BLACK) == text(WHITE, BLACK));
+        assert!(text(WHITE, BLACK) != text(BLACK, WHITE));
+    }
+
+    // widget_state_property_test.dart 'WidgetStateBorderSide.lerp()'.
+    #[test]
+    fn border_side_lerp_interpolates_the_resolved_sides() {
+        let side_1: WidgetStatePropertyRef<Option<BorderSide>> =
+            Rc::new(WidgetStatePropertyAll::new(Some(BorderSide {
+                color: Color::new(0xffff0000),
+                width: 4.0,
+                ..BorderSide::default()
+            })));
+        let side_2: WidgetStatePropertyRef<Option<BorderSide>> =
+            Rc::new(WidgetStatePropertyAll::new(Some(BorderSide {
+                color: Color::new(0xff0000ff),
+                width: 12.0,
+                ..BorderSide::default()
+            })));
+        let lerp = |t: f64| {
+            WidgetStateBorderSide::lerp(Some(Rc::clone(&side_1)), Some(Rc::clone(&side_2)), t)
+                .expect("two sides")
+                .resolve(&WidgetStates::new())
+                .expect("a side")
+        };
+        assert_eq!(lerp(0.0).color, Color::new(0xffff0000));
+        assert_eq!(lerp(0.0).width, 4.0);
+        // Dart's `isSameColorAs` allows a rounding step per channel.
+        #[allow(deprecated)]
+        let (red, blue) = (lerp(0.5).color.red(), lerp(0.5).color.blue());
+        assert!(
+            (red - 0x7f).abs() <= 1 && (blue - 0x7f).abs() <= 1,
+            "{:?}",
+            lerp(0.5).color
+        );
+        assert_eq!(lerp(0.5).width, 8.0);
+        assert_eq!(lerp(1.0).color, Color::new(0xff0000ff));
+        assert_eq!(lerp(1.0).width, 12.0);
+        assert!(WidgetStateBorderSide::lerp(None, None, 0.5).is_none());
+    }
+
+    /// A widget-state side, border or style passed where Dart takes the plain value is the
+    /// default value there and resolves through `resolve_as`.
+    #[test]
+    fn the_widget_state_values_are_their_default_and_resolve_through_resolve_as() {
+        let pressed = states([WidgetState::Pressed]);
+        let red_side = BorderSide {
+            color: RED,
+            ..BorderSide::default()
+        };
+        let side: Option<AnyBorderSide> = Some(
+            WidgetStateBorderSide::resolve_with(move |states| {
+                states.contains(&WidgetState::Pressed).then_some(red_side)
+            })
+            .into(),
+        );
+        assert_eq!(
+            *side.as_ref().expect("a side").value(),
+            BorderSide::default()
+        );
+        let resolved = <dyn WidgetStateProperty<Option<BorderSide>>>::resolve_as(&side, &pressed);
+        assert_eq!(resolved, Some(AnyBorderSide::new(red_side)));
+        let resolved =
+            <dyn WidgetStateProperty<Option<BorderSide>>>::resolve_as(&side, &WidgetStates::new());
+        assert_eq!(resolved, None);
+
+        let style: AnyTextStyle = WidgetStateTextStyle::resolve_with(|states| {
+            TextStyle::new().font_size(if states.contains(&WidgetState::Pressed) {
+                20.0
+            } else {
+                10.0
+            })
+        })
+        .into();
+        assert_eq!(*style.value(), TextStyle::new());
+        let resolved = <dyn WidgetStateProperty<TextStyle>>::resolve_as(&style, &pressed);
+        assert_eq!(resolved.font_size, Some(20.0));
+
+        let border: Option<Box<dyn OutlinedBorder>> = Some(Box::new(
+            WidgetStateOutlinedBorder::resolve_with(|states| {
+                states.contains(&WidgetState::Pressed).then(|| {
+                    Box::new(RoundedRectangleBorder {
+                        side: BorderSide {
+                            width: 3.0,
+                            ..BorderSide::default()
+                        },
+                        ..RoundedRectangleBorder::default()
+                    }) as Box<dyn OutlinedBorder>
+                })
+            }),
+        ));
+        assert_eq!(
+            border.as_ref().expect("a border").side(),
+            RoundedRectangleBorder::default().side,
+            "as a plain border it is the default rounded rectangle"
+        );
+        let resolved = <dyn WidgetStateProperty<Option<Box<dyn OutlinedBorder>>>>::resolve_as(
+            &border, &pressed,
+        )
+        .expect("a border");
+        assert_eq!(resolved.side().width, 3.0);
     }
 
     #[test]

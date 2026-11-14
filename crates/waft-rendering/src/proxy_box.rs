@@ -1,7 +1,8 @@
 //! Flutter counterpart: `rendering/proxy_box.dart` (`RenderProxyBoxMixin`,
 //! `HitTestBehavior`, `RenderConstrainedBox`, `RenderLimitedBox`, `RenderOpacity`,
 //! `RenderAnimatedOpacityMixin`, `RenderAnimatedOpacity`, `CustomClipper`,
-//! `RenderCustomClip`, `RenderClipRect`, `RenderClipRRect`, `RenderPointerListener`,
+//! `RenderCustomClip`, `RenderClipRect`, `RenderClipRRect`, `RenderPhysicalModel`,
+//! `RenderPhysicalShape`, `RenderPointerListener`,
 //! `DecorationPosition`, `RenderDecoratedBox`, `RenderTransform`,
 //! `RenderFractionalTranslation`, `RenderRepaintBoundary`, `RenderMouseRegion`,
 //! `RenderIgnorePointer`, `RenderOffstage`, `RenderAbsorbPointer`, `RenderAnnotatedRegion`),
@@ -16,8 +17,9 @@ use std::sync::Arc;
 
 use waft_animation::AnyAnimation;
 use waft_embedder::{
-    BlendMode, Clip, Color, FillRule, ImageFilter, Matrix4, Offset, Paint, Path, PathBuilder,
-    RRect, RSuperellipse, Rect, Size, TextBaseline, rsuperellipse_radii_elliptical, valo::Point,
+    BlendMode, CanvasShadow, Clip, Color, FillRule, ImageFilter, Matrix4, Offset, Paint,
+    PaintStyle, Path, PathBuilder, RRect, RSuperellipse, Rect, Size, Stroke, TextBaseline,
+    rrect_radii_elliptical, rsuperellipse_radii_elliptical, valo, valo::Point,
 };
 use waft_foundation::{App, Handle, Listenable, Listener};
 use waft_gestures::{
@@ -27,8 +29,9 @@ use waft_gestures::{
     PointerPanZoomUpdateEventListener, PointerSignalEventListener, PointerUpEventListener,
 };
 use waft_painting::{
-    Alignment, AlignmentGeometry, BorderRadiusGeometry, BoxFit, BoxPainter, ClipContext,
-    Decoration, ImageConfiguration, ShapeBorder, TextDirection, apply_box_fit, get_as_translation,
+    Alignment, AlignmentGeometry, BorderRadius, BorderRadiusGeometry, BoxFit, BoxPainter, BoxShape,
+    ClipContext, Decoration, ImageConfiguration, ShapeBorder, TextDirection, apply_box_fit,
+    debug_disable_shadows, draw_rrect, get_as_translation,
 };
 use waft_services::{MouseCursor, MouseCursorRef, MouseTrackerAnnotation};
 
@@ -47,8 +50,9 @@ use crate::object::{
     AnyRenderObject, Constraints, EmptyParentData, RenderHandle, RenderObject, RenderObjectData,
     RenderObjectWithChildData, RenderObjectWithChildMixin,
 };
-use crate::painting_context::PaintingContext;
+use crate::painting_context::{PaintingContext, shift_path};
 use crate::pipeline_owner::PipelineOwner;
+use crate::view::RenderView;
 
 /// A base class for render boxes that resemble their children.
 ///
@@ -5063,6 +5067,763 @@ impl RenderBox for RenderClipRSuperellipse {
     }
 }
 
+/// The fields of [`RenderPhysicalModelBase`].
+pub struct RenderPhysicalModelBaseData {
+    elevation: f64,
+    color: Color,
+    shadow_color: Color,
+}
+
+impl RenderPhysicalModelBaseData {
+    /// The fields of a physical model; the `elevation` must be non-negative.
+    pub fn new(elevation: f64, color: Color, shadow_color: Color) -> RenderPhysicalModelBaseData {
+        debug_assert!(elevation >= 0.0);
+        RenderPhysicalModelBaseData {
+            elevation,
+            color,
+            shadow_color,
+        }
+    }
+}
+
+/// The shared members of [`RenderPhysicalModel`] and [`RenderPhysicalShape`]; Flutter's private
+/// `_RenderPhysicalModelBase<T>`.
+pub trait RenderPhysicalModelBase<T: Clone + 'static>: RenderCustomClip<T> {
+    /// Mixin field access.
+    fn physical_model_data(self: RenderHandle<Self>, app: &App) -> &RenderPhysicalModelBaseData;
+
+    /// See [`physical_model_data`](Self::physical_model_data).
+    fn physical_model_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderPhysicalModelBaseData;
+
+    /// The z-coordinate relative to the parent at which to place this material.
+    ///
+    /// The value is non-negative.
+    ///
+    /// If `debug_disable_shadows` is set, this value is ignored and no shadow is
+    /// drawn (an outline is rendered instead).
+    fn elevation(self: RenderHandle<Self>, app: &App) -> f64 {
+        self.physical_model_data(app).elevation
+    }
+
+    /// Sets [`elevation`](Self::elevation).
+    fn set_elevation(self: RenderHandle<Self>, app: &mut App, value: f64) {
+        debug_assert!(value >= 0.0);
+        if self.elevation(app) == value {
+            return;
+        }
+        let did_need_compositing = self.as_object().always_needs_compositing(app);
+        self.physical_model_data_mut(app).elevation = value;
+        if did_need_compositing != self.as_object().always_needs_compositing(app) {
+            self.as_object().mark_needs_compositing_bits_update(app);
+        }
+        self.mark_needs_paint(app);
+    }
+
+    /// The shadow color.
+    fn shadow_color(self: RenderHandle<Self>, app: &App) -> Color {
+        self.physical_model_data(app).shadow_color
+    }
+
+    /// Sets [`shadow_color`](Self::shadow_color).
+    fn set_shadow_color(self: RenderHandle<Self>, app: &mut App, value: Color) {
+        if self.shadow_color(app) == value {
+            return;
+        }
+        self.physical_model_data_mut(app).shadow_color = value;
+        self.mark_needs_paint(app);
+    }
+
+    /// The background color.
+    fn color(self: RenderHandle<Self>, app: &App) -> Color {
+        self.physical_model_data(app).color
+    }
+
+    /// Sets [`color`](Self::color).
+    fn set_color(self: RenderHandle<Self>, app: &mut App, value: Color) {
+        if self.color(app) == value {
+            return;
+        }
+        self.physical_model_data_mut(app).color = value;
+        self.mark_needs_paint(app);
+    }
+}
+
+/// The device pixel ratio of the view `render_object` paints into, which the engine's
+/// `Canvas.drawShadow` reads from the implicit view; 1 outside a view, as the engine's is
+/// without metrics.
+fn device_pixel_ratio_of_view(app: &App, render_object: AnyRenderObject) -> f64 {
+    render_object
+        .owner(app)
+        .and_then(|owner| owner.root_node(app))
+        .and_then(|root| root.downcast::<RenderView>(app))
+        .map_or(1.0, |view| view.configuration(app).device_pixel_ratio)
+}
+
+/// Creates a physical model layer that clips its child to a rounded
+/// rectangle.
+///
+/// A physical model layer casts a shadow based on its [`elevation`](RenderPhysicalModelBase::elevation).
+pub struct RenderPhysicalModel {
+    render_object: RenderObjectData,
+    render_box: RenderBoxData,
+    child: RenderObjectWithChildData<AnyRenderBox>,
+    custom_clip: RenderCustomClipData<RRect>,
+    physical_model: RenderPhysicalModelBaseData,
+    shape: BoxShape,
+    border_radius: Option<BorderRadius>,
+}
+
+impl RenderPhysicalModel {
+    /// Creates a rounded-rectangular clip.
+    ///
+    /// The `color` is required.
+    ///
+    /// The `elevation` parameter must be non-negative. Dart's defaults: `shape`
+    /// [`BoxShape::Rectangle`], `clip_behavior` [`Clip::None`], `elevation` 0, `shadow_color`
+    /// opaque black.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Dart's named arguments, in Dart's order"
+    )]
+    pub fn new(
+        app: &mut App,
+        child: Option<AnyRenderBox>,
+        shape: BoxShape,
+        clip_behavior: Clip,
+        border_radius: Option<BorderRadius>,
+        elevation: f64,
+        color: Color,
+        shadow_color: Color,
+    ) -> RenderHandle<RenderPhysicalModel> {
+        debug_assert!(elevation >= 0.0);
+        let this = RenderHandle::new_box(
+            app,
+            RenderPhysicalModel {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                child: RenderObjectWithChildData::new(),
+                custom_clip: RenderCustomClipData::new(None, clip_behavior),
+                physical_model: RenderPhysicalModelBaseData::new(elevation, color, shadow_color),
+                shape,
+                border_radius,
+            },
+        );
+        this.set_child(app, child);
+        this
+    }
+
+    /// The shape of the layer.
+    ///
+    /// Defaults to [`BoxShape::Rectangle`]. The [`border_radius`](Self::border_radius) affects
+    /// the corners of the rectangle.
+    pub fn shape(self: RenderHandle<Self>, app: &App) -> BoxShape {
+        self.get(app).shape
+    }
+
+    /// Sets [`shape`](Self::shape).
+    pub fn set_shape(self: RenderHandle<Self>, app: &mut App, value: BoxShape) {
+        if self.shape(app) == value {
+            return;
+        }
+        self.get_mut(app).shape = value;
+        self.mark_needs_clip(app);
+    }
+
+    /// The border radius of the rounded corners.
+    ///
+    /// Values are clamped so that horizontal and vertical radii sums do not
+    /// exceed width/height.
+    ///
+    /// This property is ignored if the [`shape`](Self::shape) is not [`BoxShape::Rectangle`].
+    ///
+    /// The value `None` is treated like [`BorderRadius::ZERO`].
+    pub fn border_radius(self: RenderHandle<Self>, app: &App) -> Option<BorderRadius> {
+        self.get(app).border_radius
+    }
+
+    /// Sets [`border_radius`](Self::border_radius).
+    pub fn set_border_radius(self: RenderHandle<Self>, app: &mut App, value: Option<BorderRadius>) {
+        if self.border_radius(app) == value {
+            return;
+        }
+        self.get_mut(app).border_radius = value;
+        self.mark_needs_clip(app);
+    }
+}
+
+impl RenderObjectWithChildMixin for RenderPhysicalModel {
+    type ChildType = AnyRenderBox;
+
+    fn child_data(self: RenderHandle<Self>, app: &App) -> &RenderObjectWithChildData<AnyRenderBox> {
+        &self.get(app).child
+    }
+
+    fn child_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderObjectWithChildData<AnyRenderBox> {
+        &mut self.get_mut(app).child
+    }
+}
+
+impl RenderProxyBoxMixin for RenderPhysicalModel {}
+
+impl RenderCustomClip<RRect> for RenderPhysicalModel {
+    fn custom_clip_data(self: RenderHandle<Self>, app: &App) -> &RenderCustomClipData<RRect> {
+        &self.get(app).custom_clip
+    }
+
+    fn custom_clip_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderCustomClipData<RRect> {
+        &mut self.get_mut(app).custom_clip
+    }
+
+    fn default_clip(self: RenderHandle<Self>, app: &App) -> RRect {
+        debug_assert!(self.has_size(app));
+        let rect = Offset::ZERO & self.size(app);
+        match self.get(app).shape {
+            BoxShape::Rectangle => self
+                .get(app)
+                .border_radius
+                .unwrap_or(BorderRadius::ZERO)
+                .to_rrect(rect),
+            BoxShape::Circle => RRect::from_rect_xy(rect, rect.width() / 2.0, rect.height() / 2.0),
+        }
+    }
+}
+
+impl RenderPhysicalModelBase<RRect> for RenderPhysicalModel {
+    fn physical_model_data(self: RenderHandle<Self>, app: &App) -> &RenderPhysicalModelBaseData {
+        &self.get(app).physical_model
+    }
+
+    fn physical_model_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderPhysicalModelBaseData {
+        &mut self.get_mut(app).physical_model
+    }
+}
+
+impl RenderObject for RenderPhysicalModel {
+    crate::render_object_accessors!();
+
+    fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: Handle<PipelineOwner>) {
+        if let Some(child) = self.child(app) {
+            child.as_object().attach(app, owner);
+        }
+        RenderCustomClip::did_attach(self, app);
+    }
+
+    fn did_detach(self: RenderHandle<Self>, app: &mut App) {
+        RenderCustomClip::did_detach(self, app);
+        if let Some(child) = self.child(app) {
+            child.as_object().detach(app);
+        }
+    }
+
+    fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+        RenderCustomClip::perform_layout(self, app);
+    }
+
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        if self.child(app).is_none() {
+            self.as_object().set_layer(app, None);
+            return;
+        }
+
+        self.update_clip(app);
+        let offset_rrect = self.clip(app).shift(offset);
+        let elevation = self.elevation(app);
+        let shadow_color = self.shadow_color(app);
+        let color = self.color(app);
+        let mut paint_shadows = true;
+        if cfg!(debug_assertions) && debug_disable_shadows() {
+            if elevation > 0.0 {
+                draw_rrect(
+                    context.canvas(),
+                    offset_rrect,
+                    &Paint {
+                        color: shadow_color.into(),
+                        style: PaintStyle::Stroke(Stroke::new((elevation * 2.0) as f32)),
+                        ..Paint::default()
+                    },
+                );
+            }
+            paint_shadows = false;
+        }
+
+        let device_pixel_ratio = device_pixel_ratio_of_view(app, self.as_object());
+        let canvas = context.canvas();
+        if elevation != 0.0 && paint_shadows {
+            let mut offset_rrect_as_path = PathBuilder::new();
+            offset_rrect_as_path.rrect_radii_elliptical(
+                valo::Rect::from(offset_rrect.outer_rect()),
+                rrect_radii_elliptical(offset_rrect),
+            );
+            #[expect(deprecated, reason = "Dart's paint reads the deprecated `Color.alpha`")]
+            let transparent_occluder = color.alpha() != 0xFF;
+            canvas.draw_shadow(
+                &offset_rrect_as_path.build(),
+                shadow_color,
+                elevation,
+                transparent_occluder,
+                device_pixel_ratio,
+            );
+        }
+        let clip_behavior = self.clip_behavior(app);
+        let uses_save_layer = clip_behavior == Clip::AntiAliasWithSaveLayer;
+        if !uses_save_layer {
+            draw_rrect(
+                canvas,
+                offset_rrect,
+                &Paint {
+                    color: color.into(),
+                    ..Paint::default()
+                },
+            );
+        }
+        let clip = self.clip(app);
+        let old = self.as_object().layer_as::<ClipRRectLayer>(app);
+        let layer = context.push_clip_rrect(
+            app,
+            self.as_object().needs_compositing(app),
+            offset,
+            Offset::ZERO & self.size(app),
+            clip,
+            |app, context, offset| {
+                if uses_save_layer {
+                    // If we want to avoid the bleeding edge artifact
+                    // (https://github.com/flutter/flutter/issues/18057#issue-328003931)
+                    // using saveLayer, we have to call drawPaint instead of drawPath as
+                    // anti-aliased drawPath will always have such artifacts.
+                    fill_clip(context, clip.outer_rect().shift(offset), color);
+                }
+                RenderProxyBoxMixin::paint(self, app, context, offset)
+            },
+            clip_behavior,
+            old,
+        );
+        self.as_object()
+            .set_layer(app, layer.map(|layer| layer.as_container_layer()));
+    }
+
+    fn visit_children(
+        self: RenderHandle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyRenderObject),
+    ) {
+        if let Some(child) = self.child(app) {
+            visitor(child.as_object());
+        }
+    }
+}
+
+/// Dart's `canvas.drawPaint(Paint()..color = color)` inside a clip: valo has no paint-everything
+/// draw, so the clip's bounds are filled, which covers everything the clip lets through.
+fn fill_clip(context: &mut PaintingContext, clip_bounds: Rect, color: Color) {
+    context.canvas().draw_rect(
+        clip_bounds,
+        &Paint {
+            color: color.into(),
+            ..Paint::default()
+        },
+    );
+}
+
+impl RenderBox for RenderPhysicalModel {
+    crate::render_box_accessors!();
+
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        RenderProxyBoxMixin::setup_parent_data(self, app, child);
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
+    }
+
+    fn hit_test(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        if self.clipper(app).is_some() {
+            self.update_clip(app);
+            if !self.clip(app).contains(position) {
+                return false;
+            }
+        }
+        RenderBoxBase::hit_test(self, app, result, position)
+    }
+
+    fn hit_test_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        RenderProxyBoxMixin::hit_test_children(self, app, result, position)
+    }
+
+    fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_width(self, app, height)
+    }
+
+    fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_width(self, app, height)
+    }
+
+    fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_height(self, app, width)
+    }
+
+    fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_height(self, app, width)
+    }
+
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_distance_to_actual_baseline(self, app, baseline)
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_dry_baseline(self, app, constraints, baseline)
+    }
+
+    fn compute_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        RenderProxyBoxMixin::compute_dry_layout(self, app, constraints)
+    }
+}
+
+/// Creates a physical shape layer that clips its child to a [`Path`].
+///
+/// A physical shape layer casts a shadow based on its [`elevation`](RenderPhysicalModelBase::elevation).
+///
+/// See also:
+///
+///  * [`RenderPhysicalModel`], which is optimized for rounded rectangles and
+///    circles.
+pub struct RenderPhysicalShape {
+    render_object: RenderObjectData,
+    render_box: RenderBoxData,
+    child: RenderObjectWithChildData<AnyRenderBox>,
+    custom_clip: RenderCustomClipData<Arc<Path>>,
+    physical_model: RenderPhysicalModelBaseData,
+}
+
+impl RenderPhysicalShape {
+    /// Creates an arbitrary shape clip.
+    ///
+    /// The `color` and `clipper` parameters are required.
+    ///
+    /// The `elevation` parameter must be non-negative. Dart's defaults: `clip_behavior`
+    /// [`Clip::None`], `elevation` 0, `shadow_color` opaque black.
+    pub fn new(
+        app: &mut App,
+        child: Option<AnyRenderBox>,
+        clipper: Rc<dyn CustomClipper<Arc<Path>>>,
+        clip_behavior: Clip,
+        elevation: f64,
+        color: Color,
+        shadow_color: Color,
+    ) -> RenderHandle<RenderPhysicalShape> {
+        debug_assert!(elevation >= 0.0);
+        let this = RenderHandle::new_box(
+            app,
+            RenderPhysicalShape {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                child: RenderObjectWithChildData::new(),
+                custom_clip: RenderCustomClipData::new(Some(clipper), clip_behavior),
+                physical_model: RenderPhysicalModelBaseData::new(elevation, color, shadow_color),
+            },
+        );
+        this.set_child(app, child);
+        this
+    }
+}
+
+impl RenderObjectWithChildMixin for RenderPhysicalShape {
+    type ChildType = AnyRenderBox;
+
+    fn child_data(self: RenderHandle<Self>, app: &App) -> &RenderObjectWithChildData<AnyRenderBox> {
+        &self.get(app).child
+    }
+
+    fn child_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderObjectWithChildData<AnyRenderBox> {
+        &mut self.get_mut(app).child
+    }
+}
+
+impl RenderProxyBoxMixin for RenderPhysicalShape {}
+
+impl RenderCustomClip<Arc<Path>> for RenderPhysicalShape {
+    fn custom_clip_data(self: RenderHandle<Self>, app: &App) -> &RenderCustomClipData<Arc<Path>> {
+        &self.get(app).custom_clip
+    }
+
+    fn custom_clip_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderCustomClipData<Arc<Path>> {
+        &mut self.get_mut(app).custom_clip
+    }
+
+    fn default_clip(self: RenderHandle<Self>, app: &App) -> Arc<Path> {
+        let mut path = PathBuilder::new();
+        path.rect((Offset::ZERO & self.size(app)).into());
+        path.build()
+    }
+}
+
+impl RenderPhysicalModelBase<Arc<Path>> for RenderPhysicalShape {
+    fn physical_model_data(self: RenderHandle<Self>, app: &App) -> &RenderPhysicalModelBaseData {
+        &self.get(app).physical_model
+    }
+
+    fn physical_model_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderPhysicalModelBaseData {
+        &mut self.get_mut(app).physical_model
+    }
+}
+
+impl RenderObject for RenderPhysicalShape {
+    crate::render_object_accessors!();
+
+    fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: Handle<PipelineOwner>) {
+        if let Some(child) = self.child(app) {
+            child.as_object().attach(app, owner);
+        }
+        RenderCustomClip::did_attach(self, app);
+    }
+
+    fn did_detach(self: RenderHandle<Self>, app: &mut App) {
+        RenderCustomClip::did_detach(self, app);
+        if let Some(child) = self.child(app) {
+            child.as_object().detach(app);
+        }
+    }
+
+    fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+        RenderCustomClip::perform_layout(self, app);
+    }
+
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        if self.child(app).is_none() {
+            self.as_object().set_layer(app, None);
+            return;
+        }
+
+        self.update_clip(app);
+        let clip = self.clip(app);
+        let offset_path = shift_path(&clip, offset);
+        let elevation = self.elevation(app);
+        let shadow_color = self.shadow_color(app);
+        let color = self.color(app);
+        let mut paint_shadows = true;
+        if cfg!(debug_assertions) && debug_disable_shadows() {
+            if elevation > 0.0 {
+                context.canvas().draw_path(
+                    &offset_path,
+                    FillRule::NonZero,
+                    &Paint {
+                        color: shadow_color.into(),
+                        style: PaintStyle::Stroke(Stroke::new((elevation * 2.0) as f32)),
+                        ..Paint::default()
+                    },
+                );
+            }
+            paint_shadows = false;
+        }
+
+        let device_pixel_ratio = device_pixel_ratio_of_view(app, self.as_object());
+        let canvas = context.canvas();
+        if elevation != 0.0 && paint_shadows {
+            #[expect(deprecated, reason = "Dart's paint reads the deprecated `Color.alpha`")]
+            let transparent_occluder = color.alpha() != 0xFF;
+            canvas.draw_shadow(
+                &offset_path,
+                shadow_color,
+                elevation,
+                transparent_occluder,
+                device_pixel_ratio,
+            );
+        }
+        let clip_behavior = self.clip_behavior(app);
+        let uses_save_layer = clip_behavior == Clip::AntiAliasWithSaveLayer;
+        if !uses_save_layer {
+            canvas.draw_path(
+                &offset_path,
+                FillRule::NonZero,
+                &Paint {
+                    color: color.into(),
+                    ..Paint::default()
+                },
+            );
+        }
+        let path_bounds = clip.bounds();
+        let clip_bounds = Rect::from_ltwh(
+            f64::from(path_bounds.x),
+            f64::from(path_bounds.y),
+            f64::from(path_bounds.width),
+            f64::from(path_bounds.height),
+        );
+        let old = self.as_object().layer_as::<ClipPathLayer>(app);
+        let layer = context.push_clip_path(
+            app,
+            self.as_object().needs_compositing(app),
+            offset,
+            Offset::ZERO & self.size(app),
+            clip,
+            |app, context, offset| {
+                if uses_save_layer {
+                    // If we want to avoid the bleeding edge artifact
+                    // (https://github.com/flutter/flutter/issues/18057#issue-328003931)
+                    // using saveLayer, we have to call drawPaint instead of drawPath as
+                    // anti-aliased drawPath will always have such artifacts.
+                    fill_clip(context, clip_bounds.shift(offset), color);
+                }
+                RenderProxyBoxMixin::paint(self, app, context, offset)
+            },
+            clip_behavior,
+            old,
+        );
+        self.as_object()
+            .set_layer(app, layer.map(|layer| layer.as_container_layer()));
+    }
+
+    fn visit_children(
+        self: RenderHandle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyRenderObject),
+    ) {
+        if let Some(child) = self.child(app) {
+            visitor(child.as_object());
+        }
+    }
+}
+
+impl RenderBox for RenderPhysicalShape {
+    crate::render_box_accessors!();
+
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        RenderProxyBoxMixin::setup_parent_data(self, app, child);
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
+    }
+
+    fn hit_test(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        if self.clipper(app).is_some() {
+            self.update_clip(app);
+            let point = Point::new(position.dx() as f32, position.dy() as f32);
+            if !self.clip(app).contains(point, FillRule::NonZero) {
+                return false;
+            }
+        }
+        RenderBoxBase::hit_test(self, app, result, position)
+    }
+
+    fn hit_test_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        RenderProxyBoxMixin::hit_test_children(self, app, result, position)
+    }
+
+    fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_width(self, app, height)
+    }
+
+    fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_width(self, app, height)
+    }
+
+    fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_height(self, app, width)
+    }
+
+    fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_height(self, app, width)
+    }
+
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_distance_to_actual_baseline(self, app, baseline)
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_dry_baseline(self, app, constraints, baseline)
+    }
+
+    fn compute_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        RenderProxyBoxMixin::compute_dry_layout(self, app, constraints)
+    }
+}
+
 /// Applies a transformation before painting its child.
 pub struct RenderTransform {
     render_object: RenderObjectData,
@@ -8832,5 +9593,235 @@ mod tests {
         assert!(!clipper.should_reclip(&same));
         let other = ShapeBorderClipper::new(square, Some(TextDirection::Rtl));
         assert!(clipper.should_reclip(&other));
+    }
+
+    /// The fills a repaint boundary's recording blurs: `drawShadow`'s draws.
+    fn shadow_count(app: &App, boundary: AnyRenderObject) -> usize {
+        picture_ops(app, boundary)
+            .iter()
+            .filter(|op| matches!(op, Op::DrawPath { paint, .. } if paint.mask_blur.is_some()))
+            .count()
+    }
+
+    fn physical_model(
+        app: &mut App,
+        child: Option<AnyRenderBox>,
+        clip_behavior: Clip,
+    ) -> RenderHandle<RenderPhysicalModel> {
+        RenderPhysicalModel::new(
+            app,
+            child,
+            BoxShape::Rectangle,
+            clip_behavior,
+            None,
+            0.0,
+            Color::new(0xffff00ff),
+            Color::new(0xFF000000),
+        )
+    }
+
+    /// `proxy_box_test.dart`: "RenderPhysicalModel compositing".
+    #[test]
+    fn a_physical_model_needs_no_compositing_at_any_elevation() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let model = physical_model(&mut app, None, Clip::None);
+        let root = RenderRepaintBoundary::new(&mut app, Some(model.as_box()));
+        let owner = first_frame(&mut app, root.as_box());
+        assert!(!model.as_object().needs_compositing(&app));
+
+        model.set_elevation(&mut app, 1.0);
+        pump_frame(&mut app, owner);
+        assert!(!model.as_object().needs_compositing(&app));
+
+        model.set_elevation(&mut app, 0.0);
+        pump_frame(&mut app, owner);
+        assert!(!model.as_object().needs_compositing(&app));
+    }
+
+    /// `proxy_box_test.dart`: "RenderPhysicalModel paints shadow only for non-zero elevation".
+    #[test]
+    fn a_physical_model_paints_a_shadow_only_at_a_non_zero_elevation() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let child = sized_box(&mut app, Size::new(10.0, 10.0));
+        let model = physical_model(&mut app, Some(child.as_box()), Clip::None);
+        let root = RenderRepaintBoundary::new(&mut app, Some(model.as_box()));
+        let owner = first_frame(&mut app, root.as_box());
+        assert_eq!(shadow_count(&app, root.as_object()), 0);
+
+        model.set_elevation(&mut app, 1.0);
+        pump_frame(&mut app, owner);
+        assert_eq!(shadow_count(&app, root.as_object()), 1);
+    }
+
+    /// `_TestPathClipper` of `proxy_box_test.dart`.
+    struct TestPathClipper;
+
+    impl CustomClipper<Arc<Path>> for TestPathClipper {
+        fn get_clip(&self, _size: Size) -> Arc<Path> {
+            let mut path = PathBuilder::new();
+            path.rect(Rect::from_ltwh(50.0, 50.0, 100.0, 100.0).into());
+            path.build()
+        }
+
+        fn should_reclip(&self, _old_clipper: &dyn CustomClipper<Arc<Path>>) -> bool {
+            false
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    /// `proxy_box_test.dart`'s `_testLayerReuse`: a repaint keeps the clip layer.
+    fn assert_reuses_its_clip_layer<L: 'static>(app: &mut App, clip: AnyRenderBox) {
+        assert!(clip.as_object().layer_as::<L>(app).is_none());
+        let root = RenderRepaintBoundary::new(app, Some(clip));
+        let owner = first_frame(app, root.as_box());
+        let layer = clip
+            .as_object()
+            .layer_as::<L>(app)
+            .expect("the clip pushes its layer");
+
+        // Mark for repaint otherwise pump_frame is a noop.
+        clip.as_object().mark_needs_paint(app);
+        assert!(clip.as_object().debug_needs_paint(app));
+        pump_frame(app, owner);
+        assert!(!clip.as_object().debug_needs_paint(app));
+        assert!(clip.as_object().layer_as::<L>(app) == Some(layer));
+    }
+
+    #[test]
+    fn a_physical_model_reuses_its_layer() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let leaf = sized_box(&mut app, Size::new(1.0, 1.0));
+        let boundary = RenderRepaintBoundary::new(&mut app, Some(leaf.as_box()));
+        let model = RenderPhysicalModel::new(
+            &mut app,
+            Some(boundary.as_box()),
+            BoxShape::Rectangle,
+            Clip::HardEdge,
+            None,
+            0.0,
+            Color::from_rgbo(0, 0, 0, 1.0),
+            Color::new(0xFF000000),
+        );
+        assert_reuses_its_clip_layer::<ClipRRectLayer>(&mut app, model.as_box());
+    }
+
+    #[test]
+    fn a_physical_shape_reuses_its_layer() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let leaf = sized_box(&mut app, Size::new(1.0, 1.0));
+        let boundary = RenderRepaintBoundary::new(&mut app, Some(leaf.as_box()));
+        let shape = RenderPhysicalShape::new(
+            &mut app,
+            Some(boundary.as_box()),
+            Rc::new(TestPathClipper),
+            Clip::HardEdge,
+            0.0,
+            Color::from_rgbo(0, 0, 0, 1.0),
+            Color::new(0xFF000000),
+        );
+        assert_reuses_its_clip_layer::<ClipPathLayer>(&mut app, shape.as_box());
+    }
+
+    #[test]
+    fn a_physical_model_fills_its_shape_and_draws_its_shadow_below_it() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let child = sized_box(&mut app, Size::new(10.0, 10.0));
+        let model = RenderPhysicalModel::new(
+            &mut app,
+            Some(child.as_box()),
+            BoxShape::Rectangle,
+            Clip::None,
+            Some(BorderRadius::circular(2.0)),
+            4.0,
+            BLUE,
+            Color::new(0xFF000000),
+        );
+        let root = RenderRepaintBoundary::new(&mut app, Some(model.as_box()));
+        first_frame(&mut app, root.as_box());
+        let ops = picture_ops(&app, root.as_object());
+        let shadow = ops
+            .iter()
+            .position(|op| matches!(op, Op::DrawPath { paint, .. } if paint.mask_blur.is_some()))
+            .expect("a shadow at elevation 4");
+        let fill = ops
+            .iter()
+            .position(|op| {
+                matches!(op, Op::DrawPath { paint, .. }
+                    if paint.mask_blur.is_none() && paint.color == BLUE.into())
+            })
+            .expect("the rounded fill");
+        assert!(shadow < fill, "the shadow is drawn under the fill");
+    }
+
+    fn circle_clipper() -> Rc<dyn CustomClipper<Arc<Path>>> {
+        Rc::new(ShapeBorderClipper::new(
+            Box::new(waft_painting::CircleBorder::new(
+                waft_painting::BorderSide::NONE,
+                0.0,
+            )),
+            None,
+        ))
+    }
+
+    fn physical_shape(app: &mut App) -> RenderHandle<RenderPhysicalShape> {
+        RenderPhysicalShape::new(
+            app,
+            None,
+            circle_clipper(),
+            Clip::None,
+            0.0,
+            Color::new(0xffff00ff),
+            Color::new(0xFF000000),
+        )
+    }
+
+    /// `proxy_box_test.dart`: "RenderPhysicalShape shape change triggers repaint".
+    #[test]
+    fn a_physical_shape_repaints_only_for_a_different_shape() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let shape = physical_shape(&mut app);
+        let root = RenderRepaintBoundary::new(&mut app, Some(shape.as_box()));
+        first_frame(&mut app, root.as_box());
+        assert!(!shape.as_object().debug_needs_paint(&app));
+
+        // Same shape, no repaint.
+        shape.set_clipper(&mut app, Some(circle_clipper()));
+        assert!(!shape.as_object().debug_needs_paint(&app));
+
+        // Different shape triggers repaint.
+        shape.set_clipper(
+            &mut app,
+            Some(Rc::new(ShapeBorderClipper::new(
+                Box::new(waft_painting::StadiumBorder::default()),
+                None,
+            ))),
+        );
+        assert!(shape.as_object().debug_needs_paint(&app));
+    }
+
+    /// `proxy_box_test.dart`: "RenderPhysicalShape compositing".
+    #[test]
+    fn a_physical_shape_needs_no_compositing_at_any_elevation() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let shape = physical_shape(&mut app);
+        let root = RenderRepaintBoundary::new(&mut app, Some(shape.as_box()));
+        let owner = first_frame(&mut app, root.as_box());
+        assert!(!shape.as_object().needs_compositing(&app));
+        shape.set_elevation(&mut app, 1.0);
+        pump_frame(&mut app, owner);
+        assert!(!shape.as_object().needs_compositing(&app));
+        shape.set_elevation(&mut app, 0.0);
+        pump_frame(&mut app, owner);
+        assert!(!shape.as_object().needs_compositing(&app));
     }
 }

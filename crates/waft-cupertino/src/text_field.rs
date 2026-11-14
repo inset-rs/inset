@@ -30,14 +30,15 @@ use waft_widgets::{
     AutomaticKeepAliveClientMixinData, BuildContext, Container, ContentInsertionConfiguration,
     Directionality, EditableText, EditableTextContextMenuBuilder, EditableTextState, Expanded,
     FocusNode, FocusNodeLeaf, GestureDetector, GlobalKey, IgnorePointer, IntoWidget, KeyRef,
-    MediaQuery, Padding, RepaintBoundary, RestorableListenable, RestorableProperty,
-    RestorableTextEditingController, RestorationBucket, RestorationMixin, RestorationMixinData,
-    Row, ScrollController, ScrollPhysicsRef, SizedBox, SpellCheckConfiguration, Stack, State,
-    StateData, StatefulWidget, SystemContextMenu, Text, TextEditingControllerLeaf,
-    TextFieldTapRegion, TextMagnifierConfiguration, TextSelectionControls,
-    TextSelectionGestureDetectorBuilder, TextSelectionGestureDetectorBuilderBase,
-    TextSelectionGestureDetectorBuilderData, TextSelectionGestureDetectorBuilderDelegate,
-    ToolbarOptions, UndoHistoryController, UnmanagedRestorationScope, Visibility, WidgetRef,
+    LabeledGlobalKey, MediaQuery, Padding, RepaintBoundary, RestorableListenable,
+    RestorableProperty, RestorableTextEditingController, RestorationBucket, RestorationMixin,
+    RestorationMixinData, Row, ScrollController, ScrollPhysicsRef, SizedBox,
+    SpellCheckConfiguration, Stack, State, StateData, StatefulWidget, SystemContextMenu, Text,
+    TextEditingControllerLeaf, TextFieldTapRegion, TextMagnifierConfiguration,
+    TextSelectionControls, TextSelectionGestureDetectorBuilder,
+    TextSelectionGestureDetectorBuilderBase, TextSelectionGestureDetectorBuilderData,
+    TextSelectionGestureDetectorBuilderDelegate, ToolbarOptions, UndoHistoryController,
+    UnmanagedRestorationScope, Visibility, WidgetRef,
 };
 
 use crate::adaptive_text_selection_toolbar::CupertinoAdaptiveTextSelectionToolbar;
@@ -955,8 +956,8 @@ impl StatefulWidget for CupertinoTextField {
             state: StateData::new(),
             restoration: RestorationMixinData::new(),
             automatic_keep_alive_client: AutomaticKeepAliveClientMixinData::new(),
-            clear_global_key: GlobalKey::new(),
-            editable_text_key: GlobalKey::new(),
+            clear_global_key: <dyn GlobalKey>::new(),
+            editable_text_key: <dyn GlobalKey>::new(),
             controller: None,
             focus_node: None,
             listening_controller: None,
@@ -1005,8 +1006,8 @@ pub struct CupertinoTextFieldState {
     state: StateData<CupertinoTextField>,
     restoration: RestorationMixinData,
     automatic_keep_alive_client: AutomaticKeepAliveClientMixinData,
-    clear_global_key: GlobalKey,
-    editable_text_key: GlobalKey,
+    clear_global_key: LabeledGlobalKey,
+    editable_text_key: LabeledGlobalKey,
     controller: Option<Handle<RestorableTextEditingController>>,
     focus_node: Option<Handle<FocusNode>>,
     listening_controller: Option<AnyTextEditingController>,
@@ -1740,7 +1741,7 @@ impl State for CupertinoTextFieldState {
 }
 
 impl TextSelectionGestureDetectorBuilderDelegate for CupertinoTextFieldState {
-    fn editable_text_key(self: Handle<Self>, app: &App) -> GlobalKey {
+    fn editable_text_key(self: Handle<Self>, app: &App) -> LabeledGlobalKey {
         app.get(self).editable_text_key.clone()
     }
 
@@ -1939,7 +1940,7 @@ mod tests {
         found
     }
 
-    fn field_point(app: &mut App, key: &GlobalKey, local: Offset) -> Offset {
+    fn field_point(app: &mut App, key: &LabeledGlobalKey, local: Offset) -> Offset {
         let context = key.current_context(app).expect("the field mounted");
         let render_box = context
             .find_render_object(app)
@@ -1949,13 +1950,13 @@ mod tests {
         render_box.local_to_global(app, local, None)
     }
 
-    fn mount_field(text: &str) -> (Rc<AppCell>, Handle<TextEditingController>, GlobalKey) {
+    fn mount_field(text: &str) -> (Rc<AppCell>, Handle<TextEditingController>, LabeledGlobalKey) {
         let cell = test_cell();
         let mut app = cell.borrow_mut();
         install_fonts(&mut app);
         let controller = TextEditingController::new(&mut app);
         controller.set_text(&mut app, text);
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let key_ref: KeyRef = Rc::new(key.clone());
         drop(app);
         build(
@@ -2018,7 +2019,7 @@ mod tests {
     }
 
     /// Clicks the field so it takes focus, which is what puts it under the shortcuts.
-    fn focus_field(app: &mut App, key: &GlobalKey) {
+    fn focus_field(app: &mut App, key: &LabeledGlobalKey) {
         let at = field_point(app, key, Offset::new(12.0, 12.0));
         send_mouse(app, PointerChange::Down, at.dx(), at.dy(), 1);
         send_mouse(app, PointerChange::Up, at.dx(), at.dy(), 1);
@@ -2038,13 +2039,13 @@ mod tests {
     /// `mount_field` gives the field the whole view, so there is no outside to tap.
     fn mount_field_with_room_below(
         text: &str,
-    ) -> (Rc<AppCell>, Handle<TextEditingController>, GlobalKey) {
+    ) -> (Rc<AppCell>, Handle<TextEditingController>, LabeledGlobalKey) {
         let cell = test_cell();
         let mut app = cell.borrow_mut();
         install_fonts(&mut app);
         let controller = TextEditingController::new(&mut app);
         controller.set_text(&mut app, text);
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let key_ref: KeyRef = Rc::new(key.clone());
         drop(app);
         build(

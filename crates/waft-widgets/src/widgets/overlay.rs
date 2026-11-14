@@ -23,7 +23,7 @@ use waft_scheduler::{
 
 use crate::framework::{
     AnyElement, BuildContext, BuildScope, BuildScopeCallback, Element, ElementData, GlobalKey,
-    InheritedWidget, IntoWidget, KeyRef, MultiChildRenderObjectElementBase,
+    InheritedWidget, IntoWidget, KeyRef, LabeledGlobalKey, MultiChildRenderObjectElementBase,
     MultiChildRenderObjectElementData, MultiChildRenderObjectWidget, RenderObjectElement,
     RenderObjectElementData, RenderObjectElementWidget, RenderObjectWidget,
     SingleChildRenderObjectWidget, Slot, State, StateData, StatefulWidget, Widget, WidgetKind,
@@ -31,6 +31,7 @@ use crate::framework::{
 };
 use crate::view::View;
 use crate::widgets::basic::{Builder, Directionality, WidgetBuilder};
+use crate::widgets::lookup_boundary::LookupBoundary;
 use crate::widgets::media_query::MediaQuery;
 use crate::widgets::ticker_provider::{
     TickerMode, TickerProviderStateMixin, TickerProviderStateMixinData,
@@ -116,7 +117,7 @@ pub struct OverlayEntry {
     overlay_entry_state_notifier:
         Option<Handle<ValueNotifier<Option<Handle<OverlayEntryWidgetState>>>>>,
     overlay: Option<Handle<OverlayState>>,
-    key: GlobalKey,
+    key: LabeledGlobalKey,
     disposed_by_owner: bool,
 }
 
@@ -143,7 +144,7 @@ impl OverlayEntry {
             can_size_overlay,
             overlay_entry_state_notifier: Some(notifier),
             overlay: None,
-            key: GlobalKey::new(),
+            key: <dyn GlobalKey>::new(),
             disposed_by_owner: false,
         })
     }
@@ -2173,8 +2174,9 @@ impl RenderTheaterMarker {
         };
 
         if target_root_overlay {
-            let nearest =
-                context.get_element_for_inherited_widget_of_exact_type::<RenderTheaterMarker>(app);
+            let nearest = LookupBoundary::get_element_for_inherited_widget_of_exact_type::<
+                RenderTheaterMarker,
+            >(app, context);
             let ancestor = RenderTheaterMarker::root_marker_of(app, nearest)?;
             if create_dependency {
                 context.depend_on_inherited_element(app, ancestor, None);
@@ -2183,10 +2185,13 @@ impl RenderTheaterMarker {
         }
 
         if create_dependency {
-            context.depend_on_inherited_widget_of_exact_type::<RenderTheaterMarker>(app)?;
+            LookupBoundary::depend_on_inherited_widget_of_exact_type::<RenderTheaterMarker>(
+                app, context,
+            )?;
         }
-        let element =
-            context.get_element_for_inherited_widget_of_exact_type::<RenderTheaterMarker>(app)?;
+        let element = LookupBoundary::get_element_for_inherited_widget_of_exact_type::<
+            RenderTheaterMarker,
+        >(app, context)?;
         Some(read(app, element))
     }
 
@@ -2194,8 +2199,9 @@ impl RenderTheaterMarker {
         let marker_element = marker_element?;
         let mut ancestor = None;
         marker_element.visit_ancestor_elements(app, &mut |element| {
-            ancestor =
-                element.get_element_for_inherited_widget_of_exact_type::<RenderTheaterMarker>(app);
+            ancestor = LookupBoundary::get_element_for_inherited_widget_of_exact_type::<
+                RenderTheaterMarker,
+            >(app, element);
             false
         });
         match ancestor {

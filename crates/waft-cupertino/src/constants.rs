@@ -42,7 +42,7 @@ pub const K_CUPERTINO_FOCUS_COLOR_SATURATION: f64 = 0.835;
 /// See also:
 ///
 /// * <https://developer.apple.com/design/human-interface-guidelines/buttons#iOS-iPadOS>
-pub const K_CUPERTINO_BUTTON_TINTED_OPACITY_LIGHT: f64 = 0.12;
+pub const K_CUPERTINO_BUTTON_TINTED_OPACITY_LIGHT: f64 = 0.18;
 /// See [`K_CUPERTINO_BUTTON_TINTED_OPACITY_LIGHT`].
 pub const K_CUPERTINO_BUTTON_TINTED_OPACITY_DARK: f64 = 0.26;
 

@@ -941,7 +941,7 @@ mod tests {
             let presses = Rc::clone(&presses);
             move |_app| presses.set(presses.get() + 1)
         });
-        let global_key = GlobalKey::new();
+        let global_key = <dyn GlobalKey>::new();
         let key: KeyRef = Rc::new(global_key.clone());
         let button = configure(CupertinoButton::new(
             SizedBox::square(Some(40.0)).into_widget(),
@@ -1079,7 +1079,7 @@ mod tests {
     #[test]
     fn a_disabled_button_ignores_the_pointer() {
         let cell = crate::test_support::test_cell();
-        let global_key = GlobalKey::new();
+        let global_key = <dyn GlobalKey>::new();
         let key: KeyRef = Rc::new(global_key.clone());
         let button =
             CupertinoButton::new(SizedBox::square(Some(40.0)).into_widget(), None).key(key);
@@ -1208,6 +1208,54 @@ mod tests {
         for at in [16, 150, 300, 600] {
             pump(&mut app, Duration::from_millis(at));
         }
+    }
+
+    #[test]
+    fn a_tinted_button_fills_with_the_primary_color_at_the_light_tinted_opacity() {
+        let cell = crate::test_support::test_cell();
+        let global_key = <dyn GlobalKey>::new();
+        let key: KeyRef = Rc::new(global_key.clone());
+        let button = CupertinoButton::tinted(
+            SizedBox::square(Some(40.0)).into_widget(),
+            Some(Listener::new(|_app| {})),
+        )
+        .key(key);
+        build(&cell, button.into_widget());
+        let mut app = cell.borrow_mut();
+        let root = global_key
+            .current_context(&mut app)
+            .expect("the button mounted")
+            .find_render_object(&app)
+            .expect("the button has a render object");
+
+        let color = find_decorated_box(&app, root)
+            .expect("the button decorates its background")
+            .decoration(&app)
+            .as_any()
+            .downcast_ref::<ShapeDecoration>()
+            .expect("a shape decoration")
+            .color
+            .clone()
+            .expect("a tinted button has a fill");
+        let expected = CupertinoColors::ACTIVE_BLUE.with_values(Some(0.18), None, None, None, None);
+        assert_eq!(color.color(), expected);
+    }
+
+    /// The first `RenderDecoratedBox` from `node` down.
+    fn find_decorated_box(
+        app: &App,
+        node: waft_rendering::AnyRenderObject,
+    ) -> Option<waft_rendering::RenderHandle<waft_rendering::RenderDecoratedBox>> {
+        if let Some(found) = node.downcast::<waft_rendering::RenderDecoratedBox>(app) {
+            return Some(found);
+        }
+        let mut found = None;
+        node.visit_children(app, &mut |child| {
+            if found.is_none() {
+                found = find_decorated_box(app, child);
+            }
+        });
+        found
     }
 
     struct Counter {

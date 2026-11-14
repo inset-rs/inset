@@ -18,7 +18,7 @@ struct PageState {
     state: StateData<Page>,
     open: bool,
     top: bool,
-    nav: Rc<GlobalKey>,
+    nav: Rc<LabeledGlobalKey>,
 }
 
 impl StatefulWidget for Page {
@@ -29,7 +29,7 @@ impl StatefulWidget for Page {
             state: StateData::new(),
             open: true,
             top: false,
-            nav: Rc::new(GlobalKey::new()),
+            nav: Rc::new(<dyn GlobalKey>::new()),
         }
     }
 }

@@ -106,7 +106,7 @@ fn button_width(padding: Option<[f64; 4]>) -> f64 {
     use waft_widgets::*;
     use waft_winui::*;
 
-    let key = Rc::new(GlobalKey::new());
+    let key = Rc::new(<dyn GlobalKey>::new());
     let button_key = key.clone();
     let fixture = Fixture::with_root(
         [200, 200],

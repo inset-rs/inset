@@ -47,7 +47,7 @@ pub fn gallery() -> CupertinoApp {
 /// Runs the gallery, then opens `opening` over the index once the tree is attached: the
 /// screen a user would tap to, reached without input, for a bench or a smoke run.
 pub fn run_gallery(app: &mut App, opening: Option<Entry>) {
-    let navigator = GlobalKey::new();
+    let navigator = <dyn GlobalKey>::new();
     let window = WindowConfig {
         title: "Waft — cupertino gallery".to_owned(),
         size: [420.0, 720.0],
@@ -55,7 +55,9 @@ pub fn run_gallery(app: &mut App, opening: Option<Entry>) {
     };
     run_app_with(
         app,
-        gallery().navigator_key(navigator.clone()).into_widget(),
+        gallery()
+            .navigator_key(Rc::new(navigator.clone()))
+            .into_widget(),
         window,
     );
     // AFTER `run_app`, which is what installs the default font collection this registers

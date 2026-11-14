@@ -35,7 +35,7 @@ struct PageState {
     allow_drop: bool,
     cancel: bool,
     events: Vec<String>,
-    custom_header: Option<Rc<GlobalKey>>,
+    custom_header: Option<Rc<LabeledGlobalKey>>,
     custom_feedback: bool,
 }
 
@@ -506,7 +506,7 @@ fn custom_keyed_header_drag_keeps_live_subtree_and_accepts_independent_feedback(
     let (mut f, p) = fixture(3);
     settle(&mut f);
     let owner = p.0.get().unwrap();
-    let header_key = Rc::new(GlobalKey::new());
+    let header_key = Rc::new(<dyn GlobalKey>::new());
     owner.set_state(&mut f.cell.borrow_mut(), |state| {
         state.custom_header = Some(header_key.clone())
     });

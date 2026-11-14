@@ -1690,7 +1690,7 @@ impl StatefulWidget for FocusableActionDetector {
             highlight_mode_listener: None,
             // This global key is needed to keep only the necessary widgets in the tree while
             // maintaining the subtree's state.
-            mouse_region_key: Rc::new(GlobalKey::new()),
+            mouse_region_key: Rc::new(<dyn GlobalKey>::new()),
         }
     }
 }

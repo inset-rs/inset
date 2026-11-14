@@ -12,10 +12,10 @@ use waft_gestures::{GestureBinding, HitTestResult};
 use waft_painting::{AnyColor, BoxDecoration, EdgeInsetsGeometry};
 use waft_rendering::{BoxHitTestEntry, HitTestBehavior};
 use waft_widgets::{
-    BuildContext, DecoratedBox, GlobalKey, InheritedWidget, IntoWidget, KeyRef, MediaQuery,
-    MetaData, Padding, Positioned, PreferredSizeWidget, ScrollNotificationObserver, SizedBox,
-    Stack, State, StateData, StatefulWidget, StatelessWidget, View, WidgetRef, WidgetsBinding,
-    WidgetsBindingObserverObject, WidgetsBindingObserverRef, downcast_widget,
+    BuildContext, DecoratedBox, GlobalKey, InheritedWidget, IntoWidget, KeyRef, LabeledGlobalKey,
+    MediaQuery, MetaData, Padding, Positioned, PreferredSizeWidget, ScrollNotificationObserver,
+    SizedBox, Stack, State, StateData, StatefulWidget, StatelessWidget, View, WidgetRef,
+    WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef, downcast_widget,
 };
 
 use crate::colors::CupertinoDynamicColor;
@@ -201,7 +201,7 @@ impl StatefulWidget for CupertinoPageScaffold {
     fn create_state(&self) -> CupertinoPageScaffoldState {
         CupertinoPageScaffoldState {
             state: StateData::new(),
-            status_bar_key: Rc::new(GlobalKey::new()),
+            status_bar_key: Rc::new(<dyn GlobalKey>::new()),
             observer: None,
         }
     }
@@ -210,7 +210,7 @@ impl StatefulWidget for CupertinoPageScaffold {
 /// Dart's `_CupertinoPageScaffoldState`.
 pub struct CupertinoPageScaffoldState {
     state: StateData<CupertinoPageScaffold>,
-    status_bar_key: Rc<GlobalKey>,
+    status_bar_key: Rc<LabeledGlobalKey>,
     observer: Option<WidgetsBindingObserverRef>,
 }
 
@@ -471,7 +471,7 @@ impl InheritedWidget for CupertinoPageScaffoldBackgroundColor {
 ///
 /// This is used by [`CupertinoPageScaffoldState::handle_status_bar_tap`] to avoid sending
 /// status bar tap events to scroll views in offscreen subtrees.
-fn hit_testable_at_origin(app: &mut App, key: &GlobalKey) -> bool {
+fn hit_testable_at_origin(app: &mut App, key: &LabeledGlobalKey) -> bool {
     let Some(context) = key.current_context(app) else {
         debug_assert!(
             false,
@@ -498,11 +498,11 @@ fn hit_testable_at_origin(app: &mut App, key: &GlobalKey) -> bool {
 /// its contents.
 #[derive(Debug)]
 struct HitTestableAtOrigin {
-    global_key: Rc<GlobalKey>,
+    global_key: Rc<LabeledGlobalKey>,
 }
 
 impl HitTestableAtOrigin {
-    fn new(global_key: Rc<GlobalKey>) -> HitTestableAtOrigin {
+    fn new(global_key: Rc<LabeledGlobalKey>) -> HitTestableAtOrigin {
         HitTestableAtOrigin { global_key }
     }
 }

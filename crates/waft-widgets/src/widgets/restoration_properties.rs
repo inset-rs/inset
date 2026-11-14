@@ -1726,7 +1726,7 @@ mod tests {
             let mut app = cell.borrow_mut();
             let manager = RestorationManager::instance(&mut app);
             manager.handle_restoration_update_from_engine(&mut app, true, data);
-            let key = GlobalKey::new();
+            let key = <dyn GlobalKey>::new();
             let harness = Harness::mount(
                 &mut app,
                 RootRestorationScope::new(
@@ -2013,7 +2013,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let manager = RestorationManager::instance(&mut app);
         manager.handle_restoration_update_from_engine(&mut app, true, None);
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let harness = Harness::mount(
             &mut app,
             RootRestorationScope::new(

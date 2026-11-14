@@ -1,14 +1,11 @@
 //! Flutter counterpart: `cupertino/theme.dart`.
-//!
-//! `InheritedTheme` (`wrap` / `captureAll`) waits in widgets; `InheritedCupertinoTheme` is a
-//! plain inherited widget with `wrap` as an inherent method until then.
 
 use waft_embedder::{Brightness, Color};
 use waft_foundation::App;
 use waft_painting::AnyColor;
 use waft_widgets::{
-    BuildContext, IconTheme, InheritedWidget, IntoWidget, KeyRef, MediaQuery, StatelessWidget,
-    WidgetRef,
+    BuildContext, IconTheme, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, MediaQuery,
+    StatelessWidget, WidgetRef,
 };
 
 use crate::colors::{CupertinoColors, CupertinoDynamicColor};
@@ -167,9 +164,8 @@ pub struct InheritedCupertinoTheme {
     pub child: WidgetRef,
 }
 
-impl InheritedCupertinoTheme {
-    /// `InheritedTheme.wrap`: a new [`CupertinoTheme`] with this theme's data around `child`.
-    pub fn wrap(&self, child: WidgetRef) -> WidgetRef {
+impl InheritedTheme for InheritedCupertinoTheme {
+    fn wrap(&self, _app: &mut App, _context: BuildContext, child: WidgetRef) -> WidgetRef {
         CupertinoTheme {
             key: None,
             data: self.theme.data.clone(),
@@ -190,6 +186,10 @@ impl InheritedWidget for InheritedCupertinoTheme {
 
     fn update_should_notify(&self, old_widget: &InheritedCupertinoTheme) -> bool {
         self.theme.data != old_widget.theme.data
+    }
+
+    fn as_inherited_theme(&self) -> Option<&dyn InheritedTheme> {
+        Some(self)
     }
 }
 
@@ -564,7 +564,6 @@ impl NoDefaultCupertinoThemeData {
     }
 }
 
-/// Dart's `==` leaves `selectionHandleColor` out; kept as it is.
 impl PartialEq for NoDefaultCupertinoThemeData {
     fn eq(&self, other: &NoDefaultCupertinoThemeData) -> bool {
         self.brightness == other.brightness
@@ -573,6 +572,7 @@ impl PartialEq for NoDefaultCupertinoThemeData {
             && self.text_theme == other.text_theme
             && self.bar_background_color == other.bar_background_color
             && self.scaffold_background_color == other.scaffold_background_color
+            && self.selection_handle_color == other.selection_handle_color
             && self.apply_theme_to_all == other.apply_theme_to_all
     }
 }
@@ -788,5 +788,20 @@ mod tests {
         assert_eq!(copy.no_default().text_theme, None);
         assert_ne!(copy, data);
         assert_eq!(CupertinoThemeData::new(), CupertinoThemeData::default());
+    }
+
+    #[test]
+    fn no_default_theme_data_equality_compares_the_selection_handle_color() {
+        let red = NoDefaultCupertinoThemeData {
+            selection_handle_color: Some(CupertinoColors::SYSTEM_RED),
+            ..NoDefaultCupertinoThemeData::new()
+        };
+        let blue = NoDefaultCupertinoThemeData {
+            selection_handle_color: Some(CupertinoColors::SYSTEM_BLUE),
+            ..NoDefaultCupertinoThemeData::new()
+        };
+        let red_copy = red.copy_with();
+        assert_ne!(red, blue);
+        assert_eq!(red, red_copy);
     }
 }

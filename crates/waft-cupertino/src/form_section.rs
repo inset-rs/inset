@@ -235,21 +235,21 @@ mod tests {
 
     use waft_embedder::{Offset, TextDirection};
     use waft_rendering::{AnyRenderObject, RenderClipRRect, RenderHandle, RenderObject};
-    use waft_widgets::{Builder, Directionality, GlobalKey, SizedBox};
+    use waft_widgets::{Builder, Directionality, GlobalKey, LabeledGlobalKey, SizedBox};
 
     use super::*;
     use crate::test_support::{build, test_cell};
 
-    fn key_of(key: &GlobalKey) -> KeyRef {
+    fn key_of(key: &LabeledGlobalKey) -> KeyRef {
         Rc::new(key.clone())
     }
 
     /// A `SizedBox` of `width` x `height`, findable through `key`.
-    fn slot(key: &GlobalKey, width: f64, height: f64) -> SizedBox {
+    fn slot(key: &LabeledGlobalKey, width: f64, height: f64) -> SizedBox {
         SizedBox::new().key(key_of(key)).width(width).height(height)
     }
 
-    fn offset_of(app: &mut App, key: &GlobalKey) -> Offset {
+    fn offset_of(app: &mut App, key: &LabeledGlobalKey) -> Offset {
         key.current_context(app)
             .expect("the slot mounted")
             .find_render_object(app)
@@ -273,7 +273,7 @@ mod tests {
         found
     }
 
-    fn root(app: &mut App, key: &GlobalKey) -> AnyRenderObject {
+    fn root(app: &mut App, key: &LabeledGlobalKey) -> AnyRenderObject {
         key.current_context(app)
             .expect("the section mounted")
             .find_render_object(app)
@@ -302,7 +302,7 @@ mod tests {
         let cell = test_cell();
         let seen = Rc::new(RefCell::new(Vec::new()));
         let secondary = Rc::new(RefCell::new(None));
-        let (first, second) = (GlobalKey::new(), GlobalKey::new());
+        let (first, second) = (<dyn GlobalKey>::new(), <dyn GlobalKey>::new());
         mount(
             &cell,
             CupertinoFormSection::new([
@@ -347,7 +347,7 @@ mod tests {
     #[test]
     fn an_inset_grouped_form_section_keeps_the_form_margin_and_does_not_clip() {
         let cell = test_cell();
-        let (section_key, first) = (GlobalKey::new(), GlobalKey::new());
+        let (section_key, first) = (<dyn GlobalKey>::new(), <dyn GlobalKey>::new());
         let section = CupertinoFormSection::inset_grouped([slot(&first, 50.0, 40.0).into_widget()]);
         assert_eq!(section.margin, K_FORM_DEFAULT_INSET_GROUPED_ROWS_MARGIN);
         assert_eq!(section.clip_behavior, Clip::None);

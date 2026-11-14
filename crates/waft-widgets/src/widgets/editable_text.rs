@@ -48,8 +48,8 @@ use waft_services::{
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 use crate::framework::{
-    BuildContext, GlobalKey, IntoWidget, KeyRef, MultiChildRenderObjectWidget, RenderObjectWidget,
-    SingleChildRenderObjectWidget, State, StateData, StatefulWidget, WidgetRef,
+    BuildContext, GlobalKey, IntoWidget, KeyRef, LabeledGlobalKey, MultiChildRenderObjectWidget,
+    RenderObjectWidget, SingleChildRenderObjectWidget, State, StateData, StatefulWidget, WidgetRef,
 };
 use crate::state_accessors;
 use crate::view::View;
@@ -1994,8 +1994,8 @@ impl StatefulWidget for EditableText {
             actions: None,
             vertical_movement_run: None,
             run_selection: None,
-            editable_key: Rc::new(GlobalKey::new()),
-            scrollable_key: Rc::new(GlobalKey::new()),
+            editable_key: Rc::new(<dyn GlobalKey>::new()),
+            scrollable_key: Rc::new(<dyn GlobalKey>::new()),
             style: TextStyle::new(),
             tickers_enabled: true,
             batch_edit_depth: 0,
@@ -2301,8 +2301,8 @@ pub struct EditableTextState {
     /// to that instance, so the run is shared here instead.
     vertical_movement_run: Option<VerticalCaretMovementRun>,
     run_selection: Option<TextSelection>,
-    editable_key: Rc<GlobalKey>,
-    scrollable_key: Rc<GlobalKey>,
+    editable_key: Rc<LabeledGlobalKey>,
+    scrollable_key: Rc<LabeledGlobalKey>,
     style: TextStyle,
     tickers_enabled: bool,
     batch_edit_depth: i32,
@@ -6922,7 +6922,7 @@ mod tests {
     fn cut_and_copy_do_nothing_in_obscured_mode_even_if_explicitly_called() {
         let mock_clipboard = Rc::new(waft_test::MockClipboard::new());
         let cell = app_with_clipboard(&mock_clipboard);
-        let key = crate::framework::GlobalKey::new();
+        let key = <dyn crate::framework::GlobalKey>::new();
         let (harness, state) = {
             let mut app = cell.borrow_mut();
             let controller = TextEditingController::new(&mut app).text(&mut app, "blah blah");
@@ -6983,7 +6983,7 @@ mod tests {
     fn should_not_scroll_on_paste_if_caret_already_visible() {
         let mock_clipboard = Rc::new(waft_test::MockClipboard::new());
         let cell = app_with_clipboard(&mock_clipboard);
-        let key = crate::framework::GlobalKey::new();
+        let key = <dyn crate::framework::GlobalKey>::new();
         let (harness, state, controller, focus_node, scroll_controller) = {
             let mut app = cell.borrow_mut();
             let scroll_controller = ScrollController::default(&mut app);
@@ -7051,7 +7051,7 @@ mod tests {
 
         let cell = binding_cell();
         install_fonts(&mut cell.borrow_mut());
-        let key = crate::framework::GlobalKey::new();
+        let key = <dyn crate::framework::GlobalKey>::new();
         let (controller, focus_node, scroll_controller) = {
             let mut app = cell.borrow_mut();
             (

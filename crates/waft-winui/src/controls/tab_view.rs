@@ -231,7 +231,7 @@ impl TabView {
 #[derive(Clone)]
 struct TabContainer {
     /// Identifies the realized header independently of its collection index.
-    key: Rc<GlobalKey>,
+    key: Rc<LabeledGlobalKey>,
 
     /// Owns keyboard focus for the header surface.
     tab_focus: AnyFocusNode,
@@ -249,7 +249,7 @@ impl TabContainer {
         let content_focus = FocusScopeNode::new(app);
         content_focus.set_traversal_edge_behavior(app, TraversalEdgeBehavior::ParentScope);
         Self {
-            key: Rc::new(GlobalKey::labeled(format!("Tab {id}"))),
+            key: Rc::new(<dyn GlobalKey>::labeled(format!("Tab {id}"))),
             tab_focus: FocusNode::new(app).as_node(),
             close_focus: FocusNode::new(app).as_node(),
             content_focus,

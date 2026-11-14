@@ -1484,7 +1484,7 @@ mod tests {
         let cell = app_with_view();
         let app = cell.borrow();
         let captured: Captured = Rc::default();
-        let key: KeyRef = Rc::new(GlobalKey::new());
+        let key: KeyRef = Rc::new(<dyn GlobalKey>::new());
         drop(app);
         mount(
             &cell,

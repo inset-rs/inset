@@ -4,6 +4,7 @@
 //! with `RenderTransform`'s, and [`FadeTransition`]'s `alwaysIncludeSemantics` with
 //! accessibility.
 
+use std::any::TypeId;
 use std::f64::consts::PI;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
@@ -187,16 +188,122 @@ impl<W: AnimatedWidget> AnimatedState<W> {
 /// when the topmost route is popped off the stack.
 ///
 /// Typically used as the argument for `ModalRoute::delegated_transition`.
-pub type DelegatedTransitionBuilder = Rc<
-    dyn Fn(
-        &mut App,
-        BuildContext,
-        AnyAnimation<f64>,
-        AnyAnimation<f64>,
-        bool,
-        Option<&WidgetRef>,
-    ) -> Option<WidgetRef>,
->;
+///
+/// `ModalRoute` compares the builder a route offers with the one the route above offers, as
+/// Dart compares two function values: [`new`](Self::new) equals only its clones;
+/// [`function`](Self::function) equals any other built from the same function, as two
+/// tear-offs of one static method are identical (see the porting skill's callback-identity
+/// pattern).
+#[derive(Clone)]
+pub struct DelegatedTransitionBuilder {
+    builder: Rc<DelegatedTransitionBuilderFn>,
+    identity: DelegatedTransitionBuilderIdentity,
+}
+
+/// The function a [`DelegatedTransitionBuilder`] calls.
+type DelegatedTransitionBuilderFn = dyn Fn(
+    &mut App,
+    BuildContext,
+    AnyAnimation<f64>,
+    AnyAnimation<f64>,
+    bool,
+    Option<&WidgetRef>,
+) -> Option<WidgetRef>;
+
+/// Equality key: closures compare by allocation, functions by the `TypeId` of the function
+/// item.
+#[derive(Clone, Copy, PartialEq)]
+enum DelegatedTransitionBuilderIdentity {
+    Closure,
+    Function(TypeId),
+}
+
+impl DelegatedTransitionBuilder {
+    /// Wraps a closure; it equals only its clones.
+    pub fn new(
+        builder: impl Fn(
+            &mut App,
+            BuildContext,
+            AnyAnimation<f64>,
+            AnyAnimation<f64>,
+            bool,
+            Option<&WidgetRef>,
+        ) -> Option<WidgetRef>
+        + 'static,
+    ) -> DelegatedTransitionBuilder {
+        DelegatedTransitionBuilder {
+            builder: Rc::new(builder),
+            identity: DelegatedTransitionBuilderIdentity::Closure,
+        }
+    }
+
+    /// A function, comparable like a Dart tear-off of a static method.
+    ///
+    /// Pass the function by name. A fn pointer or capturing closure is rejected: it has no
+    /// canonical identity.
+    pub fn function<F>(builder: F) -> DelegatedTransitionBuilder
+    where
+        F: Fn(
+                &mut App,
+                BuildContext,
+                AnyAnimation<f64>,
+                AnyAnimation<f64>,
+                bool,
+                Option<&WidgetRef>,
+            ) -> Option<WidgetRef>
+            + 'static,
+    {
+        const {
+            assert!(
+                std::mem::size_of::<F>() == 0,
+                "pass the function by name: a fn pointer or capturing closure has no canonical \
+                 identity"
+            )
+        };
+        DelegatedTransitionBuilder {
+            builder: Rc::new(builder),
+            identity: DelegatedTransitionBuilderIdentity::Function(TypeId::of::<F>()),
+        }
+    }
+
+    /// Calls the builder.
+    pub fn call(
+        &self,
+        app: &mut App,
+        context: BuildContext,
+        animation: AnyAnimation<f64>,
+        secondary_animation: AnyAnimation<f64>,
+        allow_snapshotting: bool,
+        child: Option<&WidgetRef>,
+    ) -> Option<WidgetRef> {
+        (self.builder)(
+            app,
+            context,
+            animation,
+            secondary_animation,
+            allow_snapshotting,
+            child,
+        )
+    }
+}
+
+impl PartialEq for DelegatedTransitionBuilder {
+    fn eq(&self, other: &DelegatedTransitionBuilder) -> bool {
+        match (self.identity, other.identity) {
+            (
+                DelegatedTransitionBuilderIdentity::Closure,
+                DelegatedTransitionBuilderIdentity::Closure,
+            ) => Rc::ptr_eq(&self.builder, &other.builder),
+            (mine, theirs) => mine == theirs,
+        }
+    }
+}
+
+impl Debug for DelegatedTransitionBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("DelegatedTransitionBuilder")
+    }
+}
 
 /// Animates the position of a widget relative to its normal position.
 ///

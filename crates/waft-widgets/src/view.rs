@@ -27,6 +27,7 @@ use crate::widgets::focus_scope::FocusScope;
 use crate::widgets::focus_traversal::{
     AnyFocusTraversalPolicy, FocusTraversalGroup, FocusTraversalPolicy, ReadingOrderTraversalPolicy,
 };
+use crate::widgets::lookup_boundary::LookupBoundary;
 use crate::widgets::media_query::MediaQuery;
 use crate::window::WindowScopeOfView;
 
@@ -94,8 +95,7 @@ impl View {
     /// different `FlutterView` then before). The dependency is not triggered when the
     /// properties on the `FlutterView` itself change.
     pub fn maybe_of(app: &mut App, context: BuildContext) -> Option<ViewRef> {
-        context
-            .depend_on_inherited_widget_of_exact_type::<ViewScope>(app)
+        LookupBoundary::depend_on_inherited_widget_of_exact_type::<ViewScope>(app, context)
             .map(|scope| Rc::clone(&scope.view))
     }
 
@@ -914,10 +914,12 @@ impl StatelessWidget for ViewAnchor {
     }
 
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
-        // `LookupBoundary` around the view waits (`## Deferred`).
         MultiChildComponentWidget::new(
             None,
-            self.view.iter().cloned().collect(),
+            self.view
+                .iter()
+                .map(|view| LookupBoundary::new(view.clone()).into_widget())
+                .collect(),
             Some(self.child.clone()),
         )
         .into_widget()
@@ -1140,7 +1142,8 @@ mod tests {
 
     use crate::binding::WidgetsBinding;
     use crate::framework::{
-        BuildContext, GlobalKey, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
+        BuildContext, GlobalKey, IntoWidget, KeyRef, LabeledGlobalKey, State, StateData,
+        StatefulWidget, WidgetRef,
     };
     use crate::test_harness::{
         binding_cell, binding_mount, binding_pump, binding_pump_view, pump_every_view,
@@ -1156,7 +1159,7 @@ mod tests {
     fn a_dirty_render_object_under_a_view_schedules_a_frame() {
         let cell = binding_cell();
         let app = cell.borrow();
-        let key = Rc::new(GlobalKey::new());
+        let key = Rc::new(<dyn GlobalKey>::new());
         drop(app);
         binding_mount(
             &cell,
@@ -1507,7 +1510,7 @@ mod tests {
     #[test]
     fn a_global_key_subtree_moved_to_another_view_keeps_its_state_and_ticks_there() {
         let (cell, platform) = app_with_two_views();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let ticks = Ticks::default();
         let tree = |in_first: bool| -> WidgetRef {
             let ticking =
@@ -1553,7 +1556,7 @@ mod tests {
     #[test]
     fn an_anchored_view_paints_only_at_its_own_frame() {
         let (cell, platform) = app_with_two_views();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         mount_root(
             &cell,
             super::View::new(
@@ -1599,7 +1602,7 @@ mod tests {
     #[test]
     fn a_request_for_another_view_made_during_a_frame_is_not_lost() {
         let (cell, platform) = app_with_two_views();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         mount_root(
             &cell,
             super::ViewCollection::new(vec![
@@ -1638,9 +1641,13 @@ mod tests {
 
     /// Two views, each holding a keyed subtree, under a keyed subtree above both; answers the
     /// keys: above, in the first view, in the second.
-    fn mount_keyed_views(cell: &AppCell, platform: &TestPlatform) -> [GlobalKey; 3] {
-        let keys = [GlobalKey::new(), GlobalKey::new(), GlobalKey::new()];
-        let keyed = |key: &GlobalKey, child: WidgetRef| -> WidgetRef {
+    fn mount_keyed_views(cell: &AppCell, platform: &TestPlatform) -> [LabeledGlobalKey; 3] {
+        let keys = [
+            <dyn GlobalKey>::new(),
+            <dyn GlobalKey>::new(),
+            <dyn GlobalKey>::new(),
+        ];
+        let keyed = |key: &LabeledGlobalKey, child: WidgetRef| -> WidgetRef {
             crate::KeyedSubtree::new(child)
                 .key(Rc::new(key.clone()))
                 .into_widget()
@@ -1668,7 +1675,7 @@ mod tests {
     }
 
     /// Marks the element `key` is on dirty.
-    fn mark_needs_build(app: &mut App, key: &GlobalKey) {
+    fn mark_needs_build(app: &mut App, key: &LabeledGlobalKey) {
         key.current_context(app)
             .expect("mounted")
             .mark_needs_build(app);
@@ -1759,8 +1766,8 @@ mod tests {
     fn a_ticker_whose_widget_moves_to_another_view_while_its_view_is_hidden_ticks_there() {
         let (cell, platform) = app_with_two_views();
         let ticks = Ticks::default();
-        let key = GlobalKey::new();
-        let above = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
+        let above = <dyn GlobalKey>::new();
         let in_first = Rc::new(std::cell::Cell::new(true));
         let tree = {
             let (ticks, key, in_first) = (Rc::clone(&ticks), key.clone(), Rc::clone(&in_first));

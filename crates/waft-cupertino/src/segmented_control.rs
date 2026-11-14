@@ -27,7 +27,7 @@ use waft_services::{MouseCursor, SystemMouseCursors};
 use waft_widgets::{
     Action, Actions, AnyAction, AnyFocusNode, AnyRadioGroupRegistry, BuildContext, Center,
     DefaultTextStyle, Directionality, Focus, FocusNode, FocusNodeLeaf, GestureDetector, GlobalKey,
-    IconTheme, IconThemeData, IntoWidget, KeyEventResult, KeyRef, MouseRegion,
+    IconTheme, IconThemeData, IntoWidget, KeyEventResult, KeyRef, LabeledGlobalKey, MouseRegion,
     MultiChildRenderObjectWidget, Padding, RadioClient, RadioClientData, RadioGroup,
     RenderObjectWidget, State, StateData, StatefulWidget, TickerProviderStateMixin,
     TickerProviderStateMixinData, UnconstrainedBox, VoidCallbackAction, VoidCallbackIntent,
@@ -431,7 +431,7 @@ pub struct SegmentedControlState<T: Copy + Eq + Hash + Debug + 'static> {
     action_map: HashMap<std::any::TypeId, AnyAction>,
     selection_controllers: Vec<Handle<AnimationController>>,
     child_tweens: Vec<Handle<ColorTween>>,
-    segment_keys: HashMap<T, GlobalKey>,
+    segment_keys: HashMap<T, LabeledGlobalKey>,
     forward_background_color_tween: Option<Handle<ColorTween>>,
     reverse_background_color_tween: Option<Handle<ColorTween>>,
     text_color_tween: Option<Handle<ColorTween>>,
@@ -838,7 +838,7 @@ impl<T: Copy + Eq + Hash + Debug + 'static> State for SegmentedControlState<T> {
                 .get_mut(self)
                 .segment_keys
                 .entry(current_key)
-                .or_insert_with(GlobalKey::new)
+                .or_insert_with(<dyn GlobalKey>::new)
                 .clone();
 
             let mut detector = GestureDetector::new().behavior(HitTestBehavior::Opaque);
@@ -891,7 +891,6 @@ impl<T: Copy + Eq + Hash + Debug + 'static> State for SegmentedControlState<T> {
             .expect("update_colors ran")
             .color();
         let segmented_box = SegmentedControlRenderWidget {
-            key: None,
             children: gesture_children,
             selected_index,
             pressed_index,
@@ -946,7 +945,6 @@ fn color_of(color: &Option<AnyColor>) -> Option<Color> {
 /// Dart's `_SegmentedControlRenderWidget`.
 #[derive(Debug)]
 struct SegmentedControlRenderWidget {
-    key: Option<KeyRef>,
     children: Vec<WidgetRef>,
     selected_index: Option<usize>,
     pressed_index: Option<usize>,
@@ -956,10 +954,6 @@ struct SegmentedControlRenderWidget {
 
 impl RenderObjectWidget for SegmentedControlRenderWidget {
     type RenderObject = RenderSegmentedControl;
-
-    fn key(&self) -> Option<&KeyRef> {
-        self.key.as_ref()
-    }
 
     fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject {
         let text_direction = Directionality::of(app, context);
@@ -1531,7 +1525,7 @@ mod tests {
     use waft_services::{
         HardwareKeyboard, KeyDownEvent, KeyEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
     };
-    use waft_widgets::{GlobalKey, SizedBox, WidgetsBinding};
+    use waft_widgets::{GlobalKey, LabeledGlobalKey, SizedBox, WidgetsBinding};
 
     use super::*;
     use crate::test_support::{build, pump};
@@ -1578,7 +1572,7 @@ mod tests {
             HostState {
                 state: StateData::new(),
                 group_value: 0,
-                control_key: GlobalKey::new(),
+                control_key: <dyn GlobalKey>::new(),
             }
         }
     }
@@ -1586,7 +1580,7 @@ mod tests {
     struct HostState {
         state: StateData<Host>,
         group_value: u32,
-        control_key: GlobalKey,
+        control_key: LabeledGlobalKey,
     }
 
     impl State for HostState {
@@ -1688,7 +1682,7 @@ mod tests {
     fn mount(disabled: Vec<u32>, text_direction: TextDirection) -> Mounted {
         let cell = crate::test_support::test_cell();
         let changes: Rc<RefCell<Vec<u32>>> = Rc::default();
-        let host_key = GlobalKey::new();
+        let host_key = <dyn GlobalKey>::new();
         build(
             &cell,
             Host {

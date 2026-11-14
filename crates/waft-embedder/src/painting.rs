@@ -349,10 +349,145 @@ impl ImageFilter {
     }
 }
 
+/// Shadow drawing on a [`Canvas`] (Dart's `Canvas.drawShadow`), drawn as Impeller's
+/// `DlDispatcherBase::drawShadow` draws it: the path filled with a tonal colour, mask-blurred
+/// and moved down by the elevation.
+pub trait CanvasShadow {
+    /// Draws a shadow for a [`Path`] representing the given material elevation.
+    ///
+    /// The `transparent_occluder` argument should be true if the occluding object
+    /// is not opaque.
+    ///
+    /// `device_pixel_ratio` is the pixel ratio of the view the canvas is painted into, which
+    /// the engine reads from the implicit view's metrics.
+    fn draw_shadow(
+        &mut self,
+        path: &Arc<Path>,
+        color: crate::Color,
+        elevation: f64,
+        transparent_occluder: bool,
+        device_pixel_ratio: f64,
+    );
+}
+
+impl CanvasShadow for Canvas {
+    fn draw_shadow(
+        &mut self,
+        path: &Arc<Path>,
+        color: crate::Color,
+        elevation: f64,
+        transparent_occluder: bool,
+        device_pixel_ratio: f64,
+    ) {
+        let _ = transparent_occluder;
+        let mut spot_color: valo::Color = color.into();
+        spot_color.a *= 0.25;
+        spot_color = tonal_spot_color(spot_color);
+
+        let light_position_y: f32 = -1.0;
+        let occluder_z = device_pixel_ratio as f32 * elevation as f32;
+
+        // Impeller's `800 / 600` is an integer division: the light radius over its height is 1.
+        const K_LIGHT_RADIUS: f32 = (800 / 600) as f32;
+
+        // Impeller divides by the canvas transform's vertical scale, which at the root of a
+        // view is the device pixel ratio.
+        let paint = Paint {
+            style: PaintStyle::Fill,
+            color: spot_color,
+            mask_blur: Some(MaskBlur::new(radius_to_sigma(
+                K_LIGHT_RADIUS * occluder_z / device_pixel_ratio as f32,
+            ))),
+            ..Paint::default()
+        };
+
+        self.save();
+        self.translate(0.0, -occluder_z * light_position_y);
+        self.draw_path(path, FillRule::NonZero, &paint);
+        self.restore();
+    }
+}
+
+/// Impeller's `Radius` to `Sigma` conversion (`impeller/geometry/sigma.cc`), which its
+/// `MaskBlurDescriptor` applies to the shadow's radius; valo's `MaskBlur` takes the sigma.
+fn radius_to_sigma(radius: f32) -> f32 {
+    // Impeller's `kKernelRadiusPerSigma`, √3.
+    const K_KERNEL_RADIUS_PER_SIGMA: f32 = 1.732_050_8;
+    if radius > 0.0 {
+        radius / K_KERNEL_RADIUS_PER_SIGMA + 0.5
+    } else {
+        0.0
+    }
+}
+
+/// The spot colour of a shadow, ported from `SkShadowUtils::ComputeTonalColors` as Impeller's
+/// `drawShadow` ports it.
+fn tonal_spot_color(spot_color: valo::Color) -> valo::Color {
+    let max = spot_color.r.max(spot_color.g).max(spot_color.b);
+    let min = spot_color.r.min(spot_color.g).min(spot_color.b);
+    let luminance = (min + max) * 0.5;
+
+    let alpha_adjust = (2.6 + (-2.66667 + 1.06667 * spot_color.a) * spot_color.a) * spot_color.a;
+    let mut color_alpha = (3.544762 + (-4.891428 + 2.3466 * luminance) * luminance) * luminance;
+    color_alpha = (alpha_adjust * color_alpha).clamp(0.0, 1.0);
+
+    let greyscale_alpha = (spot_color.a * (1.0 - 0.4 * luminance)).clamp(0.0, 1.0);
+
+    let color_scale = color_alpha * (1.0 - greyscale_alpha);
+    let tonal_alpha = color_scale + greyscale_alpha;
+    let unpremul_scale = if tonal_alpha != 0.0 {
+        color_scale / tonal_alpha
+    } else {
+        0.0
+    };
+    valo::Color {
+        r: unpremul_scale * spot_color.r,
+        g: unpremul_scale * spot_color.g,
+        b: unpremul_scale * spot_color.b,
+        a: tonal_alpha,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ColorFilter, ImageFilter, valo};
     use crate::{BlendMode, Color, Rect};
+
+    #[test]
+    fn a_shadow_fills_the_path_with_a_tonal_colour_blurred_and_moved_down_by_the_elevation() {
+        use super::{Canvas, CanvasShadow, PathBuilder};
+        use std::sync::Arc;
+
+        let mut builder = PathBuilder::new();
+        builder.rect(valo::Rect::new(0.0, 0.0, 10.0, 10.0));
+        let path = Arc::new(builder.build());
+        let mut canvas = Canvas::new();
+        canvas.draw_shadow(&path, Color::new(0xFF000000), 4.0, false, 2.0);
+        let picture = canvas.build();
+
+        let ops = picture.ops();
+        let translation = ops
+            .iter()
+            .find_map(|op| match op {
+                valo::Op::Transform(matrix) => Some(*matrix),
+                _ => None,
+            })
+            .expect("the shadow is moved");
+        assert_eq!(translation, valo::Matrix::translation(0.0, 8.0));
+        let paint = ops
+            .iter()
+            .find_map(|op| match op {
+                valo::Op::DrawPath { paint, .. } => Some(paint.clone()),
+                _ => None,
+            })
+            .expect("the shadow fills its path");
+        // A radius of the elevation, 4, as a sigma: 4 / √3 + 0.5.
+        let sigma = paint.mask_blur.expect("the shadow is blurred").sigma;
+        assert!((sigma - 2.809_401).abs() < 1e-5, "{sigma}");
+        // Black at a quarter alpha: luminance 0, so only the greyscale alpha remains.
+        assert_eq!(paint.color.r, 0.0);
+        assert!((paint.color.a - 0.25).abs() < 1e-6, "{:?}", paint.color);
+    }
 
     #[test]
     fn a_saturation_of_one_is_the_identity_matrix() {

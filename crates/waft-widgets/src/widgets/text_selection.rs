@@ -48,17 +48,21 @@ use waft_services::{
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 use crate::framework::{
-    BuildContext, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
+    BuildContext, GlobalKey, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
 };
 use crate::view::View;
-use crate::widgets::basic::{CompositedTransformFollower, Directionality, SizedBox, WidgetBuilder};
+use crate::widgets::basic::{
+    Builder, CompositedTransformFollower, Directionality, SizedBox, WidgetBuilder,
+};
 use crate::widgets::editable_text::EditableTextState;
 use crate::widgets::feedback::Feedback;
 use crate::widgets::gesture_detector::{
     GestureRecognizerFactories, GestureRecognizerFactory, GestureRecognizerFactoryWithHandlers,
     RawGestureDetector,
 };
+use crate::widgets::inherited_theme::{CapturedThemes, InheritedTheme};
 use crate::widgets::magnifier::{MagnifierController, MagnifierInfo, TextMagnifierConfiguration};
+use crate::widgets::navigator::Navigator;
 use crate::widgets::overlay::{Overlay, OverlayEntry};
 use crate::widgets::scrollable::Scrollable;
 use crate::widgets::tap_region::TextFieldTapRegion;
@@ -2316,17 +2320,38 @@ impl SelectionOverlay {
         }
         let context = app.get(self).context;
         let overlay = Overlay::of(app, context, true);
+
+        let overlay_context = overlay.context(app);
+        let captured_themes = Rc::new(<dyn InheritedTheme>::capture(
+            app,
+            context,
+            Some(overlay_context),
+        ));
+
         let this = self;
+        let start_themes = Rc::clone(&captured_themes);
         let start = OverlayEntry::new(
             app,
-            Rc::new(move |app, context| this.build_start_handle(app, context)),
+            // The `Builder` builds the handle under the captured themes, where Dart's
+            // `_SelectionHandleOverlay` would (deferred).
+            Rc::new(move |_app, _context| {
+                start_themes.wrap(
+                    Builder::new(move |app, context| this.build_start_handle(app, context))
+                        .into_widget(),
+                )
+            }),
             false,
             false,
             false,
         );
         let end = OverlayEntry::new(
             app,
-            Rc::new(move |app, context| this.build_end_handle(app, context)),
+            Rc::new(move |_app, _context| {
+                captured_themes.wrap(
+                    Builder::new(move |app, context| this.build_end_handle(app, context))
+                        .into_widget(),
+                )
+            }),
             false,
             false,
             false,
@@ -2404,7 +2429,9 @@ impl SelectionOverlay {
                 if let Some(visibility) = visibility {
                     wrapper = wrapper.visibility(visibility);
                 }
-                wrapper.into_widget()
+                // `ContextMenuController.show` captures from the entry's context up to its
+                // navigator's.
+                capture_to_navigator(app, overlay_context).wrap(wrapper.into_widget())
             }),
             false,
             false,
@@ -2448,7 +2475,8 @@ impl SelectionOverlay {
                     .and_then(|object| object.as_box())
                     .map(|box_| -box_.local_to_global(app, Offset::ZERO, None))
                     .unwrap_or(Offset::ZERO);
-                SelectionToolbarWrapper::new(layer_link, offset, child).into_widget()
+                capture_to_navigator(app, overlay_context)
+                    .wrap(SelectionToolbarWrapper::new(layer_link, offset, child).into_widget())
             }),
             false,
             false,
@@ -2837,7 +2865,7 @@ impl State for SelectionToolbarWrapperState {
 pub trait TextSelectionGestureDetectorBuilderDelegate: Sized + 'static {
     /// [GlobalKey] to the [`EditableText`] for which the
     /// [`TextSelectionGestureDetectorBuilder`] will build a [`TextSelectionGestureDetector`].
-    fn editable_text_key(self: Handle<Self>, app: &App) -> crate::framework::GlobalKey;
+    fn editable_text_key(self: Handle<Self>, app: &App) -> crate::framework::LabeledGlobalKey;
 
     /// Whether the text field should respond to force presses.
     fn force_press_enabled(self: Handle<Self>, app: &App) -> bool;
@@ -2857,7 +2885,7 @@ pub trait TextSelectionGestureDetectorBuilderDelegate: Sized + 'static {
 }
 
 struct TextSelectionGestureDetectorBuilderDelegateVTable {
-    editable_text_key: fn(&App, HandleId) -> crate::framework::GlobalKey,
+    editable_text_key: fn(&App, HandleId) -> crate::framework::LabeledGlobalKey,
     force_press_enabled: fn(&App, HandleId) -> bool,
     selection_enabled: fn(&App, HandleId) -> bool,
 }
@@ -2887,7 +2915,7 @@ pub struct AnyTextSelectionGestureDetectorBuilderDelegate {
 }
 
 impl AnyTextSelectionGestureDetectorBuilderDelegate {
-    pub fn editable_text_key(self, app: &App) -> crate::framework::GlobalKey {
+    pub fn editable_text_key(self, app: &App) -> crate::framework::LabeledGlobalKey {
         (self.vtable.editable_text_key)(app, self.id)
     }
 
@@ -4949,6 +4977,13 @@ impl State for TextSelectionGestureDetectorState {
     }
 }
 
+/// `ContextMenuController.show`'s capture inside its entry's builder: the themes from the
+/// entry's `context` up to its navigator's.
+fn capture_to_navigator(app: &mut App, context: BuildContext) -> CapturedThemes {
+    let to = Navigator::maybe_of(app, context, false).map(|navigator| navigator.context(app));
+    <dyn InheritedTheme>::capture(app, context, to)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5322,5 +5357,111 @@ mod tests {
         pump(&cell);
         shown.set_value(&mut cell.borrow_mut(), false);
         pump(&cell);
+    }
+
+    /// Selection controls whose handles record the default text style they are built under.
+    struct RecordingControls {
+        font_sizes: Rc<RefCell<Vec<Option<f64>>>>,
+    }
+
+    #[allow(deprecated)]
+    impl TextSelectionControls for RecordingControls {
+        fn build_handle(
+            &self,
+            app: &mut App,
+            context: BuildContext,
+            _handle_type: TextSelectionHandleType,
+            _text_line_height: f64,
+            _on_tap: Option<Listener>,
+        ) -> WidgetRef {
+            let font_size = crate::DefaultTextStyle::of(app, context).style.font_size;
+            self.font_sizes.borrow_mut().push(font_size);
+            SizedBox::shrink().into_widget()
+        }
+
+        fn get_handle_anchor(
+            &self,
+            _handle_type: TextSelectionHandleType,
+            _text_line_height: f64,
+        ) -> Offset {
+            Offset::ZERO
+        }
+
+        fn build_toolbar(
+            &self,
+            _app: &mut App,
+            _context: BuildContext,
+            _global_editable_region: Rect,
+            _text_line_height: f64,
+            _selection_midpoint: Offset,
+            _endpoints: &[TextSelectionPoint],
+            _delegate: AnyTextSelectionDelegate,
+            _clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
+            _last_secondary_tap_down_position: Option<Offset>,
+        ) -> WidgetRef {
+            SizedBox::shrink().into_widget()
+        }
+
+        fn get_handle_size(&self, _text_line_height: f64) -> Size {
+            Size::ZERO
+        }
+    }
+
+    /// `SelectionOverlay.showHandles` captures the themes between the context that shows the
+    /// handles and the overlay, so a handle built in the root overlay sees a theme local to
+    /// the field.
+    #[test]
+    fn the_selection_handles_carry_the_themes_of_the_context_that_shows_them() {
+        use crate::{DefaultTextStyle, Directionality, Overlay};
+        use waft_embedder::TextDirection;
+        use waft_painting::TextStyle;
+
+        let cell = binding_cell();
+        let field_context: Rc<std::cell::Cell<Option<BuildContext>>> = Rc::default();
+        let tree = {
+            let field_context = Rc::clone(&field_context);
+            Directionality::new(
+                TextDirection::Ltr,
+                Overlay::wrap(DefaultTextStyle::new(
+                    TextStyle::new().font_size(42.0),
+                    crate::Builder::new(move |_app, context| {
+                        field_context.set(Some(context));
+                        SizedBox::expand().into_widget()
+                    }),
+                )),
+            )
+            .into_widget()
+        };
+        binding_mount(&cell, tree);
+        let mut app = cell.borrow_mut();
+        let context = field_context.get().expect("the field built");
+        let font_sizes: Rc<RefCell<Vec<Option<f64>>>> = Rc::default();
+        let links = (
+            waft_rendering::LayerLink::new(&mut app),
+            waft_rendering::LayerLink::new(&mut app),
+            waft_rendering::LayerLink::new(&mut app),
+        );
+        let overlay = SelectionOverlay::new(
+            &mut app,
+            context,
+            TextSelectionHandleType::Left,
+            10.0,
+            TextSelectionHandleType::Right,
+            10.0,
+            Vec::new(),
+            Some(Rc::new(RecordingControls {
+                font_sizes: Rc::clone(&font_sizes),
+            })),
+            None,
+            None,
+            links.0,
+            links.1,
+            links.2,
+        );
+        overlay.show_handles(&mut app);
+        crate::test_harness::binding_pump(&mut app, std::time::Duration::from_millis(16));
+        let seen = font_sizes.borrow().clone();
+        assert!(!seen.is_empty(), "a handle was built");
+        assert!(seen.iter().all(|size| *size == Some(42.0)), "{seen:?}");
     }
 }

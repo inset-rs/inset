@@ -11,7 +11,7 @@ use waft_winui_test_support::Fixture;
 #[derive(Clone, Debug)]
 struct Probe {
     owner: Rc<Cell<Option<Handle<PageState>>>>,
-    footer: Rc<GlobalKey>,
+    footer: Rc<LabeledGlobalKey>,
 }
 
 /// Owns the footer size without adding settings or footer menu entries.
@@ -93,7 +93,7 @@ fn assert_footer_visible(f: &mut Fixture, probe: &Probe, height: f64) {
 fn custom_footer_starts_visible_and_reallocates_after_owner_resize() {
     let probe = Probe {
         owner: Rc::new(Cell::new(None)),
-        footer: Rc::new(GlobalKey::new()),
+        footer: Rc::new(<dyn GlobalKey>::new()),
     };
     let copy = probe.clone();
     let mut f = Fixture::with_root([800, 400], move |app| {

@@ -12,9 +12,9 @@ use waft_foundation::{App, Handle, Task};
 use waft_rendering::{BoxConstraints, MainAxisSize};
 use waft_widgets::{
     BuildContext, Center, Column, ConstrainedBox, Expansible, ExpansibleController, FadeTransition,
-    GlobalKey, Icon, IntoWidget, KeyRef, LayoutBuilder, Opacity, Overlay, OverlayPortal,
-    OverlayPortalController, Positioned, RotationTransition, SizedBox, State, StateData,
-    StatefulWidget, Visibility, WidgetRef,
+    GlobalKey, Icon, IntoWidget, KeyRef, LabeledGlobalKey, LayoutBuilder, Opacity, Overlay,
+    OverlayPortal, OverlayPortalController, Positioned, RotationTransition, SizedBox, State,
+    StateData, StatefulWidget, Visibility, WidgetRef,
 };
 
 use crate::colors::CupertinoColors;
@@ -154,7 +154,7 @@ impl StatefulWidget for CupertinoExpansionTile {
     fn create_state(&self) -> CupertinoExpansionTileState {
         CupertinoExpansionTileState {
             state: StateData::new(),
-            header_key: GlobalKey::new(),
+            header_key: <dyn GlobalKey>::new(),
             fade_controller: None,
             quarter_tween: None,
             curve_tween: None,
@@ -167,7 +167,7 @@ impl StatefulWidget for CupertinoExpansionTile {
 /// Dart's `_CupertinoExpansionTileState`.
 pub struct CupertinoExpansionTileState {
     state: StateData<CupertinoExpansionTile>,
-    header_key: GlobalKey,
+    header_key: LabeledGlobalKey,
     /// Dart's `final OverlayPortalController _fadeController`, created in `init_state`
     /// because an arena object needs the [`App`].
     fade_controller: Option<Handle<OverlayPortalController>>,
@@ -473,7 +473,7 @@ mod tests {
         let cell = crate::test_support::test_cell();
         let mut app = cell.borrow_mut();
         install_fonts(&mut app);
-        let global_key = GlobalKey::new();
+        let global_key = <dyn GlobalKey>::new();
         let key: KeyRef = Rc::new(global_key.clone());
         let tile = configure(CupertinoExpansionTile::new(
             SizedBox::new().width(100.0).height(20.0),
@@ -564,7 +564,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         install_fonts(&mut app);
         let controller = ExpansibleController::new(&mut app);
-        let global_key = GlobalKey::new();
+        let global_key = <dyn GlobalKey>::new();
         let key: KeyRef = Rc::new(global_key.clone());
         drop(app);
         build(

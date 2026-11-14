@@ -531,22 +531,22 @@ mod tests {
     };
     use waft_gestures::GestureBinding;
     use waft_rendering::AnyRenderBox;
-    use waft_widgets::{Builder, Directionality, GlobalKey, downcast_widget};
+    use waft_widgets::{Builder, Directionality, GlobalKey, LabeledGlobalKey, downcast_widget};
 
     use super::*;
     use crate::test_support::{build, test_cell};
     use crate::theme::CupertinoThemeData;
 
-    fn key_of(key: &GlobalKey) -> KeyRef {
+    fn key_of(key: &LabeledGlobalKey) -> KeyRef {
         Rc::new(key.clone())
     }
 
     /// A `SizedBox` of `width` x `height`, findable through `key`.
-    fn slot(key: &GlobalKey, width: f64, height: f64) -> SizedBox {
+    fn slot(key: &LabeledGlobalKey, width: f64, height: f64) -> SizedBox {
         SizedBox::new().key(key_of(key)).width(width).height(height)
     }
 
-    fn box_of(app: &mut App, key: &GlobalKey) -> AnyRenderBox {
+    fn box_of(app: &mut App, key: &LabeledGlobalKey) -> AnyRenderBox {
         key.current_context(app)
             .expect("the slot mounted")
             .find_render_object(app)
@@ -555,7 +555,7 @@ mod tests {
             .expect("a box")
     }
 
-    fn offset_of(app: &mut App, key: &GlobalKey) -> Offset {
+    fn offset_of(app: &mut App, key: &LabeledGlobalKey) -> Offset {
         box_of(app, key).local_to_global(app, Offset::ZERO, None)
     }
 
@@ -592,12 +592,12 @@ mod tests {
     fn a_notched_tile_lays_out_its_five_slots_with_the_notched_paddings() {
         let cell = test_cell();
         let (tile_key, leading, title, subtitle, info, trailing) = (
-            GlobalKey::new(),
-            GlobalKey::new(),
-            GlobalKey::new(),
-            GlobalKey::new(),
-            GlobalKey::new(),
-            GlobalKey::new(),
+            <dyn GlobalKey>::new(),
+            <dyn GlobalKey>::new(),
+            <dyn GlobalKey>::new(),
+            <dyn GlobalKey>::new(),
+            <dyn GlobalKey>::new(),
+            <dyn GlobalKey>::new(),
         );
         mount(
             &cell,
@@ -645,7 +645,7 @@ mod tests {
     #[test]
     fn a_base_tile_uses_the_edge_to_edge_padding_and_minimum_height() {
         let cell = test_cell();
-        let (tile_key, title) = (GlobalKey::new(), GlobalKey::new());
+        let (tile_key, title) = (<dyn GlobalKey>::new(), <dyn GlobalKey>::new());
         mount(
             &cell,
             CupertinoListTile::new(slot(&title, 100.0, 20.0)).key(key_of(&tile_key)),
@@ -679,8 +679,8 @@ mod tests {
     fn tapping_a_tile_activates_it_and_runs_on_tap() {
         let cell = test_cell();
         let taps = Rc::new(Cell::new(0));
-        let tile_key = GlobalKey::new();
-        let title = GlobalKey::new();
+        let tile_key = <dyn GlobalKey>::new();
+        let title = <dyn GlobalKey>::new();
         mount(
             &cell,
             CupertinoListTile::new(slot(&title, 100.0, 20.0))
@@ -726,8 +726,8 @@ mod tests {
     fn a_tile_stays_activated_until_its_callback_task_completes() {
         let cell = test_cell();
         let completer: Completer<()> = Completer::new();
-        let tile_key = GlobalKey::new();
-        let title = GlobalKey::new();
+        let tile_key = <dyn GlobalKey>::new();
+        let title = <dyn GlobalKey>::new();
         mount(
             &cell,
             CupertinoListTile::new(slot(&title, 100.0, 20.0))

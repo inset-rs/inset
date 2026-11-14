@@ -14,8 +14,8 @@ use waft_rendering::RendererBinding;
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 use crate::framework::{
-    BuildContext, GlobalKey, InheritedWidget, IntoWidget, KeyRef, State, StateData, StatefulWidget,
-    WidgetRef,
+    BuildContext, GlobalKey, InheritedWidget, IntoWidget, KeyRef, LabeledGlobalKey, State,
+    StateData, StatefulWidget, WidgetRef,
 };
 use crate::widgets::app::{
     LocaleListResolutionCallback, LocaleResolutionCallback, basic_locale_list_resolution,
@@ -713,7 +713,7 @@ impl StatefulWidget for Localizations {
     fn create_state(&self) -> LocalizationsState {
         LocalizationsState {
             state: StateData::new(),
-            localized_resources_scope_key: GlobalKey::new(),
+            localized_resources_scope_key: <dyn GlobalKey>::new(),
             type_to_resources: Rc::new(TypeToResources::new()),
             locale: None,
         }
@@ -773,7 +773,7 @@ impl IntoWidget<LocalizationsOverrideKind> for LocalizationsOverride {
 /// Dart's `_LocalizationsState`.
 pub struct LocalizationsState {
     state: StateData<Localizations>,
-    localized_resources_scope_key: GlobalKey,
+    localized_resources_scope_key: LabeledGlobalKey,
     type_to_resources: Rc<TypeToResources>,
     locale: Option<Locale>,
 }
@@ -1219,7 +1219,7 @@ mod tests {
         };
         let completer = delegate.completer.clone();
         let seen = Rc::new(RefCell::new(Vec::new()));
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let harness = Harness::mount(
             &mut app,
             Localizations::new(

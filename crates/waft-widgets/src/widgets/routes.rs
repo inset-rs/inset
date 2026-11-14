@@ -19,8 +19,8 @@ use waft_physics::Simulation;
 use waft_scheduler::{FrameCallback, SchedulerBinding, SchedulerPhase, TickerFuture};
 
 use crate::framework::{
-    BuildContext, GlobalKey, InheritedModel, InheritedWidget, IntoWidget, KeyRef, Notification,
-    State, StateData, StatefulWidget, WidgetRef,
+    BuildContext, GlobalKey, InheritedModel, InheritedWidget, IntoWidget, KeyRef, LabeledGlobalKey,
+    Notification, State, StateData, StatefulWidget, WidgetRef,
 };
 use crate::view::View;
 use crate::widgets::actions::{Action, ActionData, Actions, DismissAction, DismissIntent};
@@ -1829,8 +1829,8 @@ pub struct ModalRouteData {
     animation_proxy: Option<Handle<ProxyAnimation>>,
     secondary_animation_proxy: Option<Handle<ProxyAnimation>>,
     pop_entries: Vec<Rc<dyn PopEntry>>,
-    scope_key: GlobalKey,
-    subtree_key: GlobalKey,
+    scope_key: LabeledGlobalKey,
+    subtree_key: LabeledGlobalKey,
     storage_bucket: Handle<PageStorageBucket>,
     modal_barrier: Option<Handle<OverlayEntry>>,
     modal_scope: Option<Handle<OverlayEntry>>,
@@ -1849,8 +1849,8 @@ impl ModalRouteData {
             animation_proxy: None,
             secondary_animation_proxy: None,
             pop_entries: Vec::new(),
-            scope_key: GlobalKey::new(),
-            subtree_key: GlobalKey::new(),
+            scope_key: <dyn GlobalKey>::new(),
+            subtree_key: <dyn GlobalKey>::new(),
             storage_bucket: PageStorageBucket::new(app),
             modal_barrier: None,
             modal_scope: None,
@@ -2028,15 +2028,16 @@ pub trait ModalRoute: LocalHistoryRoute {
         // but with the secondary animation still proxied. This keeps a desynched animation from
         // playing.
         let allow_snapshotting = TransitionRoute::allow_snapshotting(self, app);
-        received(
-            app,
-            context,
-            animation,
-            secondary_animation,
-            allow_snapshotting,
-            Some(&proxied_original_transitions),
-        )
-        .unwrap_or(proxied_original_transitions)
+        received
+            .call(
+                app,
+                context,
+                animation,
+                secondary_animation,
+                allow_snapshotting,
+                Some(&proxied_original_transitions),
+            )
+            .unwrap_or(proxied_original_transitions)
     }
 
     /// Dart's `ModalRoute.install`.
@@ -2375,11 +2376,7 @@ pub trait ModalRoute: LocalHistoryRoute {
                     .expect("a modal route is a transition route");
                 let mine = ModalRoute::delegated_transition(self, app);
                 let theirs = next.delegated_transition(app);
-                let differs = match (&mine, &theirs) {
-                    (None, None) => false,
-                    (Some(mine), Some(theirs)) => !Rc::ptr_eq(mine, theirs),
-                    _ => true,
-                };
+                let differs = mine != theirs;
                 if TransitionRoute::can_transition_to(self, app, next_transition) && differs {
                     theirs
                 } else {
@@ -2588,7 +2585,7 @@ struct ModalRouteVTable {
     traversal_edge_behavior: fn(&App, HandleId) -> Option<TraversalEdgeBehavior>,
     directional_traversal_edge_behavior: fn(&App, HandleId) -> Option<TraversalEdgeBehavior>,
     storage_bucket: fn(&App, HandleId) -> Handle<PageStorageBucket>,
-    subtree_key: fn(&App, HandleId) -> GlobalKey,
+    subtree_key: fn(&App, HandleId) -> LabeledGlobalKey,
     subtree_context: fn(&mut App, HandleId) -> Option<BuildContext>,
     build_page:
         fn(&mut App, HandleId, BuildContext, AnyAnimation<f64>, AnyAnimation<f64>) -> WidgetRef,
@@ -2868,7 +2865,7 @@ impl AnyModalRoute {
     }
 
     /// Dart's `ModalRoute._subtreeKey`.
-    pub fn subtree_key(self, app: &App) -> GlobalKey {
+    pub fn subtree_key(self, app: &App) -> LabeledGlobalKey {
         (self.vtable.subtree_key)(app, self.id)
     }
 
@@ -4185,7 +4182,7 @@ mod tests {
     /// A navigator whose initial route is a plain page, under a `Directionality` the overlay's
     /// theater needs.
     fn navigator(
-        key: &GlobalKey,
+        key: &LabeledGlobalKey,
         on_generate_route: impl Fn(&mut App, &RouteSettings) -> Option<AnyRoute> + 'static,
     ) -> WidgetRef {
         Directionality::new(
@@ -4197,7 +4194,7 @@ mod tests {
         .into_widget()
     }
 
-    fn state(key: &GlobalKey, app: &mut App) -> Handle<NavigatorState> {
+    fn state(key: &LabeledGlobalKey, app: &mut App) -> Handle<NavigatorState> {
         key.current_state::<NavigatorState>(app)
             .expect("a mounted navigator")
     }
@@ -4234,7 +4231,7 @@ mod tests {
     #[test]
     fn pushing_a_page_route_runs_its_transition_to_completion_and_popping_runs_it_back() {
         let cell = app_with_view();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         mount(
             &cell,
             navigator(&key, |app, _settings| {
@@ -4277,7 +4274,7 @@ mod tests {
     fn modal_route_of_reports_is_current_and_is_first() {
         let cell = app_with_view();
         let app = cell.borrow();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let seen: Rc<RefCell<Vec<(bool, bool)>>> = Rc::new(RefCell::new(Vec::new()));
         let watcher = probe({
             let seen = Rc::clone(&seen);
@@ -4313,7 +4310,7 @@ mod tests {
     #[test]
     fn a_pop_scope_with_can_pop_false_blocks_maybe_pop() {
         let cell = app_with_view();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let blocked = Rc::new(Cell::new(false));
         let scope = PopScope::new(SizedBox::new())
             .can_pop(false)
@@ -4349,7 +4346,7 @@ mod tests {
     #[test]
     fn tapping_the_barrier_dismisses_a_dismissible_popup_route() {
         let cell = app_with_view();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         mount(
             &cell,
             navigator(&key, |app, _settings| {
@@ -4379,7 +4376,7 @@ mod tests {
     #[test]
     fn a_non_dismissible_barrier_keeps_the_route() {
         let cell = app_with_view();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         mount(
             &cell,
             navigator(&key, |app, _settings| {
@@ -4405,7 +4402,7 @@ mod tests {
     #[test]
     fn local_history_entries_are_popped_before_the_route() {
         let cell = app_with_view();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         mount(
             &cell,
             navigator(&key, |app, _settings| {
@@ -4474,7 +4471,7 @@ mod tests {
 
         let cell = app_with_view();
         let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let observer = RouteObserver::new(
             &mut app,
             Rc::new(|app, route: AnyRoute| route.as_page_route(app).is_some()),

@@ -471,8 +471,8 @@ impl StatefulWidget for ComboBox {
             popup: None,
             item_focus: HashMap::new(),
             scroll: None,
-            background_key: GlobalKey::new(),
-            overlay_key: GlobalKey::new(),
+            background_key: <dyn GlobalKey>::new(),
+            overlay_key: <dyn GlobalKey>::new(),
             heights: HashMap::new(),
             widths: HashMap::new(),
             last_popup_height: Rc::new(Cell::new(0.0)),
@@ -534,10 +534,10 @@ pub struct ComboBoxState {
     scroll: Option<Handle<ScrollViewportController>>,
 
     /// Identifies `Background`, the drop-down's anchor.
-    background_key: GlobalKey,
+    background_key: LabeledGlobalKey,
 
     /// Identifies `DropDownOverlay`.
-    overlay_key: GlobalKey,
+    overlay_key: LabeledGlobalKey,
 
     /// Each item's height in the drop-down, by id, as last laid out.
     heights: HashMap<String, f64>,

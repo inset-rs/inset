@@ -1876,7 +1876,7 @@ mod tests {
     use waft_test::TestPlatform;
     use waft_widgets::{
         Actions, ActivateIntent, Center, FocusHighlightStrategy, FocusManager, FocusNode,
-        FocusNodeLeaf, GlobalKey, MediaQueryData, SizedBox, UnfocusDisposition,
+        FocusNodeLeaf, GlobalKey, LabeledGlobalKey, MediaQueryData, SizedBox, UnfocusDisposition,
     };
 
     use super::*;
@@ -1927,7 +1927,7 @@ mod tests {
                 state: StateData::new(),
                 value: self.initial,
                 enabled: true,
-                switch_key: GlobalKey::new(),
+                switch_key: <dyn GlobalKey>::new(),
             }
         }
     }
@@ -1936,7 +1936,7 @@ mod tests {
         state: StateData<Host>,
         value: bool,
         enabled: bool,
-        switch_key: GlobalKey,
+        switch_key: LabeledGlobalKey,
     }
 
     impl State for HostState {
@@ -2057,7 +2057,7 @@ mod tests {
                 .focusable
                 .then(|| FocusNode::new(&mut cell.borrow_mut()).as_node());
             let changes: Rc<RefCell<Vec<bool>>> = Rc::default();
-            let host_key = GlobalKey::new();
+            let host_key = <dyn GlobalKey>::new();
             build(
                 &cell,
                 Host {
@@ -2899,7 +2899,7 @@ mod tests {
     #[test]
     fn a_switch_squeezed_to_nothing_lays_out_at_zero() {
         let cell = crate::test_support::test_cell();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         build(
             &cell,
             Directionality::new(

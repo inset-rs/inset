@@ -24,7 +24,7 @@ pub struct LineNumbers {
 /// Where each line's number goes.
 pub struct LineNumbersState {
     state: StateData<LineNumbers>,
-    key: GlobalKey,
+    key: LabeledGlobalKey,
     /// Each numbered line's top and height in the box's coordinates.
     lines: Vec<(usize, f64, f64)>,
     listener: Option<Listener>,
@@ -36,7 +36,7 @@ impl StatefulWidget for LineNumbers {
     fn create_state(&self) -> LineNumbersState {
         LineNumbersState {
             state: StateData::new(),
-            key: GlobalKey::new(),
+            key: <dyn GlobalKey>::new(),
             lines: Vec::new(),
             listener: None,
         }

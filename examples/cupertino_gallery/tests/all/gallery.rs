@@ -19,8 +19,8 @@ use waft_rendering::{AnyRenderObject, RenderParagraph, RendererBinding};
 use waft_scheduler::SchedulerBinding;
 use waft_test::{IMPLICIT_VIEW_ID, TestPlatform, TestView};
 use waft_widgets::{
-    AnyElement, AnyRoute, GlobalKey, IntoWidget, NavigatorState, Text, WidgetsBinding,
-    downcast_widget, run_app,
+    AnyElement, AnyRoute, GlobalKey, IntoWidget, LabeledGlobalKey, NavigatorState, Text,
+    WidgetsBinding, downcast_widget, run_app,
 };
 
 /// The window `main.rs` opens, in logical points.
@@ -38,7 +38,7 @@ enum Search {
 /// The mounted gallery, plus the key its navigator is reached through.
 struct Fixture {
     cell: Rc<AppCell>,
-    navigator: GlobalKey,
+    navigator: LabeledGlobalKey,
     at: Duration,
 }
 
@@ -55,10 +55,12 @@ impl Fixture {
             fonts.add_source(valo_system_fonts::SystemFonts::load());
         });
 
-        let navigator = GlobalKey::new();
+        let navigator = <dyn GlobalKey>::new();
         run_app(
             &mut app,
-            gallery().navigator_key(navigator.clone()).into_widget(),
+            gallery()
+                .navigator_key(Rc::new(navigator.clone()))
+                .into_widget(),
         );
         // The same ordering constraint the binary has: `run_app` is what attaches the tree the
         // icon glyphs are shaped in.

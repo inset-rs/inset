@@ -1,6 +1,6 @@
 # waft-cupertino/src
-Flutter home: packages/flutter/lib/src/cupertino
-Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
+Flutter home: flutter/packages: packages/cupertino_ui/lib/src
+Ported against: 4765bd950d31784578608cfbb0c723453cc49216
 
 ## Identical
 
@@ -169,13 +169,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - route.rs, sheet.rs, nav_bar.rs: a disposed `CurvedAnimation` or driven animation keeps its arena slot. Trigger: an arena-slot lifetime for disposed foundation objects.
 - route.rs: `CupertinoPageTransitionsBuilder`. Trigger: widgets' `page_transitions_builder.dart`.
 - route.rs: the page routes' `debugLabel` and the edge shadow decoration's diagnostics and `hashCode`. Trigger: `TransitionRoute::debug_label` taking the `App`; diagnostics.
-- route.rs: the `Semantics(scopesRoute:, explicitChildNodes:)` wrapper around a route's page. Trigger: accessibility (do not stub).
+- route.rs: the `Semantics(scopesRoute:, explicitChildNodes:)` wrapper around a route's page, and `includeRouteSemantics` on the mixin, `CupertinoPageRoute` and `CupertinoPage`, which only opts out of it. Trigger: accessibility (do not stub).
 - route.rs: `anchorPoint` on `CupertinoModalPopupRoute` and `CupertinoDialogRoute`, and the `DisplayFeatureSubScreen` it feeds. Trigger: `display_feature_sub_screen.dart`, which needs `MediaQuery.displayFeatures`.
 - sheet.rs: `showCupertinoSheet`'s deprecated `pageBuilder`, a duplicate of the deprecated `builder`. Trigger: never — port it only if Flutter un-deprecates it.
-- sheet.rs: the `filterQuality` on the three `ScaleTransition`s. Trigger: `MatrixTransition.filterQuality`.
-- dialog.rs: every accessibility wrapper the file carries, including the alert-dialog label that is read and dropped. Trigger: accessibility (do not stub).
+- sheet.rs: the `filterQuality` on the three `ScaleTransition`s, and `hasPlatformViews` on `showCupertinoSheet`, `CupertinoSheetTransition`, `CupertinoSheetRoute` and `delegateTransition`, which turns that filter quality off and makes the route offer a second delegated-transition function (`_delegateTransitionWithPlatformViews`), so that a sheet with platform views and one without do not compare equal. Trigger: `MatrixTransition.filterQuality`.
+- dialog.rs: every accessibility wrapper the file carries, including the alert-dialog and action-sheet labels that are read and dropped. Trigger: accessibility (do not stub).
 - dialog.rs: the `debugCheckHasMediaQuery` assert in `CupertinoActionSheet.build`. Trigger: widgets' `debug.dart`.
-- theme.rs: `InheritedCupertinoTheme` as an `InheritedTheme`, so `captureAll` carries it; until then `wrap` is an inherent method. Trigger: widgets' `InheritedTheme`.
 - colors.rs, interface_level.rs, theme.rs, text_theme.rs, icon_theme_data.rs, page_scaffold.rs: the diagnostics members and the theme types' `hashCode`. Trigger: diagnostics.
 - localizations.rs, debug.rs: `describeMissingAncestor`, which Dart appends to the missing-localizations error. Trigger: diagnostics.
 - button.rs: the button `Semantics` and tap event, the diagnostics, and the deprecated `minSize`. Trigger: accessibility; diagnostics.
@@ -187,5 +186,4 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - switch.rs: `activeThumbImage`, `inactiveThumbImage`, `onActiveThumbImageError` and `onInactiveThumbImageError`, and the painter's cache of them. Trigger: painting's `DecorationImage` and the `image` field on `ShapeDecoration`.
 - switch.rs: the deprecated `activeColor` and `trackColor`, Dart's aliases of `activeTrackColor` and `inactiveTrackColor`. Trigger: never — port them only if Flutter un-deprecates them.
 - app.rs: `CupertinoApp.router` and everything only it fills. Trigger: `WidgetsApp.router` / `router.dart`.
-- app.rs: the `DefaultSelectionStyle` between the `CupertinoTheme` and the `HeroControllerScope`. Trigger: `default_selection_style.dart`.
 - app.rs: the three inspector-button builders and the button they build; the three debug flags reach the `WidgetsApp` as Dart passes them. Trigger: `widget_inspector.dart`'s `InspectorButton`.

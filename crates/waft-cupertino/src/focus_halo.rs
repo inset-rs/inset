@@ -197,7 +197,8 @@ mod tests {
     use waft_embedder::TextDirection;
     use waft_rendering::{AnyRenderObject, RenderDecoratedBox, RenderHandle, RenderObject};
     use waft_widgets::{
-        Directionality, FocusNode, FocusNodeLeaf, GlobalKey, SizedBox, UnfocusDisposition,
+        Directionality, FocusNode, FocusNodeLeaf, GlobalKey, LabeledGlobalKey, SizedBox,
+        UnfocusDisposition,
     };
 
     use super::*;
@@ -216,7 +217,7 @@ mod tests {
         found
     }
 
-    fn halo_side(app: &mut App, key: &GlobalKey) -> BorderSide {
+    fn halo_side(app: &mut App, key: &LabeledGlobalKey) -> BorderSide {
         let root = key
             .current_context(app)
             .expect("the halo mounted")
@@ -239,7 +240,7 @@ mod tests {
     fn a_halo_outlines_its_shape_while_a_focus_node_inside_it_has_focus() {
         let cell = test_cell();
         let mut app = cell.borrow_mut();
-        let key = Rc::new(GlobalKey::new());
+        let key = Rc::new(<dyn GlobalKey>::new());
         let node = FocusNode::new(&mut app).as_node();
         drop(app);
         build(

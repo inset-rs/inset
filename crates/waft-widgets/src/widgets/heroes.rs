@@ -22,8 +22,8 @@ use waft_painting::transform_rect;
 use waft_scheduler::{FrameCallback, SchedulerBinding};
 
 use crate::framework::{
-    AnyElement, BuildContext, GlobalKey, IntoWidget, KeyRef, State, StateData, StatefulWidget,
-    StatelessWidget, WidgetRef, downcast_widget,
+    AnyElement, BuildContext, GlobalKey, IntoWidget, KeyRef, LabeledGlobalKey, State, StateData,
+    StatefulWidget, StatelessWidget, WidgetRef, downcast_widget,
 };
 use crate::view::View;
 use crate::widgets::basic::{IgnorePointer, KeyedSubtree, Offstage, Positioned, SizedBox};
@@ -523,7 +523,7 @@ impl StatefulWidget for Hero {
     fn create_state(&self) -> HeroState {
         HeroState {
             state: StateData::new(),
-            key: GlobalKey::new(),
+            key: <dyn GlobalKey>::new(),
             placeholder_size: None,
             should_include_child: true,
         }
@@ -549,7 +549,7 @@ impl Debug for Hero {
 /// Dart's `_HeroState`.
 pub struct HeroState {
     state: StateData<Hero>,
-    key: GlobalKey,
+    key: LabeledGlobalKey,
     placeholder_size: Option<Size>,
     // Whether the placeholder widget should wrap the hero's child widget as its own child, when
     // `placeholder_size` is non-null (i.e. the hero is currently in its flight animation). See
@@ -1840,7 +1840,7 @@ mod tests {
 
     /// A navigator hosting `controller`, under the `Directionality` the overlay's theater needs.
     fn hero_navigator(
-        key: &GlobalKey,
+        key: &LabeledGlobalKey,
         controller: Handle<HeroController>,
         first_page: RoutePageBuilder,
     ) -> WidgetRef {
@@ -1858,7 +1858,7 @@ mod tests {
         .into_widget()
     }
 
-    fn navigator_state(key: &GlobalKey, app: &mut App) -> Handle<NavigatorState> {
+    fn navigator_state(key: &LabeledGlobalKey, app: &mut App) -> Handle<NavigatorState> {
         key.current_state::<NavigatorState>(app)
             .expect("a mounted navigator")
     }
@@ -1897,7 +1897,7 @@ mod tests {
     fn a_hero_flies_between_two_page_routes() {
         let cell = app_with_view();
         let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let controller = HeroController::new(&mut app);
         drop(app);
         mount(
@@ -2005,7 +2005,7 @@ mod tests {
     fn popping_back_flies_the_hero_home_and_clears_its_placeholder() {
         let cell = app_with_view();
         let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let controller = HeroController::new(&mut app);
         drop(app);
         mount(
@@ -2070,7 +2070,7 @@ mod tests {
     fn a_disabled_hero_mode_keeps_the_hero_out_of_the_flight() {
         let cell = app_with_view();
         let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let controller = HeroController::new(&mut app);
         drop(app);
         mount(
@@ -2107,7 +2107,7 @@ mod tests {
     fn a_custom_flight_shuttle_builder_supplies_the_in_flight_widget() {
         let cell = app_with_view();
         let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let controller = HeroController::new(&mut app);
         let built = Rc::new(std::cell::Cell::new(0u32));
         let shuttle_builder: HeroFlightShuttleBuilder = {

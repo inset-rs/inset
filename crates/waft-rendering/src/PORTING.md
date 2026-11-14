@@ -25,6 +25,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - sliver_fixed_extent_list.rs → sliver_fixed_extent_list.dart
 - image.rs → image.dart (RenderImage)
 - wrap.rs → wrap.dart
+- list_body.rs → list_body.dart
 
 ## object.rs → object.dart (RenderObject)
 
@@ -125,6 +126,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: `RenderColoredBox` does not pass `is_anti_alias` to the canvas.
   Reason: platform — valo's `Paint` has no anti-alias flag.
   Affect: the fill is drawn the way valo draws it, and setting the flag only marks a repaint.
+
+- Change: `RenderPhysicalModel` and `RenderPhysicalShape` draw their shadow at the device pixel ratio of the view they paint into, read from their pipeline owner's root `RenderView`, and at 1 outside a view, where the engine reads the implicit view's.
+  Reason: platform — a canvas belongs to no view and the embedder holds no implicit view whose metrics it could read, so the ratio comes from the render object's side (embedder's painting.rs entry).
+  Affect: a physical model in a second view with another pixel ratio draws its shadow at that view's ratio, where Flutter's uses the implicit view's.
 
 ## shifted_box.rs → shifted_box.dart (RenderConstraintsTransformBox)
 
@@ -254,3 +259,5 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `RenderIgnoreBaseline`, which reports no baseline for a child that has one, so that a baseline-aligned row puts that child at the top. Trigger: a child a baseline-aligned `Row` should not align by its baseline.
 - `RenderBoxBase` sits in `proxy_box.rs` beside its callers instead of next to `RenderBox`. Trigger: the next edit of `box.rs`.
 - `RenderTransform.filterQuality` and Dart's `ImageFilterLayer` path. Trigger: the first `Transform(filterQuality:)`, with `PaintingContext.pushColorFilter`.
+- proxy_box.rs: Dart's `canvas.drawPaint` inside the physical models' `Clip::AntiAliasWithSaveLayer` clip; the clip's bounds are filled meanwhile, which covers what the clip lets through. Trigger: a paint-everything draw in Valo (Impeller's `DrawPaint`).
+- proxy_box.rs: the physical models' diagnostics. Trigger: diagnostics.

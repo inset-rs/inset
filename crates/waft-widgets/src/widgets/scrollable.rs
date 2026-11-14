@@ -21,8 +21,8 @@ use waft_scheduler::{Ticker, TickerCallback, TickerProvider, TickerProviderObjec
 use waft_services::{HardwareKeyboard, RestorationBucket, RestorationData, RestorationManager};
 
 use crate::framework::{
-    BuildContext, GlobalKey, InheritedWidget, IntoWidget, KeyRef, State, StateData, StatefulWidget,
-    WidgetRef,
+    BuildContext, GlobalKey, InheritedWidget, IntoWidget, KeyRef, LabeledGlobalKey, State,
+    StateData, StatefulWidget, WidgetRef,
 };
 use crate::view::View;
 use crate::widgets::basic::{IgnorePointer, Listener as PointerListener};
@@ -446,8 +446,8 @@ impl StatefulWidget for Scrollable {
             fallback_scroll_controller: None,
             media_query_gesture_settings: None,
             device_pixel_ratio: 1.0,
-            gesture_detector_key: Rc::new(GlobalKey::new()),
-            ignore_pointer_key: Rc::new(GlobalKey::new()),
+            gesture_detector_key: Rc::new(<dyn GlobalKey>::new()),
+            ignore_pointer_key: Rc::new(<dyn GlobalKey>::new()),
             gesture_recognizers: Vec::new(),
             should_ignore_pointer: false,
             last_can_drag: None,
@@ -515,8 +515,8 @@ pub struct ScrollableState {
     fallback_scroll_controller: Option<Handle<ScrollController>>,
     media_query_gesture_settings: Option<DeviceGestureSettings>,
     device_pixel_ratio: f64,
-    gesture_detector_key: Rc<GlobalKey>,
-    ignore_pointer_key: Rc<GlobalKey>,
+    gesture_detector_key: Rc<LabeledGlobalKey>,
+    ignore_pointer_key: Rc<LabeledGlobalKey>,
     // This field is set during layout, and then reused until the next time it is set.
     gesture_recognizers: GestureRecognizerFactories,
     should_ignore_pointer: bool,
@@ -752,7 +752,7 @@ impl ScrollableState {
         app.get_mut(self).drag = None;
     }
 
-    fn gesture_detector_key(self: Handle<Self>, app: &App) -> Rc<GlobalKey> {
+    fn gesture_detector_key(self: Handle<Self>, app: &App) -> Rc<LabeledGlobalKey> {
         app.get(self).gesture_detector_key.clone()
     }
 

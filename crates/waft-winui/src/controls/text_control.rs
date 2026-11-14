@@ -61,7 +61,7 @@ pub(super) struct TextControlState {
     state: StateData<TextControl>,
 
     /// Global key consumed by the native selection gesture delegate.
-    editable_key: GlobalKey,
+    editable_key: LabeledGlobalKey,
 
     /// Native selection gesture builder; never duplicates caret hit testing.
     gestures: Option<Handle<TextControlSelectionBuilder>>,
@@ -120,7 +120,7 @@ impl TextSelectionGestureDetectorBuilder for TextControlSelectionBuilder {
 }
 
 impl TextSelectionGestureDetectorBuilderDelegate for TextControlState {
-    fn editable_text_key(self: Handle<Self>, app: &App) -> GlobalKey {
+    fn editable_text_key(self: Handle<Self>, app: &App) -> LabeledGlobalKey {
         app.get(self).editable_key.clone()
     }
 
@@ -139,7 +139,7 @@ impl StatefulWidget for TextControl {
     fn create_state(&self) -> Self::State {
         TextControlState {
             state: StateData::new(),
-            editable_key: GlobalKey::new(),
+            editable_key: <dyn GlobalKey>::new(),
             gestures: None,
             owned_focus: None,
             focus: None,

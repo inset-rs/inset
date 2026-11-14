@@ -11,7 +11,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use waft_embedder::{
-    BlendMode, Clip, ImageFilter, Matrix4, Offset, Path, RRect, RSuperellipse, Rect, Size,
+    BlendMode, Clip, Color, ImageFilter, Matrix4, Offset, Path, RRect, RSuperellipse, Rect, Size,
     TextBaseline, TextDirection,
 };
 use waft_foundation::{App, Handle};
@@ -22,9 +22,9 @@ use waft_gestures::{
     PointerPanZoomUpdateEventListener, PointerSignalEventListener, PointerUpEventListener,
 };
 use waft_painting::{
-    Alignment, AlignmentGeometry, AnyColor, Axis, AxisDirection, BorderRadiusGeometry, BoxFit,
-    EdgeInsetsGeometry, ShapeBorder, VerticalDirection, flip_axis_direction,
-    text_direction_to_axis_direction,
+    Alignment, AlignmentGeometry, AnyColor, Axis, AxisDirection, BorderRadius,
+    BorderRadiusGeometry, BoxFit, BoxShape, EdgeInsetsGeometry, ShapeBorder, VerticalDirection,
+    flip_axis_direction, text_direction_to_axis_direction,
 };
 use waft_rendering::{
     AnyRenderObject, BackdropKey, BoxConstraints, BoxConstraintsTransform, ChildLayoutId,
@@ -38,8 +38,9 @@ use waft_rendering::{
     RenderCustomPaint, RenderCustomSingleChildLayoutBox, RenderFittedBox, RenderFlex,
     RenderFollowerLayer, RenderFractionalTranslation, RenderFractionallySizedOverflowBox,
     RenderHandle, RenderIgnorePointer, RenderIndexedStack, RenderIntrinsicHeight,
-    RenderIntrinsicWidth, RenderLeaderLayer, RenderLimitedBox, RenderMetaData, RenderMouseRegion,
-    RenderOffstage, RenderOpacity, RenderPadding, RenderPointerListener, RenderPositionedBox,
+    RenderIntrinsicWidth, RenderLeaderLayer, RenderLimitedBox, RenderListBody, RenderMetaData,
+    RenderMouseRegion, RenderOffstage, RenderOpacity, RenderPadding, RenderPhysicalModel,
+    RenderPhysicalModelBase, RenderPhysicalShape, RenderPointerListener, RenderPositionedBox,
     RenderRepaintBoundary, RenderSizedOverflowBox, RenderSliver, RenderSliverPadding,
     RenderSliverToBoxAdapter, RenderStack, RenderStackBase, RenderTransform, RenderWrap,
     ShapeBorderClipper, SingleChildLayoutDelegate, StackFit, StackParentData, WrapAlignment,
@@ -49,8 +50,8 @@ use waft_services::{MouseCursor, MouseCursorRef};
 
 use crate::framework::{
     BuildContext, InheritedWidget, IntoWidget, KeyRef, MultiChildRenderObjectWidget,
-    ParentDataWidget, RenderObjectWidget, SingleChildRenderObjectWidget, StatelessWidget,
-    WidgetRef,
+    ParentDataWidget, RenderObjectWidget, SingleChildRenderObjectWidget, State, StateData,
+    StatefulWidget, StatelessWidget, WidgetRef,
 };
 use crate::widgets::focus_scope::ExcludeFocus;
 use crate::widgets::overlay::TheaterParentData;
@@ -1498,6 +1499,308 @@ impl IntoWidget<ClipPathShapeKind> for ClipPathShape {
             Some(key) => builder.key(key).into_widget(),
             None => builder.into_widget(),
         }
+    }
+}
+
+/// A widget representing a physical layer that clips its children to a shape.
+///
+/// Physical layers cast shadows based on an [`elevation`](Self::elevation) which is nominally
+/// in logical pixels, coming vertically out of the rendering surface.
+///
+/// For shapes that cannot be expressed as a rectangle with rounded corners use
+/// [`PhysicalShape`].
+///
+/// See also:
+///
+///  * `DecoratedBox`, which can apply more arbitrary shadow effects.
+///  * [`ClipRect`], which applies a clip to its child.
+pub struct PhysicalModel {
+    pub key: Option<KeyRef>,
+    /// The type of shape.
+    pub shape: BoxShape,
+    /// The content will be clipped (or not) according to this option.
+    ///
+    /// Defaults to [`Clip::None`].
+    pub clip_behavior: Clip,
+    /// The border radius of the rounded corners.
+    ///
+    /// Values are clamped so that horizontal and vertical radii sums do not
+    /// exceed width/height.
+    ///
+    /// This is ignored if the [`shape`](Self::shape) is not [`BoxShape::Rectangle`].
+    pub border_radius: Option<BorderRadius>,
+    /// The z-coordinate relative to the parent at which to place this physical
+    /// object.
+    ///
+    /// The value is non-negative.
+    pub elevation: f64,
+    /// The background color.
+    pub color: AnyColor,
+    /// The shadow color.
+    pub shadow_color: AnyColor,
+    /// The widget below this widget in the tree.
+    pub child: Option<WidgetRef>,
+}
+
+impl PhysicalModel {
+    /// Creates a physical model with a rounded-rectangular clip; Dart's optional named arguments
+    /// are the setters.
+    ///
+    /// Dart's defaults: `shape` [`BoxShape::Rectangle`], `clip_behavior` [`Clip::None`],
+    /// `elevation` 0, `shadow_color` opaque black.
+    pub fn new(color: impl Into<AnyColor>) -> PhysicalModel {
+        PhysicalModel {
+            key: None,
+            shape: BoxShape::Rectangle,
+            clip_behavior: Clip::None,
+            border_radius: None,
+            elevation: 0.0,
+            color: color.into(),
+            shadow_color: AnyColor::new(Color::new(0xFF000000)),
+            child: None,
+        }
+    }
+
+    /// Dart `PhysicalModel(key:)`.
+    pub fn key(mut self, key: KeyRef) -> PhysicalModel {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `PhysicalModel(shape:)`.
+    pub fn shape(mut self, shape: BoxShape) -> PhysicalModel {
+        self.shape = shape;
+        self
+    }
+
+    /// Dart `PhysicalModel(clipBehavior:)`.
+    pub fn clip_behavior(mut self, clip_behavior: Clip) -> PhysicalModel {
+        self.clip_behavior = clip_behavior;
+        self
+    }
+
+    /// Dart `PhysicalModel(borderRadius:)`.
+    pub fn border_radius(mut self, border_radius: BorderRadius) -> PhysicalModel {
+        self.border_radius = Some(border_radius);
+        self
+    }
+
+    /// Dart `PhysicalModel(elevation:)`.
+    pub fn elevation(mut self, elevation: f64) -> PhysicalModel {
+        debug_assert!(elevation >= 0.0);
+        self.elevation = elevation;
+        self
+    }
+
+    /// Dart `PhysicalModel(shadowColor:)`.
+    pub fn shadow_color(mut self, shadow_color: impl Into<AnyColor>) -> PhysicalModel {
+        self.shadow_color = shadow_color.into();
+        self
+    }
+
+    /// Dart `PhysicalModel(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> PhysicalModel {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
+impl RenderObjectWidget for PhysicalModel {
+    type RenderObject = RenderPhysicalModel;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+        RenderPhysicalModel::new(
+            app,
+            None,
+            self.shape,
+            self.clip_behavior,
+            self.border_radius,
+            self.elevation,
+            self.color.color(),
+            self.shadow_color.color(),
+        )
+        .as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        _context: BuildContext,
+        render_object: RenderHandle<RenderPhysicalModel>,
+    ) {
+        render_object.set_shape(app, self.shape);
+        render_object.set_clip_behavior(app, self.clip_behavior);
+        render_object.set_border_radius(app, self.border_radius);
+        render_object.set_elevation(app, self.elevation);
+        render_object.set_color(app, self.color.color());
+        render_object.set_shadow_color(app, self.shadow_color.color());
+    }
+}
+
+impl SingleChildRenderObjectWidget for PhysicalModel {
+    fn child(&self) -> Option<&WidgetRef> {
+        self.child.as_ref()
+    }
+}
+
+impl Debug for PhysicalModel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PhysicalModel")
+            .field("key", &self.key)
+            .field("shape", &self.shape)
+            .field("border_radius", &self.border_radius)
+            .field("elevation", &self.elevation)
+            .field("color", &self.color)
+            .field("shadow_color", &self.shadow_color)
+            .field("child", &self.child)
+            .finish()
+    }
+}
+
+/// A widget representing a physical layer that clips its children to a path.
+///
+/// Physical layers cast shadows based on an [`elevation`](Self::elevation) which is nominally
+/// in logical pixels, coming vertically out of the rendering surface.
+///
+/// [`PhysicalModel`] does the same but only supports shapes that can be expressed
+/// as rectangles with rounded corners.
+///
+/// See also:
+///
+///  * `ShapeBorderClipper`, which converts a `ShapeBorder` to a [`CustomClipper`], as
+///    needed by this widget.
+pub struct PhysicalShape {
+    pub key: Option<KeyRef>,
+    /// Determines which clip to use.
+    ///
+    /// If the path in question is expressed as a `ShapeBorder` subclass,
+    /// consider using the `ShapeBorderClipper` delegate class to adapt the
+    /// shape for use with this widget.
+    pub clipper: Rc<dyn CustomClipper<Arc<Path>>>,
+    /// The content will be clipped (or not) according to this option.
+    ///
+    /// Defaults to [`Clip::None`].
+    pub clip_behavior: Clip,
+    /// The z-coordinate relative to the parent at which to place this physical
+    /// object.
+    ///
+    /// The value is non-negative.
+    pub elevation: f64,
+    /// The background color.
+    pub color: AnyColor,
+    /// When elevation is non zero the color to use for the shadow color.
+    pub shadow_color: AnyColor,
+    /// The widget below this widget in the tree.
+    pub child: Option<WidgetRef>,
+}
+
+impl PhysicalShape {
+    /// Creates a physical model with an arbitrary shape clip; Dart's optional named arguments
+    /// are the setters.
+    ///
+    /// Dart's defaults: `clip_behavior` [`Clip::None`], `elevation` 0, `shadow_color` opaque
+    /// black.
+    pub fn new(
+        clipper: Rc<dyn CustomClipper<Arc<Path>>>,
+        color: impl Into<AnyColor>,
+    ) -> PhysicalShape {
+        PhysicalShape {
+            key: None,
+            clipper,
+            clip_behavior: Clip::None,
+            elevation: 0.0,
+            color: color.into(),
+            shadow_color: AnyColor::new(Color::new(0xFF000000)),
+            child: None,
+        }
+    }
+
+    /// Dart `PhysicalShape(key:)`.
+    pub fn key(mut self, key: KeyRef) -> PhysicalShape {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `PhysicalShape(clipBehavior:)`.
+    pub fn clip_behavior(mut self, clip_behavior: Clip) -> PhysicalShape {
+        self.clip_behavior = clip_behavior;
+        self
+    }
+
+    /// Dart `PhysicalShape(elevation:)`.
+    pub fn elevation(mut self, elevation: f64) -> PhysicalShape {
+        debug_assert!(elevation >= 0.0);
+        self.elevation = elevation;
+        self
+    }
+
+    /// Dart `PhysicalShape(shadowColor:)`.
+    pub fn shadow_color(mut self, shadow_color: impl Into<AnyColor>) -> PhysicalShape {
+        self.shadow_color = shadow_color.into();
+        self
+    }
+
+    /// Dart `PhysicalShape(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> PhysicalShape {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
+impl RenderObjectWidget for PhysicalShape {
+    type RenderObject = RenderPhysicalShape;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+        RenderPhysicalShape::new(
+            app,
+            None,
+            Rc::clone(&self.clipper),
+            self.clip_behavior,
+            self.elevation,
+            self.color.color(),
+            self.shadow_color.color(),
+        )
+        .as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        _context: BuildContext,
+        render_object: RenderHandle<RenderPhysicalShape>,
+    ) {
+        render_object.set_clipper(app, Some(Rc::clone(&self.clipper)));
+        render_object.set_clip_behavior(app, self.clip_behavior);
+        render_object.set_elevation(app, self.elevation);
+        render_object.set_color(app, self.color.color());
+        render_object.set_shadow_color(app, self.shadow_color.color());
+    }
+}
+
+impl SingleChildRenderObjectWidget for PhysicalShape {
+    fn child(&self) -> Option<&WidgetRef> {
+        self.child.as_ref()
+    }
+}
+
+impl Debug for PhysicalShape {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PhysicalShape")
+            .field("key", &self.key)
+            .field("clipper", &"...")
+            .field("elevation", &self.elevation)
+            .field("color", &self.color)
+            .field("shadow_color", &self.shadow_color)
+            .field("child", &self.child)
+            .finish()
     }
 }
 
@@ -5640,6 +5943,108 @@ impl Debug for Builder {
     }
 }
 
+/// The signature of the `set_state` a [`StatefulBuilder`] hands its builder; Dart's
+/// `StateSetter`.
+///
+/// The callback runs before the state is marked for a rebuild, as Dart's `setState(fn)` runs
+/// `fn` first.
+pub type StateSetter = Rc<dyn Fn(&mut App, &mut dyn FnMut(&mut App))>;
+
+/// Signature for the builder callback used by [`StatefulBuilder`].
+///
+/// Call `set_state` to schedule the [`StatefulBuilder`] to rebuild.
+pub type StatefulWidgetBuilder = Rc<dyn Fn(&mut App, BuildContext, StateSetter) -> WidgetRef>;
+
+/// A platonic widget that both has state and calls a closure to obtain its child widget.
+///
+/// The [`StateSetter`] function passed to the [`builder`](Self::builder) is used to invoke a
+/// rebuild instead of a typical [`State`]'s `set_state`.
+///
+/// Since the [`builder`](Self::builder) is re-invoked when the [`StateSetter`] is called, any
+/// variables that represents state should be kept outside the [`builder`](Self::builder)
+/// function.
+///
+/// See also:
+///
+///  * [`Builder`], the platonic stateless widget.
+pub struct StatefulBuilder {
+    pub key: Option<KeyRef>,
+    /// Called to obtain the child widget.
+    ///
+    /// This function is called whenever this widget is included in its parent's
+    /// build and the old widget (if any) that it synchronizes with has a distinct
+    /// object identity. Typically the parent's build method will construct
+    /// a new tree of widgets and so a new Builder child will not be identical
+    /// to the corresponding old one.
+    pub builder: StatefulWidgetBuilder,
+}
+
+impl StatefulBuilder {
+    /// Creates a widget that both has state and delegates its build to a callback; Dart's
+    /// optional named arguments are the setters.
+    pub fn new(
+        builder: impl Fn(&mut App, BuildContext, StateSetter) -> WidgetRef + 'static,
+    ) -> StatefulBuilder {
+        StatefulBuilder {
+            key: None,
+            builder: Rc::new(builder),
+        }
+    }
+
+    /// Dart `StatefulBuilder(key:)`.
+    pub fn key(mut self, key: KeyRef) -> StatefulBuilder {
+        self.key = Some(key);
+        self
+    }
+}
+
+impl Debug for StatefulBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StatefulBuilder")
+            .field("key", &self.key)
+            .finish_non_exhaustive()
+    }
+}
+
+impl StatefulWidget for StatefulBuilder {
+    type State = StatefulBuilderState;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_state(&self) -> StatefulBuilderState {
+        StatefulBuilderState {
+            state: StateData::new(),
+        }
+    }
+}
+
+/// Dart's `_StatefulBuilderState`.
+pub struct StatefulBuilderState {
+    state: StateData<StatefulBuilder>,
+}
+
+impl State for StatefulBuilderState {
+    type Widget = StatefulBuilder;
+    crate::state_accessors!();
+
+    fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
+        let builder = Rc::clone(&self.widget(app).builder);
+        let set_state: StateSetter = Rc::new(move |app: &mut App, f: &mut dyn FnMut(&mut App)| {
+            // `setState`'s lifecycle asserts run before the callback, as Dart's do.
+            debug_assert!(
+                self.mounted(app),
+                "setState() called after dispose(): this error happens if you call setState() \
+                 on a State object for a widget that no longer appears in the widget tree."
+            );
+            f(app);
+            self.set_state(app, |_| {});
+        });
+        builder(app, context, set_state)
+    }
+}
+
 /// A widget that paints its area with a specified color and then draws its
 /// child on top of that color.
 ///
@@ -6323,6 +6728,269 @@ impl FlexConfiguration {
         render_object.set_text_baseline(app, self.text_baseline);
         render_object.set_clip_behavior(app, self.clip_behavior);
         render_object.set_spacing(app, self.spacing);
+    }
+}
+
+/// A widget that positions its child within a [`Stack`] by text direction.
+///
+/// Much like [`Positioned`], this widget controls where a child of a [`Stack`]
+/// is positioned. Unlike [`Positioned`], this widget positions its child by
+/// distances from the start and end edges, which depend on the ambient
+/// [`Directionality`].
+///
+/// See also:
+///
+///  * [`Positioned::directional`], which also provides a directional
+///    alternative to [`Positioned`], but takes an explicit [`TextDirection`].
+#[derive(Debug)]
+pub struct PositionedDirectional {
+    pub key: Option<KeyRef>,
+    /// The distance that the child's leading edge is inset from the leading edge
+    /// of the stack.
+    ///
+    /// Only two out of the three horizontal values ([`start`](Self::start),
+    /// [`end`](Self::end), [`width`](Self::width)) can be set. The third must be `None`.
+    pub start: Option<f64>,
+    /// The distance that the child's top edge is inset from the top of the stack.
+    ///
+    /// Only two out of the three vertical values ([`top`](Self::top),
+    /// [`bottom`](Self::bottom), [`height`](Self::height)) can be set. The third must be
+    /// `None`.
+    pub top: Option<f64>,
+    /// The distance that the child's trailing edge is inset from the trailing
+    /// edge of the stack.
+    ///
+    /// Only two out of the three horizontal values ([`start`](Self::start),
+    /// [`end`](Self::end), [`width`](Self::width)) can be set. The third must be `None`.
+    pub end: Option<f64>,
+    /// The distance that the child's bottom edge is inset from the bottom of the stack.
+    ///
+    /// Only two out of the three vertical values ([`top`](Self::top),
+    /// [`bottom`](Self::bottom), [`height`](Self::height)) can be set. The third must be
+    /// `None`.
+    pub bottom: Option<f64>,
+    /// The child's width.
+    ///
+    /// Only two out of the three horizontal values ([`start`](Self::start),
+    /// [`end`](Self::end), [`width`](Self::width)) can be set. The third must be `None`.
+    pub width: Option<f64>,
+    /// The child's height.
+    ///
+    /// Only two out of the three vertical values ([`top`](Self::top),
+    /// [`bottom`](Self::bottom), [`height`](Self::height)) can be set. The third must be
+    /// `None`.
+    pub height: Option<f64>,
+    /// The widget below this widget in the tree.
+    pub child: WidgetRef,
+}
+
+impl PositionedDirectional {
+    /// Creates a widget that controls where a child of a [`Stack`] is positioned; Dart's
+    /// optional named arguments are the setters.
+    pub fn new<K>(child: impl IntoWidget<K>) -> PositionedDirectional {
+        PositionedDirectional {
+            key: None,
+            start: None,
+            top: None,
+            end: None,
+            bottom: None,
+            width: None,
+            height: None,
+            child: child.into_widget(),
+        }
+    }
+
+    /// Dart `PositionedDirectional(key:)`.
+    pub fn key(mut self, key: KeyRef) -> PositionedDirectional {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `PositionedDirectional(start:)`.
+    pub fn start(mut self, start: f64) -> PositionedDirectional {
+        self.start = Some(start);
+        self
+    }
+
+    /// Dart `PositionedDirectional(top:)`.
+    pub fn top(mut self, top: f64) -> PositionedDirectional {
+        self.top = Some(top);
+        self
+    }
+
+    /// Dart `PositionedDirectional(end:)`.
+    pub fn end(mut self, end: f64) -> PositionedDirectional {
+        self.end = Some(end);
+        self
+    }
+
+    /// Dart `PositionedDirectional(bottom:)`.
+    pub fn bottom(mut self, bottom: f64) -> PositionedDirectional {
+        self.bottom = Some(bottom);
+        self
+    }
+
+    /// Dart `PositionedDirectional(width:)`.
+    pub fn width(mut self, width: f64) -> PositionedDirectional {
+        self.width = Some(width);
+        self
+    }
+
+    /// Dart `PositionedDirectional(height:)`.
+    pub fn height(mut self, height: f64) -> PositionedDirectional {
+        self.height = Some(height);
+        self
+    }
+}
+
+impl StatelessWidget for PositionedDirectional {
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
+        let mut positioned = Positioned::directional(
+            Directionality::of(app, context),
+            self.start,
+            self.end,
+            self.child.clone(),
+        );
+        // Through the setters, which run `Positioned`'s two-of-three asserts.
+        if let Some(top) = self.top {
+            positioned = positioned.top(top);
+        }
+        if let Some(bottom) = self.bottom {
+            positioned = positioned.bottom(bottom);
+        }
+        if let Some(width) = self.width {
+            positioned = positioned.width(width);
+        }
+        if let Some(height) = self.height {
+            positioned = positioned.height(height);
+        }
+        positioned.into_widget()
+    }
+}
+
+/// A widget that arranges its children sequentially along a given axis, forcing
+/// them to the dimension of the parent in the other axis.
+///
+/// This widget is rarely used directly. Instead, consider using `ListView`,
+/// which combines a similar layout algorithm with scrolling behavior, or
+/// [`Column`], which gives you more flexible control over the layout of a
+/// vertical set of boxes.
+///
+/// See also:
+///
+///  * `RenderListBody`, which implements this layout algorithm and the
+///    documentation for which describes some of its subtleties.
+///  * `SingleChildScrollView`, which is sometimes used with [`ListBody`] to
+///    make the contents scrollable.
+///  * [`Column`] and [`Row`], which implement a more elaborate version of
+///    this layout algorithm (at the cost of being slightly less efficient).
+///  * `ListView`, which implements an efficient scrolling version of this
+///    layout algorithm.
+#[derive(Debug)]
+pub struct ListBody {
+    pub key: Option<KeyRef>,
+    /// The direction to use as the main axis.
+    pub main_axis: Axis,
+    /// Whether the list body positions children in the reading direction.
+    ///
+    /// For example, if the reading direction is left-to-right and
+    /// [`main_axis`](Self::main_axis) is [`Axis::Horizontal`], then the list body positions
+    /// children from left to right when [`reverse`](Self::reverse) is false and from right to
+    /// left when [`reverse`](Self::reverse) is true.
+    ///
+    /// Similarly, if [`main_axis`](Self::main_axis) is [`Axis::Vertical`], then the list body
+    /// positions from top to bottom when [`reverse`](Self::reverse) is false and from bottom
+    /// to top when [`reverse`](Self::reverse) is true.
+    ///
+    /// Defaults to false.
+    pub reverse: bool,
+    pub children: Vec<WidgetRef>,
+}
+
+impl ListBody {
+    /// Creates a layout widget that arranges its children sequentially along a given axis;
+    /// Dart's optional named arguments are the setters.
+    ///
+    /// By default, the [`main_axis`](Self::main_axis) is [`Axis::Vertical`].
+    pub fn new() -> ListBody {
+        ListBody {
+            key: None,
+            main_axis: Axis::Vertical,
+            reverse: false,
+            children: Vec::new(),
+        }
+    }
+
+    /// Dart `ListBody(key:)`.
+    pub fn key(mut self, key: KeyRef) -> ListBody {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `ListBody(mainAxis:)`.
+    pub fn main_axis(mut self, main_axis: Axis) -> ListBody {
+        self.main_axis = main_axis;
+        self
+    }
+
+    /// Dart `ListBody(reverse:)`.
+    pub fn reverse(mut self, reverse: bool) -> ListBody {
+        self.reverse = reverse;
+        self
+    }
+
+    /// Dart `ListBody(children:)`.
+    pub fn children(mut self, children: Vec<WidgetRef>) -> ListBody {
+        self.children = children;
+        self
+    }
+
+    fn get_direction(&self, app: &mut App, context: BuildContext) -> AxisDirection {
+        get_axis_direction_from_axis_reverse_and_directionality(
+            app,
+            context,
+            self.main_axis,
+            self.reverse,
+        )
+    }
+}
+
+impl Default for ListBody {
+    fn default() -> ListBody {
+        ListBody::new()
+    }
+}
+
+impl RenderObjectWidget for ListBody {
+    type RenderObject = RenderListBody;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject {
+        let axis_direction = self.get_direction(app, context);
+        RenderListBody::new(app, axis_direction).as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        context: BuildContext,
+        render_object: RenderHandle<RenderListBody>,
+    ) {
+        let axis_direction = self.get_direction(app, context);
+        render_object.set_axis_direction(app, axis_direction);
+    }
+}
+
+impl MultiChildRenderObjectWidget for ListBody {
+    fn children(&self) -> &[WidgetRef] {
+        &self.children
     }
 }
 
@@ -7761,7 +8429,7 @@ mod tests {
 
     use super::*;
     use crate::framework::{
-        GlobalKey, IntoWidget, State, StateData, StatefulWidget, downcast_widget,
+        GlobalKey, IntoWidget, LabeledGlobalKey, State, StateData, StatefulWidget, downcast_widget,
     };
     use crate::test_harness::{Harness, padding_under_root};
 
@@ -8283,7 +8951,11 @@ mod tests {
     }
 
     /// The `TileState` a global key names, through the harness's own build owner.
-    fn tile_state(harness: &Harness, app: &App, key: &GlobalKey) -> Option<Handle<TileState>> {
+    fn tile_state(
+        harness: &Harness,
+        app: &App,
+        key: &LabeledGlobalKey,
+    ) -> Option<Handle<TileState>> {
         harness
             .owner
             .global_key_element(app, key.identity())
@@ -8298,7 +8970,7 @@ mod tests {
     }
 
     impl Tile {
-        fn keyed(key: &GlobalKey, width: f64) -> WidgetRef {
+        fn keyed(key: &LabeledGlobalKey, width: f64) -> WidgetRef {
             Tile {
                 key: Some(Rc::new(key.clone())),
                 width,
@@ -8514,10 +9186,14 @@ mod tests {
     fn reordering_keyed_children_moves_elements_and_render_children() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let (first, second, third) = (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
-        let row = |order: [&GlobalKey; 3]| {
+        let (first, second, third) = (
+            <dyn GlobalKey>::new(),
+            <dyn GlobalKey>::new(),
+            <dyn GlobalKey>::new(),
+        );
+        let row = |order: [&LabeledGlobalKey; 3]| {
             let widths = [10.0, 20.0, 30.0];
-            let by_key = |key: &GlobalKey| {
+            let by_key = |key: &LabeledGlobalKey| {
                 let index = [&first, &second, &third]
                     .iter()
                     .position(|candidate| candidate.identity() == key.identity())
@@ -8569,7 +9245,11 @@ mod tests {
     fn a_child_can_be_added_and_removed_in_the_middle() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let (first, middle, last) = (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
+        let (first, middle, last) = (
+            <dyn GlobalKey>::new(),
+            <dyn GlobalKey>::new(),
+            <dyn GlobalKey>::new(),
+        );
         let ends = || {
             ltr(Row::new()
                 .children([Tile::keyed(&first, 10.0), Tile::keyed(&last, 30.0)])
@@ -9688,5 +10368,390 @@ mod tests {
             .downcast_ref::<ShapeBorderClipper>()
             .expect("a ShapeBorderClipper");
         assert_eq!(clipper.text_direction, Some(TextDirection::Rtl));
+    }
+
+    const DEBUG_BLACK: Color = Color::new(0xFF000000);
+
+    /// `physical_model_test.dart`: "PhysicalModel updates clipBehavior in updateRenderObject".
+    #[test]
+    fn a_physical_model_updates_its_clip_behavior() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(&mut app, PhysicalModel::new(DEBUG_BLACK).into_widget());
+        harness.pump(&mut app);
+        let render = render_object_under_root::<RenderPhysicalModel>(&harness, &app);
+        assert_eq!(render.clip_behavior(&app), Clip::None);
+
+        harness.set_child(
+            &mut app,
+            PhysicalModel::new(DEBUG_BLACK)
+                .clip_behavior(Clip::AntiAlias)
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert_eq!(render.clip_behavior(&app), Clip::AntiAlias);
+    }
+
+    fn circle_clipper() -> Rc<dyn CustomClipper<Arc<Path>>> {
+        Rc::new(ShapeBorderClipper::new(
+            Box::new(waft_painting::CircleBorder::new(
+                waft_painting::BorderSide::NONE,
+                0.0,
+            )),
+            None,
+        ))
+    }
+
+    /// `physical_model_test.dart`: "PhysicalShape updates clipBehavior in updateRenderObject".
+    #[test]
+    fn a_physical_shape_updates_its_clip_behavior() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            PhysicalShape::new(circle_clipper(), DEBUG_BLACK).into_widget(),
+        );
+        harness.pump(&mut app);
+        let render = render_object_under_root::<RenderPhysicalShape>(&harness, &app);
+        assert_eq!(render.clip_behavior(&app), Clip::None);
+
+        harness.set_child(
+            &mut app,
+            PhysicalShape::new(circle_clipper(), DEBUG_BLACK)
+                .clip_behavior(Clip::AntiAlias)
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert_eq!(render.clip_behavior(&app), Clip::AntiAlias);
+    }
+
+    /// `physical_model_test.dart`: "PhysicalModel does not crash at zero area", with a centred
+    /// childless model, which sizes to nothing.
+    #[test]
+    fn a_childless_physical_model_and_shape_take_no_space() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            Directionality::new(
+                TextDirection::Ltr,
+                Center::new().child(PhysicalModel::new(Color::new(0xAABBCC00))),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let center = render_object_under_root::<RenderPositionedBox>(&harness, &app);
+        let model = center.child(&app).expect("the model");
+        assert_eq!(model.size(&app), Size::ZERO);
+
+        harness.set_child(
+            &mut app,
+            Directionality::new(
+                TextDirection::Ltr,
+                Center::new().child(PhysicalShape::new(circle_clipper(), Color::new(0xAABBCC00))),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let center = render_object_under_root::<RenderPositionedBox>(&harness, &app);
+        let shape = center.child(&app).expect("the shape");
+        assert_eq!(shape.size(&app), Size::ZERO);
+    }
+
+    /// An app on a platform whose one view has no area, Dart's
+    /// `tester.view.physicalSize = Size.zero`, mounted with `child` under that view.
+    pub(crate) fn zero_area_cell(child: WidgetRef) -> Rc<AppCell> {
+        let platform = waft_test::TestPlatform::new()
+            .on(waft_embedder::TargetPlatform::MacOS)
+            .with_view(Rc::new(waft_test::TestView::new(0.0, 0.0)));
+        let cell = AppCell::with_platform(Rc::new(platform));
+        crate::test_harness::binding_mount(&cell, child);
+        cell
+    }
+
+    fn keyed_size(app: &mut App, key: &LabeledGlobalKey) -> Size {
+        key.current_context(app)
+            .expect("mounted")
+            .find_render_object(app)
+            .expect("a render object")
+            .as_box()
+            .expect("a box")
+            .size(app)
+    }
+
+    /// `physical_model_test.dart`: "PhysicalModel does not crash at zero area" and
+    /// "PhysicalShape does not crash at zero area", in a view of no area.
+    #[test]
+    fn a_physical_model_and_shape_in_a_view_of_no_area_take_no_space() {
+        let key = <dyn GlobalKey>::new();
+        let cell = zero_area_cell(
+            Directionality::new(
+                TextDirection::Ltr,
+                Center::new()
+                    .child(PhysicalModel::new(Color::new(0xAABBCC00)).key(Rc::new(key.clone()))),
+            )
+            .into_widget(),
+        );
+        assert_eq!(keyed_size(&mut cell.borrow_mut(), &key), Size::ZERO);
+
+        let key = <dyn GlobalKey>::new();
+        let cell = zero_area_cell(
+            Directionality::new(
+                TextDirection::Ltr,
+                Center::new().child(
+                    PhysicalShape::new(circle_clipper(), Color::new(0xAABBCC00))
+                        .key(Rc::new(key.clone())),
+                ),
+            )
+            .into_widget(),
+        );
+        assert_eq!(keyed_size(&mut cell.borrow_mut(), &key), Size::ZERO);
+    }
+
+    fn list_children(width: f64, height: f64) -> Vec<WidgetRef> {
+        (0..4).map(|_| sized(width, height)).collect()
+    }
+
+    /// The rectangles of a list body's children, in child order, in the list body's space.
+    fn list_body_rects(app: &App, list_body: AnyRenderBox) -> Vec<Rect> {
+        let list_body = list_body
+            .as_object()
+            .downcast::<RenderListBody>(app)
+            .expect("a list body");
+        let mut rects = Vec::new();
+        let mut child = list_body.first_child(app);
+        while let Some(current) = child {
+            let offset = current
+                .as_object()
+                .parent_data_of::<waft_rendering::ListBodyParentData>(app)
+                .offset();
+            rects.push(offset & current.size(app));
+            child = list_body.child_after(app, current);
+        }
+        rects
+    }
+
+    /// `list_body_test.dart`: "ListBody down" and "ListBody up", in a 300x200 view with
+    /// children 40 high.
+    #[test]
+    fn a_vertical_list_body_stacks_its_children_down_or_reversed_up() {
+        for (reverse, tops) in [
+            (false, [0.0, 40.0, 80.0, 120.0]),
+            (true, [120.0, 80.0, 40.0, 0.0]),
+        ] {
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
+            let harness = Harness::mount(
+                &mut app,
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Column::new().children(vec![
+                        ListBody::new()
+                            .reverse(reverse)
+                            .children(list_children(200.0, 40.0))
+                            .into_widget(),
+                    ]),
+                )
+                .into_widget(),
+            );
+            harness.pump(&mut app);
+            let flex = render_object_under_root::<waft_rendering::RenderFlex>(&harness, &app);
+            let list_body = flex.first_child(&app).expect("the list body");
+            let expected: Vec<Rect> = tops
+                .iter()
+                .map(|top| Rect::from_ltwh(0.0, *top, VIEW_WIDTH, 40.0))
+                .collect();
+            assert_eq!(
+                list_body_rects(&app, list_body),
+                expected,
+                "reverse {reverse}"
+            );
+        }
+    }
+
+    /// `list_body_test.dart`: "ListBody right" and "ListBody left", children 60 wide.
+    #[test]
+    fn a_horizontal_list_body_follows_the_ambient_text_direction() {
+        for (text_direction, lefts) in [
+            (TextDirection::Ltr, [0.0, 60.0, 120.0, 180.0]),
+            (TextDirection::Rtl, [180.0, 120.0, 60.0, 0.0]),
+        ] {
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
+            let harness = Harness::mount(
+                &mut app,
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Row::new().children(vec![
+                        Directionality::new(
+                            text_direction,
+                            ListBody::new()
+                                .main_axis(Axis::Horizontal)
+                                .children(list_children(60.0, 150.0)),
+                        )
+                        .into_widget(),
+                    ]),
+                )
+                .into_widget(),
+            );
+            harness.pump(&mut app);
+            let flex = render_object_under_root::<waft_rendering::RenderFlex>(&harness, &app);
+            let list_body = flex.first_child(&app).expect("the list body");
+            let expected: Vec<Rect> = lefts
+                .iter()
+                .map(|left| Rect::from_ltwh(*left, 0.0, 60.0, VIEW_HEIGHT))
+                .collect();
+            assert_eq!(
+                list_body_rects(&app, list_body),
+                expected,
+                "{text_direction:?}"
+            );
+        }
+    }
+
+    /// `list_body_test.dart`: "Limited space along main axis error".
+    #[test]
+    #[should_panic(expected = "RenderListBody must have unlimited space along its main axis.")]
+    fn a_list_body_with_a_bounded_main_axis_panics() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            SizedBox::square(Some(100.0))
+                .child(Directionality::new(
+                    TextDirection::Rtl,
+                    ListBody::new()
+                        .main_axis(Axis::Horizontal)
+                        .children(list_children(200.0, 150.0)),
+                ))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+    }
+
+    /// `list_body_test.dart`: "Nested ListBody unbounded cross axis error".
+    #[test]
+    #[should_panic(expected = "RenderListBody must have a bounded constraint for its cross axis.")]
+    fn a_list_body_nested_across_another_with_an_unbounded_cross_axis_panics() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let inner = Column::new().children(vec![
+            Directionality::new(
+                TextDirection::Ltr,
+                ListBody::new().children(list_children(200.0, 150.0)),
+            )
+            .into_widget(),
+        ]);
+        let harness = Harness::mount(
+            &mut app,
+            Directionality::new(
+                TextDirection::Ltr,
+                Row::new().children(vec![
+                    Directionality::new(
+                        TextDirection::Ltr,
+                        ListBody::new()
+                            .main_axis(Axis::Horizontal)
+                            .children(vec![inner.into_widget()]),
+                    )
+                    .into_widget(),
+                ]),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+    }
+
+    const VIEW_WIDTH: f64 = crate::test_harness::VIEW_WIDTH;
+    const VIEW_HEIGHT: f64 = crate::test_harness::VIEW_HEIGHT;
+
+    /// A `PositionedDirectional` places its start edge on the right under a right-to-left
+    /// directionality; `positioned_test.dart` checks the same through `Positioned.directional`.
+    #[test]
+    fn positioned_directional_resolves_start_and_end_against_the_directionality() {
+        for (text_direction, left) in [(TextDirection::Ltr, 10.0), (TextDirection::Rtl, 270.0)] {
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
+            let harness = Harness::mount(
+                &mut app,
+                Directionality::new(
+                    text_direction,
+                    Stack::new().children(vec![
+                        PositionedDirectional::new(sized(20.0, 20.0))
+                            .start(10.0)
+                            .top(5.0)
+                            .into_widget(),
+                    ]),
+                )
+                .into_widget(),
+            );
+            harness.pump(&mut app);
+            let stack = render_object_under_root::<RenderStack>(&harness, &app);
+            let child = stack.first_child(&app).expect("the positioned child");
+            let offset = child
+                .as_object()
+                .parent_data_of::<StackParentData>(&app)
+                .offset();
+            assert_eq!(offset, Offset::new(left, 5.0), "{text_direction:?}");
+        }
+    }
+
+    /// `PositionedDirectional` builds a `Positioned`, whose constructor asserts that at most
+    /// two of start, end and width are set.
+    #[test]
+    #[should_panic]
+    fn positioned_directional_with_start_end_and_width_panics() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            Directionality::new(
+                TextDirection::Ltr,
+                Stack::new().children(vec![
+                    PositionedDirectional::new(sized(20.0, 20.0))
+                        .start(10.0)
+                        .end(10.0)
+                        .width(20.0)
+                        .into_widget(),
+                ]),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+    }
+
+    /// A `StatefulBuilder`'s `set_state` runs its callback and rebuilds the builder.
+    #[test]
+    fn a_stateful_builder_rebuilds_when_its_setter_is_called() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let builds = Rc::new(Cell::new(0));
+        let setter: Rc<std::cell::RefCell<Option<StateSetter>>> = Rc::default();
+        let width = Rc::new(Cell::new(10.0));
+        let harness = Harness::mount(
+            &mut app,
+            Center::new()
+                .child(StatefulBuilder::new({
+                    let (builds, setter, width) =
+                        (Rc::clone(&builds), Rc::clone(&setter), Rc::clone(&width));
+                    move |_app, _context, set_state| {
+                        builds.set(builds.get() + 1);
+                        *setter.borrow_mut() = Some(set_state);
+                        sized(width.get(), 10.0)
+                    }
+                }))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert_eq!(builds.get(), 1);
+
+        let set_state = setter.borrow().clone().expect("the builder ran");
+        set_state(&mut app, &mut |_app| width.set(30.0));
+        harness.pump(&mut app);
+        assert_eq!(builds.get(), 2);
+        let center = render_object_under_root::<RenderPositionedBox>(&harness, &app);
+        assert_eq!(
+            center.child(&app).expect("the box").size(&app),
+            Size::new(30.0, 10.0)
+        );
     }
 }

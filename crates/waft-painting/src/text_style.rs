@@ -1,7 +1,9 @@
 //! Flutter counterpart: `painting/text_style.dart`.
 
+use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug};
+use std::rc::Rc;
 
 use waft_embedder::lerp_double;
 use waft_embedder::{
@@ -1359,6 +1361,104 @@ pub fn lerp_font_variations(
         }
     }
     Some(result)
+}
+
+/// A `TextStyle` subclass's own part, carried by an [`AnyTextStyle`]: Dart's `class Foo extends TextStyle`.
+pub trait TextStyleExtension: Any + Debug {
+    /// The extension as `Any`, for Dart's `is` checks ([`AnyTextStyle::extension`]).
+    fn as_any(&self) -> &dyn Any;
+
+    /// Dart's `==` override on the subclass, called once the values compared equal. `other`
+    /// is the same runtime type when it downcasts; any other type is unequal, as Dart's
+    /// `runtimeType` check makes it.
+    fn eq_extension(&self, other: &dyn TextStyleExtension) -> bool;
+}
+
+/// A `TextStyle` that may be an instance of a `TextStyle` subclass, as [`AnyColor`](crate::AnyColor) is
+/// for `Color`.
+///
+/// The framework stores this wherever Flutter stores a `TextStyle` that may be a subclass
+/// (`WidgetStateTextStyle`). The plain value is the one the subclass passed to `super`, reached
+/// by [`value`](Self::value) or by deref; the subclass is recovered with
+/// [`extension`](Self::extension), Dart's `is` check.
+///
+/// Equality follows Dart's: two plain values compare by value, two extended ones by value
+/// and by the subclass's `==`, and a plain value never equals an extended one.
+#[derive(Clone)]
+pub struct AnyTextStyle {
+    value: TextStyle,
+    extension: Option<Rc<dyn TextStyleExtension>>,
+}
+
+impl AnyTextStyle {
+    /// A plain value.
+    pub fn new(value: TextStyle) -> AnyTextStyle {
+        AnyTextStyle {
+            value,
+            extension: None,
+        }
+    }
+
+    /// A subclass instance: `value` is what it passed to `super`.
+    pub fn with_shared(value: TextStyle, extension: Rc<dyn TextStyleExtension>) -> AnyTextStyle {
+        AnyTextStyle {
+            value,
+            extension: Some(extension),
+        }
+    }
+
+    /// The plain value: the subclass's `super` value.
+    pub fn value(&self) -> &TextStyle {
+        &self.value
+    }
+
+    /// Dart's `value is T`: the subclass instance, if this value is one.
+    pub fn extension<E: TextStyleExtension>(&self) -> Option<&E> {
+        self.extension
+            .as_ref()
+            .and_then(|extension| extension.as_any().downcast_ref::<E>())
+    }
+
+    /// Whether this value is a subclass instance.
+    pub fn has_extension(&self) -> bool {
+        self.extension.is_some()
+    }
+}
+
+impl std::ops::Deref for AnyTextStyle {
+    type Target = TextStyle;
+
+    fn deref(&self) -> &TextStyle {
+        &self.value
+    }
+}
+
+impl From<TextStyle> for AnyTextStyle {
+    fn from(value: TextStyle) -> AnyTextStyle {
+        AnyTextStyle::new(value)
+    }
+}
+
+impl PartialEq for AnyTextStyle {
+    fn eq(&self, other: &AnyTextStyle) -> bool {
+        if self.value != other.value {
+            return false;
+        }
+        match (&self.extension, &other.extension) {
+            (None, None) => true,
+            (Some(mine), Some(theirs)) => mine.eq_extension(&**theirs),
+            _ => false,
+        }
+    }
+}
+
+impl Debug for AnyTextStyle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.extension {
+            Some(extension) => extension.fmt(f),
+            None => self.value.fmt(f),
+        }
+    }
 }
 
 #[cfg(test)]

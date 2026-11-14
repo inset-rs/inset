@@ -11,8 +11,10 @@ use waft_embedder::{Offset, Rect};
 use waft_foundation::{App, Handle, Listener, ValueNotifier};
 use waft_scheduler::TickerFuture;
 
-use crate::framework::{BuildContext, WidgetRef};
+use crate::framework::{BuildContext, State, WidgetRef};
 use crate::widgets::basic::WidgetBuilder;
+use crate::widgets::inherited_theme::InheritedTheme;
+use crate::widgets::navigator::Navigator;
 use crate::widgets::overlay::{Overlay, OverlayEntry};
 
 /// Signature for a builder that builds a [`WidgetRef`] with a [`MagnifierController`].
@@ -271,7 +273,19 @@ impl MagnifierController {
         }
 
         let overlay_state = Overlay::of(app, context, true);
-        let overlay_entry = OverlayEntry::new(app, builder, false, false, false);
+
+        let to = Navigator::maybe_of(app, context, false).map(|navigator| navigator.context(app));
+        let captured_themes = <dyn InheritedTheme>::capture(app, context, to);
+
+        let overlay_entry = OverlayEntry::new(
+            app,
+            Rc::new(move |app: &mut App, context: BuildContext| {
+                captured_themes.wrap(builder(app, context))
+            }),
+            false,
+            false,
+            false,
+        );
         app.get_mut(self).overlay_entry = Some(overlay_entry);
         overlay_state.insert(app, overlay_entry, below, None);
 

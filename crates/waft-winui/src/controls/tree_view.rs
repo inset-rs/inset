@@ -411,7 +411,7 @@ impl StatefulWidget for TreeView {
             row_estimate: 0.0,
             item_focus: HashMap::new(),
             row_keys: HashMap::new(),
-            viewport_key: GlobalKey::new(),
+            viewport_key: <dyn GlobalKey>::new(),
             heights: HashMap::new(),
             widths: HashMap::new(),
             realized: HashSet::new(),
@@ -456,10 +456,10 @@ pub struct TreeViewState {
     item_focus: HashMap<String, Handle<FocusNode>>,
 
     /// Identifies each row's container, where the row is laid out.
-    row_keys: HashMap<String, GlobalKey>,
+    row_keys: HashMap<String, LabeledGlobalKey>,
 
     /// Identifies the list's viewport.
-    viewport_key: GlobalKey,
+    viewport_key: LabeledGlobalKey,
 
     /// Each row's height and width, by node, as last laid out.
     heights: HashMap<String, f64>,
@@ -849,11 +849,11 @@ impl TreeViewState {
     }
 
     /// The key of the node's row.
-    fn row_key(self: Handle<Self>, app: &mut App, id: &str) -> GlobalKey {
+    fn row_key(self: Handle<Self>, app: &mut App, id: &str) -> LabeledGlobalKey {
         app.get_mut(self)
             .row_keys
             .entry(id.to_owned())
-            .or_insert_with(GlobalKey::new)
+            .or_insert_with(<dyn GlobalKey>::new)
             .clone()
     }
 

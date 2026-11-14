@@ -402,7 +402,6 @@ pub fn build_page_transitions<R: PageRoute>(
         .into_widget()
     } else {
         let detector = CupertinoBackGestureDetector {
-            key: None,
             enabled_callback: Rc::new(move |app| {
                 PredictiveBackRoute::pop_gesture_enabled(this, app)
             }),
@@ -822,7 +821,9 @@ impl ModalRoute for CupertinoPageRoute {
 
     fn delegated_transition(self: Handle<Self>, app: &App) -> Option<DelegatedTransitionBuilder> {
         let _ = app;
-        Some(Rc::new(CupertinoPageTransition::delegated_transition))
+        Some(DelegatedTransitionBuilder::function(
+            CupertinoPageTransition::delegated_transition,
+        ))
     }
 }
 
@@ -933,7 +934,7 @@ impl ModalRoute for PageBasedCupertinoPageRoute {
 
     fn delegated_transition(self: Handle<Self>, app: &App) -> Option<DelegatedTransitionBuilder> {
         (!PageRoute::fullscreen_dialog(self, app)).then(|| {
-            Rc::new(CupertinoPageTransition::delegated_transition) as DelegatedTransitionBuilder
+            DelegatedTransitionBuilder::function(CupertinoPageTransition::delegated_transition)
         })
     }
 }
@@ -1578,7 +1579,6 @@ type BackGestureEnabledCallback = Rc<dyn Fn(&mut App) -> bool>;
 /// The gesture data is converted from absolute coordinates to logical coordinates by this
 /// widget.
 struct CupertinoBackGestureDetector {
-    key: Option<KeyRef>,
     enabled_callback: BackGestureEnabledCallback,
     on_start_pop_gesture: StartPopGestureCallback,
     child: WidgetRef,
@@ -1594,10 +1594,6 @@ impl Debug for CupertinoBackGestureDetector {
 
 impl StatefulWidget for CupertinoBackGestureDetector {
     type State = CupertinoBackGestureDetectorState;
-
-    fn key(&self) -> Option<&KeyRef> {
-        self.key.as_ref()
-    }
 
     fn create_state(&self) -> CupertinoBackGestureDetectorState {
         CupertinoBackGestureDetectorState {
@@ -2776,8 +2772,8 @@ mod tests {
     use waft_embedder::{Locale, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
     use waft_gestures::GestureBinding;
     use waft_widgets::{
-        AnyModalRoute, DefaultWidgetsLocalizations, GlobalKey, Localizations, Navigator,
-        NavigatorState, PageRef, SizedBox,
+        AnyModalRoute, DefaultWidgetsLocalizations, GlobalKey, LabeledGlobalKey, Localizations,
+        Navigator, NavigatorState, PageRef, SizedBox,
     };
 
     use super::*;
@@ -2833,7 +2829,7 @@ mod tests {
     }
 
     /// A page filling the view, keyed so a test can find its render box.
-    fn keyed_page(key: &GlobalKey) -> WidgetBuilder {
+    fn keyed_page(key: &LabeledGlobalKey) -> WidgetBuilder {
         let key: KeyRef = Rc::new(key.clone());
         Rc::new(move |_app, _context| SizedBox::expand().key(key.clone()).into_widget())
     }
@@ -2850,7 +2846,10 @@ mod tests {
         })
     }
 
-    fn navigator(key: &GlobalKey, configure: impl FnOnce(Navigator) -> Navigator) -> WidgetRef {
+    fn navigator(
+        key: &LabeledGlobalKey,
+        configure: impl FnOnce(Navigator) -> Navigator,
+    ) -> WidgetRef {
         let navigator = configure(Navigator::new().key(Rc::new(key.clone())));
         Localizations::new(
             Locale::new("en"),
@@ -2863,13 +2862,13 @@ mod tests {
         .into_widget()
     }
 
-    fn navigator_state(key: &GlobalKey, app: &mut App) -> Handle<NavigatorState> {
+    fn navigator_state(key: &LabeledGlobalKey, app: &mut App) -> Handle<NavigatorState> {
         key.current_state::<NavigatorState>(app)
             .expect("a mounted navigator")
     }
 
     /// The x coordinate the keyed page paints at, in the view's coordinate system.
-    fn page_left(key: &GlobalKey, app: &mut App) -> f64 {
+    fn page_left(key: &LabeledGlobalKey, app: &mut App) -> f64 {
         let context = key.current_context(app).expect("the page is mounted");
         context
             .find_render_object(app)
@@ -2881,7 +2880,7 @@ mod tests {
     }
 
     /// The y coordinate the keyed page paints at, in the view's coordinate system.
-    fn page_top(key: &GlobalKey, app: &mut App) -> f64 {
+    fn page_top(key: &LabeledGlobalKey, app: &mut App) -> f64 {
         let context = key.current_context(app).expect("the page is mounted");
         context
             .find_render_object(app)
@@ -2896,7 +2895,7 @@ mod tests {
     fn a_pushed_cupertino_page_route_slides_in_from_the_right() {
         let cell = test_cell();
         let app = cell.borrow();
-        let navigator_key = GlobalKey::new();
+        let navigator_key = <dyn GlobalKey>::new();
         drop(app);
         build(
             &cell,
@@ -2910,7 +2909,7 @@ mod tests {
         let state = navigator_state(&navigator_key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
-        let page_key = GlobalKey::new();
+        let page_key = <dyn GlobalKey>::new();
         let pushed = CupertinoPageRoute::new(&mut app, keyed_page(&page_key));
         state.push(&mut app, Route::as_route(pushed));
         let mut at = at;
@@ -2942,7 +2941,7 @@ mod tests {
     fn cupertino_pages_build_page_based_routes_that_carry_the_previous_title() {
         let cell = test_cell();
         let app = cell.borrow();
-        let navigator_key = GlobalKey::new();
+        let navigator_key = <dyn GlobalKey>::new();
         let top_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
         let pages: Vec<PageRef> = vec![
             Rc::new(CupertinoPage::new(SizedBox::expand()).title("Home".to_string())),
@@ -2994,7 +2993,7 @@ mod tests {
     fn a_flung_back_gesture_drag_moves_the_page_and_pops_the_route() {
         let cell = test_cell();
         let app = cell.borrow();
-        let navigator_key = GlobalKey::new();
+        let navigator_key = <dyn GlobalKey>::new();
         drop(app);
         build(
             &cell,
@@ -3008,7 +3007,7 @@ mod tests {
         let state = navigator_state(&navigator_key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
-        let page_key = GlobalKey::new();
+        let page_key = <dyn GlobalKey>::new();
         let pushed = CupertinoPageRoute::new(&mut app, keyed_page(&page_key));
         state.push(&mut app, Route::as_route(pushed));
         let at = settle(&mut app, at);
@@ -3047,7 +3046,7 @@ mod tests {
     fn a_dropped_short_back_gesture_drag_snaps_the_page_back() {
         let cell = test_cell();
         let app = cell.borrow();
-        let navigator_key = GlobalKey::new();
+        let navigator_key = <dyn GlobalKey>::new();
         drop(app);
         build(
             &cell,
@@ -3061,7 +3060,7 @@ mod tests {
         let state = navigator_state(&navigator_key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
-        let page_key = GlobalKey::new();
+        let page_key = <dyn GlobalKey>::new();
         let pushed = CupertinoPageRoute::new(&mut app, keyed_page(&page_key));
         state.push(&mut app, Route::as_route(pushed));
         let at = settle(&mut app, at);
@@ -3101,7 +3100,7 @@ mod tests {
     fn a_modal_popup_slides_up_from_the_bottom_and_dismisses_on_a_barrier_tap() {
         let cell = test_cell();
         let app = cell.borrow();
-        let navigator_key = GlobalKey::new();
+        let navigator_key = <dyn GlobalKey>::new();
         let page_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
         drop(app);
         build(&cell, {
@@ -3118,7 +3117,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let at = settle(&mut app, Duration::ZERO);
 
-        let popup_key = GlobalKey::new();
+        let popup_key = <dyn GlobalKey>::new();
         let key: KeyRef = Rc::new(popup_key.clone());
         let context = page_context.get().expect("the page built");
         let popped = show_cupertino_modal_popup(
@@ -3166,7 +3165,7 @@ mod tests {
     fn a_cupertino_dialog_fades_in() {
         let cell = test_cell();
         let app = cell.borrow();
-        let navigator_key = GlobalKey::new();
+        let navigator_key = <dyn GlobalKey>::new();
         let page_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
         drop(app);
         build(&cell, {
@@ -3221,7 +3220,7 @@ mod tests {
     fn the_pop_gesture_is_disabled_for_the_first_route_and_for_a_fullscreen_dialog() {
         let cell = test_cell();
         let app = cell.borrow();
-        let navigator_key = GlobalKey::new();
+        let navigator_key = <dyn GlobalKey>::new();
         let first = Rc::new(Cell::new(None));
         drop(app);
         build(&cell, {

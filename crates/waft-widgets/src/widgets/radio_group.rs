@@ -959,7 +959,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let changes: Rc<RefCell<Vec<Option<u32>>>> = Rc::default();
         let recorded = Rc::clone(&changes);
-        let key = crate::framework::GlobalKey::new();
+        let key = <dyn crate::framework::GlobalKey>::new();
         let children = vec![
             radio(0, enabled[0], Rect::from_ltwh(0.0, 0.0, 40.0, 20.0)),
             radio(1, enabled[1], Rect::from_ltwh(50.0, 0.0, 40.0, 20.0)),

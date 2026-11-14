@@ -14,6 +14,14 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — valo's display list has no other image filter.
   Affect: the tile-mode blur and the dilate, erode, matrix and shader filters cannot be built at all.
 
+- Change: `CanvasShadow::draw_shadow` takes the device pixel ratio of the view the canvas is painted into, where dart:ui's `Canvas.drawShadow` reads the implicit view's from the engine.
+  Reason: platform — a canvas here belongs to no view, and the embedder holds no implicit view whose metrics a canvas could read.
+  Affect: the caller says which view's ratio the shadow is drawn at; a render object passes its own view's.
+
+- Change: `draw_shadow` records the shadow when it is drawn, as a fill of the path in Impeller's tonal colour, moved down by the elevation times the device pixel ratio and mask-blurred by the sigma of a radius equal to the elevation (the ratio divided back out), where Impeller resolves Flutter's `DrawShadowOp` at playback and divides the blur's radius by the canvas's full transform there.
+  Reason: platform — valo's display list has no shadow op, so the transform at playback is not known when the shadow is recorded (waiting on Valo: a shadow op drawn in its renderer as Impeller draws it).
+  Affect: under a scaled ancestor, such as a scale transition or a scaled layer, the shadow's blur scales with it, where Impeller keeps the blur at the elevation's device size; the offset scales in both.
+
 ## paragraph.rs → text.dart (`TextStyle`, `ParagraphStyle`, `ParagraphBuilder`, `Paragraph`), fonts.rs
 
 - Change: fonts are explicit — `Platform::font_source` is the host's font lookup, and `ParagraphBuilder::build` shapes against a `FontCollection` the caller passes.

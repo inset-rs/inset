@@ -30,7 +30,7 @@ const LONG: &str = "The quick brown fox jumps over the lazy dog while the long l
 struct Fixture {
     cell: Rc<AppCell>,
     /// The box's key, through which a test asks it where its characters are.
-    key: GlobalKey,
+    key: LabeledGlobalKey,
     clipboard: MockClipboard,
     time: Duration,
     last_mouse: Offset,
@@ -46,7 +46,7 @@ impl Fixture {
             .with_clipboard(Rc::new(clipboard.clone()))
             .with_font_source(|| Box::new(SystemFontSource::platform()));
         let cell = AppCell::with_platform(Rc::new(platform));
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         {
             let mut app = cell.borrow_mut();
             PaintingBinding::instance(&mut app).install_platform_fonts(&mut app);

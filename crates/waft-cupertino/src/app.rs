@@ -15,13 +15,13 @@ use waft_painting::AnyColor;
 use waft_services::SystemChrome;
 use waft_widgets::{
     AnyAction, AnyNavigatorObserver, AnyRoute, BouncingScrollPhysics, BuildContext, Builder,
-    GenerateAppTitle, GlobalKey, HeroController, HeroControllerScope, InitialRouteListFactory,
-    IntoWidget, KeyRef, LocaleListResolutionCallback, LocaleResolutionCallback,
-    LocalizationsDelegateRef, MediaQuery, NavigationNotification, NotificationListenerCallback,
-    PageRoute, RouteFactory, RouteSettingsRef, ScrollBehavior, ScrollBehaviorRef,
-    ScrollConfiguration, ScrollDecelerationRate, ScrollPhysicsRef, ScrollableDetails, ShortcutMap,
-    State, StateData, StatefulWidget, TransitionBuilder, View, WidgetBuilder, WidgetRef,
-    WidgetsApp,
+    DefaultSelectionStyle, GenerateAppTitle, GlobalKeyRef, GlobalObjectKey, HeroController,
+    HeroControllerScope, InitialRouteListFactory, IntoWidget, KeyRef, LocaleListResolutionCallback,
+    LocaleResolutionCallback, LocalizationsDelegateRef, MediaQuery, NavigationNotification,
+    NotificationListenerCallback, PageRoute, RouteFactory, RouteSettingsRef, ScrollBehavior,
+    ScrollBehaviorRef, ScrollConfiguration, ScrollDecelerationRate, ScrollPhysicsRef,
+    ScrollableDetails, ShortcutMap, State, StateData, StatefulWidget, TransitionBuilder, View,
+    WidgetBuilder, WidgetRef, WidgetsApp,
 };
 
 use crate::colors::CupertinoDynamicColor;
@@ -91,7 +91,7 @@ pub struct CupertinoApp {
     pub key: Option<KeyRef>,
 
     /// See [`WidgetsApp::navigator_key`].
-    pub navigator_key: Option<GlobalKey>,
+    pub navigator_key: Option<GlobalKeyRef>,
 
     /// See [`WidgetsApp::home`].
     pub home: Option<WidgetRef>,
@@ -272,7 +272,7 @@ impl CupertinoApp {
     }
 
     /// Dart `CupertinoApp(navigatorKey:)`.
-    pub fn navigator_key(mut self, navigator_key: GlobalKey) -> CupertinoApp {
+    pub fn navigator_key(mut self, navigator_key: GlobalKeyRef) -> CupertinoApp {
         self.navigator_key = Some(navigator_key);
         self
     }
@@ -522,7 +522,6 @@ impl StatefulWidget for CupertinoApp {
         CupertinoAppState {
             state: StateData::new(),
             hero_controller: None,
-            widgets_app_key: None,
         }
     }
 }
@@ -531,7 +530,6 @@ impl StatefulWidget for CupertinoApp {
 pub struct CupertinoAppState {
     state: StateData<CupertinoApp>,
     hero_controller: Option<Handle<HeroController>>,
-    widgets_app_key: Option<GlobalKey>,
 }
 
 impl CupertinoAppState {
@@ -539,15 +537,6 @@ impl CupertinoAppState {
         app.get(self)
             .hero_controller
             .expect("init_state creates the controller")
-    }
-
-    /// The key that keeps the [`WidgetsApp`] element alive across rebuilds; Dart's
-    /// `GlobalObjectKey(this)`.
-    fn widgets_app_key(self: Handle<Self>, app: &App) -> GlobalKey {
-        app.get(self)
-            .widgets_app_key
-            .clone()
-            .expect("init_state creates the key")
     }
 
     /// Combine the default localization for Cupertino with the ones contributed
@@ -580,10 +569,9 @@ impl CupertinoAppState {
         // The `WidgetsApp.router` branch waits with `router.dart`; see PORTING.md.
 
         let localizations_delegates = self.localizations_delegates(app);
-        let key = self.widgets_app_key(app);
         let widget = self.widget(app);
         let mut widgets_app = WidgetsApp::new(color.color())
-            .key(Rc::new(key))
+            .key(Rc::new(GlobalObjectKey::new(self.id())))
             .navigator_observers(widget.navigator_observers.clone())
             .page_route_builder(|app, settings, builder| {
                 let route = CupertinoPageRoute::new(app, builder)
@@ -670,7 +658,6 @@ impl State for CupertinoAppState {
         let hero_controller = CupertinoApp::create_cupertino_hero_controller(app);
         let state = app.get_mut(self);
         state.hero_controller = Some(hero_controller);
-        state.widgets_app_key = Some(GlobalKey::new());
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
@@ -707,19 +694,27 @@ impl State for CupertinoAppState {
             .clone()
             .unwrap_or_else(|| ScrollBehaviorRef::new(CupertinoScrollBehavior::new()));
         let hero_controller = self.hero_controller(app);
+        // Dart's deprecated `withOpacity`: its rounding to an 8-bit alpha is part of the
+        // behaviour being ported.
+        #[allow(deprecated)]
+        let selection_color = effective_theme_data
+            .primary_color()
+            .color()
+            .with_opacity(0.2);
         ScrollConfiguration::new(
             behavior,
             CupertinoUserInterfaceLevel::new(
                 CupertinoUserInterfaceLevelData::Base,
                 CupertinoTheme::new(
-                    effective_theme_data,
-                    // `DefaultSelectionStyle` waits; see PORTING.md.
-                    HeroControllerScope::new(
+                    effective_theme_data.clone(),
+                    DefaultSelectionStyle::new(HeroControllerScope::new(
                         hero_controller,
                         Builder::new(move |app, context| {
                             self.build_widget_app(app, context).into_widget()
                         }),
-                    ),
+                    ))
+                    .selection_color(selection_color)
+                    .cursor_color(effective_theme_data.primary_color()),
                 ),
             ),
         )
@@ -974,6 +969,46 @@ mod tests {
         assert_eq!(
             CupertinoTheme::of(&mut app, context).primary_color(),
             AnyColor::new(PRIMARY)
+        );
+    }
+
+    /// `app_test.dart`: "Cursor color is resolved when CupertinoThemeData.brightness is null",
+    /// read at the `DefaultSelectionStyle` the app sets from its resolved primary colour, under a
+    /// dark platform where Dart sets `debugBrightnessOverride`.
+    #[test]
+    fn the_app_sets_a_default_selection_style_from_its_resolved_primary_color() {
+        let platform = waft_test::TestPlatform::new()
+            .on(TargetPlatform::IOS)
+            .with_brightness(Brightness::Dark)
+            .with_view(test_view());
+        let cell = AppCell::with_platform(Rc::new(platform));
+        install_fonts(&mut cell.borrow_mut());
+        let home = Rc::new(Cell::new(None));
+        let builder = context_page(&home);
+        mount(&cell, |cupertino_app| {
+            cupertino_app
+                .theme(
+                    CupertinoThemeData::new()
+                        .with_primary_color(crate::colors::CupertinoColors::ACTIVE_ORANGE),
+                )
+                .home(Builder::new(move |app, context| builder(app, context)))
+        });
+        let mut app = cell.borrow_mut();
+        let context = home.get().expect("the home page built");
+        let style = DefaultSelectionStyle::of(&mut app, context);
+        let dark_orange = crate::colors::CupertinoColors::ACTIVE_ORANGE
+            .extension::<CupertinoDynamicColor>()
+            .expect("a dynamic colour")
+            .dark_color;
+        assert_eq!(
+            style.cursor_color.map(|color| color.color()),
+            Some(dark_orange)
+        );
+        #[allow(deprecated)]
+        let expected_selection = dark_orange.with_opacity(0.2);
+        assert_eq!(
+            style.selection_color.map(|color| color.color()),
+            Some(expected_selection)
         );
     }
 

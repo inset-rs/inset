@@ -23,8 +23,8 @@ use waft_scheduler::{
 use waft_services::RestorationBucket;
 
 use crate::framework::{
-    BuildContext, GlobalKey, InheritedWidget, IntoWidget, KeyRef, Notification, State, StateData,
-    StatefulWidget, WidgetRef, keys_equal,
+    BuildContext, GlobalKey, InheritedWidget, IntoWidget, KeyRef, LabeledGlobalKey, Notification,
+    State, StateData, StatefulWidget, WidgetRef, keys_equal,
 };
 use crate::view::View;
 use crate::widgets::basic::AbsorbPointer;
@@ -3267,7 +3267,7 @@ pub struct NavigatorState {
     state: StateData<Navigator>,
     ticker_provider: TickerProviderStateMixinData,
     restoration: RestorationMixinData,
-    overlay_key: Option<GlobalKey>,
+    overlay_key: Option<LabeledGlobalKey>,
     history: Option<Handle<History>>,
     /// The [`RouteEntry`]s that are waiting for their subtrees to be disposed.
     entry_waiting_for_subtree_disposal: HashSet<Handle<RouteEntry>>,
@@ -4997,7 +4997,7 @@ impl RestorationMixin for NavigatorState {
         // Delete everything in the old history and clear the overlay.
         self.forced_dispose_all_route_entries(app);
         debug_assert!(self.history(app).is_empty(app));
-        app.get_mut(self).overlay_key = Some(GlobalKey::new());
+        app.get_mut(self).overlay_key = Some(<dyn GlobalKey>::new());
 
         // Populate the new history from restoration data.
         let history = self.history(app);
@@ -6102,7 +6102,7 @@ mod tests {
             .collect()
     }
 
-    fn pages_navigator(key: &GlobalKey, pages: Vec<PageRef>) -> WidgetRef {
+    fn pages_navigator(key: &LabeledGlobalKey, pages: Vec<PageRef>) -> WidgetRef {
         Directionality::new(
             TextDirection::Ltr,
             Navigator::new()
@@ -6113,7 +6113,7 @@ mod tests {
         .into_widget()
     }
 
-    fn state(key: &GlobalKey, app: &mut App) -> Handle<NavigatorState> {
+    fn state(key: &LabeledGlobalKey, app: &mut App) -> Handle<NavigatorState> {
         key.current_state::<NavigatorState>(app)
             .expect("a mounted navigator")
     }
@@ -6124,7 +6124,7 @@ mod tests {
     fn the_pages_api_inserts_removes_and_reorders_routes_through_the_transition_delegate() {
         let (cell, _restoration) = app_with_view(None);
         let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let binding = crate::binding::WidgetsBinding::instance(&mut app);
         drop(app);
         mount(
@@ -6255,7 +6255,7 @@ mod tests {
 
         let (cell, _restoration) = app_with_view(None);
         let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let observer = app.create(Recorder::default());
         drop(app);
         mount(
@@ -6306,7 +6306,7 @@ mod tests {
     fn the_history_is_restored_from_the_restoration_data_of_a_previous_run() {
         // Run once, pushing a restorable named route on top of a restorable page.
         let (cell, restoration) = app_with_view(None);
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         mount(
             &cell,
             Directionality::new(
@@ -6347,7 +6347,7 @@ mod tests {
 
         // Run again from the saved data: the pageless route comes back.
         let (cell, _restoration) = app_with_view(Some(saved));
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         mount(
             &cell,
             Directionality::new(
@@ -6380,7 +6380,7 @@ mod tests {
     #[test]
     fn a_route_reports_its_position_in_the_history() {
         let (cell, _restoration) = app_with_view(None);
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let pushed: Rc<Cell<Option<AnyRoute>>> = Rc::new(Cell::new(None));
         mount(
             &cell,
@@ -6419,7 +6419,7 @@ mod tests {
     }
 
     /// A navigator whose every route is a plain [`PageRouteBuilder`] showing the corner page.
-    fn pageless_navigator(key: &GlobalKey) -> WidgetRef {
+    fn pageless_navigator(key: &LabeledGlobalKey) -> WidgetRef {
         Directionality::new(
             TextDirection::Ltr,
             Navigator::new()
@@ -6436,7 +6436,7 @@ mod tests {
     #[test]
     fn push_returns_a_future_that_completes_with_the_pop_result() {
         let (cell, _restoration) = app_with_view(None);
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         mount(&cell, pageless_navigator(&key));
         let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);
@@ -6470,7 +6470,7 @@ mod tests {
     #[test]
     fn remove_route_completes_the_awaited_value() {
         let (cell, _restoration) = app_with_view(None);
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         mount(&cell, pageless_navigator(&key));
         let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);

@@ -18,7 +18,8 @@ use waft_scheduler::SchedulerBinding;
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 use crate::framework::{
-    BuildContext, GlobalKey, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
+    BuildContext, GlobalKeyRef, GlobalObjectKey, IntoWidget, KeyRef, State, StateData,
+    StatefulWidget, WidgetRef,
 };
 use crate::view::View;
 use crate::widgets::actions::{
@@ -326,7 +327,7 @@ pub struct WidgetsApp {
     ///
     /// The [`Navigator`] is only built if [`on_generate_route`](Self::on_generate_route) is not
     /// `None`; if it is `None`, [`navigator_key`](Self::navigator_key) must also be `None`.
-    pub navigator_key: Option<GlobalKey>,
+    pub navigator_key: Option<GlobalKeyRef>,
 
     /// The route generator callback used when the app is navigated to a
     /// named route.
@@ -830,7 +831,7 @@ impl WidgetsApp {
     }
 
     /// Dart `WidgetsApp(navigatorKey:)`.
-    pub fn navigator_key(mut self, navigator_key: GlobalKey) -> WidgetsApp {
+    pub fn navigator_key(mut self, navigator_key: GlobalKeyRef) -> WidgetsApp {
         self.navigator_key = Some(navigator_key);
         self
     }
@@ -1299,7 +1300,7 @@ fn default_apple_os_shortcuts() -> ShortcutMap {
 /// Dart's `_WidgetsAppState`.
 pub struct WidgetsAppState {
     state: StateData<WidgetsApp>,
-    navigator: Option<GlobalKey>,
+    navigator: Option<GlobalKeyRef>,
     localizations_resolver: Option<Handle<LocalizationsResolver>>,
     observer: Option<WidgetsBindingObserverRef>,
     app_lifecycle_state: Option<AppLifecycleState>,
@@ -1364,11 +1365,12 @@ impl WidgetsAppState {
         if self.uses_navigator(app) {
             let navigator_key = self.widget(app).navigator_key.clone();
             let key_changed = old_widget.is_some_and(|old_widget| {
-                navigator_key.as_ref().map(GlobalKey::identity)
-                    != old_widget.navigator_key.as_ref().map(GlobalKey::identity)
+                navigator_key.as_ref().map(|key| key.identity())
+                    != old_widget.navigator_key.as_ref().map(|key| key.identity())
             });
             if app.get(self).navigator.is_none() || key_changed {
-                app.get_mut(self).navigator = Some(navigator_key.unwrap_or_else(GlobalKey::new));
+                app.get_mut(self).navigator =
+                    Some(navigator_key.unwrap_or_else(|| Rc::new(GlobalObjectKey::new(self.id()))));
             }
             debug_assert!(app.get(self).navigator.is_some());
         } else {
@@ -1507,7 +1509,7 @@ impl WidgetsAppState {
         let mut navigator_widget = Navigator::new()
             .clip_behavior(Clip::None)
             .restoration_scope_id("nav")
-            .key(Rc::new(navigator))
+            .key(navigator as KeyRef)
             .initial_route(initial_route)
             .on_generate_route(move |app, settings| self.on_generate_route(app, settings))
             .on_unknown_route(move |app, settings| self.on_unknown_route(app, settings))

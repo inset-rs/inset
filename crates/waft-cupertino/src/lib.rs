@@ -1,4 +1,4 @@
-//! Flutter counterpart: `packages/flutter/lib/src/cupertino`.
+//! Flutter counterpart: `cupertino_ui` in flutter/packages, `packages/cupertino_ui/lib/src`.
 //!
 //! The iOS-style widgets: colors, theme, text theme, constants, the icons, and the button.
 #![feature(arbitrary_self_types)]

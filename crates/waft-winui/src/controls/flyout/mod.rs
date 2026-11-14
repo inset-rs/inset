@@ -216,7 +216,7 @@ pub struct Flyout {
     last_target_bounds: Rect,
 
     /// Identifies the presenter's render box for pointer-distance dismissal.
-    presenter_key: GlobalKey,
+    presenter_key: LabeledGlobalKey,
 
     /// Global pointer-movement listener used only by the pointer-distance show mode.
     pointer_route: Option<PointerRoute>,
@@ -275,7 +275,7 @@ impl Flyout {
             position: None,
             exclusion: Rect::ZERO,
             last_target_bounds: Rect::ZERO,
-            presenter_key: GlobalKey::new(),
+            presenter_key: <dyn GlobalKey>::new(),
             pointer_route: None,
             disposed: false,
         });

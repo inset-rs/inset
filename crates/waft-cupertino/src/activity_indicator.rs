@@ -500,7 +500,7 @@ mod tests {
     use waft_rendering::{
         AnyRenderObject, RenderBox, RenderCustomPaint, RenderHandle, RenderObject,
     };
-    use waft_widgets::{Align, GlobalKey};
+    use waft_widgets::{Align, GlobalKey, LabeledGlobalKey};
 
     use super::*;
     use crate::test_support::{build, pump, test_cell};
@@ -520,7 +520,7 @@ mod tests {
     }
 
     /// The painter the `CustomPaint` under `key` holds, and the size it paints into.
-    fn painter_of(app: &mut App, key: &GlobalKey) -> (Rc<dyn CustomPainter>, Size) {
+    fn painter_of(app: &mut App, key: &LabeledGlobalKey) -> (Rc<dyn CustomPainter>, Size) {
         let root = key
             .current_context(app)
             .expect("the indicator mounted")
@@ -556,7 +556,7 @@ mod tests {
         })
     }
 
-    fn key_of(key: &GlobalKey) -> KeyRef {
+    fn key_of(key: &LabeledGlobalKey) -> KeyRef {
         Rc::new(key.clone())
     }
 
@@ -574,7 +574,7 @@ mod tests {
     #[test]
     fn a_spinning_indicator_paints_its_eight_ticks_and_rotates_the_alpha_table() {
         let cell = test_cell();
-        let global_key = GlobalKey::new();
+        let global_key = <dyn GlobalKey>::new();
         loosely(
             &cell,
             CupertinoActivityIndicator::new().key(key_of(&global_key)),
@@ -607,7 +607,7 @@ mod tests {
     #[test]
     fn an_indicator_that_is_not_animating_never_advances() {
         let cell = test_cell();
-        let global_key = GlobalKey::new();
+        let global_key = <dyn GlobalKey>::new();
         loosely(
             &cell,
             CupertinoActivityIndicator::new()
@@ -633,7 +633,7 @@ mod tests {
     #[test]
     fn a_partially_revealed_indicator_draws_a_fraction_of_its_ticks() {
         let cell = test_cell();
-        let global_key = GlobalKey::new();
+        let global_key = <dyn GlobalKey>::new();
         let indicator = CupertinoActivityIndicator::partially_revealed().progress(0.5);
         assert!(!indicator.animating);
         loosely(&cell, indicator.key(key_of(&global_key)));
@@ -649,7 +649,7 @@ mod tests {
     #[test]
     fn the_linear_indicator_fills_its_track_up_to_the_progress() {
         let cell = test_cell();
-        let global_key = GlobalKey::new();
+        let global_key = <dyn GlobalKey>::new();
         loosely(
             &cell,
             SizedBox::new()

@@ -409,7 +409,7 @@ mod tests {
     fn a_cupertino_scrollbar_thickens_while_its_thumb_is_pressed() {
         let cell = test_cell();
         let mut app = cell.borrow_mut();
-        let key = Rc::new(GlobalKey::new());
+        let key = Rc::new(<dyn GlobalKey>::new());
         let controller = ScrollController::default(&mut app);
         let list = ListView::new()
             .controller(controller.as_controller())

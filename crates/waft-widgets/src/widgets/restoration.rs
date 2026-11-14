@@ -1622,7 +1622,7 @@ mod tests {
     use waft_test::TestPlatform;
 
     use super::*;
-    use crate::framework::{Element, GlobalKey, StatelessWidget};
+    use crate::framework::{Element, GlobalKey, LabeledGlobalKey, StatelessWidget};
     use crate::test_harness::Harness;
     use crate::test_harness::pump_every_view;
     use crate::widgets::restoration_properties::{RestorableInt, RestorableValue};
@@ -1800,7 +1800,7 @@ mod tests {
         harness
     }
 
-    fn counter_state(harness: &Harness, app: &App, key: &GlobalKey) -> Handle<CounterState> {
+    fn counter_state(harness: &Harness, app: &App, key: &LabeledGlobalKey) -> Handle<CounterState> {
         harness
             .owner
             .global_key_element(app, key.identity())
@@ -1881,7 +1881,7 @@ mod tests {
             child("counter", values([("count", 7i64.into())])),
         )));
         let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let harness = mount(
             &mut app,
             RootRestorationScope::new(
@@ -1904,7 +1904,7 @@ mod tests {
     fn a_property_with_no_stored_value_takes_its_default_and_writes_it_out() {
         let (cell, restoration) = app_restoring(None);
         let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let harness = mount(
             &mut app,
             RootRestorationScope::new(
@@ -1940,7 +1940,7 @@ mod tests {
             child("counter", values([("count", 7i64.into())])),
         )));
         let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let harness = mount(
             &mut app,
             RootRestorationScope::new(
@@ -1982,7 +1982,7 @@ mod tests {
             child("counter", values([("count", 7i64.into())])),
         )));
         let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let key_ref: KeyRef = Rc::new(key.clone());
         let tree = |restoration_id: &str, key: &KeyRef| {
             RootRestorationScope::new(
@@ -2031,7 +2031,7 @@ mod tests {
             child("counter", values([("count", 7i64.into())])),
         )));
         let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let harness = mount(
             &mut app,
             RootRestorationScope::new(
@@ -2065,7 +2065,7 @@ mod tests {
     fn a_state_without_a_surrounding_scope_gets_no_bucket() {
         let (cell, _restoration) = app_restoring(None);
         let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let harness = mount(
             &mut app,
             Counter {

@@ -9,8 +9,8 @@ use waft_winui_test_support::Fixture;
 /// WinUI MeasureCell calls child.Measure; a native LayoutBuilder needs actual layout.
 #[test]
 fn grid_measures_layout_builder_and_constrains_remaining_star_row() {
-    let auto_key = Rc::new(GlobalKey::new());
-    let star_key = Rc::new(GlobalKey::new());
+    let auto_key = Rc::new(<dyn GlobalKey>::new());
+    let star_key = Rc::new(<dyn GlobalKey>::new());
     let seen = Rc::new(RefCell::new(Vec::new()));
     let auto = auto_key.clone();
     let star = star_key.clone();

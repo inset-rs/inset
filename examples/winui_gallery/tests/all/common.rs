@@ -42,7 +42,7 @@ pub fn size_under_center(
     size: [u32; 2],
     control: impl FnOnce(&mut App) -> WidgetRef + 'static,
 ) -> Size {
-    let key = Rc::new(GlobalKey::new());
+    let key = Rc::new(<dyn GlobalKey>::new());
     let control_key = key.clone();
     let fixture = Fixture::with_root(
         size,

@@ -39,6 +39,23 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - widgets/desktop_text_selection_toolbar_layout_delegate.rs → desktop_text_selection_toolbar_layout_delegate.dart
 - widgets/text_selection_toolbar_layout_delegate.rs → text_selection_toolbar_layout_delegate.dart
 - widgets/animated_size.rs → animated_size.dart
+- widgets/lookup_boundary.rs → lookup_boundary.dart
+- widgets/default_selection_style.rs → default_selection_style.dart
+- widgets/overflow_bar.rs → overflow_bar.dart
+- widgets/bottom_navigation_bar_item.rs → bottom_navigation_bar_item.dart
+- widgets/date.rs → date.dart
+
+## widgets/inherited_theme.rs → inherited_theme.dart
+
+- Change: an inherited widget is an `InheritedTheme` by answering `InheritedWidget::as_inherited_theme` with itself, and `capture` collects the ancestors whose widget answers.
+  Reason: language — Rust cannot ask an erased widget whether its type implements a trait, which is Dart's `widget is InheritedTheme`.
+  Affect: a theme that implements `InheritedTheme` but leaves `as_inherited_theme` at its default is not captured, and its subtree's captured copies do not see it; `InheritedTheme` cannot have `InheritedWidget` as a supertrait (`update_should_notify(&Self)` is not dyn-compatible), so `capture` checks that the ancestor is an inherited element, as Dart's `InheritedElement(widget: InheritedTheme)` pattern does.
+
+## widgets/slotted_render_object_widget.rs → slotted_render_object_widget.dart
+
+- Change: `debug_name_for_slot` names a slot by its `Debug` form, where Dart names an enum value by its `.name` and anything else by `toString()`.
+  Reason: language — Rust cannot ask whether a value is an enum, and a derived `Debug` is the one name every slot type has.
+  Affect: a debug dump names an enum slot `BottomRight` where Flutter's says `bottomRight`; a slot type that wants another name implements `Debug` by hand.
 
 ## framework/ → framework.dart
 
@@ -49,6 +66,14 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: a panic in `build` unwinds; there is no `ErrorWidget` and no `FlutterError.reportError`, and a failed `of` lookup panics with its message in every build.
   Reason: language — no catchable exception for ordinary control flow.
   Affect: a failing build takes the frame down instead of painting the red error box, and a failed lookup reports the same in release as in debug.
+
+- Change: `GlobalKey` is a trait over `waft-foundation`'s `Key`, as Dart's is an abstract class over `Key`: `LabeledGlobalKey` and `GlobalObjectKey` are types of their own, each answering `Key::global_key_identity` with what it compares by (its own allocation; an object's `HandleId`), and `current_context` / `current_widget` are provided once on the trait. A key of any kind is held as `GlobalKeyRef` (`Rc<dyn GlobalKey>`), and Dart's factory `GlobalKey()` is `<dyn GlobalKey>::new()` (or `::labeled(label)`), returning a `LabeledGlobalKey`.
+  Reason: language — the element tree's registry finds keys through an erased `Rc<dyn Key>` and `waft-foundation` cannot name the widgets' trait, so the hook and the `GlobalKeyId` it returns live in foundation; and a generic method cannot be called on a trait object, so `current_state::<S>` is an inherent method of `dyn GlobalKey` and of each kind rather than of the trait.
+  Affect: a new kind implements `Key` (answering `global_key_identity` with `GlobalKeyId::allocation` or `GlobalKeyId::object`), `GlobalKey`, and a one-line `current_state`; a field that may hold any kind, such as `WidgetsApp::navigator_key`, is a `GlobalKeyRef`, and calling the trait's methods on a concrete key needs `GlobalKey` in scope.
+
+- Change: `ObjectKey` and `GlobalObjectKey` compare by an object's `HandleId`: an object's identity is its handle.
+  Reason: language — a Rust value has no identity, and the objects Dart keys by identity (a `State`, a controller) live in the arena under handles (the lead's decision).
+  Affect: only an arena object can key a widget by identity, and a key made from a destroyed object never matches the slot's next occupant; `CupertinoApp` and `WidgetsApp` key their `WidgetsApp` and navigator by `GlobalObjectKey::new(self.id())`, as Dart's `GlobalObjectKey(this)`.
 
 - Change: a `ParentDataWidget` names the parent-data types it accepts, and `Positioned` accepts an overlay theater's parent data as well as a `Stack`'s.
   Reason: language — no subtyping between parent-data types, so Dart's `is StackParentData` test cannot pass for a subclass.
@@ -198,6 +223,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — orphan rule: an `Animatable` impl on a handle to a tween would name only foreign types.
   Affect: `drive` drives a clone, so writing `begin` or `end` afterwards does not reach the running animation as it does on a Dart `Tween`.
 
+- Change: `DelegatedTransitionBuilder` is a value carrying an identity: `DelegatedTransitionBuilder::function(f)` equals any other built from the same function, as Dart's tear-offs of one static method are identical, and `DelegatedTransitionBuilder::new(closure)` equals only its clones.
+  Reason: language — a Rust closure or function value has no identity to compare, and `ModalRoute` decides whether to receive the route above's delegated transition by comparing it with its own (the callback-identity pattern).
+  Affect: a route that offers its builder as a closure built per call never matches another route's, so a route below it always receives it; the Cupertino routes offer theirs as functions, so a sheet over a sheet, or a page over a page, receives none, as in Flutter.
+
 - `SizeTransition`'s constructor asserts run on its setters, the mutually exclusive `axis_alignment` / `alignment` on whichever runs second; see basic.rs's assert entry.
 - `MatrixTransition` (so `ScaleTransition` and `RotationTransition`) has no `filterQuality` and `FadeTransition` no `alwaysIncludeSemantics`; see basic.rs's `Transform` entry.
 
@@ -248,6 +277,14 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: `WidgetStateColor` is an `AnyColor` whose plain value is its empty-state resolution, read back with `color.extension::<WidgetStateColor>()`.
   Reason: language — painting's `Color` is a value, not a subclassable object.
   Affect: a map-built colour read as a plain `Color` gives its empty-state resolution where Dart throws, and panics only when no key matches the empty set.
+
+- Change: `WidgetStateBorderSide` and `WidgetStateTextStyle` are carried by painting's `AnyBorderSide` and `AnyTextStyle`, as `WidgetStateColor` is by `AnyColor`, whose plain value is Dart's `super` value: the default `BorderSide()` and the empty `TextStyle()`.
+  Reason: language — painting's `BorderSide` and `TextStyle` are values, not subclassable objects (the lead's decision, following `AnyColor`).
+  Affect: a field takes a widget-state side or style only when it is typed `AnyBorderSide` or `AnyTextStyle`, and a map-built one read as a plain value gives that default where Dart's mapper throws.
+
+- Change: `WidgetStateOutlinedBorder` is an `OutlinedBorder` itself, whose `ShapeBorder` and `OutlinedBorder` members are those of the default `RoundedRectangleBorder` it holds, for a map-built one too.
+  Reason: language — `OutlinedBorder` is a trait, so the subclass implements it directly as `WidgetStateMouseCursor` implements `MouseCursor`, and Dart's mapper answers those members only through `noSuchMethod`.
+  Affect: a map-built border used as a plain border paints the default rounded rectangle where Dart throws, and another border's `lerp_from` does not see it as a `RoundedRectangleBorder`, which Dart's `is` on the subclass would.
 
 - Change: `clickable()`, `adaptive_clickable()` and `textable()` return a fresh `WidgetStateMouseCursor` per call.
   Reason: language — no `static const` object holding an `Rc`.
@@ -580,12 +617,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: language — `layout` and `dispose` are not virtuals a leaf can wrap.
   Affect: a region stops being registered as soon as it detaches, not only when its slot is destroyed, and the next layout registers it again.
 
-## widgets/magnifier.rs → magnifier.dart
-
-- Change: `MagnifierController::show` inserts the builder as-is, where Dart wraps it in an `InheritedTheme` capture from the originating context.
-  Reason: language — `InheritedTheme`'s `wrap` and `capture` are not ported.
-  Affect: a magnifier in the root overlay does not inherit themes from the context that showed it.
-
 ## widgets/drag_target.rs → drag_target.dart
 
 - Change: a drag payload is an `Rc<T>` and a target accepts a draggable by matching that concrete Rust type.
@@ -631,17 +662,16 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - framework/: `ErrorWidget` with its exception reporting, and the build-time diagnostics and duplicate-key checks, `Table`'s checks for duplicate row and cell keys among them. Trigger: diagnostics.
 - table.rs: the `Semantics(role: cell)` wrapper `TableCell.build` adds. Trigger: accessibility (do not stub).
 - framework/: `reassemble`. Trigger: hot reload.
-- framework/: `ObjectKey`, `GlobalObjectKey`. Trigger: a widget keyed by object identity.
 - binding.rs: the observer callbacks no host reports (memory pressure, predictive back, pushed routes and route information, the text scale, accessibility features), `scheduleWarmUpFrame`. Trigger: a host that reports those events.
 - platform_menu_bar.rs: `PlatformMenuItem.onOpen` and `onClose`, and the tooltip. Trigger: a host that reports a menu opened or closed.
 - binding.rs: first-frame-rasterized reporting and the push/pop route handlers. Trigger: `SchedulerBinding.addTimingsCallback`; navigation.
-- view.rs: `LookupBoundary` around a `ViewAnchor`'s view, and the view's semantics owner callbacks. Trigger: `LookupBoundary`; accessibility.
-- `LookupBoundary` in the `View`, `Overlay` and theater-marker lookups, which look straight up the tree. Trigger: `LookupBoundary` in framework.
+- view.rs: the view's semantics owner callbacks. Trigger: accessibility.
+- view.rs, overlay.rs: the hidden-by-a-`LookupBoundary` variants of the `View.of` and `Overlay.of` error messages. Trigger: diagnostics.
 - `debugCheckHasDirectionality` in the widgets that resolve a directional value. Trigger: diagnostics.
-- `InheritedTheme` capture on `DefaultTextStyle`, `DefaultTextHeightBehavior` and `IconTheme`, and `DefaultTextStyle.merge`. Trigger: `InheritedTheme`; `Builder`.
 - text.rs: selection, `locale`, `strutStyle`, the semantics labels, and the deprecated `textScaleFactor`. Trigger: `SelectionContainer`; `Locale` / `StrutStyle`.
-- basic.rs: `ListBody`, `Flow`, `PositionedDirectional`, `PhysicalModel`, `PhysicalShape`, `RotatedBox`, `IgnoreBaseline`, `ShaderMask`, `RawImage`, `WidgetToRenderBoxAdapter`. Trigger: each one's render object.
-- basic.rs: the key-wrapping helpers, `StatefulBuilder`, `DefaultAssetBundle`. Trigger: a key over object identity; a caller; asset bundles.
+- basic.rs: `Flow`, `RotatedBox`, `IgnoreBaseline`, `ShaderMask`, `RawImage`, `WidgetToRenderBoxAdapter`. Trigger: each one's render object.
+- basic.rs: the key-wrapping helpers, `DefaultAssetBundle`. Trigger: a key over object identity; asset bundles.
+- basic.rs, implicit_animations.rs: the `PhysicalModel`, `PhysicalShape` and `AnimatedPhysicalModel` diagnostics. Trigger: diagnostics.
 - basic.rs: the semantics widgets and the semantics flags on the pointer and opacity widgets. Trigger: accessibility (do not stub).
 - `Transform.filterQuality`, and with it the transitions and implicit animations that pass it on. Trigger: `RenderTransform.filterQuality`.
 - basic.rs: the inspector-only transform labels and the onstage-child debug walks. Trigger: diagnostics.
@@ -657,7 +687,8 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - icon_theme: `IconThemeData.hashCode` (no `Hash` over `f64`). Trigger: a map keyed by `IconThemeData`.
 - gesture_detector.rs: the semantics gesture handling, and the double-tap and force-press callbacks. Trigger: accessibility (do not stub); `DoubleTapGestureRecognizer`; a caller of the force-press callbacks.
 - media_query.rs: `DisplayFeature`, `SystemTextScaler`, the platform sources for the accessibility flags, 24-hour format, text style overrides and corner radii, and the media-query debug checks. Trigger: observers in binding.rs; those members on `Platform` / `ViewMetrics`; diagnostics.
-- widget_state.rs: `WidgetStateBorderSide`, `WidgetStateOutlinedBorder`, `WidgetStateTextStyle`, `WidgetStatePropertyAll`, `WidgetStatesController` as a `ValueListenable`, and hashing. Trigger: the first theme or input decoration that needs them; theme-data hashing.
+- widget_state.rs: `WidgetStatesController` as a `ValueListenable`, and hashing. Trigger: the first caller that listens to a controller as a value; theme-data hashing.
+- bottom_navigation_bar_item.rs: `semanticsLabel`. Trigger: accessibility (do not stub).
 - localizations.rs: the semantics wrapper `_LocalizationsState.build` adds, and the localization debug checks. Trigger: semantics; diagnostics.
 - banner.rs: repaint on `PaintingBinding.systemFonts`. Trigger: a host reporting system font changes.
 - app.rs: `WidgetsApp.router` and every router field it fills, with their branches of `_updateRouting` and `build`. Trigger: `router.dart`.
@@ -667,7 +698,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - default_text_editing_shortcuts.rs: the Control-key editing bindings macOS supplies from its own key tables (Control-A, Control-E, Control-K, Control-D), which Dart's macOS map leaves to the host. Trigger: nothing else supplies them over a host that reports plain key presses.
 - editable_text.rs: scribble and stylus support, the spell-check fetch, the magnifier overlay, `StrutStyle`, the floating cursor, `insertContent`, and the semantics wrappers. Trigger: `StrutStyle`; `UndoManagerClient`; `RenderEditable.setFloatingCursor`; accessibility.
 - app_lifecycle_listener.rs: diagnostics. Trigger: diagnostics.
-- text_selection.rs: the selection handle overlay and the empty selection controls; handle entries do not yet follow a composited transform. Trigger: those types; `EditableText`.
+- text_selection.rs: the selection handle overlay and the empty selection controls; handle entries do not yet follow a composited transform, and a `Builder` under each entry's captured themes builds the handle where `_SelectionHandleOverlay`'s build would. Trigger: those types; `EditableText`.
 - text_selection.rs: the toolbar wrapper's outer tap region. Trigger: `SelectableRegion`.
 - feedback.rs: the system sound in `for_tap` and iOS `for_long_press`, and the semantic events they send. Trigger: services' `SystemSound`; accessibility (do not stub).
 - text_selection.rs: the Android stylus path and the `Scribe` availability check in `onTapDown`. Trigger: host `Scribe`.
@@ -708,5 +739,4 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - overlay.rs: the theater's clip layer handle and the entry location's compositing-bits update. Trigger: layer handles and compositing bits in `waft-rendering`.
 - overlay.rs: the deferred-child gates on the theater's `markNeedsLayout` and the layout box's dirty flag. Trigger: a public `RenderBox` super-hook for `markNeedsLayout` and a readable dirty flag in `waft-rendering`.
 - heroes.rs: the hero diagnostics and the structured report behind the duplicate-tag check (a `debug_assert!` carrying Dart's message meanwhile). Trigger: diagnostics.
-- implicit_animations.rs: `AnimatedPhysicalModel`; its tween slots are ready. Trigger: `PhysicalModel` (basic.rs).
 

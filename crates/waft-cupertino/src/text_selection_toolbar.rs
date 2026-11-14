@@ -31,8 +31,8 @@ use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_widgets::{
     AnimatedSize, AnyElement, BuildContext, Center, ColoredBox, CustomPaint,
     CustomSingleChildLayout, Element, ElementData, FadeTransition, GestureDetector, GlobalKey,
-    IgnorePointer, IndexedSlot, IntoWidget, KeyRef, MediaQuery, Padding, RenderObjectElement,
-    RenderObjectElementData, RenderObjectElementWidget, RenderObjectWidget,
+    IgnorePointer, IndexedSlot, IntoWidget, KeyRef, LabeledGlobalKey, MediaQuery, Padding,
+    RenderObjectElement, RenderObjectElementData, RenderObjectElementWidget, RenderObjectWidget,
     SingleChildRenderObjectWidget, SingleTickerProviderStateMixin,
     SingleTickerProviderStateMixinData, Slot, State, StateData, StatefulWidget, StatelessWidget,
     TextSelectionToolbarLayoutDelegate, ToolbarItemsParentData, Widget, WidgetKind, WidgetRef,
@@ -614,7 +614,7 @@ impl StatefulWidget for CupertinoTextSelectionToolbarContent {
             controller: None,
             next_page: None,
             page: 0,
-            toolbar_items_key: GlobalKey::new(),
+            toolbar_items_key: <dyn GlobalKey>::new(),
             single_ticker_provider: SingleTickerProviderStateMixinData::new(),
         }
     }
@@ -625,7 +625,7 @@ struct CupertinoTextSelectionToolbarContentState {
     controller: Option<Handle<AnimationController>>,
     next_page: Option<i32>,
     page: i32,
-    toolbar_items_key: GlobalKey,
+    toolbar_items_key: LabeledGlobalKey,
     single_ticker_provider: SingleTickerProviderStateMixinData,
 }
 

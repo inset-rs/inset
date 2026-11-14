@@ -287,11 +287,11 @@ impl NavigationView {
 #[derive(Clone)]
 struct NavigationContainer {
     /// Global identity preserving state in caller-supplied item content.
-    key: Rc<GlobalKey>,
+    key: Rc<LabeledGlobalKey>,
     /// Focus shared with the item's native input presenter.
     focus: AnyFocusNode,
     /// Exact source indicator geometry, including while its opacity is zero.
-    indicator_key: Rc<GlobalKey>,
+    indicator_key: Rc<LabeledGlobalKey>,
     /// Source compositor CenterPoint.X survives completion and is retained per owner.
     indicator_pivot_x: Rc<Cell<f64>>,
     /// An existing CenterPoint animation keeps its final step even if Scale is replaced.
@@ -305,7 +305,7 @@ pub struct NavigationViewState {
     /// Stable item containers, including currently collapsed children.
     containers: HashMap<String, NavigationContainer>,
     /// Stable native identities for owner content reparented by pane-mode changes.
-    slot_keys: HashMap<&'static str, Rc<GlobalKey>>,
+    slot_keys: HashMap<&'static str, Rc<LabeledGlobalKey>>,
     /// Expanded ids independent of where their children are presented.
     expanded: HashSet<String>,
     /// Expanded left items restored when a compact pane reopens.
@@ -377,7 +377,7 @@ impl StatefulWidget for NavigationView {
             .map(|slot| {
                 (
                     slot,
-                    Rc::new(GlobalKey::labeled(format!("Navigation {slot}"))),
+                    Rc::new(<dyn GlobalKey>::labeled(format!("Navigation {slot}"))),
                 )
             })
             .collect(),
@@ -547,9 +547,9 @@ impl NavigationViewState {
         for id in ids {
             if !app.get(self).containers.contains_key(&id) {
                 let entry = NavigationContainer {
-                    key: Rc::new(GlobalKey::labeled(id.clone())),
+                    key: Rc::new(<dyn GlobalKey>::labeled(id.clone())),
                     focus: FocusNode::new(app).as_node(),
-                    indicator_key: Rc::new(GlobalKey::labeled(format!("Indicator {id}"))),
+                    indicator_key: Rc::new(<dyn GlobalKey>::labeled(format!("Indicator {id}"))),
                     indicator_pivot_x: Rc::new(Cell::new(0.0)),
                     indicator_pivot_step: Cell::new(None),
                 };

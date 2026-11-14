@@ -10,7 +10,7 @@ use waft_winui::{ColumnDefinition, Grid, GridCell, GridLength, RowDefinition};
 use waft_winui_test_support::Fixture;
 
 /// The size of the render object of the widget with `key`.
-fn size_of(fixture: &Fixture, key: &Rc<GlobalKey>) -> Size {
+fn size_of(fixture: &Fixture, key: &Rc<LabeledGlobalKey>) -> Size {
     let mut app = fixture.cell.borrow_mut();
     let context = key.current_context(&mut app).unwrap();
     let object = context.find_render_object(&app).unwrap().as_box().unwrap();
@@ -21,7 +21,7 @@ fn size_of(fixture: &Fixture, key: &Rc<GlobalKey>) -> Size {
 /// child grows and when it shrinks.
 #[test]
 fn an_auto_row_follows_a_stretched_child_that_changes_its_height() {
-    let grid_key = Rc::new(GlobalKey::new());
+    let grid_key = Rc::new(<dyn GlobalKey>::new());
     let key = grid_key.clone();
     let mut height = None;
     let slot = &mut height;

@@ -29,6 +29,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - image_stream.rs → image_stream.dart (ImageInfo, ImageStreamListener, completer listener/keep-alive lifetime)
 - image_cache.rs → image_cache.dart (pending/live/LRU tracking, limits, status, and post-frame retention release)
 
+## borders.rs (`AnyBorderSide`), text_style.rs (`AnyTextStyle`) → the `BorderSide` and `TextStyle` subclass mechanism
+
+- Change: Flutter's `BorderSide` and `TextStyle` subclasses (`WidgetStateBorderSide`, `WidgetStateTextStyle`) are `BorderSideExtension` and `TextStyleExtension` payloads that `AnyBorderSide` and `AnyTextStyle` carry beside the plain value, as `AnyColor` carries a `Color`'s; each derefs to its value and `extension::<T>()` is Dart's `is T`.
+  Reason: language — `BorderSide` and `TextStyle` are values here and cannot be subclassed.
+  Affect: only the fields that resolve a widget-state value hold these types; a side or style that reaches any other field has dropped its payload and no longer resolves or compares as its subclass.
+
 ## colors.rs → colors.dart (+ the `Color` subclass mechanism)
 
 - Change: Flutter's `Color` subclasses (`CupertinoDynamicColor`, `WidgetStateColor`, `ColorSwatch`) are `ColorExtension` payloads that `AnyColor` carries beside the plain `Color`; `AnyColor` derefs to `Color` and `extension::<T>()` is Dart's `is T`.

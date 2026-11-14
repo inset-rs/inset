@@ -878,7 +878,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let value = app.create(ValueNotifier::new(0i32));
         let focus_node = FocusNode::new(&mut app);
-        let key = GlobalKey::new();
+        let key = <dyn GlobalKey>::new();
         let widget = UndoHistory::new(
             value,
             move |app, next| {

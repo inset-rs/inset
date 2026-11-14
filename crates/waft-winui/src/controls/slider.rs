@@ -389,7 +389,7 @@ pub struct SliderState {
     /// `Thumb::m_previousPosition`: where the last drag delta was measured from.
     previous_position: Offset,
     /// Names `SliderContainer`, whose `ActualWidth` / `ActualHeight` the pointer maths reads.
-    container_key: Rc<GlobalKey>,
+    container_key: Rc<LabeledGlobalKey>,
 }
 
 impl StatefulWidget for Slider {
@@ -411,7 +411,7 @@ impl StatefulWidget for Slider {
             drag_value: 0.0,
             intermediate_value: None,
             previous_position: Offset::ZERO,
-            container_key: Rc::new(GlobalKey::new()),
+            container_key: Rc::new(<dyn GlobalKey>::new()),
         }
     }
 }
