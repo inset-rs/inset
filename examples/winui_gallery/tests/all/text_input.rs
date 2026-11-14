@@ -347,3 +347,45 @@ fn a_box_showing_its_delete_button_given_spare_height_keeps_its_own() {
     });
     assert_eq!(size.height(), r.text_control_theme_min_height);
 }
+
+#[test]
+fn a_box_that_does_not_wrap_scrolls_its_lines_to_the_caret() {
+    let mut f = Fixture::for_feature([1080, 1400], winui_gallery::Feature::TextBox);
+    let markup = controller(&f, "Write markup…");
+    let (_, point, _) = editor(&f, markup);
+    click(&mut f, point);
+    let text = markup.text_value(&f.cell.borrow()).to_string();
+    let first_line_end = text.find('\n').unwrap();
+    let long_line_end = first_line_end + 1 + text[first_line_end + 1..].find('\n').unwrap();
+    let value = TextEditingValue::new()
+        .text(text.clone())
+        .selection(TextSelection::collapsed(
+            text[..long_line_end].encode_utf16().count() as i32,
+            TextAffinity::Downstream,
+        ));
+    let mut app = f.cell.borrow_mut();
+    TextInput::instance(&mut app).update_editing_value(&mut app, value);
+    drop(app);
+    f.cell.checkpoint();
+    for _ in 0..10 {
+        f.frame_after(std::time::Duration::from_millis(20));
+    }
+    let scrolled = {
+        let elements = f.elements();
+        let app = f.cell.borrow();
+        elements
+            .into_iter()
+            .filter_map(|element| {
+                let state = element.state_handle::<ScrollableState>(&app)?;
+                let position = state.position(&app);
+                (position.axis(&app) == waft_painting::Axis::Horizontal)
+                    .then(|| position.pixels(&app))
+            })
+            .fold(0.0_f64, f64::max)
+    };
+    assert!(
+        scrolled > 0.0,
+        "the box scrolled sideways to the end of its long line"
+    );
+    f.capture("gallery_text_box_no_wrap");
+}

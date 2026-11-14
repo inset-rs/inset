@@ -17,7 +17,7 @@ use std::{
 use waft_animation::{AnimationBehavior, AnimationController, Curves};
 use waft_embedder::{Color, FontWeight, Offset, Rect, TextDirection};
 use waft_foundation::{App, Handle, Listener};
-use waft_painting::{Alignment, EdgeInsetsGeometry};
+use waft_painting::{Alignment, EdgeInsets, EdgeInsetsGeometry};
 use waft_rendering::{BoxConstraints, CrossAxisAlignment, MainAxisSize, StackFit};
 use waft_scheduler::{
     FrameCallback, SchedulerBinding, Ticker, TickerCallback, TickerProviderObject,
@@ -172,6 +172,11 @@ pub struct NavigationView {
     pub pane_open_changed: Option<NavigationViewPaneOpenChanged>,
     /// Whether either pane is visible.
     pub is_pane_visible: bool,
+    /// `IsTitleBarAutoPaddingEnabled`: whether the toggle, the pane's items and the content's
+    /// controls keep clear of what the system covers of the view (the `MediaQuery`'s `padding`,
+    /// which a `Page` that `extends_content_into_system_bars` leaves), while the pane and the
+    /// content reach the view's edges.
+    pub is_title_bar_auto_padding_enabled: bool,
     /// Whether the menu toggle is visible in left layouts.
     pub is_pane_toggle_button_visible: bool,
     /// Whether the settings entry is appended to the footer.
@@ -252,6 +257,7 @@ impl NavigationView {
             is_pane_open: None,
             pane_open_changed: None,
             is_pane_visible: true,
+            is_title_bar_auto_padding_enabled: true,
             is_pane_toggle_button_visible: true,
             is_settings_visible: true,
             is_back_button_visible: NavigationViewBackButtonVisible::Auto,
@@ -1544,6 +1550,7 @@ impl NavigationViewState {
         app: &mut App,
         context: BuildContext,
         top: bool,
+        bars: EdgeInsets,
     ) -> WidgetRef {
         let widget = self.widget(app).clone();
         let resources = ThemeResources::of(app, context);
@@ -1622,6 +1629,7 @@ impl NavigationViewState {
             .border_brush(Brush::Solid(r.navigation_view_content_grid_border_brush))
             .border_thickness_ltrb(border)
             .corner_radius_corners(corners)
+            .padding([bars.left, bars.top, bars.right, bars.bottom])
             .column_definitions([
                 ColumnDefinition::new(GridLength::AUTO),
                 ColumnDefinition::new(GridLength::STAR),
@@ -1633,6 +1641,19 @@ impl NavigationViewState {
             ])
             .children(children)
             .into_widget()
+    }
+
+    /// `UpdateTitleBarPadding`'s padding, widened from the title bar to every side the system's
+    /// bars cover: the `MediaQuery`'s `padding` a `Page` extending its content into the bars
+    /// leaves, while `IsTitleBarAutoPaddingEnabled`. A page that pads for the bars itself removes
+    /// that padding, and the navigation keeps clear of nothing more, as WinUI's adds no title-bar
+    /// padding to a navigation not at the window's top.
+    fn system_bars(self: Handle<Self>, app: &mut App, context: BuildContext) -> EdgeInsets {
+        if self.widget(app).is_title_bar_auto_padding_enabled {
+            MediaQuery::padding_of(app, context)
+        } else {
+            EdgeInsets::ZERO
+        }
     }
 
     /// PaneContentGrid reserves the toggle row before custom content and item groups.
@@ -1705,7 +1726,12 @@ impl NavigationViewState {
     }
 
     /// RootSplitView maps Expanded/Compact/Minimal to the three source SplitView modes.
-    fn left_template(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
+    fn left_template(
+        self: Handle<Self>,
+        app: &mut App,
+        context: BuildContext,
+        bars: EdgeInsets,
+    ) -> WidgetRef {
         let widget = self.widget(app).clone();
         let resources = ThemeResources::of(app, context);
         let r = &resources;
@@ -1713,7 +1739,16 @@ impl NavigationViewState {
         let mode = app.get(self).display_mode;
         let chrome = PaneChrome::resolve(&resources, &widget, mode, open, app.get(self).width);
         let pane = self.left_pane(app);
-        let content = self.page_content(app, context, false);
+        // The rail and the open pane grow by the bar at their side; content beside no rail keeps
+        // clear of it itself.
+        let rail = widget.is_pane_visible && mode != NavigationViewDisplayMode::Minimal;
+        let content_bars = EdgeInsets::from_ltrb(
+            if rail { 0.0 } else { bars.left },
+            bars.top,
+            bars.right,
+            bars.bottom,
+        );
+        let content = self.page_content(app, context, false, content_bars);
         let mut split = SplitView::new(open, move |app, open| self.set_pane_open(app, open, false))
             .display_mode(if !widget.is_pane_visible {
                 SplitViewDisplayMode::CompactOverlay
@@ -1725,11 +1760,11 @@ impl NavigationViewState {
                 }
             })
             .compact_pane_length(if widget.is_pane_visible {
-                widget.compact_pane_length
+                widget.compact_pane_length + bars.left
             } else {
                 0.0
             })
-            .open_pane_length(widget.open_pane_length.min(app.get(self).width).max(0.0))
+            .open_pane_length(widget.open_pane_length.min(app.get(self).width).max(0.0) + bars.left)
             .pane_background(if mode == NavigationViewDisplayMode::Expanded {
                 Brush::Solid(r.navigation_view_expanded_pane_background)
             } else {
@@ -1749,10 +1784,18 @@ impl NavigationViewState {
                 r.overlay_corner_radius[2],
                 0.0,
             ])
-            .pane(Margin::new(
-                r.navigation_view_pane_content_grid_margin,
-                pane,
-            ))
+            .pane(
+                Padding::new(EdgeInsetsGeometry::from_ltrb(
+                    bars.left,
+                    bars.top,
+                    0.0,
+                    bars.bottom,
+                ))
+                .child(Margin::new(
+                    r.navigation_view_pane_content_grid_margin,
+                    pane,
+                )),
+            )
             .content(content);
         if let Some(callback) = widget.pane_opening {
             split = split.pane_opening(callback);
@@ -1809,8 +1852,8 @@ impl NavigationViewState {
                     button,
                     ToolTip::text(if close { "Close navigation" } else { "Back" }),
                 ))
-                .left(0.0)
-                .top(4.0)
+                .left(bars.left)
+                .top(4.0 + bars.top)
                 .into_widget(),
             );
         }
@@ -1838,8 +1881,8 @@ impl NavigationViewState {
                         }),
                     ),
                 ))
-                .left(chrome.toggle_left)
-                .top(4.0 + chrome.toggle_top)
+                .left(chrome.toggle_left + bars.left)
+                .top(4.0 + chrome.toggle_top + bars.top)
                 .into_widget(),
             );
         } else if chrome.show_title_holder && widget.is_pane_visible {
@@ -1854,8 +1897,8 @@ impl NavigationViewState {
                                 .child(pane_title(&resources, widget.pane_title.clone())),
                         )),
                 )
-                .left(chrome.toggle_left)
-                .top(4.0 + chrome.toggle_top)
+                .left(chrome.toggle_left + bars.left)
+                .top(4.0 + chrome.toggle_top + bars.top)
                 .into_widget(),
             );
         }
@@ -1894,7 +1937,12 @@ impl NavigationViewState {
     }
 
     /// TopNavGrid projects original indices without turning overflow into horizontal scrolling.
-    fn top_template(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
+    fn top_template(
+        self: Handle<Self>,
+        app: &mut App,
+        context: BuildContext,
+        bars: EdgeInsets,
+    ) -> WidgetRef {
         let widget = self.widget(app).clone();
         let resources = ThemeResources::of(app, context);
         let r = &resources;
@@ -2130,7 +2178,17 @@ impl NavigationViewState {
                 .height(r.navigation_view_top_pane_height)
                 .child(Padding::new(EdgeInsetsGeometry::only(4.0, 0.0, 4.0, 0.0)).child(top_row)),
         );
-        let content = self.page_content(app, context, true);
+        // The top pane's background reaches the view's top and sides; its items keep clear.
+        let top_row = Padding::new(EdgeInsetsGeometry::from_ltrb(
+            bars.left, bars.top, bars.right, 0.0,
+        ))
+        .child(top_row);
+        let content = self.page_content(
+            app,
+            context,
+            true,
+            EdgeInsets::from_ltrb(bars.left, 0.0, bars.right, bars.bottom),
+        );
         let overlay = widget
             .content_overlay
             .unwrap_or_else(|| SizedBox::shrink().into_widget());
@@ -2179,8 +2237,8 @@ impl NavigationViewState {
             });
             children.push(
                 Positioned::new(ToolTipService::new(button, ToolTip::text("Back")))
-                    .left(0.0)
-                    .top(4.0)
+                    .left(bars.left)
+                    .top(4.0 + bars.top)
                     .into_widget(),
             );
         }
@@ -2340,14 +2398,27 @@ impl State for NavigationViewState {
 
     fn build(self: Handle<Self>, _: &mut App, _: BuildContext) -> WidgetRef {
         let content = LayoutBuilder::new(move |app, context, constraints| {
-            self.update_adaptive_layout(app, constraints.max_width);
+            let bars = self.system_bars(app, context);
+            self.update_adaptive_layout(app, constraints.max_width - bars.left - bars.right);
             let resources = ThemeResources::of(app, context);
             let child = if self.widget(app).pane_display_mode == NavigationViewPaneDisplayMode::Top
             {
-                self.top_template(app, context)
+                self.top_template(app, context, bars)
             } else {
-                self.left_template(app, context)
+                self.left_template(app, context, bars)
             };
+            // What the navigation keeps clear of, its descendants need not. The `MediaQuery` is
+            // there whether there are bars or not, so that bars arriving keep the tree below.
+            let media = MediaQuery::of(app, context);
+            let child = MediaQuery::new(
+                if bars == EdgeInsets::ZERO {
+                    media
+                } else {
+                    media.remove_padding(true, true, true, true)
+                },
+                child,
+            )
+            .into_widget();
             DefaultTextStyle::new(
                 control_text_style(
                     &resources,
@@ -2440,6 +2511,12 @@ impl NavigationView {
     /// Sets `is_pane_visible`.
     pub fn is_pane_visible(mut self, value: bool) -> Self {
         self.is_pane_visible = value;
+        self
+    }
+
+    /// Sets `IsTitleBarAutoPaddingEnabled`.
+    pub fn is_title_bar_auto_padding_enabled(mut self, value: bool) -> Self {
+        self.is_title_bar_auto_padding_enabled = value;
         self
     }
 

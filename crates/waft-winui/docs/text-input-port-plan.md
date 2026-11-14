@@ -20,9 +20,7 @@ The resource generator now resolves references through the selected sibling Flue
 
 [WinUI TextBoxBase](../../microsoft-ui-xaml/dxaml/xcp/core/native/text/Controls/TextBoxBase.cpp) derives multiline mode from `AcceptsReturn || TextWrapping == Wrap`; the RichEdit word-wrap flag is set independently. Thus `AcceptsReturn=true, TextWrapping=NoWrap` accepts newlines and preserves long lines without wrapping.
 
-[Waft RenderEditable](../../reveal-rs/crates/waft-rendering/src/editable.rs), following Flutter's `rendering/editable.dart::_adjustConstraints`, constrains multiline text to the viewport width and scrolls it vertically. Single-line text gets unlimited layout width and horizontal scrolling. There is no independent wrapping property or two-axis editor offset in this mechanism.
-
-The approved integration uses native multiline wrapping and records the WinUI behavior difference. Preserving the unwrapped multiline case would need an editing design beyond a direct Flutter EditableText transcription.
+Waft's `RenderEditable` follows Flutter's `rendering/editable.dart::_adjustConstraints`: multiline text is broken at the width it is given and scrolls vertically, single-line text gets unlimited width and scrolls horizontally. The kit's `TextBox` keeps lines whole for `AcceptsReturn` with `TextWrapping::NoWrap` from Flutter's own pieces, as `ContentElement`'s `ScrollViewer` holds WinUI's text view: a horizontal scroll view around the editor, which `IntrinsicWidth` makes as wide as its longest line (the editable's max intrinsic width) and a `ConstrainedBox` at least as wide as the box. The editor brings the caret into view on that axis through `show_on_screen`, and `horizontal_scroll_bar_visibility` follows WinUI's `ScrollViewer.HorizontalScrollBarVisibility`, `Hidden` by default.
 
 ### Cancelable edits and selection
 

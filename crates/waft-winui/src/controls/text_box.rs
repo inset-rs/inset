@@ -1,21 +1,35 @@
 //! WinUI TextBox template and behavior, using Waft’s native editing engine.
 
-use super::text_control::TextControl;
+use super::text_control::{TextControl, TextControlState};
 use crate::Brush;
 use std::{fmt, rc::Rc};
-use waft_embedder::{Color, TextAlign, TextSelection};
+use waft_embedder::{Color, Offset, Rect, TextAlign, TextSelection};
 use waft_foundation::{App, Handle};
+use waft_rendering::RenderBox;
 use waft_services::{SelectionChangedCause, TextInputFormatterRef};
 use waft_widgets::*;
 
-/// Whether a text field requests wrapping; multiline editing follows Flutter and always wraps.
+/// XAML `TextWrapping`: whether long lines break at the box's width.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TextWrapping {
-    /// Single-line content scrolls horizontally.
+    /// Lines stay whole and scroll sideways, a single line and, with `AcceptsReturn`, each line
+    /// of a multiline box.
     #[default]
     NoWrap,
     /// Long lines wrap within the editor width.
     Wrap,
+}
+
+/// XAML `ScrollBarVisibility` for `ScrollViewer.HorizontalScrollBarVisibility`, as far as the kit's scroll bar can draw it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ScrollBarVisibility {
+    /// The content does not scroll on this axis: it is laid out at the view's width and clipped.
+    Disabled,
+    /// A scroll bar shows when the content is wider than the view.
+    Auto,
+    /// The content scrolls, with no scroll bar; `TextBox`'s style default.
+    #[default]
+    Hidden,
 }
 
 /// Notification of a user edit after the native controller updates.
@@ -85,8 +99,11 @@ pub struct TextBox {
     /// Accepts line breaks and enables native wrapped multiline editing.
     pub accepts_return: bool,
 
-    /// Wraps text independently of accepting Enter; multiline input always wraps under the accepted native policy.
+    /// Wraps text independently of accepting Enter; with `NoWrap`, a multiline box keeps each line whole and scrolls sideways.
     pub text_wrapping: TextWrapping,
+
+    /// `ScrollViewer.HorizontalScrollBarVisibility`: how a multiline box that does not wrap scrolls its lines sideways.
+    pub horizontal_scroll_bar_visibility: ScrollBarVisibility,
 
     /// Limits the visible height in lines for a multiline editor, which grows with its text from
     /// one line up to it; past it, the content scrolls vertically.
@@ -132,6 +149,7 @@ impl TextBox {
             is_read_only: false,
             accepts_return: false,
             text_wrapping: TextWrapping::NoWrap,
+            horizontal_scroll_bar_visibility: ScrollBarVisibility::Hidden,
             max_lines: None,
             text_alignment: TextAlign::Start,
             placeholder_foreground: None,
@@ -259,6 +277,12 @@ impl TextBox {
         self
     }
 
+    /// Sets `ScrollViewer.HorizontalScrollBarVisibility`.
+    pub fn horizontal_scroll_bar_visibility(mut self, value: ScrollBarVisibility) -> Self {
+        self.horizontal_scroll_bar_visibility = value;
+        self
+    }
+
     /// Sets MaxLines.
     pub fn max_lines(mut self, value: i32) -> Self {
         self.max_lines = Some(value);
@@ -307,12 +331,85 @@ impl fmt::Debug for TextBox {
     }
 }
 
-impl StatelessWidget for TextBox {
+impl StatefulWidget for TextBox {
+    type State = TextBoxState;
+
     fn key(&self) -> Option<&KeyRef> {
         self.key.as_ref()
     }
 
-    fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
-        TextControl::new(self.clone(), None).into_widget()
+    fn create_state(&self) -> TextBoxState {
+        TextBoxState {
+            state: StateData::new(),
+        }
+    }
+}
+
+/// A `TextBox` in the tree, which a `GlobalKey` on the box reaches.
+pub struct TextBoxState {
+    state: StateData<TextBox>,
+}
+
+impl TextBoxState {
+    /// `TextBox::GetRectFromCharacterIndex` (`TextBox.cpp`): the leading or, with
+    /// `trailing_edge`, the trailing edge of the character at `char_index`, a UTF-16 index into
+    /// the text, as a rectangle of no width and the line's height, in the box's own coordinates
+    /// and where the character shows now, scrolled on either axis. `None` for an index outside
+    /// the text, the end of the text and every index of an empty box among them, where WinUI
+    /// throws `E_INVALIDARG`, and before the box is laid out.
+    pub fn get_rect_from_character_index(
+        self: Handle<Self>,
+        app: &mut App,
+        char_index: i32,
+        trailing_edge: bool,
+    ) -> Option<Rect> {
+        let length = self
+            .widget(app)
+            .controller
+            .text_value(app)
+            .encode_utf16()
+            .count();
+        if char_index < 0 || char_index as usize >= length {
+            return None;
+        }
+        let editable = self.text_control(app)?.render_editable(app)?;
+        let character = TextSelection::new(char_index, char_index + 1);
+        let boxes = editable.get_boxes_for_selection(app, character);
+        let glyph = boxes.first()?;
+        // RichEdit's `TA_LEFT` and `TA_RIGHT`: the character's left and right edges.
+        let x = if trailing_edge {
+            glyph.right
+        } else {
+            glyph.left
+        };
+        let top_left = editable
+            .as_box()
+            .local_to_global(app, Offset::new(x, glyph.top), None);
+        let own = self.context(app).find_render_object(app)?.as_box()?;
+        let local = own.global_to_local(app, top_left, None);
+        Some(Rect::from_ltwh(
+            local.dx(),
+            local.dy(),
+            0.0,
+            glyph.bottom - glyph.top,
+        ))
+    }
+
+    /// The shared editor this box builds.
+    fn text_control(self: Handle<Self>, app: &App) -> Option<Handle<TextControlState>> {
+        let mut found = None;
+        self.context(app).visit_child_elements(app, &mut |child| {
+            found = child.state_handle::<TextControlState>(app);
+        });
+        found
+    }
+}
+
+impl State for TextBoxState {
+    type Widget = TextBox;
+    waft_widgets::state_accessors!();
+
+    fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+        TextControl::new(self.widget(app).clone(), None).into_widget()
     }
 }

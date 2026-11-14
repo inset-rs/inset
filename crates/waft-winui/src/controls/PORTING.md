@@ -40,9 +40,17 @@ Ported against: aa3207e6
 
 ## text_box.rs → TextBox
 
-- Change: `TextBox` wraps long lines in multiline mode even when wrapping is disabled.
-  Reason: framework — Flutter's multiline layout does not provide independent wrapping and two-axis editor scrolling.
-  Affect: A field configured to accept newlines preserves typed line breaks but also wraps lines that exceed its width.
+- Change: `TextBox` with `accepts_return` and `TextWrapping::NoWrap` scrolls its lines sideways in a horizontal scroll view around the editor, which scrolls vertically itself, where WinUI's text view scrolls both axes inside `ContentElement`'s `ScrollViewer`.
+  Reason: framework — Waft's editor follows Flutter's, which scrolls one axis and breaks multiline text at its width; the kit gives it its longest line's width with Flutter's `IntrinsicWidth`, at least the box's, inside a horizontal scroll view, which takes the second axis.
+  Affect: A sideways scroll of the wheel or the trackpad scrolls the box's lines as one view, and when an application shows a vertical scroll bar it sits on the lines and scrolls sideways with them.
+
+- Change: `TextBoxState::get_rect_from_character_index` answers `None` for an index outside the text, where WinUI's `GetRectFromCharacterIndex` throws `E_INVALIDARG`, and also before the box is laid out.
+  Reason: language — Rust reports an argument a call cannot answer for by its result, not by an exception.
+  Affect: A caller reaches the box through a `GlobalKey` on it and matches on the result; the end of the text and every index of an empty box are `None`, as they are errors in WinUI.
+
+- Change: `TextBox::horizontal_scroll_bar_visibility` takes `Disabled`, `Auto` and `Hidden`, not `Visible`.
+  Reason: framework — the kit's scroll bar shows while the pointer is over a view that overflows, which is WinUI's `Auto`, and has no bar kept on screen.
+  Affect: An application that wants WinUI's `Visible` uses `Auto`, whose bar shows on hover.
 
 - Change: A multiline `TextBox` also takes `max_lines`, a limit on its height in lines that WinUI's `TextBox` does not have, and grows with its text from one line up to it; a height limit from its parent works as WinUI's `MaxHeight` does.
   Reason: framework — Waft's editor takes a line limit, as Flutter's does, and the box passes it on beside WinUI's height limit.
@@ -238,6 +246,10 @@ Ported against: aa3207e6
   Reason: framework — the widget tree is built before item widths are measured, so moving items between the main row and overflow requires a subsequent build.
   Affect: After item text changes, moving items between the top row and its overflow menu can take an extra frame.
 
+- Change: `NavigationView::is_title_bar_auto_padding_enabled`, on by default as in WinUI, pads for every system bar the ambient `MediaQuery` reports, not only the title bar. The pane and the content card still reach the edges of the navigation; the padding goes inside them. The toggle, back and close buttons and the pane's items move down by the top bar and right by the left bar. The open pane and the compact rail grow by the left bar. The pane's items stay above the bottom bar. The content's controls stay clear of the top, right and bottom bars, and of the left bar when no rail sits beside them. In Top mode the top row is padded at its top and sides and the content at its sides and bottom. The adaptive display mode is chosen from the width between the side bars. The content gets a `MediaQuery` with the padding removed.
+  Reason: os — WinUI's `UpdateTitleBarPadding` pads only the top of the pane (`TogglePaneTopPadding`, `ContentPaneTopPadding`) by the title bar's height, and only when the navigation sits at the window's top, because a Windows window has no bars on its other sides; a phone has a status bar, a gesture bar and, in landscape, side bars.
+  Affect: Under a page that extends into the bars, the navigation's backgrounds reach the screen's edges while its controls stay clear of the bars, with no colour band at either edge; with the switch off the navigation pads nothing, as in WinUI, and an application keeps it clear of the bars itself.
+
 ## navigation_view_item.rs → NavigationView item containers
 
 - Change: `NavigationViewItem` keeps its key and stays mounted when hidden or moved between the side pane and top bar.
@@ -339,6 +351,10 @@ Ported against: aa3207e6
   Affect: Popups have a soft shadow that becomes stronger in dark theme and at deeper submenu levels, but its softness can differ from Windows; the shadow is clipped at the application window's edges.
 
 ## content_dialog.rs → `ContentDialog`
+
+- Change: `ContentDialog` centers itself in what the system's bars and the keyboard leave of the window, moving with the keyboard over 100 ms, as Flutter's `showDialog` (`useSafeArea`) and `Dialog` (`AnimatedPadding` by `MediaQuery.viewInsets`) keep a dialog; the content area shrinks first, so the command buttons stay in view.
+  Reason: framework — WinUI centers the dialog over the whole window and leaves a keyboard to the input pane handler, which scrolls the focused text box into view and which the kit does not port.
+  Affect: On a phone a dialog with a text box keeps its buttons above the keyboard, and never sits under the status bar.
 
 - Change: `ContentDialog::show_async` pushes the dialog onto the root navigator as a dialog route whose modal barrier is the smoke layer, instead of opening one popup for the smoke layer and another for the dialog.
   Reason: framework — Waft's navigator already has modal routes that block input to the page beneath and keep keyboard focus inside, while WinUI builds modality from two popups and its own focus cycling.
@@ -670,9 +686,9 @@ Ported against: aa3207e6
   Reason: framework — WinUI leaves the page's size alone and scrolls the focused text box into view from its input pane handler (`CInputPaneHandler`), which the kit does not port.
   Affect: Content laid out to the page's bottom edge, such as a text box there, moves above the keyboard while the keyboard shows.
 
-- Change: `Page` has no counterpart of `ApplicationView.DesiredBoundsMode`'s `UseCoreWindow`, under which WinUI pages fill the window under the system's bars.
-  Reason: framework — Waft has no app-wide bounds mode; what is left of the window's padding is the `MediaQuery`'s.
-  Affect: Content that should reach under the system's bars is placed outside the page, or under a `MediaQuery` whose padding the app has removed.
+- Change: `Page::extends_content_into_system_bars`, off by default, lets the content fill the page under the system's bars and leaves their padding in the content's `MediaQuery`; the keyboard is still kept clear. It takes the place of WinUI's `Window.ExtendsContentIntoTitleBar` and of `ApplicationView.DesiredBoundsMode`'s `UseCoreWindow`, and covers every system bar, not only the title bar.
+  Reason: framework — Waft has no window object or app-wide bounds mode for the switch to live on, and its system bars are the `MediaQuery`'s padding on every side, where WinUI's switch covers only the window's title bar.
+  Affect: An application sets the switch on its root page, as a WinUI application sets it on its window; the content, such as a `NavigationView`, then keeps its own controls clear of the bars from that padding.
 
 ## Deferred
 

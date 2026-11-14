@@ -4,7 +4,7 @@
 
 use crate::{Brush, ControlBorder};
 use waft_foundation::App;
-use waft_painting::EdgeInsetsGeometry;
+use waft_painting::{EdgeInsets, EdgeInsetsGeometry};
 use waft_widgets::*;
 
 /// XAML `Page`: content on a background, clear of the system's bars and keyboard.
@@ -15,6 +15,9 @@ pub struct Page {
 
     /// `Background`: painted over the page's whole area, under the system's bars too. `None` paints nothing, as XAML's null brush.
     pub background: Option<Brush>,
+
+    /// Whether the content reaches under the system's bars, which the page then leaves in the content's `MediaQuery` for the content to keep its controls clear of, as a `NavigationView` does while `is_title_bar_auto_padding_enabled`: WinUI's `Window.ExtendsContentIntoTitleBar`, widened from the title bar to the system's bars, and off by default as that is. The keyboard is kept clear of either way.
+    pub extends_content_into_system_bars: bool,
 
     /// Identity retained across parent rebuilds.
     pub key: Option<KeyRef>,
@@ -38,6 +41,12 @@ impl Page {
         self
     }
 
+    /// Sets `extends_content_into_system_bars`.
+    pub fn extends_content_into_system_bars(mut self, value: bool) -> Self {
+        self.extends_content_into_system_bars = value;
+        self
+    }
+
     /// Sets the identity retained across rebuilds.
     pub fn key(mut self, key: KeyRef) -> Self {
         self.key = Some(key);
@@ -53,21 +62,38 @@ impl StatelessWidget for Page {
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
         let page = ControlBorder::new_optional(self.background, None).border_thickness(0.0);
         match &self.content {
-            Some(content) => page.child(updated_bounds(app, context, content.clone())),
+            Some(content) => page.child(updated_bounds(
+                app,
+                context,
+                content.clone(),
+                self.extends_content_into_system_bars,
+            )),
             None => page,
         }
         .into_widget()
     }
 }
 
-/// `Page::CalculateUpdatedBounds`: the content inset by the system's bars and the keyboard, under a [`MediaQuery`] that no longer reports either.
-fn updated_bounds(app: &mut App, context: BuildContext, content: WidgetRef) -> WidgetRef {
+/// `Page::CalculateUpdatedBounds`: the content inset by the keyboard and, unless it `extends` into them, by the system's bars, under a [`MediaQuery`] that no longer reports what the page kept it clear of.
+fn updated_bounds(
+    app: &mut App,
+    context: BuildContext,
+    content: WidgetRef,
+    extends: bool,
+) -> WidgetRef {
     let media = MediaQuery::of(app, context);
-    let bars = media.padding;
+    let bars = if extends {
+        EdgeInsets::ZERO
+    } else {
+        media.padding
+    };
     let keyboard = media.view_insets.bottom;
-    let consumed = media
-        .remove_padding(true, true, true, true)
-        .remove_view_insets(false, false, false, true);
+    let consumed = if extends {
+        media.clone()
+    } else {
+        media.remove_padding(true, true, true, true)
+    }
+    .remove_view_insets(false, false, false, true);
     MediaQuery::new(
         consumed,
         Padding::new(EdgeInsetsGeometry::from_ltrb(

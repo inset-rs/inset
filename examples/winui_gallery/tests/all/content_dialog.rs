@@ -25,6 +25,11 @@ struct Probe {
 }
 
 fn fixture(theme: Theme) -> (Fixture, Probe) {
+    fixture_with_keyboard(theme, 0.0)
+}
+
+/// The window of [`fixture`], with a keyboard `keyboard` pixels tall over its bottom.
+fn fixture_with_keyboard(theme: Theme, keyboard: f64) -> (Fixture, Probe) {
     let probe = Probe::default();
     let shared = probe.clone();
     let fixture = Fixture::with_root([640, 480], move |app| {
@@ -38,6 +43,18 @@ fn fixture(theme: Theme) -> (Fixture, Probe) {
             app,
             WidgetsApp::new(AccentPalette::default().base)
                 .debug_show_checked_mode_banner(false)
+                .builder(move |app, context, navigator| {
+                    let media = MediaQuery::of(app, context);
+                    MediaQuery::new(
+                        media
+                            .copy_with()
+                            .view_insets(waft_painting::EdgeInsets::from_ltrb(
+                                0.0, 0.0, 0.0, keyboard,
+                            )),
+                        navigator.cloned().expect("the navigator"),
+                    )
+                    .into_widget()
+                })
                 .page_route_builder(|app, settings, builder| {
                     let route = PageRouteBuilder::new(
                         app,
@@ -367,4 +384,19 @@ fn arrow_keys_move_between_the_command_buttons() {
         &*probe.events.borrow(),
         &["closing Secondary", "closed Secondary"]
     );
+}
+
+#[test]
+fn the_dialog_and_its_buttons_keep_clear_of_the_keyboard() {
+    let (mut f, probe) = fixture_with_keyboard(Theme::Light, 300.0);
+    let dialog = probe.first.get().unwrap();
+    let _shown = show(&mut f, dialog, &probe);
+    for button in ["Keep", "Send", "Cancel"] {
+        let at = f.find(button);
+        assert!(
+            at.dy() < 480.0 - 300.0,
+            "{button} at {at:?} is above the keyboard"
+        );
+    }
+    f.capture("content_dialog_keyboard");
 }

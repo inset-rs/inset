@@ -2,12 +2,12 @@
 
 use super::combo_box::ComboBoxTextBoxStyle;
 use super::number_box::NumberBoxTextBoxStyle;
-use super::{PasswordRevealMode, TextBox, TextWrapping};
+use super::{PasswordRevealMode, ScrollBarVisibility, TextBox, TextWrapping};
 use crate::*;
 use std::{any::TypeId, collections::HashMap, rc::Rc};
-use waft_embedder::FontWeight;
+use waft_embedder::{Clip, FontWeight};
 use waft_foundation::{App, Handle, Listenable, Listener};
-use waft_painting::EdgeInsetsGeometry;
+use waft_painting::{Axis, EdgeInsetsGeometry};
 use waft_rendering::{BoxConstraints, HitTestBehavior};
 use waft_services::{
     FilteringTextInputFormatter, HardwareKeyboard, KeyEvent, LengthLimitingTextInputFormatter,
@@ -104,6 +104,9 @@ pub(super) struct TextControlState {
 
     /// Whether Peek is currently revealing the password.
     password_revealed: bool,
+
+    /// `ContentElement`'s horizontal scrolling, for a multiline box that does not wrap.
+    horizontal_scroll: Option<Handle<ScrollViewportController>>,
 }
 
 /// Default Flutter selection gestures around the WinUI ContentElement.
@@ -151,11 +154,55 @@ impl StatefulWidget for TextControl {
             can_show_reveal_button: false,
             reveal_button_pressed: false,
             password_revealed: false,
+            horizontal_scroll: None,
         }
     }
 }
 
 impl TextControlState {
+    /// The editor's render object, once it is built.
+    pub(super) fn render_editable(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> Option<waft_rendering::RenderHandle<waft_rendering::RenderEditable>> {
+        let key = app.get(self).editable_key.clone();
+        let editable = key.current_state::<EditableTextState>(app)?;
+        Some(editable.render_editable(app))
+    }
+
+    /// `ContentElement`'s `ScrollViewer` across a multiline box that does not wrap, from Flutter's
+    /// own pieces: the editor is as wide as its longest line (`IntrinsicWidth`, which asks the
+    /// editable's max intrinsic width) and at least as wide as the box, so that a tap anywhere
+    /// lands in the text, and the editable brings the caret into view through `show_on_screen`.
+    /// `Auto` draws the kit's scroll bar, `Hidden` none, and `Disabled` does not scroll but clips
+    /// the lines at the box's width.
+    fn scrolled_sideways(self: Handle<Self>, app: &mut App, content: WidgetRef) -> WidgetRef {
+        let visibility = self.widget(app).config.horizontal_scroll_bar_visibility;
+        let scroll = app
+            .get(self)
+            .horizontal_scroll
+            .expect("made in `init_state`");
+        LayoutBuilder::new(move |_, _, constraints| {
+            let lines = ConstrainedBox::new(BoxConstraints::new().min_width(constraints.max_width))
+                .child(IntrinsicWidth::new().child(content.clone()));
+            match visibility {
+                ScrollBarVisibility::Auto => ScrollBarViewport::new(scroll, lines)
+                    .axis(Axis::Horizontal)
+                    .into_widget(),
+                ScrollBarVisibility::Hidden => {
+                    ScrollViewport::new(Axis::Horizontal, scroll, lines).into_widget()
+                }
+                ScrollBarVisibility::Disabled => UnconstrainedBox::new()
+                    .constrained_axis(Axis::Vertical)
+                    .alignment(AlignmentGeometry::TOP_START)
+                    .clip_behavior(Clip::HardEdge)
+                    .child(lines)
+                    .into_widget(),
+            }
+        })
+        .into_widget()
+    }
+
     /// Applies the source clear-button or reveal-button eligibility predicates.
     fn button_visible(self: Handle<Self>, app: &App) -> bool {
         let widget = self.widget(app);
@@ -399,6 +446,8 @@ impl State for TextControlState {
             builder: TextSelectionGestureDetectorBuilderData::new(delegate),
         });
         app.get_mut(self).gestures = Some(gestures);
+        let horizontal_scroll = ScrollViewportController::new(app);
+        app.get_mut(self).horizontal_scroll = Some(horizontal_scroll);
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, _old: &TextControl) {
@@ -435,6 +484,11 @@ impl State for TextControlState {
 
         if let Some(action) = app.get(self).password_clipboard_action {
             app.destroy(action.id());
+        }
+
+        if let Some(scroll) = app.get_mut(self).horizontal_scroll.take() {
+            scroll.dispose(app);
+            app.destroy(scroll);
         }
 
         if let Some(undo) = app.get(self).undo {
@@ -643,6 +697,10 @@ impl State for TextControlState {
                         .into_widget(),
                 ])
                 .into_widget();
+        }
+
+        if multiline && config.text_wrapping == TextWrapping::NoWrap {
+            content = self.scrolled_sideways(app, content);
         }
 
         let gestures = app.get(self).gestures.unwrap();

@@ -10,13 +10,15 @@
 use super::flyout::shadow::PopupShadow;
 use crate::*;
 use std::{cell::Cell, collections::HashMap, fmt, rc::Rc, time::Duration};
-use waft_animation::{AnimationStatus, AnimationStatusListener, AnyAnimation, Cubic, Curve};
+use waft_animation::{
+    AnimationStatus, AnimationStatusListener, AnyAnimation, Cubic, Curve, Curves,
+};
 use waft_embedder::{FontWeight, TextDirection};
 use waft_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Completer, CompleterFuture, Handle, HandleId,
     ListenableObject, Listener,
 };
-use waft_painting::BorderRadius;
+use waft_painting::{BorderRadius, EdgeInsetsGeometry};
 use waft_rendering::{BoxConstraints, CrossAxisAlignment, MainAxisSize};
 use waft_scheduler::{FrameCallback, SchedulerBinding};
 use waft_services::{KeyEvent, LogicalKeyboardKey};
@@ -1078,7 +1080,7 @@ impl State for ContentDialogPresenterState {
         }
     }
 
-    fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+    fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let dialog = self.widget(app).dialog;
         let Some(showing) = app.get(dialog).showing.as_ref() else {
             return SizedBox::shrink().into_widget();
@@ -1103,8 +1105,8 @@ impl State for ContentDialogPresenterState {
         })
         .child(background);
         // `Container` and its `LayoutRoot`: the dialog centered over the window, where the route's
-        // barrier is `SmokeLayerBackground`.
-        let layout_root = Focus::new(Center::new().child(animated))
+        // barrier is `SmokeLayerBackground`, in the room the system's bars and the keyboard leave.
+        let layout_root = Focus::new(clear_of_the_system(app, context, animated.into_widget()))
             .can_request_focus(false)
             .skip_traversal(true)
             .on_key_event(Rc::new(move |app, _, event| {
@@ -1120,6 +1122,34 @@ impl State for ContentDialogPresenterState {
         ThemeScope::with_resources(resources, Directionality::new(direction, back_request))
             .into_widget()
     }
+}
+
+/// `dialog`, centered in what the system's bars and the keyboard leave of the window, as Flutter's
+/// `showDialog` (`useSafeArea`) and `Dialog` (`AnimatedPadding` by `MediaQuery.viewInsets`, over
+/// 100 ms, decelerating) keep a dialog: WinUI centers it over the whole window and leaves the
+/// keyboard to scroll the focused text box into view, which the kit does not port.
+fn clear_of_the_system(app: &mut App, context: BuildContext, dialog: WidgetRef) -> WidgetRef {
+    let media = MediaQuery::of(app, context);
+    let keyboard = media.view_insets;
+    let content = MediaQuery::new(
+        media.remove_view_insets(true, true, true, true),
+        Center::new().child(dialog),
+    )
+    .into_widget();
+    SafeArea::new(
+        AnimatedPadding::new(
+            EdgeInsetsGeometry::from_ltrb(
+                keyboard.left,
+                keyboard.top,
+                keyboard.right,
+                keyboard.bottom,
+            ),
+            Duration::from_millis(100),
+        )
+        .curve(Curves::decelerate())
+        .child(content),
+    )
+    .into_widget()
 }
 
 /// `ProcessLayoutRootKey`: Escape runs the close action; Enter presses the default button.

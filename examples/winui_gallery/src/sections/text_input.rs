@@ -6,6 +6,12 @@ use waft_foundation::{App, Handle, Listener};
 use waft_widgets::*;
 use waft_winui::*;
 
+/// Markup with lines longer than the box, for the example that keeps lines whole.
+const MARKUP: &str = "= Lines that do not wrap
+A markup source keeps each paragraph on one line, however long it grows, so that a change shows as a change to one line and nothing else moves.
+#table(columns: 3, [Name], [Kind], [Description of what the column holds, which is long])
+End.";
+
 /// Builds the TextBox feature page.
 pub fn text_box(resources: &ThemeResources) -> Vec<WidgetRef> {
     section(
@@ -73,9 +79,9 @@ impl State for TextExamplesState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let initial = if self.widget(app).password {
-            ["", "Saved password", ""]
+            ["", "Saved password", "", ""]
         } else {
-            ["", "This text is read-only.", ""]
+            ["", "This text is read-only.", "", MARKUP]
         };
         let controllers = initial
             .into_iter()
@@ -244,8 +250,23 @@ impl State for TextExamplesState {
                             .header(Text::new("Notes"))
                             .placeholder_text("Write a few lines…")
                             .accepts_return(true)
+                            .text_wrapping(TextWrapping::Wrap)
                             .max_lines(4)
                             .into_widget(),
+                    ),
+                    example(
+                        "Lines that do not wrap",
+                        "With TextWrapping NoWrap each line stays whole; the box scrolls sideways to the caret, with a scroll bar under the pointer. The line numbers are placed by GetRectFromCharacterIndex.",
+                        &r,
+                        super::line_numbers::LineNumbers {
+                            text_box: TextBox::new(controllers[3].as_controller())
+                                .placeholder_text("Write markup…")
+                                .accepts_return(true)
+                                .horizontal_scroll_bar_visibility(ScrollBarVisibility::Auto)
+                                .max_lines(6),
+                            controller: controllers[3],
+                        }
+                        .into_widget(),
                     ),
                 ],
                 20.0,

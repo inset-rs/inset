@@ -319,7 +319,10 @@ impl State for GalleryState {
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let r = ThemeResources::of(app, context);
-        let minimal = MediaQuery::size_of(app, context).width() < GALLERY_NAVIGATION_BREAKPOINT;
+        // The navigation's width: the view's, less the bars at its sides it keeps clear of.
+        let bars = MediaQuery::padding_of(app, context);
+        let width = MediaQuery::size_of(app, context).width() - bars.left - bars.right;
+        let minimal = width < GALLERY_NAVIGATION_BREAKPOINT;
         // Minimal HeaderContent follows the visible toggle column and its negative margin.
         let horizontal_inset = if minimal {
             r.pane_toggle_button_width + r.navigation_view_minimal_header_margin[0]
@@ -401,29 +404,17 @@ impl State for GalleryState {
                     self.set_state(app, |state| state.dark = !state.dark);
                 }
             });
-        ThemeScope::new(theme, gallery_page(&resources, minimal, navigation)).into_widget()
+        ThemeScope::new(theme, gallery_page(&resources, navigation)).into_widget()
     }
 }
 
-/// The page the navigation shell sits on. Expanded, the pane lies on the base colour and the content on its own layer, as in WinUI's gallery. Minimal, the content layer covers the whole page, so the page takes the colour the layer shows and the layer paints nothing: otherwise the strips under a phone's bars, which only the page reaches, would show as bands of another shade below a border line.
-fn gallery_page(
-    resources: &ThemeResources,
-    minimal: bool,
-    navigation: NavigationView,
-) -> WidgetRef {
-    let base = resources.solid_background_fill_color_base;
-    if !minimal {
-        return waft_winui::Page::new()
-            .background(Brush::Solid(base))
-            .content(navigation)
-            .into_widget();
-    }
-    let content_layer = Color::alpha_blend(resources.navigation_view_content_background, base);
+/// The page the navigation shell sits on: its content reaches under a phone's bars, and the
+/// navigation keeps its toggle, pane items and content clear of them while its pane and content
+/// reach the screen's edges.
+fn gallery_page(resources: &ThemeResources, navigation: NavigationView) -> WidgetRef {
     waft_winui::Page::new()
-        .background(Brush::Solid(content_layer))
-        .content(ThemeScope::overriding(navigation).any(|r| {
-            r.navigation_view_content_background = Color::from_argb(0, 0, 0, 0);
-            r.navigation_view_minimal_content_grid_border_thickness = [0.0; 4];
-        }))
+        .background(Brush::Solid(resources.solid_background_fill_color_base))
+        .extends_content_into_system_bars(true)
+        .content(navigation)
         .into_widget()
 }

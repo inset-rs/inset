@@ -147,3 +147,111 @@ fn without_bars_the_content_fills_the_page() {
     let (_, seen) = mount_page(phone(EdgeInsets::ZERO, 0.0), page);
     assert_eq!(seen.size, Size::new(100.0, 200.0));
 }
+
+#[test]
+fn extending_into_the_bars_hands_them_to_the_content() {
+    let (_, seen) = mount_page(
+        phone(EdgeInsets::from_ltrb(0.0, 24.0, 0.0, 16.0), 0.0),
+        |content| {
+            waft_winui::Page::new()
+                .background(Brush::Solid(BACKGROUND))
+                .extends_content_into_system_bars(true)
+                .content(content)
+                .into_widget()
+        },
+    );
+    assert_eq!(
+        seen.size,
+        Size::new(100.0, 200.0),
+        "the content reaches the view's edges"
+    );
+    assert_eq!(seen.padding, EdgeInsets::from_ltrb(0.0, 24.0, 0.0, 16.0));
+}
+
+/// A navigation on a page extending into a phone's bars, `width` wide, in `theme`.
+fn navigation_under_bars(width: u32, bars: EdgeInsets) -> Fixture {
+    use waft_winui::*;
+    Fixture::with_root([width, 400], move |app| {
+        winui_gallery::install_fonts(app);
+        run_app(
+            app,
+            WidgetsApp::new(AccentPalette::default().base)
+                .debug_show_checked_mode_banner(false)
+                .builder(move |app, context, _| {
+                    let media = MediaQuery::of(app, context);
+                    let navigation = NavigationView::new(
+                        vec![NavigationViewItem::text("home", "Home")],
+                        Some("home".to_owned()),
+                        |_, _| {},
+                        Text::new("Body"),
+                    )
+                    .header(Text::new("Title"));
+                    MediaQuery::new(
+                        media.copy_with().padding(bars).view_padding(bars),
+                        ThemeScope::new(
+                            Theme::Light,
+                            Overlay::wrap(
+                                Page::new()
+                                    .background(Brush::Solid(BACKGROUND))
+                                    .extends_content_into_system_bars(true)
+                                    .content(navigation),
+                            ),
+                        ),
+                    )
+                    .into_widget()
+                })
+                .into_widget(),
+        );
+    })
+}
+
+#[test]
+fn a_navigation_reaches_the_edges_and_keeps_its_controls_clear_of_the_bars() {
+    let bars = EdgeInsets::from_ltrb(0.0, 40.0, 0.0, 30.0);
+    // Minimal: the content's layer is the whole view.
+    let f = navigation_under_bars(400, bars);
+    let title = f.find("Title");
+    assert!(
+        title.dy() > 40.0,
+        "the header is below the status bar: {title:?}"
+    );
+    let pixels = f.view.pixels.borrow();
+    let pixel =
+        |x: usize, y: usize| -> [u8; 4] { pixels[(y * 400 + x) * 4..][..4].try_into().unwrap() };
+    assert_ne!(
+        pixel(200, 10),
+        [0, 0, 255, 255],
+        "no page background under the status bar"
+    );
+    assert_ne!(
+        pixel(200, 390),
+        [0, 0, 255, 255],
+        "nor under the gesture bar"
+    );
+    assert_eq!(
+        pixel(200, 10),
+        pixel(200, 200),
+        "the content's layer reaches the top"
+    );
+    drop(pixels);
+    // Expanded: the rail and the content card reach the bottom.
+    let f = navigation_under_bars(1100, bars);
+    let home = f.find("Home");
+    assert!(
+        home.dy() > 40.0,
+        "the pane's items are below the status bar: {home:?}"
+    );
+    let pixels = f.view.pixels.borrow();
+    let at =
+        |x: usize, y: usize| -> [u8; 4] { pixels[(y * 1100 + x) * 4..][..4].try_into().unwrap() };
+    assert_eq!(
+        at(20, 395),
+        at(20, 200),
+        "the pane looks the same down to the bottom"
+    );
+    assert_ne!(
+        at(800, 395),
+        [0, 0, 255, 255],
+        "the content reaches the bottom"
+    );
+}
