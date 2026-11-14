@@ -132,6 +132,8 @@ pub enum FluentSymbol {
     SpinnerIos,
     /// A page of an app's content.
     Document,
+    /// Rows of a list.
+    List,
 }
 
 impl FluentSymbol {
@@ -185,6 +187,7 @@ impl FluentSymbol {
             Self::TextBulletListTree => 63406,
             Self::SpinnerIos => 63241,
             Self::Document => 62329,
+            Self::List => 62702,
         })
         .unwrap()
     }

@@ -37,6 +37,7 @@ mod grid_child_size;
 mod grid_layout_builder;
 mod icon;
 mod info_badge;
+mod items_view;
 mod menu_bar;
 mod menu_flyout;
 mod navigation_indicator_scheduling;

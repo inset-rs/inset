@@ -187,6 +187,9 @@ fn a_disabled_view_takes_no_click() {
 #[test]
 fn control_click_deselects_the_selected_view() {
     let (mut f, probe) = fixture(Some(0), TextDirection::Ltr);
+    // The bar takes the focus first: focus arriving after the deselection, as `GotFocus` does
+    // after `ItemsView::ProcessInteraction`, finds nothing selected and selects the view again.
+    tap(&mut f, "Recent");
     press(&mut f, Physical::CONTROL_LEFT, Key::CONTROL_LEFT);
     tap(&mut f, "Recent");
     release(&mut f, Physical::CONTROL_LEFT, Key::CONTROL_LEFT);

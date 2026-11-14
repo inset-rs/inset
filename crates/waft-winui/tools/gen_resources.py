@@ -67,6 +67,7 @@ DEFAULT_CONTROLS = (
     'ColorPicker',
     'TreeView',
     'SelectorBar',
+    'ItemContainer',
 )
 
 NS = {

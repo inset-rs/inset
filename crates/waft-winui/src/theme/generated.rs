@@ -3543,6 +3543,45 @@ pub struct ThemeResources {
     pub selector_bar_item_selection_visual_margin: [f64; 4],
     /// `SelectorBarItemFocusVisualMargin`.
     pub selector_bar_item_focus_visual_margin: [f64; 4],
+    // `ItemContainer_themeresources.xaml`
+    /// `ItemContainerBackground`.
+    pub item_container_background: Color,
+    /// `ItemContainerPointerOverBackground`.
+    pub item_container_pointer_over_background: Color,
+    /// `ItemContainerPressedBackground`.
+    pub item_container_pressed_background: Color,
+    /// `ItemContainerBorderBrush`.
+    pub item_container_border_brush: Color,
+    /// `ItemContainerPointerOverBorderBrush`.
+    pub item_container_pointer_over_border_brush: Color,
+    /// `ItemContainerPressedBorderBrush`.
+    pub item_container_pressed_border_brush: Color,
+    /// `ItemContainerSelectedBackground`.
+    pub item_container_selected_background: Color,
+    /// `ItemContainerSelectedPointerOverBackground`.
+    pub item_container_selected_pointer_over_background: Color,
+    /// `ItemContainerSelectedPressedBackground`.
+    pub item_container_selected_pressed_background: Color,
+    /// `ItemContainerSelectionVisualBackground`.
+    pub item_container_selection_visual_background: Color,
+    /// `ItemContainerSelectionVisualPointerOverBackground`.
+    pub item_container_selection_visual_pointer_over_background: Color,
+    /// `ItemContainerSelectionVisualPressedBackground`.
+    pub item_container_selection_visual_pressed_background: Color,
+    /// `ItemContainerSelectedInnerBorderBrush`.
+    pub item_container_selected_inner_border_brush: Color,
+    /// `ItemContainerCheckboxBackgroundUnchecked`.
+    pub item_container_checkbox_background_unchecked: Color,
+    /// `ItemContainerDisabledOpacity`.
+    pub item_container_disabled_opacity: f64,
+    /// `ItemContainerCheckboxMinWidth`.
+    pub item_container_checkbox_min_width: f64,
+    /// `ItemContainerCheckboxMargin`.
+    pub item_container_checkbox_margin: [f64; 4],
+    /// `ItemContainerSelectedInnerMargin`.
+    pub item_container_selected_inner_margin: [f64; 4],
+    /// `ItemContainerSelectedInnerThickness`.
+    pub item_container_selected_inner_thickness: [f64; 4],
 }
 
 impl ThemeResources {
@@ -9258,6 +9297,52 @@ impl ThemeResources {
             selector_bar_item_padding: [12.0, 10.0, 12.0, 7.0],
             selector_bar_item_selection_visual_margin: [0.0, 0.0, 0.0, 0.0],
             selector_bar_item_focus_visual_margin: [-2.0, -2.0, -2.0, -2.0],
+            item_container_background: Color::from_argb(0, 255, 255, 255),
+            item_container_pointer_over_background: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            item_container_pressed_background: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(10, 255, 255, 255),
+            },
+            item_container_border_brush: Color::from_argb(0, 255, 255, 255),
+            item_container_pointer_over_border_brush: Color::from_argb(0, 255, 255, 255),
+            item_container_pressed_border_brush: Color::from_argb(0, 255, 255, 255),
+            item_container_selected_background: Color::from_argb(0, 255, 255, 255),
+            item_container_selected_pointer_over_background: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            item_container_selected_pressed_background: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(10, 255, 255, 255),
+            },
+            item_container_selection_visual_background: match theme {
+                Theme::Light => accent.dark1,
+                Theme::Dark => accent.light2,
+            },
+            item_container_selection_visual_pointer_over_background: match theme {
+                Theme::Light => accent.dark1,
+                Theme::Dark => accent.light2,
+            },
+            item_container_selection_visual_pressed_background: match theme {
+                Theme::Light => accent.dark1,
+                Theme::Dark => accent.light2,
+            },
+            item_container_selected_inner_border_brush: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(255, 69, 69, 69),
+            },
+            item_container_checkbox_background_unchecked: match theme {
+                Theme::Light => Color::from_argb(201, 255, 255, 255),
+                Theme::Dark => Color::from_argb(179, 28, 28, 28),
+            },
+            item_container_disabled_opacity: 0.3,
+            item_container_checkbox_min_width: 0.0,
+            item_container_checkbox_margin: [4.0, -2.0, 4.0, -2.0],
+            item_container_selected_inner_margin: [2.0, 2.0, 2.0, 2.0],
+            item_container_selected_inner_thickness: [1.0, 1.0, 1.0, 1.0],
         }
     }
 }

@@ -606,13 +606,59 @@ Ported against: aa3207e6
 
 ## selector_bar.rs → `SelectorBar` and `SelectorBarItem`
 
-- Change: `SelectorBar` lays its items out in a row inside the kit's scroll viewport, and does itself what the template's `ItemsView` does for it: single selection on a click (Control with a click deselects the selected item), Left, Right, Home and End moving the focus with selection following it, and one Tab stop at the selected item.
-  Reason: framework — WinUI's `ItemsView` makes item containers from a collection through `ItemsRepeater`, while Waft builds the items as widgets from the application's list, as the kit's `TabView` and `TreeView` do with their lists.
-  Affect: `ItemsView` is not a kit control; only the parts `SelectorBar`'s spec relies on are reproduced.
+- Change: `SelectorBar`'s template holds the kit's `ItemsView` in a horizontal `StackLayout`, and each `SelectorBarItem` is an `ItemContainer` in the item style's template, so a click, the keys, the Tab stop and the single selection are `ItemsView`'s.
+  Reason: framework — the bar's selection stays the application's index, which the bar keeps in step with the view's selection both ways, as `UpdateItemsViewSelectionFromSelectedItem` and `UpdateSelectedItemFromItemsView` keep `SelectedItem` with the view's.
+  Affect: A click focuses the item when the press is released, as `ItemsView::ProcessInteraction` does, so Control with a click deselects the selected item only once the bar has the focus; a first Control click finds nothing selected when the focus arrives and `OnGotFocus` selects the item again.
 
 - Change: `SelectorBar` receives its selection from the application as an index, and `selection_changed` asks the application to change it.
   Reason: framework — Waft rebuilds a control's description from its owner's state instead of the control holding a `SelectedItem` property of its own.
   Affect: Callers set `selected` from `selection_changed`, and selecting an item from code raises no event, where setting WinUI's `SelectedItem` raises `SelectionChanged`.
+
+## item_container.rs → `ItemContainer`
+
+- Change: `ItemContainer` takes a press through Waft's tap recognizer, which shows the pressed state once a press has lasted `kPressTimeout` or at its release, gives the press up to a list that starts to scroll, and takes the primary button only.
+  Reason: framework — WinUI's container tracks the raw pointer and loses it to the scroll view's manipulation, while Waft's recognizers decide in the gesture arena whether a press is a tap or a drag, as the kit's buttons already do.
+  Affect: A quick click shows no pressed state, a right-button press neither presses nor selects the item, and dragging a list never selects the item the drag started on.
+
+- Change: `ItemContainer` takes a second tap within `K_DOUBLE_TAP_TIMEOUT` and `K_DOUBLE_TAP_SLOP` of the first as a double tap.
+  Reason: os — Windows' gesture recognizer raises `DoubleTapped` with the system's double-click time and area, which Waft has no host setting for.
+  Affect: The double tap that invokes an item in a selection mode follows Flutter's 300 ms and 100 pixels rather than the user's Windows setting.
+
+- Change: `ItemContainer`'s `can_user_select`, `can_user_invoke` and `multi_select_mode` are public enums whose `Auto` the view resolves where it reads them.
+  Reason: language — WinUI keeps them internal outside its prerelease builds and stores them as flags the view ors its own choice into.
+  Affect: An application can make one row unselectable or uninvokable, which the shipped WinUI does not let it do.
+
+## items_view/mod.rs → `ItemsView`
+
+- Change: `ItemsView` takes an item count and a builder that returns each item's `ItemContainer`, and lays a vertical `StackLayout` out as Waft's lazy `ListView` and a horizontal one as a row of every item.
+  Reason: framework — WinUI's `ItemsRepeater` makes containers from `ItemsSource` through `ItemTemplate` and virtualizes them with its layouts, while Waft's slivers build only the items in and near the view.
+  Affect: An application writes `ItemsView::new(count, |app, context, index| ItemContainer::new(row))`, a horizontal view builds all its items, and only `StackLayout` is available.
+
+- Change: `ItemsView` keeps its selection and current item in an `ItemsViewSelection` the application makes and passes in, or the view makes when given none, and reports selected items by index.
+  Reason: framework — WinUI exposes `Select`, `SelectAll`, `SelectedItems` and `CurrentItemIndex` as members of the control, while a Waft application reaches a control's state through a controller it holds, as with `ScrollController`.
+  Affect: An application calls `select_all`, `deselect_all`, `invert_selection` and `selected_indices` on the selection, and maps indices to its items itself.
+
+- Change: `ItemsView` brings an item that is not built into view by an offset estimated from the extents of the items measured so far, and focuses it once the list builds it.
+  Reason: framework — Waft's `SliverList` cannot build an arbitrary item on demand as `ItemsRepeater::GetOrCreateElement` does, and laying out far from the built items builds every item in between.
+  Affect: End, Home, Page Down and Page Up reach any item, but on a long list End builds every item before the last unless the application gives the view an `item_extent`, which makes the jump exact and cheap.
+
+- Change: `ItemsView` acts on each navigation key as it arrives, where WinUI queues the keys that arrive while a bring-into-view is settling and cancels opposite ones.
+  Reason: framework — the queue exists for `ScrollView`'s asynchronous bring-into-view, and the port's scrolling jumps within the frame.
+  Affect: Held Page Down keys each move a page from where the last one left the view.
+
+- Change: `ItemsView` makes Tab stop at the current item, else the selected item in `Single` mode, else the first item built.
+  Reason: framework — WinUI realizes the current item when Tab enters the repeater, and the port cannot build an item the list has scrolled far away from.
+  Affect: When the current item has been scrolled out of the built range, Tab passes the list until an arrow key or a click makes another item current.
+
+- Change: `ItemsView`'s `item_extent` gives every item of a vertical stack the same extent.
+  Reason: framework — it is Flutter's `ListView.itemExtent`, which lets the sliver place an item without building those before it, and WinUI's layouts have no counterpart.
+  Affect: An application whose rows share a height sets it, and the view lays every row out at that height.
+
+## items_view/selection_model.rs → `SelectionModel`
+
+- Change: `SelectionModel` holds one flat list's selection, without the tree of `IndexPath`s, the source collection or its change notifications.
+  Reason: framework — `ItemsView` asks only for a flat selection (`SelectAllFlat`), and Waft's list builder has no collection to observe.
+  Affect: Inserting or removing items does not shift the selection; an application that does so adjusts the selection itself, and items past a shortened count are dropped.
 
 ## page.rs → `Page`
 
@@ -679,3 +725,6 @@ Ported against: aa3207e6
 - `Page`'s `TopAppBar` and `BottomAppBar`, whose closed height WinUI also keeps the content clear of, remain deferred. Trigger: The kit ports `AppBar`.
 - `Page`'s navigation members, `Frame`, `NavigationCacheMode` and `OnNavigatedTo`, `OnNavigatedFrom` and `OnNavigatingFrom`, remain deferred. Trigger: The kit ports `Frame`.
 - `Page` giving the focus to its first focusable element when it loads with nothing focused, with the soft keyboard held back for that focus (`InitialFocusSIPSuspender`), remains deferred. Trigger: Waft's text input can be focused without showing the soft keyboard.
+- `ItemsView`'s other layouts, `LinedFlowLayout` and `UniformGridLayout`, its `ItemTransitionProvider` and its `VerticalScrollController` remain deferred. Trigger: An application needs a grid or flow of items, or animated insertion and removal.
+- `ItemsView`'s and `ItemContainer`'s accessibility, their automation peers and selection patterns, remains deferred. Trigger: The kit gains accessibility support.
+- `ItemsView`'s gamepad and XY focus navigation remains deferred. Trigger: A host supplies gamepad or remote-control input.

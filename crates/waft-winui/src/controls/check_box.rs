@@ -518,11 +518,11 @@ impl State for CheckBoxKeysState {
     }
 }
 
-/// `CheckGlyph`: the `AnimatedIcon` showing `AnimatedAcceptVisualSource` at the state's marker, playing the transition segment when the check state changes.
+/// `CheckGlyph`: the `AnimatedIcon` showing `AnimatedAcceptVisualSource` at the state's marker, playing the transition segment when the check state changes. `ItemContainer`'s selection check box shows the same glyph.
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct CheckGlyph {
-    check: CheckState,
-    color: Color,
+pub(crate) struct CheckGlyph {
+    pub(crate) check: CheckState,
+    pub(crate) color: Color,
 }
 
 /// Which trim the playing segment animates.
@@ -536,7 +536,7 @@ enum Segment {
     Erase,
 }
 
-struct CheckGlyphState {
+pub(crate) struct CheckGlyphState {
     state: StateData<CheckGlyph>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     controller: Option<Handle<AnimationController>>,
