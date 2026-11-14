@@ -18,6 +18,8 @@ mod cue;
 mod drag_drop;
 mod file_dialogs;
 mod fonts;
+mod fragment_program;
+mod fragment_shader;
 mod geometry;
 mod hardware_buffers;
 mod image;
@@ -37,6 +39,7 @@ mod pointer_data_packet_converter;
 mod pointer_report;
 mod restoration;
 mod scene;
+mod snapshot_delegate;
 mod system_context_menu;
 #[cfg(feature = "test-support")]
 pub mod test_support;
@@ -72,6 +75,11 @@ pub use file_dialogs::{
 pub use fonts::{
     FontCollection, FontDemand, FontId, FontManager, FontSource, SystemFontSource, Typeface,
     default_font_families, set_default_font_manager,
+};
+pub use fragment_program::{FragmentProgram, PreparedPrograms, UniformError};
+pub use fragment_shader::{
+    FragmentShader, ImageSamplerSlot, UniformArray, UniformFloatSlot, UniformMat2Slot,
+    UniformMat3Slot, UniformMat4Slot, UniformVec2Slot, UniformVec3Slot, UniformVec4Slot,
 };
 pub use geometry::*;
 pub use hardware_buffers::{HardwareBuffer, HardwareBufferAllocator, HardwareBufferUsage};
@@ -121,6 +129,7 @@ pub use scene::{
     ContainerLayer, DisplayListLayer, Effect, EmbeddedLayer, EngineLayer, Layer, Mutator, Part,
     Placement, Scene, SceneBuilder, Slices, VideoLayer, slices,
 };
+pub use snapshot_delegate::SnapshotDelegate;
 pub use system_context_menu::SystemContextMenuItem;
 pub use text::*;
 pub use text_editing::*;

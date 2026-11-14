@@ -17,9 +17,9 @@ use std::sync::Arc;
 
 use waft_animation::AnyAnimation;
 use waft_embedder::{
-    BlendMode, CanvasShadow, Clip, Color, FillRule, ImageFilter, Matrix4, Offset, Paint,
-    PaintStyle, Path, PathBuilder, RRect, RSuperellipse, Rect, Size, Stroke, TextBaseline,
-    rrect_radii_elliptical, rsuperellipse_radii_elliptical, valo, valo::Point,
+    BlendMode, Clip, Color, FillRule, ImageFilter, Matrix4, Offset, Paint, PaintStyle, Path,
+    PathBuilder, RRect, RSuperellipse, Rect, Size, Stroke, TextBaseline, rrect_radii_elliptical,
+    rsuperellipse_radii_elliptical, valo, valo::Point,
 };
 use waft_foundation::{App, Handle, Listenable, Listener};
 use waft_gestures::{
@@ -5375,10 +5375,11 @@ impl RenderObject for RenderPhysicalModel {
             let transparent_occluder = color.alpha() != 0xFF;
             canvas.draw_shadow(
                 &offset_rrect_as_path.build(),
-                shadow_color,
-                elevation,
+                FillRule::NonZero,
+                shadow_color.into(),
+                elevation as f32,
                 transparent_occluder,
-                device_pixel_ratio,
+                device_pixel_ratio as f32,
             );
         }
         let clip_behavior = self.clip_behavior(app);
@@ -5681,10 +5682,11 @@ impl RenderObject for RenderPhysicalShape {
             let transparent_occluder = color.alpha() != 0xFF;
             canvas.draw_shadow(
                 &offset_path,
-                shadow_color,
-                elevation,
+                FillRule::NonZero,
+                shadow_color.into(),
+                elevation as f32,
                 transparent_occluder,
-                device_pixel_ratio,
+                device_pixel_ratio as f32,
             );
         }
         let clip_behavior = self.clip_behavior(app);
@@ -9595,11 +9597,11 @@ mod tests {
         assert!(clipper.should_reclip(&other));
     }
 
-    /// The fills a repaint boundary's recording blurs: `drawShadow`'s draws.
+    /// The shadows a repaint boundary's recording draws: `drawShadow`'s draws.
     fn shadow_count(app: &App, boundary: AnyRenderObject) -> usize {
         picture_ops(app, boundary)
             .iter()
-            .filter(|op| matches!(op, Op::DrawPath { paint, .. } if paint.mask_blur.is_some()))
+            .filter(|op| matches!(op, Op::DrawShadow { .. }))
             .count()
     }
 
@@ -9749,7 +9751,7 @@ mod tests {
         let ops = picture_ops(&app, root.as_object());
         let shadow = ops
             .iter()
-            .position(|op| matches!(op, Op::DrawPath { paint, .. } if paint.mask_blur.is_some()))
+            .position(|op| matches!(op, Op::DrawShadow { .. }))
             .expect("a shadow at elevation 4");
         let fill = ops
             .iter()

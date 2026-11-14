@@ -8,8 +8,9 @@ use std::time::Duration;
 use waft_embedder::{
     Brightness, Clipboard, Dispatcher, FileDialogs, ImageCodecFuture, Matrix4,
     NotificationActivation, Notifications, Offset, Opener, Platform, Rect, Screen, Screens, Size,
-    SystemMouseCursorKind, TargetPlatform, TextEditingValue, TextInputConfiguration, TextInputHost,
-    View, ViewFocusDirection, ViewFocusState, ViewHost, ViewId, ViewMetrics, ViewRef,
+    SnapshotDelegate, SystemMouseCursorKind, TargetPlatform, TextEditingValue,
+    TextInputConfiguration, TextInputHost, View, ViewFocusDirection, ViewFocusState, ViewHost,
+    ViewId, ViewMetrics, ViewRef,
 };
 use web_sys::HtmlCanvasElement;
 use web_time::Instant;
@@ -45,6 +46,8 @@ pub struct WebPlatform {
     /// Shared with the font source, which is created before the host installs the callback.
     on_schedule: OnSchedule,
     images: RefCell<Option<valo::ImageContext>>,
+    /// What draws the app's pictures into images on the images' device, once the page has one.
+    snapshots: RefCell<Option<SnapshotDelegate>>,
     /// The browser's notifications, where the page has them (`notifications.rs`).
     notifications: Option<BrowserNotifications>,
 }
@@ -62,6 +65,7 @@ impl WebPlatform {
             screen: RefCell::new(screen),
             on_schedule: Rc::new(RefCell::new(None)),
             images: RefCell::new(None),
+            snapshots: RefCell::new(None),
             notifications: BrowserNotifications::new(),
         };
         dispatcher::install(
@@ -81,6 +85,7 @@ impl WebPlatform {
     }
 
     pub fn set_images(&self, images: valo::ImageContext) {
+        *self.snapshots.borrow_mut() = Some(SnapshotDelegate::new(images.clone()));
         *self.images.borrow_mut() = Some(images);
     }
 
@@ -241,6 +246,21 @@ impl Platform for WebPlatform {
             images,
             Rc::clone(&self.frame_requested),
             Rc::clone(&self.on_schedule),
+        )
+    }
+
+    /// The picture drawn on the canvas's device; `None` before the page has one.
+    fn picture_to_image_sync(
+        &self,
+        picture: &waft_embedder::Picture,
+        width: u32,
+        height: u32,
+    ) -> Option<waft_embedder::Image> {
+        let snapshots = self.snapshots.borrow();
+        Some(
+            snapshots
+                .as_ref()?
+                .make_raster_snapshot_sync(picture, width, height),
         )
     }
 }

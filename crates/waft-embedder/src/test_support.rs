@@ -86,6 +86,16 @@ pub fn drawn_pixels(picture: Picture, size: [u32; 2]) -> Vec<u8> {
         .into_bytes()
 }
 
+/// `picture` drawn into an image of `size` on the test device, as a host's
+/// `Platform::picture_to_image_sync` draws it.
+///
+/// # Panics
+///
+/// Panics if no GPU adapter is available.
+pub fn picture_to_image(picture: &Picture, size: [u32; 2]) -> Image {
+    gpu().display_list_to_image(picture, size)
+}
+
 fn gpu() -> MutexGuard<'static, Context> {
     GPU.get_or_init(|| Mutex::new(headless_context()))
         .lock()

@@ -9,10 +9,10 @@ use waft_embedder::{
     AppExit, AppLifecycleState, Brightness, Cameras, CaptionSettings, Clipboard, CompositionLayer,
     Compositor, Dispatcher, DockMenu, FileDialogs, FontSource, Haptics, HardwareBuffer,
     HardwareBufferAllocator, Image, ImageCodecFuture, ImageDecodeError, Instant, MediaAssets,
-    MenuBar, Notifications, Opener, Platform, Players, PointerReport, PopupMenus, RequestId,
-    Restoration, SystemChrome, SystemContextMenu, TargetPlatform, TextServices, TrayIcons,
-    VideoFrame, VideoFrameReaders, View, ViewEmbedder, ViewError, ViewFocusEvent, ViewHost, ViewId,
-    ViewMetrics, ViewRef, WindowConfig,
+    MenuBar, Notifications, Opener, Picture, Platform, Players, PointerReport, PopupMenus,
+    RequestId, Restoration, SystemChrome, SystemContextMenu, TargetPlatform, TextServices,
+    TrayIcons, VideoFrame, VideoFrameReaders, View, ViewEmbedder, ViewError, ViewFocusEvent,
+    ViewHost, ViewId, ViewMetrics, ViewRef, WindowConfig,
 };
 
 use waft_embedder::image_codecs::ImageCodecs;
@@ -24,6 +24,7 @@ use crate::{TestView, TestWindows};
 type FontSourceMaker = Rc<dyn Fn() -> Box<dyn FontSource>>;
 type ImageCodecOpener = Rc<dyn Fn(Arc<[u8]>) -> ImageCodecFuture>;
 type PixelImporter = Rc<dyn Fn(valo::PixelBuffer) -> Option<Image>>;
+type PictureRasterizer = Rc<dyn Fn(&Picture, u32, u32) -> Option<Image>>;
 type FrameImporter = Rc<dyn Fn(&dyn VideoFrame) -> Option<Image>>;
 type BufferImporter = Rc<dyn Fn(&dyn HardwareBuffer) -> Option<Image>>;
 
@@ -57,6 +58,7 @@ pub struct TestPlatform {
     font_source: Option<FontSourceMaker>,
     image_codec: Option<ImageCodecOpener>,
     pixel_import: Option<PixelImporter>,
+    picture_to_image: Option<PictureRasterizer>,
     frame_import: Option<FrameImporter>,
     buffer_import: Option<BufferImporter>,
     windows: Option<Rc<TestWindows>>,
@@ -102,6 +104,7 @@ impl TestPlatform {
             font_source: None,
             image_codec: None,
             pixel_import: None,
+            picture_to_image: None,
             frame_import: None,
             buffer_import: None,
             windows: None,
@@ -222,6 +225,16 @@ impl TestPlatform {
         import: impl Fn(valo::PixelBuffer) -> Option<Image> + 'static,
     ) -> TestPlatform {
         self.pixel_import = Some(Rc::new(import));
+        self
+    }
+
+    /// The renderer behind `picture_to_image_sync`; none unless set, so no picture is drawn
+    /// into an image.
+    pub fn with_picture_to_image(
+        mut self,
+        draw: impl Fn(&Picture, u32, u32) -> Option<Image> + 'static,
+    ) -> TestPlatform {
+        self.picture_to_image = Some(Rc::new(draw));
         self
     }
 
@@ -501,6 +514,12 @@ impl Platform for TestPlatform {
 
     fn import_pixels(&self, pixels: valo::PixelBuffer) -> Option<Image> {
         self.pixel_import.as_ref().and_then(|import| import(pixels))
+    }
+
+    fn picture_to_image_sync(&self, picture: &Picture, width: u32, height: u32) -> Option<Image> {
+        self.picture_to_image
+            .as_ref()
+            .and_then(|draw| draw(picture, width, height))
     }
 
     fn import_video_frame(&self, frame: &dyn VideoFrame) -> Option<Image> {

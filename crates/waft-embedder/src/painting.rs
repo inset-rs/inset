@@ -39,12 +39,101 @@ fn flatten_into(picture: &Picture, ops: &mut Vec<Op>) {
 
 pub use valo::{
     Backdrop, BlendMode, BlurStyle, ClipOp, FillRule, Image, MaskBlur, Paint, PaintStyle, Path,
-    PathBuilder, Stroke,
+    PathBuilder, Shader, Stroke,
 };
 
 /// The full valo API for hosts and for recording that needs a type the
 /// aliases do not cover (`Op`, `Context`, `Surface`).
 pub use valo;
+
+/// Quality levels for image sampling in [`ImageFilter`] and [`Shader`] objects that sample
+/// images and for [`Canvas`] operations that render images.
+///
+/// When scaling up typically the quality is lowest at [`none`](Self::None), higher at
+/// [`low`](Self::Low) and [`medium`](Self::Medium), and for very large scale factors (over 10x)
+/// the highest at [`high`](Self::High).
+///
+/// When scaling down, [`medium`](Self::Medium) provides the best quality especially when scaling
+/// an image to less than half its size or for animating the scale factor between such
+/// reductions. Otherwise, [`low`](Self::Low) and [`high`](Self::High) provide similar effects for
+/// reductions of between 50% and 100% but the image may lose detail and have dropouts below 50%.
+///
+/// To get high quality when scaling images up and down, or when the scale is unknown,
+/// [`medium`](Self::Medium) is typically a good balanced choice.
+///
+/// See also:
+///
+///  * [`FragmentShader::set_image_sampler`](crate::FragmentShader::set_image_sampler).
+///  * [`ImageFilter::shader`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FilterQuality {
+    /// The fastest filtering method, albeit also the lowest quality.
+    ///
+    /// This value results in a "Nearest Neighbor" algorithm which just repeats or eliminates
+    /// pixels as an image is scaled up or down.
+    None,
+
+    /// Better quality than [`none`](Self::None), faster than [`medium`](Self::Medium).
+    ///
+    /// This value results in a "Bilinear" algorithm which smoothly interpolates between pixels in
+    /// an image.
+    Low,
+
+    /// The best all around filtering method that is only worse than [`high`](Self::High) at
+    /// extremely large scale factors.
+    ///
+    /// This value improves upon the "Bilinear" algorithm specified by [`low`](Self::Low) by
+    /// utilizing a Mipmap that pre-computes high quality lower resolutions of the image at half
+    /// (and quarter and eighth, etc.) sizes and then blends between those to prevent loss of
+    /// detail at small scale sizes.
+    Medium,
+
+    /// Best possible quality when scaling up images by scale factors larger than 5-10x.
+    ///
+    /// When images are scaled down, this can be worse than [`medium`](Self::Medium) for scales
+    /// smaller than 0.5x, or when animating the scale factor.
+    ///
+    /// This option is also the slowest.
+    ///
+    /// This value results in a standard "Bicubic" algorithm which uses a 3rd order equation to
+    /// smooth the abrupt transitions between pixels while preserving some of the sense of an edge
+    /// and avoiding sharp peaks in the result.
+    High,
+}
+
+impl FilterQuality {
+    /// How valo samples an image at this quality: the engine's `ImageFilter::SamplingFromIndex`
+    /// as Impeller's `ToSamplerDescriptor` turns it into a sampler, clamped at the edges as
+    /// `ReusableFragmentShader::SetImageSampler` clamps them. Impeller samples
+    /// [`High`](Self::High), the engine's cubic, as it samples [`Medium`](Self::Medium).
+    pub fn to_valo(self) -> valo::Sampling {
+        let (filter, mipmap) = match self {
+            FilterQuality::None => (valo::Filter::Nearest, valo::MipmapMode::None),
+            FilterQuality::Low => (valo::Filter::Linear, valo::MipmapMode::None),
+            FilterQuality::Medium | FilterQuality::High => {
+                (valo::Filter::Linear, valo::MipmapMode::Linear)
+            }
+        };
+        valo::Sampling {
+            filter,
+            mipmap,
+            tile_x: valo::TileMode::Clamp,
+            tile_y: valo::TileMode::Clamp,
+        }
+    }
+}
+
+impl std::fmt::Display for FilterQuality {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            FilterQuality::None => "none",
+            FilterQuality::Low => "low",
+            FilterQuality::Medium => "medium",
+            FilterQuality::High => "high",
+        };
+        write!(f, "FilterQuality.{name}")
+    }
+}
 
 /// A description of a color filter to apply when drawing a shape or compositing
 /// a layer with a particular [`Paint`]. A color filter is a function that takes
@@ -248,6 +337,16 @@ pub enum ImageFilter {
         /// The filter that receives the original input.
         inner: Arc<ImageFilter>,
     },
+
+    /// A [`FragmentShader`](crate::FragmentShader)'s program run over the input; Dart's
+    /// `_FragmentShaderImageFilter`, made by [`ImageFilter::shader`].
+    Shader {
+        /// The shader's uniforms and images as they were when the filter was made, its first
+        /// image left for the input, which is sampled at `filter_quality`.
+        shader: valo::RuntimeShader,
+        /// The quality the input is sampled at.
+        filter_quality: FilterQuality,
+    },
 }
 
 impl ImageFilter {
@@ -279,11 +378,83 @@ impl ImageFilter {
     /// Creates a single [`ImageFilter`] that when applied, has the same effect as
     /// subsequently applying `inner` and `outer`, i.e.,
     /// `result = outer(inner(source))`.
+    #[cfg_attr(
+        target_arch = "wasm32",
+        expect(
+            clippy::arc_with_non_send_sync,
+            reason = "a shader filter's images are the web's GPU objects, which stay on their \
+                      thread there; a filter crosses threads with its picture elsewhere"
+        )
+    )]
     pub fn compose(outer: ImageFilter, inner: ImageFilter) -> ImageFilter {
         ImageFilter::Compose {
             outer: Arc::new(outer),
             inner: Arc::new(inner),
         }
+    }
+
+    /// Creates an image filter from a [`FragmentShader`](crate::FragmentShader).
+    ///
+    /// The fragment shader provided here has additional requirements to be used by the engine
+    /// for filtering. The first uniform value must be a `vec2`, this will be set by the engine to
+    /// the size of the bound texture. There must also be at least one image, the first of which
+    /// will be set by the engine to contain the filter input.
+    ///
+    /// The `filter_quality` argument sets the quality level used to sample the filter input;
+    /// Flutter's default is [`FilterQuality::None`].
+    ///
+    /// For example, the following is a valid fragment shader that can be used with this API.
+    /// Note that the uniform names are not required to have any particular value.
+    ///
+    /// ```wgsl
+    /// struct Uniforms { u_size: vec2<f32>, u_time: f32 }
+    /// @group(2) @binding(0) var<uniform> u: Uniforms;
+    /// @group(1) @binding(0) var u_texture_input: texture_2d<f32>;
+    /// @group(1) @binding(1) var u_texture_input_sampler: sampler;
+    ///
+    /// fn shade(position: vec2<f32>) -> vec4<f32> {
+    ///     let uv = position / u.u_size;
+    ///     return textureSampleLevel(u_texture_input, u_texture_input_sampler, uv, 0.0) * u.u_time;
+    /// }
+    /// ```
+    ///
+    /// The uniforms and images are those `shader` has now; setting them afterwards changes the
+    /// filter made next, not this one.
+    ///
+    /// # Panics
+    ///
+    /// Where the shader's first uniform is not a `vec2` or it has no image, as Dart throws a
+    /// `StateError`.
+    pub fn shader(shader: &crate::FragmentShader, filter_quality: FilterQuality) -> ImageFilter {
+        let invalid_floats = shader.float_count() < 2;
+        let invalid_sampler = !shader.validate_image_filter();
+        if invalid_floats || invalid_sampler {
+            let mut buffer = String::from(
+                "ImageFilter.shader requires that the first uniform is a vec2 and at least one \
+                 sampler uniform is present.\n",
+            );
+            if invalid_floats {
+                buffer.push_str("The shader has fewer than two float uniforms.\n");
+            }
+            if invalid_sampler {
+                buffer.push_str("The shader is missing a sampler uniform.\n");
+            }
+            panic!("{buffer}");
+        }
+        let shader = shader.as_image_filter(filter_quality.to_valo());
+        if let Err(error) = valo::ImageFilter::runtime(shader.clone()) {
+            panic!("ImageFilter.shader requires that the first uniform is a vec2: {error}");
+        }
+        ImageFilter::Shader {
+            shader,
+            filter_quality,
+        }
+    }
+
+    /// Whether [`ImageFilter::shader`] is supported on the current backend: always, as valo
+    /// runs every shader the way Impeller does.
+    pub const fn is_shader_filter_supported() -> bool {
+        true
     }
 
     /// Dart's `debugShortDescription`.
@@ -306,6 +477,7 @@ impl ImageFilter {
                 inner.debug_short_description(),
                 outer.debug_short_description()
             ),
+            ImageFilter::Shader { .. } => String::from("shader"),
         }
     }
 }
@@ -319,6 +491,14 @@ impl std::fmt::Display for ImageFilter {
                 f,
                 "ImageFilter.compose(source -> {} -> result)",
                 self.debug_short_description()
+            ),
+            ImageFilter::Shader {
+                shader,
+                filter_quality,
+            } => write!(
+                f,
+                "ImageFilter.shader(Shader#{}, {filter_quality})",
+                shader.effect.id()
             ),
         }
     }
@@ -345,106 +525,8 @@ impl ImageFilter {
             ImageFilter::Compose { outer, inner } => {
                 valo::ImageFilter::compose(outer.to_valo(), inner.to_valo())
             }
+            ImageFilter::Shader { shader, .. } => valo::ImageFilter::Runtime(shader.clone()),
         }
-    }
-}
-
-/// Shadow drawing on a [`Canvas`] (Dart's `Canvas.drawShadow`), drawn as Impeller's
-/// `DlDispatcherBase::drawShadow` draws it: the path filled with a tonal colour, mask-blurred
-/// and moved down by the elevation.
-pub trait CanvasShadow {
-    /// Draws a shadow for a [`Path`] representing the given material elevation.
-    ///
-    /// The `transparent_occluder` argument should be true if the occluding object
-    /// is not opaque.
-    ///
-    /// `device_pixel_ratio` is the pixel ratio of the view the canvas is painted into, which
-    /// the engine reads from the implicit view's metrics.
-    fn draw_shadow(
-        &mut self,
-        path: &Arc<Path>,
-        color: crate::Color,
-        elevation: f64,
-        transparent_occluder: bool,
-        device_pixel_ratio: f64,
-    );
-}
-
-impl CanvasShadow for Canvas {
-    fn draw_shadow(
-        &mut self,
-        path: &Arc<Path>,
-        color: crate::Color,
-        elevation: f64,
-        transparent_occluder: bool,
-        device_pixel_ratio: f64,
-    ) {
-        let _ = transparent_occluder;
-        let mut spot_color: valo::Color = color.into();
-        spot_color.a *= 0.25;
-        spot_color = tonal_spot_color(spot_color);
-
-        let light_position_y: f32 = -1.0;
-        let occluder_z = device_pixel_ratio as f32 * elevation as f32;
-
-        // Impeller's `800 / 600` is an integer division: the light radius over its height is 1.
-        const K_LIGHT_RADIUS: f32 = (800 / 600) as f32;
-
-        // Impeller divides by the canvas transform's vertical scale, which at the root of a
-        // view is the device pixel ratio.
-        let paint = Paint {
-            style: PaintStyle::Fill,
-            color: spot_color,
-            mask_blur: Some(MaskBlur::new(radius_to_sigma(
-                K_LIGHT_RADIUS * occluder_z / device_pixel_ratio as f32,
-            ))),
-            ..Paint::default()
-        };
-
-        self.save();
-        self.translate(0.0, -occluder_z * light_position_y);
-        self.draw_path(path, FillRule::NonZero, &paint);
-        self.restore();
-    }
-}
-
-/// Impeller's `Radius` to `Sigma` conversion (`impeller/geometry/sigma.cc`), which its
-/// `MaskBlurDescriptor` applies to the shadow's radius; valo's `MaskBlur` takes the sigma.
-fn radius_to_sigma(radius: f32) -> f32 {
-    // Impeller's `kKernelRadiusPerSigma`, √3.
-    const K_KERNEL_RADIUS_PER_SIGMA: f32 = 1.732_050_8;
-    if radius > 0.0 {
-        radius / K_KERNEL_RADIUS_PER_SIGMA + 0.5
-    } else {
-        0.0
-    }
-}
-
-/// The spot colour of a shadow, ported from `SkShadowUtils::ComputeTonalColors` as Impeller's
-/// `drawShadow` ports it.
-fn tonal_spot_color(spot_color: valo::Color) -> valo::Color {
-    let max = spot_color.r.max(spot_color.g).max(spot_color.b);
-    let min = spot_color.r.min(spot_color.g).min(spot_color.b);
-    let luminance = (min + max) * 0.5;
-
-    let alpha_adjust = (2.6 + (-2.66667 + 1.06667 * spot_color.a) * spot_color.a) * spot_color.a;
-    let mut color_alpha = (3.544762 + (-4.891428 + 2.3466 * luminance) * luminance) * luminance;
-    color_alpha = (alpha_adjust * color_alpha).clamp(0.0, 1.0);
-
-    let greyscale_alpha = (spot_color.a * (1.0 - 0.4 * luminance)).clamp(0.0, 1.0);
-
-    let color_scale = color_alpha * (1.0 - greyscale_alpha);
-    let tonal_alpha = color_scale + greyscale_alpha;
-    let unpremul_scale = if tonal_alpha != 0.0 {
-        color_scale / tonal_alpha
-    } else {
-        0.0
-    };
-    valo::Color {
-        r: unpremul_scale * spot_color.r,
-        g: unpremul_scale * spot_color.g,
-        b: unpremul_scale * spot_color.b,
-        a: tonal_alpha,
     }
 }
 
@@ -452,42 +534,6 @@ fn tonal_spot_color(spot_color: valo::Color) -> valo::Color {
 mod tests {
     use super::{ColorFilter, ImageFilter, valo};
     use crate::{BlendMode, Color, Rect};
-
-    #[test]
-    fn a_shadow_fills_the_path_with_a_tonal_colour_blurred_and_moved_down_by_the_elevation() {
-        use super::{Canvas, CanvasShadow, PathBuilder};
-        use std::sync::Arc;
-
-        let mut builder = PathBuilder::new();
-        builder.rect(valo::Rect::new(0.0, 0.0, 10.0, 10.0));
-        let path = Arc::new(builder.build());
-        let mut canvas = Canvas::new();
-        canvas.draw_shadow(&path, Color::new(0xFF000000), 4.0, false, 2.0);
-        let picture = canvas.build();
-
-        let ops = picture.ops();
-        let translation = ops
-            .iter()
-            .find_map(|op| match op {
-                valo::Op::Transform(matrix) => Some(*matrix),
-                _ => None,
-            })
-            .expect("the shadow is moved");
-        assert_eq!(translation, valo::Matrix::translation(0.0, 8.0));
-        let paint = ops
-            .iter()
-            .find_map(|op| match op {
-                valo::Op::DrawPath { paint, .. } => Some(paint.clone()),
-                _ => None,
-            })
-            .expect("the shadow fills its path");
-        // A radius of the elevation, 4, as a sigma: 4 / √3 + 0.5.
-        let sigma = paint.mask_blur.expect("the shadow is blurred").sigma;
-        assert!((sigma - 2.809_401).abs() < 1e-5, "{sigma}");
-        // Black at a quarter alpha: luminance 0, so only the greyscale alpha remains.
-        assert_eq!(paint.color.r, 0.0);
-        assert!((paint.color.a - 0.25).abs() < 1e-6, "{:?}", paint.color);
-    }
 
     #[test]
     fn a_saturation_of_one_is_the_identity_matrix() {

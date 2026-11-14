@@ -103,6 +103,10 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - `View::present`, `Scene`, `slices`
 - Keep the last scene, the frame's layer tree, and present it again as soon as the system can take it after a refused frame, and on a surface the system gives anew: a frame presents only the views that changed. Draw what `slices` makes of the tree, or walk the tree yourself where the system needs a walk of its own.
 
+**Fragment programs**
+- `FragmentProgram`, `PreparedPrograms`, `valo::Context::prepare_runtime_effect`
+- Keep a `PreparedPrograms` beside each renderer, and before each draw prepare the programs made since its last on that renderer, for the format it draws into, so a program made before its first frame does not stall it.
+
 **Resizing**
 - `EmbedderClient::view_metrics_changed`, then `EmbedderClient::frame`
 - Draw the new size's frame inside the system's resize callback, so the size and the picture reach the screen in one transaction.
@@ -204,8 +208,8 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - Update what `Platform` answers before calling its change hook, and list the locales most preferred first.
 
 **Fonts and images**
-- `Platform::font_source`, `open_image_codec`, `import_pixels`, `import_video_frame`, `EmbedderClient::system_fonts_changed`
-- Call `system_fonts_changed` after registering faces that arrive late, and answer every decode, off the main thread, with its frames or an error; import a frame the app holds as an image with no copy, its hardware buffer imported as a texture on the device your images are drawn with, and `None` where that device cannot take the frame's memory.
+- `Platform::font_source`, `open_image_codec`, `import_pixels`, `import_video_frame`, `picture_to_image_sync`, `SnapshotDelegate`, `EmbedderClient::system_fonts_changed`
+- Call `system_fonts_changed` after registering faces that arrive late, and answer every decode, off the main thread, with its frames or an error; import a frame the app holds as an image with no copy, its hardware buffer imported as a texture on the device your images are drawn with, and `None` where that device cannot take the frame's memory; draw a picture the app asks for into an image on that device at once, with a `SnapshotDelegate` on your image store.
 
 **System chrome and haptics**
 - `Platform::system_chrome`, `haptics`

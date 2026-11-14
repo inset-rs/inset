@@ -120,7 +120,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: a fresh `Rc` around an equal clipper counts as a different clipper and re-subscribes; `old_clipper` is read with `as_any().downcast_ref()`.
 
 - Change: `RenderTransform` has no `filterQuality`.
-  Reason: platform — the filtered path is an `ImageFilterLayer` over `ImageFilter.matrix`, which neither the embedder's `Paint` nor `SceneBuilder` has.
+  Reason: platform — the filtered path is an `ImageFilterLayer` over `ImageFilter.matrix`, which the embedder's `ImageFilter` lacks, as valo has no matrix filter.
   Affect: a transform always paints through `push_transform`, or through the child's paint offset when the matrix is a translation.
 
 - Change: `RenderColoredBox` does not pass `is_anti_alias` to the canvas.
@@ -245,7 +245,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `RenderImage`'s `centerSlice`. Trigger: an image drawn as a resizable frame.
 - `RenderImage`'s `filterQuality` and `isAntiAlias`. Trigger: a caller that needs to choose how an image is sampled.
 - `RenderImage`'s semantics label. Trigger: accessibility.
-- `PlatformViewLayer`, `PerformanceOverlayLayer`, `ClipRSuperellipseLayer`, `ColorFilterLayer`, `ImageFilterLayer`, `ShaderMaskLayer`, `OffsetLayer.toImage` / `toImageSync`, `PaintingContext.pushColorFilter`. Trigger: a platform view, a superellipse clip, a colour/image/shader filter widget, `RepaintBoundary.toImage`.
+- `PlatformViewLayer`, `PerformanceOverlayLayer`, `ClipRSuperellipseLayer`, `ColorFilterLayer`, `ShaderMaskLayer`, `OffsetLayer.toImage` / `toImageSync`, `PaintingContext.pushColorFilter`. Trigger: a platform view, a superellipse clip, a colour or shader-mask widget, `RepaintBoundary.toImage`.
 - `PaintingContext.addCompositionCallback`. Trigger: a caller that needs composition callbacks on the painting context (layers already have them).
 - Debug paint overlays on boxes, slivers and the viewport, and the overflow indicators of `RenderFlex` and `RenderConstraintsTransformBox` (an overflowing box clips but paints no striped hint); with them, `paintsChild` as a virtual. Trigger: inspector.
 - Semantics on `PipelineOwner`, `RenderObject`, `RenderCustomPaint`, the ignore- and absorb-pointer boxes, `RenderOffstage`, the opacity boxes' `alwaysIncludeSemantics`, `RenderTable`, the viewport and the slivers. Trigger: a11y; do not stub.
@@ -258,6 +258,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `SliverConstraints.debugAssertIsValid` extra numeric checks. Trigger: a caller that relies on those messages.
 - `RenderIgnoreBaseline`, which reports no baseline for a child that has one, so that a baseline-aligned row puts that child at the top. Trigger: a child a baseline-aligned `Row` should not align by its baseline.
 - `RenderBoxBase` sits in `proxy_box.rs` beside its callers instead of next to `RenderBox`. Trigger: the next edit of `box.rs`.
-- `RenderTransform.filterQuality` and Dart's `ImageFilterLayer` path. Trigger: the first `Transform(filterQuality:)`, with `PaintingContext.pushColorFilter`.
+- `RenderTransform.filterQuality` and Dart's `ImageFilterLayer` path, which waits on `ImageFilter.matrix`. Trigger: the first `Transform(filterQuality:)`, with `PaintingContext.pushColorFilter`.
 - proxy_box.rs: Dart's `canvas.drawPaint` inside the physical models' `Clip::AntiAliasWithSaveLayer` clip; the clip's bounds are filled meanwhile, which covers what the clip lets through. Trigger: a paint-everything draw in Valo (Impeller's `DrawPaint`).
 - proxy_box.rs: the physical models' diagnostics. Trigger: diagnostics.

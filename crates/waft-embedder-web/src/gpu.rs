@@ -5,11 +5,14 @@
 //! an advanced blend or a backdrop filter copies nothing.
 
 use valo::{Color, DisplayList};
+use waft_embedder::PreparedPrograms;
 use web_sys::HtmlCanvasElement;
 
 pub struct Gpu {
     pub surface: valo::Surface,
     pub context: valo::Context,
+    /// The fragment programs the context has prepared for the canvas's format.
+    prepared_programs: PreparedPrograms,
 }
 
 impl Gpu {
@@ -39,7 +42,11 @@ impl Gpu {
         let surface = valo::Surface::from_wgpu_surface(wgpu_surface, &adapter, &device, size);
         let mut context = valo::Context::new(device, queue);
         context.set_hide_missing_glyphs(true);
-        Gpu { surface, context }
+        Gpu {
+            surface,
+            context,
+            prepared_programs: PreparedPrograms::new(),
+        }
     }
 
     /// Configures the surface for `size` where it has another: configuring the canvas's context
@@ -51,7 +58,12 @@ impl Gpu {
         self.surface.resize(size);
     }
 
+    /// Draws `picture` on the canvas, the fragment programs made since the last draw prepared
+    /// first.
     pub fn present(&mut self, picture: &DisplayList) {
+        let format = self.surface.format();
+        self.prepared_programs
+            .prepare_new(|effect| self.context.prepare_runtime_effect(effect, format));
         let Ok(frame) = self.surface.acquire() else {
             return;
         };

@@ -308,6 +308,22 @@ impl Platform for WinitPlatform {
         self.image_context().upload_pixels(pixels, false).ok()
     }
 
+    /// The picture drawn on the device every window draws with, which this makes if nothing has
+    /// needed it yet.
+    fn picture_to_image_sync(
+        &self,
+        picture: &waft_embedder::Picture,
+        width: u32,
+        height: u32,
+    ) -> Option<valo::Image> {
+        Some(
+            self.state
+                .images()
+                .snapshots()
+                .make_raster_snapshot_sync(picture, width, height),
+        )
+    }
+
     /// The frame's buffer as an image, as any buffer is.
     fn import_video_frame(&self, frame: &dyn VideoFrame) -> Option<valo::Image> {
         self.import_hardware_buffer(&*frame.hardware_buffer())

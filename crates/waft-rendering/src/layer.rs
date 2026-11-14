@@ -2562,6 +2562,114 @@ fn transform_point(transform: &Matrix4, point: Offset) -> Offset {
     }
 }
 
+/// A composite layer that applies an [`ImageFilter`] to its children.
+pub struct ImageFilterLayer {
+    layer: LayerData,
+    container_layer: ContainerLayerData,
+    offset_layer: OffsetLayerData,
+    image_filter: Option<ImageFilter>,
+}
+
+impl ImageFilterLayer {
+    /// Creates a layer that applies an [`ImageFilter`] to its children.
+    ///
+    /// The [`image_filter`](Self::image_filter) property must be non-null before the compositing
+    /// phase of the pipeline.
+    pub fn new(app: &mut App) -> Handle<ImageFilterLayer> {
+        app.create(ImageFilterLayer {
+            layer: LayerData::new(),
+            container_layer: ContainerLayerData::new(),
+            offset_layer: OffsetLayerData::new(Offset::ZERO),
+            image_filter: None,
+        })
+    }
+
+    /// The image filter to apply to children.
+    ///
+    /// The scene must be explicitly recomposited after this property is changed (as described at
+    /// [`Layer`]).
+    pub fn image_filter(self: Handle<Self>, app: &App) -> Option<&ImageFilter> {
+        app.get(self).image_filter.as_ref()
+    }
+
+    /// See [`image_filter`](Self::image_filter).
+    pub fn set_image_filter(self: Handle<Self>, app: &mut App, value: ImageFilter) {
+        if app.get(self).image_filter.as_ref() != Some(&value) {
+            app.get_mut(self).image_filter = Some(value);
+            self.as_layer().mark_needs_add_to_scene(app);
+        }
+    }
+}
+
+impl Layer for ImageFilterLayer {
+    crate::layer_accessors!(container);
+
+    fn supports_rasterization(self: Handle<Self>, app: &App) -> bool {
+        ContainerLayer::supports_rasterization(self, app)
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        ContainerLayer::dispose(self, app);
+    }
+
+    fn attach(self: Handle<Self>, app: &mut App, owner: HandleId) {
+        ContainerLayer::attach(self, app, owner);
+    }
+
+    fn detach(self: Handle<Self>, app: &mut App) {
+        ContainerLayer::detach(self, app);
+    }
+
+    fn redepth_children(self: Handle<Self>, app: &mut App) {
+        ContainerLayer::redepth_children(self, app);
+    }
+
+    fn find_annotations(
+        self: Handle<Self>,
+        app: &App,
+        result: &mut AnnotationSearch,
+        local_position: Offset,
+        only_first: bool,
+    ) -> bool {
+        OffsetLayerMixin::find_annotations(self, app, result, local_position, only_first)
+    }
+
+    fn add_to_scene(self: Handle<Self>, app: &mut App, builder: &mut SceneBuilder) {
+        debug_assert!(self.image_filter(app).is_some());
+        let image_filter = self
+            .image_filter(app)
+            .cloned()
+            .expect("image_filter must be set before compositing");
+        let offset = self.offset(app);
+        builder.push_image_filter(&image_filter, offset);
+        self.as_container_layer()
+            .add_children_to_scene(app, builder);
+        let engine_layer = builder.pop();
+        self.as_layer().set_engine_layer(app, Some(engine_layer));
+    }
+
+    fn fire_composition_callbacks(self: Handle<Self>, app: &mut App, include_children: bool) {
+        ContainerLayer::fire_composition_callbacks(self, app, include_children);
+    }
+}
+
+impl ContainerLayer for ImageFilterLayer {
+    crate::container_layer_accessors!(offset);
+
+    fn apply_transform(
+        self: Handle<Self>,
+        app: &App,
+        child: Option<AnyLayer>,
+        transform: &mut Matrix4,
+    ) {
+        OffsetLayerMixin::apply_transform(self, app, child, transform);
+    }
+}
+
+impl OffsetLayerMixin for ImageFilterLayer {
+    crate::offset_layer_accessors!();
+}
+
 /// A composited layer that applies a given transformation matrix to its children.
 ///
 /// This class inherits from [`OffsetLayer`] to make it one of the layers that can be used at the
@@ -4208,6 +4316,38 @@ mod tests {
             "a new node for the new alpha"
         );
         assert!(!opacity.as_layer().needs_add_to_scene(&app));
+    }
+
+    /// Flutter's `ImageFilterLayer.addToScene`: `pushImageFilter` with its filter and offset
+    /// around its children; an equal filter set again leaves the recorded node retained.
+    #[test]
+    fn an_image_filter_layer_pushes_its_filter_at_its_offset() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let root = OffsetLayer::new(&mut app, Offset::ZERO);
+        let filtered = ImageFilterLayer::new(&mut app);
+        filtered.set_image_filter(&mut app, ImageFilter::blur(4.0, 4.0));
+        filtered.set_offset(&mut app, Offset::new(3.0, 4.0));
+        assert!(Layer::supports_rasterization(filtered, &app));
+        let leaf = drawn_layer(&mut app);
+        filtered.as_container_layer().append(&mut app, leaf);
+        root.as_container_layer()
+            .append(&mut app, filtered.as_layer());
+        let _scene = root
+            .as_container_layer()
+            .build_scene(&mut app, SceneBuilder::new());
+        let recorded = filtered.as_layer().engine_layer(&app).expect("recorded");
+        assert_eq!(
+            recorded.effect,
+            waft_embedder::Effect::ImageFilter {
+                filter: ImageFilter::blur(4.0, 4.0),
+                offset: Offset::new(3.0, 4.0),
+            }
+        );
+        filtered.set_image_filter(&mut app, ImageFilter::blur(4.0, 4.0));
+        assert!(!filtered.as_layer().needs_add_to_scene(&app));
+        filtered.set_image_filter(&mut app, ImageFilter::blur(5.0, 5.0));
+        assert!(filtered.as_layer().needs_add_to_scene(&app));
     }
 
     #[test]

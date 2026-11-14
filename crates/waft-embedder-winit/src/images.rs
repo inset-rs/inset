@@ -1,5 +1,6 @@
 //! Images: which decoders this build carries and where they run, the loader the platform decodes
-//! with, started at the first image, and valo's codecs as the framework's.
+//! with, started at the first image, valo's codecs as the framework's, and the pictures the app
+//! draws into images.
 
 use std::cell::{Cell, OnceCell};
 use std::sync::Arc;
@@ -8,6 +9,7 @@ use valo::ImageContext;
 use valo_codec::{Decoder, ImageLoader};
 use waft_embedder::{
     ImageCodec, ImageCodecFuture, ImageDecodeError, ImageFrame, ImageFrameFuture, ImageRepetition,
+    SnapshotDelegate,
 };
 
 use crate::gpu::LazyGpu;
@@ -74,11 +76,12 @@ pub(crate) struct Images {
     started: OnceCell<StartedImages>,
 }
 
-/// The image store and the loader that decodes into it. Decoded images belong to the device and
-/// do not retain a window surface.
+/// The image store, the loader that decodes into it, and what draws pictures into images on its
+/// device. Decoded and drawn images belong to the device and do not retain a window surface.
 struct StartedImages {
     store: ImageContext,
     loader: ImageLoader,
+    snapshots: SnapshotDelegate,
 }
 
 impl Images {
@@ -95,6 +98,11 @@ impl Images {
     /// The renderer's image store.
     pub(crate) fn store(&self) -> ImageContext {
         self.started().store.clone()
+    }
+
+    /// What draws the app's pictures into images, `Platform::picture_to_image_sync`.
+    pub(crate) fn snapshots(&self) -> &SnapshotDelegate {
+        &self.started().snapshots
     }
 
     /// Opens a codec for an encoded image, decoded with mip levels.
@@ -134,7 +142,11 @@ impl Images {
             None => create_image_loader(store.clone(), DecodeExecution::default())
                 .expect("start the image decode worker"),
         };
-        StartedImages { store, loader }
+        StartedImages {
+            snapshots: SnapshotDelegate::new(store.clone()),
+            store,
+            loader,
+        }
     }
 }
 

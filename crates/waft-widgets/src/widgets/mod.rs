@@ -34,6 +34,7 @@ pub mod icon_data;
 pub mod icon_theme;
 pub mod icon_theme_data;
 pub mod image;
+pub mod image_filter;
 pub mod implicit_animations;
 pub mod inherited_notifier;
 pub mod inherited_theme;

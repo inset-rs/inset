@@ -14,7 +14,7 @@ use raw_window_handle::{
     AndroidDisplayHandle, DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle,
     RawDisplayHandle, WindowHandle,
 };
-use waft_embedder::Picture;
+use waft_embedder::{Picture, PreparedPrograms};
 
 use crate::gpu::Gpu;
 
@@ -22,6 +22,8 @@ pub(crate) struct Surface {
     /// `None` between the window being taken away and the next one arriving.
     surface: Option<valo::Surface>,
     context: valo::Context,
+    /// The fragment programs the context has prepared for the surface's format.
+    prepared_programs: PreparedPrograms,
 }
 
 impl Surface {
@@ -30,6 +32,7 @@ impl Surface {
         Surface {
             surface: None,
             context,
+            prepared_programs: PreparedPrograms::new(),
         }
     }
 
@@ -67,7 +70,8 @@ impl Surface {
     }
 
     /// Renders `picture` into the surface's next drawable and presents it, cleared to
-    /// `clear`. `Err` is the surface refusing a drawable.
+    /// `clear`, the fragment programs made since the last draw prepared first. `Err` is the
+    /// surface refusing a drawable.
     pub(crate) fn draw(
         &mut self,
         picture: &Picture,
@@ -76,6 +80,9 @@ impl Surface {
         let Some(surface) = &mut self.surface else {
             return Err(valo::Refused::Lost);
         };
+        let format = surface.format();
+        self.prepared_programs
+            .prepare_new(|effect| self.context.prepare_runtime_effect(effect, format));
         let frame = surface.acquire()?;
         self.context.render(picture, &frame.target(Some(clear)));
         self.context.present(frame);
