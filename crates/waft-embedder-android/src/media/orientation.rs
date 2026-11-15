@@ -11,20 +11,25 @@
 //! hands out reports it as its rotation, mirrored for a camera that looks at its user, its pixels
 //! left in the camera's own, as the format's size says.
 
+#[cfg(target_os = "android")]
 use std::sync::atomic::{AtomicU32, Ordering};
 
+#[cfg(target_os = "android")]
 use crate::buffer_transform::BufferTransform;
 
 /// How the screen shows its picture turned now, in degrees clockwise.
+#[cfg(target_os = "android")]
 static DISPLAY_ROTATION: AtomicU32 = AtomicU32::new(0);
 
 /// The screen shows its picture turned `degrees` clockwise from now on; answers whether that is a
 /// change.
+#[cfg(target_os = "android")]
 pub(super) fn display_rotated(degrees: u32) -> bool {
     DISPLAY_ROTATION.swap(degrees % 360, Ordering::Relaxed) != degrees % 360
 }
 
 /// How the screen shows its picture turned now, in degrees clockwise.
+#[cfg(target_os = "android")]
 fn display_rotation() -> u32 {
     DISPLAY_ROTATION.load(Ordering::Relaxed)
 }
@@ -53,12 +58,14 @@ impl SensorMount {
     /// The turn, in degrees clockwise, that shows its pictures upright on the screen now: the
     /// session's rotation angle, a frame's rotation, and the orientation a photo is taken at, for
     /// `JPEG_ORIENTATION`.
+    #[cfg(target_os = "android")]
     pub(super) fn rotation_angle(self) -> u32 {
         self.turn_on(display_rotation())
     }
 
     /// How its preview is turned on the screen now: upright, and mirrored where it looks at the
     /// user.
+    #[cfg(target_os = "android")]
     pub(super) fn preview_transform(self) -> BufferTransform {
         BufferTransform::turned(self.rotation_angle(), self.faces_user)
     }

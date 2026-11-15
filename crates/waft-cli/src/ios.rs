@@ -526,6 +526,76 @@ pub fn run_device(app: &App, device: &str) -> Result<()> {
     )
 }
 
+/// Everything iOS that `run -d` can name: the simulators, and the devices attached now.
+pub fn listed_devices() -> Result<Vec<Device>> {
+    let mut devices: Vec<Device> = simulators()?
+        .into_iter()
+        .map(|simulator| Device {
+            id: simulator.udid,
+            name: format!("{} ({})", simulator.name, simulator.runtime),
+            platform: "ios simulator",
+            state: simulator.state,
+        })
+        .collect();
+    devices.extend(connected_iphones());
+    Ok(devices)
+}
+
+/// iPhones and iPads `devicectl` can reach. Empty when Xcode 15+ is absent.
+pub fn connected_iphones() -> Vec<Device> {
+    if !cfg!(target_os = "macos") || tools::which("xcrun").is_none() {
+        return Vec::new();
+    }
+    let json_path: PathBuf =
+        std::env::temp_dir().join(format!("waft-devices-{}.json", std::process::id()));
+    let listed = Command::new("xcrun")
+        .args(["devicectl", "list", "devices", "--json-output"])
+        .arg(&json_path)
+        .output();
+    let Ok(listed) = listed else {
+        return Vec::new();
+    };
+    if !listed.status.success() {
+        return Vec::new();
+    }
+    let Ok(json) = std::fs::read_to_string(&json_path) else {
+        return Vec::new();
+    };
+    let _ = std::fs::remove_file(&json_path);
+    parse_devicectl(&json)
+}
+
+fn parse_devicectl(json: &str) -> Vec<Device> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    value
+        .pointer("/result/devices")
+        .and_then(|d| d.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|device| {
+            let platform = device.pointer("/hardwareProperties/platform")?.as_str()?;
+            if platform != "iOS" {
+                return None;
+            }
+            Some(Device {
+                id: device.get("identifier")?.as_str()?.to_owned(),
+                name: device
+                    .pointer("/deviceProperties/name")?
+                    .as_str()?
+                    .to_owned(),
+                platform: "ios device",
+                state: device
+                    .pointer("/connectionProperties/tunnelState")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_owned(),
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -629,74 +699,4 @@ mod tests {
             android: Default::default(),
         }
     }
-}
-
-/// Everything iOS that `run -d` can name: the simulators, and the devices attached now.
-pub fn listed_devices() -> Result<Vec<Device>> {
-    let mut devices: Vec<Device> = simulators()?
-        .into_iter()
-        .map(|simulator| Device {
-            id: simulator.udid,
-            name: format!("{} ({})", simulator.name, simulator.runtime),
-            platform: "ios simulator",
-            state: simulator.state,
-        })
-        .collect();
-    devices.extend(connected_iphones());
-    Ok(devices)
-}
-
-/// iPhones and iPads `devicectl` can reach. Empty when Xcode 15+ is absent.
-pub fn connected_iphones() -> Vec<Device> {
-    if !cfg!(target_os = "macos") || tools::which("xcrun").is_none() {
-        return Vec::new();
-    }
-    let json_path: PathBuf =
-        std::env::temp_dir().join(format!("waft-devices-{}.json", std::process::id()));
-    let listed = Command::new("xcrun")
-        .args(["devicectl", "list", "devices", "--json-output"])
-        .arg(&json_path)
-        .output();
-    let Ok(listed) = listed else {
-        return Vec::new();
-    };
-    if !listed.status.success() {
-        return Vec::new();
-    }
-    let Ok(json) = std::fs::read_to_string(&json_path) else {
-        return Vec::new();
-    };
-    let _ = std::fs::remove_file(&json_path);
-    parse_devicectl(&json)
-}
-
-fn parse_devicectl(json: &str) -> Vec<Device> {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
-        return Vec::new();
-    };
-    value
-        .pointer("/result/devices")
-        .and_then(|d| d.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|device| {
-            let platform = device.pointer("/hardwareProperties/platform")?.as_str()?;
-            if platform != "iOS" {
-                return None;
-            }
-            Some(Device {
-                id: device.get("identifier")?.as_str()?.to_owned(),
-                name: device
-                    .pointer("/deviceProperties/name")?
-                    .as_str()?
-                    .to_owned(),
-                platform: "ios device",
-                state: device
-                    .pointer("/connectionProperties/tunnelState")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("")
-                    .to_owned(),
-            })
-        })
-        .collect()
 }

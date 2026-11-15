@@ -5204,7 +5204,7 @@ mod tests {
         let mut app = cell.borrow_mut();
 
         assert!(
-            texts(&mut app).contains(&"Home".to_string()),
+            texts(&mut app).iter().any(|text| text == "Home"),
             "the first route's title is implied as the middle: {:?}",
             texts(&mut app)
         );
@@ -5219,11 +5219,11 @@ mod tests {
 
         let shown = texts(&mut app);
         assert!(
-            shown.contains(&"Second".to_string()),
+            shown.iter().any(|text| text == "Second"),
             "the pushed route's title is implied as the middle: {shown:?}"
         );
         assert!(
-            shown.contains(&"Home".to_string()),
+            shown.iter().any(|text| text == "Home"),
             "the previous page title is shown as the back label: {shown:?}"
         );
         let chevron = char::from_u32(CupertinoIcons::back().code_point)
@@ -5243,7 +5243,7 @@ mod tests {
         settle(&mut app);
 
         assert!(
-            !texts(&mut app).contains(&"Second".to_string()),
+            !texts(&mut app).iter().any(|text| text == "Second"),
             "tapping the back button popped the route"
         );
     }
@@ -5265,7 +5265,7 @@ mod tests {
         });
         let mut app = cell.borrow_mut();
         assert!(
-            !texts(&mut app).contains(&"Home".to_string()),
+            !texts(&mut app).iter().any(|text| text == "Home"),
             "automaticallyImplyMiddle false leaves the middle empty"
         );
     }
@@ -5475,7 +5475,7 @@ mod tests {
         let shown = texts(&mut app);
         assert!(
             shown.iter().filter(|text| *text == "Home").count() >= 1
-                && shown.contains(&"Second".to_string()),
+                && shown.iter().any(|text| text == "Second"),
             "the transition carries both routes' components: {shown:?}"
         );
     }
